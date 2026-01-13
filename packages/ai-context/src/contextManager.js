@@ -21,6 +21,16 @@ const DEFAULT_CLASSIFICATION_RANK = classificationRank(CLASSIFICATION_LEVEL.PUBL
 const RESTRICTED_CLASSIFICATION_RANK = classificationRank(CLASSIFICATION_LEVEL.RESTRICTED);
 
 /**
+ * @param {unknown} value
+ * @param {number} fallback
+ */
+function normalizeNonNegativeInt(value, fallback) {
+  if (value === undefined || value === null) return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.floor(n));
+}
+/**
  * @typedef {{ type: "range"|"formula"|"table"|"chart", reference: string, data?: any }} Attachment
  */
 
@@ -39,6 +49,10 @@ export class ContextManager {
    *   tokenBudgetTokens?: number,
    *   ragIndex?: RagIndex,
    *   workbookRag?: WorkbookRagOptions,
+   *   maxContextRows?: number,
+   *   maxContextCells?: number,
+   *   maxChunkRows?: number,
+   *   sheetRagTopK?: number,
    *   redactor?: (text: string) => string,
    *   tokenEstimator?: import("./tokenBudget.js").TokenEstimator
    * }} [options]
@@ -49,6 +63,17 @@ export class ContextManager {
     this.workbookRag = options.workbookRag;
     this.redactor = options.redactor ?? redactText;
     this.estimator = options.tokenEstimator ?? DEFAULT_TOKEN_ESTIMATOR;
+
+    // These caps are primarily safety rails to prevent accidental Excel-scale context
+    // selections from blowing up into multi-million-cell matrices in memory.
+    //
+    // Hosts can tune these for their own memory/quality tradeoffs.
+    this.maxContextRows = normalizeNonNegativeInt(options.maxContextRows, 1_000);
+    this.maxContextCells = normalizeNonNegativeInt(options.maxContextCells, 200_000);
+    // `maxChunkRows` controls how many TSV rows are included in each RAG chunk's text.
+    this.maxChunkRows = normalizeNonNegativeInt(options.maxChunkRows, 30);
+    // Top-K retrieved regions for sheet-level (non-workbook) RAG.
+    this.sheetRagTopK = normalizeNonNegativeInt(options.sheetRagTopK, 5);
   }
 
   /**
@@ -61,6 +86,7 @@ export class ContextManager {
    *   sampleRows?: number,
    *   samplingStrategy?: "random" | "stratified" | "head" | "systematic",
    *   stratifyByColumn?: number,
+   *   limits?: { maxContextRows?: number, maxContextCells?: number, maxChunkRows?: number },
    *   signal?: AbortSignal,
    *   dlp?: {
    *     documentId: string,
@@ -79,11 +105,12 @@ export class ContextManager {
     const dlp = params.dlp;
     const rawSheet = params.sheet;
 
-    const safeRowCap = 1_000;
+    const safeRowCap = normalizeNonNegativeInt(params.limits?.maxContextRows, this.maxContextRows);
     // `values` is a 2D JS array. With Excel-scale sheets, full-row/column selections can
     // explode into multi-million-cell matrices. Keep the context payload bounded so schema
     // extraction / RAG chunking can't OOM the worker.
-    const safeCellCap = 200_000;
+    const safeCellCap = normalizeNonNegativeInt(params.limits?.maxContextCells, this.maxContextCells);
+    const maxChunkRows = normalizeNonNegativeInt(params.limits?.maxChunkRows, this.maxChunkRows);
     const rawValues = Array.isArray(rawSheet?.values) ? rawSheet.values : [];
     const rowCount = Math.min(rawValues.length, safeRowCap);
     const safeColCap = rowCount > 0 ? Math.max(1, Math.floor(safeCellCap / rowCount)) : 0;
@@ -204,9 +231,9 @@ export class ContextManager {
     //
     // `indexSheet()` extracts the schema as part of chunking; reuse the returned schema so we
     // don't run schema extraction twice (once for prompt schema output + once for RAG chunks).
-    const { schema } = await this.ragIndex.indexSheet(sheetForContext, { signal });
+    const { schema } = await this.ragIndex.indexSheet(sheetForContext, { signal, maxChunkRows });
     throwIfAborted(signal);
-    const retrieved = await this.ragIndex.search(params.query, 5, { signal });
+    const retrieved = await this.ragIndex.search(params.query, this.sheetRagTopK, { signal });
     throwIfAborted(signal);
 
     const sampleRows = params.sampleRows ?? 20;

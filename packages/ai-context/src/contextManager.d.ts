@@ -21,6 +21,24 @@ export class ContextManager {
     tokenBudgetTokens?: number;
     ragIndex?: any;
     workbookRag?: WorkbookRagOptions;
+    /**
+     * Safety cap for the number of rows included from `sheet.values` when building
+     * single-sheet context. Defaults to 1000.
+     */
+    maxContextRows?: number;
+    /**
+     * Safety cap for the total number of cells included from `sheet.values` when building
+     * single-sheet context. Defaults to 200_000.
+     */
+    maxContextCells?: number;
+    /**
+     * Max rows included in each sheet-level RAG chunk preview (TSV lines). Defaults to 30.
+     */
+    maxChunkRows?: number;
+    /**
+     * Top-K retrieved regions for sheet-level (non-workbook) RAG. Defaults to 5.
+     */
+    sheetRagTopK?: number;
     redactor?: (text: string) => string;
     tokenEstimator?: TokenEstimator;
   });
@@ -32,6 +50,7 @@ export class ContextManager {
     sampleRows?: number;
     samplingStrategy?: "random" | "stratified" | "head" | "systematic";
     stratifyByColumn?: number;
+    limits?: { maxContextRows?: number; maxContextCells?: number; maxChunkRows?: number };
     signal?: AbortSignal;
     dlp?: any;
   }): Promise<{ schema: any; retrieved: any[]; sampledRows: any[]; promptContext: string }>;

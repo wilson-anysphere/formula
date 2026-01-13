@@ -76,6 +76,56 @@ test("buildContext: caps matrix size to avoid Excel-scale allocations", async ()
   assert.equal(out.sampledRows[0].length, 200);
 });
 
+test("buildContext: maxContextRows option truncates rows", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, maxContextRows: 3 });
+  const sheet = makeSheet([
+    ["r1"],
+    ["r2"],
+    ["r3"],
+    ["r4"],
+    ["r5"],
+  ]);
+
+  const out = await cm.buildContext({ sheet, query: "anything", sampleRows: 100 });
+  assert.equal(out.sampledRows.length, 3);
+  assert.equal(out.retrieved[0].range, "Sheet1!A1:A3");
+});
+
+test("buildContext: maxContextCells option truncates columns", async () => {
+  // 10 rows x 5 cols => 50 cells. Cap to 20 total => 2 cols per row (floor(20/10)=2).
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, maxContextCells: 20 });
+  const values = Array.from({ length: 10 }, (_v, r) => [`r${r}c1`, `r${r}c2`, `r${r}c3`, `r${r}c4`, `r${r}c5`]);
+  const sheet = makeSheet(values);
+
+  const out = await cm.buildContext({ sheet, query: "anything", sampleRows: 100 });
+  assert.equal(out.sampledRows.length, 10);
+  assert.ok(out.sampledRows.every((row) => row.length === 2));
+  assert.equal(out.retrieved[0].range, "Sheet1!A1:B10");
+});
+
+test("buildContext: maxChunkRows affects sheet-level retrieved chunk previews", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000 });
+  const sheet = makeSheet([["a"], ["b"], ["c"], ["d"], ["e"]]);
+
+  const outSmall = await cm.buildContext({
+    sheet,
+    query: "anything",
+    limits: { maxChunkRows: 2 },
+  });
+  const previewSmall = outSmall.retrieved[0].preview;
+  assert.equal(previewSmall.split("\n").length, 3);
+  assert.match(previewSmall, /… \(3 more rows\)$/);
+
+  const outLarge = await cm.buildContext({
+    sheet,
+    query: "anything",
+    limits: { maxChunkRows: 5 },
+  });
+  const previewLarge = outLarge.retrieved[0].preview;
+  assert.equal(previewLarge.split("\n").length, 5);
+  assert.doesNotMatch(previewLarge, /… \(/);
+});
+
 test("buildContext: respects AbortSignal", async () => {
   const cm = new ContextManager({ tokenBudgetTokens: 1_000 });
   const sheet = makeSheet([

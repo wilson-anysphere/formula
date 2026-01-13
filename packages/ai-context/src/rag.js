@@ -228,11 +228,12 @@ export class RagIndex {
 
   /**
    * @param {{ name: string, values: unknown[][] }} sheet
-   * @param {{ signal?: AbortSignal }} [options]
+   * @param {{ signal?: AbortSignal, maxChunkRows?: number }} [options]
    */
   async indexSheet(sheet, options = {}) {
     const signal = options.signal;
     throwIfAborted(signal);
+    const maxChunkRows = options.maxChunkRows;
     // `chunkSheetByRegions()` ids are deterministic (sheet name + region index),
     // but the number of regions can change over time. Clear the previous region
     // chunks for this sheet so stale chunks don't linger in the store.
@@ -241,7 +242,7 @@ export class RagIndex {
     }
 
     throwIfAborted(signal);
-    const { schema, chunks } = chunkSheetByRegionsWithSchema(sheet, { signal });
+    const { schema, chunks } = chunkSheetByRegionsWithSchema(sheet, { signal, maxChunkRows });
     const items = [];
     for (const chunk of chunks) {
       throwIfAborted(signal);
