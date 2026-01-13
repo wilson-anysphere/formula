@@ -1065,7 +1065,11 @@ export class SpreadsheetApp {
           : null;
       const encryptionKeyStore = new CollabEncryptionKeyStore();
       this.collabEncryptionKeyStore = encryptionKeyStore;
-      const encryptionKeyStoreHydrated = encryptionKeyStore.hydrateDoc(collab.docId).catch(() => {});
+      // When dev-mode encryption is enabled (`collabEncrypt=1`), the encryption key is
+      // derived deterministically from `docId` and does not rely on the persisted key store.
+      // Skip the potentially expensive/unsupported Tauri keychain hydration so binder startup
+      // isn't delayed in simple dev server scenarios.
+      const encryptionKeyStoreHydrated = devEncryption ? Promise.resolve() : encryptionKeyStore.hydrateDoc(collab.docId).catch(() => {});
       let encryptionMetadata: any = null;
 
       const metaGet = (obj: any, key: string): any => {
