@@ -22,6 +22,8 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 #[derive(Debug, Error)]
 pub enum PivotError {
+    #[error("worksheet not found: {0}")]
+    SheetNotFound(String),
     #[error("missing field in pivot cache: {0}")]
     MissingField(String),
     #[error("pivot table must have at least one value field")]

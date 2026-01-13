@@ -30,6 +30,7 @@ use std::sync::OnceLock;
 use thiserror::Error;
 
 mod bytecode_diagnostics;
+mod pivot_refresh;
 pub use bytecode_diagnostics::{
     BytecodeCompileReason, BytecodeCompileReportEntry, BytecodeCompileStats,
 };
