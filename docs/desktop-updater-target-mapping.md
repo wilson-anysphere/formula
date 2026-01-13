@@ -22,8 +22,21 @@ release contains **exactly** these `latest.json.platforms` keys:
 - `linux-x86_64`
 
 If Tauri changes these identifiers in a future upgrade, our CI guardrail
-(`scripts/verify-tauri-latest-json.mjs`, which wraps `scripts/ci/validate-updater-manifest.mjs`) is expected to fail with a clear “expected vs actual”
-diff, and this document should be updated alongside the validator.
+(`scripts/verify-tauri-latest-json.mjs`, which wraps `scripts/ci/validate-updater-manifest.mjs`) is
+expected to fail (or require adding a new alias) with a clear “expected vs actual” diff, and this
+document should be updated alongside the validator.
+
+### Accepted aliases (CI)
+
+The CI validator accepts a few equivalent key spellings to be resilient to toolchain differences:
+
+- `universal-apple-darwin` → `darwin-universal`
+- `x86_64-pc-windows-msvc` → `windows-x86_64`
+- `windows-arm64` / `aarch64-pc-windows-msvc` → `windows-aarch64`
+- `x86_64-unknown-linux-gnu` → `linux-x86_64`
+
+These are treated as aliases for validation, but the canonical keys above are what we expect
+`tauri-action` to produce for Formula releases.
 
 ## Mapping table (build target → platform key → updater artifact)
 
@@ -33,8 +46,8 @@ The table below documents what each platform key should point to in `latest.json
 | OS / Arch | Build target (Tauri `--target`) | `latest.json` platform key | Updater asset type (`platforms[key].url`) |
 | --- | --- | --- | --- |
 | macOS universal (Intel + Apple Silicon) | `universal-apple-darwin` | `darwin-universal` | `*.app.tar.gz` (preferred) or `*.tar.gz` (updater archive; **not** the `.dmg`) |
-| Windows x64 | `x86_64-pc-windows-msvc` | `windows-x86_64` | `*.msi` and/or `*.exe` (depending on updater strategy) |
-| Windows ARM64 | `aarch64-pc-windows-msvc` | `windows-aarch64` | `*.msi` and/or `*.exe` (depending on updater strategy) |
+| Windows x64 | `x86_64-pc-windows-msvc` | `windows-x86_64` | `*.msi` (Windows Installer; updater runs this) |
+| Windows ARM64 | `aarch64-pc-windows-msvc` | `windows-aarch64` | `*.msi` (Windows Installer; updater runs this) |
 | Linux x86_64 | `x86_64-unknown-linux-gnu` | `linux-x86_64` | `*.AppImage` (self-updatable; **not** `.deb`/`.rpm`) |
 
 ### Notes
