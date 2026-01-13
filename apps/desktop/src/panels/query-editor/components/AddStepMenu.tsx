@@ -130,6 +130,13 @@ export function AddStepMenu(props: {
     if (!menuOpen) return;
     if (typeof document === "undefined") return;
 
+    const focusTrigger = () => {
+      // Only refocus the trigger for keyboard-driven close actions (e.g. Escape).
+      // Avoid stealing focus on outside clicks, where the user likely clicked an
+      // input/button elsewhere.
+      queueMicrotask(() => menuTriggerRef.current?.focus());
+    };
+
     const onMouseDown = (evt: MouseEvent) => {
       const target = evt.target as Node | null;
       if (!target) return;
@@ -140,7 +147,10 @@ export function AddStepMenu(props: {
     };
 
     const onKeyDown = (evt: KeyboardEvent) => {
-      if (evt.key === "Escape") setMenuOpen(false);
+      if (evt.key === "Escape") {
+        setMenuOpen(false);
+        focusTrigger();
+      }
     };
 
     document.addEventListener("mousedown", onMouseDown);
