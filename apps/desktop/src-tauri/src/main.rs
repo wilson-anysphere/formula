@@ -1135,7 +1135,7 @@ fn main() {
             // Some platforms may briefly load an internal blank page during WebView creation.
             // Avoid treating that as "app page loaded".
             let url = payload.url().to_string();
-            if url == "about:blank" {
+            if url.starts_with("about:blank") {
                 return;
             }
 
