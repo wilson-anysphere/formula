@@ -107,6 +107,44 @@ test("fails when windows-arm64 is missing", () => {
   assert.match(proc.stderr, /windows-aarch64/);
 });
 
+test("fails when updater asset types do not match platform expectations (Linux .deb)", () => {
+  const proc = runLocal({
+    version: "0.0.0",
+    platforms: {
+      "darwin-universal": { url: "https://example.com/app.tar.gz", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/app.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/app-arm.msi", signature: "sig" },
+      // Linux updater should point to an AppImage, not a deb/rpm package.
+      "linux-x86_64": { url: "https://example.com/app.deb", signature: "sig" },
+    },
+  });
+
+  assert.notEqual(proc.status, 0);
+  assert.ok(
+    proc.stderr.includes("Updater asset type mismatch in latest.json.platforms"),
+    `stderr did not include expected asset type mismatch; got:\n${proc.stderr}`,
+  );
+});
+
+test("fails when multiple targets share the same updater URL (collision)", () => {
+  const url = "https://example.com/app.msi";
+  const proc = runLocal({
+    version: "0.0.0",
+    platforms: {
+      "darwin-universal": { url: "https://example.com/app.tar.gz", signature: "sig" },
+      "windows-x86_64": { url, signature: "sig" },
+      "windows-aarch64": { url, signature: "sig" },
+      "linux-x86_64": { url: "https://example.com/app.AppImage", signature: "sig" },
+    },
+  });
+
+  assert.notEqual(proc.status, 0);
+  assert.ok(
+    proc.stderr.includes("Duplicate platform URLs in latest.json"),
+    `stderr did not include expected collision error; got:\n${proc.stderr}`,
+  );
+});
+
 test("fails when latest.json.sig is missing", () => {
   const proc = runLocal(
     {
