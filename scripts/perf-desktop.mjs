@@ -24,6 +24,10 @@ Environment (startup):
   FORMULA_DESKTOP_STARTUP_MODE=cold|warm
     - cold (default): each measured run uses a fresh profile dir (true cold start)
     - warm: one warmup run primes caches, then measured runs reuse the same profile
+  FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS
+    - p95 budget for `webview_loaded_ms` (native WebView page-load complete; defaults to 800ms)
+  FORMULA_DESKTOP_SHELL_WEBVIEW_LOADED_TARGET_MS
+    - optional shell-only override (falls back to FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS)
 
 Notes:
   - These commands are safe to run locally: they use a repo-local HOME so they don't touch
