@@ -149,29 +149,6 @@ fn parse_options_and_locale_from_js(
     ))
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-enum GoalSeekRecalcModeDto {
-    SingleThreaded,
-    MultiThreaded,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GoalSeekRequestDto {
-    target_cell: String,
-    target_value: f64,
-    changing_cell: String,
-    #[serde(default)]
-    sheet: Option<String>,
-    #[serde(default)]
-    tolerance: Option<f64>,
-    #[serde(default)]
-    max_iterations: Option<usize>,
-    #[serde(default)]
-    recalc_mode: Option<GoalSeekRecalcModeDto>,
-}
-
 fn normalize_function_context_name(name: &str, locale: Option<&FormulaLocale>) -> String {
     let canonical = match locale {
         Some(locale) => locale.canonical_function_name(name),
@@ -3197,16 +3174,33 @@ impl WasmWorkbook {
 
     #[wasm_bindgen(js_name = "goalSeek")]
     pub fn goal_seek(&mut self, request: JsValue) -> Result<JsValue, JsValue> {
-        if request.is_null() || request.is_undefined() {
-            return Err(js_err("goalSeek request must be an object"));
-        }
-        let request: GoalSeekRequestDto = serde_wasm_bindgen::from_value(request)
-            .map_err(|err| js_err(format!("invalid goalSeek request: {err}")))?;
+        let obj = request
+            .dyn_into::<Object>()
+            .map_err(|_| js_err("goalSeek request must be an object"))?;
 
-        let sheet_name = request.sheet.as_deref().unwrap_or(DEFAULT_SHEET);
-        let sheet = self.inner.require_sheet(sheet_name)?.to_string();
+        let sheet_name_raw = Reflect::get(&obj, &JsValue::from_str("sheet"))
+            .map_err(|_| js_err("failed to read sheet"))?;
+        let sheet_name = if sheet_name_raw.is_undefined() || sheet_name_raw.is_null() {
+            DEFAULT_SHEET.to_string()
+        } else {
+            let sheet = sheet_name_raw
+                .as_string()
+                .ok_or_else(|| js_err("sheet must be a string"))?;
+            let sheet = sheet.trim();
+            if sheet.is_empty() {
+                DEFAULT_SHEET.to_string()
+            } else {
+                sheet.to_string()
+            }
+        };
+        let sheet = self.inner.require_sheet(&sheet_name)?.to_string();
 
-        let target_cell_raw = request.target_cell.trim();
+        let target_cell_raw = Reflect::get(&obj, &JsValue::from_str("targetCell"))
+            .map_err(|_| js_err("failed to read targetCell"))?;
+        let target_cell_raw = target_cell_raw
+            .as_string()
+            .ok_or_else(|| js_err("targetCell must be a non-empty string"))?;
+        let target_cell_raw = target_cell_raw.trim();
         if target_cell_raw.is_empty() {
             return Err(js_err("targetCell must be a non-empty string"));
         }
@@ -3217,7 +3211,12 @@ impl WasmWorkbook {
             .map_err(|_| js_err(format!("invalid targetCell address: {target_cell_raw}")))?
             .to_a1();
 
-        let changing_cell_raw = request.changing_cell.trim();
+        let changing_cell_raw = Reflect::get(&obj, &JsValue::from_str("changingCell"))
+            .map_err(|_| js_err("failed to read changingCell"))?;
+        let changing_cell_raw = changing_cell_raw
+            .as_string()
+            .ok_or_else(|| js_err("changingCell must be a non-empty string"))?;
+        let changing_cell_raw = changing_cell_raw.trim();
         if changing_cell_raw.is_empty() {
             return Err(js_err("changingCell must be a non-empty string"));
         }
@@ -3228,13 +3227,24 @@ impl WasmWorkbook {
             .map_err(|_| js_err(format!("invalid changingCell address: {changing_cell_raw}")))?;
         let changing_cell = changing_cell_ref.to_a1();
 
-        if !request.target_value.is_finite() {
+        let target_value_raw = Reflect::get(&obj, &JsValue::from_str("targetValue"))
+            .map_err(|_| js_err("failed to read targetValue"))?;
+        let target_value = target_value_raw
+            .as_f64()
+            .ok_or_else(|| js_err("targetValue must be a finite number"))?;
+        if !target_value.is_finite() {
             return Err(js_err("targetValue must be a finite number"));
         }
 
         let mut params =
-            GoalSeekParams::new(target_cell.as_str(), request.target_value, changing_cell.as_str());
-        if let Some(tolerance) = request.tolerance {
+            GoalSeekParams::new(target_cell.as_str(), target_value, changing_cell.as_str());
+
+        let tolerance_raw = Reflect::get(&obj, &JsValue::from_str("tolerance"))
+            .map_err(|_| js_err("failed to read tolerance"))?;
+        if !tolerance_raw.is_undefined() && !tolerance_raw.is_null() {
+            let tolerance = tolerance_raw
+                .as_f64()
+                .ok_or_else(|| js_err("tolerance must be a finite number"))?;
             if !tolerance.is_finite() {
                 return Err(js_err("tolerance must be a finite number"));
             }
@@ -3243,17 +3253,46 @@ impl WasmWorkbook {
             }
             params.tolerance = tolerance;
         }
-        if let Some(max_iterations) = request.max_iterations {
-            if max_iterations == 0 {
+
+        let max_iterations_raw = Reflect::get(&obj, &JsValue::from_str("maxIterations"))
+            .map_err(|_| js_err("failed to read maxIterations"))?;
+        if !max_iterations_raw.is_undefined() && !max_iterations_raw.is_null() {
+            let max_iterations = max_iterations_raw
+                .as_f64()
+                .ok_or_else(|| js_err("maxIterations must be > 0"))?;
+            if !max_iterations.is_finite() {
                 return Err(js_err("maxIterations must be > 0"));
             }
-            params.max_iterations = max_iterations;
+            if max_iterations.fract() != 0.0 {
+                return Err(js_err("maxIterations must be an integer"));
+            }
+            if max_iterations <= 0.0 {
+                return Err(js_err("maxIterations must be > 0"));
+            }
+            if max_iterations > usize::MAX as f64 {
+                return Err(js_err("maxIterations is too large"));
+            }
+            params.max_iterations = max_iterations as usize;
         }
 
-        let recalc_mode = request.recalc_mode.map(|mode| match mode {
-            GoalSeekRecalcModeDto::SingleThreaded => RecalcMode::SingleThreaded,
-            GoalSeekRecalcModeDto::MultiThreaded => RecalcMode::MultiThreaded,
-        });
+        let recalc_mode_raw = Reflect::get(&obj, &JsValue::from_str("recalcMode"))
+            .map_err(|_| js_err("failed to read recalcMode"))?;
+        let recalc_mode = if recalc_mode_raw.is_undefined() || recalc_mode_raw.is_null() {
+            None
+        } else {
+            let mode = recalc_mode_raw
+                .as_string()
+                .ok_or_else(|| js_err("recalcMode must be \"singleThreaded\" | \"multiThreaded\""))?;
+            match mode.as_str() {
+                "singleThreaded" => Some(RecalcMode::SingleThreaded),
+                "multiThreaded" => Some(RecalcMode::MultiThreaded),
+                _ => {
+                    return Err(js_err(
+                        "recalcMode must be \"singleThreaded\" | \"multiThreaded\"",
+                    ))
+                }
+            }
+        };
 
         let result = {
             let mut model = EngineWhatIfModel::new(&mut self.inner.engine, sheet.clone());

@@ -1897,7 +1897,7 @@ fn calculate_pivot_returns_cell_writes_for_basic_row_sum() {
             CellChange {
                 sheet: DEFAULT_SHEET.to_string(),
                 address: "E2".to_string(),
-                value: json!(15.0),
+                value: json!(15),
             },
             CellChange {
                 sheet: DEFAULT_SHEET.to_string(),
@@ -1907,7 +1907,7 @@ fn calculate_pivot_returns_cell_writes_for_basic_row_sum() {
             CellChange {
                 sheet: DEFAULT_SHEET.to_string(),
                 address: "E3".to_string(),
-                value: json!(7.0),
+                value: json!(7),
             },
             CellChange {
                 sheet: DEFAULT_SHEET.to_string(),
@@ -1917,7 +1917,7 @@ fn calculate_pivot_returns_cell_writes_for_basic_row_sum() {
             CellChange {
                 sheet: DEFAULT_SHEET.to_string(),
                 address: "E4".to_string(),
-                value: json!(22.0),
+                value: json!(22),
             },
         ]
     );
@@ -2151,6 +2151,44 @@ fn goal_seek_solves_quadratic_and_updates_workbook_state() {
     let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
     let b1_value = b1.value.as_f64().unwrap();
     assert!((b1_value - 25.0).abs() < 1e-6, "B1 = {b1_value}");
+}
+
+#[wasm_bindgen_test]
+fn goal_seek_rejects_non_object_request() {
+    let mut wb = WasmWorkbook::new();
+    let err = wb.goal_seek(JsValue::from_f64(1.0)).unwrap_err();
+    let message = err
+        .as_string()
+        .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
+    assert_eq!(message, "goalSeek request must be an object");
+}
+
+#[wasm_bindgen_test]
+fn goal_seek_rejects_non_finite_target_value() {
+    let mut wb = WasmWorkbook::new();
+    let req = Object::new();
+    Reflect::set(&req, &JsValue::from_str("targetCell"), &JsValue::from_str("B1")).unwrap();
+    Reflect::set(&req, &JsValue::from_str("targetValue"), &JsValue::from_f64(f64::NAN)).unwrap();
+    Reflect::set(&req, &JsValue::from_str("changingCell"), &JsValue::from_str("A1")).unwrap();
+    let err = wb.goal_seek(req.into()).unwrap_err();
+    let message = err
+        .as_string()
+        .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
+    assert_eq!(message, "targetValue must be a finite number");
+}
+
+#[wasm_bindgen_test]
+fn goal_seek_rejects_invalid_addresses() {
+    let mut wb = WasmWorkbook::new();
+    let req = Object::new();
+    Reflect::set(&req, &JsValue::from_str("targetCell"), &JsValue::from_str("A0")).unwrap();
+    Reflect::set(&req, &JsValue::from_str("targetValue"), &JsValue::from_f64(1.0)).unwrap();
+    Reflect::set(&req, &JsValue::from_str("changingCell"), &JsValue::from_str("A1")).unwrap();
+    let err = wb.goal_seek(req.into()).unwrap_err();
+    let message = err
+        .as_string()
+        .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
+    assert_eq!(message, "invalid targetCell address: A0");
 }
 
 #[wasm_bindgen_test]
