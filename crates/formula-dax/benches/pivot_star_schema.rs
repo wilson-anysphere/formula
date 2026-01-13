@@ -180,17 +180,23 @@ fn build_star_schema_model(rows: usize) -> DataModel {
             "([Total Sales] * 1.07) + ([Total Qty] * 0.10)",
         )
         .unwrap();
+    // A deliberately unplannable measure (the pivot planner does not support IF) that forces the
+    // star-schema pivot to fall back to `pivot_row_scan`.
+    model
+        .add_measure(
+            "Total Sales If",
+            "IF(TRUE(), [Total Sales], BLANK())",
+        )
+        .unwrap();
 
     model
 }
 
 fn bench_pivot_star_schema(c: &mut Criterion) {
-    // Enable optional pivot path tracing (prints to stderr once per pivot path).
+    // Optional pivot path tracing.
     //
-    // This is useful for validating that the bench is exercising:
-    // - the columnar fast path for base-table group-bys
-    // - the relationship-aware (row-scan) path for dimension group-bys
-    std::env::set_var("FORMULA_DAX_PIVOT_TRACE", "1");
+    // Set `FORMULA_DAX_PIVOT_TRACE=1` when running the bench to print the chosen execution paths
+    // once per process (e.g. `columnar_group_by`, `planned_row_group_by`, `row_scan`).
 
     let rows = bench_rows();
     let model = build_star_schema_model(rows);
@@ -201,6 +207,7 @@ fn bench_pivot_star_schema(c: &mut Criterion) {
         PivotMeasure::new("Avg Price", "[Avg Price]").unwrap(),
         PivotMeasure::new("Adjusted Sales", "[Adjusted Sales]").unwrap(),
     ];
+    let row_scan_measures = vec![PivotMeasure::new("Total Sales If", "[Total Sales If]").unwrap()];
 
     let base_group_by = vec![
         GroupByColumn::new("Sales", "Region"),
@@ -210,6 +217,8 @@ fn bench_pivot_star_schema(c: &mut Criterion) {
         GroupByColumn::new("Customers", "Region"),
         GroupByColumn::new("Products", "Category"),
     ];
+    let base_region_group_by = vec![GroupByColumn::new("Sales", "Region")];
+    let star_region_group_by = vec![GroupByColumn::new("Customers", "Region")];
 
     // Sanity check: the denormalized and star-schema pivots should match.
     //
@@ -224,6 +233,31 @@ fn bench_pivot_star_schema(c: &mut Criterion) {
     assert_eq!(
         &base_result.columns[base_group_by.len()..],
         &star_result.columns[star_group_by.len()..]
+    );
+
+    // Sanity check: a star-schema pivot that falls back to row-scan should still match the
+    // denormalized version (which uses the columnar group key fast path + per-group measure eval).
+    let base_if_result = pivot(
+        &model,
+        "Sales",
+        &base_region_group_by,
+        &row_scan_measures,
+        &FilterContext::empty(),
+    )
+    .unwrap();
+    let star_if_result = pivot(
+        &model,
+        "Sales",
+        &star_region_group_by,
+        &row_scan_measures,
+        &FilterContext::empty(),
+    )
+    .unwrap();
+    assert_eq!(base_if_result.rows, star_if_result.rows);
+    assert_eq!(base_if_result.columns.len(), star_if_result.columns.len());
+    assert_eq!(
+        &base_if_result.columns[base_region_group_by.len()..],
+        &star_if_result.columns[star_region_group_by.len()..]
     );
 
     let mut group = c.benchmark_group("pivot_star_schema");
@@ -247,6 +281,34 @@ fn bench_pivot_star_schema(c: &mut Criterion) {
     });
 
     group.finish();
+
+    let mut row_scan_group = c.benchmark_group("pivot_star_schema_row_scan");
+    // Row-scan is much slower than the planned/columnar paths; keep samples small so the bench
+    // remains usable on developer machines.
+    // Criterion requires `sample_size >= 10`, so we use the minimum and rely on a shorter
+    // measurement window to keep runtime reasonable.
+    row_scan_group.sample_size(10);
+    row_scan_group.measurement_time(Duration::from_secs(5));
+
+    row_scan_group.bench_with_input(
+        BenchmarkId::new("dimension_group_by_region_unplannable", rows),
+        &rows,
+        |b, _| {
+            b.iter(|| {
+                let result = pivot(
+                    &model,
+                    "Sales",
+                    &star_region_group_by,
+                    &row_scan_measures,
+                    &FilterContext::empty(),
+                )
+                .unwrap();
+                black_box(result);
+            })
+        },
+    );
+
+    row_scan_group.finish();
 }
 
 criterion_group!(benches, bench_pivot_star_schema);
