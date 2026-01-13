@@ -53,9 +53,15 @@ export class CellStructuralConflictMonitor {
    * @param {(conflict: CellStructuralConflict) => void} opts.onConflict
    * @param {number} [opts.maxOpRecordsPerUser] Maximum number of structural op
    *   records to retain per user in the shared `cellStructuralOps` log.
+   * @param {number | null} [opts.maxOpRecordAgeMs] Optional age-based pruning
+   *   window for records in the shared `cellStructuralOps` log. When enabled,
+   *   records older than `Date.now() - maxOpRecordAgeMs` may be deleted by any
+   *   client (best-effort). Defaults to null (disabled).
    */
   constructor(opts) {
     this._maxOpRecordsPerUser = opts.maxOpRecordsPerUser ?? 2000;
+    this._maxOpRecordAgeMs = opts.maxOpRecordAgeMs ?? null;
+    this._lastAgePruneAt = 0;
     this.doc = opts.doc;
     this.cells = opts.cells ?? getMapRoot(this.doc, "cells");
     this.localUserId = opts.localUserId;
@@ -89,6 +95,11 @@ export class CellStructuralConflictMonitor {
  
     this._onOpsEvent = this._onOpsEvent.bind(this);
     this._ops.observe(this._onOpsEvent);
+
+    // If configured, opportunistically prune old operation records from existing
+    // docs before ingesting them into local state. This keeps startup costs
+    // bounded when opening long-lived documents.
+    this._pruneOpLogByAge({ force: true });
 
     // Seed local state from any persisted op log entries so conflict detection
     // still works after a client restarts while offline (ops already exist in
@@ -307,23 +318,34 @@ export class CellStructuralConflictMonitor {
     if (this._isApplyingResolution) return;
     if (this.ignoredOrigins?.has(transaction.origin)) return;
     if (!event?.changes?.keys) return;
- 
+  
+    /** @type {string[]} */
+    const localDeletes = [];
+    let sawAdd = false;
     for (const [opId, change] of event.changes.keys.entries()) {
       if (change.action === "delete") {
         this._opRecords.delete(opId);
         if (this._localOpIds.has(opId)) {
           this._localOpIds.delete(opId);
-          if (this._localOpQueue.length > 0) {
-            this._localOpQueue = this._localOpQueue.filter((entry) => entry.id !== opId);
-          }
+          localDeletes.push(opId);
         }
         continue;
       }
- 
+  
       if (change.action !== "add") continue;
+      sawAdd = true;
       const record = this._ops.get(opId);
       if (!record) continue;
       this._ingestOpRecord(record);
+    }
+
+    if (localDeletes.length > 0 && this._localOpQueue.length > 0) {
+      const toRemove = new Set(localDeletes);
+      this._localOpQueue = this._localOpQueue.filter((entry) => !toRemove.has(entry.id));
+    }
+
+    if (sawAdd) {
+      this._pruneOpLogByAge();
     }
   }
  
@@ -372,6 +394,54 @@ export class CellStructuralConflictMonitor {
     this.doc.transact(() => {
       for (const entry of toDelete) {
         this._ops.delete(entry.id);
+      }
+    }, this.origin);
+  }
+
+  /**
+   * Best-effort pruning of the shared `cellStructuralOps` log by wall-clock age.
+   *
+   * This is intentionally conservative: it only considers records with a finite
+   * numeric `createdAt` timestamp and is safe under concurrent clients (the log
+   * is metadata-only).
+   *
+   * @param {{ force?: boolean }} [opts]
+   */
+  _pruneOpLogByAge(opts = {}) {
+    const maxAgeMs = this._maxOpRecordAgeMs;
+    if (maxAgeMs == null) return;
+    const ageMs = Number(maxAgeMs);
+    if (!Number.isFinite(ageMs) || ageMs <= 0) return;
+
+    const now = Date.now();
+
+    // Throttle so we don't scan the shared log on every single local edit.
+    const minIntervalMs = Math.max(5_000, Math.min(60_000, Math.floor(ageMs / 10)));
+    if (!opts.force && now - this._lastAgePruneAt < minIntervalMs) return;
+    this._lastAgePruneAt = now;
+
+    const cutoff = now - ageMs;
+
+    /** @type {string[]} */
+    const toDelete = [];
+    this._ops.forEach((record, id) => {
+      if (!record || typeof record !== "object") return;
+      const createdAt = Number(record.createdAt);
+      if (!Number.isFinite(createdAt)) return;
+      if (createdAt >= cutoff) return;
+
+      // Best-effort safety: avoid pruning records that might still be referenced
+      // by very recent local operations in-flight. We currently track local ops
+      // by `createdAt`, and we only ever prune records that are strictly older
+      // than our age cutoff.
+      toDelete.push(String(id));
+    });
+
+    if (toDelete.length === 0) return;
+
+    this.doc.transact(() => {
+      for (const id of toDelete) {
+        this._ops.delete(id);
       }
     }, this.origin);
   }

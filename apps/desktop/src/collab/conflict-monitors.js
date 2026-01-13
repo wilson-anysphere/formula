@@ -86,6 +86,7 @@ export function createDesktopFormulaConflictMonitor(opts) {
  * @param {Set<any>} [opts.undoLocalOrigins]
  * @param {(conflict: import("../../../../packages/collab/conflicts/index.js").CellStructuralConflict) => void} opts.onConflict
  * @param {number} [opts.maxOpRecordsPerUser]
+ * @param {number | null} [opts.maxOpRecordAgeMs]
  */
 export function createDesktopCellStructuralConflictMonitor(opts) {
   const localOrigins = new Set();
@@ -112,5 +113,6 @@ export function createDesktopCellStructuralConflictMonitor(opts) {
     ignoredOrigins: new Set([VERSIONING_RESTORE_ORIGIN, BRANCHING_APPLY_ORIGIN]),
     onConflict: opts.onConflict,
     maxOpRecordsPerUser: opts.maxOpRecordsPerUser,
+    maxOpRecordAgeMs: opts.maxOpRecordAgeMs,
   });
 }

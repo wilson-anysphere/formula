@@ -1,0 +1,125 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import * as Y from "yjs";
+import { CellStructuralConflictMonitor } from "../src/cell-structural-conflict-monitor.js";
+
+test("CellStructuralConflictMonitor prunes old shared op records by age when enabled", () => {
+  const doc = new Y.Doc();
+  const cells = doc.getMap("cells");
+  const ops = doc.getMap("cellStructuralOps");
+
+  const now = Date.now();
+  const oldId = "op-old";
+  const freshId = "op-fresh";
+
+  doc.transact(() => {
+    ops.set(oldId, {
+      id: oldId,
+      kind: "edit",
+      userId: "user-old",
+      createdAt: now - 60_000,
+      beforeState: [],
+      afterState: [],
+    });
+    ops.set(freshId, {
+      id: freshId,
+      kind: "edit",
+      userId: "user-fresh",
+      createdAt: now,
+      beforeState: [],
+      afterState: [],
+    });
+  });
+
+  assert.equal(ops.size, 2);
+
+  const monitor = new CellStructuralConflictMonitor({
+    doc,
+    cells,
+    localUserId: "user-local",
+    onConflict: () => {},
+    maxOpRecordAgeMs: 1_000,
+  });
+
+  assert.equal(ops.has(oldId), false);
+  assert.equal(ops.has(freshId), true);
+
+  monitor.dispose();
+  doc.destroy();
+});
+
+test("CellStructuralConflictMonitor still detects recent conflicts when age pruning is enabled", () => {
+  const cellKey = "Sheet1:0:0";
+
+  // Seed a shared starting state.
+  const docA = new Y.Doc();
+  const cellsA = docA.getMap("cells");
+  docA.transact(() => {
+    const cell = new Y.Map();
+    cell.set("value", "seed");
+    cell.set("formula", null);
+    cellsA.set(cellKey, cell);
+  });
+
+  const docB = new Y.Doc();
+  const cellsB = docB.getMap("cells");
+  Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+
+  const originA = { type: "local-a" };
+  const originB = { type: "local-b" };
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+
+  const monitorA = new CellStructuralConflictMonitor({
+    doc: docA,
+    cells: cellsA,
+    localUserId: "user-a",
+    origin: originA,
+    localOrigins: new Set([originA]),
+    onConflict: (c) => conflictsA.push(c),
+    maxOpRecordAgeMs: 60_000,
+  });
+
+  const monitorB = new CellStructuralConflictMonitor({
+    doc: docB,
+    cells: cellsB,
+    localUserId: "user-b",
+    origin: originB,
+    localOrigins: new Set([originB]),
+    onConflict: () => {},
+    maxOpRecordAgeMs: 60_000,
+  });
+
+  // Make concurrent changes:
+  // - user A deletes A1
+  // - user B edits A1
+  docA.transact(() => {
+    cellsA.delete(cellKey);
+  }, originA);
+
+  docB.transact(() => {
+    const cell = cellsB.get(cellKey);
+    assert.ok(cell instanceof Y.Map);
+    cell.set("value", "edited");
+    cell.set("formula", null);
+  }, originB);
+
+  // Exchange updates to merge the concurrent edits.
+  const updateA = Y.encodeStateAsUpdate(docA);
+  const updateB = Y.encodeStateAsUpdate(docB);
+  Y.applyUpdate(docA, updateB);
+  Y.applyUpdate(docB, updateA);
+
+  assert.equal(conflictsA.length > 0, true);
+  assert.equal(
+    conflictsA.some((c) => c.reason === "delete-vs-edit" && c.cellKey === cellKey),
+    true,
+  );
+
+  monitorA.dispose();
+  monitorB.dispose();
+  docA.destroy();
+  docB.destroy();
+});
+
