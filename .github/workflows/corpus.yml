@@ -167,6 +167,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Prepare private corpus output directory
+        run: mkdir -p tools/corpus/out/private
       - name: Restore private corpus trend (time series)
         uses: actions/cache/restore@v4
         with:
