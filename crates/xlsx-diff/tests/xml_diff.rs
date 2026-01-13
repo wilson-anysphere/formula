@@ -151,6 +151,33 @@ fn merge_cells_order_is_ignored() {
 }
 
 #[test]
+fn worksheet_part_name_is_normalized_for_ordering_rules() {
+    let a = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <mergeCells count="2">
+    <mergeCell ref="C3:D4"/>
+    <mergeCell ref="A1:B2"/>
+  </mergeCells>
+</worksheet>"#;
+
+    let b = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <mergeCells count="2">
+    <mergeCell ref="A1:B2"/>
+    <mergeCell ref="C3:D4"/>
+  </mergeCells>
+</worksheet>"#;
+
+    // Intentionally use un-normalized part names to ensure `NormalizedXml::parse` applies path
+    // normalization before checking whether worksheet-specific ordering rules should apply.
+    let ax = NormalizedXml::parse(r"\xl\worksheets\..\worksheets\sheet1.xml", a.as_bytes()).unwrap();
+    let bx = NormalizedXml::parse("/xl/worksheets/sheet1.xml", b.as_bytes()).unwrap();
+
+    let diffs = diff_xml(&ax, &bx, Severity::Critical);
+    assert!(diffs.is_empty(), "expected no diffs, got {diffs:#?}");
+}
+
+#[test]
 fn merge_cells_content_changes_are_not_ignored() {
     let a = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">

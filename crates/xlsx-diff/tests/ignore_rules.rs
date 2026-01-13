@@ -856,10 +856,8 @@ fn ignore_glob_suppresses_rels_targets_with_xl_prefix_without_leading_slash() {
     let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
 
     let options = DiffOptions {
-        ignore_parts: Default::default(),
         ignore_globs: vec!["xl/media/*".to_string()],
-        ignore_paths: Vec::new(),
-        strict_calc_chain: false,
+        ..Default::default()
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);
