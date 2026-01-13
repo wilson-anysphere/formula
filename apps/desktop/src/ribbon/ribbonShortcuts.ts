@@ -26,7 +26,6 @@ const KEYBINDING_COMMAND_BY_RIBBON_ID: Record<string, string> = {
   // --- Formatting -------------------------------------------------------------
   // (Most formatting buttons use built-in ids directly, so they are picked up by
   // the identity mapping in `deriveRibbonShortcutById` below.)
-
   // Some ribbon controls use more specific commands (e.g. short/long date) but
   // share the classic Excel preset shortcut with a single canonical command.
   "format.numberFormat.accounting": "format.numberFormat.currency",
