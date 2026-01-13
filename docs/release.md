@@ -178,8 +178,12 @@ CI also generates and uploads a `SHA256SUMS.txt` asset (SHA256 checksums for all
 To reproduce locally:
 
 ```bash
-# Verify the GitHub Release asset set and generate SHA256SUMS.txt (requires GH_TOKEN/GITHUB_TOKEN).
+# Verify the GitHub Release asset set and generate SHA256SUMS.txt for primary installers/bundles
+# (excludes `.sig` files by default; add `--include-sigs` to include them).
 GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --tag vX.Y.Z --repo owner/repo --out SHA256SUMS.txt
+
+# To match CI's SHA256SUMS.txt output exactly (hashes all release assets, including `.sig`):
+GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --tag vX.Y.Z --repo owner/repo --out SHA256SUMS.txt --all-assets --include-sigs
 
 # Or, if you already downloaded the release assets into ./release-assets:
 bash scripts/ci/generate-release-checksums.sh release-assets SHA256SUMS.txt

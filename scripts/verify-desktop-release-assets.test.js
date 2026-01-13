@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   ActionableError,
   filenameFromUrl,
+  isPrimaryBundleAssetName,
+  isPrimaryBundleOrSig,
   validateLatestJson,
   verifyUpdaterManifestSignature,
 } from "./verify-desktop-release-assets.mjs";
@@ -17,6 +19,27 @@ test("filenameFromUrl extracts decoded filename and strips query", () => {
     filenameFromUrl("https://example.com/download/My%20File.exe?foo=1#bar"),
     "My File.exe",
   );
+});
+
+test("isPrimaryBundleAssetName matches expected suffixes", () => {
+  assert.equal(isPrimaryBundleAssetName("Formula.dmg"), true);
+  assert.equal(isPrimaryBundleAssetName("Formula.app.tar.gz"), true);
+  assert.equal(isPrimaryBundleAssetName("Formula.tar.gz"), true);
+  assert.equal(isPrimaryBundleAssetName("Formula.msi"), true);
+  assert.equal(isPrimaryBundleAssetName("Formula.exe"), true);
+  assert.equal(isPrimaryBundleAssetName("Formula.AppImage"), true);
+  assert.equal(isPrimaryBundleAssetName("Formula.deb"), true);
+  assert.equal(isPrimaryBundleAssetName("Formula.rpm"), true);
+  assert.equal(isPrimaryBundleAssetName("Formula.zip"), true);
+  assert.equal(isPrimaryBundleAssetName("Formula.pkg"), true);
+  assert.equal(isPrimaryBundleAssetName("latest.json"), false);
+});
+
+test("isPrimaryBundleOrSig includes .sig when enabled", () => {
+  assert.equal(isPrimaryBundleOrSig("Formula.msi", { includeSigs: false }), true);
+  assert.equal(isPrimaryBundleOrSig("Formula.msi.sig", { includeSigs: false }), false);
+  assert.equal(isPrimaryBundleOrSig("Formula.msi.sig", { includeSigs: true }), true);
+  assert.equal(isPrimaryBundleOrSig("latest.json.sig", { includeSigs: true }), false);
 });
 
 test("validateLatestJson passes for a minimal manifest (version normalization + required OS keys)", () => {

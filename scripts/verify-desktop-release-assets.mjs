@@ -423,6 +423,8 @@ function usage() {
       "  --tag <tag>        Release tag (default: env GITHUB_REF_NAME)",
       "  --repo <owner/repo> GitHub repo (default: env GITHUB_REPOSITORY)",
       "  --out <path>       Output path for SHA256SUMS.txt (default: ./SHA256SUMS.txt)",
+      "  --all-assets       Hash all release assets (still excludes .sig by default)",
+      "  --include-sigs     Include .sig assets in SHA256SUMS (use with --all-assets to match CI)",
       "  --dry-run          Validate manifest/assets only (skip bundle hashing)",
       "  --verify-assets    Download updater assets referenced in latest.json and verify their signatures (slow)",
       "",
@@ -453,8 +455,15 @@ function usage() {
  * @param {string[]} argv
  */
 function parseArgs(argv) {
-  /** @type {{ tag?: string; repo?: string; out?: string; dryRun: boolean; verifyAssets: boolean; help: boolean; expectationsFile?: string; expectedTargets: string[] }} */
-  const parsed = { dryRun: false, verifyAssets: false, help: false, expectedTargets: [] };
+  /** @type {{ tag?: string; repo?: string; out?: string; dryRun: boolean; verifyAssets: boolean; help: boolean; expectationsFile?: string; expectedTargets: string[]; includeSigs: boolean; allAssets: boolean }} */
+  const parsed = {
+    dryRun: false,
+    verifyAssets: false,
+    help: false,
+    expectedTargets: [],
+    includeSigs: false,
+    allAssets: false,
+  };
 
   const takeValue = (i, flag) => {
     const value = argv[i + 1];
@@ -475,6 +484,14 @@ function parseArgs(argv) {
     }
     if (arg === "--verify-assets") {
       parsed.verifyAssets = true;
+      continue;
+    }
+    if (arg === "--include-sigs") {
+      parsed.includeSigs = true;
+      continue;
+    }
+    if (arg === "--all-assets") {
+      parsed.allAssets = true;
       continue;
     }
     if (arg === "--help" || arg === "-h") {
@@ -764,6 +781,18 @@ function isPrimaryBundleAssetName(name) {
     ".pkg",
   ];
   return suffixes.some((s) => lower.endsWith(s));
+}
+
+/**
+ * @param {string} name
+ * @param {{ includeSigs: boolean }} opts
+ */
+function isPrimaryBundleOrSig(name, { includeSigs }) {
+  if (isPrimaryBundleAssetName(name)) return true;
+  if (!includeSigs) return false;
+  if (!name.endsWith(".sig")) return false;
+  const base = name.slice(0, -".sig".length);
+  return isPrimaryBundleAssetName(base);
 }
 
 /**
@@ -1395,8 +1424,7 @@ async function main() {
         typeof asset.name === "string" &&
         (typeof asset.url === "string" || typeof asset.browser_download_url === "string")
     )
-    .filter((asset) => !asset.name.endsWith(".sig"))
-    .filter((asset) => isPrimaryBundleAssetName(asset.name))
+    .filter((asset) => isPrimaryBundleOrSig(asset.name, { includeSigs: args.includeSigs }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   if (primaryAssets.length === 0) {
@@ -1406,13 +1434,35 @@ async function main() {
     ]);
   }
 
+  const primaryBundleCount = primaryAssets.filter((a) => isPrimaryBundleAssetName(a.name)).length;
+  if (primaryBundleCount === 0) {
+    throw new ActionableError("No primary bundle assets found to hash.", [
+      "Only signature files were found (.sig).",
+      "Expected at least one of: .dmg, .tar.gz, .msi, .exe, .AppImage, .deb, .rpm, .zip, .pkg",
+      `Assets present (${assetNames.length}): ${assetNames.join(", ")}`,
+    ]);
+  }
+
+  const assetsToHash = args.allAssets
+    ? assets
+        .filter((asset) => asset && typeof asset === "object")
+        .filter(
+          (asset) =>
+            typeof asset.name === "string" &&
+            (typeof asset.url === "string" || typeof asset.browser_download_url === "string")
+        )
+        .filter((asset) => asset.name !== "SHA256SUMS.txt")
+        .filter((asset) => args.includeSigs || !asset.name.endsWith(".sig"))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : primaryAssets;
+
   /** @type {string[]} */
   const lines = [];
-  for (let i = 0; i < primaryAssets.length; i++) {
-    const asset = primaryAssets[i];
+  for (let i = 0; i < assetsToHash.length; i++) {
+    const asset = assetsToHash[i];
     const size = typeof asset.size === "number" ? asset.size : undefined;
     console.log(
-      `Hashing (${i + 1}/${primaryAssets.length}) ${asset.name}${size ? ` (${formatBytes(size)})` : ""}...`
+      `Hashing (${i + 1}/${assetsToHash.length}) ${asset.name}${size ? ` (${formatBytes(size)})` : ""}...`
     );
     const digest = await sha256OfReleaseAsset(asset, ghToken);
     lines.push(`${digest}  ${asset.name}`);
@@ -1421,7 +1471,7 @@ async function main() {
   await mkdir(path.dirname(outPath), { recursive: true });
   await writeFile(outPath, `${lines.join("\n")}\n`, "utf8");
 
-  console.log(`Wrote SHA256SUMS for ${primaryAssets.length} assets → ${outPath}`);
+  console.log(`Wrote SHA256SUMS for ${assetsToHash.length} assets → ${outPath}`);
   console.log("Desktop release asset verification passed.");
 }
 
@@ -1446,6 +1496,7 @@ export {
   ActionableError,
   filenameFromUrl,
   findPlatformsObject,
+  isPrimaryBundleOrSig,
   isPrimaryBundleAssetName,
   normalizeVersion,
   verifyUpdaterManifestSignature,
