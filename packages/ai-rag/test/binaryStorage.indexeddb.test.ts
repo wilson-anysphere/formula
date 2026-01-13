@@ -20,6 +20,39 @@ function uniqueDbName(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
+  });
+}
+
+function transactionToPromise(tx: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
+    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
+  });
+}
+
+async function listKeys(dbName: string, storeName: string): Promise<IDBValidKey[]> {
+  const req = fakeIndexedDB.open(dbName, 1);
+  req.onupgradeneeded = () => {
+    const db = req.result;
+    if (!db.objectStoreNames.contains(storeName)) db.createObjectStore(storeName);
+  };
+  const db = await requestToPromise(req);
+  try {
+    const tx = db.transaction(storeName, "readonly");
+    const store = tx.objectStore(storeName);
+    const keys = await requestToPromise(store.getAllKeys());
+    await transactionToPromise(tx);
+    return keys;
+  } finally {
+    db.close();
+  }
+}
+
 test("IndexedDBBinaryStorage round-trips bytes", async () => {
   const dbName = uniqueDbName("ai-rag-idb-roundtrip");
   const storage = new IndexedDBBinaryStorage({
@@ -93,4 +126,21 @@ test("IndexedDBBinaryStorage gracefully falls back when indexedDB is unavailable
 
   // The earlier save should have been a no-op.
   expect(await storage.load()).toBeNull();
+});
+
+test("IndexedDBBinaryStorage remove deletes persisted bytes", async () => {
+  const dbName = uniqueDbName("ai-rag-idb-remove");
+  const storage = new IndexedDBBinaryStorage({
+    dbName,
+    namespace: "formula.test.rag",
+    workbookId: "wb-remove",
+  });
+
+  const bytes = new Uint8Array([9, 8, 7]);
+  await storage.save(bytes);
+  expect(await listKeys(dbName, "binary")).toContain(storage.key);
+
+  await storage.remove();
+  expect(await storage.load()).toBeNull();
+  expect(await listKeys(dbName, "binary")).not.toContain(storage.key);
 });

@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export class NodeFileBinaryStorage {
@@ -30,5 +30,13 @@ export class NodeFileBinaryStorage {
     await writeFile(tmp, data);
     await rename(tmp, this.filePath);
   }
-}
 
+  async remove() {
+    try {
+      await unlink(this.filePath);
+    } catch (err) {
+      if (err && err.code === "ENOENT") return;
+      throw err;
+    }
+  }
+}

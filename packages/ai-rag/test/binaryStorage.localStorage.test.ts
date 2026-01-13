@@ -179,3 +179,33 @@ test("ChunkedLocalStorageBinaryStorage overwrites and removes old chunks when sa
   const loaded = await storage.load();
   expect(Array.from(loaded ?? [])).toEqual(Array.from(small));
 });
+
+test("ChunkedLocalStorageBinaryStorage remove deletes meta + chunk keys", async () => {
+  const storage = new ChunkedLocalStorageBinaryStorage({
+    namespace: "formula.test.rag",
+    workbookId: "wb-remove",
+    chunkSizeChars: 64,
+  });
+
+  const bytes = new Uint8Array(2048);
+  for (let i = 0; i < bytes.length; i += 1) bytes[i] = i % 256;
+
+  await storage.save(bytes);
+  expect(listKeysWithPrefix(getTestLocalStorage(), `${storage.key}:`).length).toBeGreaterThan(1);
+
+  await storage.remove();
+  expect(await storage.load()).toBeNull();
+  expect(listKeysWithPrefix(getTestLocalStorage(), `${storage.key}:`)).toEqual([]);
+});
+
+test("LocalStorageBinaryStorage remove deletes persisted bytes", async () => {
+  const storage = new LocalStorageBinaryStorage({ namespace: "formula.test.rag", workbookId: "remove-me" });
+  const bytes = new Uint8Array([9, 8, 7]);
+
+  await storage.save(bytes);
+  expect(getTestLocalStorage().getItem(storage.key)).toBeTypeOf("string");
+
+  await storage.remove();
+  expect(await storage.load()).toBeNull();
+  expect(getTestLocalStorage().getItem(storage.key)).toBeNull();
+});

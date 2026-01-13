@@ -1,11 +1,13 @@
 export type BinaryStorage = {
   load(): Promise<Uint8Array | null>;
   save(data: Uint8Array): Promise<void>;
+  remove?(): Promise<void>;
 };
 
 export class InMemoryBinaryStorage implements BinaryStorage {
   load(): Promise<Uint8Array | null>;
   save(data: Uint8Array): Promise<void>;
+  remove(): Promise<void>;
 }
 
 export class LocalStorageBinaryStorage implements BinaryStorage {
@@ -13,6 +15,7 @@ export class LocalStorageBinaryStorage implements BinaryStorage {
   readonly key: string;
   load(): Promise<Uint8Array | null>;
   save(data: Uint8Array): Promise<void>;
+  remove(): Promise<void>;
 }
 
 export class ChunkedLocalStorageBinaryStorage implements BinaryStorage {
@@ -20,6 +23,7 @@ export class ChunkedLocalStorageBinaryStorage implements BinaryStorage {
   readonly key: string;
   load(): Promise<Uint8Array | null>;
   save(data: Uint8Array): Promise<void>;
+  remove(): Promise<void>;
 }
 
 export class IndexedDBBinaryStorage implements BinaryStorage {
@@ -29,4 +33,5 @@ export class IndexedDBBinaryStorage implements BinaryStorage {
   readonly namespace: string;
   load(): Promise<Uint8Array | null>;
   save(data: Uint8Array): Promise<void>;
+  remove(): Promise<void>;
 }

@@ -2,6 +2,7 @@
  * @typedef {Object} BinaryStorage
  * @property {() => Promise<Uint8Array | null>} load
  * @property {(data: Uint8Array) => Promise<void>} save
+ * @property {() => Promise<void>} [remove]
  */
 
 export class InMemoryBinaryStorage {
@@ -16,6 +17,10 @@ export class InMemoryBinaryStorage {
 
   async save(data) {
     this._data = new Uint8Array(data);
+  }
+
+  async remove() {
+    this._data = null;
   }
 }
 
@@ -41,6 +46,12 @@ export class LocalStorageBinaryStorage {
     const storage = getLocalStorageOrNull();
     if (!storage) return;
     storage.setItem(this.key, toBase64(data));
+  }
+
+  async remove() {
+    const storage = getLocalStorageOrNull();
+    if (!storage) return;
+    storage.removeItem(this.key);
   }
 }
 
@@ -118,6 +129,29 @@ export class ChunkedLocalStorageBinaryStorage {
     }
     for (const key of keysToRemove) storage.removeItem(key);
   }
+
+  async remove() {
+    const storage = getLocalStorageOrNull();
+    if (!storage) return;
+
+    const prefix = `${this.key}:`;
+    /** @type {string[]} */
+    const keysToRemove = [];
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (!key) continue;
+      if (key === this.metaKey) {
+        keysToRemove.push(key);
+        continue;
+      }
+      if (!key.startsWith(prefix)) continue;
+      const suffix = key.slice(prefix.length);
+      if (!/^\d+$/.test(suffix)) continue;
+      keysToRemove.push(key);
+    }
+
+    for (const key of keysToRemove) storage.removeItem(key);
+  }
 }
 
 export class IndexedDBBinaryStorage {
@@ -168,6 +202,17 @@ export class IndexedDBBinaryStorage {
     } catch {
       // Best-effort persistence. If IndexedDB writes fail (quota / permissions),
       // we intentionally do not throw to keep callers usable in restricted contexts.
+    }
+  }
+
+  async remove() {
+    const db = await this._openOrNull();
+    if (!db) return;
+    try {
+      await idbWrite(db, this.storeName, (store) => store.delete(this.key));
+    } catch {
+      // Best-effort removal. If IndexedDB writes fail (quota / permissions),
+      // callers can proceed without a hard failure.
     }
   }
 
