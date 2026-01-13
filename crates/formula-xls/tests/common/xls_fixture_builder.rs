@@ -173,6 +173,101 @@ pub fn build_sheet_visibility_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing many worksheets with malformed `SELECTION` records.
+///
+/// Each malformed record yields an import warning via the BIFF worksheet view-state parser, which
+/// is internally capped. By distributing warnings across multiple sheets we can exceed the `.xls`
+/// importer's *global* warning cap.
+pub fn build_many_malformed_selection_records_fixture_xls(
+    sheet_count: usize,
+    records_per_sheet: usize,
+) -> Vec<u8> {
+    let workbook_stream =
+        build_many_malformed_selection_records_workbook_stream(sheet_count, records_per_sheet);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+fn build_many_malformed_selection_records_workbook_stream(
+    sheet_count: usize,
+    records_per_sheet: usize,
+) -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table. Many readers expect at least 16 style XFs before any cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    let mut boundsheet_offset_positions: Vec<usize> = Vec::new();
+    for sheet_idx in 0..sheet_count {
+        let sheet_name = format!("Sheet{}", sheet_idx + 1);
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, &sheet_name);
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        boundsheet_offset_positions.push(boundsheet_start + 4);
+    }
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    for boundsheet_offset_pos in boundsheet_offset_positions {
+        let sheet_offset = globals.len();
+        let sheet = build_many_malformed_selection_records_sheet_stream(xf_cell, records_per_sheet);
+        globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+            .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+        globals.extend_from_slice(&sheet);
+    }
+
+    globals
+}
+
+fn build_many_malformed_selection_records_sheet_stream(xf_cell: u16, record_count: usize) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) => A1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    // A valid WINDOW2 record so the view-state parser runs and can associate warnings with the
+    // worksheet.
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Malformed SELECTION records (empty payload) to generate many warnings.
+    for _ in 0..record_count {
+        push_record(&mut sheet, RECORD_SELECTION, &[]);
+    }
+
+    // Provide a single cell so calamine reports a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
 /// Build a BIFF8 `.xls` fixture that forces sheet-name sanitization via truncation and includes a
 /// cross-sheet formula referencing the original (over-long) name.
 ///

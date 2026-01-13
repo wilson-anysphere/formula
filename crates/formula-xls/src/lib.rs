@@ -152,6 +152,34 @@ impl ImportWarning {
     }
 }
 
+/// Cap the total number of non-fatal warnings surfaced during `.xls` import.
+///
+/// Individual BIFF parsers already cap warnings in some cases, but the importer aggregates warnings
+/// across many phases and sheets. A pathological workbook could otherwise produce an excessively
+/// large `Vec<ImportWarning>` and very noisy UX.
+const MAX_IMPORT_WARNINGS_TOTAL: usize = 1000;
+
+const IMPORT_WARNING_SUPPRESSION_MESSAGE: &str = "additional `.xls` import warnings suppressed";
+
+fn push_import_warning(
+    warnings: &mut Vec<ImportWarning>,
+    msg: impl Into<String>,
+    suppressed: &mut bool,
+) {
+    if *suppressed {
+        return;
+    }
+
+    if warnings.len() < MAX_IMPORT_WARNINGS_TOTAL {
+        warnings.push(ImportWarning::new(msg));
+        return;
+    }
+
+    // Cap reached: surface a single suppression warning and drop any subsequent warnings.
+    warnings.push(ImportWarning::new(IMPORT_WARNING_SUPPRESSION_MESSAGE));
+    *suppressed = true;
+}
+
 /// A merged cell range in the source workbook.
 ///
 /// Merged regions are also imported into [`formula_model::Worksheet::merged_regions`]. This type
@@ -277,21 +305,26 @@ fn import_xls_path_with_biff_reader(
     // Calamine does not support BIFF encryption and may return opaque parse
     // errors for password-protected workbooks.
     let mut warnings = Vec::new();
+    let mut warnings_suppressed = false;
     let mut workbook_stream = match catch_calamine_panic_with_context(
         "reading `.xls` workbook stream",
         || read_biff_workbook_stream(path),
     ) {
         Ok(Ok(bytes)) => Some(bytes),
         Ok(Err(err)) => {
-            warnings.push(ImportWarning::new(format!(
-                "failed to read `.xls` workbook stream: {err}"
-            )));
+            push_import_warning(
+                &mut warnings,
+                format!("failed to read `.xls` workbook stream: {err}"),
+                &mut warnings_suppressed,
+            );
             None
         }
         Err(ImportError::CalaminePanic(message)) => {
-            warnings.push(ImportWarning::new(format!(
-                "panic while reading `.xls` workbook stream: {message}"
-            )));
+            push_import_warning(
+                &mut warnings,
+                format!("panic while reading `.xls` workbook stream: {message}"),
+                &mut warnings_suppressed,
+            );
             None
         }
         Err(other) => return Err(other),
@@ -332,9 +365,11 @@ fn import_xls_path_with_biff_reader(
                 }
                 biff_globals = Some(globals);
             }
-            Err(err) => warnings.push(ImportWarning::new(format!(
-                "failed to import `.xls` workbook globals: {err}"
-            ))),
+            Err(err) => push_import_warning(
+                &mut warnings,
+                format!("failed to import `.xls` workbook globals: {err}"),
+                &mut warnings_suppressed,
+            ),
         };
     }
 
@@ -470,7 +505,9 @@ fn import_xls_path_with_biff_reader(
             if out.view.window.is_none() {
                 out.view.window = globals.workbook_window.take();
             }
-            warnings.extend(globals.warnings.drain(..).map(ImportWarning::new));
+            for warning in globals.warnings.drain(..) {
+                push_import_warning(&mut warnings, warning, &mut warnings_suppressed);
+            }
             sheet_tab_colors = Some(std::mem::take(&mut globals.sheet_tab_colors));
 
             let interesting = globals.xf_is_interesting_mask();
@@ -481,9 +518,11 @@ fn import_xls_path_with_biff_reader(
 
         match biff::parse_biff_bound_sheets(workbook_stream, detected_biff_version, codepage) {
             Ok(sheets) => biff_sheets = Some(sheets),
-            Err(err) => warnings.push(ImportWarning::new(format!(
-                "failed to import `.xls` sheet metadata: {err}"
-            ))),
+            Err(err) => push_import_warning(
+                &mut warnings,
+                format!("failed to import `.xls` sheet metadata: {err}"),
+                &mut warnings_suppressed,
+            ),
         }
 
         // AutoFilter ranges are stored in a built-in workbook/worksheet defined name
@@ -504,46 +543,64 @@ fn import_xls_path_with_biff_reader(
                 if !by_sheet.is_empty() {
                     filter_database_ranges = Some(by_sheet);
                 }
-                warnings.extend(biff_warnings.into_iter().map(|w| {
-                    ImportWarning::new(format!("failed to import `.xls` autofilter: {w}"))
-                }));
+                for w in biff_warnings {
+                    push_import_warning(
+                        &mut warnings,
+                        format!("failed to import `.xls` autofilter: {w}"),
+                        &mut warnings_suppressed,
+                    );
+                }
             }
-            Err(err) => warnings.push(ImportWarning::new(format!(
-                "failed to import `.xls` autofilter ranges: {err}"
-            ))),
+            Err(err) => push_import_warning(
+                &mut warnings,
+                format!("failed to import `.xls` autofilter ranges: {err}"),
+                &mut warnings_suppressed,
+            ),
         }
 
         if let Some(sheets) = biff_sheets.as_ref() {
             let mut props_by_sheet = Vec::with_capacity(sheets.len());
             for sheet in sheets {
                 if sheet.offset >= workbook_stream.len() {
-                    warnings.push(ImportWarning::new(format!(
-                        "failed to import `.xls` row/column properties for BIFF sheet index {} (`{}`): out-of-bounds stream offset {}",
-                        props_by_sheet.len(),
-                        sheet.name,
-                        sheet.offset
-                    )));
+                    push_import_warning(
+                        &mut warnings,
+                        format!(
+                            "failed to import `.xls` row/column properties for BIFF sheet index {} (`{}`): out-of-bounds stream offset {}",
+                            props_by_sheet.len(),
+                            sheet.name,
+                            sheet.offset
+                        ),
+                        &mut warnings_suppressed,
+                    );
                     props_by_sheet.push(biff::SheetRowColProperties::default());
                     continue;
                 }
 
                 match biff::parse_biff_sheet_row_col_properties(workbook_stream, sheet.offset, codepage) {
                     Ok(mut props) => {
-                        warnings.extend(props.warnings.drain(..).map(|warning| {
-                            ImportWarning::new(format!(
-                                "failed to fully import `.xls` row/column properties for BIFF sheet index {} (`{}`): {warning}",
-                                props_by_sheet.len(),
-                                sheet.name
-                            ))
-                        }));
+                        for warning in props.warnings.drain(..) {
+                            push_import_warning(
+                                &mut warnings,
+                                format!(
+                                    "failed to fully import `.xls` row/column properties for BIFF sheet index {} (`{}`): {warning}",
+                                    props_by_sheet.len(),
+                                    sheet.name
+                                ),
+                                &mut warnings_suppressed,
+                            );
+                        }
                         props_by_sheet.push(props);
                     }
                     Err(parse_err) => {
-                        warnings.push(ImportWarning::new(format!(
-                            "failed to import `.xls` row/column properties for BIFF sheet index {} (`{}`): {parse_err}",
-                            props_by_sheet.len(),
-                            sheet.name
-                        )));
+                        push_import_warning(
+                            &mut warnings,
+                            format!(
+                                "failed to import `.xls` row/column properties for BIFF sheet index {} (`{}`): {parse_err}",
+                                props_by_sheet.len(),
+                                sheet.name
+                            ),
+                            &mut warnings_suppressed,
+                        );
                         props_by_sheet.push(biff::SheetRowColProperties::default());
                     }
                 }
@@ -558,12 +615,16 @@ fn import_xls_path_with_biff_reader(
                     let mut parse_failed_by_sheet = Vec::with_capacity(sheets.len());
                     for sheet in sheets {
                         if sheet.offset >= workbook_stream.len() {
-                            warnings.push(ImportWarning::new(format!(
-                                "failed to import `.xls` cell styles for BIFF sheet index {} (`{}`): out-of-bounds stream offset {}",
-                                cell_xfs_by_sheet.len(),
-                                sheet.name,
-                                sheet.offset
-                            )));
+                            push_import_warning(
+                                &mut warnings,
+                                format!(
+                                    "failed to import `.xls` cell styles for BIFF sheet index {} (`{}`): out-of-bounds stream offset {}",
+                                    cell_xfs_by_sheet.len(),
+                                    sheet.name,
+                                    sheet.offset
+                                ),
+                                &mut warnings_suppressed,
+                            );
                             cell_xfs_by_sheet.push(HashMap::new());
                             parse_failed_by_sheet.push(true);
                             continue;
@@ -579,11 +640,15 @@ fn import_xls_path_with_biff_reader(
                                 parse_failed_by_sheet.push(false);
                             }
                             Err(parse_err) => {
-                                warnings.push(ImportWarning::new(format!(
-                                    "failed to import `.xls` cell styles for BIFF sheet index {} (`{}`): {parse_err}",
-                                    cell_xfs_by_sheet.len(),
-                                    sheet.name
-                                )));
+                                push_import_warning(
+                                    &mut warnings,
+                                    format!(
+                                        "failed to import `.xls` cell styles for BIFF sheet index {} (`{}`): {parse_err}",
+                                        cell_xfs_by_sheet.len(),
+                                        sheet.name
+                                    ),
+                                    &mut warnings_suppressed,
+                                );
                                 cell_xfs_by_sheet.push(HashMap::new());
                                 parse_failed_by_sheet.push(true);
                             }
@@ -659,7 +724,7 @@ fn import_xls_path_with_biff_reader(
     let (sheet_mapping, mapping_warning) =
         reconcile_biff_sheet_mapping(&sheets, biff_sheets.as_deref());
     if let Some(message) = mapping_warning {
-        warnings.push(ImportWarning::new(message));
+        push_import_warning(&mut warnings, message, &mut warnings_suppressed);
     }
 
     let mut final_sheet_names_by_idx: Vec<String> = Vec::with_capacity(sheets.len());
@@ -703,15 +768,21 @@ fn import_xls_path_with_biff_reader(
         ) {
             Ok(Ok(range)) => Some(range),
             Ok(Err(err)) => {
-                warnings.push(ImportWarning::new(format!(
-                    "failed to read cell values for sheet `{source_sheet_name}`: {err}"
-                )));
+                push_import_warning(
+                    &mut warnings,
+                    format!("failed to read cell values for sheet `{source_sheet_name}`: {err}"),
+                    &mut warnings_suppressed,
+                );
                 None
             }
             Err(ImportError::CalaminePanic(message)) => {
-                warnings.push(ImportWarning::new(format!(
-                    "failed to read cell values for sheet `{source_sheet_name}`: calamine panicked: {message}"
-                )));
+                push_import_warning(
+                    &mut warnings,
+                    format!(
+                        "failed to read cell values for sheet `{source_sheet_name}`: calamine panicked: {message}"
+                    ),
+                    &mut warnings_suppressed,
+                );
                 None
             }
             Err(other) => return Err(other),
@@ -750,9 +821,11 @@ fn import_xls_path_with_biff_reader(
                     }
                 };
 
-                warnings.push(ImportWarning::new(format!(
-                    "sanitized sheet name `{source_sheet_name}` -> `{candidate}` ({err})"
-                )));
+                push_import_warning(
+                    &mut warnings,
+                    format!("sanitized sheet name `{source_sheet_name}` -> `{candidate}` ({err})"),
+                    &mut warnings_suppressed,
+                );
                 used_sheet_names.push(candidate.clone());
                 (sheet_id, candidate)
             }
@@ -770,22 +843,30 @@ fn import_xls_path_with_biff_reader(
             {
                 if let Some(sheet_info) = biff_sheets.as_ref().and_then(|v| v.get(biff_idx)) {
                     if sheet_info.offset >= workbook_stream.len() {
-                        warnings.push(ImportWarning::new(format!(
-                            "failed to import `.xls` print settings for BIFF sheet index {} (`{}`): out-of-bounds stream offset {}",
-                            biff_idx, sheet_name, sheet_info.offset
-                        )));
+                        push_import_warning(
+                            &mut warnings,
+                            format!(
+                                "failed to import `.xls` print settings for BIFF sheet index {} (`{}`): out-of-bounds stream offset {}",
+                                biff_idx, sheet_name, sheet_info.offset
+                            ),
+                            &mut warnings_suppressed,
+                        );
                     } else {
                         match biff::parse_biff_sheet_print_settings(
                             workbook_stream,
                             sheet_info.offset,
                         ) {
                             Ok(mut parsed) => {
-                                warnings.extend(parsed.warnings.drain(..).map(|warning| {
-                                    ImportWarning::new(format!(
-                                        "failed to fully import `.xls` print settings for BIFF sheet index {} (`{}`): {warning}",
-                                        biff_idx, sheet_name
-                                    ))
-                                }));
+                                for warning in parsed.warnings.drain(..) {
+                                    push_import_warning(
+                                        &mut warnings,
+                                        format!(
+                                            "failed to fully import `.xls` print settings for BIFF sheet index {} (`{}`): {warning}",
+                                            biff_idx, sheet_name
+                                        ),
+                                        &mut warnings_suppressed,
+                                    );
+                                }
 
                             // Even if the sheet has default page setup and no breaks, updating is
                             // harmless and ensures later print settings (print area/titles) share a
@@ -793,10 +874,14 @@ fn import_xls_path_with_biff_reader(
                             out.set_sheet_page_setup(sheet_id, parsed.page_setup.unwrap_or_default());
                             out.set_manual_page_breaks(sheet_id, parsed.manual_page_breaks);
                             }
-                            Err(err) => warnings.push(ImportWarning::new(format!(
-                                "failed to import `.xls` print settings for BIFF sheet index {} (`{}`): {err}",
-                                biff_idx, sheet_name
-                            ))),
+                            Err(err) => push_import_warning(
+                                &mut warnings,
+                                format!(
+                                    "failed to import `.xls` print settings for BIFF sheet index {} (`{}`): {err}",
+                                    biff_idx, sheet_name
+                                ),
+                                &mut warnings_suppressed,
+                            ),
                         }
                     }
                 }
@@ -816,23 +901,37 @@ fn import_xls_path_with_biff_reader(
             .flatten();
 
         if sheet_meta.typ != SheetType::WorkSheet {
-            warnings.push(ImportWarning::new(format!(
-                "sheet `{sheet_name}` has unsupported type {:?}; importing as worksheet",
-                sheet_meta.typ
-            )));
+            push_import_warning(
+                &mut warnings,
+                format!(
+                    "sheet `{sheet_name}` has unsupported type {:?}; importing as worksheet",
+                    sheet_meta.typ
+                ),
+                &mut warnings_suppressed,
+            );
         }
 
         if let (Some(workbook_stream), Some(biff_idx)) = (workbook_stream.as_deref(), biff_idx) {
             if let Some(sheet_info) = biff_sheets.as_ref().and_then(|v| v.get(biff_idx)) {
                 if sheet_info.offset >= workbook_stream.len() {
-                    warnings.push(ImportWarning::new(format!(
-                        "failed to import `.xls` view state for BIFF sheet index {} (`{}`): out-of-bounds stream offset {}",
-                        biff_idx, sheet_name, sheet_info.offset
-                    )));
+                    push_import_warning(
+                        &mut warnings,
+                        format!(
+                            "failed to import `.xls` view state for BIFF sheet index {} (`{}`): out-of-bounds stream offset {}",
+                            biff_idx, sheet_name, sheet_info.offset
+                        ),
+                        &mut warnings_suppressed,
+                    );
                 } else {
                     match biff::parse_biff_sheet_view_state(workbook_stream, sheet_info.offset) {
                         Ok(mut view_state) => {
-                            warnings.extend(view_state.warnings.drain(..).map(ImportWarning::new));
+                            for warning in view_state.warnings.drain(..) {
+                                push_import_warning(
+                                    &mut warnings,
+                                    warning,
+                                    &mut warnings_suppressed,
+                                );
+                            }
 
                             if let Some(show) = view_state.show_grid_lines {
                                 sheet.view.show_grid_lines = show;
@@ -856,21 +955,35 @@ fn import_xls_path_with_biff_reader(
                                 sheet.view.selection = Some(selection);
                             }
                         }
-                        Err(err) => warnings.push(ImportWarning::new(format!(
-                            "failed to import `.xls` view state for BIFF sheet index {} (`{}`): {err}",
-                            biff_idx, sheet_name
-                        ))),
+                        Err(err) => push_import_warning(
+                            &mut warnings,
+                            format!(
+                                "failed to import `.xls` view state for BIFF sheet index {} (`{}`): {err}",
+                                biff_idx, sheet_name
+                            ),
+                            &mut warnings_suppressed,
+                        ),
                     }
 
                     match biff::parse_biff_sheet_protection(workbook_stream, sheet_info.offset) {
                         Ok(mut protection) => {
-                            warnings.extend(protection.warnings.drain(..).map(ImportWarning::new));
+                            for warning in protection.warnings.drain(..) {
+                                push_import_warning(
+                                    &mut warnings,
+                                    warning,
+                                    &mut warnings_suppressed,
+                                );
+                            }
                             sheet.sheet_protection = protection.protection;
                         }
-                        Err(err) => warnings.push(ImportWarning::new(format!(
-                            "failed to import `.xls` sheet protection for BIFF sheet index {} (`{}`): {err}",
-                            biff_idx, sheet_name
-                        ))),
+                        Err(err) => push_import_warning(
+                            &mut warnings,
+                            format!(
+                                "failed to import `.xls` sheet protection for BIFF sheet index {} (`{}`): {err}",
+                                biff_idx, sheet_name
+                            ),
+                            &mut warnings_suppressed,
+                        ),
                     }
                 }
             }
@@ -907,7 +1020,14 @@ fn import_xls_path_with_biff_reader(
                 sheet_row_col_props = Some(props);
                 apply_row_col_properties(sheet, props);
                 apply_outline_properties(sheet, props);
-                apply_row_col_style_ids(sheet, props, xf_style_ids.as_deref(), &mut warnings, &sheet_name);
+                apply_row_col_style_ids(
+                    sheet,
+                    props,
+                    xf_style_ids.as_deref(),
+                    &mut warnings,
+                    &mut warnings_suppressed,
+                    &sheet_name,
+                );
 
                 sheet_stream_autofilter_range = props.auto_filter_range;
                 sheet_stream_filter_columns = props.auto_filter_columns.clone();
@@ -918,9 +1038,13 @@ fn import_xls_path_with_biff_reader(
                     // We do not preserve filtered-row visibility as user-hidden rows; the model
                     // does not have a dedicated "filtered hidden" bit, and preserving them as
                     // user-hidden would be misleading.
-                    warnings.push(ImportWarning::new(format!(
-                        "sheet `{sheet_name}` has FILTERMODE (filtered rows); filtered row visibility is not preserved on import"
-                    )));
+                    push_import_warning(
+                        &mut warnings,
+                        format!(
+                            "sheet `{sheet_name}` has FILTERMODE (filtered rows); filtered row visibility is not preserved on import"
+                        ),
+                        &mut warnings_suppressed,
+                    );
                 }
             }
 
@@ -1049,10 +1173,14 @@ fn import_xls_path_with_biff_reader(
             {
                 if let Some(sheet_info) = biff_sheets.as_ref().and_then(|s| s.get(biff_idx)) {
                     if sheet_info.offset >= workbook_stream.len() {
-                        warnings.push(ImportWarning::new(format!(
-                            "failed to import `.xls` merged cells for sheet `{sheet_name}`: out-of-bounds stream offset {}",
-                            sheet_info.offset
-                        )));
+                        push_import_warning(
+                            &mut warnings,
+                            format!(
+                                "failed to import `.xls` merged cells for sheet `{sheet_name}`: out-of-bounds stream offset {}",
+                                sheet_info.offset
+                            ),
+                            &mut warnings_suppressed,
+                        );
                     } else {
                         match biff::parse_biff_sheet_merged_cells(
                             workbook_stream,
@@ -1068,9 +1196,13 @@ fn import_xls_path_with_biff_reader(
                                     ))
                                 }));
                             }
-                            Err(err) => warnings.push(ImportWarning::new(format!(
-                                "failed to import `.xls` merged cells for sheet `{sheet_name}`: {err}"
-                            ))),
+                            Err(err) => push_import_warning(
+                                &mut warnings,
+                                format!(
+                                    "failed to import `.xls` merged cells for sheet `{sheet_name}`: {err}"
+                                ),
+                                &mut warnings_suppressed,
+                            ),
                         }
                     }
                 }
@@ -1086,9 +1218,13 @@ fn import_xls_path_with_biff_reader(
 
                 // Populate the model's merged-region table so cell resolution matches Excel.
                 if let Err(err) = sheet.merged_regions.add(range) {
-                    warnings.push(ImportWarning::new(format!(
-                        "failed to add merged region `{range}` in sheet `{sheet_name}`: {err}"
-                    )));
+                    push_import_warning(
+                        &mut warnings,
+                        format!(
+                            "failed to add merged region `{range}` in sheet `{sheet_name}`: {err}"
+                        ),
+                        &mut warnings_suppressed,
+                    );
                 }
 
                 // Back-compat: preserve merged metadata on the import result.
@@ -1104,9 +1240,13 @@ fn import_xls_path_with_biff_reader(
 
             for (row, col, value) in range.used_cells() {
                 let Some(cell_ref) = to_cell_ref(range_start, row, col) else {
-                    warnings.push(ImportWarning::new(format!(
-                        "skipping out-of-bounds cell in sheet `{sheet_name}` at ({row},{col})"
-                    )));
+                    push_import_warning(
+                        &mut warnings,
+                        format!(
+                            "skipping out-of-bounds cell in sheet `{sheet_name}` at ({row},{col})"
+                        ),
+                        &mut warnings_suppressed,
+                    );
                     continue;
                 };
 
@@ -1194,10 +1334,14 @@ fn import_xls_path_with_biff_reader(
         {
             if let Some(sheet_info) = biff_sheets.as_ref().and_then(|s| s.get(biff_idx)) {
                 if sheet_info.offset >= workbook_stream.len() {
-                    warnings.push(ImportWarning::new(format!(
-                        "failed to import `.xls` hyperlinks for sheet `{sheet_name}`: out-of-bounds stream offset {}",
-                        sheet_info.offset
-                    )));
+                    push_import_warning(
+                        &mut warnings,
+                        format!(
+                            "failed to import `.xls` hyperlinks for sheet `{sheet_name}`: out-of-bounds stream offset {}",
+                            sheet_info.offset
+                        ),
+                        &mut warnings_suppressed,
+                    );
                 } else {
                     match biff::parse_biff_sheet_hyperlinks(
                         workbook_stream,
@@ -1224,15 +1368,21 @@ fn import_xls_path_with_biff_reader(
                                     }
                                 }
                             }
-                            warnings.extend(parsed.warnings.into_iter().map(|w| {
-                                ImportWarning::new(format!(
-                                    "failed to import `.xls` hyperlink in sheet `{sheet_name}`: {w}"
-                                ))
-                            }));
+                            for w in parsed.warnings {
+                                push_import_warning(
+                                    &mut warnings,
+                                    format!(
+                                        "failed to import `.xls` hyperlink in sheet `{sheet_name}`: {w}"
+                                    ),
+                                    &mut warnings_suppressed,
+                                );
+                            }
                         }
-                        Err(err) => warnings.push(ImportWarning::new(format!(
-                            "failed to import `.xls` hyperlinks for sheet `{sheet_name}`: {err}"
-                        ))),
+                        Err(err) => push_import_warning(
+                            &mut warnings,
+                            format!("failed to import `.xls` hyperlinks for sheet `{sheet_name}`: {err}"),
+                            &mut warnings_suppressed,
+                        ),
                     }
                 }
             }
@@ -1249,10 +1399,14 @@ fn import_xls_path_with_biff_reader(
         ) {
             if let Some(sheet_info) = biff_sheets.as_ref().and_then(|s| s.get(biff_idx)) {
                 if sheet_info.offset >= workbook_stream.len() {
-                    warnings.push(ImportWarning::new(format!(
-                        "failed to import `.xls` note comments for sheet `{sheet_name}`: out-of-bounds stream offset {}",
-                        sheet_info.offset
-                    )));
+                    push_import_warning(
+                        &mut warnings,
+                        format!(
+                            "failed to import `.xls` note comments for sheet `{sheet_name}`: out-of-bounds stream offset {}",
+                            sheet_info.offset
+                        ),
+                        &mut warnings_suppressed,
+                    );
                 } else {
                     match biff::parse_biff_sheet_notes(
                         workbook_stream,
@@ -1261,11 +1415,15 @@ fn import_xls_path_with_biff_reader(
                         codepage,
                     ) {
                         Ok(parsed) => {
-                            warnings.extend(parsed.warnings.into_iter().map(|w| {
-                                ImportWarning::new(format!(
-                                    "failed to import `.xls` note comment in sheet `{sheet_name}`: {w}"
-                                ))
-                            }));
+                            for w in parsed.warnings {
+                                push_import_warning(
+                                    &mut warnings,
+                                    format!(
+                                        "failed to import `.xls` note comment in sheet `{sheet_name}`: {w}"
+                                    ),
+                                    &mut warnings_suppressed,
+                                );
+                            }
                             let notes = parsed.notes;
 
                             // Generate deterministic comment ids for BIFF NOTE comments so repeated
@@ -1285,18 +1443,26 @@ fn import_xls_path_with_biff_reader(
                                 let mut collision = false;
                                 if let Some(prev_cell) = seen_obj_ids.get(&note.obj_id).copied() {
                                     collision = true;
-                                    warnings.push(ImportWarning::new(format!(
-                                        "duplicate `.xls` NOTE obj_id {} in sheet `{sheet_name}` (index {sheet_idx}) (cell {} already used at {}); generating random comment id",
-                                        note.obj_id,
-                                        anchor.to_a1(),
-                                        prev_cell.to_a1(),
-                                    )));
+                                    push_import_warning(
+                                        &mut warnings,
+                                        format!(
+                                            "duplicate `.xls` NOTE obj_id {} in sheet `{sheet_name}` (index {sheet_idx}) (cell {} already used at {}); generating random comment id",
+                                            note.obj_id,
+                                            anchor.to_a1(),
+                                            prev_cell.to_a1(),
+                                        ),
+                                        &mut warnings_suppressed,
+                                    );
                                 }
                                 if seen_ids.contains(&candidate_id) {
                                     collision = true;
-                                    warnings.push(ImportWarning::new(format!(
-                                        "duplicate `.xls` NOTE id `{candidate_id}` in sheet `{sheet_name}` (index {sheet_idx}); generating random comment id",
-                                    )));
+                                    push_import_warning(
+                                        &mut warnings,
+                                        format!(
+                                            "duplicate `.xls` NOTE id `{candidate_id}` in sheet `{sheet_name}` (index {sheet_idx}); generating random comment id",
+                                        ),
+                                        &mut warnings_suppressed,
+                                    );
                                 }
 
                                 let id = if collision {
@@ -1321,27 +1487,41 @@ fn import_xls_path_with_biff_reader(
                                 match sheet.add_comment(anchor, comment.clone()) {
                                     Ok(_) => {}
                                     Err(formula_model::CommentError::DuplicateCommentId(dup_id)) => {
-                                        warnings.push(ImportWarning::new(format!(
-                                            "duplicate `.xls` comment id `{dup_id}` in sheet `{sheet_name}` (index {sheet_idx}); generating random comment id",
-                                        )));
-                                    comment.id.clear();
+                                        push_import_warning(
+                                            &mut warnings,
+                                            format!(
+                                                "duplicate `.xls` comment id `{dup_id}` in sheet `{sheet_name}` (index {sheet_idx}); generating random comment id",
+                                            ),
+                                            &mut warnings_suppressed,
+                                        );
+                                        comment.id.clear();
                                         if let Err(err) = sheet.add_comment(anchor, comment) {
-                                        warnings.push(ImportWarning::new(format!(
-                                            "failed to import `.xls` note comment for sheet `{sheet_name}` (index {sheet_idx}) at {}: {err}",
-                                                anchor.to_a1(),
-                                        )));
+                                            push_import_warning(
+                                                &mut warnings,
+                                                format!(
+                                                    "failed to import `.xls` note comment for sheet `{sheet_name}` (index {sheet_idx}) at {}: {err}",
+                                                    anchor.to_a1(),
+                                                ),
+                                                &mut warnings_suppressed,
+                                            );
+                                        }
                                     }
-                                }
-                                    Err(err) => warnings.push(ImportWarning::new(format!(
-                                        "failed to import `.xls` note comment for sheet `{sheet_name}` (index {sheet_idx}) at {}: {err}",
-                                        anchor.to_a1(),
-                                    ))),
+                                    Err(err) => push_import_warning(
+                                        &mut warnings,
+                                        format!(
+                                            "failed to import `.xls` note comment for sheet `{sheet_name}` (index {sheet_idx}) at {}: {err}",
+                                            anchor.to_a1(),
+                                        ),
+                                        &mut warnings_suppressed,
+                                    ),
                                 }
                             }
                         }
-                        Err(err) => warnings.push(ImportWarning::new(format!(
-                            "failed to import `.xls` note comments for sheet `{sheet_name}`: {err}"
-                        ))),
+                        Err(err) => push_import_warning(
+                            &mut warnings,
+                            format!("failed to import `.xls` note comments for sheet `{sheet_name}`: {err}"),
+                            &mut warnings_suppressed,
+                        ),
                     }
                 }
             }
@@ -1360,9 +1540,13 @@ fn import_xls_path_with_biff_reader(
                 let formula_start = formula_range.start().unwrap_or((0, 0));
                 for (row, col, formula) in formula_range.used_cells() {
                     let Some(cell_ref) = to_cell_ref(formula_start, row, col) else {
-                        warnings.push(ImportWarning::new(format!(
-                            "skipping out-of-bounds formula in sheet `{sheet_name}` at ({row},{col})"
-                        )));
+                        push_import_warning(
+                            &mut warnings,
+                            format!(
+                                "skipping out-of-bounds formula in sheet `{sheet_name}` at ({row},{col})"
+                            ),
+                            &mut warnings_suppressed,
+                        );
                         continue;
                     };
 
@@ -1393,15 +1577,21 @@ fn import_xls_path_with_biff_reader(
             }
             Ok(Err(err)) => {
                 calamine_formula_failed = true;
-                warnings.push(ImportWarning::new(format!(
-                    "failed to read formulas for sheet `{sheet_name}`: {err}"
-                )));
+                push_import_warning(
+                    &mut warnings,
+                    format!("failed to read formulas for sheet `{sheet_name}`: {err}"),
+                    &mut warnings_suppressed,
+                );
             }
             Err(ImportError::CalaminePanic(message)) => {
                 calamine_formula_failed = true;
-                warnings.push(ImportWarning::new(format!(
-                    "failed to read formulas for sheet `{sheet_name}`: calamine panicked: {message}"
-                )));
+                push_import_warning(
+                    &mut warnings,
+                    format!(
+                        "failed to read formulas for sheet `{sheet_name}`: calamine panicked: {message}"
+                    ),
+                    &mut warnings_suppressed,
+                );
             }
             Err(other) => return Err(other),
         }
@@ -1422,10 +1612,14 @@ fn import_xls_path_with_biff_reader(
                         // Only surface this warning if we need BIFF formula import due to a calamine
                         // failure; otherwise keep `.xls` import warning behavior stable.
                         if calamine_formula_failed {
-                            warnings.push(ImportWarning::new(format!(
-                                "failed to import `.xls` formulas for sheet `{sheet_name}` via BIFF fallback: out-of-bounds stream offset {}",
-                                sheet_info.offset
-                            )));
+                            push_import_warning(
+                                &mut warnings,
+                                format!(
+                                    "failed to import `.xls` formulas for sheet `{sheet_name}` via BIFF fallback: out-of-bounds stream offset {}",
+                                    sheet_info.offset
+                                ),
+                                &mut warnings_suppressed,
+                            );
                         }
                     } else {
                         // Provide a minimal rgce decode context: structured references and most
@@ -1471,18 +1665,26 @@ fn import_xls_path_with_biff_reader(
                                 }
 
                                 if calamine_formula_failed {
-                                    warnings.extend(parsed.warnings.into_iter().map(|w| {
-                                        ImportWarning::new(format!(
-                                            "failed to import `.xls` formula in sheet `{sheet_name}` via BIFF fallback: {w}"
-                                        ))
-                                    }));
+                                    for w in parsed.warnings {
+                                        push_import_warning(
+                                            &mut warnings,
+                                            format!(
+                                                "failed to import `.xls` formula in sheet `{sheet_name}` via BIFF fallback: {w}"
+                                            ),
+                                            &mut warnings_suppressed,
+                                        );
+                                    }
                                 }
                             }
                             Err(err) => {
                                 if calamine_formula_failed {
-                                    warnings.push(ImportWarning::new(format!(
-                                        "failed to import `.xls` formulas for sheet `{sheet_name}` via BIFF fallback: {err}"
-                                    )));
+                                    push_import_warning(
+                                        &mut warnings,
+                                        format!(
+                                            "failed to import `.xls` formulas for sheet `{sheet_name}` via BIFF fallback: {err}"
+                                        ),
+                                        &mut warnings_suppressed,
+                                    );
                                 }
                             }
                         }
@@ -1537,7 +1739,13 @@ fn import_xls_path_with_biff_reader(
                         &ctx,
                     ) {
                         Ok(mut recovered) => {
-                            warnings.extend(recovered.warnings.drain(..).map(ImportWarning::new));
+                            for warning in recovered.warnings.drain(..) {
+                                push_import_warning(
+                                    &mut warnings,
+                                    warning,
+                                    &mut warnings_suppressed,
+                                );
+                            }
                             for (cell_ref, formula_text) in recovered.formulas {
                                 let anchor = sheet.merged_regions.resolve_cell(cell_ref);
                                 // Best-effort fallback only: do not override formulas that were
@@ -1564,9 +1772,13 @@ fn import_xls_path_with_biff_reader(
                                 }
                             }
                         }
-                        Err(err) => warnings.push(ImportWarning::new(format!(
-                            "failed to recover shared formulas for sheet `{sheet_name}`: {err}"
-                        ))),
+                        Err(err) => push_import_warning(
+                            &mut warnings,
+                            format!(
+                                "failed to recover shared formulas for sheet `{sheet_name}`: {err}"
+                            ),
+                            &mut warnings_suppressed,
+                        ),
                     }
                 }
             }
@@ -1673,9 +1885,13 @@ fn import_xls_path_with_biff_reader(
             }
 
             if out_of_range_xf_count > 0 {
-                warnings.push(ImportWarning::new(format!(
-                    "skipped {out_of_range_xf_count} cells in sheet `{sheet_name}` with out-of-range XF indices"
-                )));
+                push_import_warning(
+                    &mut warnings,
+                    format!(
+                        "skipped {out_of_range_xf_count} cells in sheet `{sheet_name}` with out-of-range XF indices"
+                    ),
+                    &mut warnings_suppressed,
+                );
             }
         }
     }
@@ -1766,10 +1982,14 @@ fn import_xls_path_with_biff_reader(
         if let Some(sheet) = out.sheets.get(imported_idx) {
             out.view.active_sheet_id = Some(sheet.id);
         } else {
-            warnings.push(ImportWarning::new(format!(
-                "skipping `.xls` active tab index {i_tab_cur}: workbook contains {} imported sheets",
-                out.sheets.len()
-            )));
+            push_import_warning(
+                &mut warnings,
+                format!(
+                    "skipping `.xls` active tab index {i_tab_cur}: workbook contains {} imported sheets",
+                    out.sheets.len()
+                ),
+                &mut warnings_suppressed,
+            );
         }
     }
 
@@ -1808,6 +2028,7 @@ fn import_xls_path_with_biff_reader(
                     &sheet_names_by_biff_idx,
                     &sheet_ids_by_biff_idx,
                     &mut warnings,
+                    &mut warnings_suppressed,
                 );
             }
         }
@@ -1837,7 +2058,9 @@ fn import_xls_path_with_biff_reader(
             &sheet_names_by_biff_idx,
         ) {
             Ok(mut parsed) => {
-                warnings.extend(parsed.warnings.drain(..).map(ImportWarning::new));
+                for warning in parsed.warnings.drain(..) {
+                    push_import_warning(&mut warnings, warning, &mut warnings_suppressed);
+                }
 
                 for name in parsed.names.drain(..) {
                     let (scope, xlsx_local_sheet_id) = match name.scope_sheet {
@@ -1849,12 +2072,16 @@ fn import_xls_path_with_biff_reader(
                                     local_sheet_ids_by_biff_idx.get(biff_idx).copied().flatten(),
                                 ),
                                 None => {
-                                    warnings.push(ImportWarning::new(format!(
-                                    "defined name `{}` has out-of-range sheet scope itab={} (sheet count={}); importing as workbook-scoped",
-                                    name.name,
-                                    biff_idx.saturating_add(1),
-                                    sheet_ids_by_biff_idx.len()
-                                )));
+                                    push_import_warning(
+                                        &mut warnings,
+                                        format!(
+                                            "defined name `{}` has out-of-range sheet scope itab={} (sheet count={}); importing as workbook-scoped",
+                                            name.name,
+                                            biff_idx.saturating_add(1),
+                                            sheet_ids_by_biff_idx.len()
+                                        ),
+                                        &mut warnings_suppressed,
+                                    );
                                     (DefinedNameScope::Workbook, None)
                                 }
                             }
@@ -1869,16 +2096,19 @@ fn import_xls_path_with_biff_reader(
                         name.hidden,
                         xlsx_local_sheet_id,
                     ) {
-                        warnings.push(ImportWarning::new(format!(
-                            "skipping defined name `{}`: {err}",
-                            name.name
-                        )));
+                        push_import_warning(
+                            &mut warnings,
+                            format!("skipping defined name `{}`: {err}", name.name),
+                            &mut warnings_suppressed,
+                        );
                     }
                 }
             }
-            Err(err) => warnings.push(ImportWarning::new(format!(
-                "failed to import `.xls` defined names: {err}"
-            ))),
+            Err(err) => push_import_warning(
+                &mut warnings,
+                format!("failed to import `.xls` defined names: {err}"),
+                &mut warnings_suppressed,
+            ),
         }
     }
 
@@ -1952,25 +2182,33 @@ fn import_xls_path_with_biff_reader(
             Ok(_) => imported_count = imported_count.saturating_add(1),
             Err(err) => {
                 skipped_count = skipped_count.saturating_add(1);
-                warnings.push(ImportWarning::new(format!(
-                    "skipping `.xls` defined name `{name}` from calamine fallback: {err}"
-                )));
+                push_import_warning(
+                    &mut warnings,
+                    format!("skipping `.xls` defined name `{name}` from calamine fallback: {err}"),
+                    &mut warnings_suppressed,
+                );
             }
         }
     }
 
     if defined_names_before_calamine == 0 && imported_count > 0 {
-        warnings.push(ImportWarning::new(
+        push_import_warning(
+            &mut warnings,
             "imported `.xls` defined names via calamine fallback; defined name metadata may be incomplete (scope/hidden/comment may be missing)",
-        ));
+            &mut warnings_suppressed,
+        );
     }
 
     if skipped_count > 0 {
-        warnings.push(ImportWarning::new(format!(
-            "skipped {skipped_count} `.xls` defined names from calamine fallback due to invalid/duplicate names"
-        )));
+        push_import_warning(
+            &mut warnings,
+            format!(
+                "skipped {skipped_count} `.xls` defined names from calamine fallback due to invalid/duplicate names"
+            ),
+            &mut warnings_suppressed,
+        );
     }
-    populate_print_settings_from_defined_names(&mut out, &mut warnings);
+    populate_print_settings_from_defined_names(&mut out, &mut warnings, &mut warnings_suppressed);
 
     // Best-effort import of worksheet AutoFilter ranges (phase 1).
     //
@@ -1990,10 +2228,14 @@ fn import_xls_path_with_biff_reader(
         let range = match parse_autofilter_range_from_defined_name(&name.refers_to) {
             Ok(range) => range,
             Err(err) => {
-                warnings.push(ImportWarning::new(format!(
-                    "failed to parse `.xls` AutoFilter range `{}` from defined name `{}`: {err}",
-                    name.refers_to, name.name
-                )));
+                push_import_warning(
+                    &mut warnings,
+                    format!(
+                        "failed to parse `.xls` AutoFilter range `{}` from defined name `{}`: {err}",
+                        name.refers_to, name.name
+                    ),
+                    &mut warnings_suppressed,
+                );
                 continue;
             }
         };
@@ -2010,6 +2252,7 @@ fn import_xls_path_with_biff_reader(
                     &name.name,
                     &name.refers_to,
                     &mut warnings,
+                    &mut warnings_suppressed,
                 )
                 .or_else(|| (out.sheets.len() == 1).then(|| out.sheets[0].name.clone()))
                 .or_else(|| {
@@ -2044,10 +2287,14 @@ fn import_xls_path_with_biff_reader(
                 });
                 let Some(sheet_name) = sheet_name else {
                     if warnings.len() == warnings_before_infer {
-                        warnings.push(ImportWarning::new(format!(
-                            "skipping `.xls` AutoFilter defined name `{}`: workbook-scoped and sheet scope could not be inferred from `{}`",
-                            name.name, name.refers_to
-                        )));
+                        push_import_warning(
+                            &mut warnings,
+                            format!(
+                                "skipping `.xls` AutoFilter defined name `{}`: workbook-scoped and sheet scope could not be inferred from `{}`",
+                                name.name, name.refers_to
+                            ),
+                            &mut warnings_suppressed,
+                        );
                     }
                     continue;
                 };
@@ -2083,9 +2330,11 @@ fn import_xls_path_with_biff_reader(
             match biff::read_workbook_stream_from_xls(path) {
                 Ok(bytes) => Some(bytes),
                 Err(err) => {
-                    warnings.push(ImportWarning::new(format!(
-                        "failed to recover `.xls` AutoFilter ranges from workbook stream: {err}"
-                    )));
+                    push_import_warning(
+                        &mut warnings,
+                        format!("failed to recover `.xls` AutoFilter ranges from workbook stream: {err}"),
+                        &mut warnings_suppressed,
+                    );
                     None
                 }
             }
@@ -2196,29 +2445,39 @@ fn import_xls_path_with_biff_reader(
             ) {
                 Ok(parsed) => {
                     for warning in parsed.warnings {
-                        warnings.push(ImportWarning::new(format!(
-                            "failed to fully recover `.xls` AutoFilter ranges from workbook stream: {warning}"
-                        )));
+                        push_import_warning(
+                            &mut warnings,
+                            format!(
+                                "failed to fully recover `.xls` AutoFilter ranges from workbook stream: {warning}"
+                            ),
+                            &mut warnings_suppressed,
+                        );
                     }
 
                     for (biff_sheet_idx, range) in parsed.by_sheet {
                         let sheet_id = resolve_sheet_id_for_biff_idx(biff_sheet_idx);
 
                         let Some(sheet_id) = sheet_id else {
-                            warnings.push(ImportWarning::new(format!(
-                                "skipping `.xls` AutoFilter range `{range}`: out-of-range sheet index {} (sheet count={})",
-                                biff_sheet_idx.saturating_add(1),
-                                out.sheets.len()
-                            )));
+                            push_import_warning(
+                                &mut warnings,
+                                format!(
+                                    "skipping `.xls` AutoFilter range `{range}`: out-of-range sheet index {} (sheet count={})",
+                                    biff_sheet_idx.saturating_add(1),
+                                    out.sheets.len()
+                                ),
+                                &mut warnings_suppressed,
+                            );
                             continue;
                         };
 
                         autofilters.push((sheet_id, range));
                     }
                 }
-                Err(err) => warnings.push(ImportWarning::new(format!(
-                    "failed to recover `.xls` AutoFilter ranges from workbook stream: {err}"
-                ))),
+                Err(err) => push_import_warning(
+                    &mut warnings,
+                    format!("failed to recover `.xls` AutoFilter ranges from workbook stream: {err}"),
+                    &mut warnings_suppressed,
+                ),
             }
 
             match biff::parse_biff_defined_names(
@@ -2236,10 +2495,14 @@ fn import_xls_path_with_biff_reader(
                         {
                             Ok(range) => range,
                             Err(err) => {
-                                warnings.push(ImportWarning::new(format!(
-                                    "failed to parse `.xls` AutoFilter range `{}` from defined name `{}`: {err}",
-                                    name.refers_to, name.name
-                                )));
+                                push_import_warning(
+                                    &mut warnings,
+                                    format!(
+                                        "failed to parse `.xls` AutoFilter range `{}` from defined name `{}`: {err}",
+                                        name.refers_to, name.name
+                                    ),
+                                    &mut warnings_suppressed,
+                                );
                                 continue;
                             }
                         };
@@ -2248,12 +2511,16 @@ fn import_xls_path_with_biff_reader(
                             Some(biff_sheet_idx) => {
                                 let sheet_id = resolve_sheet_id_for_biff_idx(biff_sheet_idx);
                                 if sheet_id.is_none() {
-                                    warnings.push(ImportWarning::new(format!(
-                                        "skipping `.xls` AutoFilter defined name `{}`: out-of-range sheet index {} (sheet count={})",
-                                        name.name,
-                                        biff_sheet_idx.saturating_add(1),
-                                        out.sheets.len()
-                                    )));
+                                    push_import_warning(
+                                        &mut warnings,
+                                        format!(
+                                            "skipping `.xls` AutoFilter defined name `{}`: out-of-range sheet index {} (sheet count={})",
+                                            name.name,
+                                            biff_sheet_idx.saturating_add(1),
+                                            out.sheets.len()
+                                        ),
+                                        &mut warnings_suppressed,
+                                    );
                                 }
                                 sheet_id
                             }
@@ -2267,6 +2534,7 @@ fn import_xls_path_with_biff_reader(
                                     &name.name,
                                     &name.refers_to,
                                     &mut warnings,
+                                    &mut warnings_suppressed,
                                 )
                                 .and_then(|sheet_name| out.sheet_by_name(&sheet_name).map(|s| s.id))
                                 .or_else(|| (out.sheets.len() == 1).then(|| out.sheets[0].id))
@@ -2298,10 +2566,14 @@ fn import_xls_path_with_biff_reader(
                                 });
 
                                 if inferred.is_none() && warnings.len() == warnings_before_infer {
-                                    warnings.push(ImportWarning::new(format!(
-                                        "skipping `.xls` AutoFilter defined name `{}`: workbook-scoped and sheet scope could not be inferred from `{}`",
-                                        name.name, name.refers_to
-                                    )));
+                                    push_import_warning(
+                                        &mut warnings,
+                                        format!(
+                                            "skipping `.xls` AutoFilter defined name `{}`: workbook-scoped and sheet scope could not be inferred from `{}`",
+                                            name.name, name.refers_to
+                                        ),
+                                        &mut warnings_suppressed,
+                                    );
                                 }
                                 inferred
                             }
@@ -2313,18 +2585,22 @@ fn import_xls_path_with_biff_reader(
                         autofilters.push((sheet_id, range));
                     }
                 }
-                Err(err) => warnings.push(ImportWarning::new(format!(
-                    "failed to recover `.xls` AutoFilter ranges from workbook stream: {err}"
-                ))),
+                Err(err) => push_import_warning(
+                    &mut warnings,
+                    format!("failed to recover `.xls` AutoFilter ranges from workbook stream: {err}"),
+                    &mut warnings_suppressed,
+                ),
             }
         }
     }
 
     for (sheet_id, range) in autofilters {
         let Some(sheet) = out.sheet_mut(sheet_id) else {
-            warnings.push(ImportWarning::new(format!(
-                "skipping `.xls` AutoFilter range for missing sheet id {sheet_id}"
-            )));
+            push_import_warning(
+                &mut warnings,
+                format!("skipping `.xls` AutoFilter range for missing sheet id {sheet_id}"),
+                &mut warnings_suppressed,
+            );
             continue;
         };
         match sheet.auto_filter.as_mut() {
@@ -2377,17 +2653,25 @@ fn import_xls_path_with_biff_reader(
                     if !parsed.filter_columns.is_empty() {
                         af.filter_columns = std::mem::take(&mut parsed.filter_columns);
                     }
-                    warnings.extend(parsed.warnings.drain(..).map(|w| {
-                        ImportWarning::new(format!(
-                            "failed to import `.xls` AutoFilter criteria for sheet `{}`: {w}",
-                            sheet.name
-                        ))
-                    }));
+                    for w in parsed.warnings.drain(..) {
+                        push_import_warning(
+                            &mut warnings,
+                            format!(
+                                "failed to import `.xls` AutoFilter criteria for sheet `{}`: {w}",
+                                sheet.name
+                            ),
+                            &mut warnings_suppressed,
+                        );
+                    }
                 }
-                Err(err) => warnings.push(ImportWarning::new(format!(
-                    "failed to import `.xls` AutoFilter criteria for sheet `{}`: {err}",
-                    sheet.name
-                ))),
+                Err(err) => push_import_warning(
+                    &mut warnings,
+                    format!(
+                        "failed to import `.xls` AutoFilter criteria for sheet `{}`: {err}",
+                        sheet.name
+                    ),
+                    &mut warnings_suppressed,
+                ),
             }
         }
     }
@@ -2520,6 +2804,7 @@ fn apply_row_col_style_ids(
     props: &biff::SheetRowColProperties,
     xf_style_ids: Option<&[u32]>,
     warnings: &mut Vec<ImportWarning>,
+    suppressed: &mut bool,
     sheet_name: &str,
 ) {
     let Some(xf_style_ids) = xf_style_ids else {
@@ -2568,10 +2853,14 @@ fn apply_row_col_style_ids(
         if out_of_range_cols > 0 {
             parts.push(format!("{out_of_range_cols} columns"));
         }
-        warnings.push(ImportWarning::new(format!(
-            "skipped {} in sheet `{sheet_name}` with out-of-range XF indices",
-            parts.join(" and ")
-        )));
+        push_import_warning(
+            warnings,
+            format!(
+                "skipped {} in sheet `{sheet_name}` with out-of-range XF indices",
+                parts.join(" and ")
+            ),
+            suppressed,
+        );
     }
 }
 
@@ -2684,6 +2973,7 @@ fn infer_sheet_name_from_workbook_scoped_defined_name(
     name: &str,
     refers_to: &str,
     warnings: &mut Vec<ImportWarning>,
+    suppressed: &mut bool,
 ) -> Option<String> {
     // `Workbook::create_defined_name` strips leading `=` but not `@`. Strip both defensively so we
     // can infer sheet scope from dynamic-array era implicit intersection prefixes as well.
@@ -2699,9 +2989,11 @@ fn infer_sheet_name_from_workbook_scoped_defined_name(
     let areas = match split_print_name_areas(refers_to) {
         Ok(v) => v,
         Err(err) => {
-            warnings.push(ImportWarning::new(format!(
-                "failed to infer sheet scope for workbook-scoped `{name}`: {err}"
-            )));
+            push_import_warning(
+                warnings,
+                format!("failed to infer sheet scope for workbook-scoped `{name}`: {err}"),
+                suppressed,
+            );
             return None;
         }
     };
@@ -2711,9 +3003,13 @@ fn infer_sheet_name_from_workbook_scoped_defined_name(
         let (sheet_name, _) = match split_print_name_sheet_ref(area) {
             Ok(v) => v,
             Err(err) => {
-                warnings.push(ImportWarning::new(format!(
-                    "failed to infer sheet scope for workbook-scoped `{name}` entry {area:?}: {err}"
-                )));
+                push_import_warning(
+                    warnings,
+                    format!(
+                        "failed to infer sheet scope for workbook-scoped `{name}` entry {area:?}: {err}"
+                    ),
+                    suppressed,
+                );
                 return None;
             }
         };
@@ -2728,9 +3024,13 @@ fn infer_sheet_name_from_workbook_scoped_defined_name(
             None => inferred = Some(sheet_name),
             Some(existing) => {
                 if !sheet_name_eq_case_insensitive(existing, &sheet_name) {
-                    warnings.push(ImportWarning::new(format!(
-                        "skipping workbook-scoped `{name}`: references multiple sheets (`{existing}` and `{sheet_name}`)"
-                    )));
+                    push_import_warning(
+                        warnings,
+                        format!(
+                            "skipping workbook-scoped `{name}`: references multiple sheets (`{existing}` and `{sheet_name}`)"
+                        ),
+                        suppressed,
+                    );
                     return None;
                 }
             }
@@ -2744,6 +3044,7 @@ fn infer_sheet_name_from_workbook_scoped_defined_name(
 fn populate_print_settings_from_defined_names(
     workbook: &mut Workbook,
     warnings: &mut Vec<ImportWarning>,
+    suppressed: &mut bool,
 ) {
     // We need to snapshot the defined names up-front so we can mutably update print settings while
     // iterating.
@@ -2768,7 +3069,7 @@ fn populate_print_settings_from_defined_names(
                 }
                 (1, DefinedNameScope::Workbook) => {
                     infer_sheet_name_from_workbook_scoped_defined_name(
-                        workbook, name, refers_to, warnings,
+                        workbook, name, refers_to, warnings, suppressed,
                     )
                 }
                 _ => None,
@@ -2786,7 +3087,9 @@ fn populate_print_settings_from_defined_names(
                 {
                     continue;
                 }
-                if let Some(ranges) = parse_print_area_refers_to(&sheet_name, refers_to, warnings) {
+                if let Some(ranges) =
+                    parse_print_area_refers_to(&sheet_name, refers_to, warnings, suppressed)
+                {
                     workbook.set_sheet_print_area_by_name(&sheet_name, Some(ranges));
                 }
             } else if name.eq_ignore_ascii_case(formula_model::XLNM_PRINT_TITLES) {
@@ -2797,7 +3100,8 @@ fn populate_print_settings_from_defined_names(
                 {
                     continue;
                 }
-                if let Some(titles) = parse_print_titles_refers_to(&sheet_name, refers_to, warnings)
+                if let Some(titles) =
+                    parse_print_titles_refers_to(&sheet_name, refers_to, warnings, suppressed)
                 {
                     workbook.set_sheet_print_titles_by_name(&sheet_name, Some(titles));
                 }
@@ -2824,6 +3128,7 @@ fn parse_print_area_refers_to(
     expected_sheet_name: &str,
     refers_to: &str,
     warnings: &mut Vec<ImportWarning>,
+    suppressed: &mut bool,
 ) -> Option<Vec<Range>> {
     let refers_to = refers_to.trim();
     if refers_to.is_empty() {
@@ -2833,10 +3138,14 @@ fn parse_print_area_refers_to(
     let areas = match split_print_name_areas(refers_to) {
         Ok(areas) => areas,
         Err(err) => {
-            warnings.push(ImportWarning::new(format!(
-                "failed to parse `{}` for sheet `{expected_sheet_name}`: {err}",
-                formula_model::XLNM_PRINT_AREA
-            )));
+            push_import_warning(
+                warnings,
+                format!(
+                    "failed to parse `{}` for sheet `{expected_sheet_name}`: {err}",
+                    formula_model::XLNM_PRINT_AREA
+                ),
+                suppressed,
+            );
             return None;
         }
     };
@@ -2846,10 +3155,14 @@ fn parse_print_area_refers_to(
         let (sheet_name, range_str) = match split_print_name_sheet_ref(area) {
             Ok(v) => v,
             Err(err) => {
-                warnings.push(ImportWarning::new(format!(
-                    "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: {err}",
-                    formula_model::XLNM_PRINT_AREA
-                )));
+                push_import_warning(
+                    warnings,
+                    format!(
+                        "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: {err}",
+                        formula_model::XLNM_PRINT_AREA
+                    ),
+                    suppressed,
+                );
                 continue;
             }
         };
@@ -2857,10 +3170,14 @@ fn parse_print_area_refers_to(
         if let Some(found_sheet_name) = sheet_name.as_deref() {
             let found_sheet_name = strip_workbook_prefix_from_sheet_ref(found_sheet_name);
             if !sheet_name_eq_case_insensitive(found_sheet_name, expected_sheet_name) {
-                warnings.push(ImportWarning::new(format!(
-                    "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: references different sheet `{found_sheet_name}`",
-                    formula_model::XLNM_PRINT_AREA
-                )));
+                push_import_warning(
+                    warnings,
+                    format!(
+                        "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: references different sheet `{found_sheet_name}`",
+                        formula_model::XLNM_PRINT_AREA
+                    ),
+                    suppressed,
+                );
                 continue;
             }
         }
@@ -2868,15 +3185,23 @@ fn parse_print_area_refers_to(
         match parse_print_name_range(range_str) {
             Ok(ParsedA1Range::Cell(range)) => ranges.push(range),
             Ok(ParsedA1Range::Row(_) | ParsedA1Range::Col(_)) => {
-                warnings.push(ImportWarning::new(format!(
-                    "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: print area must be a cell range",
-                    formula_model::XLNM_PRINT_AREA
-                )));
+                push_import_warning(
+                    warnings,
+                    format!(
+                        "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: print area must be a cell range",
+                        formula_model::XLNM_PRINT_AREA
+                    ),
+                    suppressed,
+                );
             }
-            Err(err) => warnings.push(ImportWarning::new(format!(
-                "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: {err}",
-                formula_model::XLNM_PRINT_AREA
-            ))),
+            Err(err) => push_import_warning(
+                warnings,
+                format!(
+                    "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: {err}",
+                    formula_model::XLNM_PRINT_AREA
+                ),
+                suppressed,
+            ),
         }
     }
 
@@ -2887,6 +3212,7 @@ fn parse_print_titles_refers_to(
     expected_sheet_name: &str,
     refers_to: &str,
     warnings: &mut Vec<ImportWarning>,
+    suppressed: &mut bool,
 ) -> Option<PrintTitles> {
     let refers_to = refers_to.trim();
     if refers_to.is_empty() {
@@ -2896,10 +3222,14 @@ fn parse_print_titles_refers_to(
     let areas = match split_print_name_areas(refers_to) {
         Ok(areas) => areas,
         Err(err) => {
-            warnings.push(ImportWarning::new(format!(
-                "failed to parse `{}` for sheet `{expected_sheet_name}`: {err}",
-                formula_model::XLNM_PRINT_TITLES
-            )));
+            push_import_warning(
+                warnings,
+                format!(
+                    "failed to parse `{}` for sheet `{expected_sheet_name}`: {err}",
+                    formula_model::XLNM_PRINT_TITLES
+                ),
+                suppressed,
+            );
             return None;
         }
     };
@@ -2909,10 +3239,14 @@ fn parse_print_titles_refers_to(
         let (sheet_name, range_str) = match split_print_name_sheet_ref(area) {
             Ok(v) => v,
             Err(err) => {
-                warnings.push(ImportWarning::new(format!(
-                    "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: {err}",
-                    formula_model::XLNM_PRINT_TITLES
-                )));
+                push_import_warning(
+                    warnings,
+                    format!(
+                        "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: {err}",
+                        formula_model::XLNM_PRINT_TITLES
+                    ),
+                    suppressed,
+                );
                 continue;
             }
         };
@@ -2920,10 +3254,14 @@ fn parse_print_titles_refers_to(
         if let Some(found_sheet_name) = sheet_name.as_deref() {
             let found_sheet_name = strip_workbook_prefix_from_sheet_ref(found_sheet_name);
             if !sheet_name_eq_case_insensitive(found_sheet_name, expected_sheet_name) {
-                warnings.push(ImportWarning::new(format!(
-                    "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: references different sheet `{found_sheet_name}`",
-                    formula_model::XLNM_PRINT_TITLES
-                )));
+                push_import_warning(
+                    warnings,
+                    format!(
+                        "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: references different sheet `{found_sheet_name}`",
+                        formula_model::XLNM_PRINT_TITLES
+                    ),
+                    suppressed,
+                );
                 continue;
             }
         }
@@ -2946,16 +3284,24 @@ fn parse_print_titles_refers_to(
                         end: range.end.col,
                     });
                 } else {
-                    warnings.push(ImportWarning::new(format!(
-                        "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: print titles must be a row or column range",
-                        formula_model::XLNM_PRINT_TITLES
-                    )));
+                    push_import_warning(
+                        warnings,
+                        format!(
+                            "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: print titles must be a row or column range",
+                            formula_model::XLNM_PRINT_TITLES
+                        ),
+                        suppressed,
+                    );
                 }
             }
-            Err(err) => warnings.push(ImportWarning::new(format!(
-                "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: {err}",
-                formula_model::XLNM_PRINT_TITLES
-            ))),
+            Err(err) => push_import_warning(
+                warnings,
+                format!(
+                    "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: {err}",
+                    formula_model::XLNM_PRINT_TITLES
+                ),
+                suppressed,
+            ),
         }
     }
 
@@ -3424,6 +3770,7 @@ fn import_biff8_shared_formulas(
     sheet_names_by_biff_idx: &[String],
     sheet_ids_by_biff_idx: &[Option<formula_model::WorksheetId>],
     warnings: &mut Vec<ImportWarning>,
+    suppressed: &mut bool,
 ) {
     // BIFF8 shared formulas are encoded as:
     // - FORMULA records whose rgce is a `PtgExp` token referencing the anchor cell, and
@@ -3443,9 +3790,11 @@ fn import_biff8_shared_formulas(
         warnings: supbook_warnings,
     } = biff::supbook::parse_biff8_supbook_table(workbook_stream, codepage);
     for w in supbook_warnings {
-        warnings.push(ImportWarning::new(format!(
-            "failed to import `.xls` shared formulas: {w}"
-        )));
+        push_import_warning(
+            warnings,
+            format!("failed to import `.xls` shared formulas: {w}"),
+            suppressed,
+        );
     }
 
     let biff::externsheet::ExternSheetTable {
@@ -3453,9 +3802,11 @@ fn import_biff8_shared_formulas(
         warnings: extern_warnings,
     } = biff::externsheet::parse_biff_externsheet(workbook_stream, biff::BiffVersion::Biff8, codepage);
     for w in extern_warnings {
-        warnings.push(ImportWarning::new(format!(
-            "failed to import `.xls` shared formulas: {w}"
-        )));
+        push_import_warning(
+            warnings,
+            format!("failed to import `.xls` shared formulas: {w}"),
+            suppressed,
+        );
     }
 
     let defined_names: &[biff::rgce::DefinedNameMeta] = &[];
@@ -3476,10 +3827,14 @@ fn import_biff8_shared_formulas(
         };
 
         if sheet_info.offset >= workbook_stream.len() {
-            warnings.push(ImportWarning::new(format!(
-                "failed to import `.xls` shared formulas for sheet `{}`: out-of-bounds stream offset {}",
-                sheet.name, sheet_info.offset
-            )));
+            push_import_warning(
+                warnings,
+                format!(
+                    "failed to import `.xls` shared formulas for sheet `{}`: out-of-bounds stream offset {}",
+                    sheet.name, sheet_info.offset
+                ),
+                suppressed,
+            );
             continue;
         }
 
@@ -3489,10 +3844,14 @@ fn import_biff8_shared_formulas(
             sheet_info.offset,
             allows_continuation,
         ) else {
-            warnings.push(ImportWarning::new(format!(
-                "failed to import `.xls` shared formulas for sheet `{}`: invalid substream offset {}",
-                sheet.name, sheet_info.offset
-            )));
+            push_import_warning(
+                warnings,
+                format!(
+                    "failed to import `.xls` shared formulas for sheet `{}`: invalid substream offset {}",
+                    sheet.name, sheet_info.offset
+                ),
+                suppressed,
+            );
             continue;
         };
 
@@ -3506,10 +3865,14 @@ fn import_biff8_shared_formulas(
             let record = match record {
                 Ok(r) => r,
                 Err(err) => {
-                    warnings.push(ImportWarning::new(format!(
-                        "failed to import `.xls` shared formulas for sheet `{}`: malformed BIFF record: {err}",
-                        sheet.name
-                    )));
+                    push_import_warning(
+                        warnings,
+                        format!(
+                            "failed to import `.xls` shared formulas for sheet `{}`: malformed BIFF record: {err}",
+                            sheet.name
+                        ),
+                        suppressed,
+                    );
                     break;
                 }
             };
@@ -3619,11 +3982,15 @@ fn import_biff8_shared_formulas(
             );
 
             for warning in decoded.warnings {
-                warnings.push(ImportWarning::new(format!(
-                    "failed to import `.xls` shared formula in sheet `{}` at {}: {warning}",
-                    sheet.name,
-                    cell_ref.to_a1()
-                )));
+                push_import_warning(
+                    warnings,
+                    format!(
+                        "failed to import `.xls` shared formula in sheet `{}` at {}: {warning}",
+                        sheet.name,
+                        cell_ref.to_a1()
+                    ),
+                    suppressed,
+                );
             }
 
             sheet.set_formula(anchor_cell, Some(decoded.text));
@@ -4909,11 +5276,13 @@ mod tests {
         workbook.add_sheet("Sheet2").unwrap();
 
         let mut warnings = Vec::new();
+        let mut suppressed = false;
         let sheet = infer_sheet_name_from_workbook_scoped_defined_name(
             &workbook,
             XLNM_FILTER_DATABASE,
             "=(Sheet1!$A$1:$B$3)",
             &mut warnings,
+            &mut suppressed,
         );
         assert_eq!(sheet.as_deref(), Some("Sheet1"));
         assert!(warnings.is_empty(), "warnings={warnings:?}");
