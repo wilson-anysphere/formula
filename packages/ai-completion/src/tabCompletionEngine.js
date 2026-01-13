@@ -757,6 +757,37 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "-1", displayText: "-1 (drop last column(s))", confidence: 0.59 },
     ],
   },
+  TEXTSPLIT: {
+    // ignore_empty
+    3: [
+      { replacement: "TRUE", displayText: "TRUE (ignore empty)", confidence: 0.66 },
+      { replacement: "FALSE", displayText: "FALSE (keep empty)", confidence: 0.62 },
+    ],
+    // match_mode
+    4: [
+      { replacement: "0", displayText: "0 (case-sensitive)", confidence: 0.64 },
+      { replacement: "1", displayText: "1 (case-insensitive)", confidence: 0.63 },
+    ],
+  },
+  TEXTJOIN: {
+    // ignore_empty
+    1: [
+      { replacement: "TRUE", displayText: "TRUE (ignore empty)", confidence: 0.66 },
+      { replacement: "FALSE", displayText: "FALSE (keep empty)", confidence: 0.62 },
+    ],
+  },
+  UNIQUE: {
+    // by_col
+    1: [
+      { replacement: "FALSE", displayText: "FALSE (compare by rows)", confidence: 0.63 },
+      { replacement: "TRUE", displayText: "TRUE (compare by columns)", confidence: 0.62 },
+    ],
+    // exactly_once
+    2: [
+      { replacement: "FALSE", displayText: "FALSE (include duplicates)", confidence: 0.62 },
+      { replacement: "TRUE", displayText: "TRUE (only values occurring once)", confidence: 0.61 },
+    ],
+  },
   VLOOKUP: {
     // range_lookup (TRUE = approx match, FALSE = exact)
     3: [

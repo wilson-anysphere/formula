@@ -1376,6 +1376,111 @@ test("TAKE rows suggests 1 and -1", async () => {
   );
 });
 
+test("TEXTSPLIT ignore_empty suggests TRUE/FALSE", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = '=TEXTSPLIT("a,,b", ",", , ';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTSPLIT("a,,b", ",", , TRUE'),
+    `Expected TEXTSPLIT to suggest ignore_empty=TRUE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTSPLIT("a,,b", ",", , FALSE'),
+    `Expected TEXTSPLIT to suggest ignore_empty=FALSE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("TEXTSPLIT match_mode suggests 0 and 1", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = '=TEXTSPLIT("aXb", "x", , FALSE, ';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTSPLIT("aXb", "x", , FALSE, 0'),
+    `Expected TEXTSPLIT to suggest match_mode=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTSPLIT("aXb", "x", , FALSE, 1'),
+    `Expected TEXTSPLIT to suggest match_mode=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("TEXTJOIN ignore_empty suggests TRUE/FALSE", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = '=TEXTJOIN(",", ';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTJOIN(",", TRUE'),
+    `Expected TEXTJOIN to suggest ignore_empty=TRUE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTJOIN(",", FALSE'),
+    `Expected TEXTJOIN to suggest ignore_empty=FALSE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("UNIQUE by_col suggests TRUE/FALSE", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=UNIQUE(A1:A10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=UNIQUE(A1:A10, FALSE"),
+    `Expected UNIQUE to suggest by_col=FALSE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=UNIQUE(A1:A10, TRUE"),
+    `Expected UNIQUE to suggest by_col=TRUE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("UNIQUE exactly_once suggests TRUE/FALSE", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=UNIQUE(A1:A10, FALSE, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=UNIQUE(A1:A10, FALSE, TRUE"),
+    `Expected UNIQUE to suggest exactly_once=TRUE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=UNIQUE(A1:A10, FALSE, FALSE"),
+    `Expected UNIQUE to suggest exactly_once=FALSE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("TabCompletionEngine caches suggestions by context key", async () => {
   let callCount = 0;
   const completionClient = {
