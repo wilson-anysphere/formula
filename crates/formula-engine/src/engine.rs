@@ -6909,6 +6909,30 @@ fn bytecode_error_to_engine(err: bytecode::ErrorKind) -> ErrorKind {
     err.into()
 }
 fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
+    fn array_element_to_bytecode(value: &Value) -> bytecode::Value {
+        match value {
+            Value::Number(n) => bytecode::Value::Number(*n),
+            Value::Bool(b) => bytecode::Value::Bool(*b),
+            Value::Text(s) => bytecode::Value::Text(Arc::from(s.as_str())),
+            Value::Entity(v) => bytecode::Value::Entity(Arc::new(v.clone())),
+            Value::Record(v) => bytecode::Value::Record(Arc::new(v.clone())),
+            Value::Blank => bytecode::Value::Empty,
+            Value::Error(e) => bytecode::Value::Error(engine_error_to_bytecode(*e)),
+            // Lambdas cannot appear as scalars in bytecode arrays; match spill materialization by
+            // surfacing `#CALC!`.
+            Value::Lambda(_) => bytecode::Value::Error(bytecode::ErrorKind::Calc),
+            // References/unions cannot appear in arrays; degrade to a scalar type error.
+            Value::Reference(_) | Value::ReferenceUnion(_) => {
+                bytecode::Value::Error(bytecode::ErrorKind::Value)
+            }
+            // Nested arrays are not representable in the bytecode array model; treat them as
+            // scalar type errors rather than panicking.
+            Value::Array(_) => bytecode::Value::Error(bytecode::ErrorKind::Value),
+            // Spill markers should not appear inside arrays, but degrade safely.
+            Value::Spill { .. } => bytecode::Value::Error(bytecode::ErrorKind::Spill),
+        }
+    }
+
     match value {
         Value::Number(n) => bytecode::Value::Number(*n),
         Value::Bool(b) => bytecode::Value::Bool(*b),
@@ -6921,7 +6945,25 @@ fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
         Value::Reference(_) | Value::ReferenceUnion(_) => {
             bytecode::Value::Error(bytecode::ErrorKind::Value)
         }
-        Value::Array(_) | Value::Spill { .. } => bytecode::Value::Error(bytecode::ErrorKind::Spill),
+        Value::Array(arr) => {
+            let total = match arr.rows.checked_mul(arr.cols) {
+                Some(v) => v,
+                None => return bytecode::Value::Error(bytecode::ErrorKind::Num),
+            };
+            if total != arr.values.len() {
+                return bytecode::Value::Error(bytecode::ErrorKind::Num);
+            }
+
+            let mut values = Vec::new();
+            if values.try_reserve_exact(total).is_err() {
+                return bytecode::Value::Error(bytecode::ErrorKind::Num);
+            }
+            for v in arr.iter() {
+                values.push(array_element_to_bytecode(v));
+            }
+            bytecode::Value::Array(bytecode::Array::new(arr.rows, arr.cols, values))
+        }
+        Value::Spill { .. } => bytecode::Value::Error(bytecode::ErrorKind::Spill),
     }
 }
 
