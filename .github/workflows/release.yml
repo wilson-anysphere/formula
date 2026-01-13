@@ -27,6 +27,9 @@ env:
   # Keep release builds on the same Node.js major as CI (see ci.yml) to avoid
   # "works in CI, breaks in release" drift.
   NODE_VERSION: 22
+  # Pin wasm-pack for reproducible tagged releases (avoid `cargo install wasm-pack`
+  # pulling newer incompatible versions). Keep this in sync with ci.yml/perf.yml.
+  WASM_PACK_VERSION: 0.13.1
 jobs:
   conflict-marker-guard:
     name: "Guard: no merge conflict markers"
@@ -329,7 +332,7 @@ jobs:
           path: |
             ~/.cargo/bin/wasm-pack
             ~/.cargo/bin/wasm-pack.exe
-          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-v0.13.1
+          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
           restore-keys: |
             wasm-pack-${{ runner.os }}-${{ runner.arch }}-
 
@@ -337,7 +340,7 @@ jobs:
         # Pinned for release reproducibility. Known-good with this repo's WASM build
         # (`crates/formula-wasm` via `packages/engine/scripts/build-wasm.mjs`).
         if: steps.wasm-pack-cache.outputs.cache-hit != 'true'
-        run: cargo install wasm-pack --version 0.13.1 --locked
+        run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked
 
       - name: Smoke check packaged cross-origin isolation (COOP/COEP)
         run: pnpm -C apps/desktop check:coi

@@ -9,6 +9,8 @@ env:
   # Pin CI Node.js major (keep in sync with release.yml) to reduce drift between
   # what CI tests and what tagged releases build.
   NODE_VERSION: 22
+  # Keep in sync with release.yml so CI catches WASM toolchain issues early.
+  WASM_PACK_VERSION: 0.13.1
 
 jobs:
   conflict-marker-guard:
@@ -145,7 +147,7 @@ jobs:
       - name: Install wasm-pack
         # Pinned to match the tagged release workflow so CI catches WASM toolchain
         # incompatibilities before we cut a release.
-        run: cargo install wasm-pack --version 0.13.1 --locked
+        run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked
 
       - name: Build WASM bundle (wasm-pack)
         # Build before `pnpm install` so we fail fast on Rust/WASM toolchain issues

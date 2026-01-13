@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  # Keep in sync with release.yml/ci.yml so performance runs don't break when
+  # wasm-pack publishes a new incompatible version.
+  WASM_PACK_VERSION: 0.13.1
+
 jobs:
   conflict-marker-guard:
     name: "Guard: no merge conflict markers"
@@ -94,7 +99,7 @@ jobs:
         if: steps.desktop_bench.outputs.run == 'true'
         # Pinned to match the tagged release workflow so perf runs don't break
         # when wasm-pack publishes a new incompatible version.
-        run: cargo install wasm-pack --version 0.13.1 --locked
+        run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked
 
       - name: Build desktop frontend assets (Vite → tauri.conf.json build.frontendDist)
         if: steps.desktop_bench.outputs.run == 'true'
