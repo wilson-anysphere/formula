@@ -1,6 +1,8 @@
 use formula_engine::eval::parse_a1;
+use formula_engine::functions::{Reference, SheetId};
 use formula_engine::value::Array;
 use formula_engine::{Engine, ErrorKind, Value};
+use formula_model::CellRef;
 
 #[test]
 fn bytecode_backend_spills_range_reference() {
@@ -160,6 +162,62 @@ fn bytecode_backend_spills_array_value_loaded_from_cell() {
 
     assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
     assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(2.0));
+}
+
+#[test]
+fn bytecode_backend_degrades_illegal_array_elements_to_scalar_errors() {
+    let mut engine = Engine::new();
+
+    let nested = Value::Array(Array::new(1, 1, vec![Value::Number(99.0)]));
+    let ref_a1 = Reference {
+        sheet_id: SheetId::Local(0),
+        start: parse_a1("A1").unwrap(),
+        end: parse_a1("A1").unwrap(),
+    };
+    let ref_union = Value::ReferenceUnion(vec![
+        ref_a1.clone(),
+        Reference {
+            sheet_id: SheetId::Local(0),
+            start: parse_a1("B1").unwrap(),
+            end: parse_a1("B1").unwrap(),
+        },
+    ]);
+
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Array(Array::new(
+                1,
+                4,
+                vec![
+                    nested,
+                    Value::Reference(ref_a1),
+                    ref_union,
+                    Value::Spill {
+                        origin: CellRef::new(0, 0),
+                    },
+                ],
+            )),
+        )
+        .unwrap();
+
+    // Returning an array value should spill it; illegal element types should be degraded to scalar
+    // errors instead of panicking or producing nested arrays/ranges.
+    engine.set_cell_formula("Sheet1", "C1", "=A1").unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "C1").expect("spill range");
+    assert_eq!(start, parse_a1("C1").unwrap());
+    assert_eq!(end, parse_a1("F1").unwrap());
+
+    // nested arrays / references / unions are degraded to #VALUE!
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Error(ErrorKind::Value));
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Error(ErrorKind::Value));
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Error(ErrorKind::Value));
+    // spill markers are degraded to #SPILL!
+    assert_eq!(engine.get_cell_value("Sheet1", "F1"), Value::Error(ErrorKind::Spill));
 }
 
 #[test]
