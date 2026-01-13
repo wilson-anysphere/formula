@@ -709,6 +709,9 @@ export class DocumentCellProvider implements CellProvider {
     // Strategy:
     // - Direct-evict per-cell cache keys for invalidations up to `maxDirectEvictions`.
     // - For larger invalidations, scan the bounded LRU cache and evict only matching entries.
+    // - For *huge* invalidations (large relative to our bounded cache size), fall back to `invalidateAll()`
+    //   rather than scanning. This keeps worst-case invalidation work predictable (Map.clear + a single
+    //   update) even when a user formats a massive rectangle.
     //
     // Scanning stays cheap because the provider cache is capped, and it avoids dropping unrelated
     // cached cells when a user formats a large rectangle far away from the current viewport.
@@ -724,6 +727,14 @@ export class DocumentCellProvider implements CellProvider {
           }
         }
       } else {
+        // If the invalidation covers an enormous number of cells relative to what we can cache,
+        // it's usually not worth scanning the entire LRU to preserve unrelated entries.
+        // Clearing caches is faster and gives more predictable latency.
+        const hugeInvalidationThreshold = SHEET_CACHE_MAX_SIZE;
+        if (cellCount >= hugeInvalidationThreshold) {
+          this.invalidateAll();
+          return;
+        }
         for (const key of cache.keys()) {
           const row = Math.floor(key / CACHE_KEY_COL_STRIDE);
           const col = key - row * CACHE_KEY_COL_STRIDE;

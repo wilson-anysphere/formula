@@ -16,6 +16,7 @@ function createProvider(options: {
   const headerCols = options.headerCols ?? 1;
   const doc = {
     getCell: vi.fn(options.getCell),
+    on: vi.fn(() => () => {}),
   };
 
   const provider = new DocumentCellProvider({
@@ -162,6 +163,37 @@ describe("DocumentCellProvider (shared grid)", () => {
 
     provider.getCell(1, 1);
     expect(doc.getCell).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidateDocCells falls back to invalidateAll for huge invalidations", () => {
+    const { provider, doc } = createProvider({
+      getSheetId: () => "sheet-1",
+      getCell: () => ({ value: "hello", formula: null }),
+    });
+
+    // Populate the cache with some entries.
+    provider.getCell(1, 1);
+    provider.getCell(2, 2);
+    expect(doc.getCell).toHaveBeenCalledTimes(2);
+
+    const updates: any[] = [];
+    provider.subscribe((update) => updates.push(update));
+
+    const sheetCache = (provider as any).sheetCaches.get("sheet-1");
+    expect(sheetCache).toBeTruthy();
+    const keysSpy = vi.spyOn(sheetCache, "keys");
+
+    // Invalidate an enormous region to trigger the invalidateAll heuristic.
+    provider.invalidateDocCells({ startRow: 0, endRow: 1_000, startCol: 0, endCol: 1_000 });
+
+    expect(keysSpy).not.toHaveBeenCalled();
+    expect(updates).toEqual([{ type: "invalidateAll" }]);
+    // `invalidateAll` drops per-sheet caches entirely.
+    expect((provider as any).sheetCaches.size).toBe(0);
+
+    // Cache miss after invalidation.
+    provider.getCell(1, 1);
+    expect(doc.getCell).toHaveBeenCalledTimes(3);
   });
 
   it("looks up comment metadata by numeric coords (no A1 string conversion)", () => {
