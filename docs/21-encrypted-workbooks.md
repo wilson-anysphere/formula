@@ -78,6 +78,29 @@ Detection heuristics:
 - File begins with the OLE magic header `D0 CF 11 E0 A1 B1 1A E1`.
 - The compound file contains both `EncryptionInfo` and `EncryptedPackage` streams.
 
+### `EncryptionInfo` versions (Standard vs Agile)
+
+The `EncryptionInfo` stream begins with a small fixed header:
+
+- `majorVersion: u16` (little-endian)
+- `minorVersion: u16` (little-endian)
+- `flags: u32` (little-endian)
+
+The `(majorVersion, minorVersion)` pair determines how the remainder of the stream is interpreted.
+In practice:
+
+| Scheme | `major.minor` | Notes |
+|--------|---------------|------|
+| **Standard** | `3.2` (versionMinor = `2`) | CryptoAPI-style header/verifier structures (binary). |
+| **Agile** | `4.4` | XML-based encryption descriptor. |
+
+Implementation notes:
+
+- Formula’s Standard parser (`crates/formula-offcrypto`) treats **`versionMinor == 2`** (and
+  `versionMajor ∈ {2,3,4}`) as Standard encryption; Excel commonly emits `3.2`.
+- Formula includes a small helper binary that prints the one-line scheme/version for an encrypted
+  OOXML file: `crates/formula-io/src/bin/ooxml-encryption-info.rs`.
+
 ### Supported OOXML encryption schemes
 
 The `EncryptionInfo` stream encodes one of the schemes defined in **[MS-OFFCRYPTO]**. In practice,
@@ -93,6 +116,40 @@ Formula’s encrypted-workbook support targets these two schemes:
 
 Everything else should fail with a specific “unsupported encryption scheme” error (see
 [Error semantics](#error-semantics)).
+
+### High-level decrypt/open algorithm (OOXML)
+
+At a high level, opening a password-encrypted OOXML workbook is:
+
+1. **Detect the OLE wrapper**
+   - Open the file as a CFB container.
+   - Confirm `EncryptionInfo` + `EncryptedPackage` streams exist.
+2. **Read and classify `EncryptionInfo`**
+   - Parse the `(major, minor)` version header.
+   - **Standard (3.2 / minor=2):** parse the binary CryptoAPI header + verifier structures.
+   - **Agile (4.4):** parse the XML `<encryption>` descriptor (key derivation params, ciphers,
+     integrity metadata, …).
+3. **Derive keys from the password**
+   - Convert the password to UTF-16LE as required by the spec (no BOM/terminator).
+   - Apply the KDF described by the encryption scheme (salt + spin/iteration count + hash).
+4. **Verify the password and decrypt**
+   - **Standard:** use the verifier fields to validate the derived key and decrypt
+     `EncryptedPackage`.
+   - **Agile:** decrypt the package key via the password key-encryptor; then decrypt
+     `EncryptedPackage`.
+5. **(Recommended) Verify integrity**
+   - Agile encryption can include a package-level HMAC (`dataIntegrity` /
+     `encryptedHmacKey`+`encryptedHmacValue`). Verifying this detects tampering and wrong passwords
+     earlier than “does the ZIP parse”.
+6. **Hand off to the normal workbook readers**
+   - Once decrypted, `EncryptedPackage` yields the plaintext OPC ZIP. Route that ZIP through the
+     existing `.xlsx`/`.xlsm`/`.xlsb` readers as if it were an unencrypted file.
+
+Security requirements for this flow:
+
+- **No plaintext to disk:** decrypt in memory and pass bytes/readers down the stack.
+- **Bound resource use:** the decrypted package size is encoded in `EncryptedPackage`; enforce a
+  maximum size and handle corrupt/truncated streams defensively.
 
 ### Implementation pointers (Formula code)
 
@@ -144,20 +201,49 @@ Formula’s decryption support is intentionally scoped:
 
 ### `formula-io` API
 
-When password-based decryption is implemented, callers will supply an *open password* via
-`OpenOptions.password`:
+Today, the `formula-io` crate:
+
+- **Detects** encrypted workbooks via `detect_workbook_encryption(...)`.
+- Returns `Error::EncryptedWorkbook` from `open_workbook(...)` / `open_workbook_model(...)` for
+  password-encrypted workbooks (OOXML OLE wrapper and legacy `.xls` `FILEPASS`).
+
+Example (detection + UX routing):
 
 ```rust
-use formula_io::{open_workbook_with_options, OpenOptions};
+use formula_io::{
+    detect_workbook_encryption, open_workbook, Error, WorkbookEncryptionKind,
+};
 
-let workbook = open_workbook_with_options(
-    "book.xlsx",
-    OpenOptions {
-        password: Some("correct horse battery staple".into()),
-        ..Default::default()
-    },
-)?;
+let path = "book.xlsx";
+match open_workbook(path) {
+    Ok(workbook) => {
+        // Opened normally.
+        let _ = workbook;
+    }
+    Err(Error::EncryptedWorkbook { .. }) => {
+        // Prompt the user for a password (or instruct them to remove encryption in Excel).
+        let info = detect_workbook_encryption(path)?
+            .expect("encrypted workbook should be classified");
+
+        match info.kind {
+            WorkbookEncryptionKind::OoxmlOleEncryptedPackage => {
+                // Encrypted OOXML (`EncryptionInfo` + `EncryptedPackage`).
+            }
+            WorkbookEncryptionKind::XlsFilepass => {
+                // Encrypted legacy `.xls` (BIFF `FILEPASS`).
+            }
+            WorkbookEncryptionKind::UnknownOleEncrypted => {
+                // OLE container appears encrypted but doesn't match known patterns.
+            }
+        }
+    }
+    Err(other) => return Err(other),
+}
 ```
+
+The intended end-state is that these same `formula-io` entrypoints will accept a user-provided
+password (and optionally an “Agile HMAC verify” toggle) and return a normal workbook on success.
+That plumbing is not implemented yet.
 
 Notes:
 
