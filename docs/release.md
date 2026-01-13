@@ -131,8 +131,15 @@ GITHUB_REPOSITORY=owner/repo GH_TOKEN=... \
   node scripts/verify-tauri-updater-assets.mjs vX.Y.Z
 ```
 
-If you already downloaded the manifest files (no GitHub API access needed), you can validate the
-updater manifest signature offline with:
+If you already downloaded the manifest files (no GitHub API access needed), you can validate:
+
+1) The required `latest.json.platforms` keys + per-platform updater artifact types (offline, **no crypto**):
+
+```bash
+node scripts/verify-tauri-latest-json.mjs --manifest latest.json --sig latest.json.sig
+```
+
+2) The updater manifest signature (offline, **cryptographic**):
 
 ```bash
 node scripts/ci/verify-updater-manifest-signature.mjs latest.json latest.json.sig
@@ -147,8 +154,8 @@ jq '.platforms | keys' latest.json
 Note: `scripts/verify-tauri-latest-json.mjs` delegates to the lower-level validator
 `scripts/ci/validate-updater-manifest.mjs` when run in `<tag>` mode. It downloads `latest.json` /
 `latest.json.sig` from the draft release and checks targets, signatures, and referenced assets.
-For offline checks, use `node scripts/ci/verify-updater-manifest-signature.mjs latest.json latest.json.sig`
-and inspect platform keys with `jq` (see above).
+The `--manifest/--sig` mode is an offline manifest structure check; use
+`scripts/ci/verify-updater-manifest-signature.mjs` to cryptographically verify `latest.json.sig`.
 
 ## Updater restart semantics (important)
 
