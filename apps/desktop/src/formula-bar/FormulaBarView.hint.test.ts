@@ -1,0 +1,87 @@
+/**
+ * @vitest-environment jsdom
+ */
+
+import { describe, expect, it } from "vitest";
+
+import { FormulaBarView } from "./FormulaBarView.js";
+
+function getHintEl(host: HTMLElement): HTMLElement {
+  const hint = host.querySelector<HTMLElement>('[data-testid="formula-hint"]');
+  if (!hint) throw new Error("Expected formula hint element");
+  return hint;
+}
+
+function getActiveParamText(host: HTMLElement): string | null {
+  const hint = getHintEl(host);
+  return hint.querySelector<HTMLElement>(".formula-bar-hint-token--paramActive")?.textContent ?? null;
+}
+
+function getSignatureName(host: HTMLElement): string | null {
+  const hint = getHintEl(host);
+  return hint.querySelector<HTMLElement>(".formula-bar-hint-token--name")?.textContent ?? null;
+}
+
+describe("FormulaBarView function hint UI", () => {
+  it("updates the active parameter as the cursor moves across commas", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=IF(A1>0,1,2)";
+
+    const inFirstArg = view.textarea.value.indexOf(">") + 1;
+    view.textarea.setSelectionRange(inFirstArg, inFirstArg);
+    view.textarea.dispatchEvent(new Event("input"));
+    expect(getSignatureName(host)).toBe("IF(");
+    expect(getActiveParamText(host)).toBe("logical_test");
+
+    const inSecondArg = view.textarea.value.indexOf(",1") + 1;
+    view.textarea.setSelectionRange(inSecondArg, inSecondArg);
+    view.textarea.dispatchEvent(new Event("select"));
+    expect(getActiveParamText(host)).toBe("value_if_true");
+
+    const inThirdArg = view.textarea.value.lastIndexOf(",2") + 1;
+    view.textarea.setSelectionRange(inThirdArg, inThirdArg);
+    view.textarea.dispatchEvent(new Event("select"));
+    expect(getActiveParamText(host)).toBe("[value_if_false]");
+
+    host.remove();
+  });
+
+  it("uses the innermost function context for nested calls", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=IF(SUM(A1:A3)>0,1,2)";
+
+    const inSumArg = view.textarea.value.indexOf("A1") + 1;
+    view.textarea.setSelectionRange(inSumArg, inSumArg);
+    view.textarea.dispatchEvent(new Event("input"));
+    expect(getSignatureName(host)).toBe("SUM(");
+    expect(getActiveParamText(host)).toBe("number1");
+
+    // Move the cursor back into the IF logical_test (after the SUM call closes).
+    const inIfFirstArgAfterSum = view.textarea.value.indexOf(">") + 1;
+    view.textarea.setSelectionRange(inIfFirstArgAfterSum, inIfFirstArgAfterSum);
+    view.textarea.dispatchEvent(new Event("select"));
+    expect(getSignatureName(host)).toBe("IF(");
+    expect(getActiveParamText(host)).toBe("logical_test");
+
+    // Move into IF's second argument.
+    const inIfSecondArg = view.textarea.value.indexOf(",1") + 1;
+    view.textarea.setSelectionRange(inIfSecondArg, inIfSecondArg);
+    view.textarea.dispatchEvent(new Event("select"));
+    expect(getActiveParamText(host)).toBe("value_if_true");
+
+    host.remove();
+  });
+});
+

@@ -898,20 +898,48 @@ export class FormulaBarView {
     this.root.classList.toggle("formula-bar--editing", this.model.isEditing);
 
     const hint = this.model.functionHint();
-    if (!hint) {
-      this.#hintEl.textContent = "";
-    } else {
-      const sig = hint.parts
-        .map((p) => {
-          if (p.kind !== "paramActive") return p.text;
-          // Signature parts use brackets for optional params; avoid double-bracketing
-          // when the active param is already optional.
-          if (p.text.startsWith("[") && p.text.endsWith("]")) return p.text;
-          return `[${p.text}]`;
-        })
-        .join("");
+    this.#hintEl.replaceChildren();
+    if (hint) {
+      const panel = document.createElement("div");
+      panel.className = "formula-bar-hint-panel";
+
+      const title = document.createElement("div");
+      title.className = "formula-bar-hint-title";
+      title.textContent = "PARAMETERS";
+
+      const body = document.createElement("div");
+      body.className = "formula-bar-hint-body";
+
+      const signature = document.createElement("span");
+      signature.className = "formula-bar-hint-signature";
+
+      for (const part of hint.parts) {
+        const token = document.createElement("span");
+        token.className = `formula-bar-hint-token formula-bar-hint-token--${part.kind}`;
+        token.dataset.kind = part.kind;
+        token.textContent = part.text;
+        signature.appendChild(token);
+      }
+
+      body.appendChild(signature);
+
       const summary = hint.signature.summary?.trim?.() ?? "";
-      this.#hintEl.textContent = summary ? `${sig} — ${summary}` : sig;
+      if (summary) {
+        const sep = document.createElement("span");
+        sep.className = "formula-bar-hint-summary-separator";
+        sep.textContent = " — ";
+
+        const summaryEl = document.createElement("span");
+        summaryEl.className = "formula-bar-hint-summary";
+        summaryEl.textContent = summary;
+
+        body.appendChild(sep);
+        body.appendChild(summaryEl);
+      }
+
+      panel.appendChild(title);
+      panel.appendChild(body);
+      this.#hintEl.appendChild(panel);
     }
 
     const explanation = this.model.errorExplanation();

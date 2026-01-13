@@ -639,9 +639,11 @@ describe("FormulaBarView tab completion (integration)", () => {
     view.textarea.dispatchEvent(new Event("input"));
 
     const hint = host.querySelector<HTMLElement>('[data-testid="formula-hint"]');
-    // Active parameter is rendered in brackets (see FormulaBarView paramActive formatting).
-    expect(hint?.textContent).toContain("ABS([number1])");
-    expect(hint?.textContent).not.toContain("—");
+    const signature = hint?.querySelector<HTMLElement>(".formula-bar-hint-signature");
+    expect(signature?.textContent).toContain("ABS(number1)");
+    expect(signature?.querySelector(".formula-bar-hint-token--paramActive")?.textContent).toBe("number1");
+    expect(hint?.querySelector(".formula-bar-hint-summary-separator")).toBeNull();
+    expect(hint?.querySelector(".formula-bar-hint-summary")).toBeNull();
 
     host.remove();
   });
