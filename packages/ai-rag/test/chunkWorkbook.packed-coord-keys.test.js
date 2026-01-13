@@ -73,3 +73,30 @@ test("chunkWorkbook: detectRegions connects across Number/BigInt coord key bound
   assert.equal(dataRegions[0].cells[0][0].v, "A");
   assert.equal(dataRegions[0].cells[0][1].v, "B");
 });
+
+test("chunkWorkbook: detectRegions connects across BigInt/string coord key boundaries", () => {
+  const row = 0;
+  const maxUint32 = 2 ** 32 - 1;
+  const colBigInt = maxUint32;
+  const colString = maxUint32 + 1;
+
+  const cells = new Map();
+  // Insert the string-key fallback coordinate first to ensure traversal crosses
+  // the packing boundary in both directions.
+  cells.set(`${row},${colString}`, { value: "B" });
+  cells.set(`${row},${colBigInt}`, { value: "A" });
+
+  const workbook = {
+    id: "wb-packed-keys-u32-boundary",
+    sheets: [{ name: "Sheet1", cells }],
+    tables: [],
+    namedRanges: [],
+  };
+
+  const chunks = chunkWorkbook(workbook);
+  const dataRegions = chunks.filter((c) => c.kind === "dataRegion");
+  assert.equal(dataRegions.length, 1);
+  assert.deepEqual(dataRegions[0].rect, { r0: row, c0: colBigInt, r1: row, c1: colString });
+  assert.equal(dataRegions[0].cells[0][0].v, "A");
+  assert.equal(dataRegions[0].cells[0][1].v, "B");
+});
