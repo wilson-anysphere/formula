@@ -423,20 +423,44 @@ export class CellStructuralConflictMonitor {
 
     const cutoff = now - ageMs;
 
-    /** @type {string[]} */
-    const toDelete = [];
+    // Conservative safety: avoid pruning records that might still be needed to
+    // compare against our oldest local op record. In practice this matters most
+    // for long-offline clients whose queued local ops may have `createdAt`
+    // timestamps far in the past relative to wall clock time.
+    //
+    // Policy: only prune records older than BOTH:
+    //   - the age cutoff (now - maxOpRecordAgeMs), AND
+    //   - the oldest local record we currently have in the shared log.
+    //
+    // This is intentionally best-effort and clock-skew tolerant: if we have no
+    // local records (or local records with missing/invalid createdAt), we fall
+    // back to pure age-based pruning.
+    let localQueueHeadCreatedAt = Infinity;
+
+    /** @type {Array<{ id: string, createdAt: number }>} */
+    const candidates = [];
     this._ops.forEach((record, id) => {
       if (!record || typeof record !== "object") return;
       const createdAt = Number(record.createdAt);
       if (!Number.isFinite(createdAt)) return;
+      const userId = String(record.userId ?? "");
+      if (userId === this.localUserId && createdAt < localQueueHeadCreatedAt) {
+        localQueueHeadCreatedAt = createdAt;
+      }
       if (createdAt >= cutoff) return;
 
-      // Best-effort safety: avoid pruning records that might still be referenced
-      // by very recent local operations in-flight. We currently track local ops
-      // by `createdAt`, and we only ever prune records that are strictly older
-      // than our age cutoff.
-      toDelete.push(String(id));
+      candidates.push({ id: String(id), createdAt });
     });
+
+    const safeCutoff = Math.min(cutoff, localQueueHeadCreatedAt);
+
+    /** @type {string[]} */
+    const toDelete = [];
+    for (const candidate of candidates) {
+      if (candidate.createdAt < safeCutoff) {
+        toDelete.push(candidate.id);
+      }
+    }
 
     if (toDelete.length === 0) return;
 
