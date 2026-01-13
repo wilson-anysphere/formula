@@ -65,7 +65,7 @@ export type CompletionClient = TabCompletionClient;
 export class TabCompletionEngine {
   constructor(options?: {
     functionRegistry?: FunctionRegistry;
-    parsePartialFormula?: typeof parsePartialFormula;
+    parsePartialFormula?: ParsePartialFormula;
     completionClient?: TabCompletionClient | null;
     schemaProvider?: SchemaProvider | null;
     cache?: LRUCache<Suggestion[]>;
@@ -114,6 +114,12 @@ export interface PartialFormulaContext {
   functionNamePrefix?: { text: string; start: number; end: number };
   currentArg?: { text: string; start: number; end: number };
 }
+
+export type ParsePartialFormula = (
+  input: string,
+  cursorPosition: number,
+  functionRegistry: { isRangeArg: (fnName: string, argIndex: number) => boolean },
+) => PartialFormulaContext | Promise<PartialFormulaContext>;
 
 export function parsePartialFormula(
   input: string,

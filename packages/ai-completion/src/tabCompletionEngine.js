@@ -1,6 +1,6 @@
 import { LRUCache } from "./lruCache.js";
 import { FunctionRegistry } from "./functionRegistry.js";
-import { parsePartialFormula } from "./formulaPartialParser.js";
+import { parsePartialFormula as parsePartialFormulaFallback } from "./formulaPartialParser.js";
 import { suggestRanges } from "./rangeSuggester.js";
 import { suggestPatternValues } from "./patternSuggester.js";
 import { normalizeCellRef, toA1, columnIndexToLetter } from "./a1.js";
@@ -52,7 +52,7 @@ export class TabCompletionEngine {
   /**
    * @param {{
    *   functionRegistry?: FunctionRegistry,
-   *   parsePartialFormula?: typeof parsePartialFormula,
+   *   parsePartialFormula?: typeof parsePartialFormulaFallback | ((input: string, cursorPosition: number, functionRegistry: FunctionRegistry) => any | Promise<any>),
    *   completionClient?: { completeTabCompletion: (req: { input: string, cursorPosition: number, cellA1: string }) => Promise<string> } | null,
    *   schemaProvider?: SchemaProvider | null,
    *   cache?: LRUCache,
@@ -63,7 +63,7 @@ export class TabCompletionEngine {
    */
   constructor(options = {}) {
     this.functionRegistry = options.functionRegistry ?? new FunctionRegistry();
-    this.parsePartialFormula = options.parsePartialFormula ?? parsePartialFormula;
+    this.parsePartialFormula = options.parsePartialFormula ?? parsePartialFormulaFallback;
     this.completionClient = options.completionClient ?? null;
     this.schemaProvider = options.schemaProvider ?? null;
     this.cache = options.cache ?? new LRUCache(options.cacheSize ?? 200);
@@ -181,13 +181,20 @@ export class TabCompletionEngine {
   }
 
   async #computeBaseSuggestions(context, input, cursorPosition) {
+    /** @type {ReturnType<typeof parsePartialFormulaFallback>} */
     let parsed;
     try {
-      parsed = this.parsePartialFormula(input, cursorPosition, this.functionRegistry);
+      parsed = await Promise.resolve(this.parsePartialFormula(input, cursorPosition, this.functionRegistry));
     } catch {
-      // Be defensive: if the partial parser ever throws, treat the input as
-      // non-formula and only attempt pattern-based suggestions.
-      parsed = { isFormula: false, inFunctionCall: false };
+      // Parsing is best-effort. If a caller-provided parser throws (e.g. WASM engine unavailable),
+      // fall back to the built-in JS parser so tab completion remains responsive.
+      try {
+        parsed = parsePartialFormulaFallback(input, cursorPosition, this.functionRegistry);
+      } catch {
+        // Be defensive: if even the built-in parser throws, treat as non-formula so pattern
+        // suggestions can still run.
+        parsed = { isFormula: false, inFunctionCall: false };
+      }
     }
 
     const [ruleBased, patternBased, backendBased] = await Promise.all([
@@ -201,7 +208,7 @@ export class TabCompletionEngine {
 
   /**
    * @param {CompletionContext} context
-   * @param {ReturnType<typeof parsePartialFormula>} parsed
+   * @param {ReturnType<typeof parsePartialFormulaFallback>} parsed
    * @returns {Promise<Suggestion[]>}
    */
   async getRuleBasedSuggestions(context, parsed) {
@@ -236,7 +243,7 @@ export class TabCompletionEngine {
 
   /**
    * @param {CompletionContext} context
-   * @param {ReturnType<typeof parsePartialFormula>} parsed
+   * @param {ReturnType<typeof parsePartialFormulaFallback>} parsed
    * @returns {Promise<Suggestion[]>}
    */
   async getPatternSuggestions(context, parsed) {
@@ -260,7 +267,7 @@ export class TabCompletionEngine {
 
   /**
    * @param {CompletionContext} context
-   * @param {ReturnType<typeof parsePartialFormula>} parsed
+   * @param {ReturnType<typeof parsePartialFormulaFallback>} parsed
    * @returns {Promise<Suggestion[]>}
    */
   async getCursorBackendSuggestions(context, parsed) {
@@ -353,7 +360,7 @@ export class TabCompletionEngine {
 
   /**
    * @param {CompletionContext} context
-   * @param {ReturnType<typeof parsePartialFormula>} parsed
+   * @param {ReturnType<typeof parsePartialFormulaFallback>} parsed
    * @returns {Promise<Suggestion[]>}
    */
   suggestRangeCompletions(context, parsed) {
@@ -447,7 +454,7 @@ export class TabCompletionEngine {
    * Suggest named ranges, sheet-qualified ranges, and structured references for the current arg.
    *
    * @param {CompletionContext} context
-   * @param {ReturnType<typeof parsePartialFormula>} parsed
+   * @param {ReturnType<typeof parsePartialFormulaFallback>} parsed
    * @returns {Promise<Suggestion[]>}
    */
   async suggestSchemaRanges(context, parsed) {
@@ -627,7 +634,7 @@ export class TabCompletionEngine {
 
   /**
    * @param {CompletionContext} context
-   * @param {ReturnType<typeof parsePartialFormula>} parsed
+   * @param {ReturnType<typeof parsePartialFormulaFallback>} parsed
    * @returns {Suggestion[]}
    */
   suggestArgumentValues(context, parsed) {

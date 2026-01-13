@@ -6,12 +6,14 @@ import {
   type SchemaProvider,
   type Suggestion
 } from "@formula/ai-completion";
+import type { EngineClient } from "@formula/engine";
 
 import type { DocumentController } from "../../document/documentController.js";
 import type { FormulaBarView } from "../../formula-bar/FormulaBarView.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
 import { evaluateFormula, type SpreadsheetValue } from "../../spreadsheet/evaluateFormula.js";
+import { createLocaleAwarePartialFormulaParser } from "./parsePartialFormula.js";
 
 function normalizeSheetNameToken(sheetName: string): string {
   const raw = String(sheetName ?? "").trim();
@@ -26,6 +28,13 @@ export interface FormulaBarTabCompletionControllerOptions {
   getSheetId: () => string;
   limits?: { maxRows: number; maxCols: number };
   schemaProvider?: SchemaProvider | null;
+  /**
+   * Optional getter for the WASM engine client (when available).
+   *
+   * Tab completion should remain responsive while the engine is booting; callers
+   * should return `null` until the engine has finished initializing.
+   */
+  getEngineClient?: (() => EngineClient | null) | null;
   /**
    * Optional sheet name <-> id resolver.
    *
@@ -112,6 +121,9 @@ export class FormulaBarTabCompletionController {
     this.#completion = new TabCompletionEngine({
       completionClient,
       schemaProvider,
+      parsePartialFormula: createLocaleAwarePartialFormulaParser({
+        getEngineClient: typeof opts.getEngineClient === "function" ? opts.getEngineClient : undefined,
+      }),
       // Keep room for a backend (Cursor) suggestion even when the rule-based engine
       // returns a full set of top-level starters (which otherwise consumes the
       // default `maxSuggestions=5` budget).
