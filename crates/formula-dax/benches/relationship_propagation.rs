@@ -150,11 +150,23 @@ fn bench_relationship_propagation(c: &mut Criterion) {
 
     // Filter on the far (Dim2) table.
     let filter = FilterContext::empty().with_column_equals("Regions", "Name", Value::from("Region_005"));
+    let filter_in_10 = FilterContext::empty().with_column_in(
+        "Regions",
+        "Name",
+        (0..10).map(|i| Value::from(format!("Region_{i:03}"))),
+    );
 
     // Sanity check: filter results should be identical regardless of relationship direction.
     let single_value = model_single.evaluate_measure("Total Sales", &filter).unwrap();
     let both_value = model_both.evaluate_measure("Total Sales", &filter).unwrap();
     assert_eq!(single_value, both_value);
+    let single_value_in = model_single
+        .evaluate_measure("Total Sales", &filter_in_10)
+        .unwrap();
+    let both_value_in = model_both
+        .evaluate_measure("Total Sales", &filter_in_10)
+        .unwrap();
+    assert_eq!(single_value_in, both_value_in);
 
     let mut group = c.benchmark_group("relationship_propagation");
     group.sample_size(10);
@@ -174,11 +186,36 @@ fn bench_relationship_propagation(c: &mut Criterion) {
         })
     });
 
+    group.bench_with_input(BenchmarkId::new("single_direction_in_10", rows), &rows, |b, _| {
+        b.iter(|| {
+            let value = model_single
+                .evaluate_measure("Total Sales", &filter_in_10)
+                .unwrap();
+            black_box(value);
+        })
+    });
+
+    group.bench_with_input(BenchmarkId::new("bidirectional_in_10", rows), &rows, |b, _| {
+        b.iter(|| {
+            let value = model_both
+                .evaluate_measure("Total Sales", &filter_in_10)
+                .unwrap();
+            black_box(value);
+        })
+    });
+
     group.finish();
 
     let single_rows = model_single.evaluate_measure("Sales Rows", &filter).unwrap();
     let both_rows = model_both.evaluate_measure("Sales Rows", &filter).unwrap();
     assert_eq!(single_rows, both_rows);
+    let single_rows_in = model_single
+        .evaluate_measure("Sales Rows", &filter_in_10)
+        .unwrap();
+    let both_rows_in = model_both
+        .evaluate_measure("Sales Rows", &filter_in_10)
+        .unwrap();
+    assert_eq!(single_rows_in, both_rows_in);
 
     let mut rows_group = c.benchmark_group("relationship_propagation_countrows");
     rows_group.sample_size(10);
@@ -194,6 +231,24 @@ fn bench_relationship_propagation(c: &mut Criterion) {
     rows_group.bench_with_input(BenchmarkId::new("bidirectional", rows), &rows, |b, _| {
         b.iter(|| {
             let value = model_both.evaluate_measure("Sales Rows", &filter).unwrap();
+            black_box(value);
+        })
+    });
+
+    rows_group.bench_with_input(BenchmarkId::new("single_direction_in_10", rows), &rows, |b, _| {
+        b.iter(|| {
+            let value = model_single
+                .evaluate_measure("Sales Rows", &filter_in_10)
+                .unwrap();
+            black_box(value);
+        })
+    });
+
+    rows_group.bench_with_input(BenchmarkId::new("bidirectional_in_10", rows), &rows, |b, _| {
+        b.iter(|| {
+            let value = model_both
+                .evaluate_measure("Sales Rows", &filter_in_10)
+                .unwrap();
             black_box(value);
         })
     });
