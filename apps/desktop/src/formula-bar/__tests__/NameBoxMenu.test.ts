@@ -22,6 +22,7 @@ describe("FormulaBarView name box dropdown menu", () => {
 
     const dropdown = host.querySelector<HTMLButtonElement>(".formula-bar-name-box-dropdown");
     expect(dropdown).toBeInstanceOf(HTMLButtonElement);
+    expect(dropdown?.getAttribute("aria-haspopup")).toBe("menu");
 
     dropdown!.click();
 
@@ -70,6 +71,29 @@ describe("FormulaBarView name box dropdown menu", () => {
     // Enter should activate the focused item and close the menu.
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
     expect(onGoTo).toHaveBeenCalledWith("'My Sheet'!A1:B2");
+    expect(overlay?.hidden).toBe(true);
+  });
+
+  it("opens via F4 when the name box input is focused", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    new FormulaBarView(host, {
+      onCommit: () => {},
+      getNameBoxMenuItems: () => [{ label: "MyRange", reference: "A1" }],
+    });
+
+    const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
+    expect(address).toBeInstanceOf(HTMLInputElement);
+    address!.focus();
+
+    address!.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", bubbles: true, cancelable: true }));
+
+    const overlay = document.querySelector<HTMLDivElement>('[data-testid="name-box-menu"]');
+    expect(overlay).toBeInstanceOf(HTMLDivElement);
+    expect(overlay?.hidden).toBe(false);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
     expect(overlay?.hidden).toBe(true);
   });
 
