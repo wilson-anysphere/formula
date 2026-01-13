@@ -2577,20 +2577,38 @@ fn parse_worksheet_into_model(
                 in_sheet_view = true;
                 for attr in e.attributes() {
                     let attr = attr?;
-                    if attr.key.as_ref() == b"zoomScale" {
-                        if let Ok(scale) = attr.unescape_value()?.into_owned().parse::<f32>() {
-                            worksheet.zoom = scale / 100.0;
+                    let val = attr.unescape_value()?.into_owned();
+                    match attr.key.as_ref() {
+                        b"zoomScale" => {
+                            if let Ok(scale) = val.parse::<f32>() {
+                                let zoom = scale / 100.0;
+                                worksheet.zoom = zoom;
+                                worksheet.view.zoom = zoom;
+                            }
                         }
+                        b"showGridLines" => worksheet.view.show_grid_lines = parse_xml_bool(&val),
+                        b"showHeadings" => worksheet.view.show_headings = parse_xml_bool(&val),
+                        b"showZeros" => worksheet.view.show_zeros = parse_xml_bool(&val),
+                        _ => {}
                     }
                 }
             }
             Event::Empty(e) if in_sheet_views && e.local_name().as_ref() == b"sheetView" => {
                 for attr in e.attributes() {
                     let attr = attr?;
-                    if attr.key.as_ref() == b"zoomScale" {
-                        if let Ok(scale) = attr.unescape_value()?.into_owned().parse::<f32>() {
-                            worksheet.zoom = scale / 100.0;
+                    let val = attr.unescape_value()?.into_owned();
+                    match attr.key.as_ref() {
+                        b"zoomScale" => {
+                            if let Ok(scale) = val.parse::<f32>() {
+                                let zoom = scale / 100.0;
+                                worksheet.zoom = zoom;
+                                worksheet.view.zoom = zoom;
+                            }
                         }
+                        b"showGridLines" => worksheet.view.show_grid_lines = parse_xml_bool(&val),
+                        b"showHeadings" => worksheet.view.show_headings = parse_xml_bool(&val),
+                        b"showZeros" => worksheet.view.show_zeros = parse_xml_bool(&val),
+                        _ => {}
                     }
                 }
             }
@@ -2603,21 +2621,84 @@ fn parse_worksheet_into_model(
                 if in_sheet_view && e.local_name().as_ref() == b"pane" =>
             {
                 let mut state: Option<String> = None;
-                let mut x_split: Option<u32> = None;
-                let mut y_split: Option<u32> = None;
+                let mut x_split: Option<String> = None;
+                let mut y_split: Option<String> = None;
+                let mut top_left_cell: Option<CellRef> = None;
                 for attr in e.attributes() {
                     let attr = attr?;
                     let val = attr.unescape_value()?.into_owned();
                     match attr.key.as_ref() {
                         b"state" => state = Some(val),
-                        b"xSplit" => x_split = val.parse().ok(),
-                        b"ySplit" => y_split = val.parse().ok(),
+                        b"xSplit" => x_split = Some(val),
+                        b"ySplit" => y_split = Some(val),
+                        b"topLeftCell" => {
+                            if let Ok(cell_ref) = CellRef::from_a1(&val) {
+                                top_left_cell = Some(cell_ref);
+                            }
+                        }
                         _ => {}
                     }
                 }
+                if top_left_cell.is_some() {
+                    worksheet.view.pane.top_left_cell = top_left_cell;
+                }
                 if matches!(state.as_deref(), Some("frozen") | Some("frozenSplit")) {
-                    worksheet.frozen_cols = x_split.unwrap_or(0);
-                    worksheet.frozen_rows = y_split.unwrap_or(0);
+                    let frozen_cols = x_split
+                        .as_deref()
+                        .and_then(|s| s.parse::<u32>().ok())
+                        .unwrap_or(0);
+                    let frozen_rows = y_split
+                        .as_deref()
+                        .and_then(|s| s.parse::<u32>().ok())
+                        .unwrap_or(0);
+
+                    worksheet.frozen_cols = frozen_cols;
+                    worksheet.frozen_rows = frozen_rows;
+                    worksheet.view.pane.frozen_cols = frozen_cols;
+                    worksheet.view.pane.frozen_rows = frozen_rows;
+                    // `xSplit`/`ySplit` are interpreted as frozen counts in this mode.
+                    worksheet.view.pane.x_split = None;
+                    worksheet.view.pane.y_split = None;
+                } else {
+                    // In split-pane mode, `xSplit`/`ySplit` are floating-point offsets (twips).
+                    if let Some(x_split) = x_split.and_then(|v| v.parse::<f32>().ok()) {
+                        worksheet.view.pane.x_split = Some(x_split);
+                    }
+                    if let Some(y_split) = y_split.and_then(|v| v.parse::<f32>().ok()) {
+                        worksheet.view.pane.y_split = Some(y_split);
+                    }
+                }
+            }
+
+            Event::Start(e) | Event::Empty(e)
+                if in_sheet_view && e.local_name().as_ref() == b"selection" =>
+            {
+                let mut active_cell: Option<CellRef> = None;
+                let mut sqref: Option<String> = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    let val = attr.unescape_value()?.into_owned();
+                    match attr.key.as_ref() {
+                        b"activeCell" => {
+                            if let Ok(cell_ref) = CellRef::from_a1(&val) {
+                                active_cell = Some(cell_ref);
+                            }
+                        }
+                        b"sqref" => sqref = Some(val),
+                        _ => {}
+                    }
+                }
+
+                let Some(active_cell) = active_cell else {
+                    continue;
+                };
+
+                let selection = match sqref.as_deref() {
+                    Some(sqref) => formula_model::SheetSelection::from_sqref(active_cell, sqref).ok(),
+                    None => Some(formula_model::SheetSelection::new(active_cell, Vec::new())),
+                };
+                if selection.is_some() {
+                    worksheet.view.selection = selection;
                 }
             }
 
