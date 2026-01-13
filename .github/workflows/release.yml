@@ -29,9 +29,6 @@ on:
         required: false
         type: string
 
-permissions:
-  contents: write
-
 # Prevent multiple runs for the same tag from racing while uploading GitHub Release
 # assets (including Tauri updater manifests like `latest.json`). Without this,
 # manual re-runs or tag updates can overlap and clobber/partially overwrite the
@@ -71,6 +68,8 @@ env:
 jobs:
   conflict-marker-guard:
     name: "Guard: no merge conflict markers"
+    permissions:
+      contents: read
     # Pinned runner images keep release workflows deterministic and avoid breakages
     # when GitHub updates the default `*-latest` hosted runner images.
     runs-on: ubuntu-24.04
@@ -88,6 +87,8 @@ jobs:
   validate-version:
     name: Validate desktop version matches tag
     needs: conflict-marker-guard
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     outputs:
       upload: ${{ steps.params.outputs.upload }}
@@ -309,6 +310,8 @@ jobs:
   build:
     name: Build (${{ matrix.label }})
     needs: validate-version
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       # NOTE: `tauri-apps/tauri-action` updates shared GitHub Release assets (notably `latest.json`)
@@ -1804,6 +1807,8 @@ jobs:
     # forks have configured their own updater key secrets.
     if: needs.validate-version.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
