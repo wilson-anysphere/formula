@@ -364,6 +364,10 @@ If you need to point end users at a manual install (e.g. no internet / locked-do
 Microsoft’s official WebView2 download page is:
 https://developer.microsoft.com/en-us/microsoft-edge/webview2/
 
+Troubleshooting note: WebView2 can be installed per-user or per-machine. If a user reports that
+Formula “can’t find WebView2” even though it is installed, ensure the runtime is installed for the
+same Windows user account (or install it system-wide).
+
 ## 4) Hosting updater endpoints
 
 The desktop app is configured to use **GitHub Releases** as the updater source.
