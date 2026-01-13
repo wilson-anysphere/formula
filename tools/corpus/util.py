@@ -51,14 +51,14 @@ def read_workbook_input(path: Path, *, fernet_key: str | None = None) -> Workboo
     data = path.read_bytes()
     display_name = path.name
 
-    if display_name.endswith(".b64"):
+    if display_name.casefold().endswith(".b64"):
         # Base64 fixtures are stored as text so they can live in git.
         # `validate=True` rejects whitespace/newlines, so strip them first to support
         # checked-in fixtures with trailing newlines.
         data = base64.b64decode(b"".join(data.split()), validate=True)
         display_name = display_name[: -len(".b64")]
 
-    if display_name.endswith(".enc"):
+    if display_name.casefold().endswith(".enc"):
         if not fernet_key:
             raise ValueError(
                 f"{path} looks encrypted ('.enc') but no `fernet_key` was provided."
