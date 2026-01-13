@@ -1,0 +1,407 @@
+name: Desktop Release (dry run)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref (branch/tag/SHA) to build (optional; defaults to the workflow ref)"
+        required: false
+        default: ""
+        type: string
+      enableSigning:
+        description: "Enable updater + platform signing (uses repository secrets)"
+        required: false
+        default: false
+        type: boolean
+
+# This workflow builds the same desktop bundles as the tagged release workflow, but:
+# - does NOT create/update a GitHub Release
+# - uploads bundles to Actions artifacts for inspection
+permissions:
+  contents: read
+
+jobs:
+  conflict-marker-guard:
+    name: "Guard: no merge conflict markers"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - name: Fail if merge conflict markers are present
+        run: bash scripts/ci/check-merge-conflict-markers.sh
+
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: conflict-marker-guard
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-latest, ubuntu-24.04, windows-latest]
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Optional: only runs when a tag-like ref is explicitly requested.
+      # This keeps dry runs usable from branches while still allowing "build this tag" validation.
+      - name: Check desktop version matches tag (optional)
+        if: ${{ inputs.ref != '' && (startsWith(inputs.ref, 'v') || startsWith(inputs.ref, 'refs/tags/v')) }}
+        run: node scripts/check-desktop-version.mjs "${{ inputs.ref }}"
+
+      - name: Validate Tauri updater config
+        run: node scripts/check-updater-config.mjs
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
+      # contention on shared ~/.cargo. In GitHub Actions we prefer the default
+      # CARGO_HOME so cargo installs/builds share the same cache.
+      - name: Use shared Cargo home for CI caching (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $cargoHome = Join-Path $env:USERPROFILE ".cargo"
+          "CARGO_HOME=$cargoHome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Use shared Cargo home for CI caching (Unix)
+        if: matrix.platform != 'windows-latest'
+        run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-24.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            patchelf \
+            rpm
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install wasm-pack (required for @formula/engine WASM build)
+        run: cargo install wasm-pack --locked
+
+      - name: Smoke check packaged cross-origin isolation (COOP/COEP)
+        if: matrix.platform == 'ubuntu-24.04'
+        run: pnpm -C apps/desktop check:coi
+
+      - name: Build desktop bundles (dry run, signing disabled)
+        if: ${{ !inputs.enableSigning }}
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+
+      - name: Build desktop bundles (dry run, signing enabled)
+        if: ${{ inputs.enableSigning }}
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          # Tauri updater signing (optional; enables updater signatures).
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+          # Optional platform code signing (see docs/release.md)
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+
+      - name: Validate Linux bundles (AppImage/RPM/DEB)
+        if: matrix.platform == 'ubuntu-24.04'
+        run: |
+          set -euo pipefail
+
+          roots=()
+          for candidate in "apps/desktop/src-tauri/target" "target"; do
+            if [ -d "$candidate" ]; then
+              roots+=("$candidate")
+            fi
+          done
+          if [ "${#roots[@]}" -eq 0 ]; then
+            echo "linux-validate: ERROR: No Cargo target directories found (expected apps/desktop/src-tauri/target or target/)." >&2
+            exit 1
+          fi
+
+          appimage_count=0
+          for root in "${roots[@]}"; do
+            while IFS= read -r img; do
+              appimage_count=$((appimage_count + 1))
+              echo "linux-validate: AppImage -> $img"
+              img_abs="$PWD/$img"
+              chmod +x "$img_abs"
+              tmpdir="$(mktemp -d)"
+              (cd "$tmpdir" && "$img_abs" --appimage-extract >/dev/null)
+              test -f "$tmpdir/squashfs-root/usr/bin/formula-desktop"
+              rm -rf "$tmpdir"
+            done < <(find "$root" -type f -path '*/release/bundle/appimage/*.AppImage' -print)
+          done
+
+          if [ "$appimage_count" -eq 0 ]; then
+            echo "linux-validate: ERROR: No AppImage bundles found." >&2
+            exit 1
+          fi
+
+          deb_count=0
+          for root in "${roots[@]}"; do
+            while IFS= read -r deb; do
+              deb_count=$((deb_count + 1))
+              echo "linux-validate: DEB -> $deb"
+              dpkg -I "$deb"
+              tmpdir="$(mktemp -d)"
+              dpkg-deb -x "$deb" "$tmpdir"
+              ldd "$tmpdir/usr/bin/formula-desktop" | tee "$tmpdir/ldd.txt"
+              if grep -q "not found" "$tmpdir/ldd.txt"; then
+                echo "linux-validate: ERROR: Missing shared libraries in .deb binary (ldd reports 'not found')." >&2
+                exit 1
+              fi
+              rm -rf "$tmpdir"
+            done < <(find "$root" -type f -path '*/release/bundle/deb/*.deb' -print)
+          done
+
+          if [ "$deb_count" -eq 0 ]; then
+            echo "linux-validate: ERROR: No .deb bundles found." >&2
+            exit 1
+          fi
+
+          rpm_count=0
+          for root in "${roots[@]}"; do
+            while IFS= read -r rpm_path; do
+              rpm_count=$((rpm_count + 1))
+              echo "linux-validate: RPM -> $rpm_path"
+              rpm -qp "$rpm_path" >/dev/null
+              if ! rpm -qpl "$rpm_path" | grep -q '^/usr/bin/formula-desktop$'; then
+                echo "linux-validate: ERROR: RPM payload does not include /usr/bin/formula-desktop" >&2
+                exit 1
+              fi
+            done < <(find "$root" -type f -path '*/release/bundle/rpm/*.rpm' -print)
+          done
+
+          if [ "$rpm_count" -eq 0 ]; then
+            echo "linux-validate: ERROR: No .rpm bundles found." >&2
+            exit 1
+          fi
+
+      - name: Validate macOS DMG
+        if: matrix.platform == 'macos-latest'
+        env:
+          ENABLE_SIGNING: ${{ inputs.enableSigning }}
+        run: |
+          set -euo pipefail
+          roots=()
+          for candidate in "apps/desktop/src-tauri/target" "target"; do
+            if [ -d "$candidate" ]; then
+              roots+=("$candidate")
+            fi
+          done
+          if [ "${#roots[@]}" -eq 0 ]; then
+            echo "macos-validate: ERROR: No Cargo target directories found (expected apps/desktop/src-tauri/target or target/)." >&2
+            exit 1
+          fi
+
+          dmg_count=0
+          for root in "${roots[@]}"; do
+            while IFS= read -r dmg; do
+              dmg_count=$((dmg_count + 1))
+              echo "macos-validate: DMG -> $dmg"
+
+              dmg_abs="$PWD/$dmg"
+              mount_dir="$(mktemp -d)"
+              device=""
+
+              cleanup() {
+                if [ -n "$device" ]; then
+                  hdiutil detach "$device" -force || true
+                fi
+                rm -rf "$mount_dir"
+              }
+              trap cleanup EXIT
+
+              attach_out="$(hdiutil attach "$dmg_abs" -nobrowse -readonly -mountpoint "$mount_dir")"
+              device="$(echo "$attach_out" | head -n 1 | awk '{print $1}')"
+              if [ -z "$device" ]; then
+                echo "macos-validate: ERROR: Failed to parse hdiutil attach output." >&2
+                exit 1
+              fi
+
+              # Expect at least one .app in the mounted DMG.
+              app="$(find "$mount_dir" -maxdepth 2 -name '*.app' -print -quit)"
+              if [ -z "$app" ]; then
+                echo "macos-validate: ERROR: DMG mount does not contain an .app (expected at the root)." >&2
+                exit 1
+              fi
+
+              if [ "$ENABLE_SIGNING" = "true" ]; then
+                codesign --verify --deep --strict --verbose=2 "$app"
+              fi
+
+              hdiutil detach "$device" -force
+              device=""
+              rm -rf "$mount_dir"
+              trap - EXIT
+            done < <(find "$root" -type f -path '*/release/bundle/dmg/*.dmg' -print)
+          done
+
+          if [ "$dmg_count" -eq 0 ]; then
+            echo "macos-validate: ERROR: No .dmg bundles found." >&2
+            exit 1
+          fi
+
+      - name: Validate Windows installers (MSI/NSIS)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        env:
+          ENABLE_SIGNING: ${{ inputs.enableSigning }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $targetRoots = @(
+            (Join-Path $env:GITHUB_WORKSPACE 'apps\desktop\src-tauri\target'),
+            (Join-Path $env:GITHUB_WORKSPACE 'target')
+          ) | Where-Object { Test-Path $_ }
+          if (-not $targetRoots -or $targetRoots.Count -eq 0) {
+            throw "windows-validate: ERROR: No Cargo target directories found (expected apps\\desktop\\src-tauri\\target or target\\)."
+          }
+
+          $msis = Get-ChildItem -Path $targetRoots -Recurse -File -Filter *.msi -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\release\\bundle\\msi\\' }
+          $exes = Get-ChildItem -Path $targetRoots -Recurse -File -Filter *.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\release\\bundle\\nsis\\' }
+
+          if (-not $msis -and -not $exes) {
+            throw "windows-validate: ERROR: No Windows installer bundles found (.msi or NSIS .exe)."
+          }
+
+          foreach ($msi in $msis) {
+            Write-Host "windows-validate: MSI -> $($msi.FullName)"
+            if ($env:ENABLE_SIGNING -eq 'true') {
+              $sig = Get-AuthenticodeSignature -FilePath $msi.FullName
+              if ($sig.Status -ne 'Valid') {
+                throw "windows-validate: ERROR: MSI Authenticode signature status is $($sig.Status) for $($msi.FullName)"
+              }
+            }
+
+            $extractDir = Join-Path $env:RUNNER_TEMP ("msi-extract-" + [guid]::NewGuid().ToString())
+            New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+
+            # Administrative install to extract payload without installing on the runner.
+            $proc = Start-Process -FilePath msiexec.exe -ArgumentList @('/a', $msi.FullName, '/qn', "TARGETDIR=$extractDir") -Wait -PassThru
+            if ($proc.ExitCode -ne 0) {
+              throw "windows-validate: ERROR: msiexec extraction failed with exit code $($proc.ExitCode) for $($msi.FullName)"
+            }
+
+            $payloadExe =
+              (Get-ChildItem -Path $extractDir -Recurse -File -Filter 'formula-desktop.exe' -ErrorAction SilentlyContinue | Select-Object -First 1) ??
+              (Get-ChildItem -Path $extractDir -Recurse -File -Filter 'Formula.exe' -ErrorAction SilentlyContinue | Select-Object -First 1)
+
+            if (-not $payloadExe) {
+              throw "windows-validate: ERROR: Could not find extracted desktop binary (formula-desktop.exe/Formula.exe) in MSI payload ($extractDir)."
+            }
+          }
+
+          foreach ($exe in $exes) {
+            Write-Host "windows-validate: NSIS -> $($exe.FullName)"
+
+            if ($env:ENABLE_SIGNING -eq 'true') {
+              $sig = Get-AuthenticodeSignature -FilePath $exe.FullName
+              if ($sig.Status -ne 'Valid') {
+                throw "windows-validate: ERROR: NSIS installer Authenticode signature status is $($sig.Status) for $($exe.FullName)"
+              }
+            }
+
+            if ($exe.Length -lt 1024) {
+              throw "windows-validate: ERROR: Installer file is unexpectedly small (< 1KB): $($exe.FullName)"
+            }
+
+            $fs = [System.IO.File]::OpenRead($exe.FullName)
+            try {
+              $b0 = $fs.ReadByte()
+              $b1 = $fs.ReadByte()
+            } finally {
+              $fs.Dispose()
+            }
+            if ($b0 -ne 0x4D -or $b1 -ne 0x5A) {
+              throw "windows-validate: ERROR: Installer does not start with an 'MZ' header: $($exe.FullName)"
+            }
+          }
+
+      - name: Report desktop bundle sizes
+        if: always()
+        env:
+          # Optional: set these as GitHub Actions "Variables" to enable gating.
+          # - FORMULA_ENFORCE_BUNDLE_SIZE=1 to fail when any artifact exceeds the limit
+          # - FORMULA_BUNDLE_SIZE_LIMIT_MB=50 to adjust the default 50 MB budget
+          FORMULA_ENFORCE_BUNDLE_SIZE: ${{ vars.FORMULA_ENFORCE_BUNDLE_SIZE }}
+          FORMULA_BUNDLE_SIZE_LIMIT_MB: ${{ vars.FORMULA_BUNDLE_SIZE_LIMIT_MB }}
+        run: python scripts/desktop_bundle_size_report.py
+
+      - name: Upload desktop bundles
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-bundles-${{ matrix.platform }}-${{ runner.arch }}
+          if-no-files-found: warn
+          path: |
+            apps/desktop/src-tauri/target/**/release/bundle/**/*.dmg
+            apps/desktop/src-tauri/target/**/release/bundle/**/*.AppImage
+            apps/desktop/src-tauri/target/**/release/bundle/**/*.deb
+            apps/desktop/src-tauri/target/**/release/bundle/**/*.rpm
+            apps/desktop/src-tauri/target/**/release/bundle/**/*.msi
+            apps/desktop/src-tauri/target/**/release/bundle/**/*.exe
+            apps/desktop/src-tauri/target/**/release/bundle/**/*.pkg
+            apps/desktop/src-tauri/target/**/release/bundle/**/*.zip
+            apps/desktop/src-tauri/target/**/release/bundle/**/*.tar.gz
+            apps/desktop/src-tauri/target/**/release/bundle/**/*.tgz
+            apps/desktop/src-tauri/target/**/release/bundle/**/*.sig
+            apps/desktop/src-tauri/target/**/release/bundle/**/latest.json
+            apps/desktop/src-tauri/target/**/release/bundle/**/update.json
+            target/**/release/bundle/**/*.dmg
+            target/**/release/bundle/**/*.AppImage
+            target/**/release/bundle/**/*.deb
+            target/**/release/bundle/**/*.rpm
+            target/**/release/bundle/**/*.msi
+            target/**/release/bundle/**/*.exe
+            target/**/release/bundle/**/*.pkg
+            target/**/release/bundle/**/*.zip
+            target/**/release/bundle/**/*.tar.gz
+            target/**/release/bundle/**/*.tgz
+            target/**/release/bundle/**/*.sig
+            target/**/release/bundle/**/latest.json
+            target/**/release/bundle/**/update.json
