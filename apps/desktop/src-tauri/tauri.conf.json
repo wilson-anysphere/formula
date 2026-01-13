@@ -110,7 +110,7 @@
         "depends": [
           "webkit2gtk4.1",
           "gtk3",
-          "libappindicator-gtk3",
+          "(libayatana-appindicator-gtk3 or libappindicator-gtk3)",
           "librsvg2",
           "openssl-libs"
         ]

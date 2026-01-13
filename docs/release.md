@@ -414,7 +414,7 @@ These dependencies are declared in `apps/desktop/src-tauri/tauri.conf.json` unde
 
 - `webkit2gtk4.1` – WebKitGTK system WebView used by Tauri on Linux.
 - `gtk3` – GTK3 (windowing/event loop; also required by WebKitGTK).
-- `libappindicator-gtk3` – tray icon backend.
+- `(libayatana-appindicator-gtk3 or libappindicator-gtk3)` – tray icon backend.
 - `librsvg2` – SVG rendering used by parts of the GTK icon stack / common icon themes.
 - `openssl-libs` – OpenSSL runtime libraries required by native dependencies in the Tauri stack.
 
