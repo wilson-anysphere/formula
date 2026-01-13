@@ -276,6 +276,11 @@ For `viewer` and `commenter` roles, the desktop app behaves as “read-only” f
 
 Note: the sync-server also enforces read-only roles by dropping incoming Yjs write messages for read-only connections, so client-side enforcement is primarily for UX consistency and to avoid “edit → immediate revert” loops.
 
+Sync-server nuance:
+
+- `viewer`: treated as fully read-only; SyncStep2/Update messages are dropped.
+- `commenter`: treated as **comment-only**; sync-server allows Yjs updates that touch the `comments` root and rejects updates that touch other roots (cells/sheets/etc).
+
 ### Sheet schema (`sheets` array entries)
 
 Each entry in `doc.getArray("sheets")` is a `Y.Map` with (at least):

@@ -998,6 +998,80 @@ test("enforces read-only roles (viewer/commenter) for Yjs updates", async (t) =>
   assert.equal(observerDoc.getText("t").toString(), "hello");
 });
 
+test("allows commenter role to write to the comments root but rejects other Yjs updates", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
+
+  const secret = "test-secret";
+  const docName = "commenter-comments-doc";
+
+  const server = await startSyncServer({
+    dataDir,
+    auth: { mode: "jwt", secret, audience: "formula-sync" },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const wsUrl = server.wsUrl;
+
+  const editorToken = signJwtToken({
+    secret,
+    docId: docName,
+    userId: "editor-user",
+    role: "editor",
+  });
+  const commenterToken = signJwtToken({
+    secret,
+    docId: docName,
+    userId: "commenter-user",
+    role: "commenter",
+  });
+
+  const editorDoc = new Y.Doc();
+  const commenterDoc = new Y.Doc();
+
+  const editorProvider = new WebsocketProvider(wsUrl, docName, editorDoc, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: editorToken },
+  });
+  const commenterProvider = new WebsocketProvider(wsUrl, docName, commenterDoc, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: commenterToken },
+  });
+
+  t.after(() => {
+    editorProvider.destroy();
+    commenterProvider.destroy();
+    editorDoc.destroy();
+    commenterDoc.destroy();
+  });
+
+  await waitForProviderSync(editorProvider);
+  await waitForProviderSync(commenterProvider);
+
+  // Commenter writes to the `comments` root; this should sync.
+  commenterDoc.getMap("comments").set("c1", "hello");
+
+  await waitForCondition(
+    () => editorDoc.getMap("comments").get("c1") === "hello",
+    10_000
+  );
+
+  // Commenter attempts to write to any other root; server must reject.
+  commenterDoc.getText("t").insert(0, "evil");
+
+  // Give the server a moment to (not) broadcast the update.
+  await new Promise((r) => setTimeout(r, 250));
+
+  // The editor should not observe a new root or content.
+  assert.equal(editorDoc.share.has("t"), false);
+});
+
 test("sanitizes awareness identity and blocks clientID spoofing", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
 

@@ -8,7 +8,9 @@ import type { SyncServerMetrics } from "./metrics.js";
 import { Y } from "./yjs.js";
 import {
   collectTouchedRootMapKeys,
+  inspectUpdateForAllowedRoots,
   inspectUpdateForReservedRootGuard,
+  type InspectUpdateAllowedRootsResult,
   type ReservedRootTouchKind,
 } from "./yjsUpdateInspection.js";
 
@@ -543,7 +545,8 @@ export function installYwsSecurity(
     __testHooks?.inspectUpdateForReservedRootGuard ?? inspectUpdateForReservedRootGuard;
   const role = auth?.role ?? "viewer";
   const userId = auth?.userId ?? "unknown";
-  const readOnly = role === "viewer" || role === "commenter";
+  const readOnly = role === "viewer";
+  const commentOnly = role === "commenter";
   const maxBranchingCommitsPerDoc = Math.max(0, limits.maxBranchingCommitsPerDoc ?? 0);
   const maxVersionsPerDoc = Math.max(0, limits.maxVersionsPerDoc ?? 0);
 
@@ -573,6 +576,7 @@ export function installYwsSecurity(
   const shadowDoc = enforceRangeRestrictions ? new Y.Doc() : null;
   const shadowCells = shadowDoc ? shadowDoc.getMap("cells") : null;
   let loggedRangeRestrictionViolation = false;
+  let loggedCommenterRootViolation = false;
 
   const logReservedRootOnce = (summary: ReservedRootTouchSummary): void => {
     if (!reservedRootGuardEnabled || loggedReservedRootViolation) return;
@@ -621,6 +625,12 @@ export function installYwsSecurity(
     if (!enforceRangeRestrictions || loggedRangeRestrictionViolation) return;
     loggedRangeRestrictionViolation = true;
     logger.warn({ docName, userId, role, ...(extra ?? {}) }, event);
+  };
+
+  const logCommenterRootViolationOnce = (extra?: Record<string, unknown>): void => {
+    if (!commentOnly || loggedCommenterRootViolation) return;
+    loggedCommenterRootViolation = true;
+    logger.warn({ docName, userId, role, ...(extra ?? {}) }, "commenter_root_violation");
   };
 
   if (shadowDoc && shadowCells) {
@@ -818,7 +828,7 @@ export function installYwsSecurity(
 
       const shouldParseUpdate =
         isSyncUpdate &&
-        (reservedRootGuardEnabled || enforceRangeRestrictions || shouldCheckReservedRootQuotas);
+        (reservedRootGuardEnabled || enforceRangeRestrictions || shouldCheckReservedRootQuotas || commentOnly);
 
       // If we already parsed the update bytes for the reserved root guard above, reuse them.
       if (shouldParseUpdate) {
@@ -851,6 +861,32 @@ export function installYwsSecurity(
             unknownReason: inspection.unknownReason,
           });
           ws.close(1008, RESERVED_ROOT_MUTATION_CLOSE_REASON);
+          return { drop: true };
+        }
+      }
+
+      if (commentOnly && isSyncUpdate) {
+        if (!updateBytes) {
+          ws.close(1003, "malformed sync update");
+          return { drop: true };
+        }
+
+        const allowedRoots = new Set<string>(["comments"]);
+        const allowed: InspectUpdateAllowedRootsResult = inspectUpdateForAllowedRoots({
+          ydoc,
+          update: updateBytes,
+          allowedRoots,
+        });
+
+        if (!allowed.allowed) {
+          const touch = allowed.touch;
+          logCommenterRootViolationOnce({
+            root: truncateForLog(touch.root, 256),
+            keyPath: touch.keyPath.slice(0, 8).map((segment) => truncateForLog(segment, 256)),
+            kind: touch.kind,
+            ...(allowed.unknownReason ? { unknownReason: allowed.unknownReason } : {}),
+          });
+          ws.close(1008, "permission violation");
           return { drop: true };
         }
       }

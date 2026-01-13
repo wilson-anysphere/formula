@@ -688,6 +688,229 @@ export function inspectUpdateForReservedRootGuard(params: InspectUpdateParams): 
   return { touchesReserved: touches.length > 0, touches };
 }
 
+export type InspectUpdateAllowedRootsResult =
+  | { allowed: true }
+  | {
+      allowed: false;
+      touch: ReservedRootTouch;
+      /**
+       * Present when we failed to confidently inspect the update.
+       *
+       * Callers should treat this as fail-closed.
+       */
+      unknownReason?: string;
+    };
+
+/**
+ * Best-effort inspection to enforce that an update only touches an allowlist of root names.
+ *
+ * Intended for coarse-grained role enforcement (e.g. allowing a `commenter` role to mutate
+ * the `comments` root while rejecting all workbook mutations).
+ *
+ * Like the reserved-root guard, this is designed to be safe for websocket message guards:
+ * - It avoids constructing full key paths for every struct in the common case where updates
+ *   are allowed.
+ * - When a disallowed root touch is detected, it computes the full key path only for that
+ *   first violation (sufficient for logging).
+ */
+export function inspectUpdateForAllowedRoots(params: {
+  ydoc: unknown;
+  update: Uint8Array;
+  allowedRoots: ReadonlySet<string>;
+}): InspectUpdateAllowedRootsResult {
+  const ydoc = params.ydoc as DocLike;
+  const store = ydoc?.store;
+  if (!store || store.pendingStructs || store.pendingDs) {
+    return {
+      allowed: false,
+      touch: { root: "<unknown>", keyPath: [], kind: "unknown" },
+      unknownReason: "ydoc_store_pending",
+    };
+  }
+
+  const decoded = safeDecodeUpdate(params.update);
+  if (!decoded) {
+    return {
+      allowed: false,
+      touch: { root: "<unknown>", keyPath: [], kind: "unknown" },
+      unknownReason: "decode_failed",
+    };
+  }
+
+  const decodedIndex = buildStructIndex(decoded.structs);
+
+  const isAllowed = (root: string) => params.allowedRoots.has(root);
+
+  const recordViolation = (struct: unknown, kind: ReservedRootTouchKind): InspectUpdateAllowedRootsResult => {
+    const pathRes = computeRootAndKeyPathForItem(struct, { decodedIndex, store });
+    if (!pathRes.ok) {
+      return {
+        allowed: false,
+        touch: { root: "<unknown>", keyPath: [], kind: pathRes.kind },
+        unknownReason: pathRes.reason,
+      };
+    }
+    return { allowed: false, touch: { root: pathRes.root, keyPath: pathRes.keyPath, kind } };
+  };
+
+  // Inspect newly inserted structs.
+  for (const struct of decoded.structs) {
+    if (!isItemStructLike(struct)) continue;
+    const rootRes = computeRootForItem(struct, { decodedIndex, store });
+    if (!rootRes.ok) {
+      return {
+        allowed: false,
+        touch: { root: "<unknown>", keyPath: [], kind: rootRes.kind },
+        unknownReason: rootRes.reason,
+      };
+    }
+    if (!isAllowed(rootRes.root)) {
+      return recordViolation(struct, "insert");
+    }
+  }
+
+  // Inspect delete set ranges using the server doc store.
+  const ds = decoded.ds as any;
+  const dsClients: Map<number, unknown[]> | null =
+    ds && ds.clients instanceof Map ? (ds.clients as Map<number, unknown[]>) : null;
+
+  if (dsClients) {
+    for (const [client, deletes] of dsClients.entries()) {
+      if (!Array.isArray(deletes) || deletes.length === 0) continue;
+      const storeStructs = store.clients?.get(client) ?? null;
+      const decodedStructs = decodedIndex.get(client) ?? null;
+      if (!storeStructs && !decodedStructs) {
+        return {
+          allowed: false,
+          touch: { root: "<unknown>", keyPath: [], kind: "unknown" },
+          unknownReason: "delete_set_client_missing_in_store_and_update",
+        };
+      }
+
+      const storeState = (() => {
+        if (!storeStructs || storeStructs.length === 0) return 0;
+        const last = storeStructs[storeStructs.length - 1];
+        const lastId = safeStructId(last);
+        const lastLen = safeStructLen(last);
+        if (!lastId || lastLen === null) return null;
+        return lastId.clock + lastLen;
+      })();
+
+      const decodedState = (() => {
+        if (!decodedStructs || decodedStructs.length === 0) return 0;
+        const last = decodedStructs[decodedStructs.length - 1];
+        const lastId = safeStructId(last);
+        const lastLen = safeStructLen(last);
+        if (!lastId || lastLen === null) return null;
+        return lastId.clock + lastLen;
+      })();
+
+      if (storeState === null || decodedState === null) {
+        return {
+          allowed: false,
+          touch: { root: "<unknown>", keyPath: [], kind: "unknown" },
+          unknownReason: "malformed_store_or_update_struct",
+        };
+      }
+
+      const clientState = Math.max(storeState, decodedState);
+
+      for (const del of deletes) {
+        const clock = typeof (del as any)?.clock === "number" ? (del as any).clock : null;
+        const len = typeof (del as any)?.len === "number" ? (del as any).len : null;
+        if (clock === null || len === null) {
+          return {
+            allowed: false,
+            touch: { root: "<unknown>", keyPath: [], kind: "unknown" },
+            unknownReason: "malformed_delete_set",
+          };
+        }
+        if (len <= 0) continue;
+
+        const endClock = clock + len;
+        if (clock < 0 || endClock > clientState) {
+          return {
+            allowed: false,
+            touch: { root: "<unknown>", keyPath: [], kind: "unknown" },
+            unknownReason: "delete_set_range_out_of_bounds",
+          };
+        }
+
+        let violation: InspectUpdateAllowedRootsResult | null = null;
+
+        const processStructArray = (structs: readonly unknown[]) => {
+          let index = lowerBoundByClock(structs, clock);
+          if (index > 0 && structRangeContains(structs[index - 1], clock)) {
+            index -= 1;
+          }
+          for (let i = index; i < structs.length; i += 1) {
+            const s = structs[i];
+            const sId = safeStructId(s);
+            const sLen = safeStructLen(s);
+            if (!sId || sLen === null) {
+              throw new Error("malformed_struct");
+            }
+            if (sId.clock >= endClock) break;
+            if (!isItemStructLike(s)) continue;
+
+            const rootRes = computeRootForItem(s, { decodedIndex, store });
+            if (!rootRes.ok) {
+              throw new Error(`${rootRes.kind}:${rootRes.reason}`);
+            }
+            if (!isAllowed(rootRes.root)) {
+              violation = recordViolation(s, "delete");
+              return;
+            }
+          }
+        };
+
+        const startId: IDLike = { client, clock };
+        const startInStore = storeStructs ? findStructInSortedArray(storeStructs, startId) : null;
+        const startInUpdate = decodedStructs ? findStructInSortedArray(decodedStructs, startId) : null;
+        if (!startInStore && !startInUpdate) {
+          return {
+            allowed: false,
+            touch: { root: "<unknown>", keyPath: [], kind: "unknown" },
+            unknownReason: "delete_set_start_not_found",
+          };
+        }
+
+        try {
+          if (storeStructs) processStructArray(storeStructs);
+          if (!violation && decodedStructs) processStructArray(decodedStructs);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.startsWith("gc:")) {
+            return {
+              allowed: false,
+              touch: { root: "<unknown>", keyPath: [], kind: "gc" },
+              unknownReason: msg.slice(3),
+            };
+          }
+          if (msg.startsWith("unknown:")) {
+            return {
+              allowed: false,
+              touch: { root: "<unknown>", keyPath: [], kind: "unknown" },
+              unknownReason: msg.slice(8),
+            };
+          }
+          return {
+            allowed: false,
+            touch: { root: "<unknown>", keyPath: [], kind: "unknown" },
+            unknownReason: "malformed_store_struct",
+          };
+        }
+
+        if (violation && violation.allowed === false) {
+          return violation;
+        }
+      }
+    }
+  }
+
+  return { allowed: true };
+}
+
 export function inspectUpdate(params: InspectUpdateParams): InspectUpdateResult {
   const maxTouches = params.maxTouches ?? 1;
   const touches: ReservedRootTouch[] = [];
