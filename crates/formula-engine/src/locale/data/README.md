@@ -82,15 +82,16 @@ The generator outputs entries sorted by canonical error literal for deterministi
 ## Case-folding, Unicode, and why values are stored uppercase
 
 Excel treats function identifiers case-insensitively. Our locale translation layer matches that by
-normalizing identifiers before lookup:
+normalizing identifiers before lookup and when loading TSVs:
 
-- Identifiers are **case-folded using Unicode-aware uppercasing** (Rust `char::to_uppercase`).
-- TSV entries are stored in their **already-case-folded (uppercase) form** so the runtime can do a
-  direct hash lookup against the `include_str!` data without allocating or case-folding every table
-  entry at startup.
+- The engine uses `crate::value::casefold` (Unicode-aware uppercasing via `char::to_uppercase`) so
+  case-insensitive matching behaves like Excel (e.g. `ß` → `SS`).
+- When building the locale translation maps, both the canonical and localized columns are
+  case-folded into hash keys so lookups are case-insensitive and duplicates are detected reliably.
 
 Practical takeaway: keep the TSV `Localized` values uppercase (including non-ASCII characters), and
-run the generators below to enforce normalization.
+run the generators below to enforce normalization. This is primarily for **deterministic diffs** and
+to mirror Excel’s UI conventions; the runtime still accepts mixed-case input.
 
 ## Generators and `--check`
 
@@ -145,9 +146,8 @@ And for the external-data loading error literal:
 
 - `#GETTING_DATA`
 
-The newer external-data errors (`#CONNECT!`, `#FIELD!`, `#BLOCKED!`, `#UNKNOWN!`) are currently
-treated as canonical (English) for all supported locales, until we have a verified Excel
-localization list for them. Tests assert they round-trip unchanged.
+The newer external-data errors (`#CONNECT!`, `#FIELD!`, `#BLOCKED!`, `#UNKNOWN!`) currently
+round-trip unchanged (canonical) for all supported locales.
 
 ## Adding a new locale
 
