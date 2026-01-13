@@ -29,6 +29,19 @@ import { performance } from "node:perf_hooks";
 const RUN_PERF = process.env.FORMULA_RUN_COLLAB_BINDER_PERF === "1";
 const perfTest = RUN_PERF ? test : test.skip;
 
+async function waitForCondition(fn, timeoutMs = 120_000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      if (await fn()) return;
+    } catch {
+      // ignore while polling
+    }
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  throw new Error("Timed out waiting for condition");
+}
+
 function formatBytes(bytes) {
   const n = Number(bytes);
   if (!Number.isFinite(n)) return String(bytes);
@@ -249,3 +262,84 @@ perfTest(
   },
 );
 
+perfTest(
+  "perf: binder writes many DocumentController deltas to Yjs without pathological scaling",
+  { timeout: 10 * 60_000 },
+  async () => {
+    const totalUpdates = Number.parseInt(process.env.PERF_CELL_UPDATES ?? "50000", 10);
+    const batchSize = Number.parseInt(process.env.PERF_BATCH_SIZE ?? "1000", 10);
+    const cols = Number.parseInt(process.env.PERF_COLS ?? "100", 10);
+
+    if (!Number.isFinite(totalUpdates) || totalUpdates <= 0) throw new Error("PERF_CELL_UPDATES must be a positive integer");
+    if (!Number.isFinite(batchSize) || batchSize <= 0) throw new Error("PERF_BATCH_SIZE must be a positive integer");
+    if (!Number.isFinite(cols) || cols <= 0) throw new Error("PERF_COLS must be a positive integer");
+
+    const [{ bindYjsToDocumentController }, Y] = await Promise.all([import("../../index.js"), import("yjs")]);
+
+    const ydoc = new Y.Doc();
+    const dc = new DocumentControllerPerfStub();
+    const binder = bindYjsToDocumentController({ ydoc, documentController: dc, defaultSheetId: "Sheet1" });
+
+    const cells = ydoc.getMap("cells");
+
+    if (typeof global.gc === "function") global.gc();
+    const startMem = process.memoryUsage();
+    let peakHeapUsed = startMem.heapUsed;
+    let peakRss = startMem.rss;
+
+    const t0 = performance.now();
+    for (let i = 0; i < totalUpdates; i += batchSize) {
+      const end = Math.min(totalUpdates, i + batchSize);
+
+      /** @type {any[]} */
+      const deltas = [];
+      for (let j = i; j < end; j += 1) {
+        const row = Math.floor(j / cols);
+        const col = j % cols;
+        deltas.push({
+          sheetId: "Sheet1",
+          row,
+          col,
+          before: { value: null, formula: null, styleId: 0 },
+          after: { value: j, formula: null, styleId: 0 },
+        });
+      }
+
+      dc._emit("change", { deltas });
+
+      const mem = process.memoryUsage();
+      peakHeapUsed = Math.max(peakHeapUsed, mem.heapUsed);
+      peakRss = Math.max(peakRss, mem.rss);
+    }
+    const tEmitDone = performance.now();
+
+    await waitForCondition(() => cells.size === totalUpdates);
+    const tWriteDone = performance.now();
+
+    const endMem = process.memoryUsage();
+    peakHeapUsed = Math.max(peakHeapUsed, endMem.heapUsed);
+    peakRss = Math.max(peakRss, endMem.rss);
+
+    if (typeof global.gc === "function") global.gc();
+    const postGcMem = process.memoryUsage();
+
+    assert.equal(cells.size, totalUpdates);
+
+    const emitMs = tEmitDone - t0;
+    const writeMs = tWriteDone - tEmitDone;
+    const totalMs = tWriteDone - t0;
+
+    console.log(
+      [
+        "",
+        `[binder-perf] (doc->yjs) updates=${totalUpdates.toLocaleString()} batchSize=${batchSize.toLocaleString()} cols=${cols.toLocaleString()}`,
+        `[binder-perf] time: emit=${emitMs.toFixed(1)}ms binderWrite=${writeMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`,
+        `[binder-perf] mem (best-effort): heapUsed start=${formatBytes(startMem.heapUsed)} peak=${formatBytes(peakHeapUsed)} postGC=${formatBytes(postGcMem.heapUsed)}`,
+        `[binder-perf] mem (best-effort): rss      start=${formatBytes(startMem.rss)} peak=${formatBytes(peakRss)} postGC=${formatBytes(postGcMem.rss)}`,
+      ].join("\n"),
+    );
+
+    binder.destroy();
+    ydoc.destroy();
+  },
+);
