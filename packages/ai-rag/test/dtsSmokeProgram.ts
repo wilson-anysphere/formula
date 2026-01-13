@@ -20,6 +20,9 @@ import {
   workbookFromSpreadsheetApi,
 } from "../src/index.js";
 import { fromBase64, toBase64 } from "../src/store/binaryStorage.js";
+import type { VectorRecord, VectorSearchResult } from "../src/store/inMemoryVectorStore.js";
+import type { WorkbookSearchResult } from "../src/retrieval/rankResults.js";
+import type { Rect } from "../src/workbook/rect.js";
 
 // This file is intentionally not executed. It's a compilation target for the
 // d.ts smoke test to ensure our hand-written declaration files match the
@@ -28,10 +31,17 @@ import { fromBase64, toBase64 } from "../src/store/binaryStorage.js";
 async function smoke() {
   const abortController = new AbortController();
 
-  const embedder = new HashEmbedder({ dimension: 8 });
+  const embedder = new HashEmbedder({ dimension: 8, cacheSize: 1000 });
   await embedder.embedTexts(["hello"], { signal: abortController.signal });
 
   const store = new InMemoryVectorStore({ dimension: embedder.dimension });
+  const storeAsBinary: BinaryStorage = new InMemoryBinaryStorage();
+  void storeAsBinary;
+
+  const record: VectorRecord = { id: "typed", vector: new Float32Array(embedder.dimension), metadata: { workbookId: "wb" } };
+  const typedResults: VectorSearchResult[] = [{ id: "typed", score: 0.123, metadata: { workbookId: "wb" } }];
+  void record;
+  void typedResults;
   await store.upsert([
     { id: "a", vector: new Float32Array(embedder.dimension), metadata: { workbookId: "wb" } },
   ]);
@@ -140,7 +150,8 @@ async function smoke() {
     },
   });
 
-  rectToA1({ r0: 0, c0: 0, r1: 0, c1: 0 });
+  const rect: Rect = { r0: 0, c0: 0, r1: 0, c1: 0 };
+  rectToA1(rect);
   cellToA1(0, 0);
 
   const rerankedExample = rerankWorkbookResults("hello", [
@@ -180,6 +191,8 @@ async function smoke() {
     dedupe: true,
     signal: abortController.signal,
   });
+  const workbookResults: WorkbookSearchResult[] = results;
+  void workbookResults;
   const reranked = rerankWorkbookResults("hello", results);
   const deduped = dedupeOverlappingResults(reranked);
   void deduped;
