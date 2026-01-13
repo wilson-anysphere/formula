@@ -2,7 +2,7 @@
 
 import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
 
-import { LocalStorageBinaryStorage } from "../src/store/binaryStorage.js";
+import { ChunkedLocalStorageBinaryStorage, LocalStorageBinaryStorage } from "../src/store/binaryStorage.js";
 import { ensureTestLocalStorage } from "./testLocalStorage.js";
 
 ensureTestLocalStorage();
@@ -115,4 +115,67 @@ test("LocalStorageBinaryStorage round-trips multi-MB payloads via browser base64
     getTestLocalStorage().clear();
     (globalThis as any).Buffer = originalBuffer;
   }
+});
+
+function listKeysWithPrefix(storage: Storage, prefix: string): string[] {
+  const keys: string[] = [];
+  for (let i = 0; i < storage.length; i += 1) {
+    const key = storage.key(i);
+    if (key?.startsWith(prefix)) keys.push(key);
+  }
+  return keys.sort();
+}
+
+test("ChunkedLocalStorageBinaryStorage round-trips a large payload across multiple localStorage keys", async () => {
+  const storage = new ChunkedLocalStorageBinaryStorage({
+    namespace: "formula.test.rag",
+    workbookId: "wb-123",
+    chunkSizeChars: 64,
+  });
+
+  const bytes = new Uint8Array(2048);
+  for (let i = 0; i < bytes.length; i += 1) bytes[i] = i % 256;
+
+  await storage.save(bytes);
+
+  const rawMeta = getTestLocalStorage().getItem(`${storage.key}:meta`);
+  expect(rawMeta).toBeTypeOf("string");
+  const meta = JSON.parse(rawMeta ?? "{}");
+  expect(meta.chunks).toBeGreaterThan(1);
+
+  // Sanity check that chunks were written as separate keys.
+  const keys = listKeysWithPrefix(getTestLocalStorage(), `${storage.key}:`);
+  expect(keys).toContain(`${storage.key}:meta`);
+  expect(keys).toContain(`${storage.key}:0`);
+
+  const loaded = await storage.load();
+  expect(loaded).toBeInstanceOf(Uint8Array);
+  expect(Array.from(loaded ?? [])).toEqual(Array.from(bytes));
+});
+
+test("ChunkedLocalStorageBinaryStorage overwrites and removes old chunks when saving a smaller payload", async () => {
+  const storage = new ChunkedLocalStorageBinaryStorage({
+    namespace: "formula.test.rag",
+    workbookId: "wb-123",
+    chunkSizeChars: 64,
+  });
+
+  const large = new Uint8Array(4096);
+  for (let i = 0; i < large.length; i += 1) large[i] = (i * 17) % 256;
+
+  await storage.save(large);
+  const firstMeta = JSON.parse(getTestLocalStorage().getItem(`${storage.key}:meta`) ?? "{}");
+  expect(firstMeta.chunks).toBeGreaterThan(1);
+
+  const small = new Uint8Array([1, 2, 3, 4, 5, 255]);
+  await storage.save(small);
+
+  const secondMeta = JSON.parse(getTestLocalStorage().getItem(`${storage.key}:meta`) ?? "{}");
+  expect(secondMeta.chunks).toBe(1);
+
+  const keysAfter = listKeysWithPrefix(getTestLocalStorage(), `${storage.key}:`);
+  expect(keysAfter).toEqual([`${storage.key}:0`, `${storage.key}:meta`]);
+
+  const loaded = await storage.load();
+  expect(Array.from(loaded ?? [])).toEqual(Array.from(small));
 });

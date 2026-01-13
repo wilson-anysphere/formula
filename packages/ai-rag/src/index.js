@@ -4,7 +4,12 @@ export { InMemoryVectorStore } from "./store/inMemoryVectorStore.js";
 export { JsonVectorStore } from "./store/jsonVectorStore.js";
 export { SqliteVectorStore } from "./store/sqliteVectorStore.js";
 
-export { InMemoryBinaryStorage, LocalStorageBinaryStorage, IndexedDBBinaryStorage } from "./store/binaryStorage.js";
+export {
+  InMemoryBinaryStorage,
+  LocalStorageBinaryStorage,
+  ChunkedLocalStorageBinaryStorage,
+  IndexedDBBinaryStorage,
+} from "./store/binaryStorage.js";
 
 export { chunkWorkbook } from "./workbook/chunkWorkbook.js";
 export { chunkToText } from "./workbook/chunkToText.js";

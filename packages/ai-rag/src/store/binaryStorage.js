@@ -44,6 +44,82 @@ export class LocalStorageBinaryStorage {
   }
 }
 
+export class ChunkedLocalStorageBinaryStorage {
+  /**
+   * @param {{ workbookId: string, namespace?: string, chunkSizeChars?: number }} opts
+   */
+  constructor(opts) {
+    if (!opts?.workbookId) throw new Error("ChunkedLocalStorageBinaryStorage requires workbookId");
+    const namespace = opts.namespace ?? "formula.ai-rag.sqlite";
+    this.key = `${namespace}:${opts.workbookId}`;
+    this.metaKey = `${this.key}:meta`;
+    this.chunkSizeChars = Math.max(1, Math.floor(opts.chunkSizeChars ?? 1_000_000));
+  }
+
+  async load() {
+    const storage = getLocalStorageOrNull();
+    if (!storage) return null;
+
+    const metaRaw = storage.getItem(this.metaKey);
+    if (!metaRaw) return null;
+
+    /** @type {{ chunks?: number } | null} */
+    let meta = null;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      meta = JSON.parse(metaRaw);
+    } catch {
+      return null;
+    }
+
+    const chunks = meta?.chunks;
+    if (!Number.isInteger(chunks) || chunks < 0) return null;
+
+    /** @type {string[]} */
+    const parts = [];
+    for (let i = 0; i < chunks; i += 1) {
+      const part = storage.getItem(`${this.key}:${i}`);
+      if (typeof part !== "string") return null;
+      parts.push(part);
+    }
+
+    return fromBase64(parts.join(""));
+  }
+
+  /**
+   * @param {Uint8Array} data
+   */
+  async save(data) {
+    const storage = getLocalStorageOrNull();
+    if (!storage) return;
+
+    const encoded = toBase64(data);
+    const chunks = encoded.length === 0 ? 0 : Math.ceil(encoded.length / this.chunkSizeChars);
+
+    for (let i = 0; i < chunks; i += 1) {
+      const start = i * this.chunkSizeChars;
+      storage.setItem(`${this.key}:${i}`, encoded.slice(start, start + this.chunkSizeChars));
+    }
+
+    storage.setItem(this.metaKey, JSON.stringify({ chunks }));
+
+    // Remove leftover chunks from a prior (larger) save. We avoid relying solely on
+    // stored metadata so we can clean up even if `:meta` was missing/corrupted.
+    const prefix = `${this.key}:`;
+    /** @type {string[]} */
+    const keysToRemove = [];
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (!key || !key.startsWith(prefix) || key === this.metaKey) continue;
+      const suffix = key.slice(prefix.length);
+      if (!/^\d+$/.test(suffix)) continue;
+      const index = Number(suffix);
+      if (Number.isInteger(index) && index >= chunks) keysToRemove.push(key);
+    }
+    for (const key of keysToRemove) storage.removeItem(key);
+  }
+}
+
 export class IndexedDBBinaryStorage {
   /**
    * IndexedDB-backed persistence for binary payloads (e.g. sql.js exports).
