@@ -168,6 +168,77 @@ describe("AiCellFunctionEngine", () => {
     }
   });
 
+  it("bounds concurrent LLM requests and queues additional work", async () => {
+    const maxConcurrentRequests = 2;
+    const totalRequests = 5;
+
+    const deferreds: Array<Deferred<any>> = [];
+    const llmClient = {
+      chat: vi.fn((_request: any) => {
+        const d = defer<any>();
+        deferreds.push(d);
+        return d.promise;
+      }),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      model: "test-model",
+      limits: { maxConcurrentRequests },
+    });
+
+    for (let i = 0; i < totalRequests; i += 1) {
+      const value = engine.evaluateAiFunction({
+        name: "AI",
+        args: [`prompt-${i}`, `input-${i}`],
+        cellAddress: "Sheet1!A1",
+      });
+      expect(value).toBe(AI_CELL_PLACEHOLDER);
+    }
+
+    // Only the first `maxConcurrentRequests` should start immediately.
+    expect(llmClient.chat).toHaveBeenCalledTimes(maxConcurrentRequests);
+    expect(deferreds).toHaveLength(maxConcurrentRequests);
+
+    // Completing an in-flight request should kick off the next queued request.
+    deferreds[0]!.resolve({
+      message: { role: "assistant", content: "r0" },
+      usage: { promptTokens: 1, completionTokens: 1 },
+    });
+    await Promise.resolve();
+    expect(llmClient.chat).toHaveBeenCalledTimes(3);
+    expect(deferreds).toHaveLength(3);
+
+    deferreds[1]!.resolve({
+      message: { role: "assistant", content: "r1" },
+      usage: { promptTokens: 1, completionTokens: 1 },
+    });
+    await Promise.resolve();
+    expect(llmClient.chat).toHaveBeenCalledTimes(4);
+    expect(deferreds).toHaveLength(4);
+
+    deferreds[2]!.resolve({
+      message: { role: "assistant", content: "r2" },
+      usage: { promptTokens: 1, completionTokens: 1 },
+    });
+    await Promise.resolve();
+    expect(llmClient.chat).toHaveBeenCalledTimes(totalRequests);
+    expect(deferreds).toHaveLength(totalRequests);
+
+    deferreds[3]!.resolve({
+      message: { role: "assistant", content: "r3" },
+      usage: { promptTokens: 1, completionTokens: 1 },
+    });
+    deferreds[4]!.resolve({
+      message: { role: "assistant", content: "r4" },
+      usage: { promptTokens: 1, completionTokens: 1 },
+    });
+
+    await engine.waitForIdle();
+    expect(llmClient.chat).toHaveBeenCalledTimes(totalRequests);
+  });
+
   it("formats range inputs in LLM prompts using sheet display names (Excel quoting)", async () => {
     const sheetId = "sheet_test_1";
     const sheetIdToName = new Map([[sheetId, "O'Brien"]]);

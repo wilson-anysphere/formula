@@ -46,6 +46,7 @@ const MAX_RANGE_HEADER_VALUES = 20;
 const MAX_RANGE_PREVIEW_VALUES = 30;
 const MAX_RANGE_SAMPLE_VALUES = 30;
 const MAX_USER_MESSAGE_CHARS = 16_000;
+const DEFAULT_MAX_CONCURRENT_REQUESTS = 4;
 
 type DlpNormalizedRange = ReturnType<typeof normalizeRange>;
 
@@ -107,10 +108,61 @@ export interface AiCellFunctionEngineOptions {
      * Hard cap on scalar cell values serialized into prompt compactions.
      */
     maxCellChars?: number;
+    /**
+     * Maximum number of parallel LLM requests kicked off by AI cell recalculation.
+     *
+     * When many AI() formulas are recalculated at once (e.g. pasting a column),
+     * the engine will queue additional requests beyond this limit while still
+     * returning `#GETTING_DATA` synchronously.
+     */
+    maxConcurrentRequests?: number;
   };
 }
 
 type CacheEntry = { value: string; updatedAtMs: number };
+
+class ConcurrencyLimiter {
+  private readonly maxConcurrent: number;
+  private active = 0;
+  private readonly queue: Array<() => void> = [];
+
+  constructor(maxConcurrent: number) {
+    this.maxConcurrent = clampInt(maxConcurrent, { min: 1, max: 10_000 });
+  }
+
+  run<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.active < this.maxConcurrent) {
+      this.active += 1;
+
+      let promise: Promise<T>;
+      try {
+        promise = Promise.resolve(fn());
+      } catch (error) {
+        this.active -= 1;
+        this.drain();
+        return Promise.reject(error);
+      }
+
+      return promise.finally(() => {
+        this.active -= 1;
+        this.drain();
+      });
+    }
+
+    return new Promise<T>((resolve, reject) => {
+      this.queue.push(() => {
+        this.run(fn).then(resolve, reject);
+      });
+    });
+  }
+
+  private drain(): void {
+    while (this.active < this.maxConcurrent && this.queue.length > 0) {
+      const next = this.queue.shift();
+      if (next) next();
+    }
+  }
+}
 
 /**
  * Manages async AI cell function evaluation for a workbook/session:
@@ -137,6 +189,8 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
   private readonly maxUserMessageChars: number;
   private readonly maxAuditPreviewChars: number;
   private readonly maxCellChars: number;
+
+  private readonly requestLimiter: ConcurrencyLimiter;
 
   private readonly cache = new Map<string, CacheEntry>();
   private readonly inFlightByKey = new Map<string, Promise<void>>();
@@ -165,6 +219,8 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     });
     this.maxAuditPreviewChars = clampInt(options.limits?.maxAuditPreviewChars ?? 2_000, { min: 200, max: 100_000 });
     this.maxCellChars = clampInt(options.limits?.maxCellChars ?? MAX_SCALAR_CHARS, { min: 50, max: 100_000 });
+
+    this.requestLimiter = new ConcurrencyLimiter(options.limits?.maxConcurrentRequests ?? DEFAULT_MAX_CONCURRENT_REQUESTS);
 
     this.loadCacheFromStorage();
   }
@@ -413,15 +469,18 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     });
 
     try {
-      const started = nowMs();
-      const response = await this.llmClient.chat({
-        model: this.model,
-        messages: buildMessages({
-          functionName: params.functionName,
-          prompt: params.prompt,
-          inputs: params.inputs,
-          maxPromptChars: this.maxUserMessageChars,
-        }),
+      let started = 0;
+      const response = await this.requestLimiter.run(() => {
+        started = nowMs();
+        return this.llmClient.chat({
+          model: this.model,
+          messages: buildMessages({
+            functionName: params.functionName,
+            prompt: params.prompt,
+            inputs: params.inputs,
+            maxPromptChars: this.maxUserMessageChars,
+          }),
+        });
       });
       recorder.recordModelLatency(nowMs() - started);
 
