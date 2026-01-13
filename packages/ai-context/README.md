@@ -731,7 +731,9 @@ For workbook context (`buildWorkbookContext*()`), the default section priorities
 5. `attachments` — priority 2
 
 `workbook_schema` is a compact, schema-first summary (tables + inferred headers/types + named ranges) intended to
-improve chat quality even when retrieval is sparse.
+improve chat quality even when retrieval is sparse. When a workbook does not provide explicit tables/named ranges
+(common for `buildWorkbookContextFromSpreadsheetApi`), `ContextManager` falls back to the already-indexed chunk
+metadata in the vector store (data regions), extracting only the `COLUMNS:` line so no raw sample rows are included.
 
 ### Example: pack your own sections into a prompt budget
 
