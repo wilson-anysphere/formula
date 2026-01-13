@@ -161,6 +161,31 @@ python -m tools.corpus.dashboard --triage-dir tools/corpus/out/public
 cat tools/corpus/out/public/summary.md
 ```
 
+### Promote a workbook into the public subset
+
+To add a new public, non-sensitive regression fixture (base64 + expectations) in one step:
+
+```bash
+python -m tools.corpus.promote_public \
+  --input /path/to/sanitized.xlsx \
+  --name my-regression-case \
+  --confirm-sanitized
+```
+
+Or, to sanitize a raw workbook during promotion:
+
+```bash
+python -m tools.corpus.promote_public \
+  --input /path/to/raw.xlsx \
+  --name my-regression-case \
+  --sanitize
+```
+
+The command:
+1) writes `tools/corpus/public/<name>.xlsx.b64`,
+2) runs triage on the resulting bytes, and
+3) updates `tools/corpus/public/expectations.json` (refusing to overwrite unless `--force` is passed).
+
 ### Generate a unified compatibility scorecard (corpus + Excel-oracle)
 
 The corpus dashboard captures **read + round-trip** behavior, while the Excel-oracle harness captures
