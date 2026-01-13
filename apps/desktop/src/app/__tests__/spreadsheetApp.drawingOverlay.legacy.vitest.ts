@@ -4,7 +4,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DrawingOverlay } from "../../drawings/overlay";
+import { DrawingOverlay, pxToEmu } from "../../drawings/overlay";
+import { buildHitTestIndex, hitTestDrawings } from "../../drawings/hitTest";
+import type { DrawingObject, ImageStore } from "../../drawings/types";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 function createInMemoryLocalStorage(): Storage {
@@ -194,6 +196,99 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
           frozenCols: 1,
         }),
       );
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
+  it("computes consistent render vs interaction viewports for drawings (legacy grid)", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      const doc = app.getDocument();
+      doc.setFrozen(app.getCurrentSheetId(), 1, 1, { label: "Freeze" });
+      app.setScroll(50, 10);
+
+      const renderViewport = app.getDrawingRenderViewport();
+      const interactionViewport = app.getDrawingInteractionViewport();
+
+      expect(renderViewport.headerOffsetX).toBe(0);
+      expect(renderViewport.headerOffsetY).toBe(0);
+      expect(interactionViewport.headerOffsetX).toBeGreaterThan(0);
+      expect(interactionViewport.headerOffsetY).toBeGreaterThan(0);
+
+      // Frozen boundaries should map between viewport spaces by subtracting header offsets.
+      expect(interactionViewport.frozenWidthPx! - interactionViewport.headerOffsetX!).toBe(renderViewport.frozenWidthPx);
+      expect(interactionViewport.frozenHeightPx! - interactionViewport.headerOffsetY!).toBe(renderViewport.frozenHeightPx);
+
+      // Verify hit testing aligns with where the object is rendered in drawingCanvas space.
+      const geom = (app as any).drawingOverlay.geom;
+      const images: ImageStore = { get: () => undefined, set: () => {} };
+
+      const object: DrawingObject = {
+        id: 1,
+        kind: { type: "shape" },
+        anchor: {
+          type: "oneCell",
+          from: { cell: { row: 2, col: 2 }, offset: { xEmu: 0, yEmu: 0 } },
+          size: { cx: pxToEmu(50), cy: pxToEmu(20) },
+        },
+        zOrder: 0,
+      };
+
+      const calls: Array<{ method: string; args: unknown[] }> = [];
+      const ctx: any = {
+        clearRect: (...args: unknown[]) => calls.push({ method: "clearRect", args }),
+        save: () => calls.push({ method: "save", args: [] }),
+        restore: () => calls.push({ method: "restore", args: [] }),
+        beginPath: () => calls.push({ method: "beginPath", args: [] }),
+        rect: (...args: unknown[]) => calls.push({ method: "rect", args }),
+        clip: () => calls.push({ method: "clip", args: [] }),
+        setLineDash: (...args: unknown[]) => calls.push({ method: "setLineDash", args }),
+        strokeRect: (...args: unknown[]) => calls.push({ method: "strokeRect", args }),
+        fillText: (...args: unknown[]) => calls.push({ method: "fillText", args }),
+      };
+
+      const canvas: any = {
+        width: 0,
+        height: 0,
+        style: {},
+        getContext: () => ctx,
+      };
+
+      const overlay = new DrawingOverlay(canvas as HTMLCanvasElement, images, geom);
+      await overlay.render([object], renderViewport);
+
+      const stroke = calls.find((c) => c.method === "strokeRect");
+      expect(stroke).toBeTruthy();
+      const [renderX, renderY, w, h] = stroke!.args as number[];
+
+      const index = buildHitTestIndex([object], geom, { bucketSizePx: 64 });
+      const hit = hitTestDrawings(
+        index,
+        interactionViewport,
+        renderX + interactionViewport.headerOffsetX! + 1,
+        renderY + interactionViewport.headerOffsetY! + 1,
+      );
+      expect(hit?.object.id).toBe(1);
+      expect(hit?.bounds).toEqual({
+        x: renderX + interactionViewport.headerOffsetX!,
+        y: renderY + interactionViewport.headerOffsetY!,
+        width: w,
+        height: h,
+      });
 
       app.destroy();
       root.remove();
