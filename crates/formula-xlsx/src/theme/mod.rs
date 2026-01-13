@@ -2,6 +2,8 @@ use roxmltree::Document;
 
 use crate::XlsxError;
 
+pub(crate) mod convert;
+
 /// Minimal palette extracted from `xl/theme/theme1.xml`.
 ///
 /// Colors are stored as ARGB (`0xAARRGGBB`) with alpha always set to `0xFF`.
@@ -226,4 +228,3 @@ mod tests {
         assert_eq!(apply_tint(0xFFFFFFFF, -500), 0xFF808080);
     }
 }
-

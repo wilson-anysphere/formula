@@ -29,6 +29,8 @@ use crate::shared_strings::parse_shared_strings_xml;
 use crate::sheet_metadata::parse_sheet_tab_color;
 use crate::styles::StylesPart;
 use crate::tables::{parse_table, TABLE_REL_TYPE};
+use crate::theme::convert::to_model_theme_palette;
+use crate::theme::parse_theme_palette;
 use crate::zip_util::open_zip_part;
 use crate::{parse_worksheet_hyperlinks, XlsxError};
 use crate::{
@@ -138,6 +140,15 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         DateSystem::V1904 => formula_model::DateSystem::Excel1904,
     };
     workbook.workbook_protection = workbook_protection;
+
+    // Best-effort: load theme palette from `xl/theme/theme1.xml` to enable resolving theme-based
+    // colors (e.g. in styles.xml).
+    if let Ok(Some(theme_xml)) = read_zip_part_optional(archive, "xl/theme/theme1.xml") {
+        if let Ok(palette) = parse_theme_palette(&theme_xml) {
+            workbook.theme = to_model_theme_palette(palette);
+        }
+    }
+
     let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> =
         Vec::with_capacity(sheets.len());
 
@@ -457,6 +468,33 @@ fn read_zip_part_optional<R: Read + std::io::Seek>(
     }
 }
 
+fn part_bytes_tolerant<'a>(parts: &'a BTreeMap<String, Vec<u8>>, name: &str) -> Option<&'a [u8]> {
+    // Fast path: exact match.
+    if let Some(bytes) = parts.get(name) {
+        return Some(bytes.as_slice());
+    }
+
+    // Tolerate leading `/` and Windows-style separators.
+    let normalized = name.strip_prefix('/').unwrap_or(name).replace('\\', "/");
+    if let Some(bytes) = parts.get(&normalized) {
+        return Some(bytes.as_slice());
+    }
+
+    // Some producers may include a leading `/` despite this loader normalizing entries.
+    let with_slash = format!("/{normalized}");
+    if let Some(bytes) = parts.get(&with_slash) {
+        return Some(bytes.as_slice());
+    }
+
+    // Case-insensitive fallback; normalize path separators and strip a leading `/` for comparison.
+    let target = normalized.to_ascii_lowercase();
+    parts.iter().find_map(|(key, bytes)| {
+        let key = key.strip_prefix('/').unwrap_or(key.as_str());
+        let key = key.replace('\\', "/").to_ascii_lowercase();
+        (key == target).then_some(bytes.as_slice())
+    })
+}
+
 fn detect_workbook_kind_from_content_types(xml: &[u8]) -> Option<WorkbookKind> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(false);
@@ -535,6 +573,15 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         DateSystem::V1904 => formula_model::DateSystem::Excel1904,
     };
     workbook.workbook_protection = workbook_protection;
+
+    // Best-effort: load theme palette from `xl/theme/theme1.xml` to enable resolving theme-based
+    // colors (e.g. in styles.xml).
+    if let Some(theme_xml) = part_bytes_tolerant(&parts, "xl/theme/theme1.xml") {
+        if let Ok(palette) = parse_theme_palette(theme_xml) {
+            workbook.theme = to_model_theme_palette(palette);
+        }
+    }
+
     let styles_part_name = rels_info
         .styles_target
         .as_deref()
