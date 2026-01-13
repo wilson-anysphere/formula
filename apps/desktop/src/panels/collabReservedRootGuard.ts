@@ -13,6 +13,7 @@ export const RESERVED_ROOT_GUARD_UI_MESSAGE =
 // Preserve the detected error per provider instance so panels can show the banner
 // even if they are opened after the close event occurred (or are re-opened).
 const providerReservedRootGuardError = new WeakMap<object, string>();
+const providerReservedRootGuardMonitors = new WeakMap<object, { subscribers: Set<(message: string) => void> }>();
 
 function coerceReason(reason: unknown): string {
   if (typeof reason === "string") return reason;
@@ -137,6 +138,21 @@ export function listenForProviderCloseEvents(provider: any | null, onClose: (inf
   if (!provider) return () => {};
   const disposers: Array<() => void> = [];
 
+  let wsDisposer: (() => void) | null = null;
+  let currentWs: any = null;
+
+  const refreshWsListener = () => {
+    try {
+      const nextWs = (provider as any).ws;
+      if (!nextWs || nextWs === currentWs) return;
+      wsDisposer?.();
+      currentWs = nextWs;
+      wsDisposer = attachWsCloseListener(nextWs, onClose);
+    } catch {
+      // ignore
+    }
+  };
+
   // Preferred: some providers (e.g. y-websocket) surface a `connection-close` event with close code/reason.
   if (typeof provider.on === "function") {
     const handler = (...args: unknown[]) => {
@@ -156,11 +172,35 @@ export function listenForProviderCloseEvents(provider: any | null, onClose: (inf
     } catch {
       // ignore
     }
+
+    // Some providers create/replace `provider.ws` lazily (or on reconnect). Keep
+    // refreshing our `ws` close listener when the provider emits status changes.
+    const statusHandler = () => refreshWsListener();
+    try {
+      provider.on("status", statusHandler);
+      disposers.push(() => {
+        try {
+          if (typeof provider.off === "function") provider.off("status", statusHandler);
+        } catch {
+          // ignore
+        }
+      });
+    } catch {
+      // ignore
+    }
   }
 
   // Best-effort: also attach directly to the underlying websocket when exposed.
-  const wsDisposer = attachWsCloseListener((provider as any).ws, onClose);
-  if (wsDisposer) disposers.push(wsDisposer);
+  refreshWsListener();
+  disposers.push(() => {
+    try {
+      wsDisposer?.();
+    } catch {
+      // ignore
+    }
+    wsDisposer = null;
+    currentWs = null;
+  });
 
   return () => {
     for (const dispose of disposers) dispose();
@@ -176,23 +216,38 @@ export function useReservedRootGuardError(provider: any | null): string | null {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!provider) {
+    if (!provider || (typeof provider !== "object" && typeof provider !== "function")) {
       setError(null);
       return;
     }
 
-    if (provider && (typeof provider === "object" || typeof provider === "function")) {
-      setError(providerReservedRootGuardError.get(provider as object) ?? null);
+    const key = provider as object;
+    setError(providerReservedRootGuardError.get(key) ?? null);
+
+    let monitor = providerReservedRootGuardMonitors.get(key);
+    if (!monitor) {
+      monitor = { subscribers: new Set() };
+      providerReservedRootGuardMonitors.set(key, monitor);
+      // Install a single long-lived listener per provider so we can surface the
+      // error even when panels are not mounted.
+      listenForProviderCloseEvents(provider, (info) => {
+        if (!isReservedRootGuardDisconnect(info)) return;
+        providerReservedRootGuardError.set(key, RESERVED_ROOT_GUARD_UI_MESSAGE);
+        for (const cb of Array.from(monitor!.subscribers)) {
+          try {
+            cb(RESERVED_ROOT_GUARD_UI_MESSAGE);
+          } catch {
+            // ignore
+          }
+        }
+      });
     }
 
-    return listenForProviderCloseEvents(provider, (info) => {
-      if (isReservedRootGuardDisconnect(info)) {
-        if (provider && (typeof provider === "object" || typeof provider === "function")) {
-          providerReservedRootGuardError.set(provider as object, RESERVED_ROOT_GUARD_UI_MESSAGE);
-        }
-        setError(RESERVED_ROOT_GUARD_UI_MESSAGE);
-      }
-    });
+    const subscriber = (message: string) => setError(message);
+    monitor.subscribers.add(subscriber);
+    return () => {
+      monitor?.subscribers.delete(subscriber);
+    };
   }, [provider]);
 
   return error;

@@ -281,4 +281,46 @@ describe("sync-server reserved root guard disconnect UX", () => {
       root.unmount();
     });
   });
+
+  it("records the disconnect even if the panel is unmounted when the close event fires", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const ws = new FakeBrowserWebSocket();
+    const provider = new FakeProvider(ws);
+    const session = { doc: new Y.Doc({ guid: "doc-5" }), provider, presence: null } as any;
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<CollabVersionHistoryPanel session={session} />);
+    });
+
+    await act(async () => {
+      await waitFor(() => container.querySelector(".collab-version-history__input") instanceof HTMLInputElement);
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+
+    // Emit after unmount: the reserved-root-guard monitor should still cache the error.
+    ws.emitClose(1008, "reserved root mutation");
+
+    const container2 = document.createElement("div");
+    document.body.appendChild(container2);
+    const root2 = createRoot(container2);
+    await act(async () => {
+      root2.render(<CollabVersionHistoryPanel session={session} />);
+    });
+
+    await act(async () => {
+      await waitFor(() => container2.textContent?.includes("SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED") ?? false);
+    });
+
+    await act(async () => {
+      root2.unmount();
+    });
+  });
 });
