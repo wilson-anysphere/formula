@@ -12,6 +12,7 @@ import {
   shouldUseXvfb,
   type StartupMetrics,
 } from "./desktopStartupRunnerShared.ts";
+import { terminateProcessTree } from "./processTree.ts";
 
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -90,57 +91,6 @@ function closeReadline(rl: Interface | null): void {
     rl.close();
   } catch {
     // ignore
-  }
-}
-
-function terminate(child: ChildProcess): void {
-  if (!child.pid) return;
-
-  if (process.platform !== "win32") {
-    try {
-      process.kill(-child.pid, "SIGTERM");
-      return;
-    } catch {
-      // ignore
-    }
-  }
-
-  try {
-    child.kill();
-  } catch {
-    // ignore
-  }
-}
-
-function forceKill(child: ChildProcess): void {
-  if (!child.pid) return;
-
-  if (process.platform === "win32") {
-    try {
-      spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
-      return;
-    } catch {
-      // Fall through to best-effort `child.kill()`.
-    }
-  }
-
-  if (process.platform !== "win32") {
-    try {
-      process.kill(-child.pid, "SIGKILL");
-      return;
-    } catch {
-      // ignore
-    }
-  }
-
-  try {
-    child.kill("SIGKILL");
-  } catch {
-    try {
-      child.kill();
-    } catch {
-      // ignore
-    }
   }
 }
 
@@ -510,12 +460,13 @@ async function runOnce({
     return { rssMb: rssBytes / (1024 * 1024), startup };
   } finally {
     try {
-      terminate(child);
-      await waitForExit(child, 5000);
+      const initialMode = process.platform === "win32" ? "force" : "graceful";
+      terminateProcessTree(child, initialMode);
+      await waitForExit(child, 5000).catch(() => {});
     } catch {
       // ignore
     } finally {
-      forceKill(child);
+      terminateProcessTree(child, "force");
       await waitForExit(child, 5000).catch(() => {});
     }
   }
