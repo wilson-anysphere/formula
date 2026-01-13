@@ -41,7 +41,7 @@ import { DEFAULT_DESKTOP_LOAD_MAX_COLS, DEFAULT_DESKTOP_LOAD_MAX_ROWS } from "..
 import { DocumentController } from "../document/documentController.js";
 import { MockEngine } from "../document/engine.js";
 import { isRedoKeyboardEvent, isUndoKeyboardEvent } from "../document/shortcuts.js";
-import { showToast } from "../extensions/ui.js";
+import { showToast, showQuickPick } from "../extensions/ui.js";
 import { applyNumberFormatPreset, toggleBold, toggleItalic, toggleUnderline } from "../formatting/toolbar.js";
 import {
   DEFAULT_FORMATTING_APPLY_CELL_LIMIT,
@@ -1754,6 +1754,7 @@ export class SpreadsheetApp {
           this.updateEditState();
         },
         onGoTo: (reference) => this.goTo(reference),
+        onOpenNameBoxMenu: () => this.openNameBoxMenu(),
         onCommit: (text) => this.commitFormulaBar(text),
         onCancel: () => this.cancelFormulaBar(),
         onHoverRange: (range) => {
@@ -4314,6 +4315,61 @@ export class SpreadsheetApp {
     } catch {
       // Ignore invalid Go To inputs for now.
     }
+  }
+
+  private async openNameBoxMenu(): Promise<void> {
+    const items: Array<{ label: string; value: string; description?: string }> = [];
+
+    for (const entry of this.searchWorkbook.names.values()) {
+      const name = typeof (entry as any)?.name === "string" ? ((entry as any).name as string).trim() : "";
+      if (!name) continue;
+
+      const range = (entry as any)?.range as Range | undefined;
+      const sheetName = typeof (entry as any)?.sheetName === "string" ? ((entry as any).sheetName as string).trim() : "";
+      const a1 =
+        range &&
+        typeof (range as any).startRow === "number" &&
+        typeof (range as any).startCol === "number" &&
+        typeof (range as any).endRow === "number" &&
+        typeof (range as any).endCol === "number"
+          ? rangeToA1(range)
+          : null;
+
+      items.push({
+        label: name,
+        value: name,
+        description: a1 ? (sheetName ? `${sheetName}!${a1}` : a1) : undefined,
+      });
+    }
+
+    for (const table of this.searchWorkbook.tables.values()) {
+      const name = typeof (table as any)?.name === "string" ? ((table as any).name as string).trim() : "";
+      if (!name) continue;
+
+      const sheetName = typeof (table as any)?.sheetName === "string" ? ((table as any).sheetName as string).trim() : "";
+      const startRow = (table as any)?.startRow;
+      const startCol = (table as any)?.startCol;
+      const endRow = (table as any)?.endRow;
+      const endCol = (table as any)?.endCol;
+      const a1 =
+        typeof startRow === "number" && typeof startCol === "number" && typeof endRow === "number" && typeof endCol === "number"
+          ? rangeToA1({ startRow, startCol, endRow, endCol })
+          : null;
+
+      items.push({
+        label: name,
+        value: `${name}[#All]`,
+        description: a1 ? (sheetName ? `${sheetName}!${a1}` : a1) : undefined,
+      });
+    }
+
+    items.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+
+    if (items.length === 0) return;
+
+    const selected = await showQuickPick(items, { placeHolder: "Go to…" });
+    if (typeof selected !== "string" || selected.trim() === "") return;
+    this.goTo(selected);
   }
 
   async getCellValueA1(a1: string): Promise<string> {

@@ -66,6 +66,7 @@ export interface FormulaBarViewCallbacks {
   onCommit: (text: string) => void;
   onCancel?: () => void;
   onGoTo?: (reference: string) => void;
+  onOpenNameBoxMenu?: () => void | Promise<void>;
   onHoverRange?: (range: RangeAddress | null) => void;
   onReferenceHighlights?: (
     highlights: Array<{ range: FormulaReferenceRange; color: string; text: string; index: number; active?: boolean }>
@@ -124,6 +125,7 @@ export class FormulaBarView {
 
     const nameBoxDropdown = document.createElement("button");
     nameBoxDropdown.className = "formula-bar-name-box-dropdown";
+    nameBoxDropdown.dataset.testid = "name-box-dropdown";
     nameBoxDropdown.type = "button";
     nameBoxDropdown.textContent = "▾";
     nameBoxDropdown.title = "Name box menu";
@@ -255,8 +257,12 @@ export class FormulaBarView {
     });
 
     nameBoxDropdown.addEventListener("click", () => {
-      // Placeholder affordance only (Excel-style name box dropdown).
-      // Focus the address input so keyboard "Go To" still feels natural.
+      if (this.#callbacks.onOpenNameBoxMenu) {
+        void this.#callbacks.onOpenNameBoxMenu();
+        return;
+      }
+
+      // Fallback affordance: focus the address input so keyboard "Go To" still feels natural.
       address.focus();
     });
 
