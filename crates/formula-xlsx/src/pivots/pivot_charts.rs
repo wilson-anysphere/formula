@@ -41,7 +41,10 @@ fn parse_pivot_chart_parts(package: &XlsxPackage) -> Result<Vec<PivotChartPart>,
 
         let parsed = parse_chart_xml(xml)?;
         let pivot_source_part = match parsed.pivot_source_rid.as_deref() {
-            Some(rid) => resolve_relationship_target(package, &part_name, rid)?,
+            Some(rid) => match resolve_relationship_target(package, &part_name, rid) {
+                Ok(target) => target,
+                Err(_) => None,
+            },
             None => None,
         };
 
@@ -95,3 +98,54 @@ fn parse_chart_xml(xml: &[u8]) -> Result<ParsedChartXml, XlsxError> {
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::io::{Cursor, Write};
+
+    use zip::write::FileOptions;
+    use zip::ZipWriter;
+
+    fn build_package(entries: &[(&str, &[u8])]) -> XlsxPackage {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        for (name, bytes) in entries {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+
+        let bytes = zip.finish().unwrap().into_inner();
+        XlsxPackage::from_bytes(&bytes).expect("read test pkg")
+    }
+
+    #[test]
+    fn pivot_chart_parts_is_best_effort_when_chart_rels_is_malformed() {
+        let chart_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <c:pivotSource name="PivotTable1" r:id="rId1"/>
+</c:chartSpace>"#;
+
+        // Intentionally malformed relationships XML so `openxml::parse_relationships` fails.
+        let malformed_rels = br#"<Relationships"#;
+        assert!(
+            crate::openxml::parse_relationships(malformed_rels).is_err(),
+            "expected malformed rels to fail parsing"
+        );
+
+        let pkg = build_package(&[
+            ("xl/charts/chart1.xml", chart_xml),
+            ("xl/charts/_rels/chart1.xml.rels", malformed_rels),
+        ]);
+
+        let parts = pkg.pivot_chart_parts().expect("pivot chart parts");
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].part_name, "xl/charts/chart1.xml");
+        assert_eq!(parts[0].pivot_source_name.as_deref(), Some("PivotTable1"));
+        assert_eq!(parts[0].pivot_source_part, None);
+    }
+}
