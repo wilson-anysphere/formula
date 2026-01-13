@@ -302,11 +302,6 @@ def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
         "render_rate": rates.get("render"),
         "diff_totals": diff_totals,
         "failures_by_category": summary.get("failures_by_category") or {},
-        # Optional higher-signal breakdown for round-trip failures.
-        "failures_by_round_trip_failure_kind": summary.get(
-            "failures_by_round_trip_failure_kind"
-        )
-        or {},
         # Size ratio: output_size / input_size for successful round-trips.
         "size_overhead_mean": overhead.get("mean"),
         "size_overhead_p50": overhead.get("p50"),
@@ -315,6 +310,7 @@ def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
         # Fraction of package parts that changed (any severity / critical-only).
         "part_change_ratio_p90": part_change_ratio.get("p90"),
         "part_change_ratio_critical_p90": part_change_ratio_critical.get("p90"),
+        # Optional higher-signal breakdown for round-trip failures.
         "failures_by_round_trip_failure_kind": rt_kinds,
     }
 
