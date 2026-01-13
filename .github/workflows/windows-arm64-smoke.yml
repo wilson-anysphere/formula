@@ -285,8 +285,11 @@ jobs:
           $joined = ($headers -join "`n")
           $machineLine = ($headers | Select-String -Pattern "machine" -CaseSensitive:$false | Select-Object -First 1).ToString()
           Write-Host "dumpbin machine line: $machineLine"
-          if ($joined -notmatch "machine \\(AA64\\)") {
-            throw "Expected ARM64 machine type (AA64) in PE headers for $($exe.FullName). If this is x64, the ARM64 target toolchain/environment is misconfigured."
+          if ($joined -notmatch '\bAA64\b') {
+            throw "Expected ARM64 machine type 'AA64' in dumpbin output for $($exe.FullName), but it was not found. If this is x64, the ARM64 target toolchain/environment is misconfigured."
+          }
+          if ($joined -match '\b8664\b') {
+            throw "Binary appears to be x64 (machine type '8664'), expected ARM64 (AA64)."
           }
 
       - name: Verify bundles exist
