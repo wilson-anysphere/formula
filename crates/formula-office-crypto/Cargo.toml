@@ -1,0 +1,20 @@
+[package]
+name = "formula-office-crypto"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aes = "0.8"
+base64 = "0.22"
+cbc = "0.1"
+cfb = "0.10"
+cipher = "0.4"
+quick-xml = { version = "0.31", default-features = false }
+sha1 = "0.10"
+sha2 = "0.10"
+thiserror = "1.0"
+zeroize = { version = "1.8", features = ["zeroize_derive"] }
+
+[dev-dependencies]
+zip = { version = "2.1", default-features = false }
+
