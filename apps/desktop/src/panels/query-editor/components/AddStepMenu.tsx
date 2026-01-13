@@ -1,8 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-import type { ArrowTableAdapter, DataTable, Query, QueryOperation } from "@formula/power-query";
+import { stableStringify, type ArrowTableAdapter, type DataTable, type Query, type QueryOperation } from "@formula/power-query";
 import { t } from "../../../i18n/index.js";
 import { formatQueryOperationLabel } from "../operationLabels";
+
+function prettyJson(value: unknown): string {
+  try {
+    return JSON.stringify(JSON.parse(stableStringify(value)), null, 2);
+  } catch (err) {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+}
 
 export function AddStepMenu(props: {
   onAddStep: (op: QueryOperation) => void;
@@ -231,7 +243,7 @@ export function AddStepMenu(props: {
                       setSuggestions(null);
                     }}
                     className="query-editor-add-step__suggestion"
-                    title={JSON.stringify(op, null, 2)}
+                    title={prettyJson(op)}
                   >
                     {formatQueryOperationLabel(op)}
                   </button>
