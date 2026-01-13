@@ -520,7 +520,17 @@ Notable metrics (prefix `sync_server_`):
 
 - Hard maximum websocket message size:
 
-- `SYNC_SERVER_MAX_MESSAGE_BYTES` (default: `2097152` / 2 MiB). Set to `0` to disable (not recommended).
+  - `SYNC_SERVER_MAX_MESSAGE_BYTES` (default: `2097152` / 2 MiB). Set to `0` to disable (not recommended).
+
+- WebSocket upgrade URL/token size limits (defense-in-depth against oversized request lines / auth headers):
+
+  - `SYNC_SERVER_MAX_URL_BYTES` (default: `8192`; set to `0` to disable).
+    - If exceeded, the websocket upgrade is rejected with HTTP `414` and increments
+      `sync_server_ws_connections_rejected_total{reason="url_too_long"}`.
+  - `SYNC_SERVER_MAX_TOKEN_BYTES` (default: `4096`; set to `0` to disable).
+    - Applies to both `?token=<token>` and `Authorization: Bearer <token>`.
+    - If exceeded, the websocket upgrade is rejected with HTTP `414` and increments
+      `sync_server_ws_connections_rejected_total{reason="token_too_long"}`.
 
 - Hard maximum document id (room name) size:
   - 1024 bytes (UTF-8). Requests exceeding this are rejected with HTTP `414`.
@@ -559,9 +569,12 @@ Notable metrics (prefix `sync_server_`):
   - `SYNC_SERVER_MAX_AWARENESS_ENTRIES`
   - Setting either to `0` effectively disables awareness updates (they will be dropped).
 
-- Optional JWT cell-range restriction enforcement (fail-closed):
+- Optional cell-range restriction enforcement (fail-closed):
 
   - `SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS` (default: `true` in production)
+  - Applies to `rangeRestrictions` provided via:
+    - JWT claims (`rangeRestrictions`)
+    - Token introspection responses (`rangeRestrictions`)
 
 ### Reserved root mutation guard (versioning/branching roots)
 
