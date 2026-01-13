@@ -990,9 +990,21 @@ jobs:
             exit 1
           fi
 
-          bin_path="$macos_dir/formula-desktop"
+          # Prefer the bundle-declared executable (CFBundleExecutable) so this check stays correct
+          # even if the binary name changes.
+          exe_name=""
+          info_plist="$app_path/Contents/Info.plist"
+          if [[ -f "$info_plist" ]]; then
+            exe_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$info_plist" 2>/dev/null || true)"
+          fi
+          if [[ -z "$exe_name" ]]; then
+            exe_name="formula-desktop"
+          fi
+
+          bin_path="$macos_dir/$exe_name"
           if [[ ! -f "$bin_path" ]]; then
-            bin_path="$(find "$macos_dir" -maxdepth 1 -type f -print | head -n 1 || true)"
+            # Fall back to the first executable file under Contents/MacOS (avoid picking non-binaries).
+            bin_path="$(find "$macos_dir" -maxdepth 1 -type f -perm -0100 -print | head -n 1 || true)"
           fi
           if [[ -z "$bin_path" || ! -f "$bin_path" ]]; then
             echo "::error::Could not find app executable under $macos_dir" >&2
@@ -1002,8 +1014,8 @@ jobs:
 
           echo "Checking architectures for: $bin_path"
           info="$(lipo -info "$bin_path" | tee /dev/stderr)"
-          echo "$info" | grep -q "x86_64" || { echo "::error::macOS binary is missing x86_64 slice"; exit 1; }
-          echo "$info" | grep -q "arm64" || { echo "::error::macOS binary is missing arm64 slice"; exit 1; }
+          echo "$info" | grep -qw "x86_64" || { echo "::error::macOS binary is missing x86_64 slice"; exit 1; }
+          echo "$info" | grep -qw "arm64" || { echo "::error::macOS binary is missing arm64 slice"; exit 1; }
 
       - name: Verify Windows installers are Authenticode-signed
         if: runner.os == 'Windows' && ((secrets.WINDOWS_CERTIFICATE != '' && secrets.WINDOWS_CERTIFICATE_PASSWORD != '') || vars.FORMULA_REQUIRE_CODESIGN == '1')
