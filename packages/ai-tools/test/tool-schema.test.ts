@@ -70,10 +70,11 @@ describe("tool JSON schema fidelity (matches Zod refinements)", () => {
     expect(nonBetweenVariant.required).toEqual(["column", "operator", "value"]);
   });
 
-  it("includes minItems: 1 for create_pivot_table.rows and create_pivot_table.values", () => {
+  it("includes minItems: 1 for create_pivot_table.rows and create_pivot_table.values (and requires destination)", () => {
     const schema = TOOL_REGISTRY.create_pivot_table.jsonSchema as any;
     expect(schema.properties.rows.minItems).toBe(1);
     expect(schema.properties.values.minItems).toBe(1);
+    expect(schema.required).toContain("destination");
   });
 
   it("includes minItems: 1 for sort_range.sort_by", () => {

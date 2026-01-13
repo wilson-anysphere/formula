@@ -558,7 +558,7 @@ export const TOOL_REGISTRY: { [K in ToolName]: ToolRegistryEntry<K> } = {
         },
         destination: { type: "string" }
       },
-      required: ["source_range", "rows", "values"]
+      required: ["source_range", "rows", "values", "destination"]
     }
   },
   create_chart: {
