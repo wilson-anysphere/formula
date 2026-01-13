@@ -6,6 +6,20 @@ Goals:
 - Keep fixtures **small** and **in-repo** so CI is fast and deterministic.
 - Cover representative XLSX features incrementally (basic cells, formulas, styles, etc.).
 
+## Encrypted / password-protected workbooks
+
+This corpus is intentionally limited to **ZIP/OPC-based** spreadsheet files that can be
+round-tripped by the `crates/xlsx-diff` harness.
+
+Excel “encrypted” / password-protected `.xlsx` files are **not ZIP archives** on disk. They are
+OLE/CFB (Compound File Binary) containers with `EncryptionInfo` and `EncryptedPackage` streams
+(MS-OFFCRYPTO). Because the round-trip corpus is collected by `xlsx-diff::collect_fixture_paths`
+and then opened as a ZIP archive, encrypted OOXML fixtures must live outside `fixtures/xlsx/`.
+
+Encrypted OOXML fixtures live under:
+
+- `fixtures/encrypted/ooxml/`
+
 ## Layout
 
 ```
