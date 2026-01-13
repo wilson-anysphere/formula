@@ -275,6 +275,30 @@ function createFallbackMetrics(): SyncServerMetrics {
   retentionSweepErrorsTotal.inc({ sweep: "leveldb" }, 0);
   retentionSweepErrorsTotal.inc({ sweep: "tombstone" }, 0);
 
+  const processResidentMemoryBytes = createGauge({
+    name: "sync_server_process_resident_memory_bytes",
+    help: "Resident set size (RSS) memory used by the process in bytes.",
+  });
+  processResidentMemoryBytes.set(0);
+
+  const processHeapUsedBytes = createGauge({
+    name: "sync_server_process_heap_used_bytes",
+    help: "V8 heap used in bytes.",
+  });
+  processHeapUsedBytes.set(0);
+
+  const processHeapTotalBytes = createGauge({
+    name: "sync_server_process_heap_total_bytes",
+    help: "V8 heap total size in bytes.",
+  });
+  processHeapTotalBytes.set(0);
+
+  const eventLoopDelayMs = createGauge({
+    name: "sync_server_event_loop_delay_ms",
+    help: "Event loop delay (p99) sampled over the last collection interval, in milliseconds.",
+  });
+  eventLoopDelayMs.set(0);
+
   const persistenceInfo = createGauge<"backend" | "encryption">({
     name: "sync_server_persistence_info",
     help:
@@ -305,6 +329,10 @@ function createFallbackMetrics(): SyncServerMetrics {
     retentionSweepsTotal,
     retentionDocsPurgedTotal,
     retentionSweepErrorsTotal,
+    processResidentMemoryBytes,
+    processHeapUsedBytes,
+    processHeapTotalBytes,
+    eventLoopDelayMs,
     persistenceInfo,
     setPersistenceInfo,
     metricsText: async () => await registry.metrics(),
@@ -336,6 +364,11 @@ export type SyncServerMetrics = {
   retentionSweepsTotal: Counter<"sweep">;
   retentionDocsPurgedTotal: Counter<"sweep">;
   retentionSweepErrorsTotal: Counter<"sweep">;
+
+  processResidentMemoryBytes: Gauge<string>;
+  processHeapUsedBytes: Gauge<string>;
+  processHeapTotalBytes: Gauge<string>;
+  eventLoopDelayMs: Gauge<string>;
 
   persistenceInfo: Gauge<"backend" | "encryption">;
   setPersistenceInfo: (params: {
@@ -440,6 +473,34 @@ export function createSyncServerMetrics(): SyncServerMetrics {
   retentionSweepErrorsTotal.inc({ sweep: "leveldb" }, 0);
   retentionSweepErrorsTotal.inc({ sweep: "tombstone" }, 0);
 
+  const processResidentMemoryBytes = new promClient.Gauge({
+    name: "sync_server_process_resident_memory_bytes",
+    help: "Resident set size (RSS) memory used by the process in bytes.",
+    registers: [registry],
+  });
+  processResidentMemoryBytes.set(0);
+
+  const processHeapUsedBytes = new promClient.Gauge({
+    name: "sync_server_process_heap_used_bytes",
+    help: "V8 heap used in bytes.",
+    registers: [registry],
+  });
+  processHeapUsedBytes.set(0);
+
+  const processHeapTotalBytes = new promClient.Gauge({
+    name: "sync_server_process_heap_total_bytes",
+    help: "V8 heap total size in bytes.",
+    registers: [registry],
+  });
+  processHeapTotalBytes.set(0);
+
+  const eventLoopDelayMs = new promClient.Gauge({
+    name: "sync_server_event_loop_delay_ms",
+    help: "Event loop delay (p99) sampled over the last collection interval, in milliseconds.",
+    registers: [registry],
+  });
+  eventLoopDelayMs.set(0);
+
   const persistenceInfo = new promClient.Gauge({
     name: "sync_server_persistence_info",
     help:
@@ -474,6 +535,10 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     retentionSweepsTotal,
     retentionDocsPurgedTotal,
     retentionSweepErrorsTotal,
+    processResidentMemoryBytes,
+    processHeapUsedBytes,
+    processHeapTotalBytes,
+    eventLoopDelayMs,
     persistenceInfo,
     setPersistenceInfo,
     metricsText: async () => await registry.metrics(),

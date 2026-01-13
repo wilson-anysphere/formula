@@ -74,6 +74,10 @@ test("exposes Prometheus metrics in text format", async (t) => {
   assert.match(body, /sync_server_ws_connections_total/);
   assert.match(body, /sync_server_ws_closes_total/);
   assert.match(body, /sync_server_ws_messages_too_large_total/);
+  assert.match(body, /sync_server_process_resident_memory_bytes/);
+  assert.match(body, /sync_server_process_heap_used_bytes/);
+  assert.match(body, /sync_server_process_heap_total_bytes/);
+  assert.match(body, /sync_server_event_loop_delay_ms/);
   assert.match(body, /sync_server_persistence_info/);
 
   const health = await fetch(`${server.httpUrl}/healthz`);

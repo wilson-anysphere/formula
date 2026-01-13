@@ -5,6 +5,7 @@ import https from "node:https";
 import { promises as fs, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 
@@ -271,6 +272,18 @@ export function createSyncServer(
   );
 
   const metrics = createSyncServerMetrics();
+  const eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
+  let processMetricsTimer: NodeJS.Timeout | null = null;
+  const updateProcessMetrics = () => {
+    const mem = process.memoryUsage();
+    metrics.processResidentMemoryBytes.set(mem.rss);
+    metrics.processHeapUsedBytes.set(mem.heapUsed);
+    metrics.processHeapTotalBytes.set(mem.heapTotal);
+    // monitorEventLoopDelay reports nanoseconds. Store p99 in milliseconds.
+    metrics.eventLoopDelayMs.set(eventLoopDelay.percentile(99) / 1e6);
+    // Reset so each collection is roughly per-interval, not cumulative.
+    eventLoopDelay.reset();
+  };
 
   const closeCodeLabel = (code: number): string => {
     switch (code) {
@@ -1655,6 +1668,13 @@ export function createSyncServer(
       const addr = server.address() as AddressInfo | null;
       const port = addr?.port ?? config.port;
 
+      if (!processMetricsTimer) {
+        eventLoopDelay.enable();
+        updateProcessMetrics();
+        processMetricsTimer = setInterval(updateProcessMetrics, 5_000);
+        processMetricsTimer.unref();
+      }
+
       if (config.retention.sweepIntervalMs > 0) {
         tombstoneSweepTimer = setInterval(() => {
           void triggerTombstoneSweep()
@@ -1687,6 +1707,12 @@ export function createSyncServer(
 
     async stop() {
       const errors: unknown[] = [];
+
+      if (processMetricsTimer) {
+        clearInterval(processMetricsTimer);
+        processMetricsTimer = null;
+      }
+      eventLoopDelay.disable();
 
       if (tombstoneSweepTimer) {
         clearInterval(tombstoneSweepTimer);
