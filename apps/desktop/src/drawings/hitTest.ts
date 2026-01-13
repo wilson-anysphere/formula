@@ -7,6 +7,9 @@ export interface HitTestResult {
   bounds: Rect;
 }
 
+const EMPTY_LIST: number[] = [];
+const CELL_SCRATCH = { row: 0, col: 0 };
+
 export interface HitTestIndex {
   /**
    * Objects sorted by zOrder descending (top-most first).
@@ -33,6 +36,12 @@ export interface HitTestIndex {
   bucketSizePx: number;
   /** Geometry used to derive sheet-space bounds (also used for frozen-pane layout fallbacks). */
   geom: GridGeometry;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
 }
 
 export function buildHitTestIndex(
@@ -122,45 +131,90 @@ export function hitTestDrawings(
   const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
   const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
 
-  const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+  // Fast-path when there are no frozen panes: avoid computing pane boundaries or
+  // per-object quadrant routing.
+  if (frozenRows === 0 && frozenCols === 0) {
+    const sheetX = x - headerOffsetX + viewport.scrollX;
+    const sheetY = y - headerOffsetY + viewport.scrollY;
 
-  const derivedFrozenContentWidth = (() => {
-    if (frozenCols <= 0) return 0;
-    try {
-      return geom.cellOriginPx({ row: 0, col: frozenCols }).x;
-    } catch {
-      return 0;
-    }
-  })();
-  const derivedFrozenContentHeight = (() => {
-    if (frozenRows <= 0) return 0;
-    try {
-      return geom.cellOriginPx({ row: frozenRows, col: 0 }).y;
-    } catch {
-      return 0;
-    }
-  })();
+    const bx = Math.floor(sheetX / index.bucketSizePx);
+    const by = Math.floor(sheetY / index.bucketSizePx);
 
-  const frozenBoundaryX = clamp(
-    Number.isFinite(viewport.frozenWidthPx) ? viewport.frozenWidthPx! : headerOffsetX + derivedFrozenContentWidth,
-    headerOffsetX,
-    viewport.width,
-  );
-  const frozenBoundaryY = clamp(
-    Number.isFinite(viewport.frozenHeightPx) ? viewport.frozenHeightPx! : headerOffsetY + derivedFrozenContentHeight,
-    headerOffsetY,
-    viewport.height,
-  );
+    const bucket = index.buckets.get(bx)?.get(by);
+
+    // Merge the bucket-specific list and global list (both sorted in zOrder-desc order because we
+    // inserted indices in that order).
+    const bucketList = bucket ?? EMPTY_LIST;
+    const globalList = index.global.length > 0 ? index.global : EMPTY_LIST;
+
+    let i = 0;
+    let j = 0;
+    let last = -1;
+    while (i < bucketList.length || j < globalList.length) {
+      const next =
+        j >= globalList.length || (i < bucketList.length && bucketList[i]! <= globalList[j]!)
+          ? bucketList[i++]!
+          : globalList[j++]!;
+      if (next === last) continue;
+      last = next;
+
+      const rect = index.bounds[next]!;
+      if (pointInRect(sheetX, sheetY, rect)) {
+        const screen = {
+          x: rect.x - viewport.scrollX + headerOffsetX,
+          y: rect.y - viewport.scrollY + headerOffsetY,
+          width: rect.width,
+          height: rect.height,
+        };
+        return { object: index.ordered[next]!, bounds: screen };
+      }
+    }
+
+    return null;
+  }
+
+  let frozenBoundaryX = headerOffsetX;
+  let frozenBoundaryY = headerOffsetY;
+
+  if (frozenCols > 0) {
+    let raw = viewport.frozenWidthPx;
+    if (!Number.isFinite(raw)) {
+      let derived = 0;
+      try {
+        CELL_SCRATCH.row = 0;
+        CELL_SCRATCH.col = frozenCols;
+        derived = geom.cellOriginPx(CELL_SCRATCH).x;
+      } catch {
+        derived = 0;
+      }
+      raw = headerOffsetX + derived;
+    }
+    frozenBoundaryX = clampNumber(raw as number, headerOffsetX, viewport.width);
+  }
+
+  if (frozenRows > 0) {
+    let raw = viewport.frozenHeightPx;
+    if (!Number.isFinite(raw)) {
+      let derived = 0;
+      try {
+        CELL_SCRATCH.row = frozenRows;
+        CELL_SCRATCH.col = 0;
+        derived = geom.cellOriginPx(CELL_SCRATCH).y;
+      } catch {
+        derived = 0;
+      }
+      raw = headerOffsetY + derived;
+    }
+    frozenBoundaryY = clampNumber(raw as number, headerOffsetY, viewport.height);
+  }
 
   const inFrozenCols = x < frozenBoundaryX;
   const inFrozenRows = y < frozenBoundaryY;
 
   // Convert from screen-space to sheet-space using the same frozen-pane scroll semantics
   // as `DrawingOverlay.render()`.
-  const scrollX = inFrozenCols ? 0 : viewport.scrollX;
-  const scrollY = inFrozenRows ? 0 : viewport.scrollY;
-  const sheetX = x - headerOffsetX + scrollX;
-  const sheetY = y - headerOffsetY + scrollY;
+  const sheetX = x - headerOffsetX + (inFrozenCols ? 0 : viewport.scrollX);
+  const sheetY = y - headerOffsetY + (inFrozenRows ? 0 : viewport.scrollY);
 
   const bx = Math.floor(sheetX / index.bucketSizePx);
   const by = Math.floor(sheetY / index.bucketSizePx);
@@ -209,8 +263,6 @@ export function hitTestDrawings(
 
   return null;
 }
-
-const EMPTY_LIST: number[] = [];
 
 function pointInRect(x: number, y: number, rect: Rect): boolean {
   return x >= rect.x && y >= rect.y && x <= rect.x + rect.width && y <= rect.y + rect.height;
