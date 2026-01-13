@@ -12,8 +12,6 @@ const RECORD_LEFTMARGIN: u16 = 0x0026;
 const RECORD_RIGHTMARGIN: u16 = 0x0027;
 const RECORD_TOPMARGIN: u16 = 0x0028;
 const RECORD_BOTTOMMARGIN: u16 = 0x0029;
-const RECORD_HPAGEBREAKS: u16 = 0x001B;
-const RECORD_VPAGEBREAKS: u16 = 0x001A;
 
 // SETUP grbit flags.
 // The BIFF spec defines a bit indicating landscape orientation. In BIFF8, bit 1
@@ -95,21 +93,21 @@ pub(crate) fn parse_biff_sheet_print_settings(
                 record.offset,
                 &mut out.warnings,
             ),
-            RECORD_HPAGEBREAKS => parse_horizontal_page_breaks(
-                &mut out.manual_page_breaks,
-                data,
-                record.offset,
-                &mut out.warnings,
-            ),
-            RECORD_VPAGEBREAKS => parse_vertical_page_breaks(
-                &mut out.manual_page_breaks,
-                data,
-                record.offset,
-                &mut out.warnings,
-            ),
             records::RECORD_EOF => break,
             _ => {}
         }
+    }
+
+    // Manual page breaks are stored in dedicated worksheet records. Delegate to the existing
+    // page-break parser so we share the same semantics as the rest of the importer.
+    match super::parse_biff_sheet_manual_page_breaks(workbook_stream, start) {
+        Ok(mut breaks) => {
+            out.manual_page_breaks = breaks.manual_page_breaks;
+            out.warnings.extend(breaks.warnings.drain(..));
+        }
+        Err(err) => out
+            .warnings
+            .push(format!("failed to parse manual page breaks: {err}")),
     }
 
     Ok(out)
@@ -215,66 +213,3 @@ fn parse_margin_record(
     }
     *out = value;
 }
-
-fn parse_horizontal_page_breaks(
-    manual: &mut ManualPageBreaks,
-    data: &[u8],
-    offset: usize,
-    warnings: &mut Vec<String>,
-) {
-    // HORIZONTALPAGEBREAKS record:
-    // [cbrk:u16][(rw:u16, colStart:u16, colEnd:u16) * cbrk]
-    if data.len() < 2 {
-        warnings.push(format!(
-            "truncated HORIZONTALPAGEBREAKS record at offset {offset} (len={}, expected >=2)",
-            data.len()
-        ));
-        return;
-    }
-
-    let cbrk = u16::from_le_bytes([data[0], data[1]]) as usize;
-    let mut cursor = 2usize;
-    for i in 0..cbrk {
-        if cursor + 6 > data.len() {
-            warnings.push(format!(
-                "truncated HORIZONTALPAGEBREAKS record at offset {offset}: expected {cbrk} breaks, found {i}"
-            ));
-            break;
-        }
-        let rw = u16::from_le_bytes([data[cursor], data[cursor + 1]]);
-        manual.row_breaks_after.insert(rw as u32);
-        cursor += 6;
-    }
-}
-
-fn parse_vertical_page_breaks(
-    manual: &mut ManualPageBreaks,
-    data: &[u8],
-    offset: usize,
-    warnings: &mut Vec<String>,
-) {
-    // VERTICALPAGEBREAKS record:
-    // [cbrk:u16][(col:u16, rwStart:u16, rwEnd:u16) * cbrk]
-    if data.len() < 2 {
-        warnings.push(format!(
-            "truncated VERTICALPAGEBREAKS record at offset {offset} (len={}, expected >=2)",
-            data.len()
-        ));
-        return;
-    }
-
-    let cbrk = u16::from_le_bytes([data[0], data[1]]) as usize;
-    let mut cursor = 2usize;
-    for i in 0..cbrk {
-        if cursor + 6 > data.len() {
-            warnings.push(format!(
-                "truncated VERTICALPAGEBREAKS record at offset {offset}: expected {cbrk} breaks, found {i}"
-            ));
-            break;
-        }
-        let col = u16::from_le_bytes([data[cursor], data[cursor + 1]]);
-        manual.col_breaks_after.insert(col as u32);
-        cursor += 6;
-    }
-}
-

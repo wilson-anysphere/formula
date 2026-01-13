@@ -629,8 +629,10 @@ fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
     );
 
     // Manual page breaks.
-    push_record(&mut sheet, RECORD_HPAGEBREAKS, &hpagebreaks_record(&[2, 4]));
-    push_record(&mut sheet, RECORD_VPAGEBREAKS, &vpagebreaks_record(&[1]));
+    // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.
+    // The importer converts these to the model’s “after which break occurs” form by subtracting 1.
+    push_record(&mut sheet, RECORD_HPAGEBREAKS, &hpagebreaks_record(&[3, 5]));
+    push_record(&mut sheet, RECORD_VPAGEBREAKS, &vpagebreaks_record(&[2]));
 
     // Provide at least one cell so calamine returns a non-empty range.
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
