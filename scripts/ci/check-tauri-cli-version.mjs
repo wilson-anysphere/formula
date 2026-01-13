@@ -11,6 +11,9 @@ const cargoTomlPath = path.join(repoRoot, cargoTomlRelativePath);
 const releaseWorkflowRelativePath = ".github/workflows/release.yml";
 const releaseWorkflowPath = path.join(repoRoot, releaseWorkflowRelativePath);
 
+const docsReleaseRelativePath = "docs/release.md";
+const docsReleasePath = path.join(repoRoot, docsReleaseRelativePath);
+
 function parseMajorMinor(version) {
   const normalized = String(version ?? "").trim().replace(/^[^0-9]*/, "");
   const match = normalized.match(/^(\d+)\.(\d+)/);
@@ -54,6 +57,18 @@ function extractTauriVersionFromCargoToml(tomlText) {
 function extractPinnedCliVersionFromWorkflow(workflowText) {
   const match = workflowText.match(/^[\t ]*TAURI_CLI_VERSION:[\t ]*["']?([^"'\n]+)["']?/m);
   return match ? match[1].trim() : null;
+}
+
+function extractPinnedCliVersionsFromDocs(markdownText) {
+  // Look for shell-style assignments like:
+  //   TAURI_CLI_VERSION=2.9.5
+  // (possibly indented, possibly with quotes).
+  const versions = [];
+  const re = /TAURI_CLI_VERSION\s*=\s*["']?([0-9]+\.[0-9]+\.[0-9]+(?:[-+][^\s"']+)?)["']?/g;
+  for (const match of markdownText.matchAll(re)) {
+    versions.push(match[1]);
+  }
+  return versions;
 }
 
 let cargoTomlText = "";
@@ -134,6 +149,25 @@ if (cliMajorMinor !== tauriMajorMinor) {
   console.error(`- Bump TAURI_CLI_VERSION in ${releaseWorkflowRelativePath} to ${tauriMajorMinor}.x`);
   console.error("- Update docs/release.md to match (local release instructions).");
   process.exit(1);
+}
+
+// Best-effort docs check: if the release docs pin a TAURI_CLI_VERSION, keep it in sync with the
+// canonical release workflow version so bumping is an explicit PR.
+try {
+  const docsText = await readFile(docsReleasePath, "utf8");
+  const docsVersions = extractPinnedCliVersionsFromDocs(docsText);
+  const mismatches = [...new Set(docsVersions)].filter((v) => v !== pinnedCliVersion);
+  if (mismatches.length > 0) {
+    console.error("docs/release.md TAURI_CLI_VERSION mismatch detected.");
+    console.error(`- ${releaseWorkflowRelativePath}: TAURI_CLI_VERSION="${pinnedCliVersion}"`);
+    console.error(`- ${docsReleaseRelativePath}: found ${mismatches.length} mismatching value(s): ${mismatches.join(", ")}`);
+    console.error("");
+    console.error("Fix:");
+    console.error(`- Update the TAURI_CLI_VERSION assignment(s) in ${docsReleaseRelativePath} to ${pinnedCliVersion}.`);
+    process.exit(1);
+  }
+} catch {
+  // Ignore: the docs file may not be present in some ad-hoc contexts.
 }
 
 console.log(
