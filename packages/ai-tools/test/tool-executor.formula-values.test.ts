@@ -124,6 +124,25 @@ describe("ToolExecutor include_formula_values", () => {
     expect(result.data?.statistics).toEqual({ mean: 3, sum: 6, count: 2 });
   });
 
+  it("compute_statistics correlation can include formula-cell numeric values when enabled", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });
+    workbook.setCell(parseA1Cell("Sheet1!B1"), { value: 10 });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { formula: "=2", value: 2 });
+    workbook.setCell(parseA1Cell("Sheet1!B2"), { value: 20 });
+
+    const executor = new ToolExecutor(workbook, { include_formula_values: true });
+    const result = await executor.execute({
+      name: "compute_statistics",
+      parameters: { range: "Sheet1!A1:B2", measures: ["correlation"] },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("compute_statistics");
+    if (!result.ok || result.tool !== "compute_statistics") throw new Error("Unexpected tool result");
+    expect(result.data?.statistics.correlation).toBe(1);
+  });
+
   it("compute_statistics includes numeric values from formula cells under DLP ALLOW decisions when enabled", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { formula: "=1+1", value: 2 });
@@ -163,6 +182,101 @@ describe("ToolExecutor include_formula_values", () => {
     const event = audit_logger.log.mock.calls[0]?.[0];
     expect(event.decision?.decision).toBe("allow");
     expect(event.redactedCellCount).toBe(0);
+  });
+
+  it("compute_statistics correlation includes formula values under DLP ALLOW decisions when enabled", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });
+    workbook.setCell(parseA1Cell("Sheet1!B1"), { value: 10 });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { formula: "=2", value: 2 });
+    workbook.setCell(parseA1Cell("Sheet1!B2"), { value: 20 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      include_formula_values: true,
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true,
+            },
+          },
+        },
+        audit_logger,
+      },
+    });
+
+    const result = await executor.execute({
+      name: "compute_statistics",
+      parameters: { range: "Sheet1!A1:B2", measures: ["correlation"] },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("compute_statistics");
+    if (!result.ok || result.tool !== "compute_statistics") throw new Error("Unexpected tool result");
+    expect(result.data?.statistics.correlation).toBe(1);
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event.decision?.decision).toBe("allow");
+    expect(event.redactedCellCount).toBe(0);
+  });
+
+  it("compute_statistics correlation does not use formula values under DLP REDACT decisions even when enabled", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });
+    workbook.setCell(parseA1Cell("Sheet1!B1"), { value: 10 });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { formula: "=2", value: 2 });
+    workbook.setCell(parseA1Cell("Sheet1!B2"), { value: 20 });
+    workbook.setCell(parseA1Cell("Sheet1!A3"), { value: 3 });
+    workbook.setCell(parseA1Cell("Sheet1!B3"), { value: 30 });
+
+    const executor = new ToolExecutor(workbook, {
+      include_formula_values: true,
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true,
+            },
+          },
+        },
+        classification_records: [
+          {
+            selector: {
+              scope: CLASSIFICATION_SCOPE.CELL,
+              documentId: "doc-1",
+              sheetId: "Sheet1",
+              row: 2,
+              col: 1,
+            },
+            classification: { level: "Restricted", labels: [] },
+          },
+        ],
+      },
+    });
+
+    const result = await executor.execute({
+      name: "compute_statistics",
+      parameters: { range: "Sheet1!A1:B3", measures: ["correlation"] },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("compute_statistics");
+    if (!result.ok || result.tool !== "compute_statistics") throw new Error("Unexpected tool result");
+    // Range decision is REDACT due to B3; formula-derived values should not be used for correlation.
+    // With only the first (non-formula) pair contributing, correlation falls back to 0.
+    expect(result.data?.statistics.correlation).toBe(0);
   });
 
   it("filter_range compares formula cells using computed values when enabled", async () => {
