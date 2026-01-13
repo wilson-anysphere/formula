@@ -124,7 +124,7 @@ import { CELL_CONTEXT_MENU_ID, COLUMN_CONTEXT_MENU_ID, CORNER_CONTEXT_MENU_ID, R
 import { buildContextMenuModel } from "./extensions/contextMenuModel.js";
 import { getPrimaryCommandKeybindingDisplay, type ContributedKeybinding } from "./extensions/keybindings.js";
 import { KeybindingService } from "./extensions/keybindingService.js";
-import { isEventWithinKeybindingBarrier, markKeybindingBarrier } from "./keybindingBarrier.js";
+import { isEventWithinKeybindingBarrier, KEYBINDING_BARRIER_ATTRIBUTE, markKeybindingBarrier } from "./keybindingBarrier.js";
 import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js";
 import { installKeyboardContextKeys, KeyboardContextKeyIds } from "./keyboard/installKeyboardContextKeys.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
@@ -133,6 +133,7 @@ import { registerDesktopCommands } from "./commands/registerDesktopCommands.js";
 import { registerFormatFontDropdownCommands } from "./commands/registerFormatFontDropdownCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
 import { registerPageLayoutCommands } from "./commands/registerPageLayoutCommands.js";
+import { FORMAT_PAINTER_COMMAND_ID, registerFormatPainterCommand } from "./commands/formatPainterCommand.js";
 import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
 import type { GridLimits, Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
@@ -1407,6 +1408,28 @@ function formatPainterSelectionKey(selection?: SelectionState): string {
   return parts.join("|");
 }
 
+function shouldRestoreFocusAfterArmingFormatPainter(): boolean {
+  try {
+    if (typeof document === "undefined") return true;
+    const active = document.activeElement as HTMLElement | null;
+    if (!active) return true;
+
+    // Avoid stealing focus from modal overlays (command palette, dialogs, etc.).
+    if (typeof active.closest === "function" && active.closest(`[${KEYBINDING_BARRIER_ATTRIBUTE}]`)) {
+      return false;
+    }
+
+    const tag = active.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || active.isContentEditable) {
+      return false;
+    }
+  } catch {
+    // Best-effort: default to restoring focus.
+  }
+
+  return true;
+}
+
 function disarmFormatPainter(): void {
   const state = formatPainterState;
   if (!state) return;
@@ -1475,7 +1498,9 @@ function armFormatPainter(): void {
   }
 
   // Restore grid focus so keyboard selection continues to work after clicking the ribbon.
-  queueMicrotask(() => app.focus());
+  if (shouldRestoreFocusAfterArmingFormatPainter()) {
+    queueMicrotask(() => app.focus());
+  }
 }
 
 function handleFormatPainterSelectionChange(selection: SelectionState): void {
@@ -2057,7 +2082,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "view.togglePanel.extensions": isPanelOpen(PanelIds.EXTENSIONS),
       "data.queriesConnections.queriesConnections": isPanelOpen(PanelIds.DATA_QUERIES),
       "comments.togglePanel": app.isCommentsPanelVisible(),
-      "home.clipboard.formatPainter": Boolean(formatPainterState),
+      [FORMAT_PAINTER_COMMAND_ID]: Boolean(formatPainterState),
     };
 
     const numberFormatLabel = (() => {
@@ -2144,7 +2169,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.font.fillColor": true,
             "home.font.borders": true,
             "home.font.clearFormatting": true,
-            "home.clipboard.formatPainter": true,
+            [FORMAT_PAINTER_COMMAND_ID]: true,
             "format.toggleWrapText": true,
             "home.alignment.topAlign": true,
             "home.alignment.middleAlign": true,
@@ -7336,6 +7361,20 @@ registerDesktopCommands({
   openCommandPalette: () => openCommandPalette?.(),
 });
 
+registerFormatPainterCommand({
+  commandRegistry,
+  isArmed: () => Boolean(formatPainterState),
+  arm: () => armFormatPainter(),
+  disarm: () => disarmFormatPainter(),
+  onCancel: () => {
+    try {
+      showToast("Format Painter cancelled");
+    } catch {
+      // ignore (toast root missing in non-UI test environments)
+    }
+  },
+});
+
 registerPageLayoutCommands({
   commandRegistry,
   handlers: {
@@ -8349,10 +8388,6 @@ function handleRibbonCommand(commandId: string): void {
         return;
       }
 
-      case "home.clipboard.formatPainter":
-        armFormatPainter();
-        return;
-
       case "view.appearance.theme.system":
         themeController.setThemePreference("system");
         scheduleRibbonSelectionFormatStateUpdate();
@@ -8373,7 +8408,6 @@ function handleRibbonCommand(commandId: string): void {
         scheduleRibbonSelectionFormatStateUpdate();
         app.focus();
         return;
-
       case "view.macros.viewMacros":
       case "view.macros.viewMacros.run":
       case "view.macros.viewMacros.edit":

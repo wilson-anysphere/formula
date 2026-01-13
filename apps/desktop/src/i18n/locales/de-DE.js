@@ -98,6 +98,7 @@ export const deDE = {
   "command.comments.togglePanel": "Kommentarpanel umschalten",
   "command.comments.addComment": "Kommentar hinzufügen",
   "command.edit.selectCurrentRegion": "Aktuellen Bereich auswählen",
+  "command.format.toggleFormatPainter": "Format übertragen",
   "commandDescription.view.togglePanel.aiChat": "Das KI-Chat-Panel ein-/ausblenden",
   "commandDescription.view.togglePanel.aiAudit": "Das KI-Audit-Panel ein-/ausblenden",
   "commandDescription.view.togglePanel.extensions": "Das Erweiterungen-Panel ein-/ausblenden",

@@ -41,7 +41,7 @@ export const homeTab: RibbonTabDefinition = {
         },
         { id: "clipboard.cut", label: "Cut", ariaLabel: "Cut", iconId: "cut", size: "icon" },
         { id: "clipboard.copy", label: "Copy", ariaLabel: "Copy", iconId: "copy", size: "icon" },
-        { id: "home.clipboard.formatPainter", label: "Format Painter", ariaLabel: "Format Painter", iconId: "formatPainter", size: "small" },
+        { id: "format.toggleFormatPainter", label: "Format Painter", ariaLabel: "Format Painter", iconId: "formatPainter", size: "small" },
         {
           id: "home.clipboard.clipboardPane",
           label: "Clipboard",

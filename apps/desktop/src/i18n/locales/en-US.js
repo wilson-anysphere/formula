@@ -255,6 +255,7 @@ export const enUS = {
   "command.format.toggleUnderline": "Underline",
   "command.format.toggleStrikethrough": "Strikethrough",
   "command.format.toggleWrapText": "Wrap Text",
+  "command.format.toggleFormatPainter": "Format Painter",
   "command.format.numberFormat.general": "General",
   "command.format.numberFormat.number": "Number",
   "command.format.fontSize.set": "Font Size…",

@@ -98,6 +98,7 @@ export const ar = {
   "command.comments.togglePanel": "تبديل لوحة التعليقات",
   "command.comments.addComment": "إضافة تعليق",
   "command.edit.selectCurrentRegion": "تحديد المنطقة الحالية",
+  "command.format.toggleFormatPainter": "نسخ التنسيق",
   "commandDescription.view.togglePanel.aiChat": "إظهار/إخفاء لوحة دردشة الذكاء الاصطناعي",
   "commandDescription.view.togglePanel.aiAudit": "إظهار/إخفاء لوحة تدقيق الذكاء الاصطناعي",
   "commandDescription.view.togglePanel.extensions": "إظهار/إخفاء لوحة الإضافات",
