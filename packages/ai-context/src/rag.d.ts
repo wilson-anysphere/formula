@@ -8,7 +8,7 @@ export interface RagSheet {
    *
    * When `values` is a cropped window of a larger sheet (e.g. a capped used-range
    * sample), `origin` lets schema extraction and RAG chunking produce correct
-   * absolute A1 ranges.
+   * absolute A1 ranges while slicing from the local matrix.
    */
   origin?: { row: number; col: number };
 }
@@ -139,4 +139,3 @@ export function rangeToChunk(
   range: { startRow: number; startCol: number; endRow: number; endCol: number },
   options?: { maxRows?: number },
 ): RagChunk<{ type: "range"; sheetName: string }>;
-

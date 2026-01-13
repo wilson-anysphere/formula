@@ -213,14 +213,16 @@ console.log(ctx.promptContext);
 // ⚠️ Footgun:
 // Avoid serializing `ctx.schema`, `ctx.sampledRows`, or `ctx.retrieved` directly into prompts.
 // Treat them as structured/diagnostic outputs unless you have redaction + policy checks.
+// When DLP is enabled and policy requires redaction, ContextManager will also redact these
+// structured fields before returning (defense-in-depth).
 ```
 
 ### What `buildContext()` returns
 
 - `promptContext` (string): **token-budgeted, redacted** context intended to be included in an LLM prompt.
-- `schema` (object): extracted sheet schema (may include sample values).
-- `sampledRows` (array): sampled rows (may include raw values).
-- `retrieved` (array): retrieved region previews (may include raw values).
+- `schema` (object): extracted sheet schema (may include sample values; redacted under DLP REDACT).
+- `sampledRows` (array): sampled rows (may include raw values; redacted under DLP REDACT).
+- `retrieved` (array): retrieved region previews (may include raw values; redacted under DLP REDACT).
 
 In most integrations, only `promptContext` should ever reach a cloud model.
 
