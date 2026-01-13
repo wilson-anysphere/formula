@@ -54,6 +54,16 @@ function formatScalar(value) {
 }
 
 /**
+ * Headers are rendered into `Header=value` pairs. Escape `=` so the output stays
+ * parseable when headers contain equals signs.
+ *
+ * @param {string} header
+ */
+function sanitizeHeaderLabel(header) {
+  return String(header).replace(/=/g, "≡").trim();
+}
+
+/**
  * Ensure header labels are unique so sample rows can be parsed as key/value pairs
  * without ambiguity (duplicate header names are common in messy spreadsheets).
  *
@@ -240,7 +250,7 @@ export function chunkToText(chunk, opts) {
       ? dedupeHeaders(
           Array.from({ length: Math.max(schemaColCount, rowColCount) }, (_, c) => {
           const h = formatScalar(cells[headerRow]?.[c]?.v);
-          return h || `Column${c + 1}`;
+          return sanitizeHeaderLabel(h || `Column${c + 1}`);
         })
         )
       : null;
@@ -291,6 +301,8 @@ export function chunkToText(chunk, opts) {
     if (preRows.length) {
       lines.push("PRE-HEADER ROWS:");
       for (const row of preRows) lines.push(`  - ${row}`);
+      const remaining = headerRow - maxPreRows;
+      if (remaining > 0) lines.push(`  - … (+${remaining} more pre-header rows)`);
     }
   }
 

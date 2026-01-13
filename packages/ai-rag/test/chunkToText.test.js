@@ -22,6 +22,24 @@ test("chunkToText renders labeled sample rows when a header row is detected", ()
   assert.match(text, /Units=10/);
 });
 
+test("chunkToText sanitizes '=' in header labels to keep key/value rows parseable", () => {
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 1 },
+    cells: [
+      [{ v: "A=B" }, { v: "Value" }],
+      [{ v: 1 }, { v: 2 }],
+    ],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /COLUMNS: A≡B/);
+  assert.match(text, /A≡B=1/);
+  assert.doesNotMatch(text, /A=B=1/);
+});
+
 test("chunkToText escapes '|' characters in cell text so row separators remain unambiguous", () => {
   const chunk = {
     kind: "table",
@@ -114,6 +132,28 @@ test("chunkToText detects header rows below a title row and preserves the title 
   assert.match(text, /Region=North/);
   assert.match(text, /Revenue=1200/);
   assert.match(text, /Units=10/);
+});
+
+test("chunkToText indicates when there are additional pre-header rows", () => {
+  const chunk = {
+    kind: "dataRegion",
+    title: "Data region A1:B6",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 5, c1: 1 },
+    cells: [
+      [{ v: "Revenue Summary" }, {}],
+      [{ v: "(as of 2024)" }, {}],
+      [],
+      [],
+      [{ v: "Region" }, { v: "Revenue" }],
+      [{ v: "North" }, { v: 1200 }],
+    ],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /PRE-HEADER ROWS:/);
+  assert.match(text, /… \(\+2 more pre-header rows\)/);
+  assert.match(text, /Region=North/);
 });
 
 test("chunkToText treats a sparse header row with blank columns as a header (not as data)", () => {
