@@ -421,14 +421,12 @@ fn normalize_oauth_redirect_request_urls(urls: Vec<String>) -> Vec<String> {
             .get(..8)
             .map_or(false, |prefix| prefix.eq_ignore_ascii_case("formula:"));
 
-        // Support RFC 8252 loopback redirects (http://127.0.0.1:<port>/...).
+        // Support RFC 8252 loopback redirects:
+        // - http://127.0.0.1:<port>/...
+        // - http://localhost:<port>/...
+        // - http://[::1]:<port>/...
         let is_loopback = if !is_formula {
-            Url::parse(trimmed)
-                .ok()
-                .filter(|url| url.scheme() == "http")
-                .filter(|url| url.host_str() == Some("127.0.0.1"))
-                .and_then(|url| url.port())
-                .is_some()
+            desktop::oauth_loopback::parse_loopback_redirect_uri(trimmed).is_ok()
         } else {
             false
         };

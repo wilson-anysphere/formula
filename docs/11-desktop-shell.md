@@ -547,31 +547,47 @@ Implementation notes:
 - When an open-file request is handled, `main.rs` **shows + focuses** the main window before emitting `open-file` so the request is visible to the user.
 - On macOS, `tauri::RunEvent::Opened { urls, .. }` is routed through the same pipeline so opening a document in Finder reaches the running instance.
 
-#### Deep links (`formula://...`) / OAuth redirects
+#### OAuth redirects (`formula://…` deep links vs RFC 8252 loopback)
 
-The desktop shell uses `tauri-plugin-deep-link` to **best-effort** register `formula://` as a custom URL scheme at runtime
-(`main.rs` calls `app.handle().deep_link().register("formula")`).
+Formula Desktop supports two redirect-capture strategies for OAuth (typically PKCE / auth-code flows):
 
-When the OS launches the app (or forwards an open-url event to a running instance) with a `formula://...` URL (e.g. an
-OAuth PKCE redirect), `main.rs` forwards it to the frontend by emitting:
+| Redirect URI in the auth request | How it’s captured | When to use |
+|---|---|---|
+| `formula://…` (custom scheme deep link) | OS launches/forwards a `formula://…` URL to the app (via `tauri-plugin-deep-link` + argv/single-instance handling); Rust forwards it to the frontend as `oauth-redirect` | **Preferred** when the provider allows custom schemes (no local port binding) |
+| `http://127.0.0.1:<port>/…`, `http://localhost:<port>/…`, or `http://[::1]:<port>/…` (loopback) | Frontend detects a loopback `redirect_uri` query param in the auth URL and calls the Rust command `oauth_loopback_listen` to start a temporary local HTTP listener; the listener forwards the observed redirect as `oauth-redirect` | Fallback for providers that reject custom schemes |
 
-- `oauth-redirect` (payload: string URL)
+**How the frontend chooses:** `DesktopOAuthBroker.openAuthUrl(...)` (`apps/desktop/src/power-query/oauthBroker.ts`) inspects the auth URL’s `redirect_uri` query param. If it is a supported loopback URI, it invokes `oauth_loopback_listen` **before** opening the system browser; otherwise it relies on `formula://…` deep-link delivery.
 
-Implementation notes:
+##### Supported loopback redirect URIs
 
-- Similar to open-file, `main.rs` maintains a small in-memory queue (`OauthRedirectState`) so redirects received *before* the frontend installs its listener aren’t lost.
-  - Backend emits: `oauth-redirect` (payload: `string` URL)
-  - Frontend emits: `oauth-redirect-ready` once its `listen("oauth-redirect", ...)` handler is installed, which flushes any queued URLs.
-- The frontend handles redirects in `apps/desktop/src/main.ts` (via the OAuth broker) without requiring manual copy/paste.
-- For OAuth providers that don't support custom URI schemes, the desktop broker also supports **RFC 8252 loopback redirects**:
-  - `http://127.0.0.1:<port>/...`
-  - `http://localhost:<port>/...`
-  - `http://[::1]:<port>/...`
-  - `DesktopOAuthBroker.openAuthUrl(...)` detects loopback `redirect_uri` parameters and invokes the `oauth_loopback_listen` command to start a temporary local HTTP listener in the Rust host.
-  - The listener emits the same `oauth-redirect` event when it receives the browser redirect.
-  - Notes:
-    - The redirect URI must include an explicit, non-zero port.
-    - The listener times out after 5 minutes.
+The loopback listener implementation (`oauth_loopback_listen` in `apps/desktop/src-tauri/src/main.rs`, parser in
+`apps/desktop/src-tauri/src/oauth_loopback.rs`) supports:
+
+- **Scheme:** `http` only (no `https`)
+- **Host:** `127.0.0.1`, `localhost`, or `[::1]`
+  - For `localhost`, the backend attempts both IPv4 and IPv6 bindings so platform resolver differences don’t break the flow.
+- **Port:** required and **non-zero**
+- **Path:** any, but the inbound request path must match the configured `redirect_uri` path exactly (mismatches return `404`)
+- **Query:** preserved and forwarded to the frontend
+- **Fragment (`#…`):** not supported (browsers don’t send URL fragments to loopback HTTP servers)
+- **Method:** `GET` only
+- **Lifetime:** listener stops after ~5 minutes (best-effort timeout)
+
+##### Redirect forwarding to the frontend (`oauth-redirect` + readiness handshake)
+
+Both deep-link and loopback flows end up as the same desktop event:
+
+- **Rust → frontend:** `oauth-redirect` (payload: full redirect URL string)
+- **Frontend → Rust:** `oauth-redirect-ready` once `listen("oauth-redirect", ...)` is installed (flushes any queued early redirects)
+
+The backend buffers early redirects in memory (`OauthRedirectState`) so fast redirects at cold start aren’t dropped. The frontend listener lives in `apps/desktop/src/main.ts` and forwards URLs into the in-process OAuth broker (`oauthBroker.observeRedirect(...)`).
+
+##### Troubleshooting
+
+- **Provider rejects `formula://…` redirect URIs:** use a loopback redirect and register one of `http://127.0.0.1:<port>/<path>`, `http://localhost:<port>/<path>`, or `http://[::1]:<port>/<path>` with the provider.
+- **Loopback listener fails to start / port already in use:** pick a different port. The Rust command returns an error like `Failed to bind loopback OAuth redirect listener on 127.0.0.1:<port>: ...` (or `localhost:` / `[::1]:` depending on the host).
+- **Redirect is received but auth doesn’t complete:** ensure the redirect URI used in the auth request matches exactly (scheme/host/port/path). The frontend matcher is strict about `pathname` (e.g. `/callback` vs `/callback/`).
+- **Using implicit flow (`#access_token` fragments):** loopback capture can only see query parameters; use auth-code + PKCE (code in the query string).
 
 #### Tray + app menu + global shortcuts
 
