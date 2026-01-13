@@ -585,17 +585,18 @@ alongside the installers. The file is structured roughly like:
 }
 ```
 
-Expected `{{target}}` values for this repo’s release matrix:
+Expected `{{target}}` / `latest.json.platforms` keys for this repo’s **tagged release** matrix (CI
+enforced; see `docs/desktop-updater-target-mapping.md`):
 
-- **macOS (universal):** `darwin-universal` (some toolchains use `universal-apple-darwin`) pointing
-  at the updater payload, typically an `.app.tar.gz`.
-- **Windows:** `windows-x86_64` (some toolchains use `x86_64-pc-windows-msvc`) and
-  `windows-aarch64` / `windows-arm64` (some toolchains use `aarch64-pc-windows-msvc`) — one entry per
-  architecture. Each entry points at the **updater-consumed** Windows installer (see
-  `docs/desktop-updater-target-mapping.md`; currently the updater entries should point at the
-  **`.msi`** for both x64 and ARM64).
-- **Linux:** `linux-x86_64` (some toolchains use `x86_64-unknown-linux-gnu`; points at the updater
-  payload, typically the `.AppImage`).
+- **macOS (universal):** `darwin-universal` → updater payload (typically an `.app.tar.gz`).
+- **Windows x64:** `windows-x86_64` → updater installer (currently the **`.msi`**).
+- **Windows ARM64:** `windows-aarch64` → updater installer (currently the **`.msi`**).
+- **Linux x86_64:** `linux-x86_64` → updater payload (typically the `.AppImage`).
+
+Local-note: when inspecting manifests from local builds or older tooling you may see alternate key
+spellings (for example Rust target triples like `x86_64-pc-windows-msvc` / `aarch64-pc-windows-msvc`
+or `universal-apple-darwin`). The local manifest checker (`node scripts/verify-tauri-latest-json.mjs --manifest ...`)
+canonicalizes common aliases, but tagged-release CI is intentionally strict about the canonical keys above.
 
 Note: `apps/desktop/src-tauri/tauri.conf.json` sets `bundle.targets: "all"`, which enables all
 supported bundlers for the current platform (including **MSI/WiX** + **NSIS** on Windows). CI still
