@@ -102,6 +102,21 @@ describe("defaultRibbonSchema", () => {
     ).toBe(true);
   });
 
+  it("wires Insert → PivotTable to the CommandRegistry command id (view.insertPivotTable)", () => {
+    const insertTab = defaultRibbonSchema.tabs.find((tab) => tab.id === "insert");
+    expect(insertTab, "Expected Insert tab to exist").toBeTruthy();
+    if (!insertTab) return;
+
+    const tablesGroup = insertTab.groups.find((group) => group.id === "insert.tables");
+    expect(tablesGroup, "Expected Insert → Tables group to exist").toBeTruthy();
+    if (!tablesGroup) return;
+
+    const pivot = tablesGroup.buttons.find((button) => button.testId === "ribbon-insert-pivot-table");
+    expect(pivot, "Expected PivotTable button to exist").toBeTruthy();
+    expect(pivot?.id).toBe("view.insertPivotTable");
+    expect(pivot?.menuItems?.[0]?.id).toBe("view.insertPivotTable");
+  });
+
   it("does not include legacy icon properties in the schema", () => {
     const offenders: string[] = [];
     for (const tab of defaultRibbonSchema.tabs) {
