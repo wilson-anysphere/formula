@@ -190,7 +190,7 @@ function main() {
 
   if (passwordMissing) {
     console.log(
-      `Updater signing secrets preflight passed (TAURI_KEY_PASSWORD is empty; assuming TAURI_PRIVATE_KEY is unencrypted).`
+      `Updater signing secrets preflight passed (TAURI_KEY_PASSWORD is empty; detected unencrypted TAURI_PRIVATE_KEY).`
     );
     return;
   }

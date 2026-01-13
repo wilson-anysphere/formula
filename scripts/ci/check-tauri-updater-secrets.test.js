@@ -76,3 +76,26 @@ test("passes with base64-encoded unencrypted PEM and empty password", () => {
   assert.equal(proc.status, 0, proc.stderr);
   assert.match(proc.stdout, /preflight passed/i);
 });
+
+test("requires TAURI_KEY_PASSWORD for encrypted PKCS#8 DER keys", () => {
+  const { privateKey } = generateKeyPairSync("ed25519");
+  const der = privateKey.export({
+    format: "der",
+    type: "pkcs8",
+    cipher: "aes-256-cbc",
+    passphrase: "pass",
+  });
+  const b64 = Buffer.from(der).toString("base64");
+
+  {
+    const proc = run({ TAURI_PRIVATE_KEY: b64, TAURI_KEY_PASSWORD: "" });
+    assert.notEqual(proc.status, 0);
+    assert.match(proc.stderr, /\bTAURI_KEY_PASSWORD\b/);
+  }
+
+  {
+    const proc = run({ TAURI_PRIVATE_KEY: b64, TAURI_KEY_PASSWORD: "pass" });
+    assert.equal(proc.status, 0, proc.stderr);
+    assert.match(proc.stdout, /preflight passed/i);
+  }
+});
