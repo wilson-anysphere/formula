@@ -115,6 +115,18 @@ maybeTest("SqliteVectorStore can reset persisted DB on dimension mismatch", asyn
   await store2.close();
 });
 
+maybeTest("SqliteVectorStore throws on dimension mismatch when resetOnDimensionMismatch=false", async () => {
+  const storage = new InMemoryBinaryStorage();
+
+  const store1 = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: true });
+  await store1.upsert([{ id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb" } }]);
+  await store1.close();
+
+  await expect(
+    SqliteVectorStore.create({ storage, dimension: 4, autoSave: false, resetOnDimensionMismatch: false })
+  ).rejects.toThrow(/dimension mismatch/i);
+});
+
 maybeTest("SqliteVectorStore.compact() VACUUMs and persists a smaller DB (even with autoSave:false)", async () => {
   const storage = new LocalStorageBinaryStorage({
     namespace: "formula.test.rag.sqlite",

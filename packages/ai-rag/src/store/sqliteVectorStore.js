@@ -198,10 +198,19 @@ export class SqliteVectorStore {
     const SQL = await getSqlJs(opts.locateFile);
 
     async function clearPersistedBytes() {
-      const remove = storage?.remove;
-      if (typeof remove !== "function") return;
       try {
-        await remove.call(storage);
+        const remove = storage?.remove;
+        if (typeof remove === "function") {
+          await remove.call(storage);
+          return;
+        }
+      } catch {
+        // ignore
+      }
+      // Older BinaryStorage implementations might not provide `remove()`. Overwrite
+      // with an empty payload to avoid retaining stale bytes.
+      try {
+        await storage.save(new Uint8Array());
       } catch {
         // ignore
       }
