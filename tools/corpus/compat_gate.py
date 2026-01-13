@@ -20,8 +20,28 @@ def _fmt_rate(passed: int, total: int) -> str:
     return f"{passed}/{total} ({rate:.2%})"
 
 
+def _fmt_pct(rate: float | None) -> str:
+    if rate is None:
+        return "SKIP"
+    return f"{rate:.2%}"
+
+
 def _get_int(obj: dict[str, Any], key: str) -> int:
     val = obj.get(key)
+    if isinstance(val, bool):
+        # Guard against accidentally treating booleans as integers.
+        raise TypeError(f"summary.json field {key!r} must be an int, got bool")
+    if isinstance(val, (int, float)):
+        return int(val)
+    raise TypeError(f"summary.json field {key!r} must be an int, got {type(val).__name__}")
+
+
+def _get_optional_int(obj: dict[str, Any], key: str) -> int | None:
+    if key not in obj:
+        return None
+    val = obj.get(key)
+    if val is None:
+        return None
     if isinstance(val, bool):
         # Guard against accidentally treating booleans as integers.
         raise TypeError(f"summary.json field {key!r} must be an int, got bool")
@@ -97,6 +117,10 @@ def main(argv: list[str] | None = None) -> int:
         calc_ok = _get_int(counts, "calculate_ok")
         render_ok = _get_int(counts, "render_ok")
         rt_ok = _get_int(counts, "round_trip_ok")
+        # Newer summaries include `*_attempted` so calculate/render are measured among attempted
+        # workbooks only. Older summaries implicitly treated all workbooks as attempted.
+        calc_attempted = _get_optional_int(counts, "calculate_attempted")
+        render_attempted = _get_optional_int(counts, "render_attempted")
     except Exception as e:  # noqa: BLE001 (tooling)
         print(f"CORPUS GATE ERROR: Invalid counts in {summary_path}: {e}")
         return 2
@@ -107,10 +131,46 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    # Back-compat: older summaries did not include `*_attempted`.
+    if calc_attempted is None:
+        calc_attempted = total
+    if render_attempted is None:
+        render_attempted = total
+
+    if calc_attempted < 0 or calc_attempted > total:
+        print(
+            "CORPUS GATE ERROR: Invalid counts in summary.json: "
+            f"calculate_attempted={calc_attempted} must be in [0, total={total}]"
+        )
+        return 2
+    if render_attempted < 0 or render_attempted > total:
+        print(
+            "CORPUS GATE ERROR: Invalid counts in summary.json: "
+            f"render_attempted={render_attempted} must be in [0, total={total}]"
+        )
+        return 2
+
+    if args.min_calc_rate is not None and calc_attempted == 0:
+        print(
+            "CORPUS GATE ERROR: --min-calc-rate was set but no calculate results were attempted "
+            "(counts.calculate_attempted=0). Either enable the calculate step in triage or "
+            "remove --min-calc-rate."
+        )
+        return 2
+
+    if args.min_render_rate is not None and render_attempted == 0:
+        print(
+            "CORPUS GATE ERROR: --min-render-rate was set but no render results were attempted "
+            "(counts.render_attempted=0). Either enable the render step in triage or "
+            "remove --min-render-rate."
+        )
+        return 2
+
     actual = {
         "open": _rate(open_ok, total),
-        "calculate": _rate(calc_ok, total),
-        "render": _rate(render_ok, total),
+        # Calculate/render are optional steps: compute rates among attempted workbooks only.
+        "calculate": (calc_ok / calc_attempted) if calc_attempted else None,
+        "render": (render_ok / render_attempted) if render_attempted else None,
         "round_trip": _rate(rt_ok, total),
     }
 
@@ -132,13 +192,20 @@ def main(argv: list[str] | None = None) -> int:
     for metric, min_rate in thresholds.items():
         if min_rate is None:
             continue
-        if actual[metric] + 1e-12 < min_rate:
+        metric_rate = actual[metric]
+        if metric_rate is None:
+            # Should be unreachable because we guard config errors above, but keep this safe.
+            violations.append(
+                f"{labels[metric]} SKIP (0 attempted) < min {min_rate:.2%}"
+            )
+            continue
+        if metric_rate + 1e-12 < min_rate:
             if metric == "open":
                 details = _fmt_rate(open_ok, total)
             elif metric == "calculate":
-                details = _fmt_rate(calc_ok, total)
+                details = _fmt_rate(calc_ok, calc_attempted)
             elif metric == "render":
-                details = _fmt_rate(render_ok, total)
+                details = _fmt_rate(render_ok, render_attempted)
             else:
                 details = _fmt_rate(rt_ok, total)
             violations.append(
@@ -152,10 +219,10 @@ def main(argv: list[str] | None = None) -> int:
             "Actual rates: "
             + ", ".join(
                 [
-                    f"open={actual['open']:.2%}",
-                    f"round-trip={actual['round_trip']:.2%}",
-                    f"calculate={actual['calculate']:.2%}",
-                    f"render={actual['render']:.2%}",
+                    f"open={_fmt_pct(actual['open'])}",
+                    f"round-trip={_fmt_pct(actual['round_trip'])}",
+                    f"calculate={_fmt_pct(actual['calculate'])}",
+                    f"render={_fmt_pct(actual['render'])}",
                 ]
             )
         )

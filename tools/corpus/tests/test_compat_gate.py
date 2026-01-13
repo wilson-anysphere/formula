@@ -41,6 +41,179 @@ class CompatGateTests(unittest.TestCase):
                 )
             self.assertEqual(rc, 0, buf.getvalue())
 
+    def test_calc_rate_uses_attempted_denominator(self) -> None:
+        # When calculate is skipped for some workbooks, the rate should be computed among
+        # attempted workbooks only (not total corpus size).
+        with tempfile.TemporaryDirectory() as td:
+            summary_path = Path(td) / "summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "counts": {
+                            "total": 10,
+                            "open_ok": 10,
+                            "calculate_ok": 8,
+                            "calculate_attempted": 8,
+                            "render_ok": 0,
+                            "round_trip_ok": 10,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = main(
+                    [
+                        "--summary-json",
+                        str(summary_path),
+                        "--min-calc-rate",
+                        "0.90",
+                    ]
+                )
+            self.assertEqual(rc, 0, buf.getvalue())
+
+    def test_render_rate_uses_attempted_denominator(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            summary_path = Path(td) / "summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "counts": {
+                            "total": 10,
+                            "open_ok": 10,
+                            "calculate_ok": 0,
+                            "render_ok": 7,
+                            "render_attempted": 7,
+                            "round_trip_ok": 10,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = main(
+                    [
+                        "--summary-json",
+                        str(summary_path),
+                        "--min-render-rate",
+                        "0.90",
+                    ]
+                )
+            self.assertEqual(rc, 0, buf.getvalue())
+
+    def test_calc_render_violation_details_use_attempted_denominators(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            summary_path = Path(td) / "summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "counts": {
+                            "total": 10,
+                            "open_ok": 10,
+                            "calculate_ok": 7,
+                            "calculate_attempted": 8,
+                            "render_ok": 8,
+                            "render_attempted": 9,
+                            "round_trip_ok": 10,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = main(
+                    [
+                        "--summary-json",
+                        str(summary_path),
+                        "--min-calc-rate",
+                        "0.90",
+                        "--min-render-rate",
+                        "0.90",
+                    ]
+                )
+            out = buf.getvalue()
+            self.assertEqual(rc, 1, out)
+            # Violations should be reported as ok/attempted, not ok/total.
+            first_line = out.splitlines()[0] if out else ""
+            self.assertIn("calculate 7/8", first_line)
+            self.assertIn("render 8/9", first_line)
+            self.assertNotIn("calculate 7/10", out)
+            self.assertNotIn("render 8/10", out)
+
+    def test_calc_attempted_zero_is_configuration_error_when_threshold_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            summary_path = Path(td) / "summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "counts": {
+                            "total": 10,
+                            "open_ok": 10,
+                            "calculate_ok": 0,
+                            "calculate_attempted": 0,
+                            "render_ok": 0,
+                            "round_trip_ok": 10,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = main(
+                    [
+                        "--summary-json",
+                        str(summary_path),
+                        "--min-calc-rate",
+                        "0.01",
+                    ]
+                )
+            out = buf.getvalue()
+            self.assertEqual(rc, 2, out)
+            self.assertIn("CORPUS GATE ERROR", out)
+            self.assertIn("calculate_attempted=0", out)
+
+    def test_render_attempted_zero_is_configuration_error_when_threshold_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            summary_path = Path(td) / "summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "counts": {
+                            "total": 10,
+                            "open_ok": 10,
+                            "calculate_ok": 0,
+                            "render_ok": 0,
+                            "render_attempted": 0,
+                            "round_trip_ok": 10,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = main(
+                    [
+                        "--summary-json",
+                        str(summary_path),
+                        "--min-render-rate",
+                        "0.01",
+                    ]
+                )
+            out = buf.getvalue()
+            self.assertEqual(rc, 2, out)
+            self.assertIn("CORPUS GATE ERROR", out)
+            self.assertIn("render_attempted=0", out)
+
     def test_gate_fails_when_rates_drop_below_thresholds(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             summary_path = Path(td) / "summary.json"
