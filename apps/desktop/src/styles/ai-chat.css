@@ -278,15 +278,7 @@
 }
 
 .ai-chat-approval-modal__tool-name {
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Monaco,
-    Consolas,
-    "Liberation Mono",
-    "Courier New",
-    monospace;
+  font-family: var(--font-mono);
 }
 
 .ai-chat-approval-modal__body {
@@ -377,4 +369,3 @@
   background: var(--accent);
   color: var(--text-on-accent);
 }
-

@@ -18,6 +18,8 @@ test("tokens.css defines required design tokens", () => {
   }
 
   const required = [
+    "font-sans",
+    "font-mono",
     "bg-primary",
     "bg-secondary",
     "bg-tertiary",

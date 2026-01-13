@@ -9,12 +9,7 @@ html,
 body {
   height: 100%;
   margin: 0;
-  font-family:
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    Roboto,
-    sans-serif;
+  font-family: var(--font-sans);
   background: var(--bg-primary);
   color: var(--text-primary);
 }
@@ -236,12 +231,7 @@ dialog.print-preview-dialog::backdrop {
   border-radius: 2px;
   background: var(--bg-primary);
   color: var(--text-primary);
-  font:
-    12px/12px system-ui,
-    -apple-system,
-    "Segoe UI",
-    Roboto,
-    sans-serif;
+  font: 12px/12px var(--font-sans);
   cursor: pointer;
 }
 
@@ -261,12 +251,7 @@ dialog.print-preview-dialog::backdrop {
   border: 2px solid var(--accent);
   outline: none;
   resize: none;
-  font:
-    14px/20px system-ui,
-    -apple-system,
-    "Segoe UI",
-    Roboto,
-    sans-serif;
+  font: 14px/20px var(--font-sans);
   background: var(--bg-primary);
   color: var(--text-primary);
   overflow: hidden;
@@ -373,15 +358,7 @@ dialog.print-preview-dialog::backdrop {
 }
 
 .statusbar code {
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Monaco,
-    Consolas,
-    "Liberation Mono",
-    "Courier New",
-    monospace;
+  font-family: var(--font-mono);
   color: var(--text-primary);
 }
 

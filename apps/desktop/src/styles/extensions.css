@@ -223,15 +223,7 @@
   font-size: 12px;
   color: var(--text-secondary);
   white-space: nowrap;
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Monaco,
-    Consolas,
-    "Liberation Mono",
-    "Courier New",
-    monospace;
+  font-family: var(--font-mono);
 }
 
 .extensions-panel__command-id {
