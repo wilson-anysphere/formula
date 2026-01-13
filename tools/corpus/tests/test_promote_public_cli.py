@@ -220,6 +220,35 @@ class PromotePublicCLITests(unittest.TestCase):
                     rc = promote_mod.main()
             self.assertEqual(rc, 1)
 
+    def test_main_fails_gracefully_on_non_xlsx_input(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="promote-public-cli-test-") as td:
+            tmp = Path(td)
+            public_dir = tmp / "public"
+            triage_out = tmp / "triage"
+            input_path = tmp / "input.xlsx"
+            input_path.write_text("not a zip", encoding="utf-8")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                with unittest.mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "promote_public.py",
+                        "--input",
+                        str(input_path),
+                        "--name",
+                        "case",
+                        "--public-dir",
+                        str(public_dir),
+                        "--triage-out",
+                        str(triage_out),
+                    ],
+                ):
+                    rc = promote_mod.main()
+            self.assertEqual(rc, 1)
+            self.assertIn("Leak scan failed", stdout.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

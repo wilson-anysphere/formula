@@ -273,7 +273,12 @@ def main() -> int:
             return 1
 
     if not args.confirm_sanitized:
-        scan = scan_xlsx_bytes_for_leaks(workbook_bytes, plaintext_strings=args.leak_scan_string)
+        try:
+            scan = scan_xlsx_bytes_for_leaks(workbook_bytes, plaintext_strings=args.leak_scan_string)
+        except Exception as e:  # noqa: BLE001
+            # Avoid tracebacks for common user errors (e.g. input is not a valid XLSX zip).
+            print(f"Leak scan failed: {e}")
+            return 1
         if not scan.ok:
             print(
                 f"Leak scan failed ({len(scan.findings)} findings); refusing to promote to public corpus."
@@ -287,7 +292,11 @@ def main() -> int:
     expectations_path = public_dir / "expectations.json"
 
     # 1) Run triage against the exact bytes we intend to publish.
-    report = _run_public_triage(WorkbookInput(display_name=display_name, data=workbook_bytes))
+    try:
+        report = _run_public_triage(WorkbookInput(display_name=display_name, data=workbook_bytes))
+    except Exception as e:  # noqa: BLE001
+        print(f"Triage failed: {e}")
+        return 1
 
     triage_out: Path = args.triage_out
     ensure_dir(triage_out)
