@@ -138,6 +138,8 @@ function hasValidPhoneNumber(text) {
   PHONE_INTL_CANDIDATE_RE.lastIndex = 0;
   for (let match; (match = PHONE_INTL_CANDIDATE_RE.exec(text)); ) {
     const candidate = match[2] ?? match[0];
+    // Avoid formula noise like `=+12345678901` (common Excel/Sheets pattern).
+    if (match.index === 0 && match[1] === "=") continue;
     if (isValidPhone(candidate)) return true;
   }
   PHONE_US_CANDIDATE_RE.lastIndex = 0;
@@ -268,7 +270,9 @@ export function redactText(text) {
       if (!extracted) return match;
       return `[REDACTED_IBAN]${extracted.suffix}`;
     })
-    .replace(PHONE_INTL_CANDIDATE_RE, (match, prefix, candidate) => {
+    .replace(PHONE_INTL_CANDIDATE_RE, (match, prefix, candidate, offset) => {
+      // Avoid formula noise like `=+12345678901` (common Excel/Sheets pattern).
+      if (offset === 0 && prefix === "=") return match;
       if (!candidate || !isValidPhone(candidate)) return match;
       return `${prefix}[REDACTED_PHONE]`;
     })

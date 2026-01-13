@@ -42,6 +42,12 @@ describe("dlp heuristic", () => {
     expect(redactText(formulaLike)).toBe(formulaLike);
   });
 
+  it("does not treat Excel-style '=+<number>' formulas like phone numbers", () => {
+    const formulaLike = "=+12345678901";
+    expect(classifyText(formulaLike).findings).not.toContain("phone_number");
+    expect(redactText(formulaLike)).toBe(formulaLike);
+  });
+
   it("detects common API keys/tokens with conservative patterns", () => {
     const awsAccessKeyId = "AKIAIOSFODNN7EXAMPLE";
     const ghToken = "ghp_123456789012345678901234567890123456";
