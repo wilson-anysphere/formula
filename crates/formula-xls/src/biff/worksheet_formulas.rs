@@ -13,6 +13,10 @@
 
 #![allow(dead_code)]
 
+use std::collections::{HashMap, HashSet};
+
+use formula_model::{CellRef, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
+
 use super::records;
 
 // Worksheet record ids (BIFF8).
@@ -20,9 +24,68 @@ use super::records;
 // - FORMULA: 2.4.127 (0x0006)
 // - ARRAY: 2.4.19 (0x0221)
 // - SHRFMLA: 2.4.276 (0x04BC)
+// - TABLE: 2.4.328 (0x0236)
 pub(crate) const RECORD_FORMULA: u16 = 0x0006;
 pub(crate) const RECORD_ARRAY: u16 = 0x0221;
 pub(crate) const RECORD_SHRFMLA: u16 = 0x04BC;
+pub(crate) const RECORD_TABLE: u16 = 0x0236;
+
+/// BIFF8 `FORMULA.grbit` bitfield.
+///
+/// We only decode the subset needed to disambiguate `PtgExp`/`PtgTbl` resolution.
+///
+/// [MS-XLS] 2.4.127 (FORMULA) specifies these relevant bits:
+/// - `0x0008` (`fShrFmla`): the formula is part of a shared formula group (expects `SHRFMLA` + `PtgExp`)
+/// - `0x0010` (`fArray`): the formula is part of an array formula (expects `ARRAY` + `PtgExp`)
+/// - `0x0020` (`fTbl`): the formula is part of a data table (expects `TABLE` + `PtgTbl`)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FormulaGrbit(pub(crate) u16);
+
+impl FormulaGrbit {
+    pub(crate) const F_SHR_FMLA: u16 = 0x0008;
+    pub(crate) const F_ARRAY: u16 = 0x0010;
+    pub(crate) const F_TBL: u16 = 0x0020;
+
+    pub(crate) fn is_shared(self) -> bool {
+        (self.0 & Self::F_SHR_FMLA) != 0
+    }
+
+    pub(crate) fn is_array(self) -> bool {
+        (self.0 & Self::F_ARRAY) != 0
+    }
+
+    pub(crate) fn is_table(self) -> bool {
+        (self.0 & Self::F_TBL) != 0
+    }
+
+    /// Returns a single, unambiguous membership hint if exactly one of `fShrFmla`, `fArray`, or
+    /// `fTbl` is set.
+    pub(crate) fn membership_hint(self) -> Option<FormulaMembershipHint> {
+        let mut out: Option<FormulaMembershipHint> = None;
+        let mut count = 0usize;
+        if self.is_shared() {
+            out = Some(FormulaMembershipHint::Shared);
+            count += 1;
+        }
+        if self.is_array() {
+            out = Some(FormulaMembershipHint::Array);
+            count += 1;
+        }
+        if self.is_table() {
+            out = Some(FormulaMembershipHint::Table);
+            count += 1;
+        }
+
+        (count == 1).then_some(out.expect("count==1 implies out set"))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum FormulaMembershipHint {
+    Shared,
+    Array,
+    Table,
+}
 
 // BIFF8 string option flags used by ShortXLUnicodeString.
 // See [MS-XLS] 2.5.293.
@@ -35,6 +98,7 @@ pub(crate) struct ParsedFormulaRecord {
     pub(crate) row: u16,
     pub(crate) col: u16,
     pub(crate) xf: u16,
+    pub(crate) grbit: FormulaGrbit,
     pub(crate) rgce: Vec<u8>,
 }
 
@@ -59,13 +123,21 @@ pub(crate) fn parse_biff8_formula_record(
     let col = cursor.read_u16_le()?;
     let xf = cursor.read_u16_le()?;
 
-    // Skip cached result (8), flags (2), and calc chain (4).
-    cursor.skip_bytes(8 + 2 + 4)?;
+    // Skip cached result (8), read flags/grbit (2), skip calc chain (4).
+    cursor.skip_bytes(8)?;
+    let grbit = FormulaGrbit(cursor.read_u16_le()?);
+    cursor.skip_bytes(4)?;
 
     let cce = cursor.read_u16_le()? as usize;
     let rgce = cursor.read_biff8_rgce(cce)?;
 
-    Ok(ParsedFormulaRecord { row, col, xf, rgce })
+    Ok(ParsedFormulaRecord {
+        row,
+        col,
+        xf,
+        grbit,
+        rgce,
+    })
 }
 
 pub(crate) fn parse_biff8_shrfmla_record(
@@ -111,6 +183,442 @@ pub(crate) fn parse_biff8_array_record(
     }
 
     Err("unrecognized ARRAY record layout".to_string())
+}
+
+/// Parsed BIFF8 worksheet formula cell payload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Biff8FormulaCell {
+    pub(crate) cell: CellRef,
+    /// Raw `FORMULA.grbit` flags.
+    pub(crate) grbit: FormulaGrbit,
+    /// Raw formula token stream (`rgce`).
+    pub(crate) rgce: Vec<u8>,
+}
+
+/// Minimal parsed representation of a BIFF8 SHRFMLA record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Biff8ShrFmlaRecord {
+    pub(crate) range: (CellRef, CellRef),
+    pub(crate) rgce: Vec<u8>,
+}
+
+/// Minimal parsed representation of a BIFF8 ARRAY record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Biff8ArrayRecord {
+    pub(crate) range: (CellRef, CellRef),
+    pub(crate) rgce: Vec<u8>,
+}
+
+/// Minimal parsed representation of a BIFF8 TABLE record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Biff8TableRecord {
+    pub(crate) range: (CellRef, CellRef),
+    /// Raw TABLE record payload (best-effort; preserved for diagnostics).
+    pub(crate) data: Vec<u8>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ParsedBiff8WorksheetFormulas {
+    pub(crate) formula_cells: HashMap<CellRef, Biff8FormulaCell>,
+    /// Shared formula definitions keyed by the anchor/base cell (top-left of `range`).
+    pub(crate) shrfmla: HashMap<CellRef, Biff8ShrFmlaRecord>,
+    /// Array formula definitions keyed by the anchor/base cell (top-left of `range`).
+    pub(crate) array: HashMap<CellRef, Biff8ArrayRecord>,
+    /// Data table definitions keyed by the anchor/base cell (top-left of `range`).
+    pub(crate) table: HashMap<CellRef, Biff8TableRecord>,
+    /// Non-fatal issues encountered during parse/resolution.
+    pub(crate) warnings: Vec<crate::ImportWarning>,
+}
+
+fn warn(warnings: &mut Vec<crate::ImportWarning>, msg: impl Into<String>) {
+    warnings.push(crate::ImportWarning {
+        message: msg.into(),
+    })
+}
+
+fn parse_cell_ref_u16(row: u16, col: u16) -> Option<CellRef> {
+    let row = row as u32;
+    let col = col as u32;
+    if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
+        return None;
+    }
+    Some(CellRef::new(row, col))
+}
+
+// `Ref8` columns can carry flags in their high bits; mask down to the 14-bit payload.
+const REF8_COL_MASK: u16 = 0x3FFF;
+
+fn parse_ref8(data: &[u8]) -> Option<(u16, u16, u16, u16)> {
+    let chunk = data.get(0..8)?;
+    let rw_first = u16::from_le_bytes([chunk[0], chunk[1]]);
+    let rw_last = u16::from_le_bytes([chunk[2], chunk[3]]);
+    let col_first_raw = u16::from_le_bytes([chunk[4], chunk[5]]);
+    let col_last_raw = u16::from_le_bytes([chunk[6], chunk[7]]);
+    let col_first = col_first_raw & REF8_COL_MASK;
+    let col_last = col_last_raw & REF8_COL_MASK;
+    if rw_first > rw_last || col_first > col_last {
+        return None;
+    }
+    Some((rw_first, rw_last, col_first, col_last))
+}
+
+fn parse_refu(data: &[u8]) -> Option<(u16, u16, u16, u16)> {
+    let chunk = data.get(0..6)?;
+    let rw_first = u16::from_le_bytes([chunk[0], chunk[1]]);
+    let rw_last = u16::from_le_bytes([chunk[2], chunk[3]]);
+    let col_first = chunk[4] as u16;
+    let col_last = chunk[5] as u16;
+    if rw_first > rw_last || col_first > col_last {
+        return None;
+    }
+    Some((rw_first, rw_last, col_first, col_last))
+}
+
+fn parse_ref_any(data: &[u8]) -> Option<(u16, u16, u16, u16)> {
+    // Prefer Ref8 when it decodes to "classic" `.xls` column bounds (<=255). Some producers store
+    // Ref8 even when RefU would suffice.
+    if let Some(r) = parse_ref8(data) {
+        if r.2 <= 0x00FF && r.3 <= 0x00FF {
+            return Some(r);
+        }
+    }
+
+    parse_refu(data).or_else(|| parse_ref8(data))
+}
+
+fn parse_ref_any_best_effort(data: &[u8]) -> Option<(CellRef, CellRef)> {
+    let (rw_first, rw_last, col_first, col_last) = parse_ref_any(data)?;
+    let start = parse_cell_ref_u16(rw_first, col_first)?;
+    let end = parse_cell_ref_u16(rw_last, col_last)?;
+    Some((start, end))
+}
+
+/// Best-effort parsing of a BIFF8 worksheet substream's formula-related records.
+///
+/// This collects:
+/// - Cell `FORMULA` records (including `grbit`)
+/// - Shared formula `SHRFMLA` definitions
+/// - Array formula `ARRAY` definitions
+/// - Data table `TABLE` definitions
+pub(crate) fn parse_biff8_worksheet_formulas(
+    workbook_stream: &[u8],
+    start: usize,
+) -> Result<ParsedBiff8WorksheetFormulas, String> {
+    let mut out = ParsedBiff8WorksheetFormulas::default();
+
+    let allows_continuation = |id: u16| {
+        id == RECORD_FORMULA || id == RECORD_SHRFMLA || id == RECORD_ARRAY || id == RECORD_TABLE
+    };
+    let mut iter = records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
+
+    while let Some(next) = iter.next() {
+        let record = match next {
+            Ok(r) => r,
+            Err(err) => {
+                warn(
+                    &mut out.warnings,
+                    format!("malformed BIFF record in worksheet stream: {err}"),
+                );
+                break;
+            }
+        };
+
+        if record.offset != start && records::is_bof_record(record.record_id) {
+            break;
+        }
+        if record.record_id == records::RECORD_EOF {
+            break;
+        }
+
+        match record.record_id {
+            RECORD_FORMULA => match parse_biff8_formula_record(&record) {
+                Ok(parsed_formula) => {
+                    let Some(cell) = parse_cell_ref_u16(parsed_formula.row, parsed_formula.col) else {
+                        continue;
+                    };
+                    out.formula_cells.insert(
+                        cell,
+                        Biff8FormulaCell {
+                            cell,
+                            grbit: parsed_formula.grbit,
+                            rgce: parsed_formula.rgce,
+                        },
+                    );
+                }
+                Err(err) => warn(
+                    &mut out.warnings,
+                    format!(
+                        "failed to parse FORMULA record at offset {}: {err}",
+                        record.offset
+                    ),
+                ),
+            },
+            RECORD_SHRFMLA => {
+                let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
+                    warn(
+                        &mut out.warnings,
+                        format!(
+                            "failed to parse SHRFMLA range at offset {} (len={})",
+                            record.offset,
+                            record.data.len()
+                        ),
+                    );
+                    continue;
+                };
+                let anchor = range.0;
+                match parse_biff8_shrfmla_record(&record) {
+                    Ok(parsed) => {
+                        out.shrfmla.insert(
+                            anchor,
+                            Biff8ShrFmlaRecord {
+                                range,
+                                rgce: parsed.rgce,
+                            },
+                        );
+                    }
+                    Err(err) => warn(
+                        &mut out.warnings,
+                        format!(
+                            "failed to parse SHRFMLA record at offset {}: {err}",
+                            record.offset
+                        ),
+                    ),
+                }
+            }
+            RECORD_ARRAY => {
+                let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
+                    warn(
+                        &mut out.warnings,
+                        format!(
+                            "failed to parse ARRAY range at offset {} (len={})",
+                            record.offset,
+                            record.data.len()
+                        ),
+                    );
+                    continue;
+                };
+                let anchor = range.0;
+                match parse_biff8_array_record(&record) {
+                    Ok(parsed) => {
+                        out.array.insert(
+                            anchor,
+                            Biff8ArrayRecord {
+                                range,
+                                rgce: parsed.rgce,
+                            },
+                        );
+                    }
+                    Err(err) => warn(
+                        &mut out.warnings,
+                        format!("failed to parse ARRAY record at offset {}: {err}", record.offset),
+                    ),
+                }
+            }
+            RECORD_TABLE => {
+                let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
+                    warn(
+                        &mut out.warnings,
+                        format!(
+                            "failed to parse TABLE range at offset {} (len={})",
+                            record.offset,
+                            record.data.len()
+                        ),
+                    );
+                    continue;
+                };
+                let anchor = range.0;
+                out.table.insert(
+                    anchor,
+                    Biff8TableRecord {
+                        range,
+                        data: record.data.as_ref().to_vec(),
+                    },
+                );
+            }
+            _ => {}
+        }
+    }
+
+    Ok(out)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LeadingPtg {
+    /// `PtgExp` (0x01): points at a shared/array formula definition.
+    Exp { base: CellRef },
+    /// `PtgTbl` (0x02): points at a data table definition.
+    Tbl { base: CellRef },
+    Other,
+    Empty,
+}
+
+fn decode_leading_ptg(rgce: &[u8]) -> LeadingPtg {
+    if rgce.is_empty() {
+        return LeadingPtg::Empty;
+    }
+
+    match rgce[0] {
+        0x01 | 0x02 => {
+            if rgce.len() < 5 {
+                return LeadingPtg::Other;
+            }
+            let row = u16::from_le_bytes([rgce[1], rgce[2]]);
+            let col = u16::from_le_bytes([rgce[3], rgce[4]]);
+            let Some(base) = parse_cell_ref_u16(row, col) else {
+                return LeadingPtg::Other;
+            };
+            if rgce[0] == 0x01 {
+                LeadingPtg::Exp { base }
+            } else {
+                LeadingPtg::Tbl { base }
+            }
+        }
+        _ => LeadingPtg::Other,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PtgReferenceResolution {
+    /// No PtgExp/PtgTbl indirection; use the cell's own `rgce`.
+    None,
+    Shared { base: CellRef },
+    Array { base: CellRef },
+    Table { base: CellRef },
+    /// `PtgExp`/`PtgTbl` present but no suitable backing record could be found.
+    Unresolved,
+}
+
+/// Resolve a BIFF8 `FORMULA.rgce` that begins with `PtgExp` or `PtgTbl` into a backing record type.
+///
+/// This is best-effort and uses [`FormulaGrbit`] flags as a hint to disambiguate whether `PtgExp`
+/// should resolve via `SHRFMLA` (shared formula) vs `ARRAY` (array formula).
+pub(crate) fn resolve_ptgexp_or_ptgtbl_best_effort(
+    parsed: &ParsedBiff8WorksheetFormulas,
+    cell: &Biff8FormulaCell,
+    warnings: &mut Vec<crate::ImportWarning>,
+) -> PtgReferenceResolution {
+    let leading = decode_leading_ptg(&cell.rgce);
+    let base = match leading {
+        LeadingPtg::Exp { base } | LeadingPtg::Tbl { base } => Some(base),
+        _ => None,
+    };
+
+    let hint = cell.grbit.membership_hint();
+
+    // Warn on inconsistent flag/token combinations (but keep decoding best-effort).
+    match (hint, leading) {
+        (Some(FormulaMembershipHint::Table), LeadingPtg::Tbl { .. }) => {}
+        (Some(FormulaMembershipHint::Table), _) => warn(
+            warnings,
+            format!(
+                "formula {} has grbit.fTbl set but rgce does not start with PtgTbl",
+                cell.cell.to_a1()
+            ),
+        ),
+        (
+            Some(FormulaMembershipHint::Shared) | Some(FormulaMembershipHint::Array),
+            LeadingPtg::Exp { .. },
+        ) => {}
+        (Some(FormulaMembershipHint::Shared), _) => warn(
+            warnings,
+            format!(
+                "formula {} has grbit.fShrFmla set but rgce does not start with PtgExp",
+                cell.cell.to_a1()
+            ),
+        ),
+        (Some(FormulaMembershipHint::Array), _) => warn(
+            warnings,
+            format!(
+                "formula {} has grbit.fArray set but rgce does not start with PtgExp",
+                cell.cell.to_a1()
+            ),
+        ),
+        _ => {}
+    }
+
+    // Candidate resolution order:
+    // 1) Flag-indicated membership (if unambiguous)
+    // 2) Token-based heuristics (`PtgExp` -> prefer SHRFMLA then ARRAY; `PtgTbl` -> TABLE)
+    let mut order: Vec<FormulaMembershipHint> = Vec::new();
+    if let Some(h) = hint {
+        order.push(h);
+    }
+    match leading {
+        LeadingPtg::Exp { .. } => {
+            order.push(FormulaMembershipHint::Shared);
+            order.push(FormulaMembershipHint::Array);
+        }
+        LeadingPtg::Tbl { .. } => {
+            order.push(FormulaMembershipHint::Table);
+        }
+        LeadingPtg::Empty | LeadingPtg::Other => {}
+    }
+    // Deduplicate while preserving first occurrence (small vector).
+    let mut seen = HashSet::new();
+    order.retain(|k| seen.insert(*k));
+
+    let Some(base) = base else {
+        return match leading {
+            LeadingPtg::Empty | LeadingPtg::Other => PtgReferenceResolution::None,
+            _ => PtgReferenceResolution::Unresolved,
+        };
+    };
+
+    for kind in order {
+        match kind {
+            FormulaMembershipHint::Shared => {
+                if parsed.shrfmla.contains_key(&base) {
+                    return PtgReferenceResolution::Shared { base };
+                }
+                if hint == Some(FormulaMembershipHint::Shared) {
+                    warn(
+                        warnings,
+                        format!(
+                            "formula {} indicates shared formula membership (grbit.fShrFmla), but no SHRFMLA record was found for base {}",
+                            cell.cell.to_a1(),
+                            base.to_a1()
+                        ),
+                    );
+                }
+            }
+            FormulaMembershipHint::Array => {
+                if parsed.array.contains_key(&base) {
+                    return PtgReferenceResolution::Array { base };
+                }
+                if hint == Some(FormulaMembershipHint::Array) {
+                    warn(
+                        warnings,
+                        format!(
+                            "formula {} indicates array formula membership (grbit.fArray), but no ARRAY record was found for base {}",
+                            cell.cell.to_a1(),
+                            base.to_a1()
+                        ),
+                    );
+                }
+            }
+            FormulaMembershipHint::Table => {
+                if parsed.table.contains_key(&base) {
+                    return PtgReferenceResolution::Table { base };
+                }
+                if hint == Some(FormulaMembershipHint::Table) {
+                    warn(
+                        warnings,
+                        format!(
+                            "formula {} indicates table formula membership (grbit.fTbl), but no TABLE record was found for base {}",
+                            cell.cell.to_a1(),
+                            base.to_a1()
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    // No candidates matched.
+    match leading {
+        LeadingPtg::Empty | LeadingPtg::Other => PtgReferenceResolution::None,
+        _ => PtgReferenceResolution::Unresolved,
+    }
 }
 
 fn parse_shrfmla_with_refu(cursor: &mut FragmentCursor<'_>) -> Result<Vec<u8>, String> {
@@ -571,6 +1079,7 @@ mod tests {
         assert_eq!(parsed.row, row);
         assert_eq!(parsed.col, col);
         assert_eq!(parsed.xf, xf);
+        assert_eq!(parsed.grbit, FormulaGrbit(0));
         assert_eq!(parsed.rgce, rgce_expected);
     }
 
@@ -627,6 +1136,7 @@ mod tests {
         assert!(record.is_continued());
 
         let parsed = parse_biff8_formula_record(&record).expect("parse formula");
+        assert_eq!(parsed.grbit, FormulaGrbit(0));
         assert_eq!(parsed.rgce, rgce_expected);
     }
 
@@ -726,5 +1236,159 @@ mod tests {
 
         let parsed = parse_biff8_array_record(&record).expect("parse ARRAY");
         assert_eq!(parsed.rgce, rgce_expected);
+    }
+
+    fn formula_payload(row: u16, col: u16, grbit: u16, rgce: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&row.to_le_bytes());
+        out.extend_from_slice(&col.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes()); // ixfe
+        out.extend_from_slice(&[0u8; 8]); // cached result (dummy)
+        out.extend_from_slice(&grbit.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes()); // chn (dummy)
+        out.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        out.extend_from_slice(rgce);
+        out
+    }
+
+    fn shrfmla_payload(rw_first: u16, rw_last: u16, col_first: u16, col_last: u16) -> Vec<u8> {
+        let rgce = vec![0x1E, 0x01, 0x00]; // PtgInt(1) (dummy)
+        let mut out = Vec::new();
+        out.extend_from_slice(&rw_first.to_le_bytes());
+        out.extend_from_slice(&rw_last.to_le_bytes());
+        out.extend_from_slice(&col_first.to_le_bytes());
+        out.extend_from_slice(&col_last.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes()); // cUse (dummy)
+        out.extend_from_slice(&(rgce.len() as u16).to_le_bytes());
+        out.extend_from_slice(&rgce);
+        out
+    }
+
+    fn array_payload(rw_first: u16, rw_last: u16, col_first: u16, col_last: u16) -> Vec<u8> {
+        let rgce = vec![0x1E, 0x02, 0x00]; // PtgInt(2) (dummy)
+        let mut out = Vec::new();
+        out.extend_from_slice(&rw_first.to_le_bytes());
+        out.extend_from_slice(&rw_last.to_le_bytes());
+        out.extend_from_slice(&col_first.to_le_bytes());
+        out.extend_from_slice(&col_last.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes()); // reserved
+        out.extend_from_slice(&(rgce.len() as u16).to_le_bytes());
+        out.extend_from_slice(&rgce);
+        out
+    }
+
+    fn table_payload(rw_first: u16, rw_last: u16, col_first: u16, col_last: u16) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&rw_first.to_le_bytes());
+        out.extend_from_slice(&rw_last.to_le_bytes());
+        out.extend_from_slice(&col_first.to_le_bytes());
+        out.extend_from_slice(&col_last.to_le_bytes());
+        out
+    }
+
+    fn ptgexp(base_row: u16, base_col: u16) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.push(0x01);
+        out.extend_from_slice(&base_row.to_le_bytes());
+        out.extend_from_slice(&base_col.to_le_bytes());
+        out
+    }
+
+    fn ptgtbl(base_row: u16, base_col: u16) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.push(0x02);
+        out.extend_from_slice(&base_row.to_le_bytes());
+        out.extend_from_slice(&base_col.to_le_bytes());
+        out
+    }
+
+    #[test]
+    fn resolves_ptgexp_ptgtbl_using_grbit_hints_and_warns_on_mismatch() {
+        // Build a synthetic sheet substream with:
+        // - SHRFMLA + ARRAY definitions anchored at A1 (0,0) (ambiguous without flags)
+        // - TABLE definition anchored at A4 (3,0)
+        // - Formula cells:
+        //   A2: PtgExp(A1) + fShrFmla -> resolve as shared (SHRFMLA)
+        //   A3: PtgExp(A1) + fArray  -> resolve as array (ARRAY)
+        //   A4: PtgTbl(A4) + fTbl    -> resolve as table (TABLE)
+        //   A5: PtgExp(A1) + fTbl    -> warn mismatch and missing TABLE(A1), then fall back best-effort
+        let a1 = (0u16, 0u16);
+        let a4 = (3u16, 0u16);
+
+        let stream = [
+            record(RECORD_SHRFMLA, &shrfmla_payload(0, 10, 0, 0)),
+            record(RECORD_ARRAY, &array_payload(0, 10, 0, 0)),
+            record(RECORD_TABLE, &table_payload(a4.0, a4.0, a4.1, a4.1)),
+            record(
+                RECORD_FORMULA,
+                &formula_payload(1, 0, FormulaGrbit::F_SHR_FMLA, &ptgexp(a1.0, a1.1)),
+            ),
+            record(
+                RECORD_FORMULA,
+                &formula_payload(2, 0, FormulaGrbit::F_ARRAY, &ptgexp(a1.0, a1.1)),
+            ),
+            record(
+                RECORD_FORMULA,
+                &formula_payload(3, 0, FormulaGrbit::F_TBL, &ptgtbl(a4.0, a4.1)),
+            ),
+            record(
+                RECORD_FORMULA,
+                &formula_payload(4, 0, FormulaGrbit::F_TBL, &ptgexp(a1.0, a1.1)),
+            ),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_worksheet_formulas(&stream, 0).expect("parse");
+
+        let mut warnings = Vec::new();
+
+        let a2 = parsed.formula_cells.get(&CellRef::new(1, 0)).unwrap();
+        assert_eq!(
+            resolve_ptgexp_or_ptgtbl_best_effort(&parsed, a2, &mut warnings),
+            PtgReferenceResolution::Shared {
+                base: CellRef::new(0, 0)
+            }
+        );
+
+        let a3 = parsed.formula_cells.get(&CellRef::new(2, 0)).unwrap();
+        assert_eq!(
+            resolve_ptgexp_or_ptgtbl_best_effort(&parsed, a3, &mut warnings),
+            PtgReferenceResolution::Array {
+                base: CellRef::new(0, 0)
+            }
+        );
+
+        let a4_cell = parsed.formula_cells.get(&CellRef::new(3, 0)).unwrap();
+        assert_eq!(
+            resolve_ptgexp_or_ptgtbl_best_effort(&parsed, a4_cell, &mut warnings),
+            PtgReferenceResolution::Table {
+                base: CellRef::new(3, 0)
+            }
+        );
+
+        let a5 = parsed.formula_cells.get(&CellRef::new(4, 0)).unwrap();
+        let res = resolve_ptgexp_or_ptgtbl_best_effort(&parsed, a5, &mut warnings);
+        // Best-effort fallback: `PtgExp(A1)` can still resolve via SHRFMLA/ARRAY.
+        assert_eq!(
+            res,
+            PtgReferenceResolution::Shared {
+                base: CellRef::new(0, 0)
+            }
+        );
+
+        let warning_text = warnings
+            .iter()
+            .map(|w| w.message.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            warning_text.contains("grbit.fTbl set but rgce does not start with PtgTbl"),
+            "expected mismatch warning, got:\n{warning_text}"
+        );
+        assert!(
+            warning_text.contains("no TABLE record was found for base A1"),
+            "expected missing-TABLE warning, got:\n{warning_text}"
+        );
     }
 }
