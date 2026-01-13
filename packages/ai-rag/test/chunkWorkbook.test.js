@@ -120,6 +120,38 @@ test("chunkWorkbook respects AbortSignal", () => {
   assert.throws(() => chunkWorkbook(workbook, { signal: abortController.signal }), { name: "AbortError" });
 });
 
+test("chunkWorkbook propagates AbortSignal into extractCells (abort during extraction)", () => {
+  const abortController = new AbortController();
+  let calls = 0;
+
+  const workbook = {
+    id: "wb1",
+    sheets: [
+      {
+        name: "Sheet1",
+        // Force extractCells to use the `getCell` callback so we can trigger abort mid-extraction.
+        getCell() {
+          calls += 1;
+          if (calls === 10) abortController.abort();
+          return null;
+        },
+      },
+    ],
+    tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 5000 } }],
+    namedRanges: [],
+  };
+
+  assert.throws(
+    () =>
+      chunkWorkbook(workbook, {
+        signal: abortController.signal,
+        extractMaxRows: 1,
+        extractMaxCols: 5000,
+      }),
+    { name: "AbortError" }
+  );
+});
+
 test("chunkWorkbook caps the number of disconnected data regions per sheet", () => {
   const map = new Map();
   // 20 disconnected 2-cell regions (each region is horizontal, with an empty row between).

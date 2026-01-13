@@ -16,20 +16,19 @@ test("extractCells throws AbortError when signal already aborted", () => {
 });
 
 test("extractCells checks AbortSignal periodically during extraction", () => {
-  // Fake a signal that becomes aborted after a few `.aborted` reads.
-  // This lets us validate that `extractCells` checks abort status inside the
-  // inner (cell) loop, not just once per row.
-  let checks = 0;
-  const signal = {
-    get aborted() {
-      checks += 1;
-      return checks >= 4;
+  const abortController = new AbortController();
+  let cellReads = 0;
+  const sheet = {
+    getCell() {
+      cellReads += 1;
+      // Abort after extraction has started (but before the next periodic check).
+      if (cellReads === 10) abortController.abort();
+      return null;
     },
   };
 
-  const sheet = { cells: [[]] };
-  const rect = { r0: 0, c0: 0, r1: 0, c1: 1000 };
+  // Ensure we run enough cells to hit the periodic inner-loop abort check.
+  const rect = { r0: 0, c0: 0, r1: 0, c1: 5000 };
 
-  assert.throws(() => extractCells(sheet, rect, { signal }), { name: "AbortError" });
+  assert.throws(() => extractCells(sheet, rect, { signal: abortController.signal }), { name: "AbortError" });
 });
-
