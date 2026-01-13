@@ -923,6 +923,42 @@ impl DaxEngine {
                     }
                 }
             }
+            "CONCATENATEX" => {
+                if args.len() < 2 || args.len() > 5 {
+                    return Err(DaxError::Eval(
+                        "CONCATENATEX expects 2 to 5 arguments".into(),
+                    ));
+                }
+                let table_expr = &args[0];
+                let text_expr = &args[1];
+
+                // The delimiter is evaluated once in the outer context (matching DAX behavior).
+                // Default delimiter is an empty string.
+                let delimiter = if args.len() >= 3 {
+                    let v = self.eval_scalar(model, &args[2], filter, row_ctx, env)?;
+                    coerce_text(&v).into_owned()
+                } else {
+                    String::new()
+                };
+
+                // Ordering arguments are accepted for compatibility, but are not yet implemented.
+                let table_result = self.eval_table(model, table_expr, filter, row_ctx, env)?;
+
+                let mut out = String::new();
+                let mut first = true;
+                for row in table_result.rows {
+                    let mut inner_ctx = row_ctx.clone();
+                    inner_ctx.push(&table_result.table, row);
+                    let value = self.eval_scalar(model, text_expr, filter, &inner_ctx, env)?;
+                    let text = coerce_text(&value);
+                    if !first {
+                        out.push_str(&delimiter);
+                    }
+                    out.push_str(&text);
+                    first = false;
+                }
+                Ok(Value::from(out))
+            }
             "CALCULATE" => {
                 if args.is_empty() {
                     return Err(DaxError::Eval(
@@ -1746,7 +1782,6 @@ impl DaxEngine {
             expr: &Expr,
             eval_filter: &FilterContext,
             row_ctx: &RowContext,
-            env: &mut VarEnv,
             keep_filters: bool,
             clear_columns: &mut HashSet<(String, String)>,
             row_filters: &mut Vec<(String, HashSet<usize>)>,
@@ -1910,7 +1945,6 @@ impl DaxEngine {
                     arg,
                     &eval_filter,
                     row_ctx,
-                    env,
                     keep_filters,
                     &mut clear_columns,
                     &mut row_filters,
@@ -1926,7 +1960,6 @@ impl DaxEngine {
                         arg,
                         &eval_filter,
                         row_ctx,
-                        env,
                         keep_filters,
                         &mut clear_columns,
                         &mut row_filters,
