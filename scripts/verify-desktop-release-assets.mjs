@@ -25,6 +25,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { Readable } from "node:stream";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 class ActionableError extends Error {
@@ -509,66 +510,102 @@ async function main() {
     `${tauriConfigRelativePath} → "version"`
   );
 
-  const release = await getReleaseByTag(repo, tag, token);
-  const releaseId = release.id;
+  /** @type {any} */
+  let release;
+  /** @type {any[]} */
+  let assets = [];
+  /** @type {Map<string, any>} */
+  let assetsByName = new Map();
+  /** @type {string[]} */
+  let assetNames = [];
+  /** @type {any} */
+  let manifest;
 
-  const assets = await listAllReleaseAssets(repo, releaseId, token);
-  const assetsByName = new Map();
-  for (const asset of assets) {
-    if (asset && typeof asset === "object" && typeof asset.name === "string") {
-      assetsByName.set(asset.name, asset);
+  // GitHub Releases can take a moment to reflect newly-uploaded assets (especially
+  // during CI where platform jobs upload in parallel). Retry a few times so the
+  // verifier can be run immediately after a release workflow completes.
+  const retryDelaysMs = [2000, 4000, 8000, 12000, 20000];
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
+    try {
+      release = await getReleaseByTag(repo, tag, token);
+      const releaseId = release.id;
+
+      assets = await listAllReleaseAssets(repo, releaseId, token);
+      assetsByName = new Map();
+      for (const asset of assets) {
+        if (asset && typeof asset === "object" && typeof asset.name === "string") {
+          assetsByName.set(asset.name, asset);
+        }
+      }
+
+      assetNames = Array.from(assetsByName.keys()).sort();
+      if (assetNames.length === 0) {
+        throw new ActionableError(`No assets found on the GitHub Release for tag ${tag}.`, [
+          "Ensure `.github/workflows/release.yml` completed successfully and uploaded artifacts.",
+        ]);
+      }
+
+      const latestJsonAsset = assetsByName.get("latest.json");
+      if (!latestJsonAsset) {
+        throw new ActionableError(`Release is missing required asset: latest.json`, [
+          `Tag: ${tag}`,
+          `Repo: ${repo}`,
+          `Assets present (${assetNames.length}): ${assetNames.join(", ")}`,
+        ]);
+      }
+
+      const latestJsonSigAsset = assetsByName.get("latest.json.sig");
+      if (!latestJsonSigAsset) {
+        throw new ActionableError(`Release is missing required asset: latest.json.sig`, [
+          "The Tauri updater manifest must be signed; ensure TAURI_PRIVATE_KEY/TAURI_KEY_PASSWORD are set in CI.",
+          `Assets present (${assetNames.length}): ${assetNames.join(", ")}`,
+        ]);
+      }
+
+      const latestJsonText = await downloadReleaseAssetText(latestJsonAsset, token);
+      try {
+        manifest = JSON.parse(latestJsonText);
+      } catch (err) {
+        throw new ActionableError(`Failed to parse latest.json as JSON.`, [
+          err instanceof Error ? err.message : String(err),
+        ]);
+      }
+
+      // Download latest.json.sig to ensure it's actually readable (not just present in the listing).
+      const latestSigText = await downloadReleaseAssetText(latestJsonSigAsset, token);
+      if (latestSigText.trim().length === 0) {
+        throw new ActionableError(`latest.json.sig downloaded successfully but was empty.`, [
+          "This likely indicates an upstream signing/upload failure.",
+        ]);
+      }
+
+      validateLatestJson(manifest, expectedVersion, assetsByName);
+
+      // If we get here, manifest + asset cross-check has passed.
+      console.log(
+        `Verified latest.json against desktop version ${expectedVersion} and release assets (${assetNames.length} total).`
+      );
+      lastError = null;
+      break;
+    } catch (err) {
+      lastError = err;
+      if (attempt === retryDelaysMs.length) break;
+
+      const ms = retryDelaysMs[attempt];
+      const brief = err instanceof Error ? err.message.split("\n")[0] : String(err);
+      console.log(
+        `Release assets not ready yet (${attempt + 1}/${retryDelaysMs.length + 1}): ${brief}`
+      );
+      console.log(`Retrying in ${Math.round(ms / 1000)}s...`);
+      await sleep(ms);
     }
   }
 
-  const assetNames = Array.from(assetsByName.keys()).sort();
-  if (assetNames.length === 0) {
-    throw new ActionableError(`No assets found on the GitHub Release for tag ${tag}.`, [
-      "Ensure `.github/workflows/release.yml` completed successfully and uploaded artifacts.",
-    ]);
+  if (lastError) {
+    throw lastError;
   }
-
-  const latestJsonAsset = assetsByName.get("latest.json");
-  if (!latestJsonAsset) {
-    throw new ActionableError(`Release is missing required asset: latest.json`, [
-      `Tag: ${tag}`,
-      `Repo: ${repo}`,
-      `Assets present (${assetNames.length}): ${assetNames.join(", ")}`,
-    ]);
-  }
-
-  const latestJsonSigAsset = assetsByName.get("latest.json.sig");
-  if (!latestJsonSigAsset) {
-    throw new ActionableError(`Release is missing required asset: latest.json.sig`, [
-      "The Tauri updater manifest must be signed; ensure TAURI_PRIVATE_KEY/TAURI_KEY_PASSWORD are set in CI.",
-      `Assets present (${assetNames.length}): ${assetNames.join(", ")}`,
-    ]);
-  }
-
-  const latestJsonText = await downloadReleaseAssetText(latestJsonAsset, token);
-  /** @type {any} */
-  let manifest;
-  try {
-    manifest = JSON.parse(latestJsonText);
-  } catch (err) {
-    throw new ActionableError(`Failed to parse latest.json as JSON.`, [
-      err instanceof Error ? err.message : String(err),
-    ]);
-  }
-
-  // Download latest.json.sig to ensure it's actually readable (not just present in the listing).
-  const latestSigText = await downloadReleaseAssetText(latestJsonSigAsset, token);
-  if (latestSigText.trim().length === 0) {
-    throw new ActionableError(`latest.json.sig downloaded successfully but was empty.`, [
-      "This likely indicates an upstream signing/upload failure.",
-    ]);
-  }
-
-  validateLatestJson(manifest, expectedVersion, assetsByName);
-
-  // If we get here, manifest + asset cross-check has passed.
-  console.log(
-    `Verified latest.json against desktop version ${expectedVersion} and release assets (${assetNames.length} total).`
-  );
 
   if (args.dryRun) {
     console.log("Dry-run enabled: skipping SHA256SUMS generation.");
