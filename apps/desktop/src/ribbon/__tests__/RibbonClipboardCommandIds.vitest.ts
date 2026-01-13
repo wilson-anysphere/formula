@@ -95,6 +95,7 @@ describe("Ribbon clipboard command ids", () => {
       paste?.click();
       await Promise.resolve();
     });
+    expect(getMenuItems(container).length).toBe(0);
 
     // Paste Special dropdown includes a "Paste Special…" menu item wired to clipboard.pasteSpecial.
     const pasteSpecial = Array.from(container.querySelectorAll<HTMLButtonElement>("button.ribbon-button")).find(
