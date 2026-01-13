@@ -134,4 +134,35 @@ describe("FormulaBarView name box dropdown", () => {
 
     host.remove();
   });
+
+  it("keeps focus in the name box when selecting an item without a navigation reference", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onGoTo = vi.fn();
+    const provider: NameBoxDropdownProvider = {
+      getItems: () => [{ kind: "namedRange", key: "namedRange:Const", label: "Const", reference: "" }],
+    };
+
+    new FormulaBarView(host, { onCommit: () => {}, onGoTo }, { nameBoxDropdownProvider: provider });
+
+    const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]')!;
+    const dropdown = host.querySelector<HTMLButtonElement>('[data-testid="name-box-dropdown"]')!;
+    const popup = host.querySelector<HTMLDivElement>('[data-testid="formula-name-box-popup"]')!;
+
+    dropdown.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(popup.hidden).toBe(false);
+
+    // Select the only item.
+    address.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+
+    expect(onGoTo).not.toHaveBeenCalled();
+    expect(popup.hidden).toBe(true);
+    expect(document.activeElement).toBe(address);
+    expect(address.value).toBe("Const");
+    expect(address.selectionStart).toBe(0);
+    expect(address.selectionEnd).toBe(5);
+
+    host.remove();
+  });
 });

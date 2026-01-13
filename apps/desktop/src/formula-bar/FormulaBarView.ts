@@ -2551,6 +2551,20 @@ export class FormulaBarView {
     this.#addressEl.value = item.label;
     this.#closeNameBoxDropdown({ restoreAddress: false, reason: "commit" });
 
+    const ref = String(item.reference ?? "").trim();
+    if (ref === "") {
+      // Some workbook-defined names can refer to formulas/constants rather than a cell/range.
+      // In that case, leave the text in the name box for editing instead of attempting navigation.
+      this.#clearNameBoxError();
+      try {
+        this.#addressEl.focus({ preventScroll: true });
+      } catch {
+        this.#addressEl.focus();
+      }
+      this.#addressEl.select();
+      return;
+    }
+
     const handler = this.#callbacks.onGoTo;
     if (!handler) {
       this.#addressEl.blur();
@@ -2559,7 +2573,7 @@ export class FormulaBarView {
 
     let ok = false;
     try {
-      ok = handler(String(item.reference ?? "").trim()) === true;
+      ok = handler(ref) === true;
     } catch {
       ok = false;
     }

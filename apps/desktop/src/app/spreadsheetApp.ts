@@ -2308,7 +2308,7 @@ export class SpreadsheetApp {
               kind: "namedRange",
               key: `namedRange:${name}`,
               label: name,
-              reference: name,
+              reference: range ? name : "",
               description,
             });
           }
@@ -2331,8 +2331,12 @@ export class SpreadsheetApp {
               : undefined;
 
             const structuredOk = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
-            const reference = structuredOk ? `${name}[#All]` : range && sheetName ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}` : null;
-            if (!reference) continue;
+            const reference =
+              range && sheetName
+                ? structuredOk
+                  ? `${name}[#All]`
+                  : `${formatSheetPrefix(sheetName)}${rangeToA1(range)}`
+                : "";
 
             push({
               kind: "table",
