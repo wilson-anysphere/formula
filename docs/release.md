@@ -214,6 +214,11 @@ TAURI_CLI_VERSION=2.9.5
 
 # NOTE: Keep this version in sync with `.github/workflows/release.yml` (env.TAURI_CLI_VERSION).
 bash scripts/cargo_agent.sh install tauri-cli --version "$TAURI_CLI_VERSION" --locked --force
+
+# Generate keys (prints public + private key):
+(cd apps/desktop/src-tauri && cargo tauri signer generate)
+
+# Agents:
 (cd apps/desktop/src-tauri && bash ../../../scripts/cargo_agent.sh tauri signer generate)
 ```
 
