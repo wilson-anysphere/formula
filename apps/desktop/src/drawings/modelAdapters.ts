@@ -443,6 +443,15 @@ export function convertModelWorkbookDrawingsToUiDrawingLayer(modelWorkbookJson: 
       if (!name) continue;
       drawingsBySheetName[name] = convertModelWorksheetDrawingsToUiDrawingObjects(sheet);
     }
+  } else if (isRecord(sheetsValue)) {
+    // Some workbook JSON snapshots represent sheets as a keyed object rather than
+    // an array (e.g. `{ sheets: { Sheet1: {...}, Sheet2: {...} } }`).
+    for (const [key, sheet] of Object.entries(sheetsValue)) {
+      if (!isRecord(sheet)) continue;
+      const name = readOptionalString(pick(sheet, ["name"])) ?? key;
+      if (!name) continue;
+      drawingsBySheetName[name] = convertModelWorksheetDrawingsToUiDrawingObjects(sheet);
+    }
   }
 
   return { images, drawingsBySheetName };

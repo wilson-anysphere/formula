@@ -167,4 +167,35 @@ describe("drawings/modelAdapters", () => {
     expect(ui.drawingsBySheetName.Sheet1?.[0]?.kind).toEqual({ type: "image", imageId: "image1.png" });
     expect(ui.drawingsBySheetName.Sheet2).toEqual([]);
   });
+
+  it("accepts workbook snapshots with sheets encoded as an object map", () => {
+    const workbook = {
+      images: {
+        images: {
+          "image1.png": { bytes: [1], content_type: "image/png" },
+        },
+      },
+      sheets: {
+        Sheet1: {
+          drawings: [
+            {
+              id: 1,
+              kind: { Image: { image_id: "image1.png" } },
+              anchor: {
+                OneCell: {
+                  from: { cell: { row: 0, col: 0 }, offset: { x_emu: 0, y_emu: 0 } },
+                  ext: { cx: 10, cy: 10 },
+                },
+              },
+              z_order: 0,
+            },
+          ],
+        },
+      },
+    };
+
+    const ui = convertModelWorkbookDrawingsToUiDrawingLayer(workbook);
+    expect(ui.drawingsBySheetName.Sheet1).toHaveLength(1);
+    expect(ui.drawingsBySheetName.Sheet1?.[0]?.kind).toEqual({ type: "image", imageId: "image1.png" });
+  });
 });
