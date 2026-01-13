@@ -565,6 +565,10 @@ describe("AIChatPanel attachments UI", () => {
     const callArgs = sendMessage.mock.calls[0]?.[0] as any;
     expect(callArgs.attachments).toEqual([{ type: "range", reference: "Sheet1!A1:D10" }]);
 
+    // The user message should render its attachments (separate from the pending chips UI).
+    expect(container.textContent).toContain("Attachments:");
+    expect(container.textContent).toContain("range: Sheet1!A1:D10");
+
     // Pending attachment chips should clear after sending.
     expect(container.querySelector('[data-testid="ai-chat-pending-attachments"]')).toBeNull();
 
