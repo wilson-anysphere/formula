@@ -311,6 +311,54 @@ test("suggestRanges suggests a 2D table range when an explicit start cell is pro
   );
 });
 
+test("suggestRanges preserves absolute row/col prefixes for 2D table suggestions", () => {
+  /** @type {Array<[number, number, any]>} */
+  const cells = [];
+  // Header row (row 1 in A1 notation).
+  for (let c = 0; c < 4; c++) cells.push([0, c, `H${c + 1}`]);
+  // Data rows 2..10.
+  for (let r = 1; r < 10; r++) {
+    for (let c = 0; c < 4; c++) {
+      cells.push([r, c, r * 100 + c]);
+    }
+  }
+
+  const suggestions = suggestRanges({
+    currentArgText: "$A$1",
+    cellRef: { row: 10, col: 0 }, // row 11, below the table
+    surroundingCells: createGridContext(cells),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.range === "$A$1:$D$10"),
+    `Expected suggestions to contain $A$1:$D$10, got: ${suggestions.map((s) => s.range).join(", ")}`
+  );
+});
+
+test("suggestRanges preserves lowercase column prefixes for 2D table suggestions", () => {
+  /** @type {Array<[number, number, any]>} */
+  const cells = [];
+  // Header row (row 1 in A1 notation).
+  for (let c = 0; c < 4; c++) cells.push([0, c, `H${c + 1}`]);
+  // Data rows 2..10.
+  for (let r = 1; r < 10; r++) {
+    for (let c = 0; c < 4; c++) {
+      cells.push([r, c, r * 100 + c]);
+    }
+  }
+
+  const suggestions = suggestRanges({
+    currentArgText: "a",
+    cellRef: { row: 10, col: 0 }, // row 11, below the table
+    surroundingCells: createGridContext(cells),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.range === "a1:d10"),
+    `Expected suggestions to contain a1:d10, got: ${suggestions.map((s) => s.range).join(", ")}`
+  );
+});
+
 test("suggestRanges stops table expansion when encountering a gap (entirely empty column)", () => {
   /** @type {Array<[number, number, any]>} */
   const cells = [];
