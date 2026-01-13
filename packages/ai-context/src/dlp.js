@@ -75,8 +75,15 @@ function luhnIsValid(digits) {
 function isValidCreditCard(candidate) {
   const digits = digitsOnly(candidate);
   if (digits.length < 13 || digits.length > 19) return false;
-  // 0 isn't a valid industry identifier and all-same digits are almost certainly noise.
-  if (digits[0] === "0" || isAllSameDigit(digits)) return false;
+  // Credit card IINs are (overwhelmingly) in the 2-6 range; this filters out
+  // common high-volume numeric strings like timestamps that might pass Luhn by chance.
+  // (Heuristic DLP prefers fewer false positives over perfect coverage.)
+  if (!/[2-6]/.test(digits[0])) return false;
+  // All-same digits are almost certainly noise.
+  if (isAllSameDigit(digits)) return false;
+
+  // 13-digit cards are typically Visa (4xxx...). Avoid flagging generic 13-digit IDs.
+  if (digits.length === 13 && digits[0] !== "4") return false;
   return luhnIsValid(digits);
 }
 

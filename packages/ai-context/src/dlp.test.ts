@@ -8,11 +8,14 @@ describe("dlp heuristic", () => {
     const validDashed = "Or use 5500-0000-0000-0004 for testing.";
     const invalid = "Not a real card: 4111 1111 1111 1112.";
     const obviouslyInvalid = "Also not a card: 0000 0000 0000 0000.";
+    // Luhn-valid but unrealistic (common in ids/timestamps). Should not be flagged.
+    const luhnValidButNotCard = "id=1000000000009";
 
     expect(classifyText(validSpaced).findings).toContain("credit_card");
     expect(classifyText(validDashed).findings).toContain("credit_card");
     expect(classifyText(invalid).findings).not.toContain("credit_card");
     expect(classifyText(obviouslyInvalid).findings).not.toContain("credit_card");
+    expect(classifyText(luhnValidButNotCard).findings).not.toContain("credit_card");
   });
 
   it("detects phone numbers (international + US)", () => {
@@ -71,5 +74,11 @@ describe("dlp heuristic", () => {
   it("does not redact invalid credit card numbers (reduced false positives)", () => {
     const invalid = "4111 1111 1111 1112";
     expect(redactText(`cc=${invalid}`)).toBe(`cc=${invalid}`);
+  });
+
+  it("does not redact Luhn-valid but unrealistic card-like ids (reduced false positives)", () => {
+    const id = "1000000000009";
+    expect(classifyText(`id=${id}`).findings).not.toContain("credit_card");
+    expect(redactText(`id=${id}`)).toBe(`id=${id}`);
   });
 });
