@@ -119,9 +119,8 @@ import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js
 import { installKeyboardContextKeys, KeyboardContextKeyIds } from "./keyboard/installKeyboardContextKeys.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette, installCommandPaletteRecentsTracking } from "./command-palette/index.js";
-import { registerBuiltinCommands } from "./commands/registerBuiltinCommands.js";
-import { registerWorkbenchFileCommands, WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
-import { registerNumberFormatCommands } from "./commands/registerNumberFormatCommands.js";
+import { registerDesktopCommands } from "./commands/registerDesktopCommands.js";
+import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
 import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
 import type { GridLimits, Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
@@ -531,6 +530,7 @@ let ensureExtensionsLoadedRef: (() => Promise<void>) | null = null;
 let syncContributedCommandsRef: (() => void) | null = null;
 let syncContributedPanelsRef: (() => void) | null = null;
 let updateKeybindingsRef: (() => void) | null = null;
+let focusAfterSheetNavigationFromCommandRef: (() => void) | null = null;
 
 // --- AutoSave ---------------------------------------------------------------
 // Persisted globally (not per-workbook) since the ribbon toggle is global.
@@ -5269,134 +5269,7 @@ if (
     }
     app.focusAfterSheetNavigation();
   };
-
-  registerBuiltinCommands({
-    commandRegistry,
-    app,
-    layoutController,
-    focusAfterSheetNavigation: focusAfterSheetNavigationFromCommand,
-    getVisibleSheetIds: () => listSheetsForUi().map((sheet) => sheet.id),
-    ensureExtensionsLoaded: () => ensureExtensionsLoadedRef?.() ?? Promise.resolve(),
-    onExtensionsLoaded: () => {
-      updateKeybindingsRef?.();
-      syncContributedCommandsRef?.();
-      syncContributedPanelsRef?.();
-    },
-    themeController,
-    refreshRibbonUiState: scheduleRibbonSelectionFormatStateUpdate,
-  });
-
-  const commandCategoryFormat = t("commandCategory.format");
-
-  commandRegistry.registerBuiltinCommand(
-    "format.toggleBold",
-    t("command.format.toggleBold"),
-    () =>
-      applyFormattingToSelection(
-        t("command.format.toggleBold"),
-        (doc, sheetId, ranges) => toggleBold(doc, sheetId, ranges),
-        { forceBatch: true },
-      ),
-    { category: commandCategoryFormat },
-  );
-
-  commandRegistry.registerBuiltinCommand(
-    "format.toggleItalic",
-    t("command.format.toggleItalic"),
-    () =>
-      applyFormattingToSelection(
-        t("command.format.toggleItalic"),
-        (doc, sheetId, ranges) => toggleItalic(doc, sheetId, ranges),
-        { forceBatch: true },
-      ),
-    { category: commandCategoryFormat },
-  );
-
-  commandRegistry.registerBuiltinCommand(
-    "format.toggleUnderline",
-    t("command.format.toggleUnderline"),
-    () =>
-      applyFormattingToSelection(
-        t("command.format.toggleUnderline"),
-        (doc, sheetId, ranges) => toggleUnderline(doc, sheetId, ranges),
-        { forceBatch: true },
-      ),
-    { category: commandCategoryFormat },
-  );
-
-  commandRegistry.registerBuiltinCommand(
-    "format.toggleStrikethrough",
-    t("command.format.toggleStrikethrough"),
-    (next?: boolean) =>
-      applyFormattingToSelection(
-        t("command.format.toggleStrikethrough"),
-        (doc, sheetId, ranges) => toggleStrikethrough(doc, sheetId, ranges, { next }),
-        { forceBatch: true },
-      ),
-    { category: commandCategoryFormat },
-  );
-
-  commandRegistry.registerBuiltinCommand(
-    "format.toggleWrapText",
-    t("command.format.toggleWrapText"),
-    (next?: boolean) =>
-      applyFormattingToSelection(
-        t("command.format.toggleWrapText"),
-        (doc, sheetId, ranges) => toggleWrap(doc, sheetId, ranges, typeof next === "boolean" ? { next } : undefined),
-        { forceBatch: true },
-      ),
-    { category: commandCategoryFormat },
-  );
-
-  registerNumberFormatCommands({
-    commandRegistry,
-    applyFormattingToSelection,
-    getActiveCellNumberFormat: activeCellNumberFormat,
-    t,
-    category: commandCategoryFormat,
-  });
-
-  commandRegistry.registerBuiltinCommand(
-    "format.openFormatCells",
-    t("command.format.openFormatCells"),
-    () => openFormatCells(),
-    { category: commandCategoryFormat },
-  );
-
-  // Quick-pick variant for applying common number formats without opening the full dialog.
-  commandRegistry.registerBuiltinCommand(
-    "format.applyNumberFormatPresetQuickPick",
-    t("command.format.applyNumberFormatPresetQuickPick"),
-    async () => {
-      type Choice = "general" | "currency" | "percent" | "date";
-      const choice = await showQuickPick<Choice>(
-        [
-          { label: "General", description: "Clear number format", value: "general" },
-          { label: "Currency", description: NUMBER_FORMATS.currency, value: "currency" },
-          { label: "Percent", description: NUMBER_FORMATS.percent, value: "percent" },
-          { label: "Date", description: NUMBER_FORMATS.date, value: "date" },
-        ],
-        { placeHolder: "Number format" },
-      );
-      if (!choice) return;
-
-      const patch = choice === "general" ? { numberFormat: null } : { numberFormat: NUMBER_FORMATS[choice] };
-
-      applyFormattingToSelection(
-        "Number format",
-        (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, patch, { label: "Number format" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        },
-        { forceBatch: true },
-      );
-    },
-    { category: commandCategoryFormat },
-  );
+  focusAfterSheetNavigationFromCommandRef = focusAfterSheetNavigationFromCommand;
 
   extensionPanelBridge = new ExtensionPanelBridge({
     host: extensionHostManager.host as any,
@@ -7492,21 +7365,6 @@ if (
   });
 
   openCommandPalette = commandPalette.open;
-
-  // `registerBuiltinCommands(...)` wires this as a no-op so the Tauri shell can own
-  // opening the palette. Override it in the browser/desktop UI so keybinding dispatch
-  // through `CommandRegistry.executeCommand(...)` works as well.
-  commandRegistry.registerBuiltinCommand(
-    "workbench.showCommandPalette",
-    t("command.workbench.showCommandPalette"),
-    () => commandPalette.open(),
-    {
-      category: t("commandCategory.navigation"),
-      icon: null,
-      description: t("commandDescription.workbench.showCommandPalette"),
-      keywords: ["command palette", "commands"],
-    },
-  );
   layoutController.on("change", () => {
     renderLayout();
     scheduleRibbonSelectionFormatStateUpdate();
@@ -7612,49 +7470,34 @@ function showExclusiveFindReplaceDialog(dialog: HTMLDialogElement): void {
   showDialogAndFocus(dialog);
 }
 
-commandRegistry.registerBuiltinCommand(
-  "edit.find",
-  t("command.edit.find"),
-  () => showExclusiveFindReplaceDialog(findDialog as any),
-  {
-    category: t("commandCategory.editing"),
-    icon: null,
-    description: t("commandDescription.edit.find"),
-    keywords: ["find", "search"],
-  },
-);
-
-commandRegistry.registerBuiltinCommand(
-  "edit.replace",
-  t("command.edit.replace"),
-  () => showExclusiveFindReplaceDialog(replaceDialog as any),
-  {
-    category: t("commandCategory.editing"),
-    icon: null,
-    description: t("commandDescription.edit.replace"),
-    keywords: ["replace", "find"],
-  },
-);
-
-commandRegistry.registerBuiltinCommand(
-  "navigation.goTo",
-  t("command.navigation.goTo"),
-  () => showExclusiveFindReplaceDialog(goToDialog as any),
-  {
-    category: t("commandCategory.navigation"),
-    icon: null,
-    description: t("commandDescription.navigation.goTo"),
-    keywords: ["go to", "goto", "reference", "name box"],
-  },
-);
-
 function showDesktopOnlyToast(message: string): void {
   showToast(`Desktop-only: ${message}`);
 }
 
-registerWorkbenchFileCommands({
+registerDesktopCommands({
   commandRegistry,
-  handlers: {
+  app,
+  layoutController: ribbonLayoutController,
+  focusAfterSheetNavigation: focusAfterSheetNavigationFromCommandRef,
+  getVisibleSheetIds: () => listSheetsForUi().map((sheet) => sheet.id),
+  ensureExtensionsLoaded: () => ensureExtensionsLoadedRef?.() ?? Promise.resolve(),
+  onExtensionsLoaded: () => {
+    updateKeybindingsRef?.();
+    syncContributedCommandsRef?.();
+    syncContributedPanelsRef?.();
+  },
+  themeController,
+  refreshRibbonUiState: scheduleRibbonSelectionFormatStateUpdate,
+  applyFormattingToSelection,
+  getActiveCellNumberFormat: activeCellNumberFormat,
+  openFormatCells,
+  showQuickPick,
+  findReplace: {
+    openFind: () => showExclusiveFindReplaceDialog(findDialog as any),
+    openReplace: () => showExclusiveFindReplaceDialog(replaceDialog as any),
+    openGoTo: () => showExclusiveFindReplaceDialog(goToDialog as any),
+  },
+  workbenchFileHandlers: {
     newWorkbook: () => {
       if (!tauriBackend) {
         showDesktopOnlyToast("Creating new workbooks is available in the desktop app.");
@@ -7742,6 +7585,7 @@ registerWorkbenchFileCommands({
       });
     },
   },
+  openCommandPalette: () => openCommandPalette?.(),
 });
 
 function getTauriInvokeForPrint(): TauriInvoke | null {
