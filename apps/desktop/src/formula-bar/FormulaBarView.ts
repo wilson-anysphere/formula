@@ -582,6 +582,13 @@ export class FormulaBarView {
       this.#clearNameBoxError();
     });
 
+    address.addEventListener("blur", () => {
+      // Don't leave the Name Box in an "invalid" visual state if the user abandons the entry.
+      if (!this.#isNameBoxInvalid) return;
+      this.#clearNameBoxError();
+      address.value = this.#nameBoxValue;
+    });
+
     nameBoxDropdown.addEventListener("click", () => {
       if (this.#nameBoxDropdownProvider) {
         if (this.#isNameBoxDropdownOpen) {
