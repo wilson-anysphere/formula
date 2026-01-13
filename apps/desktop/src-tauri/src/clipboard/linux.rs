@@ -1,5 +1,23 @@
 use super::{ClipboardContent, ClipboardError, ClipboardWritePayload};
 
+/// Maximum number of bytes we're willing to accept for a decoded clipboard image pixel buffer on
+/// Linux.
+///
+/// When `image/png` is not available we fall back to `gtk_clipboard_wait_for_image`, which decodes
+/// images via GdkPixbuf loaders. Highly-compressible images can expand to very large decoded pixel
+/// buffers (decompression bombs). Treat images as best-effort and skip anything that would require
+/// an unreasonably large allocation.
+const MAX_DECODED_IMAGE_BYTES: usize = 4 * super::MAX_PNG_BYTES;
+
+fn decoded_pixbuf_len(rowstride: i32, height: i32) -> Option<usize> {
+    if rowstride <= 0 || height <= 0 {
+        return None;
+    }
+    let rowstride = usize::try_from(rowstride).ok()?;
+    let height = usize::try_from(height).ok()?;
+    rowstride.checked_mul(height)
+}
+
 fn normalize_target_name(target: &str) -> String {
     target.trim().to_ascii_lowercase()
 }
@@ -56,7 +74,8 @@ mod gtk_backend {
 
     use super::super::{normalize_base64_str, string_within_limit, MAX_PNG_BYTES, MAX_TEXT_BYTES};
     use super::{
-        bytes_to_utf8, choose_best_target, ClipboardContent, ClipboardError, ClipboardWritePayload,
+        bytes_to_utf8, choose_best_target, decoded_pixbuf_len, ClipboardContent, ClipboardError,
+        ClipboardWritePayload, MAX_DECODED_IMAGE_BYTES,
     };
     use crate::clipboard_fallback;
 
@@ -260,6 +279,12 @@ mod gtk_backend {
                     // Some applications expose images on the clipboard without an `image/png` target.
                     // Fall back to GTK's pixbuf API and re-encode to PNG (requires image loaders).
                     let pixbuf = clipboard.wait_for_image()?;
+                    // Guard against decompression bombs / huge decoded images.
+                    let decoded_len = decoded_pixbuf_len(pixbuf.rowstride(), pixbuf.height())
+                        .unwrap_or(usize::MAX);
+                    if decoded_len > MAX_DECODED_IMAGE_BYTES {
+                        return None;
+                    }
                     let bytes = pixbuf.save_to_bufferv("png", &[]).ok()?;
                     if bytes.len() > MAX_PNG_BYTES {
                         return None;
@@ -460,7 +485,9 @@ pub fn write(_payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{choose_best_target, normalize_target_name};
+    use super::{
+        choose_best_target, decoded_pixbuf_len, normalize_target_name, MAX_DECODED_IMAGE_BYTES,
+    };
 
     #[test]
     fn normalize_target_name_lowercases_and_trims() {
@@ -562,5 +589,30 @@ mod tests {
         let targets = vec!["text/plain", "UTF8_STRING"];
         let best = choose_best_target(&targets, &["text/html"]);
         assert_eq!(best, None);
+    }
+
+    #[test]
+    fn decoded_pixbuf_len_computes_rowstride_times_height() {
+        let len = decoded_pixbuf_len(400, 200).expect("expected valid rowstride/height");
+        assert_eq!(len, 400 * 200);
+        assert!(len < MAX_DECODED_IMAGE_BYTES);
+    }
+
+    #[test]
+    fn decoded_pixbuf_len_rejects_non_positive_inputs() {
+        assert_eq!(decoded_pixbuf_len(0, 10), None);
+        assert_eq!(decoded_pixbuf_len(10, 0), None);
+        assert_eq!(decoded_pixbuf_len(-1, 10), None);
+        assert_eq!(decoded_pixbuf_len(10, -1), None);
+    }
+
+    #[test]
+    fn decoded_pixbuf_len_handles_extreme_values_portably() {
+        let len = decoded_pixbuf_len(i32::MAX, i32::MAX);
+        if usize::BITS <= 32 {
+            assert_eq!(len, None, "32-bit usize should overflow the multiplication");
+        } else {
+            assert!(len.is_some(), "64-bit usize should be able to represent the product");
+        }
     }
 }
