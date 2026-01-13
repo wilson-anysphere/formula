@@ -10,9 +10,11 @@ use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
 use formula_model::drawings::{DrawingObject, ImageData, ImageId};
 use formula_model::rich_text::RichText;
 use formula_model::{
-    normalize_formula_text, Cell, CellRef, CellValue, Comment, CommentKind, DefinedNameScope,
-    ErrorValue, Range, SheetProtection, SheetVisibility, Workbook, WorkbookProtection,
-    WorkbookWindow, WorkbookWindowState,
+    normalize_formula_text, Cell, CellRef, CellValue, Comment, CommentKind, DataValidation,
+    DataValidationErrorAlert, DataValidationErrorStyle, DataValidationInputMessage,
+    DataValidationKind, DataValidationOperator, DefinedNameScope, ErrorValue, Range,
+    SheetProtection, SheetVisibility, Workbook, WorkbookProtection, WorkbookWindow,
+    WorkbookWindowState,
 };
 use quick_xml::events::attributes::AttrError;
 use quick_xml::events::Event;
@@ -2541,6 +2543,9 @@ fn parse_worksheet_into_model(
     let mut in_sheet_views = false;
     let mut in_sheet_view = false;
 
+    // Data validations can appear anywhere in the worksheet XML (typically after `<sheetData>`).
+    // Parse them inline so both the full and streaming readers materialize validations.
+
     // When we don't retain the full `cell_meta` map (fast reader), we still want to materialize
     // shared-formula followers into the worksheet model so formulas match the full reader.
     let mut shared_formula_groups: Option<HashMap<u32, SharedFormulaGroup>> =
@@ -2579,6 +2584,16 @@ fn parse_worksheet_into_model(
                         }
                         _ => {}
                     }
+                }
+            }
+            Event::Start(e) if e.local_name().as_ref() == b"dataValidation" => {
+                if let Some((ranges, validation)) = parse_data_validation_start(&mut reader, &e)? {
+                    worksheet.add_data_validation(ranges, validation);
+                }
+            }
+            Event::Empty(e) if e.local_name().as_ref() == b"dataValidation" => {
+                if let Some((ranges, validation)) = parse_data_validation_empty(&e) {
+                    worksheet.add_data_validation(ranges, validation);
                 }
             }
             Event::Start(e) if e.local_name().as_ref() == b"cols" => in_cols = true,
@@ -3255,6 +3270,263 @@ fn parse_worksheet_into_model(
     }
 
     Ok(())
+}
+
+fn parse_data_validation_kind(val: &str) -> Option<DataValidationKind> {
+    match val {
+        v if v.eq_ignore_ascii_case("whole") => Some(DataValidationKind::Whole),
+        v if v.eq_ignore_ascii_case("decimal") => Some(DataValidationKind::Decimal),
+        v if v.eq_ignore_ascii_case("list") => Some(DataValidationKind::List),
+        v if v.eq_ignore_ascii_case("date") => Some(DataValidationKind::Date),
+        v if v.eq_ignore_ascii_case("time") => Some(DataValidationKind::Time),
+        v if v.eq_ignore_ascii_case("textLength") => Some(DataValidationKind::TextLength),
+        v if v.eq_ignore_ascii_case("custom") => Some(DataValidationKind::Custom),
+        _ => None,
+    }
+}
+
+fn parse_data_validation_operator(val: &str) -> Option<DataValidationOperator> {
+    match val {
+        v if v.eq_ignore_ascii_case("between") => Some(DataValidationOperator::Between),
+        v if v.eq_ignore_ascii_case("notBetween") => Some(DataValidationOperator::NotBetween),
+        v if v.eq_ignore_ascii_case("equal") => Some(DataValidationOperator::Equal),
+        v if v.eq_ignore_ascii_case("notEqual") => Some(DataValidationOperator::NotEqual),
+        v if v.eq_ignore_ascii_case("greaterThan") => Some(DataValidationOperator::GreaterThan),
+        v if v.eq_ignore_ascii_case("greaterThanOrEqual") => {
+            Some(DataValidationOperator::GreaterThanOrEqual)
+        }
+        v if v.eq_ignore_ascii_case("lessThan") => Some(DataValidationOperator::LessThan),
+        v if v.eq_ignore_ascii_case("lessThanOrEqual") => Some(DataValidationOperator::LessThanOrEqual),
+        _ => None,
+    }
+}
+
+fn parse_data_validation_error_style(val: &str) -> Option<DataValidationErrorStyle> {
+    match val {
+        v if v.eq_ignore_ascii_case("stop") => Some(DataValidationErrorStyle::Stop),
+        v if v.eq_ignore_ascii_case("warning") => Some(DataValidationErrorStyle::Warning),
+        v if v.eq_ignore_ascii_case("information") => Some(DataValidationErrorStyle::Information),
+        _ => None,
+    }
+}
+
+fn parse_sqref_ranges(val: &str) -> Vec<Range> {
+    val.split_whitespace()
+        .filter_map(|part| Range::from_a1(part).ok())
+        .collect()
+}
+
+fn normalize_data_validation_formula(raw: &str) -> String {
+    let Some(normalized) = normalize_formula_text(raw) else {
+        return String::new();
+    };
+    // Match the policy used for cell formulas and defined names: strip `_xlfn.` prefixes so the
+    // in-memory model stores UI-facing formula text.
+    crate::formula_text::strip_xlfn_prefixes(&normalized)
+}
+
+fn parse_data_validation_empty(e: &quick_xml::events::BytesStart<'_>) -> Option<(Vec<Range>, DataValidation)> {
+    let mut kind: Option<DataValidationKind> = None;
+    let mut operator: Option<DataValidationOperator> = None;
+    let mut allow_blank = false;
+    let mut show_input_message = false;
+    let mut show_error_message = false;
+    let mut show_drop_down = false;
+
+    let mut prompt_title: Option<String> = None;
+    let mut prompt_body: Option<String> = None;
+    let mut error_style: Option<DataValidationErrorStyle> = None;
+    let mut error_title: Option<String> = None;
+    let mut error_body: Option<String> = None;
+
+    let mut ranges: Vec<Range> = Vec::new();
+
+    for attr in e.attributes().with_checks(false).flatten() {
+        let key = crate::openxml::local_name(attr.key.as_ref());
+        let Ok(val) = attr.unescape_value() else {
+            continue;
+        };
+        let val = val.into_owned();
+        match key {
+            b"type" => kind = parse_data_validation_kind(&val),
+            b"operator" => operator = parse_data_validation_operator(&val),
+            b"allowBlank" => allow_blank = parse_xml_bool(&val),
+            b"showInputMessage" => show_input_message = parse_xml_bool(&val),
+            b"showErrorMessage" => show_error_message = parse_xml_bool(&val),
+            b"showDropDown" => show_drop_down = parse_xml_bool(&val),
+            b"promptTitle" => prompt_title = Some(val),
+            b"prompt" => prompt_body = Some(val),
+            b"errorStyle" => error_style = parse_data_validation_error_style(&val),
+            b"errorTitle" => error_title = Some(val),
+            b"error" => error_body = Some(val),
+            b"sqref" => ranges = parse_sqref_ranges(&val),
+            _ => {}
+        }
+    }
+
+    let kind = kind?;
+    if ranges.is_empty() {
+        return None;
+    }
+
+    let input_message = if prompt_title.is_some() || prompt_body.is_some() {
+        Some(DataValidationInputMessage {
+            title: prompt_title,
+            body: prompt_body,
+        })
+    } else {
+        None
+    };
+
+    let error_alert = if error_style.is_some() || error_title.is_some() || error_body.is_some() {
+        Some(DataValidationErrorAlert {
+            style: error_style.unwrap_or_default(),
+            title: error_title,
+            body: error_body,
+        })
+    } else {
+        None
+    };
+
+    Some((
+        ranges,
+        DataValidation {
+            kind,
+            operator,
+            formula1: String::new(),
+            formula2: None,
+            allow_blank,
+            show_input_message,
+            show_error_message,
+            show_drop_down,
+            input_message,
+            error_alert,
+        },
+    ))
+}
+
+fn parse_data_validation_start<R: std::io::BufRead>(
+    reader: &mut Reader<R>,
+    e: &quick_xml::events::BytesStart<'_>,
+) -> Result<Option<(Vec<Range>, DataValidation)>, ReadError> {
+    let mut kind: Option<DataValidationKind> = None;
+    let mut operator: Option<DataValidationOperator> = None;
+    let mut allow_blank = false;
+    let mut show_input_message = false;
+    let mut show_error_message = false;
+    let mut show_drop_down = false;
+
+    let mut prompt_title: Option<String> = None;
+    let mut prompt_body: Option<String> = None;
+    let mut error_style: Option<DataValidationErrorStyle> = None;
+    let mut error_title: Option<String> = None;
+    let mut error_body: Option<String> = None;
+
+    let mut ranges: Vec<Range> = Vec::new();
+
+    for attr in e.attributes().with_checks(false).flatten() {
+        let key = crate::openxml::local_name(attr.key.as_ref());
+        let Ok(val) = attr.unescape_value() else {
+            continue;
+        };
+        let val = val.into_owned();
+        match key {
+            b"type" => kind = parse_data_validation_kind(&val),
+            b"operator" => operator = parse_data_validation_operator(&val),
+            b"allowBlank" => allow_blank = parse_xml_bool(&val),
+            b"showInputMessage" => show_input_message = parse_xml_bool(&val),
+            b"showErrorMessage" => show_error_message = parse_xml_bool(&val),
+            b"showDropDown" => show_drop_down = parse_xml_bool(&val),
+            b"promptTitle" => prompt_title = Some(val),
+            b"prompt" => prompt_body = Some(val),
+            b"errorStyle" => error_style = parse_data_validation_error_style(&val),
+            b"errorTitle" => error_title = Some(val),
+            b"error" => error_body = Some(val),
+            b"sqref" => ranges = parse_sqref_ranges(&val),
+            _ => {}
+        }
+    }
+
+    let should_store = kind.is_some() && !ranges.is_empty();
+
+    let mut formula1 = String::new();
+    let mut formula2: Option<String> = None;
+
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if e.local_name().as_ref() == b"formula1" => {
+                formula1 = normalize_data_validation_formula(&read_text(reader, b"formula1")?);
+            }
+            Event::Empty(e) if e.local_name().as_ref() == b"formula1" => {
+                formula1.clear();
+            }
+            Event::Start(e) if e.local_name().as_ref() == b"formula2" => {
+                let normalized = normalize_data_validation_formula(&read_text(reader, b"formula2")?);
+                if normalized.is_empty() {
+                    formula2 = None;
+                } else {
+                    formula2 = Some(normalized);
+                }
+            }
+            Event::Empty(e) if e.local_name().as_ref() == b"formula2" => {
+                formula2 = None;
+            }
+            Event::Start(e) => {
+                // Best-effort: skip any unmodeled nested content.
+                reader.read_to_end_into(e.name(), &mut Vec::new())?;
+            }
+            Event::End(e) if e.local_name().as_ref() == b"dataValidation" => break,
+            Event::Eof => {
+                return Err(ReadError::Xlsx(XlsxError::Invalid(
+                    "unexpected EOF while parsing <dataValidation>".to_string(),
+                )))
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    if !should_store {
+        return Ok(None);
+    }
+
+    let kind = kind.expect("checked in should_store");
+
+    let input_message = if prompt_title.is_some() || prompt_body.is_some() {
+        Some(DataValidationInputMessage {
+            title: prompt_title,
+            body: prompt_body,
+        })
+    } else {
+        None
+    };
+
+    let error_alert = if error_style.is_some() || error_title.is_some() || error_body.is_some() {
+        Some(DataValidationErrorAlert {
+            style: error_style.unwrap_or_default(),
+            title: error_title,
+            body: error_body,
+        })
+    } else {
+        None
+    };
+
+    Ok(Some((
+        ranges,
+        DataValidation {
+            kind,
+            operator,
+            formula1,
+            formula2,
+            allow_blank,
+            show_input_message,
+            show_error_message,
+            show_drop_down,
+            input_message,
+            error_alert,
+        },
+    )))
 }
 
 #[derive(Debug, Clone)]
