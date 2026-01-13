@@ -15,6 +15,25 @@ This enables `rollup-plugin-visualizer` via `VITE_BUNDLE_ANALYZE=1` and writes t
 
 Normal builds (`pnpm -C apps/desktop build`) are unchanged unless `VITE_BUNDLE_ANALYZE=1` is set.
 
+## Rust binary size analysis (desktop shell)
+
+To inspect which Rust **crates/symbols** dominate the `formula-desktop` release binary (useful for bundle-size
+optimization work), run:
+
+```bash
+# Recommended analysis tool
+cargo install cargo-bloat --locked
+
+# Build (release) + report
+python3 scripts/desktop_binary_size_report.py
+
+# If you've already built the release binary, you can skip the build step:
+python3 scripts/desktop_binary_size_report.py --no-build
+```
+
+The report is emitted as Markdown to stdout, and is also published to the GitHub Actions step summary in the
+`Performance` workflow.
+
 ## Workbook load limits (snapshot loading)
 
 When opening a workbook in the desktop app, the renderer fetches a **cell snapshot** from the backend to populate the UI.

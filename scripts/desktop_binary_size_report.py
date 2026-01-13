@@ -16,6 +16,8 @@ DEFAULT_TOP = 50
 DEFAULT_FEATURES = "desktop"
 DEFAULT_BIN_NAME = "formula-desktop"
 DEFAULT_DESKTOP_PKG_FALLBACK = "formula-desktop-tauri"
+ENV_SIZE_LIMIT_MB = "FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB"
+ENV_ENFORCE_SIZE_LIMIT = "FORMULA_ENFORCE_DESKTOP_BINARY_SIZE"
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,24 @@ def _human_bytes(size_bytes: int) -> str:
             return f"{size:.1f} {unit}"
         size /= 1000
     return f"{size_bytes} B"
+
+
+def _is_truthy_env(val: str | None) -> bool:
+    if val is None:
+        return False
+    return val.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _parse_limit_mb(raw: str | None) -> int | None:
+    if raw is None or not raw.strip():
+        return None
+    try:
+        mb = int(float(raw))
+    except ValueError as exc:  # noqa: PERF203
+        raise ValueError(f"Invalid {ENV_SIZE_LIMIT_MB}={raw!r} (expected a number)") from exc
+    if mb <= 0:
+        raise ValueError(f"Invalid {ENV_SIZE_LIMIT_MB}={raw!r} (must be > 0)")
+    return mb
 
 
 def _repo_root() -> Path:
@@ -95,7 +115,9 @@ def _binary_path(target_dir: Path, bin_name: str, target: str | None) -> Path:
     if target:
         rel_dir = target_dir / target / "release"
     exe = bin_name
-    if sys.platform == "win32":
+    # If cross-compiling to Windows from a non-Windows host, the output binary
+    # still has a `.exe` suffix under target/<triple>/release.
+    if (target and "windows" in target) or (target is None and sys.platform == "win32"):
         exe += ".exe"
     return rel_dir / exe
 
@@ -146,6 +168,8 @@ def _render_markdown(
     target_dir: Path,
     bin_path: Path,
     bin_size_bytes: int | None,
+    limit_mb: int | None,
+    enforce: bool,
     build_cmd: list[str] | None,
     crates_cmd: list[str] | None,
     crates_out: CmdResult | None,
@@ -173,6 +197,9 @@ def _render_markdown(
     lines.append(f"- Binary path: `{bin_path}`")
     if bin_size_bytes is not None:
         lines.append(f"- Binary size: **{_human_bytes(bin_size_bytes)}** ({bin_size_bytes} bytes)")
+    if limit_mb is not None:
+        lines.append(f"- Size limit: **{limit_mb} MB**")
+        lines.append(f"- Enforcement: **{'enabled' if enforce else 'disabled'}**")
     lines.append("")
 
     if tool_note:
@@ -260,6 +287,24 @@ def main() -> int:
         default=None,
         help="Optional markdown output path (in addition to stdout).",
     )
+    parser.add_argument(
+        "--limit-mb",
+        type=int,
+        default=None,
+        help=(
+            "Optional absolute size limit (in MB) for the release binary. "
+            f"Also configurable via env {ENV_SIZE_LIMIT_MB}."
+        ),
+    )
+    parser.add_argument(
+        "--enforce",
+        action="store_true",
+        default=False,
+        help=(
+            "Fail if the release binary exceeds --limit-mb (or env limit). "
+            f"Also enabled by env {ENV_ENFORCE_SIZE_LIMIT}=1."
+        ),
+    )
     args = parser.parse_args()
 
     repo_root = _repo_root()
@@ -267,6 +312,30 @@ def main() -> int:
     bin_name = DEFAULT_BIN_NAME
     features = args.features
     target = args.target
+    enforce = args.enforce or _is_truthy_env(os.environ.get(ENV_ENFORCE_SIZE_LIMIT))
+    try:
+        limit_mb = args.limit_mb if args.limit_mb is not None else _parse_limit_mb(os.environ.get(ENV_SIZE_LIMIT_MB))
+    except ValueError as exc:
+        md = f"## Desktop Rust binary size breakdown\n\nError: {exc}\n"
+        print(md)
+        _append_step_summary(md)
+        if args.out:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(md, encoding="utf-8")
+        return 2
+
+    if enforce and limit_mb is None:
+        md = (
+            "## Desktop Rust binary size breakdown\n\n"
+            f"Error: {ENV_ENFORCE_SIZE_LIMIT} is enabled but no size limit was provided. "
+            f"Set --limit-mb or {ENV_SIZE_LIMIT_MB}.\n"
+        )
+        print(md)
+        _append_step_summary(md)
+        if args.out:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(md, encoding="utf-8")
+        return 2
 
     try:
         target_dir = _cargo_target_directory(repo_root)
@@ -308,6 +377,8 @@ def main() -> int:
                 target_dir=target_dir,
                 bin_path=bin_path,
                 bin_size_bytes=bin_path.stat().st_size if bin_path.exists() else None,
+                limit_mb=limit_mb,
+                enforce=enforce,
                 build_cmd=build_cmd,
                 crates_cmd=None,
                 crates_out=None,
@@ -333,6 +404,8 @@ def main() -> int:
             target_dir=target_dir,
             bin_path=bin_path,
             bin_size_bytes=None,
+            limit_mb=limit_mb,
+            enforce=enforce,
             build_cmd=build_cmd,
             crates_cmd=None,
             crates_out=None,
@@ -350,6 +423,8 @@ def main() -> int:
         return 1
 
     bin_size_bytes = bin_path.stat().st_size
+    limit_bytes = limit_mb * 1000 * 1000 if limit_mb is not None else None
+    over_limit = limit_bytes is not None and bin_size_bytes > limit_bytes
 
     # Preferred: cargo-bloat.
     cargo_bloat_probe = _run_capture(["cargo", "bloat", "--version"], cwd=repo_root)
@@ -408,6 +483,13 @@ def main() -> int:
             "Install with `cargo install cargo-bloat --locked` for crate/symbol breakdowns."
         )
 
+    if over_limit:
+        prefix = tool_note + "\n\n" if tool_note else ""
+        tool_note = (
+            prefix
+            + f"Warning: release binary exceeds configured limit (**{_human_bytes(bin_size_bytes)}** > **{limit_mb} MB**)."
+        )
+
     # Optional: add llvm-size output (helpful even when cargo-bloat is present).
     llvm_size_cmd: list[str] | None = None
     llvm_size_out: CmdResult | None = None
@@ -430,6 +512,8 @@ def main() -> int:
         target_dir=target_dir,
         bin_path=bin_path,
         bin_size_bytes=bin_size_bytes,
+        limit_mb=limit_mb,
+        enforce=enforce,
         build_cmd=build_cmd,
         crates_cmd=crates_cmd,
         crates_out=crates_out,
@@ -448,10 +532,9 @@ def main() -> int:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(md, encoding="utf-8")
 
-    # Informational by default: only fail on catastrophic errors like build/binary not found.
-    if has_cargo_bloat and crates_out and symbols_out:
-        if crates_out.returncode != 0 or symbols_out.returncode != 0:
-            return 1
+    # Informational by default: only fail when explicitly enforcing a size limit.
+    if enforce and over_limit:
+        return 1
 
     return 0
 
