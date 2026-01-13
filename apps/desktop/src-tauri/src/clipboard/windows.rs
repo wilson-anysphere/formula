@@ -15,9 +15,10 @@ use windows::Win32::System::Memory::{
 use super::cf_html::{build_cf_html_payload, extract_cf_html_fragment_best_effort};
 use super::retry::{retry_with_delays, total_delay, OPEN_CLIPBOARD_RETRY_DELAYS};
 use super::windows_dib::{dibv5_to_png, png_to_dib_and_dibv5};
+use super::windows_format_cache::CachedClipboardFormat;
 use super::{
-    normalize_base64_str, string_within_limit, ClipboardContent, ClipboardError, ClipboardWritePayload,
-    MAX_PNG_BYTES, MAX_TEXT_BYTES,
+    normalize_base64_str, string_within_limit, ClipboardContent, ClipboardError,
+    ClipboardWritePayload, MAX_PNG_BYTES, MAX_TEXT_BYTES,
 };
 
 // Built-in clipboard formats that we use directly. Keeping these as numeric constants avoids
@@ -31,6 +32,24 @@ const CF_DIBV5: u32 = 17;
 // DIB payloads are uncompressed, so they can be significantly larger than the corresponding PNG.
 // Allow a larger cap for DIB formats so we can still convert many clipboard images to PNG.
 const MAX_DIB_BYTES: usize = 4 * MAX_PNG_BYTES;
+
+// Custom clipboard formats we support. These are registered lazily and cached to keep clipboard
+// reads/writes on hot paths allocation-free.
+static FORMAT_HTML: CachedClipboardFormat = CachedClipboardFormat::new("HTML Format");
+static FORMAT_RTF: CachedClipboardFormat = CachedClipboardFormat::new("Rich Text Format");
+static FORMAT_PNG: CachedClipboardFormat = CachedClipboardFormat::new("PNG");
+static FORMAT_IMAGE_PNG: CachedClipboardFormat = CachedClipboardFormat::new("image/png");
+static FORMAT_IMAGE_X_PNG: CachedClipboardFormat = CachedClipboardFormat::new("image/x-png");
+static FORMAT_TEXT_HTML: CachedClipboardFormat = CachedClipboardFormat::new("text/html");
+static FORMAT_TEXT_HTML_UTF8: CachedClipboardFormat =
+    CachedClipboardFormat::new("text/html;charset=utf-8");
+static FORMAT_TEXT_RTF: CachedClipboardFormat = CachedClipboardFormat::new("text/rtf");
+static FORMAT_TEXT_RTF_UTF8: CachedClipboardFormat =
+    CachedClipboardFormat::new("text/rtf;charset=utf-8");
+static FORMAT_APPLICATION_RTF: CachedClipboardFormat =
+    CachedClipboardFormat::new("application/rtf");
+static FORMAT_APPLICATION_X_RTF: CachedClipboardFormat =
+    CachedClipboardFormat::new("application/x-rtf");
 
 struct ClipboardGuard;
 
@@ -70,16 +89,11 @@ fn open_clipboard_with_retry() -> Result<ClipboardGuard, ClipboardError> {
     })
 }
 
-fn register_format(name: &str) -> Result<u32, ClipboardError> {
+fn register_format(name: &'static str) -> Option<u32> {
     let mut wide: Vec<u16> = name.encode_utf16().collect();
     wide.push(0);
     let id = unsafe { RegisterClipboardFormatW(PCWSTR(wide.as_ptr())) };
-    if id == 0 {
-        return Err(ClipboardError::OperationFailed(format!(
-            "RegisterClipboardFormatW(\"{name}\") failed"
-        )));
-    }
-    Ok(id)
+    (id != 0).then_some(id)
 }
 
 fn try_get_clipboard_bytes(
@@ -262,8 +276,8 @@ fn parse_png_dimensions(png_bytes: &[u8]) -> Option<(u32, u32)> {
         return None;
     }
 
-    let ihdr_len = u32::from_be_bytes([png_bytes[8], png_bytes[9], png_bytes[10], png_bytes[11]])
-        as usize;
+    let ihdr_len =
+        u32::from_be_bytes([png_bytes[8], png_bytes[9], png_bytes[10], png_bytes[11]]) as usize;
     if ihdr_len < 8 {
         return None;
     }
@@ -285,19 +299,19 @@ fn parse_png_dimensions(png_bytes: &[u8]) -> Option<(u32, u32)> {
 pub fn read() -> Result<ClipboardContent, ClipboardError> {
     // Rich clipboard formats are best-effort: if registration fails (rare), still return whatever
     // formats we can read (e.g. plain text).
-    let format_html = register_format("HTML Format").ok();
-    let format_rtf = register_format("Rich Text Format").ok();
-    let format_png = register_format("PNG").ok();
+    let format_html = FORMAT_HTML.get_with(register_format);
+    let format_rtf = FORMAT_RTF.get_with(register_format);
+    let format_png = FORMAT_PNG.get_with(register_format);
     // Some producers use a MIME-like name for PNG. Treat this as best-effort fallback.
-    let format_image_png = register_format("image/png").ok();
-    let format_image_x_png = register_format("image/x-png").ok();
+    let format_image_png = FORMAT_IMAGE_PNG.get_with(register_format);
+    let format_image_x_png = FORMAT_IMAGE_X_PNG.get_with(register_format);
     // MIME-like aliases used by some cross-platform apps.
-    let format_text_html = register_format("text/html").ok();
-    let format_text_html_utf8 = register_format("text/html;charset=utf-8").ok();
-    let format_text_rtf = register_format("text/rtf").ok();
-    let format_text_rtf_utf8 = register_format("text/rtf;charset=utf-8").ok();
-    let format_application_rtf = register_format("application/rtf").ok();
-    let format_application_x_rtf = register_format("application/x-rtf").ok();
+    let format_text_html = FORMAT_TEXT_HTML.get_with(register_format);
+    let format_text_html_utf8 = FORMAT_TEXT_HTML_UTF8.get_with(register_format);
+    let format_text_rtf = FORMAT_TEXT_RTF.get_with(register_format);
+    let format_text_rtf_utf8 = FORMAT_TEXT_RTF_UTF8.get_with(register_format);
+    let format_application_rtf = FORMAT_APPLICATION_RTF.get_with(register_format);
+    let format_application_x_rtf = FORMAT_APPLICATION_X_RTF.get_with(register_format);
 
     let _guard = open_clipboard_with_retry()?;
 
@@ -309,7 +323,11 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         .or_else(|| try_get_ansi_text(CF_OEMTEXT, CP_OEMCP).ok().flatten());
 
     let mut html = format_html
-        .and_then(|format| try_get_clipboard_bytes(format, MAX_TEXT_BYTES).ok().flatten())
+        .and_then(|format| {
+            try_get_clipboard_bytes(format, MAX_TEXT_BYTES)
+                .ok()
+                .flatten()
+        })
         .map(|bytes| extract_cf_html_fragment_best_effort(&bytes))
         .filter(|s| !s.is_empty());
     if html.is_none() {
@@ -333,7 +351,11 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
     let html = html.and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
 
     let mut rtf = format_rtf
-        .and_then(|format| try_get_clipboard_bytes(format, MAX_TEXT_BYTES).ok().flatten())
+        .and_then(|format| {
+            try_get_clipboard_bytes(format, MAX_TEXT_BYTES)
+                .ok()
+                .flatten()
+        })
         .map(|bytes| {
             String::from_utf8_lossy(&bytes)
                 .trim_end_matches('\0')
@@ -395,7 +417,11 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
     let rtf = rtf.and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
 
     let mut image_png_base64 = format_png
-        .and_then(|format| try_get_clipboard_bytes(format, MAX_PNG_BYTES).ok().flatten())
+        .and_then(|format| {
+            try_get_clipboard_bytes(format, MAX_PNG_BYTES)
+                .ok()
+                .flatten()
+        })
         .map(|png_bytes| STANDARD.encode(png_bytes));
 
     if image_png_base64.is_none() {
@@ -426,7 +452,10 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
     }
 
     if image_png_base64.is_none() {
-        if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIB, MAX_DIB_BYTES).ok().flatten() {
+        if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIB, MAX_DIB_BYTES)
+            .ok()
+            .flatten()
+        {
             image_png_base64 = dibv5_to_png(&dib_bytes)
                 .ok()
                 .filter(|png| png.len() <= MAX_PNG_BYTES)
@@ -500,43 +529,62 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
 
     let format_html = html_bytes
         .as_ref()
-        .map(|_| register_format("HTML Format"))
-        .transpose()?;
+        .and_then(|_| FORMAT_HTML.get_with(register_format));
     let format_text_html = html_plain_bytes
         .as_ref()
-        .map(|_| register_format("text/html").ok())
-        .flatten();
+        .and_then(|_| FORMAT_TEXT_HTML.get_with(register_format));
     let format_text_html_utf8 = html_plain_bytes
         .as_ref()
-        .map(|_| register_format("text/html;charset=utf-8").ok())
-        .flatten();
+        .and_then(|_| FORMAT_TEXT_HTML_UTF8.get_with(register_format));
     let format_rtf = rtf_bytes
         .as_ref()
-        .map(|_| register_format("Rich Text Format"))
-        .transpose()?;
+        .and_then(|_| FORMAT_RTF.get_with(register_format));
     let format_text_rtf = rtf_bytes
         .as_ref()
-        .map(|_| register_format("text/rtf").ok())
-        .flatten();
+        .and_then(|_| FORMAT_TEXT_RTF.get_with(register_format));
     let format_text_rtf_utf8 = rtf_bytes
         .as_ref()
-        .map(|_| register_format("text/rtf;charset=utf-8").ok())
-        .flatten();
+        .and_then(|_| FORMAT_TEXT_RTF_UTF8.get_with(register_format));
     let format_application_rtf = rtf_bytes
         .as_ref()
-        .map(|_| register_format("application/rtf").ok())
-        .flatten();
+        .and_then(|_| FORMAT_APPLICATION_RTF.get_with(register_format));
     let format_application_x_rtf = rtf_bytes
         .as_ref()
-        .map(|_| register_format("application/x-rtf").ok())
-        .flatten();
+        .and_then(|_| FORMAT_APPLICATION_X_RTF.get_with(register_format));
     let format_png = png_bytes
         .as_ref()
-        .map(|_| register_format("PNG"))
-        .transpose()?;
+        .and_then(|_| FORMAT_PNG.get_with(register_format));
     // Best-effort PNG variant used by some apps.
-    let format_image_png = png_bytes.as_ref().and_then(|_| register_format("image/png").ok());
-    let format_image_x_png = png_bytes.as_ref().and_then(|_| register_format("image/x-png").ok());
+    let format_image_png = png_bytes
+        .as_ref()
+        .and_then(|_| FORMAT_IMAGE_PNG.get_with(register_format));
+    let format_image_x_png = png_bytes
+        .as_ref()
+        .and_then(|_| FORMAT_IMAGE_X_PNG.get_with(register_format));
+
+    // If we can't set any representation (e.g. clipboard format registration failed), don't clear
+    // the existing clipboard contents.
+    let requested_any = payload.text.is_some()
+        || html_bytes.is_some()
+        || rtf_bytes.is_some()
+        || png_bytes.is_some();
+    let can_set_any = payload.text.is_some()
+        || format_html.is_some()
+        || format_text_html.is_some()
+        || format_text_html_utf8.is_some()
+        || format_rtf.is_some()
+        || format_text_rtf.is_some()
+        || format_text_rtf_utf8.is_some()
+        || format_application_rtf.is_some()
+        || format_application_x_rtf.is_some()
+        || format_png.is_some()
+        || format_image_png.is_some()
+        || format_image_x_png.is_some()
+        || dibv5_bytes.is_some()
+        || dib_bytes.is_some();
+    if requested_any && !can_set_any {
+        return Ok(());
+    }
 
     let _guard = open_clipboard_with_retry()?;
 

@@ -324,6 +324,8 @@ fn tiff_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 
 #[cfg(any(target_os = "windows", test))]
 mod windows_dib;
+#[cfg(any(target_os = "windows", test))]
+mod windows_format_cache;
 #[cfg(all(target_os = "windows", feature = "desktop"))]
 mod windows;
 
