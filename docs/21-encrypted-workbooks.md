@@ -366,6 +366,19 @@ These distinctions matter for UX and telemetry: “needs password” is a normal
 Until password-based decryption is implemented, Formula will generally surface a single
 “encrypted workbook not supported” error instead of distinguishing the cases above.
 
+### Mapping to existing Rust error types
+
+Lower-level decryption code (used by XLSX) already has more granular error variants. When wiring
+password support through `formula-io`, we should preserve these distinctions rather than collapsing
+them back into a generic “encrypted workbook” error:
+
+- `formula_xlsx::offcrypto::OffCryptoError::WrongPassword` → **Invalid password**
+- `formula_xlsx::offcrypto::OffCryptoError::IntegrityMismatch` → **Invalid password** *or* **corrupt file**
+  - UX should not claim “file is corrupted” with certainty; treat as “password incorrect or file
+    corrupted”.
+- `formula_xlsx::offcrypto::OffCryptoError::UnsupportedEncryptionVersion { .. }` and
+  `Unsupported*` variants → **Unsupported encryption scheme**
+
 ---
 
 ## Saving / round-trip limitations
