@@ -1,3 +1,5 @@
+import "./tauri/startupMetricsBootstrap.js";
+
 import { SpreadsheetApp } from "./app/spreadsheetApp";
 import type { SheetNameResolver } from "./sheet/sheetNameResolver";
 import "./styles/tokens.css";
@@ -173,11 +175,7 @@ import { DlpViolationError } from "../../../packages/security/dlp/src/errors.js"
 
 import sampleHelloManifest from "../../../extensions/sample-hello/package.json";
 import { purgeLegacyDesktopLLMSettings } from "./ai/llm/desktopLLMClient.js";
-import {
-  installStartupTimingsListeners,
-  markStartupTimeToInteractive,
-  reportStartupWebviewLoaded,
-} from "./tauri/startupMetrics.js";
+import { markStartupTimeToInteractive } from "./tauri/startupMetrics.js";
 import { openExternalHyperlink } from "./hyperlinks/openExternal.js";
 import {
   clampUsedRange,
@@ -197,30 +195,6 @@ import {
   type SnapshotCell,
 } from "./workbook/mergeFormattingIntoSnapshot.js";
 import { exportDocumentRangeToCsv } from "./import-export/csv/export.js";
-
-// Startup performance instrumentation (no-op for web builds).
-//
-// Call `reportStartupWebviewLoaded()` immediately so the host-side `webview_loaded_ms`
-// measurement does not include the IPC overhead of installing listeners. Once the
-// listeners are installed, call it again (idempotent) to re-emit the timing events
-// for the now-ready listeners.
-try {
-  reportStartupWebviewLoaded();
-} catch {
-  // Best-effort; instrumentation should never block startup.
-}
-
-void installStartupTimingsListeners()
-  .catch(() => {
-    // Best-effort; instrumentation should never block startup.
-  })
-  .finally(() => {
-    try {
-      reportStartupWebviewLoaded();
-    } catch {
-      // Best-effort; instrumentation should never block startup.
-    }
-  });
 
 // Best-effort: older desktop builds persisted provider selection + API keys in localStorage.
 // Cursor desktop no longer supports user-provided keys; proactively delete stale secrets on startup.
