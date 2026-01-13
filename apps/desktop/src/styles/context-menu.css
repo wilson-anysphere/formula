@@ -97,6 +97,13 @@
   color: currentColor;
 }
 
+.context-menu__item:disabled .context-menu__shortcut,
+.context-menu__item--disabled .context-menu__shortcut,
+.context-menu__item:disabled .context-menu__submenu-arrow,
+.context-menu__item--disabled .context-menu__submenu-arrow {
+  color: currentColor;
+}
+
 .context-menu__item:disabled,
 .context-menu__item--disabled {
   color: var(--text-secondary);

@@ -9,6 +9,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../spreadsheetApp";
 
+let priorCanvasCharts: string | undefined;
+let priorUseCanvasCharts: string | undefined;
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -240,17 +243,23 @@ describe("SpreadsheetApp overlay stacking", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
-    delete process.env.CANVAS_CHARTS;
-    delete process.env.USE_CANVAS_CHARTS;
+    if (priorCanvasCharts === undefined) delete process.env.CANVAS_CHARTS;
+    else process.env.CANVAS_CHARTS = priorCanvasCharts;
+    if (priorUseCanvasCharts === undefined) delete process.env.USE_CANVAS_CHARTS;
+    else process.env.USE_CANVAS_CHARTS = priorUseCanvasCharts;
   });
 
   beforeEach(() => {
-    document.head.innerHTML = "";
-    document.body.innerHTML = "";
-    // Ensure these tests cover the default canvas charts behavior regardless of any
-    // suite-level env defaults (other tests may force legacy charts mode).
+    priorCanvasCharts = process.env.CANVAS_CHARTS;
+    priorUseCanvasCharts = process.env.USE_CANVAS_CHARTS;
+    // These tests assert overlay stacking for the default (legacy charts) behavior. Ensure the
+    // feature flag env vars do not enable canvas charts (which would omit the legacy chart
+    // canvases entirely).
     delete process.env.CANVAS_CHARTS;
     delete process.env.USE_CANVAS_CHARTS;
+
+    document.head.innerHTML = "";
+    document.body.innerHTML = "";
 
     const storage = createInMemoryLocalStorage();
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });

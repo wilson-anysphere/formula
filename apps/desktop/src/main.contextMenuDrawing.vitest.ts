@@ -25,6 +25,7 @@ describe("Drawing context menu (main wiring helper)", () => {
       }),
       cut: vi.fn(),
       copy: vi.fn(),
+      duplicateSelectedDrawing: vi.fn(),
       deleteDrawingById: vi.fn((id: number) => {
         drawings = drawings.filter((d) => d.id !== id);
         if (selectedId === id) selectedId = null;
@@ -55,7 +56,7 @@ describe("Drawing context menu (main wiring helper)", () => {
       const labels = Array.from(overlay?.querySelectorAll<HTMLElement>(".context-menu__label") ?? []).map((el) =>
         (el.textContent ?? "").trim(),
       );
-      expect(labels).toEqual(["Cut", "Copy", "Delete", "Bring Forward", "Send Backward"]);
+      expect(labels).toEqual(["Cut", "Copy", "Duplicate", "Delete", "Bring Forward", "Send Backward"]);
 
       // Ensure we didn't leak cell-oriented items into the drawing menu.
       expect(labels).not.toContain("Paste");
@@ -89,6 +90,7 @@ describe("Drawing context menu (main wiring helper)", () => {
       }),
       cut: vi.fn(),
       copy: vi.fn(),
+      duplicateSelectedDrawing: vi.fn(),
       deleteDrawingById: vi.fn(),
       bringSelectedDrawingForward: vi.fn(),
       sendSelectedDrawingBackward: vi.fn(),
@@ -129,6 +131,7 @@ describe("Drawing context menu (main wiring helper)", () => {
       }),
       cut: vi.fn(),
       copy: vi.fn(),
+      duplicateSelectedDrawing: vi.fn(),
       deleteDrawingById: vi.fn(),
       bringSelectedDrawingForward: vi.fn(),
       sendSelectedDrawingBackward: vi.fn(),
@@ -151,6 +154,7 @@ describe("Drawing context menu (main wiring helper)", () => {
 
       expect(buttonByLabel("Cut")?.disabled).toBe(true);
       expect(buttonByLabel("Copy")?.disabled).toBe(true);
+      expect(buttonByLabel("Duplicate")?.disabled).toBe(false);
       expect(buttonByLabel("Delete")?.disabled).toBe(false);
       expect(buttonByLabel("Bring Forward")?.disabled).toBe(false);
       expect(buttonByLabel("Send Backward")?.disabled).toBe(false);

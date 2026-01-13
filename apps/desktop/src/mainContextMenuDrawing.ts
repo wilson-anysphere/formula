@@ -16,6 +16,7 @@ type DrawingContextMenuApp = Pick<
   | "selectDrawingById"
   | "cut"
   | "copy"
+  | "duplicateSelectedDrawing"
   | "deleteDrawingById"
   | "bringSelectedDrawingForward"
   | "sendSelectedDrawingBackward"
@@ -98,6 +99,15 @@ export function buildDrawingContextMenuItems(params: {
       onSelect: () => {
         app.focus();
         app.copy();
+      },
+    },
+    {
+      type: "item",
+      label: "Duplicate",
+      enabled: canModify,
+      onSelect: () => {
+        app.duplicateSelectedDrawing();
+        app.focus();
       },
     },
     {

@@ -420,7 +420,7 @@ test.describe("Grid context menus", () => {
     await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
-    await expect(secondary.locator("canvas")).toHaveCount(3);
+    await expect(secondary.locator("canvas")).toHaveCount(4);
     await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
     await openGridContextMenuAt(page, "#grid-secondary", { x: 10, y: 40 });
@@ -436,7 +436,7 @@ test.describe("Grid context menus", () => {
     await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
-    await expect(secondary.locator("canvas")).toHaveCount(3);
+    await expect(secondary.locator("canvas")).toHaveCount(4);
     await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
     await openGridContextMenuAt(page, "#grid-secondary", { x: 100, y: 10 });

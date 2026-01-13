@@ -104,7 +104,7 @@ test.describe("Drawing object commands", () => {
     await expect(menu).toBeVisible();
     await expect(menu.getByRole("button", { name: "Delete" })).toBeVisible();
     await expect(menu.getByRole("button", { name: "Duplicate" })).toBeVisible();
-    await expect(menu.getByRole("button", { name: "Bring to Front" })).toBeVisible();
-    await expect(menu.getByRole("button", { name: "Send to Back" })).toBeVisible();
+    await expect(menu.getByRole("button", { name: "Bring Forward" })).toBeVisible();
+    await expect(menu.getByRole("button", { name: "Send Backward" })).toBeVisible();
   });
 });

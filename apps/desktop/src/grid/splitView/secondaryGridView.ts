@@ -806,11 +806,11 @@ export class SecondaryGridView {
 
     this.grid.renderer.applyAxisSizeOverrides({ rows: rowSizes, cols: colSizes }, { resetUnspecified: true });
     // Axis size overrides mutate the underlying GridGeometry while the `DrawingOverlay` spatial
-    // index is keyed by the stable `geom` object reference. Invalidate the cached bounds so the
+    // index is keyed by the stable `geom` object reference. Invalidate cached bounds so the
     // overlay recomputes drawing positions under the new row/col sizes.
     this.drawingsOverlay.invalidateSpatialIndex();
-    // Keep version counters in sync with the renderer so the next user-driven scroll doesn't
-    // redundantly invalidate the spatial index for the same axis-size override update.
+    // Keep row/col version tracking aligned with the renderer so the next scroll event doesn't
+    // redundantly invalidate the drawings spatial index for the same axis-size update.
     this.rowsVersion = this.grid.renderer.scroll.rows.getVersion();
     this.colsVersion = this.grid.renderer.scroll.cols.getVersion();
     this.grid.syncScrollbars();
@@ -847,6 +847,11 @@ export class SecondaryGridView {
       } else {
         this.document.setColWidth(sheetId, docCol, baseSize, { label, source });
       }
+
+      // Keep axis version tracking aligned with the interactive renderer updates.
+      this.rowsVersion = this.grid.renderer.scroll.rows.getVersion();
+      this.colsVersion = this.grid.renderer.scroll.cols.getVersion();
+
       void this.renderDrawings();
       return;
     }

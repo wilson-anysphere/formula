@@ -113,6 +113,24 @@ if (!storageUsable(existing)) {
 }
 
 // ---------------------------------------------------------------------------
+// Environment defaults
+// ---------------------------------------------------------------------------
+//
+// Canvas charts render ChartStore charts via the drawings overlay (so charts show up in
+// `SpreadsheetApp.getDrawingObjects()`). Many unit tests exercise the drawings layer in
+// isolation and assume charts are *not* part of the drawings list unless explicitly enabled.
+//
+// Keep canvas charts opt-in for unit tests by defaulting CANVAS_CHARTS off when neither
+// CANVAS_CHARTS nor USE_CANVAS_CHARTS is set. Individual suites can opt into canvas charts
+// by setting `process.env.CANVAS_CHARTS="1"`.
+if (typeof process !== "undefined") {
+  const env = process.env as Record<string, string | undefined>;
+  if (env.CANVAS_CHARTS === undefined && env.USE_CANVAS_CHARTS === undefined) {
+    env.CANVAS_CHARTS = "0";
+  }
+}
+
+// ---------------------------------------------------------------------------
 // DOM polyfills for jsdom-based unit tests
 // ---------------------------------------------------------------------------
 //

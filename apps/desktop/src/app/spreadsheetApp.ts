@@ -19,7 +19,13 @@ import { ChartRendererAdapter, type ChartStore as ChartRendererStore } from "../
 import type { ChartModel } from "../charts/renderChart";
 import { FormulaChartModelStore } from "../charts/formulaChartModelStore";
 import { FALLBACK_CHART_THEME, type ChartTheme } from "../charts/theme";
-import { buildHitTestIndex, drawingObjectToViewportRect, hitTestDrawingsInto, type HitTestIndex } from "../drawings/hitTest";
+import {
+  buildHitTestIndex,
+  drawingObjectToViewportRect,
+  hitTestDrawings,
+  hitTestDrawingsInto,
+  type HitTestIndex,
+} from "../drawings/hitTest";
 import {
   DrawingInteractionController,
   patchDrawingXmlForResize,
@@ -258,8 +264,6 @@ function engineClientAsSyncTarget(engine: EngineClient): EngineSyncTarget {
     recalculate: (sheet) => engine.recalculate(sheet),
     setSheetDisplayName: (sheetId, name) => engine.setSheetDisplayName(sheetId, name),
     setWorkbookFileMetadata: (directory, filename) => engine.setWorkbookFileMetadata(directory, filename),
-    internStyle: (styleObj) => engine.internStyle(styleObj as any),
-    setCellStyleId: (sheet, address, styleId) => engine.setCellStyleId(address, styleId, sheet),
     setColWidth: (sheet, col, widthChars) => engine.setColWidth(col, widthChars, sheet),
     setColWidthChars: (sheet, col, widthChars) => engine.setColWidthChars(sheet, col, widthChars),
   };
@@ -6045,17 +6049,23 @@ export class SpreadsheetApp {
   }
 
   /**
-   * Track external async work as part of `SpreadsheetApp.whenIdle()`.
+   * Track an external async task in the app's `whenIdle()` barrier.
    *
-   * The desktop shell owns some async flows (notably workbook open/save) that do not live inside
-   * the SpreadsheetApp class, but should still be treated as "busy" for Playwright and other
-   * callers awaiting `whenIdle()`.
+   * SpreadsheetApp internally tracks engine/clipboard/etc work, but some higher-level
+   * desktop shell flows (e.g. workbook open/save via Tauri events) live in `main.ts`.
+   * This helper lets those flows participate in `whenIdle()` so tests (and any other
+   * callers that rely on `whenIdle()` for determinism) don't race UI state.
    */
-  trackIdleTask(task: unknown): void {
+  trackIdleTask(task: unknown, opts: { swallowErrors?: boolean } = {}): void {
     if (this.disposed) return;
     if (!isThenable(task)) return;
-    // Normalize rejections so `whenIdle()` does not throw due to a background task failing.
-    this.idle.track(Promise.resolve(task).catch(() => {}));
+
+    const promise = Promise.resolve(task);
+    // Avoid poisoning `whenIdle()` for the rest of the session when callers intentionally
+    // catch/handle errors (e.g. user cancels a workbook open dialog).
+    const swallowErrors = opts.swallowErrors ?? true;
+    const tracked = swallowErrors ? promise.catch(() => {}) : promise;
+    this.idle.track(tracked);
   }
 
   /**

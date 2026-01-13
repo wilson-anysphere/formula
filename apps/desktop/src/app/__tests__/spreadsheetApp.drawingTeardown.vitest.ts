@@ -186,6 +186,9 @@ describe("SpreadsheetApp drawings teardown", () => {
     (app as any).computedValuesByCoord.set(app.getCurrentSheetId(), new Map([[0, 123]]));
     expect(((app as any).computedValuesByCoord as Map<string, unknown>).size).toBeGreaterThan(0);
 
+    let interactionTarget =
+      ((app as any).drawingInteractionController as { element?: EventTarget } | null)?.element ?? root;
+
     // Ensure the insert-image input (if created) is cleaned up on dispose.
     const input = (app as any).ensureInsertImageInput?.() as HTMLInputElement | undefined;
     expect(input).toBeTruthy();
@@ -219,7 +222,7 @@ describe("SpreadsheetApp drawings teardown", () => {
     // (the element that receives pointer events in the real UI).
     const selectionCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
     expect(selectionCanvas).toBeTruthy();
-    const interactionTarget = selectionCanvas!;
+    interactionTarget = selectionCanvas!;
     // JSDOM returns a default zero-sized rect for canvases; align with our stubbed root rect so
     // pointer coordinate conversion + hit-testing behaves consistently.
     (interactionTarget as any).getBoundingClientRect = root.getBoundingClientRect;

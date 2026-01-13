@@ -2934,6 +2934,11 @@ app.subscribeSelection((selection) => {
 });
 app.getDocument().on("change", () => scheduleRibbonSelectionFormatStateUpdate());
 
+// `SpreadsheetApp.onEditStateChange(...)` invokes the callback immediately to sync initial state.
+// The sheet tabs UI (and its supporting variables like `sheetTabsReactRoot`, `handleAddSheet`, etc)
+// is wired up later in this module. Defer sheet-tab rendering until wiring is ready so startup
+// doesn't trip TDZ errors by calling `renderSheetTabs()` too early.
+let sheetTabsRenderReady = false;
 let sheetTabsRenderScheduled = false;
 function scheduleSheetTabsRender(): void {
   if (sheetTabsRenderScheduled) return;
@@ -2941,14 +2946,8 @@ function scheduleSheetTabsRender(): void {
   const schedule = typeof queueMicrotask === "function" ? queueMicrotask : (cb: () => void) => Promise.resolve().then(cb);
   schedule(() => {
     sheetTabsRenderScheduled = false;
-    // `SpreadsheetApp.onEditStateChange` invokes listeners immediately with the current edit state.
-    // During startup, sheet-tab rendering is wired later in this module; defer to avoid referencing
-    // sheet-tab state before initialization (which can crash the app in e2e).
-    try {
-      renderSheetTabs();
-    } catch {
-      // Best-effort during startup; sheet tabs will render once initialization completes.
-    }
+    if (!sheetTabsRenderReady) return;
+    renderSheetTabs();
   });
 }
 
@@ -3635,6 +3634,12 @@ function createPermissionGuardedSheetStore(
   permissionGuardedSheetStoreCache.set(store, out);
   return out;
 }
+
+// Sheet tabs wiring is now ready (React root, sheet commands, permission guard helpers, etc).
+// Allow earlier `onEditStateChange`/`read-only-changed` listeners to render, and render the
+// initial tab strip immediately.
+sheetTabsRenderReady = true;
+renderSheetTabs();
 
 function renderSheetTabs(): void {
   if (!sheetTabsReactRoot) {
@@ -11370,12 +11375,19 @@ try {
 
   const queueOpenWorkbook = (path: string) => {
     queueWorkbookFileCommand(async () => {
-      try {
+      const task = (async () => {
         // Ensure the window is visible so any UI feedback (toasts, prompts) is visible even
         // when the app is running in the background (e.g. opened via file association while
         // minimized to tray).
         await showTauriWindowBestEffort();
         await openWorkbookFromPath(path);
+      })();
+      // Include workbook open in `__formulaApp.whenIdle()` so e2e tests (and any UI flows
+      // that rely on `whenIdle`) don't race sheet-store/UI updates while the workbook is
+      // still loading.
+      app.trackIdleTask(task, { swallowErrors: true });
+      try {
+        await task;
       } catch (err) {
         console.error("Failed to open workbook:", err);
         void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);

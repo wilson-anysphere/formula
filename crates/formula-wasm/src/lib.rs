@@ -4087,7 +4087,6 @@ impl WasmWorkbook {
         self.inner
             .with_manual_calc_mode(|this| this.set_col_format_runs_internal(&sheet, col, runs))
     }
-
     #[wasm_bindgen(js_name = "getCalcSettings")]
     pub fn get_calc_settings(&self) -> Result<JsValue, JsValue> {
         let settings = self.inner.engine.calc_settings();

@@ -21,6 +21,20 @@ type DesktopReadyOptions = {
    * and should pass a larger value.
    */
   appReadyTimeoutMs?: number;
+  /**
+   * Whether to wait for the desktop context menu overlay to be mounted.
+   *
+   * Many e2e specs open context menus early; if the dock-layout bootstrap is still
+   * initializing (or a delayed Vite reload is in progress), the `ContextMenu` instance
+   * might not be attached yet even though `window.__formulaApp` exists.
+   *
+   * Defaults to true.
+   */
+  waitForContextMenu?: boolean;
+  /**
+   * Optional cap on how long we'll wait for the context menu overlay to mount.
+   */
+  contextMenuTimeoutMs?: number;
 };
 
 /**
@@ -30,7 +44,13 @@ type DesktopReadyOptions = {
  * so make tests wait for `window.__formulaApp` before interacting with the grid.
  */
 export async function gotoDesktop(page: Page, path: string = "/", options: DesktopReadyOptions = {}): Promise<void> {
-  const { waitForIdle = true, idleTimeoutMs, appReadyTimeoutMs } = options;
+  const {
+    waitForIdle = true,
+    idleTimeoutMs,
+    appReadyTimeoutMs,
+    waitForContextMenu = true,
+    contextMenuTimeoutMs,
+  } = options;
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   const requestFailures: string[] = [];
@@ -147,6 +167,10 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
       const appReadyPromise = page.waitForFunction(() => Boolean(window.__formulaApp), undefined, {
         timeout: appReadyTimeout,
       });
+      // If we abandon this attempt due to a Vite reload, `appReadyPromise` can reject later (after
+      // its own timeout) and trigger unhandled rejection noise. Attach a handler now so retries
+      // remain clean.
+      void appReadyPromise.catch(() => {});
 
       // Vite can surface transient `net::ERR_NETWORK_CHANGED` errors during dependency
       // optimization. If the page recovers quickly (e.g. via an automatic reload), allow the boot
@@ -177,6 +201,15 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
         },
         { waitForIdle, idleTimeoutMs },
       );
+
+      if (waitForContextMenu) {
+        const menuWait = page.waitForFunction(
+          () => Boolean(document.querySelector('[data-testid="context-menu"]')),
+          undefined,
+          { timeout: typeof contextMenuTimeoutMs === "number" && contextMenuTimeoutMs > 0 ? contextMenuTimeoutMs : 30_000 },
+        );
+        await menuWait;
+      }
 
       // The desktop build includes a built-in "formula.e2e-events" extension used by other
       // Playwright specs (e.g. `extension-events.spec.ts`). That extension writes to
@@ -357,7 +390,10 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
     return parts.length > 0 ? `\n\n${parts.join("\n\n")}` : "";
   };
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  const maxAttempts = 3;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const requestStart = requestFailures.length;
     let networkChanged = false;
     let resolveNetworkChanged: (() => void) | null = null;
     const networkChangedPromise = new Promise<void>((resolve) => {
@@ -370,11 +406,12 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
     };
 
     try {
-      const appReadyPromise = page.waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: 60_000 });
+      const appWait = page.waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: 60_000 });
+      void appWait.catch(() => {});
       await Promise.race([
-        appReadyPromise,
+        appWait,
         networkChangedPromise.then(async () => {
-          await Promise.race([appReadyPromise, page.waitForTimeout(10_000)]);
+          await Promise.race([appWait, page.waitForTimeout(10_000)]);
           const ready = await page.evaluate(() => Boolean(window.__formulaApp)).catch(() => false);
           if (ready) return;
           throw new Error("net::ERR_NETWORK_CHANGED");
@@ -386,21 +423,24 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
           await app.whenIdle();
         }
       });
+
       page.off("console", onConsole);
       page.off("pageerror", onPageError);
       page.off("requestfailed", onRequestFailed);
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      const attemptFailures = requestFailures.slice(requestStart);
       const sawNetworkChanged =
         networkChanged ||
         consoleErrors.some((text) => text.includes("net::ERR_NETWORK_CHANGED")) ||
-        requestFailures.some((text) => text.includes("net::ERR_NETWORK_CHANGED"));
+        attemptFailures.some((entry) => entry.includes("net::ERR_NETWORK_CHANGED"));
       if (
-        attempt === 0 &&
+        attempt < maxAttempts - 1 &&
         (message.includes("Execution context was destroyed") ||
           message.includes("net::ERR_ABORTED") ||
           message.includes("net::ERR_NETWORK_CHANGED") ||
+          message.includes("interrupted by another navigation") ||
           message.includes("frame was detached") ||
           sawNetworkChanged)
       ) {
@@ -411,7 +451,7 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
         requestFailures.length = 0;
         try {
           // If Vite restarted mid-load we can end up in a state where module requests fail and the
-          // app never boots. Force a reload so the second attempt has a clean slate.
+          // app never boots. Force a reload so the next attempt has a clean slate.
           await page.reload({ waitUntil: "domcontentloaded" });
         } catch {
           // Fall back to waiting for the current navigation to settle.
@@ -421,7 +461,7 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
             // ignore
           }
         }
-        // Give the Vite dev server a moment to stabilize (it may restart once after optimizing deps).
+        // Give the dev server a moment to stabilize (it may restart once after optimizing deps).
         await page.waitForTimeout(250 * (attempt + 1));
         continue;
       }
