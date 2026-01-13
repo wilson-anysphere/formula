@@ -21,6 +21,7 @@ import "./styles/conflicts.css";
 import "./styles/macros-runner.css";
 import "./styles/script-editor.css";
 import "./styles/python-panel.css";
+import "./styles/data-queries.css";
 import "./styles/what-if.css";
 import "./styles/solver.css";
 

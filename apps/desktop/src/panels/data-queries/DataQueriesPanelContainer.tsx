@@ -7,7 +7,6 @@ import { createPowerQueryRefreshStateStore } from "../../power-query/refreshStat
 import { loadOAuth2ProviderConfigs, saveOAuth2ProviderConfigs, type OAuth2ProviderConfig } from "../../power-query/oauthProviders.ts";
 import { deriveQueryListRows, reduceQueryRuntimeState, type QueryRuntimeState } from "../../power-query/queryRuntime.ts";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
-import { hyperlinkTextStyle } from "../../hyperlinks/style.js";
 import {
   DesktopPowerQueryService,
   getDesktopPowerQueryService,
@@ -810,35 +809,35 @@ export function DataQueriesPanelContainer(props: Props) {
     const provider = editingProvider;
 
     return (
-      <div style={{ padding: 12, borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>Configure OAuth provider</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+      <div className="data-queries-provider-editor">
+        <div className="data-queries-provider-editor__title">Configure OAuth provider</div>
+        <div className="data-queries-provider-editor__form">
+          <label className="data-queries-provider-editor__label">
             Provider id
             <input
               value={provider.id}
               onChange={(e) => setEditingProvider({ ...provider, id: e.target.value })}
-              style={{ padding: 6 }}
+              className="data-queries-provider-editor__input"
               disabled={oauthProviders.some((p) => p.id === provider.id)}
             />
           </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+          <label className="data-queries-provider-editor__label">
             Client ID
             <input
               value={provider.clientId}
               onChange={(e) => setEditingProvider({ ...provider, clientId: e.target.value })}
-              style={{ padding: 6 }}
+              className="data-queries-provider-editor__input"
             />
           </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+          <label className="data-queries-provider-editor__label">
             Token endpoint
             <input
               value={provider.tokenEndpoint}
               onChange={(e) => setEditingProvider({ ...provider, tokenEndpoint: e.target.value })}
-              style={{ padding: 6 }}
+              className="data-queries-provider-editor__input"
             />
           </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+          <label className="data-queries-provider-editor__label">
             Device authorization endpoint (optional)
             <input
               value={provider.deviceAuthorizationEndpoint ?? ""}
@@ -848,10 +847,10 @@ export function DataQueriesPanelContainer(props: Props) {
                   deviceAuthorizationEndpoint: e.target.value || undefined,
                 })
               }
-              style={{ padding: 6 }}
+              className="data-queries-provider-editor__input"
             />
           </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+          <label className="data-queries-provider-editor__label">
             Authorization endpoint (optional, for PKCE)
             <input
               value={provider.authorizationEndpoint ?? ""}
@@ -861,24 +860,24 @@ export function DataQueriesPanelContainer(props: Props) {
                   authorizationEndpoint: e.target.value || undefined,
                 })
               }
-              style={{ padding: 6 }}
+              className="data-queries-provider-editor__input"
             />
           </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+          <label className="data-queries-provider-editor__label">
             Redirect URI (optional, for PKCE)
             <input
               value={provider.redirectUri ?? ""}
               onChange={(e) => setEditingProvider({ ...provider, redirectUri: e.target.value || undefined })}
-              style={{ padding: 6 }}
+              className="data-queries-provider-editor__input"
             />
             {hasTauri() ? (
-              <div style={{ fontSize: 11, opacity: 0.75 }}>
+              <div className="data-queries-provider-editor__tip">
                 Tip: Use <code>{RECOMMENDED_DESKTOP_OAUTH_REDIRECT_URI}</code> (preferred) or a loopback redirect like{" "}
                 <code>{EXAMPLE_LOOPBACK_OAUTH_REDIRECT_URI}</code> to enable automatic redirect capture.
               </div>
             ) : null}
           </label>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="data-queries-provider-editor__buttons">
             <button
               type="button"
               onClick={() => saveProviderConfig(provider)}
@@ -896,22 +895,20 @@ export function DataQueriesPanelContainer(props: Props) {
   };
 
   if (!service) {
-    return <div style={{ padding: 12, color: "var(--text-muted)" }}>Power Query service not available.</div>;
+    return <div className="data-queries-panel-container__message">Power Query service not available.</div>;
   }
 
   const engineError = service.engineError;
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+    <div className="data-queries-panel-container">
       {engineError ? (
-        <div style={{ padding: 12, color: "var(--text-muted)", borderBottom: "1px solid var(--border)" }}>
-          Power Query engine running in fallback mode: {engineError}
-        </div>
+        <div className="data-queries-panel-container__engine-warning">Power Query engine running in fallback mode: {engineError}</div>
       ) : null}
 
       {renderProviderEditor()}
 
-      <div style={{ padding: 12, borderBottom: "1px solid var(--border)", display: "flex", flexWrap: "wrap", gap: 8 }}>
+      <div className="data-queries-panel-container__toolbar">
         <button type="button" onClick={addNewQuery}>
           New query
         </button>
@@ -923,16 +920,16 @@ export function DataQueriesPanelContainer(props: Props) {
             Cancel refresh all
           </button>
         ) : null}
-        <div style={{ flex: 1 }} />
+        <div className="data-queries-panel-container__toolbar-spacer" />
         <button type="button" onClick={() => dispatchOpenPanel({ panelId: PanelIds.QUERY_EDITOR })}>
           Open Query Editor
         </button>
       </div>
 
       {pendingDeviceCode ? (
-        <div style={{ padding: 12, borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>OAuth device code</div>
-          <div style={{ fontSize: 12, opacity: 0.85 }}>
+        <div className="data-queries-panel-container__banner">
+          <div className="data-queries-panel-container__banner-title">OAuth device code</div>
+          <div className="data-queries-panel-container__banner-text">
             {(() => {
               const href = safeHttpUrl(pendingDeviceCode.verificationUri);
               return (
@@ -943,7 +940,7 @@ export function DataQueriesPanelContainer(props: Props) {
                       href={href}
                       target="_blank"
                       rel="noopener noreferrer"
-                      style={{ ...hyperlinkTextStyle(), fontFamily: "monospace" }}
+                      className="data-queries-panel-container__mono-link"
                     >
                       {pendingDeviceCode.verificationUri}
                     </a>
@@ -958,14 +955,14 @@ export function DataQueriesPanelContainer(props: Props) {
       ) : null}
 
       {pendingPkce ? (
-        <div style={{ padding: 12, borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
+        <div className="data-queries-panel-container__banner">
           {supportsDesktopOAuthRedirectCapture(pendingPkce.redirectUri) ? (
             <>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Awaiting OAuth redirect…</div>
-              <div style={{ fontSize: 12, opacity: 0.85 }}>
+              <div className="data-queries-panel-container__banner-title">Awaiting OAuth redirect…</div>
+              <div className="data-queries-panel-container__banner-text">
                 Complete sign-in in your browser. Formula will continue automatically after the redirect.
               </div>
-              <div style={{ marginTop: 8 }}>
+              <div className="data-queries-panel-container__banner-actions data-queries-panel-container__banner-actions--mt8">
                 <button type="button" onClick={cancelPkceRedirect}>
                   Cancel sign-in
                 </button>
@@ -973,11 +970,11 @@ export function DataQueriesPanelContainer(props: Props) {
             </>
           ) : (
             <>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>OAuth redirect required</div>
-              <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 8 }}>
+              <div className="data-queries-panel-container__banner-title">OAuth redirect required</div>
+              <div className="data-queries-panel-container__banner-text data-queries-panel-container__banner-text--mb8">
                 After authenticating, copy the full redirect URL and paste it to complete sign-in.
               </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className="data-queries-panel-container__banner-actions">
                 <button type="button" onClick={resolvePkceRedirect}>
                   Paste redirect URL…
                 </button>
@@ -991,26 +988,26 @@ export function DataQueriesPanelContainer(props: Props) {
       ) : null}
 
       {globalError ? (
-        <div style={{ padding: 12, color: "var(--error)", borderBottom: "1px solid var(--border)" }}>{globalError}</div>
+        <div className="data-queries-panel-container__error">{globalError}</div>
       ) : null}
 
-      <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <div className="data-queries-panel-container__table-wrap">
+        <table className="data-queries-table">
           <thead>
-            <tr style={{ textAlign: "left", borderBottom: "1px solid var(--border)" }}>
-              <th style={{ padding: 8 }}>Query</th>
-              <th style={{ padding: 8 }}>Destination</th>
-              <th style={{ padding: 8 }}>Last refresh</th>
-              <th style={{ padding: 8 }}>Status</th>
-              <th style={{ padding: 8 }}>Auth</th>
-              <th style={{ padding: 8 }}>Error</th>
-              <th style={{ padding: 8 }}>Actions</th>
+            <tr>
+              <th className="data-queries-table__th">Query</th>
+              <th className="data-queries-table__th">Destination</th>
+              <th className="data-queries-table__th">Last refresh</th>
+              <th className="data-queries-table__th">Status</th>
+              <th className="data-queries-table__th">Auth</th>
+              <th className="data-queries-table__th">Error</th>
+              <th className="data-queries-table__th">Actions</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={7} style={{ padding: 12, color: "var(--text-muted)" }}>
+                <td colSpan={7} className="data-queries-table__empty">
                   No queries yet.
                 </td>
               </tr>
@@ -1042,16 +1039,18 @@ export function DataQueriesPanelContainer(props: Props) {
                   row.status === "applying" && typeof row.rowsWritten === "number" ? `Applying (${row.rowsWritten} rows…)` : row.status;
 
                 return (
-                  <tr key={row.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                    <td style={{ padding: 8, fontWeight: 600 }}>{row.name}</td>
-                    <td style={{ padding: 8, fontFamily: "monospace", fontSize: 12 }}>{row.destination}</td>
-                    <td style={{ padding: 8, fontSize: 12 }}>{formatTimestamp(row.lastRefreshAtMs)}</td>
-                    <td style={{ padding: 8, fontSize: 12 }}>{statusLabel}</td>
-                    <td style={{ padding: 8, fontSize: 12 }}>
+                  <tr key={row.id} className="data-queries-table__row">
+                    <td className="data-queries-table__td data-queries-table__query-name">{row.name}</td>
+                    <td className="data-queries-table__td data-queries-table__td--mono data-queries-table__td--small">
+                      {row.destination}
+                    </td>
+                    <td className="data-queries-table__td data-queries-table__td--small">{formatTimestamp(row.lastRefreshAtMs)}</td>
+                    <td className="data-queries-table__td data-queries-table__td--small">{statusLabel}</td>
+                    <td className="data-queries-table__td data-queries-table__td--small">
                       {oauth ? (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <div className="data-queries-auth">
                           <div>{row.authLabel}</div>
-                          <div style={{ display: "flex", gap: 6 }}>
+                          <div className="data-queries-auth__buttons">
                             {signedIn ? (
                               <button type="button" onClick={() => void signOutOAuth(oauth.providerId, oauth.scopes)}>
                                 Sign out
@@ -1066,48 +1065,57 @@ export function DataQueriesPanelContainer(props: Props) {
                             </button>
                           </div>
                         </div>
-                       ) : apiUrl ? (
-                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                           <div style={{ color: "var(--text-muted)" }}>HTTP headers</div>
-                           <div style={{ display: "flex", gap: 6 }}>
-                            <button type="button" onClick={() => void setHttpHeaderCredential(apiUrl)}>
-                              {httpHasHeaders ? "Edit…" : "Set…"}
-                            </button>
-                            <button type="button" onClick={() => void clearHttpHeaderCredential(apiUrl)} disabled={!httpHasHeaders}>
-                               Clear
+                      ) : apiUrl ? (
+                        <div className="data-queries-auth">
+                          <div className="data-queries-table__muted">HTTP headers</div>
+                          <div className="data-queries-auth__buttons">
+                             <button type="button" onClick={() => void setHttpHeaderCredential(apiUrl)}>
+                               {httpHasHeaders ? "Edit…" : "Set…"}
                              </button>
-                           </div>
-                         </div>
-                       ) : databaseConnection != null ? (
-                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                           <div style={{ color: "var(--text-muted)" }}>{row.authLabel ?? "Database"}</div>
-                           {databaseScope ? (
-                             <div style={{ display: "flex", gap: 6 }}>
-                               {databaseHasCredential ? (
-                                 <button type="button" onClick={() => void clearSqlCredential(databaseConnection)}>
-                                   Clear
-                                 </button>
-                               ) : (
-                                 <button type="button" onClick={() => void setSqlCredential(databaseConnection)}>
-                                   Set…
-                                 </button>
-                               )}
-                             </div>
-                           ) : (
-                             <div style={{ color: "var(--text-muted)" }}>Credentials: managed on refresh</div>
-                           )}
-                         </div>
-                       ) : row.authRequired ? (
-                         row.authLabel
-                       ) : (
-                         "—"
-                       )}
+                             <button type="button" onClick={() => void clearHttpHeaderCredential(apiUrl)} disabled={!httpHasHeaders}>
+                                Clear
+                              </button>
+                            </div>
+                          </div>
+                      ) : databaseConnection != null ? (
+                        <div className="data-queries-auth">
+                          <div className="data-queries-table__muted">{row.authLabel ?? "Database"}</div>
+                          {databaseScope ? (
+                            <div className="data-queries-auth__buttons">
+                                {databaseHasCredential ? (
+                                  <button type="button" onClick={() => void clearSqlCredential(databaseConnection)}>
+                                    Clear
+                                  </button>
+                                ) : (
+                                  <button type="button" onClick={() => void setSqlCredential(databaseConnection)}>
+                                    Set…
+                                  </button>
+                                )}
+                            </div>
+                          ) : (
+                            <div className="data-queries-table__muted">Credentials: managed on refresh</div>
+                          )}
+                        </div>
+                      ) : row.authRequired ? (
+                        row.authLabel
+                      ) : (
+                        "—"
+                      )}
                     </td>
-                    <td style={{ padding: 8, fontSize: 12, color: row.errorSummary ? "var(--error)" : "var(--text-muted)" }}>
+                    <td
+                      className={[
+                        "data-queries-table__td",
+                        "data-queries-table__td--small",
+                        "data-queries-table__error",
+                        row.errorSummary ? "data-queries-table__error--present" : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                    >
                       {row.errorSummary ?? "—"}
                     </td>
-                    <td style={{ padding: 8 }}>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    <td className="data-queries-table__td">
+                      <div className="data-queries-actions">
                         <button type="button" onClick={() => refreshQuery(row.id)} disabled={canCancel}>
                           Refresh
                         </button>

@@ -1,0 +1,218 @@
+/*
+  Data Queries panel UI (src/panels/data-queries/DataQueriesPanelContainer.tsx).
+
+  This file intentionally uses only design tokens from `tokens.css` and does not
+  hardcode colors (enforced by `noHardcodedColors.test.js`).
+*/
+
+.data-queries-panel-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.data-queries-panel-container__message {
+  padding: 12px;
+  color: var(--text-muted);
+}
+
+.data-queries-panel-container__engine-warning {
+  padding: 12px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.data-queries-panel-container__toolbar {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.data-queries-panel-container__toolbar-spacer {
+  flex: 1;
+}
+
+.data-queries-panel-container__banner {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.data-queries-panel-container__banner-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.data-queries-panel-container__banner-text {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.data-queries-panel-container__banner-text--mb8 {
+  margin-bottom: 8px;
+}
+
+.data-queries-panel-container__banner-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.data-queries-panel-container__banner-actions--mt8 {
+  margin-top: 8px;
+}
+
+.data-queries-panel-container__mono-link {
+  color: var(--accent);
+  text-decoration: underline;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+}
+
+.data-queries-panel-container__error {
+  padding: 12px;
+  color: var(--error);
+  border-bottom: 1px solid var(--border);
+}
+
+.data-queries-provider-editor {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.data-queries-provider-editor__title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.data-queries-provider-editor__form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.data-queries-provider-editor__label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.data-queries-provider-editor__input {
+  padding: 6px;
+}
+
+.data-queries-provider-editor__tip {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.data-queries-provider-editor__buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.data-queries-panel-container__table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.data-queries-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-queries-table__th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  background: var(--grid-header-bg);
+  color: var(--grid-header-text);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.data-queries-table__row {
+  border-bottom: 1px solid var(--border);
+}
+
+.data-queries-table__row:hover {
+  background: var(--bg-hover);
+}
+
+.data-queries-table__td {
+  padding: 6px 8px;
+  vertical-align: top;
+}
+
+.data-queries-table__td--small {
+  font-size: 12px;
+}
+
+.data-queries-table__td--mono {
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+}
+
+.data-queries-table__query-name {
+  font-weight: 600;
+}
+
+.data-queries-table__empty {
+  padding: 12px;
+  color: var(--text-muted);
+}
+
+.data-queries-table__muted {
+  color: var(--text-muted);
+}
+
+.data-queries-table__error {
+  color: var(--text-muted);
+}
+
+.data-queries-table__error--present {
+  color: var(--error);
+}
+
+.data-queries-auth {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.data-queries-auth__buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.data-queries-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
