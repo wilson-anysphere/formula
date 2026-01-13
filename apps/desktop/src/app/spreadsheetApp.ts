@@ -8760,7 +8760,16 @@ export class SpreadsheetApp {
     }
 
     e.preventDefault();
-    this.toggleShowFormulas();
+    // Prefer routing through the CommandRegistry so the command palette, ribbon,
+    // and keyboard shortcuts all share a single canonical implementation. This
+    // also ensures command execution tracking (and any future command-level
+    // hooks/telemetry) sees the shortcut.
+    const registry = typeof window !== "undefined" ? (window as any).__formulaCommandRegistry : null;
+    if (registry && typeof registry.executeCommand === "function") {
+      void registry.executeCommand("view.toggleShowFormulas");
+    } else {
+      this.toggleShowFormulas();
+    }
     return true;
   }
 
