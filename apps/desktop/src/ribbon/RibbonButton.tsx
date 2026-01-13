@@ -50,6 +50,24 @@ function getRibbonIconNode(iconId?: RibbonButtonDefinition["iconId"]): React.Rea
   return <RibbonIcon id={iconId} />;
 }
 
+function formatTooltipTitle(base: string, shortcut: string | null | undefined): string {
+  const baseLabel = String(base ?? "");
+  const hint = typeof shortcut === "string" && shortcut.trim() ? shortcut.trim() : "";
+  if (!hint) return baseLabel;
+
+  // If the base tooltip already contains the shortcut (e.g. some ariaLabels include a hint),
+  // avoid duplicating it.
+  if (baseLabel.includes(hint)) return baseLabel;
+
+  // Special-case the "Ctrl/Cmd" placeholder pattern used in a small number of ribbon ariaLabels.
+  // Replace the placeholder with the platform-specific binding from KeybindingService so the
+  // tooltip stays accurate without rendering a duplicate "(...)" suffix.
+  const replaced = baseLabel.replace(/\(Ctrl\/Cmd\+[^)]*\)/, `(${hint})`);
+  if (replaced !== baseLabel) return replaced;
+
+  return `${baseLabel} (${hint})`;
+}
+
 export const RibbonButton = React.memo(function RibbonButton({
   button,
   pressed,
@@ -76,7 +94,7 @@ export const RibbonButton = React.memo(function RibbonButton({
   const label = labelOverride ?? button.label;
   const disabled = typeof disabledOverride === "boolean" ? disabledOverride : Boolean(button.disabled);
   const shortcut = shortcutOverride ?? shortcutById?.[button.id];
-  const title = shortcut ? `${button.ariaLabel} (${shortcut})` : button.ariaLabel;
+  const title = formatTooltipTitle(button.ariaLabel, shortcut);
 
   const [menuOpen, setMenuOpen] = React.useState(false);
   const dropdownRef = React.useRef<HTMLDivElement | null>(null);
@@ -264,7 +282,7 @@ export const RibbonButton = React.memo(function RibbonButton({
         >
           {button.menuItems?.map((item) => {
             const itemShortcut = shortcutById?.[item.id];
-            const itemTitle = itemShortcut ? `${item.ariaLabel} (${itemShortcut})` : item.ariaLabel;
+            const itemTitle = formatTooltipTitle(item.ariaLabel, itemShortcut);
 
             return (
               <button
