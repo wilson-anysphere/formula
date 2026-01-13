@@ -307,6 +307,38 @@ test("CursorTabCompletionClient awaits async getAuthHeaders", async () => {
   assert.equal(headersSeen?.["x-cursor-test-auth"], "async");
 });
 
+test("CursorTabCompletionClient de-dupes Authorization header case-insensitively", async () => {
+  /** @type {Record<string, string> | null} */
+  let headersSeen = null;
+
+  const fetchImpl = async (_url, init) => {
+    headersSeen = init.headers;
+    return {
+      ok: true,
+      async json() {
+        return { completion: "ok" };
+      },
+    };
+  };
+
+  const client = new CursorTabCompletionClient({
+    baseUrl: "http://example.test",
+    fetchImpl,
+    timeoutMs: 500,
+    getAuthHeaders() {
+      return {
+        Authorization: "Bearer first",
+        authorization: "Bearer second",
+      };
+    },
+  });
+
+  const completion = await client.completeTabCompletion({ input: "=", cursorPosition: 1, cellA1: "A1" });
+  assert.equal(completion, "ok");
+  assert.equal(headersSeen?.Authorization, "Bearer second");
+  assert.ok(!("authorization" in (headersSeen ?? {})));
+});
+
 test(
   "CursorTabCompletionClient resolves to empty string when aborted while awaiting getAuthHeaders",
   { timeout: 1000 },

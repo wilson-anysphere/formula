@@ -10,6 +10,8 @@ export class CursorTabCompletionClient {
    *   baseUrl?: string,
    *   fetchImpl?: typeof fetch,
    *   timeoutMs?: number,
+   *   // Cursor-managed auth headers (e.g. Authorization) for environments where
+   *   // cookie-based session auth isn't available. Do not use user API keys.
    *   getAuthHeaders?: () => (Record<string,string> | Promise<Record<string,string>>)
    * }} [options]
    */
