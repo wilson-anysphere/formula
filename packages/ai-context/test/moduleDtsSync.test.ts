@@ -23,6 +23,23 @@ function extractJsNamedExports(code: string): string[] {
   // export class NAME
   for (const m of code.matchAll(/^\s*export\s+class\s+([A-Za-z0-9_]+)\b/gm)) names.add(m[1]!);
 
+  // export { foo, bar as baz } [from "..."]
+  for (const m of code.matchAll(/^\s*export\s*\{([^}]+)\}\s*(?:from\s+["'][^"']+["'])?\s*;?/gm)) {
+    const list = m[1] ?? "";
+    for (const part of list.split(",")) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      // Handle `foo as bar`
+      const asMatch = /\bas\b/i.exec(trimmed);
+      if (asMatch) {
+        const [, alias] = trimmed.split(/\bas\b/i).map((s) => s.trim());
+        if (alias) names.add(alias);
+      } else {
+        names.add(trimmed);
+      }
+    }
+  }
+
   return [...names];
 }
 
@@ -54,4 +71,3 @@ test("all index-exported modules have matching named exports in their .d.ts file
     expect(missing, `${spec} exports missing from ${spec.replace(/\\.js$/, ".d.ts")}`).toEqual([]);
   }
 });
-
