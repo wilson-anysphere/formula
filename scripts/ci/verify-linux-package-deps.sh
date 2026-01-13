@@ -181,7 +181,8 @@ for deb in "${debs[@]}"; do
   # Core runtime deps (WebView + GTK + tray + SSL). Keep these checks intentionally fuzzy:
   # - Ubuntu/Debian may rename packages (e.g. *t64 suffix in Ubuntu 24.04)
   # - We accept either `libappindicator*` or `libayatana-appindicator*`
-  assert_contains_any "$depends" "$deb" "WebKitGTK (webview)" "libwebkit2gtk"
+  # WebKitGTK 4.1 is required by our Linux builds.
+  assert_contains_any "$depends" "$deb" "WebKitGTK 4.1 (webview)" "libwebkit2gtk-4\\.1"
   assert_contains_any "$depends" "$deb" "GTK3" "libgtk-3"
   assert_contains_any "$depends" "$deb" "AppIndicator (tray)" "appindicator"
   assert_contains_any "$depends" "$deb" "librsvg2 (icons)" "librsvg2"
@@ -197,7 +198,8 @@ for rpm_path in "${rpms[@]}"; do
   # `rpm -qpR` lists "capabilities" which may be package names (when explicitly declared)
   # or shared-library requirements (auto-generated). Match either so the check is robust
   # across rpm-based distros and packaging strategies.
-  assert_contains_any "$requires" "$rpm_path" "WebKitGTK (webview)" "(^|[^a-z0-9])webkit2gtk" "libwebkit2gtk"
+  # WebKitGTK 4.1 is required by our Linux builds. On Fedora the package is `webkit2gtk4.1`.
+  assert_contains_any "$requires" "$rpm_path" "WebKitGTK 4.1 (webview)" "webkit2gtk4\\.1" "libwebkit2gtk-4\\.1"
   assert_contains_any "$requires" "$rpm_path" "GTK3" "(^|[^a-z0-9])gtk3" "libgtk-3"
   assert_contains_any "$requires" "$rpm_path" "AppIndicator (tray)" "appindicator"
   assert_contains_any "$requires" "$rpm_path" "librsvg2 (icons)" "librsvg"
