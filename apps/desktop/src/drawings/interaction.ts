@@ -1,7 +1,8 @@
 import type { AnchorPoint, DrawingObject } from "./types";
 import type { GridGeometry, Viewport } from "./overlay";
-import { emuToPx, pxToEmu } from "./overlay";
+import { anchorToRectPx, emuToPx, pxToEmu } from "./overlay";
 import { buildHitTestIndex, hitTestDrawings, type HitTestIndex } from "./hitTest";
+import { cursorForResizeHandle, hitTestResizeHandle, type ResizeHandle } from "./selectionHandles";
 
 export interface DrawingInteractionCallbacks {
   getViewport(): Viewport;
@@ -51,11 +52,37 @@ export class DrawingInteractionController {
   private readonly onPointerDown = (e: PointerEvent) => {
     const viewport = this.callbacks.getViewport();
     const objects = this.callbacks.getObjects();
+
+    // Allow grabbing a resize handle for the current selection even when the
+    // pointer is slightly outside the object's bounds (handles are centered on
+    // the outline and extend half their size beyond the rect).
+    const selectedObject =
+      this.selectedId != null ? objects.find((o) => o.id === this.selectedId) : undefined;
+    if (selectedObject) {
+      const selectedBounds = objectToScreenRect(selectedObject, viewport, this.geom);
+      const handle = hitTestResizeHandle(selectedBounds, e.offsetX, e.offsetY);
+      if (handle) {
+        this.canvas.setPointerCapture(e.pointerId);
+        this.resizing = {
+          id: selectedObject.id,
+          handle,
+          startX: e.offsetX,
+          startY: e.offsetY,
+          startObjects: objects,
+        };
+        this.canvas.style.cursor = cursorForResizeHandle(handle);
+        return;
+      }
+    }
+
     const index = this.getHitTestIndex(objects);
     const hit = hitTestDrawings(index, viewport, e.offsetX, e.offsetY);
     this.selectedId = hit?.object.id ?? null;
     this.callbacks.onSelectionChange?.(this.selectedId);
-    if (!hit) return;
+    if (!hit) {
+      this.canvas.style.cursor = "default";
+      return;
+    }
 
     this.canvas.setPointerCapture(e.pointerId);
     const handle = hitTestResizeHandle(hit.bounds, e.offsetX, e.offsetY);
@@ -67,6 +94,7 @@ export class DrawingInteractionController {
         startY: e.offsetY,
         startObjects: objects,
       };
+      this.canvas.style.cursor = cursorForResizeHandle(handle);
     } else {
       this.dragging = {
         id: hit.object.id,
@@ -74,6 +102,7 @@ export class DrawingInteractionController {
         startY: e.offsetY,
         startObjects: objects,
       };
+      this.canvas.style.cursor = "move";
     }
   };
 
@@ -90,21 +119,27 @@ export class DrawingInteractionController {
         };
       });
       this.callbacks.setObjects(next);
+      this.canvas.style.cursor = cursorForResizeHandle(this.resizing.handle);
       return;
     }
 
-    if (!this.dragging) return;
-    const dx = e.offsetX - this.dragging.startX;
-    const dy = e.offsetY - this.dragging.startY;
+    if (this.dragging) {
+      const dx = e.offsetX - this.dragging.startX;
+      const dy = e.offsetY - this.dragging.startY;
 
-    const next = this.dragging.startObjects.map((obj) => {
-      if (obj.id !== this.dragging!.id) return obj;
-      return {
-        ...obj,
-        anchor: shiftAnchor(obj.anchor, dx, dy, this.geom),
-      };
-    });
-    this.callbacks.setObjects(next);
+      const next = this.dragging.startObjects.map((obj) => {
+        if (obj.id !== this.dragging!.id) return obj;
+        return {
+          ...obj,
+          anchor: shiftAnchor(obj.anchor, dx, dy, this.geom),
+        };
+      });
+      this.callbacks.setObjects(next);
+      this.canvas.style.cursor = "move";
+      return;
+    }
+
+    this.updateCursor(e.offsetX, e.offsetY);
   };
 
   private readonly onPointerUp = (e: PointerEvent) => {
@@ -112,7 +147,38 @@ export class DrawingInteractionController {
     this.dragging = null;
     this.resizing = null;
     this.canvas.releasePointerCapture(e.pointerId);
+    this.updateCursor(e.offsetX, e.offsetY);
   };
+
+  private updateCursor(x: number, y: number): void {
+    const viewport = this.callbacks.getViewport();
+    const objects = this.callbacks.getObjects();
+
+    if (this.selectedId != null) {
+      const selected = objects.find((o) => o.id === this.selectedId);
+      if (selected) {
+        const bounds = objectToScreenRect(selected, viewport, this.geom);
+        const handle = hitTestResizeHandle(bounds, x, y);
+        if (handle) {
+          this.canvas.style.cursor = cursorForResizeHandle(handle);
+          return;
+        }
+        if (pointInRect(x, y, bounds)) {
+          this.canvas.style.cursor = "move";
+          return;
+        }
+      }
+    }
+
+    const index = this.getHitTestIndex(objects);
+    const hit = hitTestDrawings(index, viewport, x, y);
+    if (hit) {
+      this.canvas.style.cursor = "move";
+      return;
+    }
+
+    this.canvas.style.cursor = "default";
+  }
 
   private getHitTestIndex(objects: readonly DrawingObject[]): HitTestIndex {
     if (this.hitTestIndex && this.hitTestIndexObjects === objects) return this.hitTestIndex;
@@ -150,30 +216,6 @@ export function shiftAnchor(
         },
       };
   }
-}
-
-export type ResizeHandle = "nw" | "ne" | "se" | "sw";
-
-function hitTestResizeHandle(bounds: { x: number; y: number; width: number; height: number }, x: number, y: number): ResizeHandle | null {
-  const size = 10;
-  const half = size / 2;
-  const corners: Array<{ handle: ResizeHandle; cx: number; cy: number }> = [
-    { handle: "nw", cx: bounds.x, cy: bounds.y },
-    { handle: "ne", cx: bounds.x + bounds.width, cy: bounds.y },
-    { handle: "se", cx: bounds.x + bounds.width, cy: bounds.y + bounds.height },
-    { handle: "sw", cx: bounds.x, cy: bounds.y + bounds.height },
-  ];
-  for (const c of corners) {
-    if (
-      x >= c.cx - half &&
-      x <= c.cx + half &&
-      y >= c.cy - half &&
-      y <= c.cy + half
-    ) {
-      return c.handle;
-    }
-  }
-  return null;
 }
 
 export function resizeAnchor(
@@ -226,19 +268,34 @@ export function resizeAnchor(
       left += dxPx;
       bottom += dyPx;
       break;
+    case "e":
+      right += dxPx;
+      break;
+    case "w":
+      left += dxPx;
+      break;
+    case "s":
+      bottom += dyPx;
+      break;
+    case "n":
+      top += dyPx;
+      break;
   }
 
+  const movesLeftEdge = handle === "nw" || handle === "w" || handle === "sw";
+  const movesTopEdge = handle === "nw" || handle === "n" || handle === "ne";
+
   // Prevent negative widths/heights by clamping the moved edges against the
-  // fixed ones. This keeps the opposite corner stationary.
+  // fixed ones. This keeps the opposite edge stationary.
   if (right < left) {
-    if (handle === "nw" || handle === "sw") {
+    if (movesLeftEdge) {
       left = right;
     } else {
       right = left;
     }
   }
   if (bottom < top) {
-    if (handle === "nw" || handle === "ne") {
+    if (movesTopEdge) {
       top = bottom;
     } else {
       bottom = top;
@@ -375,3 +432,22 @@ export function shiftAnchorPoint(
     offset: { xEmu: pxToEmu(xPx), yEmu: pxToEmu(yPx) },
   };
 }
+
+function objectToScreenRect(obj: DrawingObject, viewport: Viewport, geom: GridGeometry) {
+  const rect = anchorToRectPx(obj.anchor, geom);
+  return {
+    x: rect.x - viewport.scrollX,
+    y: rect.y - viewport.scrollY,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+function pointInRect(
+  x: number,
+  y: number,
+  rect: { x: number; y: number; width: number; height: number },
+): boolean {
+  return x >= rect.x && y >= rect.y && x <= rect.x + rect.width && y <= rect.y + rect.height;
+}
+

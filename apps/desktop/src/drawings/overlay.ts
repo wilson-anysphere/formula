@@ -2,6 +2,7 @@ import type { Anchor, DrawingObject, ImageStore, Rect } from "./types";
 import { ImageBitmapCache } from "./imageBitmapCache";
 import { resolveCssVar } from "../theme/cssVars.js";
 import { graphicFramePlaceholderLabel, isGraphicFrame } from "./shapeRenderer";
+import { getResizeHandleCenters, RESIZE_HANDLE_SIZE_PX } from "./selectionHandles";
 
 import { EMU_PER_INCH, PX_PER_INCH, emuToPx, pxToEmu } from "../shared/emu.js";
 
@@ -309,14 +310,9 @@ function drawSelection(
   ctx.setLineDash([]);
   ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
 
-  const handle = 8;
+  const handle = RESIZE_HANDLE_SIZE_PX;
   const half = handle / 2;
-  const points = [
-    { x: rect.x, y: rect.y },
-    { x: rect.x + rect.width, y: rect.y },
-    { x: rect.x + rect.width, y: rect.y + rect.height },
-    { x: rect.x, y: rect.y + rect.height },
-  ];
+  const points = getResizeHandleCenters(rect);
 
   ctx.fillStyle = colors.selectionHandleFill;
   ctx.strokeStyle = colors.selectionStroke;
