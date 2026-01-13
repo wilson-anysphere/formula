@@ -132,13 +132,22 @@ export function anchorToRectPx(anchor: Anchor, geom: GridGeometry, zoom: number 
         height: Math.abs(y2 - y1),
       };
     }
-    case "absolute":
+    case "absolute": {
+      // In DrawingML, absolute anchors are worksheet-space coordinates whose
+      // origin is the top-left of the cell grid (A1), not the top-left of the
+      // grid UI root (which may include row/column headers).
+      //
+      // Use the A1 origin from the grid geometry so drawings align with
+      // oneCell/twoCell anchors when the overlay canvas covers the full grid
+      // surface.
+      const origin = geom.cellOriginPx({ row: 0, col: 0 });
       return {
-        x: emuToPx(anchor.pos.xEmu) * scale,
-        y: emuToPx(anchor.pos.yEmu) * scale,
+        x: origin.x + emuToPx(anchor.pos.xEmu) * scale,
+        y: origin.y + emuToPx(anchor.pos.yEmu) * scale,
         width: emuToPx(anchor.size.cx) * scale,
         height: emuToPx(anchor.size.cy) * scale,
       };
+    }
   }
 }
 
