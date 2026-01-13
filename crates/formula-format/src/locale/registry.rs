@@ -12,21 +12,21 @@ pub struct NumberLocale {
 
 pub static EN_US: NumberLocale = NumberLocale {
     id: "en-US",
-    decimal_separator: '.',
-    thousands_separator: Some(','),
+    decimal_separator: crate::Locale::en_us().decimal_sep,
+    thousands_separator: Some(crate::Locale::en_us().thousands_sep),
 };
 
 /// British English uses the same separators as `en-US`.
 pub static EN_GB: NumberLocale = NumberLocale {
     id: "en-GB",
-    decimal_separator: '.',
-    thousands_separator: Some(','),
+    decimal_separator: crate::Locale::en_us().decimal_sep,
+    thousands_separator: Some(crate::Locale::en_us().thousands_sep),
 };
 
 pub static DE_DE: NumberLocale = NumberLocale {
     id: "de-DE",
-    decimal_separator: ',',
-    thousands_separator: Some('.'),
+    decimal_separator: crate::Locale::de_de().decimal_sep,
+    thousands_separator: Some(crate::Locale::de_de().thousands_sep),
 };
 
 /// French (France).
@@ -36,20 +36,20 @@ pub static DE_DE: NumberLocale = NumberLocale {
 /// is widely supported and matches `crate::Locale::fr_fr()`.
 pub static FR_FR: NumberLocale = NumberLocale {
     id: "fr-FR",
-    decimal_separator: ',',
-    thousands_separator: Some('\u{00A0}'),
+    decimal_separator: crate::Locale::fr_fr().decimal_sep,
+    thousands_separator: Some(crate::Locale::fr_fr().thousands_sep),
 };
 
 pub static ES_ES: NumberLocale = NumberLocale {
     id: "es-ES",
-    decimal_separator: ',',
-    thousands_separator: Some('.'),
+    decimal_separator: crate::Locale::es_es().decimal_sep,
+    thousands_separator: Some(crate::Locale::es_es().thousands_sep),
 };
 
 pub static IT_IT: NumberLocale = NumberLocale {
     id: "it-IT",
-    decimal_separator: ',',
-    thousands_separator: Some('.'),
+    decimal_separator: crate::Locale::it_it().decimal_sep,
+    thousands_separator: Some(crate::Locale::it_it().thousands_sep),
 };
 
 /// Swiss German / Swiss-style number separators (`'` grouping, `.` decimal).
@@ -260,5 +260,30 @@ mod tests {
         let (mantissa, exp) = split_exponent("-1.23E-6").unwrap();
         let mantissa = format_number_mantissa(mantissa, &DE_DE);
         assert_eq!(format!("{mantissa}{exp}"), "-1,23E-6");
+    }
+
+    #[test]
+    fn built_in_number_locales_match_format_locale_separators() {
+        let en = crate::Locale::en_us();
+        assert_eq!(EN_US.decimal_separator, en.decimal_sep);
+        assert_eq!(EN_US.thousands_separator, Some(en.thousands_sep));
+        assert_eq!(EN_GB.decimal_separator, en.decimal_sep);
+        assert_eq!(EN_GB.thousands_separator, Some(en.thousands_sep));
+
+        let de = crate::Locale::de_de();
+        assert_eq!(DE_DE.decimal_separator, de.decimal_sep);
+        assert_eq!(DE_DE.thousands_separator, Some(de.thousands_sep));
+
+        let fr = crate::Locale::fr_fr();
+        assert_eq!(FR_FR.decimal_separator, fr.decimal_sep);
+        assert_eq!(FR_FR.thousands_separator, Some(fr.thousands_sep));
+
+        let es = crate::Locale::es_es();
+        assert_eq!(ES_ES.decimal_separator, es.decimal_sep);
+        assert_eq!(ES_ES.thousands_separator, Some(es.thousands_sep));
+
+        let it = crate::Locale::it_it();
+        assert_eq!(IT_IT.decimal_separator, it.decimal_sep);
+        assert_eq!(IT_IT.thousands_separator, Some(it.thousands_sep));
     }
 }
