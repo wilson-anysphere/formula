@@ -2,7 +2,6 @@ import { explainFormulaError, type ErrorExplanation } from "./errors.js";
 import { getFunctionCallContext, type FunctionHint } from "./highlight/functionContext.js";
 import { getFunctionSignature, signatureParts } from "./highlight/functionSignatures.js";
 import { highlightFormula, type HighlightSpan } from "./highlight/highlightFormula.js";
-import { tokenizeFormula } from "./highlight/tokenizeFormula.js";
 import { rangeToA1, type RangeAddress } from "../spreadsheet/a1.js";
 import { parseSheetQualifiedA1Range } from "./parseSheetQualifiedA1Range.js";
 import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
@@ -355,7 +354,9 @@ export class FormulaBarModel {
       this.#engineHighlightErrorSpanKey === errorSpanKey;
 
     if (!highlightStable) {
-      const referenceTokens = tokenizeFormula(args.formula).filter((t) => t.type === "reference");
+      // Reuse the already-computed reference extraction metadata so applying engine results
+      // does not re-tokenize the full formula string on the main thread.
+      const referenceTokens = this.#coloredReferences.map((ref) => ({ start: ref.start, end: ref.end }));
       const engineSpans = highlightFromEngineTokens(args.formula, args.lexResult.tokens);
       const withRefs = spliceReferenceSpans(args.formula, engineSpans, referenceTokens);
       const withError = applyErrorSpan(args.formula, withRefs, errorSpan && errorSpan.end > errorSpan.start ? errorSpan : null);
