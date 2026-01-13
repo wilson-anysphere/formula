@@ -12,6 +12,7 @@
  *   signature payload/file where the payload decodes to:
  *     b"Ed" + keyid_le(8) + ed25519_signature(64)
  */
+import crypto from "node:crypto";
 
 /**
  * Normalizes base64/base64url and adds missing padding.
@@ -88,6 +89,27 @@ function extractKeyIdFromPublicKeyComment(line) {
 function formatKeyId(keyIdLe8) {
   if (keyIdLe8.length !== 8) return Buffer.from(keyIdLe8).toString("hex").toUpperCase();
   return Buffer.from(keyIdLe8).reverse().toString("hex").toUpperCase();
+}
+
+/**
+ * Creates a Node.js public key object for an Ed25519 public key stored as raw bytes.
+ *
+ * Node's crypto APIs expect a SPKI wrapper, so we construct:
+ *   SubjectPublicKeyInfo  ::=  SEQUENCE  {
+ *     algorithm         AlgorithmIdentifier,
+ *     subjectPublicKey  BIT STRING
+ *   }
+ * where AlgorithmIdentifier is OID 1.3.101.112 (Ed25519).
+ *
+ * @param {Uint8Array} rawKey32
+ */
+export function ed25519PublicKeyFromRaw(rawKey32) {
+  if (rawKey32.length !== 32) {
+    throw new Error(`Expected 32-byte Ed25519 public key, got ${rawKey32.length} bytes.`);
+  }
+  const spkiPrefix = Buffer.from("302a300506032b6570032100", "hex");
+  const spkiDer = Buffer.concat([spkiPrefix, Buffer.from(rawKey32)]);
+  return crypto.createPublicKey({ key: spkiDer, format: "der", type: "spki" });
 }
 
 /**

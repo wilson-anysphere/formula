@@ -16,9 +16,13 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createPublicKey, verify } from "node:crypto";
+import { verify } from "node:crypto";
 import process from "node:process";
-import { parseTauriUpdaterPubkey, parseTauriUpdaterSignature } from "./tauri-minisign.mjs";
+import {
+  ed25519PublicKeyFromRaw,
+  parseTauriUpdaterPubkey,
+  parseTauriUpdaterSignature,
+} from "./tauri-minisign.mjs";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const defaultConfigPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
@@ -47,17 +51,6 @@ function failBlock(heading, details) {
   fail(`\n${heading}\n${details.map((d) => `  - ${d}`).join("\n")}\n`);
 }
 
-/**
- * @param {Uint8Array} rawKey32
- */
-function ed25519PublicKeyFromRaw(rawKey32) {
-  if (rawKey32.length !== 32) {
-    throw new Error(`Expected 32-byte Ed25519 public key, got ${rawKey32.length} bytes.`);
-  }
-  const ed25519SpkiPrefix = Buffer.from("302a300506032b6570032100", "hex");
-  const spkiDer = Buffer.concat([ed25519SpkiPrefix, Buffer.from(rawKey32)]);
-  return createPublicKey({ key: spkiDer, format: "der", type: "spki" });
-}
 function main() {
   const [latestJsonPath, latestSigPath] = process.argv.slice(2);
   if (!latestJsonPath || !latestSigPath) {

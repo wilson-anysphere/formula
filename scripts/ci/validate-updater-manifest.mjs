@@ -20,7 +20,11 @@ import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { URL, fileURLToPath } from "node:url";
 import crypto from "node:crypto";
-import { parseTauriUpdaterPubkey, parseTauriUpdaterSignature } from "./tauri-minisign.mjs";
+import {
+  ed25519PublicKeyFromRaw,
+  parseTauriUpdaterPubkey,
+  parseTauriUpdaterSignature,
+} from "./tauri-minisign.mjs";
 
 /**
  * @param {string} message
@@ -413,30 +417,6 @@ function expectNonEmptyString(key, value) {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`Expected ${key} to be a non-empty string, got ${String(value)}`);
   }
-}
-
-/**
- * Creates a Node.js public key object for an Ed25519 public key stored as raw bytes.
- *
- * Tauri stores updater keys as base64 strings. Modern Tauri versions print a base64 value that
- * decodes to a minisign public key file (2-line text block). We parse that elsewhere and feed this
- * helper the extracted raw 32-byte Ed25519 public key.
- * Node's crypto APIs expect a SPKI wrapper, so we construct:
- *   SubjectPublicKeyInfo  ::=  SEQUENCE  {
- *     algorithm         AlgorithmIdentifier,
- *     subjectPublicKey  BIT STRING
- *   }
- * where AlgorithmIdentifier is OID 1.3.101.112 (Ed25519).
- *
- * @param {Uint8Array} rawKey32
- */
-function ed25519PublicKeyFromRaw(rawKey32) {
-  if (rawKey32.length !== 32) {
-    throw new Error(`Expected 32-byte Ed25519 public key, got ${rawKey32.length} bytes.`);
-  }
-  const spkiPrefix = Buffer.from("302a300506032b6570032100", "hex");
-  const spkiDer = Buffer.concat([spkiPrefix, Buffer.from(rawKey32)]);
-  return crypto.createPublicKey({ key: spkiDer, format: "der", type: "spki" });
 }
 
 /**

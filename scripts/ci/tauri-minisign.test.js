@@ -4,19 +4,13 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { parseTauriUpdaterPubkey, parseTauriUpdaterSignature } from "./tauri-minisign.mjs";
+import {
+  ed25519PublicKeyFromRaw,
+  parseTauriUpdaterPubkey,
+  parseTauriUpdaterSignature,
+} from "./tauri-minisign.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-
-/**
- * @param {Uint8Array} rawKey32
- */
-function ed25519PublicKeyFromRaw(rawKey32) {
-  assert.equal(rawKey32.length, 32);
-  const spkiPrefix = Buffer.from("302a300506032b6570032100", "hex");
-  const spkiDer = Buffer.concat([spkiPrefix, Buffer.from(rawKey32)]);
-  return crypto.createPublicKey({ key: spkiDer, format: "der", type: "spki" });
-}
 
 test("parses the repo's updater pubkey (tauri.conf.json) minisign format", () => {
   const cfgPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
