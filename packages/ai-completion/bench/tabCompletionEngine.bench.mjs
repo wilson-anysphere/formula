@@ -25,7 +25,7 @@ const DEFAULT_WARMUP = 10;
 const DEFAULT_BUDGET_MS = 100;
 
 function parseArgs(argv) {
-  /** @type {{runs:number, warmup:number, budgetMs:number, ci:boolean, output:string|null, details:string|null}} */
+  /** @type {{runs:number, warmup:number, budgetMs:number, ci:boolean, output:string|null, details:string|null, scenarios:string[]}} */
   const out = {
     runs: parsePositiveInt(process.env.BENCH_RUNS, DEFAULT_RUNS),
     warmup: parsePositiveInt(process.env.BENCH_WARMUP, DEFAULT_WARMUP),
@@ -33,6 +33,7 @@ function parseArgs(argv) {
     ci: isTruthy(process.env.CI),
     output: null,
     details: null,
+    scenarios: [],
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -54,6 +55,11 @@ function parseArgs(argv) {
     }
     if (arg === "--budget-ms") {
       out.budgetMs = parsePositiveInt(argv[++i], out.budgetMs);
+      continue;
+    }
+    if (arg === "--scenario") {
+      const value = argv[++i];
+      if (typeof value === "string" && value.length > 0) out.scenarios.push(value);
       continue;
     }
     if (arg === "--output") {
@@ -88,6 +94,7 @@ Options:
   --runs <n>        Measured iterations per scenario (default: ${DEFAULT_RUNS})
   --warmup <n>      Warmup iterations per scenario (default: ${DEFAULT_WARMUP})
   --budget-ms <n>   CI p95 budget per scenario (default: ${DEFAULT_BUDGET_MS})
+  --scenario <pat>  Run only scenarios whose name matches <pat> (repeatable)
   --output <path>   Write action-style JSON results (p95 ms) to a file
   --details <path>  Write detailed JSON results (p50/p95/mean/min/max) to a file
   --ci              Enforce the budget (also enabled automatically when CI=1)
@@ -164,7 +171,9 @@ async function runScenario({ name, warmup, runs, fn }) {
 }
 
 async function main() {
-  const { runs, warmup, budgetMs, ci, output, details } = parseArgs(process.argv.slice(2));
+  const { runs, warmup, budgetMs, ci, output, details, scenarios: scenarioFilters } = parseArgs(
+    process.argv.slice(2)
+  );
 
   // Disable caching so the benchmark exercises the full "cold path" per run.
   // The "per-keystroke" UX typically involves distinct inputs, so cache hits are
@@ -264,11 +273,24 @@ async function main() {
     },
   ];
 
+  const selectedScenarios =
+    scenarioFilters.length === 0
+      ? scenarios
+      : scenarios.filter((s) => scenarioFilters.some((f) => includesIgnoreCase(s.name, f)));
+
+  if (selectedScenarios.length === 0) {
+    throw new Error(
+      `No scenarios matched filters: ${scenarioFilters.join(
+        ", "
+      )}. Available: ${scenarios.map((s) => s.name).join(" | ")}`
+    );
+  }
+
   /** @type {{name:string, p95:number}[]} */
   const failures = [];
   /** @type {any[]} */
   const detailedResults = [];
-  for (const scenario of scenarios) {
+  for (const scenario of selectedScenarios) {
     const result = await runScenario({
       name: scenario.name,
       warmup,
@@ -317,3 +339,8 @@ async function main() {
 }
 
 await main();
+
+function includesIgnoreCase(text, pat) {
+  if (!pat) return true;
+  return String(text).toLowerCase().includes(String(pat).toLowerCase());
+}

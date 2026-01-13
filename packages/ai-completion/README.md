@@ -34,6 +34,12 @@ node packages/ai-completion/bench/tabCompletionEngine.bench.mjs --runs 200 --war
 pnpm bench:tab-completion -- --runs 200 --warmup 50 --budget-ms 100
 ```
 
+To run a subset of scenarios (useful when iterating on a specific path):
+
+```bash
+node packages/ai-completion/bench/tabCompletionEngine.bench.mjs --scenario range
+```
+
 You can also write JSON output (useful for CI/perf tooling):
 
 ```bash
