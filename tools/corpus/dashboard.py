@@ -6,6 +6,7 @@ import argparse
 import json
 import math
 import statistics
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -320,7 +321,16 @@ def _append_trend_file(
     entries: list[dict[str, Any]] = []
     if trend_path.exists():
         raw_text = trend_path.read_text(encoding="utf-8").strip()
-        raw = json.loads(raw_text or "[]")
+        try:
+            raw = json.loads(raw_text or "[]")
+        except json.JSONDecodeError:
+            # Trend files are persisted across scheduled runs via cache. Be resilient to partial
+            # writes/corruption so one bad cache entry doesn't break the scheduled job.
+            print(
+                f"warning: trend file contained invalid JSON; overwriting: {trend_path}",
+                file=sys.stderr,
+            )
+            raw = []
         if not isinstance(raw, list):
             raise ValueError(f"trend file must be a JSON list: {trend_path}")
         entries = [e for e in raw if isinstance(e, dict)]
