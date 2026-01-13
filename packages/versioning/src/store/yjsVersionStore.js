@@ -605,6 +605,25 @@ export class YjsVersionStore {
     const snapshotCompleteRaw = raw.get("snapshotComplete");
     if (snapshotCompleteRaw === false) return null;
 
+    // Additional incompleteness checks: a record can be unreadable even if
+    // `snapshotComplete` is unset/incorrect (e.g. legacy writers or corrupted
+    // docs). If we can prove the snapshot is not fully present, treat it as
+    // incomplete and return null rather than throwing on missing metadata.
+    const snapshotEncodingRaw = raw.get("snapshotEncoding");
+    const chunksArr = raw.get("snapshotChunks");
+    if ((snapshotEncodingRaw === "chunks" || chunksArr !== undefined) && !isYArray(chunksArr)) {
+      // Chunks mode must have a chunk array.
+      return null;
+    }
+    if (isYArray(chunksArr)) {
+      const expectedChunks = raw.get("snapshotChunkCountExpected");
+      if (typeof expectedChunks === "number" && chunksArr.length < expectedChunks) return null;
+    }
+    if (snapshotEncodingRaw === "base64") {
+      const base64 = raw.get("snapshotBase64");
+      if (typeof base64 !== "string") return null;
+    }
+
     const schemaVersion = raw.get("schemaVersion") ?? 1;
     if (schemaVersion !== 1) {
       throw new Error(
@@ -694,17 +713,31 @@ export class YjsVersionStore {
     this.versions.forEach((value, key) => {
       if (typeof key !== "string") return;
       if (!isYMap(value)) return;
-      if (value.get("snapshotComplete") !== false) return;
+
+      const snapshotComplete = value.get("snapshotComplete");
+      const snapshotEncoding = value.get("snapshotEncoding");
+      const chunksArr = value.get("snapshotChunks");
+      const expectedChunks = value.get("snapshotChunkCountExpected");
+      const base64 = value.get("snapshotBase64");
+
+      const hasChunks = chunksArr !== undefined;
+      const chunksExpected = typeof expectedChunks === "number" && expectedChunks >= 0;
+      const isChunkEncoded = snapshotEncoding === "chunks" || (snapshotEncoding == null && hasChunks);
+      const hasChunkArray = isYArray(chunksArr);
+
+      const isMissingChunks = isChunkEncoded && chunksExpected && hasChunkArray && chunksArr.length < expectedChunks;
+      const isMissingChunkArray = isChunkEncoded && hasChunks && !hasChunkArray;
+      const isMissingBase64 = snapshotEncoding === "base64" && typeof base64 !== "string";
+
+      const isIncomplete = snapshotComplete === false || isMissingChunks || isMissingChunkArray || isMissingBase64;
+      if (!isIncomplete) return;
 
       // If all chunks are present but the writer crashed before flipping the
       // `snapshotComplete` flag, we can safely finalize the record instead of
       // deleting it (keeps the snapshot recoverable and allows normal retention
       // to apply).
-      const expectedChunks = value.get("snapshotChunkCountExpected");
-      const chunksArr = value.get("snapshotChunks");
-      if (typeof expectedChunks === "number" && expectedChunks >= 0 && isYArray(chunksArr)) {
-        const actual = typeof chunksArr.length === "number" ? chunksArr.length : chunksArr.toArray().length;
-        if (actual >= expectedChunks) {
+      if (snapshotComplete === false && chunksExpected && hasChunkArray && chunksArr.length >= expectedChunks) {
+        {
           // Only finalize records that are likely to be readable via `getVersion`.
           // If required metadata is missing/corrupted, keep it incomplete so it
           // can be deleted via the staleness policy below.
@@ -712,7 +745,18 @@ export class YjsVersionStore {
           const kind = value.get("kind");
           const timestampMs = value.get("timestampMs");
           const kindValid = kind === "snapshot" || kind === "checkpoint" || kind === "restore";
-          if (schemaVersion === 1 && kindValid && typeof timestampMs === "number" && Number.isFinite(timestampMs)) {
+          const compression = value.get("compression");
+          const compressionValid =
+            compression == null || compression === "none" || compression === "gzip";
+          const snapshotEncodingValid = snapshotEncoding == null || snapshotEncoding === "chunks";
+          if (
+            schemaVersion === 1 &&
+            kindValid &&
+            typeof timestampMs === "number" &&
+            Number.isFinite(timestampMs) &&
+            compressionValid &&
+            snapshotEncodingValid
+          ) {
             finalizeIds.add(key);
             return;
           }
@@ -748,13 +792,25 @@ export class YjsVersionStore {
         const expectedChunks = raw.get("snapshotChunkCountExpected");
         const chunksArr = raw.get("snapshotChunks");
         if (typeof expectedChunks !== "number" || expectedChunks < 0 || !isYArray(chunksArr)) continue;
-        const actual = typeof chunksArr.length === "number" ? chunksArr.length : chunksArr.toArray().length;
-        if (actual < expectedChunks) continue;
+        if (chunksArr.length < expectedChunks) continue;
         const schemaVersion = raw.get("schemaVersion") ?? 1;
         const kind = raw.get("kind");
         const timestampMs = raw.get("timestampMs");
         const kindValid = kind === "snapshot" || kind === "checkpoint" || kind === "restore";
-        if (schemaVersion !== 1 || !kindValid || typeof timestampMs !== "number" || !Number.isFinite(timestampMs)) continue;
+        const compression = raw.get("compression");
+        const compressionValid = compression == null || compression === "none" || compression === "gzip";
+        const snapshotEncoding = raw.get("snapshotEncoding");
+        const snapshotEncodingValid = snapshotEncoding == null || snapshotEncoding === "chunks";
+        if (
+          schemaVersion !== 1 ||
+          !kindValid ||
+          typeof timestampMs !== "number" ||
+          !Number.isFinite(timestampMs) ||
+          !compressionValid ||
+          !snapshotEncodingValid
+        ) {
+          continue;
+        }
         raw.set("snapshotComplete", true);
       }
 

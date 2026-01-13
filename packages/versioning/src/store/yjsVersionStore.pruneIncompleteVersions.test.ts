@@ -265,4 +265,41 @@ describe("YjsVersionStore: pruneIncompleteVersions()", () => {
     expect(doc.getMap("versions").get("future")).toBeUndefined();
     expect((doc.getMap("versionsMeta").get("order") as any)?.toArray?.()).toEqual([]);
   });
+
+  it("prunes stale incomplete chunk records even when snapshotComplete is unset", async () => {
+    const doc = new Y.Doc();
+    const store = new YjsVersionStore({
+      doc,
+      writeMode: "stream",
+      chunkSize: 1024,
+      maxChunksPerTransaction: 2,
+    });
+
+    doc.transact(() => {
+      const versions = doc.getMap("versions");
+      const meta = doc.getMap("versionsMeta");
+      const order = new Y.Array<string>();
+      meta.set("order", order);
+
+      const record = new Y.Map<any>();
+      record.set("schemaVersion", 1);
+      record.set("id", "missingChunks");
+      record.set("kind", "snapshot");
+      record.set("timestampMs", 1);
+      record.set("compression", "none");
+      record.set("snapshotEncoding", "chunks");
+      record.set("snapshotChunkCountExpected", 2);
+      // NOTE: intentionally do not set snapshotComplete.
+      const chunks = new Y.Array<Uint8Array>();
+      chunks.push([new Uint8Array([1, 2, 3])]);
+      record.set("snapshotChunks", chunks);
+      versions.set("missingChunks", record);
+      order.push(["missingChunks"]);
+    }, "test");
+
+    await expect(store.getVersion("missingChunks")).resolves.toBeNull();
+    await store.pruneIncompleteVersions({ olderThanMs: 0 });
+    expect(doc.getMap("versions").get("missingChunks")).toBeUndefined();
+    expect((doc.getMap("versionsMeta").get("order") as any)?.toArray?.()).toEqual([]);
+  });
 });
