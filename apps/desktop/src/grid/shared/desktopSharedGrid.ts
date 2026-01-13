@@ -16,6 +16,7 @@ import {
   describeActiveCellLabel,
   describeCell,
   resolveGridThemeFromCssVars,
+  wheelDeltaToPixels,
 } from "@formula/grid";
 
 import { openExternalHyperlink } from "../../hyperlinks/openExternal.js";
@@ -648,13 +649,8 @@ export class DesktopSharedGrid {
         const viewport = renderer.scroll.getViewportState();
         const startZoom = renderer.getZoom();
 
-        let delta = event.deltaY;
-        if (event.deltaMode === 1) {
-          const lineHeight = 16 * startZoom;
-          delta *= lineHeight;
-        } else if (event.deltaMode === 2) {
-          delta *= viewport.height;
-        }
+        const lineHeight = 16 * startZoom;
+        const delta = wheelDeltaToPixels(event.deltaY, event.deltaMode, { lineHeight, pageSize: viewport.height });
 
         if (delta === 0) return;
         event.preventDefault();
@@ -679,20 +675,17 @@ export class DesktopSharedGrid {
       let deltaX = event.deltaX;
       let deltaY = event.deltaY;
 
-      if (event.deltaMode === 1) {
-        // Match React CanvasGrid wheel normalization: treat DOM_DELTA_LINE as "rows per tick"
-        // and scale by zoom so line-based wheels scroll consistently across zoom levels.
-        const lineHeight = 16 * renderer.getZoom();
-        deltaX *= lineHeight;
-        deltaY *= lineHeight;
-      } else if (event.deltaMode === 2) {
-        const viewport = renderer.scroll.getViewportState();
-        deltaX *= viewport.width;
-        deltaY *= viewport.height;
-      }
+      const viewport = renderer.scroll.getViewportState();
+      const lineHeight = 16 * renderer.getZoom();
+      const pageWidth = Math.max(0, viewport.width - viewport.frozenWidth);
+      const pageHeight = Math.max(0, viewport.height - viewport.frozenHeight);
 
-      if (event.shiftKey && deltaX === 0) {
-        deltaX = deltaY;
+      deltaX = wheelDeltaToPixels(deltaX, event.deltaMode, { lineHeight, pageSize: pageWidth });
+      deltaY = wheelDeltaToPixels(deltaY, event.deltaMode, { lineHeight, pageSize: pageHeight });
+
+      // Common spreadsheet UX: shift+wheel scrolls horizontally.
+      if (event.shiftKey) {
+        deltaX += deltaY;
         deltaY = 0;
       }
 

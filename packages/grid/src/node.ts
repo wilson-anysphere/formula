@@ -37,6 +37,9 @@ export { DEFAULT_GRID_THEME, resolveGridTheme } from "./theme/GridTheme.ts";
 export { VirtualScrollManager } from "./virtualization/VirtualScrollManager.ts";
 export type { GridViewportState } from "./virtualization/VirtualScrollManager.ts";
 
+export { wheelDeltaToPixels } from "./react/wheelDeltaToPixels.ts";
+export type { WheelDeltaToPixelsOptions } from "./react/wheelDeltaToPixels.ts";
+
 export {
   SR_ONLY_STYLE,
   applySrOnlyStyle,

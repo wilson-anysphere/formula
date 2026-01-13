@@ -17,6 +17,9 @@ export { MockCellProvider } from "./model/MockCellProvider";
 export type { GridApi, CanvasGridProps, GridAxisSizeChange, GridInteractionMode, ScrollToCellAlign, FillCommitEvent } from "./react/CanvasGrid";
 export { CanvasGrid } from "./react/CanvasGrid";
 
+export { wheelDeltaToPixels } from "./react/wheelDeltaToPixels";
+export type { WheelDeltaToPixelsOptions } from "./react/wheelDeltaToPixels";
+
 export type { FillMode } from "./interaction/fillHandle";
 
 export type { GridPresence, GridPresenceCursor, GridPresenceRange } from "./presence/types";
