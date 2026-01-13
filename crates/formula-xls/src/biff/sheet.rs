@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
+use formula_model::autofilter::{SortCondition, SortState};
 use formula_model::{
     CellRef, Hyperlink, HyperlinkTarget, OutlinePr, Range, SheetPane, SheetProtection,
     SheetSelection, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
@@ -26,6 +27,8 @@ const RECORD_DIMENSIONS: u16 = 0x0200;
 const RECORD_AUTOFILTERINFO: u16 = 0x009D;
 /// FILTERMODE [MS-XLS 2.4.102]
 const RECORD_FILTERMODE: u16 = 0x009B;
+/// SORT [MS-XLS 2.4.256]
+const RECORD_SORT: u16 = 0x0090;
 const RECORD_WSBOOL: u16 = 0x0081;
 /// MERGEDCELLS [MS-XLS 2.4.139]
 const RECORD_MERGEDCELLS: u16 = 0x00E5;
@@ -124,6 +127,8 @@ pub(crate) struct SheetRowColProperties {
     pub(crate) outline_pr: OutlinePr,
     /// Worksheet AutoFilter range inferred from BIFF metadata.
     pub(crate) auto_filter_range: Option<Range>,
+    /// Worksheet AutoFilter sort state, if the sheet substream contained a supported `SORT` record.
+    pub(crate) sort_state: Option<SortState>,
     /// Whether the worksheet contained a `FILTERMODE` record (indicating filtered rows).
     pub(crate) filter_mode: bool,
     pub(crate) warnings: Vec<String>,
@@ -585,6 +590,19 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
             RECORD_FILTERMODE => {
                 props.filter_mode = true;
             }
+            // SORT [MS-XLS 2.4.256]
+            RECORD_SORT => match parse_sort_record_best_effort(record.data) {
+                Ok(Some(state)) => {
+                    // Prefer the last SORT record in the sheet stream (Excel may emit multiple
+                    // records as sort state evolves).
+                    props.sort_state = Some(state);
+                }
+                Ok(None) => {}
+                Err(err) => props.warnings.push(format!(
+                    "failed to parse SORT record at offset {}: {err}",
+                    record.offset
+                )),
+            },
             // ROW [MS-XLS 2.4.184]
             RECORD_ROW => {
                 let data = record.data;
@@ -749,6 +767,107 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
     }
 
     Ok(props)
+}
+
+// SORT.grbit flags.
+//
+// We only currently care about whether the sorted range includes a header row. When present, we
+// map the sort key range to match OOXML `<sortCondition ref="...">` semantics: the sort key range
+// excludes the header row (Excel sorts apply to the data rows beneath the header).
+//
+// Note: This is intentionally best-effort. BIFF `SORT` supports a range of options (left-to-right
+// sorts, custom lists, case sensitivity, locale-aware comparisons) that are not currently
+// representable in `formula_model::SortState`.
+const SORT_FLAG_HAS_HEADER: u16 = 0x0001;
+
+/// Best-effort parse of a BIFF8 `SORT` record into a model [`SortState`].
+///
+/// The BIFF `SORT` record predates OOXML and stores sort settings in a compact binary form. Excel
+/// 97-2003 supports up to three sort keys. We map each key to a [`SortCondition`] with a column
+/// range spanning the sorted rows.
+fn parse_sort_record_best_effort(data: &[u8]) -> Result<Option<SortState>, String> {
+    // The canonical BIFF8 `SORT` record layout is 24 bytes:
+    // - rwFirst, rwLast, colFirst, colLast (Ref8U): 8 bytes
+    // - grbit: 2 bytes
+    // - cKey: 2 bytes
+    // - rgKey[3]: 3 * u16 (column index)
+    // - rgOrder[3]: 3 * u16 (0=ascending, 1=descending)
+    //
+    // Some producers may emit alternative layouts; this parser is intentionally conservative and
+    // only decodes the layout we write in tests today.
+    if data.len() < 24 {
+        return Err(format!(
+            "SORT record too short: expected >=24 bytes, got {}",
+            data.len()
+        ));
+    }
+
+    let rw_first = u16::from_le_bytes([data[0], data[1]]) as u32;
+    let rw_last = u16::from_le_bytes([data[2], data[3]]) as u32;
+    let col_first = u16::from_le_bytes([data[4], data[5]]) as u32;
+    let col_last = u16::from_le_bytes([data[6], data[7]]) as u32;
+    let grbit = u16::from_le_bytes([data[8], data[9]]);
+    let c_keys = u16::from_le_bytes([data[10], data[11]]) as usize;
+
+    if rw_first >= EXCEL_MAX_ROWS || rw_last >= EXCEL_MAX_ROWS {
+        return Err(format!(
+            "sorted row range out of bounds: {rw_first}..={rw_last}"
+        ));
+    }
+    if col_first >= EXCEL_MAX_COLS || col_last >= EXCEL_MAX_COLS {
+        return Err(format!(
+            "sorted column range out of bounds: {col_first}..={col_last}"
+        ));
+    }
+
+    let has_header = (grbit & SORT_FLAG_HAS_HEADER) != 0;
+    let mut start_row = rw_first.min(rw_last);
+    let end_row = rw_first.max(rw_last);
+    if has_header {
+        start_row = start_row.saturating_add(1);
+    }
+    if start_row > end_row {
+        // Range contains only a header row (or is otherwise empty).
+        return Ok(None);
+    }
+
+    let key_cols = [
+        u16::from_le_bytes([data[12], data[13]]) as u32,
+        u16::from_le_bytes([data[14], data[15]]) as u32,
+        u16::from_le_bytes([data[16], data[17]]) as u32,
+    ];
+    let orders = [
+        u16::from_le_bytes([data[18], data[19]]),
+        u16::from_le_bytes([data[20], data[21]]),
+        u16::from_le_bytes([data[22], data[23]]),
+    ];
+
+    let mut conditions = Vec::new();
+    for i in 0..c_keys.min(3) {
+        let key_col = key_cols[i];
+        if key_col == 0xFFFF {
+            continue;
+        }
+        if key_col < col_first.min(col_last) || key_col > col_first.max(col_last) {
+            // Key outside the sorted range; ignore.
+            continue;
+        }
+        if key_col >= EXCEL_MAX_COLS {
+            continue;
+        }
+
+        let descending = orders[i] != 0;
+        conditions.push(SortCondition {
+            range: Range::new(CellRef::new(start_row, key_col), CellRef::new(end_row, key_col)),
+            descending,
+        });
+    }
+
+    if conditions.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(SortState { conditions }))
+    }
 }
 
 /// Parse merged cell regions from a worksheet BIFF substream.

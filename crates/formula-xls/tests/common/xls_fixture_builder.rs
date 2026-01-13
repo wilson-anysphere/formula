@@ -48,6 +48,7 @@ const RECORD_NUMBER: u16 = 0x0203;
 const RECORD_FORMULA: u16 = 0x0006;
 const RECORD_HLINK: u16 = 0x01B8;
 const RECORD_AUTOFILTERINFO: u16 = 0x009D;
+const RECORD_SORT: u16 = 0x0090;
 const RECORD_FILTERMODE: u16 = 0x009B;
 const RECORD_WSBOOL: u16 = 0x0081;
 const RECORD_ROW: u16 = 0x0208;
@@ -1848,6 +1849,25 @@ pub fn build_defined_names_builtins_chkey_mismatch_fixture_xls() -> Vec<u8> {
 /// This exercises AutoFilter range import from legacy `.xls` files.
 pub fn build_autofilter_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_autofilter_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a single sheet named `FilterSort` with a
+/// sheet-scoped `_xlnm._FilterDatabase` defined name referencing `$A$1:$C$5`, plus a BIFF8 `SORT`
+/// record describing an AutoFilter sort state.
+///
+/// This exercises import of `SheetAutoFilter.sort_state` from legacy `.xls` files.
+pub fn build_autofilter_sort_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_autofilter_sort_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -7900,6 +7920,89 @@ fn build_autofilter_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_autofilter_sort_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table (style XFs only).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF.
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "FilterSort");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // `_xlnm._FilterDatabase` (built-in name id 0x0D) scoped to the sheet (`itab=1`).
+    let filter_db_rgce = ptg_area(0, 4, 0, 2); // $A$1:$C$5
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &builtin_name_record(true, 1, 0x0D, &filter_db_rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 5) cols [0, 3) so A1:C5 exists.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&5u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // A1: a single General cell so calamine populates a range for the sheet.
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(0, 0, xf_general, 1.0),
+    );
+
+    // AUTOFILTERINFO: cEntries = 3 (A..C).
+    push_record(&mut sheet, RECORD_AUTOFILTERINFO, &3u16.to_le_bytes());
+
+    // SORT record: sort the filtered range A1:C5 by column B descending, with a header row.
+    push_record(
+        &mut sheet,
+        RECORD_SORT,
+        &sort_record_payload(
+            0, 4, // rows (rwFirst..rwLast) => A1:C5
+            0, 2, // cols (colFirst..colLast)
+            true, // has header row
+            &[(1u16, true)], // key: column B descending
+        ),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
 fn build_autofilter_calamine_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -8222,6 +8325,53 @@ fn ptg_area(rw_first: u16, rw_last: u16, col_first: u16, col_last: u16) -> Vec<u
     out.extend_from_slice(&rw_last.to_le_bytes());
     out.extend_from_slice(&col_first.to_le_bytes());
     out.extend_from_slice(&col_last.to_le_bytes());
+    out
+}
+
+fn sort_record_payload(
+    rw_first: u16,
+    rw_last: u16,
+    col_first: u16,
+    col_last: u16,
+    has_header: bool,
+    keys: &[(u16, bool)], // (col, descending)
+) -> Vec<u8> {
+    // Minimal BIFF8 SORT record payload (classic SORT).
+    //
+    // This matches the best-effort parser in `formula-xls`:
+    // - Ref8U (rwFirst, rwLast, colFirst, colLast)
+    // - grbit (header flag)
+    // - cKeys
+    // - 3x key column indices (u16, 0xFFFF for unused)
+    // - 3x sort orders (u16, 0=ascending, 1=descending)
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&rw_first.to_le_bytes());
+    out.extend_from_slice(&rw_last.to_le_bytes());
+    out.extend_from_slice(&col_first.to_le_bytes());
+    out.extend_from_slice(&col_last.to_le_bytes());
+
+    let mut grbit: u16 = 0;
+    if has_header {
+        grbit |= 0x0001;
+    }
+    out.extend_from_slice(&grbit.to_le_bytes());
+
+    let key_count: u16 = keys.len().min(3) as u16;
+    out.extend_from_slice(&key_count.to_le_bytes());
+
+    // Key columns.
+    for i in 0..3usize {
+        let col = keys.get(i).map(|(c, _)| *c).unwrap_or(0xFFFF);
+        out.extend_from_slice(&col.to_le_bytes());
+    }
+
+    // Key orders.
+    for i in 0..3usize {
+        let descending = keys.get(i).map(|(_, d)| *d).unwrap_or(false);
+        let order: u16 = if descending { 1 } else { 0 };
+        out.extend_from_slice(&order.to_le_bytes());
+    }
+
     out
 }
 fn window2() -> [u8; 18] {

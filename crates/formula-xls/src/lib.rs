@@ -747,9 +747,37 @@ fn import_xls_path_with_biff_reader(
                     sheet.auto_filter = Some(SheetAutoFilter {
                         range,
                         filter_columns: Vec::new(),
-                        sort_state: None,
+                        sort_state: sheet_row_col_props
+                            .and_then(|props| props.sort_state.clone())
+                            .filter(|sort_state| {
+                                sort_state.conditions.iter().all(|cond| {
+                                    cond.range.start.row >= range.start.row
+                                        && cond.range.end.row <= range.end.row
+                                        && cond.range.start.col >= range.start.col
+                                        && cond.range.end.col <= range.end.col
+                                })
+                            }),
                         raw_xml: Vec::new(),
                     });
+                }
+            }
+
+            // If the AutoFilter was already present (e.g. from earlier best-effort inference),
+            // populate sort state from the worksheet stream when available.
+            if let (Some(props), Some(af)) = (sheet_row_col_props, sheet.auto_filter.as_mut()) {
+                if af.sort_state.is_none() {
+                    if let Some(sort_state) = props.sort_state.clone() {
+                        // Best-effort guard: only attach sort state when the key ranges fall
+                        // within the AutoFilter range.
+                        if sort_state.conditions.iter().all(|cond| {
+                            cond.range.start.row >= af.range.start.row
+                                && cond.range.end.row <= af.range.end.row
+                                && cond.range.start.col >= af.range.start.col
+                                && cond.range.end.col <= af.range.end.col
+                        }) {
+                            af.sort_state = Some(sort_state);
+                        }
+                    }
                 }
             }
 
@@ -1480,8 +1508,10 @@ fn import_xls_path_with_biff_reader(
     // In BIFF, the filtered range is typically stored as a hidden built-in defined name
     // `_xlnm._FilterDatabase`, scoped to the worksheet that owns the AutoFilter.
     //
-    // We only import the presence + range in phase 1 (filter criteria and sort state are not yet
-    // supported). Never fail import due to AutoFilter parsing.
+    // We only import the presence + range in phase 1 (filter criteria are not yet supported).
+    //
+    // Sort state is imported separately from worksheet BIFF `SORT` records when available.
+    // Never fail import due to AutoFilter parsing.
     let mut autofilters: Vec<(formula_model::WorksheetId, Range)> = Vec::new();
     for name in &out.defined_names {
         if !is_filter_database_defined_name(&name.name) {
