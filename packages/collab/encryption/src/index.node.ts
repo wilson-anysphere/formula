@@ -1,5 +1,11 @@
 import crypto from "node:crypto";
 
+// The Node entrypoint uses `node:crypto` directly (not WebCrypto), but the
+// desktop binder code path uses the WebCrypto implementation in `index.node.js`,
+// which caches imported `CryptoKey`s. Re-export a clear helper so callers can
+// release key material on teardown without knowing which implementation is active.
+import { clearEncryptionKeyCache as clearWebCryptoKeyCache } from "./index.node.js";
+
 import {
   AES_GCM_IV_BYTES,
   AES_GCM_TAG_BYTES,
@@ -76,6 +82,10 @@ export async function decryptCellPlaintext(opts: {
 
   const json = plaintextBytes.toString("utf8");
   return JSON.parse(json) as CellPlaintext;
+}
+
+export function clearEncryptionKeyCache(): void {
+  clearWebCryptoKeyCache();
 }
 
 export {

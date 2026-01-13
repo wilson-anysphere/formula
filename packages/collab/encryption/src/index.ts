@@ -34,11 +34,64 @@ function requireSubtleCrypto(): SubtleCrypto {
   return subtle;
 }
 
+// Cache imported `CryptoKey`s by keyId so repeated encrypt/decrypt operations don't
+// pay the cost of `subtle.importKey` each time.
+//
+// IMPORTANT: Imported CryptoKeys can retain sensitive key material. Keep the cache
+// bounded so it cannot grow without limit (e.g. in enterprise deployments with
+// many documents / keys).
+//
+// Configuration:
+// - `globalThis.__FORMULA_ENCRYPTION_KEY_CACHE_MAX_SIZE__` (number)
+const DEFAULT_ENCRYPTION_KEY_CACHE_MAX_SIZE = 256;
 const keyCache = new Map<string, CryptoKey>();
 
+function normalizeCacheMaxSize(value: unknown): number | null {
+  const num = typeof value === "string" ? Number.parseInt(value, 10) : Number(value);
+  if (!Number.isFinite(num) || num < 0) return null;
+  return Math.trunc(num);
+}
+
+function getEncryptionKeyCacheMaxSize(): number {
+  const fromGlobal = normalizeCacheMaxSize((globalThis as any)?.__FORMULA_ENCRYPTION_KEY_CACHE_MAX_SIZE__);
+  if (fromGlobal != null) return fromGlobal;
+  return DEFAULT_ENCRYPTION_KEY_CACHE_MAX_SIZE;
+}
+
+function touchEncryptionKeyCacheEntry(keyId: string, cryptoKey: CryptoKey): void {
+  // Refresh LRU order (Map iterates in insertion order).
+  keyCache.delete(keyId);
+  keyCache.set(keyId, cryptoKey);
+}
+
+function enforceEncryptionKeyCacheLimit(): void {
+  const maxSize = getEncryptionKeyCacheMaxSize();
+
+  // Allow explicitly disabling caching by setting max size to 0.
+  if (maxSize === 0) {
+    keyCache.clear();
+    return;
+  }
+
+  while (keyCache.size > maxSize) {
+    const oldestKeyId = keyCache.keys().next().value;
+    if (oldestKeyId === undefined) return;
+    keyCache.delete(oldestKeyId);
+  }
+}
+
+export function clearEncryptionKeyCache(): void {
+  keyCache.clear();
+}
+
 async function importAesGcmKey(key: CellEncryptionKey): Promise<CryptoKey> {
+  enforceEncryptionKeyCacheLimit();
+
   const cached = keyCache.get(key.keyId);
-  if (cached) return cached;
+  if (cached) {
+    touchEncryptionKeyCacheEntry(key.keyId, cached);
+    return cached;
+  }
 
   assertKeyBytes(key.keyBytes);
   const subtle = requireSubtleCrypto();
@@ -46,7 +99,14 @@ async function importAesGcmKey(key: CellEncryptionKey): Promise<CryptoKey> {
     "encrypt",
     "decrypt",
   ]);
-  keyCache.set(key.keyId, cryptoKey);
+
+  // Avoid retaining key material when caching is disabled.
+  if (getEncryptionKeyCacheMaxSize() === 0) {
+    return cryptoKey;
+  }
+
+  touchEncryptionKeyCacheEntry(key.keyId, cryptoKey);
+  enforceEncryptionKeyCacheLimit();
   return cryptoKey;
 }
 

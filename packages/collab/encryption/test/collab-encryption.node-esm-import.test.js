@@ -11,6 +11,7 @@ test("collab-encryption is importable under Node ESM when executing TS sources d
   assert.equal(typeof mod.encryptCellPlaintext, "function");
   assert.equal(typeof mod.decryptCellPlaintext, "function");
   assert.equal(typeof mod.isEncryptedCellPayload, "function");
+  assert.equal(typeof mod.clearEncryptionKeyCache, "function");
   assert.equal(typeof encryptFromTs, "function");
   assert.equal(typeof decryptFromTs, "function");
 
