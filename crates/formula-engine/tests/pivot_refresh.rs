@@ -42,6 +42,7 @@ fn engine_can_calculate_pivot_from_live_range_values() {
             source_field: "Sales".to_string(),
             name: "Sum of Sales".to_string(),
             aggregation: AggregationType::Sum,
+            number_format: None,
             show_as: None,
             base_field: None,
             base_item: None,
@@ -77,4 +78,3 @@ fn engine_can_calculate_pivot_from_live_range_values() {
     // Ensure the pivot output values are typed as expected.
     assert_eq!(result.data[2][1], PivotValue::Number(450.0));
 }
-
