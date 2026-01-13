@@ -10,6 +10,13 @@ test("index.js is fully typed for TS consumers", async () => {
   // public entrypoint and asserts the expected types.
   const entryFile = fileURLToPath(new URL("./.ai-context-index-typecheck.ts", import.meta.url));
 
+  // Enumerate the runtime exports from the entrypoint and assert the generated
+  // `.d.ts` surface matches. This catches missing/extra exports without requiring
+  // the test snippet to be updated for every new API.
+  const runtimeExports = await import("../src/index.js");
+  const runtimeExportKeys = Object.keys(runtimeExports).sort();
+  const runtimeExportKeysJson = JSON.stringify(runtimeExportKeys);
+
   const source = `\
 import {
   EXCEL_MAX_COLS,
@@ -34,10 +41,17 @@ import {
   type SystematicSamplingOptions,
 } from "../src/index.js";
 import type { SheetSchema } from "../src/schema.js";
- 
+  
 type IsAny<T> = 0 extends (1 & T) ? true : false;
 type Assert<T extends true> = T;
- 
+  
+// --- Entry point export parity (runtime vs types) ---
+const RUNTIME_EXPORT_KEYS = ${runtimeExportKeysJson} as const;
+type RuntimeKeys = typeof RUNTIME_EXPORT_KEYS[number];
+type TypeKeys = keyof typeof import("../src/index.js");
+type _RuntimeKeysInTypes = Assert<Exclude<RuntimeKeys, TypeKeys> extends never ? true : false>;
+type _TypeKeysInRuntime = Assert<Exclude<TypeKeys, RuntimeKeys> extends never ? true : false>;
+
 // --- Constants ---
 type _ExcelMaxRows_NotAny = Assert<IsAny<typeof EXCEL_MAX_ROWS> extends false ? true : false>;
 type _ExcelMaxCols_NotAny = Assert<IsAny<typeof EXCEL_MAX_COLS> extends false ? true : false>;
