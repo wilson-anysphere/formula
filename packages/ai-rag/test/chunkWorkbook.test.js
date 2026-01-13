@@ -173,3 +173,28 @@ test("chunkWorkbook: truncation fallback still produces a deterministic chunk", 
     "expected a truncation fallback chunk"
   );
 });
+
+test("chunkWorkbook encodes id parts to avoid delimiter-in-name collisions", () => {
+  const workbook = {
+    id: "wb1",
+    sheets: [
+      { name: "A", cells: [[{ v: "x" }]] },
+      { name: "A::table::B", cells: [[{ v: "y" }]] },
+    ],
+    tables: [
+      // Old-style ids would collide:
+      // wb1::A::table::B::table::C  (sheet=A, table=B::table::C)
+      // wb1::A::table::B::table::C  (sheet=A::table::B, table=C)
+      { name: "B::table::C", sheetName: "A", rect: { r0: 0, c0: 0, r1: 0, c1: 0 } },
+      { name: "C", sheetName: "A::table::B", rect: { r0: 0, c0: 0, r1: 0, c1: 0 } },
+    ],
+    namedRanges: [],
+  };
+
+  const chunks = chunkWorkbook(workbook);
+  const tableChunks = chunks.filter((c) => c.kind === "table");
+  assert.equal(tableChunks.length, 2, "expected two table chunks");
+
+  const ids = new Set(tableChunks.map((c) => c.id));
+  assert.equal(ids.size, 2, "expected distinct ids for colliding names");
+});

@@ -12,6 +12,18 @@ const DEFAULT_DETECT_REGIONS_CELL_LIMIT = 200000;
 const DEFAULT_MAX_DATA_REGIONS_PER_SHEET = 50;
 const DEFAULT_MAX_FORMULA_REGIONS_PER_SHEET = 50;
 
+/**
+ * Encode a user-controlled id segment so delimiters in names cannot create
+ * collisions between different (sheetName, tableName, ...) tuples.
+ *
+ * Keep "kind" segments (e.g. "table") unencoded for readability.
+ *
+ * @param {unknown} value
+ */
+function encodeIdPart(value) {
+  return encodeURIComponent(String(value));
+}
+
 function isNonEmptyCell(cell) {
   if (!cell) return false;
   if (cell.f != null && String(cell.f).trim() !== "") return true;
@@ -497,7 +509,9 @@ function chunkWorkbook(workbook, options = {}) {
     throwIfAborted(signal);
     const sheet = sheets.get(table.sheetName);
     if (!sheet) continue;
-    const id = `${workbook.id}::${table.sheetName}::table::${table.name}`;
+    const id = `${encodeIdPart(workbook.id)}::${encodeIdPart(table.sheetName)}::table::${encodeIdPart(
+      table.name
+    )}`;
     chunks.push({
       id,
       workbookId: workbook.id,
@@ -519,7 +533,9 @@ function chunkWorkbook(workbook, options = {}) {
     throwIfAborted(signal);
     const sheet = sheets.get(nr.sheetName);
     if (!sheet) continue;
-    const id = `${workbook.id}::${nr.sheetName}::namedRange::${nr.name}`;
+    const id = `${encodeIdPart(workbook.id)}::${encodeIdPart(nr.sheetName)}::namedRange::${encodeIdPart(
+      nr.name
+    )}`;
     chunks.push({
       id,
       workbookId: workbook.id,
@@ -579,7 +595,7 @@ function chunkWorkbook(workbook, options = {}) {
 
       const coordKey = `${rect.r0},${rect.c0},${rect.r1},${rect.c1}`;
       const suffix = region.isTruncationFallback ? `truncated::${coordKey}` : coordKey;
-      const id = `${workbook.id}::${sheet.name}::dataRegion::${suffix}`;
+      const id = `${encodeIdPart(workbook.id)}::${encodeIdPart(sheet.name)}::dataRegion::${suffix}`;
       chunks.push({
         id,
         workbookId: workbook.id,
@@ -628,7 +644,7 @@ function chunkWorkbook(workbook, options = {}) {
       const rect = region.rect;
       const coordKey = `${rect.r0},${rect.c0},${rect.r1},${rect.c1}`;
       const suffix = region.isTruncationFallback ? `truncated::${coordKey}` : coordKey;
-      const id = `${workbook.id}::${sheet.name}::formulaRegion::${suffix}`;
+      const id = `${encodeIdPart(workbook.id)}::${encodeIdPart(sheet.name)}::formulaRegion::${suffix}`;
       chunks.push({
         id,
         workbookId: workbook.id,
