@@ -1386,7 +1386,7 @@ describe("ToolExecutor", () => {
       name: "fetch_external_data",
       parameters: {
         source_type: "api",
-        url: "https://api.example.com/data?api_key=SECRET&city=berlin&ACCESS_TOKEN=SECRET2#frag",
+        url: "https://api.example.com/data?api_key=SECRET&city=berlin&ACCESS_TOKEN=SECRET2&client_secret=SECRET3#frag",
         destination: "Sheet1!A1"
       }
     });
@@ -1399,6 +1399,7 @@ describe("ToolExecutor", () => {
 
     expect(result.data.url).toContain("api_key=REDACTED");
     expect(result.data.url).toContain("ACCESS_TOKEN=REDACTED");
+    expect(result.data.url).toContain("client_secret=REDACTED");
     expect(result.data.url).toContain("city=berlin");
     expect(result.data.url).not.toContain("SECRET");
     expect(result.data.url).not.toContain("frag");

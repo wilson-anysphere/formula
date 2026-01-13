@@ -5,6 +5,7 @@ import { runChatWithToolsStreaming } from "../../../llm/src/toolCallingStreaming
 import { serializeToolResultForModel } from "../../../llm/src/toolResultSerialization.js";
 import type { ChatStreamEvent, ToolCall } from "../../../llm/src/types.js";
 
+import { redactUrlSecrets } from "../utils/urlRedaction.ts";
 import { classifyQueryNeedsTools, verifyAssistantClaims, verifyToolUsage, type VerificationResult } from "./verification.ts";
 
 export interface AuditedRunOptions {
@@ -294,46 +295,7 @@ function sanitizeAuditToolParameters(name: string, parameters: unknown): unknown
 }
 
 function safeUrlForAudit(raw: string): string {
-  try {
-    const url = new URL(raw);
-    url.username = "";
-    url.password = "";
-    url.hash = "";
-
-    if (url.search) {
-      const params = new URLSearchParams(url.search);
-      const keys = Array.from(new Set(Array.from(params.keys())));
-      for (const key of keys) {
-        if (!isSensitiveQueryParam(key)) continue;
-        const count = params.getAll(key).length;
-        params.delete(key);
-        for (let i = 0; i < count; i++) params.append(key, "REDACTED");
-      }
-      const next = params.toString();
-      url.search = next ? `?${next}` : "";
-    }
-
-    return url.toString();
-  } catch {
-    return raw;
-  }
-}
-
-function isSensitiveQueryParam(key: string): boolean {
-  const normalized = key.toLowerCase();
-  return (
-    normalized === "key" ||
-    normalized === "api_key" ||
-    normalized === "apikey" ||
-    normalized === "token" ||
-    normalized === "access_token" ||
-    normalized === "auth" ||
-    normalized === "authorization" ||
-    normalized === "signature" ||
-    normalized === "sig" ||
-    normalized === "password" ||
-    normalized === "secret"
-  );
+  return redactUrlSecrets(raw);
 }
 
 function redactHeaders(headers: Record<string, unknown>): Record<string, unknown> {

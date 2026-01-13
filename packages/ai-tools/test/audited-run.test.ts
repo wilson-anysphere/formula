@@ -143,16 +143,16 @@ describe("runChatWithToolsAudited", () => {
               content: "",
               toolCalls: [
                 {
-                  id: "call-1",
-                  name: "fetch_external_data",
-                  arguments: {
-                    source_type: "api",
-                    url: "https://api.example.com/data?api_key=SECRET#frag",
-                    destination: "Sheet1!A1",
-                    headers: { Authorization: "Bearer SECRET", Accept: "application/json" }
+                    id: "call-1",
+                    name: "fetch_external_data",
+                    arguments: {
+                      source_type: "api",
+                      url: "https://api.example.com/data?api_key=SECRET&ACCESS_TOKEN=SECRET2&client_secret=SECRET3#frag",
+                      destination: "Sheet1!A1",
+                      headers: { Authorization: "Bearer SECRET", Accept: "application/json" }
+                    }
                   }
-                }
-              ]
+                ]
             },
             usage: { promptTokens: 10, completionTokens: 5 }
           };
@@ -193,9 +193,97 @@ describe("runChatWithToolsAudited", () => {
     expect(toolCall.name).toBe("fetch_external_data");
     const params = toolCall.parameters as any;
     expect(params.url).toContain("api_key=REDACTED");
+    expect(params.url).toContain("ACCESS_TOKEN=REDACTED");
+    expect(params.url).toContain("client_secret=REDACTED");
     expect(params.url).not.toContain("SECRET");
     expect(params.url).not.toContain("frag");
     expect(params.headers).toEqual({ Authorization: "REDACTED", Accept: "application/json" });
+  });
+
+  it("uses identical URL redaction for tool results and audit parameters", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const toolExecutor = new SpreadsheetLLMToolExecutor(workbook, {
+      allow_external_data: true,
+      allowed_external_hosts: ["api.example.com"]
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(JSON.stringify([{ a: 1 }]), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }) as any
+    );
+
+    const rawUrl =
+      "https://api.example.com/data?api_key=SECRET&ACCESS_TOKEN=SECRET2&client_secret=SECRET3&city=berlin#frag";
+
+    let callCount = 0;
+    const client = {
+      async chat() {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [
+                {
+                  id: "call-1",
+                  name: "fetch_external_data",
+                  arguments: {
+                    source_type: "api",
+                    url: rawUrl,
+                    destination: "Sheet1!A1"
+                  }
+                }
+              ]
+            }
+          };
+        }
+
+        return {
+          message: {
+            role: "assistant",
+            content: "done"
+          }
+        };
+      }
+    };
+
+    const auditStore = new MemoryAIAuditStore();
+
+    await runChatWithToolsAudited({
+      client,
+      tool_executor: toolExecutor as any,
+      messages: [{ role: "user", content: "Fetch data" }],
+      audit: {
+        audit_store: auditStore,
+        session_id: "session-redaction-match-1",
+        mode: "chat",
+        input: { prompt: "Fetch data" },
+        model: "unit-test-model",
+        store_full_tool_results: true
+      },
+      require_approval: async () => true
+    });
+
+    const entries = await auditStore.listEntries({ session_id: "session-redaction-match-1" });
+    expect(entries.length).toBe(1);
+
+    const toolCall = entries[0]!.tool_calls[0]!;
+    const paramsUrl = (toolCall.parameters as any).url;
+    const resultUrl = (toolCall.result as any)?.data?.url;
+
+    expect(paramsUrl).toBe(resultUrl);
+    expect(paramsUrl).toContain("api_key=REDACTED");
+    expect(paramsUrl).toContain("ACCESS_TOKEN=REDACTED");
+    expect(paramsUrl).toContain("client_secret=REDACTED");
+    expect(paramsUrl).toContain("city=berlin");
+    expect(paramsUrl).not.toContain("SECRET");
+    expect(paramsUrl).not.toContain("frag");
   });
 
   it("stores a bounded tool result summary in audit logs by default", async () => {
