@@ -226,7 +226,14 @@ def _default_desktop_binary_path() -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Report lightweight desktop sizes (Rust desktop binary + Vite dist dir) without running `tauri build`."
+        description="Report lightweight desktop sizes (Rust desktop binary + Vite dist dir) without running `tauri build`.",
+        epilog=(
+            "Environment variables:\n"
+            "  FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB  Fail if the desktop binary exceeds this budget (optional).\n"
+            "  FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB    Fail if the dist directory exceeds this budget (optional).\n"
+            "  GITHUB_STEP_SUMMARY                   When set (GitHub Actions), append the markdown report to this file.\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--binary",
