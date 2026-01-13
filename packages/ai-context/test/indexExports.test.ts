@@ -1,0 +1,103 @@
+import { writeFileSync, unlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import ts from "typescript";
+
+describe("ai-context TS entrypoint", () => {
+  it("is importable from TypeScript with full types", () => {
+    const testDir = dirname(fileURLToPath(import.meta.url));
+    const tmpFile = join(testDir, `.__index-types.${process.pid}.${Date.now()}.ts`);
+
+    // Keep the file next to this test so `../src/index.js` matches real-world usage.
+    writeFileSync(
+      tmpFile,
+      [
+        'import { ContextManager, classifyText, chunkSheetByRegions, extractSheetSchema, parseA1Range, trimMessagesToBudget } from "../src/index.js";',
+        "",
+        'const range = parseA1Range("Sheet1!A1:B2");',
+        "range.startRow satisfies number;",
+        "",
+        "const schema = extractSheetSchema({",
+        '  name: "Sheet1",',
+        "  origin: { row: 10, col: 3 },",
+        "  values: [[\"Header\", \"Value\"], [\"A\", 1]],",
+        "});",
+        "schema.dataRegions[0]?.range satisfies string;",
+        "",
+        "const chunks = chunkSheetByRegions({ name: \"Sheet1\", values: [[1]] });",
+        "chunks[0]?.metadata.type satisfies \"region\";",
+        "",
+        "void trimMessagesToBudget({ messages: [{ role: \"user\", content: \"hi\" }], maxTokens: 128 });",
+        "",
+        "const cm = new ContextManager();",
+        "void cm.buildContext({ sheet: { name: \"Sheet1\", values: [[1]] }, query: \"hi\" });",
+        "",
+        "const dlp = classifyText(\"test@example.com\");",
+        "dlp.level satisfies \"public\" | \"sensitive\";",
+        "",
+        "// @ts-expect-error - parseA1Range expects a string.",
+        "parseA1Range(123);",
+        "",
+        "// @ts-expect-error - chunkSheetByRegions requires a 2D matrix.",
+        "chunkSheetByRegions({ name: \"Sheet1\", values: [1] });",
+        "",
+        "// @ts-expect-error - maxTokens must be a number.",
+        "trimMessagesToBudget({ messages: [], maxTokens: \"128\" });",
+        "",
+        "// @ts-expect-error - values must be a 2D array.",
+        "extractSheetSchema({ name: \"Sheet1\", values: [1] });",
+        "",
+        "// @ts-expect-error - classifyText expects a string.",
+        "classifyText(1);",
+        "",
+        "// @ts-expect-error - buildContext requires a query string.",
+        "cm.buildContext({ sheet: { name: \"Sheet1\", values: [[1]] } });",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const converted = ts.convertCompilerOptionsFromJson(
+        {
+          target: "ES2022",
+          module: "ESNext",
+          moduleResolution: "Bundler",
+          lib: ["ES2022", "DOM", "DOM.Iterable"],
+          types: ["node"],
+          strict: true,
+          skipLibCheck: true,
+          noEmit: true,
+        },
+        testDir,
+      );
+
+      // If the options are invalid, surface that as a test failure with details.
+      if (converted.errors.length > 0) {
+        const host: ts.FormatDiagnosticsHost = {
+          getCurrentDirectory: ts.sys.getCurrentDirectory,
+          getCanonicalFileName: (f) => f,
+          getNewLine: () => "\n",
+        };
+        const message = ts.formatDiagnosticsWithColorAndContext(converted.errors, host);
+        throw new Error(message);
+      }
+
+      const program = ts.createProgram([tmpFile], converted.options);
+      const diagnostics = ts.getPreEmitDiagnostics(program);
+
+      const host: ts.FormatDiagnosticsHost = {
+        getCurrentDirectory: ts.sys.getCurrentDirectory,
+        getCanonicalFileName: (f) => f,
+        getNewLine: () => "\n",
+      };
+
+      const formatted = diagnostics.length ? ts.formatDiagnosticsWithColorAndContext(diagnostics, host) : "";
+      expect(diagnostics, formatted).toHaveLength(0);
+    } finally {
+      unlinkSync(tmpFile);
+    }
+  });
+});
+

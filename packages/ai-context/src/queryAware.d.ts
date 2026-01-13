@@ -1,12 +1,11 @@
 import type { DataRegionSchema, SheetSchema, TableSchema } from "./schema.js";
 
+export type RegionType = "table" | "dataRegion";
+
+export type RegionRef = { type: RegionType; index: number };
+
 export function scoreRegionForQuery(
-  region:
-    | { type: "table" | "dataRegion"; index: number }
-    | TableSchema
-    | DataRegionSchema
-    | null
-    | undefined,
+  region: RegionRef | TableSchema | DataRegionSchema | null | undefined,
   schema: SheetSchema | null | undefined,
   query: string,
 ): number;
@@ -14,5 +13,4 @@ export function scoreRegionForQuery(
 export function pickBestRegionForQuery(
   sheetSchema: SheetSchema | null | undefined,
   query: string,
-): { type: "table" | "dataRegion"; index: number; range: string } | null;
-
+): { type: RegionType; index: number; range: string } | null;
