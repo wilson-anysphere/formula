@@ -13,7 +13,7 @@ import {
   onDesktopPowerQueryServiceChanged,
 } from "../../power-query/service.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
-import { getTauriEventApiOrNull } from "../../tauri/api";
+import { getTauriEventApiOrNull, hasTauri } from "../../tauri/api";
 import { showInputBox } from "../../extensions/ui.js";
 
 import { PanelIds } from "../panelRegistry.js";
@@ -51,10 +51,6 @@ function saveSelectedQueryId(workbookId: string, queryId: string): void {
   } catch {
     // ignore
   }
-}
-
-function hasTauri(): boolean {
-  return Boolean((globalThis as any).__TAURI__);
 }
 
 const RECOMMENDED_DESKTOP_OAUTH_REDIRECT_URI = "formula://oauth/callback";

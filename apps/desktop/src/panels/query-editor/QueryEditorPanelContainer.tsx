@@ -4,7 +4,7 @@ import { parseCronExpression, type Query } from "@formula/power-query";
 
 import { parseA1 } from "../../document/coords.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
-import { getTauriDialogOpenOrNull } from "../../tauri/api";
+import { getTauriDialogOpenOrNull, hasTauri } from "../../tauri/api";
 import { showInputBox } from "../../extensions/ui.js";
 
 import type { QuerySheetDestination } from "../../power-query/applyToDocument.js";
@@ -83,10 +83,6 @@ function describeSource(source: any): string {
     default:
       return String(source.type ?? "Unknown");
   }
-}
-
-function hasTauri(): boolean {
-  return Boolean((globalThis as any).__TAURI__);
 }
 
 type StorageLike = { getItem(key: string): string | null; setItem(key: string, value: string): void };

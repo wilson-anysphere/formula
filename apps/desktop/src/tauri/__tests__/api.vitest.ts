@@ -7,6 +7,7 @@ import {
   getTauriDialogSaveOrNull,
   getTauriEventApiOrNull,
   getTauriEventApiOrThrow,
+  hasTauri,
   hasTauriWindowApi,
   hasTauriWindowHandleApi,
   getTauriWindowHandleOrNull,
@@ -56,6 +57,7 @@ describe("tauri/api dynamic accessors", () => {
         },
       });
 
+      expect(hasTauri()).toBe(false);
       expect(getTauriDialogOrNull()).toBeNull();
       expect(getTauriEventApiOrNull()).toBeNull();
       expect(getTauriWindowHandleOrNull()).toBeNull();

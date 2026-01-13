@@ -24,6 +24,10 @@ function getTauriGlobalOrNull(): any | null {
   }
 }
 
+export function hasTauri(): boolean {
+  return getTauriGlobalOrNull() != null;
+}
+
 function getTauriDialogNamespaceOrNull(): any | null {
   const tauri = getTauriGlobalOrNull();
   return tauri?.dialog ?? tauri?.plugin?.dialog ?? tauri?.plugins?.dialog ?? null;
