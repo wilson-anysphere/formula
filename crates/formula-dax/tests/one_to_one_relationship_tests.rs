@@ -392,3 +392,108 @@ fn one_to_one_relatedtable_returns_expected_rows() {
         .collect();
     assert_eq!(counts, vec![1.into(), 1.into(), 0.into()]);
 }
+
+#[test]
+fn one_to_one_relationship_enforces_referential_integrity_on_add() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Id"]);
+    dim.push_row(vec![1.into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id"]);
+    // Non-BLANK key that does not exist in Dim.
+    fact.push_row(vec![2.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    let err = model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Id".into(),
+            to_table: "Dim".into(),
+            to_column: "Id".into(),
+            cardinality: Cardinality::OneToOne,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap_err();
+
+    assert!(matches!(err, DaxError::ReferentialIntegrityViolation { .. }));
+}
+
+#[test]
+fn one_to_one_insert_row_enforces_referential_integrity() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Id"]);
+    dim.push_row(vec![1.into()]).unwrap();
+    dim.push_row(vec![2.into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id"]);
+    fact.push_row(vec![1.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Id".into(),
+            to_table: "Dim".into(),
+            to_column: "Id".into(),
+            cardinality: Cardinality::OneToOne,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let err = model.insert_row("Fact", vec![999.into()]).unwrap_err();
+    assert!(matches!(
+        err,
+        DaxError::ReferentialIntegrityViolation { .. }
+    ));
+
+    assert_eq!(model.table("Fact").unwrap().row_count(), 1);
+}
+
+#[test]
+fn one_to_one_single_direction_does_not_propagate_filters_from_from_side_to_to_side() {
+    let mut model = DataModel::new();
+
+    let mut people = Table::new("People", vec!["PersonId"]);
+    people.push_row(vec![1.into()]).unwrap();
+    people.push_row(vec![2.into()]).unwrap();
+    model.add_table(people).unwrap();
+
+    let mut passports = Table::new("Passports", vec!["PersonId", "PassportNo"]);
+    passports.push_row(vec![1.into(), "P1".into()]).unwrap();
+    passports.push_row(vec![2.into(), "P2".into()]).unwrap();
+    model.add_table(passports).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Passports_People".into(),
+            from_table: "Passports".into(),
+            from_column: "PersonId".into(),
+            to_table: "People".into(),
+            to_column: "PersonId".into(),
+            cardinality: Cardinality::OneToOne,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let filter =
+        FilterContext::empty().with_column_equals("Passports", "PassportNo", "P1".into());
+    let value = DaxEngine::new()
+        .evaluate(&model, "COUNTROWS(People)", &filter, &RowContext::default())
+        .unwrap();
+
+    // The default single-direction relationship only propagates People -> Passports.
+    // Filtering the fact-side (Passports) should not restrict the dimension-side (People).
+    assert_eq!(value, 2.into());
+}
