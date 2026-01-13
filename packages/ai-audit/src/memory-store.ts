@@ -1,5 +1,6 @@
 import type { AIAuditEntry, AuditListFilters } from "./types.ts";
 import type { AIAuditStore } from "./store.ts";
+import { stableStringify } from "./stable-json.ts";
 
 export interface MemoryAIAuditStoreOptions {
   /**
@@ -129,7 +130,7 @@ function cloneAuditEntry(entry: AIAuditEntry): AIAuditEntry {
   }
 
   try {
-    return JSON.parse(JSON.stringify(entry)) as AIAuditEntry;
+    return JSON.parse(stableStringify(entry)) as AIAuditEntry;
   } catch {
     return entry;
   }

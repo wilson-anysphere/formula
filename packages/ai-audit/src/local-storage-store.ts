@@ -201,7 +201,7 @@ function cloneAuditEntry(entry: AIAuditEntry): AIAuditEntry {
   }
 
   try {
-    return JSON.parse(JSON.stringify(entry)) as AIAuditEntry;
+    return JSON.parse(stableStringify(entry)) as AIAuditEntry;
   } catch {
     // Last resort: return as-is (audit entries should be JSON-serializable in practice).
     return entry;
