@@ -223,6 +223,11 @@ jobs:
         run: cargo build -p formula-desktop-tauri --features desktop --release --locked
 
       - name: Desktop size report (binary + dist)
+        env:
+          # Optional: define these as GitHub Actions "Variables" to enable gating without
+          # changing the workflow. Leaving them unset (or empty) keeps the report informational.
+          FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB }}
+          FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB }}
         run: python scripts/desktop_size_report.py --binary target/release/formula-desktop --dist apps/desktop/dist --json-out desktop-size-report.json
 
   desktop-tauri-check:
