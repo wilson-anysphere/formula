@@ -187,10 +187,9 @@ describe("SpreadsheetApp shared-grid outline compatibility", () => {
       expect(app.getGridMode()).toBe("shared");
 
       const sheetId = (app as any).sheetId as string;
-      const outline = (app as any).getOutlineForSheet(sheetId) as any;
-      // Hide row 2 and col B (0-based index 1) via the user-hidden flag.
-      outline.rows.entryMut(2).hidden.user = true;
-      outline.cols.entryMut(2).hidden.user = true;
+      // Hide row 1 and col 1 (0-based indices) using the shared-grid hide/unhide path.
+      app.hideRows([1]);
+      app.hideCols([1]);
 
       const provider = (app as any).usedRangeProvider();
       expect(provider.isRowHidden(1)).toBe(true);
