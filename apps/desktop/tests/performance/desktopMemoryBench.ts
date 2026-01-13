@@ -322,7 +322,7 @@ async function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void
   });
 }
 
-async function runOnce(binPath: string, timeoutMs: number): Promise<number> {
+async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Promise<number> {
   const useXvfb = shouldUseXvfb();
   const xvfbPath = resolve(repoRoot, 'scripts/xvfb-run-safe.sh');
   const command = useXvfb ? 'bash' : binPath;
@@ -377,7 +377,14 @@ async function runOnce(binPath: string, timeoutMs: number): Promise<number> {
     const rootPid =
       (await findPidForExecutableLinux(child.pid, binPath, Math.min(2000, timeoutMs))) ?? child.pid;
 
+    if (settleMs > 0) {
+      await sleep(settleMs);
+    }
+
     const rssBytes = await getProcessTreeRssBytesLinux(rootPid);
+    if (rssBytes <= 0) {
+      throw new Error('Failed to sample desktop RSS (process may have exited)');
+    }
     return rssBytes / (1024 * 1024);
   } finally {
     // Ensure we clean up even on timeouts / crashes.
@@ -433,6 +440,7 @@ export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
   }
 
   const runs = Math.max(1, Number(process.env.FORMULA_DESKTOP_MEMORY_RUNS ?? '10') || 10);
+  const settleMs = Math.max(0, Number(process.env.FORMULA_DESKTOP_MEMORY_SETTLE_MS ?? '5000') || 5000);
   const timeoutMs = Math.max(
     1,
     Number(process.env.FORMULA_DESKTOP_MEMORY_TIMEOUT_MS ?? '20000') || 20000,
@@ -454,7 +462,7 @@ export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
   for (let i = 0; i < runs; i += 1) {
     // eslint-disable-next-line no-console
     console.log(`[desktop-memory] run ${i + 1}/${runs}...`);
-    values.push(await runOnce(binPath, timeoutMs));
+    values.push(await runOnce(binPath, timeoutMs, settleMs));
   }
 
   return [buildResult('desktop.memory.idle_rss_mb.p95', values, targetMb)];
