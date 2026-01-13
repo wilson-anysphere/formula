@@ -155,6 +155,31 @@ describe("extractFormulaReferences", () => {
     });
     expect(references.map((r) => r.text)).toEqual(["MyRange"]);
   });
+
+  it("preserves stable reference indices when mixing A1 and named ranges", () => {
+    const input = "=A1+SalesData+B2";
+    const { references } = extractFormulaReferences(input, 0, 0, {
+      resolveName: (name) =>
+        name === "SalesData" ? { sheet: "Sheet1", startRow: 0, startCol: 0, endRow: 9, endCol: 0 } : null,
+    });
+    expect(references.map((r) => [r.text, r.index])).toEqual([
+      ["A1", 0],
+      ["SalesData", 1],
+      ["B2", 2],
+    ]);
+  });
+
+  it("detects activeIndex correctly when mixing A1 and named ranges", () => {
+    const input = "=A1+SalesData+B2";
+    const start = input.indexOf("SalesData");
+    const end = start + "SalesData".length;
+    const resolveName = (name: string) =>
+      name === "SalesData" ? { sheet: "Sheet1", startRow: 0, startCol: 0, endRow: 9, endCol: 0 } : null;
+
+    expect(extractFormulaReferences(input, start + 1, start + 1, { resolveName }).activeIndex).toBe(1);
+    // Caret at end should still count as inside.
+    expect(extractFormulaReferences(input, end, end, { resolveName }).activeIndex).toBe(1);
+  });
   it("extracts structured table references (data rows only)", () => {
     const tables = new Map([
       [
