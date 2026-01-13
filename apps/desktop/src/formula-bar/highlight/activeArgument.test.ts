@@ -67,6 +67,26 @@ describe("getActiveArgumentSpan", () => {
     });
   });
 
+  it("supports semicolons as argument separators", () => {
+    const formula = "=IF(A1; B1; C1)";
+    const insideSecondArg = formula.indexOf("B1") + 1;
+    expect(getActiveArgumentSpan(formula, insideSecondArg)).toMatchObject({
+      fnName: "IF",
+      argIndex: 1,
+      argText: "B1",
+    });
+  });
+
+  it("ignores semicolons inside curly braces (array literals)", () => {
+    const formula = "=SUM({1;2;3}; 4)";
+    const insideSecondArg = formula.indexOf("4") + 1;
+    expect(getActiveArgumentSpan(formula, insideSecondArg)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 1,
+      argText: "4",
+    });
+  });
+
   it("returns an empty argText span when the argument is currently empty", () => {
     const formula = "=SUM(A1, )";
     const cursorInEmptyArg = formula.indexOf(")") - 1;
@@ -77,4 +97,3 @@ describe("getActiveArgumentSpan", () => {
     });
   });
 });
-
