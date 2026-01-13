@@ -9,6 +9,7 @@ use crate::encoding::{
 use crate::stats::{ColumnStats, DistinctCounter};
 use crate::types::{ColumnType, Value};
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Copy)]
@@ -131,6 +132,30 @@ pub struct ColumnarTable {
     cache: Arc<Mutex<LruCache<CacheKey, Arc<DecodedChunk>>>>,
 }
 
+/// Errors returned by [`ColumnarTable::with_appended_column`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ColumnAppendError {
+    /// The provided `values` vector did not have exactly one entry per table row.
+    LengthMismatch { expected: usize, actual: usize },
+    /// A column with the provided name already exists in the table schema.
+    DuplicateColumn { name: String },
+}
+
+impl fmt::Display for ColumnAppendError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LengthMismatch { expected, actual } => write!(
+                f,
+                "column length mismatch: expected {} values (one per row), got {}",
+                expected, actual
+            ),
+            Self::DuplicateColumn { name } => write!(f, "duplicate column name: {}", name),
+        }
+    }
+}
+
+impl std::error::Error for ColumnAppendError {}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 struct CacheKey {
     col: usize,
@@ -196,6 +221,54 @@ impl ColumnarTable {
     /// Return the encoded chunks for a column, without decoding them.
     pub fn encoded_chunks(&self, col: usize) -> Option<&[EncodedChunk]> {
         Some(self.columns.get(col)?.chunks.as_slice())
+    }
+
+    /// Return a new [`ColumnarTable`] with `schema` and `values` appended as a new column.
+    ///
+    /// This is primarily intended for materializing calculated columns (e.g. produced by a DAX
+    /// engine) into a columnar snapshot that can be persisted or queried efficiently.
+    ///
+    /// Notes:
+    /// - Existing columns are *reused as-is*: they are not decoded, re-encoded, or rewritten.
+    /// - Only the new column is encoded, using the normal [`ColumnarTableBuilder`] path.
+    /// - The decoded-page cache is preserved so cached pages for existing columns remain valid.
+    pub fn with_appended_column(
+        mut self,
+        schema: ColumnSchema,
+        values: Vec<Value>,
+    ) -> Result<Self, ColumnAppendError> {
+        let expected = self.row_count();
+        let actual = values.len();
+        if actual != expected {
+            return Err(ColumnAppendError::LengthMismatch { expected, actual });
+        }
+
+        let new_name = schema.name.as_str();
+        if self
+            .schema()
+            .iter()
+            .any(|existing| existing.name.as_str() == new_name)
+        {
+            return Err(ColumnAppendError::DuplicateColumn {
+                name: schema.name,
+            });
+        }
+
+        // Encode the new column using the existing builder logic, without touching the existing
+        // columns or reinitializing the decoded-page cache.
+        let mut builder = ColumnarTableBuilder::new(vec![schema.clone()], self.options());
+        for value in &values {
+            builder.append_row(std::slice::from_ref(value));
+        }
+        let mut encoded = builder.finalize();
+        let column = encoded
+            .columns
+            .pop()
+            .expect("ColumnarTableBuilder produced a table with one column");
+
+        self.schema.push(schema);
+        self.columns.push(column);
+        Ok(self)
     }
 
     /// Construct a [`ColumnarTable`] directly from encoded columns/chunks.

@@ -77,7 +77,7 @@ pub use crate::query::{
 };
 pub use crate::stats::ColumnStats;
 pub use crate::table::{
-    ColumnSchema, ColumnarRange, ColumnarTable, ColumnarTableBuilder, EncodedColumn,
-    MutableColumnarTable, TableOptions, TableScan,
+    ColumnAppendError, ColumnSchema, ColumnarRange, ColumnarTable, ColumnarTableBuilder,
+    EncodedColumn, MutableColumnarTable, TableOptions, TableScan,
 };
 pub use crate::types::{ColumnType, Value};
