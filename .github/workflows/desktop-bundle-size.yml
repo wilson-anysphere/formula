@@ -54,6 +54,10 @@ jobs:
         run: bash scripts/ci/check-merge-conflict-markers.sh
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
         run: bash scripts/ci/check-rust-toolchain-pins.sh
+      - name: "Guard: Node version pins match CI/release workflows"
+        run: bash scripts/ci/check-node-version-pins.sh
+      - name: "Guard: pnpm version pins match package.json"
+        run: bash scripts/ci/check-pnpm-version-pins.sh
 
   linux-desktop-bundle-size:
     name: Linux desktop bundle size
