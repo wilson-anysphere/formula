@@ -28,6 +28,10 @@ node scripts/check-desktop-version.mjs vX.Y.Z
 # Ensures plugins.updater.pubkey/endpoints are not placeholders when the updater is active.
 node scripts/check-updater-config.mjs
 
+# Ensures the Tauri updater signing secrets are present for tagged releases.
+# (CI reads these from GitHub Actions secrets; locally requires env vars to be set.)
+TAURI_PRIVATE_KEY=... TAURI_KEY_PASSWORD=... node scripts/ci/check-tauri-updater-secrets.mjs
+
 # Ensures macOS hardened-runtime entitlements include the WKWebView JIT keys
 # required for JavaScript/WebAssembly to run in signed/notarized builds.
 node scripts/check-macos-entitlements.mjs
