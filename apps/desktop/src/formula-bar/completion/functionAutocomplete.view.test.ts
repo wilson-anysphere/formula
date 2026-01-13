@@ -69,6 +69,29 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     host.remove();
   });
 
+  it("supports _xlfn. prefix completion (=_xlfn.VLO → =_xlfn.VLOOKUP()", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=_xlfn.VLO";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+    expect(dropdown?.hasAttribute("hidden")).toBe(false);
+    expect(dropdown?.textContent).toContain("VLOOKUP");
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
+
+    expect(view.model.draft).toBe("=_xlfn.VLOOKUP(");
+
+    host.remove();
+  });
+
   it("supports Arrow navigation + Tab to accept (=VLOOKUP()", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
