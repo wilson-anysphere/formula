@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 
 use anyhow::{Context, Result};
@@ -63,13 +63,12 @@ pub(crate) struct RelationshipIdChange {
 pub(crate) fn relationship_semantic_id_map(
     rels_part: &str,
     bytes: &[u8],
-) -> Result<BTreeMap<RelationshipSemanticKey, String>> {
+) -> Result<Option<BTreeMap<RelationshipSemanticKey, String>>> {
     let text =
         std::str::from_utf8(bytes).with_context(|| format!("part {rels_part} is not valid UTF-8"))?;
     let doc = Document::parse(text).with_context(|| format!("parse xml for {rels_part}"))?;
 
     let mut map: BTreeMap<RelationshipSemanticKey, String> = BTreeMap::new();
-    let mut ambiguous: BTreeSet<RelationshipSemanticKey> = BTreeSet::new();
 
     for node in doc
         .descendants()
@@ -92,47 +91,16 @@ pub(crate) fn relationship_semantic_id_map(
             target_mode: mode,
         };
 
-        if ambiguous.contains(&key) {
-            continue;
-        }
-
-        if map.insert(key.clone(), id.to_string()).is_some() {
-            // Duplicate semantic keys - treat as ambiguous and drop from the map. This avoids
-            // misclassifying add/remove churn as a pure Id renumbering.
-            map.remove(&key);
-            ambiguous.insert(key);
+        if map.insert(key, id.to_string()).is_some() {
+            // Duplicate semantic keys are ambiguous: there is no unique "same relationship"
+            // mapping we can use to talk about Id renumbering. Fall back to the regular XML diff.
+            return Ok(None);
         }
     }
 
-    Ok(map)
-}
-
-pub(crate) fn detect_relationship_id_changes(
-    rels_part: &str,
-    expected: &[u8],
-    actual: &[u8],
-) -> Result<Vec<RelationshipIdChange>> {
-    let expected_map = relationship_semantic_id_map(rels_part, expected)?;
-    let actual_map = relationship_semantic_id_map(rels_part, actual)?;
-
-    let mut changes = Vec::new();
-    for (key, expected_id) in &expected_map {
-        let Some(actual_id) = actual_map.get(key) else {
-            continue;
-        };
-        if expected_id != actual_id {
-            changes.push(RelationshipIdChange {
-                key: key.clone(),
-                expected_id: expected_id.clone(),
-                actual_id: actual_id.clone(),
-            });
-        }
-    }
-
-    Ok(changes)
+    Ok(Some(map))
 }
 
 fn escape_path_value(value: &str) -> String {
     value.replace('"', "\\\"")
 }
-

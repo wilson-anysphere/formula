@@ -105,3 +105,52 @@ fn rels_target_changes_continue_to_surface_as_attribute_diffs() {
         report.differences
     );
 }
+
+#[test]
+fn rels_id_permutation_is_reported_as_id_changes_not_attribute_diffs() {
+    let expected_zip = zip_bytes(&[(
+        "xl/_rels/workbook.xml.rels",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>"#,
+    )]);
+
+    let actual_zip = zip_bytes(&[(
+        "xl/_rels/workbook.xml.rels",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#,
+    )]);
+
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let report = xlsx_diff::diff_archives(&expected, &actual);
+
+    assert_eq!(
+        report.differences.len(),
+        2,
+        "expected two synthesized relationship_id_changed diffs, got {:#?}",
+        report.differences
+    );
+    assert!(
+        report
+            .differences
+            .iter()
+            .all(|d| d.kind == "relationship_id_changed"),
+        "expected only relationship_id_changed diffs, got {:#?}",
+        report.differences
+    );
+    assert!(
+        !report
+            .differences
+            .iter()
+            .any(|d| d.kind == "attribute_changed"),
+        "did not expect attribute diffs for pure Id permutation, got {:#?}",
+        report.differences
+    );
+}

@@ -457,32 +457,51 @@ fn postprocess_relationship_id_renumbering(
     diffs: Vec<xml::XmlDiff>,
     ignore: &IgnoreMatcher,
 ) -> Vec<xml::XmlDiff> {
-    let changes = match rels::detect_relationship_id_changes(rels_part, expected_bytes, actual_bytes)
-    {
-        Ok(changes) => changes,
-        Err(_) => return diffs,
+    let Some(expected_map) = rels::relationship_semantic_id_map(rels_part, expected_bytes).ok().flatten()
+    else {
+        return diffs;
     };
+    let Some(actual_map) = rels::relationship_semantic_id_map(rels_part, actual_bytes).ok().flatten()
+    else {
+        return diffs;
+    };
+
+    let mut changes: Vec<rels::RelationshipIdChange> = Vec::new();
+    for (key, expected_id) in &expected_map {
+        let Some(actual_id) = actual_map.get(key) else {
+            continue;
+        };
+        if expected_id != actual_id {
+            changes.push(rels::RelationshipIdChange {
+                key: key.clone(),
+                expected_id: expected_id.clone(),
+                actual_id: actual_id.clone(),
+            });
+        }
+    }
 
     if changes.is_empty() {
         return diffs;
     }
 
-    let mut missing_ids: BTreeSet<String> = BTreeSet::new();
-    let mut added_ids: BTreeSet<String> = BTreeSet::new();
-    for diff in &diffs {
-        match diff.kind.as_str() {
-            "child_missing" => {
-                if let Some(id) = relationship_id_from_path(&diff.path) {
-                    missing_ids.insert(id.to_string());
-                }
-            }
-            "child_added" => {
-                if let Some(id) = relationship_id_from_path(&diff.path) {
-                    added_ids.insert(id.to_string());
-                }
-            }
-            _ => {}
-        }
+    let pure_renumbering = expected_map.len() == actual_map.len()
+        && expected_map
+            .keys()
+            .zip(actual_map.keys())
+            .all(|(a, b)| a == b);
+
+    if pure_renumbering {
+        return changes
+            .into_iter()
+            .filter(|change| !ignore.matches(&change.key.resolved_target))
+            .map(|change| xml::XmlDiff {
+                severity: Severity::Critical,
+                path: change.key.to_diff_path(),
+                kind: "relationship_id_changed".to_string(),
+                expected: Some(change.expected_id),
+                actual: Some(change.actual_id),
+            })
+            .collect();
     }
 
     let mut suppress_missing: BTreeSet<String> = BTreeSet::new();
@@ -490,14 +509,6 @@ fn postprocess_relationship_id_renumbering(
     let mut synthesized: Vec<xml::XmlDiff> = Vec::new();
 
     for change in changes {
-        // Only treat it as a "pure" Id renumbering if the XML diff algorithm already
-        // classified it as a missing + added relationship. This avoids double-reporting
-        // cases like Id reuse/swaps where the key-by-Id algorithm will instead surface
-        // attribute changes.
-        if !missing_ids.contains(&change.expected_id) || !added_ids.contains(&change.actual_id) {
-            continue;
-        }
-
         suppress_missing.insert(change.expected_id.clone());
         suppress_added.insert(change.actual_id.clone());
 
@@ -514,10 +525,6 @@ fn postprocess_relationship_id_renumbering(
             expected: Some(change.expected_id),
             actual: Some(change.actual_id),
         });
-    }
-
-    if suppress_missing.is_empty() && suppress_added.is_empty() {
-        return diffs;
     }
 
     let mut out: Vec<xml::XmlDiff> = diffs
