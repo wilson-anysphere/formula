@@ -8,7 +8,10 @@ const browserSafeEntrypoints = [
   new URL("../src/store/jsonVectorStore.js", import.meta.url),
   new URL("../src/store/sqliteVectorStore.js", import.meta.url),
   new URL("../src/pipeline/indexWorkbook.js", import.meta.url),
+  new URL("../src/utils/abort.js", import.meta.url),
   new URL("../src/utils/hash.js", import.meta.url),
+  new URL("../src/retrieval/searchWorkbookRag.js", import.meta.url),
+  new URL("../src/retrieval/ranking.js", import.meta.url),
   new URL("../../../apps/desktop/src/ai/rag/index.js", import.meta.url),
 ];
 
