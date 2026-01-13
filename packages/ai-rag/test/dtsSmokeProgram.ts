@@ -8,6 +8,8 @@ import {
   JsonVectorStore,
   LocalStorageBinaryStorage,
   SqliteVectorStore,
+  type SqliteVectorStoreDimensionMismatchError,
+  type SqliteVectorStoreInvalidMetadataError,
   approximateTokenCount,
   cellToA1,
   chunkToText,
@@ -89,6 +91,25 @@ async function smoke() {
     resetOnDimensionMismatch: true,
     locateFile: (file, prefix) => `${prefix ?? ""}${file}`,
   });
+
+  // Error types are intentionally exported as type-only helpers so callers can
+  // programmatically inspect errors thrown when reset options are disabled.
+  function handleSqliteCreateError(err: unknown) {
+    if ((err as any)?.name === "SqliteVectorStoreDimensionMismatchError") {
+      const mismatch = err as SqliteVectorStoreDimensionMismatchError;
+      const _dbDim: number = mismatch.dbDimension;
+      const _requested: number = mismatch.requestedDimension;
+      void _dbDim;
+      void _requested;
+    }
+    if ((err as any)?.name === "SqliteVectorStoreInvalidMetadataError") {
+      const invalid = err as SqliteVectorStoreInvalidMetadataError;
+      const _raw: unknown = invalid.rawDimension;
+      void _raw;
+    }
+  }
+  handleSqliteCreateError(null);
+
   await sqliteStore.list({ includeVector: true, signal: abortController.signal, workbookId: "wb" });
   await sqliteStore.query(new Float32Array(embedder.dimension), 3, { signal: abortController.signal });
   await sqliteStore.updateMetadata([{ id: "a", metadata: { workbookId: "wb", tag: "sqlite" } }]);
