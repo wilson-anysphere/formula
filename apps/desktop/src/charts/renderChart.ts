@@ -8,6 +8,11 @@ export type ChartModel = LayoutChartModel & {
    */
   options?: {
     markers?: boolean;
+    /**
+     * When provided, overrides the default placeholder text rendered when the chart cannot
+     * be drawn (e.g. unsupported kind, empty data, or host-side guards like range limits).
+     */
+    placeholder?: string;
   };
 };
 
@@ -609,7 +614,9 @@ function buildScene(model: ChartModel, data: ResolvedChartData, theme: ChartThem
   const plotNodes = buildPlotScene(model, data, layout, theme);
   if (plotNodes.length === 0) {
     // If we couldn't render the chart kind, show a placeholder but keep title.
-    const label = model.chartType.kind === "unknown" ? "Unsupported chart" : `Empty ${model.chartType.kind} chart`;
+    const label =
+      model.options?.placeholder ??
+      (model.chartType.kind === "unknown" ? "Unsupported chart" : `Empty ${model.chartType.kind} chart`);
     nodes.push(...buildPlaceholderNodes(label, sizePx, theme));
   } else {
     nodes.push(...plotNodes);

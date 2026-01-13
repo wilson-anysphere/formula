@@ -26,6 +26,8 @@ function createInMemoryLocalStorage(): Storage {
   } as Storage;
 }
 
+type CanvasCall = { method: string; args: unknown[] };
+
 function createMockCanvasContext(): CanvasRenderingContext2D {
   const noop = () => {};
   const gradient = { addColorStop: noop } as any;
@@ -37,6 +39,50 @@ function createMockCanvasContext(): CanvasRenderingContext2D {
       createPattern: () => null,
       getImageData: () => ({ data: new Uint8ClampedArray(), width: 0, height: 0 }),
       putImageData: noop,
+    },
+    {
+      get(target, prop) {
+        if (prop in target) return (target as any)[prop];
+        return noop;
+      },
+      set(target, prop, value) {
+        (target as any)[prop] = value;
+        return true;
+      },
+    },
+  );
+  return context as any;
+}
+
+function createRecordingCanvasContext(calls: CanvasCall[]): CanvasRenderingContext2D {
+  const noop = () => {};
+  const gradient = { addColorStop: noop } as any;
+
+  const record =
+    (method: string) =>
+    (...args: unknown[]) => {
+      calls.push({ method, args });
+    };
+
+  const context = new Proxy(
+    {
+      canvas: document.createElement("canvas"),
+      calls,
+      measureText: (text: string) => ({ width: text.length * 8 }),
+      createLinearGradient: () => gradient,
+      createPattern: () => null,
+      getImageData: () => ({ data: new Uint8ClampedArray(), width: 0, height: 0 }),
+      putImageData: noop,
+      save: record("save"),
+      restore: record("restore"),
+      beginPath: record("beginPath"),
+      rect: record("rect"),
+      clip: record("clip"),
+      translate: record("translate"),
+      clearRect: record("clearRect"),
+      setTransform: record("setTransform"),
+      scale: record("scale"),
+      drawImage: record("drawImage"),
     },
     {
       get(target, prop) {
@@ -95,9 +141,23 @@ describe("SpreadsheetApp charts + frozen panes", () => {
     });
     Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
 
+    const chartCalls: CanvasCall[] = [];
+    (globalThis as any).__chartCanvasCalls = chartCalls;
+    const chartContexts = new WeakMap<HTMLCanvasElement, CanvasRenderingContext2D>();
+
     Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
       configurable: true,
-      value: () => createMockCanvasContext(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      value: function (this: HTMLCanvasElement): any {
+        if (this.className.includes("grid-canvas--chart")) {
+          const existing = chartContexts.get(this);
+          if (existing) return existing;
+          const created = createRecordingCanvasContext(chartCalls);
+          chartContexts.set(this, created);
+          return created;
+        }
+        return createMockCanvasContext();
+      },
     });
 
     (globalThis as any).ResizeObserver = class {
@@ -157,6 +217,10 @@ describe("SpreadsheetApp charts + frozen panes", () => {
       const app = new SpreadsheetApp(root, status);
       expect(app.getGridMode()).toBe("shared");
 
+      const renderSpy = vi.spyOn((app as any).chartRenderer, "renderToCanvas");
+      renderSpy.mockClear();
+      (globalThis as any).__chartCanvasCalls.length = 0;
+
       const doc = app.getDocument();
       doc.setFrozen(app.getCurrentSheetId(), 1, 1, { label: "Freeze" });
 
@@ -168,20 +232,21 @@ describe("SpreadsheetApp charts + frozen panes", () => {
         position: "Sheet1!A1",
       });
 
-      const panes = (app as any).sharedChartPanes as
-        | { topLeft: HTMLElement; topRight: HTMLElement; bottomLeft: HTMLElement; bottomRight: HTMLElement }
-        | null;
-      expect(panes).not.toBeNull();
+      // Canvas-only: no DOM chart hosts should exist.
+      expect(root.querySelector('[data-testid="chart-object"]')).toBeNull();
 
-      const host = ((app as any).chartElements as Map<string, HTMLElement>).get(result.chart_id);
-      expect(host).toBeTruthy();
-      expect(host?.parentElement).toBe(panes!.topLeft);
+      // In shared-grid mode, charts are rendered into the chart canvas with a translation
+      // that pins the overlay under the frozen header row/column (48px x 24px).
+      const calls: CanvasCall[] = (globalThis as any).__chartCanvasCalls;
+      expect(calls.some((c) => c.method === "translate" && c.args[0] === 48 && c.args[1] === 24)).toBe(true);
 
-      // The outer layer should stay pinned under headers (not under user frozen panes).
-      const chartLayer = (app as any).chartLayer as HTMLElement;
-      expect(chartLayer.classList.contains("chart-layer--shared")).toBe(true);
-      expect(chartLayer.style.left).toBe("48px");
-      expect(chartLayer.style.top).toBe("24px");
+      // The chart anchored in A1 should be routed to the top-left frozen quadrant, clipped
+      // to the first frozen column/row (1 col x 1 row => 100px x 24px in the data area).
+      expect(calls.some((c) => c.method === "rect" && c.args[0] === 0 && c.args[1] === 0 && c.args[2] === 100 && c.args[3] === 24)).toBe(true);
+
+      const chartCall = renderSpy.mock.calls.find((args) => args[1] === result.chart_id);
+      expect(chartCall).toBeTruthy();
+      expect(chartCall?.[2]).toMatchObject({ x: 0, y: 0 });
 
       const selectionCanvas = (app as any).selectionCanvas as HTMLElement;
       expect(selectionCanvas.classList.contains("grid-canvas--shared-selection")).toBe(true);

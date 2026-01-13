@@ -137,9 +137,9 @@ describe("SpreadsheetApp charts large ranges", () => {
     // (e.g. header detection / type sniffing), but it must stay bounded as the range grows.
     expect(getCellSpy.mock.calls.length).toBeLessThanOrEqual(20);
 
-    const host = ((app as any).chartElements as Map<string, HTMLElement>).get(result.chart_id);
-    expect(host).toBeTruthy();
-    expect(host!.innerHTML).toContain("Chart range too large");
+    const model = ((app as any).chartModels as Map<string, any>).get(result.chart_id);
+    expect(model).toBeTruthy();
+    expect(String(model?.options?.placeholder ?? "")).toContain("Chart range too large");
 
     app.destroy();
     root.remove();

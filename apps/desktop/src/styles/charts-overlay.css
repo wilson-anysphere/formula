@@ -1,19 +1,6 @@
-.chart-pane {
-  position: absolute;
+/* Chart overlay layer (canvas). */
+.grid-canvas--chart {
   pointer-events: none;
-  overflow: hidden;
-  left: 0;
-  top: 0;
-  width: 0;
-  height: 0;
-}
-
-/* The outer chart overlay should be clipped to the grid body (under headers). */
-.chart-layer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  overflow: hidden;
 }
 
 /* Canvas-based drawings overlay (shapes, images, etc). */
@@ -21,17 +8,8 @@
   position: absolute;
   pointer-events: none;
   overflow: hidden;
-}
-
-/* Individual chart host elements (positioned within the chart overlay). */
-.chart-object {
-  position: absolute;
-  pointer-events: none;
-  overflow: hidden;
   left: 0;
   top: 0;
-  width: 0;
-  height: 0;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -58,7 +36,7 @@
 }
 
 /* Shared-grid overlay stacking: charts above cells, selection above charts. */
-.chart-layer--shared {
+.grid-canvas--shared-chart {
   z-index: var(--grid-z-chart-overlay, 2);
 }
 
@@ -70,10 +48,4 @@
   z-index: var(--grid-z-outline-overlay, 4);
 }
 
-/* Modifier classes exist for debugging hooks / future styling extensions. */
-.chart-pane--top-left,
-.chart-pane--top-right,
-.chart-pane--bottom-left,
-.chart-pane--bottom-right {
-  /* no-op */
-}
+/* (Reserved) additional chart overlay styles go here. */

@@ -5,8 +5,9 @@ import type { RangeAddress as A1RangeAddress } from "../spreadsheet/a1.js";
 import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js";
 import { parseA1Range } from "../charts/a1.js";
 import { emuToPx } from "../charts/overlay.js";
-import { placeholderSvg, renderChartSvg } from "../charts/renderSvg.js";
 import { ChartStore, type ChartRecord } from "../charts/chartStore";
+import { ChartRendererAdapter, type ChartStore as ChartRendererStore } from "../charts/chartRendererAdapter";
+import type { ChartModel } from "../charts/renderChart";
 import { FALLBACK_CHART_THEME, type ChartTheme } from "../charts/theme";
 import { DrawingOverlay, pxToEmu, type GridGeometry as DrawingGridGeometry, type Viewport as DrawingViewport } from "../drawings/overlay";
 import type { DrawingObject, ImageEntry, ImageStore } from "../drawings/types";
@@ -574,8 +575,8 @@ export class SpreadsheetApp {
   private externalRepaintUnsubscribe: (() => void) | null = null;
 
   private gridCanvas: HTMLCanvasElement;
+  private chartCanvas: HTMLCanvasElement;
   private drawingCanvas: HTMLCanvasElement;
-  private chartLayer: HTMLDivElement;
   private drawingOverlay: DrawingOverlay;
   private readonly drawingImages: ImageStore;
   private drawingViewportMemo:
@@ -587,34 +588,12 @@ export class SpreadsheetApp {
         offsetY: number;
       }
     | null = null;
-  private sharedChartPanes:
-    | {
-        topLeft: HTMLDivElement;
-        topRight: HTMLDivElement;
-        bottomLeft: HTMLDivElement;
-        bottomRight: HTMLDivElement;
-      }
-    | null = null;
-  private sharedChartPaneLayout: { frozenContentWidth: number; frozenContentHeight: number } | null = null;
-  private sharedChartPaneLayoutMemo:
-    | {
-        viewportWidth: number;
-        viewportHeight: number;
-        frozenWidth: number;
-        frozenHeight: number;
-        headerWidth: number;
-        headerHeight: number;
-        frozenContentWidth: number;
-        frozenContentHeight: number;
-      }
-    | null = null;
-  // Test/debug counter: increments when `syncSharedChartPanes` applies new DOM styles (i.e. when layout inputs change).
-  private sharedChartPaneLayoutSyncCount = 0;
   private referenceCanvas: HTMLCanvasElement;
   private auditingCanvas: HTMLCanvasElement;
   private presenceCanvas: HTMLCanvasElement | null = null;
   private selectionCanvas: HTMLCanvasElement;
   private gridCtx: CanvasRenderingContext2D;
+  private chartCtx: CanvasRenderingContext2D;
   private referenceCtx: CanvasRenderingContext2D;
   private auditingCtx: CanvasRenderingContext2D;
   private presenceCtx: CanvasRenderingContext2D | null = null;
@@ -793,6 +772,8 @@ export class SpreadsheetApp {
 
   private readonly chartStore: ChartStore;
   private chartTheme: ChartTheme = FALLBACK_CHART_THEME;
+  private readonly chartModels = new Map<string, ChartModel>();
+  private readonly chartRenderer: ChartRendererAdapter;
 
   private commentsPanel!: HTMLDivElement;
   private commentsPanelThreads!: HTMLDivElement;
@@ -830,8 +811,6 @@ export class SpreadsheetApp {
       }
     | null = null;
   private dlpContext: ReturnType<typeof createDesktopDlpContext> | null = null;
-
-  private readonly chartElements = new Map<string, HTMLDivElement>();
 
   constructor(
     private root: HTMLElement,
@@ -1127,12 +1106,12 @@ export class SpreadsheetApp {
       this.drawingCanvas.classList.add("drawing-layer--shared");
     }
 
-    this.chartLayer = document.createElement("div");
-    this.chartLayer.className = "chart-layer chart-layer--overlay";
-    this.chartLayer.setAttribute("aria-hidden", "true");
+    this.chartCanvas = document.createElement("canvas");
+    this.chartCanvas.className = "grid-canvas grid-canvas--chart";
+    this.chartCanvas.setAttribute("aria-hidden", "true");
     if (this.gridMode === "shared") {
       // Shared-grid overlay stacking is expressed via CSS classes (see charts-overlay.css).
-      this.chartLayer.classList.add("chart-layer--shared");
+      this.chartCanvas.classList.add("grid-canvas--shared-chart");
     }
 
     this.referenceCanvas = document.createElement("canvas");
@@ -1158,7 +1137,7 @@ export class SpreadsheetApp {
 
     this.root.appendChild(this.gridCanvas);
     this.root.appendChild(this.drawingCanvas);
-    this.root.appendChild(this.chartLayer);
+    this.root.appendChild(this.chartCanvas);
     this.root.appendChild(this.referenceCanvas);
     this.root.appendChild(this.auditingCanvas);
     if (this.presenceCanvas) this.root.appendChild(this.presenceCanvas);
@@ -1179,12 +1158,19 @@ export class SpreadsheetApp {
         const value = state?.value ?? null;
         return isRichTextValue(value) ? value.text : value;
       },
-      // Creating/removing charts should not force a full SVG re-render for *every* existing chart.
-      // `renderCharts(false)` renders new charts (no host yet) and updates positioning while keeping
-      // existing chart content intact. Full re-renders still happen on "full" refreshes (cell edits),
+      // Creating/removing charts should not force a full data re-scan for *every* existing chart.
+      // `renderCharts(false)` updates chart positioning and ensures newly-created charts have a
+      // cached ChartModel, while full data refreshes still happen on "full" refreshes (cell edits),
       // zoom changes, etc.
       onChange: () => this.renderCharts(false)
     });
+
+    const chartRendererStore: ChartRendererStore = {
+      getChartModel: (chartId) => this.chartModels.get(chartId),
+      getChartData: () => undefined,
+      getChartTheme: () => ({ seriesColors: this.chartTheme.seriesColors }),
+    };
+    this.chartRenderer = new ChartRendererAdapter(chartRendererStore);
 
     this.outlineLayer = document.createElement("div");
     this.outlineLayer.className = "outline-layer";
@@ -1229,14 +1215,16 @@ export class SpreadsheetApp {
     this.root.appendChild(this.auditingLegend);
 
     const gridCtx = this.gridCanvas.getContext("2d");
+    const chartCtx = this.chartCanvas.getContext("2d");
     const referenceCtx = this.referenceCanvas.getContext("2d");
     const auditingCtx = this.auditingCanvas.getContext("2d");
     const presenceCtx = this.presenceCanvas ? this.presenceCanvas.getContext("2d") : null;
     const selectionCtx = this.selectionCanvas.getContext("2d");
-    if (!gridCtx || !referenceCtx || !auditingCtx || (this.presenceCanvas && !presenceCtx) || !selectionCtx) {
+    if (!gridCtx || !chartCtx || !referenceCtx || !auditingCtx || (this.presenceCanvas && !presenceCtx) || !selectionCtx) {
       throw new Error("Canvas 2D context not available");
     }
     this.gridCtx = gridCtx;
+    this.chartCtx = chartCtx;
     this.referenceCtx = referenceCtx;
     this.auditingCtx = auditingCtx;
     this.presenceCtx = presenceCtx;
@@ -1374,21 +1362,20 @@ export class SpreadsheetApp {
                 effectiveViewport = this.sharedGrid?.renderer.getViewportState() ?? viewport;
               }
 
-               const prevX = this.scrollX;
-               const prevY = this.scrollY;
-                const nextScroll = zoomChanged ? (this.sharedGrid?.renderer.scroll.getScroll() ?? scroll) : scroll;
-                this.scrollX = nextScroll.x;
-                this.scrollY = nextScroll.y;
-                this.syncSharedChartPanes(effectiveViewport);
-                this.clearSharedHoverCellCache();
-                this.hideCommentTooltip();
-                this.renderDrawings(effectiveViewport);
-                this.renderCharts(zoomChanged);
-                this.renderAuditing();
-                this.renderSelection();
-               if (this.scrollX !== prevX || this.scrollY !== prevY) {
-                 this.notifyScrollListeners();
-               }
+              const prevX = this.scrollX;
+              const prevY = this.scrollY;
+              const nextScroll = zoomChanged ? (this.sharedGrid?.renderer.scroll.getScroll() ?? scroll) : scroll;
+              this.scrollX = nextScroll.x;
+              this.scrollY = nextScroll.y;
+              this.clearSharedHoverCellCache();
+              this.hideCommentTooltip();
+              this.renderDrawings(effectiveViewport);
+              this.renderCharts(zoomChanged);
+              this.renderAuditing();
+              this.renderSelection();
+              if (this.scrollX !== prevX || this.scrollY !== prevY) {
+                this.notifyScrollListeners();
+              }
             },
             onSelectionChange: () => {
               if (this.sharedGridSelectionSyncInProgress) return;
@@ -1546,8 +1533,6 @@ export class SpreadsheetApp {
       this.sharedGrid.renderer.setColWidth(0, this.rowHeaderWidth);
       this.sharedGrid.renderer.setRowHeight(0, this.colHeaderHeight);
       this.sharedGridZoom = this.sharedGrid.renderer.getZoom();
-
-      this.initSharedChartPanes();
     }
 
     const drawingImageMap = new Map<string, ImageEntry>();
@@ -1882,8 +1867,8 @@ export class SpreadsheetApp {
           this.scheduleStatusUpdate();
         }
       }
-      // Similarly, chart SVG content is only rendered on "full" refreshes. Schedule a debounced
-      // chart-content update so charts reflect remote data edits in real time.
+      // Similarly, chart data caches are only refreshed on "full" refreshes. Schedule a debounced
+      // chart refresh so charts reflect remote data edits in real time.
       this.scheduleChartContentRefresh(payload);
     });
 
@@ -2382,7 +2367,7 @@ export class SpreadsheetApp {
       this.dragAutoScrollRaf = null;
     }
     this.outlineButtons.clear();
-    this.chartElements.clear();
+    this.chartModels.clear();
     this.conflictUiContainer = null;
     this.root.replaceChildren();
   }
@@ -2457,9 +2442,9 @@ export class SpreadsheetApp {
     const visibleCharts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
     if (visibleCharts.length === 0) return;
 
-    // Avoid expensive chart rerenders unless the incoming deltas could affect the visible charts.
+    // Avoid expensive chart data refreshes unless the incoming deltas could affect the visible charts.
     // This keeps high-frequency external edits (e.g. collaborative typing elsewhere) from forcing
-    // chart SVG regeneration on every frame.
+    // chart data rescans on every frame.
     if (payload) {
       const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
       if (deltas.length === 0) return;
@@ -5658,7 +5643,7 @@ export class SpreadsheetApp {
 
     if (this.sharedGrid) {
       // The shared grid owns the main canvas layers, but we still render auditing overlays
-      // on a separate canvas (and keep chart DOM overlays positioned relative to the frozen headers).
+      // and chart overlays on separate canvases.
       this.auditingCanvas.width = Math.floor(this.width * this.dpr);
       this.auditingCanvas.height = Math.floor(this.height * this.dpr);
       this.auditingCanvas.style.width = `${this.width}px`;
@@ -5666,13 +5651,19 @@ export class SpreadsheetApp {
       this.auditingCtx.setTransform(1, 0, 0, 1, 0, 0);
       this.auditingCtx.scale(this.dpr, this.dpr);
 
+      this.chartCanvas.width = Math.floor(this.width * this.dpr);
+      this.chartCanvas.height = Math.floor(this.height * this.dpr);
+      this.chartCanvas.style.width = `${this.width}px`;
+      this.chartCanvas.style.height = `${this.height}px`;
+      this.chartCtx.setTransform(1, 0, 0, 1, 0, 0);
+      this.chartCtx.scale(this.dpr, this.dpr);
+
       // If auditing is currently off, avoid repeatedly clearing this canvas on scroll.
       // Track that it was resized so `renderAuditing()` can do a one-time clear if needed.
       this.auditingNeedsClear = true;
 
       this.sharedGrid.resize(this.width, this.height, this.dpr);
       const viewport = this.sharedGrid.renderer.scroll.getViewportState();
-      this.syncSharedChartPanes(viewport);
 
       // Keep our legacy scroll coordinates in sync for chart positioning helpers.
       const scroll = this.sharedGrid.getScroll();
@@ -5689,6 +5680,7 @@ export class SpreadsheetApp {
 
     const legacyCanvases: HTMLCanvasElement[] = [
       this.gridCanvas,
+      this.chartCanvas,
       this.referenceCanvas,
       this.auditingCanvas,
       ...(this.presenceCanvas ? [this.presenceCanvas] : []),
@@ -5704,6 +5696,7 @@ export class SpreadsheetApp {
     // Reset transforms and apply DPR scaling so drawing code uses CSS pixels.
     const legacyContexts: CanvasRenderingContext2D[] = [
       this.gridCtx,
+      this.chartCtx,
       this.referenceCtx,
       this.auditingCtx,
       ...(this.presenceCtx ? [this.presenceCtx] : []),
@@ -5714,10 +5707,6 @@ export class SpreadsheetApp {
       ctx.scale(this.dpr, this.dpr);
     }
     this.auditingNeedsClear = true;
-
-    // Charts should scroll with the grid but stay clipped under headers.
-    this.chartLayer.style.left = `${this.rowHeaderWidth}px`;
-    this.chartLayer.style.top = `${this.colHeaderHeight}px`;
 
     const didClamp = this.clampScroll();
     if (didClamp) this.hideCommentTooltip();
@@ -6072,126 +6061,6 @@ export class SpreadsheetApp {
     return this.lowerBound(this.colIndexByVisual, col);
   }
 
-  private initSharedChartPanes(): void {
-    if (!this.sharedGrid) return;
-    if (this.sharedChartPanes) return;
-
-    const createPane = (testId: string, className: string) => {
-      const pane = document.createElement("div");
-      pane.dataset.testid = testId;
-      pane.className = className;
-      return pane;
-    };
-
-    const topLeft = createPane("chart-pane-top-left", "chart-pane chart-pane--top-left");
-    const topRight = createPane("chart-pane-top-right", "chart-pane chart-pane--top-right");
-    const bottomLeft = createPane("chart-pane-bottom-left", "chart-pane chart-pane--bottom-left");
-    const bottomRight = createPane("chart-pane-bottom-right", "chart-pane chart-pane--bottom-right");
-
-    this.chartLayer.appendChild(topLeft);
-    this.chartLayer.appendChild(topRight);
-    this.chartLayer.appendChild(bottomLeft);
-    this.chartLayer.appendChild(bottomRight);
-
-    this.sharedChartPanes = { topLeft, topRight, bottomLeft, bottomRight };
-
-    // Establish an initial pane layout before the first render pass.
-    this.syncSharedChartPanes(this.sharedGrid.renderer.scroll.getViewportState());
-  }
-
-  private syncSharedChartPanes(viewport: GridViewportState): void {
-    if (!this.sharedGrid) return;
-    if (!this.sharedChartPanes) return;
-
-    const headerRows = this.sharedHeaderRows();
-    const headerCols = this.sharedHeaderCols();
-    const headerWidth =
-      headerCols > 0 ? this.sharedGrid.renderer.scroll.cols.totalSize(headerCols) : 0;
-    const headerHeight =
-      headerRows > 0 ? this.sharedGrid.renderer.scroll.rows.totalSize(headerRows) : 0;
-
-    const headerWidthClamped = Math.min(headerWidth, viewport.width);
-    const headerHeightClamped = Math.min(headerHeight, viewport.height);
-
-    const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
-    const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
-
-    const frozenContentWidth = Math.max(0, frozenWidthClamped - headerWidthClamped);
-    const frozenContentHeight = Math.max(0, frozenHeightClamped - headerHeightClamped);
-
-    const memo = this.sharedChartPaneLayoutMemo;
-    if (
-      memo &&
-      memo.viewportWidth === viewport.width &&
-      memo.viewportHeight === viewport.height &&
-      memo.frozenWidth === viewport.frozenWidth &&
-      memo.frozenHeight === viewport.frozenHeight &&
-      memo.headerWidth === headerWidth &&
-      memo.headerHeight === headerHeight &&
-      memo.frozenContentWidth === frozenContentWidth &&
-      memo.frozenContentHeight === frozenContentHeight
-    ) {
-      return;
-    }
-
-    const cellAreaWidth = Math.max(0, viewport.width - headerWidthClamped);
-    const cellAreaHeight = Math.max(0, viewport.height - headerHeightClamped);
-
-    const scrollableWidth = Math.max(0, cellAreaWidth - frozenContentWidth);
-    const scrollableHeight = Math.max(0, cellAreaHeight - frozenContentHeight);
-
-    if (memo) {
-      memo.viewportWidth = viewport.width;
-      memo.viewportHeight = viewport.height;
-      memo.frozenWidth = viewport.frozenWidth;
-      memo.frozenHeight = viewport.frozenHeight;
-      memo.headerWidth = headerWidth;
-      memo.headerHeight = headerHeight;
-      memo.frozenContentWidth = frozenContentWidth;
-      memo.frozenContentHeight = frozenContentHeight;
-    } else {
-      this.sharedChartPaneLayoutMemo = {
-        viewportWidth: viewport.width,
-        viewportHeight: viewport.height,
-        frozenWidth: viewport.frozenWidth,
-        frozenHeight: viewport.frozenHeight,
-        headerWidth,
-        headerHeight,
-        frozenContentWidth,
-        frozenContentHeight,
-      };
-    }
-    this.sharedChartPaneLayoutSyncCount += 1;
-
-    // Charts are rendered as DOM overlays. In shared-grid mode, the column/row
-    // headers are implemented as frozen panes, so we position the outer chart
-    // layer just under those headers, then clip charts into the four pane
-    // quadrants to mimic Excel behavior (objects are constrained to their pane).
-    this.chartLayer.style.left = `${headerWidthClamped}px`;
-    this.chartLayer.style.top = `${headerHeightClamped}px`;
-
-    const applyPaneRect = (pane: HTMLDivElement, rect: { x: number; y: number; width: number; height: number }) => {
-      pane.style.left = `${rect.x}px`;
-      pane.style.top = `${rect.y}px`;
-      pane.style.width = `${rect.width}px`;
-      pane.style.height = `${rect.height}px`;
-      pane.style.display = rect.width > 0 && rect.height > 0 ? "block" : "none";
-    };
-
-    const { topLeft, topRight, bottomLeft, bottomRight } = this.sharedChartPanes;
-    applyPaneRect(topLeft, { x: 0, y: 0, width: frozenContentWidth, height: frozenContentHeight });
-    applyPaneRect(topRight, { x: frozenContentWidth, y: 0, width: scrollableWidth, height: frozenContentHeight });
-    applyPaneRect(bottomLeft, { x: 0, y: frozenContentHeight, width: frozenContentWidth, height: scrollableHeight });
-    applyPaneRect(bottomRight, {
-      x: frozenContentWidth,
-      y: frozenContentHeight,
-      width: scrollableWidth,
-      height: scrollableHeight,
-    });
-
-    this.sharedChartPaneLayout = { frozenContentWidth, frozenContentHeight };
-  }
-
   private chartAnchorToViewportRect(anchor: ChartRecord["anchor"]): { left: number; top: number; width: number; height: number } | null {
     if (!anchor || !("kind" in anchor)) return null;
 
@@ -6295,25 +6164,93 @@ export class SpreadsheetApp {
     const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
     const keep = new Set<string>();
 
-    const sharedPanes = this.sharedGrid ? this.sharedChartPanes : null;
-    const sharedLayout = this.sharedGrid ? this.sharedChartPaneLayout : null;
+    if (!this.sharedGrid) {
+      // Keep frozen pane geometry current for quadrant clipping.
+      this.ensureViewportMappingCurrent();
+    }
 
-    const resolveHostContainer = (anchor: ChartRecord["anchor"]): { container: HTMLDivElement; originX: number; originY: number } => {
-      if (!sharedPanes || !sharedLayout) return { container: this.chartLayer, originX: 0, originY: 0 };
+    // Reset the chart canvas transform and clear in CSS-pixel coordinates.
+    const ctx = this.chartCtx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(this.dpr, this.dpr);
+    ctx.clearRect(0, 0, this.width, this.height);
 
-      const { frozenRows, frozenCols } = this.getFrozen();
-      const fromRow = anchor.kind === "oneCell" || anchor.kind === "twoCell" ? anchor.fromRow : Number.POSITIVE_INFINITY;
-      const fromCol = anchor.kind === "oneCell" || anchor.kind === "twoCell" ? anchor.fromCol : Number.POSITIVE_INFINITY;
-      const inFrozenRows = fromRow < frozenRows;
-      const inFrozenCols = fromCol < frozenCols;
+    const layout = (() => {
+      if (this.sharedGrid) {
+        const viewport = this.sharedGrid.renderer.scroll.getViewportState();
+        const headerRows = this.sharedHeaderRows();
+        const headerCols = this.sharedHeaderCols();
+        const headerWidth = headerCols > 0 ? this.sharedGrid.renderer.scroll.cols.totalSize(headerCols) : 0;
+        const headerHeight = headerRows > 0 ? this.sharedGrid.renderer.scroll.rows.totalSize(headerRows) : 0;
 
-      const { frozenContentWidth, frozenContentHeight } = sharedLayout;
+        const headerWidthClamped = Math.min(headerWidth, viewport.width);
+        const headerHeightClamped = Math.min(headerHeight, viewport.height);
 
-      if (inFrozenRows && inFrozenCols) return { container: sharedPanes.topLeft, originX: 0, originY: 0 };
-      if (inFrozenRows && !inFrozenCols) return { container: sharedPanes.topRight, originX: frozenContentWidth, originY: 0 };
-      if (!inFrozenRows && inFrozenCols) return { container: sharedPanes.bottomLeft, originX: 0, originY: frozenContentHeight };
-      return { container: sharedPanes.bottomRight, originX: frozenContentWidth, originY: frozenContentHeight };
+        const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
+        const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
+
+        const frozenContentWidth = Math.max(0, frozenWidthClamped - headerWidthClamped);
+        const frozenContentHeight = Math.max(0, frozenHeightClamped - headerHeightClamped);
+
+        const cellAreaWidth = Math.max(0, viewport.width - headerWidthClamped);
+        const cellAreaHeight = Math.max(0, viewport.height - headerHeightClamped);
+
+        const scrollableWidth = Math.max(0, cellAreaWidth - frozenContentWidth);
+        const scrollableHeight = Math.max(0, cellAreaHeight - frozenContentHeight);
+
+        return {
+          originX: headerWidthClamped,
+          originY: headerHeightClamped,
+          frozenContentWidth,
+          frozenContentHeight,
+          scrollableWidth,
+          scrollableHeight,
+          cellAreaWidth,
+          cellAreaHeight,
+        };
+      }
+
+      const cellAreaWidth = Math.max(0, this.width - this.rowHeaderWidth);
+      const cellAreaHeight = Math.max(0, this.height - this.colHeaderHeight);
+      const frozenWidth = Math.min(cellAreaWidth, this.frozenWidth);
+      const frozenHeight = Math.min(cellAreaHeight, this.frozenHeight);
+      const scrollableWidth = Math.max(0, cellAreaWidth - frozenWidth);
+      const scrollableHeight = Math.max(0, cellAreaHeight - frozenHeight);
+      return {
+        originX: this.rowHeaderWidth,
+        originY: this.colHeaderHeight,
+        frozenContentWidth: frozenWidth,
+        frozenContentHeight: frozenHeight,
+        scrollableWidth,
+        scrollableHeight,
+        cellAreaWidth,
+        cellAreaHeight,
+      };
+    })();
+
+    const paneRects = {
+      topLeft: { x: 0, y: 0, width: layout.frozenContentWidth, height: layout.frozenContentHeight },
+      topRight: {
+        x: layout.frozenContentWidth,
+        y: 0,
+        width: layout.scrollableWidth,
+        height: layout.frozenContentHeight,
+      },
+      bottomLeft: {
+        x: 0,
+        y: layout.frozenContentHeight,
+        width: layout.frozenContentWidth,
+        height: layout.scrollableHeight,
+      },
+      bottomRight: {
+        x: layout.frozenContentWidth,
+        y: layout.frozenContentHeight,
+        width: layout.scrollableWidth,
+        height: layout.scrollableHeight,
+      },
     };
+
+    const { frozenRows, frozenCols } = this.getFrozen();
 
     const createProvider = () => {
       // Avoid allocating a fresh `{row,col}` object for every chart range cell read.
@@ -6341,74 +6278,183 @@ export class SpreadsheetApp {
             out.push(row);
           }
           return out;
-        }
+        },
       };
     };
 
-    const provider = renderContent ? createProvider() : null;
+    const flatten = (range2d: unknown[][]): unknown[] => {
+      if (!Array.isArray(range2d)) return [];
+      const out: unknown[] = [];
+      for (const row of range2d) {
+        if (!Array.isArray(row)) continue;
+        for (const value of row) out.push(value);
+      }
+      return out;
+    };
+
+    const toCategoryCache = (values: unknown[]): Array<string | number | null> =>
+      values.map((value) => {
+        if (value == null) return null;
+        if (typeof value === "string" || typeof value === "number") return value;
+        if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+        return String(value);
+      });
+
+    const toNumberCache = (values: unknown[]): Array<number | string | null> =>
+      values.map((value) => {
+        if (value == null) return null;
+        if (typeof value === "number" || typeof value === "string") return value;
+        if (typeof value === "boolean") return value ? 1 : 0;
+        return String(value);
+      });
+
+    const normalizeChartKind = (kind: ChartRecord["chartType"]["kind"]): ChartModel["chartType"]["kind"] => {
+      if (kind === "bar" || kind === "line" || kind === "pie" || kind === "scatter") return kind;
+      if (kind === "area") return "line";
+      return "unknown";
+    };
+
+    const buildBaseModel = (chart: ChartRecord): ChartModel => {
+      const kind = normalizeChartKind(chart.chartType.kind);
+      const hasNamedSeries = (chart.series ?? []).some((ser) => typeof ser.name === "string" && ser.name.trim() !== "");
+      const wantsLegend = kind === "pie" || (chart.series?.length ?? 0) > 1 || hasNamedSeries;
+
+      return {
+        chartType: { kind, ...(chart.chartType.name ? { name: chart.chartType.name } : {}) },
+        title: chart.title ?? null,
+        legend: wantsLegend ? { position: "right", overlay: false } : { position: "none", overlay: false },
+        ...(kind === "scatter"
+          ? {
+              axes: [
+                { kind: "value", position: "bottom", formatCode: "0" },
+                { kind: "value", position: "left", majorGridlines: true, formatCode: "0" },
+              ],
+            }
+          : kind === "pie"
+            ? {}
+            : {
+                axes: [
+                  { kind: "category", position: "bottom" },
+                  { kind: "value", position: "left", majorGridlines: true, formatCode: "0" },
+                ],
+              }),
+        series: (chart.series ?? []).map((ser) => ({
+          ...(ser.name != null ? { name: ser.name } : {}),
+        })),
+      };
+    };
+
+    const chartDataTooLarge = (chart: ChartRecord): boolean => {
+      for (const ser of chart.series ?? []) {
+        const refs = [ser.categories, ser.values, ser.xValues, ser.yValues];
+        for (const rangeRef of refs) {
+          if (typeof rangeRef !== "string" || rangeRef.trim() === "") continue;
+          const parsed = parseA1Range(rangeRef);
+          if (!parsed) continue;
+          const rows = Math.max(0, parsed.endRow - parsed.startRow + 1);
+          const cols = Math.max(0, parsed.endCol - parsed.startCol + 1);
+          if (rows * cols > MAX_CHART_DATA_CELLS) return true;
+        }
+      }
+      return false;
+    };
+
+    const intersects = (a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }): boolean => {
+      return !(
+        a.x + a.width < b.x ||
+        b.x + b.width < a.x ||
+        a.y + a.height < b.y ||
+        b.y + b.height < a.y
+      );
+    };
+
+    let provider: ReturnType<typeof createProvider> | null = null;
+
+    ctx.save();
+    // Chart anchors are computed in cell-area coordinates; translate under headers once.
+    ctx.translate(layout.originX, layout.originY);
 
     for (const chart of charts) {
       keep.add(chart.id);
       const rect = this.chartAnchorToViewportRect(chart.anchor);
       if (!rect) continue;
 
-      let host = this.chartElements.get(chart.id);
-      const shouldRenderContent = renderContent || !host;
-      const { container, originX, originY } = resolveHostContainer(chart.anchor);
-      if (!host) {
-        host = document.createElement("div");
-        host.setAttribute("data-testid", "chart-object");
-        host.dataset.chartId = chart.id;
-        host.className = "chart-object";
-        this.chartElements.set(chart.id, host);
-        container.appendChild(host);
-      } else if (host.parentElement !== container) {
-        container.appendChild(host);
-      }
+      const chartRect = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
 
-      host.style.left = `${rect.left - originX}px`;
-      host.style.top = `${rect.top - originY}px`;
-      host.style.width = `${rect.width}px`;
-      host.style.height = `${rect.height}px`;
+      const fromRow = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromRow : Number.POSITIVE_INFINITY;
+      const fromCol = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromCol : Number.POSITIVE_INFINITY;
+      const inFrozenRows = fromRow < frozenRows;
+      const inFrozenCols = fromCol < frozenCols;
 
-      if (shouldRenderContent) {
-        const chartDataTooLarge = (() => {
-          for (const ser of chart.series ?? []) {
-            const refs = [ser.categories, ser.values, ser.xValues, ser.yValues];
-            for (const rangeRef of refs) {
-              if (typeof rangeRef !== "string" || rangeRef.trim() === "") continue;
-              const parsed = parseA1Range(rangeRef);
-              if (!parsed) continue;
-              const sheetId = parsed.sheetName ? this.resolveSheetIdByName(parsed.sheetName) : this.sheetId;
-              if (!sheetId) continue;
-              const rows = Math.max(0, parsed.endRow - parsed.startRow + 1);
-              const cols = Math.max(0, parsed.endCol - parsed.startCol + 1);
-              if (rows * cols > MAX_CHART_DATA_CELLS) return true;
-            }
-          }
-          return false;
-        })();
+      const pane = inFrozenRows
+        ? inFrozenCols
+          ? paneRects.topLeft
+          : paneRects.topRight
+        : inFrozenCols
+          ? paneRects.bottomLeft
+          : paneRects.bottomRight;
 
-        if (chartDataTooLarge) {
-          host.innerHTML = placeholderSvg({
-            width: rect.width,
-            height: rect.height,
-            label: `Chart range too large (>${MAX_CHART_DATA_CELLS.toLocaleString()} cells)`,
-          });
+      if (pane.width <= 0 || pane.height <= 0) continue;
+      if (!intersects(chartRect, pane)) continue;
+
+      const shouldUpdateModel = renderContent || !this.chartModels.has(chart.id);
+      if (shouldUpdateModel) {
+        const base = buildBaseModel(chart);
+        if (chartDataTooLarge(chart)) {
+          base.options = {
+            ...(base.options ?? {}),
+            placeholder: `Chart range too large (>${MAX_CHART_DATA_CELLS.toLocaleString()} cells)`,
+          };
+          this.chartModels.set(chart.id, base);
         } else {
-          host.innerHTML = renderChartSvg(chart, provider ?? createProvider(), {
-            width: rect.width,
-            height: rect.height,
-            theme: this.chartTheme,
+          if (!provider) provider = createProvider();
+
+          const nextSeries = base.series.map((ser, idx) => {
+            const def = chart.series[idx];
+            const categories = def.categories ? toCategoryCache(flatten(provider!.getRange(def.categories))) : [];
+            const values = def.values ? toNumberCache(flatten(provider!.getRange(def.values))) : [];
+            const xValues = def.xValues ? toNumberCache(flatten(provider!.getRange(def.xValues))) : [];
+            const yValues = def.yValues ? toNumberCache(flatten(provider!.getRange(def.yValues))) : [];
+
+            const pieFallback =
+              base.chartType.kind === "pie" && categories.length === 0 && values.length > 0
+                ? Array.from({ length: values.length }, (_, i) => String(i + 1))
+                : null;
+
+            return {
+              ...ser,
+              ...(pieFallback
+                ? { categories: { cache: pieFallback } }
+                : categories.length
+                  ? { categories: { cache: categories } }
+                  : {}),
+              ...(values.length ? { values: { cache: values } } : {}),
+              ...(xValues.length ? { xValues: { cache: xValues } } : {}),
+              ...(yValues.length ? { yValues: { cache: yValues } } : {}),
+            };
           });
+
+          this.chartModels.set(chart.id, { ...base, series: nextSeries });
         }
       }
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(pane.x, pane.y, pane.width, pane.height);
+      ctx.clip();
+      try {
+        this.chartRenderer.renderToCanvas(ctx, chart.id, chartRect);
+      } catch {
+        // Best-effort: ignore chart rendering failures so one bad chart doesn't block overlays.
+      }
+      ctx.restore();
     }
 
-    for (const [id, el] of this.chartElements) {
+    ctx.restore();
+
+    for (const id of this.chartModels.keys()) {
       if (keep.has(id)) continue;
-      el.remove();
-      this.chartElements.delete(id);
+      this.chartModels.delete(id);
     }
   }
 

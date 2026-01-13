@@ -346,10 +346,10 @@ describe("SpreadsheetApp collab repaint", () => {
     expect(charts.length).toBeGreaterThan(0);
     const chartId = charts[0]!.id;
 
-    const chartElements = (app as any).chartElements as Map<string, HTMLElement>;
-    const host = chartElements.get(chartId);
-    expect(host).toBeTruthy();
-    const beforeHtml = host!.innerHTML;
+    const chartModels = (app as any).chartModels as Map<string, any>;
+    const beforeModel = chartModels.get(chartId);
+    expect(beforeModel).toBeTruthy();
+    const beforeValues = [...(beforeModel?.series?.[0]?.values?.cache ?? [])];
 
     const doc = app.getDocument();
     const sheetId = app.getCurrentSheetId();
@@ -369,7 +369,11 @@ describe("SpreadsheetApp collab repaint", () => {
       { source: "collab" },
     );
 
-    expect(host!.innerHTML).not.toBe(beforeHtml);
+    const afterModel = chartModels.get(chartId);
+    expect(afterModel).toBeTruthy();
+    const afterValues = [...(afterModel?.series?.[0]?.values?.cache ?? [])];
+    expect(afterValues).not.toEqual(beforeValues);
+    expect(afterValues[0]).toBe(10);
 
     app.destroy();
     root.remove();
