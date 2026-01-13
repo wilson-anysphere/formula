@@ -8,10 +8,21 @@ test.describe("formula bar - fx function picker", () => {
   }) => {
     await gotoDesktop(page, "/");
 
+    // Pick an empty cell so the formula bar starts blank (the default workbook seeds A1 with text).
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp");
+      const sheetId = app.getCurrentSheetId();
+      // E1 is outside the seeded used range (ends at D5).
+      app.activateCell({ sheetId, row: 0, col: 4 }, { focus: false, scrollIntoView: false });
+    });
+    await expect(page.getByTestId("active-cell")).toHaveText("E1");
+
     // 1) Focus the formula bar.
     await page.getByTestId("formula-highlight").click();
     const formulaInput = page.getByTestId("formula-input");
     await expect(formulaInput).toBeVisible();
+    await expect(formulaInput).toHaveValue("");
 
     // 2) Click fx to open the function picker.
     await page.getByTestId("formula-fx-button").click();
