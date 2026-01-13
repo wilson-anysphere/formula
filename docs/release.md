@@ -55,6 +55,15 @@ TAURI_PRIVATE_KEY=... node scripts/ci/check-tauri-updater-secrets.mjs
 node scripts/check-macos-entitlements.mjs
 ```
 
+After all platform builds finish, CI also verifies the **uploaded GitHub Release assets** are
+complete and consistent with the Tauri updater manifest (`latest.json`). This prevents publishing a
+release where `latest.json` points at missing artifacts or missing signature files:
+
+```bash
+# Requires a GitHub token with access to the release assets.
+GITHUB_TOKEN=... node scripts/verify-tauri-updater-assets.mjs vX.Y.Z
+```
+
 ## Updater restart semantics (important)
 
 When an update is downloaded/installed, the desktop app should restart/exit using Tauri's supported

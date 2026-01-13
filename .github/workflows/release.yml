@@ -1247,6 +1247,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/ci/validate-updater-manifest.mjs "${{ needs.validate-version.outputs.release_tag }}"
 
+      - name: Verify updater asset set (installers + signatures)
+        env:
+          # This validator also uses the GitHub API to read/download assets from the draft release.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/verify-tauri-updater-assets.mjs "${{ needs.validate-version.outputs.release_tag }}"
+
   verify-release-assets:
     name: Verify GitHub Release assets (multi-arch safe)
     needs: [build, validate-version]
