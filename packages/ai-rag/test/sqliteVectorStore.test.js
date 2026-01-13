@@ -44,7 +44,7 @@ test("SqliteVectorStore persists vectors and can reload them", { skip: !sqlJsAva
   }
 });
 
-test("SqliteVectorStore.compact() VACUUMs and persists a smaller DB", { skip: !sqlJsAvailable }, async () => {
+test("SqliteVectorStore.vacuum() VACUUMs and persists a smaller DB", { skip: !sqlJsAvailable }, async () => {
   const tmpRoot = path.join(__dirname, ".tmp");
   await mkdir(tmpRoot, { recursive: true });
   const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-compact-"));
@@ -68,7 +68,7 @@ test("SqliteVectorStore.compact() VACUUMs and persists a smaller DB", { skip: !s
 
     const before = (await stat(filePath)).size;
 
-    await store1.compact();
+    await store1.vacuum();
 
     const after = (await stat(filePath)).size;
     assert.ok(after > 0);
