@@ -29,6 +29,7 @@ function normalizeFormulaTextOpt(value: unknown): string | null {
 const DEFAULT_READ_RANGE_MAX_CELL_CHARS = 10_000;
 const UNSERIALIZABLE_CELL_VALUE_PLACEHOLDER = "[Unserializable cell value]";
 const DEFAULT_RICH_VALUE_SAMPLE_ITEMS = 32;
+const DEFAULT_RICH_VALUE_MAX_COLLECTION_ITEMS = 256;
 
 function truncateCellString(value: string, maxChars: number): string {
   const limit = Number.isFinite(maxChars) ? Math.max(0, Math.floor(maxChars)) : DEFAULT_READ_RANGE_MAX_CELL_CHARS;
@@ -56,9 +57,50 @@ function summarizeArrayBufferView(view: ArrayBufferView): Record<string, unknown
   };
 }
 
+function sampleIterable<T>(iterable: Iterable<T>, maxItems: number): T[] {
+  const limit = Math.max(0, Math.floor(maxItems));
+  if (limit === 0) return [];
+  const items: T[] = [];
+  for (const value of iterable) {
+    items.push(value);
+    if (items.length >= limit) break;
+  }
+  return items;
+}
+
 function richValueJsonReplacer(_key: string, value: unknown): unknown {
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "function" || typeof value === "symbol") return String(value);
+
+  if (Array.isArray(value) && value.length > DEFAULT_RICH_VALUE_MAX_COLLECTION_ITEMS) {
+    const sample = value.slice(0, DEFAULT_RICH_VALUE_SAMPLE_ITEMS);
+    return {
+      __type: "Array",
+      length: value.length,
+      sample,
+      truncated: value.length > DEFAULT_RICH_VALUE_SAMPLE_ITEMS
+    };
+  }
+
+  if (typeof Map !== "undefined" && value instanceof Map && value.size > DEFAULT_RICH_VALUE_MAX_COLLECTION_ITEMS) {
+    const items = sampleIterable(value.entries(), DEFAULT_RICH_VALUE_SAMPLE_ITEMS);
+    return {
+      __type: "Map",
+      size: value.size,
+      sample: items,
+      truncated: value.size > DEFAULT_RICH_VALUE_SAMPLE_ITEMS
+    };
+  }
+
+  if (typeof Set !== "undefined" && value instanceof Set && value.size > DEFAULT_RICH_VALUE_MAX_COLLECTION_ITEMS) {
+    const items = sampleIterable(value.values(), DEFAULT_RICH_VALUE_SAMPLE_ITEMS);
+    return {
+      __type: "Set",
+      size: value.size,
+      sample: items,
+      truncated: value.size > DEFAULT_RICH_VALUE_SAMPLE_ITEMS
+    };
+  }
 
   if (typeof ArrayBuffer !== "undefined") {
     if (value instanceof ArrayBuffer) {

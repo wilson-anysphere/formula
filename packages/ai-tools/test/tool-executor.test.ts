@@ -511,6 +511,59 @@ describe("ToolExecutor", () => {
     expect(() => JSON.stringify(result)).not.toThrow();
   });
 
+  it("read_range summarizes huge arrays to avoid huge JSON payloads", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    const arr = Array.from({ length: 1000 }, (_, idx) => idx);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: arr as any });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A1" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.values).toEqual([
+      [JSON.stringify({ __type: "Array", length: 1000, sample: arr.slice(0, 32), truncated: true })],
+    ]);
+    expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
+  it("read_range summarizes huge Maps to avoid huge JSON payloads", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    const map = new Map<number, number>();
+    for (let i = 0; i < 1000; i++) map.set(i, i);
+
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: map as any });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A1" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.values).toEqual([
+      [
+        JSON.stringify({
+          __type: "Map",
+          size: 1000,
+          sample: Array.from(map.entries()).slice(0, 32),
+          truncated: true,
+        }),
+      ],
+    ]);
+    expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
   it("read_range tolerates missing/invalid CellData entries from SpreadsheetApi.readRange", async () => {
     const spreadsheet: any = {
       listSheets: () => ["Sheet1"],
