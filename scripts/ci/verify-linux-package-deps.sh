@@ -18,6 +18,7 @@ require_cmd() {
 }
 
 require_cmd find
+require_cmd grep
 require_cmd dpkg
 require_cmd dpkg-deb
 require_cmd rpm
@@ -67,7 +68,7 @@ assert_contains_any() {
   local matched=0
 
   for needle in "$@"; do
-    if echo "$haystack" | grep -Eqi "$needle"; then
+    if printf '%s\n' "$haystack" | grep -Eqi "$needle"; then
       matched=1
       break
     fi
