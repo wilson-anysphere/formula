@@ -128,15 +128,21 @@ function parsePermissionIdentifiers(permissionLsOutput) {
   // - application permissions: `allow-invoke` (hyphenated, no `:`)
   const identifiers = new Set();
 
-  const colonIdentifier = /\b[a-z0-9][a-z0-9_-]*(?::[a-z0-9_-]+)+\b/g;
-  // Exclude sub-matches inside colon identifiers (e.g. `allow-listen` inside `core:event:allow-listen`).
-  const hyphenIdentifier = /(?<!:)\b[a-z0-9][a-z0-9_-]*-[a-z0-9_-]+(?:-[a-z0-9_-]+)*\b(?!:)/g;
+  // Parse colon-delimited identifiers as whole tokens.
+  //
+  // Important: avoid matching partial segments inside a longer identifier (e.g. matching
+  // `core:event` and `event:allow-listen` inside `core:event:allow-listen`). We enforce:
+  // - the identifier is preceded by start-of-string or a non-identifier character
+  // - the identifier is not immediately followed by another ':' (so we don't match prefixes)
+  const colonIdentifier = /(^|[^a-z0-9_:-])([a-z0-9][a-z0-9_-]*(?::[a-z0-9_-]+)+)(?![a-z0-9_:-])/gim;
+  const hyphenIdentifier =
+    /(^|[^a-z0-9_:-])([a-z0-9][a-z0-9_-]*-[a-z0-9_-]+(?:-[a-z0-9_-]+)*)(?![a-z0-9_:-])/gim;
 
   for (const match of permissionLsOutput.matchAll(colonIdentifier)) {
-    identifiers.add(match[0]);
+    identifiers.add(match[2]);
   }
   for (const match of permissionLsOutput.matchAll(hyphenIdentifier)) {
-    identifiers.add(match[0]);
+    identifiers.add(match[2]);
   }
 
   // Sanity check: if we couldn't parse anything, fail loudly rather than silently passing.
