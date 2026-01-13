@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import type { GoalSeekParams, GoalSeekProgress, GoalSeekResult, WhatIfApi } from "./types";
 import { t } from "../../i18n/index.js";
@@ -20,6 +20,17 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
   const [error, setError] = useState<string | null>(null);
 
   const parsedTargetValue = useMemo(() => Number(targetValue), [targetValue]);
+  const reactInstanceId = React.useId();
+  const domInstanceId = useMemo(() => reactInstanceId.replace(/[^a-zA-Z0-9_-]/g, "-"), [reactInstanceId]);
+  const titleId = useMemo(() => `goal-seek-title-${domInstanceId}`, [domInstanceId]);
+  const errorId = useMemo(() => `goal-seek-error-${domInstanceId}`, [domInstanceId]);
+  const targetCellRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    // Focus the first input so keyboard users can immediately type.
+    targetCellRef.current?.focus();
+  }, [open]);
 
   async function run() {
     setError(null);
@@ -55,11 +66,21 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
       className="dialog what-if-dialog"
       role="dialog"
       aria-modal="true"
-      aria-label={t("whatIf.goalSeek.title")}
+      aria-labelledby={titleId}
+      aria-describedby={error ? errorId : undefined}
       data-testid="goal-seek-dialog"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        if (running) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }}
     >
       <div className="what-if-dialog__header">
-        <h3 className="dialog__title">{t("whatIf.goalSeek.title")}</h3>
+        <h3 className="dialog__title" id={titleId}>
+          {t("whatIf.goalSeek.title")}
+        </h3>
         <button type="button" className="what-if__button" onClick={onClose} disabled={running}>
           {t("whatIf.goalSeek.close")}
         </button>
@@ -76,6 +97,7 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
               disabled={running}
               spellCheck={false}
               autoCapitalize="off"
+              ref={targetCellRef}
             />
           </label>
 
@@ -110,7 +132,7 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
         </div>
 
         {error ? (
-          <p className="what-if__message what-if__message--error" role="alert">
+          <p className="what-if__message what-if__message--error" role="alert" id={errorId}>
             {error}
           </p>
         ) : null}

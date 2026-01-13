@@ -14,7 +14,7 @@ describe("parseShapeRenderSpec", () => {
     expect(parseShapeRenderSpec(raw)).toEqual({
       geometry: { type: "rect" },
       fill: { type: "none" },
-      stroke: { color: "#000000", widthEmu: 9525 },
+      stroke: { color: "black", widthEmu: 9525 },
       label: undefined,
     });
   });

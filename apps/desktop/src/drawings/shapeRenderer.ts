@@ -81,6 +81,7 @@ const WRAP_PREFIX = `<root xmlns:xdr="${DRAWINGML_NAMESPACES.xdr}" xmlns:a="${DR
 const WRAP_SUFFIX = "</root>";
 
 const DEFAULT_LINE_WIDTH_EMU = 9_525; // 1px at 96DPI (914400 / 96)
+const DEFAULT_STROKE_COLOR = "black";
 
 const SHAPE_SPEC_CACHE = new Map<string, ShapeRenderSpec | null>();
 const SHAPE_SPEC_CACHE_MAX = 200;
@@ -353,7 +354,7 @@ function parseStroke(spPr: XmlElementLike): ShapeStroke | undefined {
   const ln = childElements(spPr).find((c) => localName(c) === "ln");
   // Shapes default to having a 1px black outline if not specified. This keeps
   // minimally-specified shapes visible and matches typical Excel defaults.
-  if (!ln) return { color: "#000000", widthEmu: DEFAULT_LINE_WIDTH_EMU };
+  if (!ln) return { color: DEFAULT_STROKE_COLOR, widthEmu: DEFAULT_LINE_WIDTH_EMU };
   if (childElements(ln).some((c) => localName(c) === "noFill")) return undefined;
 
   const widthAttr = getAttribute(ln, "w");
@@ -365,7 +366,7 @@ function parseStroke(spPr: XmlElementLike): ShapeStroke | undefined {
   if (widthEmu === 0) return undefined;
 
   const solid = childElements(ln).find((c) => localName(c) === "solidFill");
-  const color = (solid ? parseSrgbColor(solid) : null) ?? "#000000";
+  const color = (solid ? parseSrgbColor(solid) : null) ?? DEFAULT_STROKE_COLOR;
   return { color, widthEmu };
 }
 
