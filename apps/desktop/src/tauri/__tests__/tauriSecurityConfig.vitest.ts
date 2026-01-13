@@ -121,6 +121,18 @@ describe("tauri.conf.json security guardrails", () => {
 
     const directives = parseCsp(csp as string);
 
+    const formAction = requireCspDirective(directives, "form-action");
+    expect(
+      formAction,
+      "form-action must restrict form submissions to app-local origins (defense-in-depth against navigation/form exfiltration)",
+    ).toEqual(["'self'"]);
+
+    const navigateTo = requireCspDirective(directives, "navigate-to");
+    expect(
+      navigateTo,
+      "navigate-to must restrict in-webview navigations to app-local origins (external auth/links must open in the system browser)",
+    ).toEqual(["'self'"]);
+
     const frameAncestors = requireCspDirective(directives, "frame-ancestors");
     expect(frameAncestors).toContain("'none'");
 

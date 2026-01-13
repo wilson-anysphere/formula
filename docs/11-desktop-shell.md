@@ -173,11 +173,14 @@ The CSP is set in `app.security.csp` (see `apps/desktop/src-tauri/tauri.conf.jso
 Current policy (exact):
 
 ```text
-default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: data:; worker-src 'self' blob: data:; child-src 'self' blob: data:; connect-src 'self' https: ws: wss: blob: data:
+default-src 'self'; base-uri 'self'; form-action 'self'; navigate-to 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: data:; worker-src 'self' blob: data:; child-src 'self' blob: data:; connect-src 'self' https: ws: wss: blob: data:
 ```
 
 Rationale:
 
+- `form-action 'self'` prevents accidental/malicious form submissions from the WebView to unexpected origins.
+- `navigate-to 'self'` prevents in-webview navigations to remote origins. External links and OAuth flows should be opened
+  via the OS browser (see `open_external_url` / `shellOpen`).
 - The Rust engine runs as **WebAssembly inside a module Worker**, so CSP must allow:
   - `script-src 'wasm-unsafe-eval'` for WASM compilation/instantiation.
   - `worker-src 'self' blob: data:` for module workers (Vite may use `blob:`/`data:` URLs for worker bootstrapping).
