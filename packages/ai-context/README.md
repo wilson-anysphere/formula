@@ -275,6 +275,20 @@ const ctx = await cm.buildContext({
   query,
   // Optional knobs:
   sampleRows: 25,
+  // Limits (optional):
+  // - These are safety rails; overriding them can increase memory/CPU.
+  // - `maxChunkRows` controls how many TSV rows are included in each retrieved chunk preview.
+  // - `splitRegions` can improve retrieval quality for very tall tables by indexing multiple
+  //   row windows per region (at the cost of a larger in-memory index).
+  //
+  // limits: {
+  //   maxContextRows: 1000,
+  //   maxContextCells: 200_000,
+  //   maxChunkRows: 30,
+  //   splitRegions: false,
+  //   chunkRowOverlap: 3,
+  //   maxChunksPerRegion: 50,
+  // },
   // Sampling strategies:
   // - "random" (default)
   // - "stratified"
@@ -325,6 +339,32 @@ it uses for schema extraction + sampling + single-sheet RAG:
 
 If you need larger coverage, prefer workbook RAG (`buildWorkbookContext*`) where the source of truth is a **sparse** list of
 non-empty cells (via `SpreadsheetApi.listNonEmptyCells`) rather than a dense matrix.
+
+### Improving retrieval quality for tall tables (single-sheet)
+
+By default, single-sheet RAG indexes **one chunk per detected region**, and the chunk text includes only the first `maxChunkRows`
+rows (plus an ellipsis line when truncated). This keeps the in-memory index small and stable.
+
+For very tall regions (e.g. 200k rows × 1 column), queries that reference values near the bottom of the table may not retrieve well,
+since the indexed preview only contains the top rows.
+
+To improve this, you can opt into **row-window chunking**:
+
+```js
+const ctx = await cm.buildContext({
+  sheet,
+  query: "specialtoken",
+  limits: {
+    maxChunkRows: 30,
+    splitRegions: true,
+    chunkRowOverlap: 3,
+    maxChunksPerRegion: 20,
+  },
+});
+```
+
+When enabled, each tall region is split into multiple fixed-size row windows, each with its own chunk id and A1 range.
+This increases index size but typically improves recall for “bottom of table” queries.
 
 ---
 
