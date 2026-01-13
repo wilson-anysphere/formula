@@ -539,6 +539,15 @@ Spreadsheet tool calling is **provider-agnostic** and shared across Chat, Inline
 - The LLM-facing adapter is [`packages/ai-tools/src/llm/integration.ts`](../packages/ai-tools/src/llm/integration.ts) (`SpreadsheetLLMToolExecutor`),
   which connects the ToolExecutor to a host `SpreadsheetApi` (desktop uses `DocumentControllerSpreadsheetApi`).
 
+### Tool loop orchestration + approval gating
+
+- Provider-agnostic tool-calling loop (streaming): [`packages/llm/src/toolCallingStreaming.js`](../packages/llm/src/toolCallingStreaming.js)
+  - Responsible for executing tool calls, appending `role:"tool"` messages, and continuing until the model stops calling tools.
+- Audited wrapper used by desktop surfaces: [`packages/ai-tools/src/llm/audited-run.ts`](../packages/ai-tools/src/llm/audited-run.ts)
+  - Records tool calls/results + token usage and supports optional post-response claim verification.
+- Preview + approval gating helper (used by chat/agent surfaces): [`packages/ai-tools/src/llm/integration.ts`](../packages/ai-tools/src/llm/integration.ts)
+  - `createPreviewApprovalHandler` runs `PreviewEngine` on a cloned workbook and denies risky tool calls unless the UI approves.
+
 ### Tool result bounding + audit compaction
 
 - **Bounded tool results (for model context)**: [`packages/llm/src/toolResultSerialization.js`](../packages/llm/src/toolResultSerialization.js)
