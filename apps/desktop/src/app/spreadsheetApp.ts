@@ -1797,6 +1797,30 @@ export class SpreadsheetApp {
         }
       });
 
+      // Allow formula-bar range highlighting to resolve named ranges (e.g. `=SUM(SalesData)`)
+      // into concrete sheet/range coordinates.
+      this.formulaBar.model.setNameResolver((name) => {
+        const entry: any = this.searchWorkbook.getName(name);
+        const range = entry?.range;
+        if (
+          !range ||
+          typeof range.startRow !== "number" ||
+          typeof range.startCol !== "number" ||
+          typeof range.endRow !== "number" ||
+          typeof range.endCol !== "number"
+        ) {
+          return null;
+        }
+        const sheet = typeof entry?.sheetName === "string" && entry.sheetName.trim() ? entry.sheetName.trim() : undefined;
+        return {
+          startRow: range.startRow,
+          startCol: range.startCol,
+          endRow: range.endRow,
+          endCol: range.endCol,
+          sheet,
+        };
+      });
+
       this.formulaBarCompletion = new FormulaBarTabCompletionController({
         formulaBar: this.formulaBar,
         document: this.document,

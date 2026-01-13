@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { FormulaBarModel } from "./FormulaBarModel.js";
 import { parseA1Range } from "../spreadsheet/a1.js";
 import { parseSheetQualifiedA1Range } from "./parseSheetQualifiedA1Range.js";
+import { FORMULA_REFERENCE_PALETTE } from "@formula/spreadsheet-frontend";
 
 describe("FormulaBarModel", () => {
   it("inserts and updates range selections while editing", () => {
@@ -87,5 +88,27 @@ describe("FormulaBarModel", () => {
     model.setActiveCell({ address: "A1", input: "", value: null });
     model.setHoveredReference("Sheet2!A1:B2");
     expect(model.hoveredReference()).toEqual(parseA1Range("A1:B2"));
+  });
+
+  it("includes named ranges in reference highlights when a resolver is provided", () => {
+    const model = new FormulaBarModel();
+    model.setNameResolver((name) =>
+      name === "SalesData" ? { startRow: 0, startCol: 0, endRow: 9, endCol: 0, sheet: "Sheet1" } : null
+    );
+    model.setActiveCell({ address: "A1", input: "=SUM(SalesData)", value: null });
+    model.beginEdit();
+
+    const caretInside = "=SUM(".length + 1;
+    model.updateDraft("=SUM(SalesData)", caretInside, caretInside);
+
+    expect(model.referenceHighlights()).toEqual([
+      {
+        range: { startRow: 0, startCol: 0, endRow: 9, endCol: 0, sheet: "Sheet1" },
+        color: FORMULA_REFERENCE_PALETTE[0],
+        text: "SalesData",
+        index: 0,
+        active: true,
+      },
+    ]);
   });
 });

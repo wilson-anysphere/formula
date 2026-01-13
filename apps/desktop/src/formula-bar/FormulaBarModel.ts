@@ -29,6 +29,7 @@ export class FormulaBarModel {
   #isEditing = false;
   #cursorStart = 0;
   #cursorEnd = 0;
+  #resolveName: ((name: string) => FormulaReferenceRange | null) | null = null;
   #rangeInsertion: { start: number; end: number } | null = null;
   #hoveredReference: RangeAddress | null = null;
   #referenceColorByText = new Map<string, string>();
@@ -60,6 +61,18 @@ export class FormulaBarModel {
     this.#activeReferenceIndex = null;
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
+  }
+
+  /**
+   * Provide an optional name -> range resolver so formula reference highlights can
+   * include named ranges (identifiers that are not A1-style refs).
+   */
+  setNameResolver(resolver: ((name: string) => FormulaReferenceRange | null) | null): void {
+    this.#resolveName = resolver;
+    if (this.#isEditing) {
+      this.#updateReferenceHighlights();
+      this.#updateHoverFromCursor();
+    }
   }
 
   get activeCell(): ActiveCellInfo {
@@ -325,7 +338,12 @@ export class FormulaBarModel {
       return;
     }
 
-    const { references, activeIndex } = extractFormulaReferences(this.#draft, this.#cursorStart, this.#cursorEnd);
+    const { references, activeIndex } = extractFormulaReferences(
+      this.#draft,
+      this.#cursorStart,
+      this.#cursorEnd,
+      this.#resolveName ? { resolveName: this.#resolveName } : undefined
+    );
     const { colored, nextByText } = assignFormulaReferenceColors(references, this.#referenceColorByText);
     this.#referenceColorByText = nextByText;
     this.#coloredReferences = colored;

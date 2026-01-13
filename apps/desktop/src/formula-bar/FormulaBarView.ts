@@ -840,7 +840,7 @@ export class FormulaBarView {
     }
 
     const renderSpan = (span: { kind: string; start: number; end: number }, text: string): string => {
-      if (span.kind !== "reference" || !isFormulaEditing) {
+      if (!isFormulaEditing) {
         return `<span data-kind="${span.kind}">${escapeHtml(text)}</span>`;
       }
       const meta = referenceBySpanKey.get(`${span.start}:${span.end}`);
