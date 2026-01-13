@@ -621,6 +621,14 @@ export class SqliteVectorStore {
    *   storage space.
    */
   async compact() {
+    // If there is an in-flight persist, wait for it to complete before running
+    // `VACUUM` to avoid mutating the DB while `export()` is executing.
+    try {
+      await this._persistQueue;
+    } catch {
+      // ignore - a failed persist shouldn't prevent compaction, and we re-enqueue
+      // a fresh persist below.
+    }
     // `VACUUM` cannot run inside a transaction. All of our public methods free
     // prepared statements and close transactions before returning, so we can
     // safely run it directly here.
