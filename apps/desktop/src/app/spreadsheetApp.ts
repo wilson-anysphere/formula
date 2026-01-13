@@ -1937,8 +1937,13 @@ export class SpreadsheetApp {
         }
       );
 
-      // Allow formula-bar range highlighting to resolve named ranges (e.g. `=SUM(SalesData)`)
-      // into concrete sheet/range coordinates.
+      // Provide workbook schema context (defined names + tables) to the spreadsheet-frontend
+      // reference extractor so formula-bar range highlighting can resolve named ranges and
+      // structured table references (e.g. `Table1[Amount]`).
+      //
+      // NOTE: `DocumentWorkbookAdapter.tables` is keyed by normalized names, but the resolver in
+      // `@formula/spreadsheet-frontend` matches case-insensitively and also checks `table.name`.
+      this.formulaBar.model.setExtractFormulaReferencesOptions({ tables: this.searchWorkbook.tables as any });
       this.formulaBar.model.setNameResolver((name) => {
         const entry: any = this.searchWorkbook.getName(name);
         const range = entry?.range;

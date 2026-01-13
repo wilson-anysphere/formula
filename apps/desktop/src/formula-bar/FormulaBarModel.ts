@@ -10,6 +10,7 @@ import {
   assignFormulaReferenceColors,
   extractFormulaReferences,
   type ColoredFormulaReference,
+  type ExtractFormulaReferencesOptions,
   type FormulaReferenceRange,
 } from "@formula/spreadsheet-frontend";
 import type {
@@ -38,7 +39,7 @@ export class FormulaBarModel {
   #isEditing = false;
   #cursorStart = 0;
   #cursorEnd = 0;
-  #resolveName: ((name: string) => FormulaReferenceRange | null) | null = null;
+  #extractFormulaReferencesOptions: ExtractFormulaReferencesOptions | null = null;
   #rangeInsertion: { start: number; end: number } | null = null;
   #hoveredReference: RangeAddress | null = null;
   #hoveredReferenceText: string | null = null;
@@ -85,7 +86,16 @@ export class FormulaBarModel {
    * include named ranges (identifiers that are not A1-style refs).
    */
   setNameResolver(resolver: ((name: string) => FormulaReferenceRange | null) | null): void {
-    this.#resolveName = resolver;
+    const prev = this.#extractFormulaReferencesOptions;
+    const next: ExtractFormulaReferencesOptions = { ...(prev ?? {}) };
+    next.resolveName = resolver ?? undefined;
+    this.setExtractFormulaReferencesOptions(
+      next.resolveName || next.resolveStructuredRef || next.tables ? next : null
+    );
+  }
+
+  setExtractFormulaReferencesOptions(opts: ExtractFormulaReferencesOptions | null): void {
+    this.#extractFormulaReferencesOptions = opts;
     if (this.#isEditing) {
       this.#updateReferenceHighlights();
       this.#updateHoverFromCursor();
@@ -423,7 +433,7 @@ export class FormulaBarModel {
       this.#draft,
       this.#cursorStart,
       this.#cursorEnd,
-      this.#resolveName ? { resolveName: this.#resolveName } : undefined
+      this.#extractFormulaReferencesOptions ?? undefined
     );
     const { colored, nextByText } = assignFormulaReferenceColors(references, this.#referenceColorByText);
     this.#referenceColorByText = nextByText;

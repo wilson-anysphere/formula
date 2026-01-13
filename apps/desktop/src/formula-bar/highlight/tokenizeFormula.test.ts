@@ -82,4 +82,16 @@ describe("tokenizeFormula", () => {
     const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
     expect(refs).toEqual(["[Book.xlsx]Sheet1!A1", "Sheet1:Sheet3!B2"]);
   });
+
+  it("tokenizes Excel structured table references as a single reference token", () => {
+    const tokens = tokenizeFormula("=SUM(Table1[Amount])");
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["Table1[Amount]"]);
+  });
+
+  it("tokenizes structured refs with #All (including internal commas) as a single reference token", () => {
+    const tokens = tokenizeFormula("=SUM(Table1[[#All],[Amount]])");
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["Table1[[#All],[Amount]]"]);
+  });
 });
