@@ -8009,6 +8009,14 @@ const ribbonActions = createRibbonActionsFromCommands({
     if ((err as any)?.name === "DlpViolationError") return;
     showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
   },
+  commandOverrides: {
+    // Insert → PivotTable dropdown contains Excel-style submenu variants. We only implement
+    // the selection-based Pivot Builder flow today, so route "From Table/Range…" to the
+    // same built-in command.
+    "insert.tables.pivotTable.fromTableRange": async () => {
+      await commandRegistry.executeCommand("view.insertPivotTable");
+    },
+  },
   onBeforeExecuteCommand: async (_commandId, source) => {
     if (source.kind !== "extension") return;
     // Match keybinding/command palette behavior: executing an extension command should

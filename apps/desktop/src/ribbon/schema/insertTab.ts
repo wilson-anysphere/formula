@@ -19,8 +19,20 @@ export const insertTab: RibbonTabDefinition = {
           menuItems: [
             { id: "view.insertPivotTable", label: "PivotTable…", ariaLabel: "PivotTable", iconId: "chart" },
             { id: "insert.tables.pivotTable.fromTableRange", label: "From Table/Range…", ariaLabel: "PivotTable from Table or Range", iconId: "formatAsTable" },
-            { id: "insert.tables.pivotTable.fromExternal", label: "From External Data…", ariaLabel: "PivotTable from External Data", iconId: "globe" },
-            { id: "insert.tables.pivotTable.fromDataModel", label: "From Data Model…", ariaLabel: "PivotTable from Data Model", iconId: "puzzle" },
+            {
+              id: "insert.tables.pivotTable.fromExternal",
+              label: "From External Data…",
+              ariaLabel: "PivotTable from External Data",
+              iconId: "globe",
+              disabled: true,
+            },
+            {
+              id: "insert.tables.pivotTable.fromDataModel",
+              label: "From Data Model…",
+              ariaLabel: "PivotTable from Data Model",
+              iconId: "puzzle",
+              disabled: true,
+            },
           ],
         },
         {
