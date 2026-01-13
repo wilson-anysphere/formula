@@ -337,8 +337,34 @@ IP allowlists and record richer audit information.
 Expected response:
 
 ```json
-{ "ok": true, "userId": "u1", "orgId": "o1", "role": "editor", "sessionId": "..." }
+{
+  "ok": true,
+  "userId": "user-123",
+  "orgId": "o1",
+  "role": "editor",
+  "sessionId": "...",
+  "rangeRestrictions": [
+    {
+      "sheetId": "Sheet1",
+      "startRow": 0,
+      "startCol": 0,
+      "endRow": 0,
+      "endCol": 0,
+      "editAllowlist": ["user-123"]
+    }
+  ]
+}
 ```
+
+Optional fields:
+
+- `sessionId` (string) – forwarded into the websocket `AuthContext` for audit/diagnostics.
+- `rangeRestrictions` (array) – optional per-cell edit permissions, using the **same schema** as the
+  JWT `rangeRestrictions` claim above (see `packages/collab/permissions/normalizeRestriction`).
+
+  When `SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS=1` (default: `true` in production) and a non-empty
+  `rangeRestrictions` array is provided, the sync-server validates that **incoming Yjs updates do not
+  modify unauthorized cells** (violations close the websocket with code `1008`).
 
 For compatibility, `{ "active": true, ... }` is also accepted (and `active: false` is treated as
 inactive). When returning an inactive response, provide a string `reason` (or `error`) so the
