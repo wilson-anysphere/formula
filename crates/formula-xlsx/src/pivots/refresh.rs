@@ -7,6 +7,7 @@ use quick_xml::Reader;
 
 use crate::openxml::{local_name, parse_relationships, rels_part_name, resolve_target};
 use crate::package::{XlsxError, XlsxPackage};
+use crate::pivots::cache_records::PivotCacheValue;
 use crate::shared_strings::parse_shared_strings_xml;
 use crate::xml::{QName, XmlElement, XmlNode};
 
@@ -20,32 +21,45 @@ struct WorksheetSource {
     reference: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-enum PivotCacheValue {
-    String(String),
-    Number(String),
-    Bool(bool),
-    Missing,
+fn pivot_cache_value_is_blank(value: &PivotCacheValue) -> bool {
+    match value {
+        PivotCacheValue::Missing => true,
+        PivotCacheValue::String(s) => s.is_empty(),
+        PivotCacheValue::Number(_)
+        | PivotCacheValue::Bool(_)
+        | PivotCacheValue::Error(_)
+        | PivotCacheValue::DateTime(_)
+        | PivotCacheValue::Index(_) => false,
+    }
 }
 
-impl PivotCacheValue {
-    fn is_blank(&self) -> bool {
-        match self {
-            PivotCacheValue::Missing => true,
-            PivotCacheValue::String(s) => s.is_empty(),
-            PivotCacheValue::Number(_) | PivotCacheValue::Bool(_) => false,
-        }
+fn pivot_cache_value_header_text(value: &PivotCacheValue) -> String {
+    match value {
+        PivotCacheValue::String(s) => s.clone(),
+        PivotCacheValue::Number(n) => format_pivot_cache_number(*n),
+        PivotCacheValue::Bool(true) => "TRUE".to_string(),
+        PivotCacheValue::Bool(false) => "FALSE".to_string(),
+        PivotCacheValue::Error(e) => e.clone(),
+        PivotCacheValue::DateTime(dt) => dt.clone(),
+        PivotCacheValue::Index(idx) => idx.to_string(),
+        PivotCacheValue::Missing => String::new(),
     }
+}
 
-    fn header_text(&self) -> String {
-        match self {
-            PivotCacheValue::String(s) => s.clone(),
-            PivotCacheValue::Number(n) => n.clone(),
-            PivotCacheValue::Bool(true) => "TRUE".to_string(),
-            PivotCacheValue::Bool(false) => "FALSE".to_string(),
-            PivotCacheValue::Missing => String::new(),
-        }
+fn format_pivot_cache_number(value: f64) -> String {
+    // Use Excel-like "General" formatting for stable `<n v="..."/>` output.
+    //
+    // `f64::to_string()` prefers scientific notation for some magnitudes; Excel's pivot cache
+    // records generally use a more human-friendly fixed-point form when possible.
+    if !value.is_finite() {
+        return value.to_string();
     }
+    formula_format::format_value(
+        formula_format::Value::Number(value),
+        Some("General"),
+        &formula_format::FormatOptions::default(),
+    )
+    .text
 }
 
 impl XlsxPackage {
@@ -435,10 +449,9 @@ fn interpret_worksheet_cell_value(
                 return PivotCacheValue::Missing;
             };
 
-            if raw.parse::<f64>().is_ok() {
-                PivotCacheValue::Number(raw.to_string())
-            } else {
-                PivotCacheValue::String(raw.to_string())
+            match raw.parse::<f64>() {
+                Ok(n) => PivotCacheValue::Number(n),
+                Err(_) => PivotCacheValue::String(raw.to_string()),
             }
         }
     }
@@ -455,7 +468,7 @@ fn build_cache_fields_and_records(
             .get(&cell)
             .cloned()
             .unwrap_or(PivotCacheValue::Missing);
-        fields.push(value.header_text());
+        fields.push(pivot_cache_value_header_text(&value));
     }
 
     let mut records = Vec::new();
@@ -469,7 +482,7 @@ fn build_cache_fields_and_records(
                     .get(&cell)
                     .cloned()
                     .unwrap_or(PivotCacheValue::Missing);
-                if !value.is_blank() {
+                if !pivot_cache_value_is_blank(&value) {
                     all_blank = false;
                 }
                 record.push(value);
@@ -641,9 +654,18 @@ fn build_record_element(ns: Option<String>, record: &[PivotCacheValue]) -> XmlEl
     for value in record {
         out.children.push(XmlNode::Element(match value {
             PivotCacheValue::String(s) => build_value_element(ns.clone(), "s", Some(s.as_str())),
-            PivotCacheValue::Number(n) => build_value_element(ns.clone(), "n", Some(n.as_str())),
+            PivotCacheValue::Number(n) => {
+                let formatted = format_pivot_cache_number(*n);
+                build_value_element(ns.clone(), "n", Some(formatted.as_str()))
+            }
             PivotCacheValue::Bool(b) => {
                 build_value_element(ns.clone(), "b", Some(if *b { "1" } else { "0" }))
+            }
+            PivotCacheValue::Error(e) => build_value_element(ns.clone(), "e", Some(e.as_str())),
+            PivotCacheValue::DateTime(dt) => build_value_element(ns.clone(), "d", Some(dt.as_str())),
+            PivotCacheValue::Index(idx) => {
+                let idx_str = idx.to_string();
+                build_value_element(ns.clone(), "x", Some(idx_str.as_str()))
             }
             PivotCacheValue::Missing => build_value_element(ns.clone(), "m", None),
         }));
