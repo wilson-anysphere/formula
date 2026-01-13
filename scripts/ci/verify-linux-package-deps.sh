@@ -23,34 +23,95 @@ require_cmd dpkg
 require_cmd dpkg-deb
 require_cmd rpm
 
-bundle_dirs=()
-for target_dir in "apps/desktop/src-tauri/target" "target"; do
-  if [ ! -d "$target_dir" ]; then
-    continue
+target_dirs=()
+
+# Respect `CARGO_TARGET_DIR` if set (common in CI caching setups). Cargo interprets relative paths
+# relative to the working directory used for the build (repo root in CI).
+if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+  cargo_target_dir="${CARGO_TARGET_DIR}"
+  if [[ "${cargo_target_dir}" != /* ]]; then
+    cargo_target_dir="${repo_root}/${cargo_target_dir}"
   fi
-  # Cover:
-  # - apps/desktop/src-tauri/target/release/bundle
-  # - apps/desktop/src-tauri/target/<triple>/release/bundle
-  while IFS= read -r -d '' dir; do
-    bundle_dirs+=("$dir")
-  done < <(find "$target_dir" -type d -path "*/release/bundle" -print0)
+  if [[ -d "${cargo_target_dir}" ]]; then
+    target_dirs+=("${cargo_target_dir}")
+  fi
+fi
+
+# Common locations:
+# - workspace builds: target/
+# - standalone Tauri app builds: apps/desktop/src-tauri/target
+# - some setups build from apps/desktop, producing apps/desktop/target
+for d in "apps/desktop/src-tauri/target" "apps/desktop/target" "target"; do
+  if [[ -d "${d}" ]]; then
+    target_dirs+=("${d}")
+  fi
 done
 
+if [[ "${#target_dirs[@]}" -eq 0 ]]; then
+  fail "no Cargo target directories found (expected CARGO_TARGET_DIR, apps/desktop/src-tauri/target, apps/desktop/target, or target)"
+fi
+
+# Prefer predictable paths rather than traversing the entire Cargo build tree (which can be large).
+bundle_dirs=()
+shopt -s nullglob
+for target_dir in "${target_dirs[@]}"; do
+  if [[ -d "${target_dir}/release/bundle" ]]; then
+    bundle_dirs+=("${target_dir}/release/bundle")
+  fi
+  for dir in "${target_dir}"/*/release/bundle; do
+    if [[ -d "${dir}" ]]; then
+      bundle_dirs+=("${dir}")
+    fi
+  done
+done
+shopt -u nullglob
+
+# Fallback (slower): scan for bundle dirs via find if the expected layout isn't present.
+if [[ "${#bundle_dirs[@]}" -eq 0 ]]; then
+  for target_dir in "${target_dirs[@]}"; do
+    if [[ ! -d "${target_dir}" ]]; then
+      continue
+    fi
+    while IFS= read -r -d '' dir; do
+      bundle_dirs+=("$dir")
+    done < <(find "$target_dir" -type d -path "*/release/bundle" -print0)
+  done
+fi
+
+# De-dupe (preserve order).
+if [[ "${#bundle_dirs[@]}" -gt 0 ]]; then
+  declare -A seen_bundle_dirs=()
+  uniq_bundle_dirs=()
+  for dir in "${bundle_dirs[@]}"; do
+    if [[ -n "${seen_bundle_dirs[${dir}]:-}" ]]; then
+      continue
+    fi
+    seen_bundle_dirs["${dir}"]=1
+    uniq_bundle_dirs+=("${dir}")
+  done
+  bundle_dirs=("${uniq_bundle_dirs[@]}")
+fi
+
 if [ "${#bundle_dirs[@]}" -eq 0 ]; then
-  fail "no Tauri bundle directories found (expected something like apps/desktop/src-tauri/target/**/release/bundle)"
+  fail "no Tauri bundle directories found (expected something like target/**/release/bundle)"
 fi
 
 debs=()
 rpms=()
+shopt -s nullglob
 for bundle_dir in "${bundle_dirs[@]}"; do
-  while IFS= read -r -d '' f; do
-    debs+=("$f")
-  done < <(find "$bundle_dir" -type f -name "*.deb" -print0)
-
-  while IFS= read -r -d '' f; do
-    rpms+=("$f")
-  done < <(find "$bundle_dir" -type f -name "*.rpm" -print0)
+  debs+=("${bundle_dir}/deb/"*.deb)
+  rpms+=("${bundle_dir}/rpm/"*.rpm)
 done
+shopt -u nullglob
+
+# Sort/de-dupe for determinism.
+if [[ "${#debs[@]}" -gt 0 ]]; then
+  mapfile -t debs < <(printf '%s\n' "${debs[@]}" | sort -u)
+fi
+if [[ "${#rpms[@]}" -gt 0 ]]; then
+  mapfile -t rpms < <(printf '%s\n' "${rpms[@]}" | sort -u)
+fi
 
 if [ "${#debs[@]}" -eq 0 ]; then
   fail "no .deb artifacts found under: ${bundle_dirs[*]}"
