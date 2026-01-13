@@ -2082,6 +2082,9 @@ export class SpreadsheetApp {
       signal: this.domAbort.signal,
     });
 
+    this.root.addEventListener("dragover", (e) => this.onGridDragOver(e), { signal: this.domAbort.signal });
+    this.root.addEventListener("drop", (e) => this.onGridDrop(e), { signal: this.domAbort.signal });
+
     // If the user copies/cuts from an input/contenteditable (formula bar, comments, etc),
     // the system clipboard content changes and any prior "internal copy" context used for
     // style/formula shifting should be discarded. Grid copy/cut uses `preventDefault()`
@@ -9685,6 +9688,38 @@ export class SpreadsheetApp {
     if (deltaX === 0 && deltaY === 0) return;
     e.preventDefault();
     this.scrollBy(deltaX, deltaY);
+  }
+
+  private onGridDragOver(e: DragEvent): void {
+    const dt = e.dataTransfer;
+    if (!dt) return;
+    const types = Array.from(dt.types ?? []);
+    if (!types.includes("Files")) return;
+
+    // Only allow drop if at least one file is an image. Prefer `items` metadata during
+    // dragover; `files` may not be populated until drop in some browsers.
+    const hasImage =
+      Array.from(dt.items ?? []).some((item) => item.kind === "file" && item.type.startsWith("image/")) ||
+      Array.from(dt.files ?? []).some((file) => file.type.startsWith("image/"));
+    if (!hasImage) return;
+
+    e.preventDefault();
+    dt.dropEffect = "copy";
+  }
+
+  private onGridDrop(e: DragEvent): void {
+    const dt = e.dataTransfer;
+    if (!dt) return;
+
+    const imageFiles = Array.from(dt.files ?? []).filter((file) => file.type.startsWith("image/"));
+    if (imageFiles.length === 0) return;
+
+    e.preventDefault();
+
+    const placeAt = this.pickCellAtClientPoint(e.clientX, e.clientY) ?? this.getActiveCell();
+    // `insertPicturesFromFiles` is defined by the drawings/pictures feature. Use `any`
+    // here so this handler can compile independently of that implementation.
+    (this as any).insertPicturesFromFiles(imageFiles, { placeAt });
   }
 
   private onScrollbarThumbPointerDown(e: PointerEvent, axis: "x" | "y"): void {
