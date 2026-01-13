@@ -252,6 +252,13 @@ Application:
 
 Important: timelines are not representable as a pure “allowed set” without exploding into many individual dates; the model-level filter representation must preserve the range intent.
 
+Implementation note:
+
+- `formula-dax::FilterContext` is currently expressed primarily as **allowed-value sets** per column.
+  Until the DAX layer supports native range predicates in its filter context, timeline ranges may need to be:
+  - materialized into an allowed set (potentially large), or
+  - applied by extending the filter representation to carry `>=`/`<=` predicates.
+
 ## Migration note (current state + planned consolidation)
 
 ### Current state (today)
