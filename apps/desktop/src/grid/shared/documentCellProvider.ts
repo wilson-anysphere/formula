@@ -96,8 +96,16 @@ function looksLikeExternalHyperlink(text: string): boolean {
 }
 
 export class DocumentCellProvider implements CellProvider {
-  private readonly headerStyle: CellStyle = { fontFamily: DEFAULT_GRID_FONT_FAMILY, fontWeight: "600", textAlign: "center" };
-  private readonly rowHeaderStyle: CellStyle = { fontFamily: DEFAULT_GRID_FONT_FAMILY, fontWeight: "600", textAlign: "end" };
+  private readonly headerStyle: CellStyle = {
+    fontFamily: resolveCssVar("--font-sans", { fallback: DEFAULT_GRID_FONT_FAMILY }),
+    fontWeight: "600",
+    textAlign: "center"
+  };
+  private readonly rowHeaderStyle: CellStyle = {
+    fontFamily: resolveCssVar("--font-sans", { fallback: DEFAULT_GRID_FONT_FAMILY }),
+    fontWeight: "600",
+    textAlign: "end"
+  };
   private resolvedLinkColor: string | null = null;
   private readonly options: {
     document: DocumentController;
