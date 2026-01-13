@@ -15,6 +15,7 @@ describe("ContextManager types", () => {
     const source = `\
 import {
   ContextManager,
+  RagIndex,
   type BuildContextResult,
   type BuildWorkbookContextResult,
   type ContextSheet,
@@ -37,6 +38,9 @@ type _SchemaIsSheetSchema = Assert<BuildContextResult["schema"] extends SheetSch
 type _SchemaNotAny = Assert<IsAny<BuildContextResult["schema"]> extends false ? true : false>;
 type _RetrievedNotAny = Assert<IsAny<BuildContextResult["retrieved"][number]> extends false ? true : false>;
 type _RetrievedShape = Assert<BuildContextResult["retrieved"][number] extends RetrievedSheetChunk ? true : false>;
+
+type _RagIndexPropNotAny = Assert<IsAny<ContextManager["ragIndex"]> extends false ? true : false>;
+type _RagIndexPropShape = Assert<ContextManager["ragIndex"] extends RagIndex ? true : false>;
 
 type _WorkbookRetrievedNotAny = Assert<IsAny<BuildWorkbookContextResult["retrieved"][number]> extends false ? true : false>;
 type _WorkbookRetrievedShape = Assert<

@@ -206,6 +206,10 @@ export type WorkbookRagOptions = {
   sampleRows?: number;
 };
 export class ContextManager {
+  tokenBudgetTokens: number;
+  ragIndex: RagIndex;
+  workbookRag?: WorkbookRagOptions;
+
   constructor(options?: {
     tokenBudgetTokens?: number;
     ragIndex?: RagIndex;
