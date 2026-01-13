@@ -26,32 +26,22 @@ fn assert_encrypted_ooxml_bytes_detected(bytes: &[u8], stem: &str) {
 }
 
 #[test]
-fn detects_encrypted_ooxml_agile_fixture_if_present() {
+fn detects_encrypted_ooxml_agile_fixture() {
     let fixture_path = Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../fixtures/encrypted/ooxml/agile.xlsx"
     ));
-
-    if !fixture_path.exists() {
-        // Fixture is optional (may be added by another task/agent); skip if not present.
-        return;
-    }
 
     let bytes = std::fs::read(fixture_path).expect("read agile encrypted fixture");
     assert_encrypted_ooxml_bytes_detected(&bytes, "agile");
 }
 
 #[test]
-fn detects_encrypted_ooxml_standard_fixture_if_present() {
+fn detects_encrypted_ooxml_standard_fixture() {
     let fixture_path = Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../fixtures/encrypted/ooxml/standard.xlsx"
     ));
-
-    if !fixture_path.exists() {
-        // Fixture is optional (may be added by another task/agent); skip if not present.
-        return;
-    }
 
     let bytes = std::fs::read(fixture_path).expect("read standard encrypted fixture");
     assert_encrypted_ooxml_bytes_detected(&bytes, "standard");
