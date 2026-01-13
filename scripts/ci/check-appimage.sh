@@ -388,6 +388,9 @@ main() {
     local appimage_file_info=""
     appimage_file_info="$(file "$appimage_abs" 2>/dev/null || true)"
     echo "$appimage_file_info"
+    if [[ -z "$appimage_file_info" ]] || ! grep -qi "ELF" <<<"$appimage_file_info"; then
+      die "AppImage '$appimage' does not appear to be an ELF executable (file output: $appimage_file_info)"
+    fi
     if [[ -n "$appimage_file_info" ]] && ! grep -qiF "$expected_file_substring" <<<"$appimage_file_info"; then
       die "wrong AppImage architecture for '$appimage': expected '$expected_file_substring' (runner arch $(uname -m)), got: $appimage_file_info"
     fi
