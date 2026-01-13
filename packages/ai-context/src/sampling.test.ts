@@ -53,14 +53,16 @@ describe("sampling", () => {
     const total = 200_000;
     const strataCount = 100;
     const keys = Array.from({ length: strataCount }, (_v, i) => `S${i}`);
-    const rows = Array.from({ length: total }, (_v, i) => [keys[i % strataCount], i]);
+    // Keep the synthetic rows extremely small so this test stays fast and memory-light.
+    // Each row is just a reference to one of `keys`.
+    const rows = Array.from({ length: total }, (_v, i) => keys[i % strataCount]);
 
-    const sampledA = stratifiedSampleRows(rows, 10, { getStratum: (r: any) => r[0], seed: 123 });
-    const sampledB = stratifiedSampleRows(rows, 10, { getStratum: (r: any) => r[0], seed: 123 });
+    const sampledA = stratifiedSampleRows(rows, 10, { getStratum: (r: any) => r, seed: 123 });
+    const sampledB = stratifiedSampleRows(rows, 10, { getStratum: (r: any) => r, seed: 123 });
 
     expect(sampledA).toEqual(sampledB);
     expect(sampledA).toHaveLength(10);
-    expect(new Set(sampledA.map((r: any) => r[0])).size).toBe(10);
+    expect(new Set(sampledA).size).toBe(10);
   });
 
   it("headSampleRows returns the first N rows", () => {
