@@ -414,6 +414,7 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
     }
 
     exportInFlight = true;
+    let exportErrorMessage: string | null = null;
     const btn = exportButton as HTMLButtonElement;
     const prevDisabled = btn.disabled;
     btn.disabled = true;
@@ -468,14 +469,15 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
       return { blob, fileName };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      entriesMeta.textContent = `Failed to export audit log: ${message}`;
+      exportErrorMessage = `Failed to export audit log: ${message}`;
+      entriesMeta.textContent = exportErrorMessage;
       return null;
     } finally {
       exportInFlight = false;
       btn.disabled = prevDisabled;
       refreshButton.disabled = false;
       loadMoreButton.disabled = !hasMore;
-      updateMeta();
+      if (!exportErrorMessage) updateMeta();
 
       const next = queuedOperation;
       if (next) {
