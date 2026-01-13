@@ -162,6 +162,12 @@ function nextNameBoxErrorId(): string {
   return `formula-bar-name-box-error-${nameBoxErrorIdCounter}`;
 }
 
+let nameBoxListIdCounter = 0;
+function nextNameBoxListId(): string {
+  nameBoxListIdCounter += 1;
+  return `formula-name-box-list-${nameBoxListIdCounter}`;
+}
+
 export type FormulaBarCommitReason = "enter" | "tab" | "command";
 
 export interface FormulaBarCommit {
@@ -529,7 +535,7 @@ export class FormulaBarView {
     const nameBoxDropdownList = document.createElement("div");
     nameBoxDropdownList.className = "formula-bar-name-box-popup-list";
     nameBoxDropdownList.dataset.testid = "formula-name-box-list";
-    nameBoxDropdownList.id = `formula-name-box-list-${Math.random().toString(36).slice(2)}`;
+    nameBoxDropdownList.id = nextNameBoxListId();
     nameBoxDropdownList.setAttribute("role", "listbox");
     nameBoxDropdownList.setAttribute("aria-label", "Name box menu");
     nameBoxDropdownPopup.appendChild(nameBoxDropdownList);
