@@ -74,7 +74,10 @@ export class TabCompletionEngine {
     completionTimeoutMs?: number;
   });
 
-  getSuggestions(context: CompletionContext, options?: { previewEvaluator?: PreviewEvaluator }): Promise<Suggestion[]>;
+  getSuggestions(
+    context: CompletionContext,
+    options?: { previewEvaluator?: PreviewEvaluator; signal?: AbortSignal }
+  ): Promise<Suggestion[]>;
   buildCacheKey(context: CompletionContext): string;
 }
 

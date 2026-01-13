@@ -75,13 +75,14 @@ export class TabCompletionEngine {
 
   /**
    * @param {CompletionContext} context
-   * @param {{ previewEvaluator?: PreviewEvaluator }} [options]
+   * @param {{ previewEvaluator?: PreviewEvaluator, signal?: AbortSignal }} [options]
    * @returns {Promise<Suggestion[]>}
    */
   async getSuggestions(context, options = {}) {
     try {
       const input = safeToString(context?.currentInput);
       const cursorPosition = clampCursor(input, context?.cursorPosition);
+      const requestSignal = options?.signal;
 
       const normalizedContext = {
         currentInput: input,
@@ -96,7 +97,7 @@ export class TabCompletionEngine {
       const cached = safeCacheGet(this.cache, cacheKey);
       const baseSuggestions = Array.isArray(cached)
         ? cached
-        : await this.#computeBaseSuggestions(normalizedContext, input, cursorPosition);
+        : await this.#computeBaseSuggestions(normalizedContext, input, cursorPosition, requestSignal);
 
       if (!Array.isArray(cached)) {
         safeCacheSet(this.cache, cacheKey, baseSuggestions);
@@ -179,7 +180,7 @@ export class TabCompletionEngine {
     }
   }
 
-  async #computeBaseSuggestions(context, input, cursorPosition) {
+  async #computeBaseSuggestions(context, input, cursorPosition, requestSignal) {
     /** @type {ReturnType<typeof parsePartialFormulaFallback>} */
     let parsed;
     try {
@@ -199,7 +200,7 @@ export class TabCompletionEngine {
     const [ruleBased, patternBased, backendBased] = await Promise.all([
       safeArrayResult(() => this.getRuleBasedSuggestions(context, parsed)),
       safeArrayResult(() => this.getPatternSuggestions(context, parsed)),
-      safeArrayResult(() => this.getCursorBackendSuggestions(context, parsed)),
+      safeArrayResult(() => this.getCursorBackendSuggestions(context, parsed, requestSignal)),
     ]);
 
     return rankAndDedupe([...ruleBased, ...patternBased, ...backendBased]).slice(0, this.maxSuggestions);
@@ -267,9 +268,10 @@ export class TabCompletionEngine {
   /**
    * @param {CompletionContext} context
    * @param {ReturnType<typeof parsePartialFormulaFallback>} parsed
+   * @param {AbortSignal | undefined} requestSignal
    * @returns {Promise<Suggestion[]>}
    */
-  async getCursorBackendSuggestions(context, parsed) {
+  async getCursorBackendSuggestions(context, parsed, requestSignal) {
     if (!this.completionClient) return [];
     if (!parsed.isFormula) return [];
 
@@ -288,8 +290,10 @@ export class TabCompletionEngine {
     const cursor = clampCursor(input, context?.cursorPosition);
     const cell = safeNormalizeCellRef(context?.cellRef);
 
+    const controller = new AbortController();
+    const removeRequestAbortListener = forwardAbortSignal(requestSignal, controller);
+
     try {
-      const controller = new AbortController();
       const completion = await withTimeout(
         this.completionClient.completeTabCompletion({
           input,
@@ -315,6 +319,8 @@ export class TabCompletionEngine {
     } catch {
       // Backend is optional; ignore failures and timeouts.
       return [];
+    } finally {
+      removeRequestAbortListener?.();
     }
   }
 
@@ -1663,6 +1669,33 @@ function withTimeout(promise, timeoutMs, onTimeout) {
       },
     );
   });
+}
+
+/**
+ * Forward an external AbortSignal onto a local AbortController so callers can cancel
+ * in-flight backend completions (e.g. when the user keeps typing).
+ *
+ * @param {AbortSignal | undefined} requestSignal
+ * @param {AbortController} controller
+ * @returns {(() => void) | null}
+ */
+function forwardAbortSignal(requestSignal, controller) {
+  /** @type {(() => void) | null} */
+  let removeListener = null;
+  if (!requestSignal) return removeListener;
+
+  if (requestSignal.aborted) {
+    controller.abort();
+    return removeListener;
+  }
+
+  if (typeof requestSignal.addEventListener === "function") {
+    const onAbort = () => controller.abort();
+    requestSignal.addEventListener("abort", onAbort, { once: true });
+    removeListener = () => requestSignal.removeEventListener("abort", onAbort);
+  }
+
+  return removeListener;
 }
 
 const DEFAULT_CELL_REF = Object.freeze({ row: 0, col: 0 });
