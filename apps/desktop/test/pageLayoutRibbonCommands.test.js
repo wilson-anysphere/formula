@@ -11,7 +11,8 @@ function escapeRegExp(value) {
 }
 
 test("Ribbon schema includes Page Layout command ids", () => {
-  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
+  // The ribbon schema is modularized; Page Layout lives in its own schema module.
+  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "schema", "pageLayoutTab.ts");
   const schema = fs.readFileSync(schemaPath, "utf8");
 
   const ids = [
