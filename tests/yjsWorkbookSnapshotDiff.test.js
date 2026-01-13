@@ -189,6 +189,28 @@ test("diffYjsWorkbookSnapshots reads frozen panes from legacy top-level sheet ke
   ]);
 });
 
+test("diffYjsWorkbookSnapshots canonicalizes tabColor to 8-digit ARGB", () => {
+  const doc = new Y.Doc();
+  const sheets = doc.getArray("sheets");
+
+  const sheet1 = new Y.Map();
+  sheet1.set("id", "sheet1");
+  sheet1.set("name", "Sheet1");
+  // Non-canonical 6-digit RGB hex (with "#"); should normalize to ARGB with opaque alpha.
+  sheet1.set("tabColor", "#00FF00");
+  sheets.push([sheet1]);
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  doc.transact(() => {
+    sheet1.set("tabColor", null);
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  assert.deepEqual(diff.sheets.metaChanged, [{ id: "sheet1", field: "tabColor", before: "FF00FF00", after: null }]);
+});
+
 test("diffYjsWorkbookSnapshots reports formatOnly edits when column default formats change (layered formats)", () => {
   const doc = new Y.Doc();
   const sheets = doc.getArray("sheets");

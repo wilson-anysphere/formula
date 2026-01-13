@@ -310,9 +310,14 @@ function normalizeTabColor(raw) {
   else if (raw && typeof raw === "object" && typeof raw.rgb === "string") rgb = raw.rgb;
   if (rgb == null) return null;
 
-  const cleaned = rgb.trim().replace(/^#/, "");
-  if (!cleaned) return null;
-  return cleaned.toUpperCase();
+  let str = rgb.trim();
+  if (!str) return null;
+  if (str.startsWith("#")) str = str.slice(1);
+
+  // Allow 6-digit RGB hex by assuming opaque alpha.
+  if (/^[0-9A-Fa-f]{6}$/.test(str)) str = `FF${str}`;
+  if (!/^[0-9A-Fa-f]{8}$/.test(str)) return null;
+  return str.toUpperCase();
 }
 
 /**
