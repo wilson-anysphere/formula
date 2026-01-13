@@ -81,8 +81,19 @@ def _find_src_tauri_dirs(repo_root: Path) -> Iterable[Path]:
 def _candidate_target_dirs(repo_root: Path) -> list[Path]:
     candidates: list[Path] = []
 
+    # Some Tauri build flows export CARGO_TARGET_DIR (and/or use a non-default target dir).
+    # Prefer it when available so this verifier can find bundles regardless of build layout.
+    cargo_target_dir = os.environ.get("CARGO_TARGET_DIR", "").strip()
+    if cargo_target_dir:
+        p = Path(cargo_target_dir)
+        if not p.is_absolute():
+            p = repo_root / p
+        if p.is_dir():
+            candidates.append(p)
+
     for p in (
         repo_root / "apps" / "desktop" / "src-tauri" / "target",
+        repo_root / "apps" / "desktop" / "target",
         repo_root / "target",
     ):
         if p.is_dir():
