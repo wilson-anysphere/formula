@@ -706,6 +706,28 @@ test("indexWorkbook rejects when embedder returns the wrong number of vectors (n
   assert.deepEqual(await store.list({ workbookId: workbook.id, includeVector: false }), []);
 });
 
+test("indexWorkbook rejects when embedder returns a non-array result (no partial writes)", async () => {
+  const workbook = makeWorkbookTwoTables();
+  const store = new InMemoryVectorStore({ dimension: 128 });
+
+  let embedCalls = 0;
+  const embedder = {
+    async embedTexts() {
+      embedCalls += 1;
+      // Misbehaving embedder: returns a single vector instead of an array of vectors.
+      return /** @type {any} */ (new Float32Array(128));
+    },
+  };
+
+  await assert.rejects(
+    indexWorkbook({ workbook, vectorStore: store, embedder }),
+    /returned a non-array result/
+  );
+
+  assert.equal(embedCalls, 1);
+  assert.deepEqual(await store.list({ workbookId: workbook.id, includeVector: false }), []);
+});
+
 test("indexWorkbook rejects when embedder vectors have the wrong dimension (no partial writes)", async () => {
   const workbook = makeWorkbookTwoTables();
   const store = new InMemoryVectorStore({ dimension: 128 });
