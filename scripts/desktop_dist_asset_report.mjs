@@ -47,7 +47,8 @@ function formatBytesAndMb(bytes) {
 function parseBudgetMb(raw, envName) {
   const cleaned = raw.trim();
   if (!cleaned) throw new Error(`Invalid ${envName}: empty string`);
-  const value = Number.parseFloat(cleaned);
+  // Use `Number()` instead of `parseFloat()` so values like "50MB" are rejected.
+  const value = Number(cleaned);
   const quoted = JSON.stringify(raw);
   if (!Number.isFinite(value)) throw new Error(`Invalid ${envName}=${quoted} (expected a number)`);
   if (value <= 0) throw new Error(`Invalid ${envName}=${quoted} (must be > 0)`);
@@ -129,16 +130,16 @@ function parseArgs(argv) {
 
     const topMatch = arg.match(/^--top=(.*)$/) || arg.match(/^--limit=(.*)$/);
     if (topMatch) {
-      const value = Number.parseInt(topMatch[1], 10);
-      if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --top value: ${topMatch[1]}`);
+      const value = Number(topMatch[1]);
+      if (!Number.isInteger(value) || value <= 0) throw new Error(`Invalid --top value: ${topMatch[1]}`);
       out.topN = value;
       continue;
     }
     if (arg === "--top" || arg === "--limit") {
       const next = args[i + 1];
       if (!next) throw new Error(`Missing value for ${arg}`);
-      const value = Number.parseInt(next, 10);
-      if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid ${arg} value: ${next}`);
+      const value = Number(next);
+      if (!Number.isInteger(value) || value <= 0) throw new Error(`Invalid ${arg} value: ${next}`);
       out.topN = value;
       i++;
       continue;
@@ -146,16 +147,17 @@ function parseArgs(argv) {
 
     const groupDepthMatch = arg.match(/^--group-depth=(.*)$/);
     if (groupDepthMatch) {
-      const value = Number.parseInt(groupDepthMatch[1], 10);
-      if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --group-depth value: ${groupDepthMatch[1]}`);
+      const value = Number(groupDepthMatch[1]);
+      if (!Number.isInteger(value) || value <= 0)
+        throw new Error(`Invalid --group-depth value: ${groupDepthMatch[1]}`);
       out.groupDepth = value;
       continue;
     }
     if (arg === "--group-depth") {
       const next = args[i + 1];
       if (!next) throw new Error("Missing value for --group-depth");
-      const value = Number.parseInt(next, 10);
-      if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --group-depth value: ${next}`);
+      const value = Number(next);
+      if (!Number.isInteger(value) || value <= 0) throw new Error(`Invalid --group-depth value: ${next}`);
       out.groupDepth = value;
       i++;
       continue;

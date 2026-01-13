@@ -64,6 +64,21 @@ test("desktop_dist_asset_report supports --no-types", () => {
   assert.doesNotMatch(proc.stdout, /### File type totals/);
 });
 
+test("desktop_dist_asset_report rejects non-numeric budget env vars", () => {
+  const distDir = mkdtempSync(path.join(tmpdir(), "formula-desktop-dist-invalid-budget-"));
+  createSizedFile(path.join(distDir, "assets", "a.bin"), 123);
+  const proc = spawnSync(process.execPath, [scriptPath, "--dist-dir", distDir, "--top", "1"], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB: "50MB",
+    },
+  });
+
+  assert.equal(proc.status, 2);
+  assert.match(proc.stderr, /Invalid FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB/);
+});
+
 test("desktop_dist_asset_report resolves missing relative --dist-dir against CWD (not repo root)", () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "formula-desktop-dist-cwd-"));
   const missingName = `missing-dist-${process.pid}-${Date.now()}`;
