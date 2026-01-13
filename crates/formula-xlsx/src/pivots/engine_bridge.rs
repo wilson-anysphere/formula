@@ -79,28 +79,6 @@ fn pivot_cache_value_to_engine_inner(value: PivotCacheValue) -> PivotValue {
     }
 }
 
-fn pivot_value_to_key_part(value: PivotValue) -> PivotKeyPart {
-    match value {
-        PivotValue::Blank => PivotKeyPart::Blank,
-        PivotValue::Number(n) => {
-            // Match the pivot engine's internal canonicalization:
-            // - treat -0.0 and 0.0 as identical
-            // - canonicalize all NaNs to a single representation
-            let bits = if n == 0.0 {
-                0.0_f64.to_bits()
-            } else if n.is_nan() {
-                f64::NAN.to_bits()
-            } else {
-                n.to_bits()
-            };
-            PivotKeyPart::Number(bits)
-        }
-        PivotValue::Date(d) => PivotKeyPart::Date(d),
-        PivotValue::Text(s) => PivotKeyPart::Text(s),
-        PivotValue::Bool(b) => PivotKeyPart::Bool(b),
-    }
-}
-
 fn pivot_key_display_string(value: PivotValue) -> String {
     match value {
         PivotValue::Blank => "(blank)".to_string(),

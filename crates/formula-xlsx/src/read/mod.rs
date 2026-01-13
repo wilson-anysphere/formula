@@ -765,7 +765,6 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     let mut sheet_meta: Vec<SheetMeta> = Vec::with_capacity(sheets.len());
     let mut cell_meta = std::collections::HashMap::new();
     let mut rich_value_cells = std::collections::HashMap::new();
-    let persons = parse_persons_from_parts(&parts);
     let mut comment_part_names: std::collections::HashMap<formula_model::WorksheetId, WorksheetCommentPartNames> =
         std::collections::HashMap::new();
     let mut comment_snapshot: std::collections::HashMap<formula_model::WorksheetId, Vec<Comment>> =
@@ -985,19 +984,6 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         calc_affecting_edits: false,
         workbook_kind,
     })
-}
-
-fn parse_persons_from_parts(parts: &BTreeMap<String, Vec<u8>>) -> BTreeMap<String, String> {
-    let mut persons = BTreeMap::<String, String>::new();
-    for (path, bytes) in parts {
-        if !path.starts_with("xl/persons/") || !path.ends_with(".xml") {
-            continue;
-        }
-        if let Ok(parsed) = crate::comments::persons::parse_persons_xml(bytes) {
-            persons.extend(parsed);
-        }
-    }
-    persons
 }
 
 fn discover_worksheet_comment_part_names(
