@@ -21,7 +21,7 @@ export type { FillMode } from "./interaction/fillHandle";
 
 export type { GridPresence, GridPresenceCursor, GridPresenceRange } from "./presence/types";
 
-export type { CanvasGridImageResolver, CanvasGridImageSource, GridPerfStats } from "./rendering/CanvasGridRenderer";
+export type { CanvasGridImageResolver, CanvasGridImageSource, CanvasGridRendererOptions, GridPerfStats } from "./rendering/CanvasGridRenderer";
 export type { GridTheme } from "./theme/GridTheme";
 export { DEFAULT_GRID_THEME, resolveGridTheme } from "./theme/GridTheme";
 export {

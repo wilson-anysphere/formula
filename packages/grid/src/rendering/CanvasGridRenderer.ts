@@ -67,6 +67,37 @@ export interface GridPerfStats {
   blitUsed: boolean;
 }
 
+export interface CanvasGridRendererOptions {
+  provider: CellProvider;
+  rowCount: number;
+  colCount: number;
+  headerRows?: number | null;
+  headerCols?: number | null;
+  defaultRowHeight?: number;
+  defaultColWidth?: number;
+  prefetchOverscanRows?: number;
+  prefetchOverscanCols?: number;
+  theme?: Partial<GridTheme>;
+  /**
+   * Optional resolver for images referenced by {@link CellData.image}.
+   *
+   * When provided, the renderer will cache decoded bitmaps keyed by image id.
+   */
+  imageResolver?: CanvasGridImageResolver | null;
+  /**
+   * Default font family used when rendering/measuring cell text if `CellStyle.fontFamily` is unset.
+   *
+   * Defaults to `"system-ui"` to preserve existing behavior.
+   */
+  defaultCellFontFamily?: string;
+  /**
+   * Default font family used when rendering/measuring header cell text if `CellStyle.fontFamily` is unset.
+   *
+   * Defaults to `defaultCellFontFamily` (or `"system-ui"` when unset).
+   */
+  defaultHeaderFontFamily?: string;
+}
+
 interface Selection {
   row: number;
   col: number;
@@ -336,6 +367,7 @@ function fontSpecForRichTextStyle(
 const EXPLICIT_NEWLINE_RE = /[\r\n]/;
 const MAX_TEXT_OVERFLOW_COLUMNS = 128;
 const EMPTY_MERGED_INDEX = new MergedCellIndex([]);
+const DEFAULT_CELL_FONT_FAMILY = "system-ui";
 
 export function formatCellDisplayText(value: CellData["value"]): string {
   if (value === null) return "";
@@ -438,7 +470,10 @@ export class CanvasGridRenderer {
   private imagePlaceholderPattern: { pattern: CanvasPattern; zoomKey: number } | null = null;
   private destroyed = false;
 
-  private presenceFont = "12px system-ui, sans-serif";
+  private readonly defaultCellFontFamily: string;
+  private readonly defaultHeaderFontFamily: string;
+
+  private presenceFont: string;
   private theme: GridTheme;
 
   private readonly perfStats: GridPerfStats = {
@@ -518,24 +553,24 @@ export class CanvasGridRenderer {
   private mergedIndexKey: string | null = null;
   private mergedIndexDirty = true;
 
-  constructor(options: {
-    provider: CellProvider;
-    rowCount: number;
-    colCount: number;
-    headerRows?: number | null;
-    headerCols?: number | null;
-    defaultRowHeight?: number;
-    defaultColWidth?: number;
-    prefetchOverscanRows?: number;
-    prefetchOverscanCols?: number;
-    theme?: Partial<GridTheme>;
-    imageResolver?: CanvasGridImageResolver | null;
-  }) {
+  constructor(options: CanvasGridRendererOptions) {
     this.provider = options.provider;
     this.prefetchOverscanRows = CanvasGridRenderer.sanitizeOverscan(options.prefetchOverscanRows);
     this.prefetchOverscanCols = CanvasGridRenderer.sanitizeOverscan(options.prefetchOverscanCols);
     this.theme = resolveGridTheme(options.theme);
     this.imageResolver = options.imageResolver ?? null;
+
+    const sanitizeFontFamily = (value: string | undefined): string | null => {
+      if (typeof value !== "string") return null;
+      const trimmed = value.trim();
+      return trimmed ? trimmed : null;
+    };
+
+    const defaultCellFontFamily = sanitizeFontFamily(options.defaultCellFontFamily) ?? DEFAULT_CELL_FONT_FAMILY;
+    this.defaultCellFontFamily = defaultCellFontFamily;
+    this.defaultHeaderFontFamily = sanitizeFontFamily(options.defaultHeaderFontFamily) ?? defaultCellFontFamily;
+    this.presenceFont = `${12 * this.zoom}px ${this.defaultHeaderFontFamily}, sans-serif`;
+
     this.baseDefaultRowHeight = options.defaultRowHeight ?? 21;
     this.baseDefaultColWidth = options.defaultColWidth ?? 100;
     this.scroll = new VirtualScrollManager({
@@ -678,7 +713,7 @@ export class CanvasGridRenderer {
 
     this.scroll = nextScroll;
     this.zoom = clamped;
-    this.presenceFont = `${12 * this.zoom}px system-ui, sans-serif`;
+    this.presenceFont = `${12 * this.zoom}px ${this.defaultHeaderFontFamily}, sans-serif`;
 
     this.scroll.setScroll(targetScrollX, targetScrollY);
     const aligned = this.alignScrollToDevicePixels(this.scroll.getScroll());
@@ -1487,6 +1522,9 @@ export class CanvasGridRenderer {
             end: Math.min(rowCount, viewport.main.rows.end + overscanRows)
           };
 
+    const headerRows = this.headerRowsOverride ?? (viewport.frozenRows > 0 ? 1 : 0);
+    const headerCols = this.headerColsOverride ?? (viewport.frozenCols > 0 ? 1 : 0);
+
     const layoutEngine = this.textLayoutEngine;
 
     let maxMeasured = 0;
@@ -1500,7 +1538,8 @@ export class CanvasGridRenderer {
 
       const style = cell.style;
       const fontSize = (style?.fontSize ?? 12) * zoom;
-      const fontFamily = style?.fontFamily ?? "system-ui";
+      const isHeader = row < headerRows || col < headerCols;
+      const fontFamily = style?.fontFamily ?? (isHeader ? this.defaultHeaderFontFamily : this.defaultCellFontFamily);
       const fontWeight = style?.fontWeight ?? "400";
       const fontStyle = style?.fontStyle ?? "normal";
       const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight, style: fontStyle } satisfies FontSpec;
@@ -1611,6 +1650,9 @@ export class CanvasGridRenderer {
             end: Math.min(colCount, viewport.main.cols.end + overscanCols)
           };
 
+    const headerRows = this.headerRowsOverride ?? (viewport.frozenRows > 0 ? 1 : 0);
+    const headerCols = this.headerColsOverride ?? (viewport.frozenCols > 0 ? 1 : 0);
+
     const layoutEngine = this.textLayoutEngine;
     const defaultHeight = this.scroll.rows.defaultSize;
     if (!layoutEngine) return defaultHeight;
@@ -1635,7 +1677,8 @@ export class CanvasGridRenderer {
       hasContent = true;
 
       const fontSize = (style?.fontSize ?? 12) * zoom;
-      const fontFamily = style?.fontFamily ?? "system-ui";
+      const isHeader = row < headerRows || col < headerCols;
+      const fontFamily = style?.fontFamily ?? (isHeader ? this.defaultHeaderFontFamily : this.defaultCellFontFamily);
       const fontWeight = style?.fontWeight ?? "400";
       const fontStyle = style?.fontStyle ?? "normal";
       const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight, style: fontStyle } satisfies FontSpec;
@@ -2754,7 +2797,7 @@ export class CanvasGridRenderer {
 
     // Font specs are part of the text-layout cache key and are returned in layout runs.
     // Avoid mutating a shared object after passing it to the layout engine.
-    let fontSpec = { family: "system-ui", sizePx: 12 * zoom, weight: "400", style: "normal" } satisfies FontSpec;
+    let fontSpec = { family: this.defaultCellFontFamily, sizePx: 12 * zoom, weight: "400", style: "normal" } satisfies FontSpec;
     let currentFontFamily = "";
     let currentFontSize = -1;
     let currentFontWeight = "";
@@ -2953,7 +2996,8 @@ export class CanvasGridRenderer {
           const rawLabel = image.altText ?? (typeof cell.value === "string" ? cell.value : "");
           const label = rawLabel && rawLabel.trim() !== "" ? rawLabel : "[Image]";
           const fontSize = Math.max(10, Math.round(11 * zoom));
-          contentCtx.font = `${fontSize}px system-ui, sans-serif`;
+          const placeholderFontFamily = `${isHeader ? this.defaultHeaderFontFamily : this.defaultCellFontFamily}, sans-serif`;
+          contentCtx.font = `${fontSize}px ${placeholderFontFamily}`;
           contentCtx.fillStyle = "#333333";
           contentCtx.textAlign = "center";
           contentCtx.textBaseline = "middle";
@@ -2974,7 +3018,7 @@ export class CanvasGridRenderer {
 
       if (hasValue || hasRichText) {
         const fontSize = (style?.fontSize ?? 12) * zoom;
-        const fontFamily = style?.fontFamily ?? "system-ui";
+        const fontFamily = style?.fontFamily ?? (isHeader ? this.defaultHeaderFontFamily : this.defaultCellFontFamily);
         const fontWeight = style?.fontWeight ?? "400";
         const fontStyle = style?.fontStyle ?? "normal";
 
@@ -5263,6 +5307,9 @@ export class CanvasGridRenderer {
     const zoom = this.zoom;
     const paddingX = 4 * zoom;
     const paddingY = 2 * zoom;
+    const viewport = this.scroll.getViewportState();
+    const headerRows = this.headerRowsOverride ?? (viewport.frozenRows > 0 ? 1 : 0);
+    const headerCols = this.headerColsOverride ?? (viewport.frozenCols > 0 ? 1 : 0);
 
     let rowYSheet = this.scroll.rows.positionOf(startRow);
     for (let row = startRow; row < endRow; row++) {
@@ -5278,7 +5325,8 @@ export class CanvasGridRenderer {
         if (cell && cell.value !== null) {
           const style = cell.style;
           const fontSize = (style?.fontSize ?? 12) * zoom;
-          const fontFamily = style?.fontFamily ?? "system-ui";
+          const isHeader = row < headerRows || col < headerCols;
+          const fontFamily = style?.fontFamily ?? (isHeader ? this.defaultHeaderFontFamily : this.defaultCellFontFamily);
           const fontWeight = style?.fontWeight ?? "400";
           const fontStyle = style?.fontStyle ?? "normal";
           const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight, style: fontStyle } satisfies FontSpec;

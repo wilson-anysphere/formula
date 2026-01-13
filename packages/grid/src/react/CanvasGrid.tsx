@@ -139,6 +139,18 @@ export interface CanvasGridProps {
   frozenRows?: number;
   frozenCols?: number;
   theme?: Partial<GridTheme>;
+  /**
+   * Default font family used for cell text when `CellStyle.fontFamily` is unset.
+   *
+   * When omitted, the renderer preserves existing behavior (`"system-ui"`).
+   */
+  defaultCellFontFamily?: string;
+  /**
+   * Default font family used for header cell text when `CellStyle.fontFamily` is unset.
+   *
+   * Defaults to `defaultCellFontFamily` when omitted.
+   */
+  defaultHeaderFontFamily?: string;
   defaultRowHeight?: number;
   defaultColWidth?: number;
   zoom?: number;
@@ -420,6 +432,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           provider: props.provider,
           rowCount: props.rowCount,
           colCount: props.colCount,
+          defaultCellFontFamily: props.defaultCellFontFamily,
+          defaultHeaderFontFamily: props.defaultHeaderFontFamily,
           defaultRowHeight: props.defaultRowHeight,
           defaultColWidth: props.defaultColWidth,
           prefetchOverscanRows,
@@ -430,6 +444,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         props.provider,
         props.rowCount,
         props.colCount,
+        props.defaultCellFontFamily,
+        props.defaultHeaderFontFamily,
         props.defaultRowHeight,
         props.defaultColWidth,
         props.imageResolver,
