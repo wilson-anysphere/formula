@@ -440,6 +440,30 @@ For single-sheet context (`buildContext()`), the default section priorities are:
 
 This means that when budgets shrink, **samples drop first**, then attachments, then schema, etc.
 
+### Example: pack your own sections into a prompt budget
+
+If you’re not using `ContextManager`, you can still use the token-budgeting primitives directly:
+
+```js
+import {
+  createHeuristicTokenEstimator,
+  packSectionsToTokenBudget,
+  stableJsonStringify,
+} from "./src/index.js";
+
+const estimator = createHeuristicTokenEstimator();
+const maxTokens = 8_000;
+
+const sections = [
+  { key: "schema", priority: 3, text: `Schema:\n${stableJsonStringify(schema)}` },
+  { key: "retrieved", priority: 4, text: `Retrieved:\n${stableJsonStringify(retrieved)}` },
+  { key: "samples", priority: 1, text: sampledRows.map((r) => JSON.stringify(r)).join("\n") },
+].filter((s) => s.text);
+
+const packed = packSectionsToTokenBudget(sections, maxTokens, estimator);
+const promptContext = packed.map((s) => `## ${s.key}\n${s.text}`).join("\n\n");
+```
+
 ### How message token budgeting works (`trimMessagesToBudget`)
 
 `trimMessagesToBudget()` enforces:
