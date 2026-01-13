@@ -138,3 +138,18 @@ test("chunkToText truncates long formulas inside formulaRegion samples", () => {
   assert.match(text, /A1:=A{56}\.\.\./);
   assert.doesNotMatch(text, /A{80}/);
 });
+
+test("chunkToText reports when formulaRegion samples are truncated", () => {
+  const cells = Array.from({ length: 13 }, (_, r) => [{ f: `=A${r + 1}` }]);
+  const chunk = {
+    kind: "formulaRegion",
+    title: "Formula region A1:A13",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 12, c1: 0 },
+    cells,
+  };
+
+  const text = chunkToText(chunk);
+  assert.match(text, /… \(\+1 more formulas\)/);
+  assert.doesNotMatch(text, /\bA13:=/);
+});

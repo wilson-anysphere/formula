@@ -2,6 +2,7 @@ import { cellToA1, rectToA1 } from "./rect.js";
 
 const DEFAULT_MAX_COLUMNS_FOR_SCHEMA = 20;
 const DEFAULT_MAX_COLUMNS_FOR_ROWS = 20;
+const MAX_FORMULA_SAMPLES = 12;
 
 function formatScalar(value) {
   if (value == null) return "";
@@ -167,14 +168,16 @@ export function chunkToText(chunk, opts) {
 
   if (chunk.kind === "formulaRegion") {
     const formulas = [];
-    for (let r = 0; r < cells.length && formulas.length < 12; r += 1) {
-      for (let c = 0; c < (cells[r]?.length ?? 0) && formulas.length < 12; c += 1) {
+    for (let r = 0; r < cells.length && formulas.length < MAX_FORMULA_SAMPLES; r += 1) {
+      for (let c = 0; c < (cells[r]?.length ?? 0) && formulas.length < MAX_FORMULA_SAMPLES; c += 1) {
         const f = cells[r][c]?.f;
         if (!f) continue;
         const addr = cellToA1(chunk.rect.r0 + r, chunk.rect.c0 + c);
         formulas.push(`${addr}:${formatScalar(f)}`);
       }
     }
+    const extraFormulas = formulaCount - formulas.length;
+    if (extraFormulas > 0) formulas.push(`… (+${extraFormulas} more formulas)`);
     if (formulas.length) lines.push(`FORMULAS: ${formulas.join(" | ")}`);
   } else {
     const startRow = headerRow === 0 ? 1 : 0;
