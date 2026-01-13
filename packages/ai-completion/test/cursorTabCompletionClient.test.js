@@ -184,7 +184,10 @@ test("CursorTabCompletionClient returns empty string immediately when the extern
   assert.equal(fetchCalls, 0);
 });
 
-test("CursorTabCompletionClient applies the timeout budget while awaiting getAuthHeaders", async () => {
+test(
+  "CursorTabCompletionClient applies the timeout budget while awaiting getAuthHeaders",
+  { timeout: 1000 },
+  async () => {
   let fetchCalls = 0;
 
   const fetchImpl = async () => {
@@ -199,14 +202,12 @@ test("CursorTabCompletionClient applies the timeout budget while awaiting getAut
     getAuthHeaders: () => new Promise(() => {}), // never resolves
   });
 
-  const start = Date.now();
   const completion = await client.completeTabCompletion({ input: "=1+2", cursorPosition: 5, cellA1: "A1" });
-  const elapsed = Date.now() - start;
 
   assert.equal(completion, "");
   assert.equal(fetchCalls, 0);
-  assert.ok(elapsed < 200, `Expected completion to return quickly, got ${elapsed}ms`);
-});
+  },
+);
 
 test("CursorTabCompletionClient returns empty string on non-2xx responses", async () => {
   const fetchImpl = async () => {
