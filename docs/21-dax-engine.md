@@ -149,8 +149,10 @@ as well (it defines default propagation and how `RELATED` / `RELATEDTABLE` navig
 
 Internally, `DataModel` materializes two indices (`RelationshipInfo`):
 
-- `to_index: HashMap<Value, RowSet>` mapping **to_table key → one or more to_table row indices**  
-  (`RowSet::One(row)` for unique keys; `RowSet::Many(rows)` when a key maps to multiple rows, e.g. many-to-many)
+- `to_index: HashMap<Value, RowSet>` mapping **to_table key → matching to_table row(s)**  
+  `RowSet` is an internal compact representation:
+  - `RowSet::One(row)` for the common unique-key case (no allocation)
+  - `RowSet::Many(Vec<row>)` when a key matches multiple `to_table` rows (many-to-many)
 - `from_index: HashMap<Value, Vec<usize>>` mapping **from_table key → from_table row indices**
 
 These indices are built eagerly when the relationship is added, and updated on `DataModel::insert_row(...)`.
@@ -169,19 +171,15 @@ relationship is added (`DaxError::NonUniqueKey`).
 For `OneToOne` relationships, the engine enforces uniqueness on **both** sides when the relationship is
 added (`DaxError::NonUniqueKey`), treating `BLANK` as a real key for uniqueness checks.
 
-For `ManyToMany` relationships, keys are allowed to map to multiple rows on the `to_table` side.
-Filter propagation uses **distinct-key propagation** (conceptually like
-`TREATAS(VALUES(source[key]), target[key])`): the engine computes the set of visible key values on
-the source side and keeps rows on the target side whose key is in that set.
+Many-to-many semantics:
 
-Navigation notes:
-
-- `RELATED` errors if the current key matches more than one row in `to_table` (ambiguous).
-- `RELATEDTABLE` returns all matching rows and can naturally return multiple rows.
-
-Pivot/group-by note: grouping by columns across a many-to-many relationship does not expand a base
-row into multiple related rows; it effectively relies on `RELATED`-like semantics and will error
-when a key matches multiple rows on the `to_table` side.
+- Filter propagation uses **distinct-key propagation** (conceptually like
+  `TREATAS(VALUES(source[key]), target[key])`).
+- `RELATED` is ambiguous when there is more than one match on the `to_table` side (error).
+- `RELATEDTABLE` returns the set of matching rows (can be >1 for many-to-many).
+- Pivot/group-by: when a group-by column is on a related table, the pivot engine navigates relationships
+  similarly to `RELATED`. If a hop matches multiple rows, grouping is ambiguous and pivot returns an
+  evaluation error.
 
 ### Cross-filter direction
 
@@ -253,11 +251,14 @@ Different DAX functions consult relationships in slightly different ways:
 
 - `RELATED(Table[Column])`:
   - Requires row context.
-  - Follows a **unique** active relationship path from the current table to `Table` in the
-    `ManyToOne` direction (following relationships in their defined `from_table → to_table`
-    direction). If there are multiple active paths, the engine errors.
-  - Consults `FilterContext` relationship overrides when deciding which relationships are active
-    (`USERELATIONSHIP`) or disabled (`CROSSFILTER(..., NONE)`).
+  - Follows a **unique** active relationship path from the current row-context table to `Table` in the
+    `ManyToOne` direction (following relationships in their defined `from_table → to_table` direction).
+    If there are multiple active paths, the engine errors.
+  - Consults `FilterContext` relationship overrides:
+    - `USERELATIONSHIP` activation
+    - `CROSSFILTER(..., NONE)` disabling relationships
+  - Returns `BLANK` for blank keys or missing matches.
+  - Errors if a hop is ambiguous (key matches multiple rows on the one-side).
 
 - `RELATEDTABLE(Table)`:
   - Requires row context and returns rows from a `from_table`-side table related to the current row
@@ -411,7 +412,8 @@ The engine supports the following filter argument forms (see `apply_calculate_fi
      - `ONEWAY` (or `SINGLE`)
      - `NONE` (disables the relationship)
 
-3. `ALL(Table)` / `ALL(Table[Column])` and `REMOVEFILTERS(Table)` / `REMOVEFILTERS(Table[Column])`  
+3. `ALL(Table)` / `ALL(Table[Column])`, `ALLNOBLANKROW(Table)` / `ALLNOBLANKROW(Table[Column])`, and
+   `REMOVEFILTERS(Table)` / `REMOVEFILTERS(Table[Column])`  
    Clears filters on an entire table, or a specific column. (`REMOVEFILTERS` is treated as an alias for the
    `ALL` filter-modifier semantics.)
 
@@ -420,27 +422,38 @@ The engine supports the following filter argument forms (see `apply_calculate_fi
    Implementation note: `KEEPFILTERS` is supported only inside `CALCULATE` / `CALCULATETABLE`. It affects
    whether the engine clears existing table/column filters before applying the new filter.
 
-5. Column comparisons: `Table[Column] <op> <scalar>` where `<op>` is:
+5. Column comparisons / membership: `Table[Column] <op> <rhs>` where `<op>` is:
    - `=` (direct value filter)
    - `<>`, `<`, `<=`, `>`, `>=` (implemented by scanning rows to compute the set of allowed values)
+   - `IN` (value membership) with a one-column table constructor, e.g. `Fact[Category] IN { \"A\", \"B\" }`
 
    Notes:
-   - The RHS is evaluated as a scalar expression.
+   - For `=`/`<>`/`<`/`<=`/`>`/`>=`, the RHS is evaluated as a scalar expression.
+   - For `IN`, the RHS must be a one-column table constructor (`{ ... }`).
    - Non-equality comparisons currently build a *value set* by scanning rows under the current filters
      (except the column being filtered).
 
-6. Value-set filters: `VALUES(Table[Column])` or `DISTINCT(Table[Column])`  
+6. Boolean filter expressions (row filters): expressions like  
+   `Fact[Amount] > 0 && Fact[Amount] < 10` or `NOT(Fact[IsActive])`  
+   These are evaluated by scanning candidate rows and building an explicit `row_filter`.
+
+   Current limitations:
+   - The expression must reference columns from **exactly one table**.
+   - Only `&&`/`||` (binary operators) and `NOT(...)`/`AND(...)`/`OR(...)` (function forms) are recognized as
+     boolean filter expressions at the top level.
+
+7. Value-set filters: `VALUES(Table[Column])` or `DISTINCT(Table[Column])`  
    Clears the column filter and replaces it with the set of distinct values visible under the current
    (post-transition) filter context.
 
-7. `TREATAS(VALUES(SourceTable[Col]), TargetTable[Col])` (or `TREATAS(DISTINCT(...), Target...)`)  
+8. `TREATAS(VALUES(SourceTable[Col]), TargetTable[Col])` (or `TREATAS(DISTINCT(...), Target...)`)  
    Applies the set of values from one column as a filter on another column.
 
    Current limitations:
    - The first argument must be `VALUES(column)` or `DISTINCT(column)`
    - The second argument must be a target column reference
 
-8. Table expressions (row filters): any supported table expression (including a bare `TableName`)  
+9. Table expressions (row filters): any supported table expression (including a bare `TableName`)  
    The table expression is evaluated, and its resulting row set becomes an explicit `row_filter` for that
    table (intersected with any existing row filter).
 
@@ -453,8 +466,6 @@ The engine supports the following filter argument forms (see `apply_calculate_fi
 
 Notable unsupported patterns:
 
-- Boolean filter expressions that are not a column comparison (e.g. `Fact[Amount] > 0 && ...`)
-- `IN` syntax (`Table[Col] IN {...}`) (not parsed)
 - Many other filter modifiers (`ALLSELECTED`, `FILTERS`, `ISCROSSFILTERED`, etc.)
 
 ---
@@ -490,8 +501,10 @@ pub fn pivot(
     relationship path** from `base_table` to the group-by table (a `ManyToOne` chain) and compute the key
     via repeated relationship lookups (similar to `RELATED`, but possibly multi-hop).
     - If no path exists, or there are multiple active paths, pivot returns an evaluation error.
-    - Current limitation: the path resolution uses relationship `is_active` flags only; it does not
-      consider `USERELATIONSHIP`/`CROSSFILTER` overrides stored in the `FilterContext`.
+    - Relationship path resolution consults `FilterContext` overrides:
+      - `USERELATIONSHIP` activation (and the “override pairs” semantics described above)
+      - `CROSSFILTER(..., NONE)` disabling relationships
+    - If a relationship hop is ambiguous (key matches multiple rows), pivot returns an evaluation error.
 - `measures`: list of named expressions to evaluate per group.
   - A `PivotMeasure` is *not* required to correspond to a named model measure; `expression` is parsed as DAX.
 - `filter`: the initial filter context applied to the pivot query.
@@ -509,14 +522,20 @@ pub fn pivot(
    Fast path when:
    - all `group_by` columns are on `base_table`, and
    - the backend supports `group_by_aggregations`, and
-    - every measure can be “planned” into a small set of aggregations + arithmetic
- 
-    Planned expressions support:
-    - `SUM`, `AVERAGE`, `MIN`, `MAX`, `DISTINCTCOUNT`, `COUNT`, `COUNTA`, `COUNTBLANK` over `base_table` columns
-    - `COUNTROWS(base_table)`
-    - simple arithmetic (`+ - * /`), unary `-`
-    - `COALESCE`, `DIVIDE`
-    - references to named measures that expand to the above
+   - every measure can be “planned” into a small set of aggregations + arithmetic
+
+   Planned expressions support:
+   - Aggregations over `base_table` columns:
+     - `SUM`, `AVERAGE`, `MIN`, `MAX`
+     - `COUNT`, `COUNTA`, `COUNTBLANK`
+     - `DISTINCTCOUNT`
+     - `COUNTROWS(base_table)`
+   - arithmetic (`+ - * /`), unary `-`
+   - text concatenation (`&`)
+   - comparisons (`= <> < <= > >=`)
+   - boolean ops (`&&`/`||`), plus `NOT`, `AND`, `OR`
+   - `IF`, `ISBLANK`, `COALESCE`, `DIVIDE`
+   - references to named measures that expand to the above
 
 2. **Columnar groups + per-group measure evaluation** (`pivot_columnar_groups_with_measure_eval`)  
    Fast path when:
@@ -571,6 +590,26 @@ pub fn pivot_crosstab(
 
 Header formatting can be customized via `pivot_crosstab_with_options(..., &PivotCrosstabOptions { ... })`.
 
+### Pivot helpers
+
+The pivot module also exposes a few helper APIs that are useful when bridging from Excel-like pivot
+configurations:
+
+- `ValueFieldAggregation`, `ValueFieldSpec` — Excel-style value-field settings (Sum/Avg/Count/etc).
+- `measures_from_value_fields(base_table, &[ValueFieldSpec { ... }]) -> Vec<PivotMeasure>` — builds DAX
+  measures for those value fields (mapping `Count` → `COUNTA`, `CountNumbers` → `COUNT`, etc).
+
+### Debugging / tracing
+
+Set `FORMULA_DAX_PIVOT_TRACE=1` to print which pivot execution path was used (once per process).
+Current labels include `columnar_group_by`, `columnar_groups_with_measure_eval`, `planned_row_group_by`,
+and `row_scan`.
+
+### Rendering integration
+
+If built with the crate feature `pivot-model`, `PivotResultGrid::to_pivot_scalars()` converts the grid
+into `formula_model::pivots::ScalarValue` values for rendering via higher-level pivot structures.
+
 ---
 
 ## Supported syntax
@@ -586,21 +625,27 @@ Supported expression forms:
 - Bracket identifiers:
   - measures: `[Total]`
   - column names: `Fact[Amount]` (column part is bracketed)
-- Function calls: `NAME(arg1, arg2, ...)` (comma-separated arguments)
+- Function calls: `NAME(arg1, arg2, ...)` (comma- or semicolon-separated arguments)
 - Unary minus: `-expr`
 - Binary operators:
   - arithmetic: `+ - * /`
   - text concatenation: `&` (single ampersand)
   - comparisons: `= <> < <= > >=`
+  - membership: `expr IN { ... }` (RHS must be a one-column table constructor)
   - boolean: `&&` and `||`
 - Parentheses for grouping
+- Variables:
+  - `VAR Name = <expr> ... RETURN <expr>` (one or more `VAR` bindings)
+  - Variables are referenced by bare identifiers (parsed as `Expr::TableName`) and can be **scalar** or
+    **table** valued.
+- Table constructors (limited one-column literals): `{ 1, 2, 3 }`  
+  Separators may be `,` or `;`. Nested table constructors are not supported. Currently these table
+  constructors are only supported on the RHS of the `IN` operator.
 
 Unsupported (not parsed):
 
-- `VAR` / `RETURN`
-- `{ ... }` table constructors
-- `IN` operator
-- `;` argument separators (locale variants)
+- Exponent notation for numbers (`1e3`)
+- Multi-column table constructors (row tuples)
 
 ---
 
@@ -651,6 +696,7 @@ If a function is not listed here, it is currently unsupported and will evaluate 
 
 - `FILTER(tableExpr, predicateExpr)`
 - `ALL(Table)` and `ALL(Table[Column])`
+- `ALLNOBLANKROW(Table)` and `ALLNOBLANKROW(Table[Column])`
 - `VALUES(Table[Column])`, `VALUES(tableExpr)`
 - `DISTINCT(Table[Column])`, `DISTINCT(tableExpr)` (implemented in terms of `VALUES`)
 - `ALLEXCEPT(Table, Table[Col1], Table[Col2], ...)`
@@ -669,6 +715,7 @@ If a function is not listed here, it is currently unsupported and will evaluate 
 
 - `USERELATIONSHIP(TableA[Col], TableB[Col])`
 - `CROSSFILTER(TableA[Col], TableB[Col], BOTH|ONEWAY|SINGLE|NONE)`
+- `ALLNOBLANKROW(Table|Table[Column])`
 - `TREATAS(VALUES(Source[Col])|DISTINCT(Source[Col]), Target[Col])` (limited)
 - `KEEPFILTERS(innerFilterArg)` (supported only as a wrapper inside `CALCULATE` / `CALCULATETABLE`)
 - `REMOVEFILTERS(Table|Table[Column])` (alias for `ALL`-style clearing inside `CALCULATE`)
@@ -751,13 +798,13 @@ This is not an exhaustive list, but the most common contributor-facing constrain
 
 - **Relationships**
   - `OneToMany`, `OneToOne`, and `ManyToMany` are supported.
+  - DAX APIs that need a unique “one-side” lookup (`RELATED`, pivot grouping by related columns, etc.)
+    will error when a relationship key matches multiple rows.
   - Only single-column relationships are supported.
-  - Grouping/pivoting by columns across a `ManyToMany` relationship is ambiguous today and will
-    error rather than expanding a base row into multiple related rows.
-- **DAX language coverage**
-  - Variables (`VAR`/`RETURN`) and simple table constructors are supported.
-  - The `IN` operator is currently only supported in `CALCULATE` filter arguments with a one-column
-    table constructor on the right-hand side.
+ - **DAX language coverage**
+  - Variables (`VAR`/`RETURN`) are supported.
+  - Table constructors (`{ ... }`) are limited to one-column literals (no nesting / no multi-column rows),
+    and are currently only supported on the RHS of the `IN` operator.
   - Most scalar/table functions are unimplemented (anything not listed above).
 - **Types**
   - Only `Blank`, `Number(f64)`, `Boolean`, and `Text` exist at the DAX layer.
