@@ -10,6 +10,12 @@ import { type BenchmarkResult } from './benchmark.ts';
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
+// Benchmark environment knobs:
+// - `FORMULA_DISABLE_STARTUP_UPDATE_CHECK=1` prevents the release updater from running a
+//   background check/download on startup, which can add nondeterministic CPU/memory/network
+//   activity and skew idle-memory benchmarks.
+// - `FORMULA_STARTUP_METRICS=1` enables the Rust-side one-line startup metrics log we parse.
+
 type StartupMetrics = {
   ttiMs: number;
 };
@@ -326,6 +332,8 @@ async function runOnce(binPath: string, timeoutMs: number): Promise<number> {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
       ...process.env,
+      // Keep perf benchmarks stable/quiet by disabling the automatic startup update check.
+      FORMULA_DISABLE_STARTUP_UPDATE_CHECK: '1',
       // Enable the Rust-side single-line log in release builds.
       FORMULA_STARTUP_METRICS: '1',
       // In case the app reads $HOME for config, keep per-run caches out of the real home dir.
