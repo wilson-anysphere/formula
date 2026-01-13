@@ -517,6 +517,7 @@ export class TabCompletionEngine {
 
     const fnSpec = parsed.functionName ? this.functionRegistry.getFunction(parsed.functionName) : undefined;
     const argIndex = parsed.argIndex ?? 0;
+    const argSpecName = fnSpec?.args?.[argIndex]?.name;
     const functionCouldBeComplete = functionCouldBeCompleteAfterArg(fnSpec, argIndex);
 
     const spanStart = parsed.currentArg?.start ?? cursor;
@@ -581,6 +582,11 @@ export class TabCompletionEngine {
               surroundingCells: context?.surroundingCells,
               sheetName,
             });
+
+            const prefersTableRange = argSpecName === "table_array" || argSpecName === "array" || argSpecName === "database";
+            const hasTableCandidate = rangeCandidates.some(
+              (c) => typeof c?.reason === "string" && c.reason.startsWith("contiguous_table")
+            );
             // If the user already typed a complete range like Sheet2!A1:A10, rangeSuggester
             // intentionally returns no candidates (it focuses on *expanding* prefixes).
             // Still offer a useful completion by auto-closing parens when the function could
@@ -619,7 +625,20 @@ export class TabCompletionEngine {
                 if (closeUnbalancedParens(input) === input) continue;
               }
 
-              addReplacement(replacement, { confidence: Math.min(0.85, candidate.confidence + 0.05) });
+              let confidence = Math.min(0.85, candidate.confidence + 0.05);
+              if (prefersTableRange && hasTableCandidate) {
+                const isTable = typeof candidate?.reason === "string" && candidate.reason.startsWith("contiguous_table");
+                // In sheet-qualified ranges we intentionally clamp confidence so schema
+                // suggestions don't overwhelm local/rule-based ones. When we have a
+                // strong table signal for table-shaped args, prefer the 2D range by
+                // de-prioritizing the 1D contiguous candidate (otherwise both would
+                // clamp to the same max and sort lexicographically).
+                if (!isTable && (candidate.reason === "contiguous_above_current_cell" || candidate.reason === "contiguous_down_from_start" || candidate.reason === "contiguous_below_current_cell")) {
+                  confidence = clamp01(confidence - 0.1);
+                }
+              }
+
+              addReplacement(replacement, { confidence });
             }
         }
       }

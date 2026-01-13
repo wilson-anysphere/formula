@@ -3276,6 +3276,49 @@ test("Sheet-qualified ranges are suggested when typing Sheet2!A", async () => {
   );
 });
 
+test("Sheet-qualified VLOOKUP table_array prefers a 2D table range when adjacent columns form a table", async () => {
+  const values = {};
+  // Header row.
+  values["Sheet2!A1"] = "Key";
+  values["Sheet2!B1"] = "Value1";
+  values["Sheet2!C1"] = "Value2";
+  values["Sheet2!D1"] = "Value3";
+  // Data rows 2..10.
+  for (let r = 2; r <= 10; r++) {
+    values[`Sheet2!A${r}`] = `K${r}`;
+    values[`Sheet2!B${r}`] = r * 10;
+    values[`Sheet2!C${r}`] = r * 100;
+    values[`Sheet2!D${r}`] = r * 1000;
+  }
+
+  const cellContext = {
+    getCellValue(row, col, sheetName) {
+      const sheet = sheetName ?? "Sheet1";
+      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
+      return values[a1] ?? null;
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=VLOOKUP(A1, Sheet2!A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+
+  assert.equal(suggestions[0]?.text, "=VLOOKUP(A1, Sheet2!A1:D10");
+});
+
 test("Sheet-qualified ranges are suggested when typing Sheet2!A above the data block", async () => {
   const values = {};
   for (let r = 2; r <= 11; r++) values[`Sheet2!A${r}`] = r;
