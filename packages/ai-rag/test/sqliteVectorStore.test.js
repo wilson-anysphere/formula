@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -37,6 +37,59 @@ test("SqliteVectorStore persists vectors and can reload them", { skip: !sqlJsAva
 
     const hits = await store2.query([1, 0, 0], 1, { workbookId: "wb" });
     assert.equal(hits[0].id, "a");
+    await store2.close();
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("SqliteVectorStore.compact() VACUUMs and persists a smaller DB", { skip: !sqlJsAvailable }, async () => {
+  const tmpRoot = path.join(__dirname, ".tmp");
+  await mkdir(tmpRoot, { recursive: true });
+  const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-compact-"));
+  const filePath = path.join(tmpDir, "vectors.sqlite");
+
+  try {
+    const store1 = await createSqliteFileVectorStore({ filePath, dimension: 3, autoSave: true });
+
+    const payload = "x".repeat(4096);
+    const total = 300;
+    const records = Array.from({ length: total }, (_, i) => ({
+      id: `rec-${i}`,
+      vector: i % 2 === 0 ? [1, 0, 0] : [0, 1, 0],
+      metadata: { workbookId: "wb", i, payload },
+    }));
+
+    await store1.upsert(records);
+    const remaining = 10;
+    const deleteIds = Array.from({ length: total - remaining }, (_, i) => `rec-${i}`);
+    await store1.delete(deleteIds);
+
+    const before = (await stat(filePath)).size;
+
+    await store1.compact();
+
+    const after = (await stat(filePath)).size;
+    assert.ok(after > 0);
+    assert.ok(after < before, `Expected compacted DB to shrink: before=${before}, after=${after}`);
+
+    // Ensure store remains usable after VACUUM (custom dot() function still registered).
+    const remainingId = `rec-${total - 1}`;
+    const rec = await store1.get(remainingId);
+    assert.ok(rec);
+    assert.equal(rec.metadata.i, total - 1);
+
+    const hits = await store1.query([1, 0, 0], 5, { workbookId: "wb" });
+    assert.ok(hits.length > 0);
+
+    await store1.close();
+
+    const store2 = await createSqliteFileVectorStore({ filePath, dimension: 3, autoSave: false });
+    const rec2 = await store2.get(remainingId);
+    assert.ok(rec2);
+    assert.equal(rec2.metadata.i, total - 1);
+    const hits2 = await store2.query([1, 0, 0], 5, { workbookId: "wb" });
+    assert.ok(hits2.length > 0);
     await store2.close();
   } finally {
     await rm(tmpDir, { recursive: true, force: true });
