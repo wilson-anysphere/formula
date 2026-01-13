@@ -32,7 +32,7 @@
     "stylePart": null,
     "colorsPart": null
   },
-  "model": {
+  "modelChartSpace": {
     "chartKind": {
       "kind": "bar"
     },
@@ -117,5 +117,6 @@
     ],
     "plotVisOnly": true,
     "diagnostics": []
-  }
+  },
+  "modelChartEx": null
 }

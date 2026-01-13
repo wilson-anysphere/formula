@@ -32,7 +32,7 @@
     "stylePart": null,
     "colorsPart": null
   },
-  "model": {
+  "modelChartSpace": {
     "chartKind": {
       "kind": "pie"
     },
@@ -81,5 +81,6 @@
     ],
     "plotVisOnly": true,
     "diagnostics": []
-  }
+  },
+  "modelChartEx": null
 }

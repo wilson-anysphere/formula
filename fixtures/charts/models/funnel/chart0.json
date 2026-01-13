@@ -32,7 +32,7 @@
     "stylePart": null,
     "colorsPart": null
   },
-  "model": {
+  "modelChartSpace": {
     "chartKind": {
       "kind": "unknown",
       "name": "funnelChart"
@@ -122,6 +122,30 @@
       {
         "level": "warning",
         "message": "unsupported chart type funnelChart; rendering may be incomplete"
+      }
+    ]
+  },
+  "modelChartEx": {
+    "chartKind": {
+      "kind": "unknown",
+      "name": "ChartEx:unknown"
+    },
+    "title": null,
+    "legend": null,
+    "plotArea": {
+      "kind": "unknown",
+      "name": "ChartEx:unknown"
+    },
+    "axes": [],
+    "series": [],
+    "diagnostics": [
+      {
+        "level": "warning",
+        "message": "ChartEx root <chartSpace> (ns=http://schemas.microsoft.com/office/drawing/2014/chartex) parsed as placeholder model"
+      },
+      {
+        "level": "warning",
+        "message": "ChartEx chart kind could not be inferred"
       }
     ]
   }

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use formula_model::charts::ChartModel;
 use formula_model::drawings::Anchor;
+use formula_xlsx::drawingml::charts::{parse_chart_ex, parse_chart_space};
 use pretty_assertions::assert_eq;
 use serde::{Deserialize, Serialize};
 
@@ -23,7 +24,8 @@ struct ChartFixtureModel {
     sheet_name: Option<String>,
     anchor: Anchor,
     parts: ChartParts,
-    model: ChartModel,
+    model_chart_space: ChartModel,
+    model_chart_ex: Option<ChartModel>,
 }
 
 #[test]
@@ -73,10 +75,11 @@ fn chart_fixture_models_match() -> Result<(), Box<dyn std::error::Error>> {
                 )
             })?;
 
-            let model = formula_xlsx::drawingml::charts::parse_chart_space(
-                &chart.parts.chart.bytes,
-                &chart.parts.chart.path,
-            )?;
+            let model_chart_space = parse_chart_space(&chart.parts.chart.bytes, &chart.parts.chart.path)?;
+            let model_chart_ex = match chart.parts.chart_ex.as_ref() {
+                Some(part) => Some(parse_chart_ex(&part.bytes, &part.path)?),
+                None => None,
+            };
             let actual = ChartFixtureModel {
                 chart_index: idx,
                 sheet_name: chart.sheet_name,
@@ -88,7 +91,8 @@ fn chart_fixture_models_match() -> Result<(), Box<dyn std::error::Error>> {
                     style_part: chart.parts.style.map(|p| p.path),
                     colors_part: chart.parts.colors.map(|p| p.path),
                 },
-                model,
+                model_chart_space,
+                model_chart_ex,
             };
             assert_eq!(expected, actual, "fixture {stem}: chart model mismatch");
         }

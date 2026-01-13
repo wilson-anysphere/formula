@@ -10,7 +10,7 @@ use formula_model::charts::ChartModel;
 #[cfg(not(target_arch = "wasm32"))]
 use formula_model::drawings::Anchor;
 #[cfg(not(target_arch = "wasm32"))]
-use formula_xlsx::drawingml::charts::parse_chart_space;
+use formula_xlsx::drawingml::charts::{parse_chart_ex, parse_chart_space};
 #[cfg(not(target_arch = "wasm32"))]
 use formula_xlsx::XlsxPackage;
 #[cfg(not(target_arch = "wasm32"))]
@@ -39,8 +39,24 @@ struct ChartFixtureModel {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChartFixtureModels {
+    chart_index: usize,
+    sheet_name: Option<String>,
+    anchor: Anchor,
+    parts: ChartParts,
+    model_chart_space: ChartModel,
+    model_chart_ex: Option<ChartModel>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn usage() -> &'static str {
-    "dump_chart_models <path.xlsx|dir> [--out-dir <dir>] [--print-parts]\n\
+    "dump_chart_models <path.xlsx|dir>\n\
+  [--out-dir <dir>]\n\
+  [--print-parts]\n\
+  [--use-chart-object-model]\n\
+  [--emit-both-models]\n\
 \n\
 Writes one JSON file per extracted chart under:\n\
   <out-dir>/<workbook-stem>/chart<N>.json\n\
@@ -58,6 +74,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut xlsx_path: Option<PathBuf> = None;
     let mut out_dir: PathBuf = PathBuf::from("fixtures/charts/models");
     let mut print_parts = false;
+    let mut use_chart_object_model = false;
+    let mut emit_both_models = false;
 
     let mut args = std::env::args().skip(1).peekable();
     while let Some(arg) = args.next() {
@@ -74,6 +92,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             "--print-parts" => {
                 print_parts = true;
+            }
+            "--use-chart-object-model" => {
+                use_chart_object_model = true;
+            }
+            "--emit-both-models" => {
+                emit_both_models = true;
             }
             flag if flag.starts_with('-') => {
                 return Err(format!("unknown flag: {flag}\n\n{}", usage()).into());
@@ -95,14 +119,26 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     for xlsx_path in inputs {
-        dump_one(&xlsx_path, &out_dir, print_parts)?;
+        dump_one(
+            &xlsx_path,
+            &out_dir,
+            print_parts,
+            use_chart_object_model,
+            emit_both_models,
+        )?;
     }
 
     Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn dump_one(xlsx_path: &Path, out_dir: &Path, print_parts: bool) -> Result<(), Box<dyn Error>> {
+fn dump_one(
+    xlsx_path: &Path,
+    out_dir: &Path,
+    print_parts: bool,
+    use_chart_object_model: bool,
+    emit_both_models: bool,
+) -> Result<(), Box<dyn Error>> {
     let workbook_stem = xlsx_path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -133,21 +169,51 @@ fn dump_one(xlsx_path: &Path, out_dir: &Path, print_parts: bool) -> Result<(), B
 
     for (idx, chart) in charts.into_iter().enumerate() {
         let out_path = workbook_out_dir.join(format!("chart{idx}.json"));
-        let model = parse_chart_space(&chart.parts.chart.bytes, &chart.parts.chart.path)?;
-        let fixture_model = ChartFixtureModel {
-            chart_index: idx,
-            sheet_name: chart.sheet_name,
-            anchor: chart.anchor,
-            parts: ChartParts {
-                drawing_part: chart.drawing_part,
-                chart_part: chart.parts.chart.path,
-                chart_ex_part: chart.parts.chart_ex.map(|p| p.path),
-                style_part: chart.parts.style.map(|p| p.path),
-                colors_part: chart.parts.colors.map(|p| p.path),
-            },
-            model,
+        let parts = ChartParts {
+            drawing_part: chart.drawing_part,
+            chart_part: chart.parts.chart.path.clone(),
+            chart_ex_part: chart.parts.chart_ex.as_ref().map(|p| p.path.clone()),
+            style_part: chart.parts.style.as_ref().map(|p| p.path.clone()),
+            colors_part: chart.parts.colors.as_ref().map(|p| p.path.clone()),
         };
-        let mut json = serde_json::to_string_pretty(&fixture_model)?;
+
+        let mut json = if emit_both_models {
+            let model_chart_space =
+                parse_chart_space(&chart.parts.chart.bytes, &chart.parts.chart.path)?;
+            let model_chart_ex = match chart.parts.chart_ex.as_ref() {
+                Some(part) => Some(parse_chart_ex(&part.bytes, &part.path)?),
+                None => None,
+            };
+
+            let fixture_model = ChartFixtureModels {
+                chart_index: idx,
+                sheet_name: chart.sheet_name,
+                anchor: chart.anchor,
+                parts,
+                model_chart_space,
+                model_chart_ex,
+            };
+            serde_json::to_string_pretty(&fixture_model)?
+        } else {
+            let model = if use_chart_object_model {
+                chart.model.ok_or_else(|| {
+                    format!(
+                        "chart[{idx}] did not include a parsed model (use --print-parts for debugging)"
+                    )
+                })?
+            } else {
+                parse_chart_space(&chart.parts.chart.bytes, &chart.parts.chart.path)?
+            };
+
+            let fixture_model = ChartFixtureModel {
+                chart_index: idx,
+                sheet_name: chart.sheet_name,
+                anchor: chart.anchor,
+                parts,
+                model,
+            };
+            serde_json::to_string_pretty(&fixture_model)?
+        };
         json.push('\n');
         fs::write(&out_path, json)?;
     }
