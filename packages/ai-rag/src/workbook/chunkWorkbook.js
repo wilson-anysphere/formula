@@ -24,24 +24,36 @@ function encodeIdPart(value) {
   return encodeURIComponent(String(value));
 }
 
+const NON_WHITESPACE_RE = /\S/;
+// Equivalent to:
+//   const trimmed = String(formula).trim();
+//   if (trimmed === "") return false;
+//   const strippedLeading = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
+//   return strippedLeading.trim() !== "";
+const NON_EMPTY_FORMULA_RE = /^\s*=?\s*\S/;
+// Like `NON_EMPTY_FORMULA_RE`, but requires an explicit leading "=" after whitespace.
+const FORMULA_STRING_RE = /^\s*=\s*\S/;
+
 function hasNonEmptyFormulaText(formula) {
   if (formula == null) return false;
-  const trimmed = String(formula).trim();
-  if (trimmed === "") return false;
-  const strippedLeading = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
-  return strippedLeading.trim() !== "";
+  const text = typeof formula === "string" ? formula : String(formula);
+  return NON_EMPTY_FORMULA_RE.test(text);
+}
+
+/**
+ * @param {unknown} value
+ */
+function hasNonEmptyTrimmedText(value) {
+  if (value == null) return false;
+  const text = typeof value === "string" ? value : String(value);
+  return NON_WHITESPACE_RE.test(text);
 }
 
 function isNonEmptyCell(cell) {
   if (cell == null) return false;
 
   // Strings support both raw values and formulas (bundler-style sheet matrices sometimes store scalars).
-  if (typeof cell === "string") {
-    const trimmed = cell.trim();
-    if (trimmed === "") return false;
-    if (trimmed.startsWith("=")) return hasNonEmptyFormulaText(trimmed);
-    return true;
-  }
+  if (typeof cell === "string") return hasNonEmptyFormulaText(cell);
 
   // Preserve rich object values as "non-empty" (matches normalizeCell's fallback).
   if (cell instanceof Date) return true;
@@ -53,13 +65,13 @@ function isNonEmptyCell(cell) {
       const f = cell.f;
       if (typeof f === "string") {
         if (hasNonEmptyFormulaText(f)) return true;
-      } else if (f != null && String(f).trim() !== "") {
+      } else if (f != null && hasNonEmptyTrimmedText(f)) {
         return true;
       }
 
       const v = cell.v;
       if (v == null) return false;
-      if (typeof v === "string") return v.trim() !== "";
+      if (typeof v === "string") return hasNonEmptyTrimmedText(v);
       return true;
     }
 
@@ -71,12 +83,16 @@ function isNonEmptyCell(cell) {
 
       const value = cell.value;
       if (value == null || value === "") return false;
-      if (typeof value === "string") return value.trim() !== "";
+      if (typeof value === "string") return hasNonEmptyTrimmedText(value);
       return true;
     }
 
     // Treat `{}` as an empty cell; it's a common sparse representation.
-    if (cell.constructor === Object && Object.keys(cell).length === 0) return false;
+    if (cell.constructor === Object) {
+      // Avoid `Object.keys()` allocation in the common `{}` sparse representation.
+      for (const _ in cell) return true;
+      return false;
+    }
     // Any other object is considered a value.
     return true;
   }
@@ -88,16 +104,14 @@ function isNonEmptyCell(cell) {
 function isFormulaCell(cell) {
   if (cell == null) return false;
   if (typeof cell === "string") {
-    const trimmed = cell.trim();
-    if (!trimmed.startsWith("=")) return false;
-    return hasNonEmptyFormulaText(trimmed);
+    return FORMULA_STRING_RE.test(cell);
   }
 
   if (typeof cell === "object" && !Array.isArray(cell)) {
     if (Object.prototype.hasOwnProperty.call(cell, "f")) {
       const f = cell.f;
       if (typeof f === "string") return hasNonEmptyFormulaText(f);
-      return f != null && String(f).trim() !== "";
+      return f != null && hasNonEmptyTrimmedText(f);
     }
     if (Object.prototype.hasOwnProperty.call(cell, "formula")) {
       const formula = cell.formula;
