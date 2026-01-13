@@ -1,4 +1,4 @@
-use formula_xlsx::XlsxPackage;
+use formula_xlsx::{SlicerSelectionState, XlsxPackage};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -20,6 +20,36 @@ fn parses_slicer_selection_state() -> Result<(), Box<dyn std::error::Error>> {
 
     let expected = HashSet::from(["East".to_string()]);
     assert_eq!(slicer.selection.selected_items, Some(expected));
+    Ok(())
+}
+
+#[test]
+fn writes_slicer_selection_state() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/slicer-selection.xlsx");
+    let bytes = std::fs::read(&fixture_path)?;
+    let mut package = XlsxPackage::from_bytes(&bytes)?;
+
+    let parts = package.pivot_slicer_parts()?;
+    let slicer = parts.slicers.first().expect("fixture slicer");
+    let cache_part = slicer.cache_part.as_deref().expect("cache part");
+
+    let selection = SlicerSelectionState {
+        available_items: slicer.selection.available_items.clone(),
+        selected_items: Some(HashSet::from(["West".to_string()])),
+    };
+    package.set_slicer_cache_selection(cache_part, &selection)?;
+
+    let written = package.write_to_bytes()?;
+    let roundtrip = XlsxPackage::from_bytes(&written)?;
+    let parts = roundtrip.pivot_slicer_parts()?;
+    let slicer = parts.slicers.first().expect("fixture slicer roundtrip");
+
+    assert_eq!(
+        slicer.selection.selected_items,
+        Some(HashSet::from(["West".to_string()]))
+    );
+
     Ok(())
 }
 

@@ -286,6 +286,51 @@ impl XlsxPackage {
 
         Ok(())
     }
+
+    /// Update the persisted selection state inside a slicer cache part (`xl/slicerCaches/slicerCache*.xml`).
+    ///
+    /// Excel persists slicer selection by setting `s="1|0"` (or occasionally `selected="1|0"`)
+    /// on each `<slicerCacheItem .../>`.
+    ///
+    /// - When `selection.selected_items` is `None` ("All selected"), we remove any explicit
+    ///   selection attributes so Excel falls back to its default behavior.
+    /// - When `Some(set)`, we set the selection attribute to `1` when the item key matches,
+    ///   else `0`.
+    ///
+    /// Matching is tolerant of different key attributes (`n`, `name`, `caption`, `uniqueName`,
+    /// `v`, and index keys via `x`).
+    pub fn set_slicer_cache_selection(
+        &mut self,
+        cache_part: &str,
+        selection: &SlicerSelectionState,
+    ) -> Result<(), XlsxError> {
+        let part_key = resolve_part_key(self.parts_map(), cache_part)
+            .ok_or_else(|| XlsxError::MissingPart(cache_part.to_string()))?;
+        let existing = self
+            .parts_map()
+            .get(&part_key)
+            .ok_or_else(|| XlsxError::MissingPart(cache_part.to_string()))?;
+        let updated = slicer_cache_xml_set_selection(existing, selection)?;
+        self.parts_map_mut().insert(part_key, updated);
+        Ok(())
+    }
+}
+
+fn resolve_part_key(parts: &BTreeMap<String, Vec<u8>>, name: &str) -> Option<String> {
+    if parts.contains_key(name) {
+        return Some(name.to_string());
+    }
+    if let Some(stripped) = name.strip_prefix('/') {
+        if parts.contains_key(stripped) {
+            return Some(stripped.to_string());
+        }
+    } else {
+        let with_slash = format!("/{name}");
+        if parts.contains_key(&with_slash) {
+            return Some(with_slash);
+        }
+    }
+    None
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1178,6 +1223,149 @@ fn read_slicer_cache_item_text<R: std::io::BufRead>(
     Ok(text)
 }
 
+fn detect_slicer_cache_item_selection_attr_key(xml: &[u8]) -> Result<Option<Vec<u8>>, XlsxError> {
+    let mut reader = Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(start) | Event::Empty(start) => {
+                let element_name = start.name();
+                let tag = local_name(element_name.as_ref());
+                if !tag.eq_ignore_ascii_case(b"slicerCacheItem") {
+                    continue;
+                }
+                for attr in start.attributes().with_checks(false) {
+                    let attr = attr?;
+                    let key = local_name(attr.key.as_ref());
+                    if key.eq_ignore_ascii_case(b"s") || key.eq_ignore_ascii_case(b"selected") {
+                        return Ok(Some(attr.key.as_ref().to_vec()));
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(None)
+}
+
+fn slicer_cache_xml_set_selection(
+    xml: &[u8],
+    selection: &SlicerSelectionState,
+) -> Result<Vec<u8>, XlsxError> {
+    let preferred_selection_attr_key = detect_slicer_cache_item_selection_attr_key(xml)?
+        .unwrap_or_else(|| b"s".to_vec());
+
+    let mut reader = Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(false);
+    let mut writer = Writer::new(Vec::with_capacity(xml.len() + 128));
+    let mut buf = Vec::new();
+
+    loop {
+        let ev = reader.read_event_into(&mut buf)?;
+        match ev {
+            Event::Start(ref e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"slicerCacheItem") =>
+            {
+                let patched = patch_slicer_cache_item(e, selection, &preferred_selection_attr_key)?;
+                writer.write_event(Event::Start(patched))?;
+            }
+            Event::Empty(ref e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"slicerCacheItem") =>
+            {
+                let patched = patch_slicer_cache_item(e, selection, &preferred_selection_attr_key)?;
+                writer.write_event(Event::Empty(patched))?;
+            }
+            Event::Eof => break,
+            other => writer.write_event(other.into_owned())?,
+        }
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn patch_slicer_cache_item(
+    start: &BytesStart<'_>,
+    selection: &SlicerSelectionState,
+    preferred_selection_attr_key: &[u8],
+) -> Result<BytesStart<'static>, XlsxError> {
+    let mut attrs_raw: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+    let mut key_candidates: Vec<String> = Vec::new();
+
+    for attr in start.attributes().with_checks(false) {
+        let attr = attr?;
+        let key_bytes = attr.key.as_ref().to_vec();
+        let value_bytes = attr.value.as_ref().to_vec();
+        attrs_raw.push((key_bytes.clone(), value_bytes));
+
+        let attr_key = local_name(key_bytes.as_slice());
+        if attr_key.eq_ignore_ascii_case(b"n")
+            || attr_key.eq_ignore_ascii_case(b"name")
+            || attr_key.eq_ignore_ascii_case(b"itemName")
+            || attr_key.eq_ignore_ascii_case(b"caption")
+            || attr_key.eq_ignore_ascii_case(b"uniqueName")
+            || attr_key.eq_ignore_ascii_case(b"v")
+            || attr_key.eq_ignore_ascii_case(b"x")
+        {
+            let value = attr.unescape_value()?.into_owned();
+            if !value.is_empty() {
+                key_candidates.push(value);
+            }
+        }
+    }
+
+    let desired_selected = match &selection.selected_items {
+        None => None,
+        Some(selected) => Some(
+            !key_candidates.is_empty()
+                && key_candidates.iter().any(|key| selected.contains(key)),
+        ),
+    };
+
+    let element_name = start.name();
+    let tag_name = std::str::from_utf8(element_name.as_ref()).unwrap_or("slicerCacheItem");
+    let mut patched = BytesStart::new(tag_name);
+
+    let mut wrote_selection = false;
+    for (key_bytes, value_bytes) in attrs_raw {
+        let attr_key = local_name(key_bytes.as_slice());
+        let is_selection_attr =
+            attr_key.eq_ignore_ascii_case(b"s") || attr_key.eq_ignore_ascii_case(b"selected");
+
+        match desired_selected {
+            None => {
+                if is_selection_attr {
+                    continue;
+                }
+                patched.push_attribute((key_bytes.as_slice(), value_bytes.as_slice()));
+            }
+            Some(selected) => {
+                if is_selection_attr {
+                    wrote_selection = true;
+                    let value = if selected { b"1" } else { b"0" };
+                    patched.push_attribute((key_bytes.as_slice(), value.as_slice()));
+                } else {
+                    patched.push_attribute((key_bytes.as_slice(), value_bytes.as_slice()));
+                }
+            }
+        }
+    }
+
+    if let Some(selected) = desired_selected {
+        if !wrote_selection {
+            let value = if selected { b"1" } else { b"0" };
+            patched.push_attribute((preferred_selection_attr_key, value.as_slice()));
+        }
+    }
+
+    Ok(patched.into_owned())
+}
+
 fn parse_slicer_cache_item(
     start: &quick_xml::events::BytesStart<'_>,
     fallback_text: Option<&str>,
@@ -1406,6 +1594,89 @@ fn parse_timeline_selection(
     }
 
     Ok(selection)
+}
+
+#[cfg(test)]
+mod slicer_cache_patch_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn updates_slicer_cache_xml_single_selected_item() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicerCache xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+  <slicerCacheData>
+    <slicerCacheItem n="East" s="1"/>
+    <slicerCacheItem n="West" s="0"/>
+    <slicerCacheItem n="North" s="0"/>
+  </slicerCacheData>
+</slicerCache>"#;
+
+        let selection = SlicerSelectionState {
+            available_items: Vec::new(),
+            selected_items: Some(HashSet::from(["West".to_string()])),
+        };
+
+        let updated = slicer_cache_xml_set_selection(xml, &selection).expect("patch xml");
+        let parsed = parse_slicer_cache_selection(&updated).expect("parse updated");
+        assert_eq!(
+            parsed.selected_items,
+            Some(HashSet::from(["West".to_string()]))
+        );
+    }
+
+    #[test]
+    fn updates_slicer_cache_xml_all_selected_removes_attrs() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicerCache xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+  <slicerCacheData>
+    <slicerCacheItem n="East" s="0"/>
+    <slicerCacheItem n="West" s="1"/>
+  </slicerCacheData>
+</slicerCache>"#;
+
+        let selection = SlicerSelectionState {
+            available_items: Vec::new(),
+            selected_items: None,
+        };
+
+        let updated = slicer_cache_xml_set_selection(xml, &selection).expect("patch xml");
+        let updated_str = std::str::from_utf8(&updated).expect("utf8");
+        assert!(
+            !updated_str.contains(" s=\""),
+            "expected selection attr to be removed, got:\n{updated_str}"
+        );
+        assert!(
+            !updated_str.contains(" selected=\""),
+            "expected selection attr to be removed, got:\n{updated_str}"
+        );
+
+        let parsed = parse_slicer_cache_selection(&updated).expect("parse updated");
+        assert_eq!(parsed.selected_items, None);
+    }
+
+    #[test]
+    fn updates_slicer_cache_xml_index_keys() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicerCache xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+  <slicerCacheData>
+    <slicerCacheItem x="0" s="0"/>
+    <slicerCacheItem x="1" s="1"/>
+  </slicerCacheData>
+</slicerCache>"#;
+
+        let selection = SlicerSelectionState {
+            available_items: Vec::new(),
+            selected_items: Some(HashSet::from(["0".to_string()])),
+        };
+
+        let updated = slicer_cache_xml_set_selection(xml, &selection).expect("patch xml");
+        let parsed = parse_slicer_cache_selection(&updated).expect("parse updated");
+        assert_eq!(
+            parsed.selected_items,
+            Some(HashSet::from(["0".to_string()]))
+        );
+    }
 }
 
 fn normalize_timeline_date(value: &str, date_system: ExcelDateSystem) -> Option<String> {
