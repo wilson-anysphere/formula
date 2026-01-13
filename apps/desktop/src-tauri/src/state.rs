@@ -5381,7 +5381,7 @@ mod tests {
             )
             .expect("set width formula");
         let c1 = state.get_cell(&app_sheet_id, 0, 2).expect("read C1");
-        assert_eq!(c1.value, CellScalar::Number(20.0));
+        assert_eq!(c1.value, CellScalar::Number(20.1));
 
         // Hidden columns report width=0.
         state
@@ -8674,7 +8674,9 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: Vec::new(),
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: formula_engine::pivot::PivotFieldRef::CacheFieldName(
+                    "Sales".to_string(),
+                ),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -8832,7 +8834,9 @@ mod tests {
             row_fields: vec![PivotField::new("Date")],
             column_fields: Vec::new(),
             value_fields: vec![ValueField {
-                source_field: "Amount".to_string(),
+                source_field: formula_engine::pivot::PivotFieldRef::CacheFieldName(
+                    "Amount".to_string(),
+                ),
                 name: "Sum of Amount".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,

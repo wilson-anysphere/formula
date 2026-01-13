@@ -20,18 +20,22 @@ pub struct LoopbackRedirectUri {
 }
 
 pub fn parse_loopback_redirect_uri(redirect_uri: &str) -> Result<LoopbackRedirectUri, String> {
-    let parsed = Url::parse(redirect_uri.trim())
-        .map_err(|err| format!("Invalid OAuth redirect URI: {err}"))?;
+    let raw = redirect_uri.trim();
+    let parsed = Url::parse(raw).map_err(|err| format!("Invalid OAuth redirect URI {raw:?}: {err}"))?;
 
     if parsed.scheme() != "http" {
-        return Err("Loopback OAuth redirect capture requires an http:// redirect URI".to_string());
+        return Err(format!(
+            "Invalid loopback OAuth redirect URI {raw:?}: scheme must be http://"
+        ));
     }
 
     let port = parsed
         .port()
-        .ok_or_else(|| "Loopback OAuth redirect URI must include an explicit port".to_string())?;
+        .ok_or_else(|| format!("Invalid loopback OAuth redirect URI {raw:?}: must include an explicit port"))?;
     if port == 0 {
-        return Err("Loopback OAuth redirect URI must not use port 0".to_string());
+        return Err(format!(
+            "Invalid loopback OAuth redirect URI {raw:?}: port must not be 0"
+        ));
     }
 
     let host_kind = match parsed.host() {
@@ -41,10 +45,10 @@ pub fn parse_loopback_redirect_uri(redirect_uri: &str) -> Result<LoopbackRedirec
             LoopbackHostKind::Localhost
         }
         _ => {
-            return Err(
-                "Loopback OAuth redirect capture supports only 127.0.0.1, localhost, and [::1]"
-                    .to_string(),
-            );
+            let got = parsed.host_str().unwrap_or("");
+            return Err(format!(
+                "Invalid loopback OAuth redirect URI {raw:?}: host must be 127.0.0.1, localhost, or [::1] (got {got:?})"
+            ));
         }
     };
 
@@ -195,7 +199,7 @@ mod tests {
     #[test]
     fn rejects_port_zero() {
         let err = parse_loopback_redirect_uri("http://127.0.0.1:0/callback").unwrap_err();
-        assert!(err.contains("port 0"));
+        assert!(err.contains("must not be 0"));
     }
 
     #[test]
@@ -262,4 +266,3 @@ mod tests {
         assert!(!state.lock().unwrap().is_active(&uri));
     }
 }
-

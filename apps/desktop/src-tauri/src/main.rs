@@ -429,20 +429,30 @@ fn emit_open_file_event(app: &tauri::AppHandle, paths: Vec<String>) {
     show_main_window(app);
 
     if let Some(window) = app.get_webview_window("main") {
+        let window_url = match window.url() {
+            Ok(window_url) => window_url,
+            Err(err) => {
+                eprintln!(
+                    "[open-file] blocked event delivery because window URL could not be read: {err}"
+                );
+                return;
+            }
+        };
+        if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
+            eprintln!("[open-file] blocked event delivery to untrusted origin: {window_url}");
+            return;
+        }
         if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
             &window,
-            "open-file events",
-            desktop::ipc_origin::Verb::Are,
+            "open-file event delivery",
+            desktop::ipc_origin::Verb::Is,
         ) {
-            let window_url = window
-                .url()
-                .ok()
-                .map(|u| u.to_string())
-                .unwrap_or_else(|| "<unknown>".to_string());
-            eprintln!("[open-file] blocked event delivery to untrusted origin: {window_url} ({err})");
-        } else {
-            let _ = window.emit(OPEN_FILE_EVENT, paths);
+            eprintln!(
+                "[open-file] blocked event delivery from unexpected origin: {window_url} ({err})"
+            );
+            return;
         }
+        let _ = window.emit(OPEN_FILE_EVENT, paths);
     } else {
         let _ = app.emit(OPEN_FILE_EVENT, paths);
     }
@@ -457,22 +467,30 @@ fn emit_oauth_redirect_event(app: &tauri::AppHandle, url: String) {
     show_main_window(app);
 
     if let Some(window) = app.get_webview_window("main") {
+        let window_url = match window.url() {
+            Ok(window_url) => window_url,
+            Err(err) => {
+                eprintln!(
+                    "[oauth-redirect] blocked event delivery because window URL could not be read: {err}"
+                );
+                return;
+            }
+        };
+        if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
+            eprintln!("[oauth-redirect] blocked event delivery to untrusted origin: {window_url}");
+            return;
+        }
         if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
             &window,
-            "oauth redirect events",
-            desktop::ipc_origin::Verb::Are,
+            "oauth-redirect event delivery",
+            desktop::ipc_origin::Verb::Is,
         ) {
-            let window_url = window
-                .url()
-                .ok()
-                .map(|u| u.to_string())
-                .unwrap_or_else(|| "<unknown>".to_string());
             eprintln!(
-                "[oauth-redirect] blocked event delivery to untrusted origin: {window_url} ({err})"
+                "[oauth-redirect] blocked event delivery from unexpected origin: {window_url} ({err})"
             );
-        } else {
-            let _ = window.emit(OAUTH_REDIRECT_EVENT, trimmed.to_string());
+            return;
         }
+        let _ = window.emit(OAUTH_REDIRECT_EVENT, trimmed.to_string());
     } else {
         let _ = app.emit(OAUTH_REDIRECT_EVENT, trimmed.to_string());
     }
@@ -494,36 +512,7 @@ fn normalize_open_file_request_paths(paths: Vec<String>) -> Vec<String> {
 }
 
 fn normalize_oauth_redirect_request_urls(urls: Vec<String>) -> Vec<String> {
-    let mut seen = HashSet::<String>::new();
-    let mut out = Vec::new();
-    for url in urls {
-        let trimmed = url.trim().trim_matches('"');
-        if trimmed.is_empty() {
-            continue;
-        }
-        let is_formula = trimmed
-            .get(..8)
-            .map_or(false, |prefix| prefix.eq_ignore_ascii_case("formula:"));
-
-        // Support RFC 8252 loopback redirects:
-        // - http://127.0.0.1:<port>/...
-        // - http://localhost:<port>/...
-        // - http://[::1]:<port>/...
-        let is_loopback = if !is_formula {
-            desktop::oauth_loopback::parse_loopback_redirect_uri(trimmed).is_ok()
-        } else {
-            false
-        };
-
-        if !is_formula && !is_loopback {
-            continue;
-        }
-        let normalized = trimmed.to_string();
-        if seen.insert(normalized.clone()) {
-            out.push(normalized);
-        }
-    }
-    out
+    desktop::oauth_redirect::normalize_oauth_redirect_request_urls(urls)
 }
 
 fn handle_open_file_request(app: &tauri::AppHandle, paths: Vec<String>) {
@@ -807,7 +796,8 @@ async fn oauth_loopback_listen(
 
     let app = window.app_handle();
 
-    let parsed = desktop::oauth_loopback::parse_loopback_redirect_uri(&redirect_uri)?;
+    let raw_redirect_uri = redirect_uri.trim().to_string();
+    let parsed = desktop::oauth_loopback::parse_loopback_redirect_uri(&raw_redirect_uri)?;
     let host_kind = parsed.host_kind;
     let port = parsed.port;
     let expected_path = parsed.path;
@@ -847,9 +837,9 @@ async fn oauth_loopback_listen(
         let addr = SocketAddr::from((Ipv6Addr::LOCALHOST, port));
         let listener = (|| -> std::io::Result<TcpListener> {
             let socket = TcpSocket::new_v6()?;
-            // Bind as IPv6-only so we can also bind an IPv4 listener on the same port
+            // Best-effort bind as IPv6-only so we can also bind an IPv4 listener on the same port
             // (`localhost` redirect URIs may resolve to either 127.0.0.1 or ::1).
-            socket2::SockRef::from(&socket).set_only_v6(true)?;
+            let _ = socket2::SockRef::from(&socket).set_only_v6(true);
             socket.bind(addr)?;
             socket.listen(1024)
         })();
@@ -863,13 +853,13 @@ async fn oauth_loopback_listen(
         let details = listener_errors.join("; ");
         return Err(match host_kind {
             desktop::oauth_loopback::LoopbackHostKind::Ipv4Loopback => format!(
-                "Failed to bind loopback OAuth redirect listener on 127.0.0.1:{port}: {details}"
+                "Failed to bind loopback OAuth redirect listener for {raw_redirect_uri:?} on 127.0.0.1:{port}: {details}"
             ),
             desktop::oauth_loopback::LoopbackHostKind::Ipv6Loopback => format!(
-                "Failed to bind loopback OAuth redirect listener on [::1]:{port}: {details}"
+                "Failed to bind loopback OAuth redirect listener for {raw_redirect_uri:?} on [::1]:{port}: {details}"
             ),
             desktop::oauth_loopback::LoopbackHostKind::Localhost => format!(
-                "Failed to bind loopback OAuth redirect listener on localhost:{port}: {details}"
+                "Failed to bind loopback OAuth redirect listener for {raw_redirect_uri:?} on localhost:{port}: {details}"
             ),
         });
     }
@@ -2486,19 +2476,28 @@ fn main() {
                             return;
                         };
 
+                        let window_url = match window.url() {
+                            Ok(url) => url,
+                            Err(err) => {
+                                eprintln!(
+                                    "[updater] ignoring updater-ui-ready because window URL could not be read: {err}"
+                                );
+                                return;
+                            }
+                        };
+                        if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
+                            eprintln!(
+                                "[updater] ignoring updater-ui-ready from untrusted origin: {window_url}"
+                            );
+                            return;
+                        }
                         if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
                             &window,
                             "updater-ui-ready",
                             desktop::ipc_origin::Verb::Is,
                         ) {
-                            let url_for_log = window
-                                .url()
-                                .ok()
-                                .map(|u| u.to_string())
-                                .unwrap_or_else(|| "<unknown>".to_string());
                             eprintln!(
-                                "[updater] ignoring updater-ui-ready from untrusted origin: {} ({err})",
-                                url_for_log
+                                "[updater] ignoring updater-ui-ready from unexpected origin: {window_url} ({err})"
                             );
                             return;
                         }
@@ -2535,13 +2534,19 @@ fn main() {
                             return;
                         }
                     };
+                    if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
+                        eprintln!(
+                            "[open-file] ignored ready signal from untrusted origin: {window_url}"
+                        );
+                        return;
+                    }
                     if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
                         &window_for_listener,
-                        "open-file ready signals",
-                        desktop::ipc_origin::Verb::Are,
+                        "open-file-ready",
+                        desktop::ipc_origin::Verb::Is,
                     ) {
                         eprintln!(
-                            "[open-file] ignored ready signal from untrusted origin: {window_url} ({err})"
+                            "[open-file] ignored ready signal from unexpected origin: {window_url} ({err})"
                         );
                         return;
                     }
@@ -2573,13 +2578,19 @@ fn main() {
                             return;
                         }
                     };
+                    if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
+                        eprintln!(
+                            "[oauth-redirect] ignored ready signal from untrusted origin: {window_url}"
+                        );
+                        return;
+                    }
                     if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
                         &window_for_listener,
-                        "oauth-redirect ready signals",
-                        desktop::ipc_origin::Verb::Are,
+                        "oauth-redirect-ready",
+                        desktop::ipc_origin::Verb::Is,
                     ) {
                         eprintln!(
-                            "[oauth-redirect] ignored ready signal from untrusted origin: {window_url} ({err})"
+                            "[oauth-redirect] ignored ready signal from unexpected origin: {window_url} ({err})"
                         );
                         return;
                     }

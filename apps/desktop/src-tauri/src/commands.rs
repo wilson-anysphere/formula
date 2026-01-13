@@ -5429,7 +5429,7 @@ pub async fn run_macro(
 pub async fn run_python_script(
     window: tauri::WebviewWindow,
     workbook_id: Option<String>,
-    code: LimitedScriptCode<{ crate::ipc_limits::MAX_SCRIPT_CODE_BYTES }>,
+    code: LimitedScriptCode<crate::ipc_limits::MAX_SCRIPT_CODE_BYTES>,
     permissions: Option<PythonPermissions>,
     timeout_ms: Option<u64>,
     max_memory_bytes: Option<u64>,
@@ -6481,7 +6481,7 @@ pub async fn validate_vba_migration(
     workbook_id: Option<String>,
     macro_id: String,
     target: MigrationTarget,
-    code: LimitedScriptCode<{ crate::ipc_limits::MAX_SCRIPT_CODE_BYTES }>,
+    code: LimitedScriptCode<crate::ipc_limits::MAX_SCRIPT_CODE_BYTES>,
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MigrationValidationReport, String> {
