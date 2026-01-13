@@ -1,5 +1,6 @@
 import type { Anchor, DrawingObject, ImageStore, Rect } from "./types";
 import { ImageBitmapCache } from "./imageBitmapCache";
+import { resolveCssVar } from "../theme/cssVars.js";
 
 import { EMU_PER_INCH, PX_PER_INCH, emuToPx, pxToEmu } from "../shared/emu.js";
 
@@ -14,11 +15,11 @@ function resolveOverlayColorTokens(): {
   selectionHandleFill: string;
 } {
   return {
-    placeholderChartStroke: resolveCssVar("--chart-series-1", "blue"),
-    placeholderOtherStroke: resolveCssVar("--chart-series-2", "cyan"),
-    placeholderLabel: resolveCssVar("--text-primary", "black"),
-    selectionStroke: resolveCssVar("--selection-border", "blue"),
-    selectionHandleFill: resolveCssVar("--bg-primary", "white")
+    placeholderChartStroke: resolveCssVar("--chart-series-1", { fallback: "blue" }),
+    placeholderOtherStroke: resolveCssVar("--chart-series-2", { fallback: "cyan" }),
+    placeholderLabel: resolveCssVar("--text-primary", { fallback: "black" }),
+    selectionStroke: resolveCssVar("--selection-border", { fallback: "blue" }),
+    selectionHandleFill: resolveCssVar("--bg-primary", { fallback: "white" })
   };
 }
 
@@ -307,17 +308,6 @@ function drawSelection(
   }
   ctx.restore();
 }
-
-function resolveCssVar(name: string, fallback: string): string {
-  try {
-    if (typeof document === "undefined") return fallback;
-    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return value.length ? value : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 type PaneQuadrant = "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
 
 function resolveAnchorPane(

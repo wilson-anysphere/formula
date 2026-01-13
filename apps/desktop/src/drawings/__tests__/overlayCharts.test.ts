@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { DrawingOverlay, pxToEmu, type ChartRenderer, type GridGeometry, type Viewport } from "../overlay";
 import type { DrawingObject, ImageStore } from "../types";
 
-function createStubCanvasContext(): { ctx: CanvasRenderingContext2D; calls: Array<{ method: string; args: unknown[] }> } {
-  const calls: Array<{ method: string; args: unknown[] }> = [];
+type CanvasCall = { method: string; args: unknown[]; strokeStyle?: unknown; fillStyle?: unknown };
+
+function createStubCanvasContext(): { ctx: CanvasRenderingContext2D; calls: CanvasCall[] } {
+  const calls: CanvasCall[] = [];
   const ctx: any = {
     clearRect: (...args: unknown[]) => calls.push({ method: "clearRect", args }),
     drawImage: (...args: unknown[]) => calls.push({ method: "drawImage", args }),
@@ -14,9 +16,9 @@ function createStubCanvasContext(): { ctx: CanvasRenderingContext2D; calls: Arra
     rect: (...args: unknown[]) => calls.push({ method: "rect", args }),
     clip: () => calls.push({ method: "clip", args: [] }),
     setLineDash: (...args: unknown[]) => calls.push({ method: "setLineDash", args }),
-    strokeRect: (...args: unknown[]) => calls.push({ method: "strokeRect", args }),
+    strokeRect: (...args: unknown[]) => calls.push({ method: "strokeRect", args, strokeStyle: ctx.strokeStyle }),
     fillRect: (...args: unknown[]) => calls.push({ method: "fillRect", args }),
-    fillText: (...args: unknown[]) => calls.push({ method: "fillText", args }),
+    fillText: (...args: unknown[]) => calls.push({ method: "fillText", args, fillStyle: ctx.fillStyle }),
   };
 
   return { ctx: ctx as CanvasRenderingContext2D, calls };
@@ -97,5 +99,44 @@ describe("DrawingOverlay charts", () => {
 
     expect(calls.some((call) => call.method === "strokeRect")).toBe(true);
   });
-});
 
+  it("resolves nested CSS vars for placeholder strokes", async () => {
+    const hadDocument = Object.prototype.hasOwnProperty.call(globalThis, "document");
+    const hadGetComputedStyle = Object.prototype.hasOwnProperty.call(globalThis, "getComputedStyle");
+    const originalDocument = (globalThis as any).document;
+    const originalGetComputedStyle = (globalThis as any).getComputedStyle;
+
+    try {
+      (globalThis as any).document = { documentElement: {} };
+      const vars: Record<string, string> = {
+        "--chart-series-1": "var(--chart-series-base)",
+        "--chart-series-base": "rgb(1, 2, 3)",
+      };
+      (globalThis as any).getComputedStyle = () => ({
+        getPropertyValue: (name: string) => vars[name] ?? "",
+      });
+
+      const { ctx, calls } = createStubCanvasContext();
+      const canvas = createStubCanvas(ctx);
+
+      const overlay = new DrawingOverlay(canvas, images, geom);
+      await overlay.render([createChartObject("chart_1")], viewport);
+
+      const strokeCall = calls.find((call) => call.method === "strokeRect");
+      expect(strokeCall?.strokeStyle).toBe("rgb(1, 2, 3)");
+    } finally {
+      if (hadDocument) {
+        (globalThis as any).document = originalDocument;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).document;
+      }
+      if (hadGetComputedStyle) {
+        (globalThis as any).getComputedStyle = originalGetComputedStyle;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).getComputedStyle;
+      }
+    }
+  });
+});
