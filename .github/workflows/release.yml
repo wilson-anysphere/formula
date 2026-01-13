@@ -1279,6 +1279,8 @@ jobs:
 
           api_url="https://api.github.com/repos/${repo}/releases/tags/${tag}"
           retry_delays=(2 4 8 12 20)
+          win_x64_re='(x64|x86_64|amd64)'
+          win_arm64_re='(arm64|aarch64)'
 
           fetch_release() {
             curl -sSfL \
@@ -1286,6 +1288,31 @@ jobs:
               -H 'Accept: application/vnd.github+json' \
               -H 'X-GitHub-Api-Version: 2022-11-28' \
               "${api_url}"
+          }
+
+          fetch_assets() {
+            local release_id="$1"
+            local per_page=100
+            local page=1
+            local all='[]'
+
+            while :; do
+              page_json="$(curl -sSfL \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'X-GitHub-Api-Version: 2022-11-28' \
+                "https://api.github.com/repos/${repo}/releases/${release_id}/assets?per_page=${per_page}&page=${page}")"
+
+              all="$(jq -s '.[0] + .[1]' <(echo "$all") <(echo "$page_json"))"
+
+              page_len="$(echo "$page_json" | jq -r 'length')"
+              if [[ "$page_len" -lt "$per_page" ]]; then
+                break
+              fi
+              page=$((page + 1))
+            done
+
+            echo "$all"
           }
 
           # Returns 0 if all required assets are present; 1 otherwise.
@@ -1296,7 +1323,7 @@ jobs:
 
             count_matches() {
               local re="$1"
-              echo "$json" | jq -r --arg re "$re" '[.assets[].name | select(test($re; "i"))] | length'
+              echo "$json" | jq -r --arg re "$re" '[.[].name | select(test($re; "i"))] | length'
             }
 
             require_min() {
@@ -1317,22 +1344,60 @@ jobs:
             require_min "macOS app archive (.app.tar.gz)" '\.app\.tar\.gz$' 1
 
             # Windows multi-arch: ensure distinct installers per architecture were uploaded.
-            require_min "Windows x64 MSI" '(x64|x86_64).*\.msi$' 1
-            require_min "Windows x64 EXE" '(x64|x86_64).*\.exe$' 1
-            require_min "Windows arm64 MSI" '(arm64|aarch64).*\.msi$' 1
-            require_min "Windows arm64 EXE" '(arm64|aarch64).*\.exe$' 1
+            count_windows_arch() {
+              local ext_re="$1"
+              local arch_re="$2"
+              local other_arch_re="$3"
+              echo "$json" | jq -r --arg ext "$ext_re" --arg arch "$arch_re" --arg other "$other_arch_re" '[.[].name
+                | select(test($ext; "i"))
+                | select(test($arch; "i"))
+                | select(test($other; "i") | not)
+              ] | length'
+            }
+
+            win_x64_msi_count="$(count_windows_arch '\\.msi$' "$win_x64_re" "$win_arm64_re")"
+            win_x64_exe_count="$(count_windows_arch '\\.exe$' "$win_x64_re" "$win_arm64_re")"
+            win_arm64_msi_count="$(count_windows_arch '\\.msi$' "$win_arm64_re" "$win_x64_re")"
+            win_arm64_exe_count="$(count_windows_arch '\\.exe$' "$win_arm64_re" "$win_x64_re")"
+
+            if [[ "$win_x64_msi_count" -lt 1 ]]; then
+              echo "missing: Windows x64 MSI (expected >= 1, found ${win_x64_msi_count})" >&2
+              missing=1
+            fi
+            if [[ "$win_x64_exe_count" -lt 1 ]]; then
+              echo "missing: Windows x64 EXE (expected >= 1, found ${win_x64_exe_count})" >&2
+              missing=1
+            fi
+            if [[ "$win_arm64_msi_count" -lt 1 ]]; then
+              echo "missing: Windows arm64 MSI (expected >= 1, found ${win_arm64_msi_count})" >&2
+              missing=1
+            fi
+            if [[ "$win_arm64_exe_count" -lt 1 ]]; then
+              echo "missing: Windows arm64 EXE (expected >= 1, found ${win_arm64_exe_count})" >&2
+              missing=1
+            fi
 
             # Linux artifacts shipped on tagged releases.
             require_min "Linux AppImage" '\.AppImage$' 1
             require_min "Linux DEB" '\.deb$' 1
             require_min "Linux RPM" '\.rpm$' 1
 
-            windows_archless_count="$(echo "$json" | jq -r '[.assets[].name
+            windows_archless_count="$(echo "$json" | jq -r --arg x64 "$win_x64_re" --arg arm64 "$win_arm64_re" '[.[].name
               | select(test("\\.(msi|exe)$"; "i"))
-              | select(test("(x64|x86_64|arm64|aarch64)"; "i") | not)
+              | select((test($x64; "i") or test($arm64; "i")) | not)
             ] | length')"
             if [[ "$windows_archless_count" -ne 0 ]]; then
               echo "missing: found ${windows_archless_count} Windows installer asset(s) without an arch token" >&2
+              missing=1
+            fi
+
+            windows_ambiguous_count="$(echo "$json" | jq -r --arg x64 "$win_x64_re" --arg arm64 "$win_arm64_re" '[.[].name
+              | select(test("\\.(msi|exe)$"; "i"))
+              | select(test($x64; "i"))
+              | select(test($arm64; "i"))
+            ] | length')"
+            if [[ "$windows_ambiguous_count" -ne 0 ]]; then
+              echo "missing: found ${windows_ambiguous_count} Windows installer asset(s) matching BOTH x64 and arm64 patterns (ambiguous naming)" >&2
               missing=1
             fi
 
@@ -1340,33 +1405,48 @@ jobs:
           }
 
           release_json="$(fetch_release)"
-          if ! assets_ready "$release_json"; then
+          release_id="$(echo "$release_json" | jq -r '.id')"
+          if [[ -z "${release_id}" || "${release_id}" == "null" ]]; then
+            echo "::error::Failed to resolve GitHub Release id for tag ${tag}." >&2
+            echo "$release_json" | jq -r '.' >&2 || true
+            exit 1
+          fi
+          assets_json="$(fetch_assets "$release_id")"
+
+          if ! assets_ready "$assets_json"; then
             for delay in "${retry_delays[@]}"; do
               echo "Release assets not fully visible yet; retrying in ${delay}s..." >&2
               sleep "$delay"
               release_json="$(fetch_release)"
-              if assets_ready "$release_json"; then
+              release_id="$(echo "$release_json" | jq -r '.id')"
+              if [[ -z "${release_id}" || "${release_id}" == "null" ]]; then
+                echo "::error::Failed to resolve GitHub Release id for tag ${tag} during retry." >&2
+                echo "$release_json" | jq -r '.' >&2 || true
+                exit 1
+              fi
+              assets_json="$(fetch_assets "$release_id")"
+              if assets_ready "$assets_json"; then
                 break
               fi
             done
           fi
 
-          if ! assets_ready "$release_json"; then
+          if ! assets_ready "$assets_json"; then
             echo "::error::Release asset verification failed after retries." >&2
-            echo "$release_json" | jq -r '.assets[].name' | sort | sed 's/^/::error:: - /' || true
+            echo "$assets_json" | jq -r '.[].name' | sort | sed 's/^/::error:: - /' || true
             exit 1
           fi
 
           release_url="$(echo "$release_json" | jq -r '.html_url')"
           draft="$(echo "$release_json" | jq -r '.draft')"
-          asset_count="$(echo "$release_json" | jq -r '.assets | length')"
+          asset_count="$(echo "$assets_json" | jq -r 'length')"
 
           echo "Release: ${tag} (draft=${draft})"
           echo "URL: ${release_url}"
           echo "Assets: ${asset_count}"
           echo
 
-          mapfile -t asset_names < <(echo "$release_json" | jq -r '.assets[].name' | sort)
+          mapfile -t asset_names < <(echo "$assets_json" | jq -r '.[].name' | sort)
           printf '%s\n' "${asset_names[@]}"
 
           dup_names="$(printf '%s\n' "${asset_names[@]}" | sort | uniq -d || true)"
@@ -1387,7 +1467,7 @@ jobs:
             elif [[ "$base" == *.msi || "$base" == *.exe ]]; then
               if [[ "$base" =~ (arm64|aarch64) ]]; then
                 echo "windows-arm64"
-              elif [[ "$base" =~ (x64|x86_64) ]]; then
+              elif [[ "$base" =~ (x64|x86_64|amd64) ]]; then
                 echo "windows-x64"
               else
                 echo "windows-unknown"
