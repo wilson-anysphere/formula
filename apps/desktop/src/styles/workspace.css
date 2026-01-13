@@ -287,7 +287,7 @@
 }
 
 .collab-panel__message {
-  padding: 12px;
+  padding: 8px;
 }
 
 .collab-panel__message--error {
@@ -343,7 +343,7 @@
 .collab-version-history {
   flex: 1;
   min-height: 0;
-  padding: 12px;
+  padding: 8px;
   overflow: auto;
 }
 
@@ -434,6 +434,20 @@
   padding: 6px 8px;
   background: var(--bg-primary);
   color: var(--text-primary);
+  font-size: 12px;
+  line-height: 16px;
+  outline: none;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.collab-version-history__input:focus,
+.collab-version-history__textarea:focus {
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
 .collab-version-history__checkbox {
@@ -630,6 +644,24 @@
 
 .collab-version-history__compare-select {
   min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 16px;
+  outline: none;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.collab-version-history__compare-select:focus {
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
 .collab-version-history__diff-group {
@@ -735,7 +767,7 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 12px;
+  padding: 8px;
 }
 
 .branch-manager__permission-warning {
@@ -866,7 +898,7 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 12px;
+  padding: 8px;
 }
 
 .branch-merge button {
@@ -1065,6 +1097,21 @@
   border-radius: var(--radius-sm);
   background: var(--bg-primary);
   color: var(--text-primary);
+  font-size: 12px;
+  line-height: 16px;
+  outline: none;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.branch-merge__manual-cell-editor input:focus,
+.branch-merge__manual-cell-editor select:focus,
+.branch-merge__manual-cell-editor textarea:focus {
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
 .branch-merge__manual-cell-editor textarea {
