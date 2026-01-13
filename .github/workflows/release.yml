@@ -61,6 +61,7 @@ env:
   # - apps/desktop/src-tauri/Cargo.toml (tauri = "2.9")
   # - docs/release.md (local release prep instructions)
   TAURI_CLI_VERSION: "2.9.5"
+
 jobs:
   conflict-marker-guard:
     name: "Guard: no merge conflict markers"
@@ -168,6 +169,26 @@ jobs:
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
           echo "artifact_label=${artifact_label_sanitized}" >> "${GITHUB_OUTPUT}"
           echo "should_validate_version=${should_validate_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Guard: tag must be on main
+        if: steps.params.outputs.upload == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=1
+
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            exit 0
+          fi
+
+          # In a shallow checkout, `origin/main` may not include enough history to
+          # prove the tagged commit is reachable. Fetch full main history and retry.
+          git fetch --unshallow origin main 2>/dev/null || git fetch origin main --depth=1000000
+
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Releases must be tagged from the main branch. Commit $GITHUB_SHA is not reachable from origin/main."
+            exit 1
+          fi
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
