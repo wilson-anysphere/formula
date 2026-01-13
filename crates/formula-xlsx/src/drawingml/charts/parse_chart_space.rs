@@ -5,12 +5,13 @@ use formula_model::charts::{
     NumberFormatModel, PieChartModel, PlotAreaModel, ScatterChartModel, SeriesData,
     SeriesIndexRange, SeriesModel, SeriesNumberData, SeriesPointStyle, SeriesTextData, TextModel,
 };
+use formula_model::rich_text::RichTextRunStyle;
 use formula_model::RichText;
 use roxmltree::{Document, Node};
 
 use super::cache::{parse_num_cache, parse_str_cache};
 use super::REL_NS;
-use crate::drawingml::style::{parse_marker, parse_sppr, parse_txpr};
+use crate::drawingml::style::{parse_marker, parse_solid_fill, parse_sppr, parse_txpr};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChartSpaceParseError {
@@ -935,9 +936,9 @@ fn parse_text_from_tx(
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "rich")
     {
-        let text = collect_rich_text(rich_node);
+        let rich_text = parse_rich_text(rich_node);
         return Some(TextModel {
-            rich_text: RichText::new(text),
+            rich_text,
             formula: None,
             style: None,
             box_style: None,
@@ -982,12 +983,97 @@ fn parse_text_from_tx(
     None
 }
 
-fn collect_rich_text(rich_node: Node<'_, '_>) -> String {
-    rich_node
-        .descendants()
+fn parse_rich_text(rich_node: Node<'_, '_>) -> RichText {
+    // Chart text is DrawingML (`a:p` + `a:r` runs). Preserve run boundaries and
+    // capture basic formatting from `a:rPr` when present.
+    let mut segments: Vec<(String, RichTextRunStyle)> = Vec::new();
+
+    for p in rich_node
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "p")
+    {
+        for child in p.children().filter(|n| n.is_element()) {
+            match child.tag_name().name() {
+                "r" | "fld" => {
+                    let (text, style) = parse_rich_text_run(child);
+                    if !text.is_empty() {
+                        segments.push((text, style));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if segments.is_empty() {
+        // Fallback: preserve the historical behavior of concatenating all `<a:t>`
+        // descendants (best-effort for weird producer output).
+        let text = rich_node
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name() == "t")
+            .filter_map(|n| n.text())
+            .collect::<String>();
+        return RichText::new(text);
+    }
+
+    if segments.iter().all(|(_, style)| style.is_empty()) {
+        RichText::new(segments.into_iter().map(|(t, _)| t).collect::<String>())
+    } else {
+        RichText::from_segments(segments)
+    }
+}
+
+fn parse_rich_text_run(run_node: Node<'_, '_>) -> (String, RichTextRunStyle) {
+    let style = run_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "rPr")
+        .map(parse_a_rpr)
+        .unwrap_or_default();
+
+    let mut text = String::new();
+    for t in run_node
+        .children()
         .filter(|n| n.is_element() && n.tag_name().name() == "t")
-        .filter_map(|n| n.text())
-        .collect::<String>()
+    {
+        if let Some(s) = t.text() {
+            text.push_str(s);
+        }
+    }
+    (text, style)
+}
+
+fn parse_a_rpr(rpr: Node<'_, '_>) -> RichTextRunStyle {
+    let mut style = RichTextRunStyle::default();
+
+    style.bold = rpr.attribute("b").and_then(parse_drawingml_bool_attr);
+    style.italic = rpr.attribute("i").and_then(parse_drawingml_bool_attr);
+
+    style.size_100pt = rpr
+        .attribute("sz")
+        .and_then(|v| v.parse::<u32>().ok())
+        .and_then(|v| u16::try_from(v).ok());
+
+    style.font = rpr
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "latin")
+        .and_then(|n| n.attribute("typeface"))
+        .map(str::to_string);
+
+    style.color = rpr
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "solidFill")
+        .and_then(parse_solid_fill)
+        .map(|f| f.color);
+
+    style
+}
+
+fn parse_drawingml_bool_attr(v: &str) -> Option<bool> {
+    match v {
+        "1" | "true" | "True" | "TRUE" => Some(true),
+        "0" | "false" | "False" | "FALSE" => Some(false),
+        _ => None,
+    }
 }
 
 fn parse_series_text_data(
