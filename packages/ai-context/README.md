@@ -286,6 +286,14 @@ console.log(workbookCtx.promptContext);
 - `retrieved` (array): retrieved chunks with prompt-safe `text` plus metadata.
 - `indexStats` (object): indexing stats from `packages/ai-rag` (helpful for performance/debug).
 
+#### Quick safety checklist (workbook)
+
+| Value | Safe to send to a cloud model by default? | Notes |
+|---|---:|---|
+| `promptContext` | ✅ Yes | Designed to be prompt-facing and budgeted; still subject to your org’s DLP policy. |
+| `retrieved` | ⚠️ Usually | Chunk `text` is redacted/prompt-safe and `metadata.text` is stripped to avoid footguns, but prefer `promptContext` unless you need custom formatting. |
+| `indexStats` | ❌ No | Diagnostic/perf info; not useful in prompts and may bloat context. |
+
 ### Common options for `buildWorkbookContextFromSpreadsheetApi()`
 
 ```js
@@ -514,6 +522,24 @@ const classificationRecords = [
     classification: { level: "Restricted", labels: ["pii:ssn"] },
   },
 ];
+```
+
+If your environment has **stable sheet ids** that differ from display names, provide a resolver so DLP selectors still match:
+
+```js
+const sheetNameResolver = {
+  // Called by ContextManager when it needs to map a user-facing sheet name back to a stable id.
+  getSheetIdByName: (sheetName) => {
+    return sheetNameToStableIdMap.get(sheetName) ?? sheetName;
+  },
+};
+
+await cm.buildWorkbookContextFromSpreadsheetApi({
+  spreadsheet,
+  workbookId,
+  query,
+  dlp: { documentId: "doc-123", policy, classificationRecords, sheetNameResolver },
+});
 ```
 
 ---
