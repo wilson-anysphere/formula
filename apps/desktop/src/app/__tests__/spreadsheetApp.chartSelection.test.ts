@@ -160,6 +160,61 @@ describe("SpreadsheetApp chart selection + drag", () => {
     root.remove();
   });
 
+  it("ignores pointerdown events from scrollbars (does not select/deselect charts)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const result = app.addChart({
+      chart_type: "bar",
+      data_range: "A2:B5",
+      title: "Wide Chart",
+      position: "A1:H10",
+    });
+    const chart = app.listCharts().find((c) => c.id === result.chart_id);
+    expect(chart).toBeTruthy();
+
+    const rect = (app as any).chartAnchorToViewportRect(chart!.anchor);
+    expect(rect).not.toBeNull();
+
+    const layout = (app as any).chartOverlayLayout();
+    const originX = layout.originX as number;
+    const originY = layout.originY as number;
+
+    // Pick a point near the right edge of the viewport so it overlaps with where scrollbars render.
+    const clickX = 790;
+    const clickY = originY + rect.top + 10;
+
+    // Sanity: this point is inside the chart's hit region.
+    const hit = (app as any).hitTestChartAtClientPoint(clickX, clickY);
+    expect(hit?.chart?.id).toBe(chart!.id);
+
+    const thumb = (app as any).vScrollbarThumb as HTMLElement;
+    expect(thumb).toBeTruthy();
+
+    // Clicking on the scrollbar thumb should not select or deselect charts, even if a chart
+    // extends underneath the scrollbar layer.
+    dispatchPointerEvent(thumb, "pointerdown", { clientX: clickX, clientY: clickY, pointerId: 77 });
+    dispatchPointerEvent(window, "pointerup", { clientX: clickX, clientY: clickY, pointerId: 77 });
+    expect(app.getSelectedChartId()).toBe(null);
+
+    // Select via the grid surface, then ensure the scrollbar click does not deselect.
+    dispatchPointerEvent(root, "pointerdown", { clientX: originX + rect.left + 10, clientY: originY + rect.top + 10, pointerId: 78 });
+    dispatchPointerEvent(window, "pointerup", { clientX: originX + rect.left + 10, clientY: originY + rect.top + 10, pointerId: 78 });
+    expect(app.getSelectedChartId()).toBe(chart!.id);
+
+    dispatchPointerEvent(thumb, "pointerdown", { clientX: clickX, clientY: clickY, pointerId: 79 });
+    dispatchPointerEvent(window, "pointerup", { clientX: clickX, clientY: clickY, pointerId: 79 });
+    expect(app.getSelectedChartId()).toBe(chart!.id);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("dragging a chart updates its twoCell anchor", () => {
     const root = createRoot();
     const status = {

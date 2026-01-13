@@ -8118,6 +8118,20 @@ export class SpreadsheetApp {
     if (this.disposed) return;
     if (e.button !== 0) return;
 
+    const target = e.target as HTMLElement | null;
+    // Only treat pointerdown events originating from the grid surface (canvases/root) as
+    // chart selection/drags. This avoids interfering with interactive DOM overlays
+    // (scrollbars, outline buttons, comments panel, etc) even when a chart happens to
+    // extend underneath them.
+    const isGridSurface =
+      target === this.root ||
+      target === this.selectionCanvas ||
+      target === this.gridCanvas ||
+      target === this.referenceCanvas ||
+      target === this.auditingCanvas ||
+      target === this.presenceCanvas;
+    if (!isGridSurface) return;
+
     const hit = this.hitTestChartAtClientPoint(e.clientX, e.clientY);
     if (!hit) {
       if (this.selectedChartId != null) this.setSelectedChartId(null);
@@ -8805,10 +8819,16 @@ export class SpreadsheetApp {
   }
 
   private renderDrawings(sharedViewport?: GridViewportState): void {
+    // In shared-grid mode the renderer can emit an initial viewport notification while
+    // SpreadsheetApp is still constructing (e.g. unit tests that stub
+    // `requestAnimationFrame` synchronously). Guard against accessing the overlay before it
+    // is initialized.
+    const overlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
+    if (!overlay) return;
     const viewport = this.getDrawingRenderViewport(sharedViewport);
     const objects = this.listDrawingObjectsForSheet();
     this.drawingObjects = objects;
-    void this.drawingOverlay.render(objects, viewport).catch((err) => {
+    void overlay.render(objects, viewport).catch((err) => {
       console.warn("Drawing overlay render failed", err);
     });
   }
