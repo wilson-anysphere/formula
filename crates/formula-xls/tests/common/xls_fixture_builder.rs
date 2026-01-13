@@ -477,6 +477,24 @@ pub fn build_shared_formula_area3d_mixed_flags_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a **2D** shared-formula range (`B1:C2`).
+///
+/// The shared formula base (`SHRFMLA.rgce`) uses `PtgRefN(col_off=-1) + 1 + +`, so each materialized
+/// cell formula depends on decoding the shared `rgce` with the *correct base cell* (row and column).
+pub fn build_shared_formula_2d_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_2d_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a shared formula over `B1:B2` where the shared formula
 /// definition (`SHRFMLA`) includes a `PtgArray` constant stored in trailing `rgcb` bytes.
 ///
@@ -8753,6 +8771,42 @@ fn build_hyperlink_workbook_stream(sheet_name: &str, hlink: Vec<u8>) -> Vec<u8> 
     globals
 }
 
+fn build_shared_formula_2d_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: 16 style XFs + one cell XF used by our formula cells.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet containing a shared formula group.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Shared");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    let sheet_offset = globals.len();
+    let sheet = build_shared_formula_2d_sheet_stream(xf_cell);
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+
+    globals
+}
+
 fn build_formula_sheet_name_sanitization_workbook_stream() -> Vec<u8> {
     // This workbook contains:
     // - Sheet 0: `Bad:Name` (invalid; will be sanitized to `Bad_Name` on import), with a numeric A1.
@@ -9495,6 +9549,80 @@ fn build_spill_operator_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
         RECORD_FORMULA,
         &formula_cell_with_raw_value(0, 1, xf_cell, cached_numeric, &rgce),
     );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_formula_2d_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 3) => A1:C2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Shared formula range B1:C2.
+    //
+    // - Anchor/base cell: B1.
+    // - Shared rgce (stored in SHRFMLA): `PtgRefN(col_off=-1) + 1 + +`
+    //   so the materialized formula in each cell references the cell to the left.
+    //
+    // Expected materialization:
+    //   B1 = A1+1, C1 = B1+1, B2 = A2+1, C2 = B2+1
+    let shared_rgce: Vec<u8> = {
+        let row_off: i16 = 0;
+        let col_off: i16 = -1;
+        let col14: u16 = (col_off as u16) & 0x3FFF;
+        let col_field: u16 = col14 | 0xC000; // row+col relative
+
+        let mut v = Vec::new();
+        v.push(0x2C); // PtgRefN
+        v.extend_from_slice(&(row_off as u16).to_le_bytes());
+        v.extend_from_slice(&col_field.to_le_bytes());
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+
+    // Anchor cell B1: store a PtgExp(B1) formula, followed by SHRFMLA containing the shared rgce.
+    let ptgexp = ptg_exp(0, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(0, 1, xf_cell, 0.0, &ptgexp),
+    );
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 1, 1, 2, &shared_rgce),
+    );
+
+    // Remaining cells in the shared range store PtgExp(B1).
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(0, 2, xf_cell, 0.0, &ptgexp),
+    ); // C1
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 1, xf_cell, 0.0, &ptgexp),
+    ); // B2
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 2, xf_cell, 0.0, &ptgexp),
+    ); // C2
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
