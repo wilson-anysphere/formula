@@ -87,6 +87,8 @@ security-report/
 # Benchmark outputs (generated locally/CI)
 benchmark-results.json
 benchmark-details.json
+benchmark-results.tab-completion.json
+benchmark-details.tab-completion.json
 
 # App artifacts
 .formula/
