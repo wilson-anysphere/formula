@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use formula_model::charts::{Chart, ChartKind, ChartModel, ChartType};
 use roxmltree::Document;
@@ -57,6 +57,7 @@ impl XlsxPackage {
             let drawing_rel_map = match drawing_rels {
                 Some(xml) => parse_relationships(xml, &drawing_rels_part)?
                     .into_iter()
+                    .filter(|rel| !is_external_target_mode(rel.target_mode.as_deref()))
                     .map(|r| (r.id.clone(), r))
                     .collect::<HashMap<_, _>>(),
                 None => HashMap::new(),
@@ -65,7 +66,10 @@ impl XlsxPackage {
             for drawing_ref in drawing_refs {
                 let relationship = drawing_rel_map.get(&drawing_ref.rel_id);
                 let chart_part = relationship
-                    .map(|r| resolve_target(&drawing_part, &r.target))
+                    .map(|r| {
+                        let target = normalize_relationship_target(&r.target);
+                        resolve_target(&drawing_part, &target)
+                    })
                     .filter(|target| self.part(target).is_some());
 
                 let parsed = match chart_part
@@ -129,19 +133,37 @@ impl XlsxPackage {
             }
 
             let drawing_rels_part = rels_for_part(&drawing_part);
+            let mut external_drawing_rel_ids = HashSet::new();
             let drawing_rel_map = match self.part(&drawing_rels_part) {
-                Some(xml) => parse_relationships(xml, &drawing_rels_part)?
-                    .into_iter()
-                    .map(|r| (r.id.clone(), r))
-                    .collect::<HashMap<_, _>>(),
+                Some(xml) => {
+                    let mut map = HashMap::new();
+                    for rel in parse_relationships(xml, &drawing_rels_part)? {
+                        if is_external_target_mode(rel.target_mode.as_deref()) {
+                            external_drawing_rel_ids.insert(rel.id.clone());
+                            continue;
+                        }
+                        map.insert(rel.id.clone(), rel);
+                    }
+                    map
+                }
                 None => HashMap::new(),
             };
 
             for drawing_ref in drawing_chart_refs {
+                // Ignore charts that point at external targets since there is no in-package OPC part
+                // to load. This avoids producing misleading "missing chart part" diagnostics for
+                // valid workbooks that include external relationships.
+                if external_drawing_rel_ids.contains(&drawing_ref.rel_id) {
+                    continue;
+                }
+
                 let mut diagnostics = Vec::new();
 
                 let chart_part_path = match drawing_rel_map.get(&drawing_ref.rel_id) {
-                    Some(rel) => resolve_target(&drawing_part, &rel.target),
+                    Some(rel) => {
+                        let target = normalize_relationship_target(&rel.target);
+                        resolve_target(&drawing_part, &target)
+                    }
                     None => {
                         diagnostics.push(ChartDiagnostic {
                             severity: ChartDiagnosticSeverity::Error,
@@ -193,9 +215,13 @@ impl XlsxPackage {
                 {
                     let rels = parse_relationships(chart_rels_bytes, chart_rels_path)?;
                     for rel in rels {
-                        let target_path = resolve_target(&chart_part_path, &rel.target);
+                        if is_external_target_mode(rel.target_mode.as_deref()) {
+                            continue;
+                        }
+                        let normalized_target = normalize_relationship_target(&rel.target);
+                        let target_path = resolve_target(&chart_part_path, &normalized_target);
                         let rel_type = rel.type_.to_ascii_lowercase();
-                        let rel_target = rel.target.to_ascii_lowercase();
+                        let rel_target = normalized_target.to_ascii_lowercase();
 
                         if chart_ex_part.is_none()
                             && (rel_type.contains("chartex") || rel_target.contains("chartex"))
@@ -731,4 +757,21 @@ fn chart_ex_kind_is_specific(kind: &ChartKind) -> bool {
 
     let kind = kind.trim();
     !kind.is_empty() && !kind.eq_ignore_ascii_case("unknown")
+}
+
+fn normalize_relationship_target(target: &str) -> String {
+    let target = target.split_once('#').map(|(t, _)| t).unwrap_or(target);
+    let mut out = if target.contains('\\') {
+        target.replace('\\', "/")
+    } else {
+        target.to_string()
+    };
+    while let Some(stripped) = out.strip_prefix("./") {
+        out = stripped.to_string();
+    }
+    out
+}
+
+fn is_external_target_mode(target_mode: Option<&str>) -> bool {
+    target_mode.is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
 }
