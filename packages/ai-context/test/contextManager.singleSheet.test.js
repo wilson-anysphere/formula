@@ -196,6 +196,38 @@ test("buildContext: schema metadata updates (namedRanges) do not force re-indexi
   assert.deepEqual(out2.schema.namedRanges, sheet.namedRanges);
 });
 
+test("buildContext: schema metadata updates (tables) do not force re-indexing", async () => {
+  const ragIndex = new RagIndex();
+  let indexCalls = 0;
+  const originalIndexSheet = ragIndex.indexSheet.bind(ragIndex);
+  ragIndex.indexSheet = async (...args) => {
+    indexCalls++;
+    return originalIndexSheet(...args);
+  };
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1000, ragIndex });
+  const sheet = {
+    name: "Sheet1",
+    values: [
+      ["Region", "Revenue"],
+      ["North", 1000],
+      ["South", 2000],
+    ],
+    tables: [],
+  };
+
+  const out1 = await cm.buildContext({ sheet, query: "revenue" });
+  assert.equal(indexCalls, 1);
+  assert.ok(out1.schema.tables.length >= 1);
+
+  // Add an explicit table definition. This should update schema output but not require
+  // re-indexing/embedding since the cell content is unchanged.
+  sheet.tables = [{ name: "MyTable", range: "Sheet1!A1:B3" }];
+  const out2 = await cm.buildContext({ sheet, query: "revenue" });
+  assert.equal(indexCalls, 1);
+  assert.ok(out2.schema.tables.some((t) => t.name === "MyTable" && t.range === "Sheet1!A1:B3"));
+});
+
 test("buildContext: LRU cache eviction removes old sheet chunks from the in-memory store", async () => {
   const cm = new ContextManager({ tokenBudgetTokens: 1000, sheetIndexCacheLimit: 2 });
 
