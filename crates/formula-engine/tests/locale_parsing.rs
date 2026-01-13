@@ -38,6 +38,12 @@ fn canonicalize_supports_thousands_and_leading_decimal_in_de_de() {
 }
 
 #[test]
+fn canonicalize_accepts_canonical_leading_decimal_in_de_de() {
+    let canonical = locale::canonicalize_formula("=SUMME(.5;1)", &locale::DE_DE).unwrap();
+    assert_eq!(canonical, "=SUM(.5,1)");
+}
+
+#[test]
 fn canonicalize_and_localize_array_literals_for_de_de() {
     let localized = "=SUMME({1\\2;3\\4})";
     let canonical = locale::canonicalize_formula(localized, &locale::DE_DE).unwrap();

@@ -123,3 +123,14 @@ fn lex_localized_error_literal_with_non_ascii_letters() {
     assert!(matches!(tokens[0].kind, TokenKind::Error(ref s) if s == "#ÜBERLAUF!"));
     assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
 }
+
+#[test]
+fn lex_de_de_accepts_canonical_leading_decimal() {
+    let locale = LocaleConfig::de_de();
+    let mut opts = ParseOptions::default();
+    opts.locale = locale;
+    let tokens = lex(".5", &opts).unwrap();
+
+    assert!(matches!(tokens[0].kind, TokenKind::Number(ref n) if n == ".5"));
+    assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+}

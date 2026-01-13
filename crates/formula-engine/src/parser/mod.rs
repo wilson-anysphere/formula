@@ -822,7 +822,7 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 c if is_digit(c)
-                    || (c == self.locale.decimal_separator && self.peek_next_is_digit()) =>
+                    || ((c == self.locale.decimal_separator || c == '.') && self.peek_next_is_digit()) =>
                 {
                     let raw = self.lex_number();
                     self.push(TokenKind::Number(raw), start, self.idx);
@@ -1212,7 +1212,7 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 c if is_digit(c)
-                    || (c == self.locale.decimal_separator && self.peek_next_is_digit()) =>
+                    || ((c == self.locale.decimal_separator || c == '.') && self.peek_next_is_digit()) =>
                 {
                     let raw = self.lex_number();
                     self.push(TokenKind::Number(raw), start, self.idx);
@@ -1346,7 +1346,64 @@ impl<'a> Lexer<'a> {
         out
     }
 
+    /// Determine which decimal separator (if any) should be used when lexing the current number.
+    ///
+    /// Rules:
+    /// - Prefer the locale decimal separator when it appears anywhere in the mantissa.
+    /// - Otherwise, accept canonical `.` decimals in any locale.
+    /// - In locales where `.` is also the thousands separator (e.g. `de-DE`, `es-ES`), treat `.`
+    ///   as a thousands separator (not a decimal point) when the mantissa matches a typical
+    ///   thousands-grouping pattern like `1.234.567`.
+    fn number_decimal_separator(&self) -> Option<char> {
+        let start = self.idx;
+        let mut end = start;
+
+        for (rel, ch) in self.src[start..].char_indices() {
+            if matches!(ch, 'E' | 'e') {
+                break;
+            }
+            if is_digit(ch)
+                || ch == self.locale.decimal_separator
+                || ch == '.'
+                || Some(ch) == self.locale.thousands_separator
+            {
+                end = start + rel + ch.len_utf8();
+                continue;
+            }
+            break;
+        }
+
+        if end <= start {
+            return None;
+        }
+
+        let mantissa = &self.src[start..end];
+
+        if mantissa.contains(self.locale.decimal_separator) {
+            return Some(self.locale.decimal_separator);
+        }
+
+        if self.locale.decimal_separator != '.' && mantissa.contains('.') {
+            // Disambiguate locales where the thousands separator collides with the canonical
+            // decimal separator.
+            if self.locale.thousands_separator == Some('.')
+                && looks_like_thousands_grouping(mantissa, '.')
+            {
+                return None;
+            }
+            return Some('.');
+        }
+
+        None
+    }
+
     fn lex_number(&mut self) -> String {
+        let decimal_sep = self.number_decimal_separator();
+        let group_sep = match (decimal_sep, self.locale.thousands_separator) {
+            (Some(dec), Some(group)) if dec == group => None,
+            _ => self.locale.thousands_separator,
+        };
+
         let mut out = String::new();
         // integer / leading decimal
         while let Some(ch) = self.peek_char() {
@@ -1357,25 +1414,23 @@ impl<'a> Lexer<'a> {
             }
 
             // Locale-specific grouping separators inside the integer portion of the literal.
+            //
             // Note: Some locales (notably fr-FR) commonly use NBSP (U+00A0) as the grouping
             // separator, but some spreadsheets may contain the narrow no-break space (U+202F)
             // instead. When configured for either, accept both.
-            let is_thousands_sep = Some(ch) == self.locale.thousands_separator
-                || (self.locale.thousands_separator == Some('\u{00A0}') && ch == '\u{202F}')
-                || (self.locale.thousands_separator == Some('\u{202F}') && ch == '\u{00A0}');
-            if is_thousands_sep
-                && !out.is_empty()
-                && self.peek_next_is_digit()
-            {
+            let is_thousands_sep = Some(ch) == group_sep
+                || (group_sep == Some('\u{00A0}') && ch == '\u{202F}')
+                || (group_sep == Some('\u{202F}') && ch == '\u{00A0}');
+            if is_thousands_sep && !out.is_empty() && self.peek_next_is_digit() {
                 self.bump();
                 continue;
             }
 
             break;
         }
-        if self.peek_char() == Some(self.locale.decimal_separator) {
+        if decimal_sep.is_some_and(|dec| self.peek_char() == Some(dec)) {
             self.bump();
-            out.push(self.locale.decimal_separator);
+            out.push(decimal_sep.expect("is_some_and ensured decimal_sep is Some"));
             while let Some(ch) = self.peek_char() {
                 if is_digit(ch) {
                     self.bump();
@@ -1735,6 +1790,26 @@ fn is_ident_cont_char(c: char) -> bool {
         c,
         '$' | '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9'
     ) || (!c.is_ascii() && c.is_alphanumeric())
+}
+
+fn looks_like_thousands_grouping(raw: &str, sep: char) -> bool {
+    let mut parts = raw.split(sep);
+    let Some(first) = parts.next() else {
+        return false;
+    };
+    if first.is_empty() || first.len() > 3 || !first.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+
+    let mut saw_sep = false;
+    for part in parts {
+        saw_sep = true;
+        if part.len() != 3 || !part.chars().all(|c| c.is_ascii_digit()) {
+            return false;
+        }
+    }
+
+    saw_sep
 }
 
 const ERROR_LITERALS: &[&str] = &[
