@@ -30,8 +30,17 @@ export interface CollabPersistence {
    */
   flush?(docId: string): Promise<void>;
   /**
+   * Best-effort compaction for `docId`.
+   *
+   * Some persistence backends store an append-only sequence of incremental CRDT updates.
+   * Over time, replaying that log can become slow and can consume significant disk space.
+   *
+   * Compaction rewrites persisted state into a smaller representation (typically a single
+   * full-document snapshot update), reducing startup/replay cost.
+   */
+  compact?(docId: string): Promise<void>;
+  /**
    * Remove any persisted state for `docId`.
    */
   clear?(docId: string): Promise<void>;
 }
-
