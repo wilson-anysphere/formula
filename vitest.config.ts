@@ -13,12 +13,16 @@ const repoRoot = fileURLToPath(new URL(".", import.meta.url));
 // cross-package integration suites (apps/desktop) remain resilient.
 const collabUndoEntry = resolve(repoRoot, "packages/collab/undo/index.js");
 const collabCommentsEntry = resolve(repoRoot, "packages/collab/comments/src/index.ts");
+const collabPresenceEntry = resolve(repoRoot, "packages/collab/presence/index.js");
 const collabSessionEntry = resolve(repoRoot, "packages/collab/session/src/index.ts");
 const collabVersioningEntry = resolve(repoRoot, "packages/collab/versioning/src/index.ts");
 const collabPersistenceEntry = resolve(repoRoot, "packages/collab/persistence/src/index.ts");
 const collabPersistenceIndexedDbEntry = resolve(repoRoot, "packages/collab/persistence/src/indexeddb.ts");
 const collabYjsUtilsEntry = resolve(repoRoot, "packages/collab/yjs-utils/src/index.ts");
 const collabEncryptedRangesEntry = resolve(repoRoot, "packages/collab/encrypted-ranges/src/index.ts");
+const collabConflictsEntry = resolve(repoRoot, "packages/collab/conflicts/index.js");
+const collabWorkbookEntry = resolve(repoRoot, "packages/collab/workbook/src/index.ts");
+const collabEncryptionEntry = resolve(repoRoot, "packages/collab/encryption/src/index.ts");
 const marketplaceSharedEntry = resolve(repoRoot, "shared");
 const extensionMarketplaceEntry = resolve(repoRoot, "packages/extension-marketplace/src/index.ts");
 const spreadsheetFrontendTokenizerEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/formula/tokenizeFormula.ts");
@@ -61,11 +65,15 @@ export default defineConfig({
       { find: "@formula/extension-marketplace", replacement: extensionMarketplaceEntry },
       { find: "@formula/collab-comments", replacement: collabCommentsEntry },
       { find: "@formula/collab-undo", replacement: collabUndoEntry },
+      { find: "@formula/collab-presence", replacement: collabPresenceEntry },
       { find: "@formula/collab-session", replacement: collabSessionEntry },
       { find: "@formula/collab-versioning", replacement: collabVersioningEntry },
       { find: "@formula/collab-encrypted-ranges", replacement: collabEncryptedRangesEntry },
       { find: "@formula/collab-persistence/indexeddb", replacement: collabPersistenceIndexedDbEntry },
       { find: /^@formula\/collab-persistence$/, replacement: collabPersistenceEntry },
+      { find: "@formula/collab-conflicts", replacement: collabConflictsEntry },
+      { find: "@formula/collab-workbook", replacement: collabWorkbookEntry },
+      { find: "@formula/collab-encryption", replacement: collabEncryptionEntry },
       { find: "@formula/collab-yjs-utils", replacement: collabYjsUtilsEntry },
       // `@formula/spreadsheet-frontend/formula/tokenizeFormula` is a subpath export used by the
       // desktop formula bar highlight code. Alias it directly so Vitest stays resilient in

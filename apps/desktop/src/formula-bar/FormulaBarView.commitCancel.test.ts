@@ -657,8 +657,9 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(e.defaultPrevented).toBe(true);
     expect(onCommit).not.toHaveBeenCalled();
     expect(view.model.isEditing).toBe(true);
-    expect(view.textarea.value).toBe("line1\n");
     expect(view.root.classList.contains("formula-bar--editing")).toBe(true);
+    expect(view.textarea.value).toBe("line1\n");
+    expect(view.model.draft).toBe("line1\n");
     expect(cancel.hidden).toBe(false);
     expect(cancel.disabled).toBe(false);
     expect(commit.hidden).toBe(false);
