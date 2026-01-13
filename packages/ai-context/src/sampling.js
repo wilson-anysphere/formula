@@ -57,6 +57,9 @@ export function randomSampleRows(rows, sampleSize, options = {}) {
  * @param {number} sampleSize
  */
 export function headSampleRows(rows, sampleSize) {
+  if (!Number.isInteger(sampleSize) || sampleSize < 0) {
+    throw new Error(`sampleSize must be a non-negative integer, got: ${sampleSize}`);
+  }
   if (sampleSize <= 0 || rows.length === 0) return [];
   if (sampleSize >= rows.length) return rows.slice();
   return rows.slice(0, sampleSize);
@@ -68,6 +71,9 @@ export function headSampleRows(rows, sampleSize) {
  * @param {number} sampleSize
  */
 export function tailSampleRows(rows, sampleSize) {
+  if (!Number.isInteger(sampleSize) || sampleSize < 0) {
+    throw new Error(`sampleSize must be a non-negative integer, got: ${sampleSize}`);
+  }
   if (sampleSize <= 0 || rows.length === 0) return [];
   if (sampleSize >= rows.length) return rows.slice();
   return rows.slice(rows.length - sampleSize);
@@ -85,10 +91,16 @@ export function tailSampleRows(rows, sampleSize) {
  * @param {{ seed?: number, rng?: () => number, offset?: number }} [options]
  */
 export function systematicSampleRows(rows, sampleSize, options = {}) {
+  if (!Number.isInteger(sampleSize) || sampleSize < 0) {
+    throw new Error(`sampleSize must be a non-negative integer, got: ${sampleSize}`);
+  }
   if (sampleSize <= 0 || rows.length === 0) return [];
   if (sampleSize >= rows.length) return rows.slice();
 
   const rng = options.rng ?? createSeededRng(options.seed ?? 1);
+  if (options.offset !== undefined && (typeof options.offset !== "number" || !Number.isFinite(options.offset))) {
+    throw new Error(`offset must be a finite number, got: ${options.offset}`);
+  }
   const offsetRaw = options.offset ?? rng();
   // Force the offset into [0, 1) so callers can pass e.g. 1.25 to mean 0.25.
   const offset = ((offsetRaw % 1) + 1) % 1;
@@ -244,6 +256,9 @@ export function stratifiedSampleRows(rows, sampleSize, options) {
   const { getStratum } = options;
   const rng = options.rng ?? createSeededRng(options.seed ?? 1);
 
+  if (!Number.isInteger(sampleSize) || sampleSize < 0) {
+    throw new Error(`sampleSize must be a non-negative integer, got: ${sampleSize}`);
+  }
   if (sampleSize <= 0) return [];
   if (rows.length === 0) return [];
   if (sampleSize >= rows.length) return rows.slice();
