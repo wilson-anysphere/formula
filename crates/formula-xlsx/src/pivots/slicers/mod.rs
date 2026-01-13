@@ -15,6 +15,8 @@ use quick_xml::Writer;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Cursor;
 
+use super::{PivotCacheDefinition, PivotCacheValue};
+
 /// Best-effort slicer selection state extracted from `xl/slicerCaches/slicerCache*.xml`.
 ///
 /// When Excel does not persist explicit selection state, slicers behave as "All selected".
@@ -86,6 +88,47 @@ where
     RowFilter::Slicer {
         field: field.into(),
         selection,
+    }
+}
+
+/// Create a resolver that interprets slicer item keys as indices (`x="..."`) into the pivot
+/// cache field's `<sharedItems>` table.
+///
+/// This is useful when `SlicerSelectionState` keys are numeric strings (e.g. `"0"`), which
+/// Excel uses for slicer caches bound to pivot caches that store items as shared-item indices.
+pub fn shared_item_key_resolver(
+    cache_def: &PivotCacheDefinition,
+    field_idx: usize,
+) -> impl FnMut(&str) -> Option<ScalarValue> + '_ {
+    move |key| resolve_slicer_item_key(cache_def, field_idx, key)
+}
+
+/// Resolve a slicer item key into a typed [`ScalarValue`] using a pivot cache field's
+/// `<sharedItems>` table.
+///
+/// Returns `None` when `key` is not numeric, or when the shared item cannot be found.
+pub fn resolve_slicer_item_key(
+    cache_def: &PivotCacheDefinition,
+    field_idx: usize,
+    key: &str,
+) -> Option<ScalarValue> {
+    let idx = key.parse::<u32>().ok()? as usize;
+    let field = cache_def.cache_fields.get(field_idx)?;
+    let item = field.shared_items.as_ref()?.get(idx)?;
+
+    match item {
+        PivotCacheValue::String(s) => Some(ScalarValue::Text(s.clone())),
+        PivotCacheValue::Number(n) => Some(ScalarValue::from(*n)),
+        PivotCacheValue::Bool(b) => Some(ScalarValue::Bool(*b)),
+        PivotCacheValue::DateTime(s) => {
+            if let Some(date) = parse_iso_ymd(s) {
+                Some(ScalarValue::Date(date))
+            } else {
+                Some(ScalarValue::Text(s.clone()))
+            }
+        }
+        PivotCacheValue::Missing | PivotCacheValue::Error(_) => Some(ScalarValue::Blank),
+        PivotCacheValue::Index(_) => None,
     }
 }
 
@@ -2145,6 +2188,7 @@ fn parse_timeline_cache_xml(xml: &[u8]) -> Result<ParsedTimelineCacheXml, XlsxEr
 #[cfg(test)]
 mod engine_filter_field_tests {
     use super::*;
+    use crate::pivots::PivotCacheField;
     use formula_engine::pivot::PivotFieldRef;
     use std::collections::HashSet;
     use std::io::{Cursor, Write};
@@ -2251,6 +2295,61 @@ mod engine_filter_field_tests {
         );
         assert_eq!(slicer.cache_name.as_deref(), Some("Cache1"));
         assert_eq!(slicer.source_name.as_deref(), Some("Field1"));
+    }
+
+    #[test]
+    fn resolves_numeric_key_via_shared_items() {
+        let mut field = PivotCacheField::default();
+        field.name = "Field1".to_string();
+        field.shared_items = Some(vec![
+            PivotCacheValue::String("East".to_string()),
+            PivotCacheValue::Number(42.0),
+            PivotCacheValue::Bool(true),
+        ]);
+
+        let mut def = PivotCacheDefinition::default();
+        def.cache_fields.push(field);
+
+        assert_eq!(
+            resolve_slicer_item_key(&def, 0, "0"),
+            Some(ScalarValue::Text("East".to_string()))
+        );
+        assert_eq!(
+            resolve_slicer_item_key(&def, 0, "1"),
+            Some(ScalarValue::from(42.0))
+        );
+        assert_eq!(
+            resolve_slicer_item_key(&def, 0, "2"),
+            Some(ScalarValue::Bool(true))
+        );
+
+        let mut resolver = shared_item_key_resolver(&def, 0);
+        assert_eq!(resolver("1"), Some(ScalarValue::from(42.0)));
+    }
+
+    #[test]
+    fn returns_none_for_non_numeric_keys() {
+        let def = PivotCacheDefinition::default();
+        assert_eq!(resolve_slicer_item_key(&def, 0, "East"), None);
+    }
+
+    #[test]
+    fn datetime_shared_items_resolve_to_date() {
+        let mut field = PivotCacheField::default();
+        field.name = "DateField".to_string();
+        field.shared_items = Some(vec![PivotCacheValue::DateTime(
+            "2024-01-15T00:00:00Z".to_string(),
+        )]);
+
+        let mut def = PivotCacheDefinition::default();
+        def.cache_fields.push(field);
+
+        assert_eq!(
+            resolve_slicer_item_key(&def, 0, "0"),
+            Some(ScalarValue::Date(
+                NaiveDate::from_ymd_opt(2024, 1, 15).unwrap()
+            ))
+        );
     }
 }
 
