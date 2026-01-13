@@ -2159,6 +2159,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "view.togglePanel.python": isPanelOpen(PanelIds.PYTHON),
       "view.togglePanel.marketplace": isPanelOpen(PanelIds.MARKETPLACE),
       "view.togglePanel.extensions": isPanelOpen(PanelIds.EXTENSIONS),
+      "view.togglePanel.vbaMigrate": isPanelOpen(PanelIds.VBA_MIGRATE),
       "data.queriesConnections.queriesConnections": isPanelOpen(PanelIds.DATA_QUERIES),
       "comments.togglePanel": app.isCommentsPanelVisible(),
       [FORMAT_PAINTER_COMMAND_ID]: Boolean(formatPainterState),
