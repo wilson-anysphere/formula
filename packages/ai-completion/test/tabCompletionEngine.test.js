@@ -1433,6 +1433,31 @@ test("MATCH match_type suggests 0, 1, -1", async () => {
   );
 });
 
+test("MATCH match_type suggestions work with ';' argument separators", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=MATCH(A1; A1:A10; ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=MATCH(A1; A1:A10; 0"),
+    `Expected MATCH to suggest match_type=0 with semicolon separators, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=MATCH(A1; A1:A10; 1"),
+    `Expected MATCH to suggest match_type=1 with semicolon separators, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=MATCH(A1; A1:A10; -1"),
+    `Expected MATCH to suggest match_type=-1 with semicolon separators, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("XLOOKUP match_mode suggests 0, -1, 1, 2", async () => {
   const engine = new TabCompletionEngine();
 
@@ -1459,6 +1484,36 @@ test("XLOOKUP match_mode suggests 0, -1, 1, 2", async () => {
   assert.ok(
     suggestions.some((s) => s.text === "=XLOOKUP(A1, A1:A10, B1:B10, , 2"),
     `Expected XLOOKUP to suggest match_mode=2, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("XLOOKUP match_mode suggestions work with ';' argument separators", async () => {
+  const engine = new TabCompletionEngine();
+
+  // Leave if_not_found blank so we're completing match_mode (5th arg).
+  const currentInput = "=XLOOKUP(A1; A1:A10; B1:B10; ; ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=XLOOKUP(A1; A1:A10; B1:B10; ; 0"),
+    `Expected XLOOKUP to suggest match_mode=0 with semicolon separators, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XLOOKUP(A1; A1:A10; B1:B10; ; -1"),
+    `Expected XLOOKUP to suggest match_mode=-1 with semicolon separators, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XLOOKUP(A1; A1:A10; B1:B10; ; 1"),
+    `Expected XLOOKUP to suggest match_mode=1 with semicolon separators, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XLOOKUP(A1; A1:A10; B1:B10; ; 2"),
+    `Expected XLOOKUP to suggest match_mode=2 with semicolon separators, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 
