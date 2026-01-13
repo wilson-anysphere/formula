@@ -8507,6 +8507,9 @@ function handleRibbonCommand(commandId: string): void {
 
     if (commandId.startsWith("format.numberFormat.")) {
       executeBuiltinCommand(commandId);
+      // Formatting commands should leave the grid focused even if the underlying command
+      // is a no-op (e.g. selection size guard blocks).
+      app.focus();
       return;
     }
 
