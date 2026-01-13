@@ -6,6 +6,6 @@
   "main": "./src/index.js",
   "types": "./src/index.d.ts",
   "scripts": {
-    "test": "node --test test/functionCatalogArtifact.test.js"
+    "test": "node --test test/*.test.js"
   }
 }
