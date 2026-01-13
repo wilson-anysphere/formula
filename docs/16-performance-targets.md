@@ -162,7 +162,7 @@ Memory benchmark:
 - `FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1` to fail when p95 exceeds the budget
 - `FORMULA_RUN_DESKTOP_MEMORY_BENCH=1` to allow running the runner in CI (it skips by default)
 
-Bundle size gating (used by the desktop release workflow):
+Desktop installer artifact size gating (used by the desktop release workflow):
 
 - `FORMULA_BUNDLE_SIZE_LIMIT_MB=50` (default: 50MB per artifact)
 - `FORMULA_ENFORCE_BUNDLE_SIZE=1` to fail when any artifact exceeds the limit
