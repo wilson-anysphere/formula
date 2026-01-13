@@ -448,3 +448,89 @@ test("searchWorkbookRag keeps results when metadata.workbookId is missing (assum
   assert.equal(results.length, 1);
   assert.equal(results[0].id, "a");
 });
+
+test("searchWorkbookRag rejects when embedder returns a non-array result", async () => {
+  let queryCalled = false;
+  const embedder = {
+    async embedTexts() {
+      // Misbehaving embedder: returns a single vector instead of an array of vectors.
+      return /** @type {any} */ (new Float32Array([1, 0, 0]));
+    },
+  };
+  const vectorStore = {
+    async query() {
+      queryCalled = true;
+      return [];
+    },
+  };
+
+  await assert.rejects(
+    searchWorkbookRag({ queryText: "hello", workbookId: "wb", topK: 1, vectorStore, embedder }),
+    /non-array/
+  );
+  assert.equal(queryCalled, false);
+});
+
+test("searchWorkbookRag rejects when embedder returns the wrong number of vectors", async () => {
+  let queryCalled = false;
+  const embedder = {
+    async embedTexts() {
+      return [];
+    },
+  };
+  const vectorStore = {
+    async query() {
+      queryCalled = true;
+      return [];
+    },
+  };
+
+  await assert.rejects(
+    searchWorkbookRag({ queryText: "hello", workbookId: "wb", topK: 1, vectorStore, embedder }),
+    /returned 0 vector\(s\); expected 1/
+  );
+  assert.equal(queryCalled, false);
+});
+
+test("searchWorkbookRag rejects when query vector dimension mismatches vectorStore.dimension", async () => {
+  let queryCalled = false;
+  const embedder = {
+    async embedTexts() {
+      return [[1, 0]];
+    },
+  };
+  const vectorStore = {
+    dimension: 3,
+    async query() {
+      queryCalled = true;
+      return [];
+    },
+  };
+
+  await assert.rejects(
+    searchWorkbookRag({ queryText: "hello", workbookId: "wb", topK: 1, vectorStore, embedder }),
+    /dimension mismatch/
+  );
+  assert.equal(queryCalled, false);
+});
+
+test("searchWorkbookRag rejects when query vector contains non-finite values", async () => {
+  let queryCalled = false;
+  const embedder = {
+    async embedTexts() {
+      return [[Number.NaN, 0, 0]];
+    },
+  };
+  const vectorStore = {
+    async query() {
+      queryCalled = true;
+      return [];
+    },
+  };
+
+  await assert.rejects(
+    searchWorkbookRag({ queryText: "hello", workbookId: "wb", topK: 1, vectorStore, embedder }),
+    /invalid query vector value/
+  );
+  assert.equal(queryCalled, false);
+});

@@ -55,9 +55,40 @@ export async function searchWorkbookRag(params) {
   const oversample = rerank || dedupe ? 4 : 1;
   const queryK = Math.max(topK, Math.ceil(topK * oversample));
 
-  const [qVec] = await awaitWithAbort(embedder.embedTexts([queryText], { signal }), signal);
+  const vectors = await awaitWithAbort(embedder.embedTexts([queryText], { signal }), signal);
   throwIfAborted(signal);
+  if (!Array.isArray(vectors)) {
+    throw new Error(
+      "searchWorkbookRag embedder.embedTexts returned a non-array result; expected an array with a single vector"
+    );
+  }
+  if (vectors.length !== 1) {
+    throw new Error(
+      `searchWorkbookRag embedder.embedTexts returned ${vectors.length} vector(s); expected 1`
+    );
+  }
+  const qVec = vectors[0];
   if (!qVec) return [];
+  const qLen = qVec?.length;
+  if (!Number.isFinite(qLen) || qLen <= 0) {
+    throw new Error(
+      "searchWorkbookRag embedder.embedTexts returned an invalid query vector (expected an array-like vector with a finite length)"
+    );
+  }
+  const expectedDim = vectorStore?.dimension;
+  if (Number.isFinite(expectedDim) && qLen !== expectedDim) {
+    throw new Error(
+      `searchWorkbookRag query vector dimension mismatch: expected ${expectedDim}, got ${qLen}`
+    );
+  }
+  for (let i = 0; i < qLen; i += 1) {
+    const value = qVec[i];
+    if (!Number.isFinite(value)) {
+      throw new Error(
+        `searchWorkbookRag embedder.embedTexts returned an invalid query vector value at index=${i}: expected a finite number`
+      );
+    }
+  }
 
   /** @type {any[]} */
   let results = await awaitWithAbort(vectorStore.query(qVec, queryK, { workbookId, signal }), signal);
