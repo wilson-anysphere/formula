@@ -30,6 +30,10 @@ const FILTER_DATABASE_NAME_ALIAS_TRUNCATED: &str = "_FilterDatabas";
 // Similar to `FILTER_DATABASE_NAME_ALIAS_TRUNCATED`, but retaining the `_xlnm.` prefix.
 const FILTER_DATABASE_NAME_CANONICAL_TRUNCATED: &str = "_xlnm._FilterDatabas";
 
+const MAX_AUTOFILTER_WARNINGS: usize = 200;
+const AUTOFILTER_WARNINGS_SUPPRESSED_MESSAGE: &str =
+    "too many AutoFilter parse warnings; additional warnings suppressed";
+
 // BIFF8 string flags (mirrors `strings.rs`).
 const STR_FLAG_HIGH_BYTE: u8 = 0x01;
 const STR_FLAG_EXT: u8 = 0x04;
@@ -61,6 +65,30 @@ pub(crate) struct ParsedFilterDatabaseRanges {
     pub(crate) by_sheet: HashMap<usize, Range>,
     /// Non-fatal parse warnings.
     pub(crate) warnings: Vec<String>,
+}
+
+fn push_warning(out: &mut ParsedFilterDatabaseRanges, msg: String) {
+    if MAX_AUTOFILTER_WARNINGS == 0 {
+        return;
+    }
+
+    if out.warnings.len() < MAX_AUTOFILTER_WARNINGS {
+        out.warnings.push(msg);
+        return;
+    }
+
+    out.warnings.truncate(MAX_AUTOFILTER_WARNINGS);
+
+    if matches!(
+        out.warnings.last(),
+        Some(warning) if warning == AUTOFILTER_WARNINGS_SUPPRESSED_MESSAGE
+    ) {
+        return;
+    }
+
+    if let Some(last) = out.warnings.last_mut() {
+        *last = AUTOFILTER_WARNINGS_SUPPRESSED_MESSAGE.to_string();
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -110,7 +138,7 @@ pub(crate) fn parse_biff_filter_database_ranges(
         let record = match record {
             Ok(record) => record,
             Err(err) => {
-                out.warnings.push(format!("malformed BIFF record: {err}"));
+                push_warning(&mut out, format!("malformed BIFF record: {err}"));
                 break;
             }
         };
@@ -135,7 +163,9 @@ pub(crate) fn parse_biff_filter_database_ranges(
                     record.offset,
                 );
                 externsheets = parsed.entries;
-                out.warnings.extend(parsed.warnings);
+                for warning in parsed.warnings {
+                    push_warning(&mut out, warning);
+                }
             }
             RECORD_NAME => {
                 match parse_name_record_best_effort(record.data.as_ref(), biff, codepage) {
@@ -149,10 +179,10 @@ pub(crate) fn parse_biff_filter_database_ranges(
                         }
                     }
                     Ok(None) => {}
-                    Err(err) => out.warnings.push(format!(
-                        "failed to decode NAME record at offset {}: {err}",
-                        record.offset
-                    )),
+                    Err(err) => push_warning(
+                        &mut out,
+                        format!("failed to decode NAME record at offset {}: {err}", record.offset),
+                    ),
                 }
             }
             records::RECORD_EOF => {
@@ -166,8 +196,10 @@ pub(crate) fn parse_biff_filter_database_ranges(
     if !saw_eof {
         // Consistent with other BIFF helpers: tolerate missing EOF but surface a warning so
         // callers understand the parse was partial.
-        out.warnings
-            .push("unexpected end of workbook globals stream (missing EOF)".to_string());
+        push_warning(
+            &mut out,
+            "unexpected end of workbook globals stream (missing EOF)".to_string(),
+        );
     }
 
     for name in filter_database_names {
@@ -188,14 +220,20 @@ pub(crate) fn parse_biff_filter_database_ranges(
             Ok(Some((sheet_idx, range))) => {
                 out.by_sheet.insert(sheet_idx, range);
             }
-            Ok(None) => out.warnings.push(format!(
-                "skipping `_FilterDatabase` NAME record at offset {}: unsupported formula",
-                name.record_offset
-            )),
-            Err(err) => out.warnings.push(format!(
-                "skipping `_FilterDatabase` NAME record at offset {}: {err}",
-                name.record_offset
-            )),
+            Ok(None) => push_warning(
+                &mut out,
+                format!(
+                    "skipping `_FilterDatabase` NAME record at offset {}: unsupported formula",
+                    name.record_offset
+                ),
+            ),
+            Err(err) => push_warning(
+                &mut out,
+                format!(
+                    "skipping `_FilterDatabase` NAME record at offset {}: {err}",
+                    name.record_offset
+                ),
+            ),
         }
     }
 
@@ -864,6 +902,37 @@ mod tests {
         out[0..2].copy_from_slice(&0x0600u16.to_le_bytes()); // BIFF8
         out[2..4].copy_from_slice(&0x0005u16.to_le_bytes()); // workbook globals
         out.to_vec()
+    }
+
+    #[test]
+    fn caps_autofilter_warning_growth() {
+        let mut stream_parts = Vec::new();
+        stream_parts.push(record(records::RECORD_BOF_BIFF8, &bof_globals()));
+
+        for _ in 0..(MAX_AUTOFILTER_WARNINGS + 50) {
+            // Empty NAME record payload -> parse failure -> warning emission.
+            stream_parts.push(record(RECORD_NAME, &[]));
+        }
+
+        stream_parts.push(record(records::RECORD_EOF, &[]));
+        let stream = stream_parts.concat();
+
+        let parsed = parse_biff_filter_database_ranges(&stream, BiffVersion::Biff8, 1252, Some(1))
+            .expect("parse");
+
+        assert_eq!(parsed.warnings.len(), MAX_AUTOFILTER_WARNINGS);
+        assert_eq!(
+            parsed.warnings.last().map(|s| s.as_str()),
+            Some(AUTOFILTER_WARNINGS_SUPPRESSED_MESSAGE)
+        );
+        assert_eq!(
+            parsed
+                .warnings
+                .iter()
+                .filter(|s| s.as_str() == AUTOFILTER_WARNINGS_SUPPRESSED_MESSAGE)
+                .count(),
+            1
+        );
     }
 
     #[test]
