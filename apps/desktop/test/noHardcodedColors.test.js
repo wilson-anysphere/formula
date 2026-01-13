@@ -288,12 +288,22 @@ test("core UI does not hardcode colors outside tokens.css", () => {
   ]);
   const jsStyleColor = new RegExp(
     // style objects + style literals (e.g. `style={{ color: "red" }}`)
-    String.raw`\b(?:accentColor|background|backgroundColor|backgroundImage|border|borderColor|borderBottom|borderBottomColor|borderLeft|borderLeftColor|borderRight|borderRightColor|borderTop|borderTopColor|boxShadow|caretColor|color|fill|outline|outlineColor|stroke|textShadow)\b\s*:\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
+    String.raw`\b(?:accentColor|background|backgroundColor|backgroundImage|border|borderColor|borderBottom|borderBottomColor|borderLeft|borderLeftColor|borderRight|borderRightColor|borderTop|borderTopColor|boxShadow|caretColor|color|fill|fillStyle|outline|outlineColor|stroke|strokeStyle|textShadow)\b\s*:\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
     "gi",
   );
   const domStyleColor = new RegExp(
     // DOM style assignments (e.g. `el.style.color = "red"`)
     String.raw`\.style\.(?:accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|outlineColor|stroke)\s*=\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
+    "gi",
+  );
+  const canvasStyleColor = new RegExp(
+    // CanvasRenderingContext2D assignments (e.g. `ctx.fillStyle = "red"`)
+    String.raw`\b(?:fillStyle|strokeStyle)\b\s*=\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
+    "gi",
+  );
+  const setAttributeColor = new RegExp(
+    // SVG/DOM attribute assignments (e.g. `el.setAttribute("fill", "red")`)
+    String.raw`\bsetAttribute\(\s*(["'])(?:fill|stroke|color|stop-color|flood-color|lighting-color)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
     "gi",
   );
   const jsxAttributeColor = new RegExp(
@@ -332,9 +342,13 @@ test("core UI does not hardcode colors outside tokens.css", () => {
       const match =
         jsStyleColor.exec(stripped) ??
         domStyleColor.exec(stripped) ??
+        canvasStyleColor.exec(stripped) ??
+        setAttributeColor.exec(stripped) ??
         jsxAttributeColor.exec(stripped);
       jsStyleColor.lastIndex = 0;
       domStyleColor.lastIndex = 0;
+      canvasStyleColor.lastIndex = 0;
+      setAttributeColor.lastIndex = 0;
       jsxAttributeColor.lastIndex = 0;
       named = match?.groups?.color ?? null;
     }
