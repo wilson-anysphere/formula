@@ -204,16 +204,42 @@ test("supports minisign signature *files* (comment + payload lines)", () => {
   const minisignSigPayload = Buffer.concat([Buffer.from([0x45, 0x64]), keyId, Buffer.from(signature)]);
   const sigPayloadLine = minisignSigPayload.toString("base64").replace(/=+$/, "");
 
-  const minisignSigFile = `untrusted comment: minisign signature: ${keyIdHex}\n${sigPayloadLine}\ntrusted comment: timestamp: 0\nAAAA\n`;
+  const minisignSigFile = `untrusted comment: signature from minisign secret key\n${sigPayloadLine}\ntrusted comment: timestamp: 0\nAAAA\n`;
 
   writeFileSync(latestJsonPath, latestJsonBytes);
   writeFileSync(latestSigPath, minisignSigFile, "utf8");
-  writeFileSync(
-    configPath,
-    JSON.stringify({ plugins: { updater: { pubkey: tauriPubkey } } }, null, 2),
-  );
+  writeFileSync(configPath, JSON.stringify({ plugins: { updater: { pubkey: tauriPubkey } } }, null, 2));
 
   const proc = run({ configPath, latestJsonPath, latestSigPath });
   assert.equal(proc.status, 0, proc.stderr);
   assert.match(proc.stdout, /signature OK/);
+});
+
+test("fails when minisign pubkey comment key id does not match payload key id", () => {
+  const tmp = makeTempDir();
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const rawPubkey = rawEd25519PublicKey(publicKey);
+
+  const keyId = Buffer.from([1, 1, 1, 1, 1, 1, 1, 1]);
+  const keyIdHexWrong = "0000000000000000";
+
+  const pubPayload = Buffer.concat([Buffer.from([0x45, 0x64]), keyId, rawPubkey]);
+  const pubPayloadLine = pubPayload.toString("base64").replace(/=+$/, "");
+  const minisignPubkeyFile = `untrusted comment: minisign public key: ${keyIdHexWrong}\n${pubPayloadLine}\n`;
+  const tauriPubkey = Buffer.from(minisignPubkeyFile, "utf8").toString("base64");
+
+  const latestJsonPath = path.join(tmp, "latest.json");
+  const latestSigPath = path.join(tmp, "latest.json.sig");
+  const configPath = path.join(tmp, "tauri.conf.json");
+
+  const latestJsonBytes = Buffer.from(JSON.stringify({ version: "0.1.0", platforms: {} }), "utf8");
+  const signature = sign(null, latestJsonBytes, privateKey);
+
+  writeFileSync(latestJsonPath, latestJsonBytes);
+  writeFileSync(latestSigPath, Buffer.from(signature).toString("base64"));
+  writeFileSync(configPath, JSON.stringify({ plugins: { updater: { pubkey: tauriPubkey } } }, null, 2));
+
+  const proc = run({ configPath, latestJsonPath, latestSigPath });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /comment key id/i);
 });
