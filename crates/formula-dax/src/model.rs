@@ -1725,11 +1725,7 @@ impl DataModel {
         match expr {
             Expr::Let { bindings, body } => {
                 for (_, binding_expr) in bindings {
-                    self.collect_same_table_column_dependencies_inner(
-                        binding_expr,
-                        current_table,
-                        out,
-                    );
+                    self.collect_same_table_column_dependencies_inner(binding_expr, current_table, out);
                 }
                 self.collect_same_table_column_dependencies_inner(body, current_table, out);
             }

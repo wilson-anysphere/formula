@@ -21,21 +21,30 @@ fn build_star_schema_model() -> DataModel {
     products.push_row(vec![11.into(), "B".into()]).unwrap();
     model.add_table(products).unwrap();
 
-    let mut sales = Table::new("Sales", vec!["SaleId", "CustomerId", "ProductId", "Amount"]);
+    let mut sales = Table::new(
+        "Sales",
+        vec!["SaleId", "CustomerId", "ProductId", "Amount", "Maybe"],
+    );
     sales
-        .push_row(vec![100.into(), 1.into(), 10.into(), 10.0.into()])
+        .push_row(vec![
+            100.into(),
+            1.into(),
+            10.into(),
+            10.0.into(),
+            Value::Blank,
+        ])
         .unwrap(); // East, A
     sales
-        .push_row(vec![101.into(), 1.into(), 11.into(), 5.0.into()])
+        .push_row(vec![101.into(), 1.into(), 11.into(), 5.0.into(), 1.0.into()])
         .unwrap(); // East, B
     sales
-        .push_row(vec![102.into(), 2.into(), 10.into(), 7.0.into()])
+        .push_row(vec![102.into(), 2.into(), 10.into(), 7.0.into(), Value::Blank])
         .unwrap(); // West, A
     sales
-        .push_row(vec![103.into(), 2.into(), 11.into(), 3.0.into()])
+        .push_row(vec![103.into(), 2.into(), 11.into(), 3.0.into(), 1.0.into()])
         .unwrap(); // West, B
     sales
-        .push_row(vec![104.into(), 1.into(), 10.into(), 2.0.into()])
+        .push_row(vec![104.into(), 1.into(), 10.into(), 2.0.into(), 1.0.into()])
         .unwrap(); // East, A
     model.add_table(sales).unwrap();
 
@@ -148,6 +157,10 @@ fn build_star_schema_columnar_model() -> DataModel {
             name: "Amount".to_string(),
             column_type: ColumnType::Number,
         },
+        ColumnSchema {
+            name: "Maybe".to_string(),
+            column_type: ColumnType::Number,
+        },
     ];
     let mut sales = ColumnarTableBuilder::new(sales_schema, options);
     sales.append_row(&[
@@ -155,30 +168,35 @@ fn build_star_schema_columnar_model() -> DataModel {
         formula_columnar::Value::Number(1.0),
         formula_columnar::Value::Number(10.0),
         formula_columnar::Value::Number(10.0),
+        formula_columnar::Value::Null,
     ]); // East, A
     sales.append_row(&[
         formula_columnar::Value::Number(101.0),
         formula_columnar::Value::Number(1.0),
         formula_columnar::Value::Number(11.0),
         formula_columnar::Value::Number(5.0),
+        formula_columnar::Value::Number(1.0),
     ]); // East, B
     sales.append_row(&[
         formula_columnar::Value::Number(102.0),
         formula_columnar::Value::Number(2.0),
         formula_columnar::Value::Number(10.0),
         formula_columnar::Value::Number(7.0),
+        formula_columnar::Value::Null,
     ]); // West, A
     sales.append_row(&[
         formula_columnar::Value::Number(103.0),
         formula_columnar::Value::Number(2.0),
         formula_columnar::Value::Number(11.0),
         formula_columnar::Value::Number(3.0),
+        formula_columnar::Value::Number(1.0),
     ]); // West, B
     sales.append_row(&[
         formula_columnar::Value::Number(104.0),
         formula_columnar::Value::Number(1.0),
         formula_columnar::Value::Number(10.0),
         formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(1.0),
     ]); // East, A
     model
         .add_table(Table::from_columnar("Sales", sales.finalize()))
@@ -517,6 +535,63 @@ fn pivot_star_schema_groups_by_multiple_dimensions_and_supports_nested_measures(
 }
 
 #[test]
+fn pivot_star_schema_supports_count_family_measures() {
+    let model = build_star_schema_model();
+
+    let measures = vec![
+        PivotMeasure::new("Count Maybe", "COUNT(Sales[Maybe])").unwrap(),
+        PivotMeasure::new("CountA Maybe", "COUNTA(Sales[Maybe])").unwrap(),
+        PivotMeasure::new("Blank Maybe", "COUNTBLANK(Sales[Maybe])").unwrap(),
+    ];
+    let group_by = vec![
+        GroupByColumn::new("Customers", "Region"),
+        GroupByColumn::new("Products", "Category"),
+    ];
+
+    let result = pivot(
+        &model,
+        "Sales",
+        &group_by,
+        &measures,
+        &FilterContext::empty(),
+    )
+    .unwrap();
+    assert_eq!(
+        result.rows,
+        vec![
+            vec![
+                Value::from("East"),
+                Value::from("A"),
+                1.into(),
+                1.into(),
+                1.into(),
+            ],
+            vec![
+                Value::from("East"),
+                Value::from("B"),
+                1.into(),
+                1.into(),
+                0.into(),
+            ],
+            vec![
+                Value::from("West"),
+                Value::from("A"),
+                0.into(),
+                0.into(),
+                1.into(),
+            ],
+            vec![
+                Value::from("West"),
+                Value::from("B"),
+                1.into(),
+                1.into(),
+                0.into(),
+            ],
+        ]
+    );
+}
+
+#[test]
 fn pivot_star_schema_respects_dimension_filters() {
     let model = build_star_schema_model();
 
@@ -619,6 +694,9 @@ fn pivot_star_schema_columnar_matches_in_memory() {
     let measures = vec![
         PivotMeasure::new("Total Sales", "[Total Sales]").unwrap(),
         PivotMeasure::new("Double Sales", "[Double Sales]").unwrap(),
+        PivotMeasure::new("Count Maybe", "COUNT(Sales[Maybe])").unwrap(),
+        PivotMeasure::new("CountA Maybe", "COUNTA(Sales[Maybe])").unwrap(),
+        PivotMeasure::new("Blank Maybe", "COUNTBLANK(Sales[Maybe])").unwrap(),
     ];
     let group_by = vec![
         GroupByColumn::new("Customers", "Region"),
