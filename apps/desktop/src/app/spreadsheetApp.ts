@@ -1449,6 +1449,10 @@ export class SpreadsheetApp {
           value: unknown;
           formula: string | null;
         };
+        if (state?.formula != null) {
+          // Charts should use computed values for formulas (show-formulas is a display-only toggle).
+          return this.getCellComputedValueForSheetInternal(sheetId, chartCoordScratch);
+        }
         const value = state?.value ?? null;
         return isRichTextValue(value) ? value.text : value;
       },
@@ -2980,6 +2984,27 @@ export class SpreadsheetApp {
       const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
       if (deltas.length === 0) return;
 
+      type RangeRect = { startRow: number; endRow: number; startCol: number; endCol: number };
+      const rangesBySheet = new Map<string, RangeRect[]>();
+      for (const chart of visibleCharts) {
+        for (const ser of chart.series ?? []) {
+          const refs = [ser.categories, ser.values, ser.xValues, ser.yValues];
+          for (const rangeRef of refs) {
+            if (typeof rangeRef !== "string" || rangeRef.trim() === "") continue;
+            const parsed = parseA1Range(rangeRef);
+            if (!parsed) continue;
+            const resolvedSheetId = parsed.sheetName ? this.resolveSheetIdByName(parsed.sheetName) : chart.sheetId;
+            if (!resolvedSheetId) continue;
+            let list = rangesBySheet.get(resolvedSheetId);
+            if (!list) {
+              list = [];
+              rangesBySheet.set(resolvedSheetId, list);
+            }
+            list.push({ startRow: parsed.startRow, endRow: parsed.endRow, startCol: parsed.startCol, endCol: parsed.endCol });
+          }
+        }
+      }
+
       const affects = deltas.some((delta: any) => {
         const sheetId = String(delta?.sheetId ?? "");
         const row = Number(delta?.row);
@@ -2987,20 +3012,12 @@ export class SpreadsheetApp {
         if (!Number.isInteger(row) || row < 0) return false;
         if (!Number.isInteger(col) || col < 0) return false;
 
-        for (const chart of visibleCharts) {
-          for (const ser of chart.series ?? []) {
-            const ranges = [ser.categories, ser.values, ser.xValues, ser.yValues];
-            for (const rangeRef of ranges) {
-              if (typeof rangeRef !== "string" || rangeRef.trim() === "") continue;
-              const parsed = parseA1Range(rangeRef);
-              if (!parsed) continue;
-              const rangeSheet = parsed.sheetName ?? chart.sheetId;
-              if (rangeSheet !== sheetId) continue;
-              if (row < parsed.startRow || row > parsed.endRow) continue;
-              if (col < parsed.startCol || col > parsed.endCol) continue;
-              return true;
-            }
-          }
+        const ranges = rangesBySheet.get(sheetId);
+        if (!ranges) return false;
+        for (const range of ranges) {
+          if (row < range.startRow || row > range.endRow) continue;
+          if (col < range.startCol || col > range.endCol) continue;
+          return true;
         }
         return false;
       });
@@ -6942,6 +6959,10 @@ export class SpreadsheetApp {
     const createProvider = () => {
       // Avoid allocating a fresh `{row,col}` object for every chart range cell read.
       const coordScratch = { row: 0, col: 0 };
+      const sheetCount = (this.document as any)?.model?.sheets?.size;
+      const useEngineCache = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
+      const memo = new Map<string, Map<number, SpreadsheetValue>>();
+      const stack = new Map<string, Set<number>>();
       return {
         getRange: (rangeRef: string) => {
           const parsed = parseA1Range(rangeRef);
@@ -6955,12 +6976,7 @@ export class SpreadsheetApp {
             coordScratch.row = r;
             for (let c = parsed.startCol; c <= parsed.endCol; c += 1) {
               coordScratch.col = c;
-              const state = this.document.getCell(sheetId, coordScratch) as {
-                value: unknown;
-                formula: string | null;
-              };
-              const value = state?.value ?? null;
-              row.push(isRichTextValue(value) ? value.text : value);
+              row.push(this.computeCellValue(sheetId, coordScratch, memo, stack, { useEngineCache }));
             }
             out.push(row);
           }
@@ -11726,6 +11742,8 @@ export class SpreadsheetApp {
     let updated = false;
     const sheetCount = (this.document as any)?.model?.sheets?.size;
     const shouldInvalidate = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
+    const chartDeltas: Array<{ sheetId: string; row: number; col: number }> | null =
+      this.uiReady && this.chartStore.listCharts().some((chart) => chart.sheetId === this.sheetId) ? [] : null;
 
     const coordScratch = { row: 0, col: 0 };
     let lastSheetId: string | null = null;
@@ -11804,6 +11822,7 @@ export class SpreadsheetApp {
 
       sheetCache.set(key, value);
       updated = true;
+      if (chartDeltas) chartDeltas.push({ sheetId, row, col });
 
       if (shouldInvalidate && sheetId === this.sheetId) {
         // Only invalidate within the active grid limits. The engine may produce computed
@@ -11841,6 +11860,10 @@ export class SpreadsheetApp {
           // produce them asynchronously relative to the DocumentController change event).
           this.refresh("scroll");
         }
+      }
+
+      if (this.uiReady && chartDeltas && chartDeltas.length > 0) {
+        this.scheduleChartContentRefresh({ deltas: chartDeltas });
       }
     }
   }
