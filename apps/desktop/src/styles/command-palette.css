@@ -9,6 +9,8 @@
   --command-palette-overlay-padding: 16px;
   --command-palette-overlay-padding-top: max(env(safe-area-inset-top), clamp(16px, 10vh, 80px));
   --command-palette-overlay-padding-bottom: max(env(safe-area-inset-bottom), var(--command-palette-overlay-padding));
+  --command-palette-overlay-padding-inline-start: max(env(safe-area-inset-left), var(--command-palette-overlay-padding));
+  --command-palette-overlay-padding-inline-end: max(env(safe-area-inset-right), var(--command-palette-overlay-padding));
   position: fixed;
   inset: 0;
   display: flex;
@@ -18,8 +20,14 @@
   z-index: 1000;
   /* Keep the palette reachable in short windows while preserving the
      familiar "slightly below the top chrome" placement in tall ones. */
-  padding: var(--command-palette-overlay-padding-top) var(--command-palette-overlay-padding) var(--command-palette-overlay-padding-bottom);
+  padding-block-start: var(--command-palette-overlay-padding-top);
+  padding-block-end: var(--command-palette-overlay-padding-bottom);
+  padding-inline: var(--command-palette-overlay-padding-inline-start) var(--command-palette-overlay-padding-inline-end);
   overflow-y: auto;
+}
+
+.command-palette-overlay > .command-palette {
+  max-width: 100%;
 }
 
 .command-palette-overlay[hidden] {
