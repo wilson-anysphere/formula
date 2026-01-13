@@ -36,3 +36,26 @@ In Node, `@formula/ai-audit/sqlite` also exposes helpers for resolving the `sql.
 import { createSqliteAIAuditStoreNode } from "@formula/ai-audit/sqlite";
 ```
 
+## Exporting audit entries (NDJSON / JSON)
+
+For troubleshooting and compliance workflows you can serialize stored entries in a deterministic,
+bounded way:
+
+```ts
+import type { AIAuditEntry } from "@formula/ai-audit";
+import { serializeAuditEntries } from "@formula/ai-audit";
+
+const ndjson = serializeAuditEntries(entries, {
+  format: "ndjson",
+  // Default: true. Removes `tool_calls[].result` (often large / sensitive).
+  redactToolResults: true,
+  // Truncates oversized `tool_calls[].audit_result_summary` payloads and sets
+  // `export_truncated: true` when truncation occurs.
+  maxToolResultChars: 10_000,
+});
+```
+
+Notes:
+- Output ordering is deterministic (stable key sorting).
+- `bigint` values are exported as decimal strings.
+- Circular references are replaced with the placeholder string `"[Circular]"`.
