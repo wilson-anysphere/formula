@@ -27,6 +27,9 @@ All fixtures are intentionally tiny (a minimal CFB container with a `Workbook` s
 surfaces a clear `EncryptedWorkbook` error. These fixtures are therefore **detection fixtures**
 (they are not intended to be opened/decrypted in Excel).
 
+Note: In BIFF8, both RC4 variants use `wEncryptionType=0x0001`; the `subType` field distinguishes
+“RC4 standard” (`subType=0x0001`) from “RC4 CryptoAPI” (`subType=0x0002`).
+
 | File | Encryption scheme | BIFF version | Created with | Test password |
 |---|---|---:|---|---|
 | `biff8_xor_pw_open.xls` | XOR (legacy obfuscation) | BIFF8 | `cargo test -p formula-xls --test regenerate_encrypted_xls_fixtures -- --ignored` (this repo; writes a minimal CFB/BIFF stream via `cfb` `0.10`) | `password` |

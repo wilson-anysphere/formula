@@ -65,19 +65,36 @@ fn regenerate_encrypted_xls_fixtures() {
     // FILEPASS payloads are intentionally minimal; `formula-xls` currently only needs to observe
     // that `FILEPASS` exists to treat the workbook as encrypted.
     //
-    // The first 2 bytes are `wEncryptionType` (little-endian):
-    // - 0x0000: XOR obfuscation
-    // - 0x0001: RC4 "standard"
-    // - 0x0002: RC4 CryptoAPI
-    let xor_payload = [0x00, 0x00, 0x34, 0x12, 0x78, 0x56]; // type + dummy key/hash
+    // FILEPASS payload layouts we care about for classification:
+    //
+    // - BIFF8 XOR obfuscation:
+    //   wEncryptionType (0x0000) + key (u16) + verifier (u16)
+    //
+    // - BIFF8 RC4:
+    //   wEncryptionType (0x0001) + subType (0x0001) + opaque algorithm payload
+    //
+    // - BIFF8 RC4 CryptoAPI:
+    //   wEncryptionType (0x0001) + subType (0x0002) + opaque algorithm payload
+    //
+    // We intentionally keep the algorithm-specific bytes synthetic/deterministic; the importer
+    // currently only needs to classify the variant.
+    let xor_payload = [0x00, 0x00, 0x34, 0x12, 0x78, 0x56]; // type + key + verifier
 
-    let mut rc4_standard_payload = Vec::with_capacity(2 + 48);
-    rc4_standard_payload.extend_from_slice(&[0x01, 0x00]);
-    rc4_standard_payload.extend((0u8..48u8).into_iter());
+    // Use a 52-byte payload for RC4: 4-byte header + 48 bytes of deterministic filler.
+    let mut rc4_standard_payload = Vec::with_capacity(4 + 48);
+    rc4_standard_payload.extend_from_slice(&[
+        0x01, 0x00, // wEncryptionType (RC4)
+        0x01, 0x00, // subType (RC4)
+    ]);
+    rc4_standard_payload.extend(0u8..48u8);
 
-    let mut rc4_cryptoapi_payload = Vec::with_capacity(2 + 64);
-    rc4_cryptoapi_payload.extend_from_slice(&[0x02, 0x00]);
-    rc4_cryptoapi_payload.extend((0xA0u8..0xE0u8).into_iter());
+    // Use a 68-byte payload for CryptoAPI: 4-byte header + 64 bytes of deterministic filler.
+    let mut rc4_cryptoapi_payload = Vec::with_capacity(4 + 64);
+    rc4_cryptoapi_payload.extend_from_slice(&[
+        0x01, 0x00, // wEncryptionType (RC4)
+        0x02, 0x00, // subType (CryptoAPI)
+    ]);
+    rc4_cryptoapi_payload.extend(0xA0u8..0xE0u8);
 
     let fixtures: [(&str, Vec<u8>); 3] = [
         ("biff8_xor_pw_open.xls", xor_payload.to_vec()),
@@ -95,4 +112,3 @@ fn regenerate_encrypted_xls_fixtures() {
         });
     }
 }
-
