@@ -46,6 +46,13 @@ pub static ES_ES: NumberLocale = NumberLocale {
     thousands_separator: Some(crate::Locale::es_es().thousands_sep),
 };
 
+/// Spanish (Mexico) commonly uses `.` for decimals and `,` for thousands grouping.
+pub static ES_MX: NumberLocale = NumberLocale {
+    id: "es-MX",
+    decimal_separator: crate::Locale::en_us().decimal_sep,
+    thousands_separator: Some(crate::Locale::en_us().thousands_sep),
+};
+
 pub static IT_IT: NumberLocale = NumberLocale {
     id: "it-IT",
     decimal_separator: crate::Locale::it_it().decimal_sep,
@@ -119,8 +126,7 @@ fn normalize_locale_id(id: &str) -> Option<&'static str> {
         "fr-fr" | "fr" => Some("fr-FR"),
         "fr-ch" => Some("fr-CH"),
         "es-es" | "es" => Some("es-ES"),
-        // Spanish (Mexico) commonly uses `.` decimals and `,` thousands separators.
-        "es-mx" => Some("en-US"),
+        "es-mx" => Some("es-MX"),
         "it-it" | "it" => Some("it-IT"),
         "it-ch" => Some("it-CH"),
         _ => {
@@ -148,6 +154,7 @@ pub fn get_locale(id: &str) -> Option<&'static NumberLocale> {
         "fr-FR" => Some(&FR_FR),
         "fr-CH" => Some(&FR_CH),
         "es-ES" => Some(&ES_ES),
+        "es-MX" => Some(&ES_MX),
         "it-IT" => Some(&IT_IT),
         "it-CH" => Some(&IT_CH),
         _ => None,
@@ -285,7 +292,7 @@ mod tests {
         assert_eq!(normalize_locale_id("fr-CA"), Some("fr-FR"));
         assert_eq!(normalize_locale_id("fr_CH"), Some("fr-CH"));
         assert_eq!(normalize_locale_id("es-ES"), Some("es-ES"));
-        assert_eq!(normalize_locale_id("es-MX"), Some("en-US"));
+        assert_eq!(normalize_locale_id("es-MX"), Some("es-MX"));
         assert_eq!(normalize_locale_id("es-AR"), Some("es-ES"));
         assert_eq!(normalize_locale_id("it_it"), Some("it-IT"));
         assert_eq!(normalize_locale_id("it-CH"), Some("it-CH"));

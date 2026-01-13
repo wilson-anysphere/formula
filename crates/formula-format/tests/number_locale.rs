@@ -23,6 +23,10 @@ fn formats_thousands_grouping_for_each_locale() {
         "1.234.567,5"
     );
     assert_eq!(
+        locale::format_number(value, locale::get_locale("es-MX").unwrap()),
+        "1,234,567.5"
+    );
+    assert_eq!(
         locale::format_number(value, locale::get_locale("it-IT").unwrap()),
         "1.234.567,5"
     );
@@ -97,7 +101,7 @@ fn get_locale_normalizes_common_locale_id_spellings() {
     assert_eq!(locale::get_locale("fr_ch").unwrap().id, "fr-CH");
     assert_eq!(locale::get_locale("fr-CA").unwrap().id, "fr-FR");
     assert_eq!(locale::get_locale("es").unwrap().id, "es-ES");
-    assert_eq!(locale::get_locale("es-MX").unwrap().id, "en-US");
+    assert_eq!(locale::get_locale("es-MX").unwrap().id, "es-MX");
     assert_eq!(locale::get_locale("it").unwrap().id, "it-IT");
     assert_eq!(locale::get_locale("it_CH").unwrap().id, "it-CH");
 }
