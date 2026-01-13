@@ -849,6 +849,10 @@ jobs:
         if: runner.os == 'Linux'
         run: bash scripts/ci/check-appimage.sh
 
+      - name: Validate produced AppImage desktop integration (.desktop + xlsx MIME)
+        if: runner.os == 'Linux'
+        run: bash scripts/validate-linux-appimage.sh
+
       - name: Verify Linux .deb package (deps + ldd + desktop integration)
         if: matrix.platform == 'ubuntu-24.04'
         shell: bash

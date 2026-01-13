@@ -60,6 +60,23 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Best-effort: keep the expected binary name in sync with
+# apps/desktop/src-tauri/tauri.conf.json `mainBinaryName` (and the Rust `[[bin]]`).
+EXPECTED_MAIN_BINARY="${FORMULA_APPIMAGE_MAIN_BINARY:-}"
+if [ -z "$EXPECTED_MAIN_BINARY" ]; then
+  if [ -f "$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json" ] && command -v python3 >/dev/null 2>&1; then
+    EXPECTED_MAIN_BINARY="$(
+      python3 - <<'PY' 2>/dev/null || true
+import json
+with open("apps/desktop/src-tauri/tauri.conf.json", "r", encoding="utf-8") as f:
+    conf = json.load(f)
+print(conf.get("mainBinaryName", ""))
+PY
+    )"
+  fi
+  : "${EXPECTED_MAIN_BINARY:=formula-desktop}"
+fi
+
 discover_appimages() {
   local base="$1"
   if [ ! -d "$base" ]; then
@@ -77,13 +94,29 @@ discover_appimages() {
 }
 
 select_appimage() {
-  local -a found=()
-  while IFS= read -r -d '' file; do
-    found+=("$file")
-  done < <(
-    discover_appimages "$REPO_ROOT/apps/desktop/src-tauri/target"
-    discover_appimages "$REPO_ROOT/target"
+  local -a roots=()
+  # Respect `CARGO_TARGET_DIR` when set (common in CI builds).
+  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+    local cargo_target="${CARGO_TARGET_DIR}"
+    if [[ "$cargo_target" != /* ]]; then
+      cargo_target="$REPO_ROOT/$cargo_target"
+    fi
+    roots+=("$cargo_target")
+  fi
+
+  roots+=(
+    "$REPO_ROOT/apps/desktop/src-tauri/target"
+    "$REPO_ROOT/apps/desktop/target"
+    "$REPO_ROOT/target"
   )
+
+  local -a found=()
+  local root
+  for root in "${roots[@]}"; do
+    while IFS= read -r -d '' file; do
+      found+=("$file")
+    done < <(discover_appimages "$root")
+  done
 
   if [ "${#found[@]}" -eq 0 ]; then
     die "No AppImage found. Build one with Tauri, or pass --appimage <path>."
@@ -172,15 +205,15 @@ if [ ! -x "$APPDIR/AppRun" ]; then
   die "AppRun is not executable: squashfs-root/AppRun"
 fi
 
-EXPECTED_BIN="$APPDIR/usr/bin/formula-desktop"
+EXPECTED_BIN="$APPDIR/usr/bin/$EXPECTED_MAIN_BINARY"
 if [ ! -e "$EXPECTED_BIN" ]; then
-  die "Missing expected main binary: squashfs-root/usr/bin/formula-desktop"
+  die "Missing expected main binary: squashfs-root/usr/bin/$EXPECTED_MAIN_BINARY"
 fi
 if [ ! -s "$EXPECTED_BIN" ]; then
-  die "Main binary exists but is empty: squashfs-root/usr/bin/formula-desktop"
+  die "Main binary exists but is empty: squashfs-root/usr/bin/$EXPECTED_MAIN_BINARY"
 fi
 if [ ! -x "$EXPECTED_BIN" ]; then
-  die "Main binary is not executable: squashfs-root/usr/bin/formula-desktop"
+  die "Main binary is not executable: squashfs-root/usr/bin/$EXPECTED_MAIN_BINARY"
 fi
 
 APPLICATIONS_DIR="$APPDIR/usr/share/applications"
@@ -191,7 +224,7 @@ fi
 declare -a DESKTOP_FILES=()
 while IFS= read -r -d '' desktop_file; do
   DESKTOP_FILES+=("$desktop_file")
-done < <(find "$APPLICATIONS_DIR" -maxdepth 1 -type f -name '*.desktop' -print0 2>/dev/null || true)
+done < <(find "$APPLICATIONS_DIR" -type f -name '*.desktop' -print0 2>/dev/null || true)
 
 if [ "${#DESKTOP_FILES[@]}" -eq 0 ]; then
   die "No .desktop files found under squashfs-root/usr/share/applications/"
