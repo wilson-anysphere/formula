@@ -320,6 +320,28 @@ test("Typing =SUM(A suggests a contiguous range below the current cell when the 
   );
 });
 
+test("Typing =SUM(A suggests the full contiguous block when the formula is inside the block (different column)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=SUM(A",
+    cursorPosition: 6,
+    // Pretend we're on B5 (0-based row 4), inside the A1..A10 block.
+    cellRef: { row: 4, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(A1:A10)"),
+    `Expected a SUM range suggestion for the full block, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Range suggestions work for subsequent args when ';' is used as the argument separator", async () => {
   const engine = new TabCompletionEngine();
 
