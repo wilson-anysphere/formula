@@ -139,6 +139,12 @@ export function AIChatPanel(props: AIChatPanelProps) {
   const chartAttachmentPreview = safeInvoke(props.getChartAttachment);
   const tableOptionsPreview = safeInvoke(props.getTableOptions) ?? [];
   const chartOptionsPreview = safeInvoke(props.getChartOptions) ?? [];
+  const chartDisabledReason =
+    chartOptionsPreview.length > 0
+      ? null
+      : props.getChartOptions
+        ? t("chat.attachChart.disabled.noCharts")
+        : t("chat.attachChart.disabled.noSelection");
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -222,7 +228,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
 
     const attachment = safeInvoke(props.getChartAttachment);
     if (!attachment) {
-      toastBestEffort(t("chat.attachChart.disabled"));
+      toastBestEffort(chartDisabledReason ?? t("chat.attachChart.disabled.noSelection"));
       return;
     }
     addAttachment(attachment);
@@ -512,7 +518,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
               <AttachmentButton
                 testId="ai-chat-attach-chart"
                 disabled={sending || (chartOptionsPreview.length === 0 && !chartAttachmentPreview)}
-                title={chartOptionsPreview.length === 0 && !chartAttachmentPreview ? t("chat.attachChart.disabled") : undefined}
+                title={chartOptionsPreview.length === 0 && !chartAttachmentPreview ? chartDisabledReason ?? undefined : undefined}
                 onClick={() => void attachChart()}
               >
                 {t("chat.attachChart")}
