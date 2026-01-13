@@ -115,6 +115,63 @@ maybeTest("SqliteVectorStore can reset persisted DB on dimension mismatch", asyn
   await store2.close();
 });
 
+maybeTest("SqliteVectorStore resets dimension mismatch by default (resetOnDimensionMismatch=true)", async () => {
+  const storage = new InMemoryBinaryStorage();
+
+  const store1 = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: true });
+  await store1.upsert([{ id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb" } }]);
+  await store1.close();
+
+  // Do not pass resetOnDimensionMismatch; default should be true.
+  const store2 = await SqliteVectorStore.create({
+    storage,
+    dimension: 4,
+    autoSave: true,
+  });
+
+  expect(await store2.list()).toEqual([]);
+  await store2.close();
+});
+
+maybeTest("SqliteVectorStore calls storage.remove() when resetting dimension mismatch", async () => {
+  class SpyStorage {
+    removed = false;
+    #data: Uint8Array | null = null;
+
+    async load(): Promise<Uint8Array | null> {
+      return this.#data ? new Uint8Array(this.#data) : null;
+    }
+
+    async save(data: Uint8Array): Promise<void> {
+      this.#data = new Uint8Array(data);
+    }
+
+    async remove(): Promise<void> {
+      this.removed = true;
+      this.#data = null;
+    }
+  }
+
+  const storage = new SpyStorage();
+
+  const store1 = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: true });
+  await store1.upsert([{ id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb" } }]);
+  await store1.close();
+
+  expect(storage.removed).toBe(false);
+
+  const store2 = await SqliteVectorStore.create({
+    storage,
+    dimension: 4,
+    autoSave: false,
+    resetOnDimensionMismatch: true,
+  });
+
+  expect(storage.removed).toBe(true);
+  expect(await store2.list()).toEqual([]);
+  await store2.close();
+});
+
 maybeTest("SqliteVectorStore can reset dimension mismatch even when storage.remove() is missing", async () => {
   class NoRemoveBinaryStorage {
     #data: Uint8Array | null = null;
