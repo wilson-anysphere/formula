@@ -1100,7 +1100,6 @@ pub(crate) mod tests {
         let hash_alg = HashAlgorithm::Sha512;
         let spin_count = 100_000u32;
         let key_bits = 256usize;
-        let block_size = 16usize;
 
         let salt_key_encryptor: [u8; 16] = [
             0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD,
@@ -1123,12 +1122,7 @@ pub(crate) mod tests {
             key_bits / 8,
             BLOCK_KEY_VERIFIER_HASH_INPUT,
         );
-        let iv_vhi = derive_iv(
-            hash_alg,
-            &salt_key_encryptor,
-            BLOCK_KEY_VERIFIER_HASH_INPUT,
-            block_size,
-        );
+        let iv_vhi = salt_key_encryptor.to_vec();
         let enc_vhi =
             aes_cbc_encrypt(&key_vhi, &iv_vhi, &verifier_hash_input_plain).expect("enc vhi");
 
@@ -1140,12 +1134,7 @@ pub(crate) mod tests {
             key_bits / 8,
             BLOCK_KEY_VERIFIER_HASH_VALUE,
         );
-        let iv_vhv = derive_iv(
-            hash_alg,
-            &salt_key_encryptor,
-            BLOCK_KEY_VERIFIER_HASH_VALUE,
-            block_size,
-        );
+        let iv_vhv = salt_key_encryptor.to_vec();
         let enc_vhv =
             aes_cbc_encrypt(&key_vhv, &iv_vhv, &verifier_hash_value_plain).expect("enc vhv");
 
@@ -1157,12 +1146,7 @@ pub(crate) mod tests {
             key_bits / 8,
             BLOCK_KEY_ENCRYPTED_KEY_VALUE,
         );
-        let iv_kv = derive_iv(
-            hash_alg,
-            &salt_key_encryptor,
-            BLOCK_KEY_ENCRYPTED_KEY_VALUE,
-            block_size,
-        );
+        let iv_kv = salt_key_encryptor.to_vec();
         let enc_kv = aes_cbc_encrypt(&key_kv, &iv_kv, &package_key_plain).expect("enc key");
 
         let b64 = base64::engine::general_purpose::STANDARD;
@@ -1191,5 +1175,170 @@ pub(crate) mod tests {
   </keyEncryptors>
 </encryption>"#
         )
+    }
+
+    #[test]
+    fn password_encrypted_key_uses_saltvalue_as_cbc_iv() {
+        // Regression test: for `p:encryptedKey` fields, the AES-CBC IV is the saltValue itself
+        // (truncated to blockSize), not Hash(saltValue || blockKey).
+
+        let password = "Password";
+        let pw_utf16 = password_to_utf16le(password);
+        let hash_alg = HashAlgorithm::Sha512;
+        let spin_count = 1_000u32;
+        let key_bits = 256usize;
+        let block_size = 16usize;
+
+        let salt_key_encryptor: [u8; 16] = [
+            0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD,
+            0xAE, 0xAF,
+        ];
+        let salt_key_data: [u8; 16] = [
+            0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD,
+            0xBE, 0xBF,
+        ];
+
+        // Empty ciphertext: the test focuses on password verifier + package key unwrap.
+        let encrypted_package = 0u64.to_le_bytes().to_vec();
+
+        let verifier_hash_input_plain: [u8; 16] = *b"formula-agl-test";
+        let verifier_hash_value_plain = hash_alg.digest(&verifier_hash_input_plain);
+        let package_key_plain: [u8; 32] = [0x11; 32];
+
+        // Derive keys (block keys are used only for key derivation).
+        let key_vhi = derive_agile_key(
+            hash_alg,
+            &salt_key_encryptor,
+            &pw_utf16,
+            spin_count,
+            key_bits / 8,
+            BLOCK_KEY_VERIFIER_HASH_INPUT,
+        );
+        let key_vhv = derive_agile_key(
+            hash_alg,
+            &salt_key_encryptor,
+            &pw_utf16,
+            spin_count,
+            key_bits / 8,
+            BLOCK_KEY_VERIFIER_HASH_VALUE,
+        );
+        let key_kv = derive_agile_key(
+            hash_alg,
+            &salt_key_encryptor,
+            &pw_utf16,
+            spin_count,
+            key_bits / 8,
+            BLOCK_KEY_ENCRYPTED_KEY_VALUE,
+        );
+
+        // Correct IV: saltValue itself.
+        let verifier_iv = &salt_key_encryptor[..block_size];
+        let enc_vhi =
+            aes_cbc_encrypt(&key_vhi, verifier_iv, &verifier_hash_input_plain).expect("enc vhi");
+        let enc_vhv =
+            aes_cbc_encrypt(&key_vhv, verifier_iv, &verifier_hash_value_plain).expect("enc vhv");
+        let enc_kv = aes_cbc_encrypt(&key_kv, verifier_iv, &package_key_plain).expect("enc key");
+
+        // Data integrity: create a valid HMAC for this (empty) EncryptedPackage stream.
+        let digest_len = hash_alg.digest_len();
+        let hmac_key_plain = vec![0x22u8; digest_len];
+        let computed_hmac = compute_hmac(hash_alg, &hmac_key_plain, &encrypted_package);
+
+        let iv_hmac_key = derive_iv(
+            hash_alg,
+            &salt_key_data,
+            BLOCK_KEY_INTEGRITY_HMAC_KEY,
+            block_size,
+        );
+        let encrypted_hmac_key = aes_cbc_encrypt(
+            &package_key_plain,
+            &iv_hmac_key,
+            &pad_zero(&hmac_key_plain, block_size),
+        )
+        .expect("enc hmac key");
+
+        let iv_hmac_val = derive_iv(
+            hash_alg,
+            &salt_key_data,
+            BLOCK_KEY_INTEGRITY_HMAC_VALUE,
+            block_size,
+        );
+        let encrypted_hmac_value = aes_cbc_encrypt(
+            &package_key_plain,
+            &iv_hmac_val,
+            &pad_zero(&computed_hmac, block_size),
+        )
+        .expect("enc hmac value");
+
+        let info = AgileEncryptionInfo {
+            version_major: 4,
+            version_minor: 4,
+            flags: 0,
+            key_data: AgileKeyData {
+                salt: salt_key_data.to_vec(),
+                block_size,
+                key_bits,
+                hash_algorithm: hash_alg,
+                cipher_algorithm: "AES".to_string(),
+                cipher_chaining: "ChainingModeCBC".to_string(),
+            },
+            data_integrity: AgileDataIntegrity {
+                encrypted_hmac_key,
+                encrypted_hmac_value,
+            },
+            password_key_encryptor: AgilePasswordKeyEncryptor {
+                salt: salt_key_encryptor.to_vec(),
+                block_size,
+                key_bits,
+                spin_count,
+                hash_algorithm: hash_alg,
+                cipher_algorithm: "AES".to_string(),
+                cipher_chaining: "ChainingModeCBC".to_string(),
+                encrypted_verifier_hash_input: enc_vhi,
+                encrypted_verifier_hash_value: enc_vhv,
+                encrypted_key_value: enc_kv,
+            },
+        };
+
+        let out =
+            decrypt_agile_encrypted_package(&info, &encrypted_package, password).expect("decrypt");
+        assert!(out.is_empty());
+
+        // Wrong IV (the previous bug): Hash(saltValue || blockKey).
+        let wrong_iv_vhi = derive_iv(
+            hash_alg,
+            &salt_key_encryptor,
+            BLOCK_KEY_VERIFIER_HASH_INPUT,
+            block_size,
+        );
+        assert_ne!(wrong_iv_vhi.as_slice(), verifier_iv);
+        let wrong_iv_vhv = derive_iv(
+            hash_alg,
+            &salt_key_encryptor,
+            BLOCK_KEY_VERIFIER_HASH_VALUE,
+            block_size,
+        );
+        let wrong_iv_kv = derive_iv(
+            hash_alg,
+            &salt_key_encryptor,
+            BLOCK_KEY_ENCRYPTED_KEY_VALUE,
+            block_size,
+        );
+
+        let wrong_enc_vhi = aes_cbc_encrypt(&key_vhi, &wrong_iv_vhi, &verifier_hash_input_plain)
+            .expect("enc vhi");
+        let wrong_enc_vhv = aes_cbc_encrypt(&key_vhv, &wrong_iv_vhv, &verifier_hash_value_plain)
+            .expect("enc vhv");
+        let wrong_enc_kv =
+            aes_cbc_encrypt(&key_kv, &wrong_iv_kv, &package_key_plain).expect("enc key");
+
+        let mut wrong_info = info.clone();
+        wrong_info.password_key_encryptor.encrypted_verifier_hash_input = wrong_enc_vhi;
+        wrong_info.password_key_encryptor.encrypted_verifier_hash_value = wrong_enc_vhv;
+        wrong_info.password_key_encryptor.encrypted_key_value = wrong_enc_kv;
+
+        let err = decrypt_agile_encrypted_package(&wrong_info, &encrypted_package, password)
+            .expect_err("expected wrong-IV verifier to fail");
+        assert!(matches!(err, OfficeCryptoError::InvalidPassword));
     }
 }

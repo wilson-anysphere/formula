@@ -26,4 +26,6 @@ zeroize = { version = "1.8", features = ["zeroize_derive"] }
 getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
+ms-offcrypto-writer = "1.0.7"
+rand09 = { package = "rand", version = "0.9" }
 zip = { version = "2.1", default-features = false }
