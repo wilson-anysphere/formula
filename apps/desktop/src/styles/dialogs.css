@@ -14,28 +14,46 @@
 }
 
 .dialog__controls {
+  --dialog-controls-gap: 8px;
+  --dialog-controls-margin-top: 12px;
+  --dialog-control-padding: 4px 8px;
+  --dialog-control-radius: var(--radius);
+
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 12px;
+  gap: var(--dialog-controls-gap);
+  margin-top: var(--dialog-controls-margin-top);
 }
 
 .dialog__controls button {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 10px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
+  --dialog-button-bg: var(--bg-primary);
+  --dialog-button-bg-hover: var(--bg-hover);
+  --dialog-button-bg-active: var(--bg-active);
+  --dialog-button-border: var(--border);
+  --dialog-button-text: var(--text-primary);
+  --dialog-button-font-weight: 400;
+
+  border: 1px solid var(--dialog-button-border);
+  border-radius: var(--dialog-control-radius);
+  padding: var(--dialog-control-padding);
+  background: var(--dialog-button-bg);
+  color: var(--dialog-button-text);
   cursor: pointer;
+  font: inherit;
+  font-weight: var(--dialog-button-font-weight);
   transition:
-    background-color var(--motion-duration) var(--motion-ease),
-    border-color var(--motion-duration) var(--motion-ease),
-    color var(--motion-duration) var(--motion-ease),
-    box-shadow var(--motion-duration) var(--motion-ease);
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
 }
 
-.dialog__controls button:hover {
-  background: var(--bg-hover);
+.dialog__controls button:hover:not(:disabled) {
+  background: var(--dialog-button-bg-hover);
+}
+
+.dialog__controls button:active:not(:disabled) {
+  background: var(--dialog-button-bg-active);
 }
 
 .dialog__controls button:focus-visible {
@@ -132,14 +150,10 @@
 }
 
 .dialog__controls button.updater-dialog__view-versions--primary {
-  background: var(--accent);
-  border-color: var(--accent-border);
-  color: var(--text-on-accent);
-  font-weight: 700;
-}
-
-.dialog__controls button.updater-dialog__view-versions--primary:hover {
-  background: var(--accent);
-  border-color: var(--accent-border);
-  color: var(--text-on-accent);
+  --dialog-button-bg: var(--accent);
+  --dialog-button-bg-hover: var(--accent);
+  --dialog-button-bg-active: var(--accent);
+  --dialog-button-border: var(--accent-border);
+  --dialog-button-text: var(--text-on-accent);
+  --dialog-button-font-weight: 700;
 }
