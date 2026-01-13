@@ -124,7 +124,31 @@ export function registerDesktopCommands(params: {
     commandRegistry,
     applyFormattingToSelection,
     activeCellIndentLevel: getActiveCellIndentLevel,
-    openAlignmentDialog: () => void openFormatCells(),
+    openAlignmentDialog: () => {
+      const focusAlignmentSection = () => {
+        if (typeof document === "undefined") return;
+        const input = document.querySelector<HTMLElement>('[data-testid="format-cells-horizontal"]');
+        if (!input) return;
+        try {
+          input.scrollIntoView({ block: "center" });
+        } catch {
+          // ignore (non-DOM contexts/tests)
+        }
+        try {
+          input.focus();
+        } catch {
+          // ignore
+        }
+      };
+
+      const result = openFormatCells();
+      // Support async openers (even though desktop currently uses a sync dialog).
+      if (result && typeof (result as any)?.then === "function") {
+        void (result as Promise<void>).then(() => focusAlignmentSection());
+      } else {
+        focusAlignmentSection();
+      }
+    },
   });
 
   if (pageLayoutHandlers) {
