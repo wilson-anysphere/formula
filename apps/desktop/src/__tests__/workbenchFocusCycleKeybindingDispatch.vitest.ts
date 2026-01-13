@@ -141,27 +141,33 @@ describe("F6 focus cycling keybinding dispatch", () => {
     // From grid: sheet tabs -> status bar -> ribbon -> formula bar -> grid.
     let res = await dispatchF6(service, document.activeElement);
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(elements.sheetTab);
 
     res = await dispatchF6(service, document.activeElement);
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(elements.zoomControl);
 
     res = await dispatchF6(service, document.activeElement);
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(elements.ribbonTab);
 
     res = await dispatchF6(service, document.activeElement);
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(elements.formulaAddress);
 
     res = await dispatchF6(service, document.activeElement);
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(elements.grid);
 
     // Wrap.
     res = await dispatchF6(service, document.activeElement);
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(elements.sheetTab);
 
     // Reverse cycle from grid: formula bar -> ribbon -> status bar -> sheet tabs -> grid.
@@ -170,22 +176,27 @@ describe("F6 focus cycling keybinding dispatch", () => {
 
     res = await dispatchF6(service, document.activeElement, { shiftKey: true });
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(elements.formulaAddress);
 
     res = await dispatchF6(service, document.activeElement, { shiftKey: true });
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(elements.ribbonTab);
 
     res = await dispatchF6(service, document.activeElement, { shiftKey: true });
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(elements.zoomControl);
 
     res = await dispatchF6(service, document.activeElement, { shiftKey: true });
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(elements.sheetTab);
 
     res = await dispatchF6(service, document.activeElement, { shiftKey: true });
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(elements.grid);
   });
 
@@ -197,6 +208,7 @@ describe("F6 focus cycling keybinding dispatch", () => {
 
     let res = await dispatchF6(service, document.activeElement);
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(elements.ribbonTab);
 
     elements.outsideButton.focus();
@@ -204,6 +216,7 @@ describe("F6 focus cycling keybinding dispatch", () => {
 
     res = await dispatchF6(service, document.activeElement, { shiftKey: true });
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(elements.zoomControl);
   });
 
@@ -216,10 +229,12 @@ describe("F6 focus cycling keybinding dispatch", () => {
 
     let res = await dispatchF6(service, document.activeElement);
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(elements.sheetTab);
 
     res = await dispatchF6(service, document.activeElement, { shiftKey: true });
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     // Focus restoration for the grid uses the primary `app.focus()` hook.
     expect(document.activeElement).toBe(elements.grid);
   });
@@ -233,6 +248,7 @@ describe("F6 focus cycling keybinding dispatch", () => {
 
     const res = await dispatchF6(service, document.activeElement);
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(elements.versionHistoryButton);
   });
 
@@ -274,6 +290,7 @@ describe("F6 focus cycling keybinding dispatch", () => {
 
     const res = await dispatchF6(service, document.activeElement);
     expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(input);
   });
 
@@ -288,11 +305,13 @@ describe("F6 focus cycling keybinding dispatch", () => {
     // Focus in the formula bar input and press F6 -> should move to grid.
     formulaAddress.focus();
     expect(document.activeElement).toBe(formulaAddress);
-    const handled = await service.dispatchKeydown(makeKeydownEvent({ key: "F6", target: formulaAddress }), {
+    const event = makeKeydownEvent({ key: "F6", target: formulaAddress });
+    const handled = await service.dispatchKeydown(event, {
       allowBuiltins: true,
       allowExtensions: false,
     });
     expect(handled).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
     // The command uses `app.focus()` which defaults to focusing the grid root.
     expect(document.activeElement).toBe(grid);
 
@@ -314,11 +333,13 @@ describe("F6 focus cycling keybinding dispatch", () => {
     barrierButton.focus();
     expect(document.activeElement).toBe(barrierButton);
 
-    const blocked = await service.dispatchKeydown(makeKeydownEvent({ key: "F6", target: barrierButton }), {
+    const barrierEvent = makeKeydownEvent({ key: "F6", target: barrierButton });
+    const blocked = await service.dispatchKeydown(barrierEvent, {
       allowBuiltins: true,
       allowExtensions: false,
     });
     expect(blocked).toBe(false);
+    expect(barrierEvent.defaultPrevented).toBe(false);
     expect(document.activeElement).toBe(barrierButton);
 
     barrierRoot.remove();
