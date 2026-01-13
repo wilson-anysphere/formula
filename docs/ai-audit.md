@@ -487,6 +487,13 @@ It takes an array of `AIAuditEntry` and returns a string:
   - `"ndjson"` (default) – one JSON object per line
   - `"json"` – a single JSON array
 
+Additional serialization notes (via the internal stable JSON helper):
+
+- Object key ordering is deterministic (stable sorting).
+- `bigint` values are serialized as decimal strings.
+- Circular references are replaced with the placeholder string `"[Circular]"`.
+- Values that throw during serialization (e.g. getters) are replaced with `"[Unserializable]"`.
+
 ### Recommended defaults (NDJSON + tool result redaction)
 
 For large logs, prefer **NDJSON** (newline-delimited JSON). It can be streamed/processed incrementally and avoids holding a huge JSON array in memory.
