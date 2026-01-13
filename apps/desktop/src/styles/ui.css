@@ -752,8 +752,7 @@
   transition:
     background-color var(--motion-duration) var(--motion-ease),
     border-color var(--motion-duration) var(--motion-ease),
-    color var(--motion-duration) var(--motion-ease),
-    filter var(--motion-duration) var(--motion-ease);
+    color var(--motion-duration) var(--motion-ease);
 }
 
 .formula-bar-error-action:hover {
@@ -777,8 +776,14 @@
   color: var(--text-on-accent);
 }
 
-.formula-bar-error-action--primary:hover {
-  filter: brightness(0.95);
+.formula-bar-error-action--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.formula-bar-error-action--primary:active:not(:disabled) {
+  background: var(--accent-active);
+  border-color: var(--accent-active);
 }
 
 /*

@@ -10,6 +10,8 @@ const desktopRoot = path.join(__dirname, "..");
 test("Accent hover styles should not use filter: brightness(...)", () => {
   const targets = [
     path.join(desktopRoot, "src", "styles", "ribbon.css"),
+    path.join(desktopRoot, "src", "styles", "ui.css"),
+    path.join(desktopRoot, "src", "styles", "sort-filter.css"),
     path.join(desktopRoot, "src", "titlebar", "titlebar.css"),
   ];
 
@@ -21,4 +23,3 @@ test("Accent hover styles should not use filter: brightness(...)", () => {
     );
   }
 });
-

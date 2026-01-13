@@ -10,6 +10,8 @@ describe("accent hover CSS", () => {
 
     const targets = [
       path.join(desktopSrcRoot, "styles", "ribbon.css"),
+      path.join(desktopSrcRoot, "styles", "ui.css"),
+      path.join(desktopSrcRoot, "styles", "sort-filter.css"),
       path.join(desktopSrcRoot, "titlebar", "titlebar.css"),
     ];
 
@@ -19,4 +21,3 @@ describe("accent hover CSS", () => {
     }
   });
 });
-
