@@ -317,9 +317,14 @@ impl ColumnarTableBackend {
 
         #[derive(Clone, Debug)]
         enum Plan {
-            Direct { col: usize },
-            Average { sum_col: usize, count_col: usize },
-            DistinctCount { column: usize },
+            Direct {
+                col: usize,
+            },
+            DistinctCount {
+                distinct_non_blank_col: usize,
+                count_rows_col: usize,
+                count_non_blank_col: usize,
+            },
             Constant(Value),
         }
 
@@ -333,7 +338,11 @@ impl ColumnarTableBackend {
                 return key_len + pos;
             }
             let pos = planned.len();
-            planned.push(AggSpec { op, column, name: None });
+            planned.push(AggSpec {
+                op,
+                column,
+                name: None,
+            });
             planned_pos.insert((op, column), pos);
             key_len + pos
         };
@@ -381,9 +390,8 @@ impl ColumnarTableBackend {
                     let col_idx = spec.column_idx?;
                     let column_type = schema.get(col_idx)?.column_type;
                     if Self::is_dax_numeric_column(column_type) {
-                        Plan::Average {
-                            sum_col: ensure(AggOp::SumF64, Some(col_idx)),
-                            count_col: ensure(AggOp::Count, Some(col_idx)),
+                        Plan::Direct {
+                            col: ensure(AggOp::AvgF64, Some(col_idx)),
                         }
                     } else {
                         Plan::Constant(Value::Blank)
@@ -391,11 +399,13 @@ impl ColumnarTableBackend {
                 }
                 AggregationKind::DistinctCount => {
                     let col_idx = spec.column_idx?;
-                    if group_by.contains(&col_idx) {
-                        // The column is constant within each group.
-                        Plan::Constant(Value::from(1))
-                    } else {
-                        Plan::DistinctCount { column: col_idx }
+                    Plan::DistinctCount {
+                        distinct_non_blank_col: ensure(AggOp::DistinctCount, Some(col_idx)),
+                        // DAX DISTINCTCOUNT includes BLANK if any rows are blank.
+                        // Our columnar `DistinctCount` ignores nulls/blanks, so we add 1 when
+                        // `COUNTROWS(group) > COUNTNONBLANK(column)` for the group.
+                        count_rows_col: ensure(AggOp::Count, None),
+                        count_non_blank_col: ensure(AggOp::Count, Some(col_idx)),
                     }
                 }
             };
@@ -421,62 +431,17 @@ impl ColumnarTableBackend {
         let grouped_cols = grouped.to_values();
         let group_count = grouped.row_count();
 
-        let mut group_keys: Vec<Vec<Value>> = Vec::with_capacity(group_count);
-        let mut group_index: HashMap<Vec<Value>, usize> = HashMap::with_capacity(group_count);
-        for row in 0..group_count {
-            let mut key: Vec<Value> = Vec::with_capacity(key_len);
+        let mut out: Vec<Vec<Value>> = Vec::with_capacity(group_count);
+        for row_idx in 0..group_count {
+            let mut row: Vec<Value> = Vec::with_capacity(key_len + plans.len());
             for col in 0..key_len {
                 let value = grouped_cols
                     .get(col)
-                    .and_then(|c| c.get(row))
+                    .and_then(|c| c.get(row_idx))
                     .cloned()
                     .unwrap_or(formula_columnar::Value::Null);
-                key.push(Self::dax_from_columnar(value));
+                row.push(Self::dax_from_columnar(value));
             }
-            group_index.insert(key.clone(), row);
-            group_keys.push(key);
-        }
-
-        let mut distinct_counts: HashMap<usize, Vec<i64>> = HashMap::new();
-        for plan in &plans {
-            let &Plan::DistinctCount { column } = plan else {
-                continue;
-            };
-            if distinct_counts.contains_key(&column) {
-                continue;
-            }
-
-            let mut keys_plus = group_by.to_vec();
-            keys_plus.push(column);
-            let distinct = match rows {
-                Some(rows) => self.table.group_by_rows(&keys_plus, &[], rows).ok()?,
-                None => self.table.group_by(&keys_plus, &[]).ok()?,
-            };
-            let distinct_cols = distinct.to_values();
-            let distinct_rows = distinct.row_count();
-
-            let mut counts = vec![0i64; group_count];
-            let mut key_buf: Vec<Value> = Vec::with_capacity(key_len);
-            for row in 0..distinct_rows {
-                key_buf.clear();
-                for col in 0..key_len {
-                    let value = distinct_cols
-                        .get(col)
-                        .and_then(|c| c.get(row))
-                        .cloned()
-                        .unwrap_or(formula_columnar::Value::Null);
-                    key_buf.push(Self::dax_from_columnar(value));
-                }
-                if let Some(&idx) = group_index.get(key_buf.as_slice()) {
-                    counts[idx] += 1;
-                }
-            }
-            distinct_counts.insert(column, counts);
-        }
-
-        let mut out: Vec<Vec<Value>> = Vec::with_capacity(group_count);
-        for row_idx in 0..group_count {
-            let mut row = group_keys[row_idx].clone();
             for plan in &plans {
                 let value = match plan {
                     Plan::Direct { col } => {
@@ -488,30 +453,31 @@ impl ColumnarTableBackend {
                             .unwrap_or(formula_columnar::Value::Null);
                         Self::dax_from_columnar(v)
                     }
-                    Plan::Average { sum_col, count_col } => {
-                        let sum_col = *sum_col;
-                        let count_col = *count_col;
-                        let sum = grouped_cols
-                            .get(sum_col)
-                            .and_then(|c| c.get(row_idx))
-                            .and_then(Self::numeric_from_columnar);
-                        let count = grouped_cols
-                            .get(count_col)
+                    Plan::DistinctCount {
+                        distinct_non_blank_col,
+                        count_rows_col,
+                        count_non_blank_col,
+                    } => {
+                        let distinct_non_blank = grouped_cols
+                            .get(*distinct_non_blank_col)
                             .and_then(|c| c.get(row_idx))
                             .and_then(Self::numeric_from_columnar)
-                            .unwrap_or(0.0);
-                        if count == 0.0 {
-                            Value::Blank
-                        } else if let Some(sum) = sum {
-                            Value::from(sum / count)
-                        } else {
-                            Value::Blank
+                            .unwrap_or(0.0) as i64;
+                        let count_rows = grouped_cols
+                            .get(*count_rows_col)
+                            .and_then(|c| c.get(row_idx))
+                            .and_then(Self::numeric_from_columnar)
+                            .unwrap_or(0.0) as i64;
+                        let count_non_blank = grouped_cols
+                            .get(*count_non_blank_col)
+                            .and_then(|c| c.get(row_idx))
+                            .and_then(Self::numeric_from_columnar)
+                            .unwrap_or(0.0) as i64;
+                        let mut out = distinct_non_blank;
+                        if count_rows > count_non_blank {
+                            out += 1;
                         }
-                    }
-                    Plan::DistinctCount { column } => {
-                        let column = *column;
-                        let counts = distinct_counts.get(&column)?;
-                        Value::from(counts.get(row_idx).copied().unwrap_or(0))
+                        Value::from(out)
                     }
                     Plan::Constant(v) => v.clone(),
                 };
@@ -564,24 +530,28 @@ impl ColumnarTableBackend {
                         *count += 1;
                     }
                     (AggState::Sum { sum, count }, AggregationKind::Sum) => {
-                        if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar) {
+                        if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar)
+                        {
                             *sum += v;
                             *count += 1;
                         }
                     }
                     (AggState::Avg { sum, count }, AggregationKind::Average) => {
-                        if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar) {
+                        if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar)
+                        {
                             *sum += v;
                             *count += 1;
                         }
                     }
                     (AggState::Min { best }, AggregationKind::Min) => {
-                        if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar) {
+                        if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar)
+                        {
                             *best = Some(best.map_or(v, |current| current.min(v)));
                         }
                     }
                     (AggState::Max { best }, AggregationKind::Max) => {
-                        if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar) {
+                        if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar)
+                        {
                             *best = Some(best.map_or(v, |current| current.max(v)));
                         }
                     }
@@ -698,7 +668,9 @@ impl ColumnarTableBackend {
                     let row = rows[pos];
                     let chunk_start = (row / CHUNK_ROWS) * CHUNK_ROWS;
                     let chunk_end = (chunk_start + CHUNK_ROWS).min(row_count);
-                    let range = self.table.get_range(chunk_start, chunk_end, col_start, col_end);
+                    let range = self
+                        .table
+                        .get_range(chunk_start, chunk_end, col_start, col_end);
                     while pos < rows.len() {
                         let row = rows[pos];
                         if row >= chunk_end {
@@ -750,7 +722,10 @@ impl TableBackend for ColumnarTableBackend {
 
     fn stats_non_blank_count(&self, idx: usize) -> Option<usize> {
         let stats = self.table.scan().stats(idx)?;
-        let non_blank = self.table.row_count().saturating_sub(stats.null_count as usize);
+        let non_blank = self
+            .table
+            .row_count()
+            .saturating_sub(stats.null_count as usize);
         Some(non_blank)
     }
 
