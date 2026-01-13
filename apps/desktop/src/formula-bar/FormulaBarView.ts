@@ -517,6 +517,10 @@ export class FormulaBarView {
     functionPickerInput.dataset.testid = "formula-function-picker-input";
     functionPickerInput.placeholder = "Search functions";
     functionPickerInput.setAttribute("aria-label", "Search functions");
+    // Avoid browser spellcheck/autofill UI interfering with keyboard navigation + e2e tests.
+    functionPickerInput.spellcheck = false;
+    functionPickerInput.autocapitalize = "off";
+    functionPickerInput.autocomplete = "off";
 
     const functionPickerList = document.createElement("ul");
     functionPickerList.className = "command-palette__list";
