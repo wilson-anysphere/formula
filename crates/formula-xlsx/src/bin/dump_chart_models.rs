@@ -34,6 +34,9 @@ struct ChartFixtureModel {
     chart_index: usize,
     sheet_name: Option<String>,
     anchor: Anchor,
+    drawing_rel_id: String,
+    drawing_object_id: Option<u32>,
+    drawing_object_name: Option<String>,
     parts: ChartParts,
     model: ChartModel,
 }
@@ -45,6 +48,9 @@ struct ChartFixtureModels {
     chart_index: usize,
     sheet_name: Option<String>,
     anchor: Anchor,
+    drawing_rel_id: String,
+    drawing_object_id: Option<u32>,
+    drawing_object_name: Option<String>,
     parts: ChartParts,
     model_chart_space: ChartModel,
     model_chart_ex: Option<ChartModel>,
@@ -169,6 +175,10 @@ fn dump_one(
 
     for (idx, chart) in charts.into_iter().enumerate() {
         let out_path = workbook_out_dir.join(format!("chart{idx}.json"));
+        let drawing_rel_id = chart.drawing_rel_id;
+        let drawing_object_id = chart.drawing_object_id;
+        let drawing_object_name = chart.drawing_object_name;
+
         let parts = ChartParts {
             drawing_part: chart.drawing_part,
             chart_part: chart.parts.chart.path.clone(),
@@ -189,6 +199,9 @@ fn dump_one(
                 chart_index: idx,
                 sheet_name: chart.sheet_name,
                 anchor: chart.anchor,
+                drawing_rel_id,
+                drawing_object_id,
+                drawing_object_name,
                 parts,
                 model_chart_space,
                 model_chart_ex,
@@ -209,6 +222,9 @@ fn dump_one(
                 chart_index: idx,
                 sheet_name: chart.sheet_name,
                 anchor: chart.anchor,
+                drawing_rel_id,
+                drawing_object_id,
+                drawing_object_name,
                 parts,
                 model,
             };

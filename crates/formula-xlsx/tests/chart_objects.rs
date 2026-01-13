@@ -68,6 +68,14 @@ fn extracts_chart_objects_with_anchor_and_parts() {
     assert!(chart_object.drawing_frame_xml.contains("<c:chart"));
     let rid = extract_chart_rid(&chart_object.drawing_frame_xml).expect("chart r:id present");
     assert!(chart_object.drawing_frame_xml.contains(&rid));
+    assert_eq!(chart_object.drawing_rel_id, rid);
+    assert!(
+        chart_object
+            .drawing_object_name
+            .as_deref()
+            .is_some_and(|name| !name.trim().is_empty()),
+        "expected drawing object name to be populated from xdr:cNvPr"
+    );
 
     match chart_object.anchor {
         Anchor::TwoCell { from, to } => {

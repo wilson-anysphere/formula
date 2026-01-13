@@ -424,6 +424,9 @@ impl XlsxPackage {
                     sheet_name: sheet_name.clone(),
                     sheet_part: sheet_part.clone(),
                     drawing_part: drawing_part.clone(),
+                    drawing_rel_id: drawing_ref.rel_id,
+                    drawing_object_id: drawing_ref.drawing_object_id,
+                    drawing_object_name: drawing_ref.drawing_object_name,
                     anchor: drawing_ref.anchor,
                     drawing_frame_xml: drawing_ref.drawing_frame_xml,
                     parts: ChartParts {

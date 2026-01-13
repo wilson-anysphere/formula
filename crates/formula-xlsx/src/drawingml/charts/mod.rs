@@ -44,6 +44,13 @@ pub struct ChartObject {
     pub sheet_name: Option<String>,
     pub sheet_part: Option<String>,
     pub drawing_part: String,
+    /// Relationship ID (`r:id`) used inside the drawing part to reference the chart part
+    /// (`xl/charts/chartN.xml`).
+    pub drawing_rel_id: String,
+    /// DrawingML non-visual object id from `<xdr:cNvPr id="..."/>` (when present).
+    pub drawing_object_id: Option<u32>,
+    /// DrawingML non-visual object name from `<xdr:cNvPr name="..."/>` (when present).
+    pub drawing_object_name: Option<String>,
     pub anchor: Anchor,
     /// Raw XML for the `<xdr:graphicFrame>` subtree inside the drawing part.
     pub drawing_frame_xml: String,
@@ -71,6 +78,8 @@ pub enum ChartDiagnosticSeverity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DrawingChartObjectRef {
     pub rel_id: String,
+    pub drawing_object_id: Option<u32>,
+    pub drawing_object_name: Option<String>,
     pub anchor: Anchor,
     pub drawing_frame_xml: String,
 }
@@ -117,8 +126,23 @@ pub fn extract_chart_object_refs(
             };
 
             let frame_xml = slice_node_xml(&frame, xml).unwrap_or_default();
+
+            let (drawing_object_id, drawing_object_name) = frame
+                .descendants()
+                .find(|n| n.is_element() && n.tag_name().name() == "cNvPr")
+                .map(|c_nv_pr| {
+                    let id = c_nv_pr
+                        .attribute("id")
+                        .and_then(|v| v.trim().parse::<u32>().ok());
+                    let name = c_nv_pr.attribute("name").map(|v| v.to_string());
+                    (id, name)
+                })
+                .unwrap_or((None, None));
+
             out.push(DrawingChartObjectRef {
                 rel_id: rel_id.to_string(),
+                drawing_object_id,
+                drawing_object_name,
                 anchor: anchor_model,
                 drawing_frame_xml: frame_xml,
             });
