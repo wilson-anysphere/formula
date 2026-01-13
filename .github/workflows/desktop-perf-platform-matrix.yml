@@ -85,6 +85,32 @@ jobs:
       - name: Install wasm-pack (required for @formula/engine WASM build)
         run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked
 
+      - name: Detect Pyodide version (for caching)
+        id: pyodide
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p 'const fs=require("fs");const src=fs.readFileSync("apps/desktop/scripts/ensure-pyodide-assets.mjs","utf8");const m=src.match(/const\\s+PYODIDE_VERSION\\s*=\\s*[\"\\x27]([^\"\\x27]+)[\"\\x27]/);if(!m){throw new Error("PYODIDE_VERSION not found in ensure-pyodide-assets.mjs");}m[1];')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Pyodide asset cache
+        id: pyodide-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
+          key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
+
+      - name: Ensure Pyodide assets are present (populate cache on miss)
+        shell: bash
+        run: node apps/desktop/scripts/ensure-pyodide-assets.mjs
+
+      - name: Save Pyodide asset cache
+        if: steps.pyodide-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
+          key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
+
       - name: Build desktop frontend (Vite + WASM)
         run: pnpm build:desktop
 
