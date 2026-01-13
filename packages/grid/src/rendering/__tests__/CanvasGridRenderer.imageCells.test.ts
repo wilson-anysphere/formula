@@ -354,7 +354,7 @@ describe("CanvasGridRenderer image cells", () => {
     const createImageBitmapSpy = vi.fn(async () => bitmap);
     vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
 
-    let resolveSource: ((value: Blob | null) => void) | null = null;
+    let resolveSource: ((value: Blob | null) => void) | undefined;
     const imageResolver = vi.fn(
       () =>
         new Promise<Blob | null>((resolve) => {
@@ -404,7 +404,10 @@ describe("CanvasGridRenderer image cells", () => {
     expect(createImageBitmapSpy).toHaveBeenCalledTimes(0);
     expect(markDirtySpy).toHaveBeenCalledTimes(0);
 
-    resolveSource?.(new Blob([new Uint8Array([1])], { type: "image/png" }));
+    if (!resolveSource) {
+      throw new Error("Expected image resolver promise to be captured.");
+    }
+    resolveSource(new Blob([new Uint8Array([1])], { type: "image/png" }));
     await flushMicrotasks();
 
     expect(createImageBitmapSpy).toHaveBeenCalledTimes(1);

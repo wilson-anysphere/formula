@@ -883,7 +883,7 @@ describe("CanvasGridRenderer side border rendering (Excel-like)", () => {
   });
 
   it("pads provider-update dirty regions so bottom borders spanning into the next row are not clipped", () => {
-    let listener: ((update: CellProviderUpdate) => void) | null = null;
+    let listener: ((update: CellProviderUpdate) => void) | undefined;
     let enabled = false;
 
     const provider: CellProvider = {
@@ -899,7 +899,7 @@ describe("CanvasGridRenderer side border rendering (Excel-like)", () => {
       subscribe: (cb) => {
         listener = cb;
         return () => {
-          listener = null;
+          listener = undefined;
         };
       }
     };
@@ -937,7 +937,10 @@ describe("CanvasGridRenderer side border rendering (Excel-like)", () => {
     gridStrokes.length = 0;
 
     enabled = true;
-    listener?.({ type: "cells", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 1 } });
+    if (!listener) {
+      throw new Error("Expected provider subscriber to be registered.");
+    }
+    listener({ type: "cells", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 1 } });
 
     // The dirty-region clip rect should be padded beyond the 10px row height so the second double-border
     // stroke at y=11.5 is not clipped.

@@ -43,7 +43,7 @@ function withAllocationGuards<T>(fn: () => T): { result: T; elapsedMs: number; m
     }
   });
 
-  Map.prototype.set = function (...args) {
+  Map.prototype.set = function (this: Map<unknown, unknown>, ...args: [unknown, unknown]) {
     mapSetCalls += 1;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (originalMapSet as any).apply(this, args);

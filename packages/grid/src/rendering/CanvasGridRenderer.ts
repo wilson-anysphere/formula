@@ -2934,12 +2934,18 @@ export class CanvasGridRenderer {
       const sheetXEnd = sheetX + intersection.width;
       const sheetYEnd = sheetY + intersection.height;
 
+      // Treat the intersection end coordinates as *exclusive* bounds. `indexAt(pos)` returns the
+      // last index whose start position is `<= pos`, so calling it with an exact cell boundary
+      // can otherwise "round up" and include a fully-clipped trailing row/col (wasted work, and
+      // can trigger unnecessary image decode requests).
+      const epsilon = 1e-6;
+
       const startRow = this.scroll.rows.indexAt(sheetY, {
         min: quadrant.minRow,
         maxInclusive: quadrant.maxRowExclusive - 1
       });
       const endRow = Math.min(
-        this.scroll.rows.indexAt(sheetYEnd, {
+        this.scroll.rows.indexAt(Math.max(sheetY, sheetYEnd - epsilon), {
           min: quadrant.minRow,
           maxInclusive: quadrant.maxRowExclusive - 1
         }) + 1,
@@ -2951,7 +2957,7 @@ export class CanvasGridRenderer {
         maxInclusive: quadrant.maxColExclusive - 1
       });
       const endCol = Math.min(
-        this.scroll.cols.indexAt(sheetXEnd, {
+        this.scroll.cols.indexAt(Math.max(sheetX, sheetXEnd - epsilon), {
           min: quadrant.minCol,
           maxInclusive: quadrant.maxColExclusive - 1
         }) + 1,
