@@ -4,7 +4,6 @@ import { CommandRegistry } from "../../extensions/commandRegistry.js";
 import { createDefaultLayout, openPanel, closePanel } from "../../layout/layoutState.js";
 import { panelRegistry } from "../../panels/panelRegistry.js";
 import { registerDesktopCommands } from "../../commands/registerDesktopCommands.js";
-import { registerRibbonMacroCommands } from "../../commands/registerRibbonMacroCommands.js";
 import { registerFormatPainterCommand } from "../../commands/formatPainterCommand.js";
 import { RIBBON_MACRO_COMMAND_IDS, registerRibbonMacroCommands } from "../../commands/registerRibbonMacroCommands.js";
 
@@ -208,21 +207,6 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       isArmed: () => false,
       arm: () => {},
       disarm: () => {},
-    });
-
-    // View/Developer macro commands are registered separately from `registerDesktopCommands`
-    // because they require panel focus wiring + macro-recorder integration in the desktop shell.
-    registerRibbonMacroCommands({
-      commandRegistry,
-      handlers: {
-        openPanel: () => {},
-        focusScriptEditorPanel: () => {},
-        focusVbaMigratePanel: () => {},
-        setPendingMacrosPanelFocus: () => {},
-        startMacroRecorder: () => {},
-        stopMacroRecorder: () => {},
-        isTauri: () => false,
-      },
     });
 
     const implementedExemptions = [...INTENTIONALLY_UNIMPLEMENTED_RIBBON_COMMAND_IDS]
