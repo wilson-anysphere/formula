@@ -42,13 +42,20 @@ The desktop shell reports real startup timings from the Rust host + webview so w
 Events emitted by the Rust host (to the `main` window):
 
 - `startup:window-visible` — `number` (milliseconds since native process start)
-- `startup:webview-loaded` — `number` (milliseconds since native process start)
+- `startup:webview-loaded` — `number` (milliseconds since native process start; **native WebView finished its initial navigation/page load**)
 - `startup:first-render` — `number` (milliseconds since native process start; grid visible)
 - `startup:tti` — `number` (milliseconds since native process start; time-to-interactive)
 - `startup:metrics` — snapshot payload containing some/all of `{ window_visible_ms, webview_loaded_ms, first_render_ms, tti_ms }`
 
 The frontend installs listeners in `apps/desktop/src/tauri/startupMetrics.ts` and mirrors the latest snapshot into
 `globalThis.__FORMULA_STARTUP_TIMINGS__`.
+
+Notes:
+
+- `webview_loaded_ms` is recorded in Rust from a Tauri page-load callback (`PageLoadEvent::Finished`). It is intentionally
+  independent of renderer JS bootstrap/TTI work.
+- Tauri does not guarantee early events are queued before JS listeners are installed. The frontend calls
+  `reportStartupWebviewLoaded()` after installing listeners to prompt the host to (re-)emit the cached startup metrics.
 
 ### Viewing startup timings
 
