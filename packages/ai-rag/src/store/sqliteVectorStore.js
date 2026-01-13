@@ -461,16 +461,41 @@ export class SqliteVectorStore {
     return indexes;
   }
 
+  _getIndexSql(name) {
+    const stmt = this._db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ? LIMIT 1;"
+    );
+    stmt.bind([name]);
+    const hasRow = stmt.step();
+    const sql = hasRow ? stmt.get()[0] : null;
+    stmt.free();
+    return sql;
+  }
+
   _ensureIndexes() {
     const indexes = this._getTableIndexes("vectors");
     // Covering index for incremental indexing state scans (id + hashes) without
     // touching the main table payload (vector/text/metadata_json).
-    if (!indexes.has("idx_vectors_workbook_hashes")) {
-      this._db.run(
-        "CREATE INDEX IF NOT EXISTS idx_vectors_workbook_hashes ON vectors(workbook_id, id, content_hash, metadata_hash);"
-      );
+    const indexName = "idx_vectors_workbook_hashes";
+    // Include `length(vector)` as an index expression so `listContentHashes()` can
+    // validate vector byte lengths without needing to read the full table payload.
+    const desiredSql =
+      "CREATE INDEX IF NOT EXISTS idx_vectors_workbook_hashes ON vectors(workbook_id, id, content_hash, metadata_hash, length(vector));";
+
+    if (indexes.has(indexName)) {
+      const existingSql = this._getIndexSql(indexName);
+      const normalized = typeof existingSql === "string" ? existingSql.toLowerCase() : "";
+      if (normalized.includes("length(vector)")) return;
+
+      // Index exists but with an older definition; replace it.
+      this._db.run(`DROP INDEX IF EXISTS ${indexName};`);
+      this._db.run(desiredSql);
       this._dirty = true;
+      return;
     }
+
+    this._db.run(desiredSql);
+    this._dirty = true;
   }
 
   _ensureVectorsColumnsV2() {
