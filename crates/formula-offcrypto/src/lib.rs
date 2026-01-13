@@ -3589,6 +3589,9 @@ fn open_stream_best_effort<F: Seek>(
 }
 
 #[cfg(test)]
+mod fuzz_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use aes::cipher::BlockEncrypt;

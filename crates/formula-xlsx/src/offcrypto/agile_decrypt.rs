@@ -1064,6 +1064,8 @@ fn parse_key_data(
         });
     }
     let hash_algorithm = parse_hash_algorithm(node, "hashAlgorithm")?;
+    let block_size = parse_usize_attr(node, "blockSize")?;
+    let key_bits = parse_usize_attr(node, "keyBits")?;
     let hash_size = parse_usize_attr(node, "hashSize")?;
 
     if let Some(w) = warnings {
@@ -1071,11 +1073,16 @@ fn parse_key_data(
         maybe_warn_salt_size(w, "keyData", node.attribute("saltSize"), salt_value.len());
     }
 
+    validate_block_size(node, "blockSize", block_size)?;
+    validate_hash_size(node, "hashSize", hash_algorithm, hash_size)?;
+    // Prevent unbounded allocations later in the decrypt path (key derivation).
+    key_len_bytes(key_bits, "keyData", "keyBits")?;
+
     Ok(KeyData {
         salt_value,
         hash_algorithm,
         block_size,
-        key_bits: parse_usize_attr(node, "keyBits")?,
+        key_bits,
         hash_size,
     })
 }
@@ -1097,18 +1104,23 @@ fn parse_password_key_encryptor(
     warnings: Option<&mut Vec<OffCryptoWarning>>,
 ) -> Result<PasswordKeyEncryptor> {
     validate_cipher_settings(node)?;
-
+    let salt_value = parse_base64_attr(node, "saltValue", parse_opts)?;
+    let hash_algorithm = parse_hash_algorithm(node, "hashAlgorithm")?;
     let spin_count = parse_u32_attr(node, "spinCount")?;
+    let block_size = parse_usize_attr(node, "blockSize")?;
+    let key_bits = parse_usize_attr(node, "keyBits")?;
+    let hash_size = parse_usize_attr(node, "hashSize")?;
+    let encrypted_verifier_hash_input =
+        parse_base64_attr(node, "encryptedVerifierHashInput", parse_opts)?;
+    let encrypted_verifier_hash_value =
+        parse_base64_attr(node, "encryptedVerifierHashValue", parse_opts)?;
+    let encrypted_key_value = parse_base64_attr(node, "encryptedKeyValue", parse_opts)?;
+
     if spin_count > decrypt_opts.max_spin_count {
         return Err(OffCryptoError::SpinCountTooLarge {
             spin_count,
             max: decrypt_opts.max_spin_count,
         });
-    }
-
-    let block_size = parse_usize_attr(node, "blockSize")?;
-    if block_size != AES_BLOCK_SIZE {
-        return Err(OffCryptoError::InvalidBlockSize { block_size });
     }
 
     let salt_size = parse_usize_attr(node, "saltSize")?;
@@ -1120,7 +1132,6 @@ fn parse_password_key_encryptor(
         });
     }
 
-    let salt_value = parse_base64_attr(node, "saltValue", parse_opts)?;
     if salt_value.len() != salt_size {
         return Err(OffCryptoError::InvalidAttribute {
             element: "encryptedKey".to_string(),
@@ -1132,8 +1143,6 @@ fn parse_password_key_encryptor(
             ),
         });
     }
-    let hash_algorithm = parse_hash_algorithm(node, "hashAlgorithm")?;
-    let hash_size = parse_usize_attr(node, "hashSize")?;
 
     if let Some(w) = warnings {
         maybe_warn_hash_size(w, "encryptedKey", hash_algorithm, hash_size);
@@ -1144,25 +1153,20 @@ fn parse_password_key_encryptor(
             salt_value.len(),
         );
     }
+    validate_block_size(node, "blockSize", block_size)?;
+    validate_hash_size(node, "hashSize", hash_algorithm, hash_size)?;
+    key_len_bytes(key_bits, "p:encryptedKey", "keyBits")?;
 
     Ok(PasswordKeyEncryptor {
         salt_value,
         hash_algorithm,
         spin_count,
         block_size,
-        key_bits: parse_usize_attr(node, "keyBits")?,
+        key_bits,
         hash_size,
-        encrypted_verifier_hash_input: parse_base64_attr(
-            node,
-            "encryptedVerifierHashInput",
-            parse_opts,
-        )?,
-        encrypted_verifier_hash_value: parse_base64_attr(
-            node,
-            "encryptedVerifierHashValue",
-            parse_opts,
-        )?,
-        encrypted_key_value: parse_base64_attr(node, "encryptedKeyValue", parse_opts)?,
+        encrypted_verifier_hash_input,
+        encrypted_verifier_hash_value,
+        encrypted_key_value,
     })
 }
 
@@ -1773,6 +1777,46 @@ mod tests {
     }
 }
 
+fn hash_output_len(alg: HashAlgorithm) -> usize {
+    match alg {
+        HashAlgorithm::Sha1 => 20,
+        HashAlgorithm::Sha256 => 32,
+        HashAlgorithm::Sha384 => 48,
+        HashAlgorithm::Sha512 => 64,
+    }
+}
+
+fn validate_block_size(node: roxmltree::Node<'_, '_>, attr: &'static str, block_size: usize) -> Result<()> {
+    if block_size != AES_BLOCK_SIZE {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: node.tag_name().name().to_string(),
+            attr: attr.to_string(),
+            reason: format!(
+                "blockSize must be {AES_BLOCK_SIZE} for AES (got {block_size})"
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn validate_hash_size(
+    node: roxmltree::Node<'_, '_>,
+    attr: &'static str,
+    hash_alg: HashAlgorithm,
+    hash_size: usize,
+) -> Result<()> {
+    let expected = hash_output_len(hash_alg);
+    if hash_size != expected {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: node.tag_name().name().to_string(),
+            attr: attr.to_string(),
+            reason: format!(
+                "hashSize must match hashAlgorithm output length ({expected}, got {hash_size})"
+            ),
+        });
+    }
+    Ok(())
+}
 fn required_attr<'a>(node: roxmltree::Node<'a, '_>, attr: &str) -> Result<&'a str> {
     node.attribute(attr)
         .ok_or_else(|| OffCryptoError::MissingRequiredAttribute {
@@ -1827,7 +1871,17 @@ fn key_len_bytes(key_bits: usize, element: &'static str, attr: &'static str) -> 
             reason: "keyBits must be divisible by 8".to_string(),
         });
     }
-    Ok(key_bits / 8)
+    let key_len = key_bits / 8;
+    if !matches!(key_len, 16 | 24 | 32) {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: element.to_string(),
+            attr: attr.to_string(),
+            reason: format!(
+                "unsupported keyBits value {key_bits} (expected 128, 192, or 256)"
+            ),
+        });
+    }
+    Ok(key_len)
 }
 
 fn derive_key_or_err(
@@ -1992,5 +2046,164 @@ mod key_encryptor_tests {
             }
             other => panic!("expected UnsupportedKeyEncryptor, got {other:?}"),
         }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod fuzz_tests {
+    #![allow(unexpected_cfgs)]
+
+    use super::*;
+    use proptest::prelude::*;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    #[cfg(fuzzing)]
+    const CASES: u32 = 512;
+    #[cfg(not(fuzzing))]
+    const CASES: u32 = 32;
+
+    const MAX_LEN: usize = 32 * 1024;
+
+    fn invalid_agile_encryption_info(mut tail: Vec<u8>) -> Vec<u8> {
+        // Force the parser down the Agile branch (4.4) and ensure the XML slice is not UTF-8.
+        //
+        // This avoids flaky tests where randomly generated bytes accidentally form a valid
+        // EncryptionInfo XML descriptor (extremely unlikely, but possible).
+        let mut out = Vec::with_capacity(4 + 2 + tail.len());
+        out.extend_from_slice(&[0x04, 0x00, 0x04, 0x00]); // major=4, minor=4
+        out.push(b'<');
+        out.push(0xFF); // invalid UTF-8
+        out.append(&mut tail);
+        out
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: CASES,
+            max_shrink_iters: 0,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn parse_agile_encryption_info_is_panic_free_and_rejects_garbage(
+            tail in prop::collection::vec(any::<u8>(), 0..=MAX_LEN),
+        ) {
+            let bytes = invalid_agile_encryption_info(tail);
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                let opts = DecryptOptions::default();
+                super::parse_agile_encryption_info(&bytes, &opts, None)
+            }));
+            prop_assert!(outcome.is_ok(), "parse_agile_encryption_info panicked");
+            prop_assert!(outcome.unwrap().is_err(), "garbage input should not parse");
+        }
+
+        #[test]
+        fn decrypt_agile_encrypted_package_is_panic_free_and_rejects_garbage(
+            info_tail in prop::collection::vec(any::<u8>(), 0..=MAX_LEN),
+            encrypted_package in prop::collection::vec(any::<u8>(), 0..=MAX_LEN),
+        ) {
+            let encryption_info = invalid_agile_encryption_info(info_tail);
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, "pw")
+            }));
+            prop_assert!(outcome.is_ok(), "decrypt_agile_encrypted_package panicked");
+            prop_assert!(outcome.unwrap().is_err(), "garbage input should not decrypt");
+        }
+    }
+
+    #[test]
+    fn keydata_block_size_zero_is_rejected_without_panicking() {
+        use cfb::CompoundFile;
+        use ms_offcrypto_writer::Ecma376AgileWriter;
+        use std::io::{Cursor, Read, Write};
+        use zip::write::FileOptions;
+
+        fn build_tiny_zip() -> Vec<u8> {
+            let cursor = Cursor::new(Vec::new());
+            let mut writer = zip::ZipWriter::new(cursor);
+            writer
+                .start_file("hello.txt", FileOptions::<()>::default())
+                .expect("start zip file");
+            writer.write_all(b"hello").expect("write zip contents");
+            writer.finish().expect("finish zip").into_inner()
+        }
+
+        fn encrypt_zip_with_password(plain_zip: &[u8], password: &str) -> Vec<u8> {
+            let mut cursor = Cursor::new(Vec::new());
+            let mut agile =
+                Ecma376AgileWriter::create(&mut rand::rng(), password, &mut cursor).expect("create agile");
+            agile
+                .write_all(plain_zip)
+                .expect("write plaintext zip to agile writer");
+            agile.finalize().expect("finalize agile writer");
+            cursor.into_inner()
+        }
+
+        fn extract_stream_bytes(cfb_bytes: &[u8], stream_name: &str) -> Vec<u8> {
+            let mut ole = CompoundFile::open(Cursor::new(cfb_bytes)).expect("open cfb");
+            let mut stream = ole.open_stream(stream_name).expect("open stream");
+            let mut buf = Vec::new();
+            stream.read_to_end(&mut buf).expect("read stream");
+            buf
+        }
+
+        fn replace_tag_attr(xml: &str, tag: &str, attr: &str, new_value: &str) -> String {
+            let start = xml
+                .find(&format!("<{tag}"))
+                .unwrap_or_else(|| panic!("missing <{tag}> tag"));
+            let end = xml[start..]
+                .find('>')
+                .map(|i| start + i)
+                .unwrap_or_else(|| panic!("unterminated <{tag}> start tag"));
+            let head = &xml[..start];
+            let tag_contents = &xml[start..end];
+            let tail = &xml[end..];
+
+            let needle = format!("{attr}=\"");
+            let attr_pos = tag_contents
+                .find(&needle)
+                .unwrap_or_else(|| panic!("missing {attr} attribute on <{tag}>"));
+            let value_start = attr_pos + needle.len();
+            let value_end = tag_contents[value_start..]
+                .find('"')
+                .map(|i| value_start + i)
+                .unwrap_or_else(|| panic!("unterminated {attr} attribute on <{tag}>"));
+
+            format!(
+                "{}{}{}{}{}",
+                head,
+                &tag_contents[..value_start],
+                new_value,
+                &tag_contents[value_end..],
+                tail
+            )
+        }
+
+        let password = "correct horse battery staple";
+        let plain_zip = build_tiny_zip();
+
+        let encrypted_cfb = encrypt_zip_with_password(&plain_zip, password);
+        let encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
+        let encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
+
+        let xml_start = encryption_info
+            .iter()
+            .position(|b| *b == b'<')
+            .expect("EncryptionInfo should contain XML");
+        let xml = std::str::from_utf8(&encryption_info[xml_start..]).expect("fixture XML should be UTF-8");
+        let xml = replace_tag_attr(xml, "keyData", "blockSize", "0");
+
+        let mut modified = encryption_info[..xml_start].to_vec();
+        modified.extend_from_slice(xml.as_bytes());
+
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            decrypt_agile_encrypted_package(&modified, &encrypted_package, password)
+        }));
+        assert!(outcome.is_ok(), "decrypt_agile_encrypted_package panicked");
+        let err = outcome.unwrap().expect_err("expected failure due to invalid blockSize");
+        assert!(
+            matches!(err, OffCryptoError::InvalidAttribute { ref attr, .. } if attr == "blockSize"),
+            "expected InvalidAttribute(blockSize), got {err:?}"
+        );
     }
 }

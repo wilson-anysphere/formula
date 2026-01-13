@@ -25,6 +25,7 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]
 hex = "0.4"
+proptest = "1.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
