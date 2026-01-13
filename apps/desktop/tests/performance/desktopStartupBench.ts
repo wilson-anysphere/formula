@@ -89,12 +89,45 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
 
   const windowVisible = metrics.map((m) => m.windowVisibleMs);
   const tti = metrics.map((m) => m.ttiMs);
+  const webviewLoaded = metrics
+    .map((m) => m.webviewLoadedMs)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
 
   const windowTarget = Number(process.env.FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS ?? '500') || 500;
   const ttiTarget = Number(process.env.FORMULA_DESKTOP_TTI_TARGET_MS ?? '1000') || 1000;
+  const webviewLoadedTarget = Number(process.env.FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS ?? '800') || 800;
 
-  return [
+  const results: BenchmarkResult[] = [
     buildResult('desktop.startup.window_visible_ms.p95', windowVisible, windowTarget),
     buildResult('desktop.startup.tti_ms.p95', tti, ttiTarget),
   ];
+
+  // `webview_loaded_ms` is best-effort and historically missing in some runs due to the
+  // frontend->Rust IPC call racing `__TAURI__` initialization. To avoid failing the whole
+  // benchmark suite while the instrumentation is still stabilizing, only report the metric
+  // when we get a sufficiently large sample.
+  //
+  // Policy:
+  // - If 0 runs report `webview_loaded_ms`, skip the metric entirely.
+  // - If fewer than 80% of runs report it, skip the metric (avoid biased p95 on a tiny subset).
+  // - Otherwise, compute p95 over the runs that reported a value and gate on the target.
+  const minValidFraction = 0.8;
+  const minValidRuns = Math.ceil(runs * minValidFraction);
+  if (webviewLoaded.length === 0) {
+    // eslint-disable-next-line no-console
+    console.log('[desktop-startup] webview_loaded_ms unavailable (0 runs reported it); skipping metric');
+  } else if (webviewLoaded.length < minValidRuns) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[desktop-startup] webview_loaded_ms only available for ${webviewLoaded.length}/${runs} runs (<${Math.round(
+        minValidFraction * 100,
+      )}%); skipping metric`,
+    );
+  } else {
+    results.push(
+      buildResult('desktop.startup.webview_loaded_ms.p95', webviewLoaded, webviewLoadedTarget),
+    );
+  }
+
+  return results;
 }
