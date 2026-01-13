@@ -77,8 +77,8 @@ const WSBOOL_OPTION_FIT_TO_PAGE: u16 = 0x0100;
 // - 0 => landscape
 // - 1 => portrait
 const SETUP_GRBIT_PORTRAIT: u16 = 0x0002;
-// If set, printer-related fields in SETUP are undefined and must be ignored.
-// See [MS-XLS] 2.4.257 (SETUP), `fNoPls`.
+// If set, printer-related fields in SETUP (including iPaperSize/iScale/iRes/iVRes/iCopies/fNoOrient/fPortrait)
+// are undefined and must be ignored. See [MS-XLS] 2.4.257 (SETUP), `fNoPls`.
 const SETUP_GRBIT_F_NOPLS: u16 = 0x0004;
 // If set, `fPortrait` must be ignored and orientation defaults to portrait.
 // See [MS-XLS] 2.4.257 (SETUP), `fNoOrient`.
@@ -114,20 +114,17 @@ pub(crate) fn parse_biff_sheet_print_settings(
 
     let mut page_setup = PageSetup::default();
     let mut saw_any_record = false;
-
-    // WSBOOL.fFitToPage controls whether SETUP's iFitWidth/iFitHeight apply.
+    // Scaling in BIFF8 uses two orthogonal signals:
+    // - SETUP stores both iScale and iFitWidth/iFitHeight
+    // - WSBOOL.fFitToPage indicates whether iFit* are active; otherwise use iScale.
     //
-    // Keep the raw SETUP scaling fields around and compute scaling at the end so record order
-    // doesn't matter and "last wins" semantics are respected. Some `.xls` producers omit SETUP
-    // even when fit-to-page is enabled; in that case we preserve the intent as
+    // Keep these raw values until the end so WSBOOL order doesn't matter. Some `.xls` producers
+    // omit SETUP even when fit-to-page is enabled; in that case we preserve the intent as
     // `FitTo { width: 0, height: 0 }`.
     let mut wsbool_fit_to_page: Option<bool> = None;
     let mut setup_scale: Option<u16> = None;
     let mut setup_fit_width: Option<u16> = None;
     let mut setup_fit_height: Option<u16> = None;
-    // Track whether the last SETUP record had `fNoPls=1` so we can ignore scaling/orientation
-    // fields that are undefined per [MS-XLS].
-    let mut setup_no_pls: bool = false;
 
     let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
 
@@ -150,25 +147,21 @@ pub(crate) fn parse_biff_sheet_print_settings(
                 saw_any_record = true;
                 let (scale, fit_width, fit_height, no_pls) =
                     parse_setup_record(&mut page_setup, data, record.offset, &mut out.warnings);
-                setup_no_pls = no_pls;
+                // Best-effort: preserve the most recent values when later SETUP records are
+                // truncated/malformed (so corrupt files don't clobber earlier state).
+                //
+                // `fNoPls=1` indicates the printer-related fields (including iScale) are undefined.
+                // Treat this as a "clear" so later scaling logic falls back to defaults.
                 if no_pls {
-                    // `fNoPls=1` indicates printer-related fields are undefined. Treat this as a
-                    // "clear" so later scaling logic falls back to defaults.
                     setup_scale = None;
-                    setup_fit_width = None;
-                    setup_fit_height = None;
-                } else {
-                    // Best-effort: preserve the most recent valid values when later SETUP records
-                    // are truncated/malformed (so corrupt files don't clobber earlier state).
-                    if let Some(value) = scale {
-                        setup_scale = Some(value);
-                    }
-                    if let Some(value) = fit_width {
-                        setup_fit_width = Some(value);
-                    }
-                    if let Some(value) = fit_height {
-                        setup_fit_height = Some(value);
-                    }
+                } else if let Some(value) = scale {
+                    setup_scale = Some(value);
+                }
+                if let Some(value) = fit_width {
+                    setup_fit_width = Some(value);
+                }
+                if let Some(value) = fit_height {
+                    setup_fit_height = Some(value);
                 }
             }
             RECORD_LEFTMARGIN => parse_margin_record(
@@ -217,7 +210,7 @@ pub(crate) fn parse_biff_sheet_print_settings(
                 let fit_to_page = (grbit & WSBOOL_OPTION_FIT_TO_PAGE) != 0;
                 wsbool_fit_to_page = Some(fit_to_page);
                 if fit_to_page {
-                    // Only treat WSBOOL as a print-settings signal when fFitToPage is set.
+                    // Treat fit-to-page as a meaningful print setting even when SETUP is missing.
                     saw_any_record = true;
                 }
             }
@@ -233,27 +226,18 @@ pub(crate) fn parse_biff_sheet_print_settings(
         }
     }
 
-    // Compute scaling based on WSBOOL.fFitToPage (when present) and SETUP fields.
-    let fit_to_page = if setup_no_pls {
-        false
-    } else {
-        wsbool_fit_to_page.unwrap_or_else(|| {
-            setup_fit_width.unwrap_or(0) != 0 || setup_fit_height.unwrap_or(0) != 0
-        })
-    };
-    if fit_to_page {
-        page_setup.scaling = match (setup_fit_width, setup_fit_height) {
-            (Some(width), Some(height)) => Scaling::FitTo { width, height },
-            _ => Scaling::FitTo { width: 0, height: 0 },
+    if saw_any_record {
+        page_setup.scaling = if wsbool_fit_to_page == Some(true) {
+            // Some `.xls` writers omit the SETUP record even when fit-to-page is enabled.
+            // Preserve the scaling intent: FitTo {0,0} means "as many pages as needed".
+            Scaling::FitTo {
+                width: setup_fit_width.unwrap_or(0),
+                height: setup_fit_height.unwrap_or(0),
+            }
+        } else {
+            let scale = setup_scale.unwrap_or(100);
+            Scaling::Percent(if scale == 0 { 100 } else { scale })
         };
-    } else {
-        let scale = setup_scale.unwrap_or(100);
-        page_setup.scaling = Scaling::Percent(if scale == 0 { 100 } else { scale });
-    }
-
-    // WSBOOL.fFitToPage can imply non-default scaling even when SETUP is missing. Treat it as a
-    // signal that print settings exist so downstream import paths can preserve FitTo mode.
-    if saw_any_record || fit_to_page {
         out.page_setup = Some(page_setup);
     }
 
@@ -315,16 +299,17 @@ fn parse_setup_record(
     let grbit = parse_u16_at(data, 10);
     let header_margin = parse_f64_at(data, 16);
     let footer_margin = parse_f64_at(data, 24);
-    let mut scale_out = scale;
-    let mut f_no_pls = false;
-    let mut f_no_orient = false;
-    let mut f_portrait = false;
-    if let Some(grbit) = grbit {
-        f_no_pls = (grbit & SETUP_GRBIT_F_NOPLS) != 0;
-        f_no_orient = (grbit & SETUP_GRBIT_F_NOORIENT) != 0;
-        f_portrait = (grbit & SETUP_GRBIT_PORTRAIT) != 0;
-    }
 
+    let (f_no_pls, f_no_orient, f_portrait) = match grbit {
+        Some(grbit) => (
+            (grbit & SETUP_GRBIT_F_NOPLS) != 0,
+            (grbit & SETUP_GRBIT_F_NOORIENT) != 0,
+            (grbit & SETUP_GRBIT_PORTRAIT) != 0,
+        ),
+        None => (false, false, false),
+    };
+
+    // Excel clamps fit dimensions to 32767 (the maximum value representable in the UI).
     if let Some(w) = fit_width {
         if w > SETUP_MAX_FIT_DIMENSION {
             push_warning_bounded(
@@ -336,7 +321,6 @@ fn parse_setup_record(
             fit_width = Some(SETUP_MAX_FIT_DIMENSION);
         }
     }
-
     if let Some(h) = fit_height {
         if h > SETUP_MAX_FIT_DIMENSION {
             push_warning_bounded(
@@ -349,21 +333,11 @@ fn parse_setup_record(
         }
     }
 
-    // Per [MS-XLS], when `fNoPls` is set the printer-related fields are undefined and must be
-    // ignored. We still import the header/footer margins from `numHdr`/`numFtr` as those are not
-    // marked undefined by the spec (and Excel preserves them).
-    if f_no_pls {
-        // Per spec: iPaperSize/iScale/fPortrait/iRes/iVRes/iCopies are undefined; ignore them.
-        // Also reset any previously seen printer-related values so "last wins" behaves as if
-        // printer settings were not present.
-        page_setup.paper_size = PageSetup::default().paper_size;
-        page_setup.orientation = Orientation::Portrait;
-        scale_out = None;
-        // Best-effort: treat fit-to-page fields as undefined as well so we do not infer FitTo mode
-        // from non-zero iFitWidth/iFitHeight when WSBOOL is absent.
-        fit_width = None;
-        fit_height = None;
-    } else {
+    // Printer fields (including iScale) are undefined when fNoPls is set.
+    let scale_out = if f_no_pls { None } else { scale };
+
+    // Apply paper size + orientation only when fNoPls is not set.
+    if !f_no_pls {
         if let Some(code) = paper_size {
             // BIFF8 uses `iPaperSize==0` and values >=256 for printer-specific/custom paper sizes.
             // These values do not map cleanly onto OpenXML `ST_PaperSize` numeric codes and are not

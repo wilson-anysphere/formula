@@ -840,6 +840,33 @@ fn decode_rgce_impl(
                         offset: ptg_offset,
                         ptg,
                     })?;
+                    let mut func_name_text = func_name.text;
+                    // When the function name is an `ExternName_IXTI*_N*` placeholder (from
+                    // `PtgNameX`), preserve the historical `ExternName{ixti}:{nameIndex}` display
+                    // used by older rgce decoders.
+                    //
+                    // Note: This is not guaranteed to be parseable as an Excel identifier, but it
+                    // keeps decode output stable for UDF/add-in call patterns.
+                    let mut had_at = false;
+                    let mut rest = func_name_text.as_str();
+                    if let Some(stripped) = rest.strip_prefix('@') {
+                        had_at = true;
+                        rest = stripped;
+                    }
+                    if let Some(rest) = rest.strip_prefix("ExternName_IXTI") {
+                        if let Some((ixti_str, name_index_str)) = rest.split_once("_N") {
+                            if let (Ok(ixti), Ok(name_index)) = (
+                                ixti_str.parse::<u16>(),
+                                name_index_str.parse::<u16>(),
+                            ) {
+                                func_name_text = if had_at {
+                                    format!("@ExternName{ixti}:{name_index}")
+                                } else {
+                                    format!("ExternName{ixti}:{name_index}")
+                                };
+                            }
+                        }
+                    }
                     let mut args = Vec::with_capacity(argc.saturating_sub(1));
                     for _ in 0..argc.saturating_sub(1) {
                         args.push(stack.pop().ok_or(DecodeRgceError::StackUnderflow {
