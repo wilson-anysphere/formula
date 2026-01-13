@@ -2237,6 +2237,7 @@ dependencies = [
  "cfb 0.10.0",
  "cipher",
  "hex",
+ "hmac",
  "office-crypto",
  "quick-xml 0.37.5",
  "sha1",

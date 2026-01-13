@@ -11,6 +11,7 @@ base64 = "0.22"
 cbc = "0.1"
 cipher = { version = "0.4", features = ["block-padding"] }
 cfb = "0.10"
+hmac = "0.12"
 office-crypto = "0.2"
 quick-xml = "0.37"
 sha1 = "0.10"
