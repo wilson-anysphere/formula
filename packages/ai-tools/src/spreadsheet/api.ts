@@ -23,6 +23,14 @@ export interface SpreadsheetApi {
   listSheets(): string[];
   listNonEmptyCells(sheet?: string): CellEntry[];
 
+  /**
+   * Return the cell's stored value and optional formula.
+   *
+   * Note: Real spreadsheet backends often store both `cell.formula` and a computed `cell.value`.
+   * ToolExecutor defaults to treating formula cells as having no value (to match the in-memory
+   * workbook model), but can optionally surface/use computed values when
+   * `ToolExecutorOptions.include_formula_values` is enabled (with conservative DLP gating).
+   */
   getCell(address: CellAddress): CellData;
   setCell(address: CellAddress, cell: CellData): void;
 
