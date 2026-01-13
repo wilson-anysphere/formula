@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import subprocess
+import tempfile
 from functools import lru_cache
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -30,7 +31,19 @@ def load_json(path: Path) -> Any:
 
 def write_json(path: Path, data: Any) -> None:
     ensure_dir(path.parent)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    text = json.dumps(data, indent=2, sort_keys=True) + "\n"
+    # Write atomically to avoid leaving partially-written JSON if the process is interrupted.
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        delete=False,
+        dir=path.parent,
+        prefix=path.name + ".",
+        suffix=".tmp",
+    ) as f:
+        f.write(text)
+        tmp_name = f.name
+    os.replace(tmp_name, path)
 
 
 @dataclass(frozen=True)
