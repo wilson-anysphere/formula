@@ -285,7 +285,9 @@ export async function indexWorkbook(params) {
       );
     }
 
-    const expectedDim = vectorStore?.dimension;
+    const storeDim = vectorStore?.dimension;
+    /** @type {number | undefined} */
+    let expectedLen = Number.isFinite(storeDim) ? storeDim : undefined;
     for (let i = 0; i < vectors.length; i += 1) {
       const vec = vectors[i];
       const len = vec?.length;
@@ -294,9 +296,11 @@ export async function indexWorkbook(params) {
           `embedder.embedTexts returned an invalid vector for id=${toUpsert[i].id}: expected an array-like vector with a finite length`
         );
       }
-      if (Number.isFinite(expectedDim) && len !== expectedDim) {
+      if (expectedLen === undefined) {
+        expectedLen = len;
+      } else if (len !== expectedLen) {
         throw new Error(
-          `Vector dimension mismatch for id=${toUpsert[i].id}: expected ${expectedDim}, got ${len}`
+          `Vector dimension mismatch for id=${toUpsert[i].id}: expected ${expectedLen}, got ${len}`
         );
       }
       for (let j = 0; j < len; j += 1) {
