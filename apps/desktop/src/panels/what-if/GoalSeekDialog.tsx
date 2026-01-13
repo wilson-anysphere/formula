@@ -71,6 +71,7 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
       aria-modal="true"
       aria-labelledby={titleId}
       aria-describedby={error ? errorId : undefined}
+      aria-busy={running}
       data-testid="goal-seek-dialog"
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;

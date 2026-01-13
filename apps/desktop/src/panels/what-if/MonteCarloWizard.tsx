@@ -83,7 +83,13 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
   }
 
   return (
-    <div className="what-if-panel" role="region" aria-label={t("whatIf.monteCarlo.title")} data-testid="monte-carlo-wizard">
+    <div
+      className="what-if-panel"
+      role="region"
+      aria-label={t("whatIf.monteCarlo.title")}
+      aria-busy={running}
+      data-testid="monte-carlo-wizard"
+    >
       <h3 className="what-if-panel__title">{t("whatIf.monteCarlo.title")}</h3>
 
       {error ? (

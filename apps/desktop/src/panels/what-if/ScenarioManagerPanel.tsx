@@ -31,15 +31,19 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
   const [report, setReport] = useState<SummaryReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [invalidField, setInvalidField] = useState<"resultCells" | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     void (async () => {
       try {
+        setBusy(true);
         setError(null);
         const list = await api.listScenarios();
         setScenarios(list);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
       }
     })();
   }, [api]);
@@ -51,22 +55,28 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
 
   async function applySelected() {
     if (selectedScenarioId == null) return;
+    setBusy(true);
     setError(null);
     setReport(null);
     try {
       await api.applyScenario(selectedScenarioId);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
   }
 
   async function restoreBase() {
+    setBusy(true);
     setError(null);
     setReport(null);
     try {
       await api.restoreBaseScenario();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -86,17 +96,20 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
       return;
     }
 
+    setBusy(true);
     try {
       const ids = scenarios.map((s) => s.id);
       const summary = await api.generateSummaryReport(cells, ids);
       setReport(summary);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
-    <div className="what-if-panel" role="region" aria-label={t("whatIf.scenario.title")} data-testid="scenario-manager-panel">
+    <div className="what-if-panel" role="region" aria-label={t("whatIf.scenario.title")} aria-busy={busy} data-testid="scenario-manager-panel">
       <h3 className="what-if-panel__title">{t("whatIf.scenario.title")}</h3>
 
       {error ? (
@@ -112,6 +125,7 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
             className="what-if__select"
             value={selectedScenarioId ?? ""}
             onChange={(e) => setSelectedScenarioId(e.target.value ? Number(e.target.value) : null)}
+            disabled={busy}
           >
             <option value="">{t("whatIf.scenario.selectPlaceholder")}</option>
             {scenarios.map((s) => (
@@ -122,7 +136,12 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
           </select>
         </label>
 
-        <button type="button" className="what-if__button what-if__button--primary" onClick={applySelected} disabled={selectedScenarioId == null}>
+        <button
+          type="button"
+          className="what-if__button what-if__button--primary"
+          onClick={applySelected}
+          disabled={busy || selectedScenarioId == null}
+        >
           {t("whatIf.scenario.apply")}
         </button>
       </div>
@@ -143,10 +162,10 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
       ) : null}
 
       <div className="what-if__actions">
-        <button type="button" className="what-if__button" onClick={restoreBase}>
+        <button type="button" className="what-if__button" onClick={restoreBase} disabled={busy}>
           {t("whatIf.scenario.restoreBase")}
         </button>
-        <button type="button" className="what-if__button" onClick={generateReport} disabled={scenarios.length === 0}>
+        <button type="button" className="what-if__button" onClick={generateReport} disabled={busy || scenarios.length === 0}>
           {t("whatIf.scenario.summaryReport")}
         </button>
       </div>
@@ -166,6 +185,7 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
           spellCheck={false}
           autoCapitalize="off"
           aria-invalid={invalidField === "resultCells"}
+          disabled={busy}
         />
       </label>
 
