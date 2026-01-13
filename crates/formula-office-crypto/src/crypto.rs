@@ -222,28 +222,6 @@ pub(crate) fn derive_iv(
     digest[..out_len].to_vec()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::{Duration, Instant};
-
-    #[test]
-    fn hash_password_perf_guard_spin_10k() {
-        // Regression guard: the spinCount loop is the hot path for both Standard (50k) and Agile
-        // (often 100k) password-based encryption.
-        let salt = [0x11u8; 16];
-        let pw = password_to_utf16le("password");
-
-        let start = Instant::now();
-        let _ = hash_password(HashAlgorithm::Sha256, &salt, &pw, 10_000);
-        assert!(
-            start.elapsed() < Duration::from_secs(2),
-            "hash_password(spinCount=10_000) took too long: {:?}",
-            start.elapsed()
-        );
-    }
-}
-
 pub(crate) fn aes_cbc_decrypt(
     key: &[u8],
     iv: &[u8],
@@ -469,7 +447,24 @@ fn crypt_derive_key(hash_alg: HashAlgorithm, hash: &[u8], key_len: usize) -> Vec
 
 #[cfg(test)]
 mod tests {
-    use super::rc4_xor_in_place;
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn hash_password_perf_guard_spin_10k() {
+        // Regression guard: the spinCount loop is the hot path for both Standard (50k) and Agile
+        // (often 100k) password-based encryption.
+        let salt = [0x11u8; 16];
+        let pw = password_to_utf16le("password");
+
+        let start = Instant::now();
+        let _ = hash_password(HashAlgorithm::Sha256, &salt, &pw, 10_000);
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "hash_password(spinCount=10_000) took too long: {:?}",
+            start.elapsed()
+        );
+    }
 
     #[test]
     fn rc4_vectors_encrypt_decrypt_symmetry() {
