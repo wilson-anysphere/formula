@@ -985,6 +985,33 @@ fn calculate_compound_boolean_filters_respect_relationship_propagation() {
 }
 
 #[test]
+fn calculate_compound_boolean_filters_can_reference_multiple_columns_on_one_table() {
+    let mut model = build_model();
+    model
+        .add_measure(
+            "MultiColumn",
+            "CALCULATE(SUM(Orders[Amount]), Orders[Amount] > 7 && Orders[CustomerId] = 1)",
+        )
+        .unwrap();
+
+    // Existing filters on referenced columns should be replaced.
+    let customer2_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 2.into());
+    assert_eq!(
+        model.evaluate_measure("MultiColumn", &customer2_filter).unwrap(),
+        30.0.into()
+    );
+
+    // Existing filters on *other* columns should still apply (intersection semantics).
+    let order100_filter =
+        FilterContext::empty().with_column_equals("Orders", "OrderId", 100.into());
+    assert_eq!(
+        model.evaluate_measure("MultiColumn", &order100_filter).unwrap(),
+        10.0.into()
+    );
+}
+
+#[test]
 fn calculate_supports_compound_boolean_or_filters() {
     let mut model = build_model();
     model
