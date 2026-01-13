@@ -19,6 +19,11 @@ describe("computeDlpCacheKey", () => {
     expect(key1).toEqual(key2);
   });
 
+  it("returns a precomputed cacheKey when present", () => {
+    const dlp = { cacheKey: "dlp:precomputed" };
+    expect(computeDlpCacheKey(dlp)).toBe("dlp:precomputed");
+  });
+
   it("changes when classification changes", () => {
     const base = {
       documentId: "doc",
@@ -53,4 +58,3 @@ describe("computeDlpCacheKey", () => {
     expect(key1).not.toEqual(key2);
   });
 });
-

@@ -63,6 +63,17 @@ function normalizeClassificationRecordsForCacheKey(
 export function computeDlpCacheKey(dlp: any): string {
   if (!dlp) return "no_dlp";
 
+  // Allow callers to pre-compute and attach the key (or reuse a previously computed
+  // key) to avoid re-hashing large policies / record sets in hot paths.
+  try {
+    if (typeof dlp === "object" && dlp !== null) {
+      const existing = (dlp as any).cacheKey ?? (dlp as any).cache_key;
+      if (typeof existing === "string" && existing.trim()) return existing.trim();
+    }
+  } catch {
+    // ignore
+  }
+
   const includeRestrictedContent = Boolean(dlp.includeRestrictedContent ?? dlp.include_restricted_content ?? false);
 
   const policyJson = safeStableJsonStringify(dlp.policy ?? null);
@@ -100,6 +111,34 @@ export function computeDlpCacheKey(dlp: any): string {
   const recordsJson = safeStableJsonStringify(normalized);
   const recordsKey = `${recordsJson.length}:${hashString(recordsJson)}`;
 
-  return `dlp:${includeRestrictedContent ? "incl" : "excl"}:${policyKey}:${recordsKey}`;
-}
+  const key = `dlp:${includeRestrictedContent ? "incl" : "excl"}:${policyKey}:${recordsKey}`;
 
+  // Memoize when it is safe to do so:
+  // - When an explicit snapshot list of classification records is provided, OR
+  // - When no classification store is provided (records are effectively immutable/empty).
+  //
+  // If a caller passes only a dynamic classification store (no explicit records), caching
+  // could become unsafe because the store contents can change over time.
+  try {
+    if (typeof dlp === "object" && dlp !== null) {
+      const obj = dlp as any;
+      const hasExplicitRecords = Array.isArray(obj.classificationRecords) || Array.isArray(obj.classification_records);
+      const hasStore = Boolean(obj.classificationStore || obj.classification_store);
+      if (hasExplicitRecords || !hasStore) {
+        try {
+          Object.defineProperty(obj, "cacheKey", { value: key, enumerable: false, configurable: true });
+        } catch {
+          try {
+            obj.cacheKey = key;
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return key;
+}
