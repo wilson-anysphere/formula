@@ -413,6 +413,39 @@ const store = await createSqliteAIAuditStoreNode({
 });
 ```
 
+#### Migrating LocalStorage → SQLite (optional)
+
+If you have legacy entries stored via `LocalStorageAIAuditStore` (JSON array) and want to move to a
+sqlite-backed store, `@formula/ai-audit` provides a helper:
+
+```ts
+import { migrateLocalStorageAuditEntriesToSqlite } from "@formula/ai-audit";
+```
+
+It is idempotent (skips entries that already exist in the destination store by primary key `id`) and
+can optionally delete the source localStorage key after a successful migration.
+
+Example:
+
+```ts
+import { migrateLocalStorageAuditEntriesToSqlite } from "@formula/ai-audit";
+import { LocalStorageBinaryStorage } from "@formula/ai-audit/browser";
+import { SqliteAIAuditStore } from "@formula/ai-audit/sqlite";
+import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
+
+const destination = await SqliteAIAuditStore.create({
+  storage: new LocalStorageBinaryStorage("formula:ai_audit_db:v1"),
+  locateFile: (file, prefix = "") => (file.endsWith(".wasm") ? sqlWasmUrl : prefix ? `${prefix}${file}` : file),
+});
+
+await migrateLocalStorageAuditEntriesToSqlite({
+  source: { key: "formula_ai_audit_log_entries" },
+  destination,
+  delete_source: true,
+  // max_entries: 5_000, // optional safety cap (newest-first, matching listEntries semantics)
+});
+```
+
 ---
 
 ## 5) Exporting audit logs
