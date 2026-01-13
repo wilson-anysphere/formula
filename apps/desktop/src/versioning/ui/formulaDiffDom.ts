@@ -1,4 +1,4 @@
-import { diffFormulaToRenderOps, isEffectivelyEmptyFormula } from "./formulaDiffRender.js";
+import { diffFormulaToRenderOps, isEffectivelyEmptyFormula } from "./formulaDiffRender.ts";
 
 export type RenderFormulaDiffDomOptions = {
   /**
@@ -66,4 +66,3 @@ export function renderFormulaDiffDom(
   root.appendChild(code);
   return root;
 }
-

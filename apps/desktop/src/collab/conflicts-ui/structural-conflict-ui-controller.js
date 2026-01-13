@@ -1,7 +1,7 @@
 import { cellRefFromKey, numberToCol } from "../../../../../packages/collab/conflicts/src/cell-ref.js";
 import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.ts";
 import { markKeybindingBarrier } from "../../keybindingBarrier.js";
-import { renderFormulaDiffDom } from "../../versioning/ui/formulaDiffDom.js";
+import { renderFormulaDiffDom } from "../../versioning/ui/formulaDiffDom.ts";
 
 /**
  * A minimal DOM-based UI for resolving *structural* (move/delete-vs-edit) cell
