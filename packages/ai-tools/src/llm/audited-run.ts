@@ -1,8 +1,7 @@
 import { AIAuditRecorder } from "@formula/ai-audit";
 import type { AIAuditStore, AIMode, TokenUsage } from "@formula/ai-audit";
 
-import { runChatWithToolsStreaming } from "../../../llm/src/toolCallingStreaming.js";
-import { serializeToolResultForModel } from "../../../llm/src/toolResultSerialization.js";
+import { runChatWithToolsStreaming, serializeToolResultForModel } from "../../../llm/src/index.js";
 import type { ChatStreamEvent, ToolCall } from "../../../llm/src/types.js";
 
 import { redactUrlSecrets } from "../utils/urlRedaction.ts";
