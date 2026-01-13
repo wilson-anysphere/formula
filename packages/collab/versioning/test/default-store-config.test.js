@@ -112,3 +112,42 @@ test("CollabVersioning derives maxChunksPerTransaction from chunkSize when not p
     assert.equal(store.maxChunksPerTransaction, 16);
   }
 });
+
+test("CollabVersioning ignores yjsStoreOptions when an explicit store is provided", async (t) => {
+  const doc = new Y.Doc();
+  t.after(() => doc.destroy());
+
+  const store = new YjsVersionStore({ doc, writeMode: "single" });
+  const versioning = createCollabVersioning({
+    // @ts-expect-error - minimal session stub for unit tests
+    session: { doc },
+    store,
+    autoStart: false,
+    yjsStoreOptions: {
+      writeMode: "stream",
+      chunkSize: 32 * 1024,
+      maxChunksPerTransaction: 2,
+    },
+  });
+  t.after(() => versioning.destroy());
+
+  assert.equal(versioning.manager.store, store);
+  assert.equal(store.writeMode, "single");
+});
+
+test("CollabVersioning allows opting out of streaming via yjsStoreOptions.writeMode", async (t) => {
+  const doc = new Y.Doc();
+  t.after(() => doc.destroy());
+
+  const versioning = createCollabVersioning({
+    // @ts-expect-error - minimal session stub for unit tests
+    session: { doc },
+    autoStart: false,
+    yjsStoreOptions: { writeMode: "single" },
+  });
+  t.after(() => versioning.destroy());
+
+  const store = versioning.manager.store;
+  assert.ok(store instanceof YjsVersionStore);
+  assert.equal(store.writeMode, "single");
+});
