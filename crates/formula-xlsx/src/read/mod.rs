@@ -13,7 +13,7 @@ use formula_model::{
     SheetProtection, SheetVisibility, Workbook, WorkbookProtection, WorkbookWindow,
     WorkbookWindowState,
 };
-use formula_model::drawings::{ImageData, ImageId};
+use formula_model::drawings::{DrawingObject, ImageData, ImageId};
 use quick_xml::events::attributes::AttrError;
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -23,6 +23,7 @@ use zip::ZipArchive;
 use crate::autofilter::{parse_worksheet_autofilter, AutoFilterParseError};
 use crate::calc_settings::read_calc_settings_from_workbook_xml;
 use crate::conditional_formatting::parse_worksheet_conditional_formatting_streaming;
+use crate::drawings::DrawingPart;
 use crate::path::{rels_for_part, resolve_target};
 use crate::shared_strings::parse_shared_strings_xml;
 use crate::sheet_metadata::parse_sheet_tab_color;
@@ -45,6 +46,8 @@ const REL_TYPE_SHARED_STRINGS: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 const REL_TYPE_METADATA: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata";
+const REL_TYPE_DRAWING: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
 const REL_TYPE_SHEET_METADATA: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata";
 
@@ -364,6 +367,71 @@ fn attach_tables_from_part_getter<'a, F>(
     }
 }
 
+fn load_sheet_drawings_from_parts(
+    sheet_index: usize,
+    sheet_part: &str,
+    sheet_xml: &[u8],
+    sheet_rels_xml: Option<&[u8]>,
+    parts: &BTreeMap<String, Vec<u8>>,
+    workbook: &mut Workbook,
+) -> Vec<DrawingObject> {
+    let drawing_rel_ids = match parse_sheet_drawing_part_ids(sheet_xml) {
+        Ok(ids) => ids,
+        Err(_) => Vec::new(),
+    };
+    if drawing_rel_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let Some(rels_xml) = sheet_rels_xml else {
+        return Vec::new();
+    };
+
+    let relationships = match crate::openxml::parse_relationships(rels_xml) {
+        Ok(rels) => rels,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut rels_by_id: HashMap<String, crate::openxml::Relationship> =
+        HashMap::with_capacity(relationships.len());
+    for rel in relationships {
+        rels_by_id.insert(rel.id.clone(), rel);
+    }
+
+    let mut objects = Vec::new();
+    let mut seen_drawing_parts: HashSet<String> = HashSet::new();
+
+    for rel_id in drawing_rel_ids {
+        let Some(rel) = rels_by_id.get(&rel_id) else {
+            continue;
+        };
+        if rel.type_uri != REL_TYPE_DRAWING {
+            continue;
+        }
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
+
+        let drawing_part = resolve_target(sheet_part, &rel.target);
+        if !seen_drawing_parts.insert(drawing_part.clone()) {
+            continue;
+        }
+
+        let parsed = match DrawingPart::parse_from_parts(sheet_index, &drawing_part, parts, workbook)
+        {
+            Ok(part) => part,
+            Err(_) => continue,
+        };
+        objects.extend(parsed.objects);
+    }
+
+    objects
+}
+
 fn read_zip_part_required<R: Read + std::io::Seek>(
     archive: &mut ZipArchive<R>,
     name: &'static str,
@@ -508,91 +576,109 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     let mut rich_value_cells = std::collections::HashMap::new();
 
     let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> = Vec::new();
-    for sheet in sheets {
+    for (sheet_index, sheet) in sheets.into_iter().enumerate() {
         let ws_id = workbook.add_sheet(sheet.name.clone())?;
         worksheet_ids_by_index.push(ws_id);
-        let ws = workbook
-            .sheet_mut(ws_id)
-            .expect("sheet just inserted must exist");
-        ws.xlsx_sheet_id = Some(sheet.sheet_id);
-        ws.xlsx_rel_id = Some(sheet.relationship_id.clone());
-        ws.visibility = match sheet.state.as_deref() {
-            Some("hidden") => SheetVisibility::Hidden,
-            Some("veryHidden") => SheetVisibility::VeryHidden,
-            _ => SheetVisibility::Visible,
-        };
 
         let sheet_xml = parts.get(&sheet.path).ok_or(ReadError::MissingPart(
             "worksheet part referenced from workbook.xml.rels",
         ))?;
-
-        // Worksheet-level metadata lives inside the worksheet part (and sometimes its .rels).
         let sheet_xml_str = std::str::from_utf8(sheet_xml)?;
 
-        ws.tab_color = parse_sheet_tab_color(sheet_xml_str)?;
-
-        // Conditional formatting. Parsed via a streaming extractor so we don't DOM-parse the
-        // full worksheet XML.
-        let parsed_cf =
-            parse_worksheet_conditional_formatting_streaming(sheet_xml_str).unwrap_or_default();
-        if !parsed_cf.rules.is_empty() {
-            ws.conditional_formatting_rules = parsed_cf.rules;
-            let dxfs = conditional_formatting_dxfs
-                .get_or_insert_with(|| styles_part.conditional_formatting_dxfs());
-            ws.conditional_formatting_dxfs = dxfs.clone();
-        }
-
-        // Merged cells (must be parsed before cell content so we don't treat interior
-        // cells as value-bearing).
-        let merges = crate::merge_cells::read_merge_cells_from_worksheet_xml(sheet_xml_str)
-            .map_err(|err| match err {
-                crate::merge_cells::MergeCellsError::Xml(e) => ReadError::Xml(e),
-                crate::merge_cells::MergeCellsError::Attr(e) => ReadError::XmlAttr(e),
-                crate::merge_cells::MergeCellsError::Utf8(e) => ReadError::Utf8(e),
-                crate::merge_cells::MergeCellsError::InvalidRef(r) => ReadError::InvalidRangeRef(r),
-                crate::merge_cells::MergeCellsError::Zip(e) => ReadError::Zip(e),
-                crate::merge_cells::MergeCellsError::Io(e) => ReadError::Io(e),
-            })?;
-        for range in merges {
-            ws.merged_regions
-                .add(range)
-                .map_err(|e| ReadError::InvalidRangeRef(e.to_string()))?;
-        }
-
-        // Hyperlinks.
+        // Worksheet relationships are needed to resolve table parts, hyperlinks, and drawings.
         let rels_part = rels_for_part(&sheet.path);
         let rels_xml_bytes = parts.get(&rels_part).map(|bytes| bytes.as_slice());
         let rels_xml = rels_xml_bytes.map(std::str::from_utf8).transpose()?;
-        ws.hyperlinks = parse_worksheet_hyperlinks(sheet_xml_str, rels_xml)?;
 
-        // Worksheet autoFilter.
-        ws.auto_filter = parse_worksheet_autofilter(sheet_xml_str).map_err(|err| match err {
-            AutoFilterParseError::Xml(e) => ReadError::Xml(e),
-            AutoFilterParseError::Attr(e) => ReadError::XmlAttr(e),
-            AutoFilterParseError::MissingRef => {
-                ReadError::InvalidRangeRef("missing worksheet autoFilter ref attribute".to_string())
+        {
+            let ws = workbook
+                .sheet_mut(ws_id)
+                .expect("sheet just inserted must exist");
+
+            ws.xlsx_sheet_id = Some(sheet.sheet_id);
+            ws.xlsx_rel_id = Some(sheet.relationship_id.clone());
+            ws.visibility = match sheet.state.as_deref() {
+                Some("hidden") => SheetVisibility::Hidden,
+                Some("veryHidden") => SheetVisibility::VeryHidden,
+                _ => SheetVisibility::Visible,
+            };
+
+            ws.tab_color = parse_sheet_tab_color(sheet_xml_str)?;
+
+            // Conditional formatting. Parsed via a streaming extractor so we don't DOM-parse the
+            // full worksheet XML.
+            let parsed_cf =
+                parse_worksheet_conditional_formatting_streaming(sheet_xml_str).unwrap_or_default();
+            if !parsed_cf.rules.is_empty() {
+                ws.conditional_formatting_rules = parsed_cf.rules;
+                let dxfs = conditional_formatting_dxfs
+                    .get_or_insert_with(|| styles_part.conditional_formatting_dxfs());
+                ws.conditional_formatting_dxfs = dxfs.clone();
             }
-            AutoFilterParseError::InvalidRef(e) => ReadError::InvalidRangeRef(e.to_string()),
-        })?;
 
-        attach_tables_from_part_getter(ws, &sheet.path, sheet_xml, rels_xml_bytes, |target| {
-            parts
-                .get(target)
-                .map(|bytes| Cow::Borrowed(bytes.as_slice()))
-        });
+            // Merged cells (must be parsed before cell content so we don't treat interior
+            // cells as value-bearing).
+            let merges = crate::merge_cells::read_merge_cells_from_worksheet_xml(sheet_xml_str)
+                .map_err(|err| match err {
+                    crate::merge_cells::MergeCellsError::Xml(e) => ReadError::Xml(e),
+                    crate::merge_cells::MergeCellsError::Attr(e) => ReadError::XmlAttr(e),
+                    crate::merge_cells::MergeCellsError::Utf8(e) => ReadError::Utf8(e),
+                    crate::merge_cells::MergeCellsError::InvalidRef(r) => {
+                        ReadError::InvalidRangeRef(r)
+                    }
+                    crate::merge_cells::MergeCellsError::Zip(e) => ReadError::Zip(e),
+                    crate::merge_cells::MergeCellsError::Io(e) => ReadError::Io(e),
+                })?;
+            for range in merges {
+                ws.merged_regions
+                    .add(range)
+                    .map_err(|e| ReadError::InvalidRangeRef(e.to_string()))?;
+            }
 
-        parse_worksheet_into_model(
-            ws,
-            ws_id,
+            ws.hyperlinks = parse_worksheet_hyperlinks(sheet_xml_str, rels_xml)?;
+
+            ws.auto_filter = parse_worksheet_autofilter(sheet_xml_str).map_err(|err| match err {
+                AutoFilterParseError::Xml(e) => ReadError::Xml(e),
+                AutoFilterParseError::Attr(e) => ReadError::XmlAttr(e),
+                AutoFilterParseError::MissingRef => ReadError::InvalidRangeRef(
+                    "missing worksheet autoFilter ref attribute".to_string(),
+                ),
+                AutoFilterParseError::InvalidRef(e) => ReadError::InvalidRangeRef(e.to_string()),
+            })?;
+
+            attach_tables_from_part_getter(ws, &sheet.path, sheet_xml, rels_xml_bytes, |target| {
+                parts
+                    .get(target)
+                    .map(|bytes| Cow::Borrowed(bytes.as_slice()))
+            });
+
+            parse_worksheet_into_model(
+                ws,
+                ws_id,
+                sheet_xml,
+                &shared_strings,
+                &styles_part,
+                Some(&mut cell_meta),
+                Some(&mut rich_value_cells),
+                metadata_part.as_ref(),
+            )?;
+
+            expand_shared_formulas(ws, ws_id, &cell_meta);
+        }
+
+        let drawing_objects = load_sheet_drawings_from_parts(
+            sheet_index,
+            &sheet.path,
             sheet_xml,
-            &shared_strings,
-            &styles_part,
-            Some(&mut cell_meta),
-            Some(&mut rich_value_cells),
-            metadata_part.as_ref(),
-        )?;
-
-        expand_shared_formulas(ws, ws_id, &cell_meta);
+            rels_xml_bytes,
+            &parts,
+            &mut workbook,
+        );
+        if !drawing_objects.is_empty() {
+            if let Some(ws) = workbook.sheet_mut(ws_id) {
+                ws.drawings.extend(drawing_objects);
+            }
+        }
 
         sheet_meta.push(SheetMeta {
             worksheet_id: ws_id,
@@ -2374,6 +2460,33 @@ fn parse_table_part_ids(xml: &[u8]) -> Result<Vec<String>, ReadError> {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) | Event::Empty(e)
                 if crate::openxml::local_name(e.name().as_ref()) == b"tablePart" =>
+            {
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if crate::openxml::local_name(attr.key.as_ref()) == b"id" {
+                        out.push(attr.unescape_value()?.into_owned());
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
+}
+
+fn parse_sheet_drawing_part_ids(xml: &[u8]) -> Result<Vec<String>, ReadError> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) | Event::Empty(e)
+                if crate::openxml::local_name(e.name().as_ref()) == b"drawing" =>
             {
                 for attr in e.attributes() {
                     let attr = attr?;
