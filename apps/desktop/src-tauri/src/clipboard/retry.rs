@@ -7,7 +7,7 @@ use std::time::Duration;
 /// 100ms) is often insufficient in practice under real-world contention (rapid copy/paste between
 /// apps, large clipboard payloads, etc).
 ///
-/// We use an exponential backoff with a bounded total sleep budget (roughly ~800ms) to improve
+/// We use an exponential backoff with a bounded total sleep budget (roughly ~1s) to improve
 /// reliability without unbounded worst-case latency.
 pub(crate) const OPEN_CLIPBOARD_RETRY_DELAYS: &[Duration] = &[
     Duration::from_millis(5),
@@ -15,6 +15,7 @@ pub(crate) const OPEN_CLIPBOARD_RETRY_DELAYS: &[Duration] = &[
     Duration::from_millis(20),
     Duration::from_millis(40),
     Duration::from_millis(80),
+    Duration::from_millis(160),
     Duration::from_millis(160),
     Duration::from_millis(160),
     Duration::from_millis(160),
