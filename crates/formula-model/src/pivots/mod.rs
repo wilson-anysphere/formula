@@ -299,6 +299,103 @@ pub struct ValueField {
     pub base_item: Option<String>,
 }
 
+/// Filter configuration for a pivot field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterField {
+    pub source_field: String,
+    /// If `None`, all items are allowed. If `Some`, only the specified items are included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed: Option<std::collections::HashSet<PivotKeyPart>>,
+}
+
+/// Layout mode for row/column fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Layout {
+    Compact,
+    Outline,
+    Tabular,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Layout::Tabular
+    }
+}
+
+/// Where subtotals should be rendered for row fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SubtotalPosition {
+    None,
+    Top,
+    Bottom,
+}
+
+impl Default for SubtotalPosition {
+    fn default() -> Self {
+        SubtotalPosition::None
+    }
+}
+
+/// Whether to include grand totals for rows and/or columns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrandTotals {
+    pub rows: bool,
+    pub columns: bool,
+}
+
+impl Default for GrandTotals {
+    fn default() -> Self {
+        Self {
+            rows: true,
+            columns: true,
+        }
+    }
+}
+
+/// Canonical (IPC/persistence-friendly) pivot configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotConfig {
+    #[serde(default)]
+    pub row_fields: Vec<PivotField>,
+    #[serde(default)]
+    pub column_fields: Vec<PivotField>,
+    #[serde(default)]
+    pub value_fields: Vec<ValueField>,
+    #[serde(default)]
+    pub filter_fields: Vec<FilterField>,
+    #[serde(default)]
+    pub calculated_fields: Vec<CalculatedField>,
+    #[serde(default)]
+    pub calculated_items: Vec<CalculatedItem>,
+    #[serde(default)]
+    pub layout: Layout,
+    #[serde(default)]
+    pub subtotals: SubtotalPosition,
+    #[serde(default)]
+    pub grand_totals: GrandTotals,
+}
+
+impl Default for PivotConfig {
+    fn default() -> Self {
+        Self {
+            row_fields: Vec::new(),
+            column_fields: Vec::new(),
+            value_fields: Vec::new(),
+            filter_fields: Vec::new(),
+            calculated_fields: Vec::new(),
+            calculated_items: Vec::new(),
+            layout: Layout::default(),
+            subtotals: SubtotalPosition::default(),
+            grand_totals: GrandTotals::default(),
+        }
+    }
+}
+
 impl From<&str> for ScalarValue {
     fn from(value: &str) -> Self {
         ScalarValue::Text(value.to_string())

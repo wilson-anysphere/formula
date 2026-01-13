@@ -1,6 +1,6 @@
 use formula_engine::value::RecordValue;
 use formula_engine::{eval::parse_a1, locale, Engine, ErrorKind, ReferenceStyle, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[test]
 fn canonicalize_and_localize_round_trip_for_de_de() {
@@ -161,6 +161,57 @@ fn fr_fr_does_not_treat_ascii_spaces_as_thousands_separators() {
 }
 
 #[test]
+fn canonicalize_and_localize_additional_function_names_for_fr_fr() {
+    fn assert_roundtrip(canonical: &str, localized: &str) {
+        assert_eq!(
+            locale::canonicalize_formula(localized, &locale::FR_FR).unwrap(),
+            canonical
+        );
+        assert_eq!(
+            locale::localize_formula(canonical, &locale::FR_FR).unwrap(),
+            localized
+        );
+    }
+
+    // Common functions with strongly localized spellings.
+    assert_roundtrip("=COUNTIF(A1:A3,\">0\")", "=NB.SI(A1:A3;\">0\")");
+    assert_roundtrip(
+        "=SUMIF(A1:A3,\">0\",B1:B3)",
+        "=SOMME.SI(A1:A3;\">0\";B1:B3)",
+    );
+    assert_roundtrip("=AVERAGEIF(A1:A3,\">0\")", "=MOYENNE.SI(A1:A3;\">0\")");
+    assert_roundtrip(
+        "=VLOOKUP(1,A1:B3,2,FALSE)",
+        "=RECHERCHEV(1;A1:B3;2;FAUX)",
+    );
+    assert_roundtrip(
+        "=HLOOKUP(1,A1:C2,2,FALSE)",
+        "=RECHERCHEH(1;A1:C2;2;FAUX)",
+    );
+    assert_roundtrip("=LEFT(\"abc\",2)", "=GAUCHE(\"abc\";2)");
+    assert_roundtrip("=RIGHT(\"abc\",2)", "=DROITE(\"abc\";2)");
+    assert_roundtrip("=MID(\"abc\",2,1)", "=STXT(\"abc\";2;1)");
+    assert_roundtrip("=LEN(\"abc\")", "=NBCAR(\"abc\")");
+    assert_roundtrip("=FIND(\"b\",\"abc\")", "=TROUVE(\"b\";\"abc\")");
+    assert_roundtrip("=SEARCH(\"B\",\"abc\")", "=CHERCHE(\"B\";\"abc\")");
+    assert_roundtrip("=IFERROR(1/0,0)", "=SIERREUR(1/0;0)");
+    assert_roundtrip(
+        "=IFS(1=0,\"no\",1=1,\"yes\")",
+        "=SI.CONDITIONS(1=0;\"no\";1=1;\"yes\")",
+    );
+
+    // TRUE()/FALSE() also exist as zero-arg worksheet functions and are localized in Excel.
+    assert_roundtrip("=TRUE()", "=VRAI()");
+    assert_roundtrip("=FALSE()", "=FAUX()");
+
+    // `_xlfn.`-prefixed formulas still translate the base function name.
+    assert_roundtrip(
+        "=_xlfn.XLOOKUP(1,A1:A3,B1:B3)",
+        "=_xlfn.RECHERCHEX(1;A1:A3;B1:B3)",
+    );
+}
+
+#[test]
 fn structured_reference_separators_are_not_translated() {
     let canonical = "=SUM(Table1[[#Headers],[Qty]],1)";
     let localized = locale::localize_formula(canonical, &locale::DE_DE).unwrap();
@@ -168,6 +219,33 @@ fn structured_reference_separators_are_not_translated() {
 
     let canonical_roundtrip = locale::canonicalize_formula(&localized, &locale::DE_DE).unwrap();
     assert_eq!(canonical_roundtrip, canonical);
+}
+
+#[test]
+fn fr_fr_translation_table_covers_function_catalog() {
+    let mut covered = HashSet::new();
+    let tsv = include_str!("../src/locale/data/fr-FR.tsv");
+    for line in tsv.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (canon, _loc) = line
+            .split_once('\t')
+            .unwrap_or_else(|| panic!("invalid TSV line in fr-FR.tsv: {line:?}"));
+        assert!(
+            covered.insert(canon),
+            "duplicate canonical entry in fr-FR.tsv: {canon}"
+        );
+    }
+
+    for spec in formula_engine::functions::iter_function_specs() {
+        let name = spec.name.to_ascii_uppercase();
+        assert!(
+            covered.contains(name.as_str()),
+            "missing fr-FR function translation for {name}"
+        );
+    }
 }
 
 #[test]
