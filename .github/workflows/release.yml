@@ -554,6 +554,14 @@ jobs:
             apps+=("$app")
           done < <(find target -type d -path "*/release/bundle/*/*.app" -prune -print0)
 
+          # Tauri's macOS updater artifact is typically a tarball (e.g. `Formula.app.tar.gz`).
+          # Validate the `.app` inside the archive as well to ensure the updater payload is
+          # stapled/notarized, not just the standalone bundle output.
+          tarballs=()
+          while IFS= read -r -d '' archive; do
+            tarballs+=("$archive")
+          done < <(find target -type f \( -name "*.tar.gz" -o -name "*.tgz" \) -path "*/release/bundle/macos/*" -print0)
+
           if [[ ${#dmgs[@]} -eq 0 && ${#apps[@]} -eq 0 ]]; then
             echo "::error::No macOS bundle artifacts (.dmg or .app) were found under target/**/release/bundle/**."
             echo "This step runs only when APPLE_* notarization secrets are configured, and is meant to"
@@ -571,6 +579,9 @@ jobs:
           fi
           if [[ ${#apps[@]} -gt 0 ]]; then
             printf '  - %s\n' "${apps[@]}"
+          fi
+          if [[ ${#tarballs[@]} -gt 0 ]]; then
+            printf '  - %s\n' "${tarballs[@]}"
           fi
 
           fail=0
@@ -644,6 +655,36 @@ jobs:
             echo "::endgroup::"
           }
 
+          validate_apps_inside_archive() {
+            local archive="$1"
+            local extract_dir
+            extract_dir="$(mktemp -d)"
+
+            echo "::group::Validate .app inside archive: $archive"
+
+            if tar -xzf "$archive" -C "$extract_dir"; then
+              extracted_apps=()
+              while IFS= read -r -d '' app; do
+                extracted_apps+=("$app")
+              done < <(find "$extract_dir" -maxdepth 3 -type d -name "*.app" -prune -print0)
+
+              if [[ ${#extracted_apps[@]} -eq 0 ]]; then
+                echo "::error::Extracted updater archive but did not find a .app bundle inside: $archive"
+                fail=1
+              else
+                for app in "${extracted_apps[@]}"; do
+                  validate_app "$app"
+                done
+              fi
+            else
+              echo "::error::Failed to extract updater archive for validation: $archive"
+              fail=1
+            fi
+
+            rm -rf "$extract_dir" || true
+            echo "::endgroup::"
+          }
+
           for dmg in "${dmgs[@]}"; do
             validate_dmg "$dmg"
             validate_apps_inside_dmg "$dmg"
@@ -651,6 +692,10 @@ jobs:
 
           for app in "${apps[@]}"; do
             validate_app "$app"
+          done
+
+          for archive in "${tarballs[@]}"; do
+            validate_apps_inside_archive "$archive"
           done
 
           if [[ "$fail" -ne 0 ]]; then
