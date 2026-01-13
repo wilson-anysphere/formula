@@ -95,6 +95,7 @@ def _scan_features(zip_names: list[str]) -> dict[str, Any]:
     import re
 
     normalized_names = [_normalize_zip_entry_name(n) for n in zip_names]
+    normalized_casefold = [name.casefold() for name in normalized_names]
 
     prefixes = {
         "charts": "xl/charts/",
@@ -111,12 +112,13 @@ def _scan_features(zip_names: list[str]) -> dict[str, Any]:
 
     features: dict[str, Any] = {}
     for key, prefix in prefixes.items():
-        features[f"has_{key}"] = any(n.startswith(prefix) for n in normalized_names)
+        prefix_casefold = prefix.casefold()
+        features[f"has_{key}"] = any(n.startswith(prefix_casefold) for n in normalized_casefold)
 
-    normalized_casefold = {n.casefold() for n in normalized_names}
-    features["has_vba"] = "xl/vbaproject.bin" in normalized_casefold
-    features["has_connections"] = "xl/connections.xml" in normalized_casefold
-    features["has_shared_strings"] = "xl/sharedstrings.xml" in normalized_casefold
+    normalized_casefold_set = set(normalized_casefold)
+    features["has_vba"] = "xl/vbaproject.bin" in normalized_casefold_set
+    features["has_connections"] = "xl/connections.xml" in normalized_casefold_set
+    features["has_shared_strings"] = "xl/sharedstrings.xml" in normalized_casefold_set
     # Excel's "Images in Cell" feature (aka `cellImages`).
     cellimages_part_re = re.compile(r"(?i)^cellimages\d*\.xml$")
     features["has_cell_images"] = any(
@@ -124,8 +126,8 @@ def _scan_features(zip_names: list[str]) -> dict[str, Any]:
         and cellimages_part_re.match(posixpath.basename(normalized))
         for (n, normalized) in zip(zip_names, normalized_names)
     )
-    features["sheet_xml_count"] = len(
-        [n for n in normalized_names if n.startswith("xl/worksheets/sheet")]
+    features["sheet_xml_count"] = sum(
+        1 for n in normalized_casefold if n.startswith("xl/worksheets/sheet")
     )
     return features
 

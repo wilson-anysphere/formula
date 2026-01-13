@@ -6,6 +6,14 @@ from tools.corpus.triage import _scan_features
 
 
 class TriageFeatureScanTests(unittest.TestCase):
+    def test_scan_features_detects_prefixes_case_insensitively(self) -> None:
+        features = _scan_features(["XL/DRAWINGS/drawing1.xml"])
+        self.assertTrue(features["has_drawings"])
+
+    def test_scan_features_counts_sheets_case_insensitively(self) -> None:
+        features = _scan_features(["XL/WORKSHEETS/SHEET1.XML", "xl/worksheets/sheet2.xml"])
+        self.assertEqual(features["sheet_xml_count"], 2)
+
     def test_scan_features_detects_cell_images(self) -> None:
         features = _scan_features(["xl/cellImages.xml"])
         self.assertIn("has_cell_images", features)
