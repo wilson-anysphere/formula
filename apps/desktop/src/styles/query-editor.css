@@ -526,6 +526,13 @@
   background: var(--bg-hover);
 }
 
+.query-editor-add-step__menu-trigger[aria-expanded="true"],
+.query-editor-add-step__menu-trigger[aria-expanded="true"]:hover {
+  background: var(--selection-bg);
+  border-color: var(--selection-border);
+  color: var(--selection-text);
+}
+
 .query-editor-add-step__menu-trigger:active,
 .query-editor-add-step__ai-button:active,
 .query-editor-add-step__suggestion:active {
