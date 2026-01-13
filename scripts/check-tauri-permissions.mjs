@@ -24,6 +24,11 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 const capabilitiesDir = path.join(repoRoot, "apps", "desktop", "src-tauri", "capabilities");
 const releaseWorkflowPath = path.join(repoRoot, ".github", "workflows", "release.yml");
+const permissionLsCachePathRaw =
+  process.env.FORMULA_TAURI_PERMISSION_LS_CACHE || process.env.FORMULA_TAURI_PERMISSION_LS_CACHE_PATH || null;
+const permissionLsCachePath = permissionLsCachePathRaw
+  ? path.resolve(repoRoot, permissionLsCachePathRaw)
+  : null;
 
 function stripAnsi(text) {
   // Covers common ANSI SGR + cursor control sequences.
@@ -41,7 +46,35 @@ function readPinnedTauriCliVersion() {
   }
 }
 
+function readCachedPermissionLsOutput() {
+  if (!permissionLsCachePath) return null;
+  try {
+    if (!fs.existsSync(permissionLsCachePath)) return null;
+    const text = fs.readFileSync(permissionLsCachePath, "utf8");
+    const trimmed = text.trim();
+    if (!trimmed) return null;
+    return trimmed;
+  } catch {
+    return null;
+  }
+}
+
+function writePermissionLsCache(output) {
+  if (!permissionLsCachePath) return;
+  try {
+    fs.mkdirSync(path.dirname(permissionLsCachePath), { recursive: true });
+    const tmpPath = `${permissionLsCachePath}.tmp`;
+    fs.writeFileSync(tmpPath, `${output.trim()}\n`, "utf8");
+    fs.renameSync(tmpPath, permissionLsCachePath);
+  } catch {
+    // Best-effort cache write only; ignore failures so the check remains functional.
+  }
+}
+
 function runTauriPermissionLs() {
+  const cached = readCachedPermissionLsOutput();
+  if (cached) return cached;
+
   const cmd = "bash";
   const args = [
     "-lc",
@@ -83,7 +116,9 @@ function runTauriPermissionLs() {
     throw new Error(hint);
   }
 
-  return stripAnsi(String(result.stdout ?? ""));
+  const output = stripAnsi(String(result.stdout ?? ""));
+  writePermissionLsCache(output);
+  return output;
 }
 
 function parsePermissionIdentifiers(permissionLsOutput) {

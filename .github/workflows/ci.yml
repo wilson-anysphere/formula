@@ -324,7 +324,17 @@ jobs:
             echo "Expected cargo-tauri ${expected}, but found ${actual}." >&2
             exit 1
           fi
+      - name: Cache Tauri permission list (cargo tauri permission ls)
+        id: tauri-permission-list-cache
+        uses: actions/cache@v4
+        with:
+          path: target/ci/tauri-permission-ls.txt
+          key: tauri-permission-ls-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}-${{ hashFiles('Cargo.lock', 'apps/desktop/src-tauri/Cargo.toml', 'apps/desktop/src-tauri/tauri.conf.json') }}
       - name: Validate Tauri capability permission identifiers
+        env:
+          # Allows `scripts/check-tauri-permissions.mjs` to reuse the `cargo tauri permission ls`
+          # output across CI runs when the Tauri toolchain + Cargo.lock inputs haven't changed.
+          FORMULA_TAURI_PERMISSION_LS_CACHE_PATH: target/ci/tauri-permission-ls.txt
         run: node scripts/check-tauri-permissions.mjs
       - name: Check desktop shell builds with full desktop feature set
         run: |
