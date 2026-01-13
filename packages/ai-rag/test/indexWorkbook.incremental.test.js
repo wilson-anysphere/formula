@@ -498,6 +498,105 @@ test("indexWorkbook does not early-abort while awaiting vectorStore delete persi
   await assert.rejects(indexPromise, { name: "AbortError" });
 });
 
+test("indexWorkbook does not early-abort while awaiting vectorStore updateMetadata persistence", async () => {
+  const workbook = makeWorkbook();
+  const abortController = new AbortController();
+
+  /** @type {Map<string, { id: string, metadata: any }>} */
+  const records = new Map();
+
+  const updateCalled = defer();
+  const updateDone = defer();
+  let updateWasAwaited = false;
+  /** @type {any[]} */
+  let updateRecords = [];
+
+  const vectorStore = {
+    async list(opts) {
+      const workbookId = opts?.workbookId;
+      return Array.from(records.values()).filter((r) => (workbookId ? r.metadata?.workbookId === workbookId : true));
+    },
+    async upsert(items) {
+      for (const item of items) records.set(item.id, { id: item.id, metadata: item.metadata });
+    },
+    updateMetadata(items) {
+      updateRecords = items;
+      updateCalled.resolve();
+      return {
+        then(onFulfilled, onRejected) {
+          updateWasAwaited = true;
+          return updateDone.promise
+            .then(() => {
+              for (const item of updateRecords) {
+                const existing = records.get(item.id);
+                if (!existing) continue;
+                existing.metadata = item.metadata;
+              }
+            })
+            .then(onFulfilled, onRejected);
+        },
+      };
+    },
+    async delete() {
+      throw new Error("Unexpected delete() during test");
+    },
+  };
+
+  const embedder = {
+    name: "stub-embedder",
+    async embedTexts(texts) {
+      return texts.map(() => new Float32Array(8));
+    },
+  };
+
+  await indexWorkbook({
+    workbook,
+    vectorStore,
+    embedder,
+    transform: (record) => ({ metadata: { ...record.metadata, tag: "v1" } }),
+  });
+
+  const indexPromise = indexWorkbook({
+    workbook,
+    vectorStore,
+    embedder,
+    transform: (record) => ({ metadata: { ...record.metadata, tag: "v2" } }),
+    signal: abortController.signal,
+  });
+
+  let settled = false;
+  indexPromise.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    }
+  );
+
+  // Wait until metadata persistence has started but keep it blocked.
+  await updateCalled.promise;
+  assert.ok(updateRecords.length > 0);
+
+  // Give the await machinery a microtask turn to assimilate the thenable.
+  await Promise.resolve();
+  assert.equal(updateWasAwaited, true);
+
+  // Abort while updateMetadata is still in flight. `indexWorkbook` should keep waiting for the store write
+  // to finish, then reject on abort afterwards.
+  abortController.abort();
+  await Promise.resolve();
+  assert.equal(settled, false);
+
+  updateDone.resolve();
+  await assert.rejects(indexPromise, { name: "AbortError" });
+
+  // The metadata update should still have been applied.
+  for (const rec of records.values()) {
+    assert.equal(rec.metadata.tag, "v2");
+  }
+});
+
 test("indexWorkbook batches embedding requests (embedBatchSize=1)", async () => {
   const workbook = makeWorkbookTwoTables();
   const store = new InMemoryVectorStore({ dimension: 128 });
