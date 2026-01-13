@@ -18,6 +18,10 @@ import { workbookStateFromYjsSnapshot } from "./workbookState.js";
  * }} MoveChange
  * @typedef {{
  *   cell: CellRef,
+ *   oldValue?: any,
+ *   newValue?: any,
+ *   oldFormula?: string | null,
+ *   newFormula?: string | null,
  *   oldEncrypted?: boolean,
  *   newEncrypted?: boolean,
  *   oldKeyId?: string | null,
