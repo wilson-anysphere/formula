@@ -58,11 +58,14 @@ describe("FormulaBarView commit/cancel UX", () => {
     view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
     view.textarea.dispatchEvent(new Event("input"));
 
-    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+    const e = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    view.textarea.dispatchEvent(e);
 
+    expect(e.defaultPrevented).toBe(true);
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith("=1+2", { reason: "enter", shift: false });
     expect(view.model.isEditing).toBe(false);
+    expect(view.model.activeCell.input).toBe("=1+2");
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(cancel.hidden).toBe(true);
     expect(cancel.disabled).toBe(true);
@@ -115,11 +118,14 @@ describe("FormulaBarView commit/cancel UX", () => {
     view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
     view.textarea.dispatchEvent(new Event("input"));
 
-    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+    const e = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    view.textarea.dispatchEvent(e);
 
+    expect(e.defaultPrevented).toBe(true);
     expect(onCommit).not.toHaveBeenCalled();
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(view.model.isEditing).toBe(false);
+    expect(view.model.activeCell.input).toBe("original");
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(view.textarea.value).toBe("original");
     expect(cancel.hidden).toBe(true);
@@ -151,6 +157,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(onCommit).not.toHaveBeenCalled();
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(view.model.isEditing).toBe(false);
+    expect(view.model.activeCell.input).toBe("start");
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(view.textarea.value).toBe("start");
     expect(cancel.hidden).toBe(true);
@@ -169,6 +176,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(onCommit).toHaveBeenCalledWith("commit-me", { reason: "command", shift: false });
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(view.model.isEditing).toBe(false);
+    expect(view.model.activeCell.input).toBe("commit-me");
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(cancel.hidden).toBe(true);
     expect(cancel.disabled).toBe(true);
