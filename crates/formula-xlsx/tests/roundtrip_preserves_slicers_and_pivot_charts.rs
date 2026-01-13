@@ -84,3 +84,29 @@ fn roundtrip_preserves_slicers_timelines_and_pivot_charts() -> Result<(), Box<dy
 
     Ok(())
 }
+
+#[test]
+fn slicer_sheet_names_are_best_effort_when_workbook_xml_is_malformed(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/pivot_slicers_and_chart.xlsx");
+    let bytes = std::fs::read(&fixture_path)?;
+    let mut package = XlsxPackage::from_bytes(&bytes)?;
+
+    // Worksheet placement should still be discoverable via worksheet `.rels` parts even when
+    // `xl/workbook.xml` cannot be parsed (sheet names become best-effort/empty).
+    package.set_part("xl/workbook.xml", b"not xml".to_vec());
+
+    let slicers = package.pivot_slicer_parts()?;
+    assert_eq!(slicers.slicers.len(), 1);
+    assert_eq!(
+        slicers.slicers[0].placed_on_sheets,
+        vec!["xl/worksheets/sheet1.xml".to_string()]
+    );
+    assert!(
+        slicers.slicers[0].placed_on_sheet_names.is_empty(),
+        "expected sheet names to be empty when workbook.xml is malformed"
+    );
+
+    Ok(())
+}

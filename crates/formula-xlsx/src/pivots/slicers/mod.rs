@@ -280,7 +280,7 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
         }
     }
 
-    let sheet_name_by_part = sheet_name_by_part(package)?;
+    let sheet_name_by_part = sheet_name_by_part(package);
 
     let mut slicers = Vec::with_capacity(slicer_parts.len());
     for part_name in slicer_parts {
@@ -426,18 +426,26 @@ fn is_drawing_relationship_type(type_uri: &str) -> bool {
     type_uri.trim_end().ends_with("/drawing")
 }
 
-fn sheet_name_by_part(package: &XlsxPackage) -> Result<BTreeMap<String, String>, XlsxError> {
+fn sheet_name_by_part(package: &XlsxPackage) -> BTreeMap<String, String> {
     let workbook_part = "xl/workbook.xml";
     let workbook_xml = match package.part(workbook_part) {
         Some(bytes) => bytes,
-        None => return Ok(BTreeMap::new()),
+        None => return BTreeMap::new(),
     };
-    let workbook_xml = String::from_utf8(workbook_xml.to_vec())?;
-    let sheets = parse_workbook_sheets(&workbook_xml)?;
+    let workbook_xml = match String::from_utf8(workbook_xml.to_vec()) {
+        Ok(xml) => xml,
+        Err(_) => return BTreeMap::new(),
+    };
+    let sheets = match parse_workbook_sheets(&workbook_xml) {
+        Ok(sheets) => sheets,
+        Err(_) => return BTreeMap::new(),
+    };
 
     let mut out = BTreeMap::new();
     for sheet in sheets {
-        let resolved = resolve_relationship_target(package, workbook_part, &sheet.rel_id)?
+        let resolved = resolve_relationship_target(package, workbook_part, &sheet.rel_id)
+            .ok()
+            .flatten()
             .or_else(|| {
                 let guess = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
                 package.part(&guess).map(|_| guess)
@@ -447,7 +455,7 @@ fn sheet_name_by_part(package: &XlsxPackage) -> Result<BTreeMap<String, String>,
         }
     }
 
-    Ok(out)
+    out
 }
 
 fn placement_sheet_info(
