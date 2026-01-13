@@ -213,6 +213,18 @@ fn catch_calamine_panic<T>(f: impl FnOnce() -> T) -> Result<T, ImportError> {
     }
 }
 
+fn catch_calamine_panic_with_context<T>(
+    context: &str,
+    f: impl FnOnce() -> T,
+) -> Result<T, ImportError> {
+    catch_calamine_panic(f).map_err(|err| match err {
+        ImportError::CalaminePanic(message) => {
+            ImportError::CalaminePanic(format!("{context}: {message}"))
+        }
+        other => other,
+    })
+}
+
 /// Import a legacy `.xls` workbook from disk.
 ///
 /// The importer is intentionally best-effort and attempts to load a subset of
@@ -353,21 +365,31 @@ fn import_xls_path_with_biff_reader(
                 biff::BiffVersion::Biff5 => None,
             };
             let xls_bytes = build_in_memory_xls(sanitized.as_deref().unwrap_or(stream))?;
-            catch_calamine_panic(|| Xls::new(Cursor::new(xls_bytes)))?.map_err(ImportError::Xls)?
+            catch_calamine_panic_with_context("opening `.xls` via calamine", || {
+                Xls::new(Cursor::new(xls_bytes))
+            })?
+            .map_err(ImportError::Xls)?
         }
         None => {
             let bytes =
                 std::fs::read(path).map_err(|err| ImportError::Xls(calamine::XlsError::Io(err)))?;
-            catch_calamine_panic(|| Xls::new(Cursor::new(bytes)))?.map_err(ImportError::Xls)?
+            catch_calamine_panic_with_context("opening `.xls` via calamine", || {
+                Xls::new(Cursor::new(bytes))
+            })?
+            .map_err(ImportError::Xls)?
         }
     };
 
     // We need to snapshot metadata (names, visibility, type) up-front because we
     // need mutable access to the workbook while iterating over ranges.
-    let sheets: Vec<Sheet> = catch_calamine_panic(|| workbook.sheets_metadata().to_vec())?;
+    let sheets: Vec<Sheet> = catch_calamine_panic_with_context("reading sheet metadata", || {
+        workbook.sheets_metadata().to_vec()
+    })?;
     // Snapshot defined names up-front because we need mutable access to the workbook while
     // iterating over ranges.
-    let calamine_defined_names = catch_calamine_panic(|| workbook.defined_names().to_vec())?;
+    let calamine_defined_names = catch_calamine_panic_with_context("reading defined names", || {
+        workbook.defined_names().to_vec()
+    })?;
 
     let mut out = Workbook::new();
     let mut used_sheet_names: Vec<String> = Vec::new();
@@ -621,8 +643,10 @@ fn import_xls_path_with_biff_reader(
             || sheet_has_out_of_range_xf
             || sheet_xf_parse_failed;
 
-        let value_range =
-            match catch_calamine_panic(|| workbook.worksheet_range(&source_sheet_name))? {
+        let value_range = match catch_calamine_panic_with_context(
+            &format!("reading cell values for sheet `{source_sheet_name}`"),
+            || workbook.worksheet_range(&source_sheet_name),
+        )? {
             Ok(range) => Some(range),
             Err(err) => {
                 warnings.push(ImportWarning::new(format!(
@@ -897,9 +921,10 @@ fn import_xls_path_with_biff_reader(
         // Merged regions: prefer calamine's parsed merge metadata, but fall back to scanning the
         // worksheet BIFF substream for `MERGEDCELLS` records when calamine provides none.
         let mut merge_ranges: Vec<Range> = Vec::new();
-        if let Some(merge_cells) =
-            catch_calamine_panic(|| workbook.worksheet_merge_cells(&source_sheet_name))?
-        {
+        if let Some(merge_cells) = catch_calamine_panic_with_context(
+            &format!("reading merged cells for sheet `{source_sheet_name}`"),
+            || workbook.worksheet_merge_cells(&source_sheet_name),
+        )? {
             for dim in merge_cells {
                 merge_ranges.push(Range::new(
                     CellRef::new(dim.start.0, dim.start.1),
@@ -1149,7 +1174,10 @@ fn import_xls_path_with_biff_reader(
             }
         }
 
-        match catch_calamine_panic(|| workbook.worksheet_formula(&source_sheet_name))? {
+        match catch_calamine_panic_with_context(
+            &format!("reading formulas for sheet `{source_sheet_name}`"),
+            || workbook.worksheet_formula(&source_sheet_name),
+        )? {
             Ok(formula_range) => {
                 let formula_start = formula_range.start().unwrap_or((0, 0));
                 for (row, col, formula) in formula_range.used_cells() {
