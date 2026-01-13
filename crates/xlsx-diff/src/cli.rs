@@ -6,7 +6,7 @@ use clap::{Parser, ValueEnum};
 use globset::Glob;
 use serde::Serialize;
 
-use crate::{DiffOptions, IgnorePathRule, Severity};
+use crate::{DiffInput, DiffOptions, IgnorePathRule, Severity};
 
 #[derive(Clone, Debug, ValueEnum)]
 enum OutputFormat {
@@ -26,6 +26,18 @@ pub struct Args {
 
     /// Modified workbook (e.g. round-tripped output).
     modified: PathBuf,
+
+    /// Password for both workbooks (if they are encrypted).
+    #[arg(long)]
+    password: Option<String>,
+
+    /// Password for the original workbook (if encrypted). Overrides `--password`.
+    #[arg(long = "original-password")]
+    original_password: Option<String>,
+
+    /// Password for the modified workbook (if encrypted). Overrides `--password`.
+    #[arg(long = "modified-password")]
+    modified_password: Option<String>,
 
     /// Exact part names to ignore (repeatable).
     #[arg(long = "ignore-part")]
@@ -145,7 +157,26 @@ pub fn run_with_args(args: Args) -> Result<()> {
         }
     }
 
-    let mut report = crate::diff_workbooks_with_options(&args.original, &args.modified, &options)?;
+    let original_pw = args
+        .original_password
+        .as_deref()
+        .or(args.password.as_deref());
+    let modified_pw = args
+        .modified_password
+        .as_deref()
+        .or(args.password.as_deref());
+
+    let mut report = crate::diff_workbooks_with_inputs_and_options(
+        DiffInput {
+            path: &args.original,
+            password: original_pw,
+        },
+        DiffInput {
+            path: &args.modified,
+            password: modified_pw,
+        },
+        &options,
+    )?;
     report.differences.sort_by(|a, b| {
         let rank = |s: Severity| match s {
             Severity::Critical => 0u8,

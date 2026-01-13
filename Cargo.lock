@@ -8949,10 +8949,14 @@ name = "xlsx-diff"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cfb 0.10.0",
  "clap",
  "formula-xlsx",
  "globset",
+ "ms-offcrypto-writer",
+ "office-crypto",
  "pretty_assertions",
+ "rand 0.9.2",
  "roxmltree",
  "serde",
  "serde_json",

@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs::File;
 use std::io::Cursor;
-use std::io::{Read, Write};
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
@@ -26,6 +26,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 pub use part_kind::{classify_part, PartKind};
 pub use xml::{diff_xml, NormalizedXml};
+
+const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 
 #[cfg(test)]
 static FAST_PATH_SKIPPED_PARTS: std::sync::atomic::AtomicUsize =
@@ -133,9 +135,42 @@ pub struct WorkbookArchive {
 
 impl WorkbookArchive {
     pub fn open(path: &Path) -> Result<Self> {
-        let file = File::open(path).with_context(|| format!("open workbook {}", path.display()))?;
-        let mut zip = ZipArchive::new(file).context("parse zip archive")?;
+        Self::open_with_password(path, None)
+    }
 
+    pub fn open_with_password(path: &Path, password: Option<&str>) -> Result<Self> {
+        let mut file = File::open(path).with_context(|| format!("open workbook {}", path.display()))?;
+
+        let mut header = [0u8; 8];
+        let n = file.read(&mut header).context("read workbook header")?;
+        file.rewind().context("rewind workbook stream")?;
+
+        if n >= OLE_MAGIC.len() && header == OLE_MAGIC {
+            let password = password.ok_or_else(|| {
+                anyhow!(
+                    "workbook {} is encrypted; provide a password (e.g. --password)",
+                    path.display()
+                )
+            })?;
+
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)
+                .with_context(|| format!("read workbook {}", path.display()))?;
+
+            if !is_ole_encrypted_ooxml(&bytes) {
+                return Err(anyhow!(
+                    "workbook {} is an OLE compound file but not an Office EncryptedPackage container",
+                    path.display()
+                ));
+            }
+
+            let decrypted = decrypt_ole_encrypted_ooxml_with_office_crypto(&bytes, password)
+                .with_context(|| format!("decrypt workbook {}", path.display()))?;
+
+            return WorkbookArchive::from_bytes(&decrypted);
+        }
+
+        let mut zip = ZipArchive::new(file).context("parse zip archive")?;
         Self::read_zip(&mut zip)
     }
 
@@ -179,6 +214,114 @@ impl WorkbookArchive {
     }
 }
 
+fn ole_stream_exists<R: std::io::Read + std::io::Seek>(ole: &mut cfb::CompoundFile<R>, name: &str) -> bool {
+    if ole.open_stream(name).is_ok() {
+        return true;
+    }
+    let with_leading_slash = format!("/{name}");
+    ole.open_stream(&with_leading_slash).is_ok()
+}
+
+fn is_ole_encrypted_ooxml(bytes: &[u8]) -> bool {
+    if bytes.len() < OLE_MAGIC.len() || bytes[..OLE_MAGIC.len()] != OLE_MAGIC {
+        return false;
+    }
+    let cursor = Cursor::new(bytes);
+    let Ok(mut ole) = cfb::CompoundFile::open(cursor) else {
+        return false;
+    };
+    ole_stream_exists(&mut ole, "EncryptionInfo") && ole_stream_exists(&mut ole, "EncryptedPackage")
+}
+
+fn decrypt_ole_encrypted_ooxml_with_office_crypto(bytes: &[u8], password: &str) -> Result<Vec<u8>> {
+    // `office-crypto` historically assumed the decrypted package size is at least one full
+    // 4096-byte segment when decrypting OOXML (`EncryptedPackage`). Some real-world workbooks (and
+    // especially small test fixtures) are smaller than that, which could trigger a panic inside
+    // the dependency.
+    //
+    // Work around this by:
+    // - parsing the real decrypted package size from the first 8 bytes of the `EncryptedPackage`
+    //   stream (u64 LE, per MS-OFFCRYPTO),
+    // - patching the first 4 bytes (u32 LE) to be at least 4096 so the dependency's segment loop
+    //   doesn't underflow,
+    // - decrypting, then truncating back to the real size.
+    //
+    // This keeps the decrypted bytes in-memory and avoids writing anything to disk.
+    const SEGMENT_LENGTH: usize = 4096;
+
+    fn read_encrypted_package_size(bytes: &[u8]) -> Result<usize> {
+        let cursor = Cursor::new(bytes);
+        let mut ole = cfb::CompoundFile::open(cursor).context("open OLE container")?;
+        let mut stream = ole
+            .open_stream("EncryptedPackage")
+            .or_else(|_| ole.open_stream("/EncryptedPackage"))
+            .context("open EncryptedPackage stream")?;
+        let mut hdr = [0u8; 8];
+        stream
+            .read_exact(&mut hdr)
+            .context("read EncryptedPackage header")?;
+        let size = u64::from_le_bytes(hdr);
+        usize::try_from(size).context("EncryptedPackage size too large")
+    }
+
+    fn patch_encrypted_package_size(bytes: &[u8], patched_size: u32) -> Result<Vec<u8>> {
+        use std::io::{Seek as _, SeekFrom, Write as _};
+
+        let cursor = Cursor::new(bytes.to_vec());
+        let mut ole = cfb::CompoundFile::open(cursor).context("open OLE container")?;
+        {
+            let mut stream = ole
+                .open_stream("EncryptedPackage")
+                .or_else(|_| ole.open_stream("/EncryptedPackage"))
+                .context("open EncryptedPackage stream")?;
+            stream
+                .seek(SeekFrom::Start(0))
+                .context("seek EncryptedPackage stream")?;
+            stream
+                .write_all(&patched_size.to_le_bytes())
+                .context("patch EncryptedPackage header")?;
+        }
+        ole.flush().context("flush OLE container")?;
+        Ok(ole.into_inner().into_inner())
+    }
+
+    fn decrypt_with_office_crypto(bytes: Vec<u8>, password: &str) -> Result<Vec<u8>> {
+        let res = std::panic::catch_unwind(|| office_crypto::decrypt_from_bytes(bytes, password));
+        match res {
+            Ok(Ok(v)) => Ok(v),
+            Ok(Err(e)) => Err(anyhow!("failed to decrypt workbook: {e}")),
+            Err(panic) => {
+                let msg = panic
+                    .downcast_ref::<&str>()
+                    .map(|s| (*s).to_string())
+                    .or_else(|| panic.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "unknown panic".to_string());
+                Err(anyhow!("failed to decrypt workbook (panic): {msg}"))
+            }
+        }
+    }
+
+    let real_size = read_encrypted_package_size(bytes)?;
+    let input = if real_size < SEGMENT_LENGTH {
+        patch_encrypted_package_size(bytes, SEGMENT_LENGTH as u32)?
+    } else {
+        bytes.to_vec()
+    };
+
+    let mut decrypted = decrypt_with_office_crypto(input, password)?;
+    if decrypted.len() > real_size {
+        decrypted.truncate(real_size);
+    }
+
+    if decrypted.len() < 2 || &decrypted[..2] != b"PK" {
+        return Err(anyhow!(
+            "decrypted payload does not look like a ZIP (missing PK signature); wrong password?"
+        ));
+    }
+
+    Ok(decrypted)
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct DiffOptions {
     /// Exact part names to ignore.
@@ -216,6 +359,22 @@ pub struct DiffOptions {
     pub strict_calc_chain: bool,
 }
 
+/// Parameters for a single diff input (workbook path + optional password).
+#[derive(Debug, Clone, Copy)]
+pub struct DiffInput<'a> {
+    pub path: &'a Path,
+    pub password: Option<&'a str>,
+}
+
+impl<'a> DiffInput<'a> {
+    pub fn new(path: &'a Path) -> Self {
+        Self {
+            path,
+            password: None,
+        }
+    }
+}
+
 /// Fine-grained ignore rule for XML diffs (`XmlDiff`).
 ///
 /// A rule matches (and thus suppresses) an XML diff when:
@@ -249,6 +408,20 @@ pub fn diff_workbooks_with_options(
 ) -> Result<DiffReport> {
     let expected = WorkbookArchive::open(expected)?;
     let actual = WorkbookArchive::open(actual)?;
+    Ok(diff_archives_with_options(&expected, &actual, options))
+}
+
+pub fn diff_workbooks_with_inputs(expected: DiffInput<'_>, actual: DiffInput<'_>) -> Result<DiffReport> {
+    diff_workbooks_with_inputs_and_options(expected, actual, &DiffOptions::default())
+}
+
+pub fn diff_workbooks_with_inputs_and_options(
+    expected: DiffInput<'_>,
+    actual: DiffInput<'_>,
+    options: &DiffOptions,
+) -> Result<DiffReport> {
+    let expected = WorkbookArchive::open_with_password(expected.path, expected.password)?;
+    let actual = WorkbookArchive::open_with_password(actual.path, actual.password)?;
     Ok(diff_archives_with_options(&expected, &actual, options))
 }
 
