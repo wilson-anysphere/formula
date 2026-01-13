@@ -105,6 +105,17 @@ export interface PanelBodyRendererOptions {
     | import("../../../../packages/collab/versioning/src/index.ts").VersionStore
     | Promise<import("../../../../packages/collab/versioning/src/index.ts").VersionStore>;
   /**
+   * Alias for {@link createVersionStore}.
+   *
+   * This name matches older wiring code and helps keep call sites explicit about the
+   * collab/version-history context.
+   */
+  createCollabVersioningStore?: (
+    session: import("@formula/collab-session").CollabSession,
+  ) =>
+    | import("../../../../packages/collab/versioning/src/index.ts").VersionStore
+    | Promise<import("../../../../packages/collab/versioning/src/index.ts").VersionStore>;
+  /**
    * Optional factory for the Branch Manager panel's BranchStore.
    *
    * Reserved-root-guard deployments reject Yjs updates touching reserved roots
@@ -115,6 +126,14 @@ export interface PanelBodyRendererOptions {
    * mutations.
    */
   createBranchStore?: (
+    session: import("@formula/collab-session").CollabSession,
+  ) =>
+    | import("./branch-manager/branchStoreTypes.js").BranchStore
+    | Promise<import("./branch-manager/branchStoreTypes.js").BranchStore>;
+  /**
+   * Alias for {@link createBranchStore}.
+   */
+  createCollabBranchStore?: (
     session: import("@formula/collab-session").CollabSession,
   ) =>
     | import("./branch-manager/branchStoreTypes.js").BranchStore
@@ -488,7 +507,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
         <CollabVersionHistoryPanel
           session={session}
           sheetNameResolver={options.sheetNameResolver ?? null}
-          createVersionStore={options.createVersionStore}
+          createVersionStore={options.createVersionStore ?? options.createCollabVersioningStore}
         />,
       );
       return;
@@ -511,7 +530,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
         <CollabBranchManagerPanel
           session={session}
           sheetNameResolver={options.sheetNameResolver ?? null}
-          createBranchStore={options.createBranchStore}
+          createBranchStore={options.createBranchStore ?? options.createCollabBranchStore}
         />,
       );
       return;
