@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import fs from "node:fs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -13,6 +14,9 @@ const releaseWorkflowPath = path.join(repoRoot, releaseWorkflowRelativePath);
 
 const docsReleaseRelativePath = "docs/release.md";
 const docsReleasePath = path.join(repoRoot, docsReleaseRelativePath);
+
+const workflowsDirRelativePath = ".github/workflows";
+const workflowsDirPath = path.join(repoRoot, workflowsDirRelativePath);
 
 function parseMajorMinor(version) {
   const normalized = String(version ?? "").trim().replace(/^[^0-9]*/, "");
@@ -57,6 +61,15 @@ function extractTauriVersionFromCargoToml(tomlText) {
 function extractPinnedCliVersionFromWorkflow(workflowText) {
   const match = workflowText.match(/^[\t ]*TAURI_CLI_VERSION:[\t ]*["']?([^"'\n]+)["']?/m);
   return match ? match[1].trim() : null;
+}
+
+function extractPinnedCliVersionsFromWorkflow(workflowText) {
+  const versions = [];
+  const re = /^[\t ]*TAURI_CLI_VERSION:[\t ]*["']?([^"'\n]+)["']?/gm;
+  for (const match of workflowText.matchAll(re)) {
+    versions.push(match[1].trim());
+  }
+  return versions;
 }
 
 function extractPinnedCliVersionsFromDocs(markdownText) {
@@ -128,6 +141,40 @@ if (
   console.error("Fix:");
   console.error(`- Update the caller's TAURI_CLI_VERSION to match ${releaseWorkflowRelativePath}.`);
   process.exit(1);
+}
+
+if (releaseWorkflowPinnedCliVersion) {
+  try {
+    const entries = fs.readdirSync(workflowsDirPath, { withFileTypes: true });
+    const mismatchLines = [];
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith(".yml") && !entry.name.endsWith(".yaml")) continue;
+      const rel = `${workflowsDirRelativePath}/${entry.name}`;
+      const fullPath = path.join(workflowsDirPath, entry.name);
+      const text = await readFile(fullPath, "utf8");
+      const versions = extractPinnedCliVersionsFromWorkflow(text);
+      for (const v of versions) {
+        if (v !== releaseWorkflowPinnedCliVersion) {
+          mismatchLines.push(`- ${rel}: TAURI_CLI_VERSION="${v}"`);
+        }
+      }
+    }
+    if (mismatchLines.length > 0) {
+      console.error("TAURI_CLI_VERSION mismatch across workflow files detected.");
+      console.error(`- ${releaseWorkflowRelativePath}: TAURI_CLI_VERSION="${releaseWorkflowPinnedCliVersion}"`);
+      mismatchLines.sort();
+      for (const line of mismatchLines) console.error(line);
+      console.error("");
+      console.error("Fix:");
+      console.error(
+        `- Update all workflow TAURI_CLI_VERSION values to match ${releaseWorkflowRelativePath} (${releaseWorkflowPinnedCliVersion}).`,
+      );
+      process.exit(1);
+    }
+  } catch {
+    // Ignore: best-effort scan. CI contexts should include these files.
+  }
 }
 
 const cliMajorMinor = parseMajorMinor(pinnedCliVersion);
