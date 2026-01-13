@@ -78,4 +78,15 @@ test("Desktop main.ts wires Formulas → Formula Auditing commands to Spreadshee
     /"view\.toggleShowFormulas":\s*app\.getShowFormulas\(\)/,
     "Expected ribbon pressed state to include view.toggleShowFormulas",
   );
+
+  assert.doesNotMatch(
+    main,
+    /formulas\.formulaAuditing\.showFormulas/,
+    "Expected legacy formulas.formulaAuditing.showFormulas id to be removed from main.ts",
+  );
+  assert.doesNotMatch(
+    main,
+    /view\.show\.showFormulas/,
+    "Expected legacy view.show.showFormulas id to be removed from main.ts",
+  );
 });
