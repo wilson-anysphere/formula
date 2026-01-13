@@ -22,6 +22,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -75,19 +76,37 @@ const EXPECTED_PLATFORMS = [
 const EXPECTED_PLATFORM_KEYS = EXPECTED_PLATFORMS.map((p) => p.key);
 
 /**
- * @param {string} message
- */
-function fail(message) {
-  console.error(message);
-  process.exitCode = 1;
-}
-
-/**
  * @param {string} heading
  * @param {string[]} details
  */
-function failBlock(heading, details) {
-  fail(`\n${heading}\n${details.map((d) => `  - ${d}`).join("\n")}`);
+function formatBlock(heading, details) {
+  return `\n${heading}\n${details.map((d) => `  - ${d}`).join("\n")}`;
+}
+
+class VerificationFailure extends Error {
+  /**
+   * @param {{ blocks: Array<{ heading: string; details: string[] }>; retryable: boolean; logLines?: string[] }} args
+   */
+  constructor({ blocks, retryable, logLines }) {
+    super("Release asset verification failed");
+    this.blocks = blocks;
+    this.retryable = retryable;
+    this.logLines = logLines ?? [];
+  }
+
+  /**
+   * @param {NodeJS.WritableStream} stream
+   */
+  print(stream) {
+    if (this.logLines.length > 0) {
+      for (const line of this.logLines) {
+        stream.write(`${line}\n`);
+      }
+    }
+    for (const block of this.blocks) {
+      stream.write(`${formatBlock(block.heading, block.details)}\n`);
+    }
+  }
 }
 
 /**
@@ -397,8 +416,8 @@ async function main() {
     args = parseArgs(process.argv.slice(2));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    fail(`verify-tauri-updater-assets: ${msg}`);
-    fail(`Usage: node scripts/verify-tauri-updater-assets.mjs <tag> [--repo owner/repo]`);
+    console.error(`verify-tauri-updater-assets: ${msg}`);
+    console.error(`Usage: node scripts/verify-tauri-updater-assets.mjs <tag> [--repo owner/repo]`);
     process.exit(1);
   }
 
@@ -409,37 +428,143 @@ async function main() {
 
   const tag = args.tag ?? process.env.GITHUB_REF_NAME;
   if (!tag) {
-    fail(`Missing tag name. Usage: node scripts/verify-tauri-updater-assets.mjs <tag>`);
+    console.error(`Missing tag name. Usage: node scripts/verify-tauri-updater-assets.mjs <tag>`);
     process.exit(1);
   }
 
   const repo = args.repo ?? process.env.GITHUB_REPOSITORY;
   if (!repo) {
-    failBlock(`Missing repo name`, [
-      `Set GITHUB_REPOSITORY in the environment (e.g. "owner/repo"), or pass --repo owner/repo.`,
-    ]);
+    console.error(
+      formatBlock(`Missing repo name`, [
+        `Set GITHUB_REPOSITORY in the environment (e.g. "owner/repo"), or pass --repo owner/repo.`,
+      ]),
+    );
     process.exit(1);
   }
 
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   if (!token) {
-    failBlock(`Missing GitHub token`, [
-      `Set GITHUB_TOKEN (recommended for GitHub Actions) or GH_TOKEN (for local runs).`,
-    ]);
+    console.error(
+      formatBlock(`Missing GitHub token`, [
+        `Set GITHUB_TOKEN (recommended for GitHub Actions) or GH_TOKEN (for local runs).`,
+      ]),
+    );
     process.exit(1);
   }
 
   const apiBase = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/, "");
 
-  /** @type {any} */
-  const release = await githubApiJson(apiBase, `/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`, token);
+  const updaterExpectation = await readUpdaterConfigExpectation();
+  const wantsManifestSig = updaterExpectation.expectsManifestSignature;
+
+  const retryDelaysMs = [2000, 4000, 8000, 12000, 20000];
+  const maxAttempts = retryDelaysMs.length + 1;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (attempt > 1) {
+      const delayMs = retryDelaysMs[attempt - 2] ?? 0;
+      console.error(
+        `Release assets not fully visible yet; retrying in ${(delayMs / 1000).toFixed(0)}s (attempt ${attempt}/${maxAttempts})...`,
+      );
+      await sleep(delayMs);
+    }
+
+    try {
+      const result = await verifyOnce({
+        apiBase,
+        repo,
+        tag,
+        token,
+        wantsManifestSig,
+      });
+
+      // Success.
+      for (const line of result.logLines) console.log(line);
+      console.log(`Release asset verification passed.`);
+      return;
+    } catch (err) {
+      const isLastAttempt = attempt === maxAttempts;
+      if (err instanceof VerificationFailure) {
+        if (err.retryable && !isLastAttempt) {
+          continue;
+        }
+
+        // Final retryable failure (or non-retryable): print the full context.
+        err.print(process.stderr);
+        process.exit(1);
+      }
+
+      const msg = err instanceof Error ? err.stack || err.message : String(err);
+      console.error(`verify-tauri-updater-assets: ${msg}`);
+      process.exit(1);
+    }
+  }
+}
+
+main().catch((err) => {
+  const msg = err instanceof Error ? err.stack || err.message : String(err);
+  console.error(`verify-tauri-updater-assets: ${msg}`);
+  process.exit(1);
+});
+
+/**
+ * @param {{ apiBase: string; repo: string; tag: string; token: string; wantsManifestSig: boolean }} opts
+ */
+async function verifyOnce({ apiBase, repo, tag, token, wantsManifestSig }) {
+  /** @type {string[]} */
+  const logLines = [];
+
+  /** @type {Array<{ heading: string; details: string[] }>} */
+  const blocks = [];
+
+  let release;
+  try {
+    release = await githubApiJson(apiBase, `/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`, token);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new VerificationFailure({
+        retryable: true,
+        logLines: [],
+        blocks: [
+          {
+            heading: "Failed to fetch GitHub Release",
+            details: [`Repo: ${repo}`, `Tag: ${tag}`, `Error: ${msg}`],
+          },
+        ],
+      });
+    }
+
   const releaseId = release?.id;
   if (typeof releaseId !== "number") {
-    fail(`Unexpected GitHub API response: missing release id for tag ${tag}.`);
-    process.exit(1);
+    throw new VerificationFailure({
+      retryable: false,
+      logLines: [],
+      blocks: [
+        {
+          heading: "Unexpected GitHub API response",
+          details: [`Missing numeric release id for tag ${tag}.`],
+        },
+      ],
+    });
   }
 
-  const assets = await listReleaseAssets(apiBase, repo, releaseId, token);
+  let assets;
+  try {
+    assets = await listReleaseAssets(apiBase, repo, releaseId, token);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new VerificationFailure({
+      retryable: true,
+      logLines: [],
+      blocks: [
+        {
+          heading: "Failed to list GitHub Release assets",
+          details: [`Repo: ${repo}`, `Tag: ${tag}`, `Release id: ${String(releaseId)}`, `Error: ${msg}`],
+        },
+      ],
+    });
+  }
+
   /** @type {Map<string, any>} */
   const assetByName = new Map();
   for (const asset of assets) {
@@ -448,51 +573,67 @@ async function main() {
     }
   }
 
-  console.log(
-    `Release asset verification: ${repo}@${tag} (draft=${Boolean(release?.draft)}, assets=${assets.length})`,
-  );
+  logLines.push(`Release asset verification: ${repo}@${tag} (draft=${Boolean(release?.draft)}, assets=${assets.length})`);
 
   const manifestAsset = assetByName.get("latest.json");
   if (!manifestAsset) {
-    failBlock(`Missing updater manifest`, [
-      `Release does not contain "latest.json".`,
-      `This asset is expected to be uploaded by tauri-apps/tauri-action.`,
-    ]);
-    process.exit(1);
+    throw new VerificationFailure({
+      retryable: true,
+      logLines,
+      blocks: [
+        {
+          heading: "Missing updater manifest",
+          details: [
+            `Release does not contain "latest.json".`,
+            `This asset is expected to be uploaded by tauri-apps/tauri-action.`,
+          ],
+        },
+      ],
+    });
   }
 
-  const updaterExpectation = await readUpdaterConfigExpectation();
-  const wantsManifestSig = updaterExpectation.expectsManifestSignature;
   const manifestSigAsset = assetByName.get("latest.json.sig");
-
   if (wantsManifestSig && !manifestSigAsset) {
-    failBlock(`Missing updater manifest signature`, [
-      `apps/desktop/src-tauri/tauri.conf.json has plugins.updater.active=true and a non-placeholder pubkey,`,
-      `but the release is missing "latest.json.sig".`,
-    ]);
+    blocks.push({
+      heading: "Missing updater manifest signature",
+      details: [
+        `apps/desktop/src-tauri/tauri.conf.json has plugins.updater.active=true and a non-placeholder pubkey,`,
+        `but the release is missing "latest.json.sig".`,
+      ],
+    });
   }
 
-  // Download latest.json (and signature if present) from the release.
   /** @type {Buffer} */
   let manifestBuf;
   try {
     manifestBuf = await downloadReleaseAsset(apiBase, repo, manifestAsset.id, token);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    failBlock(`Failed to download updater manifest`, [`Asset: latest.json`, `Error: ${msg}`]);
-    process.exit(1);
+    throw new VerificationFailure({
+      retryable: true,
+      logLines,
+      blocks: [
+        {
+          heading: "Failed to download updater manifest",
+          details: [`Asset: latest.json`, `Error: ${msg}`],
+        },
+      ],
+    });
   }
 
   if (manifestSigAsset) {
     try {
       await downloadReleaseAsset(apiBase, repo, manifestSigAsset.id, token);
-      console.log(`- Found updater manifest signature: latest.json.sig`);
+      logLines.push(`- Found updater manifest signature: latest.json.sig`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      failBlock(`Failed to download updater manifest signature`, [`Asset: latest.json.sig`, `Error: ${msg}`]);
+      blocks.push({
+        heading: "Failed to download updater manifest signature",
+        details: [`Asset: latest.json.sig`, `Error: ${msg}`],
+      });
     }
   } else {
-    console.log(`- No updater manifest signature: latest.json.sig (not found)`);
+    logLines.push(`- No updater manifest signature: latest.json.sig (not found)`);
   }
 
   /** @type {any} */
@@ -501,33 +642,66 @@ async function main() {
     manifest = JSON.parse(manifestBuf.toString("utf8"));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    failBlock(`Invalid latest.json`, [`Failed to parse JSON.`, `Error: ${msg}`]);
-    process.exit(1);
+    throw new VerificationFailure({
+      retryable: false,
+      logLines,
+      blocks: [
+        {
+          heading: "Invalid latest.json",
+          details: [`Failed to parse JSON.`, `Error: ${msg}`],
+        },
+      ],
+    });
   }
 
   const manifestVersion = typeof manifest?.version === "string" ? manifest.version.trim() : "";
   if (manifestVersion) {
     const tagVersion = normalizeTagVersion(tag);
     if (manifestVersion !== tagVersion) {
-      failBlock(`Updater manifest version mismatch`, [
-        `Tag: ${tag} (version ${JSON.stringify(tagVersion)})`,
-        `latest.json: version ${JSON.stringify(manifestVersion)}`,
-      ]);
+      throw new VerificationFailure({
+        retryable: false,
+        logLines,
+        blocks: [
+          {
+            heading: "Updater manifest version mismatch",
+            details: [
+              `Tag: ${tag} (version ${JSON.stringify(tagVersion)})`,
+              `latest.json: version ${JSON.stringify(manifestVersion)}`,
+            ],
+          },
+        ],
+      });
     }
   }
 
   const platforms = manifest?.platforms;
   if (!isPlainObject(platforms)) {
-    failBlock(`Invalid latest.json`, [
-      `Expected latest.json to contain a "platforms" object mapping target → { url, signature, ... }.`,
-    ]);
-    process.exit(1);
+    throw new VerificationFailure({
+      retryable: false,
+      logLines,
+      blocks: [
+        {
+          heading: "Invalid latest.json",
+          details: [
+            `Expected latest.json to contain a "platforms" object mapping target → { url, signature, ... }.`,
+          ],
+        },
+      ],
+    });
   }
 
   const platformKeys = Object.keys(platforms).sort();
   if (platformKeys.length === 0) {
-    failBlock(`Invalid latest.json`, [`"platforms" is empty; updater has no targets.`]);
-    process.exit(1);
+    throw new VerificationFailure({
+      retryable: false,
+      logLines,
+      blocks: [
+        {
+          heading: "Invalid latest.json",
+          details: [`"platforms" is empty; updater has no targets.`],
+        },
+      ],
+    });
   }
 
   // Enforce stable updater platform key naming (see docs/desktop-updater-target-mapping.md).
@@ -537,20 +711,22 @@ async function main() {
   const unexpectedKeys = platformKeys.filter((k) => !expectedKeySet.has(k));
   if (missingKeys.length > 0 || unexpectedKeys.length > 0) {
     const formatKeyList = (keys) => keys.map((k) => `    - ${k}`).join("\n");
-    failBlock(`Unexpected latest.json.platforms keys (Tauri updater target identifiers)`, [
-      `Expected (${expectedKeysSorted.length}):\n${formatKeyList(expectedKeysSorted)}`,
-      `Actual (${platformKeys.length}):\n${formatKeyList(platformKeys)}`,
-      ...(missingKeys.length > 0 ? [`Missing (${missingKeys.length}):\n${formatKeyList(missingKeys)}`] : []),
-      ...(unexpectedKeys.length > 0
-        ? [`Unexpected (${unexpectedKeys.length}):\n${formatKeyList(unexpectedKeys)}`]
-        : []),
-      `If you upgraded Tauri/tauri-action, update docs/desktop-updater-target-mapping.md and scripts/verify-tauri-updater-assets.mjs together.`,
-    ]);
+    blocks.push({
+      heading: "Unexpected latest.json.platforms keys (Tauri updater target identifiers)",
+      details: [
+        `Expected (${expectedKeysSorted.length}):\n${formatKeyList(expectedKeysSorted)}`,
+        `Actual (${platformKeys.length}):\n${formatKeyList(platformKeys)}`,
+        ...(missingKeys.length > 0 ? [`Missing (${missingKeys.length}):\n${formatKeyList(missingKeys)}`] : []),
+        ...(unexpectedKeys.length > 0
+          ? [`Unexpected (${unexpectedKeys.length}):\n${formatKeyList(unexpectedKeys)}`]
+          : []),
+        `If you upgraded Tauri/tauri-action, update docs/desktop-updater-target-mapping.md and scripts/verify-tauri-updater-assets.mjs together.`,
+      ],
+    });
   }
 
   const groups = groupPlatformKeys(platformKeys);
-
-  console.log(`- Platforms in latest.json: ${platformKeys.join(", ")}`);
+  logLines.push(`- Platforms in latest.json: ${platformKeys.join(", ")}`);
 
   /** @type {{platform: string, url: string, assetName: string, inlineSig: boolean, sigAssetName: string, sigAssetPresent: boolean}[]} */
   const updaterEntries = [];
@@ -582,8 +758,7 @@ async function main() {
         );
       }
 
-      const assetExists = assetByName.has(assetName);
-      if (!assetExists) {
+      if (!assetByName.has(assetName)) {
         missing.push(`Missing release asset referenced by latest.json: ${platformKey} → ${assetName}`);
       }
 
@@ -606,7 +781,6 @@ async function main() {
     }
   }
 
-  // Print a concise per-platform summary.
   for (const entry of updaterEntries) {
     const sigStatus = entry.sigAssetPresent
       ? entry.inlineSig
@@ -615,20 +789,17 @@ async function main() {
       : entry.inlineSig
         ? "inline (no .sig asset)"
         : "MISSING";
-    console.log(`  - ${entry.platform}: ${entry.assetName} (sig: ${sigStatus})`);
+    logLines.push(`  - ${entry.platform}: ${entry.assetName} (sig: ${sigStatus})`);
   }
 
-  // Verify human-install artifacts exist.
   const assetNames = [...assetByName.keys()];
 
   const hasAny = (suffix) => assetNames.some((n) => n.toLowerCase().endsWith(suffix.toLowerCase()));
 
-  // macOS: require at least one DMG.
   if (!hasAny(".dmg")) {
     missing.push(`Missing macOS installer: no .dmg asset found in the release`);
   }
 
-  // Windows: require EXE + MSI per arch (arch list derived from updater platforms).
   const windowsArches = groups.windows.map(inferArchFromTarget);
   const uniqueWindowsArches = [...new Set(windowsArches)];
   const windowsExeAssets = assetNames.filter((n) => n.toLowerCase().endsWith(".exe"));
@@ -654,7 +825,6 @@ async function main() {
     }
   }
 
-  // Linux: require AppImage + DEB + RPM (per arch if multiple linux arches exist).
   const linuxArches = groups.linux.map(inferArchFromTarget);
   const uniqueLinuxArches = [...new Set(linuxArches)];
   const linuxAppImages = assetNames.filter((n) => n.endsWith(".AppImage"));
@@ -684,8 +854,6 @@ async function main() {
     }
   }
 
-  // Signature assets: when updater signing is enabled we expect `.sig` assets to be uploaded
-  // alongside all installer/update artifacts (see docs/release.md).
   const requireArtifactSigAssets = wantsManifestSig;
   if (requireArtifactSigAssets) {
     const signedKinds = [
@@ -712,23 +880,15 @@ async function main() {
   }
 
   if (missing.length > 0) {
-    const unique = [...new Set(missing)];
-    failBlock(`Release asset verification failed`, unique);
-    process.exit(1);
+    blocks.push({
+      heading: "Release asset verification failed",
+      details: [...new Set(missing)],
+    });
   }
 
-  // Some validations above call failBlock() without immediately exiting so we can
-  // report multiple issues in a single run. If any were triggered, ensure the job
-  // still fails (and avoid printing a misleading "passed" message).
-  if (process.exitCode) {
-    process.exit(1);
+  if (blocks.length > 0) {
+    throw new VerificationFailure({ blocks, retryable: true, logLines });
   }
 
-  console.log(`Release asset verification passed.`);
+  return { logLines };
 }
-
-main().catch((err) => {
-  const msg = err instanceof Error ? err.stack || err.message : String(err);
-  fail(`verify-tauri-updater-assets: ${msg}`);
-  process.exit(1);
-});
