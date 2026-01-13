@@ -815,6 +815,19 @@ jobs:
         if: runner.os == 'Windows'
         run: python scripts/ci/check-windows-webview2-installer.py
 
+      - name: Verify Windows installer Authenticode signatures (signtool)
+        # Only run when signing secrets are configured; forks/dry-runs may intentionally build unsigned artifacts.
+        if: runner.os == 'Windows' && secrets.WINDOWS_CERTIFICATE != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $target = "${{ matrix.rust_target }}"
+          if ([string]::IsNullOrWhiteSpace($target)) {
+            throw "windows-sigcheck: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
+          }
+          $bundleDir = "apps/desktop/src-tauri/target/$target/release/bundle"
+          python scripts/ci/check-windows-installer-signatures.py --bundle-dir "$bundleDir"
+
       - name: Verify Linux release artifacts (AppImage + deb + rpm + signatures)
         if: matrix.platform == 'ubuntu-24.04'
         shell: bash
