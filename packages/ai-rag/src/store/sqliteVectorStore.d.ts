@@ -8,7 +8,8 @@ export class SqliteVectorStore {
     /**
      * When true (default), failures to load/initialize an existing persisted DB
      * (e.g. corrupted bytes) will cause the store to clear the persisted payload
-     * (when possible) and create a fresh empty DB so callers can re-index.
+     * (via `storage.remove()` when available, otherwise by overwriting via
+     * `storage.save()`) and create a fresh empty DB so callers can re-index.
      *
      * Set to false to preserve the historical behaviour (throw on corruption).
      */
