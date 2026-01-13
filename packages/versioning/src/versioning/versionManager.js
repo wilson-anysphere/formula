@@ -234,6 +234,9 @@ export class VersionManager extends SimpleEventEmitter {
   destroy() {
     if (this._destroyed) return;
     this._destroyed = true;
+    // Treat destroyed managers as permanently clean so they cannot create
+    // snapshots (even if they happened to be dirty at the time of teardown).
+    this.dirty = false;
     this.stopAutoSnapshot();
     const unsubscribe = this._unsubscribeDocUpdates;
     this._unsubscribeDocUpdates = null;
@@ -282,6 +285,7 @@ export class VersionManager extends SimpleEventEmitter {
    * @returns {Promise<VersionRecord | null>}
    */
   async maybeSnapshot() {
+    if (this._destroyed) return null;
     if (!this.dirty) return null;
     const version = await this._createVersion({
       kind: "snapshot",
@@ -364,6 +368,7 @@ export class VersionManager extends SimpleEventEmitter {
   }
 
   startAutoSnapshot() {
+    if (this._destroyed) return;
     if (this._timer) return;
     this._timer = setInterval(() => {
       void this._autoSnapshotTick();
@@ -377,6 +382,7 @@ export class VersionManager extends SimpleEventEmitter {
   }
 
   async _autoSnapshotTick() {
+    if (this._destroyed) return;
     if (this._autoSnapshotInFlight) return;
     this._autoSnapshotInFlight = true;
     try {

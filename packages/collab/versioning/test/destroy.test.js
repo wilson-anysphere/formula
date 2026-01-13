@@ -93,3 +93,32 @@ test("CollabVersioning create/destroy cycles do not accumulate dirty listeners",
   versioning2.destroy();
   assert.equal(updateListeners.size, 0);
 });
+
+test("CollabVersioning.destroy prevents autosnapshot ticks from creating new versions", async (t) => {
+  const doc = new Y.Doc();
+  t.after(() => doc.destroy());
+
+  const cells = doc.getMap("cells");
+
+  const versioning = createCollabVersioning({
+    // @ts-expect-error - minimal session stub for unit tests
+    session: { doc },
+    autoStart: false,
+    // Make manual tick testing deterministic.
+    autoSnapshotIntervalMs: 1,
+  });
+  t.after(() => versioning.destroy());
+
+  // Mark dirty, then destroy before any snapshot can be created.
+  cells.set("Sheet1:0:0", "alpha");
+  assert.equal(versioning.manager.dirty, true);
+
+  versioning.destroy();
+
+  // Even if an autosnapshot tick were to run after teardown (race between
+  // interval callback and destroy), it should be a no-op.
+  await versioning.manager._autoSnapshotTick();
+
+  const versions = await versioning.listVersions();
+  assert.equal(versions.length, 0);
+});
