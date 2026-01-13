@@ -454,7 +454,10 @@ export class FormulaBarView {
         return;
       }
       if (this.#callbacks.onOpenNameBoxMenu) {
-        void this.#callbacks.onOpenNameBoxMenu();
+        Promise.resolve(this.#callbacks.onOpenNameBoxMenu())
+          .catch((err) => {
+            console.error("Failed to open name box menu:", err);
+          });
         return;
       }
 
