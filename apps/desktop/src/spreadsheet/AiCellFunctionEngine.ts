@@ -47,6 +47,7 @@ const MAX_RANGE_PREVIEW_VALUES = 30;
 const MAX_RANGE_SAMPLE_VALUES = 30;
 const MAX_USER_MESSAGE_CHARS = 16_000;
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 4;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_OUTPUT_CHARS = 10_000;
 
 const DLP_INDEX_CACHE_MAX_ENTRIES = 5;
@@ -129,6 +130,13 @@ export interface AiCellFunctionEngineOptions {
      * Large string outputs can freeze the grid/UI, so we clamp deterministically.
      */
     maxOutputChars?: number;
+    /**
+     * Maximum time to wait for a single LLM request before failing.
+     *
+     * Prevents AI cell functions from getting stuck on `#GETTING_DATA` forever if the
+     * backend hangs or the network stalls.
+     */
+    requestTimeoutMs?: number;
   };
 }
 
@@ -143,30 +151,41 @@ class ConcurrencyLimiter {
     this.maxConcurrent = clampInt(maxConcurrent, { min: 1, max: 10_000 });
   }
 
-  run<T>(fn: () => Promise<T>): Promise<T> {
+  run<T>(start: (release: () => void) => Promise<T>): Promise<T> {
     if (this.active < this.maxConcurrent) {
-      this.active += 1;
-
-      let promise: Promise<T>;
-      try {
-        promise = Promise.resolve(fn());
-      } catch (error) {
-        this.active -= 1;
-        this.drain();
-        return Promise.reject(error);
-      }
-
-      return promise.finally(() => {
-        this.active -= 1;
-        this.drain();
-      });
+      return this.start(start);
     }
 
     return new Promise<T>((resolve, reject) => {
       this.queue.push(() => {
-        this.run(fn).then(resolve, reject);
+        this.run(start).then(resolve, reject);
       });
     });
+  }
+
+  private start<T>(start: (release: () => void) => Promise<T>): Promise<T> {
+    this.active += 1;
+
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      this.active -= 1;
+      this.drain();
+    };
+
+    let promise: Promise<T>;
+    try {
+      promise = Promise.resolve(start(release));
+    } catch (error) {
+      release();
+      return Promise.reject(error);
+    }
+
+    // Failsafe: ensure slots are returned even if the caller forgets to `release()`.
+    // Avoid unhandled rejections by consuming the returned promise.
+    promise.finally(release).catch(() => undefined);
+    return promise;
   }
 
   private drain(): void {
@@ -203,6 +222,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
   private readonly maxAuditPreviewChars: number;
   private readonly maxCellChars: number;
   private readonly maxOutputChars: number;
+  private readonly requestTimeoutMs: number;
 
   private readonly requestLimiter: ConcurrencyLimiter;
 
@@ -239,6 +259,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     this.maxAuditPreviewChars = clampInt(options.limits?.maxAuditPreviewChars ?? 2_000, { min: 200, max: 100_000 });
     this.maxCellChars = clampInt(options.limits?.maxCellChars ?? MAX_SCALAR_CHARS, { min: 50, max: 100_000 });
     this.maxOutputChars = clampInt(options.limits?.maxOutputChars ?? MAX_OUTPUT_CHARS, { min: 1, max: 1_000_000 });
+    this.requestTimeoutMs = clampInt(options.limits?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, { min: 1, max: 3_600_000 });
 
     this.requestLimiter = new ConcurrencyLimiter(options.limits?.maxConcurrentRequests ?? DEFAULT_MAX_CONCURRENT_REQUESTS);
 
@@ -527,11 +548,18 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       model: this.model,
     });
 
+    const abortController = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timeoutMs = this.requestTimeoutMs;
+    const timeoutError = new Error(`AI cell function request timed out after ${timeoutMs}ms`);
+    let didTimeout = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
     try {
       let started = 0;
-      const response = await this.requestLimiter.run(() => {
+      const response = await this.requestLimiter.run((release) => {
         started = nowMs();
-        return this.llmClient.chat({
+
+        const chatPromise = this.llmClient.chat({
           model: this.model,
           messages: buildMessages({
             functionName: params.functionName,
@@ -539,8 +567,31 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
             inputs: params.inputs,
             maxPromptChars: this.maxUserMessageChars,
           }),
+          ...(abortController ? { signal: abortController.signal } : {}),
         });
+        // Release concurrency slots as soon as the underlying chat promise settles so
+        // queued requests can start in the same microtask flush.
+        chatPromise.finally(release).catch(() => undefined);
+
+        const timeoutPromise = new Promise<never>((_resolve, reject) => {
+          timeoutId = setTimeout(() => {
+            didTimeout = true;
+            try {
+              abortController?.abort();
+            } catch {
+              // ignore
+            }
+            release();
+            reject(timeoutError);
+          }, timeoutMs);
+        });
+
+        return Promise.race([chatPromise, timeoutPromise]) as any;
       });
+      if (timeoutId != null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
       recorder.recordModelLatency(nowMs() - started);
 
       const promptTokens = response.usage?.promptTokens;
@@ -566,9 +617,12 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
 
       this.writeCache(params.cacheKey, normalizedValue);
     } catch (error) {
-      auditInput.error = error instanceof Error ? error.message : String(error);
+      const finalError = didTimeout ? timeoutError : error;
+      auditInput.error = finalError instanceof Error ? finalError.message : String(finalError);
+      if (didTimeout) recorder.setUserFeedback("rejected");
       this.writeCache(params.cacheKey, AI_CELL_ERROR);
     } finally {
+      if (timeoutId != null) clearTimeout(timeoutId);
       await recorder.finalize();
       this.onUpdate?.();
     }

@@ -97,6 +97,60 @@ describe("AiCellFunctionEngine", () => {
     });
   });
 
+  it("aborts LLM requests that exceed the timeout and caches #AI!", async () => {
+    vi.useFakeTimers();
+    try {
+      let observedSignal: AbortSignal | undefined;
+      let abortEvents = 0;
+
+      const llmClient = {
+        chat: vi.fn((request: any) => {
+          observedSignal = request?.signal;
+          if (observedSignal && typeof (observedSignal as any).addEventListener === "function") {
+            observedSignal.addEventListener("abort", () => {
+              abortEvents += 1;
+            });
+          }
+          return new Promise(() => {
+            // Never resolve/reject: we rely on the engine timeout + abort.
+          });
+        }),
+      };
+
+      const auditStore = new MemoryAIAuditStore();
+      const engine = new AiCellFunctionEngine({
+        llmClient: llmClient as any,
+        model: "test-model",
+        sessionId: "timeout-session",
+        auditStore,
+        limits: { requestTimeoutMs: 50 },
+      });
+
+      const pending = evaluateFormula('=AI("summarize", "hello")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+      expect(pending).toBe(AI_CELL_PLACEHOLDER);
+      expect(llmClient.chat).toHaveBeenCalledTimes(1);
+      expect(observedSignal).toBeDefined();
+      expect(observedSignal?.aborted).toBe(false);
+
+      vi.advanceTimersByTime(60);
+      await engine.waitForIdle();
+
+      expect(observedSignal?.aborted).toBe(true);
+      expect(abortEvents).toBeGreaterThan(0);
+
+      const resolved = evaluateFormula('=AI("summarize", "hello")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+      expect(resolved).toBe(AI_CELL_ERROR);
+      expect(llmClient.chat).toHaveBeenCalledTimes(1);
+
+      const entries = await auditStore.listEntries({ session_id: "timeout-session" });
+      expect(entries).toHaveLength(1);
+      expect((entries[0]?.input as any)?.error).toContain("timed out");
+      expect(entries[0]?.user_feedback).toBe("rejected");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("cache hit avoids re-calling the LLM", async () => {
     const llmClient = {
       chat: vi.fn(async (_request: any) => ({
