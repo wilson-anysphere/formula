@@ -85,4 +85,42 @@ describe("dev collab encryption toggle", () => {
     expect(decryptedFormula).not.toBeNull();
     expect(decryptedFormula?.formula).toBe("=SUM(1,2)");
   });
+
+  it("can resolve a sheet display name to a stable sheet id when provided a resolver", async () => {
+    const docId = "doc-dev-encryption-sheetname";
+    const doc = new Y.Doc();
+
+    const encryption = resolveDevCollabEncryptionFromSearch({
+      search: "?collabEncrypt=1&collabEncryptRange=Display!A1:A1",
+      docId,
+      defaultSheetId: "s1",
+      resolveSheetIdByName: (name) => (name === "Display" ? "s1" : null),
+    });
+    expect(encryption).not.toBeNull();
+
+    const sessionWithKey = createCollabSession({
+      docId,
+      doc,
+      encryption: encryption!,
+      schema: { defaultSheetId: "s1", defaultSheetName: "Display" },
+    });
+
+    const a1 = makeCellKey({ sheetId: "s1", row: 0, col: 0 });
+    await sessionWithKey.setCellValue(a1, "secret");
+
+    const yA1 = sessionWithKey.cells.get(a1) as any;
+    expect(yA1?.get("enc")).toBeTruthy();
+    expect(yA1?.get("value")).toBeUndefined();
+    expect(yA1?.get("formula")).toBeUndefined();
+
+    const sessionWithoutKey = createCollabSession({
+      docId,
+      doc,
+      schema: { defaultSheetId: "s1", defaultSheetName: "Display" },
+    });
+    const masked = await sessionWithoutKey.getCell(a1);
+    expect(masked).not.toBeNull();
+    expect(masked?.value).toBe("###");
+    expect(masked?.encrypted).toBe(true);
+  });
 });

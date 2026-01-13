@@ -916,6 +916,7 @@ export class SpreadsheetApp {
               search: window.location.search,
               docId: collab.docId,
               defaultSheetId: this.sheetId,
+              resolveSheetIdByName: (name) => this.sheetNameResolver?.getSheetIdByName(name) ?? null,
             })
           : null;
 

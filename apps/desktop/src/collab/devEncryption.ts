@@ -37,10 +37,23 @@ function parseBooleanFlag(raw: string | null): boolean {
   return false;
 }
 
-export function parseDevEncryptionRange(rangeRef: string, options: { defaultSheetId?: string } = {}): DevEncryptionRange | null {
+export function parseDevEncryptionRange(
+  rangeRef: string,
+  options: { defaultSheetId?: string; resolveSheetIdByName?: (name: string) => string | null } = {}
+): DevEncryptionRange | null {
   const parsed = parseA1Range(rangeRef);
   if (!parsed) return null;
-  const sheetId = String(parsed.sheetName ?? options.defaultSheetId ?? "Sheet1").trim();
+  const rawSheetName = String(parsed.sheetName ?? options.defaultSheetId ?? "Sheet1").trim();
+  if (!rawSheetName) return null;
+  // `parseA1Range` yields a user-facing sheet name (the identifier used in formulas).
+  // Collab cell keys use a stable sheet id. When a resolver is provided, map the
+  // display name to the id so `collabEncryptRange=My Sheet!A1:C10` works even when
+  // sheet ids differ from names.
+  const resolvedSheetId =
+    parsed.sheetName && typeof options.resolveSheetIdByName === "function"
+      ? options.resolveSheetIdByName(rawSheetName)
+      : null;
+  const sheetId = String(resolvedSheetId ?? rawSheetName).trim();
   if (!sheetId) return null;
   return {
     sheetId,
@@ -113,6 +126,7 @@ export function resolveDevCollabEncryptionFromParams(opts: {
   docId: string;
   defaultSheetId?: string;
   defaultRangeRef?: string;
+  resolveSheetIdByName?: (name: string) => string | null;
 }): NonNullable<CollabSessionOptions["encryption"]> | null {
   const enabled = parseBooleanFlag(opts.params.get(DEV_COLLAB_ENCRYPT_PARAM));
   if (!enabled) return null;
@@ -121,9 +135,9 @@ export function resolveDevCollabEncryptionFromParams(opts: {
   const defaultRangeRef = opts.defaultRangeRef ?? DEFAULT_DEV_COLLAB_ENCRYPT_RANGE;
   const rangeRef = opts.params.get(DEV_COLLAB_ENCRYPT_RANGE_PARAM) ?? defaultRangeRef;
 
-  let range = parseDevEncryptionRange(rangeRef, { defaultSheetId });
+  let range = parseDevEncryptionRange(rangeRef, { defaultSheetId, resolveSheetIdByName: opts.resolveSheetIdByName });
   if (!range && rangeRef !== defaultRangeRef) {
-    range = parseDevEncryptionRange(defaultRangeRef, { defaultSheetId });
+    range = parseDevEncryptionRange(defaultRangeRef, { defaultSheetId, resolveSheetIdByName: opts.resolveSheetIdByName });
   }
   if (!range) return null;
 
@@ -135,6 +149,7 @@ export function resolveDevCollabEncryptionFromSearch(opts: {
   docId: string;
   defaultSheetId?: string;
   defaultRangeRef?: string;
+  resolveSheetIdByName?: (name: string) => string | null;
 }): NonNullable<CollabSessionOptions["encryption"]> | null {
   const raw = opts.search.startsWith("?") ? opts.search.slice(1) : opts.search;
   const params = new URLSearchParams(raw);
@@ -143,5 +158,6 @@ export function resolveDevCollabEncryptionFromSearch(opts: {
     docId: opts.docId,
     defaultSheetId: opts.defaultSheetId,
     defaultRangeRef: opts.defaultRangeRef,
+    resolveSheetIdByName: opts.resolveSheetIdByName,
   });
 }
