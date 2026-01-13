@@ -29,6 +29,35 @@ class FakeDoc extends EventEmitter {
   }
 }
 
+class InMemoryVersionStore {
+  constructor() {
+    /** @type {Map<string, any>} */
+    this._versions = new Map();
+    /** @type {string[]} */
+    this._order = [];
+  }
+
+  async saveVersion(version) {
+    if (!this._versions.has(version.id)) this._order.push(version.id);
+    this._versions.set(version.id, version);
+  }
+  async getVersion(versionId) {
+    return this._versions.get(versionId) ?? null;
+  }
+  async listVersions() {
+    return this._order.map((id) => this._versions.get(id)).filter(Boolean);
+  }
+  async updateVersion(versionId, patch) {
+    const existing = this._versions.get(versionId);
+    if (!existing) throw new Error(`Version not found: ${versionId}`);
+    this._versions.set(versionId, { ...existing, ...patch });
+  }
+  async deleteVersion(versionId) {
+    this._versions.delete(versionId);
+    this._order = this._order.filter((id) => id !== versionId);
+  }
+}
+
 test("VersionManager: checkpoint, edit, compare snapshots, restore creates new head without destroying history", async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "versioning-"));
   const storePath = path.join(tmpDir, "versions.json");
@@ -64,3 +93,54 @@ test("VersionManager: checkpoint, edit, compare snapshots, restore creates new h
   assert.equal(versionsReloaded.length, 3);
 });
 
+test("VersionManager.destroy unsubscribes from doc updates (doc.off path)", () => {
+  const doc = new FakeDoc();
+  const store = new InMemoryVersionStore();
+  const vm = new VersionManager({ doc, store, autoStart: false });
+
+  assert.equal(vm.dirty, false);
+  doc.setCell("r0c0", { value: 1 });
+  assert.equal(vm.dirty, true);
+
+  vm.dirty = false;
+  vm.destroy();
+
+  doc.setCell("r0c1", { value: 2 });
+  assert.equal(vm.dirty, false);
+});
+
+test("VersionManager.destroy unsubscribes from doc updates (unsubscribe-returning doc.on path)", () => {
+  class UnsubscribableDoc {
+    constructor() {
+      /** @type {Set<() => void>} */
+      this.listeners = new Set();
+    }
+    encodeState() {
+      return new Uint8Array();
+    }
+    applyState(_snapshot) {}
+    on(event, listener) {
+      if (event !== "update") throw new Error(`unsupported event: ${event}`);
+      this.listeners.add(listener);
+      return () => this.listeners.delete(listener);
+    }
+    emitUpdate() {
+      for (const listener of Array.from(this.listeners)) listener();
+    }
+  }
+
+  const doc = new UnsubscribableDoc();
+  const store = new InMemoryVersionStore();
+  const vm = new VersionManager({ doc, store, autoStart: false });
+
+  assert.equal(doc.listeners.size, 1);
+  doc.emitUpdate();
+  assert.equal(vm.dirty, true);
+
+  vm.dirty = false;
+  vm.destroy();
+  assert.equal(doc.listeners.size, 0);
+
+  doc.emitUpdate();
+  assert.equal(vm.dirty, false);
+});
