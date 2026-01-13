@@ -26,7 +26,7 @@
 .query-editor-container__engine-warning {
   padding: 12px;
   color: var(--text-muted);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--panel-border);
 }
 
 .query-editor-container__toolbar {
@@ -229,7 +229,8 @@
   font-size: 12px;
   background: var(--bg-tertiary);
   padding: 2px 6px;
-  border-radius: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
 }
 
 .query-editor-steps__title {
@@ -247,19 +248,34 @@
 .query-editor-steps__button {
   width: 100%;
   text-align: start;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   padding: 6px 8px;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
 }
 
 .query-editor-steps__button:hover {
   background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.query-editor-steps__button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
 .query-editor-steps__button--selected {
   background: var(--selection-bg);
+  border-color: var(--selection-border);
+  color: var(--selection-text);
 }
 
 .query-editor-add-step {
