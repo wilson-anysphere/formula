@@ -25,6 +25,9 @@ from .util import (
 from xml.etree import ElementTree as ET
 
 
+MAX_DIFF_ENTRIES_AUTO_RERUN = 200_000
+
+
 def _relationship_id_from_diff_path(path: str) -> str | None:
     """Extract `rId...` relationship ids from xlsx-diff XML paths.
 
@@ -94,11 +97,10 @@ def _ensure_full_diff_entries(
     has_part_summaries = isinstance(details.get("parts_with_diffs"), list) and isinstance(
         details.get("critical_parts"), list
     )
-    max_auto_rerun = 200_000
     if (
         not has_part_summaries
         and isinstance(total, int)
-        and 0 <= total <= max_auto_rerun
+        and 0 <= total <= MAX_DIFF_ENTRIES_AUTO_RERUN
         and len(diffs) < total
     ):
         rust_out = triage_mod._run_rust_triage(  # noqa: SLF001 (internal reuse)
@@ -185,6 +187,7 @@ def minimize_workbook(
     diff_ignore: set[str],
     diff_limit: int,
     compute_part_hashes: bool = True,
+    compute_rels_ids: bool = True,
 ) -> dict[str, Any]:
     rust_out, diff_details, diffs = _ensure_full_diff_entries(
         rust_exe,
@@ -209,6 +212,8 @@ def minimize_workbook(
     per_part_counts: dict[str, dict[str, int]] | None = None
     critical_parts: list[str] | None = None
     rels_ids: dict[str, list[str]] = {}
+    parts_with_diffs_out: list[dict[str, Any]] = []
+    part_groups: dict[str, str] = {}
     parts_with_diffs = diff_details.get("parts_with_diffs")
     if isinstance(parts_with_diffs, list):
         parsed: dict[str, dict[str, int]] = {}
@@ -218,12 +223,25 @@ def minimize_workbook(
             part = entry.get("part")
             if not isinstance(part, str) or not part:
                 continue
+            group = entry.get("group")
+            group_str = group if isinstance(group, str) and group else "other"
+            part_groups[part] = group_str
             parsed[part] = {
                 "critical": int(entry.get("critical") or 0),
                 "warning": int(entry.get("warning") or 0),
                 "info": int(entry.get("info") or 0),
                 "total": int(entry.get("total") or 0),
             }
+            parts_with_diffs_out.append(
+                {
+                    "part": part,
+                    "group": group_str,
+                    "critical": int(entry.get("critical") or 0),
+                    "warning": int(entry.get("warning") or 0),
+                    "info": int(entry.get("info") or 0),
+                    "total": int(entry.get("total") or 0),
+                }
+            )
         per_part_counts = parsed
 
         # `critical_parts` is optional; recompute from counts to keep ordering stable.
@@ -231,9 +249,11 @@ def minimize_workbook(
 
     if per_part_counts is None or critical_parts is None:
         per_part_counts, critical_parts, rels_ids = summarize_differences(diffs)
-    else:
+    elif compute_rels_ids:
         # Relationship Id extraction is best-effort and currently relies on diff paths.
         _unused_counts, _unused_critical, rels_ids = summarize_differences(diffs)
+    else:
+        rels_ids = {}
 
     critical_part_hashes: dict[str, dict[str, Any]] = {}
     critical_part_hashes_error: str | None = None
@@ -250,6 +270,38 @@ def minimize_workbook(
         else 0
     )
     emitted_diffs = len(diffs)
+
+    has_critical_rels = any(p.endswith(".rels") for p in critical_parts)
+
+    # If diff entries were truncated but we have critical relationship diffs, do a bounded rerun to
+    # capture all diff paths and extract complete relationship Ids. This avoids unbounded reruns on
+    # very large workbooks while still producing useful `.rels` metadata for common cases.
+    if (
+        compute_rels_ids
+        and has_critical_rels
+        and 0 < total_diffs <= MAX_DIFF_ENTRIES_AUTO_RERUN
+        and emitted_diffs < total_diffs
+    ):
+        try:
+            rerun_out = triage_mod._run_rust_triage(  # noqa: SLF001 (internal reuse)
+                rust_exe,
+                workbook.data,
+                workbook_name=workbook.display_name,
+                diff_ignore=diff_ignore,
+                diff_limit=total_diffs,
+                recalc=False,
+                render_smoke=False,
+            )
+            rerun_details = _diff_details_from_rust_output(rerun_out)
+            rerun_diffs = rerun_details.get("top_differences") or []
+            if isinstance(rerun_diffs, list):
+                _unused_counts, _unused_critical, rels_ids = summarize_differences(rerun_diffs)
+                emitted_diffs = len(rerun_diffs)
+                if isinstance(rerun_details.get("counts"), dict):
+                    total_diffs = int(rerun_details["counts"].get("total") or total_diffs)
+        except Exception:
+            # Fall back to the partial set extracted from the first run.
+            pass
 
     out: dict[str, Any] = {
         "display_name": workbook.display_name,
@@ -272,7 +324,10 @@ def minimize_workbook(
         "diff_entries_truncated": emitted_diffs < total_diffs,
         "critical_parts": critical_parts,
         "part_counts": per_part_counts,
+        "parts_with_diffs": parts_with_diffs_out,
+        "part_groups": part_groups,
         "rels_critical_ids": rels_ids,
+        "rels_critical_ids_complete": (not has_critical_rels) or emitted_diffs >= total_diffs,
         "critical_part_hashes": critical_part_hashes,
     }
 
@@ -561,6 +616,7 @@ def minimize_workbook_package(
             diff_ignore=diff_ignore,
             diff_limit=diff_limit,
             compute_part_hashes=False,
+            compute_rels_ids=False,
         )
 
         trial_open_ok = trial_summary.get("open_ok") is True

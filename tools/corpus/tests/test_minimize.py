@@ -181,6 +181,7 @@ class CorpusMinimizeTests(unittest.TestCase):
         self.assertEqual(calls, [1])
         self.assertEqual(summary["critical_parts"], ["xl/workbook.xml"])
         self.assertEqual(summary["part_counts"]["xl/theme/theme1.xml"]["warning"], 1)
+        self.assertTrue(any(p["part"] == "xl/theme/theme1.xml" for p in summary["parts_with_diffs"]))
 
     def test_minimize_workbook_includes_critical_part_hashes(self) -> None:
         buf = io.BytesIO()
