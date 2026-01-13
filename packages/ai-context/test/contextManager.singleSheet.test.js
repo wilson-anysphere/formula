@@ -38,6 +38,66 @@ test("buildContext: repeated calls with identical data do not re-index the sheet
   assert.equal(out2.retrieved[0].range, out1.retrieved[0].range);
 });
 
+test("buildContext: cacheSheetIndex=false re-indexes even when the sheet is unchanged", async () => {
+  const ragIndex = new RagIndex();
+  let indexCalls = 0;
+  const originalIndexSheet = ragIndex.indexSheet.bind(ragIndex);
+  ragIndex.indexSheet = async (...args) => {
+    indexCalls++;
+    return originalIndexSheet(...args);
+  };
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1000, ragIndex, cacheSheetIndex: false });
+  const sheet = makeSheet([
+    ["Region", "Revenue"],
+    ["North", 1000],
+    ["South", 2000],
+  ]);
+
+  await cm.buildContext({ sheet, query: "revenue by region" });
+  await cm.buildContext({ sheet, query: "revenue by region" });
+
+  assert.equal(indexCalls, 2);
+});
+
+test("buildContext: switching sheet.origin forces re-indexing for the active store", async () => {
+  const ragIndex = new RagIndex();
+  let indexCalls = 0;
+  const originalIndexSheet = ragIndex.indexSheet.bind(ragIndex);
+  ragIndex.indexSheet = async (...args) => {
+    indexCalls++;
+    return originalIndexSheet(...args);
+  };
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1000, ragIndex });
+
+  const baseValues = [
+    ["Region"],
+    ["North"],
+    ["South"],
+  ];
+
+  const sheetOrigin0 = { name: "Sheet1", origin: { row: 0, col: 0 }, values: baseValues };
+  const out0 = await cm.buildContext({ sheet: sheetOrigin0, query: "north" });
+  assert.equal(indexCalls, 1);
+  assert.equal(out0.retrieved[0].range, "Sheet1!A1:A3");
+
+  const sheetOrigin10 = { name: "Sheet1", origin: { row: 10, col: 0 }, values: baseValues };
+  const out10 = await cm.buildContext({ sheet: sheetOrigin10, query: "north" });
+  assert.equal(indexCalls, 2);
+  assert.equal(out10.retrieved[0].range, "Sheet1!A11:A13");
+
+  // Same origin again => cache hit (no re-index).
+  await cm.buildContext({ sheet: sheetOrigin10, query: "south" });
+  assert.equal(indexCalls, 2);
+
+  // Switching back to the previous origin requires re-indexing because the underlying
+  // store can only hold one set of chunks per sheet name prefix at a time.
+  const out0b = await cm.buildContext({ sheet: sheetOrigin0, query: "north" });
+  assert.equal(indexCalls, 3);
+  assert.equal(out0b.retrieved[0].range, "Sheet1!A1:A3");
+});
+
 test("buildContext: mutated sheet data triggers re-indexing and updates stored chunks", async () => {
   const ragIndex = new RagIndex();
   let indexCalls = 0;
