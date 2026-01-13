@@ -136,6 +136,58 @@ describe("ToolExecutor DLP enforcement", () => {
     expect(event.decision?.decision).toBe("redact");
   });
 
+  it("read_range does not leak object-valued restricted cells when policy allows redaction", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "ok" });
+    workbook.setCell(parseA1Cell("Sheet1!B1"), { value: { secret: "TopSecret" } as any });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true,
+            },
+          },
+        },
+        classification_records: [
+          {
+            selector: {
+              scope: CLASSIFICATION_SCOPE.CELL,
+              documentId: "doc-1",
+              sheetId: "Sheet1",
+              row: 0,
+              col: 1,
+            },
+            classification: { level: "Restricted", labels: [] },
+          },
+        ],
+        audit_logger,
+      },
+    });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:B1", include_formulas: true },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.values).toEqual([["ok", "[REDACTED]"]]);
+    expect(result.data?.formulas).toEqual([[null, "[REDACTED]"]]);
+
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("TopSecret");
+  });
+
   it("read_range redacts restricted cells even when the tool call uses a display sheet name", async () => {
     const workbook = new InMemoryWorkbook(["Sheet2"]);
     workbook.setCell(parseA1Cell("Sheet2!A1"), { value: "ok" });
