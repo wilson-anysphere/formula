@@ -100,21 +100,21 @@ def load_expected_mime_types(tauri_config_path: Path) -> set[str]:
     return expected
 
 
-def find_desktop_files(deb_root: Path) -> list[Path]:
+def find_desktop_files(package_root: Path) -> list[Path]:
     candidates: list[Path] = []
     for rel in (
         Path("usr/share/applications"),
         Path("usr/local/share/applications"),
         Path("share/applications"),
     ):
-        app_dir = deb_root / rel
+        app_dir = package_root / rel
         if not app_dir.is_dir():
             continue
         candidates.extend(sorted(app_dir.glob("*.desktop")))
     if candidates:
         return candidates
     # Fallback: anything in the extracted root.
-    return sorted(deb_root.rglob("*.desktop"))
+    return sorted(package_root.rglob("*.desktop"))
 
 
 def parse_desktop_entry(path: Path) -> tuple[set[str], str]:
@@ -137,10 +137,12 @@ def exec_accepts_file_arg(exec_line: str) -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--deb-root",
-        required=True,
+        "--package-root",
+        "--deb-root",  # backwards-compat (older workflow/scripts)
+        dest="package_root",
         type=Path,
-        help="Path to extracted .deb root (dpkg-deb -x output directory)",
+        required=True,
+        help="Path to extracted Linux package root (dpkg-deb -x output directory or rpm2cpio output directory)",
     )
     parser.add_argument(
         "--tauri-config",
@@ -163,22 +165,21 @@ def main() -> int:
             raise SystemExit("--url-scheme must be non-empty")
         expected_schemes = {expected_scheme}
     expected_scheme_mimes = {f"x-scheme-handler/{scheme}" for scheme in expected_schemes}
-    desktop_files = find_desktop_files(args.deb_root)
+    desktop_files = find_desktop_files(args.package_root)
     if not desktop_files:
-        print(f"[linux] ERROR: no .desktop files found under {args.deb_root}", file=sys.stderr)
+        print(f"[linux] ERROR: no .desktop files found under {args.package_root}", file=sys.stderr)
         return 1
 
     observed_mime_types: set[str] = set()
-    exec_lines: list[str] = []
+    desktop_entries: list[tuple[Path, set[str], str]] = []
 
-    print(f"[linux] Extracted deb root: {args.deb_root}")
+    print(f"[linux] Extracted package root: {args.package_root}")
     print("[linux] Desktop files:")
 
     for desktop_file in desktop_files:
         mime_types, exec_line = parse_desktop_entry(desktop_file)
         observed_mime_types |= mime_types
-        if exec_line:
-            exec_lines.append(exec_line)
+        desktop_entries.append((desktop_file, mime_types, exec_line))
         print(f"[linux] - {desktop_file}")
         print(f"[linux]   Exec={exec_line!r}")
         print(f"[linux]   MimeType entries ({len(mime_types)}): {_format_set(mime_types)}")
@@ -205,16 +206,58 @@ def main() -> int:
         )
         return 1
 
-    if not exec_lines:
-        print("[linux] ERROR: no Exec= entries found in .desktop files", file=sys.stderr)
-        return 1
-
-    if not any(exec_accepts_file_arg(exec_line) for exec_line in exec_lines):
+    file_assoc_entries = [
+        (path, exec_line)
+        for (path, mime_types, exec_line) in desktop_entries
+        if mime_types & expected_mime_types
+    ]
+    if not file_assoc_entries:
         print(
-            "[linux] ERROR: no .desktop Exec= entries include a file/URL placeholder (%u/%U/%f/%F)",
+            "[linux] ERROR: no .desktop files advertise any expected file-association MIME types",
             file=sys.stderr,
         )
-        print(f"[linux] Observed Exec lines: {_format_set(exec_lines)}", file=sys.stderr)
+        return 1
+
+    bad_file_assoc_exec = [
+        f"{path} Exec={exec_line!r}"
+        for (path, exec_line) in file_assoc_entries
+        if not exec_accepts_file_arg(exec_line)
+    ]
+    if bad_file_assoc_exec:
+        print(
+            "[linux] ERROR: .desktop file(s) that advertise file associations must include a file/URL placeholder in Exec= (%u/%U/%f/%F)",
+            file=sys.stderr,
+        )
+        print("[linux] Offending entries:", file=sys.stderr)
+        for line in bad_file_assoc_exec:
+            print(f"[linux] - {line}", file=sys.stderr)
+        return 1
+
+    scheme_entries = [
+        (path, exec_line)
+        for (path, mime_types, exec_line) in desktop_entries
+        if mime_types & expected_scheme_mimes
+    ]
+    if not scheme_entries:
+        print(
+            "[linux] ERROR: no .desktop files advertise the expected x-scheme-handler MIME types",
+            file=sys.stderr,
+        )
+        return 1
+
+    bad_scheme_exec = [
+        f"{path} Exec={exec_line!r}"
+        for (path, exec_line) in scheme_entries
+        if not exec_accepts_file_arg(exec_line)
+    ]
+    if bad_scheme_exec:
+        print(
+            "[linux] ERROR: .desktop file(s) that advertise x-scheme-handler/* must include a URL placeholder in Exec= (%u/%U/%f/%F)",
+            file=sys.stderr,
+        )
+        print("[linux] Offending entries:", file=sys.stderr)
+        for line in bad_scheme_exec:
+            print(f"[linux] - {line}", file=sys.stderr)
         return 1
 
     return 0

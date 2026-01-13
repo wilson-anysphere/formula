@@ -1537,6 +1537,83 @@ jobs:
           FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES: ${{ needs.validate-version.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '') }}
         run: node scripts/ci/check-desktop-release-artifacts.mjs
 
+      - name: Verify macOS bundle file associations + deep link schemes
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Prefer the universal build output path, but fall back to any `.app` under the bundle dirs.
+          app_path="$(
+            find apps/desktop/src-tauri/target -type d -path '*/release/bundle/macos/*.app' -prune -print 2>/dev/null | head -n 1 || true
+          )"
+          if [[ -z "${app_path}" ]]; then
+            app_path="$(
+              find target -type d -path '*/release/bundle/macos/*.app' -prune -print 2>/dev/null | head -n 1 || true
+            )"
+          fi
+          if [[ -z "${app_path}" ]]; then
+            echo "::error::Could not find a built .app bundle under apps/desktop/src-tauri/target/**/release/bundle/macos" >&2
+            find apps/desktop/src-tauri/target -maxdepth 12 -type d -name '*.app' -print | head -n 20 || true
+            find target -maxdepth 12 -type d -name '*.app' -print | head -n 20 || true
+            exit 1
+          fi
+
+          info_plist="${app_path}/Contents/Info.plist"
+          if [[ ! -f "${info_plist}" ]]; then
+            echo "::error::Missing Info.plist at: ${info_plist}" >&2
+            exit 1
+          fi
+
+          echo "App bundle: ${app_path}"
+          echo "Info.plist: ${info_plist}"
+          echo "::group::plutil -p ${info_plist} (first 200 lines)"
+          plutil -p "${info_plist}" | head -n 200
+          echo "::endgroup::"
+
+          python scripts/ci/verify_macos_bundle_associations.py --info-plist "${info_plist}"
+
+      - name: Verify Linux desktop integration in packages (.deb + .rpm)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          deb="$(find apps/desktop/src-tauri/target target -type f -path '*/release/bundle/deb/*.deb' -print 2>/dev/null | head -n 1 || true)"
+          if [[ -z "${deb}" ]]; then
+            echo "::error::Could not find a .deb under apps/desktop/src-tauri/target/**/release/bundle/deb" >&2
+            find apps/desktop/src-tauri/target -maxdepth 10 -type f -name '*.deb' -print | head -n 20 || true
+            find target -maxdepth 10 -type f -name '*.deb' -print | head -n 20 || true
+            exit 1
+          fi
+
+          echo "Validating .deb desktop integration: ${deb}"
+          tmpdir_deb="$(mktemp -d)"
+          dpkg-deb -x "${deb}" "${tmpdir_deb}"
+          python scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir_deb}"
+
+          rpm_path="$(find apps/desktop/src-tauri/target target -type f -path '*/release/bundle/rpm/*.rpm' -print 2>/dev/null | head -n 1 || true)"
+          if [[ -z "${rpm_path}" ]]; then
+            echo "::error::Could not find a .rpm under apps/desktop/src-tauri/target/**/release/bundle/rpm" >&2
+            find apps/desktop/src-tauri/target -maxdepth 10 -type f -name '*.rpm' -print | head -n 20 || true
+            find target -maxdepth 10 -type f -name '*.rpm' -print | head -n 20 || true
+            exit 1
+          fi
+
+          if ! command -v rpm2cpio >/dev/null 2>&1; then
+            echo "::error::rpm2cpio is required to extract .rpm artifacts for validation (missing on PATH)" >&2
+            exit 1
+          fi
+          if ! command -v cpio >/dev/null 2>&1; then
+            echo "::error::cpio is required to extract .rpm artifacts for validation (missing on PATH)" >&2
+            exit 1
+          fi
+
+          echo "Validating .rpm desktop integration: ${rpm_path}"
+          tmpdir_rpm="$(mktemp -d)"
+          (cd "${tmpdir_rpm}" && rpm2cpio "${rpm_path}" | cpio -idm --quiet --no-absolute-filenames)
+          python scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir_rpm}"
+
       - name: Smoke test Linux .deb install in clean Ubuntu container
         if: matrix.platform == 'ubuntu-24.04'
         run: bash scripts/ci/linux-package-install-smoke.sh deb

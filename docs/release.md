@@ -938,21 +938,28 @@ integration metadata made it into the final bundles (not just `tauri.conf.json`)
 - macOS: `CFBundleDocumentTypes` includes `.xlsx`/`.csv`/`.parquet` (etc) and
   `CFBundleURLTypes` includes the `formula` scheme.
 - Linux: the installed `.desktop` file advertises the expected `MimeType=` list
-  and has an `Exec=` placeholder so double-click open passes a path/URL.
+  (including `x-scheme-handler/formula` for deep links) and has an `Exec=`
+  placeholder so double-click open passes a path/URL.
 
 You can run the same checks locally after building:
 
 ```bash
 # macOS
-app="$(find apps/desktop/src-tauri/target/release/bundle/macos -maxdepth 2 -name '*.app' -print -quit)"
+app="$(find apps/desktop/src-tauri/target -type d -path '*/release/bundle/macos/*.app' -prune -print -quit)"
 plutil -p "$app/Contents/Info.plist" | head -n 200
 python scripts/ci/verify_macos_bundle_associations.py --info-plist "$app/Contents/Info.plist"
 
 # Linux (.deb)
-deb="$(find apps/desktop/src-tauri/target/release/bundle/deb -maxdepth 1 -name '*.deb' -print -quit)"
+deb="$(find apps/desktop/src-tauri/target -type f -path '*/release/bundle/deb/*.deb' -print -quit)"
 tmpdir="$(mktemp -d)"
 dpkg-deb -x "$deb" "$tmpdir"
-python scripts/ci/verify_linux_desktop_integration.py --deb-root "$tmpdir"
+python scripts/ci/verify_linux_desktop_integration.py --package-root "$tmpdir"
+
+# Linux (.rpm)
+rpm="$(find apps/desktop/src-tauri/target -type f -path '*/release/bundle/rpm/*.rpm' -print -quit)"
+tmpdir_rpm="$(mktemp -d)"
+(cd "$tmpdir_rpm" && rpm2cpio "$rpm" | cpio -idm --quiet --no-absolute-filenames)
+python scripts/ci/verify_linux_desktop_integration.py --package-root "$tmpdir_rpm"
 ```
 
 CI note: tagged releases run this check on macOS/Windows/Linux before uploading artifacts. If you need to temporarily skip the
