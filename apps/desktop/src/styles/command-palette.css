@@ -13,7 +13,10 @@
   justify-content: center;
   background: var(--dialog-backdrop);
   z-index: 1000;
-  padding: 80px 16px 16px;
+  /* Keep the palette reachable in short windows while preserving the
+     familiar "slightly below the top chrome" placement in tall ones. */
+  padding: clamp(16px, 10vh, 80px) 16px 16px;
+  overflow-y: auto;
 }
 
 .command-palette-overlay[hidden] {

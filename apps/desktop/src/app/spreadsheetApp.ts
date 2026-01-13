@@ -2770,6 +2770,17 @@ export class SpreadsheetApp {
     const focus = opts.focus ?? true;
     const replaceSelection = opts.replaceSelection ?? true;
     const cursorOffset = opts.cursorOffset ?? text.length;
+    const focusTextarea = (textarea: HTMLTextAreaElement): void => {
+      // The formula bar textarea is `display: none` while not editing. When we insert text
+      // programmatically we may focus before the view's next render frame toggles the
+      // `formula-bar--editing` class, so eagerly add the class to make focus reliable.
+      bar.root.classList.add("formula-bar--editing");
+      try {
+        textarea.focus({ preventScroll: true });
+      } catch {
+        textarea.focus();
+      }
+    };
 
     // If the user isn't already editing the formula bar, treat insertion as a full
     // replacement (Excel-esque "start editing with this template").
@@ -2786,7 +2797,7 @@ export class SpreadsheetApp {
       const cursor = Math.max(0, Math.min(cursorOffset, textarea.value.length));
       textarea.setSelectionRange(cursor, cursor);
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
-      if (focus) textarea.focus();
+      if (focus) focusTextarea(textarea);
       return;
     }
 
@@ -2814,7 +2825,7 @@ export class SpreadsheetApp {
     const cursor = Math.max(0, Math.min(insertAt + effectiveCursorOffset, textarea.value.length));
     textarea.setSelectionRange(cursor, cursor);
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
-    if (focus) textarea.focus();
+    if (focus) focusTextarea(textarea);
   }
 
   async whenIdle(): Promise<void> {
