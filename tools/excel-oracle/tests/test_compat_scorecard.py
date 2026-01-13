@@ -88,6 +88,73 @@ class CompatScorecardTests(unittest.TestCase):
             self.assertEqual(payload["metrics"]["l2Calculate"]["passes"], 999)
             self.assertEqual(payload["metrics"]["l2Calculate"]["mismatches"], 1)
 
+    def test_falls_back_to_counts_when_rates_are_missing(self) -> None:
+        scorecard_py = Path(__file__).resolve().parents[2] / "compat_scorecard.py"
+        self.assertTrue(scorecard_py.is_file(), f"compat_scorecard.py not found at {scorecard_py}")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            corpus_path = tmp_path / "corpus-summary.json"
+            oracle_path = tmp_path / "mismatch-report.json"
+            out_md = tmp_path / "scorecard.md"
+
+            # Deliberately omit `rates` to ensure the generator recomputes rates from counts.
+            corpus_payload = {
+                "timestamp": "unit-test",
+                "counts": {
+                    "total": 10,
+                    "open_ok": 8,
+                    "calculate_ok": 10,
+                    "render_ok": 10,
+                    "round_trip_ok": 7,
+                },
+            }
+            corpus_path.write_text(
+                json.dumps(corpus_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            # Deliberately omit `mismatchRate` to ensure the generator recomputes it from
+            # mismatches/totalCases.
+            oracle_payload = {
+                "schemaVersion": 1,
+                "summary": {
+                    "totalCases": 100,
+                    "mismatches": 5,
+                },
+            }
+            oracle_path.write_text(
+                json.dumps(oracle_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(scorecard_py),
+                    "--corpus-summary",
+                    str(corpus_path),
+                    "--oracle-report",
+                    str(oracle_path),
+                    "--out-md",
+                    str(out_md),
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+            if proc.returncode != 0:
+                self.fail(
+                    f"compat_scorecard.py exited {proc.returncode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+                )
+
+            md = out_md.read_text(encoding="utf-8")
+            self.assertIn("| L1 | Read (corpus open) | FAIL | 80.00% | 8 / 10 |", md)
+            self.assertIn("| L2 | Calculate (Excel oracle) | FAIL | 95.00% | 95 / 100 |", md)
+            self.assertIn("| L4 | Round-trip (corpus) | FAIL | 70.00% | 7 / 10 |", md)
+
     def test_missing_inputs_exits_nonzero(self) -> None:
         scorecard_py = Path(__file__).resolve().parents[2] / "compat_scorecard.py"
         self.assertTrue(scorecard_py.is_file(), f"compat_scorecard.py not found at {scorecard_py}")
@@ -164,4 +231,3 @@ class CompatScorecardTests(unittest.TestCase):
             md = out_md.read_text(encoding="utf-8")
             self.assertIn("Excel-oracle mismatch report: **MISSING**", md)
             self.assertIn("| L2 | Calculate (Excel oracle) | MISSING |", md)
-
