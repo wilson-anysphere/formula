@@ -169,6 +169,37 @@ function heapReplaceMin(heap, item) {
 }
 
 /**
+ * Sample `sampleSize` indices in `[0, total)` without replacement.
+ *
+ * Uses Floyd's algorithm (O(sampleSize) expected) and returns sorted indices.
+ *
+ * @param {number} total
+ * @param {number} sampleSize
+ * @param {() => number} rng
+ * @returns {number[]}
+ */
+function sampleIndicesFloyd(total, sampleSize, rng) {
+  if (!Number.isInteger(total) || total < 0) throw new Error(`total must be a non-negative integer, got: ${total}`);
+  if (!Number.isInteger(sampleSize) || sampleSize < 0) {
+    throw new Error(`sampleSize must be a non-negative integer, got: ${sampleSize}`);
+  }
+
+  if (sampleSize === 0 || total === 0) return [];
+  if (sampleSize >= total) return Array.from({ length: total }, (_, i) => i);
+
+  const selected = new Set();
+  for (let j = total - sampleSize; j < total; j++) {
+    const t = Math.floor(rng() * (j + 1));
+    if (selected.has(t)) selected.add(j);
+    else selected.add(t);
+  }
+
+  const out = Array.from(selected);
+  out.sort((a, b) => a - b);
+  return out;
+}
+
+/**
  * Select `sampleSize` unique stratum keys with probability proportional to stratum size
  * (weighted sampling without replacement) without constructing an O(totalRows) helper array.
  *
@@ -285,34 +316,32 @@ export function stratifiedSampleRows(rows, sampleSize, options) {
     }
   }
 
-  /** @type {Map<string, { k: number, seen: number, reservoir: number[] }>} */
-  const reservoirs = new Map();
-  for (const [key, k] of allocation.entries()) {
-    if (k > 0) reservoirs.set(key, { k, seen: 0, reservoir: [] });
+  /** @type {Map<string, { positions: number[], next: number, seen: number }>} */
+  const plans = new Map();
+  for (const [key, count] of strata.entries()) {
+    const k = allocation.get(key) ?? 0;
+    if (k <= 0) continue;
+    plans.set(key, { positions: sampleIndicesFloyd(count, Math.min(k, count), rng), next: 0, seen: 0 });
   }
 
-  // Second pass: per-stratum reservoir sampling of global row indices.
-  for (let i = 0; i < rows.length; i++) {
-    const key = getStratum(rows[i]);
-    const state = reservoirs.get(key);
-    if (!state) continue;
-
-    const seen = state.seen;
-    if (seen < state.k) {
-      state.reservoir.push(i);
-      state.seen = seen + 1;
-      continue;
-    }
-
-    const j = Math.floor(rng() * (seen + 1));
-    if (j < state.k) state.reservoir[j] = i;
-    state.seen = seen + 1;
-  }
-
+  // Second pass: select the planned indices for each stratum while streaming through the rows.
   /** @type {number[]} */
   const sampledIndices = [];
-  for (const state of reservoirs.values()) {
-    for (const idx of state.reservoir) sampledIndices.push(idx);
+  for (let i = 0; i < rows.length; i++) {
+    const key = getStratum(rows[i]);
+    const plan = plans.get(key);
+    if (!plan) continue;
+
+    if (plan.next < plan.positions.length && plan.seen === plan.positions[plan.next]) {
+      sampledIndices.push(i);
+      plan.next++;
+      if (plan.next >= plan.positions.length) {
+        plans.delete(key);
+        continue;
+      }
+    }
+
+    plan.seen++;
   }
 
   sampledIndices.sort((a, b) => a - b);
