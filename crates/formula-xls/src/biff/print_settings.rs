@@ -17,6 +17,12 @@ const RECORD_WSBOOL: u16 = 0x0081;
 // WSBOOL [MS-XLS] stores miscellaneous sheet flags, including `fFitToPage`.
 const WSBOOL_OPTION_FIT_TO_PAGE: u16 = 0x0100;
 
+// WSBOOL options.
+//
+// In BIFF8 WSBOOL.fFitToPage controls whether SETUP.iFitWidth/iFitHeight apply. When unset, Excel
+// uses SETUP.iScale percent scaling instead.
+const WSBOOL_OPTION_FIT_TO_PAGE: u16 = 0x0100;
+
 // SETUP grbit flags.
 //
 // In BIFF8, SETUP.grbit bit 1 is `fPortrait`:
@@ -119,7 +125,7 @@ pub(crate) fn parse_biff_sheet_print_settings(
                 // fFitToPage: bit8 (mask 0x0100)
                 if data.len() < 2 {
                     out.warnings.push(format!(
-                        "truncated WSBOOL record at offset {} (len={}, expected >=2)",
+                        "truncated WSBOOL record at offset {} (expected >=2 bytes, got {})",
                         record.offset,
                         data.len()
                     ));
@@ -143,18 +149,15 @@ pub(crate) fn parse_biff_sheet_print_settings(
     let fit_to_page = wsbool_fit_to_page.unwrap_or_else(|| {
         setup_fit_width.unwrap_or(0) != 0 || setup_fit_height.unwrap_or(0) != 0
     });
+
+    // WSBOOL.fFitToPage can imply non-default scaling even when SETUP is missing. Treat it as a
+    // signal that print settings exist so downstream import paths can preserve FitTo mode.
     if saw_any_record || fit_to_page {
         if fit_to_page {
-            if let (Some(width), Some(height)) = (setup_fit_width, setup_fit_height) {
-                page_setup.scaling = Scaling::FitTo { width, height };
-            } else {
-                // Some `.xls` writers omit SETUP even when fit-to-page is enabled; preserve
-                // the mode as best-effort.
-                page_setup.scaling = Scaling::FitTo {
-                    width: 0,
-                    height: 0,
-                };
-            }
+            page_setup.scaling = match (setup_fit_width, setup_fit_height) {
+                (Some(width), Some(height)) => Scaling::FitTo { width, height },
+                _ => Scaling::FitTo { width: 0, height: 0 },
+            };
         } else {
             let scale = setup_scale.unwrap_or(100);
             page_setup.scaling = Scaling::Percent(if scale == 0 { 100 } else { scale });

@@ -1106,6 +1106,58 @@ fn build_page_setup_sanitized_sheet_name_sheet_stream(xf_cell: u16) -> Vec<u8> {
     sheet
 }
 
+/// Build a BIFF8 `.xls` fixture with worksheet page setup records designed to exercise print
+/// settings record-order merging:
+///
+/// - LEFT/RIGHT/TOP/BOTTOMMARGIN records appear **before** SETUP.
+/// - The margin records set left/right/top/bottom to non-default values.
+/// - SETUP sets header/footer margins plus paper/orientation/scaling fields.
+pub fn build_page_setup_margins_before_setup_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_page_setup_margins_before_setup_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture that sets WSBOOL.fFitToPage=1 and includes a SETUP record with both
+/// iScale and iFitWidth/iFitHeight populated (non-default).
+pub fn build_page_setup_scaling_fit_to_page_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_page_setup_scaling_fit_to_page_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture that sets WSBOOL.fFitToPage=0 and includes a SETUP record with both
+/// iScale and iFitWidth/iFitHeight populated (non-default).
+pub fn build_page_setup_scaling_percent_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_page_setup_scaling_percent_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -1201,6 +1253,121 @@ fn build_custom_paper_size_sheet_stream(xf_cell: u16, paper_size: u16) -> Vec<u8
     // Provide at least one cell so calamine returns a non-empty range.
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
 
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_page_setup_margins_before_setup_workbook_stream() -> Vec<u8> {
+    let xf_general = 16u16;
+    let sheet_stream = build_page_setup_margins_before_setup_sheet_stream(xf_general);
+    build_single_sheet_workbook_stream("PageSetup", &sheet_stream, 1252)
+}
+
+fn build_page_setup_scaling_fit_to_page_workbook_stream() -> Vec<u8> {
+    let xf_general = 16u16;
+    let sheet_stream = build_page_setup_scaling_sheet_stream(xf_general, true);
+    build_single_sheet_workbook_stream("ScaleFitTo", &sheet_stream, 1252)
+}
+
+fn build_page_setup_scaling_percent_workbook_stream() -> Vec<u8> {
+    let xf_general = 16u16;
+    let sheet_stream = build_page_setup_scaling_sheet_stream(xf_general, false);
+    build_single_sheet_workbook_stream("ScalePercent", &sheet_stream, 1252)
+}
+
+fn build_page_setup_margins_before_setup_sheet_stream(xf_general: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Margin records first (record-order precedence test).
+    push_record(&mut sheet, RECORD_LEFTMARGIN, &1.25f64.to_le_bytes());
+    push_record(&mut sheet, RECORD_RIGHTMARGIN, &1.5f64.to_le_bytes());
+    push_record(&mut sheet, RECORD_TOPMARGIN, &2.25f64.to_le_bytes());
+    push_record(&mut sheet, RECORD_BOTTOMMARGIN, &2.5f64.to_le_bytes());
+
+    // SETUP record (header/footer margins + paper/orientation/scaling fields).
+    push_record(
+        &mut sheet,
+        RECORD_SETUP,
+        &setup_record(
+            9,    // A4
+            88,   // non-default percent
+            2,    // fit width
+            3,    // fit height
+            true, // landscape
+            0.25, // header margin
+            0.5,  // footer margin
+        ),
+    );
+
+    // A1: a single General cell so calamine populates a range for the sheet.
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(0, 0, xf_general, 0.0),
+    );
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_page_setup_scaling_sheet_stream(xf_general: u16, fit_to_page: bool) -> Vec<u8> {
+    const WSBOOL_DEFAULT: u16 = 0x0C01;
+
+    let wsbool = if fit_to_page {
+        WSBOOL_DEFAULT | WSBOOL_OPTION_FIT_TO_PAGE
+    } else {
+        WSBOOL_DEFAULT
+    };
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // WSBOOL controls whether `SETUP.iFitWidth/iFitHeight` are honored.
+    push_record(&mut sheet, RECORD_WSBOOL, &wsbool.to_le_bytes());
+
+    push_record(
+        &mut sheet,
+        RECORD_SETUP,
+        &setup_record(
+            1,     // Letter
+            77,    // non-default percent
+            2,     // fit width
+            3,     // fit height
+            false, // portrait
+            0.3,   // header margin
+            0.3,   // footer margin
+        ),
+    );
+
+    // A1: a single General cell so calamine populates a range for the sheet.
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(0, 0, xf_general, 0.0),
+    );
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
 }
