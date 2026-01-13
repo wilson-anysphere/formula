@@ -26,6 +26,13 @@ export class AIAuditRecorder {
   private readonly toolCallIndexById = new Map<string, number>();
 
   readonly entry: AIAuditEntry;
+  /**
+   * Captures any persistence error encountered during `finalize()`.
+   *
+   * `finalize()` is intentionally best-effort (never throws) because it's often
+   * invoked from `finally` blocks in higher-level AI flows.
+   */
+  finalize_error?: string;
 
   constructor(options: AIAuditRecorderOptions) {
     this.store = options.store;
@@ -118,7 +125,12 @@ export class AIAuditRecorder {
     if (this.entry.latency_ms === undefined) {
       this.entry.latency_ms = nowMs() - this.startedAtMs;
     }
-    await this.store.logEntry(this.entry);
+    try {
+      await this.store.logEntry(this.entry);
+    } catch (error) {
+      this.finalize_error = error instanceof Error ? error.message : String(error);
+      return;
+    }
   }
 
   private resolveToolIndex(callIdOrIndex: string | number): number {

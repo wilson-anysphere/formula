@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { AIAuditRecorder } from "../src/recorder.js";
 import { MemoryAIAuditStore } from "../src/memory-store.js";
+import { FailingAIAuditStore } from "./failing-store.js";
 
 describe("AIAuditRecorder", () => {
   it("accumulates token usage, tool call approvals, and persists via the store", async () => {
@@ -43,5 +44,19 @@ describe("AIAuditRecorder", () => {
     });
     expect(entries[0]!.user_feedback).toBe("accepted");
   });
-});
 
+  it("finalize is best-effort (never throws) and records persistence errors", async () => {
+    const store = new FailingAIAuditStore(new Error("persist failed"));
+    const recorder = new AIAuditRecorder({
+      store,
+      session_id: "session-fail",
+      mode: "chat",
+      input: { prompt: "hello" },
+      model: "unit-test-model"
+    });
+
+    await expect(recorder.finalize()).resolves.toBeUndefined();
+    expect(recorder.finalize_error).toBe("persist failed");
+    expect(typeof recorder.entry.latency_ms).toBe("number");
+  });
+});
