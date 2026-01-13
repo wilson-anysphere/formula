@@ -22,20 +22,20 @@ AI integration is not a feature bolted on—it's woven into the fabric of the ap
 │  AUTONOMY SPECTRUM                                                             │
 ├────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                │
-│  LOW AUTONOMY                                          HIGH AUTONOMY           │
-│  ◄─────────────────────────────────────────────────────────────────────────►  │
+│  LOW AUTONOMY                                             HIGH AUTONOMY        │
+│  ◄─────────────────────────────────────────────────────────────────────────►   │
 │                                                                                │
-│  Tab Complete    Inline Edit    Chat Panel    Composer    Full Agent          │
-│       │              │              │            │            │               │
-│  User types,    User selects   User asks    User        User sets           │
-│  AI suggests    range, asks    questions,   describes   goal, AI           │
-│  completions    for transform  AI answers   multi-step  executes           │
-│                                             operation   autonomously        │
+│  Tab Complete    Inline Edit    Chat Panel    AI Cell Fn    Agent Mode         │
+│       │              │              │            │             │               │
+│  User types,    User selects   User asks    User writes   User sets goal,      │
+│  AI suggests    range + prompt questions,   =AI(...)     AI uses tools         │
+│  completions    AI applies     AI answers   async eval   iteratively           │
+│                via tools                               (approval gated)       │
 │                                                                                │
 │  Latency:       Latency:       Latency:     Latency:    Latency:            │
-│  <100ms         <2s            <5s          <30s        minutes             │
+│  <100ms         <2s            <5s          async       minutes             │
 │                                                                                │
-│  (All AI via Cursor servers - model selection managed by Cursor)            │
+│  (All AI via Cursor servers - no local models, no user API keys, no provider selection) │
 │                                                                                │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -46,6 +46,10 @@ AI integration is not a feature bolted on—it's woven into the fabric of the ap
 **Latency requirement:** <100ms
 **Backend:** Cursor servers with aggressive caching
 
+**Code entrypoints:**
+- Core completion engine: [`packages/ai-completion/src/tabCompletionEngine.js`](../packages/ai-completion/src/tabCompletionEngine.js)
+- Desktop formula-bar glue (wires suggestions + previews into the UI): [`apps/desktop/src/ai/completion/formulaBarTabCompletion.ts`](../apps/desktop/src/ai/completion/formulaBarTabCompletion.ts)
+ 
 Implementation details and extension guidance: see [AI Tab Completion](ai-tab-completion.md).
 
 ```typescript
@@ -153,6 +157,11 @@ class TabCompletionEngine {
 **Latency requirement:** <2s for small operations
 **Backend:** Cursor servers
 
+**Code entrypoints (desktop):**
+- Inline edit UI + orchestration: [`apps/desktop/src/ai/inline-edit/`](../apps/desktop/src/ai/inline-edit/)
+  - Controller entrypoint: [`inlineEditController.ts`](../apps/desktop/src/ai/inline-edit/inlineEditController.ts)
+  - Overlay UI: [`inlineEditOverlay.ts`](../apps/desktop/src/ai/inline-edit/inlineEditOverlay.ts)
+
 ```typescript
 interface InlineEditRequest {
   selection: Range;
@@ -189,73 +198,22 @@ Prompt: "months of the year"
 Result: January, February, March, ...
 ```
 
-**Implementation:**
-
-```typescript
-class InlineEditEngine {
-  async processEdit(request: InlineEditRequest): Promise<InlineEditResponse> {
-    // Classify intent
-    const intent = await this.classifyIntent(request.prompt);
-    
-    switch (intent.type) {
-      case "extract":
-        return this.handleExtraction(request, intent);
-      case "transform":
-        return this.handleTransform(request, intent);
-      case "generate":
-        return this.handleGeneration(request, intent);
-      case "format":
-        return this.handleFormat(request, intent);
-      case "formula":
-        return this.handleFormulaGeneration(request, intent);
-    }
-  }
-  
-  private async handleExtraction(
-    request: InlineEditRequest,
-    intent: ExtractIntent
-  ): Promise<InlineEditResponse> {
-    // Sample data for LLM
-    const sample = request.selectionContent.slice(0, 10);
-    
-    // Ask LLM to generate extraction pattern
-    const prompt = `
-Given these values:
-${sample.map((row, i) => `${i + 1}. ${row[0]}`).join('\n')}
-
-The user wants to: "${request.prompt}"
-
-Generate a JavaScript function that extracts the desired value:
-function extract(value) {
-`;
-    
-    const code = await this.llm.complete(prompt);
-    
-    // Validate and sandbox the code
-    const fn = this.sandboxedEval(code);
-    
-    // Apply to all values
-    const changes: CellChange[] = [];
-    for (let row = 0; row < request.selectionContent.length; row++) {
-      const value = request.selectionContent[row][0];
-      const extracted = fn(value);
-      changes.push({
-        row: request.selection.startRow + row,
-        col: request.selection.endCol + 1,  // New column
-        value: extracted
-      });
-    }
-    
-    return { type: "transform", changes, confidence: 0.9 };
-  }
-}
-```
+**Implementation notes (actual):**
+- Inline edit runs a **tool-calling loop** against spreadsheet tools (no LLM codegen/sandboxing):
+  - Build bounded workbook context for the selection (schema-first + optional RAG): [`apps/desktop/src/ai/context/WorkbookContextBuilder.ts`](../apps/desktop/src/ai/context/WorkbookContextBuilder.ts)
+  - Execute the tool loop + audit: [`packages/ai-tools/src/llm/audited-run.ts`](../packages/ai-tools/src/llm/audited-run.ts) (`runChatWithToolsAudited`)
+  - Execute spreadsheet tools: [`packages/ai-tools/src/llm/integration.ts`](../packages/ai-tools/src/llm/integration.ts) (`SpreadsheetLLMToolExecutor`)
+  - Preview + approval gating before mutations: [`packages/ai-tools/src/preview/preview-engine.ts`](../packages/ai-tools/src/preview/preview-engine.ts)
+- Desktop glue enforces DLP for the selected range *before* reading sample data or calling the LLM (blocked selections show an error and do not call the model).
 
 ### Mode 3: Chat Panel
 
 **Trigger:** User opens AI panel, asks questions
 **Latency requirement:** <5s for most queries
 **Backend:** Cursor servers
+
+**Code entrypoints (desktop):**
+- Chat orchestration (context building + tool loop + audit wiring): [`apps/desktop/src/ai/chat/orchestrator.ts`](../apps/desktop/src/ai/chat/orchestrator.ts)
 
 ```typescript
 interface ChatMessage {
@@ -294,72 +252,25 @@ interface Attachment {
    - "Format column B as currency"
    - "Add a chart of monthly revenue"
 
-**Implementation:**
-
-```typescript
-// Helper that emits bounded, per-tool summaries (avoids huge `read_range` matrices).
-// See: `packages/llm/src/toolResultSerialization.js`
-import { serializeToolResultForModel } from "...";
-
-class ChatPanelEngine {
-  private conversation: ChatMessage[] = [];
-  private tools: SpreadsheetTools;
-
-  async processMessage(userMessage: string, attachments?: Attachment[]): Promise<ChatResponse> {
-    // Add user message to conversation
-    this.conversation.push({ role: "user", content: userMessage, attachments });
-
-    // Build context
-    const context = await this.buildContext(attachments);
-
-    // Call LLM with tool use
-    const response = await this.llm.chat({
-      messages: [{ role: "system", content: this.buildSystemPrompt(context) }, ...this.conversation],
-      tools: this.getToolDefinitions(),
-      toolChoice: "auto",
-    });
-
-    // Process tool calls
-    if (response.toolCalls) {
-      const results = await this.executeToolCalls(response.toolCalls);
-
-      // IMPORTANT: Tool results are part of the model's context on the next turn.
-      // They should be appended as `role: "tool"` messages (matching the provider
-      // tool-calling protocol), and must be DLP-redacted/blocked *at tool execution*
-      // time (not only during prompt context construction).
-      //
-      // ALSO IMPORTANT: Never append full JSON tool results directly.
-      // Tools like `read_range` can return huge matrices, which can blow up
-      // model context windows and any persisted audit logs. Feed back a bounded,
-      // per-tool summary instead (see `packages/llm/src/toolResultSerialization.js`).
-      for (const { call, result } of results) {
-        this.conversation.push({
-          role: "tool",
-          toolCallId: call.id,
-          content: serializeToolResultForModel({ toolCall: call, result, maxChars: 20_000 }),
-        });
-      }
-
-      // Get final response
-      return this.processMessage("Please summarize what you did.");
-    }
-
-    // Add assistant response to conversation
-    this.conversation.push({ role: "assistant", content: response.content });
-
-    return {
-      message: response.content,
-      actions: response.suggestedActions,
-    };
-  }
-}
-```
+**Implementation notes (actual):**
+- The desktop chat panel uses a single React-agnostic orchestrator: [`apps/desktop/src/ai/chat/orchestrator.ts`](../apps/desktop/src/ai/chat/orchestrator.ts) (`createAiChatOrchestrator` / `sendMessage`).
+- Each `sendMessage()`:
+  1. Builds bounded workbook context (schema-first + RAG) and applies DLP gating.
+  2. Runs the provider-agnostic tool loop with audit + (optional) claim verification via
+     [`packages/ai-tools/src/llm/audited-run.ts`](../packages/ai-tools/src/llm/audited-run.ts).
+  3. Feeds tool results back to the model as **bounded** `role:"tool"` messages using
+     [`packages/llm/src/toolResultSerialization.js`](../packages/llm/src/toolResultSerialization.js)
+     (`serializeToolResultForModel`) to avoid huge `read_range` matrices.
 
 ### Mode 4: Cell Functions (=AI())
 
 **Trigger:** User enters AI formula
 **Latency requirement:** Async with loading state
 **Backend:** Cursor servers
+
+**Code entrypoints (desktop):**
+- Formula parsing + provenance + range sampling: [`apps/desktop/src/spreadsheet/evaluateFormula.ts`](../apps/desktop/src/spreadsheet/evaluateFormula.ts)
+- Async evaluator + cache + DLP + audit: [`apps/desktop/src/spreadsheet/AiCellFunctionEngine.ts`](../apps/desktop/src/spreadsheet/AiCellFunctionEngine.ts)
 
 ```
 =AI("Summarize this feedback", A1:A100)
@@ -371,7 +282,7 @@ class ChatPanelEngine {
 **Implementation (desktop):**
 
 Cell functions are implemented as an async cell-evaluator + cache:
-- Evaluator: `apps/desktop/src/spreadsheet/evaluateFormula.ts`
+- Evaluator: [`apps/desktop/src/spreadsheet/evaluateFormula.ts`](../apps/desktop/src/spreadsheet/evaluateFormula.ts)
   - Parses `AI()`, `AI.EXTRACT`, `AI.CLASSIFY`, `AI.TRANSLATE`
   - Preserves provenance for direct cell/range references passed to AI functions:
     - Cell ref: `{ __cellRef: "Sheet1!A1", value: ... }`
@@ -379,7 +290,7 @@ Cell functions are implemented as an async cell-evaluator + cache:
   - Direct range references are sampled (default 200 cells) to avoid materializing unbounded arrays:
     - include a small deterministic prefix (top-left cells)
     - plus a deterministic seeded random sample from across the remainder of the range
-- Engine: `apps/desktop/src/spreadsheet/AiCellFunctionEngine.ts`
+- Engine: [`apps/desktop/src/spreadsheet/AiCellFunctionEngine.ts`](../apps/desktop/src/spreadsheet/AiCellFunctionEngine.ts)
   - Returns `#GETTING_DATA` while an LLM request is pending, and reuses cached results.
   - **DLP enforcement**: evaluates `ai.cloudProcessing` policy using per-cell/range classification metadata.
     - BLOCK: returns `#DLP!` without calling the LLM.
@@ -411,17 +322,17 @@ Cell functions are implemented as an async cell-evaluator + cache:
 
 **Status:** Implemented in the desktop app.
 
-Implementation notes:
-- Orchestrator: `apps/desktop/src/ai/agent/agentOrchestrator.ts` (`runAgentTask`)
-  - Builds workbook RAG context via `ContextManager.buildWorkbookContextFromSpreadsheetApi`
-  - Runs the tool-calling loop via `runChatWithToolsAudited` with `mode: "agent"`
-  - Emits progress events (`planning`, `tool_call`, `tool_result`, `assistant_message`, `complete` / `cancelled` / `error`)
-- UI surface: `apps/desktop/src/panels/ai-chat/AIChatPanelContainer.tsx`
-  - Agent tab (goal + constraints + run/cancel + live step log)
-  - Preview-based approval gating via `PreviewEngine` + the shared approval modal
-    - Default configuration requires explicit approval for any non-noop mutation (`approval_cell_threshold: 0`)
-    - Optional "continue after deny" allows the model to re-plan when an approval is denied
-  - Audit trail viewable in the AI Audit panel
+**Code entrypoints (desktop):**
+- Orchestrator: [`apps/desktop/src/ai/agent/agentOrchestrator.ts`](../apps/desktop/src/ai/agent/agentOrchestrator.ts) (`runAgentTask`)
+- UI surface: [`apps/desktop/src/panels/ai-chat/AIChatPanelContainer.tsx`](../apps/desktop/src/panels/ai-chat/AIChatPanelContainer.tsx)
+
+Implementation notes (actual):
+- Builds bounded workbook context (schema-first + RAG) via [`apps/desktop/src/ai/context/WorkbookContextBuilder.ts`](../apps/desktop/src/ai/context/WorkbookContextBuilder.ts).
+- Runs the tool-calling loop via [`packages/ai-tools/src/llm/audited-run.ts`](../packages/ai-tools/src/llm/audited-run.ts) (`runChatWithToolsAudited`, `mode: "agent"`).
+- Preview-based approval gating via [`packages/ai-tools/src/preview/preview-engine.ts`](../packages/ai-tools/src/preview/preview-engine.ts)
+  - Default configuration requires explicit approval for any non-noop mutation (`approval_cell_threshold: 0`).
+  - Optional "continue after deny" allows the model to re-plan when an approval is denied.
+- Emits progress events (`planning`, `tool_call`, `tool_result`, `assistant_message`, `complete` / `cancelled` / `error`).
 
 **Capabilities:**
 - Multi-step data gathering
@@ -498,6 +409,11 @@ class AgentEngine {
 ---
 
 ## Context Management
+
+**Code entrypoints:**
+- Core context builder (schema + sampling + RAG hooks) + DLP redaction/blocking: [`packages/ai-context/src/contextManager.js`](../packages/ai-context/src/contextManager.js)
+- Desktop wrapper that builds per-message workbook context + budgets tokens: [`apps/desktop/src/ai/context/WorkbookContextBuilder.ts`](../apps/desktop/src/ai/context/WorkbookContextBuilder.ts)
+- Desktop RAG service (persistent local index; deterministic hash embeddings): [`apps/desktop/src/ai/rag/ragService.ts`](../apps/desktop/src/ai/rag/ragService.ts)
 
 ### The Context Problem
 
@@ -713,254 +629,43 @@ class CellRAG {
 
 ## Tool Calling
 
-### Tool Definitions
+Spreadsheet tool calling is **provider-agnostic** and shared across Chat, Inline Edit, and Agent modes.
 
-```typescript
-const SPREADSHEET_TOOLS: ToolDefinition[] = [
-  {
-    name: "read_range",
-    description: "Read cell values from a range",
-    parameters: {
-      type: "object",
-      properties: {
-        range: { type: "string", description: "Range in A1 notation (e.g., 'A1:D10')" },
-        includeFormulas: { type: "boolean", default: false }
-      },
-      required: ["range"]
-    }
-  },
-  {
-    name: "write_cell",
-    description: "Write a value or formula to a cell",
-    parameters: {
-      type: "object",
-      properties: {
-        cell: { type: "string", description: "Cell reference (e.g., 'A1')" },
-        value: { type: "string", description: "Value or formula to write" }
-      },
-      required: ["cell", "value"]
-    }
-  },
-  {
-    name: "apply_formula_column",
-    description: "Apply a formula pattern to an entire column",
-    parameters: {
-      type: "object",
-      properties: {
-        column: { type: "string", description: "Column letter" },
-        formulaTemplate: { type: "string", description: "Formula with {row} placeholder" },
-        startRow: { type: "number" },
-        endRow: { type: "number", description: "-1 for last row with data" }
-      },
-      required: ["column", "formulaTemplate", "startRow"]
-    }
-  },
-  {
-    name: "create_chart",
-    description: "Create a chart from data",
-    parameters: {
-      type: "object",
-      properties: {
-        chartType: { type: "string", enum: ["bar", "line", "pie", "scatter", "area"] },
-        dataRange: { type: "string" },
-        title: { type: "string" },
-        position: { type: "string", description: "Where to place chart" }
-      },
-      required: ["chartType", "dataRange"]
-    }
-  },
-  {
-    name: "create_pivot_table",
-    description: "Create a pivot table",
-    parameters: {
-      type: "object",
-      properties: {
-        sourceRange: { type: "string" },
-        rows: { type: "array", items: { type: "string" } },
-        columns: { type: "array", items: { type: "string" } },
-        values: { 
-          type: "array", 
-          items: { 
-            type: "object",
-            properties: {
-              field: { type: "string" },
-              aggregation: { type: "string", enum: ["sum", "count", "average", "max", "min"] }
-            }
-          }
-        },
-        destination: { type: "string" }
-      },
-      required: ["sourceRange", "rows", "values"]
-    }
-  },
-  {
-    name: "sort_range",
-    description: "Sort a range by one or more columns",
-    parameters: {
-      type: "object",
-      properties: {
-        range: { type: "string" },
-        sortBy: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              column: { type: "string" },
-              order: { type: "string", enum: ["asc", "desc"] }
-            }
-          }
-        }
-      },
-      required: ["range", "sortBy"]
-    }
-  },
-  {
-    name: "filter_range",
-    description: "Filter a range based on criteria",
-    parameters: {
-      type: "object",
-      properties: {
-        range: { type: "string" },
-        criteria: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              column: { type: "string" },
-              operator: { type: "string", enum: ["equals", "contains", "greater", "less", "between"] },
-              value: { type: "string" },
-              value2: { type: "string" }
-            }
-          }
-        }
-      },
-      required: ["range", "criteria"]
-    }
-  },
-  {
-    name: "apply_formatting",
-    description: "Apply formatting to a range",
-    parameters: {
-      type: "object",
-      properties: {
-        range: { type: "string" },
-        format: {
-          type: "object",
-          properties: {
-            bold: { type: "boolean" },
-            italic: { type: "boolean" },
-            fontSize: { type: "number" },
-            fontColor: { type: "string" },
-            backgroundColor: { type: "string" },
-            numberFormat: { type: "string" },
-            horizontalAlign: { type: "string", enum: ["left", "center", "right"] }
-          }
-        }
-      },
-      required: ["range", "format"]
-    }
-  },
-  {
-    name: "detect_anomalies",
-    description: "Find outliers and anomalies in data",
-    parameters: {
-      type: "object",
-      properties: {
-        range: { type: "string" },
-        method: { type: "string", enum: ["zscore", "iqr", "isolation_forest"] },
-        threshold: { type: "number" }
-      },
-      required: ["range"]
-    }
-  },
-  {
-    name: "compute_statistics",
-    description: "Compute statistical measures for a range",
-    parameters: {
-      type: "object",
-      properties: {
-        range: { type: "string" },
-        measures: { 
-          type: "array", 
-          items: { 
-            type: "string", 
-            enum: ["mean", "median", "mode", "stdev", "variance", "min", "max", "quartiles", "correlation"] 
-          }
-        }
-      },
-      required: ["range"]
-    }
-  }
-];
-```
+### Canonical tool schemas (source of truth)
 
-### Tool Executor
+- **Canonical tool schemas live in** [`packages/ai-tools/src/tool-schema.ts`](../packages/ai-tools/src/tool-schema.ts).
+  - Defines tool names, JSON schemas, and Zod validators (via `TOOL_REGISTRY` / `validateToolCall`).
+  - Parameter names are **snake_case** (e.g. `include_formulas`, `formula_template`, `start_row`), matching what the model sees.
 
-```typescript
-class ToolExecutor {
-  async execute(tool: ToolCall): Promise<ToolResult> {
-    const startTime = performance.now();
-    
-    try {
-      let result: any;
-      
-      switch (tool.name) {
-        case "read_range":
-          result = await this.readRange(tool.parameters);
-          break;
-        case "write_cell":
-          result = await this.writeCell(tool.parameters);
-          break;
-        case "apply_formula_column":
-          result = await this.applyFormulaColumn(tool.parameters);
-          break;
-        case "create_chart":
-          result = await this.createChart(tool.parameters);
-          break;
-        case "create_pivot_table":
-          result = await this.createPivotTable(tool.parameters);
-          break;
-        default:
-          throw new Error(`Unknown tool: ${tool.name}`);
-      }
-      
-      return {
-        success: true,
-        result,
-        duration: performance.now() - startTime
-      };
-      
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message,
-        duration: performance.now() - startTime
-      };
-    }
-  }
-  
-  private async applyFormulaColumn(params: ApplyFormulaParams): Promise<string> {
-    const { column, formulaTemplate, startRow, endRow: endRowParam } = params;
-    
-    // Determine end row
-    const endRow = endRowParam === -1 
-      ? this.sheet.getLastRowWithData() 
-      : endRowParam;
-    
-    // Apply formula to each row
-    const colIndex = columnLetterToIndex(column);
-    let count = 0;
-    
-    for (let row = startRow; row <= endRow; row++) {
-      const formula = formulaTemplate.replace(/{row}/g, String(row));
-      this.sheet.setCell(row, colIndex, formula);
-      count++;
-    }
-    
-    return `Applied formula to ${count} cells in column ${column}`;
-  }
-}
-```
+### Tool execution
+
+- Spreadsheet tool execution happens in [`packages/ai-tools/src/executor/tool-executor.ts`](../packages/ai-tools/src/executor/tool-executor.ts).
+  - Enforces range limits (e.g. `max_read_range_cells`) and (when configured) DLP policy at execution time.
+- The LLM-facing adapter is [`packages/ai-tools/src/llm/integration.ts`](../packages/ai-tools/src/llm/integration.ts) (`SpreadsheetLLMToolExecutor`),
+  which connects the ToolExecutor to a host `SpreadsheetApi` (desktop uses `DocumentControllerSpreadsheetApi`).
+
+### Tool result bounding + audit compaction
+
+- **Bounded tool results (for model context)**: [`packages/llm/src/toolResultSerialization.js`](../packages/llm/src/toolResultSerialization.js)
+  (`serializeToolResultForModel`) summarizes high-volume tool results (notably `read_range`) before they are appended as
+  `role: "tool"` messages.
+- **Audit compaction**: [`packages/ai-tools/src/llm/audited-run.ts`](../packages/ai-tools/src/llm/audited-run.ts)
+  (`runChatWithToolsAudited*`) stores bounded tool parameters and (by default) stores only `audit_result_summary` rather than full tool results,
+  keeping audit logs safe and size-bounded.
+
+> Reminder (Cursor constraints): there are **no local models**, **no user API keys**, and **no provider selection**. All AI requests go through
+> Cursor-managed servers and routing.
+
+## DLP Enforcement Surfaces
+
+DLP for cloud AI processing is enforced in multiple layers; **do not rely on a single redaction step**:
+
+- **Context building (prompt construction):** [`packages/ai-context/src/contextManager.js`](../packages/ai-context/src/contextManager.js)
+- **Tool execution (tool results are fed back into the model context):** [`packages/ai-tools/src/executor/tool-executor.ts`](../packages/ai-tools/src/executor/tool-executor.ts)
+- **AI cell functions:** [`apps/desktop/src/spreadsheet/AiCellFunctionEngine.ts`](../apps/desktop/src/spreadsheet/AiCellFunctionEngine.ts)
+
+This redundancy matters because tool results become part of the conversation history (`role:"tool"`) and will be sent back to the model on
+subsequent turns.
 
 ---
 
