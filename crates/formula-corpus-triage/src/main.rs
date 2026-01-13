@@ -127,11 +127,24 @@ struct DiffEntry {
     kind: String,
 }
 
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+struct PartDiffSummary {
+    part: String,
+    critical: usize,
+    warning: usize,
+    info: usize,
+    total: usize,
+}
+
 #[derive(Debug, Serialize)]
 struct DiffDetails {
     ignore: Vec<String>,
     counts: DiffCounts,
     equal: bool,
+    parts_with_diffs: Vec<PartDiffSummary>,
+    critical_parts: Vec<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    part_groups: BTreeMap<String, String>,
     top_differences: Vec<DiffEntry>,
 }
 
@@ -391,6 +404,8 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
         },
     );
 
+    let (parts_with_diffs, critical_parts, part_groups) = summarize_diffs_by_part(&report);
+
     let counts = DiffCounts {
         critical: report.count(xlsx_diff::Severity::Critical),
         warning: report.count(xlsx_diff::Severity::Warning),
@@ -439,8 +454,103 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
         ignore: ignore_sorted,
         counts,
         equal,
+        parts_with_diffs,
+        critical_parts,
+        part_groups,
         top_differences: entries,
     })
+}
+
+fn summarize_diffs_by_part(
+    report: &xlsx_diff::DiffReport,
+) -> (Vec<PartDiffSummary>, Vec<String>, BTreeMap<String, String>) {
+    #[derive(Default)]
+    struct Counts {
+        critical: usize,
+        warning: usize,
+        info: usize,
+        total: usize,
+    }
+
+    let mut counts_by_part: BTreeMap<String, Counts> = BTreeMap::new();
+    for diff in &report.differences {
+        let counts = counts_by_part.entry(diff.part.clone()).or_default();
+        counts.total += 1;
+        match diff.severity {
+            xlsx_diff::Severity::Critical => counts.critical += 1,
+            xlsx_diff::Severity::Warning => counts.warning += 1,
+            xlsx_diff::Severity::Info => counts.info += 1,
+        }
+    }
+
+    let mut parts_with_diffs: Vec<PartDiffSummary> = counts_by_part
+        .into_iter()
+        .map(|(part, c)| PartDiffSummary {
+            part,
+            critical: c.critical,
+            warning: c.warning,
+            info: c.info,
+            total: c.total,
+        })
+        .collect();
+
+    // Stable output order: (critical desc, warning desc, info desc, part asc).
+    parts_with_diffs.sort_by(|a, b| {
+        (
+            std::cmp::Reverse(a.critical),
+            std::cmp::Reverse(a.warning),
+            std::cmp::Reverse(a.info),
+            a.part.as_str(),
+        )
+            .cmp(&(
+                std::cmp::Reverse(b.critical),
+                std::cmp::Reverse(b.warning),
+                std::cmp::Reverse(b.info),
+                b.part.as_str(),
+            ))
+    });
+
+    let critical_parts: Vec<String> = parts_with_diffs
+        .iter()
+        .filter(|p| p.critical > 0)
+        .map(|p| p.part.clone())
+        .collect();
+
+    let part_groups: BTreeMap<String, String> = parts_with_diffs
+        .iter()
+        .map(|p| (p.part.clone(), part_group(&p.part).to_string()))
+        .collect();
+
+    (parts_with_diffs, critical_parts, part_groups)
+}
+
+fn part_group(part: &str) -> &'static str {
+    let part_lower = part.to_ascii_lowercase();
+    if part_lower == "[content_types].xml" {
+        return "content_types";
+    }
+    if part_lower.ends_with(".rels") || part_lower.contains("/_rels/") {
+        return "rels";
+    }
+    if part_lower == "xl/styles.xml" || part_lower.starts_with("xl/styles/") {
+        return "styles";
+    }
+    if part_lower.starts_with("xl/worksheets/") {
+        if part_lower.ends_with(".bin") {
+            return "worksheet_bin";
+        }
+        return "worksheet_xml";
+    }
+    if part_lower == "xl/sharedstrings.xml" {
+        return "shared_strings";
+    }
+    if part_lower.starts_with("xl/media/") {
+        return "media";
+    }
+    if part_lower.starts_with("docprops/") {
+        return "doc_props";
+    }
+    "other"
 }
 
 fn recalc_against_cached(doc: &formula_xlsx::XlsxDocument) -> Result<Option<RecalcDetails>> {
@@ -847,6 +957,107 @@ mod tests {
         assert_eq!(
             normalize_engine_value(&engine.get_cell_value("Sheet1", "A2")),
             NormalizedValue::Text("Alice".to_string())
+        );
+    }
+
+    #[test]
+    fn diff_part_breakdown_is_populated_and_sorted() {
+        use xlsx_diff::{Difference, DiffReport, Severity};
+
+        let report = DiffReport {
+            differences: vec![
+                Difference::new(
+                    Severity::Info,
+                    "docProps/app.xml",
+                    "",
+                    "binary_diff",
+                    None,
+                    None,
+                ),
+                Difference::new(
+                    Severity::Info,
+                    "docProps/core.xml",
+                    "",
+                    "binary_diff",
+                    None,
+                    None,
+                ),
+                Difference::new(
+                    Severity::Warning,
+                    "xl/theme/theme1.xml",
+                    "",
+                    "binary_diff",
+                    None,
+                    None,
+                ),
+                Difference::new(
+                    Severity::Warning,
+                    "xl/theme/theme1.xml",
+                    "",
+                    "binary_diff",
+                    None,
+                    None,
+                ),
+                Difference::new(
+                    Severity::Warning,
+                    "xl/theme/theme1.xml",
+                    "",
+                    "binary_diff",
+                    None,
+                    None,
+                ),
+                Difference::new(
+                    Severity::Critical,
+                    "xl/workbook.xml",
+                    "",
+                    "missing_part",
+                    None,
+                    None,
+                ),
+                Difference::new(
+                    Severity::Critical,
+                    "xl/workbook.xml",
+                    "",
+                    "extra_part",
+                    None,
+                    None,
+                ),
+            ],
+        };
+
+        let (parts, critical_parts, part_groups) = summarize_diffs_by_part(&report);
+
+        assert_eq!(
+            parts.iter().map(|p| p.part.as_str()).collect::<Vec<_>>(),
+            vec![
+                "xl/workbook.xml",
+                "xl/theme/theme1.xml",
+                "docProps/app.xml",
+                "docProps/core.xml",
+            ],
+            "parts should be sorted by severity counts (critical > warning > info) then part name"
+        );
+
+        assert_eq!(
+            parts[0],
+            PartDiffSummary {
+                part: "xl/workbook.xml".to_string(),
+                critical: 2,
+                warning: 0,
+                info: 0,
+                total: 2,
+            }
+        );
+        assert_eq!(parts[1].warning, 3);
+        assert_eq!(parts[2].info, 1);
+        assert_eq!(parts[3].info, 1);
+
+        assert_eq!(critical_parts, vec!["xl/workbook.xml".to_string()]);
+
+        assert_eq!(part_groups.get("xl/workbook.xml").map(String::as_str), Some("other"));
+        assert_eq!(
+            part_groups.get("docProps/app.xml").map(String::as_str),
+            Some("doc_props")
         );
     }
 }

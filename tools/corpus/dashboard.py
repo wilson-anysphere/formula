@@ -197,6 +197,26 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
     else:
         lines.append("_No successful round-trip size metrics found._")
     lines.append("")
+
+    top_critical_parts = summary.get("top_diff_parts_critical") or []
+    if top_critical_parts:
+        lines.append("## Top diff parts (CRITICAL)")
+        lines.append("")
+        lines.append("| Part | Critical diffs |")
+        lines.append("|---|---:|")
+        for row in top_critical_parts[:10]:
+            lines.append(f"| {row['part']} | {row['count']} |")
+        lines.append("")
+
+    top_any_parts = summary.get("top_diff_parts_total") or []
+    if top_any_parts:
+        lines.append("## Top diff parts (all severities)")
+        lines.append("")
+        lines.append("| Part | Total diffs |")
+        lines.append("|---|---:|")
+        for row in top_any_parts[:10]:
+            lines.append(f"| {row['part']} | {row['count']} |")
+        lines.append("")
     lines.append("## Per-workbook")
     lines.append("")
     lines.append("| Workbook | Open | Calculate | Render | Round-trip | Diff (C/W/I) | Failure category |")
@@ -335,6 +355,8 @@ def main() -> int:
     failing_function_counts: Counter[str] = Counter()
     failing_feature_counts: Counter[str] = Counter()
     diff_totals: Counter[str] = Counter()
+    diff_part_critical: Counter[str] = Counter()
+    diff_part_total: Counter[str] = Counter()
     passing_cellxfs: list[int] = []
     failing_cellxfs: list[int] = []
     failing_cellxfs_by_workbook: list[tuple[int, str]] = []
@@ -369,6 +391,46 @@ def main() -> int:
             val = res.get(key)
             if isinstance(val, int):
                 diff_totals[out_key] += val
+
+        diff_step = (r.get("steps") or {}).get("diff") or {}
+        diff_details = diff_step.get("details") or {}
+        parts_with_diffs = diff_details.get("parts_with_diffs")
+        if isinstance(parts_with_diffs, list):
+            for row in parts_with_diffs:
+                if not isinstance(row, dict):
+                    continue
+                part = row.get("part")
+                if not isinstance(part, str) or not part:
+                    continue
+                critical = row.get("critical")
+                warning = row.get("warning")
+                info = row.get("info")
+                total = row.get("total")
+                if isinstance(critical, int):
+                    diff_part_critical[part] += critical
+                if isinstance(total, int):
+                    diff_part_total[part] += total
+                else:
+                    # Back-compat: older schemas might not provide `total`.
+                    part_sum = 0
+                    for v in (critical, warning, info):
+                        if isinstance(v, int):
+                            part_sum += v
+                    if part_sum:
+                        diff_part_total[part] += part_sum
+
+    top_diff_parts_critical = [
+        {"part": part, "count": count}
+        for part, count in sorted(diff_part_critical.items(), key=lambda kv: (-kv[1], kv[0]))[
+            :10
+        ]
+        if count > 0
+    ]
+    top_diff_parts_total = [
+        {"part": part, "count": count}
+        for part, count in sorted(diff_part_total.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+        if count > 0
+    ]
 
     style_summary: dict[str, Any] = {}
     if passing_cellxfs or failing_cellxfs:
@@ -415,6 +477,8 @@ def main() -> int:
         "round_trip_size_overhead": _round_trip_size_overhead(reports),
         "failures_by_category": dict(failures_by_category),
         "diff_totals": dict(diff_totals),
+        "top_diff_parts_critical": top_diff_parts_critical,
+        "top_diff_parts_total": top_diff_parts_total,
         "top_functions_in_failures": [
             {"function": fn, "count": cnt}
             for fn, cnt in failing_function_counts.most_common(50)
