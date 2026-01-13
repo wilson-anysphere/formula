@@ -358,6 +358,65 @@ export function validatePlatformEntries({ platforms, assetNames }) {
     );
   }
 
+  // Guardrail for multi-arch Windows releases: ensure the updater entries reference *arch-specific*
+  // assets (x64 vs arm64) and that the filenames include an arch token. This prevents multi-target
+  // runs from clobbering assets on the GitHub Release (same name uploaded twice) and prevents
+  // shipping a manifest that points the x64 updater target at an arm64 installer (or vice versa).
+  const winX64Token = /(x64|x86[_-]64|amd64|win64)/i;
+  const winArm64Token = /(arm64|aarch64)/i;
+  /** @type {Array<{ target: string; assetName: string; expected: string }>} */
+  const wrongWindowsAssetNames = [];
+
+  for (const key of ["windows-x86_64", "windows-aarch64"]) {
+    const validated = validatedByTarget.get(key);
+    if (!validated) continue;
+    const name = validated.assetName;
+    const hasX64 = winX64Token.test(name);
+    const hasArm64 = winArm64Token.test(name);
+
+    if (key === "windows-x86_64") {
+      if (!hasX64) {
+        wrongWindowsAssetNames.push({
+          target: key,
+          assetName: name,
+          expected: `filename contains x64 token (x64/x86_64/x86-64/amd64/win64)`,
+        });
+      } else if (hasArm64) {
+        wrongWindowsAssetNames.push({
+          target: key,
+          assetName: name,
+          expected: `filename does not contain arm64 token (arm64/aarch64)`,
+        });
+      }
+    } else if (key === "windows-aarch64") {
+      if (!hasArm64) {
+        wrongWindowsAssetNames.push({
+          target: key,
+          assetName: name,
+          expected: `filename contains arm64 token (arm64/aarch64)`,
+        });
+      } else if (hasX64) {
+        wrongWindowsAssetNames.push({
+          target: key,
+          assetName: name,
+          expected: `filename does not contain x64 token (x64/x86_64/x86-64/amd64/win64)`,
+        });
+      }
+    }
+  }
+
+  if (wrongWindowsAssetNames.length > 0) {
+    errors.push(
+      [
+        `Invalid Windows updater asset naming in latest.json.platforms (expected arch token in filename):`,
+        ...wrongWindowsAssetNames
+          .slice()
+          .sort((a, b) => a.target.localeCompare(b.target))
+          .map((t) => `  - ${t.target}: ${t.assetName} (${t.expected})`),
+      ].join("\n"),
+    );
+  }
+
   return { errors, missingAssets, invalidTargets, validatedTargets };
 }
 
@@ -374,7 +433,8 @@ function normalizeVersion(version) {
  * @param {{ repo: string; tag: string; token: string }}
  */
 async function fetchRelease({ repo, tag, token }) {
-  const url = `https://api.github.com/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`;
+  const apiBase = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/, "");
+  const url = `${apiBase}/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`;
   const res = await fetch(url, {
     headers: {
       Accept: "application/vnd.github+json",
@@ -395,10 +455,11 @@ async function fetchRelease({ repo, tag, token }) {
 async function fetchAllReleaseAssets({ repo, releaseId, token }) {
   /** @type {any[]} */
   const assets = [];
+  const apiBase = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/, "");
   const perPage = 100;
   let page = 1;
   while (true) {
-    const url = `https://api.github.com/repos/${repo}/releases/${releaseId}/assets?per_page=${perPage}&page=${page}`;
+    const url = `${apiBase}/repos/${repo}/releases/${releaseId}/assets?per_page=${perPage}&page=${page}`;
     const res = await fetch(url, {
       headers: {
         Accept: "application/vnd.github+json",

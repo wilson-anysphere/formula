@@ -126,6 +126,20 @@ test("accepts Windows updater installers ending with .exe (NSIS strategy)", () =
   assert.deepEqual(result.errors, []);
 });
 
+test("fails when Windows updater assets do not include an arch token in the filename", () => {
+  const { platforms, assetNames } = baseline();
+  platforms["windows-x86_64"].url =
+    "https://github.com/example/repo/releases/download/v0.1.0/Formula_0.1.0.msi";
+  assetNames.delete("Formula_0.1.0_x64.msi");
+  assetNames.add("Formula_0.1.0.msi");
+
+  const result = validatePlatformEntries({ platforms, assetNames });
+  assert.ok(
+    result.errors.some((e) => e.includes("Invalid Windows updater asset naming in latest.json.platforms")),
+    `Expected Windows arch-token validation error, got:\n${result.errors.join("\n\n")}`,
+  );
+});
+
 test("fails when latest.json.platforms is missing a required platform key", () => {
   const { platforms, assetNames } = baseline();
   delete platforms["linux-x86_64"];
