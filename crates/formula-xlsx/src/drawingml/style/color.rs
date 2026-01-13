@@ -18,15 +18,25 @@ pub fn parse_color(node: Node<'_, '_>) -> Option<ColorRef> {
         _ => None,
     }?;
 
-    // DrawingML represents alpha as a transform on the color element.
+    // DrawingML represents color adjustments as child transform elements on the color node.
     //
-    // We only support the absolute `<a:alpha val="..."/>` transform for now, and only for colors
-    // we can represent as a concrete ARGB value.
-    if let Color::Argb(argb) = color {
+    // For theme colors (`schemeClr`) we preserve the existing Theme+tint/shade representation so
+    // that colors can be resolved later against the workbook theme palette.
+    //
+    // For concrete ARGB colors, apply basic transforms directly so the renderer sees a closer
+    // match to Excel's output.
+    if let Color::Argb(mut argb) = color {
+        // Absolute alpha transform (`<a:alpha val="..."/>`).
         if let Some(alpha) = parse_alpha(node) {
-            let argb = (argb & 0x00FF_FFFF) | ((alpha as u32) << 24);
-            return Some(Color::Argb(argb));
+            argb = (argb & 0x00FF_FFFF) | ((alpha as u32) << 24);
         }
+
+        // Tint/shade transforms (`<a:tint>` / `<a:shade>`).
+        if let Some(tint) = parse_tint_thousandths(node) {
+            argb = apply_tint(argb, tint);
+        }
+
+        return Some(Color::Argb(argb));
     }
 
     Some(color)
@@ -143,6 +153,39 @@ fn parse_tint_thousandths(node: Node<'_, '_>) -> Option<i16> {
     }
 
     None
+}
+
+fn apply_tint(argb: u32, tint_thousandths: i16) -> u32 {
+    // Keep this in sync with `formula-model` tinting so theme-based and concrete colors behave
+    // consistently.
+    let tint = (tint_thousandths as f64 / 1000.0).clamp(-1.0, 1.0);
+    if tint == 0.0 {
+        return argb;
+    }
+
+    let a = (argb >> 24) & 0xFF;
+    let r = ((argb >> 16) & 0xFF) as u8;
+    let g = ((argb >> 8) & 0xFF) as u8;
+    let b = (argb & 0xFF) as u8;
+
+    let r = tint_channel(r, tint) as u32;
+    let g = tint_channel(g, tint) as u32;
+    let b = tint_channel(b, tint) as u32;
+
+    (a << 24) | (r << 16) | (g << 8) | b
+}
+
+fn tint_channel(value: u8, tint: f64) -> u8 {
+    let v = value as f64;
+    let out = if tint < 0.0 {
+        // Shade toward black.
+        v * (1.0 + tint)
+    } else {
+        // Tint toward white.
+        v * (1.0 - tint) + 255.0 * tint
+    };
+
+    out.round().clamp(0.0, 255.0) as u8
 }
 
 fn pct_to_thousandths(value: i32, invert_for_shade: bool) -> i16 {

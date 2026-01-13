@@ -65,6 +65,18 @@ fn solid_fill_alpha_transform() {
 }
 
 #[test]
+fn solid_fill_tint_transform_on_srgb() {
+    let xml = r#"<a:solidFill xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:srgbClr val="000000">
+            <a:tint val="50000"/>
+        </a:srgbClr>
+    </a:solidFill>"#;
+    let doc = Document::parse(xml).unwrap();
+    let fill = parse_solid_fill(doc.root_element()).unwrap();
+    assert_eq!(fill.color, Color::Argb(0xFF808080));
+}
+
+#[test]
 fn line_width_and_dash() {
     let xml = r#"<a:ln xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" w="12700">
         <a:prstDash val="dash"/>
