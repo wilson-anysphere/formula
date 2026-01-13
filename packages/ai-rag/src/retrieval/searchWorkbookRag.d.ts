@@ -18,4 +18,3 @@ export function searchWorkbookRag(params: {
   dedupe?: boolean;
   signal?: AbortSignal;
 }): Promise<VectorSearchResult[]>;
-

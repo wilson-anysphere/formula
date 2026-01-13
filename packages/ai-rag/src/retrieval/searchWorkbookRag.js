@@ -24,7 +24,7 @@ export async function searchWorkbookRag(params) {
 
   const queryText = String(params?.queryText ?? "");
   const workbookId = params?.workbookId;
-  const topK = params?.topK ?? 8;
+  const topKInput = params?.topK ?? 8;
   const vectorStore = params?.vectorStore;
   const embedder = params?.embedder;
   const rerank = params?.rerank ?? true;
@@ -38,9 +38,13 @@ export async function searchWorkbookRag(params) {
     throw new Error("searchWorkbookRag requires an embedder with an embedTexts() method");
   }
 
-  if (!Number.isFinite(topK) || topK <= 0) {
-    throw new Error(`searchWorkbookRag requires a positive topK (got ${topK})`);
+  if (!Number.isFinite(topKInput)) {
+    throw new Error(`searchWorkbookRag requires a finite topK (got ${String(topKInput)})`);
   }
+  // Align with vector store semantics: floor floats and treat non-positive values as
+  // "no retrieval" (return an empty list without embedding/querying).
+  const topK = Math.floor(topKInput);
+  if (topK <= 0) return [];
 
   // When we rerank or dedupe we want a larger candidate set to work with.
   const oversample = rerank || dedupe ? 4 : 1;

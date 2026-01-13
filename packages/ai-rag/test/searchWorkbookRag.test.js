@@ -172,3 +172,34 @@ test("searchWorkbookRag forwards workbookId + signal and avoids oversampling whe
   assert.equal(results.length, 1);
   assert.equal(results[0].id, "a");
 });
+
+test("searchWorkbookRag returns [] for topK<=0 without embedding or querying", async () => {
+  let embedCalled = false;
+  let queryCalled = false;
+
+  const embedder = {
+    async embedTexts() {
+      embedCalled = true;
+      return [[1, 0, 0]];
+    },
+  };
+
+  const vectorStore = {
+    async query() {
+      queryCalled = true;
+      return [];
+    },
+  };
+
+  const results = await searchWorkbookRag({
+    queryText: "hello",
+    workbookId: "wb",
+    topK: 0,
+    vectorStore,
+    embedder,
+  });
+
+  assert.deepEqual(results, []);
+  assert.equal(embedCalled, false);
+  assert.equal(queryCalled, false);
+});
