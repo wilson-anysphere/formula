@@ -22,6 +22,44 @@ def _normalize_ext(ext: str) -> str:
     return ext.strip().lstrip(".").lower()
 
 
+def load_expected_deep_link_schemes(tauri_config_path: Path) -> set[str]:
+    config = json.loads(tauri_config_path.read_text(encoding="utf-8"))
+    plugins = config.get("plugins")
+    if not isinstance(plugins, dict):
+        return set()
+
+    deep_link = plugins.get("deep-link")
+    if not isinstance(deep_link, dict):
+        return set()
+
+    desktop = deep_link.get("desktop")
+    schemes: set[str] = set()
+
+    def add_from_protocol(protocol: object) -> None:
+        if not isinstance(protocol, dict):
+            return
+        raw = protocol.get("schemes")
+        if isinstance(raw, str):
+            val = raw.strip().lower()
+            if val:
+                schemes.add(val)
+        elif isinstance(raw, list):
+            for item in raw:
+                if not isinstance(item, str):
+                    continue
+                val = item.strip().lower()
+                if val:
+                    schemes.add(val)
+
+    if isinstance(desktop, list):
+        for protocol in desktop:
+            add_from_protocol(protocol)
+    else:
+        add_from_protocol(desktop)
+
+    return schemes
+
+
 def load_expected_extensions(tauri_config_path: Path) -> set[str]:
     config = json.loads(tauri_config_path.read_text(encoding="utf-8"))
     associations = config.get("bundle", {}).get("fileAssociations", [])
@@ -147,9 +185,12 @@ def main() -> int:
     args = parser.parse_args()
 
     expected_exts = load_expected_extensions(args.tauri_config)
-    expected_scheme = args.url_scheme.strip().lower()
-    if not expected_scheme:
-        raise SystemExit("--url-scheme must be non-empty")
+    expected_schemes = load_expected_deep_link_schemes(args.tauri_config)
+    if not expected_schemes:
+        expected_scheme = args.url_scheme.strip().lower()
+        if not expected_scheme:
+            raise SystemExit("--url-scheme must be non-empty")
+        expected_schemes = {expected_scheme}
 
     with args.info_plist.open("rb") as f:
         plist = plistlib.load(f)
@@ -164,10 +205,11 @@ def main() -> int:
     print(
         f"[macos] Observed file extensions ({len(registered_exts)}): {_format_set(registered_exts)}"
     )
+    print(f"[macos] Expected URL schemes ({len(expected_schemes)}): {_format_set(expected_schemes)}")
     print(f"[macos] Observed URL schemes ({len(registered_schemes)}): {_format_set(registered_schemes)}")
 
     missing_exts = expected_exts - registered_exts
-    missing_schemes = {expected_scheme} - registered_schemes
+    missing_schemes = expected_schemes - registered_schemes
 
     if missing_exts or missing_schemes:
         print("[macos] ERROR: bundle registration mismatch", file=sys.stderr)
@@ -188,4 +230,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

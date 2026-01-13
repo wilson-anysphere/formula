@@ -143,6 +143,11 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["formula"]
+      }
+    },
     "updater": {
       "active": true,
       "dialog": false,

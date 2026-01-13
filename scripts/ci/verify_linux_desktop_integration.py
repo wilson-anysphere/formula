@@ -22,6 +22,44 @@ def _format_set(items: Iterable[str]) -> str:
     return ", ".join(sorted(set(items)))
 
 
+def load_expected_deep_link_schemes(tauri_config_path: Path) -> set[str]:
+    config = json.loads(tauri_config_path.read_text(encoding="utf-8"))
+    plugins = config.get("plugins")
+    if not isinstance(plugins, dict):
+        return set()
+
+    deep_link = plugins.get("deep-link")
+    if not isinstance(deep_link, dict):
+        return set()
+
+    desktop = deep_link.get("desktop")
+    schemes: set[str] = set()
+
+    def add_from_protocol(protocol: object) -> None:
+        if not isinstance(protocol, dict):
+            return
+        raw = protocol.get("schemes")
+        if isinstance(raw, str):
+            val = raw.strip().lower()
+            if val:
+                schemes.add(val)
+        elif isinstance(raw, list):
+            for item in raw:
+                if not isinstance(item, str):
+                    continue
+                val = item.strip().lower()
+                if val:
+                    schemes.add(val)
+
+    if isinstance(desktop, list):
+        for protocol in desktop:
+            add_from_protocol(protocol)
+    else:
+        add_from_protocol(desktop)
+
+    return schemes
+
+
 def load_expected_mime_types(tauri_config_path: Path) -> set[str]:
     config = json.loads(tauri_config_path.read_text(encoding="utf-8"))
     associations = config.get("bundle", {}).get("fileAssociations", [])
@@ -110,9 +148,21 @@ def main() -> int:
         type=Path,
         help="Path to tauri.conf.json (source of truth for expected file associations)",
     )
+    parser.add_argument(
+        "--url-scheme",
+        default="formula",
+        help="Expected x-scheme-handler/<scheme> entry in the .desktop MimeType= list",
+    )
     args = parser.parse_args()
 
     expected_mime_types = load_expected_mime_types(args.tauri_config)
+    expected_schemes = load_expected_deep_link_schemes(args.tauri_config)
+    if not expected_schemes:
+        expected_scheme = args.url_scheme.strip().lower()
+        if not expected_scheme:
+            raise SystemExit("--url-scheme must be non-empty")
+        expected_schemes = {expected_scheme}
+    expected_scheme_mimes = {f"x-scheme-handler/{scheme}" for scheme in expected_schemes}
     desktop_files = find_desktop_files(args.deb_root)
     if not desktop_files:
         print(f"[linux] ERROR: no .desktop files found under {args.deb_root}", file=sys.stderr)
@@ -136,12 +186,21 @@ def main() -> int:
     print(
         f"[linux] Expected MIME types from tauri.conf.json ({len(expected_mime_types)}): {_format_set(expected_mime_types)}"
     )
+    print(f"[linux] Expected deep link scheme MIME types ({len(expected_scheme_mimes)}): {_format_set(expected_scheme_mimes)}")
     print(f"[linux] Observed MIME types from .desktop files ({len(observed_mime_types)}): {_format_set(observed_mime_types)}")
 
     missing_mime_types = expected_mime_types - observed_mime_types
     if missing_mime_types:
         print(
             f"[linux] ERROR: missing MIME types in .desktop MimeType=: {_format_set(missing_mime_types)}",
+            file=sys.stderr,
+        )
+        return 1
+
+    missing_scheme_mimes = expected_scheme_mimes - observed_mime_types
+    if missing_scheme_mimes:
+        print(
+            f"[linux] ERROR: missing deep link scheme handler(s) in .desktop MimeType=: {_format_set(missing_scheme_mimes)}",
             file=sys.stderr,
         )
         return 1
