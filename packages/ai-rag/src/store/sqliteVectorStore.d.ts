@@ -1,6 +1,8 @@
+import type { BinaryStorage } from "./binaryStorage.js";
+
 export class SqliteVectorStore {
   static create(opts: {
-    storage?: any;
+    storage?: BinaryStorage;
     dimension: number;
     autoSave?: boolean;
     /**
