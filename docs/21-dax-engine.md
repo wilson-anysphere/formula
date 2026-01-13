@@ -507,14 +507,14 @@ pub fn pivot(
    Fast path when:
    - all `group_by` columns are on `base_table`, and
    - the backend supports `group_by_aggregations`, and
-   - every measure can be “planned” into a small set of aggregations + arithmetic
-
-   Planned expressions support:
-   - `SUM`, `AVERAGE`, `MIN`, `MAX`, `DISTINCTCOUNT` over `base_table` columns
-   - `COUNTROWS(base_table)`
-   - simple arithmetic (`+ - * /`), unary `-`
-   - `COALESCE`, `DIVIDE`
-   - references to named measures that expand to the above
+    - every measure can be “planned” into a small set of aggregations + arithmetic
+ 
+    Planned expressions support:
+    - `SUM`, `AVERAGE`, `MIN`, `MAX`, `DISTINCTCOUNT`, `COUNT`, `COUNTA`, `COUNTBLANK` over `base_table` columns
+    - `COUNTROWS(base_table)`
+    - simple arithmetic (`+ - * /`), unary `-`
+    - `COALESCE`, `DIVIDE`
+    - references to named measures that expand to the above
 
 2. **Columnar groups + per-group measure evaluation** (`pivot_columnar_groups_with_measure_eval`)  
    Fast path when:
