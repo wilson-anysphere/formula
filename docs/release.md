@@ -848,6 +848,19 @@ This requires a modern RPM stack (rpm ≥ 4.12). On older RPM-based distros, pre
 After building via `(cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)` (or after CI produces an artifact),
 verify the `Requires:` list and shared library resolution.
 
+Recommended (repo script; runs static RPM queries + an installability check in a Fedora container):
+
+```bash
+# Auto-discovers RPM(s) under target/**/release/bundle/rpm/*.rpm
+bash scripts/validate-linux-rpm.sh
+
+# Or validate a specific directory (or .rpm file):
+bash scripts/validate-linux-rpm.sh --rpm apps/desktop/src-tauri/target/release/bundle/rpm
+
+# Skip the Fedora container step (static checks only):
+bash scripts/validate-linux-rpm.sh --no-container
+```
+
 From `apps/desktop/src-tauri`:
 
 ```bash
