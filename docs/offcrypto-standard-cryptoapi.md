@@ -380,7 +380,15 @@ After decryption, truncate the plaintext to exactly `OriginalPackageSize` bytes 
 
 ### 7.2) Segment encryption model
 
-In practice, Office decryptors process `EncryptedPackage` in **4096-byte plaintext segments**:
+The `EncryptedPackage` stream is encrypted in fixed-size segments. The segment size depends on the
+cipher:
+
+* **AES**: 0x1000 (4096) bytes of plaintext per segment.
+* **RC4**: 0x200 (512) bytes of plaintext per segment.
+
+#### 7.2.1) AES (`CALG_AES_*`)
+
+In practice, AES-based Standard encryption processes the plaintext in **4096-byte** segments:
 
 ```text
 segmentSize = 0x1000   // 4096
@@ -394,6 +402,24 @@ For segment index `i = 0, 1, 2, ...`:
 4. Append the decrypted bytes and continue until you have at least `OriginalPackageSize` bytes.
 
 Finally, **truncate** the concatenated plaintext to `OriginalPackageSize` bytes.
+
+#### 7.2.2) RC4 (`CALG_RC4`)
+
+RC4-based Standard encryption uses **512-byte** blocks and resets the RC4 keystream per block:
+
+```text
+segmentSize = 0x200   // 512
+```
+
+For segment index `i = 0, 1, 2, ...`:
+
+1. Derive `H_block = Hash(H_final || LE32(i))`.
+2. `key_i = CryptDeriveKey(Hash, H_block, keyLen=KeySize/8)` (for SHA‑1 with 128-bit keys this is
+   typically just the first 16 bytes of `H_block`).
+3. Initialize RC4 with `key_i` (fresh state for each segment) and decrypt exactly one segment of
+   ciphertext.
+
+Concatenate segments and truncate to `OriginalPackageSize`.
 
 ---
 
