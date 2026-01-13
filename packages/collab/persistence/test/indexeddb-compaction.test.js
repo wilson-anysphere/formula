@@ -47,6 +47,23 @@ async function countUpdateRecords(dbName) {
   }
 }
 
+async function getLastUpdateKey(dbName) {
+  const db = await openDb(dbName);
+  try {
+    const tx = db.transaction("updates", "readonly");
+    const store = tx.objectStore("updates");
+    const key = await new Promise((resolve, reject) => {
+      const req = store.openCursor(null, "prev");
+      req.onsuccess = () => resolve(req.result?.key ?? null);
+      req.onerror = () => reject(req.error ?? new Error("IndexedDB cursor failed"));
+    });
+    await transactionDone(tx);
+    return key;
+  } finally {
+    db.close();
+  }
+}
+
 test("IndexedDbCollabPersistence flush compacts the updates store (bounded size + reload)", async () => {
   const docId = `doc-${randomUUID()}`;
 
@@ -127,6 +144,34 @@ test("IndexedDbCollabPersistence compaction preserves updates written by other p
 
   await persistenceC.clear(docId);
   docC.destroy();
+});
+
+test("IndexedDbCollabPersistence flush skips compaction rewrite when already compact + unchanged", async () => {
+  const docId = `doc-${randomUUID()}`;
+
+  const doc = new Y.Doc({ guid: docId });
+  const persistence = new IndexedDbCollabPersistence();
+  persistence.bind(docId, doc);
+  await persistence.load(docId, doc);
+
+  doc.getMap("root").set("k", "v");
+  await sleep(25);
+  await persistence.flush(docId);
+  await sleep(25);
+
+  assert.equal(await countUpdateRecords(docId), 1);
+  const lastKeyBefore = await getLastUpdateKey(docId);
+
+  // No further edits; flush should be a no-op (no new snapshot rewrite).
+  await persistence.flush(docId);
+  await sleep(25);
+
+  assert.equal(await countUpdateRecords(docId), 1);
+  const lastKeyAfter = await getLastUpdateKey(docId);
+  assert.equal(lastKeyAfter, lastKeyBefore);
+
+  await persistence.clear(docId);
+  doc.destroy();
 });
 
 test("IndexedDbCollabPersistence compaction does not hang when load() is in-flight", async () => {

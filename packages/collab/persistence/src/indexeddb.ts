@@ -337,6 +337,15 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
       const db = entry.persistence.db;
       if (!db) return;
 
+      // Optimization: if the document hasn't changed since the last compaction and the
+      // underlying updates store is already compacted to a single record, avoid rewriting
+      // the snapshot (which can be expensive for large docs and causes unnecessary IDB churn).
+      const localUpdateCount = this.updateCounts.get(docId) ?? 0;
+      if (localUpdateCount === 0) {
+        const persistedCount = await this.countUpdateRecords(db);
+        if (persistedCount === 1) return;
+      }
+
       let snapshot: Uint8Array;
       try {
         snapshot = Y.encodeStateAsUpdate(entry.doc);
