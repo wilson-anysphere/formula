@@ -115,7 +115,7 @@ function Find-BundleFiles {
     [string]$TargetRoot,
 
     [Parameter(Mandatory = $true)]
-    [ValidateSet("nsis", "msi")]
+    [ValidateSet("nsis", "nsis-web", "msi")]
     [string]$BundleKind,
 
     [Parameter(Mandatory = $true)]
@@ -204,22 +204,40 @@ $repoRoot = Get-RepoRoot
 
 Push-Location $repoRoot
 try {
+  $searchRoots = New-Object System.Collections.Generic.List[string]
+  # Prefer CARGO_TARGET_DIR when set (some CI environments export it), but always
+  # include the default workspace roots.
+  if (-not [string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
+    $cargoTarget = $env:CARGO_TARGET_DIR
+    if (-not [System.IO.Path]::IsPathRooted($cargoTarget)) {
+      $cargoTarget = Join-Path $repoRoot $cargoTarget
+    }
+    $searchRoots.Add($cargoTarget)
+  }
+  $searchRoots.Add((Join-Path $repoRoot "apps\\desktop\\src-tauri\\target"))
+  $searchRoots.Add((Join-Path $repoRoot "apps\\desktop\\target"))
+  $searchRoots.Add((Join-Path $repoRoot "target"))
+  $searchRoots = @($searchRoots | Where-Object { Test-Path -LiteralPath $_ } | Sort-Object -Unique)
+
   $exeInstallers = @()
   $msiInstallers = @()
 
   if ($ExePath.Count -gt 0) {
     $exeInstallers = Expand-FileInputs -Inputs $ExePath -Extension ".exe" -RepoRoot $repoRoot
   } else {
-    $exeInstallers += Find-BundleFiles -TargetRoot (Join-Path $repoRoot "apps\\desktop\\src-tauri\\target") -BundleKind "nsis" -Extension ".exe"
-    $exeInstallers += Find-BundleFiles -TargetRoot (Join-Path $repoRoot "target") -BundleKind "nsis" -Extension ".exe"
+    foreach ($root in $searchRoots) {
+      $exeInstallers += Find-BundleFiles -TargetRoot $root -BundleKind "nsis" -Extension ".exe"
+      $exeInstallers += Find-BundleFiles -TargetRoot $root -BundleKind "nsis-web" -Extension ".exe"
+    }
     $exeInstallers = @($exeInstallers | Sort-Object FullName -Unique)
   }
 
   if ($MsiPath.Count -gt 0) {
     $msiInstallers = Expand-FileInputs -Inputs $MsiPath -Extension ".msi" -RepoRoot $repoRoot
   } else {
-    $msiInstallers += Find-BundleFiles -TargetRoot (Join-Path $repoRoot "apps\\desktop\\src-tauri\\target") -BundleKind "msi" -Extension ".msi"
-    $msiInstallers += Find-BundleFiles -TargetRoot (Join-Path $repoRoot "target") -BundleKind "msi" -Extension ".msi"
+    foreach ($root in $searchRoots) {
+      $msiInstallers += Find-BundleFiles -TargetRoot $root -BundleKind "msi" -Extension ".msi"
+    }
     $msiInstallers = @($msiInstallers | Sort-Object FullName -Unique)
   }
 
@@ -227,6 +245,9 @@ try {
 
   Write-Host "Windows bundle validation"
   Write-Host "RepoRoot: $repoRoot"
+  if ($searchRoots.Count -gt 0) {
+    Write-Host ("SearchRoots: {0}" -f ($searchRoots -join ", "))
+  }
   Write-Host ""
   Write-Host ("NSIS installers (.exe): {0}" -f $exeInstallers.Count)
   foreach ($f in $exeInstallers) { Write-Host ("  - {0}" -f $f.FullName) }
