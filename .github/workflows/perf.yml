@@ -92,7 +92,9 @@ jobs:
 
       - name: Install wasm-pack (required for @formula/engine WASM build)
         if: steps.desktop_bench.outputs.run == 'true'
-        run: cargo install wasm-pack --locked
+        # Pinned to match the tagged release workflow so perf runs don't break
+        # when wasm-pack publishes a new incompatible version.
+        run: cargo install wasm-pack --version 0.13.1 --locked
 
       - name: Build desktop frontend assets (Vite → tauri.conf.json build.frontendDist)
         if: steps.desktop_bench.outputs.run == 'true'

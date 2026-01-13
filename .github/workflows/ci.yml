@@ -140,7 +140,9 @@ jobs:
         run: cargo check -p formula-wasm --target wasm32-unknown-unknown --all-targets --locked
 
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
+        # Pinned to match the tagged release workflow so CI catches WASM toolchain
+        # incompatibilities before we cut a release.
+        run: cargo install wasm-pack --version 0.13.1 --locked
 
       - name: Build WASM bundle (wasm-pack)
         # Build before `pnpm install` so we fail fast on Rust/WASM toolchain issues
