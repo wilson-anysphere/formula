@@ -930,7 +930,7 @@ python scripts/ci/verify_linux_desktop_integration.py --deb-root "$tmpdir"
 
 CI note: tagged releases run this check on macOS/Windows/Linux before uploading artifacts. If you need to temporarily skip the
 check on macOS/Windows (e.g. a hosted-runner regression makes it flaky), set the GitHub Actions variable
-`FORMULA_COI_CHECK_ALL_PLATFORMS=0` to keep the Linux check while disabling the non-Linux ones.
+`FORMULA_COI_CHECK_ALL_PLATFORMS=0` (or `false`) to keep the Linux check while disabling the non-Linux ones.
 
 ## 6) Installer/bundle artifact size reporting + size gate (tagged releases enforced)
 

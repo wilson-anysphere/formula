@@ -188,7 +188,7 @@ success/failure after evaluating `globalThis.crossOriginIsolated`, `SharedArrayB
 
 CI note: tagged desktop releases run this check on macOS/Windows/Linux before uploading artifacts. To temporarily skip the
 check on macOS/Windows (while keeping the Linux signal), set the GitHub Actions variable
-`FORMULA_COI_CHECK_ALL_PLATFORMS=0`.
+`FORMULA_COI_CHECK_ALL_PLATFORMS=0` (or `false`).
 
 ### Manual check
 
