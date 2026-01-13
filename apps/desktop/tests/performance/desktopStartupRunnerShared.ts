@@ -1,8 +1,10 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createInterface, type Interface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
+
+import { terminateProcessTree, type TerminateProcessTreeMode } from './processTree.ts';
 
 export type StartupMetrics = {
   windowVisibleMs: number;
@@ -135,57 +137,6 @@ function mergeEnvParts(parts: Array<NodeJS.ProcessEnv | undefined>): NodeJS.Proc
   return out;
 }
 
-function forceKill(child: ChildProcess): void {
-  if (!child.pid) return;
-  if (process.platform === 'win32') {
-    try {
-      spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-      return;
-    } catch {
-      // Fall through to best-effort `child.kill()`.
-    }
-  }
-
-  try {
-    if (process.platform !== 'win32') {
-      // We spawn with `detached: true`, so the child is the process group leader.
-      process.kill(-child.pid, 'SIGKILL');
-      return;
-    }
-  } catch {
-    // ignore
-  }
-
-  try {
-    child.kill('SIGKILL');
-  } catch {
-    // `SIGKILL` isn't supported on all platforms (e.g. Windows).
-    try {
-      child.kill();
-    } catch {
-      // ignore
-    }
-  }
-}
-
-function terminate(child: ChildProcess): void {
-  if (!child.pid) return;
-  if (process.platform !== 'win32') {
-    try {
-      // We spawn with `detached: true`, so the child is the process group leader.
-      process.kill(-child.pid, 'SIGTERM');
-      return;
-    } catch {
-      // ignore
-    }
-  }
-  try {
-    child.kill();
-  } catch {
-    // ignore
-  }
-}
-
 function closeReadline(rl: Interface | null): void {
   if (!rl) return;
   try {
@@ -276,15 +227,20 @@ export async function runOnce({ binPath, timeoutMs, envOverrides }: RunOnceOptio
     const beginShutdown = (reason: 'captured' | 'timeout') => {
       if (exitDeadline) return;
 
-      // Stop the app after capturing the metrics so we can run multiple iterations.
-      terminate(child);
+      const initialMode: TerminateProcessTreeMode =
+        process.platform === 'win32' || reason === 'timeout' ? 'force' : 'graceful';
+
+      // Stop the app after capturing the metrics so we can run multiple iterations. On POSIX we
+      // send SIGTERM to the process group; on Windows we use `taskkill /T /F` to ensure WebView2
+      // child processes don't survive across runs.
+      terminateProcessTree(child, initialMode);
 
       // If the process doesn't exit quickly, force-kill it so we don't accumulate
       // background GUI processes during a multi-run benchmark.
-      forceKillTimer = setTimeout(() => forceKill(child), 2000);
+      forceKillTimer = setTimeout(() => terminateProcessTree(child, 'force'), 2000);
 
       exitDeadline = setTimeout(() => {
-        forceKill(child);
+        terminateProcessTree(child, 'force');
 
         // Extremely defensive: don't hang the parent process even if kill fails.
         try {
