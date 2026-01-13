@@ -830,6 +830,8 @@ fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
     // Manual page breaks.
     // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.
     // The importer converts these to the model’s “after which break occurs” form by subtracting 1.
+    //
+    // This fixture encodes breaks-after rows {2,4} as rw={3,5} and break-after col {1} as col={2}.
     push_record(&mut sheet, RECORD_HPAGEBREAKS, &hpagebreaks_record(&[3, 5]));
     push_record(&mut sheet, RECORD_VPAGEBREAKS, &vpagebreaks_record(&[2]));
 

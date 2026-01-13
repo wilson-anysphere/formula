@@ -938,6 +938,39 @@ fn import_xls_path_with_biff_reader(
                 }
             }
 
+            // Best-effort: recover AutoFilter sort state from BIFF `SORT` metadata when the sheet
+            // stream scan did not yield a supported `SORT` layout.
+            if let (Some(workbook_stream), Some(sheet_info), Some(af)) = (
+                workbook_stream.as_deref(),
+                biff_sheets.as_ref().and_then(|s| s.get(biff_idx)),
+                sheet.auto_filter.as_mut(),
+            ) {
+                if af.sort_state.is_none() {
+                    if sheet_info.offset >= workbook_stream.len() {
+                        warnings.push(ImportWarning::new(format!(
+                            "failed to import `.xls` sort state for sheet `{sheet_name}`: out-of-bounds stream offset {}",
+                            sheet_info.offset
+                        )));
+                    } else {
+                        match biff::parse_biff_sheet_sort_state(
+                            workbook_stream,
+                            sheet_info.offset,
+                            af.range,
+                        ) {
+                            Ok(mut parsed) => {
+                                warnings.extend(parsed.warnings.drain(..).map(ImportWarning::new));
+                                if af.sort_state.is_none() {
+                                    af.sort_state = parsed.sort_state;
+                                }
+                            }
+                            Err(err) => warnings.push(ImportWarning::new(format!(
+                                "failed to import `.xls` sort state for sheet `{sheet_name}`: {err}"
+                            ))),
+                        }
+                    }
+                }
+            }
+
             // Best-effort: when `FILTERMODE` is present, Excel indicates that some rows are hidden by
             // an active filter. We do not currently import filter criteria or filtered-row
             // visibility, so clear any BIFF row hidden flags that fall inside the filter range to

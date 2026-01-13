@@ -22,6 +22,7 @@ pub(crate) mod formulas;
 pub(crate) mod rgce;
 pub(crate) mod records;
 pub(crate) mod sheet;
+pub(crate) mod sort;
 pub(crate) mod supbook;
 pub(crate) mod strings;
 pub(crate) mod worksheet_formulas;
@@ -40,6 +41,7 @@ pub(crate) use sheet::{
     parse_biff_sheet_row_col_properties,
     parse_biff_sheet_view_state, SheetRowColProperties,
 };
+pub(crate) use sort::parse_biff_sheet_sort_state;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BiffVersion {
