@@ -547,12 +547,16 @@ test.describe("grid scrolling + virtualization", () => {
 
     const before = await page.evaluate(() => {
       const app = (window as any).__formulaApp;
-      const el = document.querySelector<HTMLElement>('[data-testid="chart-object"]');
-      if (!el) return null;
+      const charts = typeof app?.listCharts === "function" ? app.listCharts() : [];
+      const chart = Array.isArray(charts) ? charts[0] : null;
+      if (!chart) return null;
+
+      const rect = (app as any).chartAnchorToViewportRect?.(chart.anchor) ?? null;
+      if (!rect) return null;
       return {
         scroll: app.getScroll(),
-        left: Number.parseFloat(el.style.left),
-        top: Number.parseFloat(el.style.top),
+        left: rect.left,
+        top: rect.top,
       };
     });
     expect(before).not.toBeNull();
@@ -569,12 +573,16 @@ test.describe("grid scrolling + virtualization", () => {
 
     const after = await page.evaluate(() => {
       const app = (window as any).__formulaApp;
-      const el = document.querySelector<HTMLElement>('[data-testid="chart-object"]');
-      if (!el) return null;
+      const charts = typeof app?.listCharts === "function" ? app.listCharts() : [];
+      const chart = Array.isArray(charts) ? charts[0] : null;
+      if (!chart) return null;
+
+      const rect = (app as any).chartAnchorToViewportRect?.(chart.anchor) ?? null;
+      if (!rect) return null;
       return {
         scroll: app.getScroll(),
-        left: Number.parseFloat(el.style.left),
-        top: Number.parseFloat(el.style.top),
+        left: rect.left,
+        top: rect.top,
       };
     });
     expect(after).not.toBeNull();
@@ -589,12 +597,16 @@ test.describe("grid scrolling + virtualization", () => {
 
     const afterX = await page.evaluate(() => {
       const app = (window as any).__formulaApp;
-      const el = document.querySelector<HTMLElement>('[data-testid="chart-object"]');
-      if (!el) return null;
+      const charts = typeof app?.listCharts === "function" ? app.listCharts() : [];
+      const chart = Array.isArray(charts) ? charts[0] : null;
+      if (!chart) return null;
+
+      const rect = (app as any).chartAnchorToViewportRect?.(chart.anchor) ?? null;
+      if (!rect) return null;
       return {
         scroll: app.getScroll(),
-        left: Number.parseFloat(el.style.left),
-        top: Number.parseFloat(el.style.top),
+        left: rect.left,
+        top: rect.top,
       };
     });
     expect(afterX).not.toBeNull();
