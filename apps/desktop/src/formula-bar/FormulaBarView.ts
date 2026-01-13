@@ -642,9 +642,9 @@ export class FormulaBarView {
             if (active) {
               this.#selectNameBoxDropdownItem(active);
               return;
-             }
-             // Fall back to the standard Go To behavior if filtering produced no matches.
-             this.#closeNameBoxDropdown({ restoreAddress: false, reason: "commit" });
+            }
+            // Fall back to the standard Go To behavior if filtering produced no matches.
+            this.#closeNameBoxDropdown({ restoreAddress: false, reason: "commit" });
             const ref = address.value.trim();
             const handler = this.#callbacks.onGoTo;
             if (!handler) {
@@ -872,8 +872,29 @@ export class FormulaBarView {
         label,
         enabled,
         onSelect: () => {
+          // Selecting any entry is a corrective action; clear prior invalid input feedback.
+          this.#clearNameBoxError();
           if (reference) {
-            this.#callbacks.onGoTo?.(reference);
+            const handler = this.#callbacks.onGoTo;
+            if (!handler) return;
+
+            let ok = false;
+            try {
+              ok = handler(reference) === true;
+            } catch {
+              ok = false;
+            }
+
+            if (!ok) {
+              this.#setNameBoxError("Invalid reference");
+              try {
+                this.#addressEl.focus({ preventScroll: true });
+              } catch {
+                this.#addressEl.focus();
+              }
+              this.#addressEl.select();
+              return;
+            }
             return;
           }
 
