@@ -2,6 +2,8 @@ import { performance } from 'node:perf_hooks';
 
 export type BenchmarkFn = () => void | Promise<void>;
 
+export type BenchmarkUnit = 'ms' | 'mb';
+
 export interface BenchmarkOptions {
   iterations?: number;
   warmup?: number;
@@ -11,7 +13,7 @@ export interface BenchmarkOptions {
    * Benchmarks fail if `p95 > targetMs`.
    */
   targetMs: number;
-  unit?: 'ms' | 'mb';
+  unit?: BenchmarkUnit;
   /**
    * Timing source for the benchmark loop.
    *
@@ -29,7 +31,7 @@ export interface BenchmarkResult {
   name: string;
   iterations: number;
   warmup: number;
-  unit: 'ms' | 'mb';
+  unit: BenchmarkUnit;
   /**
    * Timing source used for this benchmark result.
    *
@@ -44,7 +46,13 @@ export interface BenchmarkResult {
   p99: number;
   stdDev: number;
 
-  targetMs: number;
+  /**
+   * Absolute p95 threshold in the benchmark's unit.
+   *
+   * Note: This field name is historical ("Ms") because the harness started
+   * with pure latency metrics. Size/memory benchmarks reuse it for their unit.
+   */
+  targetMs?: number;
   passed: boolean;
 }
 
@@ -76,7 +84,7 @@ export async function runBenchmark(
   const iterations = options.iterations ?? 50;
   const warmup = options.warmup ?? 10;
   const targetMs = options.targetMs;
-  const unit: BenchmarkResult['unit'] = options.unit ?? 'ms';
+  const unit: BenchmarkUnit = options.unit ?? 'ms';
   const clock = options.clock ?? 'wall';
 
   for (let i = 0; i < warmup; i++) {
