@@ -1,6 +1,6 @@
 import { extractCells } from "./extractCells.js";
 import { rectIntersectionArea, rectSize, rectToA1 } from "./rect.js";
-import { getSheetCellMap, getSheetMatrix, normalizeCell } from "./normalizeCell.js";
+import { getSheetCellMap, getSheetMatrix } from "./normalizeCell.js";
 import { throwIfAborted } from "../utils/abort.js";
 
 const DEFAULT_EXTRACT_MAX_ROWS = 50;
@@ -24,17 +24,89 @@ function encodeIdPart(value) {
   return encodeURIComponent(String(value));
 }
 
+function hasNonEmptyFormulaText(formula) {
+  if (formula == null) return false;
+  const trimmed = String(formula).trim();
+  if (trimmed === "") return false;
+  const strippedLeading = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
+  return strippedLeading.trim() !== "";
+}
+
 function isNonEmptyCell(cell) {
-  if (!cell) return false;
-  if (cell.f != null && String(cell.f).trim() !== "") return true;
-  const v = cell.v;
-  if (v == null) return false;
-  if (typeof v === "string") return v.trim() !== "";
+  if (cell == null) return false;
+
+  // Strings support both raw values and formulas (bundler-style sheet matrices sometimes store scalars).
+  if (typeof cell === "string") {
+    const trimmed = cell.trim();
+    if (trimmed === "") return false;
+    if (trimmed.startsWith("=")) return hasNonEmptyFormulaText(trimmed);
+    return true;
+  }
+
+  // Preserve rich object values as "non-empty" (matches normalizeCell's fallback).
+  if (cell instanceof Date) return true;
+
+  if (typeof cell === "object" && !Array.isArray(cell)) {
+    const hasVF =
+      Object.prototype.hasOwnProperty.call(cell, "v") || Object.prototype.hasOwnProperty.call(cell, "f");
+    if (hasVF) {
+      const f = cell.f;
+      if (typeof f === "string") {
+        if (hasNonEmptyFormulaText(f)) return true;
+      } else if (f != null && String(f).trim() !== "") {
+        return true;
+      }
+
+      const v = cell.v;
+      if (v == null) return false;
+      if (typeof v === "string") return v.trim() !== "";
+      return true;
+    }
+
+    const hasValueFormula =
+      Object.prototype.hasOwnProperty.call(cell, "value") || Object.prototype.hasOwnProperty.call(cell, "formula");
+    if (hasValueFormula) {
+      const formula = cell.formula;
+      if (typeof formula === "string" && hasNonEmptyFormulaText(formula)) return true;
+
+      const value = cell.value;
+      if (value == null || value === "") return false;
+      if (typeof value === "string") return value.trim() !== "";
+      return true;
+    }
+
+    // Treat `{}` as an empty cell; it's a common sparse representation.
+    if (cell.constructor === Object && Object.keys(cell).length === 0) return false;
+    // Any other object is considered a value.
+    return true;
+  }
+
+  // Numbers, booleans, etc.
   return true;
 }
 
 function isFormulaCell(cell) {
-  return !!(cell && cell.f != null && String(cell.f).trim() !== "");
+  if (cell == null) return false;
+  if (typeof cell === "string") {
+    const trimmed = cell.trim();
+    if (!trimmed.startsWith("=")) return false;
+    return hasNonEmptyFormulaText(trimmed);
+  }
+
+  if (typeof cell === "object" && !Array.isArray(cell)) {
+    if (Object.prototype.hasOwnProperty.call(cell, "f")) {
+      const f = cell.f;
+      if (typeof f === "string") return hasNonEmptyFormulaText(f);
+      return f != null && String(f).trim() !== "";
+    }
+    if (Object.prototype.hasOwnProperty.call(cell, "formula")) {
+      const formula = cell.formula;
+      if (typeof formula !== "string") return false;
+      return hasNonEmptyFormulaText(formula);
+    }
+  }
+
+  return false;
 }
 
 function hasNonFormulaNonEmptyCell(cells, signal) {
@@ -147,8 +219,7 @@ function detectRegions(sheet, predicate, opts) {
           throwIfAborted(signal);
           const c = Number(cKey);
           if (!Number.isInteger(c) || c < 0) continue;
-          const cell = normalizeCell(row[c]);
-          if (!predicate(cell)) continue;
+          if (!predicate(row[c])) continue;
           coords.set(packCoordKey(r, c), { row: r, col: c });
           minRow = Math.min(minRow, r);
           minCol = Math.min(minCol, c);
@@ -324,8 +395,7 @@ function detectRegions(sheet, predicate, opts) {
       throwIfAborted(signal);
       const parsed = parseRowColKey(key);
       if (!parsed) continue;
-      const cell = normalizeCell(raw);
-      if (!predicate(cell)) continue;
+      if (!predicate(raw)) continue;
       coords.set(packCoordKey(parsed.row, parsed.col), parsed);
 
       minRow = Math.min(minRow, parsed.row);
