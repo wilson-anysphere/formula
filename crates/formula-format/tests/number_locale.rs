@@ -11,6 +11,10 @@ fn formats_thousands_grouping_for_each_locale() {
         "1,234,567.5"
     );
     assert_eq!(
+        locale::format_number(value, locale::get_locale("ja-JP").unwrap()),
+        "1,234,567.5"
+    );
+    assert_eq!(
         locale::format_number(value, locale::get_locale("en-GB").unwrap()),
         "1,234,567.5"
     );
@@ -43,6 +47,14 @@ fn formats_thousands_grouping_for_each_locale() {
         "1.234.567,5"
     );
     assert_eq!(
+        locale::format_number(value, locale::get_locale("da-DK").unwrap()),
+        "1.234.567,5"
+    );
+    assert_eq!(
+        locale::format_number(value, locale::get_locale("tr-TR").unwrap()),
+        "1.234.567,5"
+    );
+    assert_eq!(
         locale::format_number(value, locale::get_locale("it-IT").unwrap()),
         "1.234.567,5"
     );
@@ -60,6 +72,10 @@ fn formats_thousands_grouping_for_each_locale() {
     );
     assert_eq!(
         locale::format_number(value, locale::get_locale("fr-FR").unwrap()),
+        format!("1{nbsp}234{nbsp}567,5")
+    );
+    assert_eq!(
+        locale::format_number(value, locale::get_locale("ru-RU").unwrap()),
         format!("1{nbsp}234{nbsp}567,5")
     );
 
@@ -109,6 +125,7 @@ fn does_not_render_negative_zero() {
 fn get_locale_normalizes_common_locale_id_spellings() {
     assert_eq!(locale::get_locale("en-us").unwrap().id, "en-US");
     assert_eq!(locale::get_locale("en").unwrap().id, "en-US");
+    assert_eq!(locale::get_locale("en-GB-oed").unwrap().id, "en-GB");
     assert_eq!(locale::get_locale("en_gb").unwrap().id, "en-GB");
     assert_eq!(locale::get_locale("en_US.UTF-8").unwrap().id, "en-US");
     assert_eq!(locale::get_locale("de_ch").unwrap().id, "de-CH");
@@ -125,6 +142,15 @@ fn get_locale_normalizes_common_locale_id_spellings() {
     assert_eq!(locale::get_locale("pt-AO").unwrap().id, "pt-PT");
     assert_eq!(locale::get_locale("nl").unwrap().id, "nl-NL");
     assert_eq!(locale::get_locale("nl_BE").unwrap().id, "nl-BE");
+    assert_eq!(locale::get_locale("ja").unwrap().id, "ja-JP");
+    assert_eq!(locale::get_locale("zh-Hant-TW").unwrap().id, "zh-CN");
+    assert_eq!(locale::get_locale("ko").unwrap().id, "ko-KR");
+    assert_eq!(locale::get_locale("ru").unwrap().id, "ru-RU");
+    assert_eq!(locale::get_locale("pl-PL").unwrap().id, "pl-PL");
+    assert_eq!(locale::get_locale("sv-SE").unwrap().id, "sv-SE");
+    assert_eq!(locale::get_locale("no-NO").unwrap().id, "nb-NO");
+    assert_eq!(locale::get_locale("da").unwrap().id, "da-DK");
+    assert_eq!(locale::get_locale("tr").unwrap().id, "tr-TR");
     assert_eq!(locale::get_locale("it").unwrap().id, "it-IT");
     assert_eq!(locale::get_locale("it_CH").unwrap().id, "it-CH");
 }

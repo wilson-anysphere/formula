@@ -81,6 +81,69 @@ pub static NL_BE: NumberLocale = NumberLocale {
     thousands_separator: Some(crate::Locale::es_es().thousands_sep),
 };
 
+/// Japanese (Japan) commonly uses `.` for decimals and `,` for thousands grouping.
+pub static JA_JP: NumberLocale = NumberLocale {
+    id: "ja-JP",
+    decimal_separator: crate::Locale::en_us().decimal_sep,
+    thousands_separator: Some(crate::Locale::en_us().thousands_sep),
+};
+
+/// Chinese (China) commonly uses `.` for decimals and `,` for thousands grouping.
+pub static ZH_CN: NumberLocale = NumberLocale {
+    id: "zh-CN",
+    decimal_separator: crate::Locale::en_us().decimal_sep,
+    thousands_separator: Some(crate::Locale::en_us().thousands_sep),
+};
+
+/// Korean (Korea) commonly uses `.` for decimals and `,` for thousands grouping.
+pub static KO_KR: NumberLocale = NumberLocale {
+    id: "ko-KR",
+    decimal_separator: crate::Locale::en_us().decimal_sep,
+    thousands_separator: Some(crate::Locale::en_us().thousands_sep),
+};
+
+/// Russian (Russia) commonly uses `,` for decimals and NBSP for thousands grouping.
+pub static RU_RU: NumberLocale = NumberLocale {
+    id: "ru-RU",
+    decimal_separator: crate::Locale::fr_fr().decimal_sep,
+    thousands_separator: Some(crate::Locale::fr_fr().thousands_sep),
+};
+
+/// Polish (Poland) commonly uses `,` for decimals and NBSP for thousands grouping.
+pub static PL_PL: NumberLocale = NumberLocale {
+    id: "pl-PL",
+    decimal_separator: crate::Locale::fr_fr().decimal_sep,
+    thousands_separator: Some(crate::Locale::fr_fr().thousands_sep),
+};
+
+/// Swedish (Sweden) commonly uses `,` for decimals and NBSP for thousands grouping.
+pub static SV_SE: NumberLocale = NumberLocale {
+    id: "sv-SE",
+    decimal_separator: crate::Locale::fr_fr().decimal_sep,
+    thousands_separator: Some(crate::Locale::fr_fr().thousands_sep),
+};
+
+/// Norwegian Bokmål (Norway) commonly uses `,` for decimals and NBSP for thousands grouping.
+pub static NB_NO: NumberLocale = NumberLocale {
+    id: "nb-NO",
+    decimal_separator: crate::Locale::fr_fr().decimal_sep,
+    thousands_separator: Some(crate::Locale::fr_fr().thousands_sep),
+};
+
+/// Danish (Denmark) commonly uses `,` for decimals and `.` for thousands grouping.
+pub static DA_DK: NumberLocale = NumberLocale {
+    id: "da-DK",
+    decimal_separator: crate::Locale::es_es().decimal_sep,
+    thousands_separator: Some(crate::Locale::es_es().thousands_sep),
+};
+
+/// Turkish (Türkiye) commonly uses `,` for decimals and `.` for thousands grouping.
+pub static TR_TR: NumberLocale = NumberLocale {
+    id: "tr-TR",
+    decimal_separator: crate::Locale::es_es().decimal_sep,
+    thousands_separator: Some(crate::Locale::es_es().thousands_sep),
+};
+
 pub static IT_IT: NumberLocale = NumberLocale {
     id: "it-IT",
     decimal_separator: crate::Locale::it_it().decimal_sep,
@@ -182,6 +245,15 @@ fn normalize_locale_id(id: &str) -> Option<&'static str> {
             Some("be") => Some("nl-BE"),
             _ => Some("nl-NL"),
         },
+        "ja" => Some("ja-JP"),
+        "zh" => Some("zh-CN"),
+        "ko" => Some("ko-KR"),
+        "ru" => Some("ru-RU"),
+        "pl" => Some("pl-PL"),
+        "sv" => Some("sv-SE"),
+        "nb" | "no" | "nn" => Some("nb-NO"),
+        "da" => Some("da-DK"),
+        "tr" => Some("tr-TR"),
         _ => None,
     }
 }
@@ -200,6 +272,15 @@ pub fn get_locale(id: &str) -> Option<&'static NumberLocale> {
         "pt-BR" => Some(&PT_BR),
         "nl-NL" => Some(&NL_NL),
         "nl-BE" => Some(&NL_BE),
+        "ja-JP" => Some(&JA_JP),
+        "zh-CN" => Some(&ZH_CN),
+        "ko-KR" => Some(&KO_KR),
+        "ru-RU" => Some(&RU_RU),
+        "pl-PL" => Some(&PL_PL),
+        "sv-SE" => Some(&SV_SE),
+        "nb-NO" => Some(&NB_NO),
+        "da-DK" => Some(&DA_DK),
+        "tr-TR" => Some(&TR_TR),
         "it-IT" => Some(&IT_IT),
         "it-CH" => Some(&IT_CH),
         _ => None,
@@ -349,6 +430,17 @@ mod tests {
         assert_eq!(normalize_locale_id("nl_BE"), Some("nl-BE"));
         assert_eq!(normalize_locale_id("it_it"), Some("it-IT"));
         assert_eq!(normalize_locale_id("it-CH"), Some("it-CH"));
+        assert_eq!(normalize_locale_id("ja-JP"), Some("ja-JP"));
+        assert_eq!(normalize_locale_id("zh-CN"), Some("zh-CN"));
+        assert_eq!(normalize_locale_id("zh-Hant-TW"), Some("zh-CN"));
+        assert_eq!(normalize_locale_id("ko-KR"), Some("ko-KR"));
+        assert_eq!(normalize_locale_id("ru-RU"), Some("ru-RU"));
+        assert_eq!(normalize_locale_id("pl-PL"), Some("pl-PL"));
+        assert_eq!(normalize_locale_id("sv-SE"), Some("sv-SE"));
+        assert_eq!(normalize_locale_id("nb-NO"), Some("nb-NO"));
+        assert_eq!(normalize_locale_id("no-NO"), Some("nb-NO"));
+        assert_eq!(normalize_locale_id("da-DK"), Some("da-DK"));
+        assert_eq!(normalize_locale_id("tr-TR"), Some("tr-TR"));
         assert_eq!(normalize_locale_id("fr-FR-u-nu-latn"), Some("fr-FR"));
         assert_eq!(normalize_locale_id("fr-Latn-FR-u-nu-latn"), Some("fr-FR"));
         assert_eq!(normalize_locale_id(""), None);
@@ -370,6 +462,12 @@ mod tests {
         assert_eq!(EN_US.thousands_separator, Some(en.thousands_sep));
         assert_eq!(EN_GB.decimal_separator, en.decimal_sep);
         assert_eq!(EN_GB.thousands_separator, Some(en.thousands_sep));
+        assert_eq!(JA_JP.decimal_separator, en.decimal_sep);
+        assert_eq!(JA_JP.thousands_separator, Some(en.thousands_sep));
+        assert_eq!(ZH_CN.decimal_separator, en.decimal_sep);
+        assert_eq!(ZH_CN.thousands_separator, Some(en.thousands_sep));
+        assert_eq!(KO_KR.decimal_separator, en.decimal_sep);
+        assert_eq!(KO_KR.thousands_separator, Some(en.thousands_sep));
 
         let de = crate::Locale::de_de();
         assert_eq!(DE_DE.decimal_separator, de.decimal_sep);
@@ -378,6 +476,14 @@ mod tests {
         let fr = crate::Locale::fr_fr();
         assert_eq!(FR_FR.decimal_separator, fr.decimal_sep);
         assert_eq!(FR_FR.thousands_separator, Some(fr.thousands_sep));
+        assert_eq!(RU_RU.decimal_separator, fr.decimal_sep);
+        assert_eq!(RU_RU.thousands_separator, Some(fr.thousands_sep));
+        assert_eq!(PL_PL.decimal_separator, fr.decimal_sep);
+        assert_eq!(PL_PL.thousands_separator, Some(fr.thousands_sep));
+        assert_eq!(SV_SE.decimal_separator, fr.decimal_sep);
+        assert_eq!(SV_SE.thousands_separator, Some(fr.thousands_sep));
+        assert_eq!(NB_NO.decimal_separator, fr.decimal_sep);
+        assert_eq!(NB_NO.thousands_separator, Some(fr.thousands_sep));
 
         let es = crate::Locale::es_es();
         assert_eq!(ES_ES.decimal_separator, es.decimal_sep);
@@ -390,6 +496,10 @@ mod tests {
         assert_eq!(NL_NL.thousands_separator, Some(es.thousands_sep));
         assert_eq!(NL_BE.decimal_separator, es.decimal_sep);
         assert_eq!(NL_BE.thousands_separator, Some(es.thousands_sep));
+        assert_eq!(DA_DK.decimal_separator, es.decimal_sep);
+        assert_eq!(DA_DK.thousands_separator, Some(es.thousands_sep));
+        assert_eq!(TR_TR.decimal_separator, es.decimal_sep);
+        assert_eq!(TR_TR.thousands_separator, Some(es.thousands_sep));
 
         let it = crate::Locale::it_it();
         assert_eq!(IT_IT.decimal_separator, it.decimal_sep);
