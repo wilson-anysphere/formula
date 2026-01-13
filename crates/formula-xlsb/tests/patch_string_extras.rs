@@ -153,6 +153,7 @@ fn patcher_preserves_flagged_inline_string_record_for_noop_edits() {
         new_value: CellValue::Text(inline_text),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     };
@@ -172,6 +173,7 @@ fn patcher_updates_formula_rgce_without_losing_rich_or_phonetic_cached_bytes() {
         new_value: CellValue::Text(rich_text.clone()),
         new_formula: Some(new_rgce.clone()),
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     };
@@ -202,6 +204,7 @@ fn patcher_updates_formula_rgce_without_losing_rich_or_phonetic_cached_bytes() {
         new_value: CellValue::Text(pho_text.clone()),
         new_formula: Some(new_rgce.clone()),
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     };
@@ -236,6 +239,7 @@ fn patcher_clears_rich_phonetic_flags_when_rewriting_cached_string_value() {
         new_value: CellValue::Text("New".to_string()),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     };

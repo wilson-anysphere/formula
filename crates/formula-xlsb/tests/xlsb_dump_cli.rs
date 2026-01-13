@@ -36,6 +36,7 @@ fn xlsb_dump_prints_known_error_literals() {
             new_value: formula_xlsb::CellValue::Error(0x2C), // #SPILL!
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],

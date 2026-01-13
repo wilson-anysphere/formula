@@ -190,6 +190,7 @@ fn patcher_updates_cached_value_without_changing_flags() {
         new_value: CellValue::Number(99.5),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     };
@@ -205,6 +206,68 @@ fn patcher_updates_cached_value_without_changing_flags() {
     let formula = cell.formula.as_ref().expect("formula expected");
     assert_eq!(formula.flags, flags);
     assert_eq!(formula.extra, extra.to_vec());
+}
+
+#[test]
+fn patcher_can_override_existing_brt_fmla_flags() {
+    let flags = 0x2222;
+    let new_flags = 0x3333;
+    let extra = [0xAA, 0xBB];
+    let sheet_bin = synthetic_sheet_brt_fmla_num(flags, 10.0, &extra);
+
+    let edit = CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(99.5),
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: Some(new_flags),
+        shared_string_index: None,
+    };
+    let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
+
+    let tmp = write_fixture_like_xlsb(&patched_sheet);
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open patched xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet");
+
+    assert_eq!(sheet.cells.len(), 1);
+    let cell = &sheet.cells[0];
+    assert_eq!(cell.value, CellValue::Number(99.5));
+    let formula = cell.formula.as_ref().expect("formula expected");
+    assert_eq!(formula.flags, new_flags);
+    assert_eq!(formula.extra, extra.to_vec());
+}
+
+#[test]
+fn patcher_can_insert_formula_cells_with_explicit_flags() {
+    let mut sheet_bin = Vec::new();
+    push_record(&mut sheet_bin, WORKSHEET, &[]);
+    push_record(&mut sheet_bin, SHEETDATA, &[]);
+    push_record(&mut sheet_bin, SHEETDATA_END, &[]);
+
+    let flags = 0x1234;
+    let edit = CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(1.0),
+        new_formula: Some(Vec::new()), // empty rgce
+        new_rgcb: None,
+        new_formula_flags: Some(flags),
+        shared_string_index: None,
+    };
+    let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
+
+    let tmp = write_fixture_like_xlsb(&patched_sheet);
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open patched xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet");
+
+    assert_eq!(sheet.cells.len(), 1);
+    let cell = &sheet.cells[0];
+    assert_eq!(cell.row, 0);
+    assert_eq!(cell.col, 0);
+    assert_eq!(cell.value, CellValue::Number(1.0));
+    let formula = cell.formula.as_ref().expect("formula expected");
+    assert_eq!(formula.flags, flags);
 }
 
 #[test]
@@ -240,6 +303,7 @@ fn patcher_updates_cached_bool_without_changing_flags() {
         new_value: CellValue::Bool(false),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     };
@@ -288,6 +352,7 @@ fn patcher_updates_cached_error_without_changing_flags() {
         new_value: CellValue::Error(0x2A),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     };
@@ -339,6 +404,7 @@ fn patcher_updates_cached_string_without_changing_flags() {
         new_value: CellValue::Text("World".to_string()),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     };
@@ -368,6 +434,7 @@ fn patcher_updates_cached_string_with_reserved_flags_and_4byte_extra() {
         new_value: CellValue::Text("World".to_string()),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     };
@@ -399,6 +466,7 @@ fn patcher_is_byte_identical_for_noop_brt_fmla_bool_with_extra_bytes() {
             new_value: CellValue::Bool(true),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -422,6 +490,7 @@ fn patcher_is_byte_identical_for_noop_brt_fmla_error_with_extra_bytes() {
             new_value: CellValue::Error(0x07),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -447,6 +516,7 @@ fn patcher_is_byte_identical_for_noop_brt_fmla_string_with_extra_bytes() {
             new_value: CellValue::Text("Hello".to_string()),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -481,13 +551,16 @@ fn patcher_requires_new_rgcb_when_replacing_rgce_for_brt_fmla_string_with_existi
             new_value: CellValue::Text("Hello".to_string()),
             new_formula: Some(new_rgce.clone()),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
     )
     .expect_err("expected InvalidInput when changing rgce without supplying new_rgcb");
     match err {
-        formula_xlsb::Error::Io(io_err) => assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput),
+        formula_xlsb::Error::Io(io_err) => {
+            assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput)
+        }
         other => panic!("expected InvalidInput, got {other:?}"),
     }
 
@@ -499,6 +572,7 @@ fn patcher_requires_new_rgcb_when_replacing_rgce_for_brt_fmla_string_with_existi
             new_value: CellValue::Text("Hello".to_string()),
             new_formula: Some(new_rgce.clone()),
             new_rgcb: Some(extra.to_vec()),
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -529,13 +603,16 @@ fn patcher_requires_new_rgcb_when_replacing_rgce_for_brt_fmla_bool_with_existing
             new_value: CellValue::Bool(true),
             new_formula: Some(new_rgce.clone()),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
     )
     .expect_err("expected InvalidInput when changing rgce without supplying new_rgcb");
     match err {
-        formula_xlsb::Error::Io(io_err) => assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput),
+        formula_xlsb::Error::Io(io_err) => {
+            assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput)
+        }
         other => panic!("expected InvalidInput, got {other:?}"),
     }
 
@@ -547,6 +624,7 @@ fn patcher_requires_new_rgcb_when_replacing_rgce_for_brt_fmla_bool_with_existing
             new_value: CellValue::Bool(true),
             new_formula: Some(new_rgce.clone()),
             new_rgcb: Some(extra.to_vec()),
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -577,13 +655,16 @@ fn patcher_requires_new_rgcb_when_replacing_rgce_for_brt_fmla_error_with_existin
             new_value: CellValue::Error(0x2A),
             new_formula: Some(new_rgce.clone()),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
     )
     .expect_err("expected InvalidInput when changing rgce without supplying new_rgcb");
     match err {
-        formula_xlsb::Error::Io(io_err) => assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput),
+        formula_xlsb::Error::Io(io_err) => {
+            assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput)
+        }
         other => panic!("expected InvalidInput, got {other:?}"),
     }
 
@@ -595,6 +676,7 @@ fn patcher_requires_new_rgcb_when_replacing_rgce_for_brt_fmla_error_with_existin
             new_value: CellValue::Error(0x2A),
             new_formula: Some(new_rgce.clone()),
             new_rgcb: Some(extra.to_vec()),
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],

@@ -120,7 +120,7 @@ fn build_content_types_xml(sheet_count: usize) -> String {
   <Default Extension="bin" ContentType="application/vnd.ms-excel.sheet.binary.main"/>
   <Override PartName="/xl/workbook.bin" ContentType="application/vnd.ms-excel.sheet.binary.main"/>
 "#
-        .to_string();
+    .to_string();
 
     for idx in 1..=sheet_count {
         xml.push_str(&format!(
@@ -148,7 +148,7 @@ fn build_workbook_rels_xml(sheet_count: usize) -> String {
     let mut xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 "#
-        .to_string();
+    .to_string();
 
     for idx in 1..=sheet_count {
         xml.push_str(&format!(
@@ -256,6 +256,7 @@ fn save_with_cell_edits_streaming_multi_changes_only_edited_sheet_parts() {
             new_value: CellValue::Number(123.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -268,6 +269,7 @@ fn save_with_cell_edits_streaming_multi_changes_only_edited_sheet_parts() {
             new_value: CellValue::Number(456.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],

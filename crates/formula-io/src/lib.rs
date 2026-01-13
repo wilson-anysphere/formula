@@ -1662,6 +1662,7 @@ mod tests {
                 new_value: crate::xlsb::CellValue::Error(code),
                 new_formula: None,
                 new_rgcb: None,
+                new_formula_flags: None,
                 shared_string_index: None,
                 new_style: None,
             });
@@ -1673,6 +1674,7 @@ mod tests {
                 new_value: crate::xlsb::CellValue::Error(code),
                 new_formula: Some(vec![0x1C, code]),
                 new_rgcb: None,
+                new_formula_flags: None,
                 shared_string_index: None,
                 new_style: None,
             });

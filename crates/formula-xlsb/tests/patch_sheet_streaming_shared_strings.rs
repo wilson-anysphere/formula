@@ -194,6 +194,7 @@ fn streaming_shared_strings_does_not_touch_sst_for_inserted_formula_string_cells
             new_value: CellValue::Text("New".to_string()),
             new_formula: Some(ptg_str("New")),
             new_rgcb: None,
+            new_formula_flags: None,
             // Even if the caller supplies an `isst`, formula cached strings are stored inline and
             // should not affect the shared string table counts.
             shared_string_index: Some(0),
@@ -204,7 +205,10 @@ fn streaming_shared_strings_does_not_touch_sst_for_inserted_formula_string_cells
 
     let sheet_bin = read_zip_part(&out_path, "xl/worksheets/sheet1.bin");
     let (id, _payload) = find_cell_record(&sheet_bin, 0, 1).expect("find B1 record");
-    assert_eq!(id, 0x0008, "expected BrtFmlaString/FORMULA_STRING record id");
+    assert_eq!(
+        id, 0x0008,
+        "expected BrtFmlaString/FORMULA_STRING record id"
+    );
 
     let shared_strings_in = read_zip_part(&input_path, "xl/sharedStrings.bin");
     let shared_strings_out = read_zip_part(&out_path, "xl/sharedStrings.bin");
@@ -282,6 +286,7 @@ fn streaming_shared_string_edit_updates_isst_and_preserves_counts() {
             new_value: CellValue::Text("World".to_string()),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -321,6 +326,7 @@ fn streaming_shared_string_edit_appends_new_si_and_updates_unique_count() {
             new_value: CellValue::Text("New".to_string()),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -362,6 +368,7 @@ fn streaming_shared_string_noop_is_lossless() {
             new_value: CellValue::Text("Hello".to_string()),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -390,7 +397,10 @@ fn streaming_shared_string_noop_is_lossless() {
     );
 
     // Ensure we didn't accidentally mutate the in-memory bytes either.
-    assert_eq!(bytes, std::fs::read(&input_path).expect("read input workbook"));
+    assert_eq!(
+        bytes,
+        std::fs::read(&input_path).expect("read input workbook")
+    );
 }
 
 #[test]
@@ -413,6 +423,7 @@ fn streaming_shared_string_noop_rich_sst_is_lossless() {
             new_value: CellValue::Text("Hello Bold".to_string()),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -456,6 +467,7 @@ fn streaming_shared_string_noop_inline_string_does_not_touch_shared_strings() {
             new_value: CellValue::Text("Hello".to_string()),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -503,6 +515,7 @@ fn streaming_shared_strings_repairs_unique_count_when_header_is_incorrect() {
             new_value: CellValue::Text("New".to_string()),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -533,6 +546,7 @@ fn streaming_shared_string_total_count_updates_when_cell_leaves_sst() {
             new_value: CellValue::Number(123.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -568,6 +582,7 @@ fn streaming_shared_string_total_count_updates_when_cell_enters_sst() {
             new_value: CellValue::Text("World".to_string()),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],

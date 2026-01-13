@@ -246,6 +246,7 @@ fn xlsb_export_preserves_defined_names_and_ptgname_formulas() {
             new_value: formula_xlsb::CellValue::Number(0.0),
             new_formula: Some(rgce),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],

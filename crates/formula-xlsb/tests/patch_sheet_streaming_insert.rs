@@ -185,17 +185,11 @@ fn rewrite_dimension_len_as_two_byte_varint(sheet_bin: &[u8]) -> Vec<u8> {
 
     loop {
         let record_start = cursor.position() as usize;
-        let Some(id) = biff12_varint::read_record_id(&mut cursor)
-            .ok()
-            .flatten()
-        else {
+        let Some(id) = biff12_varint::read_record_id(&mut cursor).ok().flatten() else {
             break;
         };
         let id_end = cursor.position() as usize;
-        let Some(len) = biff12_varint::read_record_len(&mut cursor)
-            .ok()
-            .flatten()
-        else {
+        let Some(len) = biff12_varint::read_record_len(&mut cursor).ok().flatten() else {
             break;
         };
         let len_start = id_end;
@@ -236,17 +230,11 @@ fn rewrite_cell_isst_header_as_two_byte_varints(
 
     loop {
         let record_start = cursor.position() as usize;
-        let Some(id) = biff12_varint::read_record_id(&mut cursor)
-            .ok()
-            .flatten()
-        else {
+        let Some(id) = biff12_varint::read_record_id(&mut cursor).ok().flatten() else {
             break;
         };
         let id_end = cursor.position() as usize;
-        let Some(len) = biff12_varint::read_record_len(&mut cursor)
-            .ok()
-            .flatten()
-        else {
+        let Some(len) = biff12_varint::read_record_len(&mut cursor).ok().flatten() else {
             break;
         };
         let len_start = id_end;
@@ -320,7 +308,11 @@ fn dimension_header_raw(sheet_bin: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
     }
 }
 
-fn cell_header_raw(sheet_bin: &[u8], target_row: u32, target_col: u32) -> Option<(Vec<u8>, Vec<u8>)> {
+fn cell_header_raw(
+    sheet_bin: &[u8],
+    target_row: u32,
+    target_col: u32,
+) -> Option<(Vec<u8>, Vec<u8>)> {
     // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
     const SHEETDATA: u32 = 0x0091;
     const SHEETDATA_END: u32 = 0x0092;
@@ -394,6 +386,7 @@ fn patch_sheet_bin_streaming_insert_matches_in_memory_insert() {
             new_value: CellValue::Number(42.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         },
@@ -403,6 +396,7 @@ fn patch_sheet_bin_streaming_insert_matches_in_memory_insert() {
             new_value: CellValue::Number(99.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         },
@@ -431,6 +425,7 @@ fn patch_sheet_bin_streaming_expands_dimension_for_inserts() {
             new_value: CellValue::Number(42.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         },
@@ -440,6 +435,7 @@ fn patch_sheet_bin_streaming_expands_dimension_for_inserts() {
             new_value: CellValue::Number(99.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         },
@@ -464,6 +460,7 @@ fn patch_sheet_bin_streaming_noop_insertion_is_byte_identical() {
         new_value: CellValue::Blank,
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -490,6 +487,7 @@ fn patch_sheet_bin_streaming_handles_dimension_after_sheetdata() {
             new_value: CellValue::Number(42.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         },
@@ -499,6 +497,7 @@ fn patch_sheet_bin_streaming_handles_dimension_after_sheetdata() {
             new_value: CellValue::Number(99.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         },
@@ -529,6 +528,7 @@ fn patch_sheet_bin_streaming_inserts_cells_in_column_order() {
             new_value: CellValue::Number(42.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         },
@@ -539,6 +539,7 @@ fn patch_sheet_bin_streaming_inserts_cells_in_column_order() {
             new_value: CellValue::Number(100.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         },
@@ -566,6 +567,7 @@ fn patch_sheet_bin_streaming_is_lossless_for_noop_value_edit() {
         new_value: CellValue::Number(1.0),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -593,6 +595,7 @@ fn patch_sheet_bin_streaming_inserts_text_cell_as_shared_string_when_isst_provid
         new_value: CellValue::Text("Hello".to_string()),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: Some(0),
         new_style: None,
     }];
@@ -628,6 +631,7 @@ fn patch_sheet_bin_streaming_inserts_text_cell_as_inline_string_when_isst_missin
         new_value: CellValue::Text("Hello".to_string()),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -661,6 +665,7 @@ fn patch_sheet_bin_streaming_is_lossless_for_noop_formula_edit() {
         new_value: CellValue::Number(1.0),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -688,6 +693,7 @@ fn patch_sheet_bin_streaming_can_insert_into_empty_sheet() {
         new_value: CellValue::Number(123.0),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -716,6 +722,7 @@ fn patch_sheet_bin_streaming_noop_insertions_in_empty_sheet_are_lossless() {
             new_value: CellValue::Blank,
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         },
@@ -725,6 +732,7 @@ fn patch_sheet_bin_streaming_noop_insertions_in_empty_sheet_are_lossless() {
             new_value: CellValue::Blank,
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         },
@@ -753,6 +761,7 @@ fn patch_sheet_bin_streaming_inserts_missing_rows_before_first_row() {
         new_value: CellValue::Number(2.0),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -764,7 +773,10 @@ fn patch_sheet_bin_streaming_inserts_missing_rows_before_first_row() {
         .expect("patch_sheet_bin_streaming");
 
     assert_eq!(patched_stream, patched_in_mem);
-    assert_eq!(cell_coords_in_stream_order(&patched_stream), vec![(0, 0), (5, 0)]);
+    assert_eq!(
+        cell_coords_in_stream_order(&patched_stream),
+        vec![(0, 0), (5, 0)]
+    );
     assert_eq!(read_dimension_bounds(&patched_stream), Some((0, 5, 0, 0)));
 }
 
@@ -781,6 +793,7 @@ fn patch_sheet_bin_streaming_inserts_missing_rows_between_existing_rows() {
         new_value: CellValue::Number(2.0),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -809,7 +822,11 @@ fn patch_sheet_bin_streaming_preserves_dimension_header_varint_bytes() {
     let Some((id_raw, len_raw)) = dimension_header_raw(&tweaked) else {
         panic!("expected DIMENSION record");
     };
-    assert_eq!(len_raw, vec![0x90, 0x00], "expected non-canonical len varint");
+    assert_eq!(
+        len_raw,
+        vec![0x90, 0x00],
+        "expected non-canonical len varint"
+    );
 
     let edits = [CellEdit {
         row: 5,
@@ -817,6 +834,7 @@ fn patch_sheet_bin_streaming_preserves_dimension_header_varint_bytes() {
         new_value: CellValue::Number(123.0),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -851,7 +869,11 @@ fn patch_sheet_bin_streaming_preserves_cell_isst_header_varint_bytes_when_patchi
         panic!("expected cell record");
     };
     assert_eq!(id_raw, vec![0x87, 0x00], "expected non-canonical id varint");
-    assert_eq!(len_raw, vec![0x8C, 0x00], "expected non-canonical len varint");
+    assert_eq!(
+        len_raw,
+        vec![0x8C, 0x00],
+        "expected non-canonical len varint"
+    );
 
     let edits = [CellEdit {
         row: 0,
@@ -859,6 +881,7 @@ fn patch_sheet_bin_streaming_preserves_cell_isst_header_varint_bytes_when_patchi
         new_value: CellValue::Text("World".to_string()),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: Some(1),
         new_style: None,
     }];
@@ -903,6 +926,7 @@ fn patch_sheet_bin_streaming_insert_formula_with_rgcb_matches_in_memory() {
         new_value: CellValue::Number(6.0),
         new_formula: Some(rgce.clone()),
         new_rgcb: Some(rgcb.clone()),
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -916,7 +940,10 @@ fn patch_sheet_bin_streaming_insert_formula_with_rgcb_matches_in_memory() {
     assert_eq!(patched_stream, patched_in_mem);
 
     let (id, payload) = find_cell_record(&patched_stream, 4, 2).expect("find inserted cell");
-    assert_eq!(id, FORMULA_FLOAT, "expected BrtFmlaNum/FORMULA_FLOAT record id");
+    assert_eq!(
+        id, FORMULA_FLOAT,
+        "expected BrtFmlaNum/FORMULA_FLOAT record id"
+    );
 
     let cce = u32::from_le_bytes(payload[18..22].try_into().unwrap()) as usize;
     assert_eq!(payload[22..22 + cce], rgce);
@@ -941,6 +968,7 @@ fn patch_sheet_bin_streaming_can_patch_formula_rgcb_bytes() {
         new_value: CellValue::Number(6.0),
         new_formula: None,
         new_rgcb: Some(new_rgcb.clone()),
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -954,7 +982,10 @@ fn patch_sheet_bin_streaming_can_patch_formula_rgcb_bytes() {
     assert_eq!(patched_stream, patched_in_mem);
 
     let (id, payload) = find_cell_record(&patched_stream, 0, 0).expect("find patched cell");
-    assert_eq!(id, FORMULA_FLOAT, "expected BrtFmlaNum/FORMULA_FLOAT record id");
+    assert_eq!(
+        id, FORMULA_FLOAT,
+        "expected BrtFmlaNum/FORMULA_FLOAT record id"
+    );
 
     let cce = u32::from_le_bytes(payload[18..22].try_into().unwrap()) as usize;
     assert_eq!(payload[22..22 + cce], rgce);
@@ -977,6 +1008,7 @@ fn patch_sheet_bin_streaming_inserts_bool_and_error_cells_matches_in_memory() {
             new_value: CellValue::Bool(true),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         },
@@ -986,6 +1018,7 @@ fn patch_sheet_bin_streaming_inserts_bool_and_error_cells_matches_in_memory() {
             new_value: CellValue::Error(0x07),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         },
@@ -1027,6 +1060,7 @@ fn patch_sheet_bin_streaming_inserts_formula_bool_and_error_cells_matches_in_mem
             new_value: CellValue::Bool(true),
             new_formula: Some(rgce_bool_true.clone()),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         },
@@ -1036,6 +1070,7 @@ fn patch_sheet_bin_streaming_inserts_formula_bool_and_error_cells_matches_in_mem
             new_value: CellValue::Error(0x07),
             new_formula: Some(rgce_err_div0.clone()),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         },
@@ -1051,7 +1086,10 @@ fn patch_sheet_bin_streaming_inserts_formula_bool_and_error_cells_matches_in_mem
 
     let (id, payload) =
         find_cell_record(&patched_stream, 0, 1).expect("find inserted formula bool cell");
-    assert_eq!(id, FORMULA_BOOL, "expected BrtFmlaBool/FORMULA_BOOL record id");
+    assert_eq!(
+        id, FORMULA_BOOL,
+        "expected BrtFmlaBool/FORMULA_BOOL record id"
+    );
     assert_eq!(payload[8], 1);
     let cce = u32::from_le_bytes(payload[11..15].try_into().unwrap()) as usize;
     assert_eq!(payload[15..15 + cce], rgce_bool_true);
@@ -1092,6 +1130,7 @@ fn patch_sheet_bin_streaming_inserts_formula_string_cell_matches_in_memory() {
         new_value: CellValue::Text("Hello".to_string()),
         new_formula: Some(rgce.clone()),
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -1143,6 +1182,7 @@ fn patch_sheet_bin_streaming_patches_rk_cell_preserving_rk_record_when_possible(
         new_value: CellValue::Number(0.125),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -1176,6 +1216,7 @@ fn patch_sheet_bin_streaming_converts_rk_cell_to_float_when_needed() {
         new_value: CellValue::Number(0.1234),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -1211,6 +1252,7 @@ fn patch_sheet_bin_streaming_patches_shared_string_cell_when_isst_provided() {
         new_value: CellValue::Text("World".to_string()),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: Some(1),
         new_style: None,
     }];
@@ -1249,6 +1291,7 @@ fn patch_sheet_bin_streaming_converts_shared_string_cell_to_inline_string_when_i
         new_value: CellValue::Text("World".to_string()),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];

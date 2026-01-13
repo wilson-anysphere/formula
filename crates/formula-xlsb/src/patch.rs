@@ -41,6 +41,13 @@ pub struct CellEdit {
     ///
     /// If `None`, the existing bytes are preserved.
     pub new_rgcb: Option<Vec<u8>>,
+    /// If set, replaces the raw BIFF12 formula flags (`BrtFmla*.flags`, `grbitFmla`) for formula
+    /// cells.
+    ///
+    /// - When patching an existing formula cell and this is `None`, the existing flags are
+    ///   preserved.
+    /// - When inserting a new formula cell and this is `None`, flags default to `0`.
+    pub new_formula_flags: Option<u16>,
     /// Optional shared string table index (`isst`) to use when writing `CellValue::Text`.
     ///
     /// XLSB can store text cells either as inline strings (`BrtCellSt`, record id `0x0006`)
@@ -92,6 +99,7 @@ impl CellEdit {
             new_style: None,
             new_formula: Some(encoded.rgce),
             new_rgcb: Some(encoded.rgcb),
+            new_formula_flags: None,
             shared_string_index: None,
         })
     }
@@ -133,6 +141,7 @@ impl CellEdit {
             new_style: None,
             new_formula: Some(encoded.rgce),
             new_rgcb: Some(encoded.rgcb),
+            new_formula_flags: None,
             shared_string_index: None,
         })
     }
@@ -219,6 +228,7 @@ impl CellEdit {
             new_style: None,
             new_formula: Some(rgce),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
         })
     }
@@ -1074,11 +1084,20 @@ fn write_new_cell_record<W: io::Write>(
             )));
         }
     }
+    let flags = edit.new_formula_flags.unwrap_or(0);
     match (&edit.new_formula, &edit.new_value) {
-        (Some(rgce), CellValue::Number(v)) => write_new_fmla_num(writer, col, style, *v, rgce, rgcb),
-        (Some(rgce), CellValue::Bool(v)) => write_new_fmla_bool(writer, col, style, *v, rgce, rgcb),
-        (Some(rgce), CellValue::Error(v)) => write_new_fmla_error(writer, col, style, *v, rgce, rgcb),
-        (Some(rgce), CellValue::Text(s)) => write_new_fmla_string(writer, col, style, s, rgce, rgcb),
+        (Some(rgce), CellValue::Number(v)) => {
+            write_new_fmla_num(writer, col, style, *v, flags, rgce, rgcb)
+        }
+        (Some(rgce), CellValue::Bool(v)) => {
+            write_new_fmla_bool(writer, col, style, *v, flags, rgce, rgcb)
+        }
+        (Some(rgce), CellValue::Error(v)) => {
+            write_new_fmla_error(writer, col, style, *v, flags, rgce, rgcb)
+        }
+        (Some(rgce), CellValue::Text(s)) => {
+            write_new_fmla_string(writer, col, style, s, flags, rgce, rgcb)
+        }
         (Some(_), CellValue::Blank) => Err(Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
@@ -1095,6 +1114,7 @@ fn write_new_fmla_num<W: io::Write>(
     col: u32,
     style: u32,
     cached: f64,
+    flags: u16,
     rgce: &[u8],
     rgcb: &[u8],
 ) -> Result<(), Error> {
@@ -1118,7 +1138,7 @@ fn write_new_fmla_num<W: io::Write>(
     writer.write_u32(col)?;
     writer.write_u32(style)?;
     writer.write_f64(cached)?;
-    writer.write_u16(0)?; // flags
+    writer.write_u16(flags)?;
     writer.write_u32(rgce_len)?;
     writer.write_raw(rgce)?;
     writer.write_raw(rgcb)?;
@@ -1130,6 +1150,7 @@ fn write_new_fmla_bool<W: io::Write>(
     col: u32,
     style: u32,
     cached: bool,
+    flags: u16,
     rgce: &[u8],
     rgcb: &[u8],
 ) -> Result<(), Error> {
@@ -1153,7 +1174,7 @@ fn write_new_fmla_bool<W: io::Write>(
     writer.write_u32(col)?;
     writer.write_u32(style)?;
     writer.write_raw(&[u8::from(cached)])?;
-    writer.write_u16(0)?; // flags
+    writer.write_u16(flags)?;
     writer.write_u32(rgce_len)?;
     writer.write_raw(rgce)?;
     writer.write_raw(rgcb)?;
@@ -1165,6 +1186,7 @@ fn write_new_fmla_error<W: io::Write>(
     col: u32,
     style: u32,
     cached: u8,
+    flags: u16,
     rgce: &[u8],
     rgcb: &[u8],
 ) -> Result<(), Error> {
@@ -1188,7 +1210,7 @@ fn write_new_fmla_error<W: io::Write>(
     writer.write_u32(col)?;
     writer.write_u32(style)?;
     writer.write_raw(&[cached])?;
-    writer.write_u16(0)?; // flags
+    writer.write_u16(flags)?;
     writer.write_u32(rgce_len)?;
     writer.write_raw(rgce)?;
     writer.write_raw(rgcb)?;
@@ -1200,6 +1222,7 @@ fn write_new_fmla_string<W: io::Write>(
     col: u32,
     style: u32,
     cached: &str,
+    flags: u16,
     rgce: &[u8],
     rgcb: &[u8],
 ) -> Result<(), Error> {
@@ -1218,11 +1241,20 @@ fn write_new_fmla_string<W: io::Write>(
 
     let cch = cached.encode_utf16().count();
     let cch = u32::try_from(cch).map_err(|_| {
-        Error::Io(io::Error::new(io::ErrorKind::InvalidInput, "string is too large"))
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "string is too large",
+        ))
     })?;
     let utf16_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
-    // [cch:u32][flags:u16][utf16 chars...]
-    let cached_len = 6u32.checked_add(utf16_len).ok_or(Error::UnexpectedEof)?;
+    // [cch:u32][flags:u16][utf16 chars...][optional rich/phonetic headers...]
+    let mut cached_len = 6u32.checked_add(utf16_len).ok_or(Error::UnexpectedEof)?;
+    if flags & FLAG_RICH != 0 {
+        cached_len = cached_len.checked_add(4).ok_or(Error::UnexpectedEof)?;
+    }
+    if flags & FLAG_PHONETIC != 0 {
+        cached_len = cached_len.checked_add(4).ok_or(Error::UnexpectedEof)?;
+    }
     let payload_len = 8u32
         .checked_add(cached_len)
         .and_then(|v| v.checked_add(4)) // cce
@@ -1234,9 +1266,15 @@ fn write_new_fmla_string<W: io::Write>(
     writer.write_u32(col)?;
     writer.write_u32(style)?;
     writer.write_u32(cch)?;
-    writer.write_u16(0)?; // flags
+    writer.write_u16(flags)?;
     for unit in cached.encode_utf16() {
         writer.write_raw(&unit.to_le_bytes())?;
+    }
+    if flags & FLAG_RICH != 0 {
+        writer.write_u32(0)?; // cRun
+    }
+    if flags & FLAG_PHONETIC != 0 {
+        writer.write_u32(0)?; // cb
     }
     writer.write_u32(rgce_len)?;
     writer.write_raw(rgce)?;
@@ -1426,8 +1464,8 @@ fn formula_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> 
     }
 
     let existing_cached = read_f64(payload, 8)?;
-    let flags = read_u16(payload, 16)?;
-    let _flags = flags; // keep read for bounds checks.
+    let existing_flags = read_u16(payload, 16)?;
+    let desired_flags = edit.new_formula_flags.unwrap_or(existing_flags);
     let cce = read_u32(payload, 18)? as usize;
     let rgce_offset = 22usize;
     let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
@@ -1445,6 +1483,7 @@ fn formula_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> 
     let desired_extra: &[u8] = edit.new_rgcb.as_deref().unwrap_or(extra);
 
     Ok(existing_cached.to_bits() == desired_cached.to_bits()
+        && existing_flags == desired_flags
         && rgce == desired_rgce
         && extra == desired_extra)
 }
@@ -1463,6 +1502,10 @@ fn formula_string_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, 
     };
 
     let ws = parse_fmla_string_cached_value_offsets(payload)?;
+    let desired_flags = edit.new_formula_flags.unwrap_or(ws.flags);
+    if desired_flags != ws.flags {
+        return Ok(false);
+    }
     let raw = payload
         .get(ws.utf16_start..ws.utf16_end)
         .ok_or(Error::UnexpectedEof)?;
@@ -1506,7 +1549,8 @@ fn formula_bool_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Er
         _ => return Ok(false),
     };
     let existing_cached = read_u8(payload, 8)? != 0;
-    let _flags = read_u16(payload, 9)?; // bounds check
+    let existing_flags = read_u16(payload, 9)?;
+    let desired_flags = edit.new_formula_flags.unwrap_or(existing_flags);
     let cce = read_u32(payload, 11)? as usize;
     let rgce_offset = 15usize;
     let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
@@ -1516,7 +1560,10 @@ fn formula_bool_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Er
     let extra = payload.get(rgce_end..).unwrap_or(&[]);
     let desired_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
     let desired_extra: &[u8] = edit.new_rgcb.as_deref().unwrap_or(extra);
-    Ok(existing_cached == desired_cached && rgce == desired_rgce && extra == desired_extra)
+    Ok(existing_cached == desired_cached
+        && existing_flags == desired_flags
+        && rgce == desired_rgce
+        && extra == desired_extra)
 }
 
 fn formula_error_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
@@ -1532,7 +1579,8 @@ fn formula_error_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, E
         _ => return Ok(false),
     };
     let existing_cached = read_u8(payload, 8)?;
-    let _flags = read_u16(payload, 9)?; // bounds check
+    let existing_flags = read_u16(payload, 9)?;
+    let desired_flags = edit.new_formula_flags.unwrap_or(existing_flags);
     let cce = read_u32(payload, 11)? as usize;
     let rgce_offset = 15usize;
     let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
@@ -1542,7 +1590,10 @@ fn formula_error_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, E
     let extra = payload.get(rgce_end..).unwrap_or(&[]);
     let desired_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
     let desired_extra: &[u8] = edit.new_rgcb.as_deref().unwrap_or(extra);
-    Ok(existing_cached == desired_cached && rgce == desired_rgce && extra == desired_extra)
+    Ok(existing_cached == desired_cached
+        && existing_flags == desired_flags
+        && rgce == desired_rgce
+        && extra == desired_extra)
 }
 
 fn value_edit_is_noop_float(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
@@ -1601,7 +1652,10 @@ fn value_edit_is_noop_shared_string(payload: &[u8], edit: &CellEdit) -> Result<b
     Ok(read_u32(payload, 8)? == isst)
 }
 
-pub(crate) fn value_edit_is_noop_inline_string(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+pub(crate) fn value_edit_is_noop_inline_string(
+    payload: &[u8],
+    edit: &CellEdit,
+) -> Result<bool, Error> {
     if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
         return Ok(false);
     }
@@ -1794,7 +1848,8 @@ fn patch_fmla_num<W: io::Write>(
     }
 
     // BrtFmlaNum: [col: u32][style: u32][value: f64][flags: u16][cce: u32][rgce bytes...]
-    let flags = read_u16(payload, 16)?;
+    let existing_flags = read_u16(payload, 16)?;
+    let flags = edit.new_formula_flags.unwrap_or(existing_flags);
     let cce = read_u32(payload, 18)? as usize;
     let rgce_offset = 22usize;
     let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
@@ -1880,7 +1935,8 @@ fn patch_fmla_bool<W: io::Write>(
     }
 
     // BrtFmlaBool: [col: u32][style: u32][value: u8][flags: u16][cce: u32][rgce bytes...][extra...]
-    let flags = read_u16(payload, 9)?;
+    let existing_flags = read_u16(payload, 9)?;
+    let flags = edit.new_formula_flags.unwrap_or(existing_flags);
     let cce = read_u32(payload, 11)? as usize;
     let rgce_offset = 15usize;
     let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
@@ -1967,7 +2023,8 @@ fn patch_fmla_error<W: io::Write>(
     }
 
     // BrtFmlaError: [col: u32][style: u32][value: u8][flags: u16][cce: u32][rgce bytes...][extra...]
-    let flags = read_u16(payload, 9)?;
+    let existing_flags = read_u16(payload, 9)?;
+    let flags = edit.new_formula_flags.unwrap_or(existing_flags);
     let cce = read_u32(payload, 11)? as usize;
     let rgce_offset = 15usize;
     let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
@@ -2058,7 +2115,9 @@ fn patch_fmla_string<W: io::Write>(
     //   [cached value: u32 cch + u16 flags + utf16 chars...]
     //   [cce: u32][rgce bytes...][extra...]
     let ws = parse_fmla_string_cached_value_offsets(payload)?;
-    let flags = ws.flags;
+    let existing_flags = ws.flags;
+    let flags = edit.new_formula_flags.unwrap_or(existing_flags);
+    let layout_changed = ((existing_flags ^ flags) & (FLAG_RICH | FLAG_PHONETIC)) != 0;
 
     let cce = read_u32(payload, ws.end)? as usize;
     let rgce_offset = ws.end.checked_add(4).ok_or(Error::UnexpectedEof)?;
@@ -2122,7 +2181,8 @@ fn patch_fmla_string<W: io::Write>(
     for unit in cached.encode_utf16() {
         desired_utf16.extend_from_slice(&unit.to_le_bytes());
     }
-    let preserve_cached_bytes = desired_cch == ws.cch && desired_utf16.as_slice() == existing_utf16;
+    let preserve_cached_bytes =
+        desired_cch == ws.cch && desired_utf16.as_slice() == existing_utf16 && !layout_changed;
     let cached_bytes_len = if preserve_cached_bytes {
         u32::try_from(ws.end.saturating_sub(8)).map_err(|_| {
             Error::Io(io::Error::new(
@@ -2133,10 +2193,11 @@ fn patch_fmla_string<W: io::Write>(
     } else {
         // [cch:u32][flags:u16][utf16 bytes...][optional rich/phonetic headers...]
         //
-        // We preserve the original wide-string flags byte-for-byte. If the flags indicate
-        // rich-text runs or phonetic blocks, emit a minimal empty payload so the stream
-        // stays parseable even when we dropped the original formatting bytes.
-        let mut len = 6u32.checked_add(desired_str_len).ok_or(Error::UnexpectedEof)?;
+        // If the flags indicate rich-text runs or phonetic blocks, emit a minimal empty payload so
+        // the stream stays parseable even when we dropped the original formatting bytes.
+        let mut len = 6u32
+            .checked_add(desired_str_len)
+            .ok_or(Error::UnexpectedEof)?;
         if flags & FLAG_RICH != 0 {
             len = len.checked_add(4).ok_or(Error::UnexpectedEof)?;
         }
@@ -2169,8 +2230,15 @@ fn patch_fmla_string<W: io::Write>(
     writer.write_u32(col)?;
     writer.write_u32(style)?;
     if preserve_cached_bytes {
-        let raw = payload.get(8..ws.end).ok_or(Error::UnexpectedEof)?;
-        writer.write_raw(raw)?;
+        // Preserve the cached string payload bytes, but allow callers to override the u16 flags
+        // field in-place.
+        writer.write_raw(payload.get(8..12).ok_or(Error::UnexpectedEof)?)?;
+        writer.write_u16(flags)?;
+        writer.write_raw(
+            payload
+                .get(ws.utf16_start..ws.end)
+                .ok_or(Error::UnexpectedEof)?,
+        )?;
     } else {
         writer.write_u32(desired_cch_u32)?;
         writer.write_u16(flags)?;
@@ -2203,7 +2271,9 @@ fn parse_fmla_string_cached_value_offsets(payload: &[u8]) -> Result<WideStringOf
     let utf16_end = utf16_start
         .checked_add(utf16_len)
         .ok_or(Error::UnexpectedEof)?;
-    payload.get(utf16_start..utf16_end).ok_or(Error::UnexpectedEof)?;
+    payload
+        .get(utf16_start..utf16_end)
+        .ok_or(Error::UnexpectedEof)?;
 
     let simple = WideStringOffsets {
         cch,

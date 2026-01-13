@@ -3,8 +3,8 @@ use std::fs::File;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
-use formula_xlsb::{biff12_varint, patch_sheet_bin, CellEdit, CellValue, XlsbWorkbook};
 use formula_xlsb::rgce::{encode_rgce_with_context, CellCoord};
+use formula_xlsb::{biff12_varint, patch_sheet_bin, CellEdit, CellValue, XlsbWorkbook};
 use tempfile::tempdir;
 
 mod fixture_builder;
@@ -34,13 +34,10 @@ fn move_dimension_record_to_end(sheet_bin: &[u8]) -> Vec<u8> {
     let mut ranges: Vec<(u32, usize, usize)> = Vec::new();
     loop {
         let start = cursor.position() as usize;
-        let Some(id) = biff12_varint::read_record_id(&mut cursor)
-            .expect("read record id")
-        else {
+        let Some(id) = biff12_varint::read_record_id(&mut cursor).expect("read record id") else {
             break;
         };
-        let Some(len) = biff12_varint::read_record_len(&mut cursor)
-            .expect("read record len")
+        let Some(len) = biff12_varint::read_record_len(&mut cursor).expect("read record len")
         else {
             break;
         };
@@ -164,6 +161,7 @@ fn patch_sheet_bin_can_insert_into_missing_row_and_expand_dimension() {
             new_value: CellValue::Number(99.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -236,6 +234,7 @@ fn patch_sheet_bin_can_insert_formula_with_rgcb_and_expand_dimension() {
             new_value: CellValue::Number(9.0),
             new_formula: Some(encoded.rgce.clone()),
             new_rgcb: Some(encoded.rgcb.clone()),
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -295,6 +294,7 @@ fn patch_sheet_bin_can_insert_into_existing_row_in_column_order() {
             new_value: CellValue::Number(42.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -351,6 +351,7 @@ fn patch_sheet_bin_can_expand_dimension_when_brtwsdim_is_after_sheetdata() {
             new_value: CellValue::Number(99.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -383,6 +384,7 @@ fn patch_sheet_bin_does_not_materialize_missing_blank_cells() {
             new_value: CellValue::Blank,
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],

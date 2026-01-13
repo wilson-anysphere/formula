@@ -44,8 +44,8 @@ fn build_shared_strings_fixture_variant(
         parts.insert(shared_strings_part.to_string(), shared_strings);
     }
 
-    let workbook_rels_xml = String::from_utf8(parts["xl/_rels/workbook.bin.rels"].clone())
-        .expect("utf8 workbook rels");
+    let workbook_rels_xml =
+        String::from_utf8(parts["xl/_rels/workbook.bin.rels"].clone()).expect("utf8 workbook rels");
     let workbook_rels_xml = match workbook_rels_target {
         Some(target) => workbook_rels_xml.replace(
             "Target=\"sharedStrings.bin\"",
@@ -53,7 +53,11 @@ fn build_shared_strings_fixture_variant(
         ),
         None => workbook_rels_xml
             .lines()
-            .filter(|line| !line.to_ascii_lowercase().contains("relationships/sharedstrings"))
+            .filter(|line| {
+                !line
+                    .to_ascii_lowercase()
+                    .contains("relationships/sharedstrings")
+            })
             .collect::<Vec<_>>()
             .join("\n"),
     };
@@ -62,8 +66,8 @@ fn build_shared_strings_fixture_variant(
         workbook_rels_xml.into_bytes(),
     );
 
-    let content_types_xml = String::from_utf8(parts["[Content_Types].xml"].clone())
-        .expect("utf8 content types");
+    let content_types_xml =
+        String::from_utf8(parts["[Content_Types].xml"].clone()).expect("utf8 content types");
     let content_types_xml = match content_types_part_name {
         Some(part_name) => content_types_xml.replace(
             "PartName=\"/xl/sharedStrings.bin\"",
@@ -319,6 +323,7 @@ fn save_with_cell_edits_shared_strings_updates_nonstandard_shared_strings_part()
             new_value: CellValue::Text("New".to_string()),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -366,6 +371,7 @@ fn save_with_cell_edits_shared_strings_updates_content_types_resolved_shared_str
             new_value: CellValue::Text("New".to_string()),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -399,6 +405,7 @@ fn save_with_cell_edits_streaming_shared_strings_updates_nonstandard_shared_stri
             new_value: CellValue::Text("New".to_string()),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],

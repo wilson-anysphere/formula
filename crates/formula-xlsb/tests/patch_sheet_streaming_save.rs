@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use formula_xlsb::{CellEdit, CellValue, XlsbWorkbook};
 use formula_xlsb::rgce::{encode_rgce_with_context, CellCoord};
+use formula_xlsb::{CellEdit, CellValue, XlsbWorkbook};
 
 mod fixture_builder;
 use fixture_builder::XlsbFixtureBuilder;
@@ -30,6 +30,7 @@ fn save_with_cell_edits_streaming_matches_in_memory_patch_path() {
         new_value: CellValue::Number(123.0),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -69,6 +70,7 @@ fn save_with_cell_edits_streaming_can_insert_missing_cells() {
         new_value: CellValue::Number(123.0),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -102,6 +104,7 @@ fn save_with_cell_edits_streaming_is_lossless_for_noop_edit() {
         new_value: CellValue::Number(42.5),
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -133,7 +136,13 @@ fn save_with_cell_edits_streaming_can_patch_formula_rgcb_bytes() {
 
     let mut builder = XlsbFixtureBuilder::new();
     builder.set_sheet_name("ArrayRgcb");
-    builder.set_cell_formula_num(0, 0, 6.0, encoded_123.rgce.clone(), encoded_123.rgcb.clone());
+    builder.set_cell_formula_num(
+        0,
+        0,
+        6.0,
+        encoded_123.rgce.clone(),
+        encoded_123.rgcb.clone(),
+    );
 
     let tmpdir = tempfile::tempdir().expect("create temp dir");
     let fixture_path = tmpdir.path().join("input.xlsb");
@@ -154,6 +163,7 @@ fn save_with_cell_edits_streaming_can_patch_formula_rgcb_bytes() {
         new_value: CellValue::Number(9.0),
         new_formula: None,
         new_rgcb: Some(encoded_45.rgcb.clone()),
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];
@@ -214,6 +224,7 @@ fn save_with_cell_edits_streaming_can_insert_formula_rgcb_bytes() {
         new_value: CellValue::Number(9.0),
         new_formula: Some(encoded.rgce.clone()),
         new_rgcb: Some(encoded.rgcb.clone()),
+        new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
     }];

@@ -35,6 +35,7 @@ fn patch_sheet_bin_is_byte_identical_for_noop_numeric_edit() {
             new_value: CellValue::Number(42.5),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -70,6 +71,7 @@ fn patch_sheet_bin_round_trips_numeric_cell_preserving_formula() {
                 new_value: CellValue::Text("World".to_string()),
                 new_formula: None,
                 new_rgcb: None,
+                new_formula_flags: None,
                 shared_string_index: None,
                 new_style: None,
             },
@@ -79,6 +81,7 @@ fn patch_sheet_bin_round_trips_numeric_cell_preserving_formula() {
                 new_value: CellValue::Number(100.0),
                 new_formula: None,
                 new_rgcb: None,
+                new_formula_flags: None,
                 shared_string_index: None,
                 new_style: None,
             },
@@ -148,6 +151,7 @@ fn patch_sheet_bin_can_update_formula_cached_result() {
             new_value: CellValue::Number(200.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -212,6 +216,7 @@ fn patch_sheet_bin_can_update_formula_rgce_bytes() {
             new_value: CellValue::Number(127.5),
             new_formula: Some(new_rgce.clone()),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -269,6 +274,7 @@ fn patch_sheet_bin_can_update_formula_from_text() {
             new_value: CellValue::Number(1.0),
             new_formula: Some(rgce),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -324,6 +330,7 @@ fn patch_sheet_bin_can_update_udf_formula_using_workbook_context() {
             new_value: CellValue::Number(0.0),
             new_formula: Some(encoded.rgce),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -383,6 +390,7 @@ fn patch_sheet_bin_preserves_formula_trailing_bytes() {
             new_value: CellValue::Number(1.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -428,19 +436,20 @@ fn patch_sheet_bin_can_update_formula_rgcb_bytes() {
         "expected SUM(array) formulas to share the same rgce stream so only rgcb changes"
     );
 
-     let patched = patch_sheet_bin(
-         &sheet_bin,
-         &[CellEdit {
-             row: 0,
-             col: 0,
-             new_value: CellValue::Number(9.0),
-             new_formula: None,
-             new_rgcb: Some(encoded_45.rgcb.clone()),
-             shared_string_index: None,
-             new_style: None,
-         }],
-     )
-     .expect("patch sheet bin");
+    let patched = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Number(9.0),
+            new_style: None,
+            new_formula: None,
+            new_rgcb: Some(encoded_45.rgcb.clone()),
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("patch sheet bin");
 
     let parsed = formula_xlsb::parse_sheet_bin_with_context(&mut Cursor::new(&patched), &[], &ctx)
         .expect("parse patched sheet");
@@ -485,14 +494,9 @@ fn cell_edit_with_formula_text_with_context_can_patch_rgcb_formulas() {
     let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
 
-    let edit = CellEdit::with_formula_text_with_context(
-        0,
-        0,
-        CellValue::Number(9.0),
-        "=SUM({4,5})",
-        &ctx,
-    )
-    .expect("encode formula with context");
+    let edit =
+        CellEdit::with_formula_text_with_context(0, 0, CellValue::Number(9.0), "=SUM({4,5})", &ctx)
+            .expect("encode formula with context");
     let patched = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet bin");
 
     let parsed = formula_xlsb::parse_sheet_bin_with_context(&mut Cursor::new(&patched), &[], &ctx)
@@ -544,6 +548,7 @@ fn patch_sheet_bin_preserves_formula_rgcb_when_updating_cached_value_only() {
             new_value: CellValue::Number(10.0),
             new_formula: None,
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -601,19 +606,20 @@ fn patch_sheet_bin_requires_new_rgcb_when_replacing_rgce_for_formula_with_existi
         "expected MAX(array) to change rgce"
     );
 
-     let err = patch_sheet_bin(
-         &sheet_bin,
-         &[CellEdit {
-             row: 0,
-             col: 0,
-             new_value: CellValue::Number(3.0),
-             new_formula: Some(encoded_max.rgce.clone()),
-             new_rgcb: None,
-             shared_string_index: None,
-             new_style: None,
-         }],
-     )
-     .expect_err("expected InvalidInput when changing rgce without supplying new_rgcb");
+    let err = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Number(3.0),
+            new_style: None,
+            new_formula: Some(encoded_max.rgce.clone()),
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect_err("expected InvalidInput when changing rgce without supplying new_rgcb");
     match err {
         formula_xlsb::Error::Io(io_err) => {
             assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput);
@@ -621,19 +627,20 @@ fn patch_sheet_bin_requires_new_rgcb_when_replacing_rgce_for_formula_with_existi
         other => panic!("expected InvalidInput, got {other:?}"),
     }
 
-     let patched = patch_sheet_bin(
-         &sheet_bin,
-         &[CellEdit {
-             row: 0,
-             col: 0,
-             new_value: CellValue::Number(3.0),
-             new_formula: Some(encoded_max.rgce.clone()),
-             new_rgcb: Some(encoded_sum.rgcb.clone()),
-             shared_string_index: None,
-             new_style: None,
-         }],
-     )
-     .expect("patch sheet bin with explicit rgcb");
+    let patched = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Number(3.0),
+            new_style: None,
+            new_formula: Some(encoded_max.rgce.clone()),
+            new_rgcb: Some(encoded_sum.rgcb.clone()),
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("patch sheet bin with explicit rgcb");
 
     let parsed = formula_xlsb::parse_sheet_bin_with_context(&mut Cursor::new(&patched), &[], &ctx)
         .expect("parse patched sheet");
@@ -695,6 +702,7 @@ fn patch_sheet_bin_can_clear_rgcb_when_replacing_rgce_for_formula_with_existing_
             new_value: CellValue::Number(6.0),
             new_formula: Some(encoded_no_rgcb.rgce.clone()),
             new_rgcb: Some(encoded_no_rgcb.rgcb.clone()),
+            new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
         }],
@@ -712,7 +720,10 @@ fn patch_sheet_bin_can_clear_rgcb_when_replacing_rgce_for_formula_with_existing_
 
     let formula = cell.formula.as_ref().expect("formula metadata");
     assert_eq!(formula.rgce, encoded_no_rgcb.rgce);
-    assert!(formula.extra.is_empty(), "expected rgcb bytes to be cleared");
+    assert!(
+        formula.extra.is_empty(),
+        "expected rgcb bytes to be cleared"
+    );
     assert_eq!(formula.text.as_deref(), Some("SUM(1,2,3)"));
 }
 
@@ -768,6 +779,7 @@ fn patch_sheet_bin_is_byte_identical_for_noop_bool_error_blank_edits() {
                 new_value: CellValue::Bool(true),
                 new_formula: None,
                 new_rgcb: None,
+                new_formula_flags: None,
                 shared_string_index: None,
                 new_style: None,
             },
@@ -777,6 +789,7 @@ fn patch_sheet_bin_is_byte_identical_for_noop_bool_error_blank_edits() {
                 new_value: CellValue::Error(0x07),
                 new_formula: None,
                 new_rgcb: None,
+                new_formula_flags: None,
                 shared_string_index: None,
                 new_style: None,
             },
@@ -786,6 +799,7 @@ fn patch_sheet_bin_is_byte_identical_for_noop_bool_error_blank_edits() {
                 new_value: CellValue::Blank,
                 new_formula: None,
                 new_rgcb: None,
+                new_formula_flags: None,
                 shared_string_index: None,
                 new_style: None,
             },
@@ -821,6 +835,7 @@ fn save_with_cell_edits_can_patch_bool_error_blank_cells() {
                 new_value: CellValue::Bool(false),
                 new_formula: None,
                 new_rgcb: None,
+                new_formula_flags: None,
                 shared_string_index: None,
                 new_style: None,
             },
@@ -830,6 +845,7 @@ fn save_with_cell_edits_can_patch_bool_error_blank_cells() {
                 new_value: CellValue::Error(0x2A),
                 new_formula: None,
                 new_rgcb: None,
+                new_formula_flags: None,
                 shared_string_index: None,
                 new_style: None,
             },
@@ -840,6 +856,7 @@ fn save_with_cell_edits_can_patch_bool_error_blank_cells() {
                 new_value: CellValue::Number(123.0),
                 new_formula: None,
                 new_rgcb: None,
+                new_formula_flags: None,
                 shared_string_index: None,
                 new_style: None,
             },
@@ -895,35 +912,38 @@ fn save_with_cell_edits_can_patch_formula_bool_string_error_cells() {
 
     let wb = XlsbWorkbook::open(&input_path).expect("open generated xlsb");
 
-     let edits = [
-         CellEdit {
-             row: 0,
-             col: 0,
-             new_value: CellValue::Bool(false),
-             new_formula: Some(vec![0x1D, 0x00]), // FALSE
-             new_rgcb: None,
-             shared_string_index: None,
-             new_style: None,
-         },
-         CellEdit {
-             row: 0,
-             col: 1,
-             new_value: CellValue::Text("World".to_string()),
-             new_formula: Some(ptg_str("World")),
-             new_rgcb: None,
-             shared_string_index: None,
-             new_style: None,
-         },
-         CellEdit {
-             row: 0,
-             col: 2,
-             new_value: CellValue::Error(0x2A), // #N/A
-             new_formula: Some(vec![0x1C, 0x2A]),
-             new_rgcb: None,
-             shared_string_index: None,
-             new_style: None,
-         },
-     ];
+    let edits = [
+        CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Bool(false),
+            new_style: None,
+            new_formula: Some(vec![0x1D, 0x00]), // FALSE
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        },
+        CellEdit {
+            row: 0,
+            col: 1,
+            new_value: CellValue::Text("World".to_string()),
+            new_style: None,
+            new_formula: Some(ptg_str("World")),
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        },
+        CellEdit {
+            row: 0,
+            col: 2,
+            new_value: CellValue::Error(0x2A), // #N/A
+            new_style: None,
+            new_formula: Some(vec![0x1C, 0x2A]),
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        },
+    ];
 
     wb.save_with_cell_edits(&output_path, 0, &edits)
         .expect("save_with_cell_edits");
@@ -1024,19 +1044,20 @@ fn patch_sheet_bin_is_byte_identical_for_noop_rk_float_edit() {
     let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
 
-     let patched = patch_sheet_bin(
-         &sheet_bin,
-         &[CellEdit {
-             row: 0,
-             col: 1,
-             new_value: CellValue::Number(0.125),
-             new_formula: None,
-             new_rgcb: None,
-             shared_string_index: None,
-             new_style: None,
-         }],
-     )
-     .expect("patch sheet bin");
+    let patched = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 1,
+            new_value: CellValue::Number(0.125),
+            new_style: None,
+            new_formula: None,
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("patch sheet bin");
 
     assert_eq!(patched, sheet_bin);
 }
@@ -1055,19 +1076,20 @@ fn patch_sheet_bin_keeps_rk_record_for_float_rk_values() {
     let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
 
-     let patched = patch_sheet_bin(
-         &sheet_bin,
-         &[CellEdit {
-             row: 0,
-             col: 1,
-             new_value: CellValue::Number(0.125),
-             new_formula: None,
-             new_rgcb: None,
-             shared_string_index: None,
-             new_style: None,
-         }],
-     )
-     .expect("patch sheet bin");
+    let patched = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 1,
+            new_value: CellValue::Number(0.125),
+            new_style: None,
+            new_formula: None,
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("patch sheet bin");
 
     let (id, payload) = find_cell_record(&patched, 0, 1).expect("patched cell record");
     assert_eq!(id, 0x0002, "expected RK NUM record");
