@@ -73,3 +73,16 @@ test("JsonVectorStore resetOnCorrupt overwrites corrupted payloads when storage 
   const list2 = await store2.list();
   assert.deepEqual(list2, []);
 });
+
+test("JsonVectorStore resetOnCorrupt=false leaves corrupted payload in place", async () => {
+  const bad = new TextEncoder().encode("{not json");
+  const storage = new TestBinaryStorage(bad);
+  const store = new JsonVectorStore({ storage, dimension: 3, resetOnCorrupt: false });
+
+  const loaded = await store.list();
+  assert.deepEqual(loaded, []);
+
+  assert.equal(storage.removed, false);
+  assert.ok(storage.data, "expected corrupted bytes to remain when resetOnCorrupt=false");
+  assert.deepEqual(Array.from(storage.data ?? []), Array.from(bad));
+});
