@@ -50,8 +50,10 @@ Implemented in `crates/formula-xlsx/src/drawingml/charts/parse_chart_space.rs`.
   - chart title (`c:title`) and legend (`c:legend`) including basic text styling (`c:txPr`)
   - plot-area chart settings (e.g. `barDir`, `grouping`, `varyColors`, `scatterStyle`)
   - axes for `c:catAx` and `c:valAx` (id, position, scaling, number format, tick label position,
-    major gridline presence + some inline styling)
+     major gridline presence + some inline styling)
   - series formulas (`tx`, `cat`, `val`, `xVal`, `yVal`) and cached values (`strCache`, `numCache`)
+  - series data label settings (`c:ser/c:dLbls`) including `showVal`, `showCatName`, `showSerName`,
+    `dLblPos`, and `numFmt`
   - some inline formatting: `spPr` shape styles, markers, and per-point `c:dPt` overrides
 - Records non-fatal parse limitations as `ChartModel.diagnostics` warnings (for example:
   `mc:AlternateContent`, `c:extLst`, unsupported axis types, multiple chart types in one plotArea).
@@ -130,8 +132,9 @@ work in `formula-xlsx` + `formula-model`.
 - [ ] **Multi-level categories**: support `c:multiLvlStrRef` / `c:multiLvlStrCache` and related
       hierarchical category structures.
 - [ ] **Axis titles**: parse `c:*Ax/c:title` (currently ignored).
-- [ ] **Data labels**: parse `c:dLbls` / `c:dLbl` (showValue/showCategoryName/position, per-point
-      overrides, rich text).
+- [x] **Series data labels**: parse `c:ser/c:dLbls` (show value/category/series name, position,
+      number format).
+- [ ] **Per-point data label overrides**: parse `c:dLbls/c:dLbl` (per-point overrides, rich text).
 
 ---
 
