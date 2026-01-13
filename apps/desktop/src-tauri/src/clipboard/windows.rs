@@ -507,55 +507,85 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         rtf_source = None;
     }
 
+    // Images can be large; avoid doing expensive conversions/encoding while holding the clipboard
+    // lock. First copy the raw bytes out of the clipboard, then close it before decoding or
+    // base64-encoding.
+    enum RawImage {
+        Png { source: &'static str, bytes: Vec<u8> },
+        Dib { source: &'static str, bytes: Vec<u8> },
+    }
+
+    let mut raw_image: Option<RawImage> = None;
+    if let Some(format) = format_png {
+        if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_PNG_BYTES) {
+            raw_image = Some(RawImage::Png {
+                source: "PNG",
+                bytes,
+            });
+        }
+    }
+    if raw_image.is_none() {
+        if let Some(format) = format_image_png {
+            if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_PNG_BYTES) {
+                raw_image = Some(RawImage::Png {
+                    source: "image/png",
+                    bytes,
+                });
+            }
+        }
+    }
+    if raw_image.is_none() {
+        if let Some(format) = format_image_x_png {
+            if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_PNG_BYTES) {
+                raw_image = Some(RawImage::Png {
+                    source: "image/x-png",
+                    bytes,
+                });
+            }
+        }
+    }
+    if raw_image.is_none() {
+        if let Ok(Some(bytes)) = try_get_clipboard_bytes(CF_DIBV5, MAX_DIB_BYTES) {
+            raw_image = Some(RawImage::Dib {
+                source: "CF_DIBV5",
+                bytes,
+            });
+        }
+    }
+    if raw_image.is_none() {
+        if let Ok(Some(bytes)) = try_get_clipboard_bytes(CF_DIB, MAX_DIB_BYTES) {
+            raw_image = Some(RawImage::Dib {
+                source: "CF_DIB",
+                bytes,
+            });
+        }
+    }
+
+    drop(_guard);
+
     let mut image_source: Option<&'static str> = None;
     let mut image_bytes: Option<usize> = None;
     let mut image_png_base64 = None;
-    if let Some(format) = format_png {
-        if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_PNG_BYTES) {
-            image_source = Some("PNG");
+    match raw_image {
+        Some(RawImage::Png { source, bytes }) => {
+            image_source = Some(source);
             image_bytes = Some(bytes.len());
             image_png_base64 = Some(STANDARD.encode(&bytes));
         }
-    }
-    if image_png_base64.is_none() {
-        if let Some(format) = format_image_png {
-            if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_PNG_BYTES) {
-                image_source = Some("image/png");
-                image_bytes = Some(bytes.len());
-                image_png_base64 = Some(STANDARD.encode(&bytes));
-            }
-        }
-    }
-    if image_png_base64.is_none() {
-        if let Some(format) = format_image_x_png {
-            if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_PNG_BYTES) {
-                image_source = Some("image/x-png");
-                image_bytes = Some(bytes.len());
-                image_png_base64 = Some(STANDARD.encode(&bytes));
-            }
-        }
-    }
-    if image_png_base64.is_none() {
-        if let Ok(Some(dib_bytes)) = try_get_clipboard_bytes(CF_DIBV5, MAX_DIB_BYTES) {
-            if let Ok(png) = dibv5_to_png(&dib_bytes) {
+        Some(RawImage::Dib { source, bytes }) => {
+            if let Ok(png) = dibv5_to_png(&bytes) {
                 if png.len() <= MAX_PNG_BYTES {
-                    image_source = Some("CF_DIBV5->PNG");
+                    image_source = Some(match source {
+                        "CF_DIBV5" => "CF_DIBV5->PNG",
+                        "CF_DIB" => "CF_DIB->PNG",
+                        _ => "CF_DIB->PNG",
+                    });
                     image_bytes = Some(png.len());
                     image_png_base64 = Some(STANDARD.encode(&png));
                 }
             }
         }
-    }
-    if image_png_base64.is_none() {
-        if let Ok(Some(dib_bytes)) = try_get_clipboard_bytes(CF_DIB, MAX_DIB_BYTES) {
-            if let Ok(png) = dibv5_to_png(&dib_bytes) {
-                if png.len() <= MAX_PNG_BYTES {
-                    image_source = Some("CF_DIB->PNG");
-                    image_bytes = Some(png.len());
-                    image_png_base64 = Some(STANDARD.encode(&png));
-                }
-            }
-        }
+        None => {}
     }
 
     let text_bytes = text.as_ref().map(|s| s.as_bytes().len());
