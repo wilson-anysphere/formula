@@ -7920,6 +7920,13 @@ const ribbonActions = createRibbonActionsFromCommands({
     if ((err as any)?.name === "DlpViolationError") return;
     showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
   },
+  onBeforeExecuteCommand: async (_commandId, source) => {
+    if (source.kind !== "extension") return;
+    // Match keybinding/command palette behavior: executing an extension command should
+    // lazy-load the extension runtime first.
+    await ensureExtensionsLoadedRef?.();
+    syncContributedCommandsRef?.();
+  },
   // Ribbon toggles invoke both `onToggle` and `onCommand`. These overrides handle the
   // pressed state and suppress the follow-up `onCommand` call so we don't double-execute.
   toggleOverrides: {

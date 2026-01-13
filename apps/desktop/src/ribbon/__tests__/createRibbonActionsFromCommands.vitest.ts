@@ -28,6 +28,45 @@ describe("createRibbonActionsFromCommands", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it("runs onBeforeExecuteCommand before executing registered commands", async () => {
+    const registry = new CommandRegistry();
+    const run = vi.fn();
+    registry.registerBuiltinCommand("ribbon.before", "Before", run);
+
+    const onBeforeExecuteCommand = vi.fn();
+    const actions = createRibbonActionsFromCommands({ commandRegistry: registry, onBeforeExecuteCommand });
+
+    actions.onCommand?.("ribbon.before");
+    await flushMicrotasks();
+
+    expect(onBeforeExecuteCommand).toHaveBeenCalledTimes(1);
+    expect(onBeforeExecuteCommand.mock.calls[0]?.[0]).toBe("ribbon.before");
+    expect(onBeforeExecuteCommand.mock.calls[0]?.[1]).toEqual({ kind: "builtin" });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes onBeforeExecuteCommand errors to onCommandError and does not execute the command", async () => {
+    const registry = new CommandRegistry();
+    const run = vi.fn();
+    registry.registerBuiltinCommand("ribbon.beforeFail", "BeforeFail", run);
+
+    const onCommandError = vi.fn();
+    const actions = createRibbonActionsFromCommands({
+      commandRegistry: registry,
+      onCommandError,
+      onBeforeExecuteCommand: () => {
+        throw new Error("before boom");
+      },
+    });
+
+    actions.onCommand?.("ribbon.beforeFail");
+    await flushMicrotasks();
+
+    expect(run).not.toHaveBeenCalled();
+    expect(onCommandError).toHaveBeenCalledTimes(1);
+    expect(onCommandError.mock.calls[0]?.[0]).toBe("ribbon.beforeFail");
+  });
+
   it("dispatches registered toggle commands with the pressed state and suppresses the follow-up onCommand", async () => {
     const registry = new CommandRegistry();
     const run = vi.fn();
@@ -89,4 +128,3 @@ describe("createRibbonActionsFromCommands", () => {
     expect(toast?.textContent).toBe("Ribbon: ribbon.unknown");
   });
 });
-

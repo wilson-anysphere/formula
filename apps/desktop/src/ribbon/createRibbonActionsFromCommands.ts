@@ -1,4 +1,4 @@
-import type { CommandRegistry } from "../extensions/commandRegistry.js";
+import type { CommandContribution, CommandRegistry } from "../extensions/commandRegistry.js";
 import { showToast } from "../extensions/ui.js";
 import type { RibbonActions } from "./ribbonSchema.js";
 
@@ -8,6 +8,11 @@ type RibbonToggleOverride = (pressed: boolean) => void | Promise<void>;
 export function createRibbonActionsFromCommands(params: {
   commandRegistry: CommandRegistry;
   onCommandError?: (commandId: string, err: unknown) => void;
+  /**
+   * Optional hook that runs before executing a registered command (e.g. lazy-load
+   * extensions before executing extension-contributed commands).
+   */
+  onBeforeExecuteCommand?: (commandId: string, source: CommandContribution["source"]) => void | Promise<void>;
   /**
    * Special-case handlers for commands that should not (or cannot) be dispatched
    * through the CommandRegistry.
@@ -35,6 +40,7 @@ export function createRibbonActionsFromCommands(params: {
   const {
     commandRegistry,
     onCommandError,
+    onBeforeExecuteCommand,
     commandOverrides = {},
     toggleOverrides = {},
     onUnknownCommand,
@@ -100,6 +106,7 @@ export function createRibbonActionsFromCommands(params: {
 
         const registered = commandRegistry.getCommand(commandId);
         if (registered) {
+          await onBeforeExecuteCommand?.(commandId, registered.source);
           await commandRegistry.executeCommand(commandId);
           return;
         }
@@ -128,6 +135,7 @@ export function createRibbonActionsFromCommands(params: {
         const registered = commandRegistry.getCommand(commandId);
         if (registered) {
           markToggleHandled(commandId);
+          await onBeforeExecuteCommand?.(commandId, registered.source);
           await commandRegistry.executeCommand(commandId, pressed);
           return;
         }
