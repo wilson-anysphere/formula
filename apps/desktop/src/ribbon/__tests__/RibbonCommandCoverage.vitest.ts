@@ -4,6 +4,7 @@ import { CommandRegistry } from "../../extensions/commandRegistry.js";
 import { createDefaultLayout, openPanel, closePanel } from "../../layout/layoutState.js";
 import { panelRegistry } from "../../panels/panelRegistry.js";
 import { registerDesktopCommands } from "../../commands/registerDesktopCommands.js";
+import { registerPageLayoutCommands } from "../../commands/registerPageLayoutCommands.js";
 
 import { defaultRibbonSchema } from "../ribbonSchema";
 
@@ -65,6 +66,25 @@ const INTENTIONALLY_UNIMPLEMENTED_RIBBON_COMMAND_IDS = new Set<string>([
   "view.macros.useRelativeReferences",
 ]);
 
+const REQUIRED_PAGE_LAYOUT_COMMAND_IDS = [
+  "pageLayout.pageSetup.pageSetupDialog",
+  "pageLayout.pageSetup.margins.normal",
+  "pageLayout.pageSetup.margins.wide",
+  "pageLayout.pageSetup.margins.narrow",
+  "pageLayout.pageSetup.margins.custom",
+  "pageLayout.pageSetup.orientation.portrait",
+  "pageLayout.pageSetup.orientation.landscape",
+  "pageLayout.pageSetup.size.letter",
+  "pageLayout.pageSetup.size.a4",
+  "pageLayout.pageSetup.size.more",
+  "pageLayout.printArea.setPrintArea",
+  "pageLayout.printArea.clearPrintArea",
+  "pageLayout.pageSetup.printArea.set",
+  "pageLayout.pageSetup.printArea.clear",
+  "pageLayout.pageSetup.printArea.addTo",
+  "pageLayout.export.exportPdf",
+];
+
 function collectRibbonCommandIds(): string[] {
   const ids = new Set<string>();
   for (const tab of defaultRibbonSchema.tabs) {
@@ -86,6 +106,10 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
     const idsToCheck = ribbonIds
       .filter((id) => CANONICAL_RIBBON_COMMAND_RE.test(id))
       .filter((id) => !INTENTIONALLY_UNIMPLEMENTED_RIBBON_COMMAND_IDS.has(id))
+      // Page Layout is not a fully canonical command namespace yet (many schema ids are still placeholders),
+      // but these specific Page Setup/Print Area/PDF Export controls should be real commands so they can
+      // be invoked from the command palette/extensions and covered by generic command-disable logic.
+      .concat(REQUIRED_PAGE_LAYOUT_COMMAND_IDS.filter((id) => ribbonIds.includes(id)))
       .sort((a, b) => a.localeCompare(b));
 
     const commandRegistry = new CommandRegistry();
@@ -135,6 +159,18 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
         quit: () => {},
       },
       openCommandPalette: () => {},
+    });
+
+    registerPageLayoutCommands({
+      commandRegistry,
+      handlers: {
+        openPageSetupDialog: () => {},
+        updatePageSetup: () => {},
+        setPrintArea: () => {},
+        clearPrintArea: () => {},
+        addToPrintArea: () => {},
+        exportPdf: () => {},
+      },
     });
     const missing = idsToCheck.filter((id) => commandRegistry.getCommand(id) == null);
 
