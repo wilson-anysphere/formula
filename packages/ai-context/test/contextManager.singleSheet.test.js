@@ -293,6 +293,16 @@ test("buildContext: maxChunkRows affects sheet-level retrieved chunk previews", 
   assert.doesNotMatch(previewLarge, /… \(/);
 });
 
+test("buildContext: maxChunkRows constructor option affects retrieved chunk previews", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, maxChunkRows: 2 });
+  const sheet = makeSheet([["a"], ["b"], ["c"], ["d"], ["e"]]);
+
+  const out = await cm.buildContext({ sheet, query: "anything" });
+  const preview = out.retrieved[0].preview;
+  assert.equal(preview.split("\n").length, 3);
+  assert.match(preview, /… \(3 more rows\)$/);
+});
+
 test("buildContext: negative maxContextRows/maxContextCells fall back to defaults", async () => {
   const cm = new ContextManager({ tokenBudgetTokens: 1_000, maxContextRows: -1, maxContextCells: -1 });
   const sheet = makeSheet([["r1"], ["r2"], ["r3"], ["r4"], ["r5"]]);
@@ -300,6 +310,18 @@ test("buildContext: negative maxContextRows/maxContextCells fall back to default
   const out = await cm.buildContext({ sheet, query: "anything", sampleRows: 100 });
   assert.equal(out.sampledRows.length, 5);
   assert.equal(out.retrieved[0].range, "Sheet1!A1:A5");
+});
+
+test("buildContext: sheetRagTopK option limits retrieved results", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, sheetRagTopK: 1 });
+  const sheet = makeSheet([
+    ["Region", "Revenue", "", "Cost"],
+    ["North", 1000, "", 50],
+    ["South", 2000, "", 60],
+  ]);
+
+  const out = await cm.buildContext({ sheet, query: "revenue" });
+  assert.equal(out.retrieved.length, 1);
 });
 
 test("buildContext: respects AbortSignal", async () => {
