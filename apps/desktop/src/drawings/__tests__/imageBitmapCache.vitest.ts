@@ -106,6 +106,27 @@ describe("ImageBitmapCache", () => {
     expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
   });
 
+  it("invalidate() closes cached bitmaps and forces a re-decode", async () => {
+    const bitmap1 = { close: vi.fn() } as unknown as ImageBitmap;
+    const bitmap2 = { close: vi.fn() } as unknown as ImageBitmap;
+
+    const createImageBitmapMock = vi.fn()
+      .mockImplementationOnce(() => Promise.resolve(bitmap1))
+      .mockImplementationOnce(() => Promise.resolve(bitmap2));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 10 });
+    const entry = createEntry("img_1");
+
+    await expect(cache.get(entry)).resolves.toBe(bitmap1);
+    cache.invalidate(entry.id);
+    expect((bitmap1 as any).close).toHaveBeenCalledTimes(1);
+
+    await expect(cache.get(entry)).resolves.toBe(bitmap2);
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
+    expect((bitmap2 as any).close).not.toHaveBeenCalled();
+  });
+
   it("clear() closes all cached bitmaps", async () => {
     const bitmapA = { close: vi.fn() } as unknown as ImageBitmap;
     const bitmapB = { close: vi.fn() } as unknown as ImageBitmap;
