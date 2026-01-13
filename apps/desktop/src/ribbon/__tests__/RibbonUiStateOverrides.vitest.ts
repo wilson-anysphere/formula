@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Ribbon } from "../Ribbon";
 import { setRibbonUiState } from "../ribbonUiState";
+import { RIBBON_DISABLED_BY_ID_WHILE_EDITING } from "../ribbonEditingDisabledById";
 
 afterEach(() => {
   act(() => {
@@ -127,4 +128,78 @@ describe("Ribbon UI state overrides", () => {
 
     act(() => root.unmount());
   });
+
+  it("includes expected editing-mode disabled command ids", () => {
+    const expected = [
+      "home.cells.format.rowHeight",
+      "home.cells.format.columnWidth",
+      "home.alignment.mergeCenter",
+      "home.alignment.mergeCenter.mergeCenter",
+      "home.alignment.mergeCenter.mergeAcross",
+      "home.alignment.mergeCenter.mergeCells",
+      "home.alignment.mergeCenter.unmergeCells",
+      "home.font.subscript",
+      "home.font.superscript",
+      "home.editing.sortFilter.sortAtoZ",
+      "home.editing.sortFilter.sortZtoA",
+      "home.editing.sortFilter.customSort",
+      "home.editing.sortFilter.filter",
+      "home.editing.sortFilter.clear",
+      "home.editing.sortFilter.reapply",
+      "data.sortFilter.sortAtoZ",
+      "data.sortFilter.sortZtoA",
+      "data.sortFilter.sort",
+      "data.sortFilter.sort.customSort",
+      "data.sortFilter.sort.sortAtoZ",
+      "data.sortFilter.sort.sortZtoA",
+      "data.sortFilter.filter",
+      "data.sortFilter.clear",
+      "data.sortFilter.reapply",
+      "data.sortFilter.advanced",
+      "data.sortFilter.advanced.advancedFilter",
+      "data.sortFilter.advanced.clearFilter",
+    ];
+
+    for (const id of expected) {
+      expect(RIBBON_DISABLED_BY_ID_WHILE_EDITING[id]).toBe(true);
+    }
+  });
+
+  it("applies disabledById overrides to dropdown menu items", () => {
+    const { container, root } = renderRibbon();
+
+    const formatDropdown = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format"]');
+    expect(formatDropdown).toBeInstanceOf(HTMLButtonElement);
+
+    act(() => {
+      formatDropdown?.click();
+    });
+
+    const rowHeightItemSelector = '[data-command-id="home.cells.format.rowHeight"]';
+    const columnWidthItemSelector = '[data-command-id="home.cells.format.columnWidth"]';
+
+    expect(container.querySelector<HTMLButtonElement>(rowHeightItemSelector)).toBeInstanceOf(HTMLButtonElement);
+    expect(container.querySelector<HTMLButtonElement>(columnWidthItemSelector)).toBeInstanceOf(HTMLButtonElement);
+    expect(container.querySelector<HTMLButtonElement>(rowHeightItemSelector)?.disabled).toBe(false);
+    expect(container.querySelector<HTMLButtonElement>(columnWidthItemSelector)?.disabled).toBe(false);
+
+    act(() => {
+      setRibbonUiState({
+        pressedById: Object.create(null),
+        labelById: Object.create(null),
+        disabledById: {
+          "home.cells.format.rowHeight": true,
+          "home.cells.format.columnWidth": true,
+        },
+        shortcutById: Object.create(null),
+        ariaKeyShortcutsById: Object.create(null),
+      });
+    });
+
+    expect(container.querySelector<HTMLButtonElement>(rowHeightItemSelector)?.disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>(columnWidthItemSelector)?.disabled).toBe(true);
+
+    act(() => root.unmount());
+  });
 });
+

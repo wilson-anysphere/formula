@@ -45,6 +45,7 @@ import { computeRibbonDisabledByIdFromCommandRegistry } from "./ribbon/ribbonCom
 import { getRibbonUiStateSnapshot, setRibbonUiState } from "./ribbon/ribbonUiState.js";
 import { deriveRibbonAriaKeyShortcutsById, deriveRibbonShortcutById } from "./ribbon/ribbonShortcuts.js";
 import { MAX_AXIS_RESIZE_INDICES, promptAndApplyAxisSizing, selectedColIndices, selectedRowIndices } from "./ribbon/axisSizing.js";
+import { RIBBON_DISABLED_BY_ID_WHILE_EDITING } from "./ribbon/ribbonEditingDisabledById.js";
 
 import type { CellRange as GridCellRange } from "@formula/grid";
 
@@ -2289,6 +2290,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "format.numberFormat.increaseDecimal": true,
             "format.numberFormat.decreaseDecimal": true,
             "format.openFormatCells": true,
+            ...RIBBON_DISABLED_BY_ID_WHILE_EDITING,
           }
         : null),
       "comments.addComment": isEditing || !canComment,
@@ -2308,9 +2310,9 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "clipboard.pasteSpecial.formats": true,
             "clipboard.pasteSpecial.transpose": true,
             // Sheet-view mutations (freeze panes) should not be available in read-only mode,
-            // since they would only apply locally and never sync to the shared document.
-            "view.window.freezePanes": true,
-            "view.freezePanes": true,
+             // since they would only apply locally and never sync to the shared document.
+             "view.window.freezePanes": true,
+             "view.freezePanes": true,
             "view.freezeTopRow": true,
             "view.freezeFirstColumn": true,
             "view.unfreezePanes": true,
