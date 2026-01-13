@@ -44,6 +44,44 @@ test("SqliteVectorStore persists vectors and can reload them", { skip: !sqlJsAva
   }
 });
 
+test(
+  "SqliteVectorStore can reset persisted DB on dimension mismatch (file storage)",
+  { skip: !sqlJsAvailable },
+  async () => {
+    const tmpRoot = path.join(__dirname, ".tmp");
+    await mkdir(tmpRoot, { recursive: true });
+    const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-dim-mismatch-"));
+    const filePath = path.join(tmpDir, "vectors.sqlite");
+
+    try {
+      const store1 = await createSqliteFileVectorStore({
+        filePath,
+        dimension: 3,
+        autoSave: true,
+      });
+      await store1.upsert([{ id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb" } }]);
+      await store1.close();
+
+      const store2 = await createSqliteFileVectorStore({
+        filePath,
+        dimension: 4,
+        autoSave: true,
+        resetOnDimensionMismatch: true,
+      });
+
+      const list = await store2.list();
+      assert.deepEqual(list, []);
+
+      await store2.upsert([{ id: "c", vector: [1, 0, 0, 0], metadata: { workbookId: "wb" } }]);
+      const hits = await store2.query([1, 0, 0, 0], 1, { workbookId: "wb" });
+      assert.equal(hits[0].id, "c");
+      await store2.close();
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  }
+);
+
 test("SqliteVectorStore.vacuum() VACUUMs and persists a smaller DB (even with autoSave:false)", { skip: !sqlJsAvailable }, async () => {
   const tmpRoot = path.join(__dirname, ".tmp");
   await mkdir(tmpRoot, { recursive: true });
