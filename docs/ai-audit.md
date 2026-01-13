@@ -184,6 +184,8 @@ persistence.
   - Database name default: `formula_ai_audit`
   - Object store default: `ai_audit_log`
 - Filtering: supports `timestamp_ms` (before/after/cursor pagination), `session_id`, `workbook_id`, and `mode`.
+- Workbook metadata: on write, `workbook_id` is normalized for efficient filtering when possible (from `entry.workbook_id`,
+  legacy `input.workbook_id` / `input.workbookId`, or `session_id` patterns like `"workbook-123:<uuid>"`).
 - Retention knobs:
   - `max_entries?: number` (newest retained)
   - `max_age_ms?: number` (entries older than `now - max_age_ms` deleted)
@@ -206,6 +208,8 @@ persistence.
 - Retention knobs (write-time enforcement):
   - `retention.max_entries?: number`
   - `retention.max_age_ms?: number`
+- Workbook metadata: stored in a dedicated `workbook_id` column for efficient filtering. When missing, the store will attempt
+  to infer/backfill it from legacy `input.workbook_id` / `input.workbookId` or `session_id` patterns like `"workbook-123:<uuid>"`.
 
 SQLite is the recommended backend when you want:
 
