@@ -438,7 +438,7 @@ export const enUS = {
   "queryEditor.addStep.op.splitColumn": "Split Column",
   "queryEditor.addStep.op.groupBy": "Group By",
   "queryEditor.addStep.op.groupBy.count": "Count Rows",
-  "queryEditor.addStep.schemaRequired": "Preview schema required to use this operation.",
+  "queryEditor.addStep.schemaRequired": "Preview schema required for some operations.",
   "queryEditor.addStep.aiPlaceholder": "Ask AI: e.g. 'filter to East, group by Region'",
   "queryEditor.addStep.suggestNext": "Suggest next steps",
   "queryEditor.addStep.suggestingNext": "Suggesting…",
