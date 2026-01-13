@@ -1,8 +1,10 @@
 //! Legacy `.xls` BIFF encryption (FILEPASS) parsing and workbook-stream decryption.
 //!
-//! This module is currently an internal skeleton: it can classify BIFF `FILEPASS`
-//! records and locate the start of encrypted bytes in a workbook stream, but does
-//! not yet implement the underlying crypto algorithms.
+//! This module provides:
+//! - BIFF `FILEPASS` parsing / encryption scheme classification
+//! - Crypto primitives (key derivation + verifier decryption) for BIFF8 RC4 and RC4 CryptoAPI
+//!
+//! Full workbook-stream record payload decryption is not yet implemented.
 //!
 //! Supported FILEPASS variants (classification only):
 //! - BIFF5 XOR obfuscation
@@ -15,6 +17,10 @@
 use thiserror::Error;
 
 use super::{records, BiffVersion};
+
+pub(crate) mod cryptoapi;
+pub(crate) mod rc4;
+pub(crate) mod xor;
 
 // BIFF8 FILEPASS.wEncryptionType values.
 // [MS-XLS] 2.4.117 (FilePass).

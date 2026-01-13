@@ -2290,6 +2290,7 @@ dependencies = [
  "formula-format",
  "formula-model",
  "log",
+ "md-5",
  "proptest",
  "sha1",
  "tempfile",

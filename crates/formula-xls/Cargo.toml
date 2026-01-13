@@ -11,6 +11,7 @@ formula-format = { path = "../formula-format" }
 formula-biff = { path = "../formula-biff", default-features = false }
 formula-model = { path = "../formula-model" }
 log = "0.4"
+md-5 = "0.10"
 sha1 = "0.10"
 thiserror = "2.0"
 
