@@ -184,3 +184,43 @@ test("buildContext: heuristic DLP redaction also redacts numeric values that mat
   assert.doesNotMatch(JSON.stringify(out.sampledRows), /4111111111111111/);
   assert.doesNotMatch(JSON.stringify(out.retrieved), /4111111111111111/);
 });
+
+test("buildContext: DLP REDACT deep-redacts Map/Set values inside attachments", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [["Email"], ["alice@example.com"]],
+    },
+    query: "anything",
+    attachments: [
+      {
+        type: "chart",
+        reference: "MapAttachment",
+        data: new Map([
+          ["ssn", "123-45-6789"],
+          ["email", "alice@example.com"],
+        ]),
+      },
+      {
+        type: "chart",
+        reference: "SetAttachment",
+        data: new Set(["alice@example.com"]),
+      },
+    ],
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: makePolicy(),
+      classificationRecords: [],
+    },
+  });
+
+  assert.doesNotMatch(out.promptContext, /123-45-6789/);
+  assert.doesNotMatch(out.promptContext, /alice@example\.com/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});

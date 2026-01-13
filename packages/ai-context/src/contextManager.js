@@ -1960,6 +1960,29 @@ function redactStructuredValue(value, redactor, options = {}) {
   if (typeof value !== "object") return value;
   if (value instanceof Date) return value;
 
+  if (value instanceof Map) {
+    /** @type {Map<any, any>} */
+    const out = new Map();
+    for (const [k, v] of value.entries()) {
+      throwIfAborted(signal);
+      out.set(
+        redactStructuredValue(k, redactor, { signal, includeRestrictedContent, policyAllowsRestrictedContent }),
+        redactStructuredValue(v, redactor, { signal, includeRestrictedContent, policyAllowsRestrictedContent }),
+      );
+    }
+    return /** @type {T} */ (out);
+  }
+
+  if (value instanceof Set) {
+    /** @type {Set<any>} */
+    const out = new Set();
+    for (const v of value.values()) {
+      throwIfAborted(signal);
+      out.add(redactStructuredValue(v, redactor, { signal, includeRestrictedContent, policyAllowsRestrictedContent }));
+    }
+    return /** @type {T} */ (out);
+  }
+
   if (Array.isArray(value)) {
     return /** @type {T} */ (
       value.map((v) =>
