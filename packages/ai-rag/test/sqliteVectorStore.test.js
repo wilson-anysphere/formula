@@ -423,6 +423,28 @@ test("SqliteVectorStore.list respects AbortSignal", { skip: !sqlJsAvailable }, a
   }
 });
 
+test(
+  "SqliteVectorStore.listContentHashes does not parse metadata_json",
+  { skip: !sqlJsAvailable },
+  async () => {
+    const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
+    try {
+      const blob = new Uint8Array(new Float32Array([1, 0, 0]).buffer);
+      const stmt = store._db.prepare(
+        "INSERT INTO vectors (id, workbook_id, vector, content_hash, metadata_hash, metadata_json) VALUES (?, ?, ?, ?, ?, ?);"
+      );
+      stmt.run(["bad-json", "wb", blob, "ch", "mh", "not-json"]);
+      stmt.free();
+
+      const rows = await store.listContentHashes({ workbookId: "wb" });
+      rows.sort((a, b) => a.id.localeCompare(b.id));
+      assert.deepEqual(rows, [{ id: "bad-json", contentHash: "ch", metadataHash: "mh" }]);
+    } finally {
+      await store.close();
+    }
+  }
+);
+
 test("SqliteVectorStore.query returns topK matching results after filtering", { skip: !sqlJsAvailable }, async () => {
   const tmpRoot = path.join(__dirname, ".tmp");
   await mkdir(tmpRoot, { recursive: true });
