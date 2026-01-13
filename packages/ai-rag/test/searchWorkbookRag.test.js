@@ -534,3 +534,67 @@ test("searchWorkbookRag rejects when query vector contains non-finite values", a
   );
   assert.equal(queryCalled, false);
 });
+
+test("searchWorkbookRag oversamples candidates when rerank or dedupe is enabled", async () => {
+  let seenTopK = null;
+
+  const embedder = {
+    async embedTexts() {
+      return [[1, 0, 0]];
+    },
+  };
+
+  const vectorStore = {
+    async query(_vector, topK) {
+      seenTopK = topK;
+      return [];
+    },
+  };
+
+  await searchWorkbookRag({
+    queryText: "hello",
+    workbookId: "wb",
+    topK: 2,
+    vectorStore,
+    embedder,
+    rerank: true,
+    dedupe: false,
+  });
+
+  // topK=2, oversample=4 => queryK=8
+  assert.equal(seenTopK, 8);
+});
+
+test("searchWorkbookRag floors topK floats", async () => {
+  let seenTopK = null;
+
+  const embedder = {
+    async embedTexts() {
+      return [[1, 0, 0]];
+    },
+  };
+
+  const vectorStore = {
+    async query(_vector, topK, opts = {}) {
+      seenTopK = topK;
+      return [
+        { id: "a", score: 1, metadata: { workbookId: opts.workbookId } },
+        { id: "b", score: 0.9, metadata: { workbookId: opts.workbookId } },
+      ];
+    },
+  };
+
+  const results = await searchWorkbookRag({
+    queryText: "hello",
+    workbookId: "wb",
+    topK: 1.9,
+    vectorStore,
+    embedder,
+    rerank: false,
+    dedupe: false,
+  });
+
+  assert.equal(seenTopK, 1);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].id, "a");
+});
