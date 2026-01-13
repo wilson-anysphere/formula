@@ -13,10 +13,45 @@ import { formatA1Range, parseA1Range } from "../../../../../packages/ai-tools/sr
 import { getDesktopAIAuditStore } from "../../ai/audit/auditStore.js";
 import { getDesktopLLMClient, getDesktopModel, purgeLegacyDesktopLLMSettings } from "../../ai/llm/desktopLLMClient.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
+import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
+import { rangeToA1 as rangeToA1Selection } from "../../selection/a1.js";
+import type { Range } from "../../selection/types.js";
+import { DEFAULT_EXTENSION_RANGE_CELL_LIMIT, getExtensionRangeSize, normalizeExtensionRange } from "../../extensions/rangeSizeGuard.js";
 
-import { AIChatPanel, type AIChatPanelSendMessage } from "./AIChatPanel.js";
+import { AIChatPanel, type AIChatPanelSendMessage, type AIChatPanelTableOption } from "./AIChatPanel.js";
 import { ApprovalModal } from "./ApprovalModal.js";
 import { confirmPreviewApproval } from "./previewApproval.js";
+
+function clampRangeToMaxCells(range: Range, maxCells: number): Range {
+  const normalized = normalizeExtensionRange(range);
+  const { rows, cols, cellCount } = getExtensionRangeSize(normalized);
+  if (cellCount <= maxCells || rows <= 0 || cols <= 0) return normalized;
+
+  // Keep the selection's top-left corner and clamp the trailing edge so the total
+  // cell count stays within the configured limit.
+  //
+  // Prefer preserving the column span (users more often select a few columns and
+  // many rows), falling back to clamping columns when the selection is extremely
+  // wide (cols > maxCells).
+  if (cols > maxCells) {
+    return {
+      startRow: normalized.startRow,
+      startCol: normalized.startCol,
+      endRow: normalized.startRow,
+      endCol: normalized.startCol + maxCells - 1,
+    };
+  }
+
+  const clampedRows = Math.max(1, Math.min(rows, Math.floor(maxCells / cols)));
+  const maxColsForRows = Math.max(1, Math.floor(maxCells / clampedRows));
+  const clampedCols = Math.max(1, Math.min(cols, maxColsForRows));
+  return {
+    startRow: normalized.startRow,
+    startCol: normalized.startCol,
+    endRow: normalized.startRow + clampedRows - 1,
+    endCol: normalized.startCol + clampedCols - 1,
+  };
+}
 
 function generateSessionId(): string {
   const maybeCrypto = globalThis.crypto as Crypto | undefined;
@@ -230,6 +265,36 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
     };
   }, [orchestrator, resolveApproval, sheetNameResolver]);
 
+  const getSelectionAttachment = useCallback(() => {
+    const selection = props.getSelection?.();
+    if (!selection) return null;
+    const sheetId = selection.sheetId;
+    const range = selection.range;
+    if (!sheetId || !range) return null;
+
+    const displayName = sheetNameResolver?.getSheetNameById(sheetId) ?? sheetId;
+    const clamped = clampRangeToMaxCells(range as any, DEFAULT_EXTENSION_RANGE_CELL_LIMIT);
+    const reference = `${formatSheetNameForA1(displayName)}!${rangeToA1Selection(clamped)}`;
+    return { type: "range", reference } as const;
+  }, [props.getSelection, sheetNameResolver]);
+
+  const getTableOptions = useCallback((): AIChatPanelTableOption[] => {
+    const tables = schemaProvider?.getTables?.() ?? [];
+    if (!tables.length) return [];
+    const out: AIChatPanelTableOption[] = [];
+    for (const t of tables) {
+      const name = typeof t?.name === "string" ? t.name.trim() : "";
+      const sheetId = typeof t?.sheetId === "string" ? t.sheetId : "";
+      const range = t?.range;
+      if (!name || !sheetId || !range) continue;
+      const displayName = sheetNameResolver?.getSheetNameById(sheetId) ?? sheetId;
+      const desc = `${formatSheetNameForA1(displayName)}!${rangeToA1Selection(range as any)}`;
+      out.push({ name, description: desc });
+    }
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+  }, [schemaProvider, sheetNameResolver]);
+
   const [agentGoal, setAgentGoal] = useState("");
   const [agentConstraints, setAgentConstraints] = useState("");
   const [agentContinueOnDenied, setAgentContinueOnDenied] = useState(false);
@@ -345,7 +410,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
       </div>
       <div className="ai-chat-runtime__content">
         {tab === "chat" ? (
-          <AIChatPanel sendMessage={sendMessage} />
+          <AIChatPanel sendMessage={sendMessage} getSelectionAttachment={getSelectionAttachment} getTableOptions={getTableOptions} />
         ) : (
           <div className="ai-chat-agent">
             <div className="ai-chat-agent__section">

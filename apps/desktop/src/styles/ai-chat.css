@@ -205,20 +205,98 @@
 }
 
 .ai-chat-panel__pending-attachments {
-  padding: 6px 12px;
-  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   font-size: 12px;
 }
 
-.ai-chat-panel__pending-attachment {
-  margin-right: 8px;
+.ai-chat-panel__pending-attachments-label {
+  opacity: 0.85;
+}
+
+.ai-chat-panel__pending-attachments-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-chat-panel__attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-secondary);
+}
+
+.ai-chat-panel__attachment-chip-label {
+  white-space: nowrap;
+}
+
+.ai-chat-panel__attachment-chip-remove {
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.ai-chat-panel__attachment-chip-remove:focus-visible {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
 }
 
 .ai-chat-panel__composer {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 10px;
   padding: 12px;
   border-top: 1px solid var(--border);
+}
+
+.ai-chat-panel__composer-row {
+  display: flex;
+  gap: 8px;
+}
+
+.ai-chat-panel__composer-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-chat-panel__attachment-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-chat-panel__attachment-button {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.ai-chat-panel__attachment-button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.ai-chat-panel__attachment-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ai-chat-panel__attachment-button:focus-visible {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
 }
 
 .ai-chat-panel__input {
@@ -228,17 +306,6 @@
 
 .ai-chat-panel__button {
   padding: 8px 12px;
-}
-
-.ai-chat-panel__attachments-api {
-  padding: 6px 12px;
-  border-top: 1px solid var(--border);
-  font-size: 12px;
-  opacity: 0.7;
-}
-
-.ai-chat-panel__attachments-api-button {
-  margin-inline-start: 8px;
 }
 
 .ai-chat-approval-modal {

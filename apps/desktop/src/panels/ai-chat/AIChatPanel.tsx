@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Attachment, ChatMessage } from "./types.js";
+import { showQuickPick } from "../../extensions/ui.js";
 import type {
   ChatStreamEvent,
   LLMClient,
@@ -43,8 +44,27 @@ export type AIChatPanelSendMessage = (
   args: AIChatPanelSendMessageArgs,
 ) => Promise<{ messages: LLMMessage[]; final: string; verification?: ChatMessage["verification"] }>;
 
+export type AIChatPanelTableOption = {
+  name: string;
+  description?: string;
+  detail?: string;
+};
+
+export type AIChatPanelAttachmentProps = {
+  /**
+   * Optional providers for building spreadsheet context attachments.
+   *
+   * These callbacks keep the panel UI decoupled from the desktop SpreadsheetApp
+   * implementation while still letting callers wire in selection/table/etc.
+   */
+  getSelectionAttachment?: () => Attachment | null;
+  getFormulaAttachment?: () => Attachment | null;
+  getTableOptions?: () => AIChatPanelTableOption[];
+  getChartAttachment?: () => Attachment | null;
+};
+
 export type AIChatPanelProps =
-  | {
+  | (AIChatPanelAttachmentProps & {
       /**
        * When `sendMessage` is provided, the panel becomes a pure UI shell and
        * delegates orchestration (context, tools, audit, approvals) to the caller.
@@ -54,8 +74,8 @@ export type AIChatPanelProps =
       onRequestToolApproval?: (call: ToolCall) => Promise<boolean>;
       client?: LLMClient;
       toolExecutor?: ToolExecutor;
-    }
-  | {
+    })
+  | (AIChatPanelAttachmentProps & {
       /**
        * If `sendMessage` is omitted, the panel runs the provider-agnostic
        * `runChatWithTools` loop directly (legacy/demo mode).
@@ -65,7 +85,7 @@ export type AIChatPanelProps =
       toolExecutor: ToolExecutor;
       systemPrompt?: string;
       onRequestToolApproval?: (call: ToolCall) => Promise<boolean>;
-    };
+    });
 
 export function AIChatPanel(props: AIChatPanelProps) {
   const [input, setInput] = useState("");
@@ -97,6 +117,20 @@ export function AIChatPanel(props: AIChatPanelProps) {
     [props.systemPrompt],
   );
 
+  function safeInvoke<T>(fn: (() => T) | undefined): T | null {
+    if (!fn) return null;
+    try {
+      return fn();
+    } catch {
+      return null;
+    }
+  }
+
+  const selectionAttachmentPreview = safeInvoke(props.getSelectionAttachment);
+  const formulaAttachmentPreview = safeInvoke(props.getFormulaAttachment);
+  const chartAttachmentPreview = safeInvoke(props.getChartAttachment);
+  const tableOptionsPreview = safeInvoke(props.getTableOptions) ?? [];
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -121,6 +155,34 @@ export function AIChatPanel(props: AIChatPanelProps) {
     const limit = 2_000;
     if (rendered.length <= limit) return rendered;
     return `${rendered.slice(0, limit)}\n…(truncated)`;
+  }
+
+  function addAttachment(next: Attachment) {
+    setAttachments((prev) => {
+      if (prev.some((a) => a.type === next.type && a.reference === next.reference)) return prev;
+      return [...prev, next];
+    });
+  }
+
+  function removeAttachmentAt(index: number) {
+    setAttachments((prev) => prev.filter((_a, i) => i !== index));
+  }
+
+  async function attachTable() {
+    if (sending) return;
+    const tables = safeInvoke(props.getTableOptions) ?? [];
+    if (!tables.length) return;
+    const picked = await showQuickPick(
+      tables.map((t) => ({
+        label: t.name,
+        value: t.name,
+        description: t.description,
+        detail: t.detail,
+      })),
+      { placeHolder: t("chat.attachTable.placeholder") },
+    );
+    if (!picked) return;
+    addAttachment({ type: "table", reference: picked });
   }
 
   async function send() {
@@ -364,55 +426,116 @@ export function AIChatPanel(props: AIChatPanelProps) {
           </div>
         ))}
       </div>
-      {attachments.length ? (
-        <div className="ai-chat-panel__pending-attachments">
-          {t("chat.pendingAttachments")}{" "}
-          {attachments.map((a) => (
-            <span key={`${a.type}:${a.reference}`} className="ai-chat-panel__pending-attachment">
-              {a.type}:{a.reference}
-            </span>
-          ))}
-        </div>
-      ) : null}
       <div className="ai-chat-panel__composer">
-        <input
-          className="ai-chat-panel__input"
-          placeholder={t("chat.input.placeholder")}
-          value={input}
-          disabled={sending}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-        />
-        <button onClick={() => void send()} className="ai-chat-panel__button" disabled={sending}>
-          {t("chat.send")}
-        </button>
-        <button
-          onClick={() => abortControllerRef.current?.abort()}
-          className="ai-chat-panel__button"
-          disabled={!sending}
-          type="button"
-        >
-          {t("chat.cancel")}
-        </button>
-      </div>
-      <div className="ai-chat-panel__attachments-api">
-        {t("chat.attachmentsApiPlaceholder")}
-        <button
-          className="ai-chat-panel__attachments-api-button"
-          onClick={() =>
-            setAttachments((prev) => [
-              ...prev,
-              { type: "range", reference: "Sheet1!A1:D10", data: { source: "selection" } },
-            ])
-          }
-        >
-          {t("chat.addRangeDemo")}
-        </button>
+        <div className="ai-chat-panel__composer-toolbar">
+          <div className="ai-chat-panel__attachment-toolbar" role="toolbar" aria-label="Attach context">
+            <button
+              type="button"
+              className="ai-chat-panel__attachment-button"
+              data-testid="ai-chat-attach-selection"
+              disabled={sending || !selectionAttachmentPreview}
+              title={!selectionAttachmentPreview ? t("chat.attachSelection.disabled") : undefined}
+              onClick={() => {
+                const attachment = safeInvoke(props.getSelectionAttachment);
+                if (!attachment) return;
+                addAttachment(attachment);
+              }}
+            >
+              {t("chat.attachSelection")}
+            </button>
+            <button
+              type="button"
+              className="ai-chat-panel__attachment-button"
+              data-testid="ai-chat-attach-table"
+              disabled={sending || tableOptionsPreview.length === 0}
+              title={tableOptionsPreview.length === 0 ? t("chat.attachTable.disabled") : undefined}
+              onClick={() => void attachTable()}
+            >
+              {t("chat.attachTable")}
+            </button>
+            {props.getFormulaAttachment ? (
+              <button
+                type="button"
+                className="ai-chat-panel__attachment-button"
+                data-testid="ai-chat-attach-formula"
+                disabled={sending || !formulaAttachmentPreview}
+                title={!formulaAttachmentPreview ? t("chat.attachFormula.disabled") : undefined}
+                onClick={() => {
+                  const attachment = safeInvoke(props.getFormulaAttachment);
+                  if (!attachment) return;
+                  addAttachment(attachment);
+                }}
+              >
+                {t("chat.attachFormula")}
+              </button>
+            ) : null}
+            {props.getChartAttachment ? (
+              <button
+                type="button"
+                className="ai-chat-panel__attachment-button"
+                data-testid="ai-chat-attach-chart"
+                disabled={sending || !chartAttachmentPreview}
+                title={!chartAttachmentPreview ? t("chat.attachChart.disabled") : undefined}
+                onClick={() => {
+                  const attachment = safeInvoke(props.getChartAttachment);
+                  if (!attachment) return;
+                  addAttachment(attachment);
+                }}
+              >
+                {t("chat.attachChart")}
+              </button>
+            ) : null}
+          </div>
+          {attachments.length ? (
+            <div className="ai-chat-panel__pending-attachments" data-testid="ai-chat-pending-attachments">
+              <span className="ai-chat-panel__pending-attachments-label">{t("chat.pendingAttachments")}</span>
+              <div className="ai-chat-panel__pending-attachments-chips">
+                {attachments.map((a, idx) => (
+                  <span key={`${a.type}:${a.reference}:${idx}`} className="ai-chat-panel__attachment-chip" data-testid={`ai-chat-attachment-chip-${idx}`}>
+                    <span className="ai-chat-panel__attachment-chip-label">
+                      {a.type}: {a.reference}
+                    </span>
+                    <button
+                      type="button"
+                      className="ai-chat-panel__attachment-chip-remove"
+                      aria-label={`Remove ${a.type} attachment`}
+                      data-testid={`ai-chat-attachment-remove-${idx}`}
+                      onClick={() => removeAttachmentAt(idx)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <div className="ai-chat-panel__composer-row">
+          <input
+            className="ai-chat-panel__input"
+            placeholder={t("chat.input.placeholder")}
+            value={input}
+            disabled={sending}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+          />
+          <button onClick={() => void send()} className="ai-chat-panel__button" disabled={sending}>
+            {t("chat.send")}
+          </button>
+          <button
+            onClick={() => abortControllerRef.current?.abort()}
+            className="ai-chat-panel__button"
+            disabled={!sending}
+            type="button"
+          >
+            {t("chat.cancel")}
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -404,3 +404,84 @@ describe("AIChatPanel tool-calling history", () => {
     });
   });
 });
+
+describe("AIChatPanel attachments UI", () => {
+  it("can attach and remove a selection before sending (and includes attachments on the user message)", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const sendMessage = vi.fn(async () => {
+      return { messages: [], final: "Ok" };
+    });
+
+    const getSelectionAttachment = vi.fn(() => ({ type: "range" as const, reference: "Sheet1!A1:D10" }));
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          systemPrompt: "system",
+          sendMessage,
+          getSelectionAttachment,
+        }),
+      );
+    });
+
+    // Demo-only placeholder UI should be gone.
+    expect(container.textContent).not.toContain("Attachments API placeholder");
+    expect(container.textContent).not.toContain("Range (demo)");
+
+    const attachSelectionBtn = container.querySelector('[data-testid="ai-chat-attach-selection"]') as HTMLButtonElement | null;
+    expect(attachSelectionBtn).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      attachSelectionBtn!.click();
+    });
+
+    const chip = container.querySelector('[data-testid="ai-chat-attachment-chip-0"]');
+    expect(chip?.textContent).toContain("range: Sheet1!A1:D10");
+
+    const removeBtn = container.querySelector('[data-testid="ai-chat-attachment-remove-0"]') as HTMLButtonElement | null;
+    expect(removeBtn).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      removeBtn!.click();
+    });
+
+    expect(container.querySelector('[data-testid="ai-chat-attachment-chip-0"]')).toBeNull();
+
+    // Re-add and send.
+    await act(async () => {
+      attachSelectionBtn!.click();
+    });
+
+    const input = container.querySelector("input") as HTMLInputElement | null;
+    const sendButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Send") as HTMLButtonElement | undefined;
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    expect(sendButton).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      setNativeInputValue(input!, "Hello");
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
+      input!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await act(async () => {
+      sendButton!.click();
+      await waitFor(() => sendMessage.mock.calls.length === 1);
+    });
+
+    const callArgs = sendMessage.mock.calls[0]?.[0] as any;
+    expect(callArgs.attachments).toEqual([{ type: "range", reference: "Sheet1!A1:D10" }]);
+
+    // Pending attachment chips should clear after sending.
+    expect(container.querySelector('[data-testid="ai-chat-pending-attachments"]')).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+});
