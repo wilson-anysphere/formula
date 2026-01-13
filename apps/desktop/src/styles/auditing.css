@@ -7,15 +7,17 @@
 
 .auditing-legend {
   position: absolute;
-  /* row header width (48px) + offset (10px) */
-  left: 58px;
-  bottom: 10px;
-  padding: 6px 10px;
+  /* row header width (48px) + offset (8px) */
+  left: 56px;
+  bottom: 8px;
+  padding: 4px 8px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--bg-tertiary);
+  box-shadow: var(--shadow-surface);
   color: var(--text-primary);
   font-size: 12px;
+  line-height: 16px;
   pointer-events: none;
   z-index: 20;
 }
@@ -23,14 +25,14 @@
 .auditing-legend__row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .auditing-legend__modes {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -43,8 +45,9 @@
   display: inline-block;
   width: 10px;
   height: 10px;
-  border-radius: 2px;
-  margin-right: 6px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+  margin-right: 4px;
 }
 
 .auditing-legend__swatch--precedents {
@@ -60,9 +63,15 @@
 }
 
 .auditing-legend__errors {
-  margin-top: 6px;
+  margin-top: 4px;
   opacity: 0.9;
   max-width: 360px;
   white-space: pre-wrap;
 }
 
+@media (forced-colors: active), (prefers-contrast: more) {
+  .auditing-legend__transitive,
+  .auditing-legend__errors {
+    opacity: 1;
+  }
+}
