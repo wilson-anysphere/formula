@@ -67,11 +67,16 @@ export class CursorTabCompletionClient {
 
       // Use lowercase so tests (and any header-inspecting consumers) can treat this as a plain
       // record without worrying about case. Fetch treats header keys as case-insensitive.
+      //
+      // IMPORTANT: ensure we only send a single JSON Content-Type header. If we pass both
+      // `Content-Type` and `content-type`, fetch() can combine them into a single comma-separated
+      // value (e.g. "text/plain, application/json"), which can break server-side JSON parsing.
       /** @type {Record<string, string>} */
       const headers = {};
       for (const [key, value] of Object.entries(authHeaders ?? {})) {
         if (!key) continue;
         if (value === undefined || value === null) continue;
+        if (key.toLowerCase() === "content-type") continue;
         headers[key.toLowerCase()] = String(value);
       }
       headers["content-type"] = "application/json";

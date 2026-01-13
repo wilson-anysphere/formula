@@ -121,6 +121,36 @@ test("CursorTabCompletionClient merges headers from getAuthHeaders", async () =>
   assert.equal(headersSeen?.["Content-Type"] ?? headersSeen?.["content-type"], "application/json");
 });
 
+test("CursorTabCompletionClient forces Content-Type to application/json even if getAuthHeaders sets it", async () => {
+  /** @type {Record<string, string> | null} */
+  let headersSeen = null;
+
+  const fetchImpl = async (_url, init) => {
+    headersSeen = init.headers;
+    return {
+      ok: true,
+      async json() {
+        return { completion: "ok" };
+      },
+    };
+  };
+
+  const client = new CursorTabCompletionClient({
+    baseUrl: "http://example.test",
+    fetchImpl,
+    timeoutMs: 500,
+    getAuthHeaders() {
+      return { "Content-Type": "text/plain", "x-cursor-test-auth": "yes" };
+    },
+  });
+
+  const completion = await client.completeTabCompletion({ input: "=", cursorPosition: 1, cellA1: "A1" });
+  assert.equal(completion, "ok");
+  assert.equal(headersSeen?.["x-cursor-test-auth"], "yes");
+  assert.equal(headersSeen?.["content-type"] ?? headersSeen?.["Content-Type"], "application/json");
+  assert.ok(!("Content-Type" in (headersSeen ?? {})), "Expected Content-Type to be normalized to lowercase");
+});
+
 test("CursorTabCompletionClient resolves to empty string when an external AbortSignal is aborted", async () => {
   let sawAbort = false;
 
