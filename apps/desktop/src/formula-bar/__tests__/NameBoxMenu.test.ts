@@ -128,6 +128,40 @@ describe("FormulaBarView name box dropdown menu", () => {
     expect(overlay?.hidden).toBe(true);
   });
 
+  it("falls back to populating + selecting the name box text when reference is unavailable", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    new FormulaBarView(host, {
+      onCommit: () => {},
+      getNameBoxMenuItems: () => [{ label: "UnresolvedName", reference: null }],
+    });
+
+    const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
+    expect(address).toBeInstanceOf(HTMLInputElement);
+
+    const dropdown = host.querySelector<HTMLButtonElement>(".formula-bar-name-box-dropdown");
+    expect(dropdown).toBeInstanceOf(HTMLButtonElement);
+    dropdown!.click();
+
+    const overlay = document.querySelector<HTMLDivElement>('[data-testid="name-box-menu"]');
+    expect(overlay).toBeInstanceOf(HTMLDivElement);
+    expect(overlay?.hidden).toBe(false);
+
+    const item = Array.from(overlay!.querySelectorAll<HTMLButtonElement>(".context-menu__item")).find(
+      (btn) => btn.querySelector(".context-menu__label")?.textContent === "UnresolvedName",
+    );
+    expect(item).toBeInstanceOf(HTMLButtonElement);
+
+    item!.click();
+
+    expect(overlay?.hidden).toBe(true);
+    expect(document.activeElement).toBe(address);
+    expect(address!.value).toBe("UnresolvedName");
+    expect(address!.selectionStart).toBe(0);
+    expect(address!.selectionEnd).toBe("UnresolvedName".length);
+  });
+
   it("closes on Escape and restores focus to the name box input", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
