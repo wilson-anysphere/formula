@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { CredentialManager, httpScope, normalizeScopes, oauth2Scope, randomId, type Query } from "@formula/power-query";
 
-import { matchesRedirectUri, oauthBroker } from "../../power-query/oauthBroker.js";
+import { isLoopbackRedirectUrl, matchesRedirectUri, oauthBroker } from "../../power-query/oauthBroker.js";
 import { createPowerQueryRefreshStateStore } from "../../power-query/refreshStateStore.js";
 import { loadOAuth2ProviderConfigs, saveOAuth2ProviderConfigs, type OAuth2ProviderConfig } from "../../power-query/oauthProviders.ts";
 import { deriveQueryListRows, reduceQueryRuntimeState, type QueryRuntimeState } from "../../power-query/queryRuntime.ts";
@@ -59,7 +59,6 @@ function hasTauri(): boolean {
 
 const RECOMMENDED_DESKTOP_OAUTH_REDIRECT_URI = "formula://oauth/callback";
 const EXAMPLE_LOOPBACK_OAUTH_REDIRECT_URI = "http://127.0.0.1:4242/oauth/callback";
-const LOOPBACK_REDIRECT_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 
 function hasTauriEventApi(): boolean {
   return getTauriEventApiOrNull() != null;
@@ -76,7 +75,7 @@ function supportsDesktopOAuthRedirectCapture(redirectUri: string): boolean {
     if (protocol === "formula:") return true;
 
     // Loopback redirect capture (RFC 8252) for providers that support it.
-    if (protocol === "http:" && LOOPBACK_REDIRECT_HOSTS.has(url.hostname) && url.port) {
+    if (isLoopbackRedirectUrl(url)) {
       return typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
     }
 

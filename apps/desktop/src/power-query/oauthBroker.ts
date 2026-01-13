@@ -52,6 +52,19 @@ export function matchesRedirectUri(redirectUri: string, redirectUrl: string): bo
   );
 }
 
+const LOOPBACK_REDIRECT_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+
+export function isLoopbackRedirectUrl(url: URL): boolean {
+  const port = Number.parseInt(url.port, 10);
+  return (
+    url.protocol === "http:" &&
+    LOOPBACK_REDIRECT_HOSTS.has(url.hostname) &&
+    url.port !== "" &&
+    Number.isInteger(port) &&
+    port > 0
+  );
+}
+
 type Deferred<T> = {
   promise: Promise<T>;
   resolve: (value: T) => void;
@@ -133,22 +146,7 @@ export class DesktopOAuthBroker implements OAuthBroker {
     if (redirectUri) {
       try {
         const parsedRedirect = new URL(redirectUri);
-        const port = Number.parseInt(parsedRedirect.port, 10);
-        const isLoopbackHost =
-          parsedRedirect.hostname === "127.0.0.1" ||
-          parsedRedirect.hostname === "localhost" ||
-          // URL.hostname serializes IPv6 hosts with brackets per the URL standard.
-          // Accept both bracketed and unbracketed forms to be safe across runtimes.
-          parsedRedirect.hostname === "[::1]" ||
-          parsedRedirect.hostname === "::1";
-        const isLoopback =
-          parsedRedirect.protocol === "http:" &&
-          isLoopbackHost &&
-          parsedRedirect.port !== "" &&
-          Number.isInteger(port) &&
-          port > 0;
-
-        if (isLoopback) {
+        if (isLoopbackRedirectUrl(parsedRedirect)) {
           const invoke = (globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined;
           if (typeof invoke === "function") {
             await invoke("oauth_loopback_listen", { redirect_uri: redirectUri });
