@@ -5201,6 +5201,8 @@ if (
       syncContributedCommandsRef?.();
       syncContributedPanelsRef?.();
     },
+    themeController,
+    refreshRibbonUiState: scheduleRibbonSelectionFormatStateUpdate,
   });
 
   const commandCategoryFormat = t("commandCategory.format");
@@ -9601,26 +9603,6 @@ mountRibbon(ribbonReactRoot, {
       case "view.unfreezePanes":
         executeBuiltinCommand(commandId);
         return;
-      case "view.appearance.theme.system":
-        themeController.setThemePreference("system");
-        scheduleRibbonSelectionFormatStateUpdate();
-        app.focus();
-        return;
-      case "view.appearance.theme.light":
-        themeController.setThemePreference("light");
-        scheduleRibbonSelectionFormatStateUpdate();
-        app.focus();
-        return;
-      case "view.appearance.theme.dark":
-        themeController.setThemePreference("dark");
-        scheduleRibbonSelectionFormatStateUpdate();
-        app.focus();
-        return;
-      case "view.appearance.theme.highContrast":
-        themeController.setThemePreference("high-contrast");
-        scheduleRibbonSelectionFormatStateUpdate();
-        app.focus();
-        return;
 
       // --- Debug / dev controls migrated from the legacy status bar ---------------
       // Keep these command ids stable because Playwright e2e depends on their `data-testid`s.
@@ -9738,6 +9720,10 @@ mountRibbon(ribbonReactRoot, {
         void openCustomZoomQuickPick();
         return;
       default:
+        if (commandRegistry.getCommand(commandId)) {
+          executeBuiltinCommand(commandId);
+          return;
+        }
         if (commandId.startsWith("file.")) {
           showToast(`File command not implemented: ${commandId}`);
           return;

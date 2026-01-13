@@ -508,3 +508,50 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
     expect(app.pasteFromClipboard).not.toHaveBeenCalled();
   });
 });
+
+describe("registerBuiltinCommands: theme preference commands", () => {
+  it("registers theme commands that update ThemeController and refresh ribbon UI state", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    const app = { focus: vi.fn() } as any;
+
+    const themeController = { setThemePreference: vi.fn() } as any;
+    const refreshRibbonUiState = vi.fn();
+
+    registerBuiltinCommands({
+      commandRegistry,
+      app,
+      layoutController,
+      themeController,
+      refreshRibbonUiState,
+    });
+
+    await commandRegistry.executeCommand("view.appearance.theme.dark");
+    expect(themeController.setThemePreference).toHaveBeenCalledWith("dark");
+    expect(refreshRibbonUiState).toHaveBeenCalledTimes(1);
+    expect(app.focus).toHaveBeenCalledTimes(1);
+
+    await commandRegistry.executeCommand("view.appearance.theme.highContrast");
+    expect(themeController.setThemePreference).toHaveBeenCalledWith("high-contrast");
+    expect(refreshRibbonUiState).toHaveBeenCalledTimes(2);
+    expect(app.focus).toHaveBeenCalledTimes(2);
+
+    // Commands should be discoverable in the command palette under View.
+    expect(commandRegistry.getCommand("view.appearance.theme.dark")).toMatchObject({
+      commandId: "view.appearance.theme.dark",
+      category: "View",
+    });
+    expect(commandRegistry.getCommand("view.appearance.theme.dark")?.keywords).toEqual(
+      expect.arrayContaining(["theme", "dark"]),
+    );
+  });
+});

@@ -6,6 +6,7 @@ import { PanelIds } from "../panels/panelRegistry.js";
 import { t } from "../i18n/index.js";
 import { showQuickPick } from "../extensions/ui.js";
 import { getPasteSpecialMenuItems } from "../clipboard/pasteSpecial.js";
+import type { ThemeController } from "../theme/themeController.js";
 
 export function registerBuiltinCommands(params: {
   commandRegistry: CommandRegistry;
@@ -27,6 +28,15 @@ export function registerBuiltinCommands(params: {
   getVisibleSheetIds?: (() => string[]) | null;
   ensureExtensionsLoaded?: (() => Promise<void>) | null;
   onExtensionsLoaded?: (() => void) | null;
+  themeController?: Pick<ThemeController, "setThemePreference"> | null;
+  /**
+   * Optional callback to refresh ribbon UI-state overrides (e.g. label overrides).
+   *
+   * Theme preference commands call this so the ribbon's "Theme" dropdown label
+   * updates immediately after executing a theme command from the command palette
+   * or extensions.
+   */
+  refreshRibbonUiState?: (() => void) | null;
 }): void {
   const {
     commandRegistry,
@@ -36,6 +46,8 @@ export function registerBuiltinCommands(params: {
     getVisibleSheetIds = null,
     ensureExtensionsLoaded = null,
     onExtensionsLoaded = null,
+    themeController = null,
+    refreshRibbonUiState = null,
   } = params;
 
   const toggleDockPanel = (panelId: string) => {
@@ -852,4 +864,87 @@ export function registerBuiltinCommands(params: {
       keywords: ["autosum", "sum", "excel"],
     },
   );
+
+  if (themeController) {
+    const categoryView = t("commandCategory.view");
+    const refresh = () => {
+      try {
+        refreshRibbonUiState?.();
+      } catch {
+        // ignore
+      }
+    };
+
+    const focusApp = () => {
+      try {
+        (app as any)?.focus?.();
+      } catch {
+        // ignore
+      }
+    };
+
+    commandRegistry.registerBuiltinCommand(
+      "view.appearance.theme.system",
+      "Theme: System",
+      () => {
+        themeController.setThemePreference("system");
+        refresh();
+        focusApp();
+      },
+      {
+        category: categoryView,
+        icon: null,
+        description: "Use the system theme",
+        keywords: ["theme", "appearance", "system", "auto", "os", "dark mode", "light mode"],
+      },
+    );
+
+    commandRegistry.registerBuiltinCommand(
+      "view.appearance.theme.light",
+      "Theme: Light",
+      () => {
+        themeController.setThemePreference("light");
+        refresh();
+        focusApp();
+      },
+      {
+        category: categoryView,
+        icon: null,
+        description: "Use the light theme",
+        keywords: ["theme", "appearance", "light", "light mode"],
+      },
+    );
+
+    commandRegistry.registerBuiltinCommand(
+      "view.appearance.theme.dark",
+      "Theme: Dark",
+      () => {
+        themeController.setThemePreference("dark");
+        refresh();
+        focusApp();
+      },
+      {
+        category: categoryView,
+        icon: null,
+        description: "Use the dark theme",
+        keywords: ["theme", "appearance", "dark", "dark mode"],
+      },
+    );
+
+    commandRegistry.registerBuiltinCommand(
+      "view.appearance.theme.highContrast",
+      "Theme: High Contrast",
+      () => {
+        themeController.setThemePreference("high-contrast");
+        refresh();
+        focusApp();
+      },
+      {
+        category: categoryView,
+        icon: null,
+        description: "Use the high contrast theme",
+        keywords: ["theme", "appearance", "high contrast", "contrast", "accessibility", "a11y"],
+      },
+    );
+  }
 }
