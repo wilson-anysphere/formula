@@ -13,6 +13,7 @@ mod contents_hash;
 mod dir;
 mod normalized_data;
 mod offcrypto;
+mod offcrypto_rc4;
 mod ole;
 mod project_normalized_data;
 mod project_digest;
