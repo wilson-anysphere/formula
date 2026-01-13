@@ -220,6 +220,7 @@ export class FormulaBarView {
   #lastHighlightHadGhost = false;
   #lastActiveReferenceIndex: number | null = null;
   #lastHighlightSpans: ReturnType<FormulaBarModel["highlightedSpans"]> | null = null;
+  #lastColoredReferences: ReturnType<FormulaBarModel["coloredReferences"]> | null = null;
 
   #argumentPreviewProvider: ((expr: string) => unknown | Promise<unknown>) | null = null;
   #argumentPreviewKey: string | null = null;
@@ -1827,7 +1828,8 @@ export class FormulaBarView {
       this.#lastHighlightDraft === draft &&
       this.#lastHighlightIsFormulaEditing &&
       !this.#lastHighlightHadGhost &&
-      this.#lastHighlightSpans === highlightedSpans;
+      this.#lastHighlightSpans === highlightedSpans &&
+      this.#lastColoredReferences === coloredReferences;
 
     if (canFastUpdateActiveReference) {
       if (this.#lastActiveReferenceIndex !== activeReferenceIndex) {
@@ -1852,6 +1854,7 @@ export class FormulaBarView {
       this.#lastHighlightIsFormulaEditing = true;
       this.#lastHighlightHadGhost = false;
       this.#lastHighlightSpans = highlightedSpans;
+      this.#lastColoredReferences = coloredReferences;
     } else {
       let ghostInserted = false;
       let previewInserted = false;
@@ -1959,6 +1962,7 @@ export class FormulaBarView {
       this.#lastHighlightHadGhost = Boolean(ghost);
       this.#lastActiveReferenceIndex = activeReferenceIndex;
       this.#lastHighlightSpans = highlightedSpans;
+      this.#lastColoredReferences = coloredReferences;
     }
 
     // Toggle editing UI state (textarea visibility, hover hit-testing, etc.) through CSS classes.
