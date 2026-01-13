@@ -116,6 +116,58 @@ impl EncryptionVersionInfo {
     }
 }
 
+#[cfg(test)]
+mod test_alloc {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    pub static MAX_ALLOC: AtomicUsize = AtomicUsize::new(0);
+
+    pub struct TrackingAllocator;
+
+    unsafe impl GlobalAlloc for TrackingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            record(layout.size());
+            System.alloc(layout)
+        }
+
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            record(layout.size());
+            System.alloc_zeroed(layout)
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            record(new_size);
+            System.realloc(ptr, layout, new_size)
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            System.dealloc(ptr, layout)
+        }
+    }
+
+    #[inline]
+    fn record(size: usize) {
+        let mut prev = MAX_ALLOC.load(Ordering::Relaxed);
+        while size > prev {
+            match MAX_ALLOC.compare_exchange_weak(
+                prev,
+                size,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(next) => prev = next,
+            }
+        }
+    }
+
+    // Ensure tests can assert that huge `total_size` values are rejected *before*
+    // attempting allocations.
+    #[global_allocator]
+    static GLOBAL: TrackingAllocator = TrackingAllocator;
+}
+
 /// Parsed Standard (CryptoAPI) `EncryptionHeader`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StandardEncryptionHeader {
@@ -316,6 +368,7 @@ pub enum OffcryptoError {
     /// Agile `spinCount` is larger than allowed by the configured decryption limits.
     SpinCountTooLarge { spin_count: u32, max: u32 },
 }
+
 impl fmt::Display for OffcryptoError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -1062,6 +1115,26 @@ fn parse_key_data_attrs<'a>(
         let key = local_name(attr.key.as_ref());
         let value = attr.value.as_ref();
         match key {
+            b"cipherAlgorithm" => {
+                let s = std::str::from_utf8(value).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+                    context: "invalid UTF-8 attribute value",
+                })?;
+                if !s.trim().eq_ignore_ascii_case("AES") {
+                    return Err(OffcryptoError::UnsupportedAlgorithm(
+                        "keyData.cipherAlgorithm must be AES".to_string(),
+                    ));
+                }
+            }
+            b"cipherChaining" => {
+                let s = std::str::from_utf8(value).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+                    context: "invalid UTF-8 attribute value",
+                })?;
+                if !s.trim().eq_ignore_ascii_case("ChainingModeCBC") {
+                    return Err(OffcryptoError::UnsupportedAlgorithm(
+                        "keyData.cipherChaining must be ChainingModeCBC".to_string(),
+                    ));
+                }
+            }
             b"saltValue" => {
                 salt_value = Some(decode_base64_bounded(
                     value,
@@ -1076,7 +1149,14 @@ fn parse_key_data_attrs<'a>(
                 hash_algorithm = Some(HashAlgorithm::parse_offcrypto_name(s)?);
             }
             b"blockSize" => {
-                block_size = Some(parse_decimal_usize(value, "blockSize")?);
+                let parsed = parse_decimal_usize(value, "blockSize")?;
+                // AES-CBC requires a 16-byte block size (and IV length).
+                if parsed != 16 {
+                    return Err(OffcryptoError::UnsupportedAlgorithm(
+                        "keyData.blockSize must be 16 for AES".to_string(),
+                    ));
+                }
+                block_size = Some(parsed);
             }
             _ => {}
         }
@@ -1177,6 +1257,26 @@ fn parse_password_encrypted_key_attrs<'a>(
         let key = local_name(attr.key.as_ref());
         let value = attr.value.as_ref();
         match key {
+            b"cipherAlgorithm" => {
+                let s = std::str::from_utf8(value).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+                    context: "invalid UTF-8 attribute value",
+                })?;
+                if !s.trim().eq_ignore_ascii_case("AES") {
+                    return Err(OffcryptoError::UnsupportedAlgorithm(
+                        "encryptedKey.cipherAlgorithm must be AES".to_string(),
+                    ));
+                }
+            }
+            b"cipherChaining" => {
+                let s = std::str::from_utf8(value).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+                    context: "invalid UTF-8 attribute value",
+                })?;
+                if !s.trim().eq_ignore_ascii_case("ChainingModeCBC") {
+                    return Err(OffcryptoError::UnsupportedAlgorithm(
+                        "encryptedKey.cipherChaining must be ChainingModeCBC".to_string(),
+                    ));
+                }
+            }
             b"spinCount" => spin_count = Some(parse_decimal_u32(value, "spinCount")?),
             b"saltValue" => {
                 salt_value = Some(decode_base64_bounded(
@@ -2317,11 +2417,11 @@ mod tests {
             r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
     xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
-  <keyData saltValue="{key_data_salt}" hashAlgorithm="SHA256" blockSize="16"/>
+  <keyData cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{key_data_salt}" hashAlgorithm="sha256" blockSize="16"/>
   <dataIntegrity encryptedHmacKey="{encrypted_hmac_key}" encryptedHmacValue="{encrypted_hmac_value}"/>
   <keyEncryptors>
     <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
-      <p:encryptedKey spinCount="100000" saltValue="{password_salt}" hashAlgorithm="SHA512" keyBits="256"
+      <p:encryptedKey cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" spinCount="100000" saltValue="{password_salt}" hashAlgorithm="sha512" keyBits="256"
         encryptedKeyValue="{encrypted_key_value}"
         encryptedVerifierHashInput="{encrypted_verifier_hash_input}"
         encryptedVerifierHashValue="{encrypted_verifier_hash_value}"/>
@@ -2477,6 +2577,30 @@ mod tests {
         };
 
         agile_verify_password(&info, "Password1234_").expect("expected password to verify");
+    }
+
+    #[test]
+    fn agile_rejects_unsupported_cipher_algorithm() {
+        // Start from a valid Agile XML payload so we fail specifically on the algorithm check.
+        let xml = minimal_agile_xml().replacen(r#"cipherAlgorithm="AES""#, r#"cipherAlgorithm="DES""#, 1);
+
+        let bytes = build_agile_encryption_info_stream(xml.as_bytes());
+        let err = parse_encryption_info(&bytes).expect_err("expected unsupported algorithm");
+        assert!(matches!(err, OffcryptoError::UnsupportedAlgorithm(_)));
+    }
+
+    #[test]
+    fn agile_rejects_unsupported_cipher_chaining() {
+        // Start from a valid Agile XML payload so we fail specifically on the chaining mode check.
+        let xml = minimal_agile_xml().replacen(
+            r#"<p:encryptedKey cipherAlgorithm="AES" cipherChaining="ChainingModeCBC""#,
+            r#"<p:encryptedKey cipherAlgorithm="AES" cipherChaining="ChainingModeCFB""#,
+            1,
+        );
+
+        let bytes = build_agile_encryption_info_stream(xml.as_bytes());
+        let err = parse_encryption_info(&bytes).expect_err("expected unsupported algorithm");
+        assert!(matches!(err, OffcryptoError::UnsupportedAlgorithm(_)));
     }
 
     #[test]
@@ -2654,56 +2778,4 @@ mod tests {
             }
         );
     }
-}
-
-#[cfg(test)]
-mod test_alloc {
-    use std::alloc::{GlobalAlloc, Layout, System};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    pub static MAX_ALLOC: AtomicUsize = AtomicUsize::new(0);
-
-    pub struct TrackingAllocator;
-
-    unsafe impl GlobalAlloc for TrackingAllocator {
-        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            record(layout.size());
-            System.alloc(layout)
-        }
-
-        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-            record(layout.size());
-            System.alloc_zeroed(layout)
-        }
-
-        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-            record(new_size);
-            System.realloc(ptr, layout, new_size)
-        }
-
-        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-            System.dealloc(ptr, layout)
-        }
-    }
-
-    #[inline]
-    fn record(size: usize) {
-        let mut prev = MAX_ALLOC.load(Ordering::Relaxed);
-        while size > prev {
-            match MAX_ALLOC.compare_exchange_weak(
-                prev,
-                size,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(next) => prev = next,
-            }
-        }
-    }
-
-    // Ensure tests can assert that huge `total_size` values are rejected *before*
-    // attempting allocations.
-    #[global_allocator]
-    static GLOBAL: TrackingAllocator = TrackingAllocator;
 }
