@@ -17,6 +17,7 @@ import {
     ydoc,
     documentController: {} as any,
   });
+  void binder.whenIdle();
   binder.destroy();
 }
 
