@@ -1528,6 +1528,8 @@ export class SpreadsheetApp {
     // legacy selection canvas, where applicable).
     this.chartSelectionCanvas.className = "grid-canvas grid-canvas--selection chart-selection-canvas";
     this.chartSelectionCanvas.setAttribute("aria-hidden", "true");
+    // Ensure chart selection handles render above charts in both legacy + shared grid modes.
+    this.chartSelectionCanvas.classList.add("grid-canvas--selection");
     if (this.gridMode === "shared") {
       // Match the selection canvas z-index so chart handles are drawn above charts in shared mode.
       this.chartSelectionCanvas.classList.add("grid-canvas--shared-selection");
