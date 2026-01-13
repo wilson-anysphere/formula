@@ -95,5 +95,22 @@ describe("drawings/modelAdapters", () => {
     });
     expect(store.get("image2.jpg")?.mimeType).toBe("image/jpeg");
   });
-});
 
+  it("parses ImageStore bytes from JSON-friendly encodings", () => {
+    const modelImages = {
+      images: {
+        // JSON.stringify(Uint8Array([7,8]))-style object.
+        "obj.png": { bytes: { 0: 7, 1: 8 }, content_type: "image/png" },
+        // Node Buffer JSON representation.
+        "buf.png": { bytes: { type: "Buffer", data: [9, 10, 11] }, content_type: "image/png" },
+        // Base64 string.
+        "b64.png": { bytes: "AQID", content_type: "image/png" }, // [1,2,3]
+      },
+    };
+
+    const store = convertModelImageStoreToUiImageStore(modelImages);
+    expect(store.get("obj.png")?.bytes).toEqual(new Uint8Array([7, 8]));
+    expect(store.get("buf.png")?.bytes).toEqual(new Uint8Array([9, 10, 11]));
+    expect(store.get("b64.png")?.bytes).toEqual(new Uint8Array([1, 2, 3]));
+  });
+});

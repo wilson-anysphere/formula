@@ -281,10 +281,14 @@ class MapImageStore implements ImageStore {
 function decodeBase64ToBytes(base64: string): Uint8Array | null {
   // Browser.
   if (typeof globalThis.atob === "function") {
-    const binary = globalThis.atob(base64);
-    const out = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
-    return out;
+    try {
+      const binary = globalThis.atob(base64);
+      const out = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+      return out;
+    } catch {
+      return null;
+    }
   }
 
   // Node.
@@ -307,6 +311,32 @@ function parseBytes(value: unknown, context: string): Uint8Array {
       out[i] = n & 0xff;
     }
     return out;
+  }
+
+  if (isRecord(value)) {
+    // Node's `Buffer` JSON representation: { type: "Buffer", data: number[] }.
+    if ((value as JsonRecord).type === "Buffer" && Array.isArray((value as JsonRecord).data)) {
+      return parseBytes((value as JsonRecord).data, `${context}.data`);
+    }
+
+    // `Uint8Array`/typed-array stringified via JSON can show up as an object with
+    // numeric keys (e.g. { "0": 1, "1": 2, ... }).
+    const numericKeys = Object.keys(value).filter((k) => /^\d+$/.test(k));
+    if (numericKeys.length > 0) {
+      numericKeys.sort((a, b) => Number(a) - Number(b));
+      const maxIndex = Number(numericKeys[numericKeys.length - 1]);
+      const declaredLength = readOptionalNumber((value as JsonRecord).length);
+      const length =
+        declaredLength != null && declaredLength >= maxIndex + 1 ? declaredLength : maxIndex + 1;
+
+      const out = new Uint8Array(length);
+      for (const k of numericKeys) {
+        const idx = Number(k);
+        const n = readNumber((value as JsonRecord)[k], `${context}[${k}]`);
+        out[idx] = n & 0xff;
+      }
+      return out;
+    }
   }
 
   if (typeof value === "string") {
