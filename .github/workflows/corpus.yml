@@ -142,11 +142,18 @@ jobs:
           if [ "${CORPUS_RUN_RENDER_SMOKE}" = "true" ]; then
             EXTRA_FLAGS+=(--render-smoke)
           fi
+          JOBS="$(python - <<'PY'
+import os
+cpu = os.cpu_count() or 1
+print(min(4, cpu))
+PY
+)"
           python -m tools.corpus.triage \
             --corpus-dir tools/corpus/private \
             --input-scope sanitized \
             --out-dir tools/corpus/out/private \
             --privacy-mode private \
+            --jobs "$JOBS" \
             "${EXTRA_FLAGS[@]}"
       - name: Generate dashboard (private)
         run: |
