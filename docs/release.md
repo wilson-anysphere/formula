@@ -703,7 +703,8 @@ alongside the installers. The file is structured roughly like:
   "notes": "...",
   "pub_date": "2026-01-01T00:00:00Z",
   "platforms": {
-    "darwin-universal": { "url": "…", "signature": "…" },
+    "darwin-x86_64": { "url": "…", "signature": "…" },
+    "darwin-aarch64": { "url": "…", "signature": "…" },
     "windows-x86_64": { "url": "…", "signature": "…" },
     "windows-aarch64": { "url": "…", "signature": "…" },
     "linux-x86_64": { "url": "…", "signature": "…" },
@@ -715,17 +716,13 @@ alongside the installers. The file is structured roughly like:
 Expected `{{target}}` / `latest.json.platforms` keys for this repo’s **tagged release** matrix (CI
 enforced; see `docs/desktop-updater-target-mapping.md`):
 
-- **macOS (universal):** `darwin-universal` → updater payload (typically an `.app.tar.gz`).
-- **Windows x64:** `windows-x86_64` → updater installer (`.msi` or `.exe`).
-- **Windows ARM64:** `windows-aarch64` → updater installer (`.msi` or `.exe`).
+- **macOS (universal build):** `darwin-x86_64` and `darwin-aarch64`. Both keys should point at the
+  macOS updater payload (an `.app.tar.gz`). For universal builds, both keys will typically reference
+  the **same** archive URL.
+- **Windows x64:** `windows-x86_64` → updater installer (currently the **`.msi`**).
+- **Windows ARM64:** `windows-aarch64` → updater installer (currently the **`.msi`**).
 - **Linux x86_64:** `linux-x86_64` → updater payload (typically the `.AppImage`).
 - **Linux ARM64:** `linux-aarch64` → updater payload (typically the `.AppImage`).
-
-Local note: when inspecting manifests from local builds or older tooling you may see alternate key
-spellings (for example Rust target triples like `x86_64-pc-windows-msvc` / `aarch64-pc-windows-msvc`
-or `universal-apple-darwin`). Tagged-release CI is intentionally strict about the canonical keys
-above; if a release ever ships with different platform identifiers, update the validator + docs
-together.
 
 Note: `apps/desktop/src-tauri/tauri.conf.json` sets `bundle.targets: "all"`, which enables all
 supported bundlers for the current platform (including **MSI/WiX** + **NSIS** on Windows). CI still
@@ -736,15 +733,11 @@ For reference, this is how the release workflow’s Tauri build targets map to u
 
 | Workflow build | Tauri build args | Rust target triple | `latest.json` platform key(s) |
 | --- | --- | --- | --- |
-| macOS universal | `--target universal-apple-darwin` | `aarch64-apple-darwin` + `x86_64-apple-darwin` | `darwin-universal` |
+| macOS universal | `--target universal-apple-darwin` | `aarch64-apple-darwin` + `x86_64-apple-darwin` | `darwin-x86_64` + `darwin-aarch64` |
 | Windows x64 | `--target x86_64-pc-windows-msvc --bundles msi,nsis` | `x86_64-pc-windows-msvc` | `windows-x86_64` |
 | Windows ARM64 | `--target aarch64-pc-windows-msvc --bundles msi,nsis` | `aarch64-pc-windows-msvc` | `windows-aarch64` |
 | Linux x86_64 | `--bundles appimage,deb,rpm` | `x86_64-unknown-linux-gnu` | `linux-x86_64` |
 | Linux ARM64 | `--bundles appimage,deb,rpm` | `aarch64-unknown-linux-gnu` | `linux-aarch64` |
-
-Local-note: some toolchains may emit alias key spellings in `latest.json` (for example Rust target
-triples like `x86_64-pc-windows-msvc` / `aarch64-pc-windows-msvc`, or `windows-arm64`). Tagged
-release CI expects the canonical keys above; see `docs/desktop-updater-target-mapping.md`.
 
 Note: `.deb` and `.rpm` are shipped for manual install/downgrade, but are not typically used by the
 Tauri updater on Linux. If a target entry is missing from `latest.json`, auto-update for that
@@ -1043,16 +1036,16 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
    and check the build job for the relevant platform/target (and whether the Tauri bundler step
    failed before uploading assets).
 2. Download `latest.json` and confirm `platforms` includes entries for:
-   - `darwin-universal`
-   - `windows-x86_64`
-   - `windows-aarch64`
-   - `linux-x86_64`
-   - `linux-aarch64`
+   - `darwin-x86_64` (macOS; points at the `.app.tar.gz` updater payload)
+   - `darwin-aarch64` (macOS; points at the `.app.tar.gz` updater payload)
+   - `windows-x86_64` (Windows x64)
+   - `windows-aarch64` (Windows ARM64)
+   - `linux-x86_64` (Linux x86_64)
+   - `linux-aarch64` (Linux ARM64)
 
-   Note: the tagged-release CI validator is intentionally **strict** about these key names. If you
-   see different spellings (for example Rust target triples like `x86_64-pc-windows-msvc` or
-   `aarch64-pc-windows-msvc`), that usually indicates a Tauri/toolchain change and the
-   docs/validator should be updated together.
+   Note: `latest.json` may also contain additional installer-specific keys of the form
+   `{os}-{arch}-{bundle}` (e.g. `windows-x86_64-msi`, `linux-x86_64-deb`). CI validates those keys
+   reference real release assets, but the keys above are the “primary” `{os}-{arch}` updater targets.
 
    Quick check (after downloading `latest.json` to your current directory):
 

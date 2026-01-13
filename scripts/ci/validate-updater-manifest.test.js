@@ -5,7 +5,11 @@ import { validatePlatformEntries } from "./validate-updater-manifest.mjs";
 
 function baseline() {
   const platforms = {
-    "darwin-universal": {
+    "darwin-x86_64": {
+      url: "https://github.com/example/repo/releases/download/v0.1.0/Formula.app.tar.gz",
+      signature: "sig",
+    },
+    "darwin-aarch64": {
       url: "https://github.com/example/repo/releases/download/v0.1.0/Formula.app.tar.gz",
       signature: "sig",
     },
@@ -18,7 +22,7 @@ function baseline() {
       signature: "sig",
     },
     "linux-x86_64": {
-      url: "https://github.com/example/repo/releases/download/v0.1.0/Formula_0.1.0_amd64.AppImage",
+      url: "https://github.com/example/repo/releases/download/v0.1.0/Formula_0.1.0_x86_64.AppImage",
       signature: "sig",
     },
     "linux-aarch64": {
@@ -31,7 +35,7 @@ function baseline() {
     "Formula.app.tar.gz",
     "Formula_0.1.0_x64.msi",
     "Formula_0.1.0_arm64.msi",
-    "Formula_0.1.0_amd64.AppImage",
+    "Formula_0.1.0_x86_64.AppImage",
     "Formula_0.1.0_arm64.AppImage",
   ]);
 
@@ -42,7 +46,7 @@ test("fails when Linux updater URL points at a non-updatable package (.deb)", ()
   const { platforms, assetNames } = baseline();
   platforms["linux-x86_64"].url =
     "https://github.com/example/repo/releases/download/v0.1.0/formula_0.1.0_amd64.deb";
-  assetNames.delete("Formula_0.1.0_amd64.AppImage");
+  assetNames.delete("Formula_0.1.0_x86_64.AppImage");
   assetNames.add("formula_0.1.0_amd64.deb");
 
   const result = validatePlatformEntries({ platforms, assetNames });
@@ -77,7 +81,7 @@ test("fails when two targets share the same URL (collision)", () => {
 
   const result = validatePlatformEntries({ platforms, assetNames });
   assert.ok(
-    result.errors.some((e) => e.includes("Duplicate platform URLs in latest.json")),
+    result.errors.some((e) => e.includes("Duplicate updater URLs across required targets")),
     `Expected duplicate URL error, got:\n${result.errors.join("\n\n")}`,
   );
 });
@@ -90,7 +94,7 @@ test("fails when two targets reference the same asset name via different URLs (q
 
   const result = validatePlatformEntries({ platforms, assetNames });
   assert.ok(
-    result.errors.some((e) => e.includes("Duplicate platform assets in latest.json")),
+    result.errors.some((e) => e.includes("Duplicate updater assets across required targets")),
     `Expected duplicate asset-name error, got:\n${result.errors.join("\n\n")}`,
   );
 });
@@ -102,21 +106,24 @@ test("passes with distinct URLs and correct per-platform updater artifact types"
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.invalidTargets, []);
   assert.deepEqual(result.missingAssets, []);
-  assert.equal(result.validatedTargets.length, 5);
+  assert.equal(result.validatedTargets.length, 6);
 });
 
-test("accepts a macOS updater archive ending with .tar.gz (not .app.tar.gz)", () => {
+test("fails when a macOS updater entry points at a non-updater artifact (.dmg)", () => {
   const { platforms, assetNames } = baseline();
-  platforms["darwin-universal"].url =
-    "https://github.com/example/repo/releases/download/v0.1.0/Formula_universal.tar.gz";
+  platforms["darwin-x86_64"].url =
+    "https://github.com/example/repo/releases/download/v0.1.0/Formula.dmg";
   assetNames.delete("Formula.app.tar.gz");
-  assetNames.add("Formula_universal.tar.gz");
+  assetNames.add("Formula.dmg");
 
   const result = validatePlatformEntries({ platforms, assetNames });
-  assert.deepEqual(result.errors, []);
+  assert.ok(
+    result.errors.some((e) => e.includes("Updater asset type mismatch in latest.json.platforms")),
+    `Expected macOS asset type mismatch error, got:\n${result.errors.join("\n\n")}`,
+  );
 });
 
-test("accepts Windows updater installers ending with .exe (NSIS strategy)", () => {
+test("fails when Windows updater installer is .exe instead of the expected .msi", () => {
   const { platforms, assetNames } = baseline();
   platforms["windows-x86_64"].url =
     "https://github.com/example/repo/releases/download/v0.1.0/Formula_0.1.0_x64.exe";
@@ -128,7 +135,10 @@ test("accepts Windows updater installers ending with .exe (NSIS strategy)", () =
   assetNames.add("Formula_0.1.0_arm64.exe");
 
   const result = validatePlatformEntries({ platforms, assetNames });
-  assert.deepEqual(result.errors, []);
+  assert.ok(
+    result.errors.some((e) => e.includes("Updater asset type mismatch in latest.json.platforms")),
+    `Expected Windows asset type mismatch error, got:\n${result.errors.join("\n\n")}`,
+  );
 });
 
 test("fails when Windows updater assets do not include an arch token in the filename", () => {
@@ -162,28 +172,26 @@ test("fails when Linux updater assets do not include an arch token in the filena
 test("fails when latest.json.platforms is missing a required platform key", () => {
   const { platforms, assetNames } = baseline();
   delete platforms["linux-x86_64"];
-  assetNames.delete("Formula_0.1.0_amd64.AppImage");
+  assetNames.delete("Formula_0.1.0_x86_64.AppImage");
 
   const result = validatePlatformEntries({ platforms, assetNames });
   assert.ok(
-    result.errors.some((e) => e.includes("Unexpected latest.json.platforms keys")),
+    result.errors.some((e) => e.includes("Missing required latest.json.platforms keys")),
     `Expected strict platforms key mismatch error, got:\n${result.errors.join("\n\n")}`,
   );
 });
 
-test("fails when latest.json.platforms contains an unexpected platform key", () => {
+test("accepts additional installer-specific platform keys (e.g. windows-x86_64-msi)", () => {
   const { platforms, assetNames } = baseline();
-  platforms["windows-i686"] = {
-    url: "https://github.com/example/repo/releases/download/v0.1.0/Formula_0.1.0_x86.msi",
+  platforms["windows-x86_64-msi"] = {
+    url: "https://github.com/example/repo/releases/download/v0.1.0/Formula_0.1.0_x64.msi",
     signature: "sig",
   };
-  assetNames.add("Formula_0.1.0_x86.msi");
 
   const result = validatePlatformEntries({ platforms, assetNames });
-  assert.ok(
-    result.errors.some((e) => e.includes("Unexpected latest.json.platforms keys")),
-    `Expected strict platforms key mismatch error, got:\n${result.errors.join("\n\n")}`,
-  );
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.invalidTargets, []);
+  assert.deepEqual(result.missingAssets, []);
 });
 
 test("reports missing release assets referenced by platforms[*].url", () => {

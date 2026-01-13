@@ -6,10 +6,11 @@
  * - Ensures the manifest contains updater entries for all expected targets.
  * - Ensures each updater entry references an asset that exists on the GitHub Release.
  * - Ensures each target references the correct *self-updatable* artifact type:
- *   - macOS: `.app.tar.gz` (preferred) or `.tar.gz` updater archive
- *   - Windows: `.msi` and/or `.exe` (depending on updater strategy)
+ *   - macOS: `.app.tar.gz` updater archive (not the `.dmg`)
+ *   - Windows: `.msi` (Windows Installer; updater runs this)
  *   - Linux: `.AppImage`
- * - Ensures all platform URLs are unique (no two targets colliding on the same asset URL).
+ * - Ensures required `{os}-{arch}` targets do not unexpectedly collide on the same updater URL
+ *   (macOS universal uses a single updater archive referenced by both `darwin-x86_64` and `darwin-aarch64`).
  *
  * This catches "last writer wins" / merge regressions where one platform build overwrites latest.json
  * and ships an incomplete updater manifest.
@@ -123,7 +124,7 @@ function findPlatformsObject(root) {
   return null;
 }
 
-// Platform key mapping is intentionally strict.
+// Platform key mapping is intentionally strict for the required `{os}-{arch}` updater keys.
 //
 // Source of truth:
 // - docs/desktop-updater-target-mapping.md
@@ -132,34 +133,38 @@ function findPlatformsObject(root) {
 // the platform key naming, we want this validator to fail loudly with an expected vs actual
 // diff so we can update the docs + verification logic together.
 const EXPECTED_PLATFORMS = [
+  // macOS universal builds are published as a single `*.app.tar.gz`, but tauri-action writes it
+  // under both arch keys so the updater can resolve updates on both Intel and Apple Silicon.
   {
-    key: "darwin-universal",
-    label: "macOS (universal)",
+    key: "darwin-x86_64",
+    label: "macOS (x86_64)",
     expectedAsset: {
-      description: `macOS updater archive (*.app.tar.gz preferred; allow *.tar.gz)`,
-      matches: (assetName) => assetName.endsWith(".tar.gz"),
+      description: `macOS updater archive (*.app.tar.gz)`,
+      matches: (assetName) => assetName.endsWith(".app.tar.gz"),
+    },
+  },
+  {
+    key: "darwin-aarch64",
+    label: "macOS (aarch64)",
+    expectedAsset: {
+      description: `macOS updater archive (*.app.tar.gz)`,
+      matches: (assetName) => assetName.endsWith(".app.tar.gz"),
     },
   },
   {
     key: "windows-x86_64",
     label: "Windows (x64)",
     expectedAsset: {
-      description: `Windows updater installer (*.msi or *.exe)`,
-      matches: (assetName) => {
-        const lower = assetName.toLowerCase();
-        return lower.endsWith(".msi") || lower.endsWith(".exe");
-      },
+      description: `Windows updater installer (*.msi)`,
+      matches: (assetName) => assetName.toLowerCase().endsWith(".msi"),
     },
   },
   {
     key: "windows-aarch64",
     label: "Windows (ARM64)",
     expectedAsset: {
-      description: `Windows updater installer (*.msi or *.exe)`,
-      matches: (assetName) => {
-        const lower = assetName.toLowerCase();
-        return lower.endsWith(".msi") || lower.endsWith(".exe");
-      },
+      description: `Windows updater installer (*.msi)`,
+      matches: (assetName) => assetName.toLowerCase().endsWith(".msi"),
     },
   },
   {
@@ -260,20 +265,70 @@ export function validatePlatformEntries({ platforms, assetNames }) {
     });
   }
 
-  // Ensure platform URLs are unique (prevents collisions where multiple targets point at the same asset).
-  const urlToTargets = new Map();
-  for (const { target, url } of validatedTargets) {
-    const list = urlToTargets.get(url) ?? [];
-    list.push(target);
-    urlToTargets.set(url, list);
-  }
+  const expectedKeySet = new Set(EXPECTED_PLATFORM_KEYS);
 
-  const duplicateUrls = [...urlToTargets.entries()].filter(([, targets]) => targets.length > 1);
-  if (duplicateUrls.length > 0) {
+  // Ensure the manifest contains the required `{os}-{arch}` platform keys.
+  // Note: `latest.json` may also contain additional installer-specific keys of the form
+  // `{os}-{arch}-{bundle}` (for example `windows-x86_64-msi`). Those are allowed.
+  const actualPlatformKeys = Object.keys(platforms).slice().sort();
+  const expectedSortedKeys = EXPECTED_PLATFORM_KEYS.slice().sort();
+  const missingKeys = expectedSortedKeys.filter(
+    (k) => !Object.prototype.hasOwnProperty.call(platforms, k),
+  );
+  const otherKeys = actualPlatformKeys.filter((k) => !expectedKeySet.has(k));
+  if (missingKeys.length > 0) {
     errors.push(
       [
-        `Duplicate platform URLs in latest.json (target collision):`,
-        ...duplicateUrls
+        `Missing required latest.json.platforms keys (Tauri updater target identifiers).`,
+        ``,
+        `Required (${expectedSortedKeys.length}):`,
+        ...expectedSortedKeys.map((k) => `  - ${k}`),
+        ``,
+        `Actual (${actualPlatformKeys.length}):`,
+        ...actualPlatformKeys.map((k) => `  - ${k}`),
+        ``,
+        `Missing (${missingKeys.length}):`,
+        ...missingKeys.map((k) => `  - ${k}`),
+        ``,
+        ...(otherKeys.length > 0
+          ? [`Other keys present (${otherKeys.length}):`, ...otherKeys.map((k) => `  - ${k}`), ``]
+          : []),
+        `If you upgraded Tauri/tauri-action, update docs/desktop-updater-target-mapping.md and scripts/ci/validate-updater-manifest.mjs together.`,
+      ].join("\n"),
+    );
+  }
+
+  // Collision guards (required targets only).
+  //
+  // `latest.json` can legitimately contain multiple keys that point at the *same* asset URL:
+  // - tauri-action writes both `{os}-{arch}` and `{os}-{arch}-{bundle}` variants
+  //   (e.g. `windows-x86_64` and `windows-x86_64-msi` may point at the same `.msi`).
+  // - macOS universal builds use a single updater archive but it is referenced by both
+  //   `darwin-x86_64` and `darwin-aarch64`.
+  //
+  // We therefore only treat duplicates as an error when *different* required `{os}-{arch}` keys
+  // (other than the macOS universal pair) collide.
+  const allowedMacUniversalTargets = new Set(["darwin-x86_64", "darwin-aarch64"]);
+  const requiredTargets = validatedTargets.filter((t) => expectedKeySet.has(t.target));
+
+  const urlToRequiredTargets = new Map();
+  for (const { target, url } of requiredTargets) {
+    const list = urlToRequiredTargets.get(url) ?? [];
+    list.push(target);
+    urlToRequiredTargets.set(url, list);
+  }
+
+  const duplicateRequiredUrls = [...urlToRequiredTargets.entries()].filter(
+    ([, targets]) => targets.length > 1,
+  );
+  const unexpectedDuplicateRequiredUrls = duplicateRequiredUrls.filter(([, targets]) => {
+    return !targets.every((t) => allowedMacUniversalTargets.has(t));
+  });
+  if (unexpectedDuplicateRequiredUrls.length > 0) {
+    errors.push(
+      [
+        `Duplicate updater URLs across required targets in latest.json (unexpected collision):`,
+        ...unexpectedDuplicateRequiredUrls
           .slice()
           .sort((a, b) => a[0].localeCompare(b[0]))
           .map(([url, targets]) => `  - ${targets.slice().sort().join(", ")} → ${url}`),
@@ -281,52 +336,24 @@ export function validatePlatformEntries({ platforms, assetNames }) {
     );
   }
 
-  // Ensure the manifest contains the expected *platform key* names.
-  const actualPlatformKeys = Object.keys(platforms).slice().sort();
-  const expectedKeySet = new Set(EXPECTED_PLATFORM_KEYS);
-  const expectedSortedKeys = EXPECTED_PLATFORM_KEYS.slice().sort();
-  const missingKeys = expectedSortedKeys.filter(
-    (k) => !Object.prototype.hasOwnProperty.call(platforms, k),
-  );
-  const unexpectedKeys = actualPlatformKeys.filter((k) => !expectedKeySet.has(k));
-  if (missingKeys.length > 0 || unexpectedKeys.length > 0) {
-    errors.push(
-      [
-        `Unexpected latest.json.platforms keys (Tauri updater target identifiers).`,
-        ``,
-        `Expected (${expectedSortedKeys.length}):`,
-        ...expectedSortedKeys.map((k) => `  - ${k}`),
-        ``,
-        `Actual (${actualPlatformKeys.length}):`,
-        ...actualPlatformKeys.map((k) => `  - ${k}`),
-        ``,
-        ...(missingKeys.length > 0
-          ? [`Missing (${missingKeys.length}):`, ...missingKeys.map((k) => `  - ${k}`), ``]
-          : []),
-        ...(unexpectedKeys.length > 0
-          ? [`Unexpected (${unexpectedKeys.length}):`, ...unexpectedKeys.map((k) => `  - ${k}`), ``]
-          : []),
-        `If you upgraded Tauri/tauri-action, update docs/desktop-updater-target-mapping.md and scripts/ci/validate-updater-manifest.mjs together.`,
-      ].join("\n"),
-    );
-  }
-
-  // Asset name uniqueness is an extra safety net: for GitHub Releases, the asset name is the
-  // actual "identity" of the file. If two targets reference the same asset name, they are
-  // colliding even if the URL strings differ (e.g. querystrings/encoding differences).
-  const assetNameToTargets = new Map();
-  for (const { target, assetName } of validatedTargets) {
-    const list = assetNameToTargets.get(assetName) ?? [];
+  // Asset-name collision guard: same intent as URL check, but catches querystring/encoding differences.
+  const assetNameToRequiredTargets = new Map();
+  for (const { target, assetName } of requiredTargets) {
+    const list = assetNameToRequiredTargets.get(assetName) ?? [];
     list.push(target);
-    assetNameToTargets.set(assetName, list);
+    assetNameToRequiredTargets.set(assetName, list);
   }
-
-  const duplicateAssets = [...assetNameToTargets.entries()].filter(([, targets]) => targets.length > 1);
-  if (duplicateAssets.length > 0) {
+  const duplicateRequiredAssets = [...assetNameToRequiredTargets.entries()].filter(
+    ([, targets]) => targets.length > 1,
+  );
+  const unexpectedDuplicateRequiredAssets = duplicateRequiredAssets.filter(([, targets]) => {
+    return !targets.every((t) => allowedMacUniversalTargets.has(t));
+  });
+  if (unexpectedDuplicateRequiredAssets.length > 0) {
     errors.push(
       [
-        `Duplicate platform assets in latest.json (multiple targets reference the same release asset):`,
-        ...duplicateAssets
+        `Duplicate updater assets across required targets in latest.json (unexpected collision):`,
+        ...unexpectedDuplicateRequiredAssets
           .slice()
           .sort((a, b) => a[0].localeCompare(b[0]))
           .map(([asset, targets]) => `  - ${targets.slice().sort().join(", ")} → ${asset}`),

@@ -40,9 +40,18 @@ const PLACEHOLDER_PUBKEY = "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY";
 // self-update), this script should fail loudly so we update the mapping doc + verification logic
 // together.
 const EXPECTED_PLATFORMS = [
+  // macOS universal builds are represented under both arch keys (same archive URL).
   {
-    key: "darwin-universal",
-    label: "macOS (universal)",
+    key: "darwin-x86_64",
+    label: "macOS (x86_64)",
+    expectedUpdaterAsset: {
+      description: "macOS updater archive (*.app.tar.gz)",
+      matches: (name) => name.endsWith(".app.tar.gz"),
+    },
+  },
+  {
+    key: "darwin-aarch64",
+    label: "macOS (aarch64)",
     expectedUpdaterAsset: {
       description: "macOS updater archive (*.app.tar.gz preferred; allow *.tar.gz)",
       matches: (name) => name.endsWith(".tar.gz"),
@@ -724,18 +733,20 @@ async function verifyOnce({ apiBase, repo, tag, token, wantsManifestSig }) {
   // Enforce stable updater platform key naming (see docs/desktop-updater-target-mapping.md).
   const expectedKeysSorted = EXPECTED_PLATFORM_KEYS.slice().sort();
   const expectedKeySet = new Set(EXPECTED_PLATFORM_KEYS);
-  const missingKeys = expectedKeysSorted.filter((k) => !Object.prototype.hasOwnProperty.call(platforms, k));
-  const unexpectedKeys = platformKeys.filter((k) => !expectedKeySet.has(k));
-  if (missingKeys.length > 0 || unexpectedKeys.length > 0) {
+  const missingKeys = expectedKeysSorted.filter((k) =>
+    !Object.prototype.hasOwnProperty.call(platforms, k),
+  );
+  const otherKeys = platformKeys.filter((k) => !expectedKeySet.has(k));
+  if (missingKeys.length > 0) {
     const formatKeyList = (keys) => keys.map((k) => `    - ${k}`).join("\n");
     blocks.push({
-      heading: "Unexpected latest.json.platforms keys (Tauri updater target identifiers)",
+      heading: "Missing required latest.json.platforms keys (Tauri updater target identifiers)",
       details: [
         `Expected (${expectedKeysSorted.length}):\n${formatKeyList(expectedKeysSorted)}`,
         `Actual (${platformKeys.length}):\n${formatKeyList(platformKeys)}`,
-        ...(missingKeys.length > 0 ? [`Missing (${missingKeys.length}):\n${formatKeyList(missingKeys)}`] : []),
-        ...(unexpectedKeys.length > 0
-          ? [`Unexpected (${unexpectedKeys.length}):\n${formatKeyList(unexpectedKeys)}`]
+        `Missing (${missingKeys.length}):\n${formatKeyList(missingKeys)}`,
+        ...(otherKeys.length > 0
+          ? [`Other keys present (${otherKeys.length}):\n${formatKeyList(otherKeys)}`]
           : []),
         `If you upgraded Tauri/tauri-action, update docs/desktop-updater-target-mapping.md and scripts/verify-tauri-updater-assets.mjs together.`,
       ],
