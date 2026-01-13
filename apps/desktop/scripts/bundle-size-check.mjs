@@ -421,7 +421,8 @@ async function main() {
       errorLines.push(`- ${f.relPath} (${fmtKiB(f.bytes)} KiB)`);
     }
     errorLines.push("");
-    if (!viteTotalStatus.ok) {
+    const exceededViteBudgets = !viteTotalStatus.ok || !entryStatus.ok;
+    if (exceededViteBudgets) {
       errorLines.push("Largest Vite JS bundles (dist/assets):");
       for (const f of largestAssets.slice(0, 5)) {
         errorLines.push(`- ${f.relPath} (${fmtKiB(f.bytes)} KiB)`);
