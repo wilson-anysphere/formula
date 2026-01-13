@@ -17,6 +17,7 @@ export const deDE = {
   "comments.new.placeholder": "Kommentar hinzufügen…",
   "comments.new.submit": "Kommentieren",
   "comments.closePanel": "Kommentarpanel schließen",
+  "comments.readOnlyHint": "Schreibgeschützt: Sie können keine Kommentare hinzufügen",
   "prompt.unsavedChanges": "Sie haben ungespeicherte Änderungen.",
   "prompt.unsavedChangesDiscardConfirm": "Sie haben ungespeicherte Änderungen. Verwerfen?",
   "commandPalette.command.checkForUpdates": "Nach Updates suchen",

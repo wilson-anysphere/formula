@@ -17,6 +17,7 @@ export const ar = {
   "comments.new.placeholder": "أضف تعليقًا…",
   "comments.new.submit": "تعليق",
   "comments.closePanel": "إغلاق لوحة التعليقات",
+  "comments.readOnlyHint": "للقراءة فقط: لا يمكنك إضافة تعليقات",
   "prompt.unsavedChanges": "لديك تغييرات غير محفوظة.",
   "prompt.unsavedChangesDiscardConfirm": "لديك تغييرات غير محفوظة. هل تريد تجاهلها؟",
   "commandPalette.command.checkForUpdates": "التحقق من التحديثات",
