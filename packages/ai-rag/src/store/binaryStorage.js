@@ -301,17 +301,57 @@ export class ChunkedLocalStorageBinaryStorage {
         // multi-MB base64 string in memory).
         const MAX_FROM_CHAR_CODE_ARGS = 0x8000;
         const BYTE_CHUNK_SIZE = MAX_FROM_CHAR_CODE_ARGS - (MAX_FROM_CHAR_CODE_ARGS % 3); // keep base64 alignment
-        let pending = "";
+        /** @type {string[]} */
+        const pendingParts = [];
+        let pendingStart = 0;
+        let pendingLength = 0;
+
+        /**
+         * @param {string} part
+         */
+        const pushPending = (part) => {
+          pendingParts.push(part);
+          pendingLength += part.length;
+        };
+
+        /**
+         * Consume exactly `len` base64 characters from the pending buffer.
+         * @param {number} len
+         */
+        const consumePending = (len) => {
+          let remaining = len;
+          /** @type {string[]} */
+          const out = [];
+          while (remaining > 0) {
+            const part = pendingParts[pendingStart];
+            if (part.length <= remaining) {
+              out.push(part);
+              remaining -= part.length;
+              pendingStart += 1;
+            } else {
+              out.push(part.slice(0, remaining));
+              pendingParts[pendingStart] = part.slice(remaining);
+              remaining = 0;
+            }
+          }
+          pendingLength -= len;
+          // Periodically compact the array so it doesn't grow without bound.
+          if (pendingStart > 64 && pendingStart * 2 > pendingParts.length) {
+            pendingParts.splice(0, pendingStart);
+            pendingStart = 0;
+          }
+          return out.join("");
+        };
+
         for (let i = 0; i < data.length; i += BYTE_CHUNK_SIZE) {
           const chunk = data.subarray(i, i + BYTE_CHUNK_SIZE);
           // eslint-disable-next-line prefer-spread
           const binary = String.fromCharCode.apply(null, chunk);
           // eslint-disable-next-line no-undef
-          pending += btoa(binary);
+          pushPending(btoa(binary));
 
-          while (pending.length >= this.chunkSizeChars) {
-            const slice = pending.slice(0, this.chunkSizeChars);
-            pending = pending.slice(this.chunkSizeChars);
+          while (pendingLength >= this.chunkSizeChars) {
+            const slice = consumePending(this.chunkSizeChars);
             const chunkKey = `${this.key}:${chunks}`;
             backups.push({ key: chunkKey, prev: storage.getItem(chunkKey) });
             storage.setItem(chunkKey, slice);
@@ -319,10 +359,11 @@ export class ChunkedLocalStorageBinaryStorage {
           }
         }
 
-        if (pending.length > 0) {
+        if (pendingLength > 0) {
+          const slice = pendingParts.slice(pendingStart).join("");
           const chunkKey = `${this.key}:${chunks}`;
           backups.push({ key: chunkKey, prev: storage.getItem(chunkKey) });
-          storage.setItem(chunkKey, pending);
+          storage.setItem(chunkKey, slice);
           chunks += 1;
         }
       }
