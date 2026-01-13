@@ -218,9 +218,7 @@ function touchEncryptionKeyCacheEntry(keyId, cryptoKey) {
   keyCache.set(keyId, cryptoKey);
 }
 
-function enforceEncryptionKeyCacheLimit() {
-  const maxSize = getEncryptionKeyCacheMaxSize();
-
+function enforceEncryptionKeyCacheLimit(maxSize = getEncryptionKeyCacheMaxSize()) {
   // Allow explicitly disabling caching by setting max size to 0.
   if (maxSize === 0) {
     keyCache.clear();
@@ -239,11 +237,29 @@ export function clearEncryptionKeyCache() {
 }
 
 async function importAesGcmKey(key) {
-  enforceEncryptionKeyCacheLimit();
+  const maxSize = getEncryptionKeyCacheMaxSize();
+
+  // Allow explicitly disabling caching by setting max size to 0.
+  // Clear any previously cached keys so key material is not retained.
+  if (maxSize === 0) {
+    keyCache.clear();
+    assertKeyBytes(key.keyBytes);
+    const subtle = (await getWebCrypto()).subtle;
+    return await subtle.importKey(
+      "raw",
+      key.keyBytes,
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt", "decrypt"]
+    );
+  }
 
   const cached = keyCache.get(key.keyId);
   if (cached) {
     touchEncryptionKeyCacheEntry(key.keyId, cached);
+    // If max size decreased at runtime, evict after refreshing recency so the
+    // accessed key is not treated as least-recently-used.
+    enforceEncryptionKeyCacheLimit(maxSize);
     return cached;
   }
 
@@ -257,13 +273,8 @@ async function importAesGcmKey(key) {
     ["encrypt", "decrypt"]
   );
 
-  // Avoid retaining key material when caching is disabled.
-  if (getEncryptionKeyCacheMaxSize() === 0) {
-    return cryptoKey;
-  }
-
   touchEncryptionKeyCacheEntry(key.keyId, cryptoKey);
-  enforceEncryptionKeyCacheLimit();
+  enforceEncryptionKeyCacheLimit(maxSize);
   return cryptoKey;
 }
 

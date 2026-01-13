@@ -80,6 +80,26 @@ test("index.node.js encryption key cache is bounded (LRU) and clearable", async 
   await encryptCellPlaintext({ plaintext, key: key3, context });
   assert.equal(importKeyCalls, 5, "expected clearEncryptionKeyCache() to force re-import");
 
+  // If the max cache size is reduced at runtime, the accessed key should refresh
+  // its recency *before* eviction is applied so it doesn't get evicted as the LRU
+  // entry.
+  globalThis.__FORMULA_ENCRYPTION_KEY_CACHE_MAX_SIZE__ = 3;
+  clearEncryptionKeyCache();
+  importKeyCalls = 0;
+
+  await encryptCellPlaintext({ plaintext, key: key1, context });
+  await encryptCellPlaintext({ plaintext, key: key2, context });
+  await encryptCellPlaintext({ plaintext, key: key3, context });
+  assert.equal(importKeyCalls, 3);
+
+  // Shrink cache to 2 and access the *oldest* key (key1). It should remain cached
+  // (i.e. no re-import), and another key should be evicted instead.
+  globalThis.__FORMULA_ENCRYPTION_KEY_CACHE_MAX_SIZE__ = 2;
+  await encryptCellPlaintext({ plaintext, key: key1, context });
+  assert.equal(importKeyCalls, 3, "expected shrinking cache to not evict the accessed key");
+  await encryptCellPlaintext({ plaintext, key: key2, context });
+  assert.equal(importKeyCalls, 4, "expected shrinking cache to evict a different (LRU) key");
+
   // Disabling caching (max size = 0) should avoid retaining keys entirely.
   globalThis.__FORMULA_ENCRYPTION_KEY_CACHE_MAX_SIZE__ = 0;
   clearEncryptionKeyCache();
