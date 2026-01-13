@@ -146,5 +146,52 @@ describe("SpreadsheetApp comment permissions", () => {
       else process.env.DESKTOP_GRID_MODE = priorGridMode;
     }
   });
-});
 
+  it("keeps the comments panel composer enabled for commenters even when the session is read-only", () => {
+    const priorGridMode = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status, { collabMode: true });
+
+      // Simulate a "commenter" role: read-only for cell edits but allowed to comment.
+      (app as any).collabSession = {
+        canComment: () => true,
+        isReadOnly: () => true,
+        getPermissions: () => ({ role: "commenter" }),
+      };
+      // Ensure SpreadsheetApp's read-only state reflects the stubbed session.
+      (app as any).syncReadOnlyState();
+
+      app.toggleCommentsPanel();
+
+      const panel = root.querySelector('[data-testid="comments-panel"]') as HTMLDivElement | null;
+      if (!panel) throw new Error("Missing comments panel");
+
+      const input = panel.querySelector('[data-testid="new-comment-input"]') as HTMLInputElement | null;
+      if (!input) throw new Error("Missing new comment input");
+
+      const submit = panel.querySelector('[data-testid="submit-comment"]') as HTMLButtonElement | null;
+      if (!submit) throw new Error("Missing submit button");
+
+      const hint = panel.querySelector('[data-testid="comments-readonly-hint"]') as HTMLDivElement | null;
+      if (!hint) throw new Error("Missing read-only hint");
+
+      expect(input.disabled).toBe(false);
+      expect(submit.disabled).toBe(false);
+      expect(hint.hidden).toBe(true);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = priorGridMode;
+    }
+  });
+});
