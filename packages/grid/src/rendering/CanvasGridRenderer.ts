@@ -98,6 +98,30 @@ export interface CanvasGridRendererOptions {
   defaultHeaderFontFamily?: string;
 }
 
+export type GridViewportChangeReason = "axisSize" | "frozen" | "resize" | "zoom";
+
+export interface GridViewportChangeEvent {
+  viewport: GridViewportState;
+  reason: GridViewportChangeReason;
+}
+
+export type GridViewportChangeListener = (event: GridViewportChangeEvent) => void;
+
+export interface GridViewportSubscriptionOptions {
+  /**
+   * Batch viewport change notifications to the next animation frame.
+   *
+   * This is useful to avoid redundant work during resize drags (window resize, axis resize, etc).
+   */
+  animationFrame?: boolean;
+  /**
+   * Debounce viewport change notifications by the given delay (in ms).
+   *
+   * When set, this overrides `animationFrame`.
+   */
+  debounceMs?: number;
+}
+
 interface Selection {
   row: number;
   col: number;
@@ -369,6 +393,14 @@ const MAX_TEXT_OVERFLOW_COLUMNS = 128;
 const EMPTY_MERGED_INDEX = new MergedCellIndex([]);
 const DEFAULT_CELL_FONT_FAMILY = "system-ui";
 
+interface ViewportListenerEntry {
+  listener: GridViewportChangeListener;
+  options: GridViewportSubscriptionOptions;
+  rafId: number | null;
+  timeoutId: ReturnType<typeof setTimeout> | null;
+  pendingReason: GridViewportChangeReason | null;
+}
+
 export function formatCellDisplayText(value: CellData["value"]): string {
   if (value === null) return "";
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
@@ -503,6 +535,8 @@ export class CanvasGridRenderer {
   // linearized numeric key could exceed Number.MAX_SAFE_INTEGER).
   private __testOnly_rowCacheMapAllocs = 0;
 
+  private readonly viewportListeners = new Set<ViewportListenerEntry>();
+
   private readonly gridQuadrantScratch: [GridRenderQuadrant, GridRenderQuadrant, GridRenderQuadrant, GridRenderQuadrant] = [
     {
       originX: 0,
@@ -598,6 +632,40 @@ export class CanvasGridRenderer {
 
   setPerfStatsEnabled(enabled: boolean): void {
     this.perfStats.enabled = enabled;
+  }
+
+  /**
+   * Subscribe to notifications when the viewport *layout* changes.
+   *
+   * This intentionally does **not** fire for scroll offset changes (to avoid per-frame work during
+   * scrolling), but it does fire for changes that can affect scrollbar layout/metrics such as:
+   * - axis size changes (row/col resize, applyAxisSizeOverrides, etc)
+   * - frozen pane changes
+   * - viewport resize
+   * - zoom changes
+   */
+  subscribeViewport(listener: GridViewportChangeListener, options?: GridViewportSubscriptionOptions): () => void {
+    const entry: ViewportListenerEntry = {
+      listener,
+      options: options ?? {},
+      rafId: null,
+      timeoutId: null,
+      pendingReason: null
+    };
+    this.viewportListeners.add(entry);
+
+    return () => {
+      if (!this.viewportListeners.delete(entry)) return;
+      if (entry.rafId !== null) {
+        globalThis.cancelAnimationFrame?.(entry.rafId);
+        entry.rafId = null;
+      }
+      if (entry.timeoutId !== null) {
+        clearTimeout(entry.timeoutId);
+        entry.timeoutId = null;
+      }
+      entry.pendingReason = null;
+    };
   }
 
   setTheme(theme: Partial<GridTheme> | null | undefined): void {
@@ -724,6 +792,7 @@ export class CanvasGridRenderer {
     }
 
     this.markAllDirty();
+    this.notifyViewportChange("zoom");
   }
 
   attach(canvases: {
@@ -986,11 +1055,13 @@ export class CanvasGridRenderer {
       this.remotePresenceDirtyPadding = this.getRemotePresenceDirtyPadding(this.selectionCtx);
     }
     this.markAllDirty();
+    this.notifyViewportChange("resize");
   }
 
   setFrozen(frozenRows: number, frozenCols: number): void {
     this.scroll.setFrozen(frozenRows, frozenCols);
     this.markAllDirty();
+    this.notifyViewportChange("frozen");
   }
 
   setScroll(scrollX: number, scrollY: number): void {
@@ -6244,5 +6315,46 @@ export class CanvasGridRenderer {
     const aligned = this.alignScrollToDevicePixels(this.scroll.getScroll());
     this.scroll.setScroll(aligned.x, aligned.y);
     this.markAllDirty();
+    this.notifyViewportChange("axisSize");
+  }
+
+  private notifyViewportChange(reason: GridViewportChangeReason): void {
+    if (this.viewportListeners.size === 0) return;
+    let viewport: GridViewportState | null = null;
+    const getViewport = () => {
+      if (!viewport) viewport = this.scroll.getViewportState();
+      return viewport;
+    };
+
+    for (const entry of this.viewportListeners) {
+      const debounceMs = entry.options.debounceMs;
+      if (typeof debounceMs === "number" && Number.isFinite(debounceMs) && debounceMs >= 0) {
+        entry.pendingReason = reason;
+        if (entry.timeoutId !== null) clearTimeout(entry.timeoutId);
+        entry.timeoutId = setTimeout(() => {
+          entry.timeoutId = null;
+          const pendingReason = entry.pendingReason;
+          entry.pendingReason = null;
+          if (!pendingReason) return;
+          entry.listener({ viewport: this.scroll.getViewportState(), reason: pendingReason });
+        }, debounceMs);
+        continue;
+      }
+
+      if (entry.options.animationFrame) {
+        entry.pendingReason = reason;
+        if (entry.rafId !== null) continue;
+        entry.rafId = requestAnimationFrame(() => {
+          entry.rafId = null;
+          const pendingReason = entry.pendingReason;
+          entry.pendingReason = null;
+          if (!pendingReason) return;
+          entry.listener({ viewport: this.scroll.getViewportState(), reason: pendingReason });
+        });
+        continue;
+      }
+
+      entry.listener({ viewport: getViewport(), reason });
+    }
   }
 }

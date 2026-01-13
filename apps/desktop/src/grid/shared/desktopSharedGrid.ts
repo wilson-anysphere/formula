@@ -251,6 +251,19 @@ export class DesktopSharedGrid {
     this.renderer.setFrozen(this.frozenRows, this.frozenCols);
     this.renderer.setFillHandleEnabled(this.interactionMode === "default" && Boolean(this.callbacks.onFillCommit));
 
+    // Keep desktop shared scrollbars in sync with renderer viewport changes (axis size overrides,
+    // frozen pane updates, zoom, resize, etc) even when scroll offsets do not change.
+    //
+    // Batch notifications to the next animation frame to avoid redundant work during resize drags.
+    this.disposeFns.push(
+      this.renderer.subscribeViewport(
+        () => {
+          this.syncScrollbars();
+        },
+        { animationFrame: true }
+      )
+    );
+
     // Attempt to resolve theme CSS vars if the host app defines them, and keep the
     // renderer in sync with future theme/media changes.
     this.refreshTheme();

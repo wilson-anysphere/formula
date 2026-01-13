@@ -427,4 +427,36 @@ describe("DesktopSharedGrid scrollbars", () => {
     grid.destroy();
     container.remove();
   });
+
+  it("updates scrollbar thumb sizes after renderer.applyAxisSizeOverrides without requiring scrollTo/scrollBy", () => {
+    const { grid, container, scrollbars } = createGrid({
+      rowCount: 100,
+      colCount: 100,
+      defaultRowHeight: 10,
+      defaultColWidth: 10
+    });
+
+    grid.resize(300, 200, 1);
+
+    const beforeThumbHeight = parseFloat(scrollbars.vThumb.style.height);
+    expect(Number.isFinite(beforeThumbHeight)).toBe(true);
+
+    const scrollToSpy = vi.spyOn(grid, "scrollTo");
+    const scrollBySpy = vi.spyOn(grid, "scrollBy");
+    scrollToSpy.mockClear();
+    scrollBySpy.mockClear();
+
+    const rowOverrides = new Map<number, number>();
+    for (let row = 0; row < 50; row++) rowOverrides.set(row, 20);
+    grid.renderer.applyAxisSizeOverrides({ rows: rowOverrides });
+
+    expect(scrollToSpy).not.toHaveBeenCalled();
+    expect(scrollBySpy).not.toHaveBeenCalled();
+
+    const afterThumbHeight = parseFloat(scrollbars.vThumb.style.height);
+    expect(afterThumbHeight).toBeLessThan(beforeThumbHeight);
+
+    grid.destroy();
+    container.remove();
+  });
 });
