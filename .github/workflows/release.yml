@@ -111,6 +111,10 @@ jobs:
             tag="${INPUT_TAG:-}"
             version="${INPUT_VERSION:-}"
 
+            # Some users may paste full ref names. Normalize to a bare tag/version string.
+            tag="${tag#refs/tags/}"
+            version="${version#refs/tags/}"
+
             if [[ -n "${tag}" ]]; then
               if [[ "${tag}" == v* ]]; then
                 release_tag="${tag}"
@@ -143,9 +147,16 @@ jobs:
             should_validate_version="true"
           fi
 
+          # Artifact names should be safe as directory/file-ish identifiers. GitHub allows many
+          # characters, but keep it simple for consumers and avoid surprises.
+          artifact_label_sanitized="$(echo "${artifact_label}" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^-+//; s/-+$//')"
+          if [[ -z "${artifact_label_sanitized}" ]]; then
+            artifact_label_sanitized="manual-$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          fi
+
           echo "upload=${upload}" >> "${GITHUB_OUTPUT}"
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
-          echo "artifact_label=${artifact_label}" >> "${GITHUB_OUTPUT}"
+          echo "artifact_label=${artifact_label_sanitized}" >> "${GITHUB_OUTPUT}"
           echo "should_validate_version=${should_validate_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Setup Node
