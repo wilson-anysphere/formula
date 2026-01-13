@@ -1536,8 +1536,9 @@ pub fn standard_verify_key(info: &StandardEncryptionInfo, key: &[u8]) -> Result<
     }
 }
 
-const BLK_KEY_ENCRYPTED_KEY_VALUE: [u8; 8] =
-    [0x14, 0x6E, 0x0B, 0xE7, 0xAB, 0xAC, 0xD0, 0xD6];
+const BLK_KEY_VERIFIER_HASH_INPUT: [u8; 8] = [0xFE, 0xA7, 0xD2, 0x76, 0x3B, 0x4B, 0x9E, 0x79];
+const BLK_KEY_VERIFIER_HASH_VALUE: [u8; 8] = [0xD7, 0xAA, 0x0F, 0x6D, 0x30, 0x61, 0x34, 0x4E];
+const BLK_KEY_ENCRYPTED_KEY_VALUE: [u8; 8] = [0x14, 0x6E, 0x0B, 0xE7, 0xAB, 0xAC, 0xD0, 0xD6];
 
 fn hash_digest(algo: HashAlgorithm, data: &[u8]) -> Vec<u8> {
     match algo {
@@ -1665,6 +1666,57 @@ fn aes_cbc_decrypt(
     };
 
     Ok(buf)
+}
+
+/// Verify an OOXML Agile (ECMA-376) password using the same algorithm as `msoffcrypto-tool`.
+///
+/// This matches `ECMA376Agile.verify_password` in `msoffcrypto-tool`.
+pub fn agile_verify_password(
+    info: &AgileEncryptionInfo,
+    password: &str,
+) -> Result<(), OffcryptoError> {
+    let h = derive_iterated_hash_from_password(
+        password,
+        &info.password_salt,
+        info.password_hash_algorithm,
+        info.spin_count,
+    );
+
+    let key1 = derive_encryption_key(
+        &h,
+        &BLK_KEY_VERIFIER_HASH_INPUT,
+        info.password_hash_algorithm,
+        info.password_key_bits,
+    )?;
+    let key2 = derive_encryption_key(
+        &h,
+        &BLK_KEY_VERIFIER_HASH_VALUE,
+        info.password_hash_algorithm,
+        info.password_key_bits,
+    )?;
+
+    let verifier_hash_input =
+        aes_cbc_decrypt(&info.encrypted_verifier_hash_input, &key1, &info.password_salt)?;
+    let verifier_hash_value_full =
+        aes_cbc_decrypt(&info.encrypted_verifier_hash_value, &key2, &info.password_salt)?;
+
+    let hash_len = match info.password_hash_algorithm {
+        HashAlgorithm::Sha1 => 20,
+        HashAlgorithm::Sha256 => 32,
+        HashAlgorithm::Sha384 => 48,
+        HashAlgorithm::Sha512 => 64,
+    };
+    let verifier_hash_value = verifier_hash_value_full.get(..hash_len).ok_or(
+        OffcryptoError::InvalidEncryptionInfo {
+            context: "decrypted verifierHashValue shorter than hash output",
+        },
+    )?;
+
+    agile::verify_password(
+        &verifier_hash_input,
+        verifier_hash_value,
+        info.password_hash_algorithm,
+    )
 }
 
 /// Extract the Agile "secret key" by decrypting `encryptedKeyValue`.
@@ -1895,6 +1947,41 @@ mod tests {
     }
 
     #[test]
+    fn agile_verify_password_matches_msoffcrypto_tool_vectors() {
+        // Test vectors from `msoffcrypto-tool`:
+        // https://github.com/nolze/msoffcrypto-tool/blob/master/msoffcrypto/method/ecma376_agile.py
+        // (docstring in `ECMA376Agile.verify_password`).
+        let info = AgileEncryptionInfo {
+            key_data_salt: Vec::new(),
+            key_data_hash_algorithm: HashAlgorithm::Sha512,
+            key_data_block_size: 16,
+            encrypted_hmac_key: Vec::new(),
+            encrypted_hmac_value: Vec::new(),
+            spin_count: 100_000,
+            password_salt: vec![
+                0xCB, 0xCA, 0x1C, 0x99, 0x93, 0x43, 0xFB, 0xAD, 0x92, 0x07, 0x56, 0x34, 0x15,
+                0x00, 0x34, 0xB0,
+            ],
+            password_hash_algorithm: HashAlgorithm::Sha512,
+            password_key_bits: 256,
+            encrypted_key_value: Vec::new(),
+            encrypted_verifier_hash_input: vec![
+                0x39, 0xEE, 0xA5, 0x4E, 0x26, 0xE5, 0x14, 0x79, 0x8C, 0x28, 0x4B, 0xC7, 0x71,
+                0x4D, 0x38, 0xAC,
+            ],
+            encrypted_verifier_hash_value: vec![
+                0x14, 0x37, 0x6D, 0x6D, 0x81, 0x73, 0x34, 0xE6, 0xB0, 0xFF, 0x4F, 0xD8, 0x22,
+                0x1A, 0x7C, 0x67, 0x8E, 0x5D, 0x8A, 0x78, 0x4E, 0x8F, 0x99, 0x9F, 0x4C, 0x18,
+                0x89, 0x30, 0xC3, 0x6A, 0x4B, 0x29, 0xC5, 0xB3, 0x33, 0x60, 0x5B, 0x5C, 0xD4,
+                0x03, 0xB0, 0x50, 0x03, 0xAD, 0xCF, 0x18, 0xCC, 0xA8, 0xCB, 0xAB, 0x8D, 0xEB,
+                0xE3, 0x73, 0xC6, 0x56, 0x04, 0xA0, 0xBE, 0xCF, 0xAE, 0x5C, 0x0A, 0xD0,
+            ],
+        };
+
+        agile_verify_password(&info, "Password1234_").expect("expected password to verify");
+    }
+
+    #[test]
     fn inspects_minimal_agile_encryption_info() {
         let bytes = build_agile_encryption_info_stream(minimal_agile_xml().as_bytes());
         let summary = inspect_encryption_info(&bytes).expect("inspect");
@@ -1915,7 +2002,7 @@ mod tests {
         // Minimal Standard EncryptionInfo buffer sufficient for `inspect_encryption_info` / the
         // Standard parser validation logic:
         // - version (3.2)
-        // - header size + header (AES + SHA1, keySize matches algId)
+        // - header size + header (AES-256 + SHA1, keySize matches algId)
         // - verifier with saltSize=16, verifierHashSize=20 (SHA1) and a 32-byte encrypted hash
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&3u16.to_le_bytes());
