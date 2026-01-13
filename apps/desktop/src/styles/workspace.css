@@ -128,8 +128,8 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 6px;
-  padding: 4px 8px;
+  gap: 4px;
+  padding: 3px 8px;
   border-bottom: 1px solid var(--panel-border);
 }
 
@@ -161,7 +161,7 @@
   flex: 0 0 auto;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  padding: 3px 8px;
+  padding: 2px 8px;
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
@@ -210,8 +210,8 @@
 }
 
 .dock-panel__control {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   flex: 0 0 auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
