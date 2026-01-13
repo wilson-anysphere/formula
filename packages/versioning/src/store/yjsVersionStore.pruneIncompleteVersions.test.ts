@@ -337,6 +337,21 @@ describe("YjsVersionStore: pruneIncompleteVersions()", () => {
       order.push(["staleIncomplete"]);
     }, "test");
 
+    // First list call should stamp `incompleteSinceMs` but not immediately delete
+    // the record (staleness is measured from first observation, not the writer's
+    // wall clock).
+    expect(await store.listVersions()).toEqual([]);
+    const raw = doc.getMap("versions").get("staleIncomplete") as any;
+    expect(raw).toBeDefined();
+    expect(typeof raw?.get?.("incompleteSinceMs")).toBe("number");
+
+    // If the record remains incomplete long enough (simulated by forcing
+    // incompleteSinceMs far into the past), listVersions should prune it using
+    // the default staleness threshold.
+    doc.transact(() => {
+      const r = doc.getMap("versions").get("staleIncomplete") as any;
+      r?.set?.("incompleteSinceMs", 1);
+    }, "test");
     expect(await store.listVersions()).toEqual([]);
     expect(doc.getMap("versions").get("staleIncomplete")).toBeUndefined();
     expect((doc.getMap("versionsMeta").get("order") as any)?.toArray?.()).toEqual([]);

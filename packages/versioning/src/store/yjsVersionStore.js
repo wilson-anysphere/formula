@@ -771,26 +771,17 @@ export class YjsVersionStore {
 
       // Staleness tracking for incomplete records:
       //
-      // - Prefer a dedicated `incompleteSinceMs` field (set once, by the first reader that notices the record is
-      //   incomplete). This makes staleness resilient to clock skew across collaborators.
-      // - Fall back to `createdAtMs` (newer records) or `timestampMs` (legacy).
+      // Prefer a dedicated `incompleteSinceMs` field (set once, by the first
+      // reader that notices the record is incomplete). This makes staleness
+      // resilient to clock skew across collaborators and avoids deleting a
+      // slow-but-active stream due to a writer with a misconfigured clock.
       const incompleteSinceMsRaw = value.get("incompleteSinceMs");
       const incompleteSinceMsValid =
         typeof incompleteSinceMsRaw === "number" && Number.isFinite(incompleteSinceMsRaw) && incompleteSinceMsRaw <= nowMs;
-      let ts = incompleteSinceMsValid ? incompleteSinceMsRaw : null;
-
-      if (ts == null) {
-        const createdAtMs = value.get("createdAtMs");
-        const timestampMs = value.get("timestampMs");
-        let candidate =
-          typeof createdAtMs === "number" && Number.isFinite(createdAtMs)
-            ? createdAtMs
-            : typeof timestampMs === "number" && Number.isFinite(timestampMs)
-              ? timestampMs
-              : nowMs;
-        if (!Number.isFinite(candidate) || candidate < 0 || candidate > nowMs) candidate = nowMs;
-        ts = candidate;
-        // Persist `incompleteSinceMs` so future cleanup doesn't depend on any writer-provided wall-clock timestamps.
+      const ts = incompleteSinceMsValid ? incompleteSinceMsRaw : nowMs;
+      if (!incompleteSinceMsValid) {
+        // Persist `incompleteSinceMs` so future cleanup doesn't depend on any
+        // writer-provided wall-clock timestamps.
         markIncompleteSince.set(key, ts);
       }
 
