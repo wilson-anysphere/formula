@@ -6,8 +6,7 @@
 use std::path::PathBuf;
 
 use formula_offcrypto::decrypt_standard_ooxml_from_bytes;
-use formula_offcrypto::EncryptionType;
-use formula_offcrypto::OffcryptoError;
+use formula_offcrypto::{EncryptionType, OffcryptoError};
 
 fn fixture(path: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join(path)
