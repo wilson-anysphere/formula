@@ -92,6 +92,8 @@ const cm = new ContextManager({
   // tokenEstimator: createHeuristicTokenEstimator(), // optional, but recommended to keep budgeting consistent
   // redactor: (text) => text, // optional (defaults to `redactText`)
   // ragIndex: new RagIndex(), // optional single-sheet RAG index
+  // cacheSheetIndex: true, // default: cache single-sheet indexing by content signature
+  // sheetIndexCacheLimit: 32, // default: max cached sheets per ContextManager instance
   // workbookRag: { vectorStore, embedder, topK }, // required for workbook context builders
 });
 ```
@@ -101,6 +103,10 @@ Key options:
 - `tokenBudgetTokens`: max tokens for `promptContext` produced by context builders.
 - `tokenEstimator`: used for *all* token budgeting inside `ContextManager`. If you’re also using `trimMessagesToBudget`, pass the **same estimator** there too so budgets line up.
 - `redactor(text)`: last-mile redaction for prompt-facing strings. This is **not** a replacement for structured DLP.
+- `cacheSheetIndex`: when `true` (default), `buildContext()` will only call `ragIndex.indexSheet()` when the sheet’s
+  content signature changes. This avoids repeated re-embedding on every call for unchanged sheets.
+- `sheetIndexCacheLimit`: LRU limit for cached sheet signatures (defaults to 32). When an active sheet entry is evicted,
+  its in-memory RAG chunks are also removed from the underlying store to keep memory bounded.
 - `workbookRag`: enables workbook retrieval (`buildWorkbookContext*`). Requires:
   - `vectorStore` implementing the `packages/ai-rag` store interface used by indexing + retrieval:
     - `list(...)` (to load existing chunk hashes)
@@ -115,6 +121,20 @@ Key options:
     - `sampleRows`: how many rows of each workbook chunk to include when generating chunk text during indexing (lower keeps the index smaller/faster).
 
 Many APIs in this package also accept `signal?: AbortSignal` to allow cancellation from UI surfaces.
+
+### Clearing the single-sheet cache
+
+If you reuse a `ContextManager` instance across many sheets and want to drop cached state (or free memory),
+use:
+
+```js
+await cm.clearSheetIndexCache({ clearStore: true });
+```
+
+This clears both:
+
+- the internal sheet signature cache used by `buildContext()`
+- the in-memory sheet-level RAG chunks in `ragIndex.store` (optional via `clearStore: true`)
 
 Cancellation behavior:
 
