@@ -247,7 +247,7 @@ export interface CellAddress {
 
 export interface SessionPermissions {
   role: DocumentRole;
-  rangeRestrictions?: unknown[];
+  rangeRestrictions: unknown[];
   userId: string | null;
 }
 
