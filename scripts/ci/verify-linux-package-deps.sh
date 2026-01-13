@@ -182,6 +182,17 @@ assert_contains_any() {
 }
 
 echo "verify-linux-package-deps: found ${#debs[@]} .deb and ${#rpms[@]} .rpm artifact(s)"
+echo "::group::verify-linux-package-deps: bundle directories"
+printf ' - %s\n' "${bundle_dirs[@]}"
+echo "::endgroup::"
+
+echo "::group::verify-linux-package-deps: discovered .deb artifacts"
+printf ' - %s\n' "${debs[@]}"
+echo "::endgroup::"
+
+echo "::group::verify-linux-package-deps: discovered .rpm artifacts"
+printf ' - %s\n' "${rpms[@]}"
+echo "::endgroup::"
 
 assert_stripped_elf() {
   local elf_path="$1"
