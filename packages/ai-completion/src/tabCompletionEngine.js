@@ -402,6 +402,11 @@ export class TabCompletionEngine {
     if (!hasValidCellRef) return [];
 
     const typedArgText = parsed.currentArg.text ?? "";
+    // If the user has typed trailing whitespace *after* a token (e.g. "A " or
+    // "Sheet2!A1 "), avoid emitting completions. Most completions would need to
+    // delete that whitespace to be valid, which violates the formula bar’s
+    // "pure insertion" constraint.
+    if (typedArgText.length > 0 && /\s$/.test(typedArgText)) return [];
     const isEmptyArg = typedArgText.trim().length === 0;
     const currentArgText = isEmptyArg ? columnIndexToLetter(cellRef.col) : typedArgText;
 
@@ -516,7 +521,10 @@ export class TabCompletionEngine {
 
     const spanStart = parsed.currentArg?.start ?? cursor;
     const spanEnd = parsed.currentArg?.end ?? cursor;
-    const rawPrefix = (parsed.currentArg?.text ?? "").trim();
+    // Preserve the exact user-typed prefix so completions remain representable as
+    // a pure insertion at the caret. Trimming here could turn e.g. "She " into
+    // "She", causing suggestions that would delete the trailing space.
+    const rawPrefix = parsed.currentArg?.text ?? "";
 
     /** @type {Suggestion[]} */
     const suggestions = [];

@@ -365,6 +365,25 @@ test("Typing =SUM(A suggests a contiguous range above the current cell", async (
   );
 });
 
+test("Range suggestions do not delete trailing whitespace (pure insertion)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`A${r}`] = r;
+
+  // The typed prefix ends with whitespace after a token ("A "), and any valid
+  // completion would need to delete that whitespace (not a pure insertion).
+  const currentInput = "=SUM(A ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.equal(suggestions.length, 0);
+});
+
 test("Typing =SUM(A suggests a contiguous range below the current cell when the formula is above the data block", async () => {
   const engine = new TabCompletionEngine();
 
