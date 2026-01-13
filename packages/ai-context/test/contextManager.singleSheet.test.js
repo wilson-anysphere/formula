@@ -464,7 +464,8 @@ test("buildContext: attached range previews stream rows (avoid slicing full rang
   for (let r = 0; r < rowCount; r++) {
     const row = [`Row${r + 1}`];
     let calls = 0;
-    row.slice = () => {
+    const originalSlice = Array.prototype.slice;
+    row.slice = /** @type {any} */ (function (...args) {
       calls += 1;
       // ContextManager copies each row once when building the capped sheet window.
       // Any additional slice calls for rows beyond the preview limit indicate a regression
@@ -472,8 +473,8 @@ test("buildContext: attached range previews stream rows (avoid slicing full rang
       if (calls > 1 && r >= 30) {
         throw new Error(`Unexpected row.slice() call for row ${r} while building attachment preview`);
       }
-      return row;
-    };
+      return originalSlice.apply(this, args);
+    });
     values.push(row);
   }
 
