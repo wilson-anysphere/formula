@@ -5611,6 +5611,9 @@ export class SpreadsheetApp {
     this.commentsPanelReadOnlyHint.hidden = true;
     footer.appendChild(this.commentsPanelReadOnlyHint);
 
+    const footerRow = document.createElement("div");
+    footerRow.className = "comments-panel__footer-row";
+
     this.newCommentInput = document.createElement("input");
     this.newCommentInput.dataset.testid = "new-comment-input";
     this.newCommentInput.type = "text";
@@ -5624,8 +5627,9 @@ export class SpreadsheetApp {
     this.newCommentSubmitButton.className = "comments-panel__submit-button";
     this.newCommentSubmitButton.addEventListener("click", () => this.submitNewComment());
 
-    footer.appendChild(this.newCommentInput);
-    footer.appendChild(this.newCommentSubmitButton);
+    footerRow.appendChild(this.newCommentInput);
+    footerRow.appendChild(this.newCommentSubmitButton);
+    footer.appendChild(footerRow);
     panel.appendChild(footer);
 
     return panel;
