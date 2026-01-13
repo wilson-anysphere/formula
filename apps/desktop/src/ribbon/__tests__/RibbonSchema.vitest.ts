@@ -133,6 +133,10 @@ describe("defaultRibbonSchema", () => {
     expect(pivot, "Expected PivotTable button to exist").toBeTruthy();
     expect(pivot?.id).toBe("view.insertPivotTable");
     expect(pivot?.menuItems?.[0]?.id).toBe("view.insertPivotTable");
+    expect(pivot?.menuItems?.[1]?.id).toBe("insert.tables.pivotTable.fromTableRange");
+    expect(pivot?.menuItems?.[1]?.disabled).not.toBe(true);
+    expect(pivot?.menuItems?.[2]?.disabled).toBe(true);
+    expect(pivot?.menuItems?.[3]?.disabled).toBe(true);
   });
 
   it("does not include legacy icon properties in the schema", () => {
