@@ -79,6 +79,23 @@ fn pivot_cache_value_to_engine_inner(value: PivotCacheValue) -> PivotValue {
     }
 }
 
+fn pivot_key_display_string(value: PivotValue) -> String {
+    match value {
+        PivotValue::Blank => "(blank)".to_string(),
+        PivotValue::Number(n) => {
+            // Keep it simple; Excel has more nuanced formatting.
+            if n.fract() == 0.0 {
+                format!("{}", n as i64)
+            } else {
+                format!("{n}")
+            }
+        }
+        PivotValue::Date(d) => d.to_string(),
+        PivotValue::Text(s) => s,
+        PivotValue::Bool(b) => b.to_string(),
+    }
+}
+
 /// Convert a parsed pivot table definition into a pivot-engine config.
 ///
 /// This is a best-effort conversion; unsupported layout / display options are
@@ -128,9 +145,20 @@ pub fn pivot_table_to_engine_config(
                     .map(|f| f.name.clone())
             });
 
-            // `dataField@baseItem` refers to an item within `baseField`'s shared-items table. We
-            // currently do not map this index to a stable display string.
-            let base_item = None;
+            // `dataField@baseItem` refers to an item within `baseField`'s shared-items table.
+            let base_item = df.base_field.zip(df.base_item).and_then(|(field_idx, item_idx)| {
+                let shared_items = cache_def
+                    .cache_fields
+                    .get(field_idx as usize)?
+                    .shared_items
+                    .as_ref()?;
+                let item = shared_items.get(item_idx as usize)?.clone();
+                Some(pivot_key_display_string(pivot_cache_value_to_engine(
+                    cache_def,
+                    field_idx as usize,
+                    item,
+                )))
+            });
             Some(ValueField {
                 source_field,
                 name,
@@ -382,6 +410,64 @@ mod tests {
         let cfg = pivot_table_to_engine_config(&table, &cache_def);
         assert_eq!(cfg.value_fields.len(), 1);
         assert_eq!(cfg.value_fields[0].base_field.as_deref(), Some("Region"));
+    }
+
+    #[test]
+    fn maps_base_item_from_shared_items_when_available() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dataFields count="1">
+    <dataField fld="0" showDataAs="percentOf" baseField="1" baseItem="0"/>
+  </dataFields>
+</pivotTableDefinition>"#;
+
+        let table =
+            PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml).expect("parse");
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![
+                PivotCacheField {
+                    name: "Sales".to_string(),
+                    ..Default::default()
+                },
+                PivotCacheField {
+                    name: "Region".to_string(),
+                    shared_items: Some(vec![
+                        PivotCacheValue::String("East".to_string()),
+                        PivotCacheValue::String("West".to_string()),
+                    ]),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        let cfg = pivot_table_to_engine_config(&table, &cache_def);
+        assert_eq!(cfg.value_fields.len(), 1);
+        assert_eq!(cfg.value_fields[0].base_field.as_deref(), Some("Region"));
+        assert_eq!(cfg.value_fields[0].base_item.as_deref(), Some("East"));
+    }
+
+    #[test]
+    fn pivot_cache_to_engine_source_resolves_shared_item_indices() {
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![PivotCacheField {
+                name: "Region".to_string(),
+                shared_items: Some(vec![
+                    PivotCacheValue::String("East".to_string()),
+                    PivotCacheValue::String("West".to_string()),
+                ]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let source = pivot_cache_to_engine_source(
+            &cache_def,
+            vec![vec![PivotCacheValue::Index(1)]].into_iter(),
+        );
+        assert_eq!(source.len(), 2, "header + one record");
+        assert_eq!(source[0], vec![PivotValue::Text("Region".to_string())]);
+        assert_eq!(source[1], vec![PivotValue::Text("West".to_string())]);
     }
 
     #[test]

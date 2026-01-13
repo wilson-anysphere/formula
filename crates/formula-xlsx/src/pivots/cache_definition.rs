@@ -872,6 +872,39 @@ mod tests {
     }
 
     #[test]
+    fn parses_cache_field_shared_items() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cacheFields count="1">
+    <cacheField name="Field1">
+      <sharedItems count="6">
+        <m/>
+        <n v="42"/>
+        <n>43</n>
+        <s v="Hello"/>
+        <s>World</s>
+        <b v="1"/>
+      </sharedItems>
+    </cacheField>
+  </cacheFields>
+</pivotCacheDefinition>"#;
+
+        let def = parse_pivot_cache_definition(xml).expect("parse");
+        assert_eq!(def.cache_fields.len(), 1);
+        assert_eq!(
+            def.cache_fields[0].shared_items,
+            Some(vec![
+                PivotCacheValue::Missing,
+                PivotCacheValue::Number(42.0),
+                PivotCacheValue::Number(43.0),
+                PivotCacheValue::String("Hello".to_string()),
+                PivotCacheValue::String("World".to_string()),
+                PivotCacheValue::Bool(true),
+            ])
+        );
+    }
+
+    #[test]
     fn parses_cache_source_connection_id() {
         let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
