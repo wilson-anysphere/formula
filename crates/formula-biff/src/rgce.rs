@@ -240,19 +240,28 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
                             return Err(DecodeRgceError::UnexpectedEof);
                         }
 
-                        let table_id = u32::from_le_bytes([input[0], input[1], input[2], input[3]]);
-                        let flags = u16::from_le_bytes([input[4], input[5]]);
-                        let col_first = u16::from_le_bytes([input[6], input[7]]);
-                        let col_last = u16::from_le_bytes([input[8], input[9]]);
-                        // Skip reserved u16.
+                        // Excel uses a fixed 12-byte payload. The canonical layout is documented
+                        // in MS-XLSB, but in practice there are multiple observed encodings in the
+                        // wild (different field packing/ordering). Decode in a best-effort way by
+                        // trying a handful of plausible interpretations and choosing the most
+                        // likely one based on simple heuristics.
+                        let mut payload = [0u8; 12];
+                        payload.copy_from_slice(&input[..12]);
                         input = &input[12..];
+
+                        let decoded = decode_ptg_list_payload_best_effort(&payload);
+
+                        let table_id = decoded.table_id;
+                        let flags16 = (decoded.flags & 0xFFFF) as u16;
+                        let col_first = decoded.col_first;
+                        let col_last = decoded.col_last;
 
                         // Best-effort: map table/column IDs to placeholder names (we don't have
                         // workbook context in this crate).
                         let table_name = format!("Table{table_id}");
                         let columns = structured_columns_from_ids(col_first, col_last);
 
-                        let item = structured_ref_item_from_flags(flags);
+                        let item = structured_ref_item_from_flags(flags16);
                         let display_table_name = match item {
                             Some(StructuredRefItem::ThisRow) => None,
                             _ => Some(table_name.as_str()),
@@ -539,6 +548,182 @@ enum StructuredColumns {
     Range { start: String, end: String },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PtgListDecoded {
+    table_id: u32,
+    flags: u32,
+    col_first: u32,
+    col_last: u32,
+}
+
+fn decode_ptg_list_payload_best_effort(payload: &[u8; 12]) -> PtgListDecoded {
+    // There are multiple "in the wild" encodings for the 12-byte PtgList payload (table refs /
+    // structured references). We try a handful of plausible layouts and prefer the one that
+    // produces the most reasonable (table_id, flags, column ids) tuple.
+    //
+    // This logic mirrors `formula-xlsb`'s `decode_ptg_list_payload_best_effort`, but without
+    // workbook context for scoring.
+    //
+    // Layout A (u32 + 4*u16):
+    //   [table_id: u32][flags: u16][col_first: u16][col_last: u16][reserved: u16]
+    //
+    // Layout B (u32 + 2*u32):
+    //   [table_id: u32][col_first_raw: u32][col_last_raw: u32]
+    //   where `col_first_raw` packs `[col_first: u16][flags: u16]` (and `col_last_raw` packs
+    //   `[col_last: u16][reserved: u16]`).
+    //
+    // Layout C (3*u32):
+    //   [table_id: u32][flags: u32][col_spec: u32]
+    //   where `col_spec` packs `[col_first: u16][col_last: u16]`.
+    let table_id = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+
+    let flags_a = u16::from_le_bytes([payload[4], payload[5]]) as u32;
+    let col_first_a = u16::from_le_bytes([payload[6], payload[7]]) as u32;
+    let col_last_a = u16::from_le_bytes([payload[8], payload[9]]) as u32;
+
+    let col_first_raw = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let col_last_raw = u32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
+    let col_first_b = (col_first_raw & 0xFFFF) as u32;
+    let flags_b = (col_first_raw >> 16) & 0xFFFF;
+    let col_last_b = (col_last_raw & 0xFFFF) as u32;
+
+    let flags_c = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let col_spec_c = u32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
+    let col_first_c = (col_spec_c & 0xFFFF) as u32;
+    let col_last_c = ((col_spec_c >> 16) & 0xFFFF) as u32;
+
+    let mut candidates = [
+        PtgListDecoded {
+            table_id,
+            flags: flags_a,
+            col_first: col_first_a,
+            col_last: col_last_a,
+        },
+        PtgListDecoded {
+            table_id,
+            flags: flags_b,
+            col_first: col_first_b,
+            col_last: col_last_b,
+        },
+        PtgListDecoded {
+            table_id,
+            flags: flags_c,
+            col_first: col_first_c,
+            col_last: col_last_c,
+        },
+        // Layout D: treat the middle/end u32s as raw column ids with no separate flags.
+        PtgListDecoded {
+            table_id,
+            flags: 0,
+            col_first: col_first_raw,
+            col_last: col_last_raw,
+        },
+    ];
+
+    // Default to the canonical (documented) layout when it yields a plausible result, to avoid
+    // mis-decoding well-formed payloads that are ambiguous under other interpretations.
+    if ptg_list_candidate_is_plausible(&candidates[0]) {
+        return candidates[0];
+    }
+
+    candidates.sort_by_key(|cand| std::cmp::Reverse(score_ptg_list_candidate(cand)));
+
+    candidates[0]
+}
+
+fn ptg_list_candidate_is_plausible(cand: &PtgListDecoded) -> bool {
+    let col_first = cand.col_first;
+    let col_last = cand.col_last;
+
+    // Column id `0` is used as a sentinel for "all columns". Seeing it on only one side is
+    // usually a sign we've chosen the wrong payload layout.
+    if (col_first == 0) ^ (col_last == 0) {
+        return false;
+    }
+
+    // Column ids should be in ascending order (except for the all-columns sentinel).
+    if col_first != 0 && col_last != 0 && col_first > col_last {
+        return false;
+    }
+
+    // Table column ids are bounded by Excel's max column count.
+    if col_first > 16_384 || col_last > 16_384 {
+        return false;
+    }
+
+    true
+}
+
+fn score_ptg_list_candidate(cand: &PtgListDecoded) -> i32 {
+    const FLAG_ALL: u16 = 0x0001;
+    const FLAG_HEADERS: u16 = 0x0002;
+    const FLAG_DATA: u16 = 0x0004;
+    const FLAG_TOTALS: u16 = 0x0008;
+    const FLAG_THIS_ROW: u16 = 0x0010;
+    const KNOWN_FLAGS: u16 = FLAG_ALL | FLAG_HEADERS | FLAG_DATA | FLAG_TOTALS | FLAG_THIS_ROW;
+
+    let mut score = 0i32;
+
+    // Prefer non-zero table ids.
+    if cand.table_id != 0 {
+        score += 1;
+    } else {
+        score -= 1;
+    }
+
+    // Prefer candidates where the low 16 bits of the flags field look like known structured-ref
+    // flags. Unknown bits are allowed, but usually indicate we chose the wrong layout.
+    let flags16 = (cand.flags & 0xFFFF) as u16;
+    let unknown = flags16 & !KNOWN_FLAGS;
+    if unknown == 0 {
+        score += 10;
+    } else {
+        score -= 10;
+    }
+
+    // Slightly prefer flags that fit in 16 bits (canonical layout).
+    if cand.flags & 0xFFFF_0000 != 0 {
+        score -= 1;
+    }
+
+    let col_first = cand.col_first;
+    let col_last = cand.col_last;
+
+    // Column id `0` is treated as a sentinel for "all columns"; seeing it on only one side is
+    // usually a sign we've chosen the wrong payload layout.
+    if (col_first == 0) ^ (col_last == 0) {
+        score -= 50;
+    }
+
+    // Prefer small, Excel-like column ids.
+    if col_first <= 16_384 {
+        score += 3;
+    } else {
+        score -= 3;
+    }
+    if col_last <= 16_384 {
+        score += 3;
+    } else {
+        score -= 3;
+    }
+
+    // Prefer ascending ranges (col_first <= col_last) when both are non-zero.
+    if col_first == 0 && col_last == 0 {
+        score += 1;
+    } else if col_first <= col_last {
+        score += 2;
+    } else {
+        score -= 20;
+    }
+
+    // Slightly prefer single-column selections.
+    if col_first == col_last {
+        score += 1;
+    }
+
+    score
+}
+
 fn structured_ref_item_from_flags(flags: u16) -> Option<StructuredRefItem> {
     const FLAG_ALL: u16 = 0x0001;
     const FLAG_HEADERS: u16 = 0x0002;
@@ -563,7 +748,7 @@ fn structured_ref_item_from_flags(flags: u16) -> Option<StructuredRefItem> {
     }
 }
 
-fn structured_columns_from_ids(col_first: u16, col_last: u16) -> StructuredColumns {
+fn structured_columns_from_ids(col_first: u32, col_last: u32) -> StructuredColumns {
     if col_first == 0 && col_last == 0 {
         StructuredColumns::All
     } else if col_first == col_last {
