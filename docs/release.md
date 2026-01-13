@@ -618,10 +618,14 @@ For reference, this is how the release workflow’s Tauri build targets map to u
 
 | Workflow build | Tauri build args | Rust target triple | `latest.json` platform key(s) |
 | --- | --- | --- | --- |
-| macOS universal | `--target universal-apple-darwin` | `aarch64-apple-darwin` + `x86_64-apple-darwin` | `darwin-universal` (or `universal-apple-darwin`) |
-| Windows x64 | `--target x86_64-pc-windows-msvc --bundles msi,nsis` | `x86_64-pc-windows-msvc` | `windows-x86_64` (or `x86_64-pc-windows-msvc`) |
-| Windows ARM64 | `--target aarch64-pc-windows-msvc --bundles msi,nsis` | `aarch64-pc-windows-msvc` | `windows-aarch64` / `windows-arm64` (or `aarch64-pc-windows-msvc`) |
-| Linux x64 | `--bundles appimage,deb,rpm` | `x86_64-unknown-linux-gnu` | `linux-x86_64` (or `x86_64-unknown-linux-gnu`) |
+| macOS universal | `--target universal-apple-darwin` | `aarch64-apple-darwin` + `x86_64-apple-darwin` | `darwin-universal` |
+| Windows x64 | `--target x86_64-pc-windows-msvc --bundles msi,nsis` | `x86_64-pc-windows-msvc` | `windows-x86_64` |
+| Windows ARM64 | `--target aarch64-pc-windows-msvc --bundles msi,nsis` | `aarch64-pc-windows-msvc` | `windows-aarch64` |
+| Linux x64 | `--bundles appimage,deb,rpm` | `x86_64-unknown-linux-gnu` | `linux-x86_64` |
+
+Local-note: some toolchains may emit alias key spellings in `latest.json` (for example Rust target
+triples like `x86_64-pc-windows-msvc` / `aarch64-pc-windows-msvc`, or `windows-arm64`). Tagged
+release CI expects the canonical keys above; see `docs/desktop-updater-target-mapping.md`.
 
 Note: `.deb` and `.rpm` are shipped for manual install/downgrade, but are not typically used by the
 Tauri updater on Linux. If a target entry is missing from `latest.json`, auto-update for that
