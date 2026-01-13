@@ -17,6 +17,9 @@ use super::{externsheet, records, rgce, strings, supbook, BiffVersion};
 // - NAME: 2.4.150
 const RECORD_NAME: u16 = 0x0018;
 
+// Avoid unbounded warning growth when parsing corrupt/hostile workbook-global NAME record streams.
+const MAX_DEFINED_NAME_WARNINGS: usize = 200;
+
 // NAME record flags (Lbl.grbit).
 // See [MS-XLS] 2.4.150 (NAME) / 2.5.114 (Lbl).
 const NAME_FLAG_HIDDEN: u16 = 0x0001;
@@ -60,6 +63,20 @@ pub(crate) struct BiffDefinedNames {
     pub(crate) warnings: Vec<String>,
 }
 
+fn push_warning(out: &mut BiffDefinedNames, msg: String) {
+    if out.warnings.len() < MAX_DEFINED_NAME_WARNINGS {
+        out.warnings.push(msg);
+        return;
+    }
+
+    // When the warning cap is exceeded, append a single suppression message and then ignore any
+    // subsequent warnings so the vector size remains bounded.
+    if out.warnings.len() == MAX_DEFINED_NAME_WARNINGS {
+        out.warnings
+            .push("additional defined-name warnings suppressed".to_string());
+    }
+}
+
 #[derive(Debug, Clone)]
 struct RawDefinedName {
     name: String,
@@ -80,8 +97,10 @@ pub(crate) fn parse_biff_defined_names(
     let mut out = BiffDefinedNames::default();
 
     if biff != BiffVersion::Biff8 {
-        out.warnings
-            .push("BIFF defined name import currently supports BIFF8 only".to_string());
+        push_warning(
+            &mut out,
+            "BIFF defined name import currently supports BIFF8 only".to_string(),
+        );
         return Ok(out);
     }
 
@@ -94,13 +113,17 @@ pub(crate) fn parse_biff_defined_names(
         supbooks,
         warnings: supbook_warnings,
     } = supbook::parse_biff8_supbook_table(workbook_stream, codepage);
-    out.warnings.extend(supbook_warnings);
+    for warning in supbook_warnings {
+        push_warning(&mut out, warning);
+    }
 
     let externsheet::ExternSheetTable {
         entries: externsheet_entries,
         warnings,
     } = externsheet::parse_biff_externsheet(workbook_stream, biff, codepage);
-    out.warnings.extend(warnings);
+    for warning in warnings {
+        push_warning(&mut out, warning);
+    }
 
     let allows_continuation = |id: u16| id == RECORD_NAME;
     let iter = records::LogicalBiffRecordIter::new(workbook_stream, allows_continuation);
@@ -115,7 +138,7 @@ pub(crate) fn parse_biff_defined_names(
         let record = match record {
             Ok(record) => record,
             Err(err) => {
-                out.warnings.push(format!("malformed BIFF record: {err}"));
+                push_warning(&mut out, format!("malformed BIFF record: {err}"));
                 break;
             }
         };
@@ -131,7 +154,7 @@ pub(crate) fn parse_biff_defined_names(
             RECORD_NAME => match parse_biff8_name_record(&record, codepage, sheet_names) {
                 Ok(raw) => raw_names.push(Some(raw)),
                 Err(err) => {
-                    out.warnings.push(format!("failed to parse NAME record: {err}"));
+                    push_warning(&mut out, format!("failed to parse NAME record: {err}"));
                     raw_names.push(None);
                 }
             },
@@ -168,7 +191,7 @@ pub(crate) fn parse_biff_defined_names(
     for raw in raw_names.into_iter().flatten() {
         let decoded = rgce::decode_defined_name_rgce_with_context(&raw.rgce, codepage, &ctx);
         for warning in decoded.warnings {
-            out.warnings.push(format!("defined name `{}`: {warning}", raw.name));
+            push_warning(&mut out, format!("defined name `{}`: {warning}", raw.name));
         }
 
         out.names.push(BiffDefinedName {
@@ -224,7 +247,11 @@ fn parse_biff8_name_record(
         // keyboard shortcut), but Excel appears to prefer `rgchName` when present.
         //
         // We still consume `rgchName` so `rgce` parsing stays aligned.
-        let id_from_name = if cch > 0 { Some(cursor.read_u8()?) } else { None };
+        let id_from_name = if cch > 0 {
+            Some(cursor.read_u8()?)
+        } else {
+            None
+        };
         if cch > 1 {
             cursor.skip_bytes(cch - 1)?;
         }
@@ -822,7 +849,10 @@ mod tests {
         let second_rgce = &rgce[4..];
 
         let r_bof = record(records::RECORD_BOF_BIFF8, &[0u8; 16]);
-        let r_name = record(RECORD_NAME, &[header.clone(), name_str.clone(), first_rgce.to_vec()].concat());
+        let r_name = record(
+            RECORD_NAME,
+            &[header.clone(), name_str.clone(), first_rgce.to_vec()].concat(),
+        );
         let r_continue = record(records::RECORD_CONTINUE, second_rgce);
         let r_eof = record(records::RECORD_EOF, &[]);
         let stream = [r_bof, r_name, r_continue, r_eof].concat();
@@ -911,7 +941,10 @@ mod tests {
 
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
-            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(
+                RECORD_NAME,
+                &[header, name_str, first_rgce.to_vec()].concat(),
+            ),
             record(records::RECORD_CONTINUE, &continue_payload),
             record(records::RECORD_EOF, &[]),
         ]
@@ -964,7 +997,10 @@ mod tests {
 
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
-            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(
+                RECORD_NAME,
+                &[header, name_str, first_rgce.to_vec()].concat(),
+            ),
             record(records::RECORD_CONTINUE, &continue_payload),
             record(records::RECORD_EOF, &[]),
         ]
@@ -992,7 +1028,7 @@ mod tests {
 
         // rgce for `#REF!&"ABCDE"`.
         let rgce: Vec<u8> = [
-            vec![0x2A, 0x00, 0x00, 0x00, 0x00], // PtgRefErr + payload
+            vec![0x2A, 0x00, 0x00, 0x00, 0x00],   // PtgRefErr + payload
             vec![0x17, literal.len() as u8, 0u8], // PtgStr + cch + flags (compressed)
             literal.as_bytes().to_vec(),
             vec![0x08], // PtgConcat
@@ -1023,7 +1059,10 @@ mod tests {
 
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
-            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(
+                RECORD_NAME,
+                &[header, name_str, first_rgce.to_vec()].concat(),
+            ),
             record(records::RECORD_CONTINUE, &continue_payload),
             record(records::RECORD_EOF, &[]),
         ]
@@ -1082,7 +1121,10 @@ mod tests {
 
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
-            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(
+                RECORD_NAME,
+                &[header, name_str, first_rgce.to_vec()].concat(),
+            ),
             record(records::RECORD_CONTINUE, &continue_payload),
             record(records::RECORD_EOF, &[]),
         ]
@@ -1106,7 +1148,7 @@ mod tests {
 
         let rgce: Vec<u8> = [
             vec![0x18, 0x11, 0x22, 0x33, 0x44, 0x55], // ptg=0x18 + 5-byte opaque payload
-            vec![0x17, literal.len() as u8, 0u8],      // PtgStr + cch + flags (compressed)
+            vec![0x17, literal.len() as u8, 0u8],     // PtgStr + cch + flags (compressed)
             literal.as_bytes().to_vec(),
         ]
         .concat();
@@ -1132,7 +1174,10 @@ mod tests {
 
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
-            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(
+                RECORD_NAME,
+                &[header, name_str, first_rgce.to_vec()].concat(),
+            ),
             record(records::RECORD_CONTINUE, &continue_payload),
             record(records::RECORD_EOF, &[]),
         ]
@@ -1194,7 +1239,10 @@ mod tests {
 
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
-            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(
+                RECORD_NAME,
+                &[header, name_str, first_rgce.to_vec()].concat(),
+            ),
             record(records::RECORD_CONTINUE, &continue_payload),
             record(records::RECORD_EOF, &[]),
         ]
@@ -1219,7 +1267,7 @@ mod tests {
         let rgce: Vec<u8> = [
             // PtgRef (A1) with relative row/col flags so the decoder prints `A1`.
             vec![0x24, 0x00, 0x00, 0x00, 0xC0],
-            vec![0x2F], // spill postfix
+            vec![0x2F],                           // spill postfix
             vec![0x17, literal.len() as u8, 0u8], // PtgStr + cch + flags (compressed)
             literal.as_bytes().to_vec(),
         ]
@@ -1246,7 +1294,10 @@ mod tests {
 
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
-            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(
+                RECORD_NAME,
+                &[header, name_str, first_rgce.to_vec()].concat(),
+            ),
             record(records::RECORD_CONTINUE, &continue_payload),
             record(records::RECORD_EOF, &[]),
         ]
@@ -1340,7 +1391,10 @@ mod tests {
 
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
-            record(RECORD_NAME, &[header, name_str, rgce.clone(), desc_str].concat()),
+            record(
+                RECORD_NAME,
+                &[header, name_str, rgce.clone(), desc_str].concat(),
+            ),
             record(records::RECORD_EOF, &[]),
         ]
         .concat();
@@ -1408,7 +1462,8 @@ mod tests {
         // Truncated description: flags + only 2 bytes ("AB"), but header says 5 chars.
         let bad_desc_partial: Vec<u8> = [vec![0u8], b"AB".to_vec()].concat();
 
-        let bad_record_payload = [bad_header, bad_name_str, rgce.clone(), bad_desc_partial].concat();
+        let bad_record_payload =
+            [bad_header, bad_name_str, rgce.clone(), bad_desc_partial].concat();
 
         // Second record: valid defined name.
         let good_name = "Good";
@@ -1545,7 +1600,7 @@ mod tests {
 
         // NAME #2 formula: PtgName(name_id=1).
         let ptgname_rgce: Vec<u8> = [
-            vec![0x23],                 // PtgName
+            vec![0x23],                  // PtgName
             1u32.to_le_bytes().to_vec(), // name_id=1
             0u16.to_le_bytes().to_vec(), // reserved
         ]
@@ -1598,10 +1653,10 @@ mod tests {
         header.extend_from_slice(&0u16.to_le_bytes()); // ixals
         header.extend_from_slice(&itab.to_le_bytes()); // itab
         header.extend_from_slice(&[
-            0,                      // cchCustMenu
+            0,                       // cchCustMenu
             description.len() as u8, // cchDescription
-            0,                      // cchHelpTopic
-            0,                      // cchStatusText
+            0,                       // cchHelpTopic
+            0,                       // cchStatusText
         ]);
 
         let r_name = record(
@@ -1626,10 +1681,7 @@ mod tests {
             header.extend_from_slice(&0u16.to_le_bytes()); // itab
             header.extend_from_slice(&[0, 0, 0, 0]); // no optional strings
 
-            record(
-                RECORD_NAME,
-                &[header, vec![id]].concat(),
-            )
+            record(RECORD_NAME, &[header, vec![id]].concat())
         }
 
         let stream = [
@@ -1778,5 +1830,42 @@ mod tests {
         assert_eq!(parsed.names[0].rgce, rgce);
         assert_eq!(parsed.names[0].refers_to, "1");
         assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+    }
+
+    #[test]
+    fn caps_defined_name_warnings_and_emits_suppression_message() {
+        // Build a workbook globals stream with many malformed NAME records (empty payloads).
+        // Each record should trigger a warning, but the warning vector must remain bounded.
+        let count = MAX_DEFINED_NAME_WARNINGS + 50;
+
+        let mut stream_parts: Vec<Vec<u8>> = Vec::new();
+        stream_parts.push(record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+        for _ in 0..count {
+            stream_parts.push(record(RECORD_NAME, &[]));
+        }
+        stream_parts.push(record(records::RECORD_EOF, &[]));
+        let stream = stream_parts.concat();
+
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+
+        assert!(parsed.names.is_empty());
+
+        assert_eq!(parsed.warnings.len(), MAX_DEFINED_NAME_WARNINGS + 1);
+        assert_eq!(
+            parsed.warnings[MAX_DEFINED_NAME_WARNINGS],
+            "additional defined-name warnings suppressed"
+        );
+
+        assert_eq!(
+            parsed
+                .warnings
+                .iter()
+                .filter(|w| w.contains("failed to parse NAME record"))
+                .count(),
+            MAX_DEFINED_NAME_WARNINGS,
+            "warnings={:?}",
+            parsed.warnings
+        );
     }
 }
