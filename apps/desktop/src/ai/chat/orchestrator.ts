@@ -48,6 +48,9 @@ export type AiChatAttachment =
   | { type: "table"; reference: string; data?: unknown }
   | { type: "chart"; reference: string; data?: unknown };
 
+const MAX_ATTACHMENT_DATA_CHARS_FOR_PROMPT = 2_000;
+const MAX_ATTACHMENT_DATA_CHARS_FOR_AUDIT = 2_000;
+
 function selectionFromAttachments(
   attachments: AiChatAttachment[],
   defaultSheetId: string,
@@ -382,6 +385,8 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
 
     const activeSheetId = options.getActiveSheetId?.() ?? "Sheet1";
     const attachments = params.attachments ?? [];
+    const promptAttachments = compactAttachmentsForPrompt(attachments);
+    const auditAttachments = compactAttachmentsForAudit(attachments);
     const selectedRange =
       selectionFromAttachments(attachments, activeSheetId, options.sheetNameResolver) ?? options.getSelectedRange?.() ?? undefined;
 
@@ -403,7 +408,8 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
           dlp,
           ...(selectedRange ? { selectedRange } : {}),
           focusQuestion: text,
-          attachments,
+          // Keep attachment payloads bounded before they reach downstream context builders / RAG.
+          attachments: promptAttachments,
         }),
       );
     } catch (error) {
@@ -468,7 +474,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
       ...sanitizeHistory(params.history),
       {
         role: "user",
-        content: formatUserMessage(text, attachments)
+        content: formatUserMessage(text, promptAttachments)
       }
     ];
 
@@ -581,7 +587,8 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
           }
         },
         messages: budgetedInitialMessages as any,
-        attachments,
+        // The verifier only needs attachment references; keep this payload bounded.
+        attachments: promptAttachments,
         require_approval: requireApproval as any,
         on_tool_call: params.onToolCall as any,
         on_tool_result: params.onToolResult as any,
@@ -597,7 +604,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
           model: options.model,
           input: {
             text,
-            attachments,
+            attachments: auditAttachments,
             workbookId: options.workbookId,
             sheetId: activeSheetId,
             context: summarizeContextForAudit(workbookContext, options.sheetNameResolver ?? null),
@@ -663,13 +670,14 @@ class CapturingAuditStore implements AIAuditStore {
 }
 
 function formatUserMessage(text: string, attachments: AiChatAttachment[]): string {
-  if (!attachments.length) return text;
-  return `${text}\n\nAttachments:\n${formatAttachmentsForPrompt(attachments)}`;
+  const compacted = compactAttachmentsForPrompt(attachments);
+  if (!compacted.length) return text;
+  return `${text}\n\nAttachments:\n${formatAttachmentsForPrompt(compacted)}`;
 }
 
 function formatAttachmentsForPrompt(attachments: AiChatAttachment[]) {
   return attachments
-    .map((a) => `- ${a.type}: ${a.reference}${a.data ? ` (${stableJson(a.data)})` : ""}`)
+    .map((a) => `- ${a.type}: ${a.reference}${a.data !== undefined ? ` (${stableJson(a.data)})` : ""}`)
     .join("\n");
 }
 
@@ -685,24 +693,106 @@ function stableJson(value: unknown): string {
   }
 }
 
-function stabilizeJson(value: unknown): unknown {
+function stabilizeJson(value: unknown, stack: WeakSet<object> = new WeakSet()): unknown {
   if (value === undefined) return null;
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "symbol") return value.toString();
   if (typeof value === "function") return `[Function ${value.name || "anonymous"}]`;
-  if (value instanceof Date) return value.toISOString();
 
-  if (Array.isArray(value)) return value.map((v) => stabilizeJson(v));
+  if (!value || typeof value !== "object") return value;
 
-  if (value && typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-    const keys = Object.keys(obj).sort();
+  const obj = value as object;
+  if (stack.has(obj)) return "[Circular]";
+  stack.add(obj);
+  try {
+    if (value instanceof Date) return value.toISOString();
+    if (value instanceof Map) {
+      return Array.from(value.entries()).map(([k, v]) => [stabilizeJson(k, stack), stabilizeJson(v, stack)]);
+    }
+    if (value instanceof Set) return Array.from(value.values()).map((v) => stabilizeJson(v, stack));
+
+    if (Array.isArray(value)) return value.map((v) => stabilizeJson(v, stack));
+
+    const record = value as Record<string, unknown>;
+    const keys = Object.keys(record).sort();
     const out: Record<string, unknown> = {};
-    for (const key of keys) out[key] = stabilizeJson(obj[key]);
+    for (const key of keys) out[key] = stabilizeJson(record[key], stack);
     return out;
+  } finally {
+    stack.delete(obj);
   }
+}
 
-  return value;
+function fnv1a32(value: string): number {
+  // 32-bit FNV-1a hash. (Stable across runs.)
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+function hashString(value: string): string {
+  return fnv1a32(value).toString(16);
+}
+
+function compactAttachmentData(
+  data: unknown,
+  options: { maxChars: number; forceTruncate: boolean },
+): unknown {
+  const { json, stabilized, ok } = safeStableJson(data);
+  const originalChars = json.length;
+  const shouldTruncate = options.forceTruncate || !ok || originalChars > options.maxChars;
+  if (!shouldTruncate) return stabilized;
+  return {
+    truncated: true,
+    hash: hashString(json),
+    original_chars: originalChars,
+  };
+}
+
+function safeStableJson(value: unknown): { json: string; stabilized: unknown; ok: boolean } {
+  try {
+    const stabilized = stabilizeJson(value);
+    const json = JSON.stringify(stabilized);
+    if (typeof json === "string") return { json, stabilized, ok: true };
+    // Should be rare (e.g. JSON.stringify(undefined) => undefined), but keep the return type stable.
+    const fallback = JSON.stringify(String(value)) ?? String(value);
+    return { json: fallback, stabilized: String(value), ok: false };
+  } catch {
+    try {
+      const fallback = JSON.stringify(String(value));
+      return { json: typeof fallback === "string" ? fallback : String(value), stabilized: String(value), ok: false };
+    } catch {
+      return { json: String(value), stabilized: String(value), ok: false };
+    }
+  }
+}
+
+function compactAttachmentsForPrompt(attachments: AiChatAttachment[]): AiChatAttachment[] {
+  if (!attachments.length) return [];
+  return attachments.map((a) => {
+    const out: AiChatAttachment = { type: a.type, reference: a.reference } as any;
+    if (a.data !== undefined) {
+      out.data = compactAttachmentData(a.data, { maxChars: MAX_ATTACHMENT_DATA_CHARS_FOR_PROMPT, forceTruncate: false });
+    }
+    return out;
+  });
+}
+
+function compactAttachmentsForAudit(attachments: AiChatAttachment[]): Array<{ type: string; reference: string; data?: unknown }> {
+  if (!attachments.length) return [];
+  return attachments.map((a) => {
+    const out: { type: string; reference: string; data?: unknown } = { type: a.type, reference: a.reference };
+    if (a.data !== undefined) {
+      // Audit logs are persisted locally (often backed by LocalStorage). Never store raw
+      // selection/table payloads (they can contain user data) and keep all attachment data bounded.
+      const forceTruncate = a.type === "range" || a.type === "table";
+      out.data = compactAttachmentData(a.data, { maxChars: MAX_ATTACHMENT_DATA_CHARS_FOR_AUDIT, forceTruncate });
+    }
+    return out;
+  });
 }
 
 function formatPromptContext(promptContext: string): string {

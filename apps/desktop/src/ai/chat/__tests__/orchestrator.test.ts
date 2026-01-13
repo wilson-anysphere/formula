@@ -4,7 +4,7 @@ import { DocumentController } from "../../../document/documentController.js";
 
 import { LocalStorageAIAuditStore } from "../../../../../../packages/ai-audit/src/local-storage-store.js";
 import { ContextManager } from "../../../../../../packages/ai-context/src/contextManager.js";
-import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../../packages/ai-context/src/tokenBudget.js";
+import { createHeuristicTokenEstimator, estimateToolDefinitionTokens, stableJsonStringify } from "../../../../../../packages/ai-context/src/tokenBudget.js";
 import { CONTEXT_SUMMARY_MARKER } from "../../../../../../packages/ai-context/src/trimMessagesToBudget.js";
 import { HashEmbedder } from "../../../../../../packages/ai-rag/src/embedding/hashEmbedder.js";
 import { InMemoryVectorStore } from "../../../../../../packages/ai-rag/src/store/inMemoryVectorStore.js";
@@ -1288,4 +1288,84 @@ describe("ai chat orchestrator", () => {
     const writeCell = toolDefs.find((t: any) => t.name === "write_cell");
     expect(writeCell?.requiresApproval).toBe(true);
   });
+
+  it("compacts large attachment data in prompts and audit logs", async () => {
+    const controller = new DocumentController();
+    seed2x2(controller);
+
+    const requests: any[] = [];
+    const llmClient = {
+      async chat(request: any) {
+        requests.push(request);
+        return { message: { role: "assistant", content: "ok" }, usage: { promptTokens: 1, completionTokens: 1 } };
+      },
+    };
+
+    const auditStore = new LocalStorageAIAuditStore({ key: "test_audit_attachment_compaction" });
+
+    // Keep the test focused on prompt/audit behavior; no need to exercise workbook RAG.
+    const ragService = {
+      async getContextManager() {
+        return new ContextManager({ tokenBudgetTokens: 800 });
+      },
+      async buildWorkbookContextFromSpreadsheetApi() {
+        return { retrieved: [] };
+      },
+      async dispose() {},
+    };
+
+    const orchestrator = createAiChatOrchestrator({
+      documentController: controller,
+      workbookId: "wb_attachment_compaction",
+      llmClient: llmClient as any,
+      model: "mock-model",
+      getActiveSheetId: () => "Sheet1",
+      auditStore,
+      sessionId: "session_attachment_compaction",
+      ragService: ragService as any,
+    });
+
+    const giant = "x".repeat(50_000);
+    const attachments = [
+      { type: "table" as const, reference: "Sheet1!A1:B2", data: { snapshot: giant } },
+    ];
+
+    await orchestrator.sendMessage({ text: "Hello", history: [], attachments });
+
+    expect(requests).toHaveLength(1);
+    const userMessage = (requests[0]?.messages ?? []).find((m: any) => m?.role === "user");
+    expect(userMessage).toBeTruthy();
+    expect(userMessage.content).not.toContain(giant);
+
+    const entries = await auditStore.listEntries({ session_id: "session_attachment_compaction" });
+    expect(entries).toHaveLength(1);
+    const auditAttachments = (entries[0] as any)?.input?.attachments;
+    expect(auditAttachments).toEqual([
+      {
+        type: "table",
+        reference: "Sheet1!A1:B2",
+        data: expect.objectContaining({
+          truncated: true,
+          hash: expect.any(String),
+          original_chars: expect.any(Number),
+        }),
+      },
+    ]);
+    expect(JSON.stringify(auditAttachments)).not.toContain(giant);
+
+    const expectedJson = stableJsonStringify({ snapshot: giant });
+    const expectedHash = fnv1a32(expectedJson).toString(16);
+    expect(auditAttachments[0].data.hash).toBe(expectedHash);
+    expect(auditAttachments[0].data.original_chars).toBe(expectedJson.length);
+  });
 });
+
+function fnv1a32(value: string): number {
+  // Keep in sync with the chat orchestrator's attachment hashing.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
