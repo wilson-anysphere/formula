@@ -101,6 +101,22 @@ test("CollabSession setCells enforces viewer role permissions (no Yjs mutation)"
   doc.destroy();
 });
 
+test("CollabSession setCells rejects unparseable cell keys when permissions are configured (viewer)", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc, schema: { autoInit: false } });
+  session.setPermissions({ role: "viewer", userId: "u-viewer", rangeRestrictions: [] });
+
+  const before = Y.encodeStateAsUpdate(doc);
+  await assert.rejects(session.setCells([{ cellKey: "bad-key", value: "hacked" }]), /Invalid cellKey/);
+  const after = Y.encodeStateAsUpdate(doc);
+
+  assert.equal(Buffer.from(before).equals(Buffer.from(after)), true);
+  assert.equal(session.cells.has("bad-key"), false);
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession setCells ignorePermissions bypasses permission checks (but still respects encryption invariants)", async () => {
   const doc = new Y.Doc();
   const session = createCollabSession({ doc, schema: { autoInit: false } });
@@ -108,6 +124,18 @@ test("CollabSession setCells ignorePermissions bypasses permission checks (but s
 
   await session.setCells([{ cellKey: "Sheet1:0:0", value: "allowed" }], { ignorePermissions: true });
   assert.equal((await session.getCell("Sheet1:0:0"))?.value, "allowed");
+
+  session.destroy();
+  doc.destroy();
+});
+
+test("CollabSession setCells ignorePermissions allows writing to unparseable cell keys (when encryption does not require parsing)", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc, schema: { autoInit: false } });
+  session.setPermissions({ role: "viewer", userId: "u-viewer", rangeRestrictions: [] });
+
+  await session.setCells([{ cellKey: "bad-key", value: "allowed" }], { ignorePermissions: true });
+  assert.equal((await session.getCell("bad-key"))?.value, "allowed");
 
   session.destroy();
   doc.destroy();
