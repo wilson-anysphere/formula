@@ -39,5 +39,29 @@ describe("FormulaBarView name box invalid reference feedback", () => {
 
     host.remove();
   });
-});
 
+  it("clears invalid state on blur and restores the previous name box value", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onGoTo = vi.fn(() => false);
+    new FormulaBarView(host, { onCommit: () => {}, onGoTo });
+
+    const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]')!;
+    address.focus();
+    address.value = "NotARef";
+    address.dispatchEvent(new Event("input", { bubbles: true }));
+    address.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+
+    expect(address.getAttribute("aria-invalid")).toBe("true");
+    expect(address.value).toBe("NotARef");
+
+    address.blur();
+
+    expect(address.getAttribute("aria-invalid")).not.toBe("true");
+    // `FormulaBarView` keeps the name box in sync with the selection; the default selection is A1.
+    expect(address.value).toBe("A1");
+
+    host.remove();
+  });
+});
