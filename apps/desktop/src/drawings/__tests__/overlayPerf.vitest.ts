@@ -51,7 +51,7 @@ afterEach(() => {
 });
 
 describe("DrawingOverlay perf guards", () => {
-  it("does not call getComputedStyle on every render()", async () => {
+  it("does not call getComputedStyle on every render()", () => {
     const getPropertyValue = vi.fn((name: string) => {
       switch (name) {
         case "--chart-series-1":
@@ -80,8 +80,8 @@ describe("DrawingOverlay perf guards", () => {
     const canvas = createStubCanvas(ctx);
     const overlay = new DrawingOverlay(canvas, images, geom);
 
-    await overlay.render([], viewport);
-    await overlay.render([], viewport);
+    overlay.render([], viewport);
+    overlay.render([], viewport);
 
     expect(getComputedStyleSpy).toHaveBeenCalledTimes(1);
   });

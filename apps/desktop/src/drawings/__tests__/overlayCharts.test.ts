@@ -64,7 +64,7 @@ const geom: GridGeometry = {
 const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 100, height: 100, dpr: 1, zoom: 1 };
 
 describe("DrawingOverlay charts", () => {
-  it("delegates to chartRenderer when chartId is present", async () => {
+  it("delegates to chartRenderer when chartId is present", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -78,7 +78,7 @@ describe("DrawingOverlay charts", () => {
     };
 
     const overlay = new DrawingOverlay(canvas, images, geom, chartRenderer);
-    await overlay.render([createChartObject("chart_1")], viewport);
+    overlay.render([createChartObject("chart_1")], viewport);
 
     expect(received).toEqual({
       chartId: "chart_1",
@@ -88,7 +88,7 @@ describe("DrawingOverlay charts", () => {
     expect(calls.some((call) => call.method === "strokeRect")).toBe(false);
   });
 
-  it("falls back to placeholder when chartRenderer throws", async () => {
+  it("falls back to placeholder when chartRenderer throws", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -99,12 +99,12 @@ describe("DrawingOverlay charts", () => {
     };
 
     const overlay = new DrawingOverlay(canvas, images, geom, chartRenderer);
-    await overlay.render([createChartObject("chart_1")], viewport);
+    overlay.render([createChartObject("chart_1")], viewport);
 
     expect(calls.some((call) => call.method === "strokeRect")).toBe(true);
   });
 
-  it("resolves nested CSS vars for overlay tokens", async () => {
+  it("resolves nested CSS vars for overlay tokens", () => {
     const hadDocument = Object.prototype.hasOwnProperty.call(globalThis, "document");
     const hadGetComputedStyle = Object.prototype.hasOwnProperty.call(globalThis, "getComputedStyle");
     const originalDocument = (globalThis as any).document;
@@ -136,7 +136,7 @@ describe("DrawingOverlay charts", () => {
 
       const overlay = new DrawingOverlay(canvas, images, geom);
       overlay.setSelectedId(1);
-      await overlay.render([createChartObject("chart_1")], viewport);
+      overlay.render([createChartObject("chart_1")], viewport);
 
       const strokeCalls = calls.filter((call) => call.method === "strokeRect");
       // First strokeRect is the placeholder outline.

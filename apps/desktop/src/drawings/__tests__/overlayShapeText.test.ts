@@ -63,7 +63,7 @@ const geom: GridGeometry = {
 const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 200, height: 200, dpr: 1 };
 
 describe("DrawingOverlay shapes", () => {
-  it("renders txBody text instead of placeholder label", async () => {
+  it("renders txBody text instead of placeholder label", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -81,7 +81,7 @@ describe("DrawingOverlay shapes", () => {
       </xdr:sp>
     `;
 
-    await overlay.render([createShapeObject(rawXml)], viewport);
+    overlay.render([createShapeObject(rawXml)], viewport);
 
     const fillTextValues = calls.filter((call) => call.method === "fillText").map((call) => call.args[0]);
     expect(fillTextValues).toContain("Hello");

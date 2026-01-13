@@ -329,11 +329,12 @@ export class DrawingOverlay {
   private shapeTextCachePruneSource: DrawingObject[] | null = null;
   private shapeTextCachePruneLength = 0;
   private readonly spatialIndex = new DrawingSpatialIndex();
-  private readonly prefetchedImageBitmaps = new Map<string, Promise<ImageBitmap>>();
+  private requestRender: (() => void) | null = null;
+  private readonly onBitmapReady = () => {
+    this.scheduleHydrationRerender();
+  };
   private resizeMemo: { cssWidth: number; cssHeight: number; dpr: number; pixelWidth: number; pixelHeight: number } | null = null;
   private selectedId: number | null = null;
-  private renderSeq = 0;
-  private renderAbort: AbortController | null = null;
   private preloadAbort: AbortController | null = typeof AbortController !== "undefined" ? new AbortController() : null;
   private preloadCount = 0;
   private destroyed = false;
@@ -347,6 +348,7 @@ export class DrawingOverlay {
   private themeObserver: MutationObserver | null = null;
   private lastRenderArgs: { objects: DrawingObject[]; viewport: Viewport; options?: { drawObjects?: boolean } } | null = null;
   private readonly pendingImageHydrations = new Map<string, Promise<ImageEntry | undefined>>();
+  private readonly imageHydrationNegativeCache = new Map<string, number>();
   private hydrationRerenderScheduled = false;
 
   constructor(
@@ -354,10 +356,12 @@ export class DrawingOverlay {
     private readonly images: ImageStore,
     private readonly geom: GridGeometry,
     private readonly chartRenderer?: ChartRenderer,
+    requestRender?: (() => void) | null,
   ) {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("overlay canvas 2d context not available");
     this.ctx = ctx;
+    this.requestRender = requestRender ?? null;
     this.installThemeObserver();
   }
 
@@ -448,6 +452,10 @@ export class DrawingOverlay {
     return this.orderedObjects;
   }
 
+  setRequestRender(requestRender: (() => void) | null): void {
+    this.requestRender = requestRender;
+  }
+
   private scheduleHydrationRerender(): void {
     if (this.hydrationRerenderScheduled) return;
     this.hydrationRerenderScheduled = true;
@@ -462,9 +470,23 @@ export class DrawingOverlay {
     schedule(() => {
       this.hydrationRerenderScheduled = false;
       if (this.destroyed) return;
+      const cb = this.requestRender;
+      if (cb) {
+        try {
+          cb();
+        } catch {
+          // Best-effort: rendering hooks should never throw from cache callbacks.
+        }
+        return;
+      }
+
       const last = this.lastRenderArgs;
       if (!last) return;
-      void this.render(last.objects, last.viewport, last.options).catch(() => {});
+      try {
+        this.render(last.objects, last.viewport, last.options);
+      } catch {
+        // Best-effort: avoid throwing from microtask callbacks.
+      }
     });
   }
 
@@ -472,6 +494,14 @@ export class DrawingOverlay {
     const id = String(imageId ?? "");
     if (!id) return;
     if (typeof this.images.getAsync !== "function") return;
+
+    // Avoid hammering async stores (e.g. IndexedDB) if an image cannot be found.
+    const cachedUntil = this.imageHydrationNegativeCache.get(id);
+    if (cachedUntil != null) {
+      if (cachedUntil > Date.now()) return;
+      this.imageHydrationNegativeCache.delete(id);
+    }
+
     if (this.pendingImageHydrations.has(id)) return;
 
     const promise = Promise.resolve()
@@ -486,7 +516,10 @@ export class DrawingOverlay {
       // while an async hydration is still in-flight. Avoid mutating shared image stores after
       // teardown so the decoded bytes can be released promptly.
       if (this.destroyed) return;
-      if (!entry) return;
+      if (!entry) {
+        this.imageHydrationNegativeCache.set(id, Date.now() + 250);
+        return;
+      }
 
       // Ensure subsequent sync `get()` calls can resolve without awaiting `getAsync`.
       try {
@@ -497,28 +530,20 @@ export class DrawingOverlay {
         // Best-effort: ignore caching failures.
       }
 
+      // Kick off bitmap decode so we can re-render once ready.
+      this.bitmapCache.getOrRequest(entry, this.onBitmapReady);
+
       this.scheduleHydrationRerender();
     });
   }
 
-  async render(objects: DrawingObject[], viewport: Viewport, options?: { drawObjects?: boolean }): Promise<void> {
+  render(objects: DrawingObject[], viewport: Viewport, options?: { drawObjects?: boolean }): void {
     if (this.destroyed) return;
-    this.renderSeq += 1;
-    const seq = this.renderSeq;
     let completed = false;
-    let shapeCount = 0;
     const drawObjects = options?.drawObjects !== false;
     // Keep the latest render args around so async image hydration can trigger a follow-up render
     // once bytes are available (without relying on callers to poll/refresh).
     this.lastRenderArgs = { objects, viewport: { ...viewport }, options };
-
-    // Cancel any prior render pass so we don't draw stale content after a newer
-    // render begins (e.g. rapid scroll/zoom updates). This also lets callers
-    // abort in-flight image decode awaits for offscreen images.
-    this.renderAbort?.abort();
-    const abort = typeof AbortController !== "undefined" ? new AbortController() : null;
-    this.renderAbort = abort;
-    const signal = abort?.signal;
 
     const chartRenderer = this.chartRenderer;
     if (chartRenderer && typeof chartRenderer.pruneSurfaces === "function") {
@@ -547,8 +572,6 @@ export class DrawingOverlay {
 
     const paneLayout = resolvePaneLayout(viewport, this.geom);
     const viewportRect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
-    const prefetchedImageBitmaps = this.prefetchedImageBitmaps;
-    prefetchedImageBitmaps.clear();
     const withClipRect = (clipRect: Rect, fn: () => void) => {
       ctx.save();
       ctx.beginPath();
@@ -630,7 +653,6 @@ export class DrawingOverlay {
       // multiple images can decode concurrently on cold render.
       for (const obj of ordered) {
         if (obj.kind.type !== "image") continue;
-        if (seq !== this.renderSeq || signal?.aborted) return;
 
         const rect = this.spatialIndex.getRect(obj.id) ?? anchorToRectPx(obj.anchor, this.geom, zoom);
         const anchor = obj.anchor;
@@ -661,25 +683,16 @@ export class DrawingOverlay {
         if (!intersects(aabb, viewportRect)) continue;
 
         const imageId = obj.kind.imageId;
-        if (prefetchedImageBitmaps.has(imageId)) continue;
         const entry = this.images.get(imageId);
         if (!entry) {
-          // Start best-effort hydration early so async image byte loading can overlap with any
-          // in-flight decode awaits for earlier z-order images.
+          // Start best-effort hydration early so async image byte loading can overlap bitmap decode.
           this.hydrateImage(imageId);
           continue;
         }
-        const bitmapPromise = this.bitmapCache.get(entry, signal ? { signal } : undefined);
-        // Attach a no-op rejection handler immediately so failures for images later in the
-        // z-order (or in cancelled render passes) don't surface as unhandled promise
-        // rejections before we reach their draw pass.
-        void bitmapPromise.catch(() => {});
-        prefetchedImageBitmaps.set(imageId, bitmapPromise);
+        this.bitmapCache.getOrRequest(entry, this.onBitmapReady);
       }
 
       for (const obj of ordered) {
-        if (seq !== this.renderSeq || signal?.aborted) return;
-        if (obj.kind.type === "shape") shapeCount += 1;
         const rect = this.spatialIndex.getRect(obj.id) ?? anchorToRectPx(obj.anchor, this.geom, zoom);
         const anchor = obj.anchor;
         const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < paneLayout.frozenRows;
@@ -776,13 +789,8 @@ export class DrawingOverlay {
             continue;
           }
 
-          try {
-            const bitmapPromise =
-              prefetchedImageBitmaps.get(imageId) ??
-              this.bitmapCache.get(entry, signal ? { signal } : undefined);
-            const bitmap = await bitmapPromise;
-            if (signal?.aborted) return;
-            if (seq !== this.renderSeq) return;
+          const bitmap = this.bitmapCache.getOrRequest(entry, this.onBitmapReady);
+          if (bitmap) {
             withClipRect(clipRect, () => {
               if (hasNonIdentityTransform(obj.transform)) {
                 withObjectTransform(ctx, screenRectScratch, obj.transform, (localRect) => {
@@ -803,11 +811,9 @@ export class DrawingOverlay {
               }
             });
             continue;
-          } catch (err) {
-            if (signal?.aborted || isAbortError(err)) return;
-            if (seq !== this.renderSeq) return;
-            // Fall through to placeholder rendering.
           }
+
+          // Fall through to placeholder rendering while decode is in-flight.
         }
 
         if (obj.kind.type === "chart") {
@@ -973,7 +979,6 @@ export class DrawingOverlay {
     }
 
     // Selection overlay.
-    if (seq !== this.renderSeq) return;
     if (selectedId != null) {
       if (selectedScreenRect && selectedClipRect && selectedAabb) {
         if (selectedClipRect.width > 0 && selectedClipRect.height > 0 && intersects(selectedAabb, selectedClipRect)) {
@@ -1027,9 +1032,7 @@ export class DrawingOverlay {
     } finally {
       // Prune cached shape text layouts for shapes that no longer exist.
       //
-      // Only the latest render pass should mutate shared caches; older async renders
-      // can finish out-of-order and must not evict newer cache entries.
-      if (completed && seq === this.renderSeq && this.shapeTextCache.size > 0) {
+      if (completed && this.shapeTextCache.size > 0) {
         // `shapeTextCache` is keyed by drawing id and can otherwise grow unbounded across
         // delete/undo/redo sessions. Avoid per-frame allocations by only pruning when the
         // object list changes (or appears to have been mutated in place).
@@ -1096,14 +1099,13 @@ export class DrawingOverlay {
     // If the bitmap bytes change while we are mid-render or mid-preload, the old decode result can
     // arrive after the cache entry has been invalidated. Abort any in-flight consumers first so the
     // stale ImageBitmap is closed when the decode eventually resolves.
-    this.renderAbort?.abort();
-    this.renderAbort = null;
     if (this.preloadCount > 0) {
       this.preloadAbort?.abort();
       this.preloadAbort = typeof AbortController !== "undefined" ? new AbortController() : null;
     }
-    this.prefetchedImageBitmaps.clear();
-    this.bitmapCache.invalidate(String(imageId ?? ""));
+    const id = String(imageId ?? "");
+    this.imageHydrationNegativeCache.delete(id);
+    this.bitmapCache.invalidate(id);
   }
 
   /**
@@ -1116,27 +1118,23 @@ export class DrawingOverlay {
     // When callers clear the cache (e.g. applying a new document snapshot), ensure any in-flight
     // decodes from older renders/preloads don't leak their ImageBitmaps after the cache entry is
     // dropped.
-    this.renderAbort?.abort();
-    this.renderAbort = null;
     this.preloadAbort?.abort();
     this.preloadAbort = typeof AbortController !== "undefined" ? new AbortController() : null;
-    this.prefetchedImageBitmaps.clear();
     this.bitmapCache.clear();
+    this.pendingImageHydrations.clear();
+    this.imageHydrationNegativeCache.clear();
   }
 
   destroy(): void {
     // Cancel any in-flight render and release cached bitmap resources.
     this.destroyed = true;
-    this.renderAbort?.abort();
-    this.renderAbort = null;
+    this.requestRender = null;
     this.preloadAbort?.abort();
     this.preloadAbort = null;
-    this.renderSeq += 1;
     this.chartRenderer?.destroy?.();
     this.themeObserver?.disconnect();
     this.themeObserver = null;
     this.bitmapCache.clear();
-    this.prefetchedImageBitmaps.clear();
     this.shapeTextCache.clear();
     this.shapeTextCachePruneSource = null;
     this.shapeTextCachePruneLength = 0;
@@ -1154,6 +1152,7 @@ export class DrawingOverlay {
     this.selectedId = null;
     this.lastRenderArgs = null;
     this.pendingImageHydrations.clear();
+    this.imageHydrationNegativeCache.clear();
     this.hydrationRerenderScheduled = false;
 
     // Release the canvas backing store even if the DOM element is still referenced
@@ -1173,10 +1172,6 @@ export class DrawingOverlay {
   dispose(): void {
     this.destroy();
   }
-}
-
-function isAbortError(err: unknown): boolean {
-  return typeof (err as { name?: unknown } | null)?.name === "string" && (err as any).name === "AbortError";
 }
 
 function createAbortError(): Error {

@@ -615,7 +615,7 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       };
 
       const overlay = new DrawingOverlay(canvas as HTMLCanvasElement, images, geom);
-      await overlay.render([object], renderViewport);
+      overlay.render([object], renderViewport);
 
       const stroke = calls.find((c) => c.method === "strokeRect");
       expect(stroke).toBeTruthy();

@@ -47,7 +47,7 @@ afterEach(() => {
 });
 
 describe("DrawingOverlay images", () => {
-  it("aborts stale render passes without triggering duplicate decodes", async () => {
+  it("dedupes in-flight decodes across render passes and requests a redraw when ready", async () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -73,22 +73,26 @@ describe("DrawingOverlay images", () => {
 
     const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 100, height: 100, dpr: 1 };
 
-    const overlay = new DrawingOverlay(canvas, images, geom);
+    const requestRender = vi.fn();
+    const overlay = new DrawingOverlay(canvas, images, geom, undefined, requestRender);
 
     const objects = [createImageObject(entry.id)];
 
-    const first = overlay.render(objects, viewport);
-    const second = overlay.render(objects, viewport);
+    overlay.render(objects, viewport);
+    overlay.render(objects, viewport);
+
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+    expect(calls.filter((c) => c.method === "drawImage")).toHaveLength(0);
+    expect(requestRender).toHaveBeenCalledTimes(0);
 
     resolveDecode({} as ImageBitmap);
 
-    await expect(first).resolves.toBeUndefined();
-    await expect(second).resolves.toBeUndefined();
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
 
-    // The decode should only be attempted once even though the first render was aborted.
     expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+    expect(requestRender).toHaveBeenCalledTimes(1);
 
-    // Only the latest render pass should draw.
+    overlay.render(objects, viewport);
     expect(calls.filter((c) => c.method === "drawImage")).toHaveLength(1);
   });
 });

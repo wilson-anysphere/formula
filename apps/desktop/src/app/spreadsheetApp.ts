@@ -2519,6 +2519,7 @@ export class SpreadsheetApp {
       this.drawingChartRenderer,
     );
     this.drawingOverlay.setSelectedId(null);
+    this.drawingOverlay.setRequestRender(() => this.refresh("scroll"));
 
     this.workbookImageManager = new WorkbookImageManager({
       images: this.drawingImages,
@@ -11671,9 +11672,11 @@ export class SpreadsheetApp {
 
     if (!selected) {
       overlay.setSelectedId(null);
-      void overlay.render([], viewport, { drawObjects: false }).catch((err) => {
+      try {
+        overlay.render([], viewport, { drawObjects: false });
+      } catch (err) {
         console.warn("Chart selection overlay render failed", err);
-      });
+      }
       return;
     }
 
@@ -11685,9 +11688,11 @@ export class SpreadsheetApp {
       zOrder: 0,
     };
     overlay.setSelectedId(drawingId);
-    void overlay.render([obj], viewport, { drawObjects: false }).catch((err) => {
+    try {
+      overlay.render([obj], viewport, { drawObjects: false });
+    } catch (err) {
       console.warn("Chart selection overlay render failed", err);
-    });
+    }
   }
 
   private hitTestChartAtClientPoint(clientX: number, clientY: number): {
@@ -12921,9 +12926,11 @@ export class SpreadsheetApp {
     const overlaySelectedId =
       this.selectedDrawingId != null ? (drawDrawingSelectionInOverlay ? this.selectedDrawingId : null) : selectedOverlayId;
     overlay.setSelectedId(overlaySelectedId);
-    void overlay.render(objects, viewport).catch((err) => {
+    try {
+      overlay.render(objects, viewport);
+    } catch (err) {
       console.warn("Drawing overlay render failed", err);
-    });
+    }
     if (this.getSelectedDrawingId() !== prevSelected) {
       this.emitDrawingSelectionChanged();
     }

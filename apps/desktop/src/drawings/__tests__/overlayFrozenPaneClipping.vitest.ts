@@ -59,7 +59,7 @@ function shapeObject(opts: { id: number; row: number; col: number; zOrder: numbe
 }
 
 describe("DrawingOverlay frozen pane clipping", () => {
-  it("clips each object to its frozen-pane quadrant (including header offsets)", async () => {
+  it("clips each object to its frozen-pane quadrant (including header offsets)", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
     const overlay = new DrawingOverlay(canvas, images, geom);
@@ -90,7 +90,7 @@ describe("DrawingOverlay frozen pane clipping", () => {
       frozenHeightPx: headerOffsetY + frozenContentHeight,
     };
 
-    await overlay.render(objects, viewport);
+    overlay.render(objects, viewport);
 
     const rectCalls = calls.filter((c) => c.method === "rect").map((c) => c.args as number[]);
     expect(rectCalls).toEqual([
@@ -118,7 +118,7 @@ describe("DrawingOverlay frozen pane clipping", () => {
     ]);
   });
 
-  it("ignores stale frozen pixel extents when frozen row/col counts are 0", async () => {
+  it("ignores stale frozen pixel extents when frozen row/col counts are 0", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
     const overlay = new DrawingOverlay(canvas, images, geom);
@@ -140,7 +140,7 @@ describe("DrawingOverlay frozen pane clipping", () => {
       frozenHeightPx: 50,
     };
 
-    await overlay.render(objects, viewport);
+    overlay.render(objects, viewport);
 
     const strokeCalls = calls.filter((c) => c.method === "strokeRect").map((c) => c.args as number[]);
     expect(strokeCalls).toEqual([[0, 0, 10, 10]]);

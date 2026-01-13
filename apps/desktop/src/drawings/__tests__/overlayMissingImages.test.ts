@@ -58,7 +58,7 @@ const geom: GridGeometry = {
 const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 100, height: 100, dpr: 1 };
 
 describe("DrawingOverlay missing images", () => {
-  it("renders a placeholder and selection handles when image bytes are missing", async () => {
+  it("renders a placeholder and selection handles when image bytes are missing", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -72,7 +72,7 @@ describe("DrawingOverlay missing images", () => {
     const overlay = new DrawingOverlay(canvas, images, geom);
     overlay.setSelectedId(1);
 
-    await overlay.render([createImageObject("img_1")], viewport);
+    overlay.render([createImageObject("img_1")], viewport);
 
     expect(calls.some((call) => call.method === "drawImage")).toBe(false);
 

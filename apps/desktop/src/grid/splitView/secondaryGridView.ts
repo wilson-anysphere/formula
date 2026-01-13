@@ -96,7 +96,9 @@ export class SecondaryGridView {
   private sheetViewFrozen: { rows: number; cols: number } = { rows: 0, cols: 0 };
   private drawingsRenderInProgress = false;
   private drawingsRenderQueued = false;
-  private drawingsRenderPromise: Promise<void> | null = null;
+  // Rendering is synchronous, but some callers may trigger nested render requests (e.g. as
+  // a side-effect of scroll/resize events). Keep a tiny re-entrancy/queue guard so we can
+  // coalesce those into a single pass.
 
   constructor(options: {
     container: HTMLElement;
@@ -452,7 +454,9 @@ export class SecondaryGridView {
         };
       },
     };
-    this.drawingsOverlay = new DrawingOverlay(drawingsCanvas, this.drawingsImages, geom, options.chartRenderer);
+    this.drawingsOverlay = new DrawingOverlay(drawingsCanvas, this.drawingsImages, geom, options.chartRenderer, () =>
+      this.renderDrawings(),
+    );
 
     // Initial sizing (ResizeObserver will keep it updated).
     this.resizeToContainer();
@@ -508,7 +512,6 @@ export class SecondaryGridView {
     this.drawingsOverlay?.destroy?.();
     this.drawingsRenderQueued = false;
     this.drawingsRenderInProgress = false;
-    this.drawingsRenderPromise = null;
     this.flushPersistence();
     this.resizeObserver.disconnect();
     for (const dispose of this.disposeFns) dispose();
@@ -1019,34 +1022,29 @@ export class SecondaryGridView {
     };
   }
 
-  private async renderDrawings(): Promise<void> {
+  private renderDrawings(): void {
     if (this.disposed) return;
     if (this.drawingsRenderInProgress) {
       this.drawingsRenderQueued = true;
-      return this.drawingsRenderPromise ?? Promise.resolve();
+      return;
     }
 
     this.drawingsRenderInProgress = true;
-    const run = (async () => {
-      try {
-        do {
-          if (this.disposed) return;
-          this.drawingsRenderQueued = false;
-          const sheetId = this.getSheetId();
-          const objects = this.getDrawingObjects(sheetId);
-          const viewport = this.getDrawingsViewport();
-          const selectedId = this.getSelectedDrawingId?.() ?? null;
-          this.drawingsOverlay.setSelectedId(selectedId);
-          await this.drawingsOverlay.render(objects, viewport);
-        } while (this.drawingsRenderQueued);
-      } catch {
-        // Best-effort: drawing overlay should never break grid interactions.
-      } finally {
-        this.drawingsRenderInProgress = false;
-        this.drawingsRenderPromise = null;
-      }
-    })();
-    this.drawingsRenderPromise = run;
-    return run;
+    try {
+      do {
+        if (this.disposed) return;
+        this.drawingsRenderQueued = false;
+        const sheetId = this.getSheetId();
+        const objects = this.getDrawingObjects(sheetId);
+        const viewport = this.getDrawingsViewport();
+        const selectedId = this.getSelectedDrawingId?.() ?? null;
+        this.drawingsOverlay.setSelectedId(selectedId);
+        this.drawingsOverlay.render(objects, viewport);
+      } while (this.drawingsRenderQueued);
+    } catch {
+      // Best-effort: drawing overlay should never break grid interactions.
+    } finally {
+      this.drawingsRenderInProgress = false;
+    }
   }
 }

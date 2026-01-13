@@ -151,7 +151,9 @@ describe("SpreadsheetApp.destroy drawing overlay teardown", () => {
       // Render once so the bitmap enters the overlay cache.
       const overlay: any = (app as any).drawingOverlay;
       const viewport = (app as any).getDrawingRenderViewport() as DrawingViewport;
-      await overlay.render(objects, viewport);
+      overlay.render(objects, viewport);
+      // Let the cache attach the resolved bitmap before destroying the app.
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
 
       app.destroy();
 

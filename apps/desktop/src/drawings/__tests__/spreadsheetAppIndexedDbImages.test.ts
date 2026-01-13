@@ -158,10 +158,26 @@ describe("SpreadsheetApp + IndexedDbImageStore", () => {
     const images = (app as any).drawingImages as { get: (id: string) => any };
     expect(images.get(entry.id)).toBeUndefined();
 
-    const overlay = (app as any).drawingOverlay as { render: (...args: any[]) => Promise<void> };
+    const overlay = (app as any).drawingOverlay as { render: (...args: any[]) => void };
     const viewport = (app as any).getDrawingRenderViewport();
     const objects = (app as any).listDrawingObjectsForSheet();
-    await overlay.render(objects, viewport);
+    overlay.render(objects, viewport);
+
+    // `DrawingOverlay.render()` is synchronous and may need a subsequent render after
+    // IndexedDB hydration + bitmap decode settle.
+    //
+    // Wait for the async hydration/render loop to complete (requestAnimationFrame is
+    // stubbed in this test environment to run immediately).
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      // Allow IndexedDB request events + microtasks to run.
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+      const hydrated = images.get(entry.id);
+      const drawingCanvas = root.querySelector<HTMLCanvasElement>('[data-testid="drawing-layer-canvas"]')!;
+      const ctx = contexts.get(drawingCanvas) as any;
+      if (hydrated && ctx?.drawImage?.mock?.calls?.length > 0) break;
+    }
 
     const drawingCanvas = root.querySelector<HTMLCanvasElement>('[data-testid="drawing-layer-canvas"]')!;
     const ctx = contexts.get(drawingCanvas) as any;
@@ -289,22 +305,32 @@ describe("SpreadsheetApp + IndexedDbImageStore", () => {
     const images2 = (app2 as any).drawingImages as { get: (id: string) => any };
     expect(images2.get(imageId)).toBeUndefined();
 
-    const overlay = (app2 as any).drawingOverlay as { render: (...args: any[]) => Promise<void> };
+    const overlay = (app2 as any).drawingOverlay as { render: (...args: any[]) => void };
     const viewport = (app2 as any).getDrawingRenderViewport();
     const objects = (app2 as any).listDrawingObjectsForSheet();
-    await overlay.render(objects, viewport);
-
     const drawingCanvas = root2.querySelector<HTMLCanvasElement>('[data-testid="drawing-layer-canvas"]')!;
     const ctx = contexts.get(drawingCanvas) as any;
-    // Hydration is async (IndexedDB + follow-up render). Poll briefly for bytes to land in memory.
+
+    // First render should schedule async hydration from IndexedDB (non-blocking).
+    overlay.render(objects, viewport);
+
+    // Wait for the async store hydration to populate the in-memory ImageStore.
     let hydrated: any = null;
-    for (let attempt = 0; attempt < 50; attempt += 1) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
       hydrated = images2.get(imageId);
-      if (hydrated && ctx.drawImage.mock.calls.length > 0) break;
+      if (hydrated) break;
       await new Promise((r) => setTimeout(r, 0));
     }
     expect(hydrated).toBeTruthy();
     expect(Array.from(hydrated.bytes)).toEqual(Array.from(bytes));
+
+    // Allow the bitmap decode microtasks to settle.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    // Re-render to draw the now-decoded bitmap.
+    ctx.drawImage.mockClear();
+    overlay.render(objects, viewport);
     expect(ctx.drawImage).toHaveBeenCalled();
 
     app2.destroy();

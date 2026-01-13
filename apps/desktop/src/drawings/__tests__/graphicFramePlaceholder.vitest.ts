@@ -121,12 +121,12 @@ describe("DrawingML graphicFrame detection", () => {
 });
 
 describe("DrawingOverlay graphicFrame placeholders", () => {
-  it("renders SmartArt placeholder label when no label is provided", async () => {
+  it("renders SmartArt placeholder label when no label is provided", () => {
     const { ctx, calls, state } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
     const overlay = new DrawingOverlay(canvas, images, geom);
 
-    await overlay.render(
+    overlay.render(
       [
         createUnknownObject({
           type: "unknown",
@@ -144,12 +144,12 @@ describe("DrawingOverlay graphicFrame placeholders", () => {
     ).toBe(true);
   });
 
-  it("uses the object's label when available", async () => {
+  it("uses the object's label when available", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
     const overlay = new DrawingOverlay(canvas, images, geom);
 
-    await overlay.render(
+    overlay.render(
       [
         createUnknownObject({
           type: "unknown",

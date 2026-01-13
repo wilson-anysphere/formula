@@ -50,7 +50,7 @@ const geom: GridGeometry = {
 };
 
 describe("DrawingOverlay selection handles", () => {
-  it("renders 8 handle rects when an object is selected", async () => {
+  it("renders 8 handle rects when an object is selected", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -71,7 +71,7 @@ describe("DrawingOverlay selection handles", () => {
     ];
 
     const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 300, height: 300, dpr: 1 };
-    await overlay.render(objects, viewport);
+    overlay.render(objects, viewport);
 
     const handleRects = calls.filter(
       (call) =>

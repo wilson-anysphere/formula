@@ -55,7 +55,7 @@ const geom: GridGeometry = {
 };
 
 describe("DrawingOverlay viewport transforms", () => {
-  it("offsets absolute anchors by the A1 origin when geometry is root-space (includes headers)", async () => {
+  it("offsets absolute anchors by the A1 origin when geometry is root-space (includes headers)", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
     const geomWithOrigin: GridGeometry = {
@@ -88,7 +88,7 @@ describe("DrawingOverlay viewport transforms", () => {
     ];
 
     const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 200, height: 200, dpr: 1 };
-    await overlay.render(objects, viewport);
+    overlay.render(objects, viewport);
 
     const strokeRects = calls.filter((call) => call.method === "strokeRect").map((call) => call.args);
     expect(strokeRects).toEqual([
@@ -97,7 +97,7 @@ describe("DrawingOverlay viewport transforms", () => {
     ]);
   });
 
-  it("pins frozen-pane anchored objects while scrollable objects subtract scroll", async () => {
+  it("pins frozen-pane anchored objects while scrollable objects subtract scroll", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
     const overlay = new DrawingOverlay(canvas, images, geom);
@@ -145,7 +145,7 @@ describe("DrawingOverlay viewport transforms", () => {
       frozenCols: 1,
     };
 
-    await overlay.render(objects, viewport);
+    overlay.render(objects, viewport);
 
     const strokeRects = calls.filter((call) => call.method === "strokeRect").map((call) => call.args);
     expect(strokeRects).toEqual([
@@ -163,7 +163,7 @@ describe("DrawingOverlay viewport transforms", () => {
     expect(absHit?.object.id).toBe(3);
   });
 
-  it("applies viewport zoom to EMU-derived pixel geometry", async () => {
+  it("applies viewport zoom to EMU-derived pixel geometry", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
     const overlay = new DrawingOverlay(canvas, images, geom);
@@ -182,7 +182,7 @@ describe("DrawingOverlay viewport transforms", () => {
     ];
 
     const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 500, height: 500, dpr: 1, zoom: 2 };
-    await overlay.render(objects, viewport);
+    overlay.render(objects, viewport);
 
     const strokeRects = calls.filter((call) => call.method === "strokeRect").map((call) => call.args);
     expect(strokeRects).toEqual([[10, 14, 40, 20]]);
@@ -193,7 +193,7 @@ describe("DrawingOverlay viewport transforms", () => {
     expect(hit?.bounds).toEqual({ x: 10, y: 14, width: 40, height: 20 });
   });
 
-  it("renders selection handles using the same frozen/scroll transform as objects", async () => {
+  it("renders selection handles using the same frozen/scroll transform as objects", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
     const overlay = new DrawingOverlay(canvas, images, geom);
@@ -223,7 +223,7 @@ describe("DrawingOverlay viewport transforms", () => {
       frozenCols: 1,
     };
 
-    await overlay.render(objects, viewport);
+    overlay.render(objects, viewport);
 
     const halfHandle = RESIZE_HANDLE_SIZE_PX / 2;
     const handleRects = calls

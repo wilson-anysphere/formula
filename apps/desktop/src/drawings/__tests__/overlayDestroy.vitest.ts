@@ -97,7 +97,9 @@ describe("DrawingOverlay destroy()", () => {
     };
 
     const overlay = new DrawingOverlay(canvas, images, geom);
-    await overlay.render([createImageObject(imageEntry.id)], viewport);
+    overlay.render([createImageObject(imageEntry.id)], viewport);
+    // Let the cache's internal `.then` handlers attach the resolved bitmap.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
 
     overlay.destroy();
 
@@ -262,7 +264,7 @@ describe("DrawingOverlay destroy()", () => {
     expect(set).not.toHaveBeenCalled();
   });
 
-  it("prunes cached shape text layouts when objects are removed", async () => {
+  it("prunes cached shape text layouts when objects are removed", () => {
     const ctx = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -285,10 +287,10 @@ describe("DrawingOverlay destroy()", () => {
       </xdr:sp>
     `;
 
-    await overlay.render([createShapeObject(123, rawXml)], viewport);
+    overlay.render([createShapeObject(123, rawXml)], viewport);
     expect((overlay as any).shapeTextCache.size).toBe(1);
 
-    await overlay.render([], viewport);
+    overlay.render([], viewport);
     expect((overlay as any).shapeTextCache.size).toBe(0);
   });
 

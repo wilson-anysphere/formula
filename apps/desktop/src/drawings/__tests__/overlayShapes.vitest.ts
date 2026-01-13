@@ -70,7 +70,7 @@ const geom: GridGeometry = {
 const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 100, height: 100, dpr: 1, zoom: 1 };
 
 describe("DrawingOverlay shapes", () => {
-  it("renders supported shapes using canvas primitives (no placeholder)", async () => {
+  it("renders supported shapes using canvas primitives (no placeholder)", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -92,7 +92,7 @@ describe("DrawingOverlay shapes", () => {
     `;
 
     const overlay = new DrawingOverlay(canvas, images, geom);
-    await overlay.render([createShapeObject(xml)], viewport);
+    overlay.render([createShapeObject(xml)], viewport);
 
     expect(calls.some((call) => call.method === "ellipse")).toBe(true);
     expect(calls.some((call) => call.method === "fill")).toBe(true);
@@ -101,7 +101,7 @@ describe("DrawingOverlay shapes", () => {
     expect(calls.some((call) => call.method === "strokeRect")).toBe(false);
   });
 
-  it("renders line shapes using moveTo/lineTo", async () => {
+  it("renders line shapes using moveTo/lineTo", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -117,7 +117,7 @@ describe("DrawingOverlay shapes", () => {
     `;
 
     const overlay = new DrawingOverlay(canvas, images, geom);
-    await overlay.render([createShapeObject(xml)], viewport);
+    overlay.render([createShapeObject(xml)], viewport);
 
     expect(calls.some((call) => call.method === "moveTo")).toBe(true);
     expect(calls.some((call) => call.method === "lineTo")).toBe(true);
@@ -125,7 +125,7 @@ describe("DrawingOverlay shapes", () => {
     expect(calls.some((call) => call.method === "strokeRect")).toBe(false);
   });
 
-  it("falls back to placeholder rendering for unsupported shapes", async () => {
+  it("falls back to placeholder rendering for unsupported shapes", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -136,12 +136,12 @@ describe("DrawingOverlay shapes", () => {
     `;
 
     const overlay = new DrawingOverlay(canvas, images, geom);
-    await overlay.render([createShapeObject(xml)], viewport);
+    overlay.render([createShapeObject(xml)], viewport);
 
     expect(calls.some((call) => call.method === "strokeRect")).toBe(true);
   });
 
-  it("applies dash patterns for stroked shapes when prstDash is present", async () => {
+  it("applies dash patterns for stroked shapes when prstDash is present", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -157,7 +157,7 @@ describe("DrawingOverlay shapes", () => {
     `;
 
     const overlay = new DrawingOverlay(canvas, images, geom);
-    await overlay.render([createShapeObject(xml)], viewport);
+    overlay.render([createShapeObject(xml)], viewport);
 
     expect(
       calls.some(
@@ -167,7 +167,7 @@ describe("DrawingOverlay shapes", () => {
     expect(calls.some((call) => call.method === "strokeRect")).toBe(false);
   });
 
-  it("positions label text using txBody alignment (center/middle)", async () => {
+  it("positions label text using txBody alignment (center/middle)", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -190,7 +190,7 @@ describe("DrawingOverlay shapes", () => {
     `;
 
     const overlay = new DrawingOverlay(canvas, images, geom);
-    await overlay.render([createShapeObject(xml)], viewport);
+    overlay.render([createShapeObject(xml)], viewport);
 
     const call = calls.find((c) => c.method === "fillText" && c.args[0] === "Centered");
     expect(call).toBeTruthy();

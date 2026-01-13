@@ -153,7 +153,7 @@ describe("ChartRendererAdapter + DrawingOverlay", () => {
     }
   });
 
-  it("renders chart objects via ChartRendererAdapter (no placeholder)", async () => {
+  it("renders chart objects via ChartRendererAdapter (no placeholder)", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -179,7 +179,7 @@ describe("ChartRendererAdapter + DrawingOverlay", () => {
 
     const chartRenderer = new ChartRendererAdapter(store);
     const overlay = new DrawingOverlay(canvas, images, geom, chartRenderer);
-    await overlay.render([createChartObject(chartId)], viewport);
+    overlay.render([createChartObject(chartId)], viewport);
 
     expect(calls.some((call) => call.method === "drawImage")).toBe(true);
     expect(calls.some((call) => call.method === "strokeRect")).toBe(false);

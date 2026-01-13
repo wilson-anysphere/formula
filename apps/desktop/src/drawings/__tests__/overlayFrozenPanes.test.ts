@@ -60,7 +60,7 @@ const geom: GridGeometry = {
 };
 
 describe("DrawingOverlay frozen panes", () => {
-  it("keeps objects anchored in the frozen top-left pane pinned when scrolling", async () => {
+  it("keeps objects anchored in the frozen top-left pane pinned when scrolling", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -78,13 +78,13 @@ describe("DrawingOverlay frozen panes", () => {
       frozenHeightPx: CELL,
     };
 
-    await overlay.render([createOneCellShapeObject({ id: 1, row: 0, col: 0, widthPx: 5, heightPx: 5 })], viewport);
+    overlay.render([createOneCellShapeObject({ id: 1, row: 0, col: 0, widthPx: 5, heightPx: 5 })], viewport);
 
     const stroke = calls.find((c) => c.method === "strokeRect");
     expect(stroke?.args).toEqual([0, 0, 5, 5]);
   });
 
-  it("keeps frozen objects pinned across renders when the scroll position changes", async () => {
+  it("keeps frozen objects pinned across renders when the scroll position changes", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -101,8 +101,8 @@ describe("DrawingOverlay frozen panes", () => {
 
     const objects = [createOneCellShapeObject({ id: 1, row: 0, col: 0, widthPx: 5, heightPx: 5 })];
 
-    await overlay.render(objects, { ...base, scrollX: 0, scrollY: 0 });
-    await overlay.render(objects, { ...base, scrollX: 50, scrollY: 100 });
+    overlay.render(objects, { ...base, scrollX: 0, scrollY: 0 });
+    overlay.render(objects, { ...base, scrollX: 50, scrollY: 100 });
 
     const strokes = calls.filter((c) => c.method === "strokeRect");
     expect(strokes).toHaveLength(2);
@@ -110,7 +110,7 @@ describe("DrawingOverlay frozen panes", () => {
     expect(strokes[1]?.args).toEqual([0, 0, 5, 5]);
   });
 
-  it("scrolls objects in the top-right pane horizontally but not vertically", async () => {
+  it("scrolls objects in the top-right pane horizontally but not vertically", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -128,14 +128,14 @@ describe("DrawingOverlay frozen panes", () => {
       frozenHeightPx: CELL,
     };
 
-    await overlay.render([createOneCellShapeObject({ id: 1, row: 0, col: 2, widthPx: 5, heightPx: 5 })], viewport);
+    overlay.render([createOneCellShapeObject({ id: 1, row: 0, col: 2, widthPx: 5, heightPx: 5 })], viewport);
 
     const stroke = calls.find((c) => c.method === "strokeRect");
     // Base x = 2 * CELL, scrolls by scrollX; y stays pinned because it's in a frozen row.
     expect(stroke?.args).toEqual([2 * CELL - viewport.scrollX, 0, 5, 5]);
   });
 
-  it("clips objects to the quadrant that contains their anchor cell", async () => {
+  it("clips objects to the quadrant that contains their anchor cell", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
@@ -154,7 +154,7 @@ describe("DrawingOverlay frozen panes", () => {
     };
 
     // Large shape anchored in A1; should be clipped to the top-left frozen quadrant (CELL x CELL).
-    await overlay.render([createOneCellShapeObject({ id: 1, row: 0, col: 0, widthPx: 30, heightPx: 30 })], viewport);
+    overlay.render([createOneCellShapeObject({ id: 1, row: 0, col: 0, widthPx: 30, heightPx: 30 })], viewport);
 
     const clipRectCall = calls.find((c) => c.method === "rect");
     expect(clipRectCall?.args).toEqual([0, 0, CELL, CELL]);

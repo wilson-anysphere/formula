@@ -38,6 +38,11 @@ type CacheEntry = {
   promise: Promise<ImageBitmap>;
   bitmap?: ImageBitmap;
   /**
+   * Callbacks registered by `getOrRequest()` callers waiting for this decode to
+   * settle.
+   */
+  onReady: Set<() => void>;
+  /**
    * Number of signal-based waiters currently attached to this in-flight decode.
    *
    * This lets us avoid dropping the cache entry when *one* caller aborts but
@@ -139,8 +144,7 @@ export class ImageBitmapCache {
     const existing = this.entries.get(id);
     if (existing) {
       // Mark as most-recently-used.
-      this.entries.delete(id);
-      this.entries.set(id, existing);
+      this.touch(id, existing);
       if (!existing.bitmap) {
         if (opts.signal) existing.waiters++;
         else existing.pinned = true;
@@ -167,6 +171,7 @@ export class ImageBitmapCache {
     const record: CacheEntry = {
       promise,
       bitmap: undefined as ImageBitmap | undefined,
+      onReady: new Set(),
       waiters: opts.signal ? 1 : 0,
       pinned: !opts.signal,
     };
@@ -184,6 +189,7 @@ export class ImageBitmapCache {
           // it was invalidated or superseded). If every tracked consumer has
           // already aborted and there were no untracked consumers, ensure we
           // don't leak the decoded bitmap.
+          record.onReady.clear();
           if (!record.pinned && record.waiters === 0) {
             ImageBitmapCache.tryClose(bitmap);
           }
@@ -193,7 +199,7 @@ export class ImageBitmapCache {
         // If the decode finishes after all callers have aborted (and no
         // untracked waiters exist), drop it immediately to avoid caching a bitmap
         // nobody will use.
-        if (!record.pinned && record.waiters === 0) {
+        if (!record.pinned && record.waiters === 0 && record.onReady.size === 0) {
           this.entries.delete(id);
           ImageBitmapCache.tryClose(bitmap);
           return;
@@ -204,6 +210,7 @@ export class ImageBitmapCache {
         // since the caller owns the resolved value).
         if (this.maxEntries === 0) {
           this.entries.delete(id);
+          this.fireReadyCallbacks(record);
           return;
         }
 
@@ -223,10 +230,10 @@ export class ImageBitmapCache {
         // Mark as most-recently-used. This avoids evicting+closing the bitmap in
         // the same microtask that resolves the promise (which would make the
         // resolved bitmap unusable for awaiting callers).
-        this.entries.delete(id);
-        this.entries.set(id, record);
+        this.touch(id, record);
 
         this.evictIfNeeded();
+        this.fireReadyCallbacks(record);
       },
       (err) => {
         const current = this.entries.get(id);
@@ -240,10 +247,99 @@ export class ImageBitmapCache {
         }
 
         this.entries.delete(id);
+        this.fireReadyCallbacks(record);
       },
     );
 
     return this.wrapWithAbort(id, record, opts.signal, Boolean(opts.signal));
+  }
+
+  /**
+   * Returns a cached bitmap synchronously, or starts an async decode and returns
+   * `null` immediately.
+   *
+   * When the decode finishes (success or failure), `onReady` is invoked so the
+   * caller can schedule a re-render.
+   */
+  getOrRequest(entry: ImageEntry, onReady: () => void): ImageBitmap | null {
+    const id = entry.id;
+    const existing = this.entries.get(id);
+    if (existing) {
+      this.touch(id, existing);
+      if (existing.bitmap) return existing.bitmap;
+      existing.onReady.add(onReady);
+      return null;
+    }
+
+    const cachedFailure = this.negativeCache.get(id);
+    if (cachedFailure) {
+      if (cachedFailure.expiresAt > Date.now()) {
+        return null;
+      }
+      this.negativeCache.delete(id);
+    }
+
+    const promise = ImageBitmapCache.decode(entry);
+    const record: CacheEntry = {
+      promise,
+      bitmap: undefined as ImageBitmap | undefined,
+      onReady: new Set([onReady]),
+      waiters: 0,
+      pinned: false,
+    };
+    this.entries.set(id, record);
+
+    void promise.then(
+      (bitmap) => {
+        const current = this.entries.get(id);
+        if (current !== record || current.promise !== promise) {
+          record.onReady.clear();
+          if (!record.pinned && record.waiters === 0) {
+            ImageBitmapCache.tryClose(bitmap);
+          }
+          return;
+        }
+
+        if (!record.pinned && record.waiters === 0 && record.onReady.size === 0) {
+          this.entries.delete(id);
+          ImageBitmapCache.tryClose(bitmap);
+          return;
+        }
+
+        if (this.maxEntries === 0) {
+          this.entries.delete(id);
+          this.fireReadyCallbacks(record);
+          return;
+        }
+
+        if (!record.bitmap) {
+          record.bitmap = bitmap;
+          this.decodedCount++;
+        } else if (record.bitmap !== bitmap) {
+          ImageBitmapCache.tryClose(record.bitmap);
+          record.bitmap = bitmap;
+        }
+
+        this.negativeCache.delete(id);
+        this.touch(id, record);
+        this.evictIfNeeded();
+        this.fireReadyCallbacks(record);
+      },
+      (err) => {
+        const current = this.entries.get(id);
+        if (current !== record || current.promise !== promise) return;
+
+        this.__testOnly_failCount++;
+        if (this.negativeCacheMs > 0) {
+          this.negativeCache.set(id, { error: err, expiresAt: Date.now() + this.negativeCacheMs });
+        }
+
+        this.entries.delete(id);
+        this.fireReadyCallbacks(record);
+      },
+    );
+
+    return null;
   }
 
   invalidate(imageId: string): void {
@@ -253,6 +349,7 @@ export class ImageBitmapCache {
       return;
     }
 
+    existing.onReady.clear();
     this.entries.delete(imageId);
     this.negativeCache.delete(imageId);
     if (existing.bitmap) {
@@ -263,6 +360,7 @@ export class ImageBitmapCache {
 
   clear(): void {
     for (const entry of this.entries.values()) {
+      entry.onReady.clear();
       if (entry.bitmap) ImageBitmapCache.tryClose(entry.bitmap);
     }
     this.entries.clear();
@@ -275,6 +373,24 @@ export class ImageBitmapCache {
    */
   dispose(): void {
     this.clear();
+  }
+
+  private touch(imageId: string, entry: CacheEntry): void {
+    this.entries.delete(imageId);
+    this.entries.set(imageId, entry);
+  }
+
+  private fireReadyCallbacks(entry: CacheEntry): void {
+    if (entry.onReady.size === 0) return;
+    const callbacks = Array.from(entry.onReady);
+    entry.onReady.clear();
+    for (const cb of callbacks) {
+      try {
+        cb();
+      } catch {
+        // Ignore errors from caller-provided callbacks so cache bookkeeping stays robust.
+      }
+    }
   }
 
   private wrapWithAbort(
