@@ -15,6 +15,12 @@ This enables `rollup-plugin-visualizer` via `VITE_BUNDLE_ANALYZE=1` and writes t
 
 Note: `pnpm -C apps/desktop build:analyze` sets `VITE_BUNDLE_ANALYZE=1` automatically.
 
+To get a quick CLI summary of the largest chunks and dependency groups (from `bundle-stats.json`):
+
+```bash
+pnpm -C apps/desktop report:bundle-stats
+```
+
 Normal builds (`pnpm -C apps/desktop build`) are unchanged unless `VITE_BUNDLE_ANALYZE=1` is set.
 
 ## JS bundle size budgets (CI guard)
