@@ -34,8 +34,12 @@ This is important because:
 ### Error translations (`<locale>.errors.tsv`)
 
 Error literal translations are maintained in the locale registry (`src/locale/registry.rs`), but we
-also support generating a TSV export per locale (e.g. `de-DE.errors.tsv`) for auditing and keeping
-coverage in sync with the engine’s error set (`ErrorKind`).
+also commit a TSV export per locale (e.g. `de-DE.errors.tsv`) for auditing and keeping coverage in
+sync with the engine’s error set (`ErrorKind`).
+
+Upstream localized spellings (used to (re)generate the committed TSVs) live under:
+
+- `crates/formula-engine/src/locale/data/upstream/errors/*.tsv`
 
 ## TSV format
 
@@ -45,9 +49,23 @@ Each TSV file is a simple tab-separated mapping:
 Canonical<TAB>Localized
 ```
 
+### Function-translation TSVs
+
+Function-translation TSVs live directly in this directory (e.g. `de-DE.tsv`) and use the
+following conventions:
+
 - Lines starting with `#` and empty lines are ignored.
 - The canonical column must use the engine’s canonical spelling.
 - The localized column should use **the exact spelling Excel displays for that locale**.
+
+### Error-literal TSVs (`<locale>.errors.tsv`)
+
+Error literals themselves start with `#`, so error TSVs use a stricter comment convention:
+
+- Lines where the first non-whitespace characters are `#` followed by whitespace are comments
+  (e.g. `# Canonical<TAB>Localized`).
+- Empty lines are ignored.
+- Data lines begin with the canonical error literal (e.g. `#VALUE!`).
 
 ## Case-folding, Unicode, and why values are stored uppercase
 
@@ -64,7 +82,7 @@ run the generators below to enforce normalization.
 
 ## Generators and `--check`
 
-TSVs are maintained by small generator binaries so we can enforce:
+TSVs are maintained by small generator tools so we can enforce:
 
 - completeness against the engine catalog (`shared/functionCatalog.json`);
 - normalization (case-folded uppercase);
@@ -76,15 +94,19 @@ Run these from the repo root:
 # Regenerate function TSVs (writes files in-place)
 cargo run -p formula-engine --bin generate_locale_function_tsv
 
-# Verify TSVs are up to date (CI mode)
+# Verify function TSVs are up to date (CI mode)
 cargo run -p formula-engine --bin generate_locale_function_tsv -- --check
 
-# Export error literal TSVs from the locale registry
-cargo run -p formula-engine --bin generate_locale_error_tsv
+# Regenerate error TSVs from committed upstream mapping sources
+node scripts/generate-locale-error-tsvs.mjs
 
-# Verify error TSV exports are up to date
-cargo run -p formula-engine --bin generate_locale_error_tsv -- --check
+# Verify error TSVs are up to date (CI mode)
+node scripts/generate-locale-error-tsvs.mjs --check
 ```
+
+The error TSV generator derives the canonical error literal list from
+`formula_engine::value::ErrorKind::as_code` (scraped from `crates/formula-engine/src/value/mod.rs`)
+so new error kinds automatically flow through the generator.
 
 `--check` exits non-zero if any files would change.
 
@@ -92,7 +114,8 @@ cargo run -p formula-engine --bin generate_locale_error_tsv -- --check
 
 1. **Create the TSV(s):**
    - Add `crates/formula-engine/src/locale/data/<locale>.tsv` for function names.
-   - (Optional but recommended) add `<locale>.errors.tsv` via the error TSV generator.
+   - Add `crates/formula-engine/src/locale/data/upstream/errors/<locale>.tsv` and run the error TSV
+     generator to produce `crates/formula-engine/src/locale/data/<locale>.errors.tsv`.
 2. **Register the locale in code:**
    - Add a `static <LOCALE>_FUNCTIONS: FunctionTranslations = ...include_str!("data/<locale>.tsv")`
      in `crates/formula-engine/src/locale/registry.rs`.
@@ -104,3 +127,4 @@ cargo run -p formula-engine --bin generate_locale_error_tsv -- --check
 3. **Add tests:** extend `crates/formula-engine/tests/locale_parsing.rs` with basic round-trip tests
    for separators, a couple of translated functions, and at least one localized error literal.
 4. **Run generators in `--check` mode** to ensure TSVs stay in sync with the engine catalog.
+

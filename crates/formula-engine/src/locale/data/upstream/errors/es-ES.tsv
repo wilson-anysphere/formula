@@ -1,0 +1,20 @@
+# Canonical	Localized
+# Source: Curated from Microsoft Excel (es-ES) error literal spellings.
+#
+# Note: Some Spanish Excel error literals use leading inverted punctuation (e.g. `#¡VALOR!`,
+# `#¿NOMBRE?`). Those spellings are not supported by the current lexer, so we keep those entries
+# canonical (English) for now.
+#NULL!	#NULL!
+#DIV/0!	#DIV/0!
+#VALUE!	#VALUE!
+#REF!	#REF!
+#NAME?	#NAME?
+#NUM!	#NUM!
+#N/A	#N/A
+#GETTING_DATA	#OBTENIENDO_DATOS
+#SPILL!	#SPILL!
+#CALC!	#CALC!
+#FIELD!	#FIELD!
+#CONNECT!	#CONNECT!
+#BLOCKED!	#BLOCKED!
+#UNKNOWN!	#UNKNOWN!
