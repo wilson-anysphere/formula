@@ -162,6 +162,63 @@ fn calcchain_related_rels_and_content_types_remain_critical_when_strict_enabled(
 }
 
 #[test]
+fn calcchain_relationship_id_renumbering_is_warning_by_default_and_critical_in_strict_mode() {
+    let expected_zip = zip_bytes(&[(
+        "xl/_rels/workbook.xml.rels",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>
+</Relationships>"#,
+    )]);
+    let actual_zip = zip_bytes(&[(
+        "xl/_rels/workbook.xml.rels",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>
+</Relationships>"#,
+    )]);
+
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    // Default behavior: calcChain-related relationship churn is warning-level noise.
+    let report = xlsx_diff::diff_archives(&expected, &actual);
+    assert_eq!(
+        report.count(Severity::Critical),
+        0,
+        "expected no CRITICAL diffs, got {:#?}",
+        report.differences
+    );
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|d| d.part == "xl/_rels/workbook.xml.rels"
+                && d.kind == "relationship_id_changed"
+                && d.severity == Severity::Warning),
+        "expected calcChain relationship_id_changed diff to be WARNING by default, got {:#?}",
+        report.differences
+    );
+
+    // Strict mode: keep calcChain diffs CRITICAL.
+    let options = DiffOptions {
+        strict_calc_chain: true,
+        ..Default::default()
+    };
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|d| d.part == "xl/_rels/workbook.xml.rels"
+                && d.kind == "relationship_id_changed"
+                && d.severity == Severity::Critical),
+        "expected calcChain relationship_id_changed diff to be CRITICAL in strict mode, got {:#?}",
+        report.differences
+    );
+}
+
+#[test]
 fn calcchain_related_rels_and_content_types_downgrade_to_warning() {
     let expected_zip = zip_bytes(&[
         (

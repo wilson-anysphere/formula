@@ -6,9 +6,9 @@
 //! timestamp metadata while still catching fidelity regressions.
 
 mod part_kind;
-mod xml;
 pub mod cli;
 mod rels;
+mod xml;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -364,19 +364,15 @@ pub fn diff_archives_with_options(
                         if should_ignore_xml_diff(part, &diff.path, &ignored_rel_ids, &ignore) {
                             continue;
                         }
-                        let severity = if diff.kind == "relationship_id_changed" {
-                            Severity::Critical
-                        } else {
-                            adjust_xml_diff_severity(
-                                part,
-                                diff.severity,
-                                &diff.path,
-                                diff.expected.as_deref(),
-                                diff.actual.as_deref(),
-                                &calc_chain_rel_ids,
-                                options.strict_calc_chain,
-                            )
-                        };
+                        let severity = adjust_xml_diff_severity(
+                            part,
+                            diff.severity,
+                            &diff.path,
+                            diff.expected.as_deref(),
+                            diff.actual.as_deref(),
+                            &calc_chain_rel_ids,
+                            options.strict_calc_chain,
+                        );
                         report.differences.push(Difference::new(
                             severity,
                             part.to_string(),
@@ -459,11 +455,15 @@ fn postprocess_relationship_id_renumbering(
     diffs: Vec<xml::XmlDiff>,
     ignore: &IgnoreMatcher,
 ) -> Vec<xml::XmlDiff> {
-    let Some(expected_map) = rels::relationship_semantic_id_map(rels_part, expected_bytes).ok().flatten()
+    let Some(expected_map) = rels::relationship_semantic_id_map(rels_part, expected_bytes)
+        .ok()
+        .flatten()
     else {
         return diffs;
     };
-    let Some(actual_map) = rels::relationship_semantic_id_map(rels_part, actual_bytes).ok().flatten()
+    let Some(actual_map) = rels::relationship_semantic_id_map(rels_part, actual_bytes)
+        .ok()
+        .flatten()
     else {
         return diffs;
     };
