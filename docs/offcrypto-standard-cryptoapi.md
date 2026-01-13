@@ -145,6 +145,14 @@ The `EncryptionHeader` `AlgID` and `AlgIDHash` are CryptoAPI `ALG_ID` values.
 | AES-192 | `CALG_AES_192` | `0x0000660F` | 24 |
 | AES-256 | `CALG_AES_256` | `0x00006610` | 32 |
 
+**RC4 40-bit interoperability note:** CryptoAPI/Office represent a “40-bit” RC4 key as a 128-bit
+RC4 key with the low 40 bits set and the remaining 88 bits zero. Concretely, when `KeySize = 40`,
+the RC4 key bytes passed into the RC4 KSA are:
+
+```text
+rc4_key = H_block[0..5] || 0x00 * 11   // 16 bytes total
+```
+
 ### 3.2) Hash `AlgIDHash` values
 
 | Hash | Name | ALG_ID (hex) | Digest bytes |
@@ -493,6 +501,9 @@ Derived values:
 ```text
 H_final  = 1b5972284eab6481eb6565a0985b334b3e65e041
 H_block0 = 6ad7dedf2da3514b1d85eabee069d47dd058967f
+
+// If using CryptoAPI RC4 with KeySize=40, the per-block RC4 key for block=0 would be:
+rc4_key_block0_40bit = 6ad7dedf2d0000000000000000000000
 
 key (32 bytes, CryptDeriveKey expansion) =
   de5451b9dc3fcb383792cbeec80b6bc3

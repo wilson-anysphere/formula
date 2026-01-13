@@ -30,7 +30,11 @@ fn cryptoapi_hash2(alg_id_hash: u32, a: &[u8], b: &[u8]) -> Vec<u8> {
 /// This corresponds to the "RC4 CryptoAPI" / "CryptoAPI" encryption scheme used by newer BIFF8
 /// workbooks (Excel 2002/2003), which uses SHA-1 + a spin count to harden password derivation.
 ///
-/// `key_len` is the length of the RC4 key in bytes (commonly 16 for 128-bit RC4).
+/// `key_len` is `KeySize / 8` from the CryptoAPI header (e.g. 16 for 128-bit RC4, 5 for 40-bit).
+///
+/// **40-bit note:** CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit RC4 key where the
+/// high 88 bits are zero. Concretely, when `key_len == 5`, the RC4 key bytes are 16 bytes long:
+/// `Hash(..)[0..5] || 0x00 * 11`.
 pub(crate) fn derive_biff8_cryptoapi_key(
     alg_id_hash: u32,
     password: &str,
@@ -58,6 +62,13 @@ pub(crate) fn derive_biff8_cryptoapi_key(
     // Final block key hash: H = Hash(Hspin || block_index_le)
     let block_bytes = block_index.to_le_bytes();
     let block_hash = cryptoapi_hash2(alg_id_hash, &hash, &block_bytes);
+
+    if key_len == 5 {
+        let mut key = Vec::with_capacity(16);
+        key.extend_from_slice(&block_hash[..5]);
+        key.resize(16, 0);
+        return key;
+    }
 
     block_hash[..key_len.min(block_hash.len())].to_vec()
 }
@@ -226,8 +237,10 @@ mod tests {
             assert_eq!(key.as_slice(), expected_key, "block={block}");
         }
 
-        // Truncation for 40-bit key size.
+        // 40-bit CryptoAPI RC4 uses a 128-bit RC4 key with the high 88 bits zero.
         let key_40 = derive_biff8_cryptoapi_key(CALG_MD5, password, &salt, spin_count, 0, 5);
-        assert_eq!(key_40, vec![0x69, 0xBA, 0xDC, 0xAE, 0x24]);
+        let mut expected_40 = vec![0x69, 0xBA, 0xDC, 0xAE, 0x24];
+        expected_40.resize(16, 0);
+        assert_eq!(key_40, expected_40);
     }
 }

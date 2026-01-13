@@ -131,7 +131,17 @@ impl Rc4CryptoApiDecryptor {
         match self.hash_alg {
             HashAlg::Sha1 => {
                 let digest = sha1_digest(&[&self.password_hash, &block_index.to_le_bytes()]);
-                Ok(digest[..self.key_len].to_vec())
+                // CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit key with the high 88
+                // bits zero. That means the RC4 key bytes are 16 bytes long: 5 derived bytes + 11
+                // zero bytes.
+                if self.key_len == 5 {
+                    let mut key = Vec::with_capacity(16);
+                    key.extend_from_slice(&digest[..5]);
+                    key.resize(16, 0);
+                    Ok(key)
+                } else {
+                    Ok(digest[..self.key_len].to_vec())
+                }
             }
         }
     }
@@ -196,7 +206,14 @@ mod tests {
 
         fn key_for_block(&self, block_index: u32) -> Vec<u8> {
             let digest = sha1_digest(&[&self.password_hash, &block_index.to_le_bytes()]);
-            digest[..self.key_len].to_vec()
+            if self.key_len == 5 {
+                let mut key = Vec::with_capacity(16);
+                key.extend_from_slice(&digest[..5]);
+                key.resize(16, 0);
+                key
+            } else {
+                digest[..self.key_len].to_vec()
+            }
         }
 
         fn encrypt_encrypted_package(&self, plaintext: &[u8]) -> Vec<u8> {
@@ -251,5 +268,46 @@ mod tests {
                 .expect("decrypt");
             assert_eq!(decrypted, plaintext, "round-trip mismatch at len={len}");
         }
+    }
+
+    #[test]
+    fn rc4_cryptoapi_40_bit_key_is_padded_to_16_bytes() {
+        let password = "password";
+        let salt: [u8; 16] = (0u8..16u8).collect::<Vec<_>>().try_into().unwrap();
+        let key_len = 5; // 40-bit
+
+        let helper = TestCryptoApiRc4::new(password, &salt, key_len);
+        let block0_key = helper.key_for_block(0);
+        assert_eq!(block0_key.len(), 16);
+        assert!(block0_key[5..].iter().all(|b| *b == 0));
+
+        let decryptor =
+            Rc4CryptoApiDecryptor::new(password, &salt, key_len, HashAlg::Sha1).expect("decryptor");
+        let derived = decryptor.derive_key(0).expect("derive key");
+        assert_eq!(derived, block0_key);
+    }
+
+    #[test]
+    fn rc4_cryptoapi_encryptedpackage_roundtrip_with_40_bit_key() {
+        // Fixed parameters; keep deterministic.
+        let password = "correct horse battery staple";
+        let salt: [u8; 16] = [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x10, 0x32, 0x54, 0x76, 0x98, 0xBA,
+            0xDC, 0xFE,
+        ];
+        let key_len = 5; // 40-bit (must be padded to 16 bytes for RC4)
+
+        // Keep encryption helper independent of the production decryptor's key derivation.
+        let helper = TestCryptoApiRc4::new(password, &salt, key_len);
+        let decryptor =
+            Rc4CryptoApiDecryptor::new(password, &salt, key_len, HashAlg::Sha1).expect("decryptor");
+
+        // Ensure plaintext crosses a 0x200 boundary so we rekey.
+        let plaintext = make_plaintext_pattern(10_000);
+        let encrypted_package = helper.encrypt_encrypted_package(&plaintext);
+        let decrypted = decryptor
+            .decrypt_encrypted_package(&encrypted_package)
+            .expect("decrypt");
+        assert_eq!(decrypted, plaintext);
     }
 }
