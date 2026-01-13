@@ -18,7 +18,7 @@ import { cellToA1, rangeToA1 as rangeToA1Selection } from "../../selection/a1.js
 import type { Range } from "../../selection/types.js";
 import { DEFAULT_EXTENSION_RANGE_CELL_LIMIT, getExtensionRangeSize, normalizeExtensionRange } from "../../extensions/rangeSizeGuard.js";
 
-import { AIChatPanel, type AIChatPanelSendMessage, type AIChatPanelTableOption } from "./AIChatPanel.js";
+import { AIChatPanel, type AIChatPanelSendMessage, type AIChatPanelChartOption, type AIChatPanelTableOption } from "./AIChatPanel.js";
 import { ApprovalModal } from "./ApprovalModal.js";
 import { confirmPreviewApproval } from "./previewApproval.js";
 
@@ -116,6 +116,10 @@ export interface AIChatPanelContainerProps {
    * When provided, chat/agent can include this metadata in workbook context.
    */
   getSearchWorkbook?: () => unknown;
+  /**
+   * Optional chart metadata provider for attaching chart ids to chat messages.
+   */
+  getCharts?: () => Array<{ id: string; sheetId: string; title?: string; chartType?: { kind: string; name?: string } }>;
   sheetNameResolver?: SheetNameResolver | null;
   workbookId?: string;
   createChart?: SpreadsheetApi["createChart"];
@@ -345,6 +349,32 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
     return out;
   }, [schemaProvider, sheetNameResolver]);
 
+  const getChartOptions = useCallback((): AIChatPanelChartOption[] => {
+    const charts = props.getCharts?.() ?? [];
+    if (!Array.isArray(charts) || charts.length === 0) return [];
+    const out: AIChatPanelChartOption[] = [];
+    for (const chart of charts) {
+      const id = typeof (chart as any)?.id === "string" ? String((chart as any).id) : "";
+      const sheetId = typeof (chart as any)?.sheetId === "string" ? String((chart as any).sheetId) : "";
+      if (!id || !sheetId) continue;
+      const title = typeof (chart as any)?.title === "string" ? String((chart as any).title).trim() : "";
+      const kind = typeof (chart as any)?.chartType?.kind === "string" ? String((chart as any).chartType.kind) : "";
+      const sheetName = sheetNameResolver?.getSheetNameById(sheetId) ?? sheetId;
+      out.push({
+        id,
+        label: title || id,
+        description: `${sheetName}${kind ? ` • ${kind}` : ""}`,
+        detail: id,
+      });
+    }
+    out.sort((a, b) => {
+      const ak = `${a.label}\u0000${a.id}`;
+      const bk = `${b.label}\u0000${b.id}`;
+      return ak.localeCompare(bk);
+    });
+    return out;
+  }, [props.getCharts, sheetNameResolver]);
+
   const [agentGoal, setAgentGoal] = useState("");
   const [agentConstraints, setAgentConstraints] = useState("");
   const [agentContinueOnDenied, setAgentContinueOnDenied] = useState(false);
@@ -465,6 +495,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
             getSelectionAttachment={getSelectionAttachment}
             getFormulaAttachment={getFormulaAttachment}
             getTableOptions={getTableOptions}
+            getChartOptions={props.getCharts ? getChartOptions : undefined}
           />
         ) : (
           <div className="ai-chat-agent">

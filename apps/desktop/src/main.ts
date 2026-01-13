@@ -6474,6 +6474,7 @@ if (
     getDocumentController: () => app.getDocument(),
     getActiveSheetId: () => app.getCurrentSheetId(),
     getSearchWorkbook: () => app.getSearchWorkbook(),
+    getCharts: () => app.listCharts(),
     sheetNameResolver,
     getSelection: () => {
       const selection = currentSelectionRect();

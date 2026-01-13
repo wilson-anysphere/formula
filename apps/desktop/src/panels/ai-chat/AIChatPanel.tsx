@@ -50,6 +50,13 @@ export type AIChatPanelTableOption = {
   detail?: string;
 };
 
+export type AIChatPanelChartOption = {
+  id: string;
+  label: string;
+  description?: string;
+  detail?: string;
+};
+
 export type AIChatPanelAttachmentProps = {
   /**
    * Optional providers for building spreadsheet context attachments.
@@ -60,6 +67,7 @@ export type AIChatPanelAttachmentProps = {
   getSelectionAttachment?: () => Attachment | null;
   getFormulaAttachment?: () => Attachment | null;
   getTableOptions?: () => AIChatPanelTableOption[];
+  getChartOptions?: () => AIChatPanelChartOption[];
   getChartAttachment?: () => Attachment | null;
 };
 
@@ -130,6 +138,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
   const formulaAttachmentPreview = safeInvoke(props.getFormulaAttachment);
   const chartAttachmentPreview = safeInvoke(props.getChartAttachment);
   const tableOptionsPreview = safeInvoke(props.getTableOptions) ?? [];
+  const chartOptionsPreview = safeInvoke(props.getChartOptions) ?? [];
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -191,6 +200,32 @@ export function AIChatPanel(props: AIChatPanelProps) {
     );
     if (!picked) return;
     addAttachment({ type: "table", reference: picked });
+  }
+
+  async function attachChart() {
+    if (sending) return;
+    const charts = safeInvoke(props.getChartOptions) ?? [];
+    if (charts.length) {
+      const picked = await showQuickPick(
+        charts.map((c) => ({
+          label: c.label,
+          value: c.id,
+          description: c.description,
+          detail: c.detail,
+        })),
+        { placeHolder: t("chat.attachChart.placeholder") },
+      );
+      if (!picked) return;
+      addAttachment({ type: "chart", reference: picked });
+      return;
+    }
+
+    const attachment = safeInvoke(props.getChartAttachment);
+    if (!attachment) {
+      toastBestEffort(t("chat.attachChart.disabled"));
+      return;
+    }
+    addAttachment(attachment);
   }
 
   async function send() {
@@ -437,10 +472,8 @@ export function AIChatPanel(props: AIChatPanelProps) {
       <div className="ai-chat-panel__composer">
         <div className="ai-chat-panel__composer-toolbar">
           <div className="ai-chat-panel__attachment-toolbar" role="toolbar" aria-label="Attach context">
-            <button
-              type="button"
-              className="ai-chat-panel__attachment-button"
-              data-testid="ai-chat-attach-selection"
+            <AttachmentButton
+              testId="ai-chat-attach-selection"
               disabled={sending || !selectionAttachmentPreview}
               title={!selectionAttachmentPreview ? t("chat.attachSelection.disabled") : undefined}
               onClick={() => {
@@ -464,17 +497,27 @@ export function AIChatPanel(props: AIChatPanelProps) {
               }}
             >
               {t("chat.attachSelection")}
-            </button>
-            <button
-              type="button"
-              className="ai-chat-panel__attachment-button"
-              data-testid="ai-chat-attach-table"
+            </AttachmentButton>
+
+            <AttachmentButton
+              testId="ai-chat-attach-table"
               disabled={sending || tableOptionsPreview.length === 0}
               title={tableOptionsPreview.length === 0 ? t("chat.attachTable.disabled") : undefined}
               onClick={() => void attachTable()}
             >
               {t("chat.attachTable")}
-            </button>
+            </AttachmentButton>
+
+            {props.getChartOptions || props.getChartAttachment ? (
+              <AttachmentButton
+                testId="ai-chat-attach-chart"
+                disabled={sending || (chartOptionsPreview.length === 0 && !chartAttachmentPreview)}
+                title={chartOptionsPreview.length === 0 && !chartAttachmentPreview ? t("chat.attachChart.disabled") : undefined}
+                onClick={() => void attachChart()}
+              >
+                {t("chat.attachChart")}
+              </AttachmentButton>
+            ) : null}
             {props.getFormulaAttachment ? (
               <button
                 type="button"
@@ -492,22 +535,6 @@ export function AIChatPanel(props: AIChatPanelProps) {
                 }}
               >
                 {t("chat.attachFormula")}
-              </button>
-            ) : null}
-            {props.getChartAttachment ? (
-              <button
-                type="button"
-                className="ai-chat-panel__attachment-button"
-                data-testid="ai-chat-attach-chart"
-                disabled={sending || !chartAttachmentPreview}
-                title={!chartAttachmentPreview ? t("chat.attachChart.disabled") : undefined}
-                onClick={() => {
-                  const attachment = safeInvoke(props.getChartAttachment);
-                  if (!attachment) return;
-                  addAttachment(attachment);
-                }}
-              >
-                {t("chat.attachChart")}
               </button>
             ) : null}
           </div>
@@ -564,4 +591,37 @@ export function AIChatPanel(props: AIChatPanelProps) {
       </div>
     </div>
   );
+}
+
+function AttachmentButton(props: {
+  testId: string;
+  disabled?: boolean;
+  title?: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  const button = (
+    <button
+      type="button"
+      className="ai-chat-panel__attachment-button"
+      data-testid={props.testId}
+      disabled={props.disabled}
+      title={!props.disabled ? props.title : undefined}
+      onClick={props.onClick}
+    >
+      {props.children}
+    </button>
+  );
+
+  // Disabled buttons do not reliably show `title` tooltips in browsers. Wrap in a
+  // non-disabled element so the tooltip is still available to mouse users.
+  if (props.disabled && props.title) {
+    return (
+      <span className="ai-chat-panel__attachment-button-wrap" title={props.title}>
+        {button}
+      </span>
+    );
+  }
+
+  return button;
 }

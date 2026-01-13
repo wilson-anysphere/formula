@@ -346,6 +346,10 @@
   gap: 6px;
 }
 
+.ai-chat-panel__attachment-button-wrap {
+  display: inline-flex;
+}
+
 .ai-chat-panel__attachment-button {
   padding: 4px 8px;
   border: 1px solid var(--border);

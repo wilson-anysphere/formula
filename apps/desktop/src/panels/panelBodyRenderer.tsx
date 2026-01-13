@@ -29,6 +29,7 @@ export interface PanelBodyRendererOptions {
   getActiveSheetId?: () => string;
   getSelection?: () => unknown;
   getSearchWorkbook?: () => unknown;
+  getCharts?: () => unknown;
   /**
    * Optional stable-id <-> display-name resolver for sheet-qualified strings.
    *
@@ -263,6 +264,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           getActiveSheetId={options.getActiveSheetId}
           getSelection={options.getSelection as any}
           getSearchWorkbook={options.getSearchWorkbook}
+          getCharts={options.getCharts as any}
           sheetNameResolver={options.sheetNameResolver}
           workbookId={workbookId}
           createChart={options.createChart}
