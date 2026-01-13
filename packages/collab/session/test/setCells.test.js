@@ -117,6 +117,26 @@ test("CollabSession setCells rejects unparseable cell keys when permissions are 
   doc.destroy();
 });
 
+test("CollabSession setCells still parses supported legacy key formats when permissions are configured (viewer)", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc, schema: { autoInit: false } });
+  session.setPermissions({ role: "viewer", userId: "u-viewer", rangeRestrictions: [] });
+
+  const before = Y.encodeStateAsUpdate(doc);
+
+  await assert.rejects(session.setCells([{ cellKey: "Sheet1:0,0", value: "hacked" }]), /Permission denied/);
+  await assert.rejects(session.setCells([{ cellKey: "r0c0", value: "hacked" }]), /Permission denied/);
+
+  assert.equal(session.cells.has("Sheet1:0,0"), false);
+  assert.equal(session.cells.has("r0c0"), false);
+
+  const after = Y.encodeStateAsUpdate(doc);
+  assert.equal(Buffer.from(before).equals(Buffer.from(after)), true);
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession setCells ignorePermissions bypasses permission checks (but still respects encryption invariants)", async () => {
   const doc = new Y.Doc();
   const session = createCollabSession({ doc, schema: { autoInit: false } });
