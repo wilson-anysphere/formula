@@ -42,9 +42,9 @@ export function extractWorkbookSchema(
     id: string;
     sheets: Array<{
       name: string;
-      cells?: any;
-      values?: any;
-      getCell?: (row: number, col: number) => any;
+      cells?: unknown;
+      values?: unknown[][];
+      getCell?: (row: number, col: number) => unknown;
     }>;
     tables?: Array<{ name: string; sheetName: string; rect: WorkbookSchemaRect }>;
     namedRanges?: Array<{ name: string; sheetName: string; rect: WorkbookSchemaRect }>;
