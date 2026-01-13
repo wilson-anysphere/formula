@@ -9,6 +9,7 @@ use super::cache_definition::split_sheet_ref;
 use crate::openxml::{local_name, parse_relationships, rels_part_name, resolve_target};
 use crate::package::{XlsxError, XlsxPackage};
 use crate::pivots::cache_records::PivotCacheValue;
+use crate::pivots::PivotCacheSourceType;
 use crate::shared_strings::parse_shared_strings_xml;
 use crate::xml::{QName, XmlElement, XmlNode};
 
@@ -111,6 +112,31 @@ impl XlsxPackage {
 
         self.set_part(cache_definition_part.to_string(), updated_cache_definition);
         self.set_part(cache_records_part, updated_cache_records);
+        Ok(())
+    }
+
+    /// Refresh every pivot cache whose `cacheSource` is worksheet-backed.
+    ///
+    /// This convenience wrapper iterates all `xl/pivotCache/pivotCacheDefinition*.xml` parts and
+    /// refreshes any cache definition that declares `cacheSource type="worksheet"`.
+    ///
+    /// Non-worksheet cache sources (external, consolidation, scenario, unknown) are skipped.
+    ///
+    /// If any cache refresh fails, returns an error that includes the failing part name.
+    pub fn refresh_all_pivot_caches_from_worksheets(&mut self) -> Result<(), XlsxError> {
+        let defs = self.pivot_cache_definitions()?;
+        for (part_name, def) in defs {
+            if def.cache_source_type != PivotCacheSourceType::Worksheet {
+                continue;
+            }
+
+            if let Err(err) = self.refresh_pivot_cache_from_worksheet(&part_name) {
+                return Err(XlsxError::Invalid(format!(
+                    "failed to refresh pivot cache {part_name:?} from worksheet source: {err}"
+                )));
+            }
+        }
+
         Ok(())
     }
 }
