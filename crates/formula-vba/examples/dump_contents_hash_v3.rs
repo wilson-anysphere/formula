@@ -1,11 +1,11 @@
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use formula_vba::{project_normalized_data_v3_transcript, v3_content_normalized_data};
 
-#[path = "shared/zip_util.rs"]
-mod zip_util;
+#[path = "shared/vba_project_bin.rs"]
+mod vba_project_bin;
 
 const DEFAULT_HEAD_BYTES: usize = 64;
 
@@ -31,9 +31,10 @@ fn run() -> Result<(), String> {
         .next()
         .unwrap_or_else(|| OsString::from("dump_contents_hash_v3"));
 
-    let (input_path, alg) = parse_args(&program, args)?;
+    let (input_path, password, alg) = parse_args(&program, args)?;
 
-    let (vba_project_bin, source) = load_vba_project_bin(&input_path)?;
+    let (vba_project_bin, source) =
+        vba_project_bin::load_vba_project_bin(&input_path, password.as_deref())?;
 
     println!("vbaProject.bin source: {source}");
     println!("vbaProject.bin size: {} bytes", vba_project_bin.len());
@@ -109,7 +110,7 @@ fn run() -> Result<(), String> {
 
 fn usage(program: &OsString) -> String {
     format!(
-        "usage: {} [--alg [md5|sha256]] <vbaProject.bin|workbook.xlsm|workbook.xlsx|workbook.xlsb>",
+        "usage: {} [--password <pw>] [--alg [md5|sha256]] <vbaProject.bin|workbook.xlsm|workbook.xlsx|workbook.xlsb>",
         program.to_string_lossy()
     )
 }
@@ -117,9 +118,10 @@ fn usage(program: &OsString) -> String {
 fn parse_args(
     program: &OsString,
     args: impl Iterator<Item = OsString>,
-) -> Result<(PathBuf, Option<Alg>), String> {
+) -> Result<(PathBuf, Option<String>, Option<Alg>), String> {
     let mut args = args.peekable();
     let mut input: Option<PathBuf> = None;
+    let mut password: Option<String> = None;
     let mut alg: Option<Alg> = None;
 
     while let Some(arg) = args.next() {
@@ -127,6 +129,23 @@ fn parse_args(
 
         if arg_str == "--help" || arg_str == "-h" {
             return Err(usage(program));
+        }
+
+        if arg_str == "--password" {
+            let Some(value) = args.next() else {
+                return Err(format!("missing value for --password\n{}", usage(program)));
+            };
+            let value = value
+                .to_str()
+                .ok_or_else(|| "--password value must be valid UTF-8".to_owned())?
+                .to_owned();
+            password = Some(value);
+            continue;
+        }
+
+        if let Some(rest) = arg_str.strip_prefix("--password=") {
+            password = Some(rest.to_owned());
+            continue;
         }
 
         if arg_str == "--alg" {
@@ -178,7 +197,7 @@ fn parse_args(
     let Some(input) = input else {
         return Err(usage(program));
     };
-    Ok((input, alg))
+    Ok((input, password, alg))
 }
 
 fn parse_alg(arg: &OsString) -> Option<Alg> {
@@ -193,44 +212,6 @@ fn parse_alg_str(s: &str) -> Option<Alg> {
         return Some(Alg::Sha256);
     }
     None
-}
-
-fn load_vba_project_bin(path: &Path) -> Result<(Vec<u8>, String), String> {
-    match try_extract_vba_project_bin_from_zip(path) {
-        Ok(Some(bytes)) => Ok((
-            bytes,
-            format!("{} (zip entry xl/vbaProject.bin)", path.display()),
-        )),
-        Ok(None) => {
-            // Not a zip workbook; treat as a raw vbaProject.bin OLE file.
-            let bytes =
-                std::fs::read(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-            Ok((bytes, path.display().to_string()))
-        }
-        Err(err) => Err(err),
-    }
-}
-
-fn try_extract_vba_project_bin_from_zip(path: &Path) -> Result<Option<Vec<u8>>, String> {
-    let file = match std::fs::File::open(path) {
-        Ok(f) => f,
-        Err(e) => return Err(format!("failed to open {}: {e}", path.display())),
-    };
-
-    let mut archive = match zip::ZipArchive::new(file) {
-        Ok(a) => a,
-        Err(_) => return Ok(None),
-    };
-
-    let Some(buf) = zip_util::read_zip_entry_bytes(&mut archive, "xl/vbaProject.bin")
-        .map_err(|e| format!("failed to read zip {}: {e}", path.display()))?
-    else {
-        return Err(format!(
-            "{} is a zip, but does not contain xl/vbaProject.bin",
-            path.display()
-        ));
-    };
-    Ok(Some(buf))
 }
 
 fn bytes_to_lower_hex(bytes: &[u8]) -> String {

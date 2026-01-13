@@ -2294,6 +2294,7 @@ dependencies = [
  "cfb 0.10.0",
  "encoding_rs",
  "md-5",
+ "office-crypto",
  "openssl",
  "sha1",
  "sha2",

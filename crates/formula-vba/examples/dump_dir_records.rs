@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use encoding_rs::UTF_16LE;
@@ -7,8 +7,8 @@ use formula_vba::{decompress_container, OleFile};
 
 #[path = "shared/dir_record_names.rs"]
 mod dir_record_names;
-#[path = "shared/zip_util.rs"]
-mod zip_util;
+#[path = "shared/vba_project_bin.rs"]
+mod vba_project_bin;
 
 fn main() -> ExitCode {
     match run() {
@@ -26,16 +26,10 @@ fn run() -> Result<(), String> {
         .next()
         .unwrap_or_else(|| OsString::from("dump_dir_records"));
 
-    let Some(input) = args.next() else {
-        return Err(usage(&program));
-    };
-    if args.next().is_some() {
-        return Err(usage(&program));
-    }
+    let (input_path, password) = parse_args(&program, args)?;
 
-    let input_path = PathBuf::from(input);
-
-    let (vba_project_bin, source) = load_vba_project_bin(&input_path)?;
+    let (vba_project_bin, source) =
+        vba_project_bin::load_vba_project_bin(&input_path, password.as_deref())?;
 
     println!("vbaProject.bin source: {source}");
     println!("vbaProject.bin size: {} bytes", vba_project_bin.len());
@@ -66,47 +60,55 @@ fn run() -> Result<(), String> {
 
 fn usage(program: &OsString) -> String {
     format!(
-        "usage: {} <vbaProject.bin|workbook.xlsm|workbook.xlsx|workbook.xlsb>",
+        "usage: {} [--password <pw>] <vbaProject.bin|workbook.xlsm|workbook.xlsx|workbook.xlsb>",
         program.to_string_lossy()
     )
 }
 
-fn load_vba_project_bin(path: &Path) -> Result<(Vec<u8>, String), String> {
-    match try_extract_vba_project_bin_from_zip(path) {
-        Ok(Some(bytes)) => Ok((
-            bytes,
-            format!("{} (zip entry xl/vbaProject.bin)", path.display()),
-        )),
-        Ok(None) => {
-            // Not a zip workbook; treat as a raw vbaProject.bin OLE file.
-            let bytes = std::fs::read(path)
-                .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-            Ok((bytes, path.display().to_string()))
+fn parse_args(
+    program: &OsString,
+    args: impl Iterator<Item = OsString>,
+) -> Result<(PathBuf, Option<String>), String> {
+    let mut args = args.peekable();
+    let mut input: Option<PathBuf> = None;
+    let mut password: Option<String> = None;
+
+    while let Some(arg) = args.next() {
+        let arg_str = arg.to_string_lossy();
+
+        if arg_str == "--help" || arg_str == "-h" {
+            return Err(usage(program));
         }
-        Err(err) => Err(err),
+
+        if arg_str == "--password" {
+            let Some(value) = args.next() else {
+                return Err(format!("missing value for --password\n{}", usage(program)));
+            };
+            let value = value
+                .to_str()
+                .ok_or_else(|| "--password value must be valid UTF-8".to_owned())?
+                .to_owned();
+            password = Some(value);
+            continue;
+        }
+
+        if let Some(rest) = arg_str.strip_prefix("--password=") {
+            password = Some(rest.to_owned());
+            continue;
+        }
+
+        if input.is_none() {
+            input = Some(PathBuf::from(arg));
+            continue;
+        }
+
+        return Err(usage(program));
     }
-}
 
-fn try_extract_vba_project_bin_from_zip(path: &Path) -> Result<Option<Vec<u8>>, String> {
-    let file = match std::fs::File::open(path) {
-        Ok(f) => f,
-        Err(e) => return Err(format!("failed to open {}: {e}", path.display())),
+    let Some(input) = input else {
+        return Err(usage(program));
     };
-
-    let mut archive = match zip::ZipArchive::new(file) {
-        Ok(a) => a,
-        Err(_) => return Ok(None),
-    };
-
-    let Some(buf) = zip_util::read_zip_entry_bytes(&mut archive, "xl/vbaProject.bin")
-        .map_err(|e| format!("failed to read zip {}: {e}", path.display()))?
-    else {
-        return Err(format!(
-            "{} is a zip, but does not contain xl/vbaProject.bin",
-            path.display()
-        ));
-    };
-    Ok(Some(buf))
+    Ok((input, password))
 }
 
 fn dump_dir_records(decompressed: &[u8]) {
@@ -157,9 +159,7 @@ fn dump_dir_records(decompressed: &[u8]) {
                 break;
             }
 
-            if fixed_end <= decompressed.len()
-                && fixed_next_ok
-                && (!tlv_next_ok || len_field == 0)
+            if fixed_end <= decompressed.len() && fixed_next_ok && (!tlv_next_ok || len_field == 0)
             {
                 let data = &decompressed[record_offset + 2..fixed_end];
                 (data, data.len(), fixed_end)
@@ -196,9 +196,7 @@ fn dump_dir_records(decompressed: &[u8]) {
 
         idx += 1;
         let name = dir_record_names::record_name(id).unwrap_or("<unknown>");
-        println!(
-            "[{idx:03}] offset=0x{record_offset:08x} id={id:#06x} len={record_len:>6} {name}"
-        );
+        println!("[{idx:03}] offset=0x{record_offset:08x} id={id:#06x} len={record_len:>6} {name}");
 
         if record_len <= 64 {
             println!("      hex: {}", bytes_to_hex_spaced(data));
@@ -270,8 +268,22 @@ fn looks_like_projectversion_following_record(bytes: &[u8], offset: usize) -> bo
     let id = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
     if !matches!(
         id,
-        0x000C | 0x003C | 0x004A | 0x000D | 0x000E | 0x0016 | 0x002F | 0x0030 | 0x0033 | 0x000F
-            | 0x0013 | 0x0010 | 0x0019 | 0x0047 | 0x001A | 0x0032
+        0x000C
+            | 0x003C
+            | 0x004A
+            | 0x000D
+            | 0x000E
+            | 0x0016
+            | 0x002F
+            | 0x0030
+            | 0x0033
+            | 0x000F
+            | 0x0013
+            | 0x0010
+            | 0x0019
+            | 0x0047
+            | 0x001A
+            | 0x0032
     ) {
         return false;
     }
