@@ -288,6 +288,7 @@ export async function indexWorkbook(params) {
     vector: vectors[i],
     metadata: r.metadata,
   }));
+  const upsertTotal = upsertRecords.length + toUpdateMetadata.length;
 
   const hasMutations =
     upsertRecords.length > 0 || (supportsUpdateMetadata && toUpdateMetadata.length > 0) || staleIds.length > 0;
@@ -298,12 +299,16 @@ export async function indexWorkbook(params) {
     throwIfAborted(signal);
     await vectorStore.batch(async () => {
       if (signal?.aborted) return;
-      if (upsertRecords.length) {
-        onProgress?.({ phase: "upsert", processed: 0, total: upsertRecords.length });
+      if (upsertTotal > 0) {
+        onProgress?.({ phase: "upsert", processed: 0, total: upsertTotal });
         // Allow callers to cancel from within onProgress before starting persistence.
         if (signal?.aborted) return;
+      }
+      let upsertProcessed = 0;
+      if (upsertRecords.length) {
         await vectorStore.upsert(upsertRecords);
-        onProgress?.({ phase: "upsert", processed: upsertRecords.length, total: upsertRecords.length });
+        upsertProcessed += upsertRecords.length;
+        onProgress?.({ phase: "upsert", processed: upsertProcessed, total: upsertTotal });
       }
       // Preserve the existing behavior: if an abort happens during the upsert, skip
       // subsequent mutations, but do not throw inside the batch (throwing would skip
@@ -311,6 +316,8 @@ export async function indexWorkbook(params) {
       if (signal?.aborted) return;
       if (supportsUpdateMetadata && toUpdateMetadata.length) {
         await vectorStore.updateMetadata(toUpdateMetadata);
+        upsertProcessed += toUpdateMetadata.length;
+        onProgress?.({ phase: "upsert", processed: upsertProcessed, total: upsertTotal });
       }
       if (signal?.aborted) return;
       if (staleIds.length) {
@@ -322,16 +329,20 @@ export async function indexWorkbook(params) {
       }
     });
   } else {
-    if (upsertRecords.length) {
+    if (upsertTotal > 0) {
       // Avoid aborting while awaiting persistence. Upserts are stateful; if we were to
       // reject early here, callers could start a new indexing run while the underlying
       // store is still writing.
       throwIfAborted(signal);
-      onProgress?.({ phase: "upsert", processed: 0, total: upsertRecords.length });
+      onProgress?.({ phase: "upsert", processed: 0, total: upsertTotal });
       // Allow callers to cancel from within onProgress before starting persistence.
       throwIfAborted(signal);
+    }
+    let upsertProcessed = 0;
+    if (upsertRecords.length) {
       await vectorStore.upsert(upsertRecords);
-      onProgress?.({ phase: "upsert", processed: upsertRecords.length, total: upsertRecords.length });
+      upsertProcessed += upsertRecords.length;
+      onProgress?.({ phase: "upsert", processed: upsertProcessed, total: upsertTotal });
     }
     throwIfAborted(signal);
 
@@ -341,6 +352,8 @@ export async function indexWorkbook(params) {
       // underlying store is still writing.
       throwIfAborted(signal);
       await vectorStore.updateMetadata(toUpdateMetadata);
+      upsertProcessed += toUpdateMetadata.length;
+      onProgress?.({ phase: "upsert", processed: upsertProcessed, total: upsertTotal });
     }
     throwIfAborted(signal);
 

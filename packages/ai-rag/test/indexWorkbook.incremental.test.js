@@ -653,6 +653,35 @@ test("indexWorkbook treats non-finite embedBatchSize as Infinity (single embed c
   assert.equal(embedCalls, 1);
 });
 
+test("indexWorkbook reports upsert progress for metadata-only updates", async () => {
+  const workbook = makeWorkbook();
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const store = new InMemoryVectorStore({ dimension: 128 });
+
+  await indexWorkbook({
+    workbook,
+    vectorStore: store,
+    embedder,
+    transform: (record) => ({ metadata: { ...(record.metadata ?? {}), tag: "v1" } }),
+  });
+
+  /** @type {Array<{ phase: string, processed: number, total?: number }>} */
+  const events = [];
+  await indexWorkbook({
+    workbook,
+    vectorStore: store,
+    embedder,
+    transform: (record) => ({ metadata: { ...(record.metadata ?? {}), tag: "v2" } }),
+    onProgress: (info) => events.push(info),
+  });
+
+  const upsertEvents = events.filter((e) => e.phase === "upsert");
+  assert.ok(upsertEvents.length >= 2);
+  const last = upsertEvents[upsertEvents.length - 1];
+  assert.equal(last.processed, last.total);
+  assert.ok((last.total ?? 0) > 0);
+});
+
 test("indexWorkbook reports progress across phases", async () => {
   const workbook = makeWorkbookTwoTables();
   const embedder = new HashEmbedder({ dimension: 128 });
