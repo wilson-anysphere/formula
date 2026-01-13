@@ -164,7 +164,19 @@ export const RibbonButton = React.memo(function RibbonButton({
   React.useEffect(() => {
     if (!menuOpen) return;
 
+    // `button.click()` in jsdom only dispatches a `click` event (no pointer events),
+    // so include a click listener in addition to `pointerdown` to ensure dropdowns
+    // reliably close when interacting with other ribbon controls in tests.
     const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      const root = dropdownRef.current;
+      if (!root) return;
+      if (root.contains(target)) return;
+      closeMenu();
+    };
+
+    const onClick = (event: MouseEvent) => {
       const target = event.target as Node | null;
       if (!target) return;
       const root = dropdownRef.current;
@@ -190,10 +202,12 @@ export const RibbonButton = React.memo(function RibbonButton({
     };
 
     document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("click", onClick);
     document.addEventListener("focusin", onFocusIn);
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("click", onClick);
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("keydown", onKeyDown);
     };

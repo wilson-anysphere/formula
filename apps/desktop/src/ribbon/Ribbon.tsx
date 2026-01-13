@@ -197,7 +197,6 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
         const nextPressed = !currentPressed;
         setPressedById((prev) => ({ ...prev, [button.id]: nextPressed }));
         actions.onToggle?.(button.id, nextPressed);
-        actions.onCommand?.(button.id);
         setFlyoutOpen(false);
         return;
       }

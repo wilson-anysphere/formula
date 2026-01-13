@@ -110,11 +110,21 @@ export interface RibbonFileActions {
 
 export interface RibbonActions {
   /**
-   * Called for any command-like activation (including dropdown buttons).
+   * Called when a non-toggle ribbon control is activated.
+   *
+   * This is emitted for:
+   * - Regular buttons (`kind: "button"`).
+   * - Dropdown menu items (synthetic buttons generated from `menuItems`).
+   * - Dropdown buttons without `menuItems` (treated as a normal command button).
+   *
+   * Toggle buttons (`kind: "toggle"`) do **not** invoke `onCommand`; they are
+   * handled exclusively via `onToggle`.
    */
   onCommand?: (commandId: string) => void;
   /**
    * Called when a toggle button changes state.
+   *
+   * `pressed` is the *next* pressed state after the user activates the toggle.
    */
   onToggle?: (commandId: string, pressed: boolean) => void;
   /**

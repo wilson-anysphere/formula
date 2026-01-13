@@ -212,7 +212,15 @@ export function createRibbonActions(deps: RibbonCommandRouterDeps): RibbonAction
   const ribbonActions = createRibbonActionsFromCommands({
     commandRegistry: deps.commandRegistry,
     onCommandError: (commandId, err) => reportRibbonCommandError(deps, commandId, err),
-    onUnknownToggle: (commandId, pressed) => handleRibbonFormattingToggle(ribbonCommandHandlersCtx, commandId, pressed),
+    onUnknownToggle: (commandId, pressed) => {
+      const handled = handleRibbonFormattingToggle(ribbonCommandHandlersCtx, commandId, pressed);
+      if (handled) return true;
+
+      // Toggle buttons invoke `onToggle` (not `onCommand`) in `Ribbon`. Route unknown toggles
+      // through the same fallback handler so unimplemented buttons still surface a toast.
+      handleRibbonCommand(commandId);
+      return true;
+    },
     commandOverrides: {
       // File tab ribbon schema uses `file.*` ids for UI compatibility. Route them to the
       // canonical `workbench.*` / `view.*` / `pageLayout.*` commands so ribbon, keybindings,
@@ -321,8 +329,9 @@ export function createRibbonActions(deps: RibbonCommandRouterDeps): RibbonAction
       await deps.getEnsureExtensionsLoadedRef()?.();
       deps.getSyncContributedCommandsRef()?.();
     },
-    // Ribbon toggles invoke both `onToggle` and `onCommand`. These overrides handle the
-    // pressed state and suppress the follow-up `onCommand` call so we don't double-execute.
+    // Toggle-specific wiring for ribbon controls that need special handling beyond dispatching
+    // through the CommandRegistry (e.g. because they need to reconcile the pressed state with
+    // app state or invoke multiple commands).
     toggleOverrides: {
       "file.save.autoSave": async (pressed) => {
         try {

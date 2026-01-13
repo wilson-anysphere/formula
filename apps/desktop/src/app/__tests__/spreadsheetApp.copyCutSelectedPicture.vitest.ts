@@ -373,7 +373,6 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
     // This test is scoped to the clipboard copy path, so keep overlay rendering disabled to avoid
     // unrelated decode attempts.
     vi.spyOn((app as any).drawingOverlay, "render").mockImplementation(() => {});
-
     const sheetId = app.getCurrentSheetId();
     const imageId = "img-wrong-mime";
     const pngBytes = createPngHeaderBytes(1, 1);
@@ -390,7 +389,6 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
     app.getDocument().setSheetDrawings(sheetId, [drawing]);
     app.selectDrawing(drawing.id);
     await app.whenIdle();
-
     // The drawings overlay may attempt best-effort decoding when `createImageBitmap` is available.
     // This test specifically asserts that the clipboard copy path does not invoke `createImageBitmap`
     // when the stored bytes already look like a PNG, even if the mimeType metadata is wrong.
