@@ -171,6 +171,9 @@ Implementation detail (important for contributors):
 - When any override is present for a `(from_table, to_table)` pair, *only* those overridden relationships
   are considered active for that pair.
 
+> Note: `CROSSFILTER(...)` can override direction or disable a relationship, but it does **not** activate
+> inactive relationships. Use `USERELATIONSHIP` to activate an inactive relationship.
+
 ### Referential integrity
 
 If `Relationship::enforce_referential_integrity == true`:
@@ -208,6 +211,24 @@ The virtual blank row is considered “allowed” when the filter context does *
 - Any column filter on the dimension table that does not include `BLANK` disables it.
 
 See `blank_row_allowed(...)` and `virtual_blank_row_exists(...)` in `engine.rs`.
+
+### Relationship resolution in DAX functions
+
+Different DAX functions consult relationships in slightly different ways:
+
+- `RELATED(Table[Column])`:
+  - Requires a **direct** active relationship from the current row-context table to `Table`
+    (`from_table == current_table`, `to_table == Table`, and `Relationship::is_active == true`).
+  - Current limitation: it does **not** consult `FilterContext` relationship overrides
+    (`USERELATIONSHIP` / `CROSSFILTER`).
+
+- `RELATEDTABLE(Table)`:
+  - Requires row context and returns rows from a many-side table related to the current row on the one
+    side.
+  - Supports multi-hop traversal when there is a **unique** active relationship path (in the reverse
+    direction, `OneToMany` at each hop).
+  - Consults `FilterContext` relationship overrides when deciding which relationships are active, and
+    respects `CROSSFILTER(..., NONE)` disabling relationships.
 
 ---
 
@@ -609,6 +630,16 @@ If a function is not listed here, it is currently unsupported and will evaluate 
 - `KEEPFILTERS(innerFilterArg)` (supported only as a wrapper inside `CALCULATE` / `CALCULATETABLE`)
 - `REMOVEFILTERS(Table|Table[Column])` (alias for `ALL`-style clearing inside `CALCULATE`)
 
+### Notable unsupported functions (non-exhaustive)
+
+The real DAX surface area is large; `formula-dax` currently only implements the functions listed above.
+Some common functions that are **not implemented** (and will error if called) include:
+
+- Table shaping: `ADDCOLUMNS`, `SELECTCOLUMNS`, `GENERATE`, `UNION`, `INTERSECT`, `EXCEPT`, `CROSSJOIN`, `TOPN`
+- Filter inspection: `ISFILTERED`, `HASONEFILTER`, `ISCROSSFILTERED`, `ALLSELECTED`
+- Row context helpers: `RANKX`
+- Time intelligence: `CALENDAR`, `DATEADD`, `SAMEPERIODLASTYEAR`, etc.
+
 ---
 
 ## Examples
@@ -678,6 +709,8 @@ This is not an exhaustive list, but the most common contributor-facing constrain
 - **Relationships**
   - `OneToMany` and `OneToOne` are supported; `ManyToMany` is not.
   - Only single-column relationships are supported.
+  - Some APIs consult only `Relationship::is_active` and do not apply `FilterContext` relationship
+    overrides (notably `RELATED` and pivot group-by path discovery).
 - **DAX language coverage**
   - No variables (`VAR`/`RETURN`), no `IN`, no table constructors.
   - Most scalar/table functions are unimplemented (anything not listed above).
