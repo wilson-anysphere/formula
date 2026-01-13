@@ -226,7 +226,7 @@ find_main_binary() {
   # 2) Try to read the Exec= line from the desktop file.
   local desktop_file=""
   desktop_file="$(find "$squashfs_root" \
-    -maxdepth 3 \
+    -maxdepth 5 \
     -type f \
     -name '*.desktop' \
     2>/dev/null \
