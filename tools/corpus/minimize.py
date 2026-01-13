@@ -88,7 +88,19 @@ def _ensure_full_diff_entries(
         diffs = []
 
     total = ((details.get("counts") or {}).get("total")) if isinstance(details.get("counts"), dict) else None
-    if isinstance(total, int) and total >= 0 and len(diffs) < total:
+    # Only auto-rerun when we need the full diff entry list. Newer Rust helpers provide
+    # per-part diff summaries (`parts_with_diffs` / `critical_parts`) without requiring
+    # emitting every difference, and requesting millions of entries can be expensive.
+    has_part_summaries = isinstance(details.get("parts_with_diffs"), list) and isinstance(
+        details.get("critical_parts"), list
+    )
+    max_auto_rerun = 200_000
+    if (
+        not has_part_summaries
+        and isinstance(total, int)
+        and 0 <= total <= max_auto_rerun
+        and len(diffs) < total
+    ):
         rust_out = triage_mod._run_rust_triage(  # noqa: SLF001 (internal reuse)
             rust_exe,
             workbook.data,
@@ -192,6 +204,37 @@ def minimize_workbook(
     if not isinstance(result, dict):
         result = {}
 
+    # Prefer per-part summaries provided by newer Rust triage helpers. These are derived from the
+    # full diff report even when `top_differences` is truncated.
+    per_part_counts: dict[str, dict[str, int]] | None = None
+    critical_parts: list[str] | None = None
+    rels_ids: dict[str, list[str]] = {}
+    parts_with_diffs = diff_details.get("parts_with_diffs")
+    if isinstance(parts_with_diffs, list):
+        parsed: dict[str, dict[str, int]] = {}
+        for entry in parts_with_diffs:
+            if not isinstance(entry, dict):
+                continue
+            part = entry.get("part")
+            if not isinstance(part, str) or not part:
+                continue
+            parsed[part] = {
+                "critical": int(entry.get("critical") or 0),
+                "warning": int(entry.get("warning") or 0),
+                "info": int(entry.get("info") or 0),
+                "total": int(entry.get("total") or 0),
+            }
+        per_part_counts = parsed
+
+        # `critical_parts` is optional; recompute from counts to keep ordering stable.
+        critical_parts = sorted([p for p, c in parsed.items() if c.get("critical", 0) > 0])
+
+    if per_part_counts is None or critical_parts is None:
+        per_part_counts, critical_parts, rels_ids = summarize_differences(diffs)
+    else:
+        # Relationship Id extraction is best-effort and currently relies on diff paths.
+        _unused_counts, _unused_critical, rels_ids = summarize_differences(diffs)
+
     critical_part_hashes: dict[str, dict[str, Any]] = {}
     critical_part_hashes_error: str | None = None
     if compute_part_hashes and critical_parts:
@@ -200,6 +243,13 @@ def minimize_workbook(
         except Exception as e:  # noqa: BLE001 (tooling)
             critical_part_hashes = {}
             critical_part_hashes_error = str(e)
+
+    total_diffs = (
+        int(((diff_details.get("counts") or {}).get("total") or 0))
+        if isinstance(diff_details.get("counts"), dict)
+        else 0
+    )
+    emitted_diffs = len(diffs)
 
     out: dict[str, Any] = {
         "display_name": workbook.display_name,
@@ -217,6 +267,9 @@ def minimize_workbook(
             "info": int(overall_counts.get("info") or 0),
             "total": int(overall_counts.get("total") or 0),
         },
+        "diff_entries_emitted": emitted_diffs,
+        "diff_entries_total": total_diffs,
+        "diff_entries_truncated": emitted_diffs < total_diffs,
         "critical_parts": critical_parts,
         "part_counts": per_part_counts,
         "rels_critical_ids": rels_ids,
