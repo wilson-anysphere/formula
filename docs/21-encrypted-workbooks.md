@@ -255,17 +255,31 @@ The intended end-state is that these same `formula-io` entrypoints will accept a
 password (and optionally an “Agile HMAC verify” toggle) and return a normal workbook on success.
 That plumbing is not implemented yet.
 
+#### Planned API: `open_workbook_with_options` + `OpenOptions.password`
+
+Once password plumbing exists, callers should be able to pass an *open password* directly on the
+open call:
+
+```rust
+use formula_io::{open_workbook_with_options, OpenOptions};
+
+let workbook = open_workbook_with_options(
+    "book.xlsx",
+    OpenOptions {
+        password: Some("correct horse battery staple".into()),
+        ..Default::default()
+    },
+)?;
+```
+
 Notes:
 
 - Passwords are treated as **UTF-8 strings at the API boundary** and encoded internally according
   to the relevant spec requirements (typically UTF-16LE for key derivation).
 - Callers should avoid logging passwords or embedding them in error messages.
 
-This `*_with_options` API is **planned**; today `formula-io` exposes `open_workbook` and
-`open_workbook_model` only.
-
-If you call the current APIs on an encrypted workbook, they will return
-`Error::EncryptedWorkbook` until password support is integrated.
+Until password support lands, callers can use `detect_workbook_encryption` to decide whether to
+prompt the user or show an “encryption not supported” message.
 
 #### Preflight detection (optional)
 
