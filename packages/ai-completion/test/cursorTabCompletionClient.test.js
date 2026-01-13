@@ -92,6 +92,30 @@ test("CursorTabCompletionClient aborts the request when the timeout budget is ex
   assert.equal(sawAbort, true);
 });
 
+test(
+  "CursorTabCompletionClient enforces the timeout budget even if fetchImpl ignores AbortSignal",
+  { timeout: 1000 },
+  async () => {
+    let fetchCalls = 0;
+
+    const fetchImpl = async () => {
+      fetchCalls += 1;
+      // Intentionally ignore init.signal and never resolve.
+      return await new Promise(() => {});
+    };
+
+    const client = new CursorTabCompletionClient({
+      baseUrl: "http://example.test",
+      fetchImpl,
+      timeoutMs: 10,
+    });
+
+    const completion = await client.completeTabCompletion({ input: "=1+", cursorPosition: 3, cellA1: "A1" });
+    assert.equal(completion, "");
+    assert.equal(fetchCalls, 1);
+  },
+);
+
 test("CursorTabCompletionClient merges headers from getAuthHeaders", async () => {
   /** @type {Record<string, string> | null} */
   let headersSeen = null;

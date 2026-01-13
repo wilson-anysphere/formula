@@ -86,7 +86,8 @@ export class CursorTabCompletionClient {
       headers["Content-Type"] = "application/json";
       if (controller.signal.aborted) return "";
 
-      const res = await this.fetchImpl(this.endpointUrl, {
+      const res = await raceWithAbort(
+        this.fetchImpl(this.endpointUrl, {
         method: "POST",
         headers,
         // Cursor authentication is handled by the session (cookies). When the
@@ -98,7 +99,9 @@ export class CursorTabCompletionClient {
         credentials: "include",
         body: JSON.stringify({ input, cursorPosition, cellA1 }),
         signal: controller.signal,
-      });
+        }),
+        controller.signal,
+      );
 
       if (!res?.ok) return "";
 
