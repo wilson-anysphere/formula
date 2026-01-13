@@ -257,7 +257,7 @@
 }
 
 .formula-bar-name-box-empty {
-  padding: 8px 10px;
+  padding: 6px 10px;
   font-size: 12px;
   color: var(--text-secondary);
 }
@@ -488,7 +488,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 8px 10px;
+  padding: 6px 10px;
   border: none;
   background: transparent;
   color: var(--text-primary);
@@ -774,7 +774,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 6px 10px;
   max-width: 360px;
   background: var(--bg-primary);
   border: 1px solid var(--border);
@@ -927,7 +927,7 @@
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius);
-  padding: 10px;
+  padding: 8px;
   transition:
     background-color var(--motion-duration) var(--motion-ease),
     border-color var(--motion-duration) var(--motion-ease),
@@ -946,7 +946,7 @@
   background: var(--dialog-bg);
   border: 1px solid var(--dialog-border);
   border-radius: var(--radius);
-  padding: 12px;
+  padding: 10px;
   transition:
     background-color var(--motion-duration) var(--motion-ease),
     border-color var(--motion-duration) var(--motion-ease),
@@ -981,7 +981,7 @@
   background: var(--cmdk-bg);
   border: 1px solid var(--cmdk-border);
   border-radius: var(--radius);
-  padding: 10px;
+  padding: 8px 10px;
   width: 420px;
   transition:
     background-color var(--motion-duration) var(--motion-ease),
@@ -991,8 +991,8 @@
 
 .command-palette__input {
   width: 100%;
-  padding: 6px 10px;
-  border-radius: var(--radius);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--cmdk-input-bg);
   color: var(--text-primary);
@@ -1006,7 +1006,7 @@
 }
 
 .command-palette__list {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   padding: 0;
   list-style: none;
   max-height: 340px;
@@ -1020,7 +1020,7 @@
 }
 
 .command-palette__group {
-  margin: 8px 0 4px;
+  margin: 6px 0 4px;
   padding: 0 8px;
   font-size: 11px;
   letter-spacing: 0.06em;
@@ -1128,7 +1128,7 @@
 }
 
 .command-palette__empty {
-  padding: 8px;
+  padding: 6px 8px;
   color: var(--text-secondary);
 }
 
@@ -1177,7 +1177,7 @@
 #sheet-tabs.sheet-bar {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   padding: 0 6px;
   height: 24px;
   background: var(--bg-secondary);
@@ -1278,7 +1278,7 @@ html[data-reduced-motion="true"] #sheet-tabs.sheet-bar .sheet-tabs {
   position: relative;
   border: 1px solid var(--border);
   border-bottom: none;
-  border-radius: var(--radius) var(--radius) 0 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   background: var(--bg-primary);
   color: inherit;
 }
@@ -1361,7 +1361,7 @@ html[data-reduced-motion="true"] #sheet-tabs.sheet-bar .sheet-tabs {
   background: var(--bg-primary);
   color: var(--text-primary);
   border: 1px solid var(--selection-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   outline: none;
 }
 
