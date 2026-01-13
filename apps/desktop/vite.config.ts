@@ -112,6 +112,7 @@ export default defineConfig({
       { find: "@formula/collab-comments", replacement: collabCommentsEntry },
       { find: "@formula/collab-undo", replacement: collabUndoEntry },
       { find: "@formula/collab-session", replacement: collabSessionEntry },
+      { find: "@formula/collab-yjs-utils", replacement: collabYjsUtilsEntry },
       { find: "@formula/collab-versioning", replacement: collabVersioningEntry },
       { find: "@formula/collab-yjs-utils", replacement: collabYjsUtilsEntry },
       // Workspace packages are linked via pnpm's node_modules symlinks. Some CI/dev environments
