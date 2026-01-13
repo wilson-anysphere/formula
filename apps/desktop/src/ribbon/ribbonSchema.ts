@@ -671,11 +671,11 @@ export const defaultRibbonSchema: RibbonSchema = {
               kind: "dropdown",
               size: "icon",
               menuItems: [
-                { id: "home.number.moreFormats.formatCells", label: "Format Cells…", ariaLabel: "Format Cells", iconId: "settings" },
+                { id: "format.openFormatCells", label: "Format Cells…", ariaLabel: "Format Cells", iconId: "settings" },
                 { id: "home.number.moreFormats.custom", label: "Custom…", ariaLabel: "Custom Number Format", iconId: "edit" },
               ],
             },
-            { id: "home.number.formatCells", label: "Format Cells…", ariaLabel: "Format Cells", iconId: "settings", size: "small", testId: "ribbon-format-cells" },
+            { id: "format.openFormatCells", label: "Format Cells…", ariaLabel: "Format Cells", iconId: "settings", size: "small", testId: "ribbon-format-cells" },
           ],
         },
         {
@@ -767,7 +767,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               iconId: "settings",
               kind: "dropdown",
               menuItems: [
-                { id: "home.cells.format.formatCells", label: "Format Cells…", ariaLabel: "Format Cells", iconId: "settings" },
+                { id: "format.openFormatCells", label: "Format Cells…", ariaLabel: "Format Cells", iconId: "settings" },
                 { id: "home.cells.format.rowHeight", label: "Row Height…", ariaLabel: "Row Height", iconId: "arrowUpDown" },
                 { id: "home.cells.format.columnWidth", label: "Column Width…", ariaLabel: "Column Width", iconId: "arrowLeftRight" },
                 { id: "home.cells.format.organizeSheets", label: "Organize Sheets", ariaLabel: "Organize Sheets", iconId: "folderOpen" },

@@ -271,6 +271,7 @@ export const enUS = {
   "command.format.numberFormat.accounting.gbp": "Accounting: £ (Pound)",
   "command.format.numberFormat.accounting.jpy": "Accounting: ¥ (Yen)",
   "command.format.openFormatCells": "Format Cells…",
+  "command.format.applyNumberFormatPresetQuickPick": "Number Format Presets…",
   "commandDescription.workbench.showCommandPalette": "Show the command palette",
   "commandDescription.workbench.newWorkbook": "Create a new workbook",
   "commandDescription.workbench.openWorkbook": "Open an existing workbook",

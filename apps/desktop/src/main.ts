@@ -101,7 +101,7 @@ import { createDesktopDlpContext } from "./dlp/desktopDlp.js";
 import { enforceClipboardCopy } from "./dlp/enforceClipboardCopy.js";
 import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
 import { assertExtensionRangeWithinLimits } from "./extensions/rangeSizeGuard.js";
-import { openFormatCellsDialog } from "./formatting/openFormatCellsDialog.js";
+import { createOpenFormatCells } from "./formatting/openFormatCellsCommand.js";
 import { parseCollabShareLink, serializeCollabShareLink } from "./sharing/collabLink.js";
 import { saveCollabConnectionForWorkbook, loadCollabConnectionForWorkbook } from "./sharing/collabConnectionStore.js";
 import { loadCollabToken, storeCollabToken } from "./sharing/collabTokenStore.js";
@@ -1660,17 +1660,15 @@ window.addEventListener("unload", () => {
   clearAutoSaveTimer();
 });
 
-function openFormatCells(): void {
-  openFormatCellsDialog({
-    isEditing: () => isSpreadsheetEditing(),
-    getDocument: () => app.getDocument(),
-    getSheetId: () => app.getCurrentSheetId(),
-    getActiveCell: () => app.getActiveCell(),
-    getSelectionRanges: () => app.getSelectionRanges(),
-    getGridLimits: () => getGridLimitsForFormatting(),
-    focusGrid: () => app.focus(),
-  });
-}
+const openFormatCells = createOpenFormatCells({
+  isEditing: () => isSpreadsheetEditing(),
+  getDocument: () => app.getDocument(),
+  getSheetId: () => app.getCurrentSheetId(),
+  getActiveCell: () => app.getActiveCell(),
+  getSelectionRanges: () => app.getSelectionRanges(),
+  getGridLimits: () => getGridLimitsForFormatting(),
+  focusGrid: () => app.focus(),
+});
 
 const onUndo = () => {
   app.undo();
@@ -2172,21 +2170,21 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.alignment.bottomAlign": true,
             "home.alignment.alignLeft": true,
             "home.alignment.center": true,
-             "home.alignment.alignRight": true,
-             "home.alignment.orientation": true,
-             "home.alignment.increaseIndent": true,
-             "home.alignment.decreaseIndent": true,
-             "home.number.numberFormat": true,
-             "home.number.moreFormats": true,
-             "format.numberFormat.percent": true,
-             "format.numberFormat.accounting": true,
-             "format.numberFormat.shortDate": true,
-             "format.numberFormat.commaStyle": true,
-             "format.numberFormat.increaseDecimal": true,
-             "format.numberFormat.decreaseDecimal": true,
-             "home.number.formatCells": true,
-           }
-         : null),
+            "home.alignment.alignRight": true,
+            "home.alignment.orientation": true,
+            "home.alignment.increaseIndent": true,
+            "home.alignment.decreaseIndent": true,
+            "home.number.numberFormat": true,
+            "home.number.moreFormats": true,
+            "format.numberFormat.percent": true,
+            "format.numberFormat.accounting": true,
+            "format.numberFormat.shortDate": true,
+            "format.numberFormat.commaStyle": true,
+            "format.numberFormat.increaseDecimal": true,
+            "format.numberFormat.decreaseDecimal": true,
+            "format.openFormatCells": true,
+          }
+        : null),
       ...(printExportAvailable
         ? null
         : {
@@ -5345,6 +5343,14 @@ if (
   commandRegistry.registerBuiltinCommand(
     "format.openFormatCells",
     t("command.format.openFormatCells"),
+    () => openFormatCells(),
+    { category: commandCategoryFormat },
+  );
+
+  // Quick-pick variant for applying common number formats without opening the full dialog.
+  commandRegistry.registerBuiltinCommand(
+    "format.applyNumberFormatPresetQuickPick",
+    t("command.format.applyNumberFormatPresetQuickPick"),
     async () => {
       type Choice = "general" | "currency" | "percent" | "date";
       const choice = await showQuickPick<Choice>(
@@ -5354,23 +5360,18 @@ if (
           { label: "Percent", description: NUMBER_FORMATS.percent, value: "percent" },
           { label: "Date", description: NUMBER_FORMATS.date, value: "date" },
         ],
-        { placeHolder: "Format Cells" },
+        { placeHolder: "Number format" },
       );
       if (!choice) return;
 
-      const patch =
-        choice === "general"
-          ? { numberFormat: null }
-          : {
-              numberFormat: NUMBER_FORMATS[choice],
-            };
+      const patch = choice === "general" ? { numberFormat: null } : { numberFormat: NUMBER_FORMATS[choice] };
 
       applyFormattingToSelection(
-        "Format Cells",
+        "Number format",
         (doc, sheetId, ranges) => {
           let applied = true;
           for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, patch, { label: "Format Cells" });
+            const ok = doc.setRangeFormat(sheetId, range, patch, { label: "Number format" });
             if (ok === false) applied = false;
           }
           return applied;
@@ -9221,14 +9222,15 @@ function handleRibbonCommand(commandId: string): void {
         });
         return;
       case "home.alignment.orientation.formatCellAlignment":
-        openFormatCells();
+        executeBuiltinCommand("format.openFormatCells");
         return;
 
-      case "home.number.formatCells":
-      case "home.number.moreFormats.formatCells":
+      case "format.openFormatCells":
+      case "home.number.formatCells": // legacy ribbon schema id
+      case "home.number.moreFormats.formatCells": // legacy ribbon schema id
       case "home.number.moreFormats.custom":
-      case "home.cells.format.formatCells":
-        openFormatCells();
+      case "home.cells.format.formatCells": // legacy ribbon schema id
+        executeBuiltinCommand("format.openFormatCells");
         return;
       case "edit.autoSum":
         executeBuiltinCommand(commandId);
