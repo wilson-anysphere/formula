@@ -276,6 +276,14 @@ const trimmed = await trimMessagesToBudget({
 // Use `trimmed` for the LLM call.
 ```
 
+Notes:
+
+- By default, `trimMessagesToBudget()` uses a **deterministic stub summarizer** (no model call). If you provide a
+  `summarize()` callback that calls an LLM, treat that as another cloud AI request and apply the same DLP/policy
+  checks you use for your main chat request.
+- Generated summaries are marked with `[CONTEXT_SUMMARY]` so repeated trimming can replace/merge older summaries
+  instead of accumulating them.
+
 ---
 
 ## DLP safety
