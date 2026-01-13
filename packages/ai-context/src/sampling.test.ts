@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { headSampleRows, randomSampleRows, stratifiedSampleRows, systematicSampleRows, tailSampleRows } from "./sampling.js";
+import {
+  headSampleRows,
+  randomSampleIndices,
+  randomSampleRows,
+  stratifiedSampleRows,
+  systematicSampleRows,
+  tailSampleRows,
+} from "./sampling.js";
 
 describe("sampling", () => {
   it("randomSampleRows is deterministic with a seed and returns unique rows", () => {
@@ -100,5 +107,38 @@ describe("sampling", () => {
     expect(() =>
       stratifiedSampleRows(stratifiedRows, 1.1 as any, { getStratum: (r: any) => r[0], seed: 1 }),
     ).toThrow(/sampleSize must be a non-negative integer/);
+  });
+
+  it("randomSampleIndices uses O(sampleSize) RNG calls for large totals", () => {
+    let calls = 0;
+    const rng = () => {
+      calls += 1;
+      if (calls > 100) throw new Error("rng called too many times");
+      return 0.123456;
+    };
+
+    const indices = randomSampleIndices(1_000_000_000, 10, rng);
+    expect(indices).toHaveLength(10);
+    expect(new Set(indices).size).toBe(10);
+    expect(calls).toBeLessThanOrEqual(100);
+  });
+
+  it("stratifiedSampleRows does not call rng per row", () => {
+    const total = 200_000;
+    const strataCount = 100;
+    const keys = Array.from({ length: strataCount }, (_v, i) => `S${i}`);
+    const rows = Array.from({ length: total }, (_v, i) => keys[i % strataCount]);
+
+    let calls = 0;
+    const rng = () => {
+      calls += 1;
+      if (calls > 10_000) throw new Error("rng called too many times");
+      return 0.5;
+    };
+
+    const sampled = stratifiedSampleRows(rows, 10, { getStratum: (r: any) => r, rng });
+    expect(sampled).toHaveLength(10);
+    expect(new Set(sampled).size).toBe(10);
+    expect(calls).toBeLessThanOrEqual(10_000);
   });
 });
