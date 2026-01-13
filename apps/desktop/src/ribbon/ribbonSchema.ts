@@ -593,7 +593,7 @@ export const defaultRibbonSchema: RibbonSchema = {
                 { id: "home.alignment.orientation.formatCellAlignment", label: "Format Cell Alignment…", ariaLabel: "Format Cell Alignment", iconId: "settings" },
               ],
             },
-            { id: "home.alignment.wrapText", label: "Wrap Text", ariaLabel: "Wrap Text", iconId: "wrapText", kind: "toggle", size: "small" },
+            { id: "format.toggleWrapText", label: "Wrap Text", ariaLabel: "Wrap Text", iconId: "wrapText", kind: "toggle", size: "small" },
             {
               id: "home.alignment.mergeCenter",
               label: "Merge & Center",

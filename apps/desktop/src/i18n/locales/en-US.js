@@ -231,6 +231,7 @@ export const enUS = {
   "command.format.toggleBold": "Bold",
   "command.format.toggleItalic": "Italic",
   "command.format.toggleUnderline": "Underline",
+  "command.format.toggleWrapText": "Wrap Text",
   "command.format.numberFormat.currency": "Currency",
   "command.format.numberFormat.percent": "Percent",
   "command.format.numberFormat.date": "Date",

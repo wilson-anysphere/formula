@@ -2088,7 +2088,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "format.toggleItalic": formatState.italic,
       "format.toggleUnderline": formatState.underline,
       "home.font.strikethrough": formatState.strikethrough,
-      "home.alignment.wrapText": formatState.wrapText,
+      "format.toggleWrapText": formatState.wrapText,
       "home.alignment.alignLeft": formatState.align === "left",
       "home.alignment.center": formatState.align === "center",
       "home.alignment.alignRight": formatState.align === "right",
@@ -2186,7 +2186,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.font.borders": true,
             "home.font.clearFormatting": true,
             "home.clipboard.formatPainter": true,
-            "home.alignment.wrapText": true,
+            "format.toggleWrapText": true,
             "home.alignment.topAlign": true,
             "home.alignment.middleAlign": true,
             "home.alignment.bottomAlign": true,
@@ -5241,6 +5241,18 @@ if (
       applyFormattingToSelection(
         t("command.format.toggleUnderline"),
         (doc, sheetId, ranges) => toggleUnderline(doc, sheetId, ranges),
+        { forceBatch: true },
+      ),
+    { category: commandCategoryFormat },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.toggleWrapText",
+    t("command.format.toggleWrapText"),
+    (next?: boolean) =>
+      applyFormattingToSelection(
+        t("command.format.toggleWrapText"),
+        (doc, sheetId, ranges) => toggleWrap(doc, sheetId, ranges, typeof next === "boolean" ? { next } : undefined),
         { forceBatch: true },
       ),
     { category: commandCategoryFormat },
@@ -8387,8 +8399,10 @@ mountRibbon(ribbonReactRoot, {
           return applied;
         });
         return;
-      case "home.alignment.wrapText":
-        applyFormattingToSelection("Wrap", (doc, sheetId, ranges) => toggleWrap(doc, sheetId, ranges, { next: pressed }));
+      case "format.toggleWrapText":
+        void commandRegistry.executeCommand("format.toggleWrapText", pressed).catch((err) => {
+          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+        });
         return;
       default:
         return;
@@ -8416,7 +8430,7 @@ mountRibbon(ribbonReactRoot, {
     // falling through to the default "unimplemented" toast here.
     if (
       commandId === "home.font.strikethrough" ||
-      commandId === "home.alignment.wrapText" ||
+      commandId === "format.toggleWrapText" ||
       commandId === "view.toggleShowFormulas" ||
       commandId === "view.show.performanceStats" ||
       commandId === "view.window.split" ||
