@@ -6,6 +6,66 @@ import type { TokenEstimator } from "./tokenBudget.js";
 
 export type Attachment = { type: "range" | "formula" | "table" | "chart"; reference: string; data?: unknown };
 
+export interface WorkbookRagVectorStore {
+  /**
+   * Optional embedding dimension. When provided, indexing will validate that all
+   * embeddings match this size.
+   */
+  readonly dimension?: number;
+
+  /**
+   * Query for the nearest neighbors to a vector. Must return `{ id, score, metadata }`
+   * objects (metadata is prompt-unsafe and will be redacted before ContextManager
+   * returns it).
+   */
+  query(
+    vector: ArrayLike<number>,
+    topK: number,
+    opts?: { filter?: (metadata: unknown, id: string) => boolean; workbookId?: string; signal?: AbortSignal },
+  ): Promise<Array<{ id: string; score: number; metadata: unknown }>>;
+
+  // Indexing/persistence methods (required when `skipIndexing` is false).
+  list?: (opts?: {
+    filter?: (metadata: unknown, id: string) => boolean;
+    workbookId?: string;
+    includeVector?: boolean;
+    signal?: AbortSignal;
+  }) => Promise<Array<{ id: string; vector?: Float32Array; metadata: unknown }>>;
+  upsert?: (records: Array<{ id: string; vector: ArrayLike<number>; metadata: unknown }>) => Promise<void>;
+  updateMetadata?: (records: Array<{ id: string; metadata: unknown }>) => Promise<void>;
+  delete?: (ids: string[]) => Promise<void>;
+  batch?: <T>(fn: () => Promise<T> | T) => Promise<T>;
+  close?: () => Promise<void>;
+}
+
+export interface WorkbookRagRect {
+  r0: number;
+  c0: number;
+  r1: number;
+  c1: number;
+}
+
+export interface WorkbookRagSheet {
+  name: string;
+  /**
+   * Either a 2D matrix `[row][col]`, a sparse Map keyed by coordinates, or any other
+   * host-specific cell representation understood by `packages/ai-rag`.
+   */
+  cells?: unknown;
+  /**
+   * Optional alternative to `cells` (treated as `[row][col]`).
+   */
+  values?: unknown[][];
+}
+
+export interface WorkbookRagWorkbook {
+  id: string;
+  sheets: WorkbookRagSheet[];
+  tables?: Array<{ name: string; sheetName: string; rect: WorkbookRagRect }>;
+  namedRanges?: Array<{ name: string; sheetName: string; rect: WorkbookRagRect }>;
+  [key: string]: unknown;
+}
+
 export interface RetrievedSheetChunk {
   range: string;
   score: number;
@@ -70,7 +130,7 @@ export interface DlpOptions {
 }
 
 export type WorkbookRagOptions = {
-  vectorStore: unknown;
+  vectorStore: WorkbookRagVectorStore;
   /**
    * Workbook RAG embedder.
    *
@@ -136,7 +196,7 @@ export class ContextManager {
   }): Promise<BuildContextResult>;
 
   buildWorkbookContext(params: {
-    workbook: unknown;
+    workbook: WorkbookRagWorkbook;
     query: string;
     attachments?: Attachment[];
     topK?: number;
