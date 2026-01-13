@@ -248,6 +248,7 @@ export class FormulaBarView {
     | { id: number; kind: "raf" }
     | { id: ReturnType<typeof setTimeout>; kind: "timeout" }
     | null = null;
+  #toolingAbort: AbortController | null = null;
   #toolingPending: {
     requestId: number;
     draft: string;
@@ -1085,9 +1086,15 @@ export class FormulaBarView {
 
     try {
       const options: FormulaParseOptions = { localeId: pending.localeId, referenceStyle: pending.referenceStyle };
+      // Abort any in-flight tooling request so rapid typing doesn't queue up work in the worker.
+      this.#toolingAbort?.abort();
+      const abort = new AbortController();
+      this.#toolingAbort = abort;
+      const rpcOptions = { signal: abort.signal };
+
       const [lexResult, parseResult] = await Promise.all([
-        engine.lexFormulaPartial(pending.draft, options),
-        engine.parseFormulaPartial(pending.draft, pending.cursor, options),
+        engine.lexFormulaPartial(pending.draft, options, rpcOptions),
+        engine.parseFormulaPartial(pending.draft, pending.cursor, options, rpcOptions),
       ]);
 
       // Ignore stale/out-of-order results.
@@ -1105,6 +1112,8 @@ export class FormulaBarView {
   }
 
   #cancelPendingTooling(): void {
+    this.#toolingAbort?.abort();
+    this.#toolingAbort = null;
     if (this.#toolingScheduled) {
       const { id, kind } = this.#toolingScheduled;
       if (kind === "raf") {
