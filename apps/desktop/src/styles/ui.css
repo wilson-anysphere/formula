@@ -797,13 +797,16 @@
 
 .formula-range-preview-tooltip__grid {
   border-collapse: collapse;
+  background: var(--formula-grid-bg, var(--bg-primary));
+  color: var(--formula-grid-cell-text, var(--text-primary));
 }
 
 .formula-range-preview-tooltip__grid td {
-  border: 1px solid var(--border);
+  border: 1px solid var(--formula-grid-line, var(--border));
   padding: 4px 6px;
   min-width: 54px;
   max-width: 120px;
+  background: var(--formula-grid-bg, var(--bg-primary));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
