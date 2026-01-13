@@ -29,6 +29,7 @@ const DEFAULT_SHEET_INDEX_CACHE_LIMIT = 32;
 const DEFAULT_RAG_MAX_CHUNK_ROWS = 30;
 const DEFAULT_RAG_CHUNK_ROW_OVERLAP = 3;
 const DEFAULT_RAG_MAX_CHUNKS_PER_REGION = 50;
+const DEFAULT_MAX_CONTEXT_COLS = 500;
 const SHEET_INDEX_SIGNATURE_VERSION = 1;
 const SHEET_SCHEMA_SIGNATURE_VERSION = 1;
 
@@ -319,6 +320,7 @@ export class ContextManager {
    *   sheetIndexCacheLimit?: number,
    *   workbookRag?: WorkbookRagOptions,
    *   maxContextRows?: number,
+   *   maxContextCols?: number,
    *   maxContextCells?: number,
    *   maxChunkRows?: number,
    *   /**
@@ -353,6 +355,8 @@ export class ContextManager {
     // Hosts can tune these for their own memory/quality tradeoffs.
     this.maxContextRows = normalizeNonNegativeInt(options.maxContextRows, 1_000);
     this.maxContextCells = normalizeNonNegativeInt(options.maxContextCells, 200_000);
+    // Explicit safety cap for extremely wide (but short) selections (e.g. 10 rows x 16k cols).
+    this.maxContextCols = normalizeNonNegativeInt(options.maxContextCols, DEFAULT_MAX_CONTEXT_COLS);
     // `maxChunkRows` controls how many TSV rows are included in each RAG chunk's text.
     this.maxChunkRows = normalizeNonNegativeInt(options.maxChunkRows, 30);
     this.splitRegions = options.splitRegions === true;
@@ -641,6 +645,7 @@ export class ContextManager {
     *   stratifyByColumn?: number,
     *   limits?: {
     *     maxContextRows?: number,
+    *     maxContextCols?: number,
     *     maxContextCells?: number,
     *     maxChunkRows?: number,
     *     /**
@@ -678,6 +683,7 @@ export class ContextManager {
     // `values` is a 2D JS array. With Excel-scale sheets, full-row/column selections can
     // explode into multi-million-cell matrices. Keep the context payload bounded so schema
     // extraction / RAG chunking can't OOM the worker.
+    const safeExplicitColCap = normalizeNonNegativeInt(params.limits?.maxContextCols, this.maxContextCols);
     const safeCellCap = normalizeNonNegativeInt(params.limits?.maxContextCells, this.maxContextCells);
     const maxChunkRows = normalizeNonNegativeInt(params.limits?.maxChunkRows, this.maxChunkRows);
     const splitRegions = (params.limits?.splitRegions ?? this.splitRegions) === true;
@@ -693,9 +699,10 @@ export class ContextManager {
     // further so we can still include at least one column per row without exceeding the
     // total cell budget.
     let rowCount = Math.min(rawValues.length, safeRowCap);
-    if (safeCellCap === 0) rowCount = 0;
+    if (safeCellCap === 0 || safeExplicitColCap === 0) rowCount = 0;
     else if (rowCount > safeCellCap) rowCount = safeCellCap;
-    const safeColCap = rowCount > 0 ? Math.floor(safeCellCap / rowCount) : 0;
+    const safeColCap =
+      rowCount > 0 ? Math.min(Math.floor(safeCellCap / rowCount), safeExplicitColCap) : 0;
     const valuesForContext = rawValues.slice(0, rowCount).map((row) => {
       if (!Array.isArray(row) || safeColCap === 0) return [];
       return row.length <= safeColCap ? row.slice() : row.slice(0, safeColCap);

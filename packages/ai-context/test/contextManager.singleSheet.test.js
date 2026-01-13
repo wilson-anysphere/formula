@@ -3,9 +3,25 @@ import test from "node:test";
 
 import { ContextManager } from "../src/contextManager.js";
 import { RagIndex } from "../src/rag.js";
+import { parseA1Range } from "../src/a1.js";
 
 function makeSheet(values, name = "Sheet1") {
   return { name, values };
+}
+
+function makeWideMatrix(rows, cols) {
+  const values = new Array(rows);
+  const header = new Array(cols);
+  for (let c = 0; c < cols; c++) header[c] = `H${c + 1}`;
+  values[0] = header;
+
+  for (let r = 1; r < rows; r++) {
+    const row = new Array(cols);
+    for (let c = 0; c < cols; c++) row[c] = c;
+    values[r] = row;
+  }
+
+  return values;
 }
 
 test("buildContext: repeated calls with identical data do not re-index the sheet", async () => {
@@ -328,6 +344,39 @@ test("clearSheetIndexCache: waits for in-flight indexing before clearing the sto
 
   // If clear did not wait, the in-flight index could repopulate after the store was cleared.
   assert.equal(cm.ragIndex.store.size, 0);
+});
+
+test("buildContext: maxContextCols clamps extremely wide selections (default cap)", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 1000 });
+  const rows = 10;
+  const cols = 2048;
+  const sheet = makeSheet(makeWideMatrix(rows, cols));
+
+  const out = await cm.buildContext({ sheet, query: "H1", sampleRows: 1 });
+
+  const defaultMaxContextCols = 500;
+  assert.equal(out.sampledRows.length, 1);
+  assert.ok(out.sampledRows[0].length <= defaultMaxContextCols);
+  assert.ok(out.schema?.dataRegions?.[0]?.columnCount <= defaultMaxContextCols);
+
+  assert.ok(out.retrieved.length > 0);
+  const range = parseA1Range(out.retrieved[0].range);
+  assert.equal(range.sheetName, "Sheet1");
+  assert.ok(range.endCol - range.startCol + 1 <= defaultMaxContextCols);
+  assert.ok(range.endRow - range.startRow + 1 <= rows);
+});
+
+test("buildContext: limits.maxContextCols overrides constructor defaults", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 1000, maxContextCols: 100 });
+  const sheet = makeSheet(makeWideMatrix(10, 300));
+
+  const outDefault = await cm.buildContext({ sheet, query: "H1", sampleRows: 1 });
+  assert.ok(outDefault.sampledRows[0].length <= 100);
+  assert.ok(outDefault.schema?.dataRegions?.[0]?.columnCount <= 100);
+
+  const outOverride = await cm.buildContext({ sheet, query: "H1", sampleRows: 1, limits: { maxContextCols: 10 } });
+  assert.ok(outOverride.sampledRows[0].length <= 10);
+  assert.ok(outOverride.schema?.dataRegions?.[0]?.columnCount <= 10);
 });
 
 test("buildContext: mutated sheet data triggers re-indexing and updates stored chunks", async () => {

@@ -271,6 +271,15 @@ export class ContextManager {
      */
     maxContextRows?: number;
     /**
+     * Safety cap for the number of columns included from `sheet.values` when building
+     * single-sheet context. Defaults to 500.
+     *
+     * This protects against pathological "short but extremely wide" selections (e.g.
+     * full-row attachments) that would otherwise produce enormous schema/sample/chunk
+     * strings even when the row count is small.
+     */
+    maxContextCols?: number;
+    /**
      * Safety cap for the total number of cells included from `sheet.values` when building
      * single-sheet context. Defaults to 200_000.
      */
@@ -310,6 +319,7 @@ export class ContextManager {
     stratifyByColumn?: number;
     limits?: {
       maxContextRows?: number;
+      maxContextCols?: number;
       maxContextCells?: number;
       maxChunkRows?: number;
       /**

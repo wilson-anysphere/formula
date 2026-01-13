@@ -335,7 +335,16 @@ In most integrations, only `promptContext` should ever reach a cloud model.
 it uses for schema extraction + sampling + single-sheet RAG:
 
 - scans at most **1,000 rows**
+- caps included columns to **500** (protects against “short but extremely wide” selections)
 - caps total scanned cells to ~**200,000** by shrinking the column count accordingly
+
+These caps can be configured:
+
+- globally via `new ContextManager({ maxContextRows, maxContextCols, maxContextCells })`
+- per-call via `buildContext({ limits: { maxContextRows, maxContextCols, maxContextCells } })`
+
+If you pass user selections (especially whole-row selections / large pasted ranges), setting a conservative `maxContextCols`
+is recommended to prevent prompt bloat and O(width) work across thousands of columns.
 
 If you need larger coverage, prefer workbook RAG (`buildWorkbookContext*`) where the source of truth is a **sparse** list of
 non-empty cells (via `SpreadsheetApi.listNonEmptyCells`) rather than a dense matrix.
