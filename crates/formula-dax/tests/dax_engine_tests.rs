@@ -838,6 +838,22 @@ fn calculate_supports_compound_boolean_or_filters() {
 }
 
 #[test]
+fn calculate_supports_not_boolean_filters() {
+    let mut model = build_model();
+    model
+        .add_measure(
+            "Not Twenty",
+            "CALCULATE(SUM(Orders[Amount]), NOT(Orders[Amount] = 20))",
+        )
+        .unwrap();
+
+    let value = model
+        .evaluate_measure("Not Twenty", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(value, 23.0.into());
+}
+
+#[test]
 fn calculate_boolean_filter_expressions_must_reference_one_table() {
     let model = build_model();
     let err = DaxEngine::new()
