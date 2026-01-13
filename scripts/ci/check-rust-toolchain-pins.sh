@@ -60,6 +60,7 @@ while IFS= read -r match; do
   line="${rest%%:*}"
   ref="${match#*dtolnay/rust-toolchain@}"
   ref="${ref%%[[:space:]]*}"
+  ref="${ref#v}"
 
   if [ -z "$ref" ]; then
     continue
