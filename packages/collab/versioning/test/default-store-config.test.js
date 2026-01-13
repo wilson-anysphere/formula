@@ -49,3 +49,24 @@ test("CollabVersioning default YjsVersionStore options can be overridden without
   assert.equal(store.maxChunksPerTransaction, 2);
 });
 
+test("CollabVersioning ignores accidental yjsStoreOptions.doc overrides", async (t) => {
+  const doc = new Y.Doc();
+  const otherDoc = new Y.Doc();
+  t.after(() => doc.destroy());
+  t.after(() => otherDoc.destroy());
+
+  const versioning = createCollabVersioning({
+    // @ts-expect-error - minimal session stub for unit tests
+    session: { doc },
+    autoStart: false,
+    // `yjsStoreOptions` should never be able to override the session doc binding,
+    // even if a JS caller passes a `doc` field (not part of the public type).
+    // @ts-expect-error - invalid option is intentional for test coverage
+    yjsStoreOptions: { doc: otherDoc },
+  });
+  t.after(() => versioning.destroy());
+
+  const store = versioning.manager.store;
+  assert.ok(store instanceof YjsVersionStore);
+  assert.equal(store.doc, doc);
+});
