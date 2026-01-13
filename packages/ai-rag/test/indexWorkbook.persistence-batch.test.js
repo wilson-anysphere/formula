@@ -5,7 +5,6 @@ import { HashEmbedder } from "../src/embedding/hashEmbedder.js";
 import { indexWorkbook } from "../src/pipeline/indexWorkbook.js";
 import { InMemoryBinaryStorage } from "../src/store/binaryStorage.js";
 import { JsonVectorStore } from "../src/store/jsonVectorStore.js";
-import { SqliteVectorStore } from "../src/store/sqliteVectorStore.js";
 
 class CountingBinaryStorage extends InMemoryBinaryStorage {
   constructor() {
@@ -70,7 +69,11 @@ test("indexWorkbook persists once when batching JsonVectorStore mutations", asyn
 
 let sqlJsAvailable = true;
 try {
-  await import("sql.js");
+  // Keep this as a computed dynamic import (no literal bare specifier) so
+  // `scripts/run-node-tests.mjs` can still execute this file when `node_modules/`
+  // is missing.
+  const sqlJsModuleName = "sql" + ".js";
+  await import(sqlJsModuleName);
 } catch {
   sqlJsAvailable = false;
 }
@@ -81,6 +84,8 @@ test(
   async () => {
     const embedder = new HashEmbedder({ dimension: 128 });
     const storage = new CountingBinaryStorage();
+    const modulePath = "../src/store/" + "sqliteVectorStore.js";
+    const { SqliteVectorStore } = await import(modulePath);
     const store = await SqliteVectorStore.create({ storage, dimension: 128, autoSave: true });
 
     await indexWorkbook({ workbook: makeWorkbookTwoTables(), vectorStore: store, embedder });
@@ -94,4 +99,3 @@ test(
     await store.close();
   }
 );
-
