@@ -1,6 +1,7 @@
-# Encrypted OOXML (`.xlsx`) fixtures
+# Encrypted OOXML spreadsheet fixtures
 
-This directory is the home for Excel workbooks that require a password to open.
+This directory is the home for Excel OOXML spreadsheets that require a password to open (for
+example `.xlsx`, `.xlsm`, `.xlsb`).
 
 Even though they use the `.xlsx` extension, encrypted OOXML workbooks are **not ZIP/OPC
 packages**. Excel stores them as OLE/CFB (Compound File Binary) containers with

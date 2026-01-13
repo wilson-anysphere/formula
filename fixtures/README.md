@@ -7,7 +7,7 @@ This directory contains small, in-repo workbooks used by tests and documentation
 ```
 fixtures/
   xlsx/         # ZIP/OPC-based XLSX/XLSM fixtures used by the `xlsx-diff` round-trip harness
-  encrypted/    # Password-protected/encrypted workbooks (OLE/CFB wrappers; excluded from the ZIP/OPC round-trip corpus)
+  encrypted/    # Password-to-open/encrypted OOXML workbooks (OLE/CFB wrappers; excluded from the ZIP/OPC round-trip corpus)
   charts/       # Chart-specific fixtures + generated models + Excel golden PNGs
 ```
 

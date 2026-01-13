@@ -15,10 +15,11 @@ This refers to Excel’s **“Encrypt with Password” / “Password to open”*
 Workbook/worksheet protection (“password to edit”) is **not** encryption and still produces a
 normal ZIP/OPC `.xlsx`, so protection-related fixtures can live in this corpus.
 
-Excel “password-to-open” `.xlsx` files are **not ZIP archives** on disk. They are OLE/CFB
-(Compound File Binary) containers with `EncryptionInfo` and `EncryptedPackage` streams
-(MS-OFFCRYPTO). Because the round-trip corpus is collected by `xlsx-diff::collect_fixture_paths`
-and then opened as a ZIP archive, encrypted OOXML fixtures must live outside `fixtures/xlsx/`.
+Excel “password-to-open” OOXML workbooks (e.g. `.xlsx`, `.xlsm`, `.xlsb`) are **not ZIP archives**
+on disk. They are OLE/CFB (Compound File Binary) containers with `EncryptionInfo` and
+`EncryptedPackage` streams (MS-OFFCRYPTO). Because the round-trip corpus is collected by
+`xlsx-diff::collect_fixture_paths` and then opened as a ZIP archive, encrypted OOXML fixtures must
+live outside `fixtures/xlsx/`.
 
 Encrypted OOXML fixtures live under:
 

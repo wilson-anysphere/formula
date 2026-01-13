@@ -369,7 +369,8 @@ When implementing (or calling) encrypted-workbook support:
 
 ## Test fixtures in this repo
 
-- Encrypted/password-protected OOXML workbook fixtures live under `fixtures/encrypted/ooxml/`.
+- Encrypted/password-protected OOXML workbook fixtures live under `fixtures/encrypted/ooxml/` (for
+  example `.xlsx`, `.xlsm`, `.xlsb`).
   These files are OLE/CFB wrappers (not ZIP/OPC), so they must not live under `fixtures/xlsx/`
   where the round-trip corpus is enumerated via `xlsx-diff::collect_fixture_paths`.
 - Some encryption coverage is exercised with **synthetic** containers generated directly in tests
