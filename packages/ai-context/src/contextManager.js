@@ -3,6 +3,7 @@ import { DEFAULT_TOKEN_ESTIMATOR, packSectionsToTokenBudget, stableJsonStringify
 import { headSampleRows, randomSampleRows, stratifiedSampleRows, systematicSampleRows } from "./sampling.js";
 import { classifyText, redactText } from "./dlp.js";
 import { awaitWithAbort, throwIfAborted } from "./abort.js";
+import { inferColumnType, isLikelyHeaderRow } from "./schema.js";
 
 import { indexWorkbook } from "../../ai-rag/src/pipeline/indexWorkbook.js";
 import { workbookFromSpreadsheetApi } from "../../ai-rag/src/workbook/fromSpreadsheetApi.js";
@@ -30,6 +31,63 @@ function normalizeNonNegativeInt(value, fallback) {
   if (!Number.isFinite(n)) return fallback;
   return Math.max(0, Math.floor(n));
 }
+
+/**
+ * Normalize a workbook cell (ai-rag / spreadsheet-like) to a scalar value for schema inference.
+ *
+ * Supported shapes:
+ * - { v, f } (ai-rag normalized cell)
+ * - { value, formula } (SpreadsheetApi cell)
+ * - raw scalar (string/number/etc)
+ *
+ * @param {unknown} cell
+ * @returns {unknown}
+ */
+function workbookCellToScalar(cell) {
+  if (cell == null) return cell;
+  if (typeof cell !== "object") return cell;
+  const obj = /** @type {any} */ (cell);
+  const f = obj.f ?? obj.formula;
+  if (typeof f === "string" && f.trim() !== "") {
+    // Ensure formula strings get classified as formulas by downstream type inference.
+    const trimmed = f.trim();
+    return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
+  }
+  if (Object.prototype.hasOwnProperty.call(obj, "v")) return obj.v;
+  if (Object.prototype.hasOwnProperty.call(obj, "value")) return obj.value;
+  return cell;
+}
+
+/**
+ * @param {unknown} value
+ */
+function isEmptyScalar(value) {
+  return value === null || value === undefined || value === "";
+}
+
+/**
+ * @param {any} sheet
+ * @param {number} row
+ * @param {number} col
+ * @returns {unknown}
+ */
+function getWorkbookSheetCell(sheet, row, col) {
+  if (!sheet || typeof sheet !== "object") return undefined;
+  const values = sheet.values;
+  if (Array.isArray(values)) return workbookCellToScalar(values[row]?.[col]);
+
+  const cells = sheet.cells;
+  if (Array.isArray(cells)) return workbookCellToScalar(cells[row]?.[col]);
+
+  if (cells && typeof cells.get === "function") {
+    const keyComma = `${row},${col}`;
+    const keyColon = `${row}:${col}`;
+    return workbookCellToScalar(cells.get(keyComma) ?? cells.get(keyColon));
+  }
+
+  return undefined;
+}
+
 /**
  * Normalize DLP options so ContextManager methods can accept both camelCase and
  * snake_case field names (e.g. when options are deserialized from JSON in a
@@ -835,6 +893,132 @@ export class ContextManager {
 
     let promptContext = "";
     if (includePromptContext) {
+      const schemaLines = [];
+      const tables = Array.isArray(params.workbook?.tables) ? params.workbook.tables : [];
+      const namedRanges = Array.isArray(params.workbook?.namedRanges) ? params.workbook.namedRanges : [];
+      const sheetByName = new Map((params.workbook?.sheets ?? []).map((s) => [s.name, s]));
+
+      const maxTables = 25;
+      const maxColumns = 25;
+      const maxTypeSampleRows = 50;
+
+      // Prefer stable output ordering to help with cacheability and tests.
+      const sortedTables = tables
+        .slice()
+        .sort((a, b) =>
+          String(a?.sheetName ?? "").localeCompare(String(b?.sheetName ?? "")) ||
+          String(a?.name ?? "").localeCompare(String(b?.name ?? ""))
+        );
+
+      for (let i = 0; i < sortedTables.length && i < maxTables; i++) {
+        throwIfAborted(signal);
+        const table = sortedTables[i];
+        if (!table || typeof table !== "object") continue;
+        const name = typeof table.name === "string" ? table.name : "";
+        const sheetName = typeof table.sheetName === "string" ? table.sheetName : "";
+        const rect = table.rect;
+        if (!name || !sheetName || !rect || typeof rect !== "object") continue;
+        const r0 = rect.r0;
+        const c0 = rect.c0;
+        const r1 = rect.r1;
+        const c1 = rect.c1;
+        if (![r0, c0, r1, c1].every((n) => Number.isInteger(n) && n >= 0)) continue;
+        if (r1 < r0 || c1 < c0) continue;
+
+        const sheet = sheetByName.get(sheetName);
+        if (!sheet) continue;
+
+        // Structured DLP classifications: if the table's range is disallowed due to explicit
+        // selectors (document/sheet/range), omit column details entirely (match chunk redaction).
+        if (dlp) {
+          const range = rectToRange(rect);
+          const sheetId = sheetName ? resolveDlpSheetId(sheetName) : "";
+          if (range && sheetId) {
+            const index = getDlpDocumentIndex();
+            const recordClassification = index
+              ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range }, signal)
+              : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);
+            const recordDecision = evaluatePolicy({
+              action: DLP_ACTION.AI_CLOUD_PROCESSING,
+              classification: recordClassification,
+              policy: dlp.policy,
+              options: { includeRestrictedContent },
+            });
+            if (recordDecision.decision !== DLP_DECISION.ALLOW) {
+              schemaLines.push(`- Table ${name} (sheet="${sheetName}"): [REDACTED]`);
+              continue;
+            }
+          }
+        }
+
+        const colCount = Math.max(0, c1 - c0 + 1);
+        const boundedColCount = Math.min(colCount, maxColumns);
+
+        /** @type {unknown[]} */
+        const headerRowValues = [];
+        /** @type {unknown[]} */
+        const nextRowValues = [];
+        for (let offset = 0; offset < boundedColCount; offset++) {
+          throwIfAborted(signal);
+          const c = c0 + offset;
+          headerRowValues.push(getWorkbookSheetCell(sheet, r0, c));
+          nextRowValues.push(getWorkbookSheetCell(sheet, r0 + 1, c));
+        }
+
+        const hasHeader = isLikelyHeaderRow(headerRowValues, nextRowValues);
+        const dataStartRow = hasHeader ? r0 + 1 : r0;
+
+        const cols = [];
+        for (let offset = 0; offset < boundedColCount; offset++) {
+          throwIfAborted(signal);
+          const rawHeader = headerRowValues[offset];
+          const header =
+            hasHeader &&
+            typeof rawHeader === "string" &&
+            rawHeader.trim() !== "" &&
+            !rawHeader.trim().startsWith("=") &&
+            !/^[+-]?\d+(?:\.\d+)?$/.test(rawHeader.trim())
+              ? rawHeader.trim()
+              : `Column${offset + 1}`;
+
+          /** @type {unknown[]} */
+          const samples = [];
+          for (let r = dataStartRow; r <= r1 && samples.length < maxTypeSampleRows; r++) {
+            throwIfAborted(signal);
+            const v = getWorkbookSheetCell(sheet, r, c0 + offset);
+            if (v === undefined) continue;
+            if (isEmptyScalar(v)) continue;
+            samples.push(v);
+          }
+          const type = inferColumnType(samples, { signal });
+          cols.push(`${header} (${type})`);
+        }
+
+        const colSuffix = cols.length < colCount ? " | …" : "";
+        schemaLines.push(`- Table ${name} (sheet="${sheetName}"): ${cols.join(" | ")}${colSuffix}`);
+      }
+
+      // Named ranges can be helpful anchors even without cell samples.
+      const sortedNamedRanges = namedRanges
+        .slice()
+        .sort((a, b) =>
+          String(a?.sheetName ?? "").localeCompare(String(b?.sheetName ?? "")) ||
+          String(a?.name ?? "").localeCompare(String(b?.name ?? ""))
+        );
+      const maxNamedRanges = 25;
+      for (let i = 0; i < sortedNamedRanges.length && i < maxNamedRanges; i++) {
+        throwIfAborted(signal);
+        const nr = sortedNamedRanges[i];
+        if (!nr || typeof nr !== "object") continue;
+        const name = typeof nr.name === "string" ? nr.name : "";
+        const sheetName = typeof nr.sheetName === "string" ? nr.sheetName : "";
+        const rect = nr.rect;
+        if (!name || !sheetName || !rect || typeof rect !== "object") continue;
+        schemaLines.push(`- Named range ${name} (sheet="${sheetName}")`);
+      }
+
+      const workbookSchemaText = schemaLines.length ? this.redactor(`Workbook schema (schema-first):\n${schemaLines.join("\n")}`) : "";
+
       const sections = [
         ...(dlp && redactedChunkCount > 0
           ? [
@@ -864,6 +1048,12 @@ export class ContextManager {
               })),
             })}`
           ),
+        },
+        {
+          key: "workbook_schema",
+          // Keep between workbook_summary (3) and retrieved (4).
+          priority: 3.5,
+          text: workbookSchemaText,
         },
         {
           key: "attachments",

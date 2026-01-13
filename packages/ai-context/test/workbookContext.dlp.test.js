@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ContextManager } from "../src/contextManager.js";
-import { HashEmbedder, InMemoryVectorStore, indexWorkbook } from "../../ai-rag/src/index.js";
+import { HashEmbedder } from "../../ai-rag/src/embedding/hashEmbedder.js";
+import { indexWorkbook } from "../../ai-rag/src/pipeline/indexWorkbook.js";
+import { InMemoryVectorStore } from "../../ai-rag/src/store/inMemoryVectorStore.js";
 import { DLP_ACTION } from "../../security/dlp/src/actions.js";
 import { DlpViolationError } from "../../security/dlp/src/errors.js";
 
@@ -139,6 +141,31 @@ test("buildWorkbookContext: redacts sensitive workbook chunks when policy allows
   assert.equal(auditEvents[0].documentId, workbook.id);
   assert.equal(auditEvents[0].decision.decision, "redact");
   assert.equal(auditEvents[0].redactedChunkCount, 1);
+});
+
+test("buildWorkbookContext: workbook_schema does not contain raw sensitive strings when DLP redaction is enabled", async () => {
+  const workbook = makeSensitiveWorkbook();
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "contacts",
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ redactDisallowed: true }),
+    },
+  });
+
+  assert.match(out.promptContext, /## workbook_schema/i);
+  assert.match(out.promptContext, /ContactsTable/);
+  assert.doesNotMatch(out.promptContext, /alice@example\.com/);
+  assert.doesNotMatch(out.promptContext, /123-45-6789/);
 });
 
 test("buildWorkbookContext: does not send raw sensitive workbook text to embedder when blocked", async () => {

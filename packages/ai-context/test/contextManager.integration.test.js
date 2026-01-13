@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ContextManager } from "../src/contextManager.js";
-import { HashEmbedder, InMemoryVectorStore } from "../../ai-rag/src/index.js";
+import { HashEmbedder } from "../../ai-rag/src/embedding/hashEmbedder.js";
+import { InMemoryVectorStore } from "../../ai-rag/src/store/inMemoryVectorStore.js";
 
 function makeWorkbook() {
   return {
@@ -27,11 +28,17 @@ test('integration: query "revenue by region" retrieves the right table chunk', a
   const vectorStore = new InMemoryVectorStore({ dimension: 128 });
 
   const cm = new ContextManager({
-    tokenBudgetTokens: 500,
+    tokenBudgetTokens: 800,
     workbookRag: { vectorStore, embedder, topK: 3 },
   });
 
   const out = await cm.buildWorkbookContext({ workbook, query: "revenue by region" });
+
+  assert.match(out.promptContext, /## workbook_schema/i);
+  // Schema-first: table columns (headers + inferred types) should be present even when
+  // retrieval is sparse/noisy.
+  assert.match(out.promptContext, /Region\s*\(string\)/i);
+  assert.match(out.promptContext, /Revenue\s*\(number\)/i);
 
   assert.match(out.promptContext, /RevenueByRegion/);
   assert.ok(out.retrieved.length > 0);
