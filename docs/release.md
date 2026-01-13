@@ -699,7 +699,7 @@ assets (including `latest.json` + `latest.json.sig`) to your own host and update
 
 Tauri's updater supports **templated endpoint URLs**. At runtime it replaces:
 
-- `{{target}}` — the current platform triple (used to select the right OS/arch artifact)
+- `{{target}}` — the current Tauri updater **target string** (used to select the right OS/arch artifact)
 - `{{current_version}}` — the currently-installed app version
 
 This is useful when hosting update metadata outside GitHub (or when you want per-target/per-version
@@ -962,11 +962,14 @@ The AppImage is a **self-contained SquashFS bundle**. Before publishing a releas
 contains the expected payload (binary + resources) and that the embedded `.desktop` file declares
 the expected MIME/file associations.
 
-Recommended (repo script):
+Recommended (repo scripts):
 
 ```bash
 appimage="$(ls apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage | head -n 1)"
 bash scripts/validate-linux-appimage.sh --appimage "$appimage"
+
+# Optional: also run the CI smoke test locally (checks ELF arch + ldd "not found", no GUI).
+bash scripts/ci/check-appimage.sh "$appimage"
 ```
 
 CI note: the release workflow also runs a lightweight smoke test that validates AppImage extraction
@@ -992,6 +995,10 @@ grep -E '^MimeType=' "$desktop_file"
 
 # Optional: validate .desktop syntax (requires `desktop-file-utils`)
 command -v desktop-file-validate >/dev/null && desktop-file-validate "$desktop_file" || true
+
+# Optional (recommended): run the same desktop-integration validator CI uses for Linux packages.
+# This checks `MimeType=` coverage and that `Exec=` includes a %u/%U/%f/%F placeholder.
+python scripts/ci/verify_linux_desktop_integration.py --package-root "$root"
 ```
 
 ## 5) Verifying a release
