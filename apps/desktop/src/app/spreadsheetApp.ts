@@ -6675,12 +6675,14 @@ export class SpreadsheetApp {
     this.status.activeValue.textContent = this.getCellDisplayValue(this.selection.active);
     this.updateSelectionStats();
 
-    if (this.formulaBar && !this.formulaBar.isEditing()) {
+    if (this.formulaBar) {
       const address = cellToA1(this.selection.active);
       const input = this.getCellInputText(this.selection.active);
       const value = this.getCellComputedValue(this.selection.active);
       this.formulaBar.setActiveCell({ address, input, value, nameBox: selectionRangeText });
-      this.formulaBarCompletion?.update();
+      if (!this.formulaBar.isEditing()) {
+        this.formulaBarCompletion?.update();
+      }
     }
 
     this.renderCommentsPanel();

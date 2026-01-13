@@ -135,5 +135,37 @@ describe("SpreadsheetApp formula bar name box selection range", () => {
     root.remove();
     formulaBar.remove();
   });
-});
 
+  it("updates the name box while the formula bar is editing", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const formulaInput = formulaBar.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+    expect(formulaInput).not.toBeNull();
+    formulaInput!.focus();
+
+    app.selectRange(
+      {
+        range: { startRow: 0, endRow: 2, startCol: 0, endCol: 1 }, // A1:B3
+      },
+      { scrollIntoView: false, focus: false },
+    );
+
+    const address = formulaBar.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
+    expect(address).not.toBeNull();
+    expect(address!.value).toBe("A1:B3");
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+});

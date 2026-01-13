@@ -688,10 +688,17 @@ export class FormulaBarView {
   }
 
   setActiveCell(info: { address: string; input: string; value: unknown; nameBox?: string }): void {
-    if (this.model.isEditing) return;
     const { nameBox, ...activeCell } = info;
-    this.model.setActiveCell(activeCell);
     this.#nameBoxValue = nameBox ?? activeCell.address;
+
+    // Keep the Name Box display in sync with selection changes even while editing
+    // (but never clobber the user's in-progress typing in the Name Box itself).
+    if (document.activeElement !== this.#addressEl) {
+      this.#addressEl.value = this.#nameBoxValue;
+    }
+
+    if (this.model.isEditing) return;
+    this.model.setActiveCell(activeCell);
     this.#hoverOverride = null;
     this.#hoverOverrideText = null;
     this.#selectedReferenceIndex = null;
