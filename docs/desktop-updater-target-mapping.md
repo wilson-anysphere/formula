@@ -93,6 +93,11 @@ The table below documents what each platform key should point to in `latest.json
   a multi-target run cannot overwrite/clobber assets on the GitHub Release. CI enforces this via:
   - `scripts/ci/validate-updater-manifest.mjs` (ensures `latest.json` points at arch-specific assets)
   - `verify-release-assets` in `.github/workflows/release.yml` (ensures uploaded assets are uniquely named)
+- Linux multi-arch safety requirement: the `.AppImage` / `.deb` / `.rpm` filenames must include an
+  explicit architecture marker (for example `x86_64`, `amd64`, `x64` vs `arm64`, `aarch64`) so that a
+  multi-target run cannot overwrite/clobber assets on the GitHub Release. CI enforces this via:
+  - `scripts/ci/validate-updater-manifest.mjs` (ensures `latest.json` points at arch-specific updater assets)
+  - `scripts/verify-tauri-updater-assets.mjs` (ensures each arch has distinct install bundles)
 - To inspect a manifest locally:
   - `jq '.platforms | keys' latest.json`
   - `jq -r '.platforms["windows-aarch64"].url' latest.json`
