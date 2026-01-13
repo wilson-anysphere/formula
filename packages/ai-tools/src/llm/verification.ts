@@ -1,4 +1,5 @@
 import { extractVerifiableClaims } from "./claim-extraction.ts";
+import { parseSpreadsheetNumber } from "../executor/number-parsing.ts";
 
 export interface VerificationResult {
   /**
@@ -381,7 +382,8 @@ async function verifyCellValueClaim(
     const result = await ctx.toolExecutor.execute(toolCall);
     const sanitized = sanitizeVerificationToolResult(result);
     const actual = extractSingleCellValue(result);
-    const actualNumber = typeof actual === "number" ? actual : typeof actual === "string" ? Number(actual) : null;
+    const actualNumber =
+      typeof actual === "number" ? actual : typeof actual === "string" ? parseSpreadsheetNumber(actual) : null;
     const verified = numbersApproximatelyEqual(actualNumber, claim.expected);
     return {
       claim: claimLabel,

@@ -67,4 +67,58 @@ describe("verifyAssistantClaims", () => {
     expect(evidence?.call?.name).toBe("compute_statistics");
     expect(evidence?.result?.data?.statistics?.count).toBe(1_000_000);
   });
+
+  it("verifies cell_value claims when read_range returns formatted numeric strings (thousands separators)", async () => {
+    const toolExecutor = {
+      tools: [{ name: "read_range" }],
+      async execute(call: any) {
+        return {
+          tool: "read_range",
+          ok: true,
+          timing: { started_at_ms: 0, duration_ms: 0 },
+          data: { range: call.arguments?.range, values: [["1,200"]] }
+        };
+      }
+    };
+
+    const result = await verifyAssistantClaims({
+      assistantText: "Sheet1!A1 is 1200.",
+      toolExecutor: toolExecutor as any
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.verified).toBe(true);
+    expect(result?.claims?.[0]).toMatchObject({
+      verified: true,
+      expected: 1200,
+      actual: 1200
+    });
+  });
+
+  it("verifies cell_value claims when read_range returns percent-formatted numeric strings", async () => {
+    const toolExecutor = {
+      tools: [{ name: "read_range" }],
+      async execute(call: any) {
+        return {
+          tool: "read_range",
+          ok: true,
+          timing: { started_at_ms: 0, duration_ms: 0 },
+          data: { range: call.arguments?.range, values: [["10%"]] }
+        };
+      }
+    };
+
+    const result = await verifyAssistantClaims({
+      assistantText: "Sheet1!A1 is 0.1.",
+      toolExecutor: toolExecutor as any
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.verified).toBe(true);
+    expect(result?.claims?.[0]).toMatchObject({
+      verified: true,
+      expected: 0.1,
+      actual: 0.1
+    });
+  });
 });
