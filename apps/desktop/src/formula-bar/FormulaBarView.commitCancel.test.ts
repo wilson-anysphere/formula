@@ -79,6 +79,24 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("commitEdit()/cancelEdit() are no-ops when not editing", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel });
+
+    view.commitEdit();
+    view.cancelEdit();
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(false);
+
+    host.remove();
+  });
+
   it("hides commit/cancel buttons when not editing and shows them on focus", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -101,6 +119,54 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(cancel.disabled).toBe(false);
     expect(commit.hidden).toBe(false);
     expect(commit.disabled).toBe(false);
+
+    host.remove();
+  });
+
+  it("commits via commitEdit() API with reason=command by default", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+
+    view.textarea.focus();
+    view.textarea.value = "api-commit";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.commitEdit();
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("api-commit", { reason: "command", shift: false });
+    expect(view.model.isEditing).toBe(false);
+    expect(view.model.activeCell.input).toBe("api-commit");
+
+    host.remove();
+  });
+
+  it("cancels via cancelEdit() API and restores the active cell input", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel });
+    view.setActiveCell({ address: "A1", input: "original", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "changed";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.cancelEdit();
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(view.model.isEditing).toBe(false);
+    expect(view.model.draft).toBe("original");
+    expect(view.model.activeCell.input).toBe("original");
+    expect(view.textarea.value).toBe("original");
 
     host.remove();
   });
