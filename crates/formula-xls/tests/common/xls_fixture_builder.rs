@@ -714,6 +714,25 @@ fn vpagebreaks_record(breaks: &[u16]) -> Vec<u8> {
     out
 }
 
+/// Build a BIFF8 `.xls` fixture containing two worksheets (`First`, `Second`) that each store
+/// distinct page setup (paper size, orientation, scaling), margins, and manual page breaks.
+///
+/// This is used to validate that BIFF sheet-index mapping / per-sheet application logic attaches
+/// page setup metadata to the correct sheet in multi-sheet workbooks.
+pub fn build_page_setup_multisheet_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_page_setup_multisheet_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a minimal BIFF8 `.xls` fixture containing a single sheet named `Notes`
 /// with a NOTE/OBJ/TXO comment anchored to `A1`.
 pub fn build_note_comment_fixture_xls() -> Vec<u8> {
@@ -5955,6 +5974,173 @@ fn build_manual_page_breaks_sheet_stream(xf_general: u16) -> Vec<u8> {
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
+}
+
+#[derive(Clone, Copy)]
+struct PageSetupFixtureSheet {
+    paper_size: u16,
+    landscape: bool,
+    scale_percent: u16,
+    header_margin: f64,
+    footer_margin: f64,
+    left_margin: f64,
+    right_margin: f64,
+    top_margin: f64,
+    bottom_margin: f64,
+    row_break_after: u16,
+    col_break_after: u16,
+    cell_value: f64,
+}
+
+fn build_page_setup_sheet_stream(xf_cell: u16, cfg: PageSetupFixtureSheet) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: ensure the configured break positions are in range.
+    let last_row_plus1 = u32::from(cfg.row_break_after).saturating_add(2).max(1);
+    let last_col_plus1 = cfg.col_break_after.saturating_add(2).max(1);
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&last_row_plus1.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&last_col_plus1.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Margins.
+    push_record(&mut sheet, RECORD_LEFTMARGIN, &cfg.left_margin.to_le_bytes());
+    push_record(&mut sheet, RECORD_RIGHTMARGIN, &cfg.right_margin.to_le_bytes());
+    push_record(&mut sheet, RECORD_TOPMARGIN, &cfg.top_margin.to_le_bytes());
+    push_record(
+        &mut sheet,
+        RECORD_BOTTOMMARGIN,
+        &cfg.bottom_margin.to_le_bytes(),
+    );
+
+    // Page setup.
+    push_record(
+        &mut sheet,
+        RECORD_SETUP,
+        &setup_record(
+            cfg.paper_size,
+            cfg.scale_percent,
+            0,
+            0,
+            cfg.landscape,
+            cfg.header_margin,
+            cfg.footer_margin,
+        ),
+    );
+
+    // Manual page breaks.
+    push_record(
+        &mut sheet,
+        RECORD_HPAGEBREAKS,
+        &hpagebreaks_record(&[cfg.row_break_after]),
+    );
+    push_record(
+        &mut sheet,
+        RECORD_VPAGEBREAKS,
+        &vpagebreaks_record(&[cfg.col_break_after]),
+    );
+
+    // A1: a single cell so calamine returns a non-empty range.
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(0, 0, xf_cell, cfg.cell_value),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_page_setup_multisheet_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table (style XFs only).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF (required by some readers).
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Two worksheets.
+    let boundsheet1_start = globals.len();
+    let mut boundsheet1 = Vec::<u8>::new();
+    boundsheet1.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet1.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet1, "First");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet1);
+    let boundsheet1_offset_pos = boundsheet1_start + 4;
+
+    let boundsheet2_start = globals.len();
+    let mut boundsheet2 = Vec::<u8>::new();
+    boundsheet2.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet2.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet2, "Second");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet2);
+    let boundsheet2_offset_pos = boundsheet2_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet substreams -------------------------------------------------------
+    let sheet1_offset = globals.len();
+    let sheet1 = build_page_setup_sheet_stream(
+        xf_general,
+        PageSetupFixtureSheet {
+            paper_size: 9,
+            landscape: true,
+            scale_percent: 80,
+            header_margin: 0.125,
+            footer_margin: 0.875,
+            left_margin: 0.5,
+            right_margin: 1.0,
+            top_margin: 1.5,
+            bottom_margin: 2.0,
+            row_break_after: 4,
+            col_break_after: 1,
+            cell_value: 1.0,
+        },
+    );
+    let sheet2_offset = sheet1_offset + sheet1.len();
+    let sheet2 = build_page_setup_sheet_stream(
+        xf_general,
+        PageSetupFixtureSheet {
+            paper_size: 1,
+            landscape: false,
+            scale_percent: 120,
+            header_margin: 0.25,
+            footer_margin: 0.75,
+            left_margin: 0.375,
+            right_margin: 0.625,
+            top_margin: 1.125,
+            bottom_margin: 1.875,
+            row_break_after: 9,
+            col_break_after: 3,
+            cell_value: 2.0,
+        },
+    );
+
+    globals[boundsheet1_offset_pos..boundsheet1_offset_pos + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals[boundsheet2_offset_pos..boundsheet2_offset_pos + 4]
+        .copy_from_slice(&(sheet2_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet1);
+    globals.extend_from_slice(&sheet2);
+
+    globals
 }
 
 fn build_empty_sheet_stream(xf_general: u16) -> Vec<u8> {
