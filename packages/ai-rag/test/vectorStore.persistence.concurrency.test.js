@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { JsonVectorStore } from "../src/store/jsonVectorStore.js";
-import { SqliteVectorStore } from "../src/store/sqliteVectorStore.js";
 
 function createDeferred() {
   /** @type {(value?: void) => void} */
@@ -205,7 +204,11 @@ test("JsonVectorStore serializes clear persistence writes to prevent lost update
 
 let sqlJsAvailable = true;
 try {
-  await import("sql.js");
+  // Keep this as a computed dynamic import (no literal bare specifier) so
+  // `scripts/run-node-tests.mjs` can still execute this file when `node_modules/`
+  // is missing.
+  const sqlJsModuleName = "sql" + ".js";
+  await import(sqlJsModuleName);
 } catch {
   sqlJsAvailable = false;
 }
@@ -215,6 +218,8 @@ test(
   { skip: !sqlJsAvailable },
   async () => {
     const storage = new ControlledBinaryStorage();
+    const modulePath = "../src/store/" + "sqliteVectorStore.js";
+    const { SqliteVectorStore } = await import(modulePath);
     const store = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: true });
 
     const p1 = store.upsert([{ id: "a", vector: [1, 0], metadata: { label: "A" } }]);
@@ -253,6 +258,8 @@ test(
   { skip: !sqlJsAvailable },
   async () => {
     const storage = new ControlledBinaryStorage();
+    const modulePath = "../src/store/" + "sqliteVectorStore.js";
+    const { SqliteVectorStore } = await import(modulePath);
     const store = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: true });
 
     // Seed two workbooks.
@@ -290,6 +297,8 @@ test(
   { skip: !sqlJsAvailable },
   async () => {
     const storage = new ControlledBinaryStorage();
+    const modulePath = "../src/store/" + "sqliteVectorStore.js";
+    const { SqliteVectorStore } = await import(modulePath);
     const store = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: true });
 
     const seed = store.upsert([

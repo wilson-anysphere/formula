@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { InMemoryVectorStore } from "../src/store/inMemoryVectorStore.js";
-import { SqliteVectorStore } from "../src/store/sqliteVectorStore.js";
 
 let sqlJsAvailable = true;
 try {
-  await import("sql.js");
+  // Keep this as a computed dynamic import (no literal bare specifier) so
+  // `scripts/run-node-tests.mjs` can still execute this file when `node_modules/`
+  // is missing.
+  const sqlJsModuleName = "sql" + ".js";
+  await import(sqlJsModuleName);
 } catch {
   sqlJsAvailable = false;
 }
@@ -37,6 +40,10 @@ test("InMemoryVectorStore.query breaks score ties by id (ascending)", async () =
 });
 
 test("SqliteVectorStore.query breaks score ties by id (ascending)", { skip: !sqlJsAvailable }, async () => {
+  // Same reasoning as above: avoid literal dynamic import specifiers so
+  // node:test can run this file in dependency-free environments.
+  const modulePath = "../src/store/" + "sqliteVectorStore.js";
+  const { SqliteVectorStore } = await import(modulePath);
   const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
   try {
     await store.upsert([
