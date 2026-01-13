@@ -56,6 +56,32 @@ def _make_xlsx_with_custom_relationship_uris() -> bytes:
     return buf.getvalue()
 
 
+def _make_xlsx_with_custom_content_type() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/cellimages.xml" ContentType="application/vnd.corp.example.cellimages+xml"/>
+</Types>
+""",
+        )
+        z.writestr(
+            "xl/cellimages.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ci:cellImages xmlns:ci="http://schemas.microsoft.com/office/spreadsheetml/2024/cellimages"
+               xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <ci:cellImage><a:blip r:embed="rId1"/></ci:cellImage>
+</ci:cellImages>
+""",
+        )
+    return buf.getvalue()
+
+
 class TriagePrivacyModeTests(unittest.TestCase):
     def test_triage_workbook_private_mode_anonymizes_display_name_and_hashes_custom_uris(self) -> None:
         import tools.corpus.triage as triage_mod
@@ -222,6 +248,34 @@ class TriagePrivacyModeTests(unittest.TestCase):
         self.assertIsInstance(report.get("run_url"), str)
         self.assertTrue(report["run_url"].startswith("sha256="))
         self.assertNotIn("github.corp.example.com", report["run_url"])
+
+    def test_private_mode_hashes_custom_content_types(self) -> None:
+        import tools.corpus.triage as triage_mod
+
+        original_run_rust_triage = triage_mod._run_rust_triage
+        try:
+            triage_mod._run_rust_triage = lambda *args, **kwargs: {  # type: ignore[assignment]
+                "steps": {},
+                "result": {"open_ok": True, "round_trip_ok": True},
+            }
+
+            data = _make_xlsx_with_custom_content_type()
+            report = triage_workbook(
+                WorkbookInput(display_name="book.xlsx", data=data),
+                rust_exe=Path("noop"),
+                diff_ignore=set(),
+                diff_limit=0,
+                recalc=False,
+                render_smoke=False,
+                privacy_mode="private",
+            )
+        finally:
+            triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
+
+        ct = report.get("cell_images", {}).get("content_type")
+        self.assertIsInstance(ct, str)
+        self.assertTrue(ct.startswith("sha256="))
+        self.assertNotIn("corp.example", ct)
 
 
 if __name__ == "__main__":

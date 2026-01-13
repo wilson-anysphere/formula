@@ -357,6 +357,22 @@ _SAFE_RUN_URL_HOST_SUFFIXES = {
     "github.com",
 }
 
+# OpenXML content types are not URIs, but custom producers sometimes embed corporate domains or
+# internal product names (e.g. `application/vnd.corp.example+xml`). In privacy mode we keep only
+# well-known standard prefixes and hash everything else.
+_SAFE_CONTENT_TYPE_PREFIXES = (
+    "application/xml",
+    "text/xml",
+    "application/octet-stream",
+    "image/",
+    "text/",
+    # OpenXML + OPC package content types.
+    "application/vnd.openxmlformats-officedocument.",
+    "application/vnd.openxmlformats-package.",
+    # Microsoft/Office ecosystem content types.
+    "application/vnd.ms-",
+)
+
 
 def _anonymized_display_name(*, sha256: str, original_name: str) -> str:
     # Keep the extension as a lightweight hint (xlsx vs xlsm) while avoiding leaking the original
@@ -450,6 +466,15 @@ def _redact_run_url(url: str | None, *, privacy_mode: str) -> str | None:
     if parsed.scheme in ("http", "https") and parsed.netloc and _is_safe_run_url_host(parsed.hostname):
         return url
     return f"sha256={_sha256_text(url)}"
+
+
+def _redact_content_type(value: str | None, *, privacy_mode: str) -> str | None:
+    if not value or privacy_mode != _PRIVACY_PRIVATE:
+        return value
+    lowered = value.strip().casefold()
+    if any(lowered.startswith(prefix) for prefix in _SAFE_CONTENT_TYPE_PREFIXES):
+        return value
+    return f"sha256={_sha256_text(value)}"
 
 
 def _now_ms() -> float:
@@ -1098,7 +1123,12 @@ def triage_workbook(
                         for k in ("content_type", "workbook_rel_type", "root_namespace"):
                             v = cell_images.get(k)
                             if isinstance(v, str) and v:
-                                cell_images[k] = _redact_uri_like(v)
+                                if k == "content_type":
+                                    cell_images[k] = _redact_content_type(
+                                        v, privacy_mode=privacy_mode
+                                    )
+                                else:
+                                    cell_images[k] = _redact_uri_like(v)
                         rels_types = cell_images.get("rels_types")
                         if isinstance(rels_types, list):
                             cell_images["rels_types"] = [
