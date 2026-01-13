@@ -76,3 +76,61 @@ fn txpr_parses_underline_and_strike_false() {
     assert_eq!(style.underline, Some(false));
     assert_eq!(style.strike, Some(false));
 }
+
+#[test]
+fn txpr_preserves_theme_font_placeholders() {
+    let xml = r#"<c:txPr xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:p>
+            <a:pPr>
+                <a:defRPr>
+                    <a:latin typeface="+mn-lt"/>
+                </a:defRPr>
+            </a:pPr>
+        </a:p>
+    </c:txPr>"#;
+    let doc = Document::parse(xml).unwrap();
+    let style = parse_txpr(doc.root_element()).unwrap();
+    assert_eq!(style.font_family.as_deref(), Some("+mn-lt"));
+}
+
+#[test]
+fn txpr_falls_back_to_rpr_when_defrpr_missing_attrs() {
+    let xml = r#"<c:txPr xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:p>
+            <a:pPr>
+                <a:defRPr/>
+            </a:pPr>
+            <a:r>
+                <a:rPr u="sng" strike="sngStrike">
+                    <a:latin typeface="Calibri"/>
+                </a:rPr>
+                <a:t>Text</a:t>
+            </a:r>
+        </a:p>
+    </c:txPr>"#;
+    let doc = Document::parse(xml).unwrap();
+    let style = parse_txpr(doc.root_element()).unwrap();
+    assert_eq!(style.underline, Some(true));
+    assert_eq!(style.strike, Some(true));
+    assert_eq!(style.font_family.as_deref(), Some("Calibri"));
+}
+
+#[test]
+fn txpr_falls_back_to_end_para_rpr_when_no_runs() {
+    let xml = r#"<c:txPr xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:p>
+            <a:pPr/>
+            <a:endParaRPr u="sng" strike="sngStrike">
+                <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+        </a:p>
+    </c:txPr>"#;
+    let doc = Document::parse(xml).unwrap();
+    let style = parse_txpr(doc.root_element()).unwrap();
+    assert_eq!(style.underline, Some(true));
+    assert_eq!(style.strike, Some(true));
+    assert_eq!(style.font_family.as_deref(), Some("Calibri"));
+}

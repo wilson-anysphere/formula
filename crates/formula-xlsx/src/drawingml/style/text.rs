@@ -9,13 +9,17 @@ pub fn parse_txpr(node: Node<'_, '_>) -> Option<TextRunStyle> {
     }
 
     // Prefer default run properties from the list style if present, but allow fallback to a run
-    // (`a:rPr`) for any properties that are not specified on `a:defRPr`.
+    // (`a:rPr`) or paragraph end properties (`a:endParaRPr`) for any properties that are not
+    // specified on `a:defRPr`.
     let def_rpr = node
         .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "defRPr");
     let run_rpr = node
         .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "rPr");
+    let end_para_rpr = node
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "endParaRPr");
 
     let mut style = TextRunStyle::default();
     if let Some(def_rpr) = def_rpr {
@@ -24,9 +28,12 @@ pub fn parse_txpr(node: Node<'_, '_>) -> Option<TextRunStyle> {
     if let Some(run_rpr) = run_rpr {
         apply_rpr_fallback(&mut style, run_rpr);
     }
+    if let Some(end_para_rpr) = end_para_rpr {
+        apply_rpr_fallback(&mut style, end_para_rpr);
+    }
 
     // Bail early if we didn't find any `a:*RPr` nodes at all.
-    if def_rpr.is_none() && run_rpr.is_none() {
+    if def_rpr.is_none() && run_rpr.is_none() && end_para_rpr.is_none() {
         return None;
     }
 
