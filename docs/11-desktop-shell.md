@@ -63,16 +63,24 @@ The frontend installs listeners in `apps/desktop/src/tauri/startupMetrics.ts` an
   pnpm perf:desktop-startup
   ```
   This command:
-  - builds `apps/desktop/dist` (Vite)
+  - by default (full startup): builds `apps/desktop/dist` (Vite)
   - builds `target/release/formula-desktop` (Rust, `--features desktop`)
   - runs `apps/desktop/tests/performance/desktop-startup-runner.ts`
   - uses a repo-local HOME (`target/perf-home`) so runs don't touch your real `~/.config` / `~/Library`
     - override with `FORMULA_PERF_HOME=/path/to/dir`
     - set `FORMULA_PERF_PRESERVE_HOME=1` to reuse the perf HOME between invocations
 
+  Shell-only startup (fast CI mode; does **not** require `apps/desktop/dist`):
+  ```bash
+  pnpm perf:desktop-startup -- --startup-bench
+  ```
+  This runs the desktop binary with `--startup-bench`, which loads a minimal page and exits after reporting
+  `[startup] ...` timings.
+
   Tuning knobs:
   - `FORMULA_DESKTOP_STARTUP_RUNS` (default: 20)
   - `FORMULA_DESKTOP_STARTUP_TIMEOUT_MS` (default: 15000)
+  - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell|full` (what to measure)
   - `FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS` (default: 500)
   - `FORMULA_DESKTOP_FIRST_RENDER_TARGET_MS` (default: 500)
   - `FORMULA_DESKTOP_TTI_TARGET_MS` (default: 1000)

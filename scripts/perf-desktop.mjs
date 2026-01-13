@@ -10,7 +10,9 @@ function usage() {
   console.log(`Usage: node scripts/perf-desktop.mjs <startup|memory|size> [-- <args...>]
 
 Commands:
-  startup  Build the desktop app (dist + binary) and run the desktop startup benchmark.
+  startup  Run the desktop startup benchmark.
+           - default: full app startup (builds apps/desktop/dist + desktop binary)
+           - CI default: shell startup only (skips frontend build; requires --startup-bench support in the binary)
   memory   Build the desktop app (dist + binary) and run the desktop idle memory benchmark.
   size     Report desktop size: frontend dist, binary, and (if present) installer artifacts.
 
@@ -22,6 +24,10 @@ Notes:
   - These commands are safe to run locally: they use a repo-local HOME so they don't touch
     ~/.config, ~/Library, etc.
   - Pass extra args after "--" to forward them to the underlying runner script.
+  - For shell startup benchmarking (no apps/desktop/dist required), pass:
+      pnpm perf:desktop-startup -- --startup-bench
+    or set:
+      FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell
 `);
 }
 
@@ -98,10 +104,38 @@ function runOptional(command, args, { cwd = repoRoot, env = process.env, label }
   return proc.status ?? 0;
 }
 
-function buildDesktop({ env }) {
-  // eslint-disable-next-line no-console
-  console.log("[perf-desktop] Building frontend (apps/desktop/dist)...");
-  run("pnpm", ["-C", "apps/desktop", "build"], { env });
+function parseDesktopStartupBenchKind({ env, forwardedArgs }) {
+  const rawEnv = String(env.FORMULA_DESKTOP_STARTUP_BENCH_KIND ?? "").trim().toLowerCase();
+  let envKind = null;
+  if (rawEnv !== "") {
+    if (rawEnv === "shell") envKind = "shell";
+    else if (rawEnv === "full") envKind = "full";
+    else throw new Error(`Invalid FORMULA_DESKTOP_STARTUP_BENCH_KIND=${JSON.stringify(rawEnv)}`);
+  }
+
+  const defaultKind = envKind ?? (isTruthyEnv(env.CI) ? "shell" : "full");
+  let kind = defaultKind;
+
+  // Mirror the startup runner's behavior: later flags win.
+  for (const arg of forwardedArgs) {
+    if (arg === "--startup-bench" || arg === "--shell") kind = "shell";
+    else if (arg === "--full") kind = "full";
+  }
+
+  return kind;
+}
+
+function buildDesktop({ env, buildFrontend = true } = {}) {
+  if (buildFrontend) {
+    // eslint-disable-next-line no-console
+    console.log("[perf-desktop] Building frontend (apps/desktop/dist)...");
+    run("pnpm", ["-C", "apps/desktop", "build"], { env });
+  } else {
+    // eslint-disable-next-line no-console
+    console.log(
+      "[perf-desktop] Skipping frontend build (shell startup benchmark does not require apps/desktop/dist)...",
+    );
+  }
 
   // eslint-disable-next-line no-console
   console.log("[perf-desktop] Building desktop binary (target/release/formula-desktop)...");
@@ -266,10 +300,11 @@ function main() {
   );
 
   if (cmd === "startup") {
-    buildDesktop({ env });
+    const benchKind = parseDesktopStartupBenchKind({ env, forwardedArgs });
+    buildDesktop({ env, buildFrontend: benchKind === "full" });
 
     // eslint-disable-next-line no-console
-    console.log("\n[perf-desktop] Running desktop startup benchmark...\n");
+    console.log(`\n[perf-desktop] Running desktop startup benchmark (kind=${benchKind})...\n`);
     run(
       process.execPath,
       ["scripts/run-node-ts.mjs", "apps/desktop/tests/performance/desktop-startup-runner.ts", ...forwardedArgs],
