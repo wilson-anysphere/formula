@@ -167,6 +167,7 @@ jobs:
           FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB }}
 
       - name: Build desktop binary (release, desktop feature)
+        id: build_desktop_binary
         if: steps.desktop_bench.outputs.run == 'true'
         run: |
           bash scripts/cargo_agent.sh build \
@@ -190,19 +191,6 @@ jobs:
         if: steps.desktop_bench.outputs.run == 'true' && steps.cargo-bloat-cache.outputs.cache-hit != 'true'
         continue-on-error: true
         run: cargo install cargo-bloat --locked
-
-      - name: Report desktop binary size breakdown (cargo-bloat)
-        if: steps.desktop_bench.outputs.run == 'true'
-        # Informational only (for now). The report script writes markdown to both stdout and the
-        # job summary (`GITHUB_STEP_SUMMARY`) so it shows up directly in the PR UI.
-        continue-on-error: true
-        env:
-          # Optional: set these as GitHub Actions "Variables" to enable gating later.
-          # - FORMULA_ENFORCE_DESKTOP_BINARY_SIZE=1 to fail when the binary exceeds the limit
-          # - FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB=XX to set the budget
-          FORMULA_ENFORCE_DESKTOP_BINARY_SIZE: ${{ vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE }}
-          FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB }}
-        run: python3 scripts/desktop_binary_size_report.py --no-build
 
       - name: Run benchmark suite
         id: perf
@@ -273,7 +261,17 @@ jobs:
             process.exit(1);
           }
           NODE
+          
+      - name: Report desktop binary size breakdown (cargo-bloat)
+        if: always() && steps.desktop_bench.outputs.run == 'true' && steps.build_desktop_binary.outcome == 'success'
+        # Informational by default. To turn this into a gate, set the repo variable
+        # `FORMULA_ENFORCE_DESKTOP_BINARY_SIZE=1` (and a `FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB` budget).
+        continue-on-error: ${{ vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE != '1' }}
+        env:
+          FORMULA_ENFORCE_DESKTOP_BINARY_SIZE: ${{ vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE }}
+          FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB }}
+        run: python3 scripts/desktop_binary_size_report.py --no-build
 
       - name: Fail on absolute target regression
-        if: steps.perf.outcome == 'failure'
+        if: always() && steps.perf.outcome == 'failure'
         run: exit 1
