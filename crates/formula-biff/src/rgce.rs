@@ -1035,44 +1035,38 @@ fn decode_rgce_impl(
             }
             // PtgRefErr: [row: u32][col: u16]
             0x2A | 0x4A | 0x6A => {
-                let needed = 6;
-                let remaining = rgce.len().saturating_sub(i);
-                if remaining < needed {
+                if rgce.len().saturating_sub(i) < 6 {
                     return Err(DecodeRgceError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
-                        needed,
-                        remaining,
+                        needed: 6,
+                        remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                i += needed;
+                i += 6;
                 stack.push(ExprFragment::new("#REF!".to_string()));
             }
             // PtgAreaErr: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
             0x2B | 0x4B | 0x6B => {
-                let needed = 12;
-                let remaining = rgce.len().saturating_sub(i);
-                if remaining < needed {
+                if rgce.len().saturating_sub(i) < 12 {
                     return Err(DecodeRgceError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
-                        needed,
-                        remaining,
+                        needed: 12,
+                        remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                i += needed;
+                i += 12;
                 stack.push(ExprFragment::new("#REF!".to_string()));
             }
             // PtgRefN: [row_off: i32][col_off: i16]
             0x2C | 0x4C | 0x6C => {
-                let needed = 6;
-                let remaining = rgce.len().saturating_sub(i);
-                if remaining < needed {
+                if rgce.len().saturating_sub(i) < 6 {
                     return Err(DecodeRgceError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
-                        needed,
-                        remaining,
+                        needed: 6,
+                        remaining: rgce.len().saturating_sub(i),
                     });
                 }
                 let Some((base_row0, base_col0)) = base else {
@@ -1085,7 +1079,7 @@ fn decode_rgce_impl(
                 let row_off =
                     i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) as i64;
                 let col_off = i16::from_le_bytes([rgce[i + 4], rgce[i + 5]]) as i64;
-                i += needed;
+                i += 6;
 
                 const MAX_ROW0: i64 = 1_048_575;
                 const MAX_COL0: i64 = 0x3FFF;
@@ -1102,14 +1096,12 @@ fn decode_rgce_impl(
             }
             // PtgAreaN: [rowFirst_off: i32][rowLast_off: i32][colFirst_off: i16][colLast_off: i16]
             0x2D | 0x4D | 0x6D => {
-                let needed = 12;
-                let remaining = rgce.len().saturating_sub(i);
-                if remaining < needed {
+                if rgce.len().saturating_sub(i) < 12 {
                     return Err(DecodeRgceError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
-                        needed,
-                        remaining,
+                        needed: 12,
+                        remaining: rgce.len().saturating_sub(i),
                     });
                 }
                 let Some((base_row0, base_col0)) = base else {
@@ -1125,7 +1117,7 @@ fn decode_rgce_impl(
                     i32::from_le_bytes([rgce[i + 4], rgce[i + 5], rgce[i + 6], rgce[i + 7]]) as i64;
                 let col1_off = i16::from_le_bytes([rgce[i + 8], rgce[i + 9]]) as i64;
                 let col2_off = i16::from_le_bytes([rgce[i + 10], rgce[i + 11]]) as i64;
-                i += needed;
+                i += 12;
 
                 const MAX_ROW0: i64 = 1_048_575;
                 const MAX_COL0: i64 = 0x3FFF;
