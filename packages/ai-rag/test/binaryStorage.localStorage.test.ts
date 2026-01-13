@@ -180,6 +180,39 @@ test("ChunkedLocalStorageBinaryStorage overwrites and removes old chunks when sa
   expect(Array.from(loaded ?? [])).toEqual(Array.from(small));
 });
 
+test("ChunkedLocalStorageBinaryStorage does not corrupt existing data if a save fails mid-write", async () => {
+  const storage = new ChunkedLocalStorageBinaryStorage({
+    namespace: "formula.test.rag",
+    workbookId: "wb-rollback",
+    chunkSizeChars: 4,
+  });
+
+  const original = new Uint8Array(128);
+  for (let i = 0; i < original.length; i += 1) original[i] = i % 256;
+  await storage.save(original);
+
+  // Fail when writing the second chunk (`:1`) to simulate a quota/storage error after
+  // chunk 0 has already been overwritten.
+  const originalSetItem = (Storage.prototype as any).setItem as (...args: any[]) => any;
+  (Storage.prototype as any).setItem = function (key: string, value: string) {
+    if (key === `${storage.key}:1`) {
+      throw new Error("QuotaExceededError");
+    }
+    return originalSetItem.call(this, key, value);
+  };
+
+  try {
+    const next = new Uint8Array(128);
+    for (let i = 0; i < next.length; i += 1) next[i] = (i * 17) % 256;
+    await expect(storage.save(next)).rejects.toThrow(/QuotaExceededError/);
+  } finally {
+    (Storage.prototype as any).setItem = originalSetItem;
+  }
+
+  const loaded = await storage.load();
+  expect(Array.from(loaded ?? [])).toEqual(Array.from(original));
+});
+
 test("ChunkedLocalStorageBinaryStorage remove deletes meta + chunk keys", async () => {
   const storage = new ChunkedLocalStorageBinaryStorage({
     namespace: "formula.test.rag",

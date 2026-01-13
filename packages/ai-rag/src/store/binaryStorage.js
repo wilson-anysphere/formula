@@ -136,30 +136,67 @@ export class ChunkedLocalStorageBinaryStorage {
     const encoded = toBase64(data);
     const chunks = encoded.length === 0 ? 0 : Math.ceil(encoded.length / this.chunkSizeChars);
 
-    for (let i = 0; i < chunks; i += 1) {
-      const start = i * this.chunkSizeChars;
-      storage.setItem(`${this.key}:${i}`, encoded.slice(start, start + this.chunkSizeChars));
+    // Rollback protection: `setItem` can throw (quota / permissions). Since we write chunks to
+    // stable keys (`${key}:0`, `${key}:1`, ...), a mid-write failure could otherwise corrupt
+    // previously-saved data (meta would still point at the old chunk count, but chunk 0 might
+    // already be overwritten). Keep a small in-memory backup of any chunk keys we overwrite so
+    // we can restore them if something throws.
+    /** @type {Array<{ key: string, prev: string | null }>} */
+    const backups = [];
+    const prevMeta = storage.getItem(this.metaKey);
+
+    try {
+      for (let i = 0; i < chunks; i += 1) {
+        const chunkKey = `${this.key}:${i}`;
+        backups.push({ key: chunkKey, prev: storage.getItem(chunkKey) });
+        const start = i * this.chunkSizeChars;
+        storage.setItem(chunkKey, encoded.slice(start, start + this.chunkSizeChars));
+      }
+
+      storage.setItem(this.metaKey, JSON.stringify({ chunks }));
+    } catch (err) {
+      // Best-effort rollback to preserve the previously persisted value.
+      try {
+        if (prevMeta == null) storage.removeItem?.(this.metaKey);
+        else storage.setItem(this.metaKey, prevMeta);
+      } catch {
+        // ignore
+      }
+
+      for (const { key, prev } of backups) {
+        try {
+          if (prev == null) storage.removeItem?.(key);
+          else storage.setItem(key, prev);
+        } catch {
+          // ignore
+        }
+      }
+
+      throw err;
     }
 
-    storage.setItem(this.metaKey, JSON.stringify({ chunks }));
+    // Remove leftover chunks from a prior (larger) save. Best-effort: successful chunk + meta
+    // writes should not be treated as failed persistence because cleanup encountered a storage error.
+    try {
+      // We avoid relying solely on stored metadata so we can clean up even if `:meta` was missing/corrupted.
+      const prefix = `${this.key}:`;
+      /** @type {string[]} */
+      const keysToRemove = [];
+      for (let i = 0; i < storage.length; i += 1) {
+        const key = storage.key(i);
+        if (!key || !key.startsWith(prefix) || key === this.metaKey) continue;
+        const suffix = key.slice(prefix.length);
+        if (!/^\d+$/.test(suffix)) continue;
+        const index = Number(suffix);
+        if (Number.isInteger(index) && index >= chunks) keysToRemove.push(key);
+      }
+      for (const key of keysToRemove) storage.removeItem?.(key);
 
-    // Remove leftover chunks from a prior (larger) save. We avoid relying solely on
-    // stored metadata so we can clean up even if `:meta` was missing/corrupted.
-    const prefix = `${this.key}:`;
-    /** @type {string[]} */
-    const keysToRemove = [];
-    for (let i = 0; i < storage.length; i += 1) {
-      const key = storage.key(i);
-      if (!key || !key.startsWith(prefix) || key === this.metaKey) continue;
-      const suffix = key.slice(prefix.length);
-      if (!/^\d+$/.test(suffix)) continue;
-      const index = Number(suffix);
-      if (Number.isInteger(index) && index >= chunks) keysToRemove.push(key);
+      // Clean up the legacy single-key storage entry if it exists.
+      storage.removeItem?.(this.key);
+    } catch {
+      // ignore
     }
-    for (const key of keysToRemove) storage.removeItem(key);
-
-    // Clean up the legacy single-key storage entry if it exists.
-    storage.removeItem(this.key);
   }
 
   async remove() {
