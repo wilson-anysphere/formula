@@ -75,6 +75,11 @@ export async function indexWorkbook(params) {
   const signal = params.signal;
   throwIfAborted(signal);
   const { workbook, vectorStore, embedder } = params;
+  const rawEmbedderName = embedder?.name;
+  const embedderName =
+    typeof rawEmbedderName === "string" && rawEmbedderName.trim() !== ""
+      ? rawEmbedderName
+      : "unknown-embedder";
   const sampleRows = params.sampleRows ?? 5;
   const tokenCount = params.tokenCount ?? approximateTokenCount;
   const chunks = chunkWorkbook(workbook, { signal });
@@ -112,6 +117,7 @@ export async function indexWorkbook(params) {
         title: chunk.title,
         rect: chunk.rect,
         text: originalText,
+        embedder: embedderName,
       },
     };
 
@@ -128,13 +134,19 @@ export async function indexWorkbook(params) {
         record.metadata = transformed.metadata ?? record.metadata;
       }
 
-      if (!Object.prototype.hasOwnProperty.call(record.metadata ?? {}, "text")) {
-        record.metadata = { ...(record.metadata ?? {}), text: record.text };
+      const hasText = Object.prototype.hasOwnProperty.call(record.metadata ?? {}, "text");
+      const hasEmbedder = Object.prototype.hasOwnProperty.call(record.metadata ?? {}, "embedder");
+      if (!hasText || !hasEmbedder) {
+        record.metadata = {
+          ...(record.metadata ?? {}),
+          ...(hasText ? null : { text: record.text }),
+          ...(hasEmbedder ? null : { embedder: embedderName }),
+        };
       }
     }
 
     throwIfAborted(signal);
-    const chunkHash = await awaitWithAbort(contentHash(record.text), signal);
+    const chunkHash = await awaitWithAbort(contentHash(`${embedderName}\n${record.text}`), signal);
     throwIfAborted(signal);
     currentIds.add(record.id);
 
@@ -145,6 +157,11 @@ export async function indexWorkbook(params) {
       text: record.text,
       metadata: {
         ...(record.metadata ?? {}),
+        // Re-apply so every record stores the embedder identity unless a transform
+        // explicitly overrides it.
+        ...(Object.prototype.hasOwnProperty.call(record.metadata ?? {}, "embedder")
+          ? null
+          : { embedder: embedderName }),
         contentHash: chunkHash,
         tokenCount: tokenCount(record.text),
       },

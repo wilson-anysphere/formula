@@ -52,7 +52,12 @@ export class HashEmbedder {
   }
 
   get name() {
-    return `hash:${this._dimension}`;
+    // Embedder identity string used in persisted metadata and cache keys.
+    //
+    // Include an explicit algorithm version so changes to the hashing/tokenization
+    // logic can safely force a re-embed of existing vector stores (by changing
+    // this string, index cache keys will change).
+    return `hash:v1:${this._dimension}`;
   }
 
   /**
