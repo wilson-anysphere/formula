@@ -17,6 +17,9 @@ const collabPersistenceEntry = fileURLToPath(new URL("../../packages/collab/pers
 const collabPersistenceIndexedDbEntry = fileURLToPath(
   new URL("../../packages/collab/persistence/src/indexeddb.ts", import.meta.url),
 );
+const spreadsheetFrontendTokenizerEntry = fileURLToPath(
+  new URL("../../packages/spreadsheet-frontend/src/formula/tokenizeFormula.ts", import.meta.url),
+);
 const tauriConfigPath = fileURLToPath(new URL("./src-tauri/tauri.conf.json", import.meta.url));
 const tauriCsp = (JSON.parse(readFileSync(tauriConfigPath, "utf8")) as any)?.app?.security?.csp as unknown;
 const isE2E = process.env.FORMULA_E2E === "1";
@@ -95,6 +98,9 @@ export default defineConfig({
       // the desktop dev server/e2e harness resilient.
       { find: "@formula/collab-persistence/indexeddb", replacement: collabPersistenceIndexedDbEntry },
       { find: /^@formula\/collab-persistence$/, replacement: collabPersistenceEntry },
+      // Like the collab aliases above, keep formula-bar highlighting resilient when the workspace
+      // link is stale and the new package subpath export isn't resolvable.
+      { find: "@formula/spreadsheet-frontend/formula/tokenizeFormula", replacement: spreadsheetFrontendTokenizerEntry },
     ],
   },
   build: {
