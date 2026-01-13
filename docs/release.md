@@ -336,7 +336,9 @@ WINDOWS_CERTIFICATE=... WINDOWS_CERTIFICATE_PASSWORD=... \
 
 Verification (signed artifacts):
 
-- After a Windows release build, verify the generated installer(s) are Authenticode-signed and timestamped:
+- After a Windows release build, verify the generated installer(s) are Authenticode-signed and timestamped.
+  Note: bundle output paths can vary depending on whether you built with an explicit `--target <triple>`
+  (CI does) — adjust the `target\\...` path accordingly.
   ```powershell
   signtool verify /pa /v apps\desktop\src-tauri\target\release\bundle\nsis\*.exe
   signtool verify /pa /v apps\desktop\src-tauri\target\release\bundle\msi\*.msi
