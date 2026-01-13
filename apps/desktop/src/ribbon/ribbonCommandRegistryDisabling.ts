@@ -11,13 +11,6 @@ import { defaultRibbonSchema, type RibbonSchema } from "./ribbonSchema.js";
  * when possible so other UI surfaces (e.g. command palette / keybindings) stay consistent.
  */
 const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
-  // --- Power Query / data refresh --------------------------------------------
-  "data.queriesConnections.refreshAll",
-  "data.queriesConnections.refreshAll.refresh",
-  "data.queriesConnections.refreshAll.refreshAllConnections",
-  "data.queriesConnections.refreshAll.refreshAllQueries",
-  "data.queriesConnections.queriesConnections",
-
   // --- Desktop/file actions ----------------------------------------------------
   "file.save.autoSave",
   "file.new.new",
