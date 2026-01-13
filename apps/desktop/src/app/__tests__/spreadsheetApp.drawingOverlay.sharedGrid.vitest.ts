@@ -4,7 +4,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DrawingOverlay } from "../../drawings/overlay";
+import { DrawingOverlay, pxToEmu } from "../../drawings/overlay";
+import { buildHitTestIndex, hitTestDrawings } from "../../drawings/hitTest";
+import type { DrawingObject, ImageStore } from "../../drawings/types";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 function createInMemoryLocalStorage(): Storage {
@@ -265,6 +267,111 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       const imageStore = (app as any).drawingImages;
       expect(imageStore.get(imageId)).toMatchObject({ id: imageId, mimeType: "image/png" });
       expect(imageStore.get(imageId)?.bytes).toEqual(bytes);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
+  it("computes consistent render vs interaction viewports for drawings (headers + frozen panes)", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+
+      const doc = app.getDocument();
+      doc.setFrozen(app.getCurrentSheetId(), 1, 1, { label: "Freeze" });
+
+      const sharedGrid = (app as any).sharedGrid;
+
+      // Scroll so the object is in the scrollable quadrant and uses scroll offsets.
+      sharedGrid.scrollTo(50, 10);
+      const sharedViewport = sharedGrid.renderer.scroll.getViewportState();
+
+      const renderViewport = (app as any).getDrawingRenderViewport(sharedViewport);
+      const interactionViewport = (app as any).getDrawingInteractionViewport(sharedViewport);
+
+      // Render viewport (drawingCanvas-local).
+      expect(renderViewport.headerOffsetX).toBe(0);
+      expect(renderViewport.headerOffsetY).toBe(0);
+      // Interaction viewport (selectionCanvas/root-local).
+      expect(interactionViewport.headerOffsetX).toBeGreaterThan(0);
+      expect(interactionViewport.headerOffsetY).toBeGreaterThan(0);
+
+      // Frozen boundaries should map between viewport spaces by the header offsets.
+      expect(interactionViewport.frozenWidthPx! - interactionViewport.headerOffsetX!).toBe(renderViewport.frozenWidthPx);
+      expect(interactionViewport.frozenHeightPx! - interactionViewport.headerOffsetY!).toBe(renderViewport.frozenHeightPx);
+
+      // Verify hit testing aligns with the rectangle rendered in drawingCanvas space.
+      const geom = (app as any).drawingOverlay.geom;
+      const images: ImageStore = { get: () => undefined, set: () => {} };
+
+      const object: DrawingObject = {
+        id: 1,
+        kind: { type: "shape" },
+        anchor: {
+          type: "oneCell",
+          from: { cell: { row: 2, col: 2 }, offset: { xEmu: 0, yEmu: 0 } },
+          size: { cx: pxToEmu(50), cy: pxToEmu(20) },
+        },
+        zOrder: 0,
+      };
+
+      const calls: Array<{ method: string; args: unknown[] }> = [];
+      const ctx: any = {
+        clearRect: (...args: unknown[]) => calls.push({ method: "clearRect", args }),
+        save: () => calls.push({ method: "save", args: [] }),
+        restore: () => calls.push({ method: "restore", args: [] }),
+        beginPath: () => calls.push({ method: "beginPath", args: [] }),
+        rect: (...args: unknown[]) => calls.push({ method: "rect", args }),
+        clip: () => calls.push({ method: "clip", args: [] }),
+        setLineDash: (...args: unknown[]) => calls.push({ method: "setLineDash", args }),
+        strokeRect: (...args: unknown[]) => calls.push({ method: "strokeRect", args }),
+        fillText: (...args: unknown[]) => calls.push({ method: "fillText", args }),
+      };
+
+      const canvas: any = {
+        width: 0,
+        height: 0,
+        style: {},
+        getContext: () => ctx,
+      };
+
+      const overlay = new DrawingOverlay(canvas as HTMLCanvasElement, images, geom);
+      await overlay.render([object], renderViewport);
+
+      const stroke = calls.find((c) => c.method === "strokeRect");
+      expect(stroke).toBeTruthy();
+      const [renderX, renderY, w, h] = stroke!.args as number[];
+
+      const index = buildHitTestIndex([object], geom, { bucketSizePx: 64 });
+      const hit = hitTestDrawings(
+        index,
+        interactionViewport,
+        renderX + interactionViewport.headerOffsetX! + 1,
+        renderY + interactionViewport.headerOffsetY! + 1,
+      );
+      expect(hit?.object.id).toBe(1);
+      expect(hit?.bounds).toEqual({
+        x: renderX + interactionViewport.headerOffsetX!,
+        y: renderY + interactionViewport.headerOffsetY!,
+        width: w,
+        height: h,
+      });
+
+      // The hit-test bounds should map back to the render-space bounds by subtracting headers.
+      expect(hit!.bounds.x - interactionViewport.headerOffsetX!).toBe(renderX);
+      expect(hit!.bounds.y - interactionViewport.headerOffsetY!).toBe(renderY);
 
       app.destroy();
       root.remove();

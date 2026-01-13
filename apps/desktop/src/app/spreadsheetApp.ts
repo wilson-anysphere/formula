@@ -7111,14 +7111,28 @@ export class SpreadsheetApp {
   }
 
   private syncDrawingOverlayViewport(sharedViewport?: GridViewportState): DrawingViewport {
-    let offsetX = 0;
-    let offsetY = 0;
-    let width = 0;
-    let height = 0;
-    let frozenRows = 0;
-    let frozenCols = 0;
-    let frozenWidthPx: number | undefined;
-    let frozenHeightPx: number | undefined;
+    return this.getDrawingRenderViewport(sharedViewport);
+  }
+
+  private computeDrawingViewportLayout(
+    sharedViewport?: GridViewportState,
+  ): {
+    headerOffsetX: number;
+    headerOffsetY: number;
+    rootWidth: number;
+    rootHeight: number;
+    cellAreaWidth: number;
+    cellAreaHeight: number;
+    /** Frozen boundary position in selection/root coordinates (includes header offsets). */
+    frozenBoundaryXRoot: number;
+    frozenBoundaryYRoot: number;
+    /** Frozen boundary position in drawingCanvas coordinates (excludes header offsets). */
+    frozenBoundaryXCellArea: number;
+    frozenBoundaryYCellArea: number;
+    frozenRows: number;
+    frozenCols: number;
+  } {
+    const { frozenRows, frozenCols } = this.getFrozen();
 
     const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
@@ -7128,54 +7142,132 @@ export class SpreadsheetApp {
       const headerCols = this.sharedHeaderCols();
       const headerWidth = headerCols > 0 ? this.sharedGrid.renderer.scroll.cols.totalSize(headerCols) : 0;
       const headerHeight = headerRows > 0 ? this.sharedGrid.renderer.scroll.rows.totalSize(headerRows) : 0;
-      offsetX = Math.min(headerWidth, viewport.width);
-      offsetY = Math.min(headerHeight, viewport.height);
-      width = Math.max(0, viewport.width - offsetX);
-      height = Math.max(0, viewport.height - offsetY);
 
-      // Shared-grid viewport state includes frozen header rows/cols; drawings use sheet-space
-      // indices (excluding headers), so read the sheet-level frozen counts from the document.
-      ({ frozenRows, frozenCols } = this.getFrozen());
+      const headerOffsetX = Math.min(headerWidth, viewport.width);
+      const headerOffsetY = Math.min(headerHeight, viewport.height);
+      const rootWidth = viewport.width;
+      const rootHeight = viewport.height;
+      const cellAreaWidth = Math.max(0, rootWidth - headerOffsetX);
+      const cellAreaHeight = Math.max(0, rootHeight - headerOffsetY);
 
-      // Convert the shared-grid frozen extents (which include header sizes) into the drawing
-      // canvas coordinate system (which already excludes headers via `offsetX/offsetY`).
-      frozenWidthPx = clamp(viewport.frozenWidth - offsetX, 0, width);
-      frozenHeightPx = clamp(viewport.frozenHeight - offsetY, 0, height);
-    } else {
-      offsetX = this.rowHeaderWidth;
-      offsetY = this.colHeaderHeight;
-      width = Math.max(0, this.width - offsetX);
-      height = Math.max(0, this.height - offsetY);
+      // Shared-grid viewport frozen extents include the synthetic header row/col, but
+      // drawings viewports expect sheet-level frozen row/col counts. Keep the pixel
+      // boundary positions from the renderer (so hidden/variable row/col sizes stay
+      // aligned) while passing sheet-level frozenRows/frozenCols counts separately.
+      const frozenBoundaryXRoot = clamp(viewport.frozenWidth, headerOffsetX, rootWidth);
+      const frozenBoundaryYRoot = clamp(viewport.frozenHeight, headerOffsetY, rootHeight);
+      const frozenBoundaryXCellArea = clamp(frozenBoundaryXRoot - headerOffsetX, 0, cellAreaWidth);
+      const frozenBoundaryYCellArea = clamp(frozenBoundaryYRoot - headerOffsetY, 0, cellAreaHeight);
 
-      // Mirror chart overlay behaviour: prefer the sheet view state over any derived/cached
-      // frozen counts so pinned drawings stay correct even if internal state is stale.
-      ({ frozenRows, frozenCols } = this.getFrozen());
-      frozenWidthPx = this.frozenWidth;
-      frozenHeightPx = this.frozenHeight;
+      return {
+        headerOffsetX,
+        headerOffsetY,
+        rootWidth,
+        rootHeight,
+        cellAreaWidth,
+        cellAreaHeight,
+        frozenBoundaryXRoot,
+        frozenBoundaryYRoot,
+        frozenBoundaryXCellArea,
+        frozenBoundaryYCellArea,
+        frozenRows,
+        frozenCols,
+      };
     }
 
-    this.drawingCanvas.style.left = `${offsetX}px`;
-    this.drawingCanvas.style.top = `${offsetY}px`;
+    // Legacy renderer: frozen pane extents are derived from visible (non-hidden) rows/cols.
+    this.ensureViewportMappingCurrent();
+
+    const headerOffsetX = this.rowHeaderWidth;
+    const headerOffsetY = this.colHeaderHeight;
+    const rootWidth = this.width;
+    const rootHeight = this.height;
+    const cellAreaWidth = Math.max(0, rootWidth - headerOffsetX);
+    const cellAreaHeight = Math.max(0, rootHeight - headerOffsetY);
+
+    const frozenBoundaryXCellArea = clamp(this.frozenWidth, 0, cellAreaWidth);
+    const frozenBoundaryYCellArea = clamp(this.frozenHeight, 0, cellAreaHeight);
+    const frozenBoundaryXRoot = clamp(headerOffsetX + frozenBoundaryXCellArea, headerOffsetX, rootWidth);
+    const frozenBoundaryYRoot = clamp(headerOffsetY + frozenBoundaryYCellArea, headerOffsetY, rootHeight);
+
+    return {
+      headerOffsetX,
+      headerOffsetY,
+      rootWidth,
+      rootHeight,
+      cellAreaWidth,
+      cellAreaHeight,
+      frozenBoundaryXRoot,
+      frozenBoundaryYRoot,
+      frozenBoundaryXCellArea,
+      frozenBoundaryYCellArea,
+      frozenRows,
+      frozenCols,
+    };
+  }
+
+  /**
+   * Viewport used for rendering on `drawingCanvas`, whose origin is already positioned
+   * under the row/col headers (so headerOffsetX/Y are always 0).
+   */
+  private getDrawingRenderViewport(sharedViewport?: GridViewportState): DrawingViewport {
+    const layout = this.computeDrawingViewportLayout(sharedViewport);
+
+    // The drawing canvas is positioned under headers so the overlay render coordinates
+    // match sheet cell-space without needing header offsets.
+    this.drawingCanvas.style.left = `${layout.headerOffsetX}px`;
+    this.drawingCanvas.style.top = `${layout.headerOffsetY}px`;
+
+    const viewport: DrawingViewport = {
+      scrollX: this.scrollX,
+      scrollY: this.scrollY,
+      width: layout.cellAreaWidth,
+      height: layout.cellAreaHeight,
+      dpr: this.dpr,
+      headerOffsetX: 0,
+      headerOffsetY: 0,
+      frozenRows: layout.frozenRows,
+      frozenCols: layout.frozenCols,
+      frozenWidthPx: layout.frozenBoundaryXCellArea,
+      frozenHeightPx: layout.frozenBoundaryYCellArea,
+    };
 
     const memo = this.drawingViewportMemo;
-    if (!memo || memo.width !== width || memo.height !== height || memo.dpr !== this.dpr) {
-      this.drawingOverlay.resize({ scrollX: this.scrollX, scrollY: this.scrollY, width, height, dpr: this.dpr, frozenRows, frozenCols });
-      this.drawingViewportMemo = { width, height, dpr: this.dpr, offsetX, offsetY };
-    } else if (memo.offsetX !== offsetX || memo.offsetY !== offsetY) {
-      memo.offsetX = offsetX;
-      memo.offsetY = offsetY;
+    if (!memo || memo.width !== viewport.width || memo.height !== viewport.height || memo.dpr !== viewport.dpr) {
+      this.drawingOverlay.resize(viewport);
+      this.drawingViewportMemo = {
+        width: viewport.width,
+        height: viewport.height,
+        dpr: viewport.dpr,
+        offsetX: layout.headerOffsetX,
+        offsetY: layout.headerOffsetY,
+      };
+    } else if (memo.offsetX !== layout.headerOffsetX || memo.offsetY !== layout.headerOffsetY) {
+      memo.offsetX = layout.headerOffsetX;
+      memo.offsetY = layout.headerOffsetY;
     }
 
+    return viewport;
+  }
+
+  /**
+   * Viewport used for hit testing + interactions on surfaces that include the row/col
+   * headers (e.g. `selectionCanvas` in shared-grid mode).
+   */
+  private getDrawingInteractionViewport(sharedViewport?: GridViewportState): DrawingViewport {
+    const layout = this.computeDrawingViewportLayout(sharedViewport);
     return {
       scrollX: this.scrollX,
       scrollY: this.scrollY,
-      width,
-      height,
+      width: layout.rootWidth,
+      height: layout.rootHeight,
       dpr: this.dpr,
-      frozenRows,
-      frozenCols,
-      frozenWidthPx,
-      frozenHeightPx,
+      headerOffsetX: layout.headerOffsetX,
+      headerOffsetY: layout.headerOffsetY,
+      frozenRows: layout.frozenRows,
+      frozenCols: layout.frozenCols,
+      frozenWidthPx: layout.frozenBoundaryXRoot,
+      frozenHeightPx: layout.frozenBoundaryYRoot,
     };
   }
 
@@ -7269,7 +7361,7 @@ export class SpreadsheetApp {
   }
 
   private renderDrawings(sharedViewport?: GridViewportState): void {
-    const viewport = this.syncDrawingOverlayViewport(sharedViewport);
+    const viewport = this.getDrawingRenderViewport(sharedViewport);
     const objects = this.listDrawingObjectsForSheet();
     void this.drawingOverlay.render(objects, viewport).catch(() => {
       // Best-effort: avoid unhandled rejections from overlay rendering.
