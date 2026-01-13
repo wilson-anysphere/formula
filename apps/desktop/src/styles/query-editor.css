@@ -628,3 +628,60 @@
     padding: 8px;
   }
 }
+
+/* Fallback for runtimes without container queries support: approximate the
+   responsive behavior using viewport media queries. */
+@supports not (container-type: inline-size) {
+  @media (max-width: 700px) {
+    .query-editor {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto 1fr;
+    }
+
+    .query-editor__sidebar {
+      border-inline-end: none;
+      border-bottom: 1px solid var(--panel-border);
+      max-height: clamp(180px, 35vh, 320px);
+    }
+  }
+
+  @media (max-width: 520px) {
+    .query-editor-container__toolbar {
+      padding: 8px;
+      gap: 6px;
+    }
+
+    .query-editor-container__toolbar select,
+    .query-editor-container__toolbar button {
+      padding: 4px 8px;
+    }
+
+    .query-editor-container__source {
+      flex-basis: 100%;
+      margin-right: 0;
+    }
+
+    .query-editor-container__select {
+      flex-basis: 100%;
+    }
+
+    .query-editor-container__refresh-policy {
+      flex-basis: 100%;
+      min-width: 0;
+    }
+
+    .query-editor-container__refresh-policy select {
+      flex: 1 1 auto;
+    }
+
+    .query-editor-container__engine-warning,
+    .query-editor-container__action-error {
+      padding: 8px;
+    }
+
+    .query-editor__sidebar,
+    .query-editor__schema {
+      padding: 8px;
+    }
+  }
+}
