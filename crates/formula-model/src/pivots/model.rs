@@ -36,6 +36,7 @@ impl From<&str> for DefinedNameIdentifier {
         Self::Name(value.to_string())
     }
 }
+
 /// Canonical (IPC/persistence-friendly) pivot table definition stored in a [`crate::Workbook`].
 ///
 /// This is intentionally distinct from the legacy in-memory [`super::PivotTable`] runtime type.

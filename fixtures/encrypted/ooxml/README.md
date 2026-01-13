@@ -149,3 +149,30 @@ Notes:
   salts/IVs).
 - POI's `standard` mode currently emits an `EncryptionInfo` header version of `4.2`
   (still Standard/CryptoAPI encryption).
+
+## `EncryptionInfo` parameters pinned by tests
+
+These values are asserted by `crates/formula-io/tests/encrypted_ooxml_fixtures.rs` to prevent silent
+fixture drift (cipher/keysize/provider/flags).
+
+### Standard / CryptoAPI fixtures (`standard.xlsx`, `standard-large.xlsx`, `standard-basic.xlsm`)
+
+`EncryptionVersionInfo` (stream prefix):
+
+- `major`: `3`
+- `minor`: `2`
+- `flags`: `0x00000000`
+
+`EncryptionHeader` (CryptoAPI):
+
+- `AlgID`: `0x0000660E` (CALG_AES_128)
+- `AlgIDHash`: `0x00008004` (CALG_SHA1)
+- `KeySize`: `128` (bits)
+- `ProviderType`: `24` (PROV_RSA_AES)
+- `CSPName`:
+  - `standard.xlsx` / `standard-basic.xlsm`: `"Microsoft Enhanced RSA and AES Cryptographic Provider"`
+  - `standard-large.xlsx`: _(empty)_
+
+`EncryptionVerifier`:
+
+- `saltSize`: `16`
