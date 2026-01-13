@@ -561,6 +561,26 @@ describe("ToolExecutor", () => {
     expect(() => JSON.stringify(result)).not.toThrow();
   });
 
+  it("read_range normalizes non-string formulas to JSON-safe scalars", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: null, formula: { op: "SUM", args: ["A1:A3"] } as any });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A1", include_formulas: true },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.values).toEqual([[null]]);
+    expect(result.data?.formulas).toEqual([[JSON.stringify({ op: "SUM", args: ["A1:A3"] })]]);
+    expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
   it("read_range enforces max_read_range_chars based on normalized output size", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);
