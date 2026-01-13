@@ -93,6 +93,23 @@ ZIP/OPC round-trip corpus under `fixtures/xlsx/`):
 - `crates/formula-xlsx/tests/encrypted_ooxml_empty_password.rs`:
   decrypts `agile-empty-password.xlsx` and asserts empty password `""` is distinct from a missing password.
 
+## Agile encryption parameters
+
+Agile encryption stores configuration as an XML `<encryption>` document inside the `EncryptionInfo`
+stream. Fixture regeneration tooling (e.g. `msoffcrypto-tool` / Apache POI version bumps) can
+silently change defaults like `spinCount`, hash algorithm, or cipher key size; those changes can
+also impact CI runtime (large `spinCount` values make password-based key derivation expensive).
+
+The values below are asserted in `crates/formula-io/tests/agile_encryption_info.rs` to prevent
+silent drift.
+
+| fixture | spinCount | cipherAlgorithm | cipherChaining | keyBits | hashAlgorithm | saltSize |
+| --- | ---: | --- | --- | ---: | --- | ---: |
+| agile.xlsx | 100000 | AES | ChainingModeCBC | 256 | SHA512 | 16 |
+| agile-large.xlsx | 100000 | AES | ChainingModeCBC | 256 | SHA512 | 16 |
+| agile-unicode.xlsx | 100000 | AES | ChainingModeCBC | 256 | SHA512 | 16 |
+| agile-empty-password.xlsx | 1000 | AES | ChainingModeCBC | 128 | SHA256 | 16 |
+
 ## Inspecting encryption headers
 
 You can inspect an encrypted OOXML container (and confirm Agile vs Standard) with:
