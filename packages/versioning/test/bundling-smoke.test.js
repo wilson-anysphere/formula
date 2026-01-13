@@ -83,3 +83,45 @@ test("versioning diff helpers bundle for the browser without Node builtins", { s
   );
 });
 
+test("versioning entrypoint bundles for the browser without Node builtins", { skip: !build }, async () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const pkgRoot = path.resolve(here, "..");
+  const repoRoot = path.resolve(pkgRoot, "../..");
+
+  const outdir = await fs.mkdtemp(path.join(os.tmpdir(), "versioning-index-esbuild-"));
+
+  const result = await build({
+    absWorkingDir: repoRoot,
+    bundle: true,
+    format: "esm",
+    metafile: true,
+    outdir,
+    platform: "browser",
+    write: false,
+    stdin: {
+      sourcefile: "entry.js",
+      resolveDir: repoRoot,
+      contents: `
+        import { semanticDiff, diffYjsWorkbookSnapshots, diffDocumentWorkbookSnapshots } from "./packages/versioning/src/index.js";
+        console.log(semanticDiff, diffYjsWorkbookSnapshots, diffDocumentWorkbookSnapshots);
+      `,
+    },
+  });
+
+  assert.ok(result.outputFiles?.length, "Expected esbuild to produce outputFiles (write:false)");
+
+  const inputFiles = Object.keys(result.metafile?.inputs ?? {}).map((file) => file.replace(/\\/g, "/"));
+  assert.ok(
+    inputFiles.some((file) => file.endsWith("packages/versioning/src/index.js")),
+    `Expected the bundle to include versioning entrypoint, got inputs:\n${inputFiles.join("\n")}`,
+  );
+
+  const nodeBuiltins = createNodeBuiltinsSet();
+  const outputImports = collectOutputImports(result);
+  const offending = outputImports.filter((imp) => nodeBuiltins.has(imp.path));
+  assert.deepEqual(
+    offending,
+    [],
+    `Expected browser bundle to avoid Node builtin imports, found: ${offending.map((imp) => imp.path).join(", ")}`,
+  );
+});
