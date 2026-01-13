@@ -287,6 +287,7 @@ enum PlannedExpr {
     Const(Value),
     AggRef(usize),
     Negate(Box<PlannedExpr>),
+    IsBlank(Box<PlannedExpr>),
     Binary {
         op: BinaryOp,
         left: Box<PlannedExpr>,
@@ -363,6 +364,10 @@ fn eval_planned(expr: &PlannedExpr, agg_values: &[Value]) -> Value {
                 return Value::Blank;
             };
             Value::from(-n)
+        }
+        PlannedExpr::IsBlank(inner) => {
+            let v = eval_planned(inner, agg_values);
+            Value::from(v.is_blank())
         }
         PlannedExpr::Binary { op, left, right } => {
             let l = eval_planned(left, agg_values);
@@ -586,6 +591,24 @@ fn plan_pivot_expr(
             "BLANK" if args.is_empty() => Ok(Some(PlannedExpr::Const(Value::Blank))),
             "TRUE" if args.is_empty() => Ok(Some(PlannedExpr::Const(Value::from(true)))),
             "FALSE" if args.is_empty() => Ok(Some(PlannedExpr::Const(Value::from(false)))),
+            "ISBLANK" => {
+                let [arg] = args.as_slice() else {
+                    return Ok(None);
+                };
+                let Some(inner) = plan_pivot_expr(
+                    model,
+                    base_table,
+                    base_table_name,
+                    arg,
+                    depth + 1,
+                    agg_specs,
+                    agg_map,
+                )?
+                else {
+                    return Ok(None);
+                };
+                Ok(Some(PlannedExpr::IsBlank(Box::new(inner))))
+            }
             "IF" => {
                 if args.len() < 2 || args.len() > 3 {
                     return Ok(None);
@@ -1510,6 +1533,52 @@ mod tests {
             .unwrap();
 
         let measures = vec![PivotMeasure::new("Big Total", "[Big Total]").unwrap()];
+        let group_by = vec![GroupByColumn::new("Fact", "Group")];
+        let filter = FilterContext::empty();
+
+        let fast = pivot_columnar_group_by(&model, "Fact", &group_by, &measures, &filter)
+            .unwrap()
+            .expect("expected planned columnar pivot to be available");
+        let scan = pivot_row_scan(&model, "Fact", &group_by, &measures, &filter).unwrap();
+        assert_eq!(fast, scan);
+    }
+
+    #[test]
+    fn pivot_columnar_group_by_plans_isblank() {
+        let rows = 10_000usize;
+        let schema = vec![
+            ColumnSchema {
+                name: "Group".to_string(),
+                column_type: ColumnType::String,
+            },
+            ColumnSchema {
+                name: "Amount".to_string(),
+                column_type: ColumnType::Number,
+            },
+        ];
+        let options = TableOptions {
+            page_size_rows: 1024,
+            cache: PageCacheConfig { max_entries: 4 },
+        };
+        let mut builder = ColumnarTableBuilder::new(schema, options);
+        let groups = ["A", "B", "C", "D"];
+        for i in 0..rows {
+            builder.append_row(&[
+                formula_columnar::Value::String(Arc::<str>::from(groups[i % groups.len()])),
+                formula_columnar::Value::Number((i % 100) as f64),
+            ]);
+        }
+
+        let mut model = DataModel::new();
+        model
+            .add_table(crate::Table::from_columnar("Fact", builder.finalize()))
+            .unwrap();
+        model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+        model
+            .add_measure("Total (0 if blank)", "IF(ISBLANK([Total]), 0, [Total])")
+            .unwrap();
+
+        let measures = vec![PivotMeasure::new("Total (0 if blank)", "[Total (0 if blank)]").unwrap()];
         let group_by = vec![GroupByColumn::new("Fact", "Group")];
         let filter = FilterContext::empty();
 
