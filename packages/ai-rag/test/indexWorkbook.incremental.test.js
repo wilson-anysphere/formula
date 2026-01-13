@@ -322,6 +322,39 @@ test("indexWorkbook respects AbortSignal and avoids partial writes", async () =>
   assert.deepEqual(await store.list({ workbookId: workbook.id, includeVector: false }), []);
 });
 
+test("indexWorkbook uses vectorStore.listContentHashes when available", async () => {
+  const workbook = makeWorkbook();
+  const embedder = new HashEmbedder({ dimension: 128 });
+
+  let listCalls = 0;
+  let listHashCalls = 0;
+  let upserts = 0;
+
+  const store = {
+    dimension: 128,
+    async list() {
+      listCalls += 1;
+      throw new Error("indexWorkbook should prefer listContentHashes when available");
+    },
+    async listContentHashes() {
+      listHashCalls += 1;
+      return [];
+    },
+    async upsert(records) {
+      upserts += records.length;
+    },
+    async delete() {
+      throw new Error("Unexpected delete");
+    },
+  };
+
+  const res = await indexWorkbook({ workbook, vectorStore: store, embedder });
+  assert.ok(res.totalChunks > 0);
+  assert.equal(listCalls, 0);
+  assert.equal(listHashCalls, 1);
+  assert.equal(upserts, res.upserted);
+});
+
 test("indexWorkbook batching respects AbortSignal and avoids partial writes", async () => {
   const workbook = makeWorkbookTwoTables();
   const store = new InMemoryVectorStore({ dimension: 128 });

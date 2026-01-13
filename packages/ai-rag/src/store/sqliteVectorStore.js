@@ -105,6 +105,7 @@ function splitMetadata(metadata) {
   delete extra.rect;
   delete extra.contentHash;
   delete extra.tokenCount;
+  delete extra.metadataHash;
   delete extra.text;
 
   const workbookId = typeof meta.workbookId === "string" ? meta.workbookId : null;
@@ -119,6 +120,7 @@ function splitMetadata(metadata) {
 
   const contentHash = typeof meta.contentHash === "string" ? meta.contentHash : null;
   const tokenCount = Number.isFinite(meta.tokenCount) ? meta.tokenCount : null;
+  const metadataHash = typeof meta.metadataHash === "string" ? meta.metadataHash : null;
   const text = typeof meta.text === "string" ? meta.text : null;
 
   return {
@@ -132,6 +134,7 @@ function splitMetadata(metadata) {
     c1,
     contentHash,
     tokenCount,
+    metadataHash,
     text,
     metadataJson: JSON.stringify(extra),
   };
@@ -339,6 +342,7 @@ export class SqliteVectorStore {
         r1 INTEGER,
         c1 INTEGER,
         content_hash TEXT,
+        metadata_hash TEXT,
         token_count INTEGER,
         text TEXT,
         metadata_json TEXT NOT NULL
@@ -416,6 +420,7 @@ export class SqliteVectorStore {
       ["r1", "INTEGER"],
       ["c1", "INTEGER"],
       ["content_hash", "TEXT"],
+      ["metadata_hash", "TEXT"],
       ["token_count", "INTEGER"],
       ["text", "TEXT"],
     ];
@@ -446,6 +451,7 @@ export class SqliteVectorStore {
         r1,
         c1,
         content_hash,
+        metadata_hash,
         token_count,
         text,
         metadata_json
@@ -463,6 +469,7 @@ export class SqliteVectorStore {
         r1 = ?,
         c1 = ?,
         content_hash = ?,
+        metadata_hash = ?,
         token_count = ?,
         text = ?,
         metadata_json = ?
@@ -482,9 +489,10 @@ export class SqliteVectorStore {
         const r1Col = row[7];
         const c1Col = row[8];
         const contentHashCol = row[9];
-        const tokenCountCol = row[10];
-        const textCol = row[11];
-        const metaJson = row[12];
+        const metadataHashCol = row[10];
+        const tokenCountCol = row[11];
+        const textCol = row[12];
+        const metaJson = row[13];
 
         const parsedMeta = metaJson ? JSON.parse(metaJson) : {};
         const meta = parsedMeta && typeof parsedMeta === "object" ? parsedMeta : {};
@@ -523,6 +531,12 @@ export class SqliteVectorStore {
             : typeof contentHashCol === "string"
               ? contentHashCol
               : null;
+        const metadataHash =
+          typeof meta.metadataHash === "string"
+            ? meta.metadataHash
+            : typeof metadataHashCol === "string"
+              ? metadataHashCol
+              : null;
         const tokenCount =
           Number.isFinite(meta.tokenCount) ? meta.tokenCount : Number.isFinite(tokenCountCol) ? tokenCountCol : null;
         const text = typeof meta.text === "string" ? meta.text : typeof textCol === "string" ? textCol : null;
@@ -537,6 +551,7 @@ export class SqliteVectorStore {
         delete extra.rect;
         delete extra.contentHash;
         delete extra.tokenCount;
+        delete extra.metadataHash;
         delete extra.text;
 
         update.run([
@@ -549,6 +564,7 @@ export class SqliteVectorStore {
           r1,
           c1,
           contentHash,
+          metadataHash,
           tokenCount,
           text,
           JSON.stringify(extra),
@@ -564,7 +580,25 @@ export class SqliteVectorStore {
   _ensureSchemaVersion() {
     const raw = this._getMetaValue("schema_version");
     const current = raw == null ? 1 : Number(raw);
-    if (Number.isFinite(current) && current >= SCHEMA_VERSION) return;
+    // Even for schema_version >= 2, older DBs may be missing newly-added v2 columns.
+    // Check for required columns so migrations remain forward-compatible within the
+    // same schema_version (and so SQL statements selecting those columns don't fail).
+    const cols = this._getTableColumns("vectors");
+    const required = [
+      "sheet_name",
+      "kind",
+      "title",
+      "r0",
+      "c0",
+      "r1",
+      "c1",
+      "content_hash",
+      "metadata_hash",
+      "token_count",
+      "text",
+    ];
+    const missingRequiredColumn = required.some((c) => !cols.has(c));
+    if (Number.isFinite(current) && current >= SCHEMA_VERSION && !missingRequiredColumn) return;
 
     this._db.run("BEGIN;");
     try {
@@ -681,11 +715,12 @@ export class SqliteVectorStore {
         r1,
         c1,
         content_hash,
+        metadata_hash,
         token_count,
         text,
         metadata_json
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         workbook_id = excluded.workbook_id,
         vector = excluded.vector,
@@ -697,6 +732,7 @@ export class SqliteVectorStore {
         r1 = excluded.r1,
         c1 = excluded.c1,
         content_hash = excluded.content_hash,
+        metadata_hash = excluded.metadata_hash,
         token_count = excluded.token_count,
         text = excluded.text,
         metadata_json = excluded.metadata_json;
@@ -726,6 +762,7 @@ export class SqliteVectorStore {
           meta.r1,
           meta.c1,
           meta.contentHash,
+          meta.metadataHash,
           meta.tokenCount,
           meta.text,
           meta.metadataJson,
@@ -763,6 +800,7 @@ export class SqliteVectorStore {
         r1 = ?,
         c1 = ?,
         content_hash = ?,
+        metadata_hash = ?,
         token_count = ?,
         text = ?,
         metadata_json = ?
@@ -783,6 +821,7 @@ export class SqliteVectorStore {
           meta.r1,
           meta.c1,
           meta.contentHash,
+          meta.metadataHash,
           meta.tokenCount,
           meta.text,
           meta.metadataJson,
@@ -927,6 +966,7 @@ export class SqliteVectorStore {
         r1,
         c1,
         content_hash,
+        metadata_hash,
         token_count,
         text,
         metadata_json
@@ -957,10 +997,11 @@ export class SqliteVectorStore {
       base.rect = { r0: row[5], c0: row[6], r1: row[7], c1: row[8] };
     }
     if (row[9] != null) base.contentHash = row[9];
-    if (row[10] != null) base.tokenCount = row[10];
-    if (row[11] != null) base.text = row[11];
+    if (row[10] != null) base.metadataHash = row[10];
+    if (row[11] != null) base.tokenCount = row[11];
+    if (row[12] != null) base.text = row[12];
 
-    const extra = parseExtraMetadata(row[12]);
+    const extra = parseExtraMetadata(row[13]);
     const metadata = { ...extra, ...base };
     return { id, vector: new Float32Array(vec), metadata };
   }
@@ -994,6 +1035,7 @@ export class SqliteVectorStore {
           r1,
           c1,
           content_hash,
+          metadata_hash,
           token_count,
           text,
           metadata_json
@@ -1013,6 +1055,7 @@ export class SqliteVectorStore {
           r1,
           c1,
           content_hash,
+          metadata_hash,
           token_count,
           text,
           metadata_json
@@ -1051,10 +1094,11 @@ export class SqliteVectorStore {
           };
         }
         if (row[offset + 8] != null) base.contentHash = row[offset + 8];
-        if (row[offset + 9] != null) base.tokenCount = row[offset + 9];
-        if (row[offset + 10] != null) base.text = row[offset + 10];
+        if (row[offset + 9] != null) base.metadataHash = row[offset + 9];
+        if (row[offset + 10] != null) base.tokenCount = row[offset + 10];
+        if (row[offset + 11] != null) base.text = row[offset + 11];
 
-        const extra = parseExtraMetadata(row[offset + 11]);
+        const extra = parseExtraMetadata(row[offset + 12]);
         const metadata = { ...extra, ...base };
         if (filter && !filter(metadata, id)) continue;
         let vecOut;
@@ -1083,6 +1127,40 @@ export class SqliteVectorStore {
           vector: vecOut,
           metadata,
         });
+      }
+      throwIfAborted(signal);
+      return out;
+    } finally {
+      stmt.free();
+    }
+  }
+
+  /**
+   * Return `{ id, contentHash, metadataHash }` for records, avoiding `metadata_json` parsing.
+   *
+   * This is primarily used by incremental indexing, which only needs the
+   * `contentHash` and `metadataHash` to determine whether a chunk or its metadata changed.
+   *
+   * @param {{ workbookId?: string, signal?: AbortSignal }} [opts]
+   * @returns {Promise<Array<{ id: string, contentHash: string | null, metadataHash: string | null }>>}
+   */
+  async listContentHashes(opts) {
+    const signal = opts?.signal;
+    const workbookId = opts?.workbookId;
+    throwIfAborted(signal);
+    const sql = workbookId
+      ? "SELECT id, content_hash, metadata_hash FROM vectors WHERE workbook_id = ?"
+      : "SELECT id, content_hash, metadata_hash FROM vectors";
+    const stmt = this._db.prepare(sql);
+    try {
+      if (workbookId) stmt.bind([workbookId]);
+      /** @type {Array<{ id: string, contentHash: string | null, metadataHash: string | null }>} */
+      const out = [];
+      while (true) {
+        throwIfAborted(signal);
+        if (!stmt.step()) break;
+        const row = stmt.get();
+        out.push({ id: row[0], contentHash: row[1] ?? null, metadataHash: row[2] ?? null });
       }
       throwIfAborted(signal);
       return out;
@@ -1180,6 +1258,7 @@ export class SqliteVectorStore {
           r1,
           c1,
           content_hash,
+          metadata_hash,
           token_count,
           text,
           metadata_json,
@@ -1201,6 +1280,7 @@ export class SqliteVectorStore {
           r1,
           c1,
           content_hash,
+          metadata_hash,
           token_count,
           text,
           metadata_json,
@@ -1236,14 +1316,15 @@ export class SqliteVectorStore {
             base.rect = { r0: row[5], c0: row[6], r1: row[7], c1: row[8] };
           }
           if (row[9] != null) base.contentHash = row[9];
-          if (row[10] != null) base.tokenCount = row[10];
-          if (row[11] != null) base.text = row[11];
+          if (row[10] != null) base.metadataHash = row[10];
+          if (row[11] != null) base.tokenCount = row[11];
+          if (row[12] != null) base.text = row[12];
 
-          const extra = parseExtraMetadata(row[12]);
+          const extra = parseExtraMetadata(row[13]);
           const metadata = { ...extra, ...base };
           if (filter && !filter(metadata, id)) continue;
 
-          const score = Number(row[13]);
+          const score = Number(row[14]);
           out.push({ id, score, metadata });
           if (out.length >= k) break;
         }

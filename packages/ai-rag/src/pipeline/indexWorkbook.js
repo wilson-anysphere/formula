@@ -83,21 +83,42 @@ export async function indexWorkbook(params) {
 
   const supportsUpdateMetadata = typeof vectorStore.updateMetadata === "function";
 
-  const existingForWorkbook = await awaitWithAbort(
-    vectorStore.list({
-      workbookId: workbook.id,
-      includeVector: false,
-      signal,
-    }),
-    signal
-  );
-  throwIfAborted(signal);
-  const existingState = new Map(
-    existingForWorkbook.map((r) => [
-      r.id,
-      { contentHash: r.metadata?.contentHash, metadataHash: r.metadata?.metadataHash },
-    ])
-  );
+  /** @type {string[]} */
+  let existingIds = [];
+  /** @type {Map<string, { contentHash?: string, metadataHash?: string }>} */
+  let existingState = new Map();
+
+  if (typeof vectorStore.listContentHashes === "function") {
+    const existing = await awaitWithAbort(
+      vectorStore.listContentHashes({ workbookId: workbook.id, signal }),
+      signal
+    );
+    throwIfAborted(signal);
+    existingIds = existing.map((r) => r.id);
+    existingState = new Map(
+      existing.map((r) => [
+        r.id,
+        { contentHash: r.contentHash ?? undefined, metadataHash: r.metadataHash ?? undefined },
+      ])
+    );
+  } else {
+    const existingForWorkbook = await awaitWithAbort(
+      vectorStore.list({
+        workbookId: workbook.id,
+        includeVector: false,
+        signal,
+      }),
+      signal
+    );
+    throwIfAborted(signal);
+    existingIds = existingForWorkbook.map((r) => r.id);
+    existingState = new Map(
+      existingForWorkbook.map((r) => [
+        r.id,
+        { contentHash: r.metadata?.contentHash, metadataHash: r.metadata?.metadataHash },
+      ])
+    );
+  }
 
   const currentIds = new Set();
   /** @type {{ id: string, text: string, metadata: any }[]} */
@@ -282,9 +303,7 @@ export async function indexWorkbook(params) {
   }
 
   // Delete stale records for this workbook.
-  const staleIds = existingForWorkbook
-    .map((r) => r.id)
-    .filter((id) => !currentIds.has(id));
+  const staleIds = existingIds.filter((id) => !currentIds.has(id));
 
   const upsertRecords = toUpsert.map((r, i) => ({
     id: r.id,

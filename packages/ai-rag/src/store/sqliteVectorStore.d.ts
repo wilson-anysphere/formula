@@ -46,6 +46,10 @@ export class SqliteVectorStore {
    */
   vacuum(): Promise<void>;
   get(id: string): Promise<{ id: string; vector: Float32Array; metadata: any } | null>;
+  listContentHashes(opts?: {
+    workbookId?: string;
+    signal?: AbortSignal;
+  }): Promise<Array<{ id: string; contentHash: string | null; metadataHash: string | null }>>;
   list(opts?: {
     filter?: (metadata: any, id: string) => boolean;
     workbookId?: string;
