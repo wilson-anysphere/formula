@@ -2,6 +2,14 @@
 
 set -euo pipefail
 
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$repo_root"
+
+# Optional overrides for CI/debugging.
+# - FORMULA_APPIMAGE_MAIN_BINARY: expected basename of the main binary under `squashfs-root/usr/bin/`
+# - FORMULA_EXPECTED_ELF_MACHINE_SUBSTRING: expected substring from `readelf -h` "Machine:" line
+: "${FORMULA_APPIMAGE_MAIN_BINARY:=formula-desktop}"
+
 ##
 # CI smoke test for produced Linux AppImage artifacts.
 #
@@ -25,6 +33,11 @@ require_cmd() {
 }
 
 expected_readelf_machine_substring() {
+  if [ -n "${FORMULA_EXPECTED_ELF_MACHINE_SUBSTRING:-}" ]; then
+    echo "$FORMULA_EXPECTED_ELF_MACHINE_SUBSTRING"
+    return 0
+  fi
+
   # `readelf -h` prints e.g.:
   #   Machine:                           Advanced Micro Devices X86-64
   #   Machine:                           AArch64
@@ -41,18 +54,27 @@ expected_readelf_machine_substring() {
 }
 
 find_appimages() {
-  # We intentionally use `find` rather than globstar for portability and to avoid
-  # relying on shell options.
-  # Note: `find`'s default implicit `-print` interacts poorly with `-o` due to
-  # operator precedence. Always parenthesize `-o` expressions and add an
-  # explicit `-print`.
-  find . \
+  # Prefer searching the known Cargo/Tauri target directories rather than
+  # traversing the whole repo.
+  local roots=()
+  for root in "apps/desktop/src-tauri/target" "target"; do
+    if [ -d "$root" ]; then
+      roots+=("$root")
+    fi
+  done
+
+  if [ "${#roots[@]}" -eq 0 ]; then
+    die "no target directories found (expected apps/desktop/src-tauri/target and/or target)"
+  fi
+
+  # Covers:
+  # - target/release/bundle/appimage/*.AppImage
+  # - target/<triple>/release/bundle/appimage/*.AppImage
+  # - apps/desktop/src-tauri/target/**/release/bundle/appimage/*.AppImage
+  find "${roots[@]}" \
     -type f \
     -name '*.AppImage' \
-    \( \
-      -path '*/target/*/release/bundle/appimage/*.AppImage' -o \
-      -path '*/target/release/bundle/appimage/*.AppImage' \
-    \) \
+    -path '*/release/bundle/appimage/*.AppImage' \
     -print \
     | sort
 }
@@ -61,6 +83,13 @@ find_main_binary() {
   # Best-effort heuristic to locate the application's main ELF binary inside
   # an extracted AppImage squashfs-root directory.
   local squashfs_root="$1"
+
+  # 0) Prefer the expected main binary name (most deterministic).
+  local expected_bin="$squashfs_root/usr/bin/$FORMULA_APPIMAGE_MAIN_BINARY"
+  if [ -f "$expected_bin" ] && file -b "$expected_bin" | grep -q 'ELF'; then
+    echo "$expected_bin"
+    return 0
+  fi
 
   # 1) Prefer AppRun if it's an ELF or a symlink to an ELF.
   if [ -e "$squashfs_root/AppRun" ]; then
