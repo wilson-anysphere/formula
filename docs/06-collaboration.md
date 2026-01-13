@@ -23,6 +23,7 @@ If you are editing collaboration code, start here and keep this doc in sync with
 - Workbook metadata managers: [`packages/collab/workbook/src/index.ts`](../packages/collab/workbook/src/index.ts) (`SheetManager`, `MetadataManager`, `NamedRangeManager`, `createSheetManagerForSession`, `createMetadataManagerForSession`, `createNamedRangeManagerForSession`)
 - Cell key helpers: [`packages/collab/session/src/cell-key.js`](../packages/collab/session/src/cell-key.js) (`makeCellKey`, `parseCellKey`, `normalizeCellKey`)
 - Desktop binder: [`packages/collab/binder/index.js`](../packages/collab/binder/index.js) (`bindYjsToDocumentController`)
+- Desktop sheet view binder: [`apps/desktop/src/collab/sheetViewBinder.ts`](../apps/desktop/src/collab/sheetViewBinder.ts) (`bindSheetViewToCollabSession`)
 - Collaborative undo: [`packages/collab/undo/index.js`](../packages/collab/undo/index.js) (`createUndoService`, `REMOTE_ORIGIN`)
 - Cell encryption: [`packages/collab/encryption/src/index.node.js`](../packages/collab/encryption/src/index.node.js) (`encryptCellPlaintext`, `decryptCellPlaintext`)
 - Presence (Awareness wrapper): [`packages/collab/presence/src/presenceManager.js`](../packages/collab/presence/src/presenceManager.js) (`PresenceManager`)
@@ -797,6 +798,12 @@ desktop projection in sync with the shared view state:
   `setFrozen`/`setColWidth`/`setRowHeight` for older controllers).
 - **Desktop → Yjs:** listens for `sheetViewDeltas` emitted by `DocumentController`
   and writes normalized state back into `sheets[i].view`.
+
+Desktop also has a lightweight sheet-view-only binder used by `SpreadsheetApp`:
+[`apps/desktop/src/collab/sheetViewBinder.ts`](../apps/desktop/src/collab/sheetViewBinder.ts) (`bindSheetViewToCollabSession`).
+It performs the same high-level synchronization (Yjs `sheets` ↔ `DocumentController` frozen panes + row/col size overrides),
+and also mirrors legacy top-level `frozenRows`/`frozenCols` fields for backwards compatibility. Like the main binder, it
+suppresses writes for read-only roles (`viewer`/`commenter`).
 
 In addition, the binder synchronizes layered formatting defaults (sheet/row/col styles):
 
