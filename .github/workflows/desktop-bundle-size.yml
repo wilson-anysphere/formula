@@ -53,6 +53,11 @@ jobs:
     name: Linux desktop bundle size
     needs: conflict-marker-guard
     runs-on: ubuntu-24.04
+    env:
+      # Keep this aligned with the pinned versions in `.github/workflows/release.yml`
+      # so this workflow catches the same toolchain regressions that would break
+      # tagged releases.
+      TAURI_CLI_VERSION: 2.9.5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -116,8 +121,11 @@ jobs:
       - name: Install wasm-pack (required for @formula/engine WASM build)
         run: bash scripts/cargo_agent.sh install wasm-pack --locked
 
-      - name: Install cargo-tauri
-        run: bash scripts/cargo_agent.sh install cargo-tauri --locked
+      - name: Install pinned tauri-cli (installs the `cargo tauri` subcommand)
+        run: bash scripts/cargo_agent.sh install tauri-cli --version "${TAURI_CLI_VERSION}" --locked --force
+
+      - name: Print Tauri CLI version
+        run: cargo tauri --version
 
       - name: Build desktop bundles (Tauri)
         env:
