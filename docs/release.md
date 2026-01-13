@@ -941,7 +941,7 @@ variables in **Settings → Secrets and variables → Actions → Variables**:
     (cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)
     ```
 
-2. From the repo root, print a bundle size table:
+2. From the repo root, print an installer/bundle artifact size table:
 
    ```bash
    python scripts/desktop_bundle_size_report.py

@@ -164,7 +164,7 @@ def _render_markdown(artifacts: list[Artifact], limit_mb: int, enforce: bool, re
     lines: list[str] = []
     runner_os = os.environ.get("RUNNER_OS", "").strip()
 
-    heading = "## Desktop bundle sizes"
+    heading = "## Desktop installer artifact sizes"
     if runner_os:
         heading += f" ({runner_os})"
     lines.append(heading)
@@ -177,7 +177,7 @@ def _render_markdown(artifacts: list[Artifact], limit_mb: int, enforce: bool, re
     lines.append("")
 
     if not artifacts:
-        lines.append("_No bundle artifacts found._")
+        lines.append("_No installer/bundle artifacts found._")
         lines.append("")
         return "\n".join(lines)
 
@@ -289,7 +289,7 @@ def _write_json_report(json_path: Path | None, report: dict[str, Any]) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Report (and optionally enforce) desktop Tauri bundle sizes after a release build."
+        description="Report (and optionally enforce) desktop installer/bundle artifact sizes after a release build."
     )
     parser.add_argument(
         "--bundle-dir",
