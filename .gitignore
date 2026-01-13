@@ -37,6 +37,12 @@ playwright-report/
 test-results/
 **/test-results/
 
+# Playwright defaults to storing screenshot snapshots alongside the spec in
+# `<spec>.spec.ts-snapshots/`. Desktop e2e tests use a custom `snapshotPathTemplate`
+# so baselines live under `apps/desktop/tests/e2e/__screenshots__/...`; ignore the
+# legacy location to avoid accidentally committing stale snapshots.
+apps/desktop/tests/e2e/**/*-snapshots/
+
 coverage/
 .turbo/
 npm-debug.log*
