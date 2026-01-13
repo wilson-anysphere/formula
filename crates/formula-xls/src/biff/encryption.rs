@@ -400,4 +400,56 @@ mod tests {
         let err = decrypt_workbook_stream(&mut stream, "pw").expect_err("expected error");
         assert!(matches!(err, DecryptError::InvalidFilePass(_)));
     }
+
+    #[test]
+    fn decrypt_workbook_stream_parses_filepass_and_dispatches_biff8_xor() {
+        let bof_payload = [0x00, 0x06, 0x05, 0x00];
+        let filepass_payload = [
+            0x00, 0x00, // wEncryptionType (XOR)
+            0x34, 0x12, // key
+            0x78, 0x56, // verifier
+        ];
+        let mut stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_payload),
+            record(records::RECORD_FILEPASS, &filepass_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let err = decrypt_workbook_stream(&mut stream, "pw").expect_err("expected error");
+        assert!(matches!(err, DecryptError::UnsupportedEncryption(_)));
+    }
+
+    #[test]
+    fn decrypt_workbook_stream_parses_filepass_and_dispatches_biff5_xor() {
+        let bof_payload = [0x00, 0x05, 0x05, 0x00];
+        let filepass_payload = [
+            0x34, 0x12, // key
+            0x78, 0x56, // verifier
+        ];
+        let mut stream = [
+            record(records::RECORD_BOF_BIFF5, &bof_payload),
+            record(records::RECORD_FILEPASS, &filepass_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let err = decrypt_workbook_stream(&mut stream, "pw").expect_err("expected error");
+        assert!(matches!(err, DecryptError::UnsupportedEncryption(_)));
+    }
+
+    #[test]
+    fn decrypt_workbook_stream_returns_invalid_filepass_when_payload_truncated() {
+        let bof_payload = [0x00, 0x06, 0x05, 0x00];
+        let filepass_payload = [0x00]; // truncated wEncryptionType
+        let mut stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_payload),
+            record(records::RECORD_FILEPASS, &filepass_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let err = decrypt_workbook_stream(&mut stream, "pw").expect_err("expected error");
+        assert!(matches!(err, DecryptError::InvalidFilePass(_)));
+    }
 }
