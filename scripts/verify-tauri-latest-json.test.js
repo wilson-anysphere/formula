@@ -41,14 +41,15 @@ function runLocal(manifest, opts = {}) {
   return proc;
 }
 
-test("passes for universal macOS + windows x64/arm64 + linux x64", () => {
+test("passes for universal macOS + windows x64/arm64 + linux x64/arm64", () => {
   const proc = runLocal({
     version: "0.0.0",
     platforms: {
       "darwin-universal": { url: "https://example.com/app.tar.gz", signature: "sig" },
-      "windows-x86_64": { url: "https://example.com/app.msi", signature: "sig" },
-      "windows-aarch64": { url: "https://example.com/app-arm.msi", signature: "sig" },
-      "linux-x86_64": { url: "https://example.com/app.AppImage", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/app_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/app_arm64.msi", signature: "sig" },
+      "linux-x86_64": { url: "https://example.com/app_x86_64.AppImage", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/app_arm64.AppImage", signature: "sig" },
     },
   });
 
@@ -66,7 +67,8 @@ test("fails for alias platform keys (Rust target triples) instead of Tauri updat
       "aarch64-apple-darwin": { url: "https://example.com/app-arm.tar.gz", signature: "sig" },
       "x86_64-pc-windows-msvc": { url: "https://example.com/app.msi", signature: "sig" },
       "aarch64-pc-windows-msvc": { url: "https://example.com/app-arm.msi", signature: "sig" },
-      "x86_64-unknown-linux-gnu": { url: "https://example.com/app.AppImage", signature: "sig" },
+      "x86_64-unknown-linux-gnu": { url: "https://example.com/app_x86_64.AppImage", signature: "sig" },
+      "aarch64-unknown-linux-gnu": { url: "https://example.com/app_arm64.AppImage", signature: "sig" },
     },
   });
 
@@ -83,9 +85,10 @@ test("finds nested platforms objects", () => {
     data: {
       platforms: {
         "darwin-universal": { url: "https://example.com/app.tar.gz", signature: "sig" },
-        "windows-x86_64": { url: "https://example.com/app.msi", signature: "sig" },
-        "windows-aarch64": { url: "https://example.com/app-arm.msi", signature: "sig" },
-        "linux-x86_64": { url: "https://example.com/app.AppImage", signature: "sig" },
+        "windows-x86_64": { url: "https://example.com/app_x64.msi", signature: "sig" },
+        "windows-aarch64": { url: "https://example.com/app_arm64.msi", signature: "sig" },
+        "linux-x86_64": { url: "https://example.com/app_x86_64.AppImage", signature: "sig" },
+        "linux-aarch64": { url: "https://example.com/app_arm64.AppImage", signature: "sig" },
       },
     },
   });
@@ -98,8 +101,9 @@ test("fails when windows-arm64 is missing", () => {
     version: "0.0.0",
     platforms: {
       "darwin-universal": { url: "https://example.com/app.tar.gz", signature: "sig" },
-      "windows-x86_64": { url: "https://example.com/app.msi", signature: "sig" },
-      "linux-x86_64": { url: "https://example.com/app.AppImage", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/app_x64.msi", signature: "sig" },
+      "linux-x86_64": { url: "https://example.com/app_x86_64.AppImage", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/app_arm64.AppImage", signature: "sig" },
     },
   });
 
@@ -112,10 +116,11 @@ test("fails when updater asset types do not match platform expectations (Linux .
     version: "0.0.0",
     platforms: {
       "darwin-universal": { url: "https://example.com/app.tar.gz", signature: "sig" },
-      "windows-x86_64": { url: "https://example.com/app.msi", signature: "sig" },
-      "windows-aarch64": { url: "https://example.com/app-arm.msi", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/app_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/app_arm64.msi", signature: "sig" },
       // Linux updater should point to an AppImage, not a deb/rpm package.
       "linux-x86_64": { url: "https://example.com/app.deb", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/app_arm64.AppImage", signature: "sig" },
     },
   });
 
@@ -134,7 +139,8 @@ test("fails when multiple targets share the same updater URL (collision)", () =>
       "darwin-universal": { url: "https://example.com/app.tar.gz", signature: "sig" },
       "windows-x86_64": { url, signature: "sig" },
       "windows-aarch64": { url, signature: "sig" },
-      "linux-x86_64": { url: "https://example.com/app.AppImage", signature: "sig" },
+      "linux-x86_64": { url: "https://example.com/app_x86_64.AppImage", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/app_arm64.AppImage", signature: "sig" },
     },
   });
 
@@ -151,9 +157,10 @@ test("fails when latest.json.sig is missing", () => {
       version: "0.0.0",
       platforms: {
         "darwin-universal": { url: "https://example.com/app.tar.gz", signature: "sig" },
-        "windows-x86_64": { url: "https://example.com/app.msi", signature: "sig" },
-        "windows-aarch64": { url: "https://example.com/app-arm.msi", signature: "sig" },
-        "linux-x86_64": { url: "https://example.com/app.AppImage", signature: "sig" },
+        "windows-x86_64": { url: "https://example.com/app_x64.msi", signature: "sig" },
+        "windows-aarch64": { url: "https://example.com/app_arm64.msi", signature: "sig" },
+        "linux-x86_64": { url: "https://example.com/app_x86_64.AppImage", signature: "sig" },
+        "linux-aarch64": { url: "https://example.com/app_arm64.AppImage", signature: "sig" },
       },
     },
     { includeSig: false },

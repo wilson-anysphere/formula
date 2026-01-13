@@ -18,7 +18,11 @@ function baseline() {
       signature: "sig",
     },
     "linux-x86_64": {
-      url: "https://github.com/example/repo/releases/download/v0.1.0/Formula.AppImage",
+      url: "https://github.com/example/repo/releases/download/v0.1.0/Formula_0.1.0_amd64.AppImage",
+      signature: "sig",
+    },
+    "linux-aarch64": {
+      url: "https://github.com/example/repo/releases/download/v0.1.0/Formula_0.1.0_arm64.AppImage",
       signature: "sig",
     },
   };
@@ -27,7 +31,8 @@ function baseline() {
     "Formula.app.tar.gz",
     "Formula_0.1.0_x64.msi",
     "Formula_0.1.0_arm64.msi",
-    "Formula.AppImage",
+    "Formula_0.1.0_amd64.AppImage",
+    "Formula_0.1.0_arm64.AppImage",
   ]);
 
   return { platforms, assetNames };
@@ -37,7 +42,7 @@ test("fails when Linux updater URL points at a non-updatable package (.deb)", ()
   const { platforms, assetNames } = baseline();
   platforms["linux-x86_64"].url =
     "https://github.com/example/repo/releases/download/v0.1.0/formula_0.1.0_amd64.deb";
-  assetNames.delete("Formula.AppImage");
+  assetNames.delete("Formula_0.1.0_amd64.AppImage");
   assetNames.add("formula_0.1.0_amd64.deb");
 
   const result = validatePlatformEntries({ platforms, assetNames });
@@ -97,7 +102,7 @@ test("passes with distinct URLs and correct per-platform updater artifact types"
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.invalidTargets, []);
   assert.deepEqual(result.missingAssets, []);
-  assert.equal(result.validatedTargets.length, 4);
+  assert.equal(result.validatedTargets.length, 5);
 });
 
 test("accepts a macOS updater archive ending with .tar.gz (not .app.tar.gz)", () => {
@@ -143,7 +148,7 @@ test("fails when Windows updater assets do not include an arch token in the file
 test("fails when latest.json.platforms is missing a required platform key", () => {
   const { platforms, assetNames } = baseline();
   delete platforms["linux-x86_64"];
-  assetNames.delete("Formula.AppImage");
+  assetNames.delete("Formula_0.1.0_amd64.AppImage");
 
   const result = validatePlatformEntries({ platforms, assetNames });
   assert.ok(
