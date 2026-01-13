@@ -934,13 +934,28 @@ Note: the in-app updater downloads whatever URLs `latest.json` points at (per-pl
 like `.dmg` / `.msi` / `.deb` are for **manual** installation; auto-update uses the **updater
 payload** artifacts referenced by `latest.json` (see `docs/desktop-updater-target-mapping.md`).
 
+### One-liner: release smoke test
+
+To run the repo’s release sanity checks (version check, updater config validation, and GitHub Release asset/manifest verification) in one command:
+
+```bash
+# Use a GitHub token to avoid rate limits (or pass --token).
+GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name
+```
+
+If you have locally-built Tauri bundles and want to run any platform-specific bundle validators too:
+
+```bash
+node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundles
+```
+
 1. Open the GitHub Release (draft) and confirm:
-   - Updater metadata: `latest.json` and `latest.json.sig`
-   - `SHA256SUMS.txt` (SHA256 checksums for all release assets)
-   - macOS (**universal**): `.dmg` (installer) + `.app.tar.gz` (updater payload)
-   - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `x64` / `x86_64`)
-   - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `arm64` / `aarch64`)
-   - Linux (**x86_64 + ARM64**): `.AppImage` + `.deb` + `.rpm` for each architecture (filenames typically include `x86_64` / `aarch64`)
+    - Updater metadata: `latest.json` and `latest.json.sig`
+    - `SHA256SUMS.txt` (SHA256 checksums for all release assets)
+    - macOS (**universal**): `.dmg` (installer) + `.app.tar.gz` (updater payload)
+    - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `x64` / `x86_64`)
+    - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `arm64` / `aarch64`)
+    - Linux (**x86_64 + ARM64**): `.AppImage` + `.deb` + `.rpm` for each architecture (filenames typically include `x86_64` / `aarch64`)
 
    This repo requires Tauri updater signing for tagged releases, so expect `.sig` signature files to
    be uploaded alongside the produced artifacts:
