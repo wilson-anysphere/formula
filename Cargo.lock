@@ -2290,6 +2290,7 @@ dependencies = [
  "formula-model",
  "log",
  "proptest",
+ "sha1",
  "tempfile",
  "thiserror 2.0.17",
 ]

@@ -40,7 +40,10 @@ use formula_model::{
 use thiserror::Error;
 
 mod biff;
+mod decrypt;
 mod formula_rewrite;
+
+pub use decrypt::DecryptError;
 
 #[derive(Clone, Copy, Debug)]
 struct DateTimeStyleIds {
@@ -181,6 +184,8 @@ pub enum ImportError {
     CalaminePanic(String),
     #[error("encrypted workbook not supported: workbook is password-protected/encrypted; remove password protection in Excel and try again")]
     EncryptedWorkbook,
+    #[error("failed to decrypt `.xls`: {0}")]
+    Decrypt(#[from] DecryptError),
     #[error("invalid worksheet name: {0}")]
     InvalidSheetName(#[from] formula_model::SheetNameError),
 }
@@ -215,7 +220,22 @@ fn catch_calamine_panic<T>(f: impl FnOnce() -> T) -> Result<T, ImportError> {
 /// malformed or unsupported records may produce warnings rather than failing
 /// the import.
 pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, ImportError> {
-    import_xls_path_with_biff_reader(path.as_ref(), biff::read_workbook_stream_from_xls)
+    import_xls_path_with_biff_reader(path.as_ref(), None, biff::read_workbook_stream_from_xls)
+}
+
+/// Import a legacy `.xls` workbook from disk using a password for BIFF8 `FILEPASS` encryption.
+///
+/// This currently supports Excel 2000/2003-style RC4 CryptoAPI encryption (`FILEPASS`
+/// `wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`).
+pub fn import_xls_path_with_password(
+    path: impl AsRef<Path>,
+    password: &str,
+) -> Result<XlsImportResult, ImportError> {
+    import_xls_path_with_biff_reader(
+        path.as_ref(),
+        Some(password),
+        biff::read_workbook_stream_from_xls,
+    )
 }
 
 /// Import a legacy `.xls` workbook from disk while treating BIFF workbook-stream parsing as
@@ -226,11 +246,14 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
 pub fn import_xls_path_without_biff(
     path: impl AsRef<Path>,
 ) -> Result<XlsImportResult, ImportError> {
-    import_xls_path_with_biff_reader(path.as_ref(), |_| Err("BIFF parsing disabled".to_string()))
+    import_xls_path_with_biff_reader(path.as_ref(), None, |_| {
+        Err("BIFF parsing disabled".to_string())
+    })
 }
 
 fn import_xls_path_with_biff_reader(
     path: &Path,
+    password: Option<&str>,
     read_biff_workbook_stream: impl FnOnce(&Path) -> Result<Vec<u8>, String>,
 ) -> Result<XlsImportResult, ImportError> {
     let path = path.as_ref();
@@ -239,7 +262,7 @@ fn import_xls_path_with_biff_reader(
     // Calamine does not support BIFF encryption and may return opaque parse
     // errors for password-protected workbooks.
     let mut warnings = Vec::new();
-    let workbook_stream = match read_biff_workbook_stream(path) {
+    let mut workbook_stream = match read_biff_workbook_stream(path) {
         Ok(bytes) => Some(bytes),
         Err(err) => {
             warnings.push(ImportWarning::new(format!(
@@ -248,18 +271,30 @@ fn import_xls_path_with_biff_reader(
             None
         }
     };
+
+    // Attempt to decrypt BIFF8 `FILEPASS` records when a password is provided. We do this before
+    // running any BIFF record parsers so downstream metadata scans see plaintext.
+    let needs_decrypt = workbook_stream
+        .as_deref()
+        .is_some_and(biff::records::workbook_globals_has_filepass_record);
+    if needs_decrypt {
+        let Some(password) = password else {
+            return Err(ImportError::EncryptedWorkbook);
+        };
+
+        let decrypted = decrypt::decrypt_biff8_workbook_stream_rc4_cryptoapi(
+            workbook_stream
+                .as_deref()
+                .expect("checked Some via needs_decrypt"),
+            password,
+        )?;
+        workbook_stream = Some(decrypted);
+    }
     let mut biff_version: Option<biff::BiffVersion> = None;
     let mut biff_codepage: Option<u16> = None;
     let mut biff_globals: Option<biff::globals::BiffWorkbookGlobals> = None;
 
     if let Some(workbook_stream) = workbook_stream.as_deref() {
-        // Detect encrypted/password-protected `.xls` files before attempting to parse workbook
-        // globals or opening via calamine. Encrypted BIFF streams contain a `FILEPASS` record in
-        // the workbook globals substream.
-        if biff::records::workbook_globals_has_filepass_record(workbook_stream) {
-            return Err(ImportError::EncryptedWorkbook);
-        }
-
         let detected_biff_version = biff::detect_biff_version(workbook_stream);
         let codepage = biff::parse_biff_codepage(workbook_stream);
         biff_version = Some(detected_biff_version);
