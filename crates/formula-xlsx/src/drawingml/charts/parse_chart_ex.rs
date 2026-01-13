@@ -169,6 +169,7 @@ fn parse_chart_data<'a>(
                             formula: Some(f.to_string()),
                             cache: None,
                             multi_cache: None,
+                            literal: None,
                         });
                     }
                 }
@@ -183,6 +184,7 @@ fn parse_chart_data<'a>(
                         formula: Some(f.to_string()),
                         cache: None,
                         format_code: None,
+                        literal: None,
                     };
                     match typ {
                         "val" => {
