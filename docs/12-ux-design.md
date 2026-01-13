@@ -632,9 +632,15 @@ function setTheme(dark: boolean) {
   document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
 }
 
-// Initial
-setTheme(prefersDark.matches);
+// Default: Light theme (new users should not automatically follow OS dark mode).
+setTheme(false);
 
-// Watch for changes
-prefersDark.addEventListener("change", (e) => setTheme(e.matches));
+// If the user selects "System" theme preference, follow OS.
+function followSystemTheme() {
+  setTheme(prefersDark.matches);
+  prefersDark.addEventListener("change", (e) => setTheme(e.matches));
+}
+
+// Example usage:
+// if (userThemePreference === "system") followSystemTheme();
 ```
