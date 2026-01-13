@@ -4,6 +4,7 @@ import type {
   FillCommitEvent,
   FillMode,
   GridAxisSizeChange,
+  CanvasGridImageResolver,
   GridPerfStats,
   GridViewportState,
   ScrollToCellAlign
@@ -227,6 +228,7 @@ export class DesktopSharedGrid {
     defaultColWidth?: number;
     prefetchOverscanRows?: number;
     prefetchOverscanCols?: number;
+    imageResolver?: CanvasGridImageResolver | null;
     enableResize?: boolean;
     enableKeyboard?: boolean;
     enableWheel?: boolean;
@@ -257,7 +259,8 @@ export class DesktopSharedGrid {
       defaultRowHeight: options.defaultRowHeight,
       defaultColWidth: options.defaultColWidth,
       prefetchOverscanRows: options.prefetchOverscanRows,
-      prefetchOverscanCols: options.prefetchOverscanCols
+      prefetchOverscanCols: options.prefetchOverscanCols,
+      imageResolver: options.imageResolver ?? null
     });
 
     // Match the React CanvasGrid behaviour: enable resize unless explicitly disabled.

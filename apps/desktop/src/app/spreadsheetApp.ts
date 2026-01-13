@@ -81,6 +81,7 @@ import type { CellRange as GridCellRange, GridAxisSizeChange, GridPresence, Grid
 import { resolveDesktopGridMode, type DesktopGridMode } from "../grid/shared/desktopGridMode.js";
 import { DocumentCellProvider } from "../grid/shared/documentCellProvider.js";
 import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../grid/shared/desktopSharedGrid.js";
+import { DesktopImageStore } from "../images/imageStore.js";
 import { openExternalHyperlink } from "../hyperlinks/openExternal.js";
 import * as nativeDialogs from "../tauri/nativeDialogs.js";
 import { shellOpen } from "../tauri/shellOpen.js";
@@ -166,6 +167,14 @@ function looksLikeExternalHyperlink(text: string): boolean {
   // separator (`://`) or a `mailto:` prefix.
   if (/^mailto:/i.test(trimmed)) return true;
   return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed);
+}
+
+function decodeBase64ToBytes(base64: string): Uint8Array {
+  if (typeof atob !== "function") return new Uint8Array();
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 
 /**
@@ -537,6 +546,7 @@ export class SpreadsheetApp {
     (changes) => this.applyComputedChanges(changes)
   );
   private readonly document = new DocumentController({ engine: this.engine });
+  private readonly imageStore = new DesktopImageStore();
   /**
    * In collaborative mode, keyboard undo/redo must use Yjs UndoManager semantics
    * (see `@formula/collab-undo`) so we never overwrite newer remote edits.
@@ -1091,6 +1101,12 @@ export class SpreadsheetApp {
       this.document.setCellValue(this.sheetId, { row: 3, col: 1 }, 3);
       this.document.setCellValue(this.sheetId, { row: 4, col: 0 }, "D");
       this.document.setCellValue(this.sheetId, { row: 4, col: 1 }, 5);
+
+      // Temporary/demo: seed a couple of in-cell images for shared-grid rendering.
+      // This is a stopgap until the workbook backend exposes real workbook.images hydration.
+      if (this.gridMode === "shared") {
+        this.seedDemoInCellImages();
+      }
     }
 
     // Best-effort: keep the WASM engine worker hydrated from the DocumentController.
@@ -1330,6 +1346,7 @@ export class SpreadsheetApp {
         frozenCols: headerCols,
         defaultRowHeight: this.cellHeight,
         defaultColWidth: this.cellWidth,
+        imageResolver: async (imageId) => this.imageStore.getImageBlob(imageId),
         enableResize: true,
         enableKeyboard: false,
         canvases: { grid: this.gridCanvas, content: this.referenceCanvas, selection: this.selectionCanvas },
@@ -3233,6 +3250,27 @@ export class SpreadsheetApp {
     } finally {
       this.wasmSyncSuspended = false;
     }
+  }
+
+  private seedDemoInCellImages(): void {
+    // Keep demo image ids stable so tests can assert on resolution attempts.
+    const redId = "demo-image-red";
+    const blueId = "demo-image-blue";
+
+    // 1×1 PNGs (red + blue) as base64 to avoid depending on runtime asset loading.
+    this.imageStore.set(redId, {
+      mimeType: "image/png",
+      bytes: decodeBase64ToBytes("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQAY+l0AAAAASUVORK5CYII="),
+    });
+    this.imageStore.set(blueId, {
+      mimeType: "image/png",
+      bytes: decodeBase64ToBytes("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYPgPAAEDAQAIicLsAAAAAElFTkSuQmCC"),
+    });
+
+    // Place the demo images inside the existing seeded used-range (A1:D5) so we don't perturb
+    // navigation tests that assume the used range does not extend past D5.
+    this.document.setCellValue(this.sheetId, { row: 4, col: 2 }, { type: "image", value: { imageId: redId, altText: "Red" } }); // C5
+    this.document.setCellValue(this.sheetId, { row: 1, col: 3 }, { type: "image", value: { imageId: blueId, altText: "Blue" } }); // D2
   }
 
   private async initWasmEngine(): Promise<void> {

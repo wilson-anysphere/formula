@@ -797,7 +797,7 @@ export class DocumentCellProvider implements CellProvider {
       return null;
     }
 
-    let value: string | number | boolean | null = null;
+    let value: CellData["value"] = null;
     let richText: RichTextValue | undefined;
     let image: CellData["image"] | undefined;
 
