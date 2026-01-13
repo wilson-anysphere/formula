@@ -10,6 +10,10 @@ env:
   # Keep these in sync with ci.yml/release.yml to reduce cross-workflow drift.
   NODE_VERSION: 22
   WASM_PACK_VERSION: 0.13.1
+  # This workflow is for tracking/visibility, not gating. Force bench enforcement off even if
+  # repo/organization variables set these for other workflows.
+  FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH: "0"
+  FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH: "0"
 
 jobs:
   desktop-startup-perf:
