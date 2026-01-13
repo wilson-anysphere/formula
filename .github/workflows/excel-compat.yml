@@ -2,8 +2,18 @@ name: Excel Compatibility (Oracle)
 
 on:
   pull_request:
+    paths:
+      - "crates/**"
+      - "tools/excel-oracle/**"
+      - "tests/compatibility/excel-oracle/**"
+      - "rust-toolchain.toml"
   push:
     branches: [main]
+    paths:
+      - "crates/**"
+      - "tools/excel-oracle/**"
+      - "tests/compatibility/excel-oracle/**"
+      - "rust-toolchain.toml"
   workflow_dispatch:
     inputs:
       mode:
