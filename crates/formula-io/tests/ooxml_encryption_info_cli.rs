@@ -1,4 +1,5 @@
 use std::io::{Cursor, Write as _};
+use std::path::PathBuf;
 use std::process::Command;
 
 fn ooxml_encryption_info_bin() -> &'static str {
@@ -28,6 +29,12 @@ fn make_ooxml_encrypted_container(major: u16, minor: u16, flags: u32, payload: &
         .expect("create EncryptedPackage stream");
 
     ole.into_inner().into_inner()
+}
+
+fn fixture_path(rel: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/encrypted/ooxml")
+        .join(rel)
 }
 
 #[test]
@@ -181,5 +188,49 @@ fn cli_prints_agile_version_and_root_tag() {
     assert!(
         stdout.contains("xml_root=encryption"),
         "expected xml_root detection, got: {stdout}"
+    );
+}
+
+#[test]
+fn cli_reports_expected_versions_for_repo_fixtures() {
+    let agile = fixture_path("agile.xlsx");
+    let standard = fixture_path("standard.xlsx");
+
+    let out = Command::new(ooxml_encryption_info_bin())
+        .arg(&agile)
+        .output()
+        .expect("run cli on agile fixture");
+    assert!(
+        out.status.success(),
+        "expected success exit status for agile fixture, got {:?}",
+        out.status.code()
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stdout = stdout.trim_end();
+    assert!(
+        stdout.starts_with("Agile (4.4) flags=0x00000040"),
+        "unexpected stdout for agile fixture: {stdout}"
+    );
+    if stdout.contains("xml_root=") {
+        assert!(
+            stdout.contains("xml_root=encryption"),
+            "unexpected xml root tag for agile fixture: {stdout}"
+        );
+    }
+
+    let out = Command::new(ooxml_encryption_info_bin())
+        .arg(&standard)
+        .output()
+        .expect("run cli on standard fixture");
+    assert!(
+        out.status.success(),
+        "expected success exit status for standard fixture, got {:?}",
+        out.status.code()
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        stdout.trim_end(),
+        "Standard (3.2) flags=0x00000000",
+        "unexpected stdout for standard fixture: {stdout}"
     );
 }
