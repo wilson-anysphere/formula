@@ -230,7 +230,8 @@ impl XlsxPackage {
                             continue;
                         }
 
-                        if style_part.is_none() && is_chart_style_relationship(&rel_type, &rel_target)
+                        if style_part.is_none()
+                            && is_chart_style_relationship(&rel_type, &rel_target)
                         {
                             style_part = Some(target_path);
                             continue;
@@ -648,6 +649,16 @@ fn merge_chart_models(
             xpath: None,
         });
         merged.chart_kind = chart_ex.chart_kind.clone();
+        // Keep plot_area consistent with chart_kind (ChartEx charts often have a
+        // minimal chartSpace fallback like `<c:barChart/>` that is not representative
+        // of the real chart type).
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: "model.plot_area: using ChartEx".to_string(),
+            part: Some(chart_ex_part.to_string()),
+            xpath: None,
+        });
+        merged.plot_area = chart_ex.plot_area.clone();
     } else {
         diagnostics.push(ChartDiagnostic {
             severity: ChartDiagnosticSeverity::Info,
