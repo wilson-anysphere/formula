@@ -520,7 +520,10 @@ impl BiffWorkbookGlobals {
             base.border = self.resolve_border(xf.border);
         }
 
-        if apply(xf.apply.alignment) {
+        // Some BIFF writers appear to leave the "apply alignment" bit unset even when the
+        // alignment fields are meaningful. Treat any non-default alignment as applied to avoid
+        // dropping formatting (for example, vertical alignment in some encrypted fixtures).
+        if apply(xf.apply.alignment) || self.alignment_is_non_default(xf.alignment) {
             base.alignment = self.resolve_alignment(xf.alignment);
         }
 
@@ -586,7 +589,7 @@ impl BiffWorkbookGlobals {
             base.border = self.border_is_non_default(xf.border);
         }
 
-        if apply(xf.apply.alignment) {
+        if apply(xf.apply.alignment) || self.alignment_is_non_default(xf.alignment) {
             base.alignment = self.alignment_is_non_default(xf.alignment);
         }
 

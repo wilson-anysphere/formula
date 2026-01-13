@@ -368,6 +368,8 @@ fn build_cryptoapi_encrypted_xls_bytes(password: &str) -> Vec<u8> {
     for _ in 0..16 {
         push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true, 0x20));
     }
+    // Cell XF used by the sheet's NUMBER record. Make it non-default (vertical alignment = Top)
+    // so the decrypt + BIFF parser tests can assert that XF metadata after FILEPASS was imported.
     let xf_cell: u16 = 16;
     // Make the cell XF "interesting" so the decryption integration test can assert that
     // workbook-global styles (XF) are imported correctly after decrypting the stream.

@@ -1473,7 +1473,11 @@ fn import_xls_path_with_biff_reader(
                                 let anchor = sheet.merged_regions.resolve_cell(cell_ref);
                                 // Best-effort fallback only: do not override formulas that were
                                 // already resolved by calamine (normal SHRFMLA/ARRAY handling).
-                                if sheet.formula(anchor).is_some() {
+                                //
+                                // Note: BIFF fallback decoding will render unresolved `PtgExp`
+                                // tokens as `#UNKNOWN!`. Treat that placeholder as "not resolved"
+                                // so we can still populate a recovered formula.
+                                if matches!(sheet.formula(anchor), Some(existing) if existing != "#UNKNOWN!") {
                                     continue;
                                 }
                                 if let Some(normalized) = normalize_formula_text(&formula_text) {
@@ -3496,7 +3500,11 @@ fn import_biff8_shared_formulas(
             let cell_ref = CellRef::new(row as u32, col as u32);
             let anchor_cell = sheet.merged_regions.resolve_cell(cell_ref);
 
-            if sheet.formula(anchor_cell).is_some() {
+            // Best-effort shared-formula recovery should not clobber formulas already surfaced by
+            // calamine / BIFF decoding. However, unresolved `PtgExp` tokens are rendered as
+            // `#UNKNOWN!` by the rgce decoder; treat that placeholder as "not resolved" so we can
+            // still materialize the shared formula from SHRFMLA.
+            if matches!(sheet.formula(anchor_cell), Some(existing) if existing != "#UNKNOWN!") {
                 continue;
             }
 
