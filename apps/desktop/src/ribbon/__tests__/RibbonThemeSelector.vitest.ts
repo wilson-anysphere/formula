@@ -15,6 +15,7 @@ afterEach(() => {
       labelById: Object.create(null),
       disabledById: Object.create(null),
       shortcutById: Object.create(null),
+      ariaKeyShortcutsById: Object.create(null),
     });
   });
   document.body.innerHTML = "";
@@ -103,6 +104,7 @@ describe("Ribbon theme selector", () => {
           labelById: { "view.appearance.theme": `Theme: ${label}` },
           disabledById: Object.create(null),
           shortcutById: Object.create(null),
+          ariaKeyShortcutsById: Object.create(null),
         });
       });
     });
