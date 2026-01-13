@@ -190,4 +190,3 @@ function getLocalStorageOrNull(): Storage | null {
     return null;
   }
 }
-

@@ -4,6 +4,7 @@ import { createDefaultAIAuditStore } from "../src/factory.js";
 import { BoundedAIAuditStore } from "../src/bounded-store.js";
 import { IndexedDbAIAuditStore } from "../src/indexeddb-store.js";
 import { LocalStorageAIAuditStore } from "../src/local-storage-store.js";
+import { MemoryAIAuditStore } from "../src/memory-store.js";
 
 import { IDBKeyRange, indexedDB } from "fake-indexeddb";
 
@@ -95,6 +96,21 @@ describe("createDefaultAIAuditStore", () => {
     expect((store as LocalStorageAIAuditStore).maxEntries).toBe(7);
   });
 
+  it("falls back to LocalStorageAIAuditStore when IndexedDB is unavailable", async () => {
+    const storage = new MemoryLocalStorage();
+    Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
+    // Ensure IndexedDB globals are absent.
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete (globalThis as any).indexedDB;
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete (globalThis as any).IDBKeyRange;
+
+    const store = await createDefaultAIAuditStore({ bounded: false, retention: { max_entries: 42 } });
+
+    expect(store).toBeInstanceOf(LocalStorageAIAuditStore);
+    expect((store as LocalStorageAIAuditStore).maxEntries).toBe(42);
+  });
+
   it('prefer: "indexeddb" falls back to LocalStorageAIAuditStore when IndexedDB open fails', async () => {
     const storage = new MemoryLocalStorage();
     Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
@@ -108,6 +124,25 @@ describe("createDefaultAIAuditStore", () => {
     expect(store).toBeInstanceOf(LocalStorageAIAuditStore);
   });
 
+  it("falls back to MemoryAIAuditStore when localStorage access throws", async () => {
+    const win: any = {};
+    Object.defineProperty(win, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("no localStorage");
+      }
+    });
+    Object.defineProperty(globalThis, "window", { value: win, configurable: true });
+    // Ensure IndexedDB is unavailable so the factory attempts localStorage next.
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete (globalThis as any).indexedDB;
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete (globalThis as any).IDBKeyRange;
+
+    const store = await createDefaultAIAuditStore({ bounded: false });
+    expect(store).toBeInstanceOf(MemoryAIAuditStore);
+  });
+
   it("wraps the selected store in BoundedAIAuditStore when bounded is enabled", async () => {
     const storage = new MemoryLocalStorage();
     Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
@@ -118,5 +153,23 @@ describe("createDefaultAIAuditStore", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((store as any).store).toBeInstanceOf(LocalStorageAIAuditStore);
   });
-});
 
+  it("wraps the default store in BoundedAIAuditStore by default", async () => {
+    const storage = new MemoryLocalStorage();
+    Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
+    (globalThis as any).indexedDB = indexedDB;
+    (globalThis as any).IDBKeyRange = IDBKeyRange;
+
+    const store = await createDefaultAIAuditStore();
+    expect(store).toBeInstanceOf(BoundedAIAuditStore);
+  });
+
+  it("defaults to MemoryAIAuditStore in Node runtimes (no window)", async () => {
+    // Ensure we don't accidentally treat the test environment as browser-like.
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete (globalThis as any).window;
+
+    const store = await createDefaultAIAuditStore({ bounded: false });
+    expect(store).toBeInstanceOf(MemoryAIAuditStore);
+  });
+});
