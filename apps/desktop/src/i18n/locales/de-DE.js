@@ -50,6 +50,7 @@ export const deDE = {
   "clipboard.pasteSpecial.pasteValues": "Werte einfügen",
   "clipboard.pasteSpecial.pasteFormulas": "Formeln einfügen",
   "clipboard.pasteSpecial.pasteFormats": "Formate einfügen",
+  "clipboard.pasteSpecial.transpose": "Transponieren",
   "versionHistory.checkpoint": "Kontrollpunkt",
   "versionHistory.autoSave": "Auto-Speichern",
   "versionHistory.restore": "Wiederhergestellt",

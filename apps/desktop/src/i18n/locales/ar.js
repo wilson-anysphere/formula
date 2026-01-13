@@ -50,6 +50,7 @@ export const ar = {
   "clipboard.pasteSpecial.pasteValues": "لصق القيم",
   "clipboard.pasteSpecial.pasteFormulas": "لصق الصيغ",
   "clipboard.pasteSpecial.pasteFormats": "لصق التنسيقات",
+  "clipboard.pasteSpecial.transpose": "تبديل الصفوف والأعمدة",
   "versionHistory.checkpoint": "نقطة حفظ",
   "versionHistory.autoSave": "حفظ تلقائي",
   "versionHistory.restore": "تمت الاستعادة",
