@@ -1,7 +1,7 @@
 import type { AnchorPoint, DrawingObject, DrawingTransform, Rect } from "./types";
 import type { GridGeometry, Viewport } from "./overlay";
 import { anchorToRectPx, emuToPx, pxToEmu } from "./overlay";
-import { buildHitTestIndex, hitTestDrawings, hitTestDrawingsObject, type HitTestIndex } from "./hitTest";
+import { buildHitTestIndex, hitTestDrawings, hitTestDrawingsObject, type HitTestIndex, type HitTestResult } from "./hitTest";
 import {
   cursorForResizeHandleWithTransform,
   cursorForRotationHandle,
@@ -61,6 +61,19 @@ export interface DrawingInteractionCallbacks {
     after: DrawingObject;
     objects: DrawingObject[];
   }) => void;
+  /**
+   * Return false to skip handling the pointer down entirely.
+   *
+   * This is useful for cases where the grid should "win" even when the pointer
+   * lands on a drawing (e.g. formula-bar range selection mode).
+   */
+  shouldHandlePointerDown?(event: PointerEvent): boolean;
+  /**
+   * Called when a pointer down hits a drawing, before selection/drag state is set.
+   *
+   * Return false to cancel drawing handling and allow the event to propagate.
+   */
+  onPointerDownHit?(event: PointerEvent, hit: HitTestResult): boolean | void;
 }
 
 export interface DrawingInteractionControllerOptions {
@@ -227,6 +240,10 @@ export class DrawingInteractionController {
   }
 
   private readonly onPointerDown = (e: PointerEvent) => {
+    if (this.callbacks.shouldHandlePointerDown && this.callbacks.shouldHandlePointerDown(e) === false) {
+      return;
+    }
+
     const pointerType = e.pointerType ?? "";
     const button = typeof e.button === "number" ? e.button : 0;
     const isMouse = pointerType === "mouse";
@@ -267,6 +284,12 @@ export class DrawingInteractionController {
           this.scratchRect,
         );
         if (hitTestRotationHandle(selectedBounds, x, y, selectedObject.transform)) {
+          if (
+            this.callbacks.onPointerDownHit &&
+            this.callbacks.onPointerDownHit(e, { object: selectedObject, bounds: selectedBounds }) === false
+          ) {
+            return;
+          }
           if (isContextClick) {
             // Keep the current selection but allow the event to bubble so the app
             // can show a context menu.
@@ -298,6 +321,12 @@ export class DrawingInteractionController {
 
         const handle = hitTestResizeHandle(selectedBounds, x, y, selectedObject.transform);
         if (handle) {
+          if (
+            this.callbacks.onPointerDownHit &&
+            this.callbacks.onPointerDownHit(e, { object: selectedObject, bounds: selectedBounds }) === false
+          ) {
+            return;
+          }
           if (isContextClick) {
             // Keep the current selection but allow the event to bubble so the app
             // can show a context menu.
@@ -330,6 +359,9 @@ export class DrawingInteractionController {
     }
 
     const hit = hitTestDrawings(index, viewport, x, y, this.geom, paneLayout);
+    if (hit && this.callbacks.onPointerDownHit && this.callbacks.onPointerDownHit(e, hit) === false) {
+      return;
+    }
     this.selectedId = hit?.object.id ?? null;
     this.callbacks.onSelectionChange?.(this.selectedId);
     if (!hit) {

@@ -2370,6 +2370,12 @@ export class SpreadsheetApp {
             this.renderCharts(false);
           }
         },
+        shouldHandlePointerDown: () => !this.formulaBar?.isFormulaEditing(),
+        onPointerDownHit: () => {
+          if (this.editor.isOpen()) {
+            this.editor.commit("command");
+          }
+        },
         onSelectionChange: (selectedId) => {
           const prev = this.selectedDrawingId;
           this.selectedDrawingId = selectedId;
@@ -6229,6 +6235,20 @@ export class SpreadsheetApp {
   }
 
   /**
+   * Replace drawing objects for the active sheet.
+   *
+   * Intended for unit tests and ephemeral UI-only drawing edits. This updates the in-memory
+   * draw-object cache and triggers a re-render; it does not persist the drawings back to the
+   * workbook model.
+   */
+  setDrawingObjects(objects: DrawingObject[] | null | undefined): void {
+    if (this.disposed) return;
+    const next = Array.isArray(objects) ? objects : [];
+    this.setDrawingObjectsForSheet(next);
+    this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+  }
+
+  /**
    * Returns the ImageStore used by the drawings overlay (picture bitmaps).
    *
    * This is used by the split-view secondary pane so it can render the same pictures
@@ -7722,6 +7742,12 @@ export class SpreadsheetApp {
           this.renderCharts(false);
         }
       },
+      shouldHandlePointerDown: () => !this.formulaBar?.isFormulaEditing(),
+      onPointerDownHit: () => {
+        if (this.editor.isOpen()) {
+          this.editor.commit("command");
+        }
+      },
       onSelectionChange: (selectedId) => {
         const prev = this.selectedDrawingId;
         this.selectedDrawingId = selectedId;
@@ -7736,6 +7762,7 @@ export class SpreadsheetApp {
         this.renderDrawings();
         this.focus();
       },
+      requestFocus: () => this.focus(),
     };
     this.drawingInteractionCallbacks = callbacks;
     const interactionElement = this.gridMode === "shared" ? this.selectionCanvas : this.root;
@@ -10627,7 +10654,9 @@ export class SpreadsheetApp {
     // If another capture listener already claimed the event (e.g. chart interactions),
     // do not compete.
     if (e.cancelBubble) return;
-
+    // When the formula bar is in range-selection mode, drawing hits should not steal the
+    // pointerdown; let normal grid range selection continue.
+    if (this.formulaBar?.isFormulaEditing()) return;
     const target = e.target as HTMLElement | null;
     // Only treat pointerdown events originating from the grid surface (canvases/root) as
     // drawing selection. This avoids interfering with interactive DOM overlays
@@ -10641,11 +10670,9 @@ export class SpreadsheetApp {
       target === this.presenceCanvas;
     if (!isGridSurface) return;
 
-    // Drawings should not interfere with the in-place editor.
-    if (this.editor.isOpen()) return;
-
     const objects = this.listDrawingObjectsForSheet();
     const prevSelected = this.selectedDrawingId;
+    const editorWasOpen = this.editor.isOpen();
 
     // If there are no drawings, clear selection on any click in the cell area.
     if (objects.length === 0) {
@@ -10679,6 +10706,10 @@ export class SpreadsheetApp {
         }
       }
       return;
+    }
+
+    if (editorWasOpen) {
+      this.editor.commit("command");
     }
 
     e.preventDefault();
@@ -13438,7 +13469,7 @@ export class SpreadsheetApp {
   }
 
   private onPointerDown(e: PointerEvent): void {
-    if (this.editor.isOpen()) return;
+    const editorWasOpen = this.editor.isOpen();
 
     const rect = this.root.getBoundingClientRect();
     this.rootLeft = rect.left;
@@ -13450,110 +13481,126 @@ export class SpreadsheetApp {
 
     const primaryButton = e.pointerType !== "mouse" || e.button === 0;
 
-    // Drawing hit testing must happen before cell-selection logic so clicks on
-    // overlaid objects (charts/images/shapes) behave like Excel.
-    const drawingViewport = this.getDrawingInteractionViewport();
-    const drawings = this.listDrawingObjectsForSheet();
+    const formulaEditing = this.formulaBar?.isFormulaEditing() === true;
+    if (!formulaEditing) {
+      // Drawing hit testing must happen before cell-selection logic so clicks on
+      // overlaid objects (charts/images/shapes) behave like Excel.
+      const drawingViewport = this.getDrawingInteractionViewport();
+      const drawings = this.listDrawingObjectsForSheet();
 
-    // Allow grabbing a resize handle for the current drawing selection even when the
-    // pointer is slightly outside the object's bounds (handles extend beyond the
-    // selection outline).
-    if (primaryButton && this.selectedDrawingId != null) {
-      const selected = drawings.find((obj) => obj.id === this.selectedDrawingId) ?? null;
-      if (selected) {
-        const headerOffsetX = Number.isFinite(drawingViewport.headerOffsetX) ? Math.max(0, drawingViewport.headerOffsetX!) : 0;
-        const headerOffsetY = Number.isFinite(drawingViewport.headerOffsetY) ? Math.max(0, drawingViewport.headerOffsetY!) : 0;
-        if (x >= headerOffsetX && y >= headerOffsetY) {
-          const selectedBounds = drawingObjectToViewportRect(selected, drawingViewport, this.drawingGeom);
-          const handle = hitTestResizeHandle(selectedBounds, x, y, selected.transform);
-          if (handle) {
-            e.preventDefault();
-            this.renderSelection();
-            this.focus();
+      // Allow grabbing a resize handle for the current drawing selection even when the
+      // pointer is slightly outside the object's bounds (handles extend beyond the
+      // selection outline).
+      if (primaryButton && this.selectedDrawingId != null) {
+        const selected = drawings.find((obj) => obj.id === this.selectedDrawingId) ?? null;
+        if (selected) {
+          const headerOffsetX = Number.isFinite(drawingViewport.headerOffsetX)
+            ? Math.max(0, drawingViewport.headerOffsetX!)
+            : 0;
+          const headerOffsetY = Number.isFinite(drawingViewport.headerOffsetY)
+            ? Math.max(0, drawingViewport.headerOffsetY!)
+            : 0;
+          if (x >= headerOffsetX && y >= headerOffsetY) {
+            const selectedBounds = drawingObjectToViewportRect(selected, drawingViewport, this.drawingGeom);
+            const handle = hitTestResizeHandle(selectedBounds, x, y, selected.transform);
+            if (handle) {
+              if (editorWasOpen) {
+                this.editor.commit("command");
+              }
+              e.preventDefault();
+              this.renderSelection();
+              this.focus();
 
-            const scroll = effectiveScrollForAnchor(selected.anchor, drawingViewport);
-            const startSheetX = x - headerOffsetX + scroll.scrollX;
-            const startSheetY = y - headerOffsetY + scroll.scrollY;
-            this.drawingGesture = {
-              pointerId: e.pointerId,
-              mode: "resize",
-              objectId: selected.id,
-              handle,
-              startSheetX,
-              startSheetY,
-              startAnchor: selected.anchor,
-              startWidthPx: selectedBounds.width,
-              startHeightPx: selectedBounds.height,
-              transform: selected.transform,
-              aspectRatio:
-                selected.kind.type === "image" && selectedBounds.width > 0 && selectedBounds.height > 0
-                  ? selectedBounds.width / selectedBounds.height
-                  : null,
-            };
-            try {
-              this.root.setPointerCapture(e.pointerId);
-            } catch {
-              // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+              const scroll = effectiveScrollForAnchor(selected.anchor, drawingViewport);
+              const startSheetX = x - headerOffsetX + scroll.scrollX;
+              const startSheetY = y - headerOffsetY + scroll.scrollY;
+              this.drawingGesture = {
+                pointerId: e.pointerId,
+                mode: "resize",
+                objectId: selected.id,
+                handle,
+                startSheetX,
+                startSheetY,
+                startAnchor: selected.anchor,
+                startWidthPx: selectedBounds.width,
+                startHeightPx: selectedBounds.height,
+                transform: selected.transform,
+                aspectRatio:
+                  selected.kind.type === "image" && selectedBounds.width > 0 && selectedBounds.height > 0
+                    ? selectedBounds.width / selectedBounds.height
+                    : null,
+              };
+              try {
+                this.root.setPointerCapture(e.pointerId);
+              } catch {
+                // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+              }
+              return;
             }
-            return;
           }
         }
       }
-    }
-    const hitIndex = this.getDrawingHitTestIndex(drawings);
-    const hit = hitTestDrawings(hitIndex, drawingViewport, x, y, this.drawingGeom);
-    if (hit) {
-      this.selectedDrawingId = hit.object.id;
-      this.renderSelection();
-      this.focus();
 
-      // Begin drag/resize gesture for primary-button interactions.
-      if (primaryButton) {
-        e.preventDefault();
-        const handle = hitTestResizeHandle(hit.bounds, x, y, hit.object.transform);
-        const scroll = effectiveScrollForAnchor(hit.object.anchor, drawingViewport);
-        const headerOffsetX = Number.isFinite(drawingViewport.headerOffsetX)
-          ? Math.max(0, drawingViewport.headerOffsetX!)
-          : 0;
-        const headerOffsetY = Number.isFinite(drawingViewport.headerOffsetY)
-          ? Math.max(0, drawingViewport.headerOffsetY!)
-          : 0;
-        const startSheetX = x - headerOffsetX + scroll.scrollX;
-        const startSheetY = y - headerOffsetY + scroll.scrollY;
-        this.drawingGesture = handle
-          ? {
-              pointerId: e.pointerId,
-              mode: "resize",
-              objectId: hit.object.id,
-              handle,
-              startSheetX,
-              startSheetY,
-              startAnchor: hit.object.anchor,
-              startWidthPx: hit.bounds.width,
-              startHeightPx: hit.bounds.height,
-              transform: hit.object.transform,
-              aspectRatio:
-                hit.object.kind.type === "image" && hit.bounds.width > 0 && hit.bounds.height > 0
-                  ? hit.bounds.width / hit.bounds.height
-                  : null,
-            }
-          : {
-              pointerId: e.pointerId,
-              mode: "drag",
-              objectId: hit.object.id,
-              startSheetX,
-              startSheetY,
-              startAnchor: hit.object.anchor,
-            };
-        try {
-          this.root.setPointerCapture(e.pointerId);
-        } catch {
-          // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+      const hitIndex = this.getDrawingHitTestIndex(drawings);
+      const hit = hitTestDrawings(hitIndex, drawingViewport, x, y, this.drawingGeom);
+      if (hit) {
+        if (editorWasOpen) {
+          this.editor.commit("command");
         }
-      }
+        this.selectedDrawingId = hit.object.id;
+        this.renderSelection();
+        this.focus();
 
-      return;
+        // Begin drag/resize gesture for primary-button interactions.
+        if (primaryButton) {
+          e.preventDefault();
+          const handle = hitTestResizeHandle(hit.bounds, x, y, hit.object.transform);
+          const scroll = effectiveScrollForAnchor(hit.object.anchor, drawingViewport);
+          const headerOffsetX = Number.isFinite(drawingViewport.headerOffsetX)
+            ? Math.max(0, drawingViewport.headerOffsetX!)
+            : 0;
+          const headerOffsetY = Number.isFinite(drawingViewport.headerOffsetY)
+            ? Math.max(0, drawingViewport.headerOffsetY!)
+            : 0;
+          const startSheetX = x - headerOffsetX + scroll.scrollX;
+          const startSheetY = y - headerOffsetY + scroll.scrollY;
+          this.drawingGesture = handle
+            ? {
+                pointerId: e.pointerId,
+                mode: "resize",
+                objectId: hit.object.id,
+                handle,
+                startSheetX,
+                startSheetY,
+                startAnchor: hit.object.anchor,
+                startWidthPx: hit.bounds.width,
+                startHeightPx: hit.bounds.height,
+                transform: hit.object.transform,
+                aspectRatio:
+                  hit.object.kind.type === "image" && hit.bounds.width > 0 && hit.bounds.height > 0
+                    ? hit.bounds.width / hit.bounds.height
+                    : null,
+              }
+            : {
+                pointerId: e.pointerId,
+                mode: "drag",
+                objectId: hit.object.id,
+                startSheetX,
+                startSheetY,
+                startAnchor: hit.object.anchor,
+              };
+          try {
+            this.root.setPointerCapture(e.pointerId);
+          } catch {
+            // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+          }
+        }
+
+        return;
+      }
     }
+
+    if (editorWasOpen) return;
 
     // Clicking outside any drawing clears drawing selection.
     if (primaryButton && this.selectedDrawingId != null) {
