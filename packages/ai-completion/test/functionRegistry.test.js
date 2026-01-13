@@ -142,4 +142,8 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   // Size helpers
   assert.ok(registry.isRangeArg("ROWS", 0), "Expected ROWS array to be a range");
   assert.ok(registry.isRangeArg("COLUMNS", 0), "Expected COLUMNS array to be a range");
+
+  // Time-series forecasting functions
+  assert.ok(registry.isRangeArg("FORECAST.ETS", 1), "Expected FORECAST.ETS values to be a range");
+  assert.ok(registry.isRangeArg("FORECAST.ETS", 2), "Expected FORECAST.ETS timeline to be a range");
 });

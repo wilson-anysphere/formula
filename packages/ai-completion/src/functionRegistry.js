@@ -906,6 +906,53 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "FORECAST.ETS",
+    description: "Returns a future value based on existing (historical) values by using the AAA version of the Exponential Smoothing algorithm.",
+    args: [
+      { name: "target_date", type: "value" },
+      { name: "values", type: "range" },
+      { name: "timeline", type: "range" },
+      { name: "seasonality", type: "number", optional: true },
+      { name: "data_completion", type: "number", optional: true },
+      { name: "aggregation", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "FORECAST.ETS.CONFINT",
+    description: "Returns a confidence interval for a forecast value.",
+    args: [
+      { name: "target_date", type: "value" },
+      { name: "values", type: "range" },
+      { name: "timeline", type: "range" },
+      { name: "confidence_level", type: "number" },
+      { name: "seasonality", type: "number", optional: true },
+      { name: "data_completion", type: "number", optional: true },
+      { name: "aggregation", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "FORECAST.ETS.SEASONALITY",
+    description: "Returns the length of the repetitive pattern Excel detects for the specified time series.",
+    args: [
+      { name: "values", type: "range" },
+      { name: "timeline", type: "range" },
+      { name: "data_completion", type: "number", optional: true },
+      { name: "aggregation", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "FORECAST.ETS.STAT",
+    description: "Returns a statistical value as the result of time series forecasting.",
+    args: [
+      { name: "values", type: "range" },
+      { name: "timeline", type: "range" },
+      { name: "statistic_type", type: "number" },
+      { name: "seasonality", type: "number", optional: true },
+      { name: "data_completion", type: "number", optional: true },
+      { name: "aggregation", type: "number", optional: true },
+    ],
+  },
+  {
     name: "LOGEST",
     description: "Returns the statistics for an exponential curve fit.",
     args: [
