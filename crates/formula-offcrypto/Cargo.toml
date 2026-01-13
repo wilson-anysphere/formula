@@ -6,5 +6,7 @@ license = "MIT OR Apache-2.0"
 description = "Microsoft Office encryption (MS-OFFCRYPTO) helpers for Formula."
 
 [dependencies]
+aes = "0.8"
 base64 = "0.22"
 quick-xml = "0.37"
+sha1 = "0.10"

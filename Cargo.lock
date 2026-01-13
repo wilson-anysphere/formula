@@ -2195,8 +2195,10 @@ dependencies = [
 name = "formula-offcrypto"
 version = "0.1.0"
 dependencies = [
+ "aes",
  "base64 0.22.1",
  "quick-xml 0.37.5",
+ "sha1",
 ]
 
 [[package]]

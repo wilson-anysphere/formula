@@ -1,15 +1,23 @@
-//! MS-OFFCRYPTO parsing utilities.
+//! MS-OFFCRYPTO parsing and crypto utilities.
 //!
-//! This crate currently supports parsing the *Standard* (CryptoAPI) `EncryptionInfo`
-//! stream header (version 3.2), the *Agile* `EncryptionInfo` stream (version 4.4),
-//! as well as the `EncryptedPackage` stream header.
+//! This crate currently supports:
+//! - Parsing the *Standard* (CryptoAPI) `EncryptionInfo` stream header (version 3.2)
+//! - Parsing the *Agile* `EncryptionInfo` stream (version 4.4) (password key-encryptor subset)
+//! - Parsing the `EncryptedPackage` stream header
+//! - ECMA-376 Standard password→key derivation + verifier checks
 
 use core::fmt;
+use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
+use aes::{Aes128, Aes192, Aes256};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::Reader as XmlReader;
+use sha1::{Digest as _, Sha1};
+
+const ITER_COUNT: u32 = 50_000;
+const SHA1_LEN: usize = 20;
 
 const PASSWORD_KEY_ENCRYPTOR_NS: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/password";
@@ -43,6 +51,13 @@ pub struct StandardEncryptionVerifier {
     pub encrypted_verifier: [u8; 16],
     pub verifier_hash_size: u32,
     pub encrypted_verifier_hash: Vec<u8>,
+}
+
+/// Parsed Standard (CryptoAPI) `EncryptionInfo`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StandardEncryptionInfo {
+    pub header: StandardEncryptionHeader,
+    pub verifier: StandardEncryptionVerifier,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,6 +139,22 @@ pub enum OffcryptoError {
     InvalidEncryptionInfo { context: &'static str },
     /// The `EncryptionInfo` version is not supported by the current parser.
     UnsupportedVersion { major: u16, minor: u16 },
+    /// Ciphertext length must be a multiple of 16 bytes for AES-ECB.
+    InvalidCiphertextLength { len: usize },
+    /// Invalid AES key length (expected 16, 24, or 32 bytes).
+    InvalidKeyLength { len: usize },
+    /// Standard encryption keySize must be a multiple of 8 bits.
+    InvalidKeySizeBits { key_size_bits: u32 },
+    /// The requested key size is larger than the 40-byte derivation output.
+    DerivedKeyTooLong {
+        key_size_bits: u32,
+        required_bytes: usize,
+        available_bytes: usize,
+    },
+    /// Decrypted verifier hash is too short.
+    InvalidVerifierHashLength { len: usize },
+    /// Password/key did not pass verifier check.
+    InvalidPassword,
 }
 
 impl fmt::Display for OffcryptoError {
@@ -139,6 +170,31 @@ impl fmt::Display for OffcryptoError {
             OffcryptoError::UnsupportedVersion { major, minor } => {
                 write!(f, "unsupported EncryptionInfo version {major}.{minor}")
             }
+            OffcryptoError::InvalidCiphertextLength { len } => write!(
+                f,
+                "ciphertext length must be a multiple of 16 bytes for AES-ECB, got {len}"
+            ),
+            OffcryptoError::InvalidKeyLength { len } => write!(
+                f,
+                "invalid AES key length {len}; expected 16, 24, or 32 bytes"
+            ),
+            OffcryptoError::InvalidKeySizeBits { key_size_bits } => write!(
+                f,
+                "standard encryption keySize must be a multiple of 8 bits, got {key_size_bits}"
+            ),
+            OffcryptoError::DerivedKeyTooLong {
+                key_size_bits,
+                required_bytes,
+                available_bytes,
+            } => write!(
+                f,
+                "keySize ({key_size_bits} bits) requires {required_bytes} bytes, but the SHA1-based derivation output is only {available_bytes} bytes"
+            ),
+            OffcryptoError::InvalidVerifierHashLength { len } => write!(
+                f,
+                "encrypted verifier hash must be at least 20 bytes after decryption, got {len}"
+            ),
+            OffcryptoError::InvalidPassword => write!(f, "invalid password or key"),
         }
     }
 }
@@ -724,6 +780,129 @@ pub fn parse_encrypted_package_header(
     let mut r = Reader::new(bytes);
     let original_size = r.read_u64_le("EncryptedPackageHeader.original_size")?;
     Ok(EncryptedPackageHeader { original_size })
+}
+
+fn password_to_utf16le_bytes(password: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(password.len() * 2);
+    for unit in password.encode_utf16() {
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+    out
+}
+
+fn sha1(data: &[u8]) -> [u8; SHA1_LEN] {
+    Sha1::digest(data).into()
+}
+
+fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoError> {
+    if buf.len() % 16 != 0 {
+        return Err(OffcryptoError::InvalidCiphertextLength { len: buf.len() });
+    }
+
+    fn decrypt_with<C>(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoError>
+    where
+        C: BlockDecrypt + KeyInit,
+    {
+        let cipher =
+            C::new_from_slice(key).map_err(|_| OffcryptoError::InvalidKeyLength { len: key.len() })?;
+        for block in buf.chunks_mut(16) {
+            cipher.decrypt_block(GenericArray::from_mut_slice(block));
+        }
+        Ok(())
+    }
+
+    match key.len() {
+        16 => decrypt_with::<Aes128>(key, buf),
+        24 => decrypt_with::<Aes192>(key, buf),
+        32 => decrypt_with::<Aes256>(key, buf),
+        _ => Err(OffcryptoError::InvalidKeyLength { len: key.len() }),
+    }
+}
+
+/// ECMA-376 Standard Encryption password→key derivation.
+///
+/// Reference algorithm: `msoffcrypto` `ECMA376Standard.makekey_from_password`.
+pub fn standard_derive_key(
+    info: &StandardEncryptionInfo,
+    password: &str,
+) -> Result<Vec<u8>, OffcryptoError> {
+    let key_len = match info.header.key_size_bits.checked_div(8) {
+        Some(v) if info.header.key_size_bits % 8 == 0 => v as usize,
+        _ => {
+            return Err(OffcryptoError::InvalidKeySizeBits {
+                key_size_bits: info.header.key_size_bits,
+            })
+        }
+    };
+
+    let password_utf16 = password_to_utf16le_bytes(password);
+
+    // h = sha1(salt || password_utf16)
+    let mut hasher = Sha1::new();
+    hasher.update(&info.verifier.salt);
+    hasher.update(&password_utf16);
+    let mut h: [u8; SHA1_LEN] = hasher.finalize().into();
+
+    // for i in 0..ITER_COUNT-1: h = sha1(u32le(i) || h)
+    let mut buf = [0u8; 4 + SHA1_LEN];
+    for i in 0..ITER_COUNT {
+        buf[..4].copy_from_slice(&(i as u32).to_le_bytes());
+        buf[4..].copy_from_slice(&h);
+        h = sha1(&buf);
+    }
+
+    // hfinal = sha1(h || u32le(0))
+    let mut buf0 = [0u8; SHA1_LEN + 4];
+    buf0[..SHA1_LEN].copy_from_slice(&h);
+    buf0[SHA1_LEN..].copy_from_slice(&0u32.to_le_bytes());
+    let hfinal = sha1(&buf0);
+
+    // key = (sha1((0x36*64) ^ hfinal) || sha1((0x5c*64) ^ hfinal))[..key_len]
+    let mut buf1 = [0x36u8; 64];
+    let mut buf2 = [0x5cu8; 64];
+    for i in 0..SHA1_LEN {
+        buf1[i] ^= hfinal[i];
+        buf2[i] ^= hfinal[i];
+    }
+    let x1 = sha1(&buf1);
+    let x2 = sha1(&buf2);
+
+    let mut out = [0u8; SHA1_LEN * 2];
+    out[..SHA1_LEN].copy_from_slice(&x1);
+    out[SHA1_LEN..].copy_from_slice(&x2);
+
+    if key_len > out.len() {
+        return Err(OffcryptoError::DerivedKeyTooLong {
+            key_size_bits: info.header.key_size_bits,
+            required_bytes: key_len,
+            available_bytes: out.len(),
+        });
+    }
+
+    Ok(out[..key_len].to_vec())
+}
+
+/// ECMA-376 Standard Encryption key verifier check.
+///
+/// Reference algorithm: `msoffcrypto` `ECMA376Standard.verifykey`.
+pub fn standard_verify_key(info: &StandardEncryptionInfo, key: &[u8]) -> Result<(), OffcryptoError> {
+    let mut verifier = info.verifier.encrypted_verifier;
+    aes_ecb_decrypt_in_place(key, &mut verifier)?;
+    let expected_hash: [u8; SHA1_LEN] = sha1(&verifier);
+
+    let mut verifier_hash = info.verifier.encrypted_verifier_hash.clone();
+    aes_ecb_decrypt_in_place(key, &mut verifier_hash)?;
+    if verifier_hash.len() < SHA1_LEN {
+        return Err(OffcryptoError::InvalidVerifierHashLength {
+            len: verifier_hash.len(),
+        });
+    }
+
+    if &expected_hash[..] == &verifier_hash[..SHA1_LEN] {
+        Ok(())
+    } else {
+        Err(OffcryptoError::InvalidPassword)
+    }
 }
 
 #[cfg(test)]
