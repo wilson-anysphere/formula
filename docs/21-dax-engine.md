@@ -102,6 +102,34 @@ The engine’s scalar type is `formula_dax::Value` (`crates/formula-dax/src/valu
 
 There is no distinct datetime type at the DAX layer today; datetime-like values are represented as numbers.
 
+#### Type coercions (current behavior)
+
+The engine implements a small subset of DAX’s coercion rules. These matter most for arithmetic,
+comparisons, and text concatenation:
+
+- **Numeric coercion** (used by `+ - * /` and numeric comparisons):
+  - `Number(n)` → `n`
+  - `Boolean(true/false)` → `1.0` / `0.0`
+  - `Blank` → `0.0`
+  - `Text(...)` → type error
+
+- **Text coercion** (used by the `&` operator):
+  - `Text(s)` → `s`
+  - `Number(n)` → `n.to_string()` (Rust formatting; not DAX format strings)
+  - `Blank` → `""` (empty string)
+  - `Boolean(true/false)` → `"TRUE"` / `"FALSE"`
+
+- **Truthiness** (used by `IF`, `AND`, `OR`, and `&&`/`||`):
+  - `Boolean(b)` → `b`
+  - `Number(n)` → `n != 0.0`
+  - `Blank` → `false`
+  - `Text(...)` → type error
+
+- **Comparison rules** (used by `= <> < <= > >=`):
+  - Text comparisons are supported for `Text` vs `Text`, with `Blank` treated as the empty string.
+  - Numeric comparisons apply numeric coercion (so `Blank` compares like `0`, booleans like `1/0`).
+  - Comparing `Text` to a non-text value is a type error.
+
 ---
 
 ## Relationships
