@@ -764,7 +764,7 @@ export class TabCompletionEngine {
     // is available) users get the richer, context-aware suggestion instead of a
     // bare function stub. When the backend times out/unavailable, these still
     // provide useful immediate fallbacks.
-    const starters = ["SUM(", "AVERAGE(", "IF(", "XLOOKUP(", "VLOOKUP("];
+    const starters = ["SUM(", "AVERAGE(", "IF(", "XLOOKUP(", "VLOOKUP(", "INDEX(", "MATCH("];
 
     /** @type {Suggestion[]} */
     const suggestions = [];

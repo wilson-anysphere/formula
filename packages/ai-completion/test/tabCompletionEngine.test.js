@@ -2548,6 +2548,27 @@ test("Quoted sheet-name prefixes are suggested as 'Sheet Name'! inside range arg
   );
 });
 
+test("Sheet prefixes are not suggested when the user hasn't started quotes for a sheet that needs them (=SUM(My Sheet)", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["My Sheet"],
+      getTables: () => [],
+    },
+  });
+
+  // Do not attempt to "fix" missing quotes here (would not be a pure insertion).
+  const currentInput = "=SUM(My Sheet";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.equal(suggestions.length, 0);
+});
+
 test("Sheet-qualified ranges are suggested when typing Sheet2!A", async () => {
   const values = {};
   for (let r = 1; r <= 10; r++) values[`Sheet2!A${r}`] = r;
