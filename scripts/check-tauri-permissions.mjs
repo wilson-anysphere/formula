@@ -23,11 +23,22 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const capabilitiesDir = path.join(repoRoot, "apps", "desktop", "src-tauri", "capabilities");
+const releaseWorkflowPath = path.join(repoRoot, ".github", "workflows", "release.yml");
 
 function stripAnsi(text) {
   // Covers common ANSI SGR + cursor control sequences.
   // eslint-disable-next-line no-control-regex
   return text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+}
+
+function readPinnedTauriCliVersion() {
+  try {
+    const workflowText = fs.readFileSync(releaseWorkflowPath, "utf8");
+    const match = workflowText.match(/^[\t ]*TAURI_CLI_VERSION:[\t ]*["']?([^"'\n]+)["']?/m);
+    return match ? match[1].trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 function runTauriPermissionLs() {
@@ -54,11 +65,16 @@ function runTauriPermissionLs() {
     const stderr = (result.stderr ?? "").trim();
     if (stdout) process.stderr.write(`${stdout}\n`);
     if (stderr) process.stderr.write(`${stderr}\n`);
+    const pinnedCli = readPinnedTauriCliVersion();
+    const pinnedHint = pinnedCli
+      ? `TAURI_CLI_VERSION=${pinnedCli} bash scripts/cargo_agent.sh install tauri-cli --version "${pinnedCli}" --locked --force`
+      : "bash scripts/cargo_agent.sh install tauri-cli --locked --force";
+
     const hint = [
       "Failed to list Tauri permissions via `cargo tauri permission ls`.",
       "",
       "Common causes:",
-      "- `cargo-tauri` is not installed (install with: bash scripts/cargo_agent.sh install cargo-tauri --locked)",
+      `- \`tauri-cli\` (\`cargo tauri\`) is not installed (install with: ${pinnedHint})`,
       "- Linux WebView deps are missing (gtk/webkit2gtk; see `.github/workflows/ci.yml` desktop-tauri-check job)",
       "",
       "Manual debug command:",
@@ -253,4 +269,3 @@ try {
   process.stderr.write(`${message}\n`);
   process.exit(1);
 }
-
