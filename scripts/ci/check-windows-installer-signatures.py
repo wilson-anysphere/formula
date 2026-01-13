@@ -192,7 +192,15 @@ def main(argv: list[str]) -> int:
     check_paths(exes)
 
     if failures:
+        # Common failure mode: signing succeeds but timestamping fails (network/proxy issues or a bad timestamp URL),
+        # producing artifacts that are signed-but-not-timestamped. Timestamping matters because it keeps signatures valid
+        # after the signing certificate expires.
         print("sigcheck: ERROR one or more installers failed Authenticode verification:", file=sys.stderr)
+        print(
+            "sigcheck: HINT If this is a timestamping failure, check apps/desktop/src-tauri/tauri.conf.json -> "
+            "bundle.windows.timestampUrl (must be a reachable https:// timestamp server) and re-run the build.",
+            file=sys.stderr,
+        )
         for msg in failures:
             print("\n---\n", file=sys.stderr)
             print(msg, file=sys.stderr)
