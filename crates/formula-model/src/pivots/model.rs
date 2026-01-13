@@ -20,7 +20,8 @@ pub enum Layout {
 
 impl Default for Layout {
     fn default() -> Self {
-        Layout::Tabular
+        // Match Excel's default pivot rendering mode.
+        Self::Compact
     }
 }
 
@@ -43,7 +44,9 @@ impl Default for SubtotalPosition {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GrandTotals {
+    #[serde(default = "default_true")]
     pub rows: bool,
+    #[serde(default = "default_true")]
     pub columns: bool,
 }
 
@@ -55,6 +58,10 @@ impl Default for GrandTotals {
             columns: true,
         }
     }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Configuration for a pivot table filter field.

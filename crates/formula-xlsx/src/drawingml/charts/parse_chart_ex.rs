@@ -294,6 +294,11 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
                 }
             }
         }
+
+        // Bound diagnostics to avoid pathological allocations on malicious inputs.
+        if out.len() >= 16 {
+            break;
+        }
     }
 
     out

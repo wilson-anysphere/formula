@@ -614,6 +614,7 @@ mod tests {
                 ciphertext_len: 16
             }
         );
+    }
 
     struct TestRc4 {
         s: [u8; 256],

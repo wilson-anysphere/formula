@@ -1,8 +1,78 @@
 use std::io::{Read, Seek, SeekFrom};
 
+use md5::Md5;
 use sha1::{Digest as _, Sha1};
+use thiserror::Error;
 
+const ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN: usize = 8;
 const RC4_BLOCK_SIZE: usize = 0x200;
+
+// CryptoAPI ALG_ID values for `EncryptionHeader.algIdHash` (MS-OFFCRYPTO).
+const CALG_MD5: u32 = 0x0000_8003;
+const CALG_SHA1: u32 = 0x0000_8004;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CryptoApiHashAlg {
+    Sha1,
+    Md5,
+}
+
+impl CryptoApiHashAlg {
+    fn digest_len(&self) -> usize {
+        match self {
+            CryptoApiHashAlg::Sha1 => 20,
+            CryptoApiHashAlg::Md5 => 16,
+        }
+    }
+}
+
+/// Errors returned when validating/constructing an RC4 CryptoAPI `EncryptedPackage` decryptor.
+#[derive(Debug, Error)]
+pub enum Rc4CryptoApiEncryptedPackageError {
+    #[error(
+        "`EncryptedPackage` stream is too short: expected at least {ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN} bytes, got {len}"
+    )]
+    StreamTooShort { len: u64 },
+
+    #[error(
+        "`EncryptedPackage` package_size {package_size} exceeds ciphertext length {ciphertext_len}"
+    )]
+    PackageSizeExceedsCiphertext {
+        package_size: u64,
+        ciphertext_len: u64,
+    },
+
+    #[error(
+        "invalid `EncryptionHeader.keySize` {key_size_bits} bits: must be a non-zero multiple of 8"
+    )]
+    InvalidKeySizeBits { key_size_bits: u32 },
+
+    #[error(
+        "unsupported `EncryptionHeader.keySize` {key_size_bits} bits (supported: 40, 56, 128 for RC4 CryptoAPI)"
+    )]
+    UnsupportedKeySizeBits { key_size_bits: u32 },
+
+    #[error(
+        "`EncryptionHeader.keySize` {key_size_bits} bits implies key_len {key_len} bytes, but algIdHash {alg_id_hash:#010x} digest length is {hash_len} bytes"
+    )]
+    KeySizeTooLargeForHash {
+        key_size_bits: u32,
+        key_len: u32,
+        alg_id_hash: u32,
+        hash_len: usize,
+    },
+
+    #[error(
+        "unsupported `EncryptionHeader.algIdHash` {alg_id_hash:#010x} (supported: CALG_SHA1=0x00008004, CALG_MD5=0x00008003)"
+    )]
+    UnsupportedHashAlgorithm { alg_id_hash: u32 },
+
+    #[error("`EncryptedPackage` stream offset arithmetic overflow while {context}")]
+    OffsetOverflow { context: &'static str },
+
+    #[error("I/O error while reading `EncryptedPackage`: {0}")]
+    Io(#[from] std::io::Error),
+}
 
 /// Streaming decryptor for Standard/CryptoAPI RC4 `EncryptedPackage` (MS-OFFCRYPTO).
 ///
@@ -23,7 +93,7 @@ const RC4_BLOCK_SIZE: usize = 0x200;
 /// `rc4_key_b = Hash(H || LE32(b))[0..5] || 0x00 * 11` (16 bytes total)
 ///
 /// where:
-/// - `H` is the base hash bytes (typically `Hfinal`, 20-byte SHA-1 output)
+/// - `H` is the base hash bytes (typically `Hfinal`; 20 bytes for SHA-1 or 16 bytes for MD5).
 /// - `b` is the 0-based block index.
 ///
 /// Seeking is supported by re-deriving the block key and discarding `o = pos % 0x200` bytes of
@@ -47,6 +117,7 @@ pub struct Rc4CryptoApiDecryptReader<R: Read + Seek> {
     h: Vec<u8>,
     /// RC4 key length in bytes (e.g. `keySize / 8` from EncryptionHeader).
     key_len: usize,
+    hash_alg: CryptoApiHashAlg,
 
     rc4: Option<Rc4>,
     block_index: Option<u32>,
@@ -55,15 +126,131 @@ pub struct Rc4CryptoApiDecryptReader<R: Read + Seek> {
 }
 
 impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
+    /// Create a decrypting reader from the start of an `EncryptedPackage` stream.
+    ///
+    /// This helper validates the `EncryptedPackage` framing:
+    /// - The stream is at least 8 bytes long (the `package_size` prefix).
+    /// - `package_size` does not claim more bytes than the available ciphertext.
+    ///
+    /// It also validates CryptoAPI parameters from the corresponding Standard `EncryptionHeader`:
+    /// - `alg_id_hash` must be SHA-1 (`CALG_SHA1`) or MD5 (`CALG_MD5`).
+    /// - `key_size_bits` must be one of 40/56/128 bits and fit within the hash digest length.
+    ///
+    /// Note: Some producers pad the ciphertext to a block boundary, so ciphertext may be longer than
+    /// `package_size`. We treat `package_size > ciphertext_len` as a malformed/truncated stream and
+    /// fail fast (rather than attempting reads that would end in EOF).
+    pub fn from_encrypted_package_stream(
+        mut inner: R,
+        h: Vec<u8>,
+        key_size_bits: u32,
+        alg_id_hash: u32,
+    ) -> Result<Self, Rc4CryptoApiEncryptedPackageError> {
+        let start_pos = inner.stream_position()?;
+        let end_pos = inner.seek(SeekFrom::End(0))?;
+        let stream_len = end_pos.checked_sub(start_pos).ok_or(
+            Rc4CryptoApiEncryptedPackageError::OffsetOverflow {
+                context: "computing stream length",
+            },
+        )?;
+
+        if stream_len < ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN as u64 {
+            return Err(Rc4CryptoApiEncryptedPackageError::StreamTooShort { len: stream_len });
+        }
+
+        // Restore the stream to the start of the EncryptedPackage header.
+        inner.seek(SeekFrom::Start(start_pos))?;
+
+        let mut size_bytes = [0u8; ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN];
+        inner.read_exact(&mut size_bytes)?;
+        let package_size = u64::from_le_bytes(size_bytes);
+
+        let ciphertext_len = stream_len
+            .checked_sub(ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN as u64)
+            .ok_or(Rc4CryptoApiEncryptedPackageError::OffsetOverflow {
+                context: "computing ciphertext length",
+            })?;
+
+        if package_size > ciphertext_len {
+            return Err(
+                Rc4CryptoApiEncryptedPackageError::PackageSizeExceedsCiphertext {
+                    package_size,
+                    ciphertext_len,
+                },
+            );
+        }
+
+        let hash_alg = match alg_id_hash {
+            CALG_SHA1 => CryptoApiHashAlg::Sha1,
+            CALG_MD5 => CryptoApiHashAlg::Md5,
+            _ => {
+                return Err(
+                    Rc4CryptoApiEncryptedPackageError::UnsupportedHashAlgorithm { alg_id_hash },
+                )
+            }
+        };
+
+        if key_size_bits == 0 || key_size_bits % 8 != 0 {
+            return Err(Rc4CryptoApiEncryptedPackageError::InvalidKeySizeBits { key_size_bits });
+        }
+        if !matches!(key_size_bits, 40 | 56 | 128) {
+            // If we decide to accept a broader set in the future, keep the "key_len <= hashLen"
+            // guardrails below.
+            return Err(Rc4CryptoApiEncryptedPackageError::UnsupportedKeySizeBits {
+                key_size_bits,
+            });
+        }
+
+        let key_len_u32 = key_size_bits / 8;
+        let hash_len = hash_alg.digest_len();
+        if key_len_u32 as usize > hash_len {
+            return Err(Rc4CryptoApiEncryptedPackageError::KeySizeTooLargeForHash {
+                key_size_bits,
+                key_len: key_len_u32,
+                alg_id_hash,
+                hash_len,
+            });
+        }
+
+        // Ensure `inner` is positioned at the ciphertext start for the streaming decryptor.
+        let ciphertext_start = start_pos
+            .checked_add(ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN as u64)
+            .ok_or(Rc4CryptoApiEncryptedPackageError::OffsetOverflow {
+                context: "computing ciphertext start offset",
+            })?;
+        inner.seek(SeekFrom::Start(ciphertext_start))?;
+
+        Ok(Self::new_with_hash_alg(
+            inner,
+            package_size,
+            h,
+            key_len_u32 as usize,
+            hash_alg,
+        )?)
+    }
+
     /// Create a decrypting reader wrapping `inner`.
     ///
     /// `inner` must be positioned at the start of the ciphertext payload (i.e. just after reading
     /// the 8-byte `package_size` prefix from the `EncryptedPackage` stream).
+    ///
+    /// This constructor assumes `algIdHash = CALG_SHA1` for per-block key derivation. Prefer
+    /// [`Self::from_encrypted_package_stream`] when parsing real Office files so that the `algIdHash`
+    /// and `keySize` parameters are validated.
     pub fn new(
+        inner: R,
+        package_size: u64,
+        h: Vec<u8>,
+        key_len: usize,
+    ) -> std::io::Result<Self> {
+        Self::new_with_hash_alg(inner, package_size, h, key_len, CryptoApiHashAlg::Sha1)
+    }
+
+    fn new_with_hash_alg(
         mut inner: R,
         package_size: u64,
         h: Vec<u8>,
         key_len: usize,
+        hash_alg: CryptoApiHashAlg,
     ) -> std::io::Result<Self> {
         if key_len == 0 {
             return Err(std::io::Error::new(
@@ -72,12 +259,13 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
             ));
         }
 
-        // RC4 key bytes are derived by hashing (SHA-1) and truncating, so key_len cannot exceed
-        // the SHA-1 output size.
-        if key_len > 20 {
+        // RC4 key bytes are derived by hashing and truncating, so key_len cannot exceed the hash
+        // digest size.
+        let hash_len = hash_alg.digest_len();
+        if key_len > hash_len {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                format!("RC4 key_len {key_len} exceeds SHA-1 digest size"),
+                format!("RC4 key_len {key_len} exceeds hash digest size {hash_len}"),
             ));
         }
 
@@ -90,6 +278,7 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
             pos: 0,
             h,
             key_len,
+            hash_alg,
             rc4: None,
             block_index: None,
             block_offset: 0,
@@ -110,8 +299,13 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
         if self.inner_pos == self.pos {
             return Ok(());
         }
-        self.inner
-            .seek(SeekFrom::Start(self.ciphertext_start + self.pos))?;
+        let abs = self.ciphertext_start.checked_add(self.pos).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "ciphertext offset overflow while seeking",
+            )
+        })?;
+        self.inner.seek(SeekFrom::Start(abs))?;
         self.inner_pos = self.pos;
         Ok(())
     }
@@ -130,11 +324,22 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
             return Ok(());
         }
 
-        // Derive per-block RC4 key: SHA1(H || LE32(block_index)) truncated to key_len.
-        let mut hasher = Sha1::new();
-        hasher.update(&self.h);
-        hasher.update(block_index.to_le_bytes());
-        let digest = hasher.finalize();
+        // Derive per-block RC4 key: Hash(H || LE32(block_index)) truncated to key_len.
+        let digest = match self.hash_alg {
+            CryptoApiHashAlg::Sha1 => {
+                let mut hasher = Sha1::new();
+                hasher.update(&self.h);
+                hasher.update(block_index.to_le_bytes());
+                hasher.finalize().to_vec()
+            }
+            CryptoApiHashAlg::Md5 => {
+                let mut hasher = Md5::new();
+                hasher.update(&self.h);
+                hasher.update(block_index.to_le_bytes());
+                hasher.finalize().to_vec()
+            }
+        };
+
         let mut rc4 = if self.key_len == 5 {
             // CryptoAPI 40-bit RC4 uses a 128-bit key with the high 88 bits zero.
             let mut padded = [0u8; 16];
@@ -167,7 +372,8 @@ impl<R: Read + Seek> Read for Rc4CryptoApiDecryptReader<R> {
             return Ok(0);
         }
 
-        let mut remaining = (self.package_size - self.pos) as usize;
+        let remaining_u64 = self.package_size - self.pos;
+        let mut remaining = usize::try_from(remaining_u64).unwrap_or(usize::MAX);
         remaining = remaining.min(buf.len());
 
         let mut written = 0usize;
@@ -190,18 +396,35 @@ impl<R: Read + Seek> Read for Rc4CryptoApiDecryptReader<R> {
                 }
                 break;
             }
-            self.inner_pos = self
-                .inner_pos
-                .checked_add(n as u64)
-                .expect("inner_pos should not overflow u64");
+            self.inner_pos = self.inner_pos.checked_add(n as u64).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "inner_pos overflow while reading EncryptedPackage ciphertext",
+                )
+            })?;
 
             self.rc4
                 .as_mut()
-                .expect("rc4 state must be initialized by ensure_block")
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "internal error: RC4 state missing",
+                    )
+                })?
                 .apply_keystream(&mut out[..n]);
 
-            self.pos += n as u64;
-            self.block_offset += n;
+            self.pos = self.pos.checked_add(n as u64).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "plaintext position overflow while reading EncryptedPackage",
+                )
+            })?;
+            self.block_offset = self.block_offset.checked_add(n).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "block offset overflow while reading EncryptedPackage",
+                )
+            })?;
 
             written += n;
             remaining -= n;
@@ -234,19 +457,26 @@ impl<R: Read + Seek> Seek for Rc4CryptoApiDecryptReader<R> {
                 "invalid seek to a negative position",
             ));
         }
-        let mut new_pos = base as u64;
-
         // Clamp to the plaintext EOF boundary. This avoids seeking the underlying stream past the
         // meaningful ciphertext range while still satisfying "seek beyond EOF behaves like EOF".
-        if new_pos > self.package_size {
-            new_pos = self.package_size;
-        }
+        //
+        // Use an i128 comparison to avoid `as u64` wraparound for very large positive offsets.
+        let new_pos = if base > self.package_size as i128 {
+            self.package_size
+        } else {
+            base as u64
+        };
 
         self.pos = new_pos;
         self.invalidate_cipher_state();
 
-        self.inner
-            .seek(SeekFrom::Start(self.ciphertext_start + self.pos))?;
+        let abs = self.ciphertext_start.checked_add(self.pos).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "ciphertext offset overflow while seeking",
+            )
+        })?;
+        self.inner.seek(SeekFrom::Start(abs))?;
         self.inner_pos = self.pos;
 
         Ok(self.pos)
@@ -472,5 +702,81 @@ mod tests {
         let mut buf = [0u8; 32];
         let n = reader.read(&mut buf).unwrap();
         assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn encrypted_package_errors_on_too_short_stream() {
+        let stream = Cursor::new(vec![0u8; 7]);
+        let err = Rc4CryptoApiDecryptReader::from_encrypted_package_stream(
+            stream,
+            vec![0u8; 20],
+            128,
+            CALG_SHA1,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            Rc4CryptoApiEncryptedPackageError::StreamTooShort { len: 7 }
+        ));
+    }
+
+    #[test]
+    fn encrypted_package_errors_on_bogus_key_size() {
+        // Valid EncryptedPackage framing with empty ciphertext and package_size=0.
+        let stream = Cursor::new(0u64.to_le_bytes().to_vec());
+        let err = Rc4CryptoApiDecryptReader::from_encrypted_package_stream(
+            stream,
+            vec![0u8; 20],
+            7, // not divisible by 8
+            CALG_SHA1,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            Rc4CryptoApiEncryptedPackageError::InvalidKeySizeBits { key_size_bits: 7 }
+        ));
+    }
+
+    #[test]
+    fn encrypted_package_errors_on_unsupported_hash_alg() {
+        // Valid EncryptedPackage framing with empty ciphertext and package_size=0.
+        let stream = Cursor::new(0u64.to_le_bytes().to_vec());
+        let err = Rc4CryptoApiDecryptReader::from_encrypted_package_stream(
+            stream,
+            vec![0u8; 20],
+            40,
+            0xDEAD_BEEF,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            Rc4CryptoApiEncryptedPackageError::UnsupportedHashAlgorithm {
+                alg_id_hash: 0xDEAD_BEEF
+            }
+        ));
+    }
+
+    #[test]
+    fn encrypted_package_errors_when_package_size_exceeds_ciphertext() {
+        // Header claims 100 bytes of plaintext, but we only have 10 bytes of ciphertext.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&100u64.to_le_bytes());
+        bytes.extend_from_slice(&[0u8; 10]);
+
+        let stream = Cursor::new(bytes);
+        let err = Rc4CryptoApiDecryptReader::from_encrypted_package_stream(
+            stream,
+            vec![0u8; 20],
+            128,
+            CALG_SHA1,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            Rc4CryptoApiEncryptedPackageError::PackageSizeExceedsCiphertext {
+                package_size: 100,
+                ciphertext_len: 10
+            }
+        ));
     }
 }
