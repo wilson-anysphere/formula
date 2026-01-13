@@ -106,7 +106,9 @@ export function createRibbonActionsFromCommands(params: {
 
         const registered = commandRegistry.getCommand(commandId);
         if (registered) {
-          await onBeforeExecuteCommand?.(commandId, registered.source);
+          if (onBeforeExecuteCommand) {
+            await onBeforeExecuteCommand(commandId, registered.source);
+          }
           await commandRegistry.executeCommand(commandId);
           return;
         }
@@ -135,7 +137,9 @@ export function createRibbonActionsFromCommands(params: {
         const registered = commandRegistry.getCommand(commandId);
         if (registered) {
           markToggleHandled(commandId);
-          await onBeforeExecuteCommand?.(commandId, registered.source);
+          if (onBeforeExecuteCommand) {
+            await onBeforeExecuteCommand(commandId, registered.source);
+          }
           await commandRegistry.executeCommand(commandId, pressed);
           return;
         }
