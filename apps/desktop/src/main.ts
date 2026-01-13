@@ -144,6 +144,7 @@ import { PAGE_LAYOUT_COMMANDS } from "./commands/registerPageLayoutCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
 import { FORMAT_PAINTER_COMMAND_ID, registerFormatPainterCommand } from "./commands/formatPainterCommand.js";
 import { registerDataQueriesCommands } from "./commands/registerDataQueriesCommands.js";
+import { isRibbonMacroCommandId, registerRibbonMacroCommands } from "./commands/registerRibbonMacroCommands.js";
 import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
 import type { GridLimits, Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
@@ -526,6 +527,63 @@ let syncContributedCommandsRef: (() => void) | null = null;
 let syncContributedPanelsRef: (() => void) | null = null;
 let updateKeybindingsRef: (() => void) | null = null;
 let focusAfterSheetNavigationFromCommandRef: (() => void) | null = null;
+
+function openRibbonPanel(panelId: string): void {
+  const layoutController = ribbonLayoutController;
+  if (!layoutController) {
+    showToast("Panels are not available (layout controller missing).", "error");
+    return;
+  }
+
+  const placement = getPanelPlacement(layoutController.layout, panelId);
+  // Always call openPanel so we activate docked panels and also trigger a layout
+  // re-render even when the panel is already floating (useful for commands like
+  // Record Macro that update panel-local state).
+  layoutController.openPanel(panelId);
+
+  // Floating panels can be minimized; opening should restore them.
+  if (placement.kind === "floating" && layoutController.layout?.floating?.[panelId]?.minimized) {
+    layoutController.setFloatingPanelMinimized(panelId, false);
+  }
+}
+
+function focusScriptEditorPanel(): void {
+  // Script editor is mounted via panel rendering; wait a frame (or two) so the
+  // DOM nodes exist before focusing.
+  if (typeof document === "undefined") return;
+  if (typeof requestAnimationFrame !== "function") return;
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      const el =
+        document.querySelector<HTMLElement>('[data-testid="script-editor-code"]') ??
+        document.querySelector<HTMLElement>('[data-testid="script-editor-run"]');
+      try {
+        el?.focus();
+      } catch {
+        // Best-effort: ignore focus errors (e.g. element not focusable in headless environments).
+      }
+    }),
+  );
+}
+
+function focusVbaMigratePanel(): void {
+  // The VBA migrate panel is a React mount; give it a couple of frames to render.
+  if (typeof document === "undefined") return;
+  if (typeof requestAnimationFrame !== "function") return;
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      const el =
+        document.querySelector<HTMLElement>('[data-testid="vba-entrypoint"]') ??
+        document.querySelector<HTMLElement>('button[data-testid^="vba-module-"]') ??
+        document.querySelector<HTMLElement>('[data-testid="vba-refresh"]');
+      try {
+        el?.focus();
+      } catch {
+        // Best-effort: ignore focus errors (e.g. element not focusable in headless environments).
+      }
+    }),
+  );
+}
 
 // --- AutoSave ---------------------------------------------------------------
 // Persisted globally (not per-workbook) since the ribbon toggle is global.
@@ -7404,6 +7462,21 @@ registerDesktopCommands({
   openCommandPalette: () => openCommandPalette?.(),
 });
 
+registerRibbonMacroCommands({
+  commandRegistry,
+  handlers: {
+    openPanel: openRibbonPanel,
+    focusScriptEditorPanel,
+    focusVbaMigratePanel,
+    setPendingMacrosPanelFocus: (target) => {
+      pendingMacrosPanelFocus = target;
+    },
+    startMacroRecorder: () => activeMacroRecorder?.start(),
+    stopMacroRecorder: () => activeMacroRecorder?.stop(),
+    isTauri: () => isTauriInvokeAvailable(),
+  },
+});
+
 registerFormatPainterCommand({
   commandRegistry,
   isArmed: () => Boolean(formatPainterState),
@@ -8143,6 +8216,11 @@ function handleRibbonCommand(commandId: string): void {
       return;
     }
 
+    if (isRibbonMacroCommandId(commandId)) {
+      executeBuiltinCommand(commandId);
+      return;
+    }
+
     // Ribbon/menus/keybindings should all route clipboard actions through the CommandRegistry so
     // execution tracking + keybinding wiring stay consistent.
     if (commandId.startsWith("clipboard.")) {
@@ -8167,54 +8245,41 @@ function handleRibbonCommand(commandId: string): void {
       return;
     }
 
-    const openRibbonPanel = (panelId: string): void => {
-      const layoutController = ribbonLayoutController;
-      if (!layoutController) {
-        showToast("Panels are not available (layout controller missing).", "error");
+    const openCustomZoomQuickPick = async (): Promise<void> => {
+      if (!app.supportsZoom()) return;
+      // Keep the custom zoom picker aligned with the shared-grid zoom clamp
+      // (currently 25%–400%, Excel-style).
+      const baseOptions = [25, 50, 75, 100, 125, 150, 200, 400];
+      const current = Math.round(app.getZoom() * 100);
+      const options = baseOptions.includes(current) ? baseOptions : [current, ...baseOptions];
+      const picked = await showQuickPick(
+        options.map((value) => ({ label: `${value}%`, value })),
+        { placeHolder: "Zoom" },
+      );
+      if (picked == null) return;
+      app.setZoom(picked / 100);
+      syncZoomControl();
+      app.focus();
+    };
+
+    const zoomMenuItemPrefix = "view.zoom.zoom.";
+    if (commandId.startsWith(zoomMenuItemPrefix)) {
+      const suffix = commandId.slice(zoomMenuItemPrefix.length);
+      if (suffix === "custom") {
+        void openCustomZoomQuickPick();
         return;
       }
 
-      const placement = getPanelPlacement(layoutController.layout, panelId);
-      // Always call openPanel so we activate docked panels and also trigger a layout
-      // re-render even when the panel is already floating (useful for commands like
-      // Record Macro that update panel-local state).
-      layoutController.openPanel(panelId);
+      const percent = Number(suffix);
+      if (Number.isFinite(percent) && Number.isInteger(percent) && percent > 0) {
+        if (!app.supportsZoom()) return;
 
-      // Floating panels can be minimized; opening should restore them.
-      if (placement.kind === "floating" && layoutController.layout?.floating?.[panelId]?.minimized) {
-        layoutController.setFloatingPanelMinimized(panelId, false);
+        app.setZoom(percent / 100);
+        syncZoomControl();
+        app.focus();
+        return;
       }
-    };
-
-    const focusScriptEditorPanel = () => {
-      // Script editor is mounted via panel rendering; wait a frame (or two) so the
-      // DOM nodes exist before focusing.
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        const el =
-          document.querySelector<HTMLElement>('[data-testid="script-editor-code"]') ??
-          document.querySelector<HTMLElement>('[data-testid="script-editor-run"]');
-        try {
-          el?.focus();
-        } catch {
-          // Best-effort: ignore focus errors (e.g. element not focusable in headless environments).
-        }
-      }));
-    };
-
-    const focusVbaMigratePanel = () => {
-      // The VBA migrate panel is a React mount; give it a couple of frames to render.
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        const el =
-          document.querySelector<HTMLElement>('[data-testid="vba-entrypoint"]') ??
-          document.querySelector<HTMLElement>('button[data-testid^="vba-module-"]') ??
-          document.querySelector<HTMLElement>('[data-testid="vba-refresh"]');
-        try {
-          el?.focus();
-        } catch {
-          // Best-effort: ignore focus errors (e.g. element not focusable in headless environments).
-        }
-      }));
-    };
+    }
 
     const command = commandRegistry.getCommand(commandId);
     if (command) {
@@ -8400,87 +8465,23 @@ function handleRibbonCommand(commandId: string): void {
         scheduleRibbonSelectionFormatStateUpdate();
         app.focus();
         return;
-      case "view.macros.viewMacros":
-      case "view.macros.viewMacros.run":
-      case "view.macros.viewMacros.edit":
-      case "view.macros.viewMacros.delete":
-        // Clear any previously-requested focus so that edit/Visual Basic actions don't
-        // get focus stolen by an earlier async macro runner render.
-        if (commandId.endsWith(".edit")) pendingMacrosPanelFocus = null;
-        if (commandId === "view.macros.viewMacros") pendingMacrosPanelFocus = "runner-select";
-        if (commandId.endsWith(".run")) pendingMacrosPanelFocus = "runner-run";
-        if (commandId.endsWith(".delete")) pendingMacrosPanelFocus = "runner-select";
-        openRibbonPanel(PanelIds.MACROS);
-        // "Edit…" in Excel normally opens an editor; best-effort surface our Script Editor panel too.
-        if (commandId.endsWith(".edit")) {
-          openRibbonPanel(PanelIds.SCRIPT_EDITOR);
-          focusScriptEditorPanel();
-        }
+      case "formulas.formulaAuditing.tracePrecedents":
+        app.clearAuditing();
+        app.toggleAuditingPrecedents();
+        app.focus();
         return;
-
-      case "view.macros.recordMacro":
-        pendingMacrosPanelFocus = "recorder-stop";
-        activeMacroRecorder?.start();
-        openRibbonPanel(PanelIds.MACROS);
+      case "formulas.formulaAuditing.traceDependents":
+        app.clearAuditing();
+        app.toggleAuditingDependents();
+        app.focus();
         return;
-      case "view.macros.recordMacro.stop":
-        pendingMacrosPanelFocus = "recorder-start";
-        activeMacroRecorder?.stop();
-        openRibbonPanel(PanelIds.MACROS);
+      case "formulas.formulaAuditing.removeArrows":
+        app.clearAuditing();
+        app.focus();
         return;
-
-      case "view.macros.useRelativeReferences":
-        // Toggle state is handled by the ribbon UI; we don't currently implement a
-        // "relative reference" mode in the macro recorder. Avoid the default toast.
-        return;
-
-      case "developer.code.macros":
-      case "developer.code.macros.run":
-      case "developer.code.macros.edit":
-        // Clear any previously-requested focus so that edit/Visual Basic actions don't
-        // get focus stolen by an earlier async macro runner render.
-        if (commandId.endsWith(".edit")) pendingMacrosPanelFocus = null;
-        if (commandId === "developer.code.macros") pendingMacrosPanelFocus = "runner-select";
-        if (commandId.endsWith(".run")) pendingMacrosPanelFocus = "runner-run";
-        openRibbonPanel(PanelIds.MACROS);
-        if (commandId.endsWith(".edit")) {
-          openRibbonPanel(PanelIds.SCRIPT_EDITOR);
-          focusScriptEditorPanel();
-        }
-        return;
-
-      case "developer.code.macroSecurity":
-      case "developer.code.macroSecurity.trustCenter":
-        pendingMacrosPanelFocus = "runner-trust-center";
-        openRibbonPanel(PanelIds.MACROS);
-        return;
-
-      case "developer.code.recordMacro":
-        pendingMacrosPanelFocus = "recorder-stop";
-        activeMacroRecorder?.start();
-        openRibbonPanel(PanelIds.MACROS);
-        return;
-      case "developer.code.recordMacro.stop":
-        pendingMacrosPanelFocus = "recorder-start";
-        activeMacroRecorder?.stop();
-        openRibbonPanel(PanelIds.MACROS);
-        return;
-
-      case "developer.code.useRelativeReferences":
-        // Toggle state is handled by the ribbon UI; we don't currently implement a
-        // "relative reference" mode in the macro recorder. Avoid the default toast.
-        return;
-
-      case "developer.code.visualBasic":
-        pendingMacrosPanelFocus = null;
-        // Desktop builds expose a VBA migration panel (used as a stand-in for the VBA editor).
-        if (typeof (globalThis as any).__TAURI__?.core?.invoke === "function") {
-          openRibbonPanel(PanelIds.VBA_MIGRATE);
-          focusVbaMigratePanel();
-        } else {
-          openRibbonPanel(PanelIds.SCRIPT_EDITOR);
-          focusScriptEditorPanel();
-        }
+      case "insert.tables.pivotTable":
+        ribbonLayoutController?.openPanel(PanelIds.PIVOT_BUILDER);
+        window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
         return;
 
       case "home.font.borders":
