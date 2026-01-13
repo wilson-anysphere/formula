@@ -123,6 +123,22 @@ describe("extractFormulaReferences", () => {
     expect(extractFormulaReferences(input, tokenEnd, tokenEnd, { resolveName }).activeIndex).toBe(0);
   });
 
+  it("does not treat function-call identifiers as named ranges", () => {
+    const input = "=MyFunc(MyRange)";
+    const { references } = extractFormulaReferences(input, 0, 0, {
+      resolveName: (name) => (name === "MyFunc" || name === "MyRange" ? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 } : null),
+    });
+    // Only the argument identifier should be considered (the function name is tokenized as `function`).
+    expect(references.map((r) => r.text)).toEqual(["MyRange"]);
+  });
+
+  it("does not treat TRUE/FALSE identifiers as named ranges", () => {
+    const input = "=TRUE+FALSE+MyRange";
+    const { references } = extractFormulaReferences(input, 0, 0, {
+      resolveName: (name) => ({ startRow: 0, startCol: 0, endRow: 0, endCol: 0, sheet: name }),
+    });
+    expect(references.map((r) => r.text)).toEqual(["MyRange"]);
+  });
   it("extracts structured table references (data rows only)", () => {
     const tables = new Map([
       [
