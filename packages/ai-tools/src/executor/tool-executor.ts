@@ -230,6 +230,11 @@ export interface ToolExecutorOptions {
    * DLP-safe default: when DLP is configured, formula values are only surfaced when the
    * range-level decision is `ALLOW`. Under `REDACT`, formula values remain `null` to avoid
    * leaking restricted content via computed results.
+   *
+   * Note: DLP decisions are evaluated over the selected range only. ToolExecutor does not
+   * attempt to trace formula dependencies; hosts that compute formula values should ensure
+   * `cell.value` does not reflect restricted content that is out-of-scope for the current DLP
+   * evaluation.
    */
   include_formula_values?: boolean;
   /**
