@@ -586,6 +586,166 @@
   flex-wrap: wrap;
 }
 
+/* --- Branch merge conflict details -------------------------------------- */
+
+.branch-merge__empty {
+  color: var(--text-secondary);
+}
+
+.branch-merge__encrypted {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.branch-merge__conflict-grid--cell {
+  align-items: start;
+}
+
+.branch-merge__cell-column {
+  min-width: 0;
+}
+
+.branch-merge__cell-section {
+  margin-top: 6px;
+  min-width: 0;
+}
+
+.branch-merge__cell-section-title {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.branch-merge__cell-section-body {
+  min-width: 0;
+}
+
+.branch-merge__cell-json {
+  white-space: pre-wrap;
+  margin: 0;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font:
+    12px/16px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+}
+
+.branch-merge__formula-diff {
+  /* Keep long formulas readable inside the three-column layout. */
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.branch-merge__diff-token {
+  padding: 0 1px;
+  border-radius: 2px;
+}
+
+.branch-merge__diff-token--insert {
+  background: var(--success-bg);
+}
+
+.branch-merge__diff-token--delete {
+  background: var(--error-bg);
+  text-decoration: line-through;
+}
+
+.branch-merge__resolution-actions button {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.branch-merge__resolution-actions button:hover {
+  background: var(--bg-hover);
+}
+
+.branch-merge__resolution-actions button[data-selected="true"] {
+  background: var(--selection-bg);
+  border-color: var(--selection-border);
+  color: var(--selection-text);
+}
+
+.branch-merge__manual-cell-editor {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.branch-merge__manual-cell-toggle {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.branch-merge__manual-cell-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.branch-merge__manual-cell-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.branch-merge__manual-cell-editor input,
+.branch-merge__manual-cell-editor select,
+.branch-merge__manual-cell-editor textarea {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.branch-merge__manual-cell-editor textarea {
+  min-height: 90px;
+  resize: vertical;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+}
+
+.branch-merge__manual-cell-error {
+  color: var(--error);
+  font-size: 12px;
+}
+
+.branch-merge__conflict-move-base {
+  min-width: 0;
+}
+
+.branch-merge__conflict-move-dest {
+  color: var(--text-secondary);
+}
+
 .macros-panel {
   display: flex;
   flex-direction: column;
