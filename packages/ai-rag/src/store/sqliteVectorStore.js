@@ -54,6 +54,22 @@ function blobToFloat32(blob) {
 }
 
 /**
+ * Wrap blob decode errors with a more descriptive context so callers don't need to
+ * guess which record/operation triggered the failure.
+ *
+ * @param {Uint8Array} blob
+ * @param {string} context
+ */
+function blobToFloat32WithContext(blob, context) {
+  try {
+    return blobToFloat32(blob);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`${context}: ${msg}`);
+  }
+}
+
+/**
  * @param {Float32Array} vec
  * @param {number} expectedDim
  * @param {string} context
@@ -556,8 +572,8 @@ export class SqliteVectorStore {
     // sql.js exposes create_function(name, fn)
     // eslint-disable-next-line no-underscore-dangle
     this._db.create_function("dot", (a, b) => {
-      const va = blobToFloat32(a);
-      const vb = blobToFloat32(b);
+      const va = blobToFloat32WithContext(a, "SqliteVectorStore dot() failed to decode arg0 vector blob");
+      const vb = blobToFloat32WithContext(b, "SqliteVectorStore dot() failed to decode arg1 vector blob");
       if (va.length !== vb.length) {
         throw new Error(
           `SqliteVectorStore dot() dimension mismatch: expected ${this._dimension}, got ${va.length} vs ${vb.length}`
@@ -912,7 +928,10 @@ export class SqliteVectorStore {
     const row = stmt.get();
     stmt.free();
 
-    const vec = blobToFloat32(row[0]);
+    const vec = blobToFloat32WithContext(
+      row[0],
+      `SqliteVectorStore.get(${JSON.stringify(id)}) failed to decode stored vector blob`
+    );
     assertVectorDim(vec, this._dimension, `SqliteVectorStore.get(${JSON.stringify(id)}) vector dimension mismatch`);
 
     const base = {};
@@ -1025,7 +1044,10 @@ export class SqliteVectorStore {
         if (filter && !filter(metadata, id)) continue;
         let vecOut;
         if (includeVector) {
-          const vec = blobToFloat32(vecBlob);
+          const vec = blobToFloat32WithContext(
+            vecBlob,
+            `SqliteVectorStore.list() failed to decode stored vector blob for id=${JSON.stringify(id)}`
+          );
           assertVectorDim(
             vec,
             this._dimension,
