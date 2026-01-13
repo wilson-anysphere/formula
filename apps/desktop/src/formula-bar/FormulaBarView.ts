@@ -63,7 +63,7 @@ const DEFAULT_FUNCTION_NAMES: string[] = (() => {
 
 export interface FormulaBarViewCallbacks {
   onBeginEdit?: (activeCellAddress: string) => void;
-  onCommit: (text: string) => void;
+  onCommit: (text: string, commit: FormulaBarCommit) => void;
   onCancel?: () => void;
   onGoTo?: (reference: string) => void;
   onOpenNameBoxMenu?: () => void | Promise<void>;
@@ -71,6 +71,16 @@ export interface FormulaBarViewCallbacks {
   onReferenceHighlights?: (
     highlights: Array<{ range: FormulaReferenceRange; color: string; text: string; index: number; active?: boolean }>
   ) => void;
+}
+
+export type FormulaBarCommitReason = "enter" | "tab" | "command";
+
+export interface FormulaBarCommit {
+  reason: FormulaBarCommitReason;
+  /**
+   * Shift modifier for enter/tab (Shift+Enter moves up, Shift+Tab moves left).
+   */
+  shift: boolean;
 }
 
 export class FormulaBarView {
@@ -313,7 +323,7 @@ export class FormulaBarView {
     });
 
     cancelButton.addEventListener("click", () => this.#cancel());
-    commitButton.addEventListener("click", () => this.#commit());
+    commitButton.addEventListener("click", () => this.#commit({ reason: "command", shift: false }));
     fxButton.addEventListener("click", () => this.#focusFx());
     fxButton.addEventListener("mousedown", (e) => {
       // Preserve the caret/selection in the textarea when clicking the fx button.
@@ -370,8 +380,8 @@ export class FormulaBarView {
     return this.model.isEditing;
   }
 
-  commitEdit(): void {
-    this.#commit();
+  commitEdit(reason: FormulaBarCommitReason = "command", shift = false): void {
+    this.#commit({ reason, shift });
   }
 
   cancelEdit(): void {
@@ -545,15 +555,25 @@ export class FormulaBarView {
     }
 
     if (e.key === "Tab") {
-      const accepted = this.model.acceptAiSuggestion();
-      if (accepted) {
-        e.preventDefault();
-        this.#selectedReferenceIndex = null;
-        this.#render({ preserveTextareaValue: false });
-        this.#setTextareaSelectionFromModel();
-        this.#emitOverlays();
-        return;
+      // Excel-like behavior: Tab/Shift+Tab commits the edit (and the app navigates selection).
+      // Exception: plain Tab accepts an AI suggestion if one is available.
+      //
+      // Never allow default browser focus traversal while editing.
+      if (!e.shiftKey) {
+        const accepted = this.model.acceptAiSuggestion();
+        if (accepted) {
+          e.preventDefault();
+          this.#selectedReferenceIndex = null;
+          this.#render({ preserveTextareaValue: false });
+          this.#setTextareaSelectionFromModel();
+          this.#emitOverlays();
+          return;
+        }
       }
+
+      e.preventDefault();
+      this.#commit({ reason: "tab", shift: e.shiftKey });
+      return;
     }
 
     if (e.key === "Escape") {
@@ -565,7 +585,7 @@ export class FormulaBarView {
     // Excel behavior: Enter commits, Alt+Enter inserts newline.
     if (e.key === "Enter" && !e.altKey) {
       e.preventDefault();
-      this.#commit();
+      this.#commit({ reason: "enter", shift: e.shiftKey });
       return;
     }
   }
@@ -582,7 +602,7 @@ export class FormulaBarView {
     this.#emitOverlays();
   }
 
-  #commit(): void {
+  #commit(commit: FormulaBarCommit): void {
     if (!this.model.isEditing) return;
     this.#closeFunctionPicker({ restoreFocus: false });
     this.textarea.blur();
@@ -590,7 +610,7 @@ export class FormulaBarView {
     this.#hoverOverride = null;
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
-    this.#callbacks.onCommit(committed);
+    this.#callbacks.onCommit(committed, commit);
     this.#emitOverlays();
   }
 

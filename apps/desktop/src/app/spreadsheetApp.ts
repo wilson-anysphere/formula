@@ -1,6 +1,6 @@
 import { CellEditorOverlay } from "../editor/cellEditorOverlay";
 import { FormulaBarTabCompletionController } from "../ai/completion/formulaBarTabCompletion.js";
-import { FormulaBarView } from "../formula-bar/FormulaBarView";
+import { FormulaBarView, type FormulaBarCommit } from "../formula-bar/FormulaBarView";
 import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js";
 import { parseA1Range } from "../charts/a1.js";
 import { emuToPx } from "../charts/overlay.js";
@@ -1772,7 +1772,7 @@ export class SpreadsheetApp {
         },
         onGoTo: (reference) => this.goTo(reference),
         onOpenNameBoxMenu: () => this.openNameBoxMenu(),
-        onCommit: (text) => this.commitFormulaBar(text),
+        onCommit: (text, commit) => this.commitFormulaBar(text, commit),
         onCancel: () => this.cancelFormulaBar(),
         onHoverRange: (range) => {
           this.referencePreview = range
@@ -8199,7 +8199,7 @@ export class SpreadsheetApp {
       // Match FormulaBarView: Enter commits, Alt+Enter inserts newline.
       if (e.key === "Enter" && !e.altKey) {
         e.preventDefault();
-        this.formulaBar?.commitEdit();
+        this.formulaBar?.commitEdit("enter", e.shiftKey);
         return;
       }
 
@@ -10147,7 +10147,7 @@ export class SpreadsheetApp {
     this.document.setCellInput(sheetId, cell, rawValue, { label: "Edit cell" });
   }
 
-  private commitFormulaBar(text: string): void {
+  private commitFormulaBar(text: string, commit: FormulaBarCommit): void {
     const target = this.formulaEditCell ?? { sheetId: this.sheetId, cell: { ...this.selection.active } };
     this.applyEdit(target.sheetId, target.cell, text);
 
@@ -10164,9 +10164,28 @@ export class SpreadsheetApp {
       this.sharedGrid.renderer.setReferenceHighlights(null);
     }
 
-    // Restore focus + selection to the original edit cell, even if the user
-    // navigated to another sheet while picking ranges.
-    this.activateCell({ sheetId: target.sheetId, row: target.cell.row, col: target.cell.col });
+    // Restore selection to the original edit cell (sheet + cell), even if the user navigated
+    // to another sheet while picking ranges. Navigation after commit (Enter/Tab) should be
+    // relative to the original edit cell, not whatever cell/range was active during range-picking.
+    this.activateCell(
+      { sheetId: target.sheetId, row: target.cell.row, col: target.cell.col },
+      { scrollIntoView: false, focus: false }
+    );
+
+    if (commit.reason === "enter" || commit.reason === "tab") {
+      const next = navigateSelectionByKey(
+        this.selection,
+        commit.reason === "enter" ? "Enter" : "Tab",
+        { shift: commit.shift, primary: false },
+        this.usedRangeProvider(),
+        this.limits
+      );
+      if (next) this.selection = next;
+    }
+
+    this.ensureActiveCellVisible();
+    this.scrollCellIntoView(this.selection.active);
+    if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: false });
     this.refresh();
     this.focus();
   }
