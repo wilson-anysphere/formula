@@ -1,5 +1,55 @@
 import type { ImageEntry } from "./types";
 
+export interface ImageBitmapCacheOptions {
+  /**
+   * Maximum number of decoded bitmaps to keep in the in-memory LRU cache.
+   *
+   * A value of 0 disables bitmap caching (but still dedupes concurrent decodes).
+   *
+   * @defaultValue 256
+   */
+  maxEntries?: number;
+
+  /**
+   * How long (in ms) to keep a short-lived "negative cache" entry after a decode
+   * failure.
+   *
+   * This helps avoid tight retry loops (e.g. every render pass) when an image is
+   * corrupted or uses an unsupported mime type, while still allowing retries
+   * shortly after.
+   *
+   * Set to 0 to disable.
+   *
+   * @defaultValue 250
+   */
+  negativeCacheMs?: number;
+}
+
+export interface ImageBitmapCacheGetOptions {
+  /**
+   * Abort signal for callers that no longer need the bitmap (e.g. offscreen
+   * images). Aborting rejects the returned promise with an `AbortError` and
+   * ensures the cache entry is cleaned up so future callers can retry.
+   */
+  signal?: AbortSignal;
+}
+
+type CacheEntry = {
+  promise: Promise<ImageBitmap>;
+  bitmap?: ImageBitmap;
+};
+
+type NegativeCacheEntry = {
+  error: unknown;
+  expiresAt: number;
+};
+
+function createAbortError(): Error {
+  const err = new Error("The operation was aborted.");
+  err.name = "AbortError";
+  return err;
+}
+
 /**
  * Cache for decoded images.
  *
@@ -22,19 +72,25 @@ export class ImageBitmapCache {
    * observe the resolved bitmap (our internal `.then` handlers run before any
    * caller `await`/`.then` handlers attached later).
    */
-  private readonly entries = new Map<
-    string,
-    {
-      promise: Promise<ImageBitmap>;
-      bitmap?: ImageBitmap;
-    }
-  >();
+  private readonly entries = new Map<string, CacheEntry>();
   private maxEntries: number;
   private decodedCount = 0;
 
-  constructor(options?: { maxEntries?: number }) {
-    const max = options?.maxEntries;
+  private readonly negativeCache = new Map<string, NegativeCacheEntry>();
+  private readonly negativeCacheMs: number;
+
+  /**
+   * Test/debug counter for how many decode attempts have failed.
+   *
+   * This is intentionally not private so unit tests can assert that failures are
+   * observed and handled.
+   */
+  __testOnly_failCount = 0;
+
+  constructor(options: ImageBitmapCacheOptions = {}) {
+    const max = options.maxEntries;
     this.maxEntries = ImageBitmapCache.normalizeMaxEntries(max ?? 256);
+    this.negativeCacheMs = options.negativeCacheMs ?? 250;
   }
 
   setMaxEntries(maxEntries: number): void {
@@ -42,24 +98,38 @@ export class ImageBitmapCache {
     this.evictIfNeeded();
   }
 
-  get(entry: ImageEntry): Promise<ImageBitmap> {
+  get(entry: ImageEntry, opts: ImageBitmapCacheGetOptions = {}): Promise<ImageBitmap> {
     const id = entry.id;
     const existing = this.entries.get(id);
     if (existing) {
       // Mark as most-recently-used.
       this.entries.delete(id);
       this.entries.set(id, existing);
-      return existing.promise;
+      return this.wrapWithAbort(id, existing, opts.signal);
+    }
+
+    // If the request is already aborted, don't start decoding (and don't poison
+    // the cache with a rejected promise).
+    if (opts.signal?.aborted) {
+      return Promise.reject(createAbortError());
+    }
+
+    const cachedFailure = this.negativeCache.get(id);
+    if (cachedFailure) {
+      if (cachedFailure.expiresAt > Date.now()) {
+        return Promise.reject(cachedFailure.error);
+      }
+      this.negativeCache.delete(id);
     }
 
     const promise = ImageBitmapCache.decode(entry);
-    const record = { promise, bitmap: undefined as ImageBitmap | undefined };
+    const record: CacheEntry = { promise, bitmap: undefined as ImageBitmap | undefined };
     this.entries.set(id, record);
 
     // Once the decode finishes, populate the LRU cache *only if* this promise is
     // still the active in-flight request for the image id. This prevents stale
-    // requests (e.g. after `invalidate()` or `clear()`) from repopulating the
-    // cache.
+    // requests (e.g. after `invalidate()` or `clear()`, or abort cleanup) from
+    // repopulating the cache.
     void promise.then(
       (bitmap) => {
         const current = this.entries.get(id);
@@ -84,6 +154,8 @@ export class ImageBitmapCache {
           record.bitmap = bitmap;
         }
 
+        this.negativeCache.delete(id);
+
         // Mark as most-recently-used. This avoids evicting+closing the bitmap in
         // the same microtask that resolves the promise (which would make the
         // resolved bitmap unusable for awaiting callers).
@@ -92,22 +164,31 @@ export class ImageBitmapCache {
 
         this.evictIfNeeded();
       },
-      () => {
+      (err) => {
         const current = this.entries.get(id);
-        if (current === record && current.promise === promise) {
-          this.entries.delete(id);
+        if (current !== record || current.promise !== promise) return;
+
+        this.__testOnly_failCount++;
+        if (this.negativeCacheMs > 0) {
+          this.negativeCache.set(id, { error: err, expiresAt: Date.now() + this.negativeCacheMs });
         }
+
+        this.entries.delete(id);
       },
     );
 
-    return promise;
+    return this.wrapWithAbort(id, record, opts.signal);
   }
 
   invalidate(imageId: string): void {
     const existing = this.entries.get(imageId);
-    if (!existing) return;
+    if (!existing) {
+      this.negativeCache.delete(imageId);
+      return;
+    }
 
     this.entries.delete(imageId);
+    this.negativeCache.delete(imageId);
     if (existing.bitmap) {
       this.decodedCount--;
       ImageBitmapCache.tryClose(existing.bitmap);
@@ -120,6 +201,45 @@ export class ImageBitmapCache {
     }
     this.entries.clear();
     this.decodedCount = 0;
+    this.negativeCache.clear();
+  }
+
+  private wrapWithAbort(imageId: string, record: CacheEntry, signal?: AbortSignal): Promise<ImageBitmap> {
+    if (!signal) return record.promise;
+
+    const abortAndCleanup = (): Error => {
+      const current = this.entries.get(imageId);
+      // Only drop in-flight decodes (no bitmap yet). Resolved entries stay cached.
+      if (current === record && !record.bitmap) {
+        this.entries.delete(imageId);
+      }
+      return createAbortError();
+    };
+
+    if (signal.aborted) {
+      return Promise.reject(abortAndCleanup());
+    }
+
+    // Note: `createImageBitmap` itself is not abortable; we only provide
+    // predictable caller semantics and cache cleanup.
+    return new Promise<ImageBitmap>((resolve, reject) => {
+      const onAbort = () => {
+        reject(abortAndCleanup());
+      };
+
+      signal.addEventListener("abort", onAbort, { once: true });
+
+      record.promise.then(
+        (bitmap) => {
+          signal.removeEventListener("abort", onAbort);
+          resolve(bitmap);
+        },
+        (err) => {
+          signal.removeEventListener("abort", onAbort);
+          reject(err);
+        },
+      );
+    });
   }
 
   private evictIfNeeded(): void {
@@ -144,10 +264,21 @@ export class ImageBitmapCache {
   }
 
   private static decode(entry: ImageEntry): Promise<ImageBitmap> {
-    const buffer = new ArrayBuffer(entry.bytes.byteLength);
-    new Uint8Array(buffer).set(entry.bytes);
-    const blob = new Blob([buffer], { type: entry.mimeType });
-    return createImageBitmap(blob);
+    if (typeof createImageBitmap !== "function") {
+      return Promise.reject(new Error("createImageBitmap is not available in this environment"));
+    }
+
+    try {
+      const buffer = new ArrayBuffer(entry.bytes.byteLength);
+      new Uint8Array(buffer).set(entry.bytes);
+      const blob = new Blob([buffer], { type: entry.mimeType });
+      // `createImageBitmap` should always return a promise, but tests and
+      // polyfills are not always well-behaved. Normalize to a promise so our
+      // callers and internal bookkeeping remain predictable.
+      return Promise.resolve(createImageBitmap(blob));
+    } catch (err) {
+      return Promise.reject(err);
+    }
   }
 
   private static tryClose(bitmap: ImageBitmap): void {
