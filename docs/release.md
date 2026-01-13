@@ -698,6 +698,18 @@ docker run --rm -it \
   '
 ```
 
+Optional: openSUSE smoke install (helps validate our RPM rich-deps cover openSUSE package naming):
+
+```bash
+docker run --rm -it \
+  -v "$PWD/target/release/bundle/rpm:/rpm" \
+  opensuse/tumbleweed:latest bash -lc '
+    zypper --non-interactive refresh
+    zypper --non-interactive install --no-recommends --allow-unsigned-rpm /rpm/*.rpm
+    ldd /usr/bin/formula-desktop | grep -q "not found" && exit 1 || true
+  '
+```
+
 CI guardrails (tagged releases):
 
 - `bash scripts/ci/verify-linux-package-deps.sh` inspects the produced `.rpm` with `rpm -qpR` and fails the workflow if the
