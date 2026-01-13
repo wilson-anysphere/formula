@@ -401,7 +401,10 @@ jobs:
           fi
           python -m tools.corpus.compat_gate "${GATE_ARGS[@]}"
       - name: Save private corpus trend cache
-        if: always() && hashFiles('tools/corpus/out/private/trend.json') != ''
+        # Only save a new cache entry when we actually produced a new dashboard summary (and thus
+        # appended a new trend entry). This avoids filling the cache with identical copies when
+        # the private corpus is unavailable (e.g. missing secrets).
+        if: always() && hashFiles('tools/corpus/out/private/summary.json') != '' && hashFiles('tools/corpus/out/private/trend.json') != ''
         uses: actions/cache/save@v4
         with:
           path: tools/corpus/out/private/trend.json
