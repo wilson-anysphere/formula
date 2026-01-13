@@ -50,7 +50,7 @@ fn rejects_agile_fixture() {
     assert!(
         matches!(
             err,
-            OffcryptoError::UnsupportedEncryption {
+            OffcryptoError::UnsupportedEncryptionType {
                 encryption_type: EncryptionType::Agile
             }
         ),

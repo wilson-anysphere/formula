@@ -988,9 +988,19 @@ pub fn open_workbook_model_with_password(
         return Err(err);
     }
 
-    // If no password was provided, preserve the existing open path (including the current format
-    // classification behaviour for legacy `.xls`).
+    // If no password was provided, preserve the existing open path for non-encrypted files.
+    //
+    // For legacy `.xls` BIFF encryption (FILEPASS), provide a more actionable error: callers using
+    // the password-capable API likely want to prompt the user for a password rather than being told
+    // to remove encryption.
     let Some(password) = password else {
+        if let Ok(Some(info)) = detect_workbook_encryption(path) {
+            if info.kind == WorkbookEncryptionKind::XlsFilepass {
+                return Err(Error::PasswordRequired {
+                    path: path.to_path_buf(),
+                });
+            }
+        }
         return open_workbook_model(path);
     };
 
@@ -1016,6 +1026,11 @@ pub fn open_workbook_model_with_password(
             Err(xls::ImportError::EncryptedWorkbook) => Err(Error::EncryptedWorkbook {
                 path: path.to_path_buf(),
             }),
+            Err(xls::ImportError::Decrypt(xls::DecryptError::WrongPassword)) => {
+                Err(Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                })
+            }
             Err(source) => Err(Error::OpenXls {
                 path: path.to_path_buf(),
                 source,
@@ -1109,9 +1124,19 @@ pub fn open_workbook_with_password(
         return Err(err);
     }
 
-    // If no password was provided, preserve the existing open path (including the current format
-    // classification behaviour for legacy `.xls`).
+    // If no password was provided, preserve the existing open path for non-encrypted files.
+    //
+    // For legacy `.xls` BIFF encryption (FILEPASS), provide a more actionable error: callers using
+    // the password-capable API likely want to prompt the user for a password rather than being told
+    // to remove encryption.
     let Some(password) = password else {
+        if let Ok(Some(info)) = detect_workbook_encryption(path) {
+            if info.kind == WorkbookEncryptionKind::XlsFilepass {
+                return Err(Error::PasswordRequired {
+                    path: path.to_path_buf(),
+                });
+            }
+        }
         return open_workbook(path);
     };
 
@@ -1139,6 +1164,11 @@ pub fn open_workbook_with_password(
             Err(xls::ImportError::EncryptedWorkbook) => Err(Error::EncryptedWorkbook {
                 path: path.to_path_buf(),
             }),
+            Err(xls::ImportError::Decrypt(xls::DecryptError::WrongPassword)) => {
+                Err(Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                })
+            }
             Err(source) => Err(Error::OpenXls {
                 path: path.to_path_buf(),
                 source,

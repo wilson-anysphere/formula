@@ -690,7 +690,7 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
 ///
 /// This helper is intended for callers that only implement ECMA-376 Standard encryption.
 /// If the provided `EncryptionInfo` stream describes Agile encryption, this returns
-/// [`OffcryptoError::UnsupportedEncryption`] (even if the password is correct).
+/// [`OffcryptoError::UnsupportedEncryptionType`] (even if the password is correct).
 ///
 /// Inputs are the raw `EncryptionInfo` and `EncryptedPackage` *stream bytes* extracted from the
 /// OLE/CFB wrapper.
