@@ -235,7 +235,10 @@ async function downloadReleaseAsset(baseUrl, repo, assetId, token) {
 async function listReleaseAssets(baseUrl, repo, releaseId, token) {
   /** @type {any[]} */
   const assets = [];
-  for (let page = 1; page <= 20; page += 1) {
+  // Use a generous upper bound to avoid infinite loops on unexpected API behavior, but don't
+  // artificially cap small/medium releases (some repos upload hundreds of assets).
+  const maxPages = 100;
+  for (let page = 1; page <= maxPages; page += 1) {
     const pageAssets = await githubApiJson(
       baseUrl,
       `/repos/${repo}/releases/${releaseId}/assets?per_page=100&page=${page}`,
