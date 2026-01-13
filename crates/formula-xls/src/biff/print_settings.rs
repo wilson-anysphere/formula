@@ -83,6 +83,7 @@ const SETUP_GRBIT_F_NOPLS: u16 = 0x0004;
 // If set, `fPortrait` must be ignored and orientation defaults to portrait.
 // See [MS-XLS] 2.4.257 (SETUP), `fNoOrient`.
 const SETUP_GRBIT_F_NOORIENT: u16 = 0x0040;
+const SETUP_MAX_FIT_DIMENSION: u16 = 32767;
 
 #[derive(Debug, Clone)]
 pub(crate) struct BiffSheetPrintSettings {
@@ -113,6 +114,7 @@ pub(crate) fn parse_biff_sheet_print_settings(
 
     let mut page_setup = PageSetup::default();
     let mut saw_any_record = false;
+
     // WSBOOL.fFitToPage controls whether SETUP's iFitWidth/iFitHeight apply.
     // Keep the raw SETUP scaling fields around and compute scaling at the end so record order
     // doesn't matter and "last wins" semantics are respected.
@@ -146,9 +148,25 @@ pub(crate) fn parse_biff_sheet_print_settings(
                 let (scale, fit_width, fit_height, no_pls) =
                     parse_setup_record(&mut page_setup, data, record.offset, &mut out.warnings);
                 setup_no_pls = no_pls;
-                setup_scale = scale;
-                setup_fit_width = fit_width;
-                setup_fit_height = fit_height;
+                if no_pls {
+                    // `fNoPls=1` indicates printer-related fields are undefined. Treat this as a
+                    // "clear" so later scaling logic falls back to defaults.
+                    setup_scale = None;
+                    setup_fit_width = None;
+                    setup_fit_height = None;
+                } else {
+                    // Best-effort: preserve the most recent valid values when later SETUP records
+                    // are truncated/malformed (so corrupt files don't clobber earlier state).
+                    if let Some(value) = scale {
+                        setup_scale = Some(value);
+                    }
+                    if let Some(value) = fit_width {
+                        setup_fit_width = Some(value);
+                    }
+                    if let Some(value) = fit_height {
+                        setup_fit_height = Some(value);
+                    }
+                }
             }
             RECORD_LEFTMARGIN => parse_margin_record(
                 &mut page_setup.margins.left,
@@ -296,6 +314,30 @@ fn parse_setup_record(
         f_no_pls = (grbit & SETUP_GRBIT_F_NOPLS) != 0;
         f_no_orient = (grbit & SETUP_GRBIT_F_NOORIENT) != 0;
         f_portrait = (grbit & SETUP_GRBIT_PORTRAIT) != 0;
+    }
+
+    if let Some(w) = fit_width {
+        if w > SETUP_MAX_FIT_DIMENSION {
+            push_warning_bounded(
+                warnings,
+                format!(
+                    "invalid SETUP.iFitWidth value {w} at offset {offset}: must be <= {SETUP_MAX_FIT_DIMENSION}; clamped to {SETUP_MAX_FIT_DIMENSION}"
+                ),
+            );
+            fit_width = Some(SETUP_MAX_FIT_DIMENSION);
+        }
+    }
+
+    if let Some(h) = fit_height {
+        if h > SETUP_MAX_FIT_DIMENSION {
+            push_warning_bounded(
+                warnings,
+                format!(
+                    "invalid SETUP.iFitHeight value {h} at offset {offset}: must be <= {SETUP_MAX_FIT_DIMENSION}; clamped to {SETUP_MAX_FIT_DIMENSION}"
+                ),
+            );
+            fit_height = Some(SETUP_MAX_FIT_DIMENSION);
+        }
     }
 
     // Per [MS-XLS], when `fNoPls` is set the printer-related fields are undefined and must be

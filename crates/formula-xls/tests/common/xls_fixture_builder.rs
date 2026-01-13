@@ -1000,6 +1000,25 @@ pub fn build_page_break_cbrk_cap_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing an invalid FitTo page setup:
+/// - `WSBOOL.fFitToPage=1`
+/// - `SETUP.iFitWidth=40000`, `SETUP.iFitHeight=40000` (out of spec; should be clamped by importer)
+pub fn build_fit_to_clamp_fixture_xls() -> Vec<u8> {
+    let xf_cell: u16 = 16; // First cell XF after the 16 style XFs in `build_single_sheet_workbook_stream`.
+    let sheet_stream = build_fit_to_clamp_sheet_stream(xf_cell);
+    let workbook_stream = build_single_sheet_workbook_stream("Sheet1", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 fn build_page_break_cbrk_cap_sheet_stream(xf_cell: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -4243,6 +4262,51 @@ fn build_single_sheet_workbook_stream(
 
     globals.extend_from_slice(sheet_stream);
     globals
+}
+
+fn build_fit_to_clamp_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) => A1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // WSBOOL.fFitToPage is stored in bit 0x0100. Use the typical Excel defaults (0x0C01) plus that
+    // bit.
+    let wsbool = (0x0C01u16 | 0x0100u16).to_le_bytes();
+    push_record(&mut sheet, RECORD_WSBOOL, &wsbool);
+
+    // SETUP [MS-XLS 2.4.257]
+    // Most fields are boilerplate; the important part is iFitWidth/iFitHeight are intentionally
+    // out of range (>32767).
+    let mut setup = Vec::<u8>::new();
+    setup.extend_from_slice(&9u16.to_le_bytes()); // iPaperSize (A4)
+    setup.extend_from_slice(&100u16.to_le_bytes()); // iScale (percent)
+    setup.extend_from_slice(&1u16.to_le_bytes()); // iPageStart
+    setup.extend_from_slice(&40000u16.to_le_bytes()); // iFitWidth (invalid)
+    setup.extend_from_slice(&40000u16.to_le_bytes()); // iFitHeight (invalid)
+    setup.extend_from_slice(&0x0083u16.to_le_bytes()); // grbit
+    setup.extend_from_slice(&300u16.to_le_bytes()); // iRes
+    setup.extend_from_slice(&300u16.to_le_bytes()); // iVRes
+    setup.extend_from_slice(&0.1f64.to_le_bytes()); // numHdr
+    setup.extend_from_slice(&0.1f64.to_le_bytes()); // numFtr
+    setup.extend_from_slice(&1u16.to_le_bytes()); // iCopies
+    push_record(&mut sheet, RECORD_SETUP, &setup);
+
+    // Provide at least one cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
 }
 
 fn build_single_sheet_workbook_stream_biff5(
