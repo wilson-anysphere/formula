@@ -6517,13 +6517,24 @@ export class CanvasGridRenderer {
       if (entry.options.animationFrame) {
         entry.pendingReason = reason;
         if (entry.rafId !== null) continue;
-        entry.rafId = requestAnimationFrame(() => {
+        // Some unit tests stub `requestAnimationFrame` to invoke the callback synchronously.
+        // If that happens and we assign `entry.rafId` *after* `requestAnimationFrame` returns,
+        // the callback's `entry.rafId = null` can be overwritten with the returned id, leaving
+        // the subscription stuck in a "pending RAF" state (future viewport changes won't
+        // schedule).
+        //
+        // Track whether the callback executed synchronously and only persist the returned id
+        // when it hasn't yet run.
+        let executedSynchronously = false;
+        const rafId = requestAnimationFrame(() => {
+          executedSynchronously = true;
           entry.rafId = null;
           const pendingReason = entry.pendingReason;
           entry.pendingReason = null;
           if (!pendingReason) return;
           entry.listener({ viewport: this.scroll.getViewportState(), reason: pendingReason });
         });
+        entry.rafId = executedSynchronously ? null : rafId;
         continue;
       }
 
