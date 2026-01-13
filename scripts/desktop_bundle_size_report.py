@@ -346,6 +346,7 @@ def main() -> int:
         return 2
 
     bundle_dirs: list[Path] = []
+    target_dirs: list[Path] = []
     if args.bundle_dir:
         bundle_dirs = [d for d in args.bundle_dir if d.is_dir()]
         missing = [str(d) for d in args.bundle_dir if not d.is_dir()]
@@ -373,11 +374,31 @@ def main() -> int:
     bundle_dirs = uniq
 
     if not bundle_dirs:
-        expected = repo_root / "apps" / "desktop" / "src-tauri" / "target" / "release" / "bundle"
+        expected_examples = [
+            repo_root / "target" / "release" / "bundle",
+            repo_root / "apps" / "desktop" / "src-tauri" / "target" / "release" / "bundle",
+            repo_root / "apps" / "desktop" / "target" / "release" / "bundle",
+        ]
+        # If CARGO_TARGET_DIR is configured, include it in the example list.
+        env_target = os.environ.get("CARGO_TARGET_DIR", "").strip()
+        if env_target:
+            p = Path(env_target)
+            if not p.is_absolute():
+                p = repo_root / p
+            expected_examples.insert(0, p / "release" / "bundle")
+
+        expected_joined = "\n".join(f"  - {p}" for p in expected_examples)
+        candidates_joined = (
+            ", ".join(_report_path_str(p, repo_root=repo_root) for p in target_dirs)
+            if target_dirs
+            else "(none found)"
+        )
         msg = (
             "bundle-size: ERROR No Tauri bundle directories found.\n"
             f"Searched for: target/**/release/bundle (from {repo_root})\n"
-            f"Expected a directory like: {expected}\n"
+            f"Candidate target dirs: {candidates_joined}\n"
+            "Expected a directory like one of:\n"
+            f"{expected_joined}\n"
             "Hint: build the desktop app with `(cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)` before running this script."
         )
         print(msg, file=sys.stderr)
