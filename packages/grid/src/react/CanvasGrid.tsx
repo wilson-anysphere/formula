@@ -124,6 +124,13 @@ export interface CanvasGridProps {
   zoom?: number;
   onZoomChange?: (zoom: number) => void;
   /**
+   * Fired whenever the grid's effective scroll position changes.
+   *
+   * Useful for positioning DOM overlays (tooltips, editors, etc.) since the grid
+   * does not use a native scroll container.
+   */
+  onScroll?: (scroll: { x: number; y: number }, viewport: GridViewportState) => void;
+  /**
    * Touch interaction strategy.
    *
    * - `"auto"` (default): single-finger drags pan; taps select.
@@ -340,6 +347,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const onFillCommitRef = useRef(props.onFillCommit);
   const onZoomChangeRef = useRef(props.onZoomChange);
   const onAxisSizeChangeRef = useRef(props.onAxisSizeChange);
+  const onScrollRef = useRef(props.onScroll);
   const touchModeRef = useRef<CanvasGridProps["touchMode"]>(props.touchMode ?? "auto");
 
   onSelectionChangeRef.current = props.onSelectionChange;
@@ -354,6 +362,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   onFillCommitRef.current = props.onFillCommit;
   onZoomChangeRef.current = props.onZoomChange;
   onAxisSizeChangeRef.current = props.onAxisSizeChange;
+  onScrollRef.current = props.onScroll;
   touchModeRef.current = props.touchMode ?? "auto";
 
   const selectionAnchorRef = useRef<{ row: number; col: number } | null>(null);
@@ -374,6 +383,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     mode: FillMode;
     previewTarget: CellRange | null;
   } | null>(null);
+  const lastEmittedScrollRef = useRef<{ x: number; y: number } | null>(null);
 
   const sanitizeHeaderCount = (value: number | undefined, max: number) => {
     if (typeof value !== "number" || !Number.isFinite(value)) return 0;
@@ -473,17 +483,34 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     ]
   );
 
+  const maybeEmitScroll = (scroll: { x: number; y: number }, viewport: GridViewportState) => {
+    const last = lastEmittedScrollRef.current;
+    if (last && last.x === scroll.x && last.y === scroll.y) return;
+    // Don't emit on the first observation; treat it as the baseline.
+    if (!last) {
+      lastEmittedScrollRef.current = { x: scroll.x, y: scroll.y };
+      return;
+    }
+
+    lastEmittedScrollRef.current = { x: scroll.x, y: scroll.y };
+    onScrollRef.current?.({ x: scroll.x, y: scroll.y }, viewport);
+  };
+
   const syncScrollbars = () => {
     const renderer = rendererRef.current;
+    if (!renderer) return;
+
+    const viewport = renderer.scroll.getViewportState();
+    const scroll = renderer.scroll.getScroll();
+
+    maybeEmitScroll(scroll, viewport);
+
     const vTrack = vTrackRef.current;
     const vThumb = vThumbRef.current;
     const hTrack = hTrackRef.current;
     const hThumb = hThumbRef.current;
 
-    if (!renderer || !vTrack || !vThumb || !hTrack || !hThumb) return;
-
-    const viewport = renderer.scroll.getViewportState();
-    const scroll = renderer.scroll.getScroll();
+    if (!vTrack || !vThumb || !hTrack || !hThumb) return;
     const minThumbSize = 24 * zoomRef.current;
 
     // Avoid layout reads during continuous scroll; track sizing is deterministic from the
