@@ -370,6 +370,23 @@ jobs:
           releaseDraft: true
           prerelease: false
 
+      - name: Verify macOS signed app includes WKWebView JIT entitlements
+        # Only run when code signing is enabled (forks/dry-runs may not have signing secrets).
+        if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != ''
+        run: |
+          set -euo pipefail
+          app="$(find apps/desktop/src-tauri/target -maxdepth 8 -type d -path '*/release/bundle/macos/*.app' | head -n 1 || true)"
+          if [ -z "${app:-}" ]; then
+            echo "No .app bundle found under apps/desktop/src-tauri/target/**/release/bundle/macos."
+            echo "Available .app directories under src-tauri/target (first 20):"
+            find apps/desktop/src-tauri/target -maxdepth 10 -type d -name '*.app' | head -n 20 || true
+            exit 1
+          fi
+          echo "Verifying entitlements embedded in: $app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -d --entitlements :- "$app" 2>&1 | grep -q "com.apple.security.cs.allow-jit"
+          codesign -d --entitlements :- "$app" 2>&1 | grep -q "com.apple.security.cs.allow-unsigned-executable-memory"
+
       - name: Build and upload release assets
         if: runner.os != 'macOS'
         # Pinned for reproducible releases: avoid upstream floating major tags moving and breaking builds.
