@@ -20,7 +20,7 @@ describe("dev collab encryption toggle", () => {
     const doc = new Y.Doc();
 
     const encryption = resolveDevCollabEncryptionFromSearch({
-      search: "?collabEncrypt=1&collabEncryptRange=Sheet1!A1:A1",
+      search: "?collabEncrypt=1&collabEncryptRange=Sheet1!A1:A2",
       docId,
       defaultSheetId: "Sheet1",
     });
@@ -28,9 +28,11 @@ describe("dev collab encryption toggle", () => {
 
     const sessionWithKey = createCollabSession({ docId, doc, encryption: encryption! });
     const a1 = makeCellKey({ sheetId: "Sheet1", row: 0, col: 0 });
+    const a2 = makeCellKey({ sheetId: "Sheet1", row: 1, col: 0 });
     const b1 = makeCellKey({ sheetId: "Sheet1", row: 0, col: 1 });
 
     await sessionWithKey.setCellValue(a1, "secret");
+    await sessionWithKey.setCellFormula(a2, "=SUM(1,2)");
     await sessionWithKey.setCellValue(b1, "public");
 
     const yA1 = sessionWithKey.cells.get(a1) as any;
@@ -42,12 +44,23 @@ describe("dev collab encryption toggle", () => {
     expect(yB1?.get("enc")).toBeUndefined();
     expect(yB1?.get("value")).toBe("public");
 
+    const yA2 = sessionWithKey.cells.get(a2) as any;
+    expect(yA2?.get("enc")).toBeTruthy();
+    expect(yA2?.get("value")).toBeUndefined();
+    expect(yA2?.get("formula")).toBeUndefined();
+
     const sessionWithoutKey = createCollabSession({ docId, doc });
     const masked = await sessionWithoutKey.getCell(a1);
     expect(masked).not.toBeNull();
     expect(masked?.value).toBe("###");
     expect(masked?.formula).toBeNull();
     expect(masked?.encrypted).toBe(true);
+
+    const maskedFormula = await sessionWithoutKey.getCell(a2);
+    expect(maskedFormula).not.toBeNull();
+    expect(maskedFormula?.value).toBe("###");
+    expect(maskedFormula?.formula).toBeNull();
+    expect(maskedFormula?.encrypted).toBe(true);
 
     // The dev helper should remain able to *decrypt* already-encrypted cells even if the
     // demo encryption range is later changed (writes are range-restricted via shouldEncryptCell).
@@ -62,5 +75,9 @@ describe("dev collab encryption toggle", () => {
     const decrypted = await sessionDifferentRange.getCell(a1);
     expect(decrypted).not.toBeNull();
     expect(decrypted?.value).toBe("secret");
+
+    const decryptedFormula = await sessionDifferentRange.getCell(a2);
+    expect(decryptedFormula).not.toBeNull();
+    expect(decryptedFormula?.formula).toBe("=SUM(1,2)");
   });
 });
