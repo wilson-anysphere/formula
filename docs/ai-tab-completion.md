@@ -214,10 +214,12 @@ Range suggestions are implemented in `packages/ai-completion/src/rangeSuggester.
    - If the user provided a row (`A5`), treat that cell as the start and scan **down** until the first empty cell (`reason: contiguous_down_from_start`).
       - If the explicitly provided start cell is empty, no contiguous-block suggestion is produced.
    - Otherwise (user typed only a column, like `A`):
-      - First scan **up** from the row above the current cell, skipping blank separators to find the nearest non-empty cell, then expand to the full contiguous block (`reason: contiguous_above_current_cell`).
-      - **Downward scan fallback:** if there is no data above (within the scan budget), scan **down** using the same “skip blanks then expand” logic (`reason: contiguous_below_current_cell`).
-        - If the active cell is in the referenced column, scanning starts at the row **below** the active cell.
-        - If the active cell is in a different column (e.g. formula in `B2` referencing `A`), scanning starts on the **same row** so same-row values can be included.
+       - First scan **up** to find the nearest non-empty cell and expand to a contiguous block (`reason: contiguous_above_current_cell`).
+         - If the active cell is in the referenced column, the scan starts at the row **above** the active cell (so the active row itself isn’t treated as part of the data block).
+         - If the active cell is in a different column (e.g. formula in `B5` referencing `A`), the scan starts on the **same row**, and if a block is found it is then extended **downward** to capture the full contiguous run around that row (common “in-block” formulas).
+       - **Downward scan fallback:** if there is no data above (within the scan budget), scan **down** using the same “skip blanks then expand” logic (`reason: contiguous_below_current_cell`).
+         - If the active cell is in the referenced column, scanning starts at the row **below** the active cell.
+         - If the active cell is in a different column (e.g. formula in `B2` referencing `A`), scanning starts on the **same row** so same-row values can be included.
 
 3. **Numeric trimming heuristic (implicit scans)**
    - If a block is “mostly numeric”, non-numeric *edge* cells are treated as header/footer and trimmed (common for a text header row above numeric data).
