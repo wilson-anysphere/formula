@@ -964,6 +964,67 @@ fn ignore_path_kind_filter_only_suppresses_matching_kind() {
 }
 
 #[test]
+fn ignore_path_part_glob_suppresses_all_matching_parts() {
+    let expected_zip = zip_bytes(&[
+        (
+            "xl/worksheets/sheet1.xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>
+</worksheet>"#,
+        ),
+        (
+            "xl/worksheets/sheet2.xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>
+</worksheet>"#,
+        ),
+    ]);
+    let actual_zip = zip_bytes(&[
+        (
+            "xl/worksheets/sheet1.xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.30"/>
+</worksheet>"#,
+        ),
+        (
+            "xl/worksheets/sheet2.xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.30"/>
+</worksheet>"#,
+        ),
+    ]);
+
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let options = DiffOptions {
+        ignore_parts: Default::default(),
+        ignore_globs: Vec::new(),
+        ignore_paths: vec![IgnorePathRule {
+            part: Some("xl/worksheets/*.xml".to_string()),
+            path_substring: "dyDescent".to_string(),
+            kind: None,
+        }],
+        strict_calc_chain: false,
+    };
+
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert!(
+        report.is_empty(),
+        "expected no diffs, got {:#?}",
+        report.differences
+    );
+}
+
+#[test]
 fn ignore_path_with_invalid_part_glob_does_not_match_all_parts() {
     let expected_zip = zip_bytes(&[(
         "xl/worksheets/sheet1.xml",
@@ -1140,6 +1201,73 @@ fn cli_ignore_path_in_flag_scopes_to_matching_part_only() {
     assert!(
         !stdout.contains("] xl/worksheets/sheet1.xml:"),
         "expected sheet1.xml diff to be suppressed (ignores may still be listed in header), got:\n{stdout}"
+    );
+}
+
+#[test]
+fn cli_ignore_path_in_glob_suppresses_all_matching_parts() {
+    let expected_zip = zip_bytes(&[
+        (
+            "xl/worksheets/sheet1.xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>
+</worksheet>"#,
+        ),
+        (
+            "xl/worksheets/sheet2.xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>
+</worksheet>"#,
+        ),
+    ]);
+    let actual_zip = zip_bytes(&[
+        (
+            "xl/worksheets/sheet1.xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.30"/>
+</worksheet>"#,
+        ),
+        (
+            "xl/worksheets/sheet2.xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.30"/>
+</worksheet>"#,
+        ),
+    ]);
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let original_path = tempdir.path().join("original.xlsx");
+    let modified_path = tempdir.path().join("modified.xlsx");
+    std::fs::write(&original_path, expected_zip).unwrap();
+    std::fs::write(&modified_path, actual_zip).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&original_path)
+        .arg(&modified_path)
+        .arg("--ignore-path-in")
+        .arg("xl/worksheets/*.xml:dyDescent")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "expected exit 0, got {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("No differences."),
+        "expected output to say 'No differences.', got:\n{}",
+        String::from_utf8_lossy(&output.stdout)
     );
 }
 
