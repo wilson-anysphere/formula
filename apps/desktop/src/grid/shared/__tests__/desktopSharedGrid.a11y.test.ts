@@ -104,8 +104,9 @@ describe("DesktopSharedGrid a11y", () => {
     const activeId = container.getAttribute("aria-activedescendant");
     expect(activeId).toBeTruthy();
 
-    const activeCell = container.querySelector(`#${activeId}`);
+    const activeCell = container.querySelector('[data-testid="canvas-grid-a11y-active-cell"]') as HTMLDivElement | null;
     expect(activeCell).not.toBeNull();
+    expect(activeCell?.id).toBe(activeId);
     expect(activeCell?.getAttribute("role")).toBe("gridcell");
     expect(activeCell?.getAttribute("aria-rowindex")).toBe("3");
     expect(activeCell?.getAttribute("aria-colindex")).toBe("5");
@@ -117,7 +118,12 @@ describe("DesktopSharedGrid a11y", () => {
     expect(activeCell?.getAttribute("aria-rowindex")).toBe("1");
     expect(activeCell?.getAttribute("aria-colindex")).toBe("1");
 
+    // Clearing selection should remove aria-activedescendant but keep the SR-only active-cell element mounted.
+    grid.setSelectionRanges(null);
+    expect(container.getAttribute("aria-activedescendant")).toBeNull();
+    expect(container.querySelector(`#${activeId}`)).toBe(activeCell);
+    expect(activeCell?.getAttribute("aria-hidden")).toBe("true");
+
     grid.destroy();
   });
 });
-

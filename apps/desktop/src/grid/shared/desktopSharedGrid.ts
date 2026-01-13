@@ -220,7 +220,11 @@ export class DesktopSharedGrid {
     this.a11yActiveCellEl.id = this.a11yActiveCellId;
     this.a11yActiveCellEl.dataset.testid = "canvas-grid-a11y-active-cell";
     this.a11yActiveCellEl.setAttribute("role", "gridcell");
+    // Keep the element mounted for the lifetime of the grid so aria-activedescendant can
+    // reliably reference it when the active cell changes.
+    this.a11yActiveCellEl.setAttribute("aria-hidden", "true");
     applySrOnlyStyle(this.a11yActiveCellEl);
+    this.container.appendChild(this.a11yActiveCellEl);
 
     this.container.setAttribute("role", "grid");
     this.container.setAttribute("aria-rowcount", String(options.rowCount));
@@ -457,7 +461,7 @@ export class DesktopSharedGrid {
 
     if (!selection) {
       this.container.removeAttribute("aria-activedescendant");
-      this.a11yActiveCellEl.remove();
+      this.a11yActiveCellEl.setAttribute("aria-hidden", "true");
       this.a11yActiveCellEl.textContent = "";
       this.a11yActiveCellEl.removeAttribute("aria-rowindex");
       this.a11yActiveCellEl.removeAttribute("aria-colindex");
@@ -470,10 +474,11 @@ export class DesktopSharedGrid {
       this.container.appendChild(this.a11yActiveCellEl);
     }
 
-    this.container.setAttribute("aria-activedescendant", this.a11yActiveCellId);
+    this.a11yActiveCellEl.removeAttribute("aria-hidden");
     this.a11yActiveCellEl.setAttribute("aria-rowindex", String(selection.row + 1));
     this.a11yActiveCellEl.setAttribute("aria-colindex", String(selection.col + 1));
     this.a11yActiveCellEl.setAttribute("aria-selected", "true");
+    this.container.setAttribute("aria-activedescendant", this.a11yActiveCellId);
 
     const row0 = selection.row - this.headerRows;
     const col0 = selection.col - this.headerCols;
