@@ -7,6 +7,15 @@ For the intended *cross-crate* ownership boundaries and end-to-end refresh flows
 compute vs XLSX import/export), see
 [ADR-0005: PivotTables ownership and data flow across crates](./adr/ADR-0005-pivot-tables-ownership-and-data-flow.md).
 
+This document is intentionally scoped to **OpenXML I/O + round-trip fidelity**. Pivot *computation*
+lives elsewhere:
+
+- Worksheet/range pivots: `formula-engine`
+- Data Model pivots (measures/relationships): `formula-dax`
+
+Note: `formula-xlsx` also contains a best-effort OpenXML → engine bridge (for in-app computation),
+but that is a convenience layer, not the canonical schema boundary (see ADR-0005).
+
 The goal is team clarity: pivots are a large subsystem with many interdependent OPC parts, and
 regressions are easy to introduce when changing ZIP/relationship handling.
 
