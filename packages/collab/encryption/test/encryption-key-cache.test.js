@@ -13,7 +13,17 @@ test("index.node.js encryption key cache is bounded (LRU) and clearable", async 
   assert.equal(typeof decryptCellPlaintext, "function");
   assert.equal(typeof clearEncryptionKeyCache, "function");
 
-  const subtle = globalThis.crypto.subtle;
+  // Node 18 may not expose WebCrypto on `globalThis.crypto`. The implementation
+  // under test falls back to `node:crypto`'s `webcrypto` in that case, so patch
+  // the `SubtleCrypto#importKey` method on whichever WebCrypto instance the
+  // module will use.
+  const nodeCrypto = await import("node:crypto");
+  const globalCrypto = globalThis.crypto;
+  const cryptoObj =
+    globalCrypto?.subtle && typeof globalCrypto.getRandomValues === "function" ? globalCrypto : nodeCrypto.webcrypto;
+  assert.ok(cryptoObj?.subtle, "expected WebCrypto (crypto.subtle) to be available for this test");
+
+  const subtle = cryptoObj.subtle;
   const originalImportKey = subtle.importKey;
   let importKeyCalls = 0;
   subtle.importKey = async (...args) => {
@@ -70,4 +80,3 @@ test("index.node.js encryption key cache is bounded (LRU) and clearable", async 
   await encryptCellPlaintext({ plaintext, key: key3, context });
   assert.equal(importKeyCalls, 5, "expected clearEncryptionKeyCache() to force re-import");
 });
-
