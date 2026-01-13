@@ -37,7 +37,8 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Keep security scans on the same Node.js major as CI/release builds to reduce drift.
+          node-version: 22
           cache: pnpm
           cache-dependency-path: "**/pnpm-lock.yaml"
 
