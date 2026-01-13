@@ -63,12 +63,32 @@ export class JsonVectorStore extends InMemoryVectorStore {
 
   async _maybeResetOnCorrupt() {
     if (!this._resetOnCorrupt) return;
+    let cleared = false;
+
     const remove = this._storage?.remove;
-    if (typeof remove !== "function") return;
-    try {
-      await remove.call(this._storage);
-    } catch {
-      // ignore
+    if (typeof remove === "function") {
+      try {
+        await remove.call(this._storage);
+        cleared = true;
+      } catch {
+        // ignore
+      }
+    }
+
+    // Some BinaryStorage implementations may not support `remove()`. In that case,
+    // best-effort overwrite the corrupted payload with a valid empty snapshot so
+    // subsequent loads don't repeatedly hit the corruption path.
+    if (!cleared) {
+      try {
+        const payload = JSON.stringify({
+          version: JSON_VECTOR_STORE_VERSION,
+          dimension: this.dimension,
+          records: [],
+        });
+        await this._storage.save(new TextEncoder().encode(payload));
+      } catch {
+        // ignore
+      }
     }
   }
 

@@ -47,3 +47,29 @@ test("JsonVectorStore resetOnCorrupt clears storage and loads empty on invalid J
   assert.ok(storage.data, "expected store to persist after upsert");
 });
 
+test("JsonVectorStore resetOnCorrupt overwrites corrupted payloads when storage lacks remove()", async () => {
+  const bad = new TextEncoder().encode("{not json");
+  /** @type {Uint8Array | null} */
+  let stored = new Uint8Array(bad);
+  let saves = 0;
+
+  const storage = {
+    async load() {
+      return stored ? new Uint8Array(stored) : null;
+    },
+    async save(data) {
+      saves += 1;
+      stored = new Uint8Array(data);
+    },
+  };
+
+  const store = new JsonVectorStore({ storage, dimension: 3, resetOnCorrupt: true, autoSave: false });
+  const list1 = await store.list();
+  assert.deepEqual(list1, []);
+  assert.ok(saves >= 1, "expected JsonVectorStore to overwrite corrupted payload with empty snapshot");
+
+  // A second instance should now be able to parse the persisted data.
+  const store2 = new JsonVectorStore({ storage, dimension: 3, resetOnCorrupt: true, autoSave: false });
+  const list2 = await store2.list();
+  assert.deepEqual(list2, []);
+});
