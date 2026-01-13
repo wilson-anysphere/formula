@@ -30,6 +30,8 @@ type WasmModule = {
   default?: (module_or_path?: unknown) => Promise<void> | void;
   lexFormula: (formula: string, options?: FormulaParseOptions) => unknown;
   parseFormulaPartial: (formula: string, cursor?: number, options?: FormulaParseOptions) => unknown;
+  canonicalizeFormula?: (formula: string, localeId: string, referenceStyle?: "A1" | "R1C1") => string;
+  localizeFormula?: (formula: string, localeId: string, referenceStyle?: "A1" | "R1C1") => string;
   rewriteFormulasForCopyDelta?: (requests: unknown) => unknown;
   WasmWorkbook: {
     new (): WasmWorkbookInstance;

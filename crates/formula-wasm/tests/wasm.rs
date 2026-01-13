@@ -8,7 +8,8 @@ use wasm_bindgen_test::wasm_bindgen_test;
 
 use formula_model::CellValue as ModelCellValue;
 use formula_wasm::{
-    lex_formula, parse_formula_partial, rewrite_formulas_for_copy_delta, WasmWorkbook, DEFAULT_SHEET,
+    canonicalize_formula, lex_formula, localize_formula, parse_formula_partial,
+    rewrite_formulas_for_copy_delta, WasmWorkbook, DEFAULT_SHEET,
 };
 
 #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
@@ -273,6 +274,49 @@ fn lex_formula_accepts_full_parse_options_struct() {
     assert!(
         tokens.iter().any(|t| t.kind == "R1C1Cell"),
         "expected full ParseOptions R1C1 lexing to emit R1C1Cell tokens, got {tokens:?}"
+    );
+}
+
+#[wasm_bindgen_test]
+fn canonicalize_and_localize_formula_roundtrip_de_de() {
+    let localized = "=SUMME(1,5;2)";
+    let canonical = canonicalize_formula(localized, "de-DE", None).unwrap();
+    assert_eq!(canonical, "=SUM(1.5,2)");
+
+    let roundtrip = localize_formula(&canonical, "de-DE", None).unwrap();
+    assert_eq!(roundtrip, localized);
+}
+
+#[wasm_bindgen_test]
+fn canonicalize_and_localize_formula_roundtrip_fr_fr() {
+    let localized = "=SOMME(1,5;2)";
+    let canonical = canonicalize_formula(localized, "fr-FR", None).unwrap();
+    assert_eq!(canonical, "=SUM(1.5,2)");
+
+    let roundtrip = localize_formula(&canonical, "fr-FR", None).unwrap();
+    assert_eq!(roundtrip, localized);
+}
+
+#[wasm_bindgen_test]
+fn canonicalize_and_localize_formula_roundtrip_r1c1_reference_style() {
+    let localized = "=SUMME(R1C1;R1C2)";
+    let canonical = canonicalize_formula(localized, "de-DE", Some("R1C1".to_string())).unwrap();
+    assert_eq!(canonical, "=SUM(R1C1,R1C2)");
+
+    let roundtrip = localize_formula(&canonical, "de-DE", Some("R1C1".to_string())).unwrap();
+    assert_eq!(roundtrip, localized);
+}
+
+#[wasm_bindgen_test]
+fn canonicalize_formula_rejects_unknown_locale_id_with_supported_list() {
+    let err = canonicalize_formula("=1+2", "xx-XX", None).unwrap_err();
+    let message = err
+        .as_string()
+        .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
+    assert!(message.contains("unknown localeId: xx-XX"));
+    assert!(
+        message.contains("Supported locale ids"),
+        "expected actionable locale message, got {message:?}"
     );
 }
 

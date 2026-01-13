@@ -7,7 +7,8 @@ use formula_engine::{
 };
 use formula_engine::editing::rewrite::rewrite_formula_for_copy_delta;
 use formula_engine::locale::{
-    canonicalize_formula, get_locale, FormulaLocale, ValueLocaleConfig, EN_US,
+    canonicalize_formula_with_style, get_locale, localize_formula_with_style, FormulaLocale,
+    ValueLocaleConfig, DE_DE, EN_US, ES_ES, FR_FR,
 };
 use formula_model::{
     display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range, EXCEL_MAX_COLS,
@@ -45,6 +46,27 @@ pub struct CellChange {
 
 fn js_err(message: impl ToString) -> JsValue {
     JsValue::from_str(&message.to_string())
+}
+
+fn require_formula_locale(locale_id: &str) -> Result<&'static FormulaLocale, JsValue> {
+    get_locale(locale_id).ok_or_else(|| {
+        js_err(format!(
+            "unknown localeId: {locale_id}. Supported locale ids: {}, {}, {}, {}",
+            EN_US.id, DE_DE.id, FR_FR.id, ES_ES.id
+        ))
+    })
+}
+
+fn parse_reference_style(
+    reference_style: Option<String>,
+) -> Result<formula_engine::ReferenceStyle, JsValue> {
+    match reference_style.as_deref().unwrap_or("A1") {
+        "A1" => Ok(formula_engine::ReferenceStyle::A1),
+        "R1C1" => Ok(formula_engine::ReferenceStyle::R1C1),
+        other => Err(js_err(format!(
+            "invalid referenceStyle: {other}. Expected \"A1\" or \"R1C1\""
+        ))),
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -450,6 +472,43 @@ pub fn lex_formula_partial(formula: &str, opts: Option<JsValue>) -> JsValue {
     use serde::ser::Serialize as _;
     out.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
         .unwrap_or_else(|err| js_err(err.to_string()))
+}
+
+/// Canonicalize a localized formula into the engine's persisted form.
+///
+/// Canonical form uses:
+/// - English function names (e.g. `SUM`)
+/// - `,` as argument separator
+/// - `.` as decimal separator
+///
+/// `referenceStyle` controls how cell references are tokenized (`A1` vs `R1C1`).
+#[wasm_bindgen(js_name = "canonicalizeFormula")]
+pub fn canonicalize_formula(
+    formula: &str,
+    locale_id: &str,
+    reference_style: Option<String>,
+) -> Result<String, JsValue> {
+    ensure_rust_constructors_run();
+    let locale = require_formula_locale(locale_id)?;
+    let reference_style = parse_reference_style(reference_style)?;
+    canonicalize_formula_with_style(formula, locale, reference_style)
+        .map_err(|err| js_err(err.to_string()))
+}
+
+/// Localize a canonical (English) formula into a locale-specific display form.
+///
+/// `referenceStyle` controls how cell references are tokenized (`A1` vs `R1C1`).
+#[wasm_bindgen(js_name = "localizeFormula")]
+pub fn localize_formula(
+    formula: &str,
+    locale_id: &str,
+    reference_style: Option<String>,
+) -> Result<String, JsValue> {
+    ensure_rust_constructors_run();
+    let locale = require_formula_locale(locale_id)?;
+    let reference_style = parse_reference_style(reference_style)?;
+    localize_formula_with_style(formula, locale, reference_style)
+        .map_err(|err| js_err(err.to_string()))
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1138,7 +1197,11 @@ impl WorkbookState {
             let canonical = if self.formula_locale.id == EN_US.id {
                 normalized
             } else {
-                canonicalize_formula(&normalized, self.formula_locale)
+                canonicalize_formula_with_style(
+                    &normalized,
+                    self.formula_locale,
+                    formula_engine::ReferenceStyle::A1,
+                )
                     .map_err(|err| js_err(err.to_string()))?
             };
 
