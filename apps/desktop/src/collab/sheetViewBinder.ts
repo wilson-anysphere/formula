@@ -1,4 +1,5 @@
 import * as Y from "yjs";
+import { getYMap, getYText } from "@formula/collab-yjs-utils";
 
 import type { CollabSession } from "@formula/collab-session";
 import type { DocumentController } from "../document/documentController.js";
@@ -24,40 +25,6 @@ function isRecord(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function isYText(value: unknown): value is { toString: () => string } {
-  if (value instanceof Y.Text) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = value as any;
-  // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
-  // module instances (ESM + CJS). Avoid relying on `constructor.name`; prefer a
-  // structural check instead.
-  if (typeof maybe.toString !== "function") return false;
-  if (typeof maybe.toDelta !== "function") return false;
-  if (typeof maybe.applyDelta !== "function") return false;
-  if (typeof maybe.insert !== "function") return false;
-  if (typeof maybe.delete !== "function") return false;
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return true;
-}
-
-function getYMap(value: unknown): Y.Map<any> | null {
-  if (value instanceof Y.Map) return value;
-
-  // Duck-type to handle multiple `yjs` module instances.
-  if (!value || typeof value !== "object") return null;
-  const maybe = value as any;
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.set !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.forEach !== "function") return null;
-  // Plain JS Maps also have get/set/delete/forEach, so additionally require Yjs'
-  // deep observer APIs.
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe as Y.Map<any>;
-}
-
 function readYMapOrObject(value: any, key: string): any {
   const map = getYMap(value);
   if (map) return map.get(key);
@@ -67,7 +34,8 @@ function readYMapOrObject(value: any, key: string): any {
 
 function coerceString(value: unknown): string | null {
   if (typeof value === "string") return value;
-  if (isYText(value)) return value.toString();
+  const text = getYText(value);
+  if (text) return text.toString();
   if (value == null) return null;
   return String(value);
 }
