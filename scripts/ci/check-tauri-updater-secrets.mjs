@@ -128,6 +128,61 @@ function isEncryptedPrivateKey(privateKey) {
   return undefined;
 }
 
+/**
+ * Basic format validation for the updater private key.
+ *
+ * The tauri-action signer supports:
+ * - PEM (`-----BEGIN (ENCRYPTED )?PRIVATE KEY-----`)
+ * - base64-encoded raw Ed25519 keys (32/64 bytes)
+ * - base64-encoded PKCS#8 DER (ASN.1 SEQUENCE, starts with 0x30)
+ * - base64-encoded PEM blobs (decoded bytes contain the PEM header)
+ *
+ * @param {string} privateKey
+ */
+function validatePrivateKeyFormat(privateKey) {
+  const trimmed = privateKey.trim();
+  if (trimmed.length === 0) return;
+
+  if (
+    trimmed.includes("-----BEGIN PRIVATE KEY-----") ||
+    trimmed.includes("-----BEGIN ENCRYPTED PRIVATE KEY-----")
+  ) {
+    return;
+  }
+
+  const decoded = decodeBase64(trimmed);
+  if (!decoded) {
+    errBlock(`Invalid TAURI_PRIVATE_KEY`, [
+      `TAURI_PRIVATE_KEY is set but does not look like a PEM key or a base64-encoded key.`,
+      `Make sure you paste the private key printed by:`,
+      `  (cd apps/desktop/src-tauri && cargo tauri signer generate)`,
+      `Then store it as the GitHub Actions secret TAURI_PRIVATE_KEY (Settings → Secrets and variables → Actions).`,
+    ]);
+    err(`\nUpdater signing secrets preflight failed. Fix TAURI_PRIVATE_KEY before tagging a release.\n`);
+    throw new Error("invalid TAURI_PRIVATE_KEY");
+  }
+
+  // base64-encoded PEM
+  if (decoded.includes(Buffer.from("-----BEGIN PRIVATE KEY-----"))) return;
+  if (decoded.includes(Buffer.from("-----BEGIN ENCRYPTED PRIVATE KEY-----"))) return;
+
+  // raw key material
+  if (decoded.length === 32 || decoded.length === 64) return;
+
+  // PKCS#8 DER should begin with an ASN.1 SEQUENCE (0x30).
+  if (decoded.length > 0 && decoded[0] === 0x30) return;
+
+  errBlock(`Invalid TAURI_PRIVATE_KEY`, [
+    `TAURI_PRIVATE_KEY is set but does not look like a supported Tauri signing key format.`,
+    `Expected a PEM key, base64-encoded raw Ed25519 key, or base64-encoded PKCS#8 DER.`,
+    `Regenerate keys with:`,
+    `  (cd apps/desktop/src-tauri && cargo tauri signer generate)`,
+    `Then update the GitHub Actions secret TAURI_PRIVATE_KEY.`,
+  ]);
+  err(`\nUpdater signing secrets preflight failed. Fix TAURI_PRIVATE_KEY before tagging a release.\n`);
+  throw new Error("invalid TAURI_PRIVATE_KEY");
+}
+
 function main() {
   /** @type {any} */
   let config;
@@ -157,6 +212,16 @@ function main() {
   const missing = [];
   if (privateKey.trim().length === 0) {
     missing.push("TAURI_PRIVATE_KEY");
+  }
+
+  // If the key is present, ensure it at least looks like a valid Tauri signing key
+  // so we fail early with a helpful error instead of failing inside tauri-action.
+  if (privateKey.trim().length > 0) {
+    try {
+      validatePrivateKeyFormat(privateKey);
+    } catch {
+      return;
+    }
   }
 
   const passwordTrimmed = password.trim();

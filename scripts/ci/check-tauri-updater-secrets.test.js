@@ -31,6 +31,12 @@ test("fails when TAURI_PRIVATE_KEY is missing", () => {
   assert.match(proc.stderr, /\bTAURI_PRIVATE_KEY\b/);
 });
 
+test("fails when TAURI_PRIVATE_KEY is set but not a supported format", () => {
+  const proc = run({ TAURI_PRIVATE_KEY: "definitely-not-a-key", TAURI_KEY_PASSWORD: "pass" });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /Invalid TAURI_PRIVATE_KEY/);
+});
+
 test("passes with an unencrypted raw Ed25519 key and empty password", () => {
   const raw = Buffer.alloc(64, 1).toString("base64").replace(/=+$/, ""); // unpadded base64
   const proc = run({ TAURI_PRIVATE_KEY: raw, TAURI_KEY_PASSWORD: "" });
