@@ -237,6 +237,17 @@ export class DesktopSharedGrid {
       content: this.contentCanvas,
       selection: this.selectionCanvas
     });
+
+    // `CanvasGridRenderer.attach()` assigns inline z-index values (0/1/2) so the grid can be
+    // embedded in isolation without depending on any external CSS.
+    //
+    // The desktop app relies on a single z-index system shared across canvases + DOM overlays
+    // (drawings, charts, selection, outline, scrollbars). Clear the inline z-index so
+    // `apps/desktop/src/styles/charts-overlay.css` can deterministically control stacking.
+    this.gridCanvas.style.zIndex = "";
+    this.contentCanvas.style.zIndex = "";
+    this.selectionCanvas.style.zIndex = "";
+
     this.renderer.setFrozen(this.frozenRows, this.frozenCols);
     this.renderer.setFillHandleEnabled(this.interactionMode === "default" && Boolean(this.callbacks.onFillCommit));
 

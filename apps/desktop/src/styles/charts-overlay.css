@@ -1,6 +1,12 @@
 /* Chart overlay layer (canvas). */
 .grid-canvas--chart {
   pointer-events: none;
+  /*
+    Deterministic overlay stacking across both legacy and shared grid renderers:
+    charts should render above the grid cell content and above the drawings overlay.
+  */
+  z-index: 2;
+  z-index: var(--grid-z-chart-overlay, 2);
 }
 
 /* Canvas-based drawings overlay (shapes, images, etc). */
@@ -10,6 +16,12 @@
   overflow: hidden;
   left: 0;
   top: 0;
+  /*
+    Deterministic overlay stacking across both legacy and shared grid renderers:
+    drawings should render above the grid cell content but below charts + selection.
+  */
+  z-index: 1;
+  z-index: var(--grid-z-drawing-overlay, 1);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -24,28 +36,48 @@
   any floating UI (comments, tooltips, conflicts, etc).
 */
 .grid-root {
-  /* CanvasGridRenderer uses z-index 0/1/2 for its base/content/selection canvases. */
-  --grid-z-drawing-overlay: 2;
+  --grid-z-drawing-overlay: 1;
   --grid-z-chart-overlay: 2;
   --grid-z-selection-overlay: 3;
   --grid-z-outline-overlay: 4;
 }
 
+/*
+  Grid overlay stacking (both legacy + shared):
+  - drawings above cell content
+  - charts above drawings
+  - selection above all (except outline + scrollbars)
+*/
+
+.grid-canvas--selection {
+  z-index: 3;
+  z-index: var(--grid-z-selection-overlay, 3);
+}
+
+.outline-layer {
+  z-index: 4;
+  z-index: var(--grid-z-outline-overlay, 4);
+}
+
 /* Shared-grid overlay stacking: drawings above cells, charts above drawings, selection above all. */
 .drawing-layer--shared {
-  z-index: var(--grid-z-drawing-overlay, 2);
+  z-index: 1;
+  z-index: var(--grid-z-drawing-overlay, 1);
 }
 
 /* Shared-grid overlay stacking: charts above cells, selection above charts. */
 .grid-canvas--shared-chart {
+  z-index: 2;
   z-index: var(--grid-z-chart-overlay, 2);
 }
 
 .grid-canvas--shared-selection {
+  z-index: 3;
   z-index: var(--grid-z-selection-overlay, 3);
 }
 
 .outline-layer--shared {
+  z-index: 4;
   z-index: var(--grid-z-outline-overlay, 4);
 }
 
