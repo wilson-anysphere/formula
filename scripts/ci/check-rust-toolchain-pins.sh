@@ -31,6 +31,11 @@ if [ -z "$channel" ]; then
   exit 1
 fi
 
+if ! [[ "$channel" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "rust-toolchain.toml must pin an explicit Rust release (e.g. 1.92.0); found channel=${channel}" >&2
+  exit 1
+fi
+
 fail=0
 
 # `git grep` exits:
