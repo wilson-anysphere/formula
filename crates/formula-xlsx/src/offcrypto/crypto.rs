@@ -283,6 +283,7 @@ pub fn derive_segment_iv(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::decrypt_aes_cbc_no_padding;
     use std::time::{Duration, Instant};
 
     #[test]
@@ -413,5 +414,91 @@ mod tests {
         let a = derive_segment_iv(&salt, idx, 16, HashAlgorithm::Sha1).unwrap();
         let b = derive_iv(&salt, &idx.to_le_bytes(), 16, HashAlgorithm::Sha1).unwrap();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn agile_makekey_from_password_vector_matches_msoffcrypto_tool() {
+        // Test vector sourced from `msoffcrypto-tool` (Python) `ecma376_agile.py` docstring for
+        // `ECMA376Agile.makekey_from_password`.
+        let password = "Password1234_";
+        let salt_value: [u8; 16] = [
+            0x4c, 0x72, 0x5d, 0x45, 0xdc, 0x61, 0x0f, 0x93, 0x94, 0x12, 0xa0, 0x4d, 0xa7, 0x91,
+            0x04, 0x66,
+        ];
+        let encrypted_key_value: [u8; 32] = [
+            0xa1, 0x6c, 0xd5, 0x16, 0x5a, 0x7a, 0xb9, 0xd2, 0x71, 0x11, 0x3e, 0xd3, 0x86, 0xa7,
+            0x8c, 0xf4, 0x96, 0x92, 0xe8, 0xe5, 0x27, 0xb0, 0xc5, 0xfc, 0x00, 0x55, 0xed, 0x08,
+            0x0b, 0x7c, 0xb9, 0x4b,
+        ];
+        let expected_key: [u8; 32] = [
+            0x40, 0x20, 0x66, 0x09, 0xd9, 0xfa, 0xad, 0xf2, 0x4b, 0x07, 0x6a, 0xeb, 0xf2, 0xc4,
+            0x35, 0xb7, 0x42, 0x92, 0xc8, 0xb8, 0xa7, 0xaa, 0x81, 0xbc, 0x67, 0x9b, 0xe8, 0x97,
+            0x11, 0xb0, 0x2a, 0xc2,
+        ];
+
+        let hash_alg = HashAlgorithm::Sha512;
+        let password_hash = hash_password(password, &salt_value, 100_000, hash_alg).unwrap();
+        let encryption_key = derive_key(&password_hash, &KEY_VALUE_BLOCK, 256 / 8, hash_alg).unwrap();
+        let key = decrypt_aes_cbc_no_padding(&encryption_key, &salt_value, &encrypted_key_value)
+            .expect("decrypt encryptedKeyValue");
+
+        assert_eq!(key.as_slice(), expected_key);
+    }
+
+    #[test]
+    fn agile_verify_password_vector_matches_msoffcrypto_tool() {
+        // Test vector sourced from `msoffcrypto-tool` (Python) `ecma376_agile.py` docstring for
+        // `ECMA376Agile.verify_password`.
+        let salt_value: [u8; 16] = [
+            0xcb, 0xca, 0x1c, 0x99, 0x93, 0x43, 0xfb, 0xad, 0x92, 0x07, 0x56, 0x34, 0x15, 0x00,
+            0x34, 0xb0,
+        ];
+        let encrypted_verifier_hash_input: [u8; 16] = [
+            0x39, 0xee, 0xa5, 0x4e, 0x26, 0xe5, 0x14, 0x79, 0x8c, 0x28, 0x4b, 0xc7, 0x71, 0x4d,
+            0x38, 0xac,
+        ];
+        let encrypted_verifier_hash_value: [u8; 64] = [
+            0x14, 0x37, 0x6d, 0x6d, 0x81, 0x73, 0x34, 0xe6, 0xb0, 0xff, 0x4f, 0xd8, 0x22, 0x1a,
+            0x7c, 0x67, 0x8e, 0x5d, 0x8a, 0x78, 0x4e, 0x8f, 0x99, 0x9f, 0x4c, 0x18, 0x89, 0x30,
+            0xc3, 0x6a, 0x4b, 0x29, 0xc5, 0xb3, 0x33, 0x60, 0x5b, 0x5c, 0xd4, 0x03, 0xb0, 0x50,
+            0x03, 0xad, 0xcf, 0x18, 0xcc, 0xa8, 0xcb, 0xab, 0x8d, 0xeb, 0xe3, 0x73, 0xc6, 0x56,
+            0x04, 0xa0, 0xbe, 0xcf, 0xae, 0x5c, 0x0a, 0xd0,
+        ];
+
+        let hash_alg = HashAlgorithm::Sha512;
+        let key_len = 256 / 8;
+        let expected_hash_len = hash_alg.digest_len();
+
+        let verify = |password: &str| -> bool {
+            let password_hash = hash_password(password, &salt_value, 100_000, hash_alg).unwrap();
+
+            let k1 = derive_key(&password_hash, &VERIFIER_HASH_INPUT_BLOCK, key_len, hash_alg).unwrap();
+            let verifier_input_padded = decrypt_aes_cbc_no_padding(
+                &k1,
+                &salt_value,
+                &encrypted_verifier_hash_input,
+            )
+            .expect("decrypt encryptedVerifierHashInput");
+            let verifier_input = verifier_input_padded;
+
+            let mut computed_hash = [0u8; MAX_DIGEST_LEN];
+            hash_alg.hash_two_into(&verifier_input, &[], &mut computed_hash);
+
+            let k2 = derive_key(&password_hash, &VERIFIER_HASH_VALUE_BLOCK, key_len, hash_alg).unwrap();
+            let expected_hash_padded = decrypt_aes_cbc_no_padding(
+                &k2,
+                &salt_value,
+                &encrypted_verifier_hash_value,
+            )
+            .expect("decrypt encryptedVerifierHashValue");
+            let expected_hash = expected_hash_padded
+                .get(..expected_hash_len)
+                .expect("expected hash");
+
+            computed_hash[..expected_hash_len] == *expected_hash
+        };
+
+        assert!(verify("Password1234_"), "expected verifier to accept correct password");
+        assert!(!verify("wrong password"), "expected verifier to reject incorrect password");
     }
 }
