@@ -14,14 +14,31 @@ import {
 } from "../api";
 
 describe("tauri/api dynamic accessors", () => {
-  const originalTauri = (globalThis as any).__TAURI__;
+  const originalTauriDescriptor = Object.getOwnPropertyDescriptor(globalThis, "__TAURI__");
+
+  const restoreTauri = () => {
+    if (originalTauriDescriptor) {
+      Object.defineProperty(globalThis, "__TAURI__", originalTauriDescriptor);
+      return;
+    }
+    // If the property did not exist initially, remove it.
+    // (If it is non-configurable for some reason, deletion will fail; ignore.)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (globalThis as any).__TAURI__;
+    } catch {
+      // ignore
+    }
+  };
 
   beforeEach(() => {
-    (globalThis as any).__TAURI__ = undefined;
+    // Ensure a consistent, configurable starting point even if a prior test defined
+    // `__TAURI__` with a throwing getter.
+    Object.defineProperty(globalThis, "__TAURI__", { configurable: true, writable: true, value: undefined });
   });
 
   afterEach(() => {
-    (globalThis as any).__TAURI__ = originalTauri;
+    restoreTauri();
     vi.restoreAllMocks();
   });
 
@@ -29,6 +46,25 @@ describe("tauri/api dynamic accessors", () => {
     it("returns null / throws when __TAURI__ is missing", () => {
       expect(getTauriDialogOrNull()).toBeNull();
       expect(() => getTauriDialogOrThrow()).toThrowError("Tauri dialog API not available");
+    });
+
+    it("treats a throwing __TAURI__ getter as \"missing\" (best-effort hardening)", () => {
+      Object.defineProperty(globalThis, "__TAURI__", {
+        configurable: true,
+        get() {
+          throw new Error("Blocked __TAURI__ access");
+        },
+      });
+
+      expect(getTauriDialogOrNull()).toBeNull();
+      expect(getTauriEventApiOrNull()).toBeNull();
+      expect(getTauriWindowHandleOrNull()).toBeNull();
+      expect(hasTauriWindowApi()).toBe(false);
+      expect(hasTauriWindowHandleApi()).toBe(false);
+
+      expect(() => getTauriDialogOrThrow()).toThrowError("Tauri dialog API not available");
+      expect(() => getTauriEventApiOrThrow()).toThrowError("Tauri event API not available");
+      expect(() => getTauriWindowHandleOrThrow()).toThrowError("Tauri window API not available");
     });
 
     it("detects the dialog API on __TAURI__.dialog (legacy shape)", () => {

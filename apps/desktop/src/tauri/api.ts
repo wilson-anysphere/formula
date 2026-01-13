@@ -14,8 +14,18 @@ export type TauriEventApi = {
   emit: TauriEmit | null;
 };
 
+function getTauriGlobalOrNull(): any | null {
+  try {
+    return (globalThis as any).__TAURI__ ?? null;
+  } catch {
+    // Some hardened host environments (or tests) may define `__TAURI__` with a throwing getter.
+    // Treat that as "unavailable" so best-effort callsites can fall back cleanly.
+    return null;
+  }
+}
+
 function getTauriDialogNamespaceOrNull(): any | null {
-  const tauri = (globalThis as any).__TAURI__ as any;
+  const tauri = getTauriGlobalOrNull();
   return tauri?.dialog ?? tauri?.plugin?.dialog ?? tauri?.plugins?.dialog ?? null;
 }
 
@@ -60,7 +70,7 @@ export function getTauriDialogOrThrow(): TauriDialogApi {
  * `@tauri-apps/api`.
  */
 export function getTauriEventApiOrNull(): TauriEventApi | null {
-  const tauri = (globalThis as any).__TAURI__ as any;
+  const tauri = getTauriGlobalOrNull();
   const eventApi = tauri?.event ?? tauri?.plugin?.event ?? tauri?.plugins?.event ?? null;
   const listen = eventApi?.listen as TauriListen | undefined;
   if (typeof listen !== "function") return null;
@@ -77,7 +87,7 @@ export function getTauriEventApiOrThrow(): TauriEventApi {
 }
 
 export function hasTauriWindowApi(): boolean {
-  return Boolean((globalThis as any).__TAURI__?.window);
+  return Boolean(getTauriGlobalOrNull()?.window);
 }
 
 /**
@@ -87,18 +97,25 @@ export function hasTauriWindowApi(): boolean {
  * feature-detection without invoking the underlying bindings).
  */
 export function hasTauriWindowHandleApi(): boolean {
-  const winApi = (globalThis as any).__TAURI__?.window as any;
+  const winApi = getTauriGlobalOrNull()?.window as any;
   if (!winApi) return false;
+  const hasAppWindow = (() => {
+    try {
+      return Boolean(winApi.appWindow);
+    } catch {
+      return false;
+    }
+  })();
   return (
     typeof winApi.getCurrentWebviewWindow === "function" ||
     typeof winApi.getCurrentWindow === "function" ||
     typeof winApi.getCurrent === "function" ||
-    Boolean(winApi.appWindow)
+    hasAppWindow
   );
 }
 
 export function getTauriWindowHandleOrNull(): any | null {
-  const winApi = (globalThis as any).__TAURI__?.window as any;
+  const winApi = getTauriGlobalOrNull()?.window as any;
   if (!winApi) return null;
 
   // Tauri v2 exposes window handles via helper functions; keep this flexible since
@@ -128,7 +145,7 @@ export function getTauriWindowHandleOrNull(): any | null {
 }
 
 export function getTauriWindowHandleOrThrow(): any {
-  const winApi = (globalThis as any).__TAURI__?.window as any;
+  const winApi = getTauriGlobalOrNull()?.window as any;
   if (!winApi) {
     throw new Error("Tauri window API not available");
   }
