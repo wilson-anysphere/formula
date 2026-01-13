@@ -2252,10 +2252,31 @@ fn materialize_rgce(
             }
             0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
             | 0x2E | 0x4E | 0x6E => {
-                // PtgMem*: [cce: u16]
+                // PtgMem*: [cce: u16][rgce subexpression bytes...]
+                //
+                // In BIFF12, the `cce` field is followed immediately by `cce` bytes containing a
+                // nested rgce subexpression. These tokens are usually ignored for printing, but
+                // the nested bytes still need to be materialized (shift relative refs) so the
+                // dependency graph stays consistent for shared formulas.
+                if i + 2 > base.len() {
+                    return None;
+                }
+                let cce = u16::from_le_bytes([base[i], base[i + 1]]) as usize;
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 2)?);
+                out.extend_from_slice(&base[i..i + 2]);
                 i += 2;
+
+                if i + cce > base.len() {
+                    return None;
+                }
+                let nested = base.get(i..i + cce)?;
+                let nested_out = materialize_rgce(nested, base_row, base_col, row, col)?;
+                // Materialization should preserve encoded size; bail out defensively otherwise.
+                if nested_out.len() != cce {
+                    return None;
+                }
+                out.extend_from_slice(&nested_out);
+                i += cce;
             }
             0x19 => {
                 // PtgAttr: [grbit: u8][wAttr: u16]
