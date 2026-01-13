@@ -700,6 +700,7 @@ export class FormulaBarView {
               } catch {
                 address.focus();
               }
+              address.select();
               return;
             }
 
@@ -766,6 +767,7 @@ export class FormulaBarView {
           } catch {
             address.focus();
           }
+          address.select();
           return;
         }
 
