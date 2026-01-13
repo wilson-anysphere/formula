@@ -106,6 +106,14 @@ The release workflow passes these to `tauri-apps/tauri-action`, which signs the 
 
 The release workflow is wired for code signing if the following secrets are present.
 
+CI behavior note:
+
+- If the signing/notarization secrets are **not** configured (common on forks or dry-runs), the
+  release workflow will still build successfully and publish **unsigned** artifacts.
+- This is implemented by a small CI helper (`scripts/ci/prepare-tauri-signing-config.mjs`) which
+  disables the relevant Tauri signing config for that job and only enables notarization when all
+  required credentials are available.
+
 ### macOS (Developer ID + notarization)
 
 Secrets used by `tauri-apps/tauri-action`:
