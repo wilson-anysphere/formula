@@ -14,6 +14,11 @@ function fmtInt(n) {
   return numberFmt.format(n);
 }
 
+function isTruthyEnv(val) {
+  if (val == null) return false;
+  return ["1", "true", "yes", "y", "on"].includes(String(val).trim().toLowerCase());
+}
+
 function fmtKiB(bytes, decimals = 1) {
   return (bytes / KB).toFixed(decimals);
 }
@@ -196,7 +201,7 @@ async function main() {
     throw new Error(`Missing index.html: ${indexHtmlPath}\nRun: pnpm -C apps/desktop build`);
   }
 
-  const skipGzip = process.env.FORMULA_DESKTOP_BUNDLE_SIZE_SKIP_GZIP === "1";
+  const skipGzip = isTruthyEnv(process.env.FORMULA_DESKTOP_BUNDLE_SIZE_SKIP_GZIP);
 
   const jsAbsPaths = await collectFiles(distDir, (p) => p.endsWith(".js") && !p.endsWith(".js.map"));
 
@@ -281,7 +286,7 @@ async function main() {
   const viteTotalBudgetKiB = parseBudgetKiB("FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB");
   const entryBudgetKiB = parseBudgetKiB("FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB");
   const distTotalBudgetKiB = parseBudgetKiB("FORMULA_DESKTOP_JS_DIST_TOTAL_BUDGET_KB");
-  const warnOnly = process.env.FORMULA_DESKTOP_BUNDLE_SIZE_WARN_ONLY === "1";
+  const warnOnly = isTruthyEnv(process.env.FORMULA_DESKTOP_BUNDLE_SIZE_WARN_ONLY);
 
   const viteTotalStatus = budgetStatus(assetsBytes, viteTotalBudgetKiB);
   const entryStatus = budgetStatus(entryBytes, entryBudgetKiB);
