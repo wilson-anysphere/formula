@@ -1163,25 +1163,16 @@ function heuristicClassifyReferencedValue(params: {
 function heuristicClassifyValue(value: CellValue, maxChars: number): any {
   if (Array.isArray(value)) return { ...DEFAULT_CLASSIFICATION };
   const scalar = isProvenanceCellValue(value) ? value.value : (value as SpreadsheetValue);
-
   // Heuristic classification is used to decide whether we should redact a value entirely.
   // This should be conservative and resilient to prompt truncation (e.g. private key blocks
   // can exceed `maxCellChars` but we still must not send any prefix).
   //
-  // We scan up to `scanChars` (>= MAX_PROMPT_CHARS) of the raw scalar text rather than the
-  // prompt-formatted value, so detectors that rely on begin/end markers (PEM blocks, etc)
-  // can still fire even when the prompt would otherwise be truncated.
+  // Scan up to `scanChars` (>= MAX_PROMPT_CHARS) so we have enough context for conservative
+  // detectors. When the value is longer than `scanChars`, use a head+tail snippet so we can
+  // still catch patterns that appear near the end (while staying within a bounded budget).
   const scanChars = Math.max(maxChars, MAX_PROMPT_CHARS);
-
-  let rawText = "";
-  if (scalar === null) rawText = "";
-  else if (typeof scalar === "string") rawText = scalar;
-  else if (typeof scalar === "number") rawText = Number.isFinite(scalar) ? String(scalar) : "";
-  else if (typeof scalar === "boolean") rawText = scalar ? "TRUE" : "FALSE";
-  else rawText = String(scalar);
-
-  if (!rawText) return { ...DEFAULT_CLASSIFICATION };
-  const scanText = rawText.length > scanChars ? rawText.slice(0, scanChars) : rawText;
+  const scanText = formatScalarForHeuristicScan(scalar, { maxChars: scanChars });
+  if (!scanText) return { ...DEFAULT_CLASSIFICATION };
 
   // Conservative heuristic DLP scanner (defense-in-depth) from `@formula/ai-context`.
   const heuristic = classifyText(scanText);
@@ -1205,6 +1196,33 @@ function heuristicClassifyValue(value: CellValue, maxChars: number): any {
   if (lowered.includes("confidential")) return { level: CLASSIFICATION_LEVEL.CONFIDENTIAL, labels };
   if (lowered.includes("internal")) return { level: CLASSIFICATION_LEVEL.INTERNAL, labels };
   return { ...DEFAULT_CLASSIFICATION };
+}
+
+function formatScalarForHeuristicScan(value: SpreadsheetValue, opts: { maxChars: number }): string {
+  let text = "";
+  if (value === null) text = "";
+  else if (typeof value === "string") text = value;
+  else if (typeof value === "number") text = Number.isFinite(value) ? String(value) : "";
+  else if (typeof value === "boolean") text = value ? "TRUE" : "FALSE";
+  else text = String(value);
+  return truncateTextForHeuristicScan(text, opts.maxChars);
+}
+
+function truncateTextForHeuristicScan(text: string, maxChars: number): string {
+  const s = String(text);
+  if (!Number.isFinite(maxChars) || maxChars <= 0) return "";
+  if (s.length <= maxChars) return s;
+
+  // Keep a small suffix to capture trailing markers (e.g. "-----END PRIVATE KEY-----"),
+  // while still preserving most of the prefix (where "-----BEGIN" usually appears).
+  const marker = "\n[TRUNCATED]…\n";
+  if (maxChars <= marker.length) return marker.slice(0, Math.max(0, maxChars));
+
+  const budget = maxChars - marker.length;
+  const suffixLen = Math.min(200, Math.max(0, Math.floor(budget / 3)));
+  const prefixLen = Math.max(0, budget - suffixLen);
+
+  return `${s.slice(0, prefixLen)}${marker}${suffixLen > 0 ? s.slice(-suffixLen) : ""}`;
 }
 
 function preparePromptAndInputs(params: {

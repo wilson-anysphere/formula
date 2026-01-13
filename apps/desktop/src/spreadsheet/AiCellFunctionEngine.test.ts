@@ -1057,6 +1057,35 @@ describe("AiCellFunctionEngine", () => {
     expect(userMessage).not.toContain("user@example.com");
   });
 
+  it("DLP heuristically detects long private key blocks in referenced cells", async () => {
+    const workbookId = "dlp-heuristic-private-key";
+    const llmClient = {
+      chat: vi.fn(async (_request: any) => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      workbookId,
+    });
+
+    // Long enough that a prefix-only truncation would omit the END marker, causing a miss.
+    const privateKey = `-----BEGIN PRIVATE KEY-----\n${"A".repeat(5000)}\n-----END PRIVATE KEY-----`;
+    const getCellValue = (addr: string) => (addr === "A1" ? privateKey : null);
+    const pending = evaluateFormula('=AI("summarize", A1)', getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    const call = llmClient.chat.mock.calls[0]?.[0];
+    const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
+    expect(userMessage).toContain("[REDACTED]");
+    expect(userMessage).not.toContain("BEGIN PRIVATE KEY");
+    expect(userMessage).not.toContain("END PRIVATE KEY");
+  });
+
   it("DLP redacts only disallowed cells within a mixed-classification range", async () => {
     const workbookId = "dlp-redact-range-workbook";
     const llmClient = {
