@@ -2609,12 +2609,23 @@ export class SpreadsheetApp {
       // Collaborators list (names + colors), similar to a Google Docs avatar strip.
       // This is an always-on overlay, but is non-interactive so it never blocks grid pointer events.
       this.collaboratorsListContainer = document.createElement("div");
-      this.collaboratorsListContainer.classList.add("presence-collaborators-overlay");
-      this.root.appendChild(this.collaboratorsListContainer);
-      // Cap visible items to keep the overlay compact; show a "+N" pill when more are present.
+      const statusbarMain = typeof document !== "undefined" ? document.querySelector(".statusbar__main") : null;
+      if (statusbarMain instanceof HTMLElement) {
+        // Prefer mounting in the status bar when available so we never occlude grid content.
+        this.collaboratorsListContainer.classList.add("presence-collaborators-statusbar");
+        const collabBlock = statusbarMain.querySelector(".statusbar__collab");
+        if (collabBlock) statusbarMain.insertBefore(this.collaboratorsListContainer, collabBlock);
+        else statusbarMain.appendChild(this.collaboratorsListContainer);
+      } else {
+        // Unit tests often mount SpreadsheetApp with a minimal DOM; fall back to an in-grid overlay.
+        this.collaboratorsListContainer.classList.add("presence-collaborators-overlay");
+        this.root.appendChild(this.collaboratorsListContainer);
+      }
+
+      // Cap visible items to keep the list compact; show a "+N" pill when more are present.
       this.collaboratorsListUi = new CollaboratorsListUiController({
         container: this.collaboratorsListContainer,
-        maxVisible: 5,
+        maxVisible: statusbarMain instanceof HTMLElement ? 3 : 5,
       });
 
       this.conflictUi = new ConflictUiController({

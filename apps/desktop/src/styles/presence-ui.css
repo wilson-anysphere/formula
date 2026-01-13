@@ -18,11 +18,35 @@
   max-width: min(260px, 40vw);
 }
 
+.presence-collaborators-statusbar {
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  min-width: 0;
+  max-width: 320px;
+}
+
 .presence-collaborators {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+}
+
+.presence-collaborators-statusbar .presence-collaborators {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.presence-collaborators-statusbar .presence-collaborators__sheet {
+  display: none;
+}
+
+.presence-collaborators-statusbar .presence-collaborators__item,
+.presence-collaborators-statusbar .presence-collaborators__overflow {
+  box-shadow: none;
+  padding: 2px 6px;
 }
 
 .presence-collaborators__item,
