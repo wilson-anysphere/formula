@@ -410,6 +410,17 @@ main() {
       die "expected extracted directory '$squashfs_root' to exist after --appimage-extract"
     fi
 
+    # Validate that the AppImage's `.desktop` metadata advertises our expected file associations
+    # and deep-link scheme handler (x-scheme-handler/*). This is the metadata that AppImage
+    # integration tools (e.g. AppImageLauncher) install into the user's desktop database.
+    if command -v python3 >/dev/null 2>&1; then
+      echo "::group::check-appimage: desktop integration (.desktop MimeType/Exec)"
+      python3 scripts/ci/verify_linux_desktop_integration.py --package-root "$squashfs_root"
+      echo "::endgroup::"
+    else
+      die "python3 is required to validate AppImage desktop integration (missing on PATH)"
+    fi
+
     if ! main_bin="$(find_main_binary "$squashfs_root")"; then
       die "failed to locate main ELF binary inside extracted AppImage (looked in '$squashfs_root')"
     fi
