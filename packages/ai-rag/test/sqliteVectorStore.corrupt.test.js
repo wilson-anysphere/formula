@@ -111,6 +111,45 @@ test(
 );
 
 test(
+  "SqliteVectorStore resetOnCorrupt tolerates storage.remove() failures (falls back to save())",
+  { skip: !sqlJsAvailable },
+  async () => {
+    // Not a SQLite database.
+    /** @type {Uint8Array | null} */
+    let stored = new TextEncoder().encode("not a sqlite database");
+    const saveLengths = [];
+    let removeCalls = 0;
+
+    const storage = {
+      async load() {
+        return stored ? new Uint8Array(stored) : null;
+      },
+      async save(data) {
+        saveLengths.push(data.byteLength);
+        stored = new Uint8Array(data);
+      },
+      async remove() {
+        removeCalls += 1;
+        throw new Error("remove failed");
+      },
+    };
+
+    const store = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: false, resetOnCorrupt: true });
+    await store.close();
+
+    assert.equal(removeCalls, 1);
+    assert.ok(saveLengths.some((n) => n === 0), "expected save(empty) fallback to run");
+    assert.ok(saveLengths.some((n) => n >= 16), "expected a valid DB snapshot to be persisted");
+
+    assert.ok(stored && stored.length >= 16, "expected persisted DB bytes to exist after reset");
+    const expectedHeader = [
+      83, 81, 76, 105, 116, 101, 32, 102, 111, 114, 109, 97, 116, 32, 51, 0,
+    ];
+    assert.deepEqual(Array.from(stored.slice(0, 16)), expectedHeader);
+  }
+);
+
+test(
   "SqliteVectorStore resetOnCorrupt overwrites when storage.load throws (no remove)",
   { skip: !sqlJsAvailable },
   async () => {
