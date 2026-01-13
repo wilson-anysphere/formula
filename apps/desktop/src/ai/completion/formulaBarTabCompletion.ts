@@ -10,6 +10,7 @@ import type { EngineClient } from "@formula/engine";
 
 import type { DocumentController } from "../../document/documentController.js";
 import type { FormulaBarView } from "../../formula-bar/FormulaBarView.js";
+import { getLocale } from "../../i18n/index.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
 import { evaluateFormula, type SpreadsheetValue } from "../../spreadsheet/evaluateFormula.js";
@@ -111,7 +112,11 @@ export class FormulaBarTabCompletionController {
       getCacheKey: () => {
         const base = defaultSchemaProvider.getCacheKey?.() ?? "";
         const extra = externalSchemaProvider?.getCacheKey?.() ?? "";
-        return extra ? `${base}|${extra}` : base;
+        // The partial parser is locale-aware (argument separators, etc). Include locale in the cache key so
+        // tab completion recomputes suggestions if the UI locale changes at runtime.
+        const locale = getLocale();
+        const combined = extra ? `${base}|${extra}` : base;
+        return locale ? `${combined}|locale:${locale}` : combined;
       },
     };
     this.#schemaProvider = schemaProvider;
