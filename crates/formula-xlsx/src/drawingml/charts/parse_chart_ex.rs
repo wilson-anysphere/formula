@@ -64,26 +64,24 @@ pub fn parse_chart_ex(
     let legend = chart_node.and_then(|chart| parse_legend(chart, &mut diagnostics));
     let chart_data = parse_chart_data(&doc, &mut diagnostics);
 
-    // Collect series across all chart-type nodes. Real-world ChartEx parts can
-    // contain multiple `<cx:*Chart>` blocks; limiting to only the first drops
-    // series for combo-ish plot areas.
+    // ChartEx series can appear either under `<cx:*Chart>` wrappers or
+    // directly under `<cx:plotArea>`. Both variants are descendants of
+    // `<cx:chart>`, so scan the chart subtree for series nodes and exclude
+    // `<cx:chartData>` definitions.
     let mut series = Vec::new();
-    let chart_type_nodes = find_chart_type_nodes(&doc);
-    if !chart_type_nodes.is_empty() {
-        for chart_type_node in chart_type_nodes {
-            for series_node in chart_type_node.descendants().filter(is_series_node) {
-                series.push(parse_series(series_node, &chart_data, &mut diagnostics));
-            }
-        }
-    } else if let Some(chart_type_node) = find_chart_type_node(&doc) {
-        for series_node in chart_type_node.descendants().filter(is_series_node) {
-            series.push(parse_series(series_node, &chart_data, &mut diagnostics));
-        }
+    for series_node in doc.descendants().filter(|n| {
+        is_series_node(n) && has_ancestor_named(*n, "chart") && !has_ancestor_named(*n, "chartData")
+    }) {
+        series.push(parse_series(series_node, &chart_data, &mut diagnostics));
     }
+
     if series.is_empty() {
-        // Some real-world ChartEx parts omit the `<cx:*Chart>` wrapper and
-        // instead place `<cx:series>` nodes directly under `<cx:plotArea>`.
-        for series_node in doc.descendants().filter(is_series_node_in_plot_area) {
+        // Defensive fallback: if the part omits `<cx:chart>`, parse any series
+        // nodes outside of `<cx:chartData>`.
+        for series_node in doc
+            .descendants()
+            .filter(|n| is_series_node(n) && !has_ancestor_named(*n, "chartData"))
+        {
             series.push(parse_series(series_node, &chart_data, &mut diagnostics));
         }
     }
@@ -280,30 +278,6 @@ fn is_series_node(node: &Node<'_, '_>) -> bool {
 fn has_ancestor_named(node: Node<'_, '_>, name: &str) -> bool {
     node.ancestors()
         .any(|a| a.is_element() && a.tag_name().name() == name)
-}
-
-fn is_series_node_in_plot_area(node: &Node<'_, '_>) -> bool {
-    is_series_node(node)
-        && has_ancestor_named(*node, "plotArea")
-        && !has_ancestor_named(*node, "chartData")
-}
-
-fn find_chart_type_nodes<'a>(doc: &'a Document<'a>) -> Vec<Node<'a, 'a>> {
-    // ChartEx parts sometimes include other `*Chart`-suffixed elements (e.g.
-    // style/theme) that can appear before the actual chart type. To avoid
-    // mistakenly treating those as chart types, only include `*Chart` nodes
-    // that actually contain series elements.
-    doc.descendants()
-        .filter(|n| {
-            if !n.is_element() {
-                return false;
-            }
-            let name = n.tag_name().name();
-            let lower = name.to_ascii_lowercase();
-            lower.ends_with("chart") && lower != "chart" && lower != "chartspace"
-        })
-        .filter(|n| n.descendants().any(|d| is_series_node(&d)))
-        .collect()
 }
 
 fn attribute_case_insensitive<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
