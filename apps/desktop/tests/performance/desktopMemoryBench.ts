@@ -31,6 +31,7 @@ import {
   percentile,
   parseStartupLine as parseStartupMetricsLine,
   shouldUseXvfb,
+  terminateProcessTree,
   stdDev,
 } from './desktopStartupUtil.ts';
 
@@ -322,6 +323,26 @@ async function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void
   });
 }
 
+function defangChild(child: ChildProcess): void {
+  // Best-effort: prevent the parent Node process from hanging if the child refuses to exit.
+  // This is a last resort after kill attempts/timeouts.
+  try {
+    child.unref();
+  } catch {
+    // ignore
+  }
+  try {
+    child.stdout?.destroy();
+  } catch {
+    // ignore
+  }
+  try {
+    child.stderr?.destroy();
+  } catch {
+    // ignore
+  }
+}
+
 async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Promise<number> {
   const useXvfb = shouldUseXvfb();
   const xvfbPath = resolve(repoRoot, 'scripts/xvfb-run-safe.sh');
@@ -364,6 +385,11 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
       TEMP: perfTmp,
       TMP: perfTmp,
     },
+    // On POSIX, start the app in its own process group so we can signal the entire tree.
+    // Even though this benchmark currently runs on Linux only, keeping this consistent
+    // with other perf runners prevents copy/paste drift.
+    detached: process.platform !== 'win32',
+    windowsHide: true,
   });
 
   if (!child.pid) {
@@ -392,16 +418,15 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
       if (process.platform === 'linux') {
         await killProcessTreeLinux(child.pid, 5000);
       } else {
-        child.kill();
+        terminateProcessTree(child, 'force');
       }
     } finally {
       await waitForExit(child, 5000).catch(() => {
-        // If we failed to cleanly terminate, try a last-resort SIGKILL.
-        try {
-          child.kill('SIGKILL');
-        } catch {
-          child.kill();
-        }
+        // If we failed to cleanly terminate, try a last-resort kill + detach the handles
+        // so the parent process cannot hang indefinitely.
+        terminateProcessTree(child, 'force');
+        defangChild(child);
+        throw new Error('Timed out waiting for desktop process tree to exit after sampling memory');
       });
     }
   }
