@@ -88,6 +88,10 @@ pub fn write_workbook_to_writer_with_kind<W: Write + Seek>(
     zip.start_file("xl/_rels/workbook.xml.rels", options)?;
     zip.write_all(workbook_rels_xml(workbook, !shared_strings.values.is_empty()).as_bytes())?;
 
+    // Theme
+    zip.start_file("xl/theme/theme1.xml", options)?;
+    zip.write_all(theme_xml(workbook).as_bytes())?;
+
     // Styles
     zip.start_file("xl/styles.xml", options)?;
     zip.write_all(&styles_xml)?;
@@ -354,6 +358,11 @@ fn workbook_rels_xml(workbook: &Workbook, has_shared_strings: bool) -> String {
     }
     rels.push_str(&format!(
         r#"<Relationship Id="rId{}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>"#,
+        next
+    ));
+    next += 1;
+    rels.push_str(&format!(
+        r#"<Relationship Id="rId{}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>"#,
         next
     ));
 
@@ -1259,6 +1268,9 @@ fn content_types_xml(
     overrides.push_str(
         r#"<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>"#,
     );
+    overrides.push_str(
+        r#"<Override PartName="/xl/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>"#,
+    );
     if !shared_strings.values.is_empty() {
         overrides.push_str(
             r#"<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>"#,
@@ -1303,4 +1315,82 @@ fn escape_xml(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
+}
+
+fn theme_xml(workbook: &Workbook) -> String {
+    // The theme part primarily exists so downstream consumers can resolve theme-based colors used
+    // in `styles.xml` (`<color theme="N" .../>`). Keep this deterministic and minimal: just the
+    // `a:clrScheme` plus required placeholder font/format scheme elements.
+    let theme = &workbook.theme;
+
+    fn rgb_hex(argb: u32) -> String {
+        // Theme XML uses RGB (`RRGGBB`); ignore alpha.
+        format!("{:06X}", argb & 0x00FF_FFFF)
+    }
+
+    let dk1 = rgb_hex(theme.dk1.argb());
+    let lt1 = rgb_hex(theme.lt1.argb());
+    let dk2 = rgb_hex(theme.dk2.argb());
+    let lt2 = rgb_hex(theme.lt2.argb());
+    let accent1 = rgb_hex(theme.accent1.argb());
+    let accent2 = rgb_hex(theme.accent2.argb());
+    let accent3 = rgb_hex(theme.accent3.argb());
+    let accent4 = rgb_hex(theme.accent4.argb());
+    let accent5 = rgb_hex(theme.accent5.argb());
+    let accent6 = rgb_hex(theme.accent6.argb());
+    let hlink = rgb_hex(theme.hlink.argb());
+    let fol_hlink = rgb_hex(theme.fol_hlink.argb());
+
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office Theme">
+  <a:themeElements>
+    <a:clrScheme name="Office">
+      <a:dk1><a:srgbClr val="{dk1}"/></a:dk1>
+      <a:lt1><a:srgbClr val="{lt1}"/></a:lt1>
+      <a:dk2><a:srgbClr val="{dk2}"/></a:dk2>
+      <a:lt2><a:srgbClr val="{lt2}"/></a:lt2>
+      <a:accent1><a:srgbClr val="{accent1}"/></a:accent1>
+      <a:accent2><a:srgbClr val="{accent2}"/></a:accent2>
+      <a:accent3><a:srgbClr val="{accent3}"/></a:accent3>
+      <a:accent4><a:srgbClr val="{accent4}"/></a:accent4>
+      <a:accent5><a:srgbClr val="{accent5}"/></a:accent5>
+      <a:accent6><a:srgbClr val="{accent6}"/></a:accent6>
+      <a:hlink><a:srgbClr val="{hlink}"/></a:hlink>
+      <a:folHlink><a:srgbClr val="{fol_hlink}"/></a:folHlink>
+    </a:clrScheme>
+    <a:fontScheme name="Office">
+      <a:majorFont>
+        <a:latin typeface="Calibri Light"/>
+        <a:ea typeface=""/>
+        <a:cs typeface=""/>
+      </a:majorFont>
+      <a:minorFont>
+        <a:latin typeface="Calibri"/>
+        <a:ea typeface=""/>
+        <a:cs typeface=""/>
+      </a:minorFont>
+    </a:fontScheme>
+    <a:fmtScheme name="Office">
+      <a:fillStyleLst>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+      </a:fillStyleLst>
+      <a:lnStyleLst>
+        <a:ln w="6350">
+          <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+          <a:prstDash val="solid"/>
+        </a:ln>
+      </a:lnStyleLst>
+      <a:effectStyleLst>
+        <a:effectStyle><a:effectLst/></a:effectStyle>
+      </a:effectStyleLst>
+      <a:bgFillStyleLst>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+      </a:bgFillStyleLst>
+    </a:fmtScheme>
+  </a:themeElements>
+  <a:objectDefaults/>
+  <a:extraClrSchemeLst/>
+</a:theme>"#
+    )
 }
