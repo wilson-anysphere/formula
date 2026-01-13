@@ -71,13 +71,13 @@ def load_expected_mime_types(tauri_config_path: Path) -> set[str]:
         mime_type = assoc.get("mimeType")
         exts = assoc.get("ext", [])
         if isinstance(mime_type, str):
-            mt = mime_type.strip()
+            mt = mime_type.strip().lower()
             if mt:
                 expected.add(mt)
         elif isinstance(mime_type, list):
             for raw in mime_type:
                 if isinstance(raw, str) and raw.strip():
-                    expected.add(raw.strip())
+                    expected.add(raw.strip().lower())
         else:
             # If any association lacks a MIME type, Linux packaging can't reliably
             # advertise it in `MimeType=` (the `.desktop` file uses MIME types, not
@@ -125,7 +125,9 @@ def parse_desktop_entry(path: Path) -> tuple[set[str], str]:
         raise SystemExit(f"{path} missing [Desktop Entry] section")
     entry = parser["Desktop Entry"]
     mime_raw = entry.get("MimeType", "").strip()
-    mime_types = {part for part in mime_raw.split(";") if part}
+    # MIME types are case-insensitive by spec; normalize to lowercase so we don't fail on
+    # capitalization differences (e.g. macroEnabled vs macroenabled).
+    mime_types = {part.strip().lower() for part in mime_raw.split(";") if part.strip()}
     exec_line = entry.get("Exec", "").strip()
     return mime_types, exec_line
 
