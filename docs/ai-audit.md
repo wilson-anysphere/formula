@@ -314,3 +314,91 @@ const store = await createSqliteAIAuditStoreNode({
   },
 });
 ```
+
+---
+
+## 5) Exporting audit logs
+
+`@formula/ai-audit` includes a deterministic export helper in `packages/ai-audit/src/export.ts`:
+
+```ts
+import { serializeAuditEntries } from "@formula/ai-audit";
+```
+
+It takes an array of `AIAuditEntry` and returns a string:
+
+- `serializeAuditEntries(entries, { format })`
+- `format` is one of:
+  - `"ndjson"` (default) – one JSON object per line
+  - `"json"` – a single JSON array
+
+### Recommended defaults (NDJSON + tool result redaction)
+
+For large logs, prefer **NDJSON** (newline-delimited JSON). It can be streamed/processed incrementally and avoids holding a huge JSON array in memory.
+
+By default, `serializeAuditEntries(...)` also uses `redactToolResults: true` (recommended). This:
+
+- removes `tool_calls[].result` from the export (often large and/or sensitive),
+- and truncates oversized `tool_calls[].audit_result_summary` payloads to `maxToolResultChars` (default: `10_000`), adding `export_truncated: true` on the affected tool call.
+
+`maxToolResultChars` is a useful safety knob when you want exports to stay bounded even if a tool summary accidentally becomes large.
+
+### Example: export as NDJSON (recommended for large logs)
+
+```ts
+import { AIAuditRecorder, MemoryAIAuditStore, serializeAuditEntries } from "@formula/ai-audit";
+import { writeFile } from "node:fs/promises";
+
+// `store` can be any AIAuditStore implementation (Memory, LocalStorage, SQLite, etc).
+const store = new MemoryAIAuditStore();
+
+// (Optional) create an entry so the example produces output immediately.
+const recorder = new AIAuditRecorder({
+  store,
+  session_id: "workbook-123:session-abc",
+  mode: "chat",
+  input: { prompt: "Summarize sales by region" },
+  model: "cursor-default",
+});
+await recorder.finalize();
+
+const entries = await store.listEntries({ session_id: "workbook-123:session-abc" });
+
+// Stores return entries newest-first; reverse if you prefer chronological order.
+entries.reverse();
+
+const ndjson = serializeAuditEntries(entries, {
+  format: "ndjson", // default
+  redactToolResults: true, // default (recommended)
+  maxToolResultChars: 10_000, // default
+});
+
+await writeFile("./ai-audit.ndjson", ndjson + "\n", "utf8");
+```
+
+### Example: export as a JSON array
+
+```ts
+import { AIAuditRecorder, MemoryAIAuditStore, serializeAuditEntries } from "@formula/ai-audit";
+import { writeFile } from "node:fs/promises";
+
+const store = new MemoryAIAuditStore();
+
+const recorder = new AIAuditRecorder({
+  store,
+  session_id: "workbook-123:session-abc",
+  mode: "chat",
+  input: { prompt: "Summarize sales by region" },
+  model: "cursor-default",
+});
+await recorder.finalize();
+
+const entries = await store.listEntries({ session_id: "workbook-123:session-abc" });
+
+const jsonArray = serializeAuditEntries(entries, {
+  format: "json",
+  redactToolResults: true, // recommended even for JSON exports
+});
+
+await writeFile("./ai-audit.json", jsonArray, "utf8");
+```
