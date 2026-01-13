@@ -86,6 +86,23 @@ test("enables macOS code signing with an explicit identity when secrets are pres
   assert.match(githubEnv, /\bAPPLE_SIGNING_IDENTITY<</);
 });
 
+test("enables macOS code signing with a default identity when signingIdentity secret is missing", () => {
+  const minimalConfig = { bundle: { macOS: {}, windows: { certificateThumbprint: null } } };
+  const { proc, config, githubEnv } = runWithConfig(
+    {
+      RUNNER_OS: "macOS",
+      APPLE_CERTIFICATE: "base64p12",
+      APPLE_CERTIFICATE_PASSWORD: "pw",
+    },
+    minimalConfig,
+  );
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.equal(config.bundle.macOS.signingIdentity, "Developer ID Application");
+  assert.match(githubEnv, /\bAPPLE_CERTIFICATE<</);
+  assert.match(githubEnv, /\bAPPLE_CERTIFICATE_PASSWORD<</);
+  assert.doesNotMatch(githubEnv, /\bAPPLE_SIGNING_IDENTITY<</);
+});
+
 test("exports notarization env vars only when all notarization credentials are present", () => {
   const minimalConfig = { bundle: { macOS: {}, windows: { certificateThumbprint: null } } };
   const identity = "Developer ID Application: Example Co (TEAMID)";
@@ -127,4 +144,3 @@ test("fails fast when FORMULA_REQUIRE_CODESIGN=1 and required secrets are missin
   // In enforcement mode we should fail before mutating the config.
   assert.equal(config.bundle.macOS.signingIdentity, undefined);
 });
-

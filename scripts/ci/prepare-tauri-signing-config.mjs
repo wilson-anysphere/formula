@@ -6,7 +6,8 @@
  * so local builds work without Developer ID certificates installed. In CI we want:
  *   - unsigned builds to succeed cleanly on forks/dry-runs (no secrets)
  *   - signed/notarized builds to use the explicit `APPLE_SIGNING_IDENTITY` provided by secrets
- *     (avoid ambiguous identity selection when multiple certs exist)
+ *     when available (avoid ambiguous identity selection when multiple certs exist). If no
+ *     identity is provided, we fall back to the generic "Developer ID Application" selector.
  *
  * This script:
  *   1) Detects whether macOS/Windows signing (and macOS notarization) secrets are present.
@@ -145,8 +146,10 @@ function main() {
 
   const hasAppleCert = envHasValue("APPLE_CERTIFICATE");
   const hasAppleCertPassword = envHasValue("APPLE_CERTIFICATE_PASSWORD");
-  const hasAppleSigningIdentity = envHasValue("APPLE_SIGNING_IDENTITY");
-  const hasMacSigningSecrets = hasAppleCert && hasAppleCertPassword && hasAppleSigningIdentity;
+  // Treat the signing identity as optional: if missing, we fall back to the config's current
+  // identity (or a safe default) so forks/dry-runs can still opt into signing by providing only
+  // a certificate + password.
+  const hasMacSigningSecrets = hasAppleCert && hasAppleCertPassword;
 
   const hasAppleNotarizationSecrets =
     envHasValue("APPLE_ID") && envHasValue("APPLE_PASSWORD") && envHasValue("APPLE_TEAM_ID");
@@ -185,27 +188,27 @@ function main() {
     }
   } else {
     const explicitIdentity = process.env.APPLE_SIGNING_IDENTITY?.trim() ?? "";
-    if (explicitIdentity.length === 0) {
-      // Should be unreachable because `hasMacSigningSecrets` requires a non-empty identity, but
-      // keep the branch so the script is robust against future changes.
+    const currentIdentity = config?.bundle?.macOS?.signingIdentity;
+
+    const desiredIdentity =
+      explicitIdentity.length > 0
+        ? explicitIdentity
+        : typeof currentIdentity === "string" && currentIdentity.trim().length > 0
+          ? currentIdentity
+          : "Developer ID Application";
+
+    if (currentIdentity !== desiredIdentity) {
+      config.bundle ??= {};
+      config.bundle.macOS ??= {};
+      config.bundle.macOS.signingIdentity = desiredIdentity;
+      changed = true;
       log(
-        `macOS code signing secrets detected but APPLE_SIGNING_IDENTITY is empty; leaving bundle.macOS.signingIdentity unchanged.`
+        explicitIdentity.length > 0
+          ? `macOS code signing secrets detected; setting bundle.macOS.signingIdentity to explicit APPLE_SIGNING_IDENTITY for this run.`
+          : `macOS code signing secrets detected; setting bundle.macOS.signingIdentity to ${JSON.stringify(desiredIdentity)} for this run.`
       );
     } else {
-      const currentIdentity = config?.bundle?.macOS?.signingIdentity;
-      if (currentIdentity !== explicitIdentity) {
-        config.bundle ??= {};
-        config.bundle.macOS ??= {};
-        config.bundle.macOS.signingIdentity = explicitIdentity;
-        changed = true;
-        log(
-          `macOS code signing secrets detected; setting bundle.macOS.signingIdentity to explicit APPLE_SIGNING_IDENTITY for this run.`
-        );
-      } else {
-        log(
-          `macOS code signing secrets detected; bundle.macOS.signingIdentity already matches APPLE_SIGNING_IDENTITY.`
-        );
-      }
+      log(`macOS code signing secrets detected; leaving bundle.macOS.signingIdentity unchanged.`);
     }
   }
 
@@ -234,7 +237,9 @@ function main() {
   if (hasMacSigningSecrets) {
     exportGithubEnv("APPLE_CERTIFICATE", process.env.APPLE_CERTIFICATE ?? "");
     exportGithubEnv("APPLE_CERTIFICATE_PASSWORD", process.env.APPLE_CERTIFICATE_PASSWORD ?? "");
-    exportGithubEnv("APPLE_SIGNING_IDENTITY", process.env.APPLE_SIGNING_IDENTITY ?? "");
+    if (envHasValue("APPLE_SIGNING_IDENTITY")) {
+      exportGithubEnv("APPLE_SIGNING_IDENTITY", process.env.APPLE_SIGNING_IDENTITY ?? "");
+    }
   }
 
   // Notarization should only run when signing is enabled and all notarization creds are present.
