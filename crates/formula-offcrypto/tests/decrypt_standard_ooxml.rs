@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 
 use formula_offcrypto::decrypt_standard_ooxml_from_bytes;
+use formula_offcrypto::EncryptionType;
 use formula_offcrypto::OffcryptoError;
 
 fn fixture(path: &str) -> PathBuf {
@@ -49,10 +50,9 @@ fn rejects_agile_fixture() {
         matches!(
             err,
             OffcryptoError::UnsupportedEncryption {
-                version_major: 4,
-                version_minor: 4
+                encryption_type: EncryptionType::Agile
             }
         ),
-        "expected UnsupportedEncryption(4.4), got {err:?}"
+        "expected UnsupportedEncryption(Agile), got {err:?}"
     );
 }

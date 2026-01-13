@@ -4,7 +4,7 @@ use formula_model::charts::{
 };
 use formula_model::RichText;
 use roxmltree::{Document, Node};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use super::cache::{parse_num_cache, parse_str_cache};
 use super::REL_NS;
@@ -264,6 +264,37 @@ fn detect_chart_kind(
     });
 
     "unknown".to_string()
+}
+
+fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
+    let mut hints: BTreeSet<String> = BTreeSet::new();
+
+    for node in doc.descendants().filter(|n| n.is_element()) {
+        if let Some(layout_id) = attribute_case_insensitive(node, "layoutId") {
+            if let Some(kind) = normalize_chart_ex_kind_hint(layout_id) {
+                hints.insert(format!("layoutId={kind}"));
+            } else if !layout_id.trim().is_empty() {
+                hints.insert(format!("layoutId(raw)={layout_id}"));
+            }
+        }
+
+        if let Some(chart_type) = attribute_case_insensitive(node, "chartType") {
+            if let Some(kind) = normalize_chart_ex_kind_hint(chart_type) {
+                hints.insert(format!("chartType={kind}"));
+            } else if !chart_type.trim().is_empty() {
+                hints.insert(format!("chartType(raw)={chart_type}"));
+            }
+        }
+
+        // Capture any potential `*Chart` element names as a fallback hint.
+        let name = node.tag_name().name();
+        let lower = name.to_ascii_lowercase();
+        if lower.ends_with("chart") && lower != "chart" && lower != "chartspace" {
+            hints.insert(format!("tag={name}"));
+        }
+    }
+
+    hints.into_iter().collect()
 }
 
 fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {

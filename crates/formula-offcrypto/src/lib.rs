@@ -242,8 +242,6 @@ pub enum OffcryptoError {
     InvalidVerifierHashLength { len: usize },
     /// Password/key did not pass verifier check.
     InvalidPassword,
-    /// The file uses an encryption scheme/version we don't support.
-    UnsupportedEncryption { version_major: u16, version_minor: u16 },
     /// The requested OLE stream was not present in the container.
     MissingOleStream { stream: &'static str },
     /// The decrypted bytes do not look like an OOXML ZIP/OPC container.
@@ -310,14 +308,12 @@ impl PartialEq for OffcryptoError {
             (Self::InvalidPassword, Self::InvalidPassword) => true,
             (
                 Self::UnsupportedEncryption {
-                    version_major: a_major,
-                    version_minor: a_minor,
+                    encryption_type: a,
                 },
                 Self::UnsupportedEncryption {
-                    version_major: b_major,
-                    version_minor: b_minor,
+                    encryption_type: b,
                 },
-            ) => a_major == b_major && a_minor == b_minor,
+            ) => a == b,
             (Self::MissingOleStream { stream: a }, Self::MissingOleStream { stream: b }) => a == b,
             (Self::DecryptedPackageNotZip, Self::DecryptedPackageNotZip) => true,
             (Self::OfficeCrypto(a), Self::OfficeCrypto(b)) => a.to_string() == b.to_string(),
@@ -384,13 +380,6 @@ impl fmt::Display for OffcryptoError {
                 "encrypted verifier hash must be at least 20 bytes after decryption, got {len}"
             ),
             OffcryptoError::InvalidPassword => write!(f, "invalid password or key"),
-            OffcryptoError::UnsupportedEncryption {
-                version_major,
-                version_minor,
-            } => write!(
-                f,
-                "unsupported encryption scheme (EncryptionInfo version {version_major}.{version_minor})"
-            ),
             OffcryptoError::MissingOleStream { stream } => {
                 write!(f, "OLE stream not found: {stream}")
             }
@@ -1833,9 +1822,17 @@ pub fn decrypt_standard_ooxml_from_bytes(
     let encryption_info = read_ole_stream(&raw_ole, "EncryptionInfo")?;
     let version = EncryptionVersionInfo::parse(&encryption_info)?;
     if (version.major, version.minor) != (3, 2) {
-        return Err(OffcryptoError::UnsupportedEncryption {
-            version_major: version.major,
-            version_minor: version.minor,
+        // `decrypt_standard_ooxml_from_bytes` intentionally only supports ECMA-376 Standard
+        // (CryptoAPI) encryption v3.2 via the upstream `office-crypto` crate. If we detect an
+        // Agile-encrypted file, surface that explicitly so callers can dispatch appropriately.
+        if (version.major, version.minor) == (4, 4) {
+            return Err(OffcryptoError::UnsupportedEncryption {
+                encryption_type: EncryptionType::Agile,
+            });
+        }
+        return Err(OffcryptoError::UnsupportedVersion {
+            major: version.major,
+            minor: version.minor,
         });
     }
 
