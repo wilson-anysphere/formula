@@ -1875,7 +1875,6 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
             version_minor,
         });
     }
-
     let Some(password) = password else {
         return Err(Error::PasswordRequired {
             path: path.to_path_buf(),

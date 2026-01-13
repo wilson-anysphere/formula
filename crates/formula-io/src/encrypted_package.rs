@@ -78,7 +78,7 @@ impl<R: Read + Seek> StandardAesEncryptedPackageReader<R> {
         }
 
         // Guardrail: the `orig_size` prefix is attacker-controlled; reject inputs where the declared
-        // plaintext length is implausible for the available ciphertext bytes.
+        // plaintext length cannot fit in the available ciphertext bytes.
         //
         // The ciphertext length must be at least `ceil(orig_size / 16) * 16` bytes for AES-CBC.
         // (We treat this as a hard requirement rather than deferring errors to `read()`: callers

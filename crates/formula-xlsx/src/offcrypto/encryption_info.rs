@@ -68,22 +68,54 @@ pub fn extract_encryption_info_xml<'a>(
     encryption_info_stream: &'a [u8],
     opts: &ParseOptions,
 ) -> Result<&'a [u8]> {
-    let xml_raw = encryption_info_stream.get(8..).unwrap_or(&[]);
-    if xml_raw.len() > opts.max_encryption_info_xml_len {
+    // The `EncryptionInfo` stream begins with:
+    // - majorVersion (u16 LE)
+    // - minorVersion (u16 LE)
+    // - flags (u32 LE)
+    //
+    // For Agile encryption (4.4), the remainder is typically a UTF-8 XML document.
+    //
+    // Real-world producers vary in whether the XML is stored directly after the 8-byte header, or
+    // preceded by a 4-byte length prefix (`u32le xml_len`). Excel and `ms-offcrypto-writer` use the
+    // "no length prefix" form, but other tooling (including Formula's own
+    // `formula-office-crypto`) can emit the length-prefixed variant.
+    //
+    // Accept both forms by looking for a plausible length prefix and ensuring the resulting slice
+    // looks like XML to avoid false positives.
+    let mut xml = encryption_info_stream.get(8..).unwrap_or(&[]);
+    if encryption_info_stream.len() >= 12 {
+        let len = u32::from_le_bytes([
+            encryption_info_stream[8],
+            encryption_info_stream[9],
+            encryption_info_stream[10],
+            encryption_info_stream[11],
+        ]) as usize;
+        let available = encryption_info_stream.len().saturating_sub(12);
+        if len > 0 && len <= available {
+            let candidate = &encryption_info_stream[12..12 + len];
+            if candidate_looks_like_xml(candidate) {
+                xml = candidate;
+            }
+        }
+    }
+    if xml.len() > opts.max_encryption_info_xml_len {
         return Err(OffCryptoError::EncryptionInfoTooLarge {
-            len: xml_raw.len(),
+            len: xml.len(),
             max: opts.max_encryption_info_xml_len,
         });
     }
+    Ok(xml)
+}
 
-    // Some producers (notably `msoffcrypto-tool`) include trailing NUL bytes after the XML payload.
-    // XML 1.0 forbids the NUL character, so trim it here so downstream UTF-8 and XML parsers can
-    // consume otherwise valid descriptors.
-    let mut end = xml_raw.len();
-    while end > 0 && xml_raw[end - 1] == 0 {
-        end -= 1;
+fn candidate_looks_like_xml(bytes: &[u8]) -> bool {
+    let trimmed = strip_utf8_bom(trim_start_ascii_whitespace(bytes));
+    if trimmed.first() == Some(&b'<') {
+        return true;
     }
-    Ok(&xml_raw[..end])
+    // UTF-16 BOMs: accept so length-prefixed UTF-16 descriptors can still be extracted cleanly.
+    trimmed
+        .get(0..2)
+        .is_some_and(|rest| rest == [0xFF, 0xFE] || rest == [0xFE, 0xFF])
 }
 
 fn trim_trailing_nul_bytes(mut bytes: &[u8]) -> &[u8] {
@@ -113,17 +145,7 @@ fn strip_utf8_bom(bytes: &[u8]) -> &[u8] {
     bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes)
 }
 
-fn is_nul_heavy(bytes: &[u8]) -> bool {
-    if bytes.is_empty() {
-        return false;
-    }
-    let zeros = bytes.iter().filter(|&&b| b == 0).count();
-    zeros > bytes.len() / 8
-}
-
-fn decode_utf16le_xml(bytes: &[u8]) -> Result<String> {
-    let mut bytes = bytes;
-    // Trim trailing UTF-16LE NUL terminators / padding.
+fn trim_trailing_utf16_nul_units(mut bytes: &[u8]) -> &[u8] {
     while bytes.len() >= 2 {
         let n = bytes.len();
         if bytes[n - 2] == 0 && bytes[n - 1] == 0 {
@@ -132,21 +154,77 @@ fn decode_utf16le_xml(bytes: &[u8]) -> Result<String> {
             break;
         }
     }
+    bytes
+}
 
-    if bytes.starts_with(&[0xFF, 0xFE]) {
-        bytes = &bytes[2..];
+fn is_nul_heavy(bytes: &[u8]) -> bool {
+    if bytes.is_empty() {
+        return false;
     }
+    let zeros = bytes.iter().filter(|&&b| b == 0).count();
+    zeros > bytes.len() / 8
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Utf16Endian {
+    Le,
+    Be,
+}
+
+fn guess_utf16_endianness(bytes: &[u8]) -> Option<Utf16Endian> {
+    if bytes.len() < 4 {
+        return None;
+    }
+    let sample_len = bytes.len().min(512);
+    let sample_len = sample_len - (sample_len % 2);
+    if sample_len < 4 {
+        return None;
+    }
+    let sample = &bytes[..sample_len];
+
+    let mut even_zero = 0usize;
+    let mut odd_zero = 0usize;
+    for (idx, b) in sample.iter().enumerate() {
+        if *b == 0 {
+            if idx % 2 == 0 {
+                even_zero += 1;
+            } else {
+                odd_zero += 1;
+            }
+        }
+    }
+
+    // For UTF-16LE ASCII, the high byte is typically 0, which lands at odd indexes.
+    // For UTF-16BE ASCII, the high byte lands at even indexes.
+    if odd_zero > even_zero.saturating_mul(3) {
+        Some(Utf16Endian::Le)
+    } else if even_zero > odd_zero.saturating_mul(3) {
+        Some(Utf16Endian::Be)
+    } else {
+        None
+    }
+}
+
+fn decode_utf16_xml(bytes: &[u8], endian: Utf16Endian) -> Result<String> {
+    // Some producers include a BOM, some do not. Support both endiannesses (UTF-16LE/UTF-16BE).
+    let bytes = trim_trailing_utf16_nul_units(bytes);
+    let bytes = match endian {
+        Utf16Endian::Le => bytes.strip_prefix(&[0xFF, 0xFE]).unwrap_or(bytes),
+        Utf16Endian::Be => bytes.strip_prefix(&[0xFE, 0xFF]).unwrap_or(bytes),
+    };
 
     // UTF-16 requires an even number of bytes; ignore a trailing odd byte.
-    bytes = &bytes[..bytes.len().saturating_sub(bytes.len() % 2)];
+    let bytes = &bytes[..bytes.len().saturating_sub(bytes.len() % 2)];
 
-    let mut units: Vec<u16> = Vec::with_capacity(bytes.len() / 2);
-    for chunk in bytes.chunks_exact(2) {
-        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+    let mut code_units = Vec::with_capacity(bytes.len() / 2);
+    for pair in bytes.chunks_exact(2) {
+        code_units.push(match endian {
+            Utf16Endian::Le => u16::from_le_bytes([pair[0], pair[1]]),
+            Utf16Endian::Be => u16::from_be_bytes([pair[0], pair[1]]),
+        });
     }
 
-    let mut xml = String::from_utf16(&units)?;
-    // Be tolerant of a BOM encoded as U+FEFF.
+    let mut xml = String::from_utf16(&code_units)?;
     if let Some(stripped) = xml.strip_prefix('\u{FEFF}') {
         xml = stripped.to_string();
     }
@@ -167,9 +245,11 @@ fn length_prefixed_slice(payload: &[u8]) -> Option<&[u8]> {
     // Ensure the candidate *looks* like XML to avoid false positives on arbitrary data.
     let trimmed = strip_utf8_bom(trim_start_ascii_whitespace(candidate));
     let looks_like_utf8 = trimmed.first() == Some(&b'<');
-    let looks_like_utf16le = trimmed.starts_with(&[0xFF, 0xFE])
-        || (trimmed.len() >= 2 && trimmed[0] == b'<' && trimmed[1] == 0);
-    if !(looks_like_utf8 || looks_like_utf16le) {
+    let looks_like_utf16 = trimmed.starts_with(&[0xFF, 0xFE])
+        || trimmed.starts_with(&[0xFE, 0xFF])
+        || (trimmed.len() >= 2 && trimmed[0] == b'<' && trimmed[1] == 0)
+        || (trimmed.len() >= 2 && trimmed[0] == 0 && trimmed[1] == b'<');
+    if !(looks_like_utf8 || looks_like_utf16) {
         return None;
     }
 
@@ -247,11 +327,54 @@ pub(super) fn decode_encryption_info_xml_text<'a>(payload: &'a [u8]) -> Result<C
         .or_else(|| if nul_heavy { scan_to_encryption_tag_utf16le(payload) } else { None })
         .unwrap_or(payload);
 
-    // UTF-16LE fallback heuristic (NUL-heavy buffers, or explicit BOM / `<\0` prefix).
-    let looks_like_utf16le = candidate.starts_with(&[0xFF, 0xFE])
-        || (candidate.len() >= 2 && candidate[0] == b'<' && candidate[1] == 0);
-    if looks_like_utf16le || is_nul_heavy(candidate) {
-        return Ok(Cow::Owned(decode_utf16le_xml(candidate)?));
+    // UTF-16 fallback heuristic (NUL-heavy buffers, explicit BOM, or `<\0` / `\0<` prefix).
+    if candidate.starts_with(&[0xFF, 0xFE]) {
+        return Ok(Cow::Owned(decode_utf16_xml(candidate, Utf16Endian::Le)?));
+    }
+    if candidate.starts_with(&[0xFE, 0xFF]) {
+        return Ok(Cow::Owned(decode_utf16_xml(candidate, Utf16Endian::Be)?));
+    }
+    if candidate.len() >= 2 {
+        if candidate[0] == b'<' && candidate[1] == 0 {
+            return Ok(Cow::Owned(decode_utf16_xml(candidate, Utf16Endian::Le)?));
+        }
+        if candidate[0] == 0 && candidate[1] == b'<' {
+            return Ok(Cow::Owned(decode_utf16_xml(candidate, Utf16Endian::Be)?));
+        }
+    }
+    if is_nul_heavy(candidate) {
+        let preferred = guess_utf16_endianness(candidate);
+        if let Some(endian) = preferred {
+            // If the heuristic picks the wrong endianness, fall back to trying the other side.
+            let decoded = decode_utf16_xml(candidate, endian).or_else(|_| {
+                decode_utf16_xml(
+                    candidate,
+                    match endian {
+                        Utf16Endian::Le => Utf16Endian::Be,
+                        Utf16Endian::Be => Utf16Endian::Le,
+                    },
+                )
+            })?;
+            return Ok(Cow::Owned(decoded));
+        }
+
+        // Unknown endianness: try both and prefer the one that yields an XML-looking string.
+        let le = decode_utf16_xml(candidate, Utf16Endian::Le);
+        let be = decode_utf16_xml(candidate, Utf16Endian::Be);
+        match (le, be) {
+            (Ok(le), Ok(be)) => {
+                let le_ok = le.trim_start().starts_with('<');
+                let be_ok = be.trim_start().starts_with('<');
+                if be_ok && !le_ok {
+                    return Ok(Cow::Owned(be));
+                }
+                // Deterministic fallback: prefer LE on ties.
+                return Ok(Cow::Owned(le));
+            }
+            (Ok(le), Err(_)) => return Ok(Cow::Owned(le)),
+            (Err(_), Ok(be)) => return Ok(Cow::Owned(be)),
+            (Err(err), Err(_)) => return Err(err),
+        }
     }
 
     let candidate = strip_utf8_bom(trim_trailing_nul_bytes(candidate));
@@ -526,6 +649,25 @@ fn validate_cipher_chaining(chaining: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extract_encryption_info_xml_accepts_length_prefix() {
+        // Minimal root tag bytes.
+        let xml = b"<encryption/>";
+        let xml_len = xml.len() as u32;
+
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&4u16.to_le_bytes()); // major
+        stream.extend_from_slice(&4u16.to_le_bytes()); // minor
+        stream.extend_from_slice(&0u32.to_le_bytes()); // flags
+        stream.extend_from_slice(&xml_len.to_le_bytes());
+        stream.extend_from_slice(xml);
+        stream.extend_from_slice(b"\0\0trailing-garbage");
+
+        let extracted =
+            extract_encryption_info_xml(&stream, &ParseOptions::default()).expect("extract xml");
+        assert_eq!(extracted, xml);
+    }
 
     #[test]
     fn selects_password_key_encryptor_when_multiple_present() {

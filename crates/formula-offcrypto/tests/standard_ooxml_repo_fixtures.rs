@@ -18,4 +18,3 @@ fn decrypts_repo_standard_xlsx_fixture() {
     assert!(decrypted.starts_with(b"PK"));
     assert_eq!(decrypted, expected);
 }
-

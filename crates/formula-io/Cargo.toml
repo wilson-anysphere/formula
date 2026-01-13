@@ -54,6 +54,7 @@ zeroize = "1.8"
 [dev-dependencies]
 cbc = "0.1"
 proptest = "1"
+formula-office-crypto = { path = "../formula-office-crypto" }
 xlsx-diff = { path = "../xlsx-diff" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
