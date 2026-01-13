@@ -239,4 +239,33 @@ describe("serializeAuditEntries", () => {
 
     expect(parsed[0].input.secret).toBe("[Unserializable]");
   });
+
+  it("preserves __proto__ keys without prototype pollution", () => {
+    const input: any = { a: 1 };
+    Object.defineProperty(input, "__proto__", {
+      value: { polluted: true },
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+
+    const entries: AIAuditEntry[] = [
+      {
+        id: "audit-1",
+        timestamp_ms: 1,
+        session_id: "session",
+        mode: "chat",
+        input,
+        model: "unit-test-model",
+        tool_calls: [],
+      },
+    ];
+
+    const output = serializeAuditEntries(entries, { format: "json", redactToolResults: false });
+    const parsed = JSON.parse(output) as any[];
+
+    expect(Object.getPrototypeOf(parsed[0].input)).toBe(Object.prototype);
+    expect(parsed[0].input["__proto__"]).toEqual({ polluted: true });
+    expect(({} as any).polluted).toBeUndefined();
+  });
 });

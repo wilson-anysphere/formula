@@ -147,7 +147,9 @@ function stableJsonValue(value: unknown, ancestors: WeakSet<object>): unknown {
   if (ancestors.has(obj)) return "[Circular]";
   ancestors.add(obj);
 
-  const sorted: Record<string, unknown> = {};
+  // Use a null-prototype object to avoid special-casing keys like `__proto__`
+  // (which can otherwise mutate the prototype chain and drop data).
+  const sorted: Record<string, unknown> = Object.create(null);
   let keys: string[];
   try {
     keys = Object.keys(obj).sort();
