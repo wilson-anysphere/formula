@@ -2,12 +2,12 @@ export const SR_ONLY_STYLE: Record<string, string> = {
   position: "absolute",
   width: "1px",
   height: "1px",
-  padding: "0",
+  padding: "0px",
   margin: "-1px",
   overflow: "hidden",
-  clip: "rect(0, 0, 0, 0)",
+  clip: "rect(0px, 0px, 0px, 0px)",
   whiteSpace: "nowrap",
-  border: "0"
+  border: "0px"
 };
 
 Object.freeze(SR_ONLY_STYLE);

@@ -10,6 +10,8 @@ describe("a11y helpers", () => {
     expect(toColumnName(27)).toBe("AB");
     expect(toColumnName(51)).toBe("AZ");
     expect(toColumnName(52)).toBe("BA");
+    expect(toColumnName(701)).toBe("ZZ");
+    expect(toColumnName(702)).toBe("AAA");
   });
 
   it("converts 0-based coordinates to A1 addresses", () => {
