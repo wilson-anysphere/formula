@@ -2243,7 +2243,7 @@ test("Sheet names are suggested as identifiers when typing =Sheet", async () => 
 
   assert.ok(
     suggestions.some((s) => s.text === "=Sheet1!" || s.text === "=Sheet2!"),
-    `Expected a sheet-name identifier suggestion ending with '!', got: ${suggestions.map((s) => s.text).join(", ")}`,
+    `Expected a sheet-name identifier suggestion ending with '!', got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 
@@ -2266,7 +2266,7 @@ test("Sheet name suggestions preserve the typed prefix case (lowercase)", async 
 
   assert.ok(
     suggestions.some((s) => s.text.startsWith("=shee") && s.text.endsWith("!")),
-    `Expected a sheet-name suggestion that preserves prefix case, got: ${suggestions.map((s) => s.text).join(", ")}`,
+    `Expected a sheet-name suggestion that preserves prefix case, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 
@@ -2290,6 +2290,81 @@ test("Sheet names that require quotes are not suggested as identifiers (=My Shee
   assert.equal(
     suggestions.filter((s) => s.text.endsWith("!")).length,
     0,
-    `Expected no sheet-name suggestions ending with '!', got: ${suggestions.map((s) => s.text).join(", ")}`,
+    `Expected no sheet-name suggestions ending with '!', got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("getSuggestions never throws when cellRef is malformed", async () => {
+  const engine = new TabCompletionEngine();
+  const invalidRefs = [null, { row: "x" }, "not-a1"];
+
+  for (const cellRef of invalidRefs) {
+    const formulaInput = "=SUM(A";
+    const formulaSuggestions = await engine.getSuggestions({
+      currentInput: formulaInput,
+      cursorPosition: formulaInput.length,
+      cellRef,
+      surroundingCells: createMockCellContext({}),
+    });
+    assert.ok(Array.isArray(formulaSuggestions), `Expected array for cellRef=${String(cellRef)}`);
+
+    const valueInput = "x";
+    const valueSuggestions = await engine.getSuggestions({
+      currentInput: valueInput,
+      cursorPosition: valueInput.length,
+      cellRef,
+      surroundingCells: createMockCellContext({ A2: "xray" }),
+    });
+    assert.ok(Array.isArray(valueSuggestions), `Expected array for cellRef=${String(cellRef)}`);
+  }
+});
+
+test("Completion client request falls back to A1 when cellRef is invalid", async () => {
+  /** @type {any} */
+  let seenReq = null;
+  const completionClient = {
+    async completeTabCompletion(req) {
+      seenReq = req;
+      return "2";
+    },
+  };
+
+  const engine = new TabCompletionEngine({ completionClient, completionTimeoutMs: 200 });
+
+  const currentInput = "=1+";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: "not-a1",
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.deepEqual(seenReq, {
+    input: currentInput,
+    cursorPosition: currentInput.length,
+    cellA1: "A1",
+  });
+  assert.ok(Array.isArray(suggestions));
+});
+
+test("parsePartialFormula errors do not crash getSuggestions (falls back to pattern suggestions)", async () => {
+  const engine = new TabCompletionEngine({
+    parsePartialFormula() {
+      throw new Error("boom");
+    },
+  });
+
+  const currentInput = "ap";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 5, col: 0 },
+    surroundingCells: createMockCellContext({ A5: "apple", A4: "apricot" }),
+  });
+
+  assert.ok(Array.isArray(suggestions));
+  assert.ok(
+    suggestions.some((s) => s.text === "apple" || s.text === "apricot"),
+    `Expected pattern suggestions, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });

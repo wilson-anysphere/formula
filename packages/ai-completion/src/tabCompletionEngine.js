@@ -79,56 +79,124 @@ export class TabCompletionEngine {
    * @returns {Promise<Suggestion[]>}
    */
   async getSuggestions(context, options = {}) {
-    const input = context?.currentInput ?? "";
-    const cursorPosition = clampCursor(input, context?.cursorPosition);
+    try {
+      const input = safeToString(context?.currentInput);
+      const cursorPosition = clampCursor(input, context?.cursorPosition);
 
-    const cacheKey = this.buildCacheKey({
-      ...context,
-      currentInput: input,
-      cursorPosition,
-    });
+      const normalizedContext = {
+        currentInput: input,
+        cursorPosition,
+        // Normalize defensively because tab completion runs on every keystroke
+        // and hosts may pass malformed refs.
+        cellRef: safeNormalizeCellRef(context?.cellRef),
+        surroundingCells: context?.surroundingCells,
+      };
 
-    const cached = this.cache.get(cacheKey);
-    const baseSuggestions = cached ?? (await this.#computeBaseSuggestions(context, input, cursorPosition));
-    if (!cached) this.cache.set(cacheKey, baseSuggestions);
+      const cacheKey = this.buildCacheKey(normalizedContext);
 
-    if (typeof options?.previewEvaluator === "function") {
-      return attachPreviews(baseSuggestions, context, options.previewEvaluator);
+      const cached = safeCacheGet(this.cache, cacheKey);
+      const baseSuggestions = Array.isArray(cached)
+        ? cached
+        : await this.#computeBaseSuggestions(normalizedContext, input, cursorPosition);
+
+      if (!Array.isArray(cached)) {
+        safeCacheSet(this.cache, cacheKey, baseSuggestions);
+      }
+
+      if (typeof options?.previewEvaluator === "function") {
+        try {
+          const withPreviews = await attachPreviews(baseSuggestions, normalizedContext, options.previewEvaluator);
+          return Array.isArray(withPreviews) ? withPreviews : [];
+        } catch {
+          return Array.isArray(baseSuggestions) ? baseSuggestions : [];
+        }
+      }
+
+      return Array.isArray(baseSuggestions) ? baseSuggestions : [];
+    } catch {
+      // Tab completion must never crash the host.
+      return [];
     }
-    return baseSuggestions;
   }
 
   buildCacheKey(context) {
-    const cell = normalizeCellRef(context.cellRef);
-    const surroundingKey =
-      typeof context.surroundingCells?.getCacheKey === "function"
-        ? context.surroundingCells.getCacheKey()
-        : "";
-    const schemaKey =
-      typeof this.schemaProvider?.getCacheKey === "function" ? this.schemaProvider.getCacheKey() : "";
-    return JSON.stringify({
-      input: context.currentInput,
-      cursor: context.cursorPosition,
-      cell,
-      surroundingKey,
-      schemaKey,
-    });
+    let degraded = false;
+
+    let cell = DEFAULT_CELL_REF;
+    try {
+      // Defensive normalization for cache keys: invalid refs should not throw.
+      const normalized = normalizeCellRef(context?.cellRef);
+      if (
+        normalized &&
+        Number.isInteger(normalized.row) &&
+        Number.isInteger(normalized.col) &&
+        normalized.row >= 0 &&
+        normalized.col >= 0
+      ) {
+        cell = { row: normalized.row, col: normalized.col };
+      } else {
+        degraded = true;
+        cell = DEFAULT_CELL_REF;
+      }
+    } catch {
+      degraded = true;
+      cell = DEFAULT_CELL_REF;
+    }
+
+    let surroundingKey = "";
+    try {
+      surroundingKey =
+        typeof context?.surroundingCells?.getCacheKey === "function"
+          ? safeToString(context.surroundingCells.getCacheKey())
+          : "";
+    } catch {
+      degraded = true;
+      surroundingKey = "";
+    }
+
+    let schemaKey = "";
+    try {
+      schemaKey =
+        typeof this.schemaProvider?.getCacheKey === "function" ? safeToString(this.schemaProvider.getCacheKey()) : "";
+    } catch {
+      degraded = true;
+      schemaKey = "";
+    }
+
+    const input = safeToString(context?.currentInput);
+    const cursor = Number.isInteger(context?.cursorPosition) ? context.cursorPosition : -1;
+
+    const payload = { input, cursor, cell, surroundingKey, schemaKey };
+
+    // If any component failed, return a degraded-but-stable key instead of throwing.
+    if (degraded) {
+      return `degraded:${input}:${cursor}:${cell.row},${cell.col}:${surroundingKey}:${schemaKey}`;
+    }
+
+    try {
+      return JSON.stringify(payload);
+    } catch {
+      return `degraded:${input}:${cursor}:${cell.row},${cell.col}:${surroundingKey}:${schemaKey}`;
+    }
   }
 
   async #computeBaseSuggestions(context, input, cursorPosition) {
-    const parsed = this.parsePartialFormula(input, cursorPosition, this.functionRegistry);
+    let parsed;
+    try {
+      parsed = this.parsePartialFormula(input, cursorPosition, this.functionRegistry);
+    } catch {
+      // Be defensive: if the partial parser ever throws, treat the input as
+      // non-formula and only attempt pattern-based suggestions.
+      parsed = { isFormula: false, inFunctionCall: false };
+    }
 
     const [ruleBased, patternBased, backendBased] = await Promise.all([
-      this.getRuleBasedSuggestions(context, parsed),
-      this.getPatternSuggestions(context, parsed),
-      this.getCursorBackendSuggestions(context, parsed),
+      safeArrayResult(() => this.getRuleBasedSuggestions(context, parsed)),
+      safeArrayResult(() => this.getPatternSuggestions(context, parsed)),
+      safeArrayResult(() => this.getCursorBackendSuggestions(context, parsed)),
     ]);
 
-    return rankAndDedupe([
-      ...ruleBased,
-      ...patternBased,
-      ...backendBased,
-    ]).slice(0, this.maxSuggestions);
+    return rankAndDedupe([...ruleBased, ...patternBased, ...backendBased]).slice(0, this.maxSuggestions);
   }
 
   /**
@@ -173,13 +241,21 @@ export class TabCompletionEngine {
    */
   async getPatternSuggestions(context, parsed) {
     if (parsed.isFormula) return [];
-    const candidates = suggestPatternValues(context);
-    return candidates.map(c => ({
-      text: c.text,
-      displayText: c.text,
-      type: "value",
-      confidence: c.confidence,
-    }));
+    try {
+      const candidates = suggestPatternValues({
+        ...context,
+        // patternSuggester normalizes internally; ensure it always receives a valid ref.
+        cellRef: safeNormalizeCellRef(context?.cellRef),
+      });
+      return candidates.map((c) => ({
+        text: c.text,
+        displayText: c.text,
+        type: "value",
+        confidence: c.confidence,
+      }));
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -191,11 +267,11 @@ export class TabCompletionEngine {
     if (!this.completionClient) return [];
     if (!parsed.isFormula) return [];
 
-    const input = context.currentInput ?? "";
+    const input = safeToString(context?.currentInput);
     // Avoid asking the backend when the formula body is empty (e.g. "=" / "= ").
     // This keeps tab completion responsive and lets the curated starter functions
     // appear immediately without waiting for the network timeout.
-    if (typeof input === "string" && input.startsWith("=") && input.slice(1).trim() === "") {
+    if (input.startsWith("=") && input.slice(1).trim() === "") {
       return [];
     }
 
@@ -203,15 +279,15 @@ export class TabCompletionEngine {
     // argument structure. Only ask the backend when we have an actual formula body.
     if (parsed.functionNamePrefix) return [];
 
-    const cursor = clampCursor(input, context.cursorPosition);
-    const cell = normalizeCellRef(context.cellRef);
+    const cursor = clampCursor(input, context?.cursorPosition);
+    const cell = safeNormalizeCellRef(context?.cellRef);
 
     try {
       const completion = await withTimeout(
         this.completionClient.completeTabCompletion({
           input,
           cursorPosition: cursor,
-          cellA1: toA1(cell),
+          cellA1: safeToA1(cell),
         }),
         this.completionTimeoutMs
       );
@@ -281,9 +357,9 @@ export class TabCompletionEngine {
    * @returns {Promise<Suggestion[]>}
    */
   suggestRangeCompletions(context, parsed) {
-    const input = context.currentInput ?? "";
-    const cursor = clampCursor(input, context.cursorPosition);
-    const cellRef = normalizeCellRef(context.cellRef);
+    const input = safeToString(context?.currentInput);
+    const cursor = clampCursor(input, context?.cursorPosition);
+    const cellRef = safeNormalizeCellRef(context?.cellRef);
     const fnSpec = parsed.functionName ? this.functionRegistry.getFunction(parsed.functionName) : undefined;
     const argIndex = parsed.argIndex ?? 0;
     const argSpecName = fnSpec?.args?.[argIndex]?.name;
@@ -302,10 +378,10 @@ export class TabCompletionEngine {
     const isEmptyArg = typedArgText.trim().length === 0;
     const currentArgText = isEmptyArg ? columnIndexToLetter(cellRef.col) : typedArgText;
 
-    const rangeCandidates = suggestRanges({
+    const rangeCandidates = safeSuggestRanges({
       currentArgText,
       cellRef,
-      surroundingCells: context.surroundingCells,
+      surroundingCells: context?.surroundingCells,
     });
 
     // Some functions (VLOOKUP table_array, TAKE array, etc.) almost always want
@@ -376,9 +452,9 @@ export class TabCompletionEngine {
     const provider = this.schemaProvider;
     if (!provider) return [];
 
-    const input = context.currentInput ?? "";
-    const cursor = clampCursor(input, context.cursorPosition);
-    const cellRef = normalizeCellRef(context.cellRef);
+    const input = safeToString(context?.currentInput);
+    const cursor = clampCursor(input, context?.cursorPosition);
+    const cellRef = safeNormalizeCellRef(context?.cellRef);
 
     const fnSpec = parsed.functionName ? this.functionRegistry.getFunction(parsed.functionName) : undefined;
     const argIndex = parsed.argIndex ?? 0;
@@ -436,17 +512,17 @@ export class TabCompletionEngine {
         .find((s) => s.toLowerCase() === sheetArg.sheetPrefix.toLowerCase());
       if (sheetName) {
         if (!(needsSheetQuotes(sheetName) && !typedQuoted)) {
-          const rangeCandidates = suggestRanges({
-            currentArgText: sheetArg.rangePrefix,
-            cellRef,
-            surroundingCells: context.surroundingCells,
-            sheetName,
-          });
-          for (const candidate of rangeCandidates) {
-            addReplacement(`${rawPrefix}${candidate.range.slice(sheetArg.rangePrefix.length)}`, {
-              confidence: Math.min(0.85, candidate.confidence + 0.05),
+            const rangeCandidates = safeSuggestRanges({
+              currentArgText: sheetArg.rangePrefix,
+              cellRef,
+              surroundingCells: context?.surroundingCells,
+              sheetName,
             });
-          }
+            for (const candidate of rangeCandidates) {
+              addReplacement(`${rawPrefix}${candidate.range.slice(sheetArg.rangePrefix.length)}`, {
+                confidence: Math.min(0.85, candidate.confidence + 0.05),
+              });
+            }
         }
       }
     } else if (rawPrefix) {
@@ -553,9 +629,9 @@ export class TabCompletionEngine {
    * @returns {Suggestion[]}
    */
   suggestArgumentValues(context, parsed) {
-    const input = context.currentInput ?? "";
-    const cursor = clampCursor(input, context.cursorPosition);
-    const cellRef = normalizeCellRef(context.cellRef);
+    const input = safeToString(context?.currentInput);
+    const cursor = clampCursor(input, context?.cursorPosition);
+    const cellRef = safeNormalizeCellRef(context?.cellRef);
 
     const fnName = parsed.functionName;
     const argIndex = parsed.argIndex ?? 0;
@@ -955,7 +1031,10 @@ function rankAndDedupe(suggestions) {
     if (!s || typeof s.text !== "string" || s.text.length === 0) continue;
     const existing = bestByText.get(s.text);
     if (!existing || (s.confidence ?? 0) > (existing.confidence ?? 0)) {
-      bestByText.set(s.text, s);
+      bestByText.set(s.text, {
+        ...s,
+        displayText: typeof s.displayText === "string" && s.displayText.length > 0 ? s.displayText : s.text,
+      });
     }
   }
 
@@ -971,7 +1050,9 @@ function rankAndDedupe(suggestions) {
     if (confDiff !== 0) return confDiff;
     const typeDiff = (typePriority[b.type] ?? 0) - (typePriority[a.type] ?? 0);
     if (typeDiff !== 0) return typeDiff;
-    return a.displayText.localeCompare(b.displayText);
+    const aText = typeof a.displayText === "string" ? a.displayText : a.text;
+    const bText = typeof b.displayText === "string" ? b.displayText : b.text;
+    return aText.localeCompare(bText);
   });
 }
 
@@ -1174,4 +1255,94 @@ function withTimeout(promise, timeoutMs) {
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs)),
   ]);
+}
+
+const DEFAULT_CELL_REF = Object.freeze({ row: 0, col: 0 });
+
+/**
+ * @param {any} value
+ * @returns {string}
+ */
+function safeToString(value) {
+  try {
+    if (typeof value === "string") return value;
+    return String(value ?? "");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * @param {any} cellRef
+ * @returns {{row:number,col:number}}
+ */
+function safeNormalizeCellRef(cellRef) {
+  try {
+    const normalized = normalizeCellRef(cellRef);
+    const row = Number.isInteger(normalized?.row) && normalized.row >= 0 ? normalized.row : 0;
+    const col = Number.isInteger(normalized?.col) && normalized.col >= 0 ? normalized.col : 0;
+    return { row, col };
+  } catch {
+    return { row: 0, col: 0 };
+  }
+}
+
+/**
+ * @param {{row:number,col:number}} cellRef
+ * @returns {string}
+ */
+function safeToA1(cellRef) {
+  try {
+    return toA1(cellRef);
+  } catch {
+    return "A1";
+  }
+}
+
+/**
+ * @param {any} cache
+ * @param {string} key
+ */
+function safeCacheGet(cache, key) {
+  try {
+    return cache?.get?.(key);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * @param {any} cache
+ * @param {string} key
+ * @param {any} value
+ */
+function safeCacheSet(cache, key, value) {
+  try {
+    cache?.set?.(key, value);
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * @template T
+ * @param {() => T | Promise<T>} fn
+ * @returns {Promise<T[]>}
+ */
+async function safeArrayResult(fn) {
+  try {
+    const result = await Promise.resolve().then(fn);
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
+}
+
+function safeSuggestRanges(params) {
+  try {
+    const out = suggestRanges(params);
+    return Array.isArray(out) ? out : [];
+  } catch {
+    return [];
+  }
 }
