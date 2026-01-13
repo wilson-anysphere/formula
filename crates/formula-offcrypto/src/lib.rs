@@ -5,6 +5,13 @@
 //! - Parsing the *Agile* `EncryptionInfo` stream (version 4.4) (password key-encryptor subset)
 //! - Parsing the `EncryptedPackage` stream header
 //! - ECMA-376 Standard password→key derivation + verifier checks
+//!
+//! Verifier digests are compared in constant time to reduce timing side channels.
+
+mod util;
+
+pub mod agile;
+pub mod standard;
 
 use core::fmt;
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
@@ -89,6 +96,15 @@ impl HashAlgorithm {
             _ => Err(OffcryptoError::InvalidEncryptionInfo {
                 context: "unsupported hashAlgorithm",
             }),
+        }
+    }
+
+    pub(crate) fn digest(self, data: &[u8]) -> Vec<u8> {
+        match self {
+            HashAlgorithm::Sha1 => sha1::Sha1::digest(data).to_vec(),
+            HashAlgorithm::Sha256 => sha2::Sha256::digest(data).to_vec(),
+            HashAlgorithm::Sha384 => sha2::Sha384::digest(data).to_vec(),
+            HashAlgorithm::Sha512 => sha2::Sha512::digest(data).to_vec(),
         }
     }
 }
@@ -1077,7 +1093,7 @@ pub fn standard_verify_key(info: &StandardEncryptionInfo, key: &[u8]) -> Result<
         });
     }
 
-    if &expected_hash[..] == &verifier_hash[..SHA1_LEN] {
+    if util::ct_eq(&expected_hash[..], &verifier_hash[..SHA1_LEN]) {
         Ok(())
     } else {
         Err(OffcryptoError::InvalidPassword)
