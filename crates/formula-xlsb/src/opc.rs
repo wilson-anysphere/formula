@@ -12,6 +12,7 @@ use crate::styles::Styles;
 use crate::workbook_context::WorkbookContext;
 use crate::SharedString;
 use formula_fs::{atomic_write_with_path, AtomicWriteError};
+use formula_office_crypto as office_crypto;
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
@@ -236,6 +237,18 @@ impl XlsbWorkbook {
     /// Open an XLSB workbook from in-memory ZIP bytes, without copying.
     pub fn from_bytes(bytes: Arc<[u8]>, options: OpenOptions) -> Result<Self, ParseError> {
         Self::open_from_owned_bytes(bytes, options)
+    }
+
+    /// Open an Office-encrypted/password-protected workbook using `password`.
+    ///
+    /// This expects the input file to be an OLE compound file containing
+    /// `EncryptionInfo` + `EncryptedPackage` streams (the standard Office
+    /// encryption wrapper for OOXML/XLSB packages).
+    pub fn open_with_password(path: impl AsRef<Path>, password: &str) -> Result<Self, ParseError> {
+        let bytes = std::fs::read(path.as_ref())?;
+        let package = office_crypto::decrypt_encrypted_package_ole(&bytes, password)
+            .map_err(|err| ParseError::OfficeCrypto(err.to_string()))?;
+        Self::open_from_vec(package)
     }
 
     /// Open an XLSB workbook from an in-memory reader.
@@ -562,6 +575,52 @@ impl XlsbWorkbook {
     /// This is equivalent to [`Self::save_as`] but does not require a filesystem path.
     pub fn save_as_to_writer<W: Write + Seek>(&self, writer: W) -> Result<(), ParseError> {
         self.save_with_part_overrides_to_writer(writer, &HashMap::new())
+    }
+
+    /// Save the workbook as an `.xlsb` package and return the resulting ZIP bytes.
+    pub fn save_as_to_bytes(&self) -> Result<Vec<u8>, ParseError> {
+        let mut cursor = Cursor::new(Vec::new());
+        self.save_as_to_writer(&mut cursor)?;
+        Ok(cursor.into_inner())
+    }
+
+    /// Save the workbook as a password-protected/encrypted `.xlsb` file.
+    ///
+    /// This writes an OLE compound file wrapper containing:
+    /// - `EncryptionInfo`
+    /// - `EncryptedPackage` (the encrypted XLSB ZIP payload)
+    pub fn save_as_encrypted(
+        &self,
+        dest: impl AsRef<Path>,
+        password: &str,
+    ) -> Result<(), ParseError> {
+        let dest = dest.as_ref();
+        atomic_write_with_path(dest, |tmp_path| {
+            let mut out = File::create(tmp_path)?;
+            self.save_as_encrypted_to_writer(&mut out, password)
+        })
+        .map_err(|err| match err {
+            AtomicWriteError::Io(err) => ParseError::Io(err),
+            AtomicWriteError::Writer(err) => err,
+        })
+    }
+
+    /// Save the workbook as an encrypted/password-protected `.xlsb` payload written to an
+    /// arbitrary writer.
+    pub fn save_as_encrypted_to_writer<W: Write>(
+        &self,
+        mut writer: W,
+        password: &str,
+    ) -> Result<(), ParseError> {
+        let package_bytes = self.save_as_to_bytes()?;
+        let ole_bytes = office_crypto::encrypt_package_to_ole(
+            &package_bytes,
+            password,
+            office_crypto::EncryptOptions::default(),
+        )
+            .map_err(|err| ParseError::OfficeCrypto(err.to_string()))?;
+        writer.write_all(&ole_bytes)?;
+        Ok(())
     }
 
     /// Save the workbook with an updated numeric cell value.

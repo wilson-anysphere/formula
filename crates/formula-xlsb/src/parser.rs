@@ -113,6 +113,8 @@ pub enum Error {
     PreservedPartsTooLarge { total: u64, max: u64 },
     #[error("XLSB has too many ZIP entries: {count} exceeds limit {max}")]
     TooManyZipEntries { count: usize, max: usize },
+    #[error("office encryption error: {0}")]
+    OfficeCrypto(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

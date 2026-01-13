@@ -1699,7 +1699,6 @@ fn convert_value_record_to_formula<W: io::Write>(
             ),
         )));
     }
-
     // Value records do not carry `BrtFmla*` flags. When converting a value record into a formula
     // record, default to `0` unless the caller explicitly overrides. This mirrors Excel's behavior
     // for newly-created formula cells.
