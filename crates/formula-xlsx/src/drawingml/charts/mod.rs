@@ -88,7 +88,7 @@ pub(crate) fn extract_chart_object_refs(
         };
 
         for frame in anchor
-            .children()
+            .descendants()
             .filter(|n| n.is_element() && n.tag_name().name() == "graphicFrame")
         {
             let Some(chart) = frame
@@ -115,6 +115,64 @@ pub(crate) fn extract_chart_object_refs(
     }
 
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_chart_object_refs;
+
+    #[test]
+    fn extract_chart_object_refs_finds_nested_graphic_frame() {
+        let drawing_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+          xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+          xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <xdr:twoCellAnchor>
+    <xdr:from>
+      <xdr:col>0</xdr:col>
+      <xdr:colOff>0</xdr:colOff>
+      <xdr:row>0</xdr:row>
+      <xdr:rowOff>0</xdr:rowOff>
+    </xdr:from>
+    <xdr:to>
+      <xdr:col>5</xdr:col>
+      <xdr:colOff>0</xdr:colOff>
+      <xdr:row>10</xdr:row>
+      <xdr:rowOff>0</xdr:rowOff>
+    </xdr:to>
+    <xdr:grpSp>
+      <xdr:nvGrpSpPr/>
+      <xdr:grpSpPr/>
+      <xdr:graphicFrame>
+        <xdr:nvGraphicFramePr/>
+        <xdr:xfrm/>
+        <a:graphic>
+          <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">
+            <c:chart r:id="rId42"/>
+          </a:graphicData>
+        </a:graphic>
+      </xdr:graphicFrame>
+    </xdr:grpSp>
+    <xdr:clientData/>
+  </xdr:twoCellAnchor>
+</xdr:wsDr>
+"#;
+
+        let refs = extract_chart_object_refs(drawing_xml.as_bytes(), "xl/drawings/drawing1.xml")
+            .expect("chart refs parsed");
+        assert_eq!(refs.len(), 1);
+
+        let chart_ref = &refs[0];
+        assert_eq!(chart_ref.rel_id, "rId42");
+        assert!(chart_ref.drawing_frame_xml.contains("<xdr:graphicFrame"));
+        assert!(chart_ref.drawing_frame_xml.contains("r:id=\"rId42\""));
+        assert!(!chart_ref.drawing_frame_xml.contains("<xdr:grpSp"));
+
+        let frame_xml = chart_ref.drawing_frame_xml.trim();
+        assert!(frame_xml.starts_with("<xdr:graphicFrame"));
+        assert!(frame_xml.ends_with("</xdr:graphicFrame>"));
+    }
 }
 
 fn parse_anchor(anchor: &roxmltree::Node<'_, '_>) -> Option<Anchor> {
@@ -193,4 +251,3 @@ fn slice_node_xml(node: &roxmltree::Node<'_, '_>, doc: &str) -> Option<String> {
     let range = node.range();
     doc.get(range).map(|s| s.to_string())
 }
-
