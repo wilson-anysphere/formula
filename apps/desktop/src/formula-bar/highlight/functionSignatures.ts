@@ -336,7 +336,7 @@ export function getFunctionSignature(name: string): FunctionSignature | null {
   return lookup === requested ? known : { ...known, name: requested };
 }
 
-export type SignaturePart = { text: string; kind: "name" | "param" | "paramActive" | "punct" };
+type SignaturePart = { text: string; kind: "name" | "param" | "paramActive" | "punct" };
 
 export function signatureParts(
   sig: FunctionSignature,
