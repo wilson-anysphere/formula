@@ -123,6 +123,8 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealInlineAI", key: "ctrl+cmd+k", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealEditCell", key: "f2", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealAddComment", key: "shift+f2", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealCopy", key: "f6", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealCopy", key: "shift+f6", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealAIChat", key: "ctrl+shift+a", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealAIChat", key: "cmd+i", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealAIChat", key: "ctrl+cmd+i", mac: null, when: null },
@@ -183,6 +185,18 @@ describe("KeybindingService", () => {
       binding: parseKeybinding("ext.stealCopy", "enter", null)!,
       weight: 0,
       order: 10001,
+    });
+    (service as any).extensions.push({
+      source: { kind: "extension", extensionId: "ext" },
+      binding: parseKeybinding("ext.stealCopy", "f6", null)!,
+      weight: 0,
+      order: 10002,
+    });
+    (service as any).extensions.push({
+      source: { kind: "extension", extensionId: "ext" },
+      binding: parseKeybinding("ext.stealCopy", "shift+f6", null)!,
+      weight: 0,
+      order: 10003,
     });
     const escapeEvent = makeKeydownEvent({ key: "Escape" });
     const escapeHandled = await service.dispatchKeydown(escapeEvent);
@@ -293,6 +307,19 @@ describe("KeybindingService", () => {
     const handled15 = await service.dispatchKeydown(event15);
     expect(handled15).toBe(false);
     expect(event15.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    // Focus cycling between major regions (Excel-style): F6 / Shift+F6.
+    const eventF6 = makeKeydownEvent({ key: "F6" });
+    const handledF6 = await service.dispatchKeydown(eventF6);
+    expect(handledF6).toBe(false);
+    expect(eventF6.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    const eventShiftF6 = makeKeydownEvent({ key: "F6", shiftKey: true });
+    const handledShiftF6 = await service.dispatchKeydown(eventShiftF6);
+    expect(handledShiftF6).toBe(false);
+    expect(eventShiftF6.defaultPrevented).toBe(false);
     expect(extRun).not.toHaveBeenCalled();
 
     // Toggle Comments Panel (core UX): Ctrl/Cmd+Shift+M.
