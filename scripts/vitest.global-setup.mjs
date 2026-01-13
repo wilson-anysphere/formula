@@ -77,7 +77,7 @@ function shouldSkipWasmBuildForCurrentRun() {
 
   const needsWasmBuild = resolved.some((abs) => {
     const normalized = ensureTrailingSep(path.resolve(abs));
-    return normalized.startsWith(engineDir) || normalized.startsWith(formulaWasmDir);
+    return overlapsPath(normalized, engineDir) || overlapsPath(normalized, formulaWasmDir);
   });
 
   return !needsWasmBuild;
@@ -85,4 +85,11 @@ function shouldSkipWasmBuildForCurrentRun() {
 
 function ensureTrailingSep(p) {
   return p.endsWith(path.sep) ? p : `${p}${path.sep}`;
+}
+
+function overlapsPath(candidatePath, dirPath) {
+  // Candidate may be a file or directory path. Consider it overlapping if:
+  // - it's inside the wasm-backed suite dir, OR
+  // - it's an ancestor that contains the suite dir (e.g. `vitest run packages`).
+  return candidatePath.startsWith(dirPath) || dirPath.startsWith(candidatePath);
 }
