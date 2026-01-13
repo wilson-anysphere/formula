@@ -193,13 +193,14 @@ export class SqliteVectorStore {
    * @param {boolean} [opts.resetOnCorrupt]
    *   When true (default), any failure to load/validate an existing persisted
    *   database causes the underlying storage to be cleared (via `storage.remove()`
-   *   when available) and a fresh empty database to be created. When false, the
-   *   initialization error is rethrown.
+   *   when available, otherwise by overwriting with an empty payload) and a fresh
+   *   empty database to be created. When false, the initialization error is
+   *   rethrown.
    * @param {boolean} [opts.resetOnDimensionMismatch]
-   *   When true (default), if a persisted DB exists with a different embedding
-   *   dimension than requested, the underlying storage is cleared (via
-   *   `storage.remove()` when available) and a fresh empty database is created.
-   *   When false, the dimension mismatch error is rethrown.
+   *   When true (default), if the persisted database's `dimension` metadata does
+   *   not match the requested `opts.dimension`, the persisted bytes are wiped and
+   *   an empty database is created so callers can re-index. When false, the
+   *   mismatch is treated as fatal and the initialization error is rethrown.
    */
   static async create(opts) {
     if (!opts || !Number.isFinite(opts.dimension) || opts.dimension <= 0) {
