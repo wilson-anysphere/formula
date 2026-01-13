@@ -122,6 +122,7 @@ import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette, installCommandPaletteRecentsTracking } from "./command-palette/index.js";
 import { registerDesktopCommands } from "./commands/registerDesktopCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
+import { registerPageLayoutCommands } from "./commands/registerPageLayoutCommands.js";
 import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
 import type { GridLimits, Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
@@ -7364,6 +7365,18 @@ registerDesktopCommands({
   openCommandPalette: () => openCommandPalette?.(),
 });
 
+registerPageLayoutCommands({
+  commandRegistry,
+  handlers: {
+    openPageSetupDialog: () => handleRibbonPageSetup(),
+    updatePageSetup: (patch) => handleRibbonUpdatePageSetup(patch),
+    setPrintArea: () => handleRibbonSetPrintArea(),
+    clearPrintArea: () => handleRibbonClearPrintArea(),
+    addToPrintArea: () => handleRibbonAddToPrintArea(),
+    exportPdf: () => handleRibbonExportPdf(),
+  },
+});
+
 function getTauriInvokeForPrint(): TauriInvoke | null {
   const invoke =
     queuedInvoke ?? ((globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined) ?? null;
@@ -8081,6 +8094,16 @@ function handleRibbonCommand(commandId: string): void {
     if (commandId.startsWith("clipboard.")) {
       executeBuiltinCommand(commandId);
       return;
+    }
+
+    // Page Layout ribbon actions are backed by real commands so they can be invoked from
+    // the command palette / extensions and can participate in generic command disabling.
+    if (commandId.startsWith("pageLayout.")) {
+      const registered = commandRegistry.getCommand(commandId);
+      if (registered && registered.source.kind === "builtin") {
+        executeBuiltinCommand(commandId);
+        return;
+      }
     }
 
     if (
@@ -8900,59 +8923,6 @@ function handleRibbonCommand(commandId: string): void {
         return;
       case "navigation.goTo":
         executeBuiltinCommand("navigation.goTo");
-        return;
-      case "pageLayout.pageSetup.pageSetupDialog":
-        void handleRibbonPageSetup();
-        return;
-      case "pageLayout.pageSetup.margins.normal":
-        void handleRibbonUpdatePageSetup((current) => ({
-          ...current,
-          margins: { ...current.margins, left: 0.7, right: 0.7, top: 0.75, bottom: 0.75 },
-        }));
-        return;
-      case "pageLayout.pageSetup.margins.wide":
-        void handleRibbonUpdatePageSetup((current) => ({
-          ...current,
-          margins: { ...current.margins, left: 1, right: 1, top: 1, bottom: 1 },
-        }));
-        return;
-      case "pageLayout.pageSetup.margins.narrow":
-        void handleRibbonUpdatePageSetup((current) => ({
-          ...current,
-          margins: { ...current.margins, left: 0.25, right: 0.25, top: 0.75, bottom: 0.75 },
-        }));
-        return;
-      case "pageLayout.pageSetup.margins.custom":
-        void handleRibbonPageSetup();
-        return;
-      case "pageLayout.pageSetup.orientation.portrait":
-        void handleRibbonUpdatePageSetup((current) => ({ ...current, orientation: "portrait" }));
-        return;
-      case "pageLayout.pageSetup.orientation.landscape":
-        void handleRibbonUpdatePageSetup((current) => ({ ...current, orientation: "landscape" }));
-        return;
-      case "pageLayout.pageSetup.size.letter":
-        void handleRibbonUpdatePageSetup((current) => ({ ...current, paperSize: 1 }));
-        return;
-      case "pageLayout.pageSetup.size.a4":
-        void handleRibbonUpdatePageSetup((current) => ({ ...current, paperSize: 9 }));
-        return;
-      case "pageLayout.pageSetup.size.more":
-        void handleRibbonPageSetup();
-        return;
-      case "pageLayout.printArea.setPrintArea":
-      case "pageLayout.pageSetup.printArea.set":
-        void handleRibbonSetPrintArea();
-        return;
-      case "pageLayout.printArea.clearPrintArea":
-      case "pageLayout.pageSetup.printArea.clear":
-        void handleRibbonClearPrintArea();
-        return;
-      case "pageLayout.pageSetup.printArea.addTo":
-        void handleRibbonAddToPrintArea();
-        return;
-      case "pageLayout.export.exportPdf":
-        void handleRibbonExportPdf();
         return;
       case "view.freezePanes":
       case "view.freezeTopRow":
