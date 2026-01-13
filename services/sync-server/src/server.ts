@@ -5,7 +5,7 @@ import https from "node:https";
 import { promises as fs, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
-import { monitorEventLoopDelay } from "node:perf_hooks";
+import { monitorEventLoopDelay, type IntervalHistogram } from "node:perf_hooks";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 
@@ -131,6 +131,52 @@ function rawDataByteLength(raw: WebSocket.RawData): number {
 const MAX_CLIENT_IP_CHARS = 128;
 const MAX_USER_AGENT_CHARS = 512;
 const MAX_DOC_NAME_BYTES = 1024;
+
+let eventLoopDelayHistogram: IntervalHistogram | null = null;
+let eventLoopDelayHistogramUsers = 0;
+
+function acquireEventLoopDelayHistogram(): IntervalHistogram | null {
+  if (eventLoopDelayHistogram) {
+    eventLoopDelayHistogramUsers += 1;
+    return eventLoopDelayHistogram;
+  }
+
+  try {
+    // `monitorEventLoopDelay()` was added in Node 11 and is guaranteed in our
+    // supported runtime (Node >= 20), but guard so the server can still start
+    // in older environments.
+    if (typeof monitorEventLoopDelay !== "function") return null;
+    eventLoopDelayHistogram = monitorEventLoopDelay({ resolution: 20 });
+    eventLoopDelayHistogram.enable();
+    eventLoopDelayHistogramUsers = 1;
+    return eventLoopDelayHistogram;
+  } catch {
+    eventLoopDelayHistogram = null;
+    eventLoopDelayHistogramUsers = 0;
+    return null;
+  }
+}
+
+function releaseEventLoopDelayHistogram(): void {
+  if (eventLoopDelayHistogramUsers <= 0) return;
+  eventLoopDelayHistogramUsers -= 1;
+  if (eventLoopDelayHistogramUsers > 0) return;
+
+  const histogram = eventLoopDelayHistogram;
+  eventLoopDelayHistogram = null;
+
+  if (!histogram) return;
+  try {
+    histogram.disable();
+  } catch {
+    // ignore
+  }
+  try {
+    histogram.reset();
+  } catch {
+    // ignore
+  }
+}
 
 function sendUpgradeRejection(
   socket: Duplex,
@@ -297,7 +343,7 @@ export function createSyncServer(
   );
 
   const metrics = createSyncServerMetrics();
-  const eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
+  let eventLoopDelay: IntervalHistogram | null = null;
   let processMetricsTimer: NodeJS.Timeout | null = null;
   const updateProcessMetrics = () => {
     const mem = process.memoryUsage();
@@ -305,11 +351,14 @@ export function createSyncServer(
     metrics.processHeapUsedBytes.set(mem.heapUsed);
     metrics.processHeapTotalBytes.set(mem.heapTotal);
     // monitorEventLoopDelay reports nanoseconds. Store p99 in milliseconds.
-    metrics.eventLoopDelayMs.set(eventLoopDelay.percentile(99) / 1e6);
-    // Reset so each collection is roughly per-interval, not cumulative.
-    eventLoopDelay.reset();
+    if (eventLoopDelay) {
+      metrics.eventLoopDelayMs.set(eventLoopDelay.percentile(99) / 1e6);
+      // Reset so each collection is roughly per-interval, not cumulative.
+      eventLoopDelay.reset();
+    }
   };
   const getEventLoopDelayMs = (): number => {
+    if (!eventLoopDelay) return 0;
     const p99Ns = eventLoopDelay.percentile(99);
     // Values are reported in nanoseconds.
     return Number.isFinite(p99Ns) ? p99Ns / 1e6 : 0;
@@ -1701,6 +1750,10 @@ export function createSyncServer(
         );
       }
 
+      if (!eventLoopDelay) {
+        eventLoopDelay = acquireEventLoopDelayHistogram();
+      }
+
       try {
         await initPersistence();
         await new Promise<void>((resolve, reject) => {
@@ -1715,6 +1768,11 @@ export function createSyncServer(
           });
         });
       } catch (err) {
+        if (eventLoopDelay) {
+          releaseEventLoopDelayHistogram();
+          eventLoopDelay = null;
+        }
+
         if (persistenceCleanup) {
           try {
             await persistenceCleanup();
@@ -1741,7 +1799,6 @@ export function createSyncServer(
       const port = addr?.port ?? config.port;
 
       if (!processMetricsTimer) {
-        eventLoopDelay.enable();
         updateProcessMetrics();
         processMetricsTimer = setInterval(updateProcessMetrics, 5_000);
         processMetricsTimer.unref();
@@ -1784,7 +1841,10 @@ export function createSyncServer(
         clearInterval(processMetricsTimer);
         processMetricsTimer = null;
       }
-      eventLoopDelay.disable();
+      if (eventLoopDelay) {
+        releaseEventLoopDelayHistogram();
+        eventLoopDelay = null;
+      }
 
       if (tombstoneSweepTimer) {
         clearInterval(tombstoneSweepTimer);
