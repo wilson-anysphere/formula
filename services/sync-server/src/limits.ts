@@ -66,6 +66,7 @@ export class SlidingWindowRateLimiter {
     string,
     { timestamps: number[]; startIndex: number }
   >();
+  private lastSweepMs = 0;
 
   constructor(
     private readonly maxEvents: number,
@@ -76,6 +77,27 @@ export class SlidingWindowRateLimiter {
     if (this.maxEvents <= 0 || this.windowMs <= 0) return true;
 
     const cutoff = nowMs - this.windowMs;
+
+    // Opportunistically sweep stale entries so a large number of one-off keys
+    // (e.g. message floods from many unique IPs) doesn't grow this map without
+    // bound.
+    const sweepIntervalMs = Math.max(this.windowMs, 30_000);
+    const maxEntriesBeforeSweep = 10_000;
+    if (
+      this.windows.size > 0 &&
+      (this.windows.size > maxEntriesBeforeSweep ||
+        nowMs - this.lastSweepMs > sweepIntervalMs)
+    ) {
+      for (const [windowKey, window] of this.windows) {
+        const timestamps = window.timestamps;
+        const lastTimestamp = timestamps[timestamps.length - 1];
+        if (lastTimestamp !== undefined && lastTimestamp <= cutoff) {
+          this.windows.delete(windowKey);
+        }
+      }
+      this.lastSweepMs = nowMs;
+    }
+
     const existing = this.windows.get(key) ?? { timestamps: [], startIndex: 0 };
     const { timestamps } = existing;
 

@@ -222,6 +222,78 @@ test("rate limits messages per document", async (t) => {
   assert.equal(await close, 1013);
 });
 
+test("rate limits messages per IP across connections", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-ip-rate-"));
+
+  const server = await startSyncServer({
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_MAX_MESSAGES_PER_IP_WINDOW: "5",
+      SYNC_SERVER_IP_MESSAGE_WINDOW_MS: "60000",
+    },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const wsA = new WebSocket(`${server.wsUrl}/ip-rate-a?token=test-token`);
+  const wsB = new WebSocket(`${server.wsUrl}/ip-rate-b?token=test-token`);
+  t.after(() => wsA.terminate());
+  t.after(() => wsB.terminate());
+
+  await Promise.all([
+    new Promise<void>((resolve, reject) => {
+      wsA.once("open", () => resolve());
+      wsA.once("error", (err) => reject(err));
+    }),
+    new Promise<void>((resolve, reject) => {
+      wsB.once("open", () => resolve());
+      wsB.once("error", (err) => reject(err));
+    }),
+  ]);
+
+  const closeA = new Promise<{ code: number; reason: string }>((resolve) => {
+    wsA.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
+  });
+  const closeB = new Promise<{ code: number; reason: string }>((resolve) => {
+    wsB.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
+  });
+  const firstClose = Promise.race([closeA, closeB]);
+
+  // Send 6 total messages across two connections from the same IP. With the per-IP
+  // limit set to 5, one of the connections should be closed.
+  for (let i = 0; i < 3; i += 1) {
+    wsA.send(
+      buildAwarenessMessage([
+        { clientID: 123, clock: i + 1, stateJSON: JSON.stringify({ ok: true }) },
+      ])
+    );
+  }
+  for (let i = 0; i < 3; i += 1) {
+    wsB.send(
+      buildAwarenessMessage([
+        { clientID: 456, clock: i + 1, stateJSON: JSON.stringify({ ok: true }) },
+      ])
+    );
+  }
+
+  const timeout = new Promise<never>((_, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("Timed out waiting for per-IP rate limit close")),
+      5_000
+    );
+    timer.unref();
+  });
+
+  const { code, reason } = await Promise.race([firstClose, timeout]);
+  assert.equal(code, 1013);
+  assert.equal(reason, "Rate limit exceeded");
+});
+
 test("disables ws maxPayload when SYNC_SERVER_MAX_MESSAGE_BYTES is 0", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-limit-disabled-"));
 

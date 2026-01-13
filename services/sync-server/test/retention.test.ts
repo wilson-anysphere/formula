@@ -119,6 +119,8 @@ function createConfig(ttlMs: number, dataDir: string): SyncServerConfig {
       connAttemptWindowMs: 60_000,
       maxMessagesPerWindow: 2_000,
       messageWindowMs: 10_000,
+      maxMessagesPerIpWindow: 0,
+      ipMessageWindowMs: 0,
       maxMessageBytes: 2 * 1024 * 1024,
       maxAwarenessStateBytes: 64 * 1024,
       maxAwarenessEntries: 10,

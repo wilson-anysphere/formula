@@ -347,6 +347,10 @@ export function createSyncServer(
     config.limits.maxMessagesPerDocWindow,
     config.limits.docMessageWindowMs
   );
+  const ipMessageLimiter = new SlidingWindowRateLimiter(
+    config.limits.maxMessagesPerIpWindow,
+    config.limits.ipMessageWindowMs
+  );
 
   const metrics = createSyncServerMetrics();
   const eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
@@ -1397,8 +1401,19 @@ export function createSyncServer(
         return;
       }
 
+      const nowMs = Date.now();
+
+      if (!ipMessageLimiter.consume(ip, nowMs)) {
+        metrics.wsMessagesRateLimitedTotal.inc();
+        logger.warn(
+          { ip, docName, userId: authCtx?.userId },
+          "ws_ip_message_rate_limited"
+        );
+        ws.close(1013, "Rate limit exceeded");
+        return;
+      }
+
       if (maxMessagesPerWindow > 0 && messageWindowMs > 0) {
-        const nowMs = Date.now();
         if (nowMs - messageWindowStartedAtMs >= messageWindowMs) {
           messageWindowStartedAtMs = nowMs;
           messagesInWindow = 0;
@@ -1416,7 +1431,7 @@ export function createSyncServer(
         }
       }
 
-      if (!docMessageLimiter.consume(docName)) {
+      if (!docMessageLimiter.consume(docName, nowMs)) {
         metrics.wsMessagesRateLimitedTotal.inc();
         logger.warn(
           { ip, docName, userId: authCtx?.userId },

@@ -242,6 +242,9 @@ export async function startSyncServer(opts: {
       SYNC_SERVER_MAX_CONNECTIONS_PER_DOC: "",
       // Prevent websocket origin allowlist settings from leaking into tests.
       SYNC_SERVER_ALLOWED_ORIGINS: "",
+      // Prevent per-IP websocket message rate limiting env vars from leaking into tests.
+      SYNC_SERVER_MAX_MESSAGES_PER_IP_WINDOW: "",
+      SYNC_SERVER_IP_MESSAGE_WINDOW_MS: "",
       ...authEnv,
       ...(opts.env ?? {}),
     },

@@ -126,6 +126,8 @@ export type SyncServerConfig = {
     maxMessageBytes: number;
     maxMessagesPerWindow: number;
     messageWindowMs: number;
+    maxMessagesPerIpWindow: number;
+    ipMessageWindowMs: number;
     maxAwarenessStateBytes: number;
     maxAwarenessEntries: number;
     maxMessagesPerDocWindow: number;
@@ -462,6 +464,14 @@ export function loadConfigFromEnv(): SyncServerConfig {
       messageWindowMs: envInt(
         process.env.SYNC_SERVER_MESSAGE_WINDOW_MS,
         10_000
+      ),
+      maxMessagesPerIpWindow: envInt(
+        process.env.SYNC_SERVER_MAX_MESSAGES_PER_IP_WINDOW,
+        0
+      ),
+      ipMessageWindowMs: envInt(
+        process.env.SYNC_SERVER_IP_MESSAGE_WINDOW_MS,
+        0
       ),
       maxMessageBytes: envInt(
         process.env.SYNC_SERVER_MAX_MESSAGE_BYTES,
