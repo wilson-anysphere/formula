@@ -176,7 +176,7 @@ export function AddStepMenu(props: {
                 setSuggestions(ops ?? []);
               } catch (err) {
                 setAiError(err instanceof Error ? err.message : String(err));
-                setSuggestions([]);
+                setSuggestions(null);
               } finally {
                 setAiLoading(false);
               }

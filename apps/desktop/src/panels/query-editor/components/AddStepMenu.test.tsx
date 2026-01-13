@@ -179,4 +179,34 @@ describe("AddStepMenu", () => {
     expect(suggestionButtons.length).toBe(1);
     expect(suggestionButtons[0]?.textContent).toBe("Filter Rows (Region)");
   });
+
+  it("shows an error message when AI suggestion fails", async () => {
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const query = baseQuery();
+    const aiContext = { query, preview };
+    const onAiSuggest = vi.fn(async () => {
+      throw new Error("AI exploded");
+    });
+
+    await act(async () => {
+      root?.render(<AddStepMenu onAddStep={() => {}} onAiSuggest={onAiSuggest} aiContext={aiContext} />);
+    });
+
+    const input = host!.querySelector("input.query-editor-add-step__ai-input") as HTMLInputElement;
+    const suggestButton = host!.querySelector("button.query-editor-add-step__ai-button") as HTMLButtonElement;
+
+    await act(async () => {
+      input.value = "do something";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await act(async () => {
+      suggestButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flushMicrotasks(5);
+    });
+
+    expect(host?.textContent).toContain("AI exploded");
+    // Error state should not be confused with the empty suggestions state.
+    expect(host?.textContent).not.toContain("No suggestions.");
+  });
 });
