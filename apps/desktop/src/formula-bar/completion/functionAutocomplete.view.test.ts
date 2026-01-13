@@ -156,6 +156,35 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     host.remove();
   });
 
+  it("accepts the clicked item", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const item = host.querySelector<HTMLButtonElement>(
+      '[data-testid="formula-function-autocomplete-item"][data-name="VLOOKUP"]',
+    );
+    expect(item).not.toBeNull();
+
+    item?.click();
+
+    expect(view.model.draft).toBe("=VLOOKUP(");
+    expect(view.textarea.selectionStart).toBe(view.textarea.value.length);
+    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length);
+
+    const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+    expect(dropdown?.hasAttribute("hidden")).toBe(true);
+
+    host.remove();
+  });
+
   it("uses aria-activedescendant on the textarea while navigating", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
