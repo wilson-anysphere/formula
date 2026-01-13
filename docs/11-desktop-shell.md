@@ -128,6 +128,7 @@ pnpm perf:desktop-size
 This reports:
 
 - `apps/desktop/dist` total size (and largest assets)
+- frontend asset download size (compressed JS/CSS/WASM) via `scripts/frontend_asset_size_report.mjs`
 - the built desktop binary size (`target/**/formula-desktop`)
 - if present, installer/bundle artifacts under `target/**/release/bundle` (via `scripts/desktop_bundle_size_report.py`)
 

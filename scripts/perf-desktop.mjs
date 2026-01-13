@@ -12,7 +12,7 @@ function usage() {
 Commands:
   startup  Build the desktop app (dist + binary) and run the desktop startup benchmark.
   memory   Build the desktop app (dist + binary) and run the desktop idle memory benchmark.
-  size     Report desktop size: frontend dist, binary, and (if present) Tauri bundles.
+  size     Report desktop size: frontend dist, binary, and (if present) installer artifacts.
 
 Environment (shared):
   FORMULA_PERF_HOME             Override the isolated HOME dir (default: target/perf-home)
@@ -198,6 +198,16 @@ function reportSize({ env }) {
     }
   }
 
+  // Approximate the *network download cost* of the frontend by summing per-asset Brotli/gzip sizes.
+  // This is intentionally separate from installer artifact size budgets.
+  try {
+    // eslint-disable-next-line no-console
+    console.log("\n[desktop-size] frontend asset download size (compressed JS/CSS/WASM):\n");
+    run(process.execPath, ["scripts/frontend_asset_size_report.mjs", "--dist", "apps/desktop/dist"], { env });
+  } catch {
+    // Best-effort: this is a convenience report for local runs.
+  }
+
   const bundleDirs = findBundleDirs();
   if (bundleDirs.length === 0) {
     // eslint-disable-next-line no-console
@@ -211,7 +221,7 @@ function reportSize({ env }) {
   }
 
   // eslint-disable-next-line no-console
-  console.log(`\n[desktop-size] Tauri bundle artifacts (override limit via FORMULA_BUNDLE_SIZE_LIMIT_MB):\n`);
+  console.log(`\n[desktop-size] Installer artifacts (override limit via FORMULA_BUNDLE_SIZE_LIMIT_MB):\n`);
 
   runPython("scripts/desktop_bundle_size_report.py", [], { env });
 }
