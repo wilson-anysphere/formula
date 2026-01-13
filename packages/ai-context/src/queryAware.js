@@ -137,31 +137,11 @@ function resolveRegion(region, schema) {
 }
 
 /**
- * Score a table / data region for a given query.
- *
- * Higher is better. `0` means no match.
- *
- * Heuristics (deliberately simple and deterministic):
- *  - token overlap between query words and table names / headers
- *  - bonus for exact header matches (all header tokens appear in the query)
- *  - optional penalty for very small / header-only regions
- *
- * @param {RegionRef | TableSchema | DataRegionSchema | null | undefined} region
- * @param {SheetSchema | null | undefined} schema
- * @param {string} query
- * @returns {number}
+ * @param {RegionType} type
+ * @param {TableSchema | DataRegionSchema} resolvedRegion
+ * @param {Set<string>} querySet
  */
-export function scoreRegionForQuery(region, schema, query) {
-  if (typeof query !== "string") return 0;
-  const queryTokens = tokenize(query, { dropStopwords: true });
-  if (queryTokens.length === 0) return 0;
-  const querySet = new Set(queryTokens);
-
-  const resolved = resolveRegion(region, schema);
-  if (!resolved) return 0;
-
-  const { type, region: resolvedRegion } = resolved;
-
+function scoreResolvedRegionForQueryTokens(type, resolvedRegion, querySet) {
   /** @type {string[]} */
   const headerStrings = [];
   /** @type {string} */
@@ -244,6 +224,33 @@ export function scoreRegionForQuery(region, schema, query) {
 }
 
 /**
+ * Score a table / data region for a given query.
+ *
+ * Higher is better. `0` means no match.
+ *
+ * Heuristics (deliberately simple and deterministic):
+ *  - token overlap between query words and table names / headers
+ *  - bonus for exact header matches (all header tokens appear in the query)
+ *  - optional penalty for very small / header-only regions
+ *
+ * @param {RegionRef | TableSchema | DataRegionSchema | null | undefined} region
+ * @param {SheetSchema | null | undefined} schema
+ * @param {string} query
+ * @returns {number}
+ */
+export function scoreRegionForQuery(region, schema, query) {
+  if (typeof query !== "string") return 0;
+  const queryTokens = tokenize(query, { dropStopwords: true });
+  if (queryTokens.length === 0) return 0;
+  const querySet = new Set(queryTokens);
+
+  const resolved = resolveRegion(region, schema);
+  if (!resolved) return 0;
+
+  return scoreResolvedRegionForQueryTokens(resolved.type, resolved.region, querySet);
+}
+
+/**
  * Pick the best matching table / data region for a query.
  *
  * Returns null when no candidate receives a positive score.
@@ -254,6 +261,11 @@ export function scoreRegionForQuery(region, schema, query) {
  */
 export function pickBestRegionForQuery(sheetSchema, query) {
   if (!sheetSchema || typeof sheetSchema !== "object") return null;
+  if (typeof query !== "string") return null;
+
+  const queryTokens = tokenize(query, { dropStopwords: true });
+  if (queryTokens.length === 0) return null;
+  const querySet = new Set(queryTokens);
 
   /** @type {{ type: RegionType, index: number, range: string, score: number } | null} */
   let best = null;
@@ -295,14 +307,14 @@ export function pickBestRegionForQuery(sheetSchema, query) {
   for (let i = 0; i < (sheetSchema.tables?.length ?? 0); i++) {
     const table = sheetSchema.tables[i];
     const range = table?.range ?? "";
-    const score = scoreRegionForQuery({ type: "table", index: i }, sheetSchema, query);
+    const score = table ? scoreResolvedRegionForQueryTokens("table", table, querySet) : 0;
     consider({ type: "table", index: i, range }, score);
   }
 
   for (let i = 0; i < (sheetSchema.dataRegions?.length ?? 0); i++) {
     const region = sheetSchema.dataRegions[i];
     const range = region?.range ?? "";
-    const score = scoreRegionForQuery({ type: "dataRegion", index: i }, sheetSchema, query);
+    const score = region ? scoreResolvedRegionForQueryTokens("dataRegion", region, querySet) : 0;
     consider({ type: "dataRegion", index: i, range }, score);
   }
 
