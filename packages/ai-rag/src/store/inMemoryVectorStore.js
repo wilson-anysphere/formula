@@ -99,19 +99,127 @@ export class InMemoryVectorStore {
     const filter = opts?.filter;
     const workbookId = opts?.workbookId;
     const q = normalizeL2(vector);
-    /** @type {VectorSearchResult[]} */
-    const scored = [];
+
+    // Keep only the best `topK` results while scanning. This avoids allocating an array
+    // proportional to the number of records (which can be very large) when callers only
+    // need a small set of nearest neighbors.
+    //
+    // We preserve the old `Array#sort` semantics by tracking scan order and using it as
+    // a tie-breaker when scores are identical (stable sort behavior).
+    /**
+     * Normalize `topK` the same way `Array.prototype.slice(0, topK)` did in the previous
+     * implementation:
+     *  - `undefined` means "all"
+     *  - non-integers are truncated toward 0
+     */
+    /** @type {number} */
+    let k;
+    if (topK === undefined) {
+      k = Number.POSITIVE_INFINITY;
+    } else {
+      const n = Number(topK);
+      if (!Number.isFinite(n)) {
+        // NaN, -Infinity => behave like slice(0, 0) and return nothing.
+        k = n === Number.POSITIVE_INFINITY ? n : 0;
+      } else {
+        k = Math.trunc(n);
+      }
+    }
+
+    /**
+     * Heap item. `_idx` is a stable tie-breaker based on scan order so results match
+     * the previous full-sort implementation when scores are equal.
+     * @type {Array<{ id: string, score: number, metadata: any, _idx: number }>}
+     */
+    const heap = [];
+
+    /**
+     * Return true if `a` should come before `b` in the min-heap (i.e. `a` is "worse").
+     * Lower score is worse; for equal scores, later scan order is worse.
+     */
+    function isWorse(a, b) {
+      if (a.score !== b.score) return a.score < b.score;
+      return a._idx > b._idx;
+    }
+
+    function heapSwap(i, j) {
+      const tmp = heap[i];
+      heap[i] = heap[j];
+      heap[j] = tmp;
+    }
+
+    function heapifyUp(i) {
+      while (i > 0) {
+        const parent = (i - 1) >> 1;
+        if (!isWorse(heap[i], heap[parent])) break;
+        heapSwap(i, parent);
+        i = parent;
+      }
+    }
+
+    function heapifyDown(i) {
+      while (true) {
+        const left = i * 2 + 1;
+        if (left >= heap.length) return;
+        const right = left + 1;
+        let smallest = left;
+        if (right < heap.length && isWorse(heap[right], heap[left])) smallest = right;
+        if (!isWorse(heap[smallest], heap[i])) return;
+        heapSwap(i, smallest);
+        i = smallest;
+      }
+    }
+
+    /** @type {number} */
+    let idx = 0;
     for (const [id, rec] of this._records) {
       throwIfAborted(signal);
-      if (workbookId && rec.metadata?.workbookId !== workbookId) continue;
-      if (filter && !filter(rec.metadata, id)) continue;
+      if (workbookId && rec.metadata?.workbookId !== workbookId) {
+        idx += 1;
+        continue;
+      }
+      if (filter && !filter(rec.metadata, id)) {
+        idx += 1;
+        continue;
+      }
+
+      // Fast path: if `topK` is 0/null/negative, keep nothing.
+      if (k <= 0) {
+        idx += 1;
+        continue;
+      }
+
       const score = cosineSimilarity(q, rec.vector);
-      scored.push({ id, score, metadata: rec.metadata });
+
+      if (heap.length < k) {
+        heap.push({ id, score, metadata: rec.metadata, _idx: idx });
+        heapifyUp(heap.length - 1);
+        idx += 1;
+        continue;
+      }
+
+      // Heap is full; evict the worst item if this candidate is better.
+      const worst = heap[0];
+      if (score > worst.score || (score === worst.score && idx < worst._idx)) {
+        // Reuse the existing object to avoid per-record allocations when the corpus is large.
+        worst.id = id;
+        worst.score = score;
+        worst.metadata = rec.metadata;
+        worst._idx = idx;
+        heapifyDown(0);
+      }
+      idx += 1;
     }
+
     throwIfAborted(signal);
-    scored.sort((a, b) => b.score - a.score);
+
+    // Sort the retained results descending (stable tie-breaker via scan index) to
+    // match the previous behavior of sorting the full scored list.
+    heap.sort((a, b) => b.score - a.score || a._idx - b._idx);
     throwIfAborted(signal);
-    return scored.slice(0, topK);
+
+    // Strip internal bookkeeping before returning.
+    return heap.map(({ id, score, metadata }) => ({ id, score, metadata }));
   }
 
   async close() {}
