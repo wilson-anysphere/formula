@@ -334,6 +334,19 @@ recorder.setUserFeedback("accepted");
 await recorder.finalize();
 ```
 
+### `finalize()` is best-effort
+
+`AIAuditRecorder.finalize()` never throws, even if the underlying store fails to persist the entry.
+
+If you need to detect persistence failures (e.g. for telemetry), inspect:
+
+```ts
+await recorder.finalize();
+if (recorder.finalizeError) {
+  console.warn("Audit persistence failed:", recorder.finalizeError);
+}
+```
+
 ### Choosing a store (browser vs Node)
 
 #### Convenience: `createDefaultAIAuditStore`

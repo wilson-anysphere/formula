@@ -59,6 +59,14 @@ Or explicitly:
 import { LocalStorageAIAuditStore } from "@formula/ai-audit/browser";
 ```
 
+### Utility stores
+
+```ts
+import { NoopAIAuditStore, FailingAIAuditStore } from "@formula/ai-audit";
+```
+
+`NoopAIAuditStore` discards all writes and always returns an empty list. `FailingAIAuditStore` throws for both reads and writes (useful for tests and for validating best-effort logging paths).
+
 ### SQLite store (explicit opt-in)
 
 ```ts
