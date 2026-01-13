@@ -13,10 +13,12 @@ import {
   applySrOnlyStyle,
   CanvasGridRenderer,
   computeScrollbarThumb,
+  DEFAULT_GRID_FONT_FAMILY,
+  DEFAULT_GRID_MONOSPACE_FONT_FAMILY,
   describeActiveCellLabel,
   describeCell,
-  resolveGridThemeFromCssVars,
-  wheelDeltaToPixels,
+  resolveGridThemeFromCssVars
+  wheelDeltaToPixels
 } from "@formula/grid";
 
 import { openExternalHyperlink } from "../../hyperlinks/openExternal.js";
@@ -198,6 +200,10 @@ export class DesktopSharedGrid {
       defaultColWidth: options.defaultColWidth,
       prefetchOverscanRows: options.prefetchOverscanRows,
       prefetchOverscanCols: options.prefetchOverscanCols,
+      // Desktop UX: cell content is monospace by default, while headers and other chrome
+      // remain in system UI fonts.
+      defaultCellFontFamily: DEFAULT_GRID_MONOSPACE_FONT_FAMILY,
+      defaultHeaderFontFamily: DEFAULT_GRID_FONT_FAMILY,
       imageResolver: options.imageResolver ?? null
     });
 

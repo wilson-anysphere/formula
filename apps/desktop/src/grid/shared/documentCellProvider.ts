@@ -1,5 +1,5 @@
 import type { CellData, CellProvider, CellProviderUpdate, CellRange, CellRichText, CellStyle } from "@formula/grid/node";
-import { LruCache, toColumnName } from "@formula/grid/node";
+import { DEFAULT_GRID_FONT_FAMILY, LruCache, toColumnName } from "@formula/grid/node";
 import type { DocumentController } from "../../document/documentController.js";
 import { applyStylePatch } from "../../formatting/styleTable.js";
 import { resolveCssVar } from "../../theme/cssVars.js";
@@ -96,8 +96,8 @@ function looksLikeExternalHyperlink(text: string): boolean {
 }
 
 export class DocumentCellProvider implements CellProvider {
-  private readonly headerStyle: CellStyle = { fontWeight: "600", textAlign: "center" };
-  private readonly rowHeaderStyle: CellStyle = { fontWeight: "600", textAlign: "end" };
+  private readonly headerStyle: CellStyle = { fontFamily: DEFAULT_GRID_FONT_FAMILY, fontWeight: "600", textAlign: "center" };
+  private readonly rowHeaderStyle: CellStyle = { fontFamily: DEFAULT_GRID_FONT_FAMILY, fontWeight: "600", textAlign: "end" };
   private resolvedLinkColor: string | null = null;
   private readonly options: {
     document: DocumentController;

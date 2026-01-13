@@ -92,6 +92,7 @@ import { createSchemaProviderFromSearchWorkbook } from "../ai/context/searchWork
 import type { WorkbookContextBuildStats } from "../ai/context/WorkbookContextBuilder.js";
 import { InlineEditController, type InlineEditLLMClient } from "../ai/inline-edit/inlineEditController";
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
+import { DEFAULT_GRID_MONOSPACE_FONT_FAMILY } from "@formula/grid";
 import type {
   CanvasGridImageResolver,
   CellRange as GridCellRange,
@@ -6747,7 +6748,7 @@ export class SpreadsheetApp {
     ctx.lineTo(this.width, originY + 0.5);
     ctx.stroke();
 
-    const fontFamily = resolveCssVar("--font-sans", { fallback: "system-ui, sans-serif" });
+    const fontFamily = resolveCssVar("--font-mono", { fallback: DEFAULT_GRID_MONOSPACE_FONT_FAMILY });
     const fontSizePx = 14;
     const defaultTextColor = resolveCssVar("--formula-grid-cell-text", { fallback: resolveCssVar("--text-primary", { fallback: "CanvasText" }) });
     const errorTextColor = resolveCssVar("--formula-grid-error-text", { fallback: resolveCssVar("--error", { fallback: defaultTextColor }) });

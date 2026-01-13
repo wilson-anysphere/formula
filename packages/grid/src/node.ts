@@ -29,6 +29,7 @@ export type {
 export { CanvasGridRenderer } from "./rendering/CanvasGridRenderer.ts";
 export { DirtyRegionTracker } from "./rendering/DirtyRegionTracker.ts";
 export type { Rect } from "./rendering/DirtyRegionTracker.ts";
+export { DEFAULT_GRID_FONT_FAMILY, DEFAULT_GRID_MONOSPACE_FONT_FAMILY } from "./rendering/defaultFontFamilies.ts";
 export { LruCache } from "./utils/LruCache.ts";
 
 export type { GridTheme } from "./theme/GridTheme.ts";

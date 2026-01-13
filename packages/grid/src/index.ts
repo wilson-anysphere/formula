@@ -27,6 +27,7 @@ export type { GridPresence, GridPresenceCursor, GridPresenceRange } from "./pres
 export type { CanvasGridImageResolver, CanvasGridImageSource, CanvasGridRendererOptions, GridPerfStats } from "./rendering/CanvasGridRenderer";
 export type { GridTheme } from "./theme/GridTheme";
 export { DEFAULT_GRID_THEME, resolveGridTheme } from "./theme/GridTheme";
+export { DEFAULT_GRID_FONT_FAMILY, DEFAULT_GRID_MONOSPACE_FONT_FAMILY } from "./rendering/defaultFontFamilies";
 export {
   GRID_THEME_CSS_VAR_NAMES,
   readGridThemeFromCssVars,

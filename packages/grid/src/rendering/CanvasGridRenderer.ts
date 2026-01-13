@@ -541,11 +541,10 @@ export class CanvasGridRenderer {
   private imagePlaceholderPattern: { pattern: CanvasPattern; zoomKey: number } | null = null;
   private destroyed = false;
 
-  private readonly defaultCellFontFamily: string;
-  private readonly defaultHeaderFontFamily: string;
-
   private presenceFont: string;
   private theme: GridTheme;
+  private readonly defaultCellFontFamily: string;
+  private readonly defaultHeaderFontFamily: string;
 
   // Optional worksheet-level background pattern (tiled) rendered behind cell fills.
   //
@@ -1720,6 +1719,8 @@ export class CanvasGridRenderer {
     const paddingX = 4 * zoom;
     const extraPadding = 8 * zoom;
     const overscanRows = 2;
+    const headerRows = this.headerRowsOverride ?? (viewport.frozenRows > 0 ? 1 : 0);
+    const headerCols = this.headerColsOverride ?? (viewport.frozenCols > 0 ? 1 : 0);
 
     const rowCount = this.getRowCount();
     const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
@@ -1848,6 +1849,8 @@ export class CanvasGridRenderer {
     const paddingX = 4 * zoom;
     const paddingY = 2 * zoom;
     const overscanCols = 2;
+    const headerRows = this.headerRowsOverride ?? (viewport.frozenRows > 0 ? 1 : 0);
+    const headerCols = this.headerColsOverride ?? (viewport.frozenCols > 0 ? 1 : 0);
 
     const colCount = this.getColCount();
     const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
