@@ -6026,6 +6026,11 @@ export class SpreadsheetApp {
       } else if (this.formulaBar?.isEditing() || this.formulaEditCell) {
         this.formulaBar?.focus();
       }
+
+      // Even though we no-op the underlying document mutation, the shared-grid renderer may have
+      // updated axis sizes interactively during the drag. Ensure drawings/pictures overlays are
+      // redrawn to stay aligned with the restored renderer geometry.
+      this.scheduleDrawingsRender();
       return;
     }
 
@@ -6050,6 +6055,10 @@ export class SpreadsheetApp {
       } else {
         this.document.setColWidth(this.sheetId, docCol, baseSize, { label, source });
       }
+      // Shared-grid axis resize updates the CanvasGridRenderer directly during the drag; SpreadsheetApp
+      // intentionally skips `syncFrozenPanes()` for these source-tagged sheetView deltas. Ensure any
+      // geometry-dependent overlays (drawings/pictures canvas) are still redrawn.
+      this.scheduleDrawingsRender();
       return;
     }
 
@@ -6061,6 +6070,7 @@ export class SpreadsheetApp {
     } else {
       this.document.setRowHeight(this.sheetId, docRow, baseSize, { label, source });
     }
+    this.scheduleDrawingsRender();
   }
 
   private syncSharedGridInteractionMode(): void {
@@ -8272,7 +8282,6 @@ export class SpreadsheetApp {
 
       const headerWidth = headerCols > 0 ? this.sharedGrid.renderer.scroll.cols.totalSize(headerCols) : 0;
       const headerHeight = headerRows > 0 ? this.sharedGrid.renderer.scroll.rows.totalSize(headerRows) : 0;
-
       return {
         x: this.sharedGrid.renderer.scroll.cols.positionOf(gridCol) - headerWidth,
         y: this.sharedGrid.renderer.scroll.rows.positionOf(gridRow) - headerHeight,
@@ -8809,7 +8818,6 @@ export class SpreadsheetApp {
     this.chartDragAbort?.abort();
     this.chartDragAbort = null;
   }
-
   private renderCharts(renderContent: boolean): void {
     const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
     const keep = new Set<string>();
