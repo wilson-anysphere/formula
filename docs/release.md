@@ -196,6 +196,9 @@ CI note:
   with `upload=true`) will **fail fast** if these secrets are missing (the workflow prints a
   “Missing Tauri updater signing secrets” error). Without the private key, the release workflow
   cannot generate the updater signature files (`*.sig`) required for auto-update.
+- CI also verifies that `TAURI_PRIVATE_KEY` matches the embedded updater public key
+  (`plugins.updater.pubkey`). A mismatch would produce signatures that clients cannot verify, so we
+  fail fast before any build steps run.
 - On forks/dry-runs without these secrets, the workflow can still build and upload artifacts, but
   updater signature/manifest validation jobs are skipped and auto-update will not work until you
   configure your own updater keypair/secrets.
