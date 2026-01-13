@@ -654,7 +654,8 @@ The loopback listener implementation (`oauth_loopback_listen` in `apps/desktop/s
 - **Query:** preserved and forwarded to the frontend
 - **Fragment (`#…`):** not supported (browsers don’t send URL fragments to loopback HTTP servers)
 - **Method:** `GET` only
-- **Lifetime:** listener stops after ~5 minutes (best-effort timeout)
+- **Lifetime:** listener stops after the first successful redirect (best-effort “first one wins”) or after ~5 minutes (timeout)
+  - Repeated `oauth_loopback_listen` calls for the same `redirect_uri` are treated as a no-op while a listener is already active.
 
 ##### Redirect forwarding to the frontend (`oauth-redirect` + readiness handshake)
 
@@ -663,7 +664,10 @@ Both deep-link and loopback flows end up as the same desktop event:
 - **Rust → frontend:** `oauth-redirect` (payload: full redirect URL string)
 - **Frontend → Rust:** `oauth-redirect-ready` once `listen("oauth-redirect", ...)` is installed (flushes any queued early redirects)
 
-The backend buffers early redirects in memory (`OauthRedirectState` in `apps/desktop/src-tauri/src/oauth_redirect_ipc.rs`) so fast redirects at cold start aren’t dropped. The frontend listener lives in `apps/desktop/src/main.ts` and forwards URLs into the in-process OAuth broker (`oauthBroker.observeRedirect(...)`).
+The backend buffers early redirects in memory (`OauthRedirectState` in `apps/desktop/src-tauri/src/oauth_redirect_ipc.rs`) so fast redirects at cold start aren’t dropped.
+
+- The pending queue is **bounded** (currently 64 URLs; oldest are dropped) to avoid unbounded growth if the OS delivers many redirects.
+- The frontend listener lives in `apps/desktop/src/main.ts` and forwards URLs into the in-process OAuth broker (`oauthBroker.observeRedirect(...)`).
 
 ##### Troubleshooting
 
