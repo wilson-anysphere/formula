@@ -1,5 +1,6 @@
 import * as Y from "yjs";
 import { getWorkbookRoots } from "@formula/collab-workbook";
+import { getYArray, getYMap, getYText } from "@formula/collab-yjs-utils";
 
 import { normalizeCellKey } from "../cell-key.js";
 
@@ -46,47 +47,6 @@ function getYMapLike(value: unknown): YMapLike | null {
   if (typeof maybe.delete !== "function") return null;
   if (typeof maybe.forEach !== "function") return null;
   return maybe as YMapLike;
-}
-
-function getYMap(value: unknown): any | null {
-  if (value instanceof Y.Map) return value;
-  if (!value || typeof value !== "object") return null;
-  const maybe = value as any;
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.set !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.keys !== "function") return null;
-  if (typeof maybe.forEach !== "function") return null;
-  // Plain JS Maps also have get/set/delete/keys/forEach; require Yjs observer APIs.
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe;
-}
-
-function getYArray(value: unknown): any | null {
-  if (value instanceof Y.Array) return value;
-  if (!value || typeof value !== "object") return null;
-  const maybe = value as any;
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.toArray !== "function") return null;
-  if (typeof maybe.push !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe;
-}
-
-function getYText(value: unknown): any | null {
-  if (value instanceof Y.Text) return value;
-  if (!value || typeof value !== "object") return null;
-  const maybe = value as any;
-  if (typeof maybe.toDelta !== "function") return null;
-  if (typeof maybe.applyDelta !== "function") return null;
-  if (typeof maybe.insert !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe;
 }
 
 function isEncryptedCellValue(value: unknown): boolean {
