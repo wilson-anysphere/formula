@@ -266,6 +266,7 @@ function main() {
   const appIdentifiers = readApplicationPermissionIdentifiers();
   const toolchainIdentifiers = parsePermissionIdentifiers(permissionLsOutput);
   const validIdentifiers = new Set([...toolchainIdentifiers, ...appIdentifiers]);
+  const overlapCount = toolchainIdentifiers.size + appIdentifiers.size - validIdentifiers.size;
 
   const capabilityFiles = fs
     .readdirSync(capabilitiesDir, { withFileTypes: true })
@@ -330,9 +331,12 @@ function main() {
       lines.push("");
     }
 
-    lines.push(
-      `Toolchain reported ${toolchainIdentifiers.size} permission identifiers (+ ${appIdentifiers.size} application permissions).`,
-    );
+    lines.push(`Toolchain identifiers: ${toolchainIdentifiers.size}`);
+    lines.push(`Application permission identifiers: ${appIdentifiers.size}`);
+    if (overlapCount > 0) {
+      lines.push(`Overlapping identifiers (present in both): ${overlapCount}`);
+    }
+    lines.push(`Total accepted identifiers: ${validIdentifiers.size}`);
     lines.push("To list them manually:");
     lines.push("  cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls");
     lines.push("");
@@ -341,8 +345,14 @@ function main() {
     process.exit(1);
   }
 
+  const summaryParts = [
+    `${toolchainIdentifiers.size} toolchain`,
+    `${appIdentifiers.size} app`,
+    overlapCount > 0 ? `${overlapCount} overlap` : null,
+    `${validIdentifiers.size} total`,
+  ].filter(Boolean);
   process.stdout.write(
-    `OK: all capability permission identifiers exist in the installed Tauri toolchain (${toolchainIdentifiers.size} toolchain + ${appIdentifiers.size} app = ${validIdentifiers.size} identifiers).\n`,
+    `OK: all capability permission identifiers exist in the installed Tauri toolchain (${summaryParts.join(", ")}).\n`,
   );
 }
 
