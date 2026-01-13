@@ -1,7 +1,6 @@
 import type { DrawingObject, DrawingTransform, Rect } from "./types";
 import { anchorToRectPx } from "./overlay";
 import type { GridGeometry, Viewport } from "./overlay";
-import { applyTransformVector, inverseTransformVector } from "./transform";
 
 export interface HitTestResult {
   object: DrawingObject;
@@ -40,6 +39,18 @@ export interface HitTestIndex {
    * their visible geometry extends beyond the untransformed anchor rectangle.
    */
   aabbs: Rect[];
+  /** Precomputed rotation cos(theta) for hit testing (only meaningful when `transformFlags[i] !== 0`). */
+  transformCos: Float64Array;
+  /** Precomputed rotation sin(theta) for hit testing (only meaningful when `transformFlags[i] !== 0`). */
+  transformSin: Float64Array;
+  /**
+   * Bit flags describing non-identity transforms.
+   *
+   * - bit0: flipH
+   * - bit1: flipV
+   * - bit2: has non-identity transform (rotation/flip)
+   */
+  transformFlags: Uint8Array;
   /**
    * Spatial bins keyed by bucket X then bucket Y.
    *
@@ -93,6 +104,9 @@ export function buildHitTestIndex(
   const ordered = [...objects].sort((a, b) => b.zOrder - a.zOrder);
   const bounds: Rect[] = new Array(ordered.length);
   const aabbs: Rect[] = new Array(ordered.length);
+  const transformCos = new Float64Array(ordered.length);
+  const transformSin = new Float64Array(ordered.length);
+  const transformFlags = new Uint8Array(ordered.length);
   const buckets: Map<number, Map<number, number[]>> = new Map();
   const global: number[] = [];
   const byId = new Map<number, number>();
@@ -102,7 +116,25 @@ export function buildHitTestIndex(
     byId.set(obj.id, i);
     const rect = anchorToRectPx(obj.anchor, geom);
     bounds[i] = rect;
-    const aabb = hasNonIdentityTransform(obj.transform) ? rectToAabb(rect, obj.transform!) : rect;
+    let aabb = rect;
+    let cos = 1;
+    let sin = 0;
+    let flags = 0;
+
+    const transform = obj.transform;
+    if (hasNonIdentityTransform(transform)) {
+      flags = 4;
+      if (transform!.flipH) flags |= 1;
+      if (transform!.flipV) flags |= 2;
+      const radians = (transform!.rotationDeg * Math.PI) / 180;
+      cos = Math.cos(radians);
+      sin = Math.sin(radians);
+      aabb = rectToAabb(rect, cos, sin, flags);
+    }
+
+    transformCos[i] = cos;
+    transformSin[i] = sin;
+    transformFlags[i] = flags;
     aabbs[i] = aabb;
 
     const x1 = aabb.x;
@@ -143,7 +175,7 @@ export function buildHitTestIndex(
     }
   }
 
-  return { ordered, bounds, aabbs, buckets, global, bucketSizePx, geom, byId };
+  return { ordered, bounds, aabbs, transformCos, transformSin, transformFlags, buckets, global, bucketSizePx, geom, byId };
 }
 
 function hitTestCandidateIndex(
@@ -189,13 +221,14 @@ function hitTestCandidateIndex(
 
     if (!pointInRect(sheetX, sheetY, aabb)) continue;
 
-    const hit = hasNonIdentityTransform(obj.transform)
-      ? pointInTransformedRect(sheetX, sheetY, rect, obj.transform!)
-      : true;
-
-    if (hit) {
-      return next;
+    const flags = index.transformFlags[next] ?? 0;
+    if ((flags & 4) !== 0) {
+      const cos = index.transformCos[next] ?? 1;
+      const sin = index.transformSin[next] ?? 0;
+      if (!pointInTransformedRect(sheetX, sheetY, rect, cos, sin, flags)) continue;
     }
+
+    return next;
   }
 
   return null;
@@ -379,43 +412,54 @@ function pointInRect(x: number, y: number, rect: Rect): boolean {
   return x >= rect.x && y >= rect.y && x <= rect.x + rect.width && y <= rect.y + rect.height;
 }
 
-function pointInTransformedRect(x: number, y: number, rect: Rect, transform: DrawingTransform): boolean {
+function pointInTransformedRect(x: number, y: number, rect: Rect, cos: number, sin: number, flags: number): boolean {
   if (!(rect.width > 0 && rect.height > 0)) return false;
   const cx = rect.x + rect.width / 2;
   const cy = rect.y + rect.height / 2;
-  const local = inverseTransformVector(x - cx, y - cy, transform);
+  const dx = x - cx;
+  const dy = y - cy;
+  // Inverse transform of: scale(flip) then rotate(theta).
+  // Apply rotate(-theta) then scale(flip).
+  let lx = dx * cos + dy * sin;
+  let ly = -dx * sin + dy * cos;
+  if (flags & 1) lx = -lx;
+  if (flags & 2) ly = -ly;
   const hw = rect.width / 2;
   const hh = rect.height / 2;
-  return local.x >= -hw && local.x <= hw && local.y >= -hh && local.y <= hh;
+  return lx >= -hw && lx <= hw && ly >= -hh && ly <= hh;
 }
 
-function rectToAabb(rect: Rect, transform: DrawingTransform): Rect {
+function rectToAabb(rect: Rect, cos: number, sin: number, flags: number): Rect {
   const cx = rect.x + rect.width / 2;
   const cy = rect.y + rect.height / 2;
   const hw = rect.width / 2;
   const hh = rect.height / 2;
 
-  const corners = [
-    applyTransformVector(-hw, -hh, transform),
-    applyTransformVector(hw, -hh, transform),
-    applyTransformVector(hw, hh, transform),
-    applyTransformVector(-hw, hh, transform),
-  ];
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
 
-  let minX = cx + corners[0]!.x;
-  let maxX = cx + corners[0]!.x;
-  let minY = cy + corners[0]!.y;
-  let maxY = cy + corners[0]!.y;
+  const visitCorner = (dx: number, dy: number) => {
+    let x = dx;
+    let y = dy;
+    if (flags & 1) x = -x;
+    if (flags & 2) y = -y;
+    // Forward transform: scale(flip) then rotate(theta).
+    const tx = x * cos - y * sin;
+    const ty = x * sin + y * cos;
+    const wx = cx + tx;
+    const wy = cy + ty;
+    if (wx < minX) minX = wx;
+    if (wx > maxX) maxX = wx;
+    if (wy < minY) minY = wy;
+    if (wy > maxY) maxY = wy;
+  };
 
-  for (let i = 1; i < corners.length; i += 1) {
-    const p = corners[i]!;
-    const x = cx + p.x;
-    const y = cy + p.y;
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-  }
+  visitCorner(-hw, -hh);
+  visitCorner(hw, -hh);
+  visitCorner(hw, hh);
+  visitCorner(-hw, hh);
 
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
