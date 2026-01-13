@@ -346,7 +346,7 @@ jobs:
             }
           }
 
-      - name: Report desktop bundle sizes
+      - name: Report desktop installer artifact sizes
         if: always()
         env:
           # Optional: set these as GitHub Actions "Variables" to enable gating.

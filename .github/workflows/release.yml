@@ -1969,7 +1969,7 @@ jobs:
       - name: Verify desktop binary is stripped (no symbols)
         run: python scripts/verify_desktop_binary_stripped.py
 
-      - name: Report desktop bundle sizes
+      - name: Report desktop installer artifact sizes
         env:
           # Enforce the bundle size budget on tagged releases by default.
           # Override via GitHub Actions "Variables":
@@ -1979,7 +1979,7 @@ jobs:
           FORMULA_BUNDLE_SIZE_LIMIT_MB: ${{ vars.FORMULA_BUNDLE_SIZE_LIMIT_MB }}
         run: python scripts/desktop_bundle_size_report.py --json desktop-bundle-size-report.json
 
-      - name: Upload desktop bundle size report (JSON)
+      - name: Upload desktop installer artifact size report (JSON)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

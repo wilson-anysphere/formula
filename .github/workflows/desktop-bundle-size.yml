@@ -1,4 +1,4 @@
-name: Desktop bundle size
+name: Desktop installer artifact sizes
 
 on:
   workflow_dispatch:
@@ -62,7 +62,7 @@ jobs:
         run: bash scripts/ci/check-pnpm-version-pins.sh
 
   linux-desktop-bundle-size:
-    name: Linux desktop bundle size
+    name: Linux desktop installer artifact sizes
     needs: conflict-marker-guard
     runs-on: ubuntu-24.04
     steps:
@@ -230,7 +230,7 @@ jobs:
       - name: Validate produced AppImage desktop integration (.desktop + xlsx MIME)
         run: bash scripts/validate-linux-appimage.sh
 
-      - name: Report desktop bundle sizes
+      - name: Report desktop installer artifact sizes
         # If earlier steps fail (dependency install / build), still try to emit an
         # empty report + JSON artifact to aid debugging. When the build succeeds,
         # this step enforces the size gate (if enabled) normally.
@@ -244,7 +244,7 @@ jobs:
           FORMULA_BUNDLE_SIZE_LIMIT_MB: ${{ vars.FORMULA_BUNDLE_SIZE_LIMIT_MB }}
         run: python scripts/desktop_bundle_size_report.py --json desktop-bundle-size-report.json
 
-      - name: Upload desktop bundle size report (JSON)
+      - name: Upload desktop installer artifact size report (JSON)
         if: always()
         uses: actions/upload-artifact@v4
         with:

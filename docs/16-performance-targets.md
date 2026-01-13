@@ -177,7 +177,7 @@ Desktop installer artifact size gating (used by the desktop release workflow):
 - `FORMULA_ENFORCE_BUNDLE_SIZE=1` to fail when any artifact exceeds the limit
   (reported by `scripts/desktop_bundle_size_report.py`)
 
-Also reported on Linux PRs/main (informational by default) via `.github/workflows/desktop-bundle-size.yml`
+Also reported (installer artifacts) on Linux PRs/main (informational by default) via `.github/workflows/desktop-bundle-size.yml`
 which builds the Linux desktop bundles and uploads a JSON size report artifact for debugging.
 
 Lightweight PR size gating (desktop binary + `apps/desktop/dist`; disabled by default):
