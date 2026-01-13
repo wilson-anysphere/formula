@@ -19,7 +19,7 @@ import type { SpreadsheetApi } from "../../../../packages/ai-tools/src/spreadshe
 import { MarketplaceClient, WebExtensionManager } from "@formula/extension-marketplace";
 import type { SheetNameResolver } from "../sheet/sheetNameResolver.js";
 import type { CollabSession } from "@formula/collab-session";
-import { CollabVersionHistoryPanel } from "./version-history/CollabVersionHistoryPanel.js";
+import { CollabVersionHistoryPanel } from "./version-history/index.js";
 import { BranchManagerPanel, type Actor as BranchActor } from "./branch-manager/BranchManagerPanel.js";
 import { MergeBranchPanel } from "./branch-manager/MergeBranchPanel.js";
 // Import the browser-safe branch store/service modules directly.

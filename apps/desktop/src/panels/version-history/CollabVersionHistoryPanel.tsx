@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 
 import type { CollabSession } from "@formula/collab-session";
 
-import { buildVersionHistoryItems } from "./index.js";
+import { buildVersionHistoryItems } from "./VersionHistoryPanel.js";
 import { t, tWithVars } from "../../i18n/index.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
 
