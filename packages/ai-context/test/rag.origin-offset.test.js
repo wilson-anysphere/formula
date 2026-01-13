@@ -88,7 +88,22 @@ test("chunk splitting: tall regions produce multiple chunks; shrinking removes s
   const makeSheet = (rows) => ({
     name: "Sheet1",
     values: Array.from({ length: rows }, (_v, rIdx) => [`Row${rIdx + 1}`, `Value${rIdx + 1}`]),
-  });
+});
+
+test("chunk splitting: repeats header row in later window chunks when a region has a header", () => {
+  const values = [["Region", "Revenue"]];
+  for (let i = 0; i < 20; i++) {
+    values.push([`R${i + 1}`, i + 1]);
+  }
+  const sheet = { name: "Sheet1", values };
+
+  const chunks = chunkSheetByRegions(sheet, { splitByRowWindows: true, maxChunkRows: 5, rowOverlap: 0 });
+  assert.ok(chunks.length > 1);
+
+  // The second window chunk should include the header row for better standalone retrieval quality.
+  const second = chunks[1];
+  assert.equal(second.text.split("\n")[0], "Region\tRevenue");
+});
 
   const tallSheet = makeSheet(80);
   const tallChunks = chunkSheetByRegions(tallSheet, { splitByRowWindows: true });

@@ -359,6 +359,18 @@ export function chunkSheetByRegionsWithSchema(sheet, options = {}) {
     const parsedAbs = parseRangeFromSchemaRange(region.range);
 
     const regionRectAbs = normalizeRange(parsedAbs);
+    const shouldPrefixHeader = splitByRowWindows && region.hasHeader;
+    let headerLine = "";
+    if (shouldPrefixHeader) {
+      const headerRangeRaw = {
+        startRow: regionRectAbs.startRow - origin.row,
+        endRow: regionRectAbs.startRow - origin.row,
+        startCol: regionRectAbs.startCol - origin.col,
+        endCol: regionRectAbs.endCol - origin.col,
+      };
+      const headerRange = clampRangeToMatrixBounds(matrixBounds, headerRangeRaw);
+      headerLine = headerRange ? valuesRangeToTsv(sheet.values, headerRange, { maxRows: 1 }) : "";
+    }
     const windows = splitByRowWindows
       ? splitRectByRowWindows(
           { startRow: regionRectAbs.startRow, endRow: regionRectAbs.endRow },
@@ -388,7 +400,13 @@ export function chunkSheetByRegionsWithSchema(sheet, options = {}) {
       };
 
       const localRange = clampRangeToMatrixBounds(matrixBounds, localRangeRaw);
-      const text = localRange ? valuesRangeToTsv(sheet.values, localRange, { maxRows: maxChunkRows }) : "";
+      const windowText = localRange ? valuesRangeToTsv(sheet.values, localRange, { maxRows: maxChunkRows }) : "";
+      const text =
+        headerLine && window.startRow > regionRectAbs.startRow
+          ? windowText
+            ? `${headerLine}\n${windowText}`
+            : headerLine
+          : windowText;
 
       chunks.push({
         id: `${baseId}${originSuffix}-w${window.index + 1}`,
