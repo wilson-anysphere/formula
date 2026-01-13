@@ -1206,44 +1206,6 @@ export class SqliteVectorStore {
     const q = normalizeL2(qVec);
     const qBlob = float32ToBlob(q);
 
-    // Validate stored vector blobs before running the dot() query. When a user-defined
-    // SQLite function throws, sql.js can surface it as a generic `Error` without the
-    // original message, which makes debugging difficult (and breaks tests that assert
-    // on the error message). We preflight the table with cheap LIMIT 1 checks so we
-    // can throw a descriptive error from JS.
-    const expectedBytes = this._dimension * 4;
-    // 1) Ensure byteLength is a multiple of 4 (Float32 alignment).
-    const invalidByteLengthSql = workbookId
-      ? "SELECT id, length(vector) FROM vectors WHERE workbook_id = ? AND (length(vector) % 4) != 0 LIMIT 1;"
-      : "SELECT id, length(vector) FROM vectors WHERE (length(vector) % 4) != 0 LIMIT 1;";
-    const invalidByteLengthStmt = this._db.prepare(invalidByteLengthSql);
-    try {
-      if (workbookId) invalidByteLengthStmt.bind([workbookId]);
-      if (invalidByteLengthStmt.step()) {
-        const row = invalidByteLengthStmt.get();
-        throw new Error(`Invalid vector blob length: ${Number(row[1])}`);
-      }
-    } finally {
-      invalidByteLengthStmt.free();
-    }
-
-    // 2) Ensure the stored vector length matches the configured embedding dimension.
-    const invalidDimSql = workbookId
-      ? "SELECT id, length(vector) FROM vectors WHERE workbook_id = ? AND length(vector) != ? LIMIT 1;"
-      : "SELECT id, length(vector) FROM vectors WHERE length(vector) != ? LIMIT 1;";
-    const invalidDimStmt = this._db.prepare(invalidDimSql);
-    try {
-      if (workbookId) invalidDimStmt.bind([workbookId, expectedBytes]);
-      else invalidDimStmt.bind([expectedBytes]);
-      if (invalidDimStmt.step()) {
-        const row = invalidDimStmt.get();
-        const gotDim = Math.floor(Number(row[1]) / 4);
-        throw new Error(`SqliteVectorStore dot() dimension mismatch: expected ${this._dimension}, got ${gotDim}`);
-      }
-    } finally {
-      invalidDimStmt.free();
-    }
-
     /**
      * When a JS-level filter is provided, we can't apply it inside SQLite. To match
      * InMemoryVectorStore semantics ("return up to topK *matching* records"), we
@@ -1311,6 +1273,8 @@ export class SqliteVectorStore {
       /** @type {{ id: string, score: number, metadata: any }[]} */
       const out = [];
       let rows = 0;
+      /** @type {any} */
+      let sqlError = null;
       try {
         if (workbookId) stmt.bind([qBlob, workbookId, limit]);
         else stmt.bind([qBlob, limit]);
@@ -1344,8 +1308,58 @@ export class SqliteVectorStore {
           if (out.length >= k) break;
         }
         throwIfAborted(signal);
+      } catch (err) {
+        sqlError = err;
       } finally {
         stmt.free();
+      }
+
+      if (sqlError) {
+        // sql.js can surface exceptions thrown inside user-defined functions (like our `dot`)
+        // as a generic `Error` without preserving the original message. When this happens,
+        // attempt to detect invalid vector blobs and throw a descriptive error instead.
+        throwIfAborted(signal);
+
+        const label = String(sqlError);
+        if (label === "Error") {
+          const expectedBytes = this._dimension * 4;
+
+          // 1) Ensure stored vector byteLength is a multiple of 4 (Float32 alignment).
+          const invalidByteLengthSql = workbookId
+            ? "SELECT id, length(vector) FROM vectors WHERE workbook_id = ? AND (length(vector) % 4) != 0 LIMIT 1;"
+            : "SELECT id, length(vector) FROM vectors WHERE (length(vector) % 4) != 0 LIMIT 1;";
+          const invalidByteLengthStmt = this._db.prepare(invalidByteLengthSql);
+          try {
+            if (workbookId) invalidByteLengthStmt.bind([workbookId]);
+            if (invalidByteLengthStmt.step()) {
+              const row = invalidByteLengthStmt.get();
+              throw new Error(`Invalid vector blob length: ${Number(row[1])}`);
+            }
+          } finally {
+            invalidByteLengthStmt.free();
+          }
+
+          // 2) Ensure stored vector length matches the configured embedding dimension.
+          const invalidDimSql = workbookId
+            ? "SELECT id, length(vector) FROM vectors WHERE workbook_id = ? AND length(vector) != ? LIMIT 1;"
+            : "SELECT id, length(vector) FROM vectors WHERE length(vector) != ? LIMIT 1;";
+          const invalidDimStmt = this._db.prepare(invalidDimSql);
+          try {
+            if (workbookId) invalidDimStmt.bind([workbookId, expectedBytes]);
+            else invalidDimStmt.bind([expectedBytes]);
+            if (invalidDimStmt.step()) {
+              const row = invalidDimStmt.get();
+              const gotDim = Math.floor(Number(row[1]) / 4);
+              throw new Error(
+                `SqliteVectorStore dot() dimension mismatch: expected ${this._dimension}, got ${gotDim}`
+              );
+            }
+          } finally {
+            invalidDimStmt.free();
+          }
+        }
+
+        throw sqlError;
       }
 
       if (out.length >= k) return out;
