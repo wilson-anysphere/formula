@@ -137,7 +137,7 @@ jobs:
         run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
 
       - name: Install WiX Toolset (required for MSI builds)
-        if: matrix.platform == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -266,7 +266,7 @@ jobs:
           prerelease: false
 
       - name: Verify Windows installer assets (MSI + NSIS + signatures)
-        if: matrix.platform == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
