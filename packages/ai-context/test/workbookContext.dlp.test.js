@@ -47,6 +47,18 @@ function makeSensitiveWorkbook() {
   };
 }
 
+function makeTopSecretWorkbook() {
+  return {
+    id: "wb-dlp-structured",
+    sheets: [
+      {
+        name: "Secrets",
+        cells: [[{ v: "Label" }], [{ v: "TopSecret" }]],
+      },
+    ],
+  };
+}
+
 function makePolicy({ maxAllowed = "Public", redactDisallowed }) {
   return {
     version: 1,
@@ -325,6 +337,52 @@ test("buildWorkbookContext: structured Restricted classifications can block when
   assert.equal(auditEvents[0].decision.decision, "block");
 });
 
+test("buildWorkbookContext: supports snake_case DLP options (structured block + audit documentId)", async () => {
+  const workbook = makeTopSecretWorkbook();
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 800,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  const auditEvents = [];
+
+  await assert.rejects(
+    () =>
+      cm.buildWorkbookContext({
+        workbook,
+        query: "TopSecret",
+        dlp: {
+          document_id: workbook.id,
+          policy: makePolicy({ maxAllowed: "Confidential", redactDisallowed: false }),
+          classification_records: [
+            {
+              selector: {
+                scope: "range",
+                documentId: workbook.id,
+                sheetId: "Secrets",
+                range: { start: { row: 0, col: 0 }, end: { row: 1, col: 0 } },
+              },
+              classification: { level: "Restricted", labels: [] },
+            },
+          ],
+          auditLogger: { log: (e) => auditEvents.push(e) },
+        },
+      }),
+    (err) => {
+      assert.ok(err instanceof DlpViolationError);
+      return true;
+    }
+  );
+
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditEvents[0].type, "ai.workbook_context");
+  assert.equal(auditEvents[0].documentId, workbook.id);
+  assert.equal(auditEvents[0].decision.decision, "block");
+});
+
 test("buildWorkbookContext: classificationStore records are enforced for non-regex restricted content", async () => {
   const workbook = makeSensitiveWorkbook();
   workbook.sheets[0].cells[1][0].v = "TopSecret";
@@ -461,6 +519,65 @@ test("buildWorkbookContextFromSpreadsheetApi: redacts sensitive workbook chunks 
   assert.equal(auditEvents.length, 1);
   assert.equal(auditEvents[0].type, "ai.workbook_context");
   assert.equal(auditEvents[0].decision.decision, "redact");
+});
+
+test("buildWorkbookContextFromSpreadsheetApi: supports snake_case DLP options (structured block + audit documentId)", async () => {
+  const spreadsheet = {
+    listSheets() {
+      return ["Secrets"];
+    },
+    listNonEmptyCells(sheet) {
+      assert.equal(sheet, "Secrets");
+      return [
+        { address: { sheet: "Secrets", row: 1, col: 1 }, cell: { value: "Label" } },
+        { address: { sheet: "Secrets", row: 2, col: 1 }, cell: { value: "TopSecret" } },
+      ];
+    },
+  };
+
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 800,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  const auditEvents = [];
+
+  await assert.rejects(
+    () =>
+      cm.buildWorkbookContextFromSpreadsheetApi({
+        spreadsheet,
+        workbookId: "wb-api-dlp-structured",
+        query: "TopSecret",
+        dlp: {
+          document_id: "wb-api-dlp-structured",
+          policy: makePolicy({ maxAllowed: "Confidential", redactDisallowed: false }),
+          classification_records: [
+            {
+              selector: {
+                scope: "range",
+                documentId: "wb-api-dlp-structured",
+                sheetId: "Secrets",
+                range: { start: { row: 0, col: 0 }, end: { row: 1, col: 0 } },
+              },
+              classification: { level: "Restricted", labels: [] },
+            },
+          ],
+          auditLogger: { log: (e) => auditEvents.push(e) },
+        },
+      }),
+    (err) => {
+      assert.ok(err instanceof DlpViolationError);
+      return true;
+    }
+  );
+
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditEvents[0].type, "ai.workbook_context");
+  assert.equal(auditEvents[0].documentId, "wb-api-dlp-structured");
+  assert.equal(auditEvents[0].decision.decision, "block");
 });
 
 test("buildWorkbookContext: does not rely on persisted dlpHeuristic metadata for block decisions", async () => {

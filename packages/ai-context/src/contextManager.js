@@ -31,6 +31,40 @@ function normalizeNonNegativeInt(value, fallback) {
   return Math.max(0, Math.floor(n));
 }
 /**
+ * Normalize DLP options so ContextManager methods can accept both camelCase and
+ * snake_case field names (e.g. when options are deserialized from JSON in a
+ * non-TS host).
+ *
+ * @param {any} dlp
+ * @returns {null | {
+ *   documentId: string,
+ *   sheetId?: string,
+ *   policy: any,
+ *   classificationRecords?: Array<{ selector: any, classification: any }>,
+ *   classificationStore?: { list(documentId: string): Array<{ selector: any, classification: any }> },
+ *   includeRestrictedContent: boolean,
+ *   auditLogger?: { log(event: any): void },
+ *   sheetNameResolver?: any
+ * }}
+ */
+function normalizeDlpOptions(dlp) {
+  if (!dlp) return null;
+  if (typeof dlp !== "object") {
+    throw new Error("DLP options must be an object");
+  }
+  return {
+    documentId: dlp.documentId ?? dlp.document_id,
+    sheetId: dlp.sheetId ?? dlp.sheet_id,
+    policy: dlp.policy,
+    classificationRecords: dlp.classificationRecords ?? dlp.classification_records,
+    classificationStore: dlp.classificationStore ?? dlp.classification_store,
+    includeRestrictedContent: (dlp.includeRestrictedContent ?? dlp.include_restricted_content ?? false) === true,
+    auditLogger: dlp.auditLogger,
+    sheetNameResolver: dlp.sheetNameResolver ?? dlp.sheet_name_resolver,
+  };
+}
+
+/**
  * @typedef {{ type: "range"|"formula"|"table"|"chart", reference: string, data?: any }} Attachment
  */
 
@@ -102,7 +136,7 @@ export class ContextManager {
   async buildContext(params) {
     const signal = params.signal;
     throwIfAborted(signal);
-    const dlp = params.dlp;
+    const dlp = normalizeDlpOptions(params.dlp);
     const rawSheet = params.sheet;
 
     const safeRowCap = normalizeNonNegativeInt(params.limits?.maxContextRows, this.maxContextRows);
@@ -136,19 +170,14 @@ export class ContextManager {
     let dlpAuditSheetId = null;
 
     if (dlp) {
-      const documentId = dlp.documentId ?? dlp.document_id;
-      const records =
-        dlp.classificationRecords ??
-        dlp.classification_records ??
-        dlp.classificationStore?.list?.(documentId) ??
-        dlp.classification_store?.list?.(documentId) ??
-        [];
-      const includeRestrictedContent = dlp.includeRestrictedContent ?? dlp.include_restricted_content ?? false;
+      const documentId = dlp.documentId;
+      const records = dlp.classificationRecords ?? dlp.classificationStore?.list?.(documentId) ?? [];
+      const includeRestrictedContent = dlp.includeRestrictedContent ?? false;
 
       // Some hosts keep stable internal sheet ids even after a user renames the sheet
       // (id != display name). When a resolver is provided, map the user-facing name back
       // to the stable id before evaluating structured DLP selectors.
-      const dlpSheetNameResolver = dlp.sheetNameResolver ?? dlp.sheet_name_resolver ?? null;
+      const dlpSheetNameResolver = dlp.sheetNameResolver ?? null;
       const resolveDlpSheetId = (sheetNameOrId) => {
         const raw = typeof sheetNameOrId === "string" ? sheetNameOrId.trim() : "";
         if (!raw) return "";
@@ -162,7 +191,7 @@ export class ContextManager {
         return raw;
       };
 
-      const sheetId = resolveDlpSheetId(dlp.sheetId ?? dlp.sheet_id ?? rawSheet.name);
+      const sheetId = resolveDlpSheetId(dlp.sheetId ?? rawSheet.name);
       dlpAuditDocumentId = documentId;
       dlpAuditSheetId = sheetId;
 
@@ -377,8 +406,8 @@ export class ContextManager {
     if (dlp) {
       dlp.auditLogger?.log({
         type: "ai.context",
-        documentId: dlpAuditDocumentId ?? dlp.documentId ?? dlp.document_id,
-        sheetId: dlpAuditSheetId ?? dlp.sheetId ?? dlp.sheet_id ?? rawSheet.name,
+        documentId: dlpAuditDocumentId ?? dlp.documentId,
+        sheetId: dlpAuditSheetId ?? dlp.sheetId ?? rawSheet.name,
         sheetName: rawSheet.name,
         decision: dlpDecision,
         selectionClassification: dlpSelectionClassification,
@@ -431,10 +460,10 @@ export class ContextManager {
     const { vectorStore, embedder } = this.workbookRag;
     const topK = params.topK ?? this.workbookRag.topK ?? 8;
     const includePromptContext = params.includePromptContext ?? true;
-    const dlp = params.dlp;
+    const dlp = normalizeDlpOptions(params.dlp);
     const includeRestrictedContent = dlp?.includeRestrictedContent ?? false;
     const classificationRecords =
-      dlp?.classificationRecords ?? dlp?.classificationStore?.list(dlp.documentId) ?? [];
+      dlp?.classificationRecords ?? dlp?.classificationStore?.list?.(dlp.documentId) ?? [];
 
     // Some hosts (notably the desktop DocumentController) keep a stable internal sheet id
     // even after a user renames the sheet. In those cases:
@@ -443,8 +472,7 @@ export class ContextManager {
     //
     // When a resolver is provided, map chunk `metadata.sheetName` back to the stable id
     // before applying structured DLP classification.
-    const dlpSheetNameResolver =
-      (dlp && (dlp.sheetNameResolver ?? dlp.sheet_name_resolver)) || null;
+    const dlpSheetNameResolver = (dlp && dlp.sheetNameResolver) || null;
     const resolveDlpSheetId = (sheetNameOrId) => {
       const raw = typeof sheetNameOrId === "string" ? sheetNameOrId.trim() : "";
       if (!raw) return "";
@@ -916,10 +944,10 @@ export class ContextManager {
     // (which uses user-facing sheet names).
     const spreadsheetResolver =
       params?.spreadsheet?.sheetNameResolver ?? params?.spreadsheet?.sheet_name_resolver ?? null;
-    const dlp =
-      params.dlp && spreadsheetResolver && !(params.dlp.sheetNameResolver || params.dlp.sheet_name_resolver)
-        ? { ...params.dlp, sheetNameResolver: spreadsheetResolver, sheet_name_resolver: spreadsheetResolver }
-        : params.dlp;
+    let dlp = normalizeDlpOptions(params.dlp);
+    if (dlp && spreadsheetResolver && !dlp.sheetNameResolver) {
+      dlp = { ...dlp, sheetNameResolver: spreadsheetResolver };
+    }
 
     const workbook =
       skipIndexing && (!dlp || skipIndexingWithDlp)

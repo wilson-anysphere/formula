@@ -14,6 +14,37 @@ export type WorkbookRagOptions = {
   sampleRows?: number;
 };
 
+/**
+ * DLP options accepted by ContextManager methods.
+ *
+ * Both camelCase and snake_case field names are supported so callers can pass options
+ * deserialized from JSON or from non-TS hosts.
+ */
+export type DlpOptions = {
+  // Required identifiers (at least one form should be provided).
+  documentId?: string;
+  document_id?: string;
+
+  // Single-sheet contexts may provide a stable sheet id.
+  sheetId?: string;
+  sheet_id?: string;
+
+  policy?: any;
+
+  classificationRecords?: Array<{ selector: any; classification: any }>;
+  classification_records?: Array<{ selector: any; classification: any }>;
+  classificationStore?: { list(documentId: string): Array<{ selector: any; classification: any }> };
+  classification_store?: { list(documentId: string): Array<{ selector: any; classification: any }> };
+
+  includeRestrictedContent?: boolean;
+  include_restricted_content?: boolean;
+
+  auditLogger?: { log(event: any): void };
+
+  sheetNameResolver?: any;
+  sheet_name_resolver?: any;
+};
+
 import type { TokenEstimator } from "./tokenBudget.js";
 
 export class ContextManager {
@@ -52,7 +83,7 @@ export class ContextManager {
     stratifyByColumn?: number;
     limits?: { maxContextRows?: number; maxContextCells?: number; maxChunkRows?: number };
     signal?: AbortSignal;
-    dlp?: any;
+    dlp?: DlpOptions;
   }): Promise<{ schema: any; retrieved: any[]; sampledRows: any[]; promptContext: string }>;
 
   buildWorkbookContext(params: {
@@ -64,7 +95,7 @@ export class ContextManager {
     skipIndexingWithDlp?: boolean;
     includePromptContext?: boolean;
     signal?: AbortSignal;
-    dlp?: any;
+    dlp?: DlpOptions;
   }): Promise<{ indexStats: any; retrieved: any[]; promptContext: string }>;
 
   buildWorkbookContextFromSpreadsheetApi(params: {
@@ -77,6 +108,6 @@ export class ContextManager {
     skipIndexingWithDlp?: boolean;
     includePromptContext?: boolean;
     signal?: AbortSignal;
-    dlp?: any;
+    dlp?: DlpOptions;
   }): Promise<{ indexStats: any; retrieved: any[]; promptContext: string }>;
 }
