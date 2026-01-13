@@ -161,6 +161,32 @@ python -m tools.corpus.dashboard --triage-dir tools/corpus/out/public
 cat tools/corpus/out/public/summary.md
 ```
 
+### Generate a unified compatibility scorecard (corpus + Excel-oracle)
+
+The corpus dashboard captures **read + round-trip** behavior, while the Excel-oracle harness captures
+**calculation fidelity**. To get a single view across both, generate a unified scorecard:
+
+```bash
+# 1) Run corpus triage + dashboard (produces tools/corpus/out/**/summary.json)
+python -m tools.corpus.triage --corpus-dir tools/corpus/public --out-dir tools/corpus/out/public \
+  --expectations tools/corpus/public/expectations.json
+python -m tools.corpus.dashboard --triage-dir tools/corpus/out/public
+
+# 2) Run the Excel-oracle gate (produces tests/compatibility/excel-oracle/reports/mismatch-report.json)
+python tools/excel-oracle/compat_gate.py
+
+# 3) Merge into a single markdown scorecard
+python tools/compat_scorecard.py --out-md compat_scorecard.md
+```
+
+By default, `tools/compat_scorecard.py` looks for:
+
+- `tools/corpus/out/**/summary.json` (prefers `tools/corpus/out/public/summary.json` when present)
+- `tests/compatibility/excel-oracle/reports/mismatch-report.json`
+
+If one input is missing, it exits non-zero and prints which file is missing (use
+`--allow-missing-inputs` to render a partial scorecard).
+
 ---
 
 ## CI integration

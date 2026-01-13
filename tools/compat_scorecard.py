@@ -1,0 +1,442 @@
+#!/usr/bin/env python3
+"""
+Unified compatibility scorecard generator.
+
+This script merges:
+
+* The XLSX compatibility corpus harness (file I/O) summary:
+    tools/corpus/out/**/summary.json
+* The Excel-oracle mismatch report (calculation fidelity):
+    tests/compatibility/excel-oracle/reports/mismatch-report.json
+
+Output:
+* Markdown scorecard (default: compat_scorecard.md)
+* Optional JSON output (via --out-json)
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _github_commit_sha() -> str | None:
+    sha = os.environ.get("GITHUB_SHA")
+    return sha or None
+
+
+def _github_run_url() -> str | None:
+    server = os.environ.get("GITHUB_SERVER_URL")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    if server and repo and run_id:
+        return f"{server}/{repo}/actions/runs/{run_id}"
+    return None
+
+
+def _load_json(path: Path) -> Any:
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        raise SystemExit(f"File not found: {path}") from None
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"Invalid JSON in {path}: {e}") from None
+
+
+def _as_int(value: Any, *, label: str, path: Path) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise SystemExit(f"Expected int for {label} in {path}, got {type(value).__name__}")
+    return value
+
+
+def _as_float(value: Any, *, label: str, path: Path) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise SystemExit(f"Expected float for {label} in {path}, got {type(value).__name__}")
+    out = float(value)
+    if not (0.0 <= out <= 1.0):
+        raise SystemExit(f"Expected {label} in {path} to be in [0, 1], got {out}")
+    return out
+
+
+def _as_str_or_none(value: Any) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+@dataclass(frozen=True)
+class CorpusMetrics:
+    path: Path
+    timestamp: str | None
+    commit: str | None
+    run_url: str | None
+    total_workbooks: int
+    open_ok: int
+    open_rate: float
+    round_trip_ok: int
+    round_trip_rate: float
+
+
+@dataclass(frozen=True)
+class OracleMetrics:
+    path: Path
+    total_cases: int
+    mismatches: int
+    mismatch_rate: float
+    max_mismatch_rate: float | None
+
+
+def _parse_corpus_summary(path: Path, payload: Any) -> CorpusMetrics:
+    if not isinstance(payload, dict):
+        raise SystemExit(f"Corpus summary JSON must be an object: {path}")
+
+    counts = payload.get("counts")
+    rates = payload.get("rates")
+    if not isinstance(counts, dict) or not isinstance(rates, dict):
+        raise SystemExit(f"Corpus summary missing counts/rates objects: {path}")
+
+    total = _as_int(counts.get("total"), label="counts.total", path=path)
+    open_ok = _as_int(counts.get("open_ok"), label="counts.open_ok", path=path)
+    rt_ok = _as_int(counts.get("round_trip_ok"), label="counts.round_trip_ok", path=path)
+    open_rate = _as_float(rates.get("open"), label="rates.open", path=path)
+    rt_rate = _as_float(rates.get("round_trip"), label="rates.round_trip", path=path)
+
+    return CorpusMetrics(
+        path=path,
+        timestamp=_as_str_or_none(payload.get("timestamp")),
+        commit=_as_str_or_none(payload.get("commit")),
+        run_url=_as_str_or_none(payload.get("run_url")),
+        total_workbooks=total,
+        open_ok=open_ok,
+        open_rate=open_rate,
+        round_trip_ok=rt_ok,
+        round_trip_rate=rt_rate,
+    )
+
+
+def _parse_oracle_report(path: Path, payload: Any) -> OracleMetrics:
+    if not isinstance(payload, dict):
+        raise SystemExit(f"Mismatch report JSON must be an object: {path}")
+
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        raise SystemExit(f"Mismatch report missing summary object: {path}")
+
+    total = _as_int(summary.get("totalCases"), label="summary.totalCases", path=path)
+    mismatches = _as_int(summary.get("mismatches"), label="summary.mismatches", path=path)
+    mismatch_rate = _as_float(summary.get("mismatchRate"), label="summary.mismatchRate", path=path)
+    max_rate_raw = summary.get("maxMismatchRate")
+    max_rate = None
+    if max_rate_raw is not None:
+        max_rate = _as_float(max_rate_raw, label="summary.maxMismatchRate", path=path)
+
+    return OracleMetrics(
+        path=path,
+        total_cases=total,
+        mismatches=mismatches,
+        mismatch_rate=mismatch_rate,
+        max_mismatch_rate=max_rate,
+    )
+
+
+def _find_default_corpus_summary(repo_root: Path) -> Path | None:
+    # Prefer the public corpus summary, which is what PR CI runs.
+    preferred = repo_root / "tools" / "corpus" / "out" / "public" / "summary.json"
+    if preferred.is_file():
+        return preferred
+
+    out_root = repo_root / "tools" / "corpus" / "out"
+    if not out_root.is_dir():
+        return None
+
+    candidates = [p for p in out_root.glob("**/summary.json") if p.is_file()]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Multiple corpora (public/private). Pick the newest output so local runs "just work".
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return candidates[0]
+
+
+def _fmt_pct(value: float | None) -> str:
+    if value is None:
+        return "—"
+    return f"{value:.2%}"
+
+
+def _fmt_ratio(passed: int | None, total: int | None) -> str:
+    if passed is None or total is None:
+        return "—"
+    return f"{passed} / {total}"
+
+
+def _fmt_path(repo_root: Path, path: Path) -> str:
+    try:
+        return str(path.relative_to(repo_root))
+    except ValueError:
+        return str(path)
+
+
+def _rate_status(rate: float | None, *, target: float) -> str:
+    if rate is None:
+        return "MISSING"
+    return "PASS" if rate >= target else "FAIL"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Generate a unified compatibility scorecard (corpus + Excel oracle)."
+    )
+    parser.add_argument(
+        "--corpus-summary",
+        default="",
+        help=(
+            "Path to corpus summary.json. Defaults to tools/corpus/out/public/summary.json if "
+            "present, else the newest tools/corpus/out/**/summary.json."
+        ),
+    )
+    parser.add_argument(
+        "--oracle-report",
+        default="tests/compatibility/excel-oracle/reports/mismatch-report.json",
+        help="Path to Excel-oracle mismatch report JSON (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--out-md",
+        default="compat_scorecard.md",
+        help="Where to write the markdown scorecard (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--out-json",
+        default="",
+        help="Optional path to write the scorecard as JSON (default: disabled)",
+    )
+    parser.add_argument(
+        "--allow-missing-inputs",
+        action="store_true",
+        help=(
+            "Write a partial scorecard even if one or both inputs are missing (missing metrics "
+            "are rendered as '—'). Exit code is 0."
+        ),
+    )
+    args = parser.parse_args()
+
+    repo_root = Path(__file__).resolve().parents[1]
+
+    corpus_path: Path | None
+    if args.corpus_summary:
+        corpus_path = Path(args.corpus_summary)
+        if not corpus_path.is_absolute():
+            corpus_path = repo_root / corpus_path
+    else:
+        corpus_path = _find_default_corpus_summary(repo_root)
+
+    oracle_path = Path(args.oracle_report)
+    if not oracle_path.is_absolute():
+        oracle_path = repo_root / oracle_path
+
+    missing: list[str] = []
+    if corpus_path is None or not corpus_path.is_file():
+        searched = repo_root / "tools" / "corpus" / "out"
+        msg = (
+            "Missing corpus summary.json. "
+            "Expected a file under tools/corpus/out/**/summary.json "
+            "(run: python -m tools.corpus.triage ... then python -m tools.corpus.dashboard ...)."
+        )
+        if corpus_path is not None:
+            msg += f" Provided/selected path: {corpus_path}"
+        else:
+            msg += f" Searched under: {searched}"
+        missing.append(msg)
+
+    if not oracle_path.is_file():
+        missing.append(
+            "Missing Excel-oracle mismatch report. "
+            "Expected tests/compatibility/excel-oracle/reports/mismatch-report.json "
+            "(run: python tools/excel-oracle/compat_gate.py). "
+            f"Path: {oracle_path}"
+        )
+
+    if missing and not args.allow_missing_inputs:
+        for msg in missing:
+            sys.stderr.write(msg + "\n")
+        return 1
+
+    corpus: CorpusMetrics | None = None
+    oracle: OracleMetrics | None = None
+    if corpus_path is not None and corpus_path.is_file():
+        corpus = _parse_corpus_summary(corpus_path, _load_json(corpus_path))
+    if oracle_path.is_file():
+        oracle = _parse_oracle_report(oracle_path, _load_json(oracle_path))
+
+    # Targets (project goals).
+    target_read = 1.0
+    target_calc = 0.999  # 99.9% calc fidelity target.
+    target_round_trip = 0.97
+
+    read_rate = corpus.open_rate if corpus else None
+    read_pass = corpus.open_ok if corpus else None
+    read_total = corpus.total_workbooks if corpus else None
+
+    rt_rate = corpus.round_trip_rate if corpus else None
+    rt_pass = corpus.round_trip_ok if corpus else None
+    rt_total = corpus.total_workbooks if corpus else None
+
+    corpus_label = corpus.path.parent.name if corpus else None
+
+    calc_total = oracle.total_cases if oracle else None
+    calc_mismatches = oracle.mismatches if oracle else None
+    calc_mismatch_rate = oracle.mismatch_rate if oracle else None
+    calc_pass_rate = (1.0 - calc_mismatch_rate) if calc_mismatch_rate is not None else None
+    calc_passes = (calc_total - calc_mismatches) if calc_total is not None and calc_mismatches is not None else None
+
+    commit = _github_commit_sha() or (corpus.commit if corpus else None)
+    run_url = _github_run_url() or (corpus.run_url if corpus else None)
+
+    out_md = Path(args.out_md)
+    if not out_md.is_absolute():
+        out_md = repo_root / out_md
+    out_md.parent.mkdir(parents=True, exist_ok=True)
+
+    lines: list[str] = []
+    lines.append("# Compatibility scorecard")
+    lines.append("")
+    lines.append(f"- Generated: `{_utc_now_iso()}`")
+    if commit:
+        lines.append(f"- Commit: `{commit}`")
+    if run_url:
+        lines.append(f"- Run: {run_url}")
+    lines.append("")
+    lines.append("## Inputs")
+    lines.append("")
+    if corpus:
+        extra = f" (timestamp: `{corpus.timestamp}`)" if corpus.timestamp else ""
+        lines.append(f"- Corpus summary: `{_fmt_path(repo_root, corpus.path)}`{extra}")
+    else:
+        lines.append("- Corpus summary: **MISSING**")
+    if oracle:
+        lines.append(f"- Excel-oracle mismatch report: `{_fmt_path(repo_root, oracle.path)}`")
+    else:
+        lines.append("- Excel-oracle mismatch report: **MISSING**")
+    lines.append("")
+    lines.append("## Scorecard")
+    lines.append("")
+    lines.append("| Level | Metric | Status | Pass rate | Passes / Total | Target | Notes |")
+    lines.append("| --- | --- | --- | ---: | ---: | ---: | --- |")
+    lines.append(
+        "| L1 | Read (corpus open) | "
+        + _rate_status(read_rate, target=target_read)
+        + " | "
+        + _fmt_pct(read_rate)
+        + " | "
+        + _fmt_ratio(read_pass, read_total)
+        + " | "
+        + _fmt_pct(target_read)
+        + " | "
+        + (f"corpus={corpus_label}" if corpus_label else "—")
+        + " |"
+    )
+
+    calc_notes_parts: list[str] = []
+    if oracle is not None:
+        calc_notes_parts.append(f"mismatch rate={_fmt_pct(calc_mismatch_rate)}")
+        if oracle.max_mismatch_rate is not None:
+            calc_notes_parts.append(f"max={_fmt_pct(oracle.max_mismatch_rate)}")
+    calc_notes = ", ".join(calc_notes_parts) if calc_notes_parts else "—"
+    lines.append(
+        "| L2 | Calculate (Excel oracle) | "
+        + _rate_status(calc_pass_rate, target=target_calc)
+        + " | "
+        + _fmt_pct(calc_pass_rate)
+        + " | "
+        + _fmt_ratio(calc_passes, calc_total)
+        + " | "
+        + _fmt_pct(target_calc)
+        + " | "
+        + calc_notes
+        + " |"
+    )
+
+    lines.append(
+        "| L4 | Round-trip (corpus) | "
+        + _rate_status(rt_rate, target=target_round_trip)
+        + " | "
+        + _fmt_pct(rt_rate)
+        + " | "
+        + _fmt_ratio(rt_pass, rt_total)
+        + " | "
+        + _fmt_pct(target_round_trip)
+        + " | "
+        + (f"corpus={corpus_label}" if corpus_label else "—")
+        + " |"
+    )
+    lines.append("")
+
+    out_md.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+
+    if args.out_json:
+        out_json = Path(args.out_json)
+        if not out_json.is_absolute():
+            out_json = repo_root / out_json
+        out_json.parent.mkdir(parents=True, exist_ok=True)
+
+        payload: dict[str, Any] = {
+            "schemaVersion": 1,
+            "generatedAt": _utc_now_iso(),
+            "commit": commit,
+            "runUrl": run_url,
+            "inputs": {
+                "corpusSummaryPath": _fmt_path(repo_root, corpus.path) if corpus else None,
+                "oracleReportPath": _fmt_path(repo_root, oracle.path) if oracle else None,
+            },
+            "metrics": {
+                "l1Read": {
+                    "passRate": read_rate,
+                    "passes": read_pass,
+                    "total": read_total,
+                    "targetPassRate": target_read,
+                },
+                "l2Calculate": {
+                    "passRate": calc_pass_rate,
+                    "mismatchRate": calc_mismatch_rate,
+                    "passes": calc_passes,
+                    "mismatches": calc_mismatches,
+                    "total": calc_total,
+                    "targetPassRate": target_calc,
+                },
+                "l4RoundTrip": {
+                    "passRate": rt_rate,
+                    "passes": rt_pass,
+                    "total": rt_total,
+                    "targetPassRate": target_round_trip,
+                },
+            },
+        }
+        out_json.write_text(
+            json.dumps(payload, indent=2, sort_keys=False) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+
+    if missing:
+        for msg in missing:
+            sys.stderr.write(msg + "\n")
+        return 0
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
