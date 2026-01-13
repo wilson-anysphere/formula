@@ -690,3 +690,55 @@ const trimmedMessages = await trimMessagesToBudget({
 
 // Send `trimmedMessages` (+ `tools`) to your LLM client.
 ```
+
+---
+
+## Troubleshooting / gotchas
+
+### `ContextManager.buildWorkbookContext requires workbookRag`
+
+Workbook context builders (`buildWorkbookContext*`) need a `workbookRag` configuration in the `ContextManager`
+constructor:
+
+- `vectorStore` (implements `list`/`upsert`/`delete`/`query`)
+- `embedder` (implements `embedTexts`)
+
+See the workbook example above.
+
+### “Vector dimension mismatch” errors
+
+The embedder and vector store must agree on dimension:
+
+```js
+const embedder = new HashEmbedder({ dimension: 384 });
+const vectorStore = new InMemoryVectorStore({ dimension: embedder.dimension });
+```
+
+### `buildWorkbookContextFromSpreadsheetApi` coordinate base
+
+`buildWorkbookContextFromSpreadsheetApi()` assumes `SpreadsheetApi`-style **1-based** coordinates (`A1 => row=1, col=1`).
+
+If your adapter uses **0-based** coordinates, build the workbook yourself with `packages/ai-rag` and call
+`buildWorkbookContext()` instead:
+
+```js
+import { workbookFromSpreadsheetApi } from "../ai-rag/src/index.js";
+
+const workbook = workbookFromSpreadsheetApi({
+  spreadsheet,
+  workbookId,
+  coordinateBase: "zero",
+});
+
+const ctx = await cm.buildWorkbookContext({ workbook, query });
+```
+
+### DLP blocks (`DlpViolationError`)
+
+If DLP blocks cloud AI processing, `ContextManager` will throw `DlpViolationError`. Catch it and **do not**
+call a cloud model with blocked content.
+
+Also note:
+
+- `dlp.includeRestrictedContent` is only honored if policy allows it (`allowRestrictedContent: true`).
+- If your sheet ids differ from display names, provide a `sheetNameResolver` so structured selectors match.
