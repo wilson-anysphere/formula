@@ -86,6 +86,25 @@ test("rerankWorkbookResults boosts results whose title/sheetName match query tok
   assert.deepEqual(reranked.map((r) => r.id), ["match-title", "no-match"]);
 });
 
+test("rerankWorkbookResults tokenizes underscores/camelCase for lexical matching", () => {
+  const query = "revenue_by_region";
+  const results = [
+    {
+      id: "no-match",
+      score: 0.5,
+      metadata: { kind: "dataRegion", title: "Costs", sheetName: "Sheet1", tokenCount: 10 },
+    },
+    {
+      id: "match",
+      score: 0.5,
+      metadata: { kind: "dataRegion", title: "RevenueByRegion", sheetName: "Sheet1", tokenCount: 10 },
+    },
+  ];
+
+  const reranked = rerankWorkbookResults(query, results);
+  assert.deepEqual(reranked.map((r) => r.id), ["match", "no-match"]);
+});
+
 test("rerankWorkbookResults penalizes very large chunks to favor concise context", () => {
   const query = "";
   const results = [

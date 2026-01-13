@@ -13,10 +13,22 @@ const DEFAULT_KIND_BOOST = Object.freeze({
  * @returns {string[]}
  */
 function tokenize(text) {
-  const tokens = String(text ?? "")
+  const raw = String(text ?? "");
+  // Insert separators so lexical matching behaves similarly to HashEmbedder tokenization:
+  // - treat underscores as separators
+  // - split camelCase/PascalCase and digit boundaries
+  const separated = raw
+    .replace(/_/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/([A-Za-z])([0-9])/g, "$1 $2")
+    .replace(/([0-9])([A-Za-z])/g, "$1 $2");
+
+  const tokens = separated
     .toLowerCase()
-    .match(/[a-z0-9_]+/g);
-  if (!tokens) return [];
+    .split(/[^a-z0-9]+/g)
+    .filter(Boolean);
+  if (tokens.length === 0) return [];
   // De-dupe while preserving first-seen order.
   const seen = new Set();
   const out = [];
