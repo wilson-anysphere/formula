@@ -208,6 +208,15 @@ Secrets used by `tauri-apps/tauri-action`:
 - `APPLE_PASSWORD` – app-specific password
 - `APPLE_TEAM_ID`
 
+CI preflight: the release workflow validates that `APPLE_CERTIFICATE` is valid base64 and a valid
+PKCS#12 archive decryptable with `APPLE_CERTIFICATE_PASSWORD` (fail-fast on tagged releases when
+misconfigured). You can run the same check locally:
+
+```bash
+APPLE_CERTIFICATE=... APPLE_CERTIFICATE_PASSWORD=... \
+  bash scripts/ci/verify-codesign-secrets.sh macos
+```
+
 CI guardrail (tagged releases when secrets are configured):
 
 - The release workflow validates that the produced macOS artifacts are **notarized + stapled** so they pass Gatekeeper:
@@ -300,6 +309,15 @@ Secrets:
 
 - `WINDOWS_CERTIFICATE` – base64-encoded `.pfx`
 - `WINDOWS_CERTIFICATE_PASSWORD`
+
+CI preflight: the release workflow validates that `WINDOWS_CERTIFICATE` is valid base64 and a valid
+PKCS#12 archive decryptable with `WINDOWS_CERTIFICATE_PASSWORD` (fail-fast when misconfigured). You
+can run the same check locally:
+
+```bash
+WINDOWS_CERTIFICATE=... WINDOWS_CERTIFICATE_PASSWORD=... \
+  bash scripts/ci/verify-codesign-secrets.sh windows
+```
 
 Verification (signed artifacts):
 
