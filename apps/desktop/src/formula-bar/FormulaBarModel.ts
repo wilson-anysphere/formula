@@ -32,6 +32,7 @@ export class FormulaBarModel {
   #resolveName: ((name: string) => FormulaReferenceRange | null) | null = null;
   #rangeInsertion: { start: number; end: number } | null = null;
   #hoveredReference: RangeAddress | null = null;
+  #hoveredReferenceText: string | null = null;
   #referenceColorByText = new Map<string, string>();
   #coloredReferences: ColoredFormulaReference[] = [];
   #activeReferenceIndex: number | null = null;
@@ -56,6 +57,7 @@ export class FormulaBarModel {
     this.#cursorEnd = this.#draft.length;
     this.#rangeInsertion = null;
     this.#hoveredReference = null;
+    this.#hoveredReferenceText = null;
     this.#referenceColorByText.clear();
     this.#coloredReferences = [];
     this.#activeReferenceIndex = null;
@@ -120,6 +122,7 @@ export class FormulaBarModel {
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
     this.#hoveredReference = null;
+    this.#hoveredReferenceText = null;
     this.#referenceColorByText.clear();
     this.#coloredReferences = [];
     this.#activeReferenceIndex = null;
@@ -135,6 +138,7 @@ export class FormulaBarModel {
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
     this.#hoveredReference = null;
+    this.#hoveredReferenceText = null;
     this.#referenceColorByText.clear();
     this.#coloredReferences = [];
     this.#activeReferenceIndex = null;
@@ -155,13 +159,19 @@ export class FormulaBarModel {
   setHoveredReference(referenceText: string | null): void {
     if (!referenceText) {
       this.#hoveredReference = null;
+      this.#hoveredReferenceText = null;
       return;
     }
+    this.#hoveredReferenceText = referenceText;
     this.#hoveredReference = parseSheetQualifiedA1Range(referenceText);
   }
 
   hoveredReference(): RangeAddress | null {
     return this.#hoveredReference;
+  }
+
+  hoveredReferenceText(): string | null {
+    return this.#hoveredReferenceText;
   }
 
   coloredReferences(): readonly ColoredFormulaReference[] {
@@ -317,6 +327,7 @@ export class FormulaBarModel {
   #updateHoverFromCursor(): void {
     if (this.#cursorStart !== this.#cursorEnd) {
       this.#hoveredReference = null;
+      this.#hoveredReferenceText = null;
       return;
     }
 
@@ -325,9 +336,11 @@ export class FormulaBarModel {
     const token = tokenizeFormula(this.#draft).find((t) => t.start <= probe && probe < t.end);
     if (!token || token.type !== "reference") {
       this.#hoveredReference = null;
+      this.#hoveredReferenceText = null;
       return;
     }
 
+    this.#hoveredReferenceText = token.text;
     this.#hoveredReference = parseSheetQualifiedA1Range(token.text);
   }
 

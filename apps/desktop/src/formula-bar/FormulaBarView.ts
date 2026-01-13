@@ -93,6 +93,11 @@ export interface FormulaBarViewCallbacks {
   onGoTo?: (reference: string) => void;
   onOpenNameBoxMenu?: () => void | Promise<void>;
   onHoverRange?: (range: RangeAddress | null) => void;
+  /**
+   * Like `onHoverRange`, but includes the original reference text (e.g. `Sheet2!A1:B2`)
+   * so consumers can display a label and/or enforce sheet-qualified preview behavior.
+   */
+  onHoverRangeWithText?: (range: RangeAddress | null, refText: string | null) => void;
   onReferenceHighlights?: (
     highlights: Array<{ range: FormulaReferenceRange; color: string; text: string; index: number; active?: boolean }>
   ) => void;
@@ -147,6 +152,7 @@ export class FormulaBarView {
   #isErrorPanelOpen = false;
   #errorPanelReferenceHighlights: FormulaReferenceHighlight[] | null = null;
   #hoverOverride: RangeAddress | null = null;
+  #hoverOverrideText: string | null = null;
   #selectedReferenceIndex: number | null = null;
   #callbacks: FormulaBarViewCallbacks;
 
@@ -488,6 +494,7 @@ export class FormulaBarView {
     if (this.model.isEditing) return;
     this.model.setActiveCell(info);
     this.#hoverOverride = null;
+    this.#hoverOverrideText = null;
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
   }
@@ -534,6 +541,9 @@ export class FormulaBarView {
     this.#errorPanelReferenceHighlights = null;
     this.model.beginEdit();
     this.#callbacks.onBeginEdit?.(this.model.activeCell.address);
+    // Hover overrides are a view-mode affordance and should not leak into editing behavior.
+    this.#hoverOverride = null;
+    this.#hoverOverrideText = null;
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: true });
     this.#emitOverlays();
@@ -716,6 +726,7 @@ export class FormulaBarView {
     this.textarea.blur();
     this.model.cancel();
     this.#hoverOverride = null;
+    this.#hoverOverrideText = null;
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
     this.#callbacks.onCancel?.();
@@ -729,6 +740,7 @@ export class FormulaBarView {
     this.textarea.blur();
     const committed = this.model.commit();
     this.#hoverOverride = null;
+    this.#hoverOverrideText = null;
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
     this.#callbacks.onCommit(committed, commit);
@@ -1254,6 +1266,8 @@ export class FormulaBarView {
   #emitOverlays(): void {
     const range = this.#hoverOverride ?? this.model.hoveredReference();
     this.#callbacks.onHoverRange?.(range);
+    const refText = this.#hoverOverrideText ?? this.model.hoveredReferenceText();
+    this.#callbacks.onHoverRangeWithText?.(range, refText ?? null);
 
     this.#callbacks.onReferenceHighlights?.(this.#currentReferenceHighlights());
   }
@@ -1273,13 +1287,16 @@ export class FormulaBarView {
     }
 
     const text = span.textContent ?? "";
+    this.#hoverOverrideText = text || null;
     this.#hoverOverride = text ? parseSheetQualifiedA1Range(text) : null;
     this.#callbacks.onHoverRange?.(this.#hoverOverride);
+    this.#callbacks.onHoverRangeWithText?.(this.#hoverOverride, this.#hoverOverrideText);
   }
 
   #clearHoverOverride(): void {
-    if (this.#hoverOverride === null) return;
+    if (this.#hoverOverride === null && this.#hoverOverrideText === null) return;
     this.#hoverOverride = null;
+    this.#hoverOverrideText = null;
     this.#emitOverlays();
   }
 

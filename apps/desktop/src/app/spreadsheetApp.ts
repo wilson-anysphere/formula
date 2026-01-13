@@ -1,6 +1,7 @@
 import { CellEditorOverlay } from "../editor/cellEditorOverlay";
 import { FormulaBarTabCompletionController } from "../ai/completion/formulaBarTabCompletion.js";
 import { FormulaBarView, type FormulaBarCommit } from "../formula-bar/FormulaBarView";
+import type { RangeAddress as A1RangeAddress } from "../spreadsheet/a1.js";
 import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js";
 import { parseA1Range } from "../charts/a1.js";
 import { emuToPx } from "../charts/overlay.js";
@@ -130,6 +131,11 @@ const MAX_DATE_TIME_INSERT_CELLS = 10_000;
 // Chart rendering is synchronous and (today) materializes the full series ranges into JS arrays.
 // Keep charts bounded so a large A1 range doesn't allocate millions of values on every render.
 const MAX_CHART_DATA_CELLS = 100_000;
+// Formula-bar range preview tooltip should never enumerate massive ranges.
+// Keep reads bounded to avoid keystroke-latency regressions when editing formulas.
+const MAX_FORMULA_RANGE_PREVIEW_CELLS = 100;
+const FORMULA_RANGE_PREVIEW_SAMPLE_ROWS = 3;
+const FORMULA_RANGE_PREVIEW_SAMPLE_COLS = 3;
 // Encode (row, col) into a single numeric key for allocation-free lookups.
 // `16_384` matches Excel's maximum column count, so the mapping is collision-free for Excel-sized sheets.
 const COMMENT_COORD_COL_STRIDE = 16_384;
@@ -708,6 +714,9 @@ export class SpreadsheetApp {
   private suppressFocusRestoreOnNextCommandCommit = false;
   private formulaBar: FormulaBarView | null = null;
   private formulaBarCompletion: FormulaBarTabCompletionController | null = null;
+  private formulaRangePreviewTooltip: HTMLDivElement | null = null;
+  private formulaRangePreviewTooltipVisible = false;
+  private formulaRangePreviewTooltipLastKey: string | null = null;
   private formulaEditCell: { sheetId: string; cell: CellCoord } | null = null;
   private referencePreview: { start: CellCoord; end: CellCoord } | null = null;
   private referenceHighlights: Array<{ start: CellCoord; end: CellCoord; color: string; active: boolean }> = [];
@@ -1815,6 +1824,9 @@ export class SpreadsheetApp {
             this.renderReferencePreview();
           }
         },
+        onHoverRangeWithText: (range, refText) => {
+          this.updateFormulaRangePreviewTooltip(range, refText);
+        },
         onReferenceHighlights: (highlights) => {
           this.referenceHighlightsSource = highlights;
           this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
@@ -1854,6 +1866,8 @@ export class SpreadsheetApp {
           sheet,
         };
       });
+      this.formulaRangePreviewTooltip = this.createFormulaRangePreviewTooltip();
+      opts.formulaBar.appendChild(this.formulaRangePreviewTooltip);
 
       this.formulaBarCompletion = new FormulaBarTabCompletionController({
         formulaBar: this.formulaBar,
@@ -4731,6 +4745,14 @@ export class SpreadsheetApp {
     return tooltip;
   }
 
+  private createFormulaRangePreviewTooltip(): HTMLDivElement {
+    const tooltip = document.createElement("div");
+    tooltip.dataset.testid = "formula-range-preview-tooltip";
+    tooltip.className = "formula-range-preview-tooltip";
+    tooltip.hidden = true;
+    return tooltip;
+  }
+
   private createAuditingLegend(): HTMLDivElement {
     const legend = document.createElement("div");
     legend.dataset.testid = "auditing-legend";
@@ -4821,6 +4843,128 @@ export class SpreadsheetApp {
     this.lastHoveredCommentIndexVersion = -1;
     this.commentTooltipVisible = false;
     this.commentTooltip.classList.remove("comment-tooltip--visible");
+  }
+
+  private hideFormulaRangePreviewTooltip(): void {
+    const tooltip = this.formulaRangePreviewTooltip;
+    if (!tooltip) {
+      this.formulaRangePreviewTooltipVisible = false;
+      this.formulaRangePreviewTooltipLastKey = null;
+      return;
+    }
+    if (!this.formulaRangePreviewTooltipVisible && tooltip.hidden) return;
+    this.formulaRangePreviewTooltipVisible = false;
+    tooltip.hidden = true;
+    tooltip.classList.remove("formula-range-preview-tooltip--visible");
+  }
+
+  private updateFormulaRangePreviewTooltip(range: A1RangeAddress | null, refText: string | null): void {
+    const tooltip = this.formulaRangePreviewTooltip;
+    if (!tooltip) return;
+
+    if (!range) {
+      this.hideFormulaRangePreviewTooltip();
+      return;
+    }
+
+    const rawText = typeof refText === "string" ? refText.trim() : "";
+    const { sheetName } = splitSheetQualifier(rawText);
+    if (sheetName) {
+      const resolved = this.resolveSheetIdByName(sheetName);
+      // For sheet-qualified refs, only preview when the referenced sheet is currently active.
+      if (!resolved || resolved.toLowerCase() !== this.sheetId.toLowerCase()) {
+        this.hideFormulaRangePreviewTooltip();
+        return;
+      }
+    }
+
+    const startRow = Math.min(range.start.row, range.end.row);
+    const endRow = Math.max(range.start.row, range.end.row);
+    const startCol = Math.min(range.start.col, range.end.col);
+    const endCol = Math.max(range.start.col, range.end.col);
+    const rowCount = endRow - startRow + 1;
+    const colCount = endCol - startCol + 1;
+    if (rowCount <= 0 || colCount <= 0) {
+      this.hideFormulaRangePreviewTooltip();
+      return;
+    }
+
+    const totalCells = rowCount * colCount;
+    const tooLarge = totalCells > MAX_FORMULA_RANGE_PREVIEW_CELLS;
+
+    const label =
+      rawText ||
+      rangeToA1({
+        startRow,
+        endRow,
+        startCol,
+        endCol,
+      });
+
+    const key = `${this.sheetId}:${startRow},${startCol}:${endRow},${endCol}:${label}:${tooLarge ? "L" : "S"}`;
+    if (this.formulaRangePreviewTooltipVisible && this.formulaRangePreviewTooltipLastKey === key) {
+      return;
+    }
+    this.formulaRangePreviewTooltipLastKey = key;
+
+    tooltip.replaceChildren();
+
+    const header = document.createElement("div");
+    header.className = "formula-range-preview-tooltip__header";
+    header.textContent = label;
+    tooltip.appendChild(header);
+
+    const sampleRows = Math.min(rowCount, FORMULA_RANGE_PREVIEW_SAMPLE_ROWS);
+    const sampleCols = Math.min(colCount, FORMULA_RANGE_PREVIEW_SAMPLE_COLS);
+
+    const table = document.createElement("table");
+    table.className = "formula-range-preview-tooltip__grid";
+    const tbody = document.createElement("tbody");
+    table.appendChild(tbody);
+
+    const coordScratch = { row: 0, col: 0 };
+    for (let r = 0; r < sampleRows; r += 1) {
+      const tr = document.createElement("tr");
+      for (let c = 0; c < sampleCols; c += 1) {
+        coordScratch.row = startRow + r;
+        coordScratch.col = startCol + c;
+        const td = document.createElement("td");
+        td.textContent = this.getCellDisplayValue(coordScratch);
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+
+    tooltip.appendChild(table);
+
+    const summary = document.createElement("div");
+    summary.className = "formula-range-preview-tooltip__summary";
+    if (tooLarge) {
+      summary.textContent = "(range too large)";
+    } else {
+      let sum = 0;
+      let numericCount = 0;
+      for (let row = startRow; row <= endRow; row += 1) {
+        for (let col = startCol; col <= endCol; col += 1) {
+          coordScratch.row = row;
+          coordScratch.col = col;
+          const n = coerceNumber(this.getCellComputedValue(coordScratch));
+          if (n == null) continue;
+          sum += n;
+          numericCount += 1;
+        }
+      }
+      if (numericCount === 0) {
+        summary.textContent = "No numeric values";
+      } else {
+        summary.textContent = `Sum: ${sum} · Count: ${numericCount}`;
+      }
+    }
+    tooltip.appendChild(summary);
+
+    this.formulaRangePreviewTooltipVisible = true;
+    tooltip.hidden = false;
+    tooltip.classList.add("formula-range-preview-tooltip--visible");
   }
 
   private clearSharedHoverCellCache(): void {
