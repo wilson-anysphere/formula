@@ -32,7 +32,7 @@
     "stylePart": null,
     "colorsPart": null
   },
-  "model": {
+  "modelChartSpace": {
     "chartKind": {
       "kind": "bar"
     },
@@ -48,12 +48,33 @@
       "overlay": false
     },
     "plotArea": {
-      "kind": "bar",
-      "barDirection": "col",
-      "grouping": "clustered",
-      "axIds": [
-        50010001,
-        50010002
+      "kind": "combo",
+      "charts": [
+        {
+          "kind": "bar",
+          "barDirection": "col",
+          "grouping": "clustered",
+          "axIds": [
+            50010001,
+            50010002
+          ],
+          "series": {
+            "start": 0,
+            "end": 1
+          }
+        },
+        {
+          "kind": "line",
+          "grouping": "standard",
+          "axIds": [
+            50010001,
+            50010002
+          ],
+          "series": {
+            "start": 1,
+            "end": 2
+          }
+        }
       ]
     },
     "axes": [
@@ -69,7 +90,9 @@
         },
         "numFmt": null,
         "tickLabelPosition": "nextTo",
-        "majorGridlines": false
+        "majorGridlines": false,
+        "crossAxisId": 50010002,
+        "crosses": "autoZero"
       },
       {
         "id": 50010002,
@@ -86,7 +109,9 @@
           "sourceLinked": true
         },
         "tickLabelPosition": "nextTo",
-        "majorGridlines": true
+        "majorGridlines": true,
+        "crossAxisId": 50010001,
+        "crosses": "autoZero"
       }
     ],
     "series": [
@@ -112,14 +137,40 @@
           "formatCode": "General"
         },
         "xValues": null,
-        "yValues": null
+        "yValues": null,
+        "plotIndex": 0
+      },
+      {
+        "name": null,
+        "categories": {
+          "formula": "Sheet1!$A$2:$A$5",
+          "cache": [
+            "A",
+            "B",
+            "C",
+            "D"
+          ]
+        },
+        "values": {
+          "formula": "Sheet1!$C$2:$C$5",
+          "cache": [
+            1.0,
+            2.0,
+            2.5,
+            4.0
+          ],
+          "formatCode": "General"
+        },
+        "xValues": null,
+        "yValues": null,
+        "marker": {
+          "shape": "none"
+        },
+        "plotIndex": 1
       }
     ],
-    "diagnostics": [
-      {
-        "level": "warning",
-        "message": "plotArea contains multiple chart types; only the first is currently modeled"
-      }
-    ]
-  }
+    "plotVisOnly": true,
+    "diagnostics": []
+  },
+  "modelChartEx": null
 }
