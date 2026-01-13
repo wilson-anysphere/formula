@@ -43,7 +43,10 @@ The table below documents what each platform key should point to in `latest.json
   as stable for CI verification.
 - Formula still publishes **additional** artifacts (DMG, NSIS `.exe`, `.deb`, `.rpm`) for user
   convenience; the updater keys above intentionally validate the *updatable* artifact.
+- Windows distribution requirement: even though the updater uses the `.msi` for self-update, tagged
+  releases must also ship a corresponding **NSIS `.exe` installer** for both `windows-x86_64` and
+  `windows-aarch64`. The release workflow enforces that both `.msi` and `.exe` assets exist per
+  architecture.
 - To inspect a manifest locally:
   - `jq '.platforms | keys' latest.json`
   - `jq -r '.platforms["windows-aarch64"].url' latest.json`
-
