@@ -44,7 +44,7 @@ AI integration is not a feature bolted on—it's woven into the fabric of the ap
 
 **Trigger:** User typing in formula bar or cell
 **Latency requirement:** <100ms
-**Backend:** Cursor servers with aggressive caching
+**Backend:** Primarily local heuristics; optional Cursor server completion for formula drafts (hard timeout + caching)
 
 **Code entrypoints:**
 - Core completion engine: [`packages/ai-completion/src/tabCompletionEngine.js`](../packages/ai-completion/src/tabCompletionEngine.js)
@@ -87,18 +87,22 @@ Suggestions:
   - =VLOOKUP(          [Standard completion]
   - =XLOOKUP(          [Suggest modern alternative]
 
-User types: "Tot in B15
+User types: Tot
 Suggestions:
-  - "Total"            [Based on nearby text patterns]
-  - =SUM(B1:B14)       [Detect "total" intent, suggest formula]
+  - Total              [Based on nearby text patterns]
 ```
+
+> **Note (current behavior):** the desktop formula bar only renders tab completion as **pure insertion** ghost text at
+> the caret (it cannot rewrite characters *before* the cursor). Because of this, tab completion does not currently
+> “rewrite” non-formula text into formulas—formula suggestions (including Cursor backend calls) only run when the user is
+> already editing a formula (input starts with `=`).
 
 **Implementation notes (actual):**
 - For a deep-dive (algorithms, schema integration, tests), see [AI Tab Completion](ai-tab-completion.md).
 - `TabCompletionEngine.getSuggestions()` (`packages/ai-completion/...`) parses the partial draft and merges three sources (in parallel), caching the base results:
-  - rule-based suggestions (functions, ranges, argument hints)
-  - pattern suggestions (nearby repeated values for non-formula input)
-  - optional Cursor backend completion via `CursorTabCompletionClient` (strict timeout for UI responsiveness)
+  - rule-based suggestions (functions, ranges, argument hints) **for formulas**
+  - pattern suggestions (nearby repeated values) **for non-formula input** (`type: "value"`)
+  - optional Cursor backend completion via `CursorTabCompletionClient` **for formulas** (strict timeout for UI responsiveness)
 - Desktop attaches formula previews by evaluating the suggested formula locally (see `createPreviewEvaluator` in
   [`apps/desktop/src/ai/completion/formulaBarTabCompletion.ts`](../apps/desktop/src/ai/completion/formulaBarTabCompletion.ts), which uses
   [`apps/desktop/src/spreadsheet/evaluateFormula.ts`](../apps/desktop/src/spreadsheet/evaluateFormula.ts)).
