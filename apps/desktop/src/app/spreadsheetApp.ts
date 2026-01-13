@@ -5,7 +5,6 @@ import {
   type FormulaBarCommit,
   type NameBoxDropdownItem,
   type NameBoxDropdownProvider,
-  type NameBoxMenuItem,
 } from "../formula-bar/FormulaBarView";
 import type { RangeAddress as A1RangeAddress } from "../spreadsheet/a1.js";
 import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js";
@@ -2249,13 +2248,41 @@ export class SpreadsheetApp {
             return formatted ? `${formatted}!` : "";
           };
 
+          const normalizeDocRange = (range: any): Range | null => {
+            if (!range) return null;
+            const { startRow, endRow, startCol, endCol } = range as any;
+            if (
+              !Number.isInteger(startRow) ||
+              !Number.isInteger(endRow) ||
+              !Number.isInteger(startCol) ||
+              !Number.isInteger(endCol) ||
+              startRow < 0 ||
+              endRow < 0 ||
+              startCol < 0 ||
+              endCol < 0
+            ) {
+              return null;
+            }
+
+            return {
+              startRow: Math.min(startRow, endRow),
+              endRow: Math.max(startRow, endRow),
+              startCol: Math.min(startCol, endCol),
+              endCol: Math.max(startCol, endCol),
+            };
+          };
+
           for (const entry of this.searchWorkbook.names.values()) {
             const e: any = entry as any;
             const name = typeof e?.name === "string" ? String(e.name).trim() : "";
             if (!name) continue;
             const sheetName = typeof e?.sheetName === "string" ? String(e.sheetName) : "";
-            const range = e?.range;
-            const description = sheetName && range ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}` : undefined;
+            const range = normalizeDocRange(e?.range);
+            const description = range
+              ? sheetName
+                ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}`
+                : rangeToA1(range)
+              : undefined;
             push({
               kind: "namedRange",
               key: `namedRange:${name}`,
@@ -2270,27 +2297,27 @@ export class SpreadsheetApp {
             const name = typeof t?.name === "string" ? String(t.name).trim() : "";
             if (!name) continue;
             const sheetName = typeof t?.sheetName === "string" ? String(t.sheetName) : "";
-            const hasRange =
-              typeof t?.startRow === "number" &&
-              typeof t?.startCol === "number" &&
-              typeof t?.endRow === "number" &&
-              typeof t?.endCol === "number";
-            const description =
-              sheetName && hasRange
-                ? `${formatSheetPrefix(sheetName)}${rangeToA1({
-                    startRow: t.startRow,
-                    startCol: t.startCol,
-                    endRow: t.endRow,
-                    endCol: t.endCol,
-                  })}`
-                : undefined;
+            const range = normalizeDocRange({
+              startRow: t?.startRow,
+              startCol: t?.startCol,
+              endRow: t?.endRow,
+              endCol: t?.endCol,
+            });
+            const description = range
+              ? sheetName
+                ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}`
+                : rangeToA1(range)
+              : undefined;
 
-            // `parseGoTo` only understands structured references for tables.
+            const structuredOk = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
+            const reference = structuredOk ? `${name}[#All]` : range && sheetName ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}` : null;
+            if (!reference) continue;
+
             push({
               kind: "table",
               key: `table:${name}`,
               label: name,
-              reference: `${name}[#All]`,
+              reference,
               description,
             });
           }
@@ -2321,84 +2348,6 @@ export class SpreadsheetApp {
           this.formulaEditCell = { sheetId: this.sheetId, cell: { ...this.selection.active } };
           this.syncSharedGridInteractionMode();
           this.updateEditState();
-        },
-        getNameBoxMenuItems: () => {
-          const formatSheetPrefix = (sheetName: string): string => {
-            const token = formatSheetNameForA1(sheetName);
-            return token ? `${token}!` : "";
-          };
-
-          const normalizeDocRange = (range: any): Range | null => {
-            if (!range) return null;
-            const { startRow, endRow, startCol, endCol } = range as any;
-            if (
-              !Number.isInteger(startRow) ||
-              !Number.isInteger(endRow) ||
-              !Number.isInteger(startCol) ||
-              !Number.isInteger(endCol) ||
-              startRow < 0 ||
-              endRow < 0 ||
-              startCol < 0 ||
-              endCol < 0
-            ) {
-              return null;
-            }
-
-            return {
-              startRow: Math.min(startRow, endRow),
-              endRow: Math.max(startRow, endRow),
-              startCol: Math.min(startCol, endCol),
-              endCol: Math.max(startCol, endCol),
-            };
-          };
-
-          const namedRanges: NameBoxMenuItem[] = [];
-          for (const entry of this.searchWorkbook.names.values()) {
-            const e: any = entry as any;
-            const name = typeof e?.name === "string" ? e.name.trim() : "";
-            if (!name) continue;
-
-            const sheetName = typeof e?.sheetName === "string" ? e.sheetName.trim() : "";
-            const normalized = normalizeDocRange(e?.range);
-            const reference = normalized
-              ? sheetName
-                ? `${formatSheetPrefix(sheetName)}${rangeToA1(normalized)}`
-                : rangeToA1(normalized)
-              : null;
-            namedRanges.push({ label: name, reference });
-          }
-
-          const tables: NameBoxMenuItem[] = [];
-          for (const entry of this.searchWorkbook.tables.values()) {
-            const table: any = entry as any;
-            const name = typeof table?.name === "string" ? table.name.trim() : "";
-            if (!name) continue;
-            const sheetName = typeof table?.sheetName === "string" ? table.sheetName.trim() : "";
-
-            const range = {
-              startRow: table?.startRow,
-              endRow: table?.endRow,
-              startCol: table?.startCol,
-              endCol: table?.endCol,
-            };
-            const normalized = normalizeDocRange(range);
-            const structuredOk = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
-            const reference = normalized && sheetName
-              ? structuredOk
-                ? `${name}[#All]`
-                : `${formatSheetPrefix(sheetName)}${rangeToA1(normalized)}`
-              : null;
-            // Tables should always navigate when selectable. If the table metadata is incomplete/invalid,
-            // surface it as a disabled entry rather than offering a broken Go To.
-            tables.push({ label: name, reference, enabled: reference != null });
-          }
-
-          const ciSort = (a: NameBoxMenuItem, b: NameBoxMenuItem): number =>
-            a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
-          namedRanges.sort(ciSort);
-          tables.sort(ciSort);
-
-          return [...namedRanges, ...tables];
         },
         onGoTo: (reference) => this.goTo(reference),
         onOpenNameBoxMenu: () => this.openNameBoxMenu(),
