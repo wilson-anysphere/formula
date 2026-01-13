@@ -1439,6 +1439,85 @@ impl DaxEngine {
         let mut row_filters: Vec<(String, HashSet<usize>)> = Vec::new();
         let mut column_filters: Vec<((String, String), HashSet<Value>)> = Vec::new();
 
+        fn collect_column_refs(
+            expr: &Expr,
+            tables: &mut HashSet<String>,
+            columns: &mut HashSet<(String, String)>,
+        ) {
+            match expr {
+                Expr::ColumnRef { table, column } => {
+                    tables.insert(table.clone());
+                    columns.insert((table.clone(), column.clone()));
+                }
+                Expr::UnaryOp { expr, .. } => collect_column_refs(expr, tables, columns),
+                Expr::BinaryOp { left, right, .. } => {
+                    collect_column_refs(left, tables, columns);
+                    collect_column_refs(right, tables, columns);
+                }
+                Expr::Call { args, .. } => {
+                    for arg in args {
+                        collect_column_refs(arg, tables, columns);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        fn apply_boolean_filter_expr(
+            engine: &DaxEngine,
+            model: &DataModel,
+            expr: &Expr,
+            eval_filter: &FilterContext,
+            row_ctx: &RowContext,
+            clear_columns: &mut HashSet<(String, String)>,
+            row_filters: &mut Vec<(String, HashSet<usize>)>,
+        ) -> DaxResult<()> {
+            let mut referenced_tables: HashSet<String> = HashSet::new();
+            let mut referenced_columns: HashSet<(String, String)> = HashSet::new();
+            collect_column_refs(expr, &mut referenced_tables, &mut referenced_columns);
+
+            let table = if referenced_tables.len() == 1 {
+                referenced_tables
+                    .into_iter()
+                    .next()
+                    .expect("len==1")
+            } else {
+                let mut tables: Vec<String> = referenced_tables.into_iter().collect();
+                tables.sort();
+                return Err(DaxError::Eval(format!(
+                    "CALCULATE boolean filter expression must reference columns from exactly one table, got {}",
+                    if tables.is_empty() {
+                        "no tables".to_string()
+                    } else {
+                        format!("tables: {}", tables.join(", "))
+                    }
+                )));
+            };
+
+            // Boolean filter arguments have replacement semantics for the columns they reference.
+            // Evaluate the predicate over candidate rows with existing filters on those columns
+            // removed.
+            let mut base_filter = eval_filter.clone();
+            for key in &referenced_columns {
+                base_filter.column_filters.remove(key);
+                clear_columns.insert(key.clone());
+            }
+
+            let candidate_rows = resolve_table_rows(model, &base_filter, &table)?;
+            let mut allowed_rows = HashSet::new();
+            for row in candidate_rows {
+                let mut inner_ctx = row_ctx.clone();
+                inner_ctx.push(&table, row);
+                let pred = engine.eval_scalar(model, expr, &base_filter, &inner_ctx)?;
+                if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
+                    allowed_rows.insert(row);
+                }
+            }
+
+            row_filters.push((table, allowed_rows));
+            Ok(())
+        }
+
         for arg in filter_args {
             // `KEEPFILTERS` wraps a normal filter argument, but changes its semantics from
             // replacement (clear existing filters on the target table/column) to intersection.
@@ -1493,6 +1572,33 @@ impl DaxEngine {
                             )))
                         }
                     }
+                }
+                // Boolean filter expressions like:
+                //   Orders[Amount] > 10 && Orders[Amount] < 20
+                //   NOT(Orders[Amount] > 10)
+                // These are treated like table filters against the one referenced table.
+                Expr::BinaryOp {
+                    op: BinaryOp::And | BinaryOp::Or,
+                    ..
+                } => apply_boolean_filter_expr(
+                    self,
+                    model,
+                    arg,
+                    &eval_filter,
+                    row_ctx,
+                    &mut clear_columns,
+                    &mut row_filters,
+                )?,
+                Expr::Call { name, .. } if name.eq_ignore_ascii_case("NOT") => {
+                    apply_boolean_filter_expr(
+                        self,
+                        model,
+                        arg,
+                        &eval_filter,
+                        row_ctx,
+                        &mut clear_columns,
+                        &mut row_filters,
+                    )?
                 }
                 Expr::BinaryOp { op, left, right } => {
                     let Expr::ColumnRef { table, column } = left.as_ref() else {

@@ -674,6 +674,60 @@ fn calculate_supports_column_comparisons() {
 }
 
 #[test]
+fn calculate_supports_compound_boolean_and_filters() {
+    let mut model = build_model();
+    model
+        .add_measure(
+            "Medium Sales",
+            "CALCULATE(SUM(Orders[Amount]), Orders[Amount] > 7 && Orders[Amount] < 20)",
+        )
+        .unwrap();
+
+    let value = model
+        .evaluate_measure("Medium Sales", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(value, 18.0.into());
+}
+
+#[test]
+fn calculate_supports_compound_boolean_or_filters() {
+    let mut model = build_model();
+    model
+        .add_measure(
+            "Selected Sales",
+            "CALCULATE(SUM(Orders[Amount]), Orders[Amount] = 10 || Orders[Amount] = 20)",
+        )
+        .unwrap();
+
+    let value = model
+        .evaluate_measure("Selected Sales", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(value, 30.0.into());
+}
+
+#[test]
+fn calculate_boolean_filter_expressions_must_reference_one_table() {
+    let model = build_model();
+    let err = DaxEngine::new()
+        .evaluate(
+            &model,
+            "CALCULATE(SUM(Orders[Amount]), Orders[Amount] > 7 && Customers[Region] = \"East\")",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap_err();
+
+    match err {
+        DaxError::Eval(msg) => {
+            assert!(msg.contains("exactly one table"));
+            assert!(msg.contains("Orders"));
+            assert!(msg.contains("Customers"));
+        }
+        other => panic!("expected DaxError::Eval, got {other:?}"),
+    }
+}
+
+#[test]
 fn if_works_in_calculated_columns() {
     let mut model = build_model();
     model
