@@ -21,6 +21,7 @@ import {
   type DlpOptions,
   type RetrievedSheetChunk,
   type RetrievedWorkbookChunk,
+  type WorkbookIndexStats,
   type SheetNameResolverLike,
   type SpreadsheetApiLike,
   type WorkbookRagVectorStore,
@@ -39,6 +40,10 @@ type _RetrievedShape = Assert<BuildContextResult["retrieved"][number] extends Re
 type _WorkbookRetrievedNotAny = Assert<IsAny<BuildWorkbookContextResult["retrieved"][number]> extends false ? true : false>;
 type _WorkbookRetrievedShape = Assert<
   BuildWorkbookContextResult["retrieved"][number] extends RetrievedWorkbookChunk ? true : false
+>;
+type _WorkbookIndexStatsNotAny = Assert<IsAny<BuildWorkbookContextResult["indexStats"]> extends false ? true : false>;
+type _WorkbookIndexStatsShape = Assert<
+  BuildWorkbookContextResult["indexStats"] extends WorkbookIndexStats | null ? true : false
 >;
 
 type _ContextSheetNotAny = Assert<IsAny<ContextSheet> extends false ? true : false>;

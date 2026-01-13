@@ -142,9 +142,16 @@ export interface BuildContextResult {
 }
 
 export interface BuildWorkbookContextResult {
-  indexStats: unknown | null;
+  indexStats: WorkbookIndexStats | null;
   retrieved: RetrievedWorkbookChunk[];
   promptContext: string;
+}
+
+export interface WorkbookIndexStats {
+  totalChunks: number;
+  upserted: number;
+  skipped: number;
+  deleted: number;
 }
 
 /**
