@@ -316,7 +316,7 @@ fn merge_cells_child_sort_key(node: &XmlNode) -> (u8, String, String) {
             attr_value(el, "ref").unwrap_or_default().to_string(),
             String::new(),
         ),
-        XmlNode::Element(el) => (1, el.name.local.clone(), String::new()),
+        XmlNode::Element(_el) => (1, String::new(), String::new()),
         XmlNode::Text(_) => (2, String::new(), String::new()),
     }
 }
@@ -330,7 +330,7 @@ fn hyperlinks_child_sort_key(node: &XmlNode) -> (u8, String, String) {
                 .to_string();
             (0, key, String::new())
         }
-        XmlNode::Element(el) => (1, el.name.local.clone(), String::new()),
+        XmlNode::Element(_el) => (1, String::new(), String::new()),
         XmlNode::Text(_) => (2, String::new(), String::new()),
     }
 }
@@ -343,7 +343,7 @@ fn data_validations_child_sort_key(node: &XmlNode) -> (u8, String, String, Strin
             attr_value(el, "type").unwrap_or_default().to_string(),
             String::new(),
         ),
-        XmlNode::Element(el) => (1, el.name.local.clone(), String::new(), String::new()),
+        XmlNode::Element(_el) => (1, String::new(), String::new(), String::new()),
         XmlNode::Text(_) => (2, String::new(), String::new(), String::new()),
     }
 }
@@ -357,7 +357,7 @@ fn conditional_formatting_child_sort_key(node: &XmlNode) -> (u8, u32, String, St
             let ty = attr_value(el, "type").unwrap_or_default().to_string();
             (0, priority, ty, String::new())
         }
-        XmlNode::Element(el) => (1, u32::MAX, String::new(), el.name.local.clone()),
+        XmlNode::Element(_el) => (1, u32::MAX, String::new(), String::new()),
         XmlNode::Text(_) => (2, u32::MAX, String::new(), String::new()),
     }
 }
