@@ -76,4 +76,26 @@ describe("a11y helpers", () => {
 
     expect(describeCell({ row: 1, col: 1 }, null, provider, 1, 1)).toBe("Active cell A1, value [Image]. Selection none.");
   });
+
+  it("includes image alt text in the active-cell label when the cell value is blank", () => {
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 1 && col === 1
+          ? { row, col, value: null, image: { imageId: "img1", altText: "Logo" } }
+          : { row, col, value: null }
+    };
+
+    expect(describeActiveCellLabel({ row: 1, col: 1 }, provider, 1, 1)).toBe("Cell A1, value Logo.");
+  });
+
+  it("falls back to [Image] in the active-cell label when the cell value is blank and no alt text is present", () => {
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 1 && col === 1
+          ? { row, col, value: null, image: { imageId: "img1" } }
+          : { row, col, value: null }
+    };
+
+    expect(describeActiveCellLabel({ row: 1, col: 1 }, provider, 1, 1)).toBe("Cell A1, value [Image].");
+  });
 });
