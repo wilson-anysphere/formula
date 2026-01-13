@@ -31,7 +31,9 @@ describe("registerNumberFormatCommands", () => {
 
     await commandRegistry.executeCommand("format.numberFormat.general");
     await commandRegistry.executeCommand("format.numberFormat.number");
+    await commandRegistry.executeCommand("format.numberFormat.currency");
     await commandRegistry.executeCommand("format.numberFormat.time");
+    await commandRegistry.executeCommand("format.numberFormat.increaseDecimal");
 
     expect(doc.setRangeFormat).toHaveBeenCalledWith(
       sheetId,
@@ -48,9 +50,20 @@ describe("registerNumberFormatCommands", () => {
     expect(doc.setRangeFormat).toHaveBeenCalledWith(
       sheetId,
       ranges[0],
+      { numberFormat: "$#,##0.00" },
+      { label: "Number format" },
+    );
+    expect(doc.setRangeFormat).toHaveBeenCalledWith(
+      sheetId,
+      ranges[0],
       { numberFormat: "h:mm:ss" },
+      { label: "Number format" },
+    );
+    expect(doc.setRangeFormat).toHaveBeenCalledWith(
+      sheetId,
+      ranges[0],
+      { numberFormat: "0.000" },
       { label: "Number format" },
     );
   });
 });
-
