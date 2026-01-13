@@ -44,12 +44,28 @@ jobs:
         run: node scripts/check-desktop-version.mjs "${{ github.ref_name }}"
 
   build:
-    name: Build (${{ matrix.platform }})
+    name: Build (${{ matrix.label }})
     needs: validate-version
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, ubuntu-24.04, windows-latest]
+        include:
+          - platform: macos-latest
+            label: macos-latest
+            rust_target: ""
+            tauri_args: ""
+          - platform: ubuntu-24.04
+            label: ubuntu-24.04
+            rust_target: ""
+            tauri_args: "--bundles appimage,deb,rpm"
+          - platform: windows-latest
+            label: windows-latest (x64)
+            rust_target: ""
+            tauri_args: ""
+          - platform: windows-latest
+            label: windows-latest (arm64)
+            rust_target: aarch64-pc-windows-msvc
+            tauri_args: "--target aarch64-pc-windows-msvc"
 
     runs-on: ${{ matrix.platform }}
 
@@ -82,6 +98,9 @@ jobs:
       - name: Install macOS Rust targets (universal build)
         if: matrix.platform == 'macos-latest'
         run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+      - name: Install Rust target (${{ matrix.rust_target }})
+        if: matrix.rust_target != ''
+        run: rustup target add ${{ matrix.rust_target }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -186,6 +205,7 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         with:
           projectPath: apps/desktop
+          args: ${{ matrix.tauri_args }}
           tagName: ${{ github.ref_name }}
           releaseName: Formula ${{ github.ref_name }}
           releaseBody: |
@@ -193,11 +213,6 @@ jobs:
             See the assets below for the installers/bundles.
           releaseDraft: true
           prerelease: false
-          # Explicitly build all required Linux artifact types. We keep `bundle.targets: "all"`
-          # in `tauri.conf.json`, but some formats can be skipped if system tooling is missing.
-          # This forces the bundler to attempt each required output so the post-build check can
-          # catch regressions early.
-          args: ${{ matrix.platform == 'ubuntu-24.04' && '--bundles appimage,deb,rpm' || '' }}
 
       - name: Verify Linux release artifacts (AppImage + deb + rpm + signatures)
         if: matrix.platform == 'ubuntu-24.04'
@@ -484,6 +499,90 @@ jobs:
           fi
 
           echo "macOS notarization/stapling validation passed."
+
+      - name: Verify Windows ARM64 binary (formula-desktop.exe is AA64)
+        if: matrix.rust_target == 'aarch64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $exeCandidates = @(
+            (Join-Path $env:GITHUB_WORKSPACE 'apps/desktop/src-tauri/target/aarch64-pc-windows-msvc/release/formula-desktop.exe'),
+            (Join-Path $env:GITHUB_WORKSPACE 'target/aarch64-pc-windows-msvc/release/formula-desktop.exe')
+          )
+          $exe = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (!$exe) {
+            Write-Error "Expected ARM64 executable not found. Looked in:`n$($exeCandidates -join [Environment]::NewLine)`nDid the build run with --target aarch64-pc-windows-msvc?"
+            exit 1
+          }
+
+          # Locate dumpbin from the installed Visual Studio toolchain.
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          if (!(Test-Path $vswhere)) {
+            Write-Error "vswhere.exe not found at: $vswhere"
+            exit 1
+          }
+
+          $vsInstall = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+          if (!$vsInstall) {
+            Write-Error 'Unable to locate a Visual Studio installation via vswhere.'
+            exit 1
+          }
+
+          $msvcRoot = Join-Path $vsInstall 'VC/Tools/MSVC'
+          if (!(Test-Path $msvcRoot)) {
+            Write-Error "MSVC tools dir not found at: $msvcRoot"
+            exit 1
+          }
+
+          $dumpbin = Get-ChildItem -Path $msvcRoot -Filter dumpbin.exe -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\bin\\Hostx64\\x64\\dumpbin\.exe$' } |
+            Sort-Object -Property FullName -Descending |
+            Select-Object -First 1
+
+          if (!$dumpbin) {
+            Write-Error "dumpbin.exe not found under: $msvcRoot"
+            exit 1
+          }
+
+          $headers = & $dumpbin.FullName /headers $exe
+          $headersText = ($headers | Out-String)
+          Write-Host $headersText
+
+          if ($headersText -notmatch 'AA64') {
+            Write-Error "Expected ARM64 machine type 'AA64' in dumpbin output, but it was not found."
+            exit 1
+          }
+
+          if ($headersText -match '8664') {
+            Write-Error "Binary appears to be x64 (machine type '8664'), expected ARM64 (AA64)."
+            exit 1
+          }
+
+      - name: Verify Windows ARM64 updater signatures exist
+        if: matrix.rust_target == 'aarch64-pc-windows-msvc' && secrets.TAURI_PRIVATE_KEY != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $bundleCandidates = @(
+            (Join-Path $env:GITHUB_WORKSPACE 'apps/desktop/src-tauri/target/aarch64-pc-windows-msvc/release/bundle'),
+            (Join-Path $env:GITHUB_WORKSPACE 'target/aarch64-pc-windows-msvc/release/bundle')
+          )
+          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (!$bundleDir) {
+            Write-Error "Bundle output dir not found. Looked in:`n$($bundleCandidates -join [Environment]::NewLine)"
+            exit 1
+          }
+
+          $sigs = Get-ChildItem -Path $bundleDir -Recurse -File -Filter '*.sig'
+          if ($sigs.Count -lt 1) {
+            Write-Error "No updater signature files (*.sig) found under: $bundleDir"
+            exit 1
+          }
+
+          Write-Host "Found updater signatures:"
+          $sigs | ForEach-Object { Write-Host "- $($_.FullName)" }
 
       - name: Validate desktop release artifacts
         run: node scripts/ci/check-desktop-release-artifacts.mjs
