@@ -421,3 +421,43 @@ fn conditional_formatting_rules_sort_by_priority_then_type() {
     let diffs = diff_xml(&ax, &bx, Severity::Critical);
     assert!(diffs.is_empty(), "expected no diffs, got {diffs:#?}");
 }
+
+#[test]
+fn unicode_text_truncation_is_utf8_safe() {
+    // Regression test: `truncate` used to slice `&value[..MAX]` where MAX is a byte
+    // offset, which panics if MAX falls in the middle of a multi-byte UTF-8
+    // character.
+    //
+    // Craft a string where the 120th byte is in the middle of `é` (2 bytes):
+    // - 119 ASCII bytes ("a" * 119)
+    // - followed by "é" (bytes 119..121)
+    // so a naive `[..120]` slice would be invalid UTF-8.
+    let prefix = format!("{}é", "a".repeat(119));
+    let common_tail = "b".repeat(50);
+    let expected_text = format!("{prefix}{common_tail}expected");
+    let actual_text = format!("{prefix}{common_tail}actual");
+
+    let expected_xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><root>{expected_text}</root>"#
+    );
+    let actual_xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><root>{actual_text}</root>"#
+    );
+
+    let ax = NormalizedXml::parse("root.xml", expected_xml.as_bytes()).unwrap();
+    let bx = NormalizedXml::parse("root.xml", actual_xml.as_bytes()).unwrap();
+
+    let diffs = diff_xml(&ax, &bx, Severity::Critical);
+    assert_eq!(diffs.len(), 1, "expected a single diff, got {diffs:#?}");
+
+    let expected = diffs[0].expected.as_deref().unwrap_or_default();
+    let actual = diffs[0].actual.as_deref().unwrap_or_default();
+    assert!(
+        expected.ends_with('…'),
+        "expected truncated string to end with ellipsis, got {expected:?}"
+    );
+    assert!(
+        actual.ends_with('…'),
+        "expected truncated string to end with ellipsis, got {actual:?}"
+    );
+}

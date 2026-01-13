@@ -770,9 +770,21 @@ fn node_summary(node: &XmlNode) -> String {
 
 fn truncate(value: &str) -> String {
     const MAX: usize = 120;
-    if value.len() > MAX {
-        format!("{}…", &value[..MAX])
-    } else {
-        value.to_string()
+    if value.len() <= MAX {
+        return value.to_string();
     }
+
+    // `str` indices are in bytes; slicing at an arbitrary byte offset can panic if the
+    // cut falls in the middle of a multi-byte UTF-8 sequence. Excel XML frequently
+    // contains non-ASCII text (shared strings, sheet names, comments, etc.), so we
+    // must truncate on a valid UTF-8 boundary.
+    let mut end = 0usize;
+    for (idx, _) in value.char_indices() {
+        if idx > MAX {
+            break;
+        }
+        end = idx;
+    }
+
+    format!("{}…", &value[..end])
 }
