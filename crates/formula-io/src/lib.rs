@@ -3,21 +3,24 @@ use std::path::{Path, PathBuf};
 
 use encoding_rs::{UTF_16BE, UTF_16LE, WINDOWS_1252};
 use formula_fs::{atomic_write, AtomicWriteError};
-use formula_model::import::{
-    import_csv_into_workbook, CsvImportError, CsvOptions,
-};
+use formula_model::import::{import_csv_into_workbook, CsvImportError, CsvOptions};
 use formula_model::sanitize_sheet_name;
-use std::io::{Read, Seek};
 pub use formula_xls as xls;
 pub use formula_xlsb as xlsb;
 pub use formula_xlsx as xlsx;
+use std::io::{Read, Seek};
 
-pub mod offcrypto;
 mod encryption_info;
+pub mod offcrypto;
 pub use encryption_info::{extract_agile_encryption_info_xml, EncryptionInfoXmlError};
 mod rc4_cryptoapi;
 pub use rc4_cryptoapi::{Rc4CryptoApiDecryptReader, Rc4CryptoApiEncryptedPackageError};
 mod ms_offcrypto;
+
+#[cfg(feature = "encrypted-workbooks")]
+mod encrypted_ooxml;
+#[cfg(any(test, feature = "encrypted-workbooks"))]
+mod encrypted_package_reader;
 
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 const PARQUET_MAGIC: [u8; 4] = *b"PAR1";
@@ -409,7 +412,10 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
             // Some arbitrary OLE containers can contain a stream named `Workbook`/`Book`. Only
             // treat the file as a legacy Excel workbook when that stream actually looks like a
             // BIFF workbook stream (starts with a BOF record).
-            if matches!(ole_workbook_stream_starts_with_biff_bof(&mut ole), Some(false)) {
+            if matches!(
+                ole_workbook_stream_starts_with_biff_bof(&mut ole),
+                Some(false)
+            ) {
                 return Ok(WorkbookFormat::Unknown);
             }
 
@@ -723,7 +729,10 @@ fn workbook_format_impl(path: &Path, allow_encrypted_xls: bool) -> Result<Workbo
             // Some arbitrary OLE containers can contain a stream named `Workbook`/`Book`. Only
             // treat the file as a legacy Excel workbook when that stream actually looks like a
             // BIFF workbook stream (starts with a BOF record).
-            if matches!(ole_workbook_stream_starts_with_biff_bof(&mut ole), Some(false)) {
+            if matches!(
+                ole_workbook_stream_starts_with_biff_bof(&mut ole),
+                Some(false)
+            ) {
                 if let Some(fmt) = ext_format {
                     return Ok(fmt);
                 }
@@ -918,16 +927,11 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
                 .unwrap_or_else(|| sanitize_sheet_name(stem));
 
             let mut workbook = formula_model::Workbook::new();
-            import_csv_into_workbook(
-                &mut workbook,
-                sheet_name,
-                reader,
-                CsvOptions::default(),
-            )
-            .map_err(|source| Error::OpenCsv {
-                path: path.to_path_buf(),
-                source,
-            })?;
+            import_csv_into_workbook(&mut workbook, sheet_name, reader, CsvOptions::default())
+                .map_err(|source| Error::OpenCsv {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
 
             Ok(workbook)
         }
@@ -1214,6 +1218,204 @@ pub fn open_workbook_with_password(
             path: path.to_path_buf(),
             extension: ext.to_string(),
         }),
+    }
+}
+
+/// Additional options for opening workbooks (e.g. password for encrypted workbooks).
+#[cfg(feature = "encrypted-workbooks")]
+#[derive(Debug, Clone, Default)]
+pub struct OpenOptions {
+    /// Password for Office-encrypted workbooks (OOXML `EncryptedPackage` wrapper).
+    pub password: Option<String>,
+}
+
+/// Open a spreadsheet workbook from disk, with additional options (e.g. password).
+///
+/// This is the main entrypoint for password-based decryption when the `encrypted-workbooks` feature
+/// is enabled.
+#[cfg(feature = "encrypted-workbooks")]
+pub fn open_workbook_with_options(
+    path: impl AsRef<Path>,
+    options: OpenOptions,
+) -> Result<Workbook, Error> {
+    use std::io::Read as _;
+
+    let path = path.as_ref();
+
+    // Fast path: if the file is not an OLE container, it cannot be an `EncryptedPackage` wrapper.
+    let mut file = std::fs::File::open(path).map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut header = [0u8; 8];
+    let n = file.read(&mut header).map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if n >= OLE_MAGIC.len() && header[..OLE_MAGIC.len()] == OLE_MAGIC {
+        file.rewind().map_err(|source| Error::OpenIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let mut ole = cfb::CompoundFile::open(file).map_err(|source| Error::OpenIo {
+            path: path.to_path_buf(),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
+        })?;
+
+        if stream_exists(&mut ole, "EncryptionInfo") && stream_exists(&mut ole, "EncryptedPackage")
+        {
+            let password = options
+                .password
+                .as_deref()
+                .ok_or_else(|| Error::PasswordRequired {
+                    path: path.to_path_buf(),
+                })?;
+
+            let mut enc_info_stream = open_stream_case_tolerant(&mut ole, "EncryptionInfo")
+                .map_err(|source| Error::OpenIo {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+            let mut encryption_info = Vec::new();
+            enc_info_stream
+                .read_to_end(&mut encryption_info)
+                .map_err(|source| Error::OpenIo {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+
+            let mut pkg_stream =
+                open_stream_case_tolerant(&mut ole, "EncryptedPackage").map_err(|source| {
+                    Error::OpenIo {
+                        path: path.to_path_buf(),
+                        source,
+                    }
+                })?;
+            let mut len_bytes = [0u8; 8];
+            pkg_stream
+                .read_exact(&mut len_bytes)
+                .map_err(|source| Error::OpenIo {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+            let plaintext_len = u64::from_le_bytes(len_bytes);
+
+            // Wrap the stream so ciphertext offset 0 corresponds to the first encrypted byte after
+            // the 8-byte plaintext length prefix.
+            let offset_stream =
+                OffsetSeekReader::new(pkg_stream, 8).map_err(|source| Error::OpenIo {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+
+            let decrypted = encrypted_ooxml::decrypted_package_reader(
+                offset_stream,
+                plaintext_len,
+                &encryption_info,
+                password,
+            )
+            .map_err(|err| match err {
+                encrypted_ooxml::DecryptError::InvalidPassword => Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                },
+                encrypted_ooxml::DecryptError::UnsupportedVersion { major, minor } => {
+                    Error::UnsupportedOoxmlEncryption {
+                        path: path.to_path_buf(),
+                        version_major: major,
+                        version_minor: minor,
+                    }
+                }
+                encrypted_ooxml::DecryptError::Io(source) => Error::OpenIo {
+                    path: path.to_path_buf(),
+                    source,
+                },
+                encrypted_ooxml::DecryptError::InvalidInfo(_) => Error::EncryptedWorkbook {
+                    path: path.to_path_buf(),
+                },
+            })?;
+
+            let model =
+                xlsx::read_workbook_from_reader(decrypted).map_err(|source| Error::OpenXlsx {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+            return Ok(Workbook::Model(model));
+        }
+    }
+
+    // Non-encrypted path: delegate to the standard open logic.
+    open_workbook(path)
+}
+
+#[cfg(feature = "encrypted-workbooks")]
+fn open_stream_case_tolerant<R: std::io::Read + std::io::Write + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+    name: &str,
+) -> std::io::Result<cfb::Stream<R>> {
+    ole.open_stream(name).or_else(|_| {
+        let with_leading_slash = format!("/{name}");
+        ole.open_stream(&with_leading_slash)
+    })
+}
+
+/// A `Read + Seek` wrapper that presents an underlying stream starting at a fixed byte offset.
+///
+/// This is used for OLE `EncryptedPackage` streams where the first 8 bytes are a plaintext length
+/// header and the ciphertext begins immediately after.
+#[cfg(feature = "encrypted-workbooks")]
+struct OffsetSeekReader<R> {
+    inner: R,
+    base: u64,
+}
+
+#[cfg(feature = "encrypted-workbooks")]
+impl<R> OffsetSeekReader<R> {
+    fn new(mut inner: R, base: u64) -> Result<Self, std::io::Error>
+    where
+        R: Seek,
+    {
+        inner.seek(std::io::SeekFrom::Start(base))?;
+        Ok(Self { inner, base })
+    }
+}
+
+#[cfg(feature = "encrypted-workbooks")]
+impl<R: Read> Read for OffsetSeekReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+#[cfg(feature = "encrypted-workbooks")]
+impl<R: Seek> Seek for OffsetSeekReader<R> {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        let abs: i128 = match pos {
+            std::io::SeekFrom::Start(n) => self.base.checked_add(n).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "encrypted package seek overflow",
+                )
+            })? as i128,
+            std::io::SeekFrom::End(off) => {
+                let end = self.inner.seek(std::io::SeekFrom::End(0))?;
+                end as i128 + off as i128
+            }
+            std::io::SeekFrom::Current(off) => {
+                let cur = self.inner.seek(std::io::SeekFrom::Current(0))?;
+                cur as i128 + off as i128
+            }
+        };
+        if abs < self.base as i128 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid seek before ciphertext start",
+            ));
+        }
+        let abs_u64 = u64::try_from(abs).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid seek position")
+        })?;
+        let new = self.inner.seek(std::io::SeekFrom::Start(abs_u64))?;
+        Ok(new - self.base)
     }
 }
 
@@ -1782,16 +1984,11 @@ pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
                 .unwrap_or_else(|| sanitize_sheet_name(stem));
 
             let mut workbook = formula_model::Workbook::new();
-            import_csv_into_workbook(
-                &mut workbook,
-                sheet_name,
-                reader,
-                CsvOptions::default(),
-            )
-            .map_err(|source| Error::OpenCsv {
-                path: path.to_path_buf(),
-                source,
-            })?;
+            import_csv_into_workbook(&mut workbook, sheet_name, reader, CsvOptions::default())
+                .map_err(|source| Error::OpenCsv {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
 
             Ok(Workbook::Model(workbook))
         }
@@ -1912,8 +2109,8 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
         },
         Workbook::Xls(result) => match ext.as_str() {
             "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind = xlsx::WorkbookKind::from_extension(&ext)
-                    .expect("handled by match arm above");
+                let kind =
+                    xlsx::WorkbookKind::from_extension(&ext).expect("handled by match arm above");
                 let res = atomic_write(path, |file| {
                     xlsx::write_workbook_to_writer_with_kind(&result.workbook, file, kind)
                 });
@@ -1950,8 +2147,8 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
                 }
             }
             "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind = xlsx::WorkbookKind::from_extension(&ext)
-                    .expect("handled by match arm above");
+                let kind =
+                    xlsx::WorkbookKind::from_extension(&ext).expect("handled by match arm above");
                 let model = xlsb_to_model_workbook(wb).map_err(|source| Error::SaveXlsbExport {
                     path: path.to_path_buf(),
                     source,
@@ -1978,8 +2175,8 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
         },
         Workbook::Model(model) => match ext.as_str() {
             "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind = xlsx::WorkbookKind::from_extension(&ext)
-                    .expect("handled by match arm above");
+                let kind =
+                    xlsx::WorkbookKind::from_extension(&ext).expect("handled by match arm above");
                 let res = atomic_write(path, |file| {
                     xlsx::write_workbook_to_writer_with_kind(model, file, kind)
                 });
