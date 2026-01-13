@@ -78,22 +78,40 @@ const tauriMajorMinor = parseMajorMinor(tauriVersion);
 const cliVersionFromEnv = process.env.TAURI_CLI_VERSION;
 const cliVersionFromArg = process.argv[2];
 
+const pinnedSource = cliVersionFromEnv ? "env" : cliVersionFromArg ? "arg" : "workflow";
+
 let pinnedCliVersion = cliVersionFromEnv || cliVersionFromArg || null;
+let releaseWorkflowPinnedCliVersion = null;
+try {
+  const workflowText = await readFile(releaseWorkflowPath, "utf8");
+  releaseWorkflowPinnedCliVersion = extractPinnedCliVersionFromWorkflow(workflowText);
+} catch {
+  // Best-effort: this script is sometimes run in ad-hoc contexts where the
+  // release workflow file isn't present. In CI we expect it to exist.
+  releaseWorkflowPinnedCliVersion = null;
+}
 if (!pinnedCliVersion) {
-  try {
-    const workflowText = await readFile(releaseWorkflowPath, "utf8");
-    pinnedCliVersion = extractPinnedCliVersionFromWorkflow(workflowText);
-  } catch (err) {
-    console.error(`Failed to read ${releaseWorkflowRelativePath}.`);
-    console.error(err);
-    process.exit(1);
-  }
+  pinnedCliVersion = releaseWorkflowPinnedCliVersion;
 }
 
 if (!pinnedCliVersion) {
   console.error(
     "Missing TAURI_CLI_VERSION. Provide it via env/CLI arg, or define it in .github/workflows/release.yml.",
   );
+  process.exit(1);
+}
+
+if (
+  pinnedSource !== "workflow" &&
+  releaseWorkflowPinnedCliVersion &&
+  releaseWorkflowPinnedCliVersion !== pinnedCliVersion
+) {
+  console.error("TAURI_CLI_VERSION mismatch detected.");
+  console.error(`- ${releaseWorkflowRelativePath}: TAURI_CLI_VERSION="${releaseWorkflowPinnedCliVersion}"`);
+  console.error(`- provided via ${pinnedSource}: TAURI_CLI_VERSION="${pinnedCliVersion}"`);
+  console.error("");
+  console.error("Fix:");
+  console.error(`- Update the caller's TAURI_CLI_VERSION to match ${releaseWorkflowRelativePath}.`);
   process.exit(1);
 }
 
