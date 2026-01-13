@@ -89,21 +89,22 @@ CI runs:
 
 ```bash
 node scripts/verify-tauri-latest-json.mjs vX.Y.Z
+node scripts/verify-tauri-updater-assets.mjs vX.Y.Z
 ```
 
-You can run it locally too (requires a GitHub token with access to the release assets):
+You can run the same checks locally (requires a GitHub token with access to the release assets):
 
 ```bash
 GITHUB_REPOSITORY=owner/repo GH_TOKEN=... \
   node scripts/verify-tauri-latest-json.mjs vX.Y.Z
-```
 
-Optional extra (stricter) local check that also validates the “human install” artifact set:
-
-```bash
 GITHUB_REPOSITORY=owner/repo GH_TOKEN=... \
   node scripts/verify-tauri-updater-assets.mjs vX.Y.Z
 ```
+
+Note: `scripts/verify-tauri-latest-json.mjs` delegates to the lower-level validator
+`scripts/ci/validate-updater-manifest.mjs`, which downloads `latest.json` / `latest.json.sig` from
+the draft release and checks targets, signatures, and referenced assets.
 
 ## Updater restart semantics (important)
 
