@@ -97,5 +97,32 @@ describe("extractWorkbookSchema", () => {
     // Each row touches 3 columns.
     expect(readCount).toBeLessThanOrEqual(30);
   });
-});
 
+  it("bounds sampling work for very wide table rects (maxAnalyzeCols)", () => {
+    let readCount = 0;
+    const sheet = {
+      name: "WideSheet",
+      getCell(row: number, col: number) {
+        readCount += 1;
+        // We should never read beyond the analyzed columns (0..2).
+        if (col > 2) throw new Error(`scanned too far: col=${col}`);
+        if (row === 0) return ["H1", "H2", "H3"][col] ?? null;
+        if (row === 1) return ["A", 1, true][col] ?? null;
+        if (row === 2) return ["B", 2, false][col] ?? null;
+        return null;
+      },
+    };
+
+    const workbook = {
+      id: "wb-wide",
+      sheets: [sheet],
+      tables: [{ name: "WideTable", sheetName: "WideSheet", rect: { r0: 0, c0: 0, r1: 2, c1: 999_999 } }],
+    };
+
+    const schema = extractWorkbookSchema(workbook, { maxAnalyzeRows: 2, maxAnalyzeCols: 3 });
+    expect(schema.tables[0].name).toBe("WideTable");
+    expect(schema.tables[0].headers).toEqual(["H1", "H2", "H3"]);
+    expect(schema.tables[0].inferredColumnTypes).toEqual(["string", "number", "boolean"]);
+    expect(readCount).toBeLessThanOrEqual(15);
+  });
+});

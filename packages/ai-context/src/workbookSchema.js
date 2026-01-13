@@ -102,15 +102,17 @@ function cellToScalar(raw) {
  * @param {any} sheet
  * @param {{ r0: number, c0: number, r1: number, c1: number }} rect
  * @param {number} row
+ * @param {number} colCount
  * @param {AbortSignal | undefined} signal
  * @returns {unknown[]}
  */
-function readRowScalars(sheet, rect, row, signal) {
+function readRowScalars(sheet, rect, row, colCount, signal) {
   throwIfAborted(signal);
   const out = [];
-  for (let c = rect.c0; c <= rect.c1; c++) {
+  const count = Math.max(0, colCount);
+  for (let offset = 0; offset < count; offset++) {
     throwIfAborted(signal);
-    out.push(cellToScalar(getCellRaw(sheet, row, c)));
+    out.push(cellToScalar(getCellRaw(sheet, row, rect.c0 + offset)));
   }
   return out;
 }
@@ -145,22 +147,26 @@ function rectToRangeA1(sheetName, rect) {
 /**
  * @param {any} sheet
  * @param {{ r0: number, c0: number, r1: number, c1: number }} rect
- * @param {{ maxAnalyzeRows: number, signal?: AbortSignal }} options
+ * @param {{ maxAnalyzeRows: number, maxAnalyzeCols: number, signal?: AbortSignal }} options
  * @returns {{ hasHeader: boolean, headers: string[], inferredColumnTypes: InferredType[], rowCount: number, columnCount: number }}
  */
 function analyzeTableRect(sheet, rect, options) {
   const signal = options.signal;
   throwIfAborted(signal);
-  const columnCount = Math.max(0, rect.c1 - rect.c0 + 1);
+  const fullColumnCount = Math.max(0, rect.c1 - rect.c0 + 1);
+  const maxAnalyzeCols = Math.max(0, options.maxAnalyzeCols);
+  const analyzedColumnCount = maxAnalyzeCols > 0 ? Math.min(fullColumnCount, maxAnalyzeCols) : fullColumnCount;
   const totalRows = Math.max(0, rect.r1 - rect.r0 + 1);
 
-  const headerRowValues = columnCount > 0 ? readRowScalars(sheet, rect, rect.r0, signal) : [];
+  const headerRowValues = analyzedColumnCount > 0 ? readRowScalars(sheet, rect, rect.r0, analyzedColumnCount, signal) : [];
   const nextRowValues =
-    totalRows > 1 && columnCount > 0 ? readRowScalars(sheet, rect, rect.r0 + 1, signal) : undefined;
+    totalRows > 1 && analyzedColumnCount > 0
+      ? readRowScalars(sheet, rect, rect.r0 + 1, analyzedColumnCount, signal)
+      : undefined;
 
   const hasHeader = isLikelyHeaderRow(headerRowValues, nextRowValues);
   const headers = [];
-  for (let c = 0; c < columnCount; c++) {
+  for (let c = 0; c < analyzedColumnCount; c++) {
     throwIfAborted(signal);
     const raw = headerRowValues[c];
     const fallback = `Column${c + 1}`;
@@ -175,10 +181,10 @@ function analyzeTableRect(sheet, rect, options) {
   const sampleEndRow = rowCount === 0 ? dataStartRow - 1 : Math.min(rect.r1, dataStartRow + maxAnalyzeRows - 1);
 
   /** @type {unknown[][]} */
-  const valuesByCol = Array.from({ length: columnCount }, () => []);
+  const valuesByCol = Array.from({ length: analyzedColumnCount }, () => []);
   for (let r = dataStartRow; r <= sampleEndRow; r++) {
     throwIfAborted(signal);
-    for (let c = 0; c < columnCount; c++) {
+    for (let c = 0; c < analyzedColumnCount; c++) {
       throwIfAborted(signal);
       valuesByCol[c].push(cellToScalar(getCellRaw(sheet, r, rect.c0 + c)));
     }
@@ -186,12 +192,12 @@ function analyzeTableRect(sheet, rect, options) {
 
   /** @type {InferredType[]} */
   const inferredColumnTypes = [];
-  for (let c = 0; c < columnCount; c++) {
+  for (let c = 0; c < analyzedColumnCount; c++) {
     throwIfAborted(signal);
     inferredColumnTypes.push(inferColumnType(valuesByCol[c], { signal }));
   }
 
-  return { hasHeader, headers, inferredColumnTypes, rowCount, columnCount };
+  return { hasHeader, headers, inferredColumnTypes, rowCount, columnCount: fullColumnCount };
 }
 
 /**
@@ -210,7 +216,7 @@ function analyzeTableRect(sheet, rect, options) {
  *   tables?: Array<{ name: string, sheetName: string, rect: any }>,
  *   namedRanges?: Array<{ name: string, sheetName: string, rect: any }>
  * }} workbook
- * @param {{ maxAnalyzeRows?: number, signal?: AbortSignal }} [options]
+ * @param {{ maxAnalyzeRows?: number, maxAnalyzeCols?: number, signal?: AbortSignal }} [options]
  * @returns {{
  *   id: string,
  *   sheets: Array<{ name: string }>,
@@ -236,6 +242,11 @@ export function extractWorkbookSchema(workbook, options = {}) {
     typeof maxAnalyzeRowsRaw === "number" && Number.isFinite(maxAnalyzeRowsRaw) && maxAnalyzeRowsRaw > 0
       ? Math.floor(maxAnalyzeRowsRaw)
       : 50;
+  const maxAnalyzeColsRaw = options.maxAnalyzeCols;
+  const maxAnalyzeCols =
+    typeof maxAnalyzeColsRaw === "number" && Number.isFinite(maxAnalyzeColsRaw) && maxAnalyzeColsRaw > 0
+      ? Math.floor(maxAnalyzeColsRaw)
+      : 50;
 
   /** @type {Array<{ name: string, sheet: any }>} */
   const sheetEntries = [];
@@ -260,7 +271,7 @@ export function extractWorkbookSchema(workbook, options = {}) {
     if (!name || !sheetName || !rect) continue;
     const sheet = sheetByName.get(sheetName);
     if (!sheet) continue;
-    const analysis = analyzeTableRect(sheet, rect, { maxAnalyzeRows, signal });
+    const analysis = analyzeTableRect(sheet, rect, { maxAnalyzeRows, maxAnalyzeCols, signal });
     tables.push({
       name,
       sheetName,

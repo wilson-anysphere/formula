@@ -49,6 +49,5 @@ export function extractWorkbookSchema(
     tables?: Array<{ name: string; sheetName: string; rect: WorkbookSchemaRect }>;
     namedRanges?: Array<{ name: string; sheetName: string; rect: WorkbookSchemaRect }>;
   },
-  options?: { maxAnalyzeRows?: number; signal?: AbortSignal },
+  options?: { maxAnalyzeRows?: number; maxAnalyzeCols?: number; signal?: AbortSignal },
 ): WorkbookSchemaSummary;
-
