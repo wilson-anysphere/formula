@@ -8414,7 +8414,7 @@ function handleRibbonCommand(commandId: string): void {
           return;
         }
 
-        applyFormatAsTable(picked.value);
+        applyFormatAsTable(picked);
       })();
       return;
     }
