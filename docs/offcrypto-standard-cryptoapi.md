@@ -207,9 +207,11 @@ Standard encryption derives keys from the password hash and a per-block 32-bit i
 Terminology used below:
 
 * `block` – a 32-bit unsigned “block key” (`u32`), encoded as `LE32(block)`.
-  * `block = 0` is used for the **password verifier** key.
-  * Some producers also derive per-segment keys for `EncryptedPackage` using `block = segmentIndex`
-    (e.g. `block = 0, 1, 2, ...` for successive segments).
+  * `block = 0` is used to derive the **file key** (and to validate the password using the verifier).
+  * For `EncryptedPackage`:
+    * **AES** uses the same derived file key (`block = 0`) for all segments and varies the **IV** by
+      `segmentIndex` (see §7.2.1).
+    * **RC4** varies the **key** by `segmentIndex` (see §7.2.2).
 
 ### 5.1) Per-block hash input (key material)
 
