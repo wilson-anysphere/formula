@@ -992,6 +992,23 @@ Quick reference (auto-update vs manual install):
 | `linux-x86_64` | `*.AppImage` | `.deb` / `.rpm` (AppImage optional) |
 | `linux-aarch64` | `*.AppImage` | `.deb` / `.rpm` (AppImage optional) |
 
+### Verify updater assets (auto-update) — quick checklist
+
+Before validating in-app auto-update behavior, confirm the updater manifest (`latest.json`) is
+wired to the correct **updater-consumed** artifacts:
+
+1. Confirm the Release contains:
+   - `latest.json`
+   - `latest.json.sig` (signature for `latest.json`)
+2. Download `latest.json` and inspect the platform URLs:
+   - `jq -r '.platforms | to_entries[] | "\(.key)\t\(.value.url)"' latest.json`
+3. Confirm each `platforms[*].url` points at the expected **updater** asset type (not a manual-only installer):
+   - macOS: `*.app.tar.gz` (or `*.tar.gz`; **not** `.dmg`)
+   - Windows: `.msi` (preferred) or `.exe`
+   - Linux: `*.AppImage` (**not** `.deb`/`.rpm`)
+4. Confirm each URL filename matches an actual Release asset (no broken/missing assets).
+5. (Optional) Verify downloaded updater assets against `SHA256SUMS.txt`.
+
 ### One-liner: release smoke test
 
 To run the repo’s release sanity checks (version check, updater config validation, and GitHub Release asset/manifest verification) in one command:
