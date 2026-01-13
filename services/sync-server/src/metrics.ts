@@ -265,6 +265,22 @@ function createFallbackMetrics(): SyncServerMetrics {
   wsReservedRootQuotaViolationsTotal.inc({ kind: "branching_commits" }, 0);
   wsReservedRootQuotaViolationsTotal.inc({ kind: "versions" }, 0);
 
+  const wsReservedRootMutationsTotal = createCounter({
+    name: "sync_server_ws_reserved_root_mutations_total",
+    help: "Total WebSocket connections closed due to reserved-root mutation guard rejections.",
+  });
+
+  const wsReservedRootInspectionFailClosedTotal = createCounter<"reason">({
+    name: "sync_server_ws_reserved_root_inspection_fail_closed_total",
+    help:
+      "Total reserved-root update inspections that failed closed (the server could not confidently inspect the update).",
+    labelNames: ["reason"],
+  });
+  wsReservedRootInspectionFailClosedTotal.inc({ reason: "decode_failed" }, 0);
+  wsReservedRootInspectionFailClosedTotal.inc({ reason: "ydoc_store_pending" }, 0);
+  wsReservedRootInspectionFailClosedTotal.inc({ reason: "gc" }, 0);
+  wsReservedRootInspectionFailClosedTotal.inc({ reason: "unknown" }, 0);
+
   const retentionSweepsTotal = createCounter<"sweep">({
     name: "sync_server_retention_sweeps_total",
     help: "Total retention sweeps executed.",
@@ -342,6 +358,8 @@ function createFallbackMetrics(): SyncServerMetrics {
     wsAwarenessSpoofAttemptsTotal,
     wsAwarenessClientIdCollisionsTotal,
     wsReservedRootQuotaViolationsTotal,
+    wsReservedRootMutationsTotal,
+    wsReservedRootInspectionFailClosedTotal,
     retentionSweepsTotal,
     retentionDocsPurgedTotal,
     retentionSweepErrorsTotal,
@@ -382,6 +400,8 @@ export type SyncServerMetrics = {
   wsAwarenessSpoofAttemptsTotal: Counter<string>;
   wsAwarenessClientIdCollisionsTotal: Counter<string>;
   wsReservedRootQuotaViolationsTotal: Counter<"kind">;
+  wsReservedRootMutationsTotal: Counter<string>;
+  wsReservedRootInspectionFailClosedTotal: Counter<"reason">;
 
   retentionSweepsTotal: Counter<"sweep">;
   retentionDocsPurgedTotal: Counter<"sweep">;
@@ -484,6 +504,24 @@ export function createSyncServerMetrics(): SyncServerMetrics {
   wsReservedRootQuotaViolationsTotal.inc({ kind: "branching_commits" }, 0);
   wsReservedRootQuotaViolationsTotal.inc({ kind: "versions" }, 0);
 
+  const wsReservedRootMutationsTotal = new promClient.Counter({
+    name: "sync_server_ws_reserved_root_mutations_total",
+    help: "Total WebSocket connections closed due to reserved-root mutation guard rejections.",
+    registers: [registry],
+  });
+
+  const wsReservedRootInspectionFailClosedTotal = new promClient.Counter({
+    name: "sync_server_ws_reserved_root_inspection_fail_closed_total",
+    help:
+      "Total reserved-root update inspections that failed closed (the server could not confidently inspect the update).",
+    labelNames: ["reason"],
+    registers: [registry],
+  });
+  wsReservedRootInspectionFailClosedTotal.inc({ reason: "decode_failed" }, 0);
+  wsReservedRootInspectionFailClosedTotal.inc({ reason: "ydoc_store_pending" }, 0);
+  wsReservedRootInspectionFailClosedTotal.inc({ reason: "gc" }, 0);
+  wsReservedRootInspectionFailClosedTotal.inc({ reason: "unknown" }, 0);
+
   const retentionSweepsTotal = new promClient.Counter({
     name: "sync_server_retention_sweeps_total",
     help: "Total retention sweeps executed.",
@@ -572,6 +610,8 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     wsAwarenessSpoofAttemptsTotal,
     wsAwarenessClientIdCollisionsTotal,
     wsReservedRootQuotaViolationsTotal,
+    wsReservedRootMutationsTotal,
+    wsReservedRootInspectionFailClosedTotal,
     retentionSweepsTotal,
     retentionDocsPurgedTotal,
     retentionSweepErrorsTotal,

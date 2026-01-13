@@ -6,7 +6,11 @@ import { getCellPermissions } from "../../../packages/collab/permissions/index.j
 import type { AuthContext } from "./auth.js";
 import type { SyncServerMetrics } from "./metrics.js";
 import { Y } from "./yjs.js";
-import { collectTouchedRootMapKeys, inspectUpdate } from "./yjsUpdateInspection.js";
+import {
+  collectTouchedRootMapKeys,
+  inspectUpdate,
+  type ReservedRootTouchKind,
+} from "./yjsUpdateInspection.js";
 
 type MessageListener = (data: WebSocket.RawData, isBinary: boolean) => void;
 
@@ -170,6 +174,7 @@ type CellAddress = { sheetId: string; row: number; col: number };
 type ReservedRootTouchSummary = {
   root: string;
   keyPath: string[];
+  kind: ReservedRootTouchKind;
   unknownReason?: string;
 };
 
@@ -463,6 +468,8 @@ export function installYwsSecurity(
     metrics?: Pick<
       SyncServerMetrics,
       | "wsReservedRootQuotaViolationsTotal"
+      | "wsReservedRootMutationsTotal"
+      | "wsReservedRootInspectionFailClosedTotal"
       | "wsAwarenessSpoofAttemptsTotal"
       | "wsAwarenessClientIdCollisionsTotal"
     >;
@@ -523,6 +530,26 @@ export function installYwsSecurity(
   const logReservedRootOnce = (summary: ReservedRootTouchSummary): void => {
     if (!reservedRootGuardEnabled || loggedReservedRootViolation) return;
     loggedReservedRootViolation = true;
+    try {
+      metrics?.wsReservedRootMutationsTotal.inc();
+    } catch {
+      // ignore
+    }
+    if (summary.unknownReason) {
+      const reason: "decode_failed" | "ydoc_store_pending" | "gc" | "unknown" =
+        summary.unknownReason === "decode_failed"
+          ? "decode_failed"
+          : summary.unknownReason === "ydoc_store_pending"
+            ? "ydoc_store_pending"
+            : summary.kind === "gc"
+              ? "gc"
+              : "unknown";
+      try {
+        metrics?.wsReservedRootInspectionFailClosedTotal.inc({ reason });
+      } catch {
+        // ignore
+      }
+    }
     const keyPath = summary.keyPath
       .slice(0, 8)
       .map((segment) => truncateForLog(segment, 256));
@@ -705,6 +732,7 @@ export function installYwsSecurity(
           logReservedRootOnce({
             root: firstTouch?.root ?? "<unknown>",
             keyPath: firstTouch?.keyPath ?? [],
+            kind: firstTouch?.kind ?? "unknown",
             unknownReason: inspection.unknownReason,
           });
           ws.close(1008, RESERVED_ROOT_MUTATION_CLOSE_REASON);
@@ -772,6 +800,7 @@ export function installYwsSecurity(
           logReservedRootOnce({
             root: firstTouch?.root ?? "<unknown>",
             keyPath: firstTouch?.keyPath ?? [],
+            kind: firstTouch?.kind ?? "unknown",
             unknownReason: inspection.unknownReason,
           });
           ws.close(1008, RESERVED_ROOT_MUTATION_CLOSE_REASON);
