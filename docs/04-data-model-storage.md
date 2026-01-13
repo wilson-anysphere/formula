@@ -275,6 +275,27 @@ interface Relationship {
 }
 ```
 
+#### Many-to-many relationships (`formula-dax` semantics)
+
+`formula-dax` treats `"many-to-many"` relationships as **distinct-key** relationships for filter
+propagation: when a relationship propagates a filter from one table to the other, it does so by
+taking the distinct set of visible key values on the source side and applying that set to the
+target side (conceptually similar to `TREATAS(VALUES(source[key]), target[key])`).
+
+Row-context navigation follows the relationship orientation (`fromTable` → `toTable`):
+
+- `RELATED(toTable[column])` is only defined when the current `fromTable[fromColumn]` value matches
+  **at most one** row in `toTable[toColumn]`. If there are multiple matches (a common case for
+  many-to-many), the engine treats it as an ambiguity error.
+- `RELATEDTABLE(otherTable)` returns the set of matching rows, and can naturally return multiple
+  rows for many-to-many relationships.
+
+Pivot/group-by note: the current pivot/group-by implementation does not expand a base row into
+multiple related rows when traversing a many-to-many relationship (it effectively relies on
+`RELATED`-like semantics for group keys). Grouping by columns across a many-to-many relationship is
+therefore currently unsupported/ambiguous; prefer an explicit bridge table or pre-aggregated
+mapping when pivoting.
+
 ### Referential Integrity
 
 ```typescript

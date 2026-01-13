@@ -5,6 +5,11 @@ use crate::value::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+/// Relationship cardinality between two tables.
+///
+/// `formula-dax` models relationships in the same oriented way as Tabular/Power Pivot: every
+/// relationship has a `from_*` side and a `to_*` side. That orientation is meaningful even for
+/// [`Cardinality::ManyToMany`] relationships (see [`Relationship`] for details).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cardinality {
     OneToMany,
@@ -12,22 +17,87 @@ pub enum Cardinality {
     ManyToMany,
 }
 
+/// Controls how filters propagate across a relationship.
+///
+/// In `formula-dax`, `from_table`/`to_table` are oriented such that the default propagation
+/// direction is always `to_table → from_table`:
+///
+/// - [`CrossFilterDirection::Single`]: propagate filters only from `to_table` to `from_table`.
+/// - [`CrossFilterDirection::Both`]: propagate filters in both directions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CrossFilterDirection {
     Single,
     Both,
 }
 
+/// A relationship between two tables.
+///
+/// ## Orientation (`from_*` / `to_*`)
+/// `from_table[from_column]` and `to_table[to_column]` form an *oriented* relationship.
+///
+/// - For [`Cardinality::OneToMany`], `to_*` is the lookup/"one" side (unique key) and `from_*` is
+///   the fact/"many" side (foreign key).
+/// - For [`Cardinality::OneToOne`], both sides are unique.
+/// - For [`Cardinality::ManyToMany`], neither side is required to be unique. The orientation is
+///   still meaningful: it defines the default direction for filter propagation (see
+///   [`cross_filter_direction`](Relationship::cross_filter_direction)) and which side `RELATED` /
+///   `RELATEDTABLE` navigate.
+///
+/// ## Row-context navigation (`RELATED` / `RELATEDTABLE`)
+/// `RELATED` navigates from a row on the `from_table` side to a row on the `to_table` side.
+///
+/// - For 1:* / 1:1 relationships, this is a single-row lookup.
+/// - For many-to-many relationships, the lookup can be ambiguous: if the key matches more than one
+///   row in `to_table`, `RELATED` raises an error.
+///
+/// `RELATEDTABLE` navigates from a row on the `to_table` side to the set of matching rows in
+/// `from_table` (and may return multiple rows for both 1:* and *:* relationships).
+///
+/// ## Filter propagation
+/// Relationship propagation is handled by the evaluation engine ([`crate::DaxEngine`]) by
+/// repeatedly applying relationship constraints until reaching a fixed point.
+///
+/// - With [`CrossFilterDirection::Single`], filters propagate from `to_table` to `from_table`.
+/// - With [`CrossFilterDirection::Both`], filters propagate in both directions.
+/// - For [`Cardinality::ManyToMany`], propagation is based on the **distinct set of visible key
+///   values** on the source side (conceptually similar to `TREATAS(VALUES(source[key]),
+///   target[key])`), rather than relying on a unique lookup row.
+///
+/// ## Referential integrity and the implicit blank/unknown member
+/// Tabular models treat fact-side rows whose key is BLANK (or has no match in the related table) as
+/// belonging to a virtual "(blank)" / "unknown" member on the `to_table` side.
+///
+/// When [`enforce_referential_integrity`](Relationship::enforce_referential_integrity) is `true`,
+/// `formula-dax` rejects non-BLANK values on the `from_*` side that have no match on the `to_*`
+/// side. This prevents *unmatched* keys from contributing to the virtual blank member, but BLANK
+/// values are still allowed and can still make the virtual blank member visible.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Relationship {
     pub name: String,
+    /// The "from" table in the oriented relationship.
+    ///
+    /// For 1:* relationships this is the fact/"many" side (foreign key). For many-to-many this is
+    /// still the side that is filtered by default when
+    /// [`cross_filter_direction`](Relationship::cross_filter_direction) is
+    /// [`CrossFilterDirection::Single`].
     pub from_table: String,
+    /// The column in [`from_table`](Relationship::from_table) participating in the relationship.
     pub from_column: String,
+    /// The "to" table in the oriented relationship.
+    ///
+    /// For 1:* relationships this is the lookup/"one" side (unique key). For many-to-many this is
+    /// still the default source of filter propagation and the table navigated to by `RELATED`.
     pub to_table: String,
+    /// The column in [`to_table`](Relationship::to_table) participating in the relationship.
     pub to_column: String,
     pub cardinality: Cardinality,
     pub cross_filter_direction: CrossFilterDirection,
     pub is_active: bool,
+    /// If true, ensure that every non-BLANK `from_column` value exists in `to_column`.
+    ///
+    /// When this is `false`, keys on the `from_*` side that do not exist on the `to_*` side are
+    /// treated as belonging to the implicit blank/unknown member of `to_table` during filter
+    /// propagation.
     pub enforce_referential_integrity: bool,
 }
 

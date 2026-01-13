@@ -1,3 +1,14 @@
+//! DAX evaluation engine.
+//!
+//! Relationship filtering in Tabular models is global: a filter on one table can restrict rows in
+//! another table through active relationships, and bidirectional relationships can create cycles.
+//! `formula-dax` models this by resolving a [`FilterContext`] into per-table row sets and then
+//! repeatedly propagating constraints across relationships until reaching a fixed point (see
+//! `resolve_row_sets` / `propagate_filter`).
+//!
+//! For many-to-many relationships, propagation uses the **distinct set of visible key values** on
+//! the source side (conceptually similar to `TREATAS(VALUES(source[key]), target[key])`) instead of
+//! requiring a unique lookup row.
 use crate::backend::TableBackend;
 use crate::model::{
     Cardinality, CrossFilterDirection, DataModel, RelationshipInfo, RelationshipPathDirection,
@@ -2960,6 +2971,18 @@ pub(crate) fn resolve_table_rows(
         .collect())
 }
 
+/// Resolve the current filter context to a per-table set of allowed physical rows.
+///
+/// The algorithm is:
+/// 1. Initialize each table's row set from the explicit column/row filters in [`FilterContext`].
+/// 2. Repeatedly apply relationship constraints (`to_table → from_table`, plus the reverse
+///    direction when `cross_filter_direction == Both`) until no row set changes.
+///
+/// The fixed-point iteration is required because relationships can form cycles (for example via
+/// bidirectional filtering).
+///
+/// For [`Cardinality::ManyToMany`], propagation is based on the distinct set of keys visible on the
+/// source side rather than a unique lookup row.
 fn resolve_row_sets(
     model: &DataModel,
     filter: &FilterContext,
