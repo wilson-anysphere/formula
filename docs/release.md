@@ -253,13 +253,14 @@ then revert the change—do not commit it).
 2. Locate the `.app` produced by Tauri (path can vary by target):
 
    ```bash
-   ls apps/desktop/src-tauri/target/release/bundle/macos/*.app
+   find apps/desktop/src-tauri/target -maxdepth 8 -type d -path "*/release/bundle/macos/*.app"
    ```
 
 3. Verify the signature + entitlements (replace the path as needed):
 
    ```bash
-   app="apps/desktop/src-tauri/target/release/bundle/macos/Formula.app"
+   app="$(find apps/desktop/src-tauri/target -maxdepth 8 -type d -path '*/release/bundle/macos/*.app' | head -n 1)"
+   echo "Checking app at: $app"
    codesign --verify --deep --strict --verbose=2 "$app"
    codesign -d --entitlements :- "$app" 2>&1 | grep -E "allow-jit|allow-unsigned-executable-memory"
    spctl --assess --type execute -vv "$app"
