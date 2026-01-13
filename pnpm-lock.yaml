@@ -74,6 +74,9 @@ importers:
       '@formula/collab-versioning':
         specifier: workspace:*
         version: link:../../packages/collab/versioning
+      '@formula/collab-yjs-utils':
+        specifier: workspace:*
+        version: link:../../packages/collab/yjs-utils
       '@formula/data-io':
         specifier: workspace:*
         version: link:../../packages/data-io
@@ -217,6 +220,9 @@ importers:
 
   packages/collab/comments:
     dependencies:
+      '@formula/collab-yjs-utils':
+        specifier: workspace:*
+        version: link:../yjs-utils
       yjs:
         specifier: ^13.6.27
         version: 13.6.29
@@ -227,6 +233,9 @@ importers:
 
   packages/collab/conflicts:
     dependencies:
+      '@formula/collab-yjs-utils':
+        specifier: workspace:*
+        version: link:../yjs-utils
       yjs:
         specifier: ^13.6.27
         version: 13.6.29
@@ -279,6 +288,9 @@ importers:
       '@formula/collab-workbook':
         specifier: workspace:*
         version: link:../workbook
+      '@formula/collab-yjs-utils':
+        specifier: workspace:*
+        version: link:../yjs-utils
       y-websocket:
         specifier: ^2.1.0
         version: 2.1.0(yjs@13.6.29)
@@ -307,9 +319,18 @@ importers:
 
   packages/collab/workbook:
     dependencies:
+      '@formula/collab-yjs-utils':
+        specifier: workspace:*
+        version: link:../yjs-utils
       '@formula/workbook-backend':
         specifier: workspace:*
         version: link:../../workbook-backend
+      yjs:
+        specifier: ^13.6.27
+        version: 13.6.29
+
+  packages/collab/yjs-utils:
+    dependencies:
       yjs:
         specifier: ^13.6.27
         version: 13.6.29
