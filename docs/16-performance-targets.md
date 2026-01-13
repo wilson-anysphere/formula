@@ -136,6 +136,10 @@ These scripts are designed to be safe to run locally:
 
 - **`window_visible_ms`**: time from native process start until the main window is shown.
 - **`tti_ms`**: time-to-interactive (first input accepted); includes webview + frontend init.
+- **Startup benchmark kinds**:
+  - **Full app** (`desktop.startup.*`): end-to-end UI startup (requires `apps/desktop/dist`); includes `first_render_ms`.
+  - **Shell-only** (`desktop.shell_startup.*`): minimal webview startup via `--startup-bench` (does **not** require `apps/desktop/dist`);
+    does not emit `first_render_ms`.
 - **`idleRssMb`**: resident set size (RSS) of the desktop process *plus child processes*, sampled
   after TTI + a "settle" delay. (Useful for regression tracking; RSS can double-count shared pages.)
 - **Size**:
@@ -149,6 +153,7 @@ These scripts are designed to be safe to run locally:
 Startup benchmark (runner defaults shown):
 
 - `FORMULA_DESKTOP_STARTUP_MODE=cold|warm` (default: `cold`)
+- `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell|full` (default: `full` locally, `shell` on CI)
 - `FORMULA_DESKTOP_STARTUP_RUNS=20`
 - `FORMULA_DESKTOP_STARTUP_TIMEOUT_MS=15000`
 - Cold-start targets (defaults shown; legacy unscoped vars are still accepted as fallbacks):

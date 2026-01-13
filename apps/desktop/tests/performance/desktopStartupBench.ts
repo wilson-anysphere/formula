@@ -85,7 +85,13 @@ function parseStartupMode(): StartupMode {
 }
 
 function parseBenchKind(): StartupBenchKind {
-  const kindRaw = (process.env.FORMULA_DESKTOP_STARTUP_BENCH_KIND ?? 'full').trim().toLowerCase();
+  const kindRaw = (process.env.FORMULA_DESKTOP_STARTUP_BENCH_KIND ?? '').trim().toLowerCase();
+  if (!kindRaw) {
+    // Prefer the lightweight shell benchmark in CI so we can measure startup without requiring
+    // a Vite/wasm build of `apps/desktop/dist`. For full end-to-end measurements, set
+    // `FORMULA_DESKTOP_STARTUP_BENCH_KIND=full` (or run the dedicated desktop perf workflows).
+    return process.env.CI ? 'shell' : 'full';
+  }
   if (kindRaw !== 'full' && kindRaw !== 'shell') {
     throw new Error(
       `Invalid FORMULA_DESKTOP_STARTUP_BENCH_KIND=${JSON.stringify(kindRaw)} (expected "full" or "shell")`,

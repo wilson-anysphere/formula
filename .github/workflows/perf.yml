@@ -80,6 +80,8 @@ jobs:
           if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "runs=10" >> "$GITHUB_OUTPUT"
+            # Full app benchmark (requires built frontend assets).
+            echo "kind=full" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -87,11 +89,14 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.event.pull_request.head.repo.full_name }}" == "${{ github.repository }}" ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "runs=5" >> "$GITHUB_OUTPUT"
+            # Lightweight shell benchmark (uses `--startup-bench`; does not require apps/desktop/dist).
+            echo "kind=shell" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo "run=false" >> "$GITHUB_OUTPUT"
           echo "runs=5" >> "$GITHUB_OUTPUT"
+          echo "kind=shell" >> "$GITHUB_OUTPUT"
 
       - name: Install Linux dependencies (Tauri/WebView + Xvfb)
         if: steps.desktop_bench.outputs.run == 'true'
@@ -107,11 +112,11 @@ jobs:
             xvfb
 
       - name: Install wasm32 target (required for desktop renderer build)
-        if: steps.desktop_bench.outputs.run == 'true'
+        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
         run: rustup target add wasm32-unknown-unknown
 
       - name: Cache wasm-pack binary
-        if: steps.desktop_bench.outputs.run == 'true'
+        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
         id: wasm-pack-cache
         uses: actions/cache@v4
         with:
@@ -121,13 +126,13 @@ jobs:
             wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Install wasm-pack (required for @formula/engine WASM build)
-        if: steps.desktop_bench.outputs.run == 'true' && steps.wasm-pack-cache.outputs.cache-hit != 'true'
+        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full' && steps.wasm-pack-cache.outputs.cache-hit != 'true'
         # Pinned to match the tagged release workflow so perf runs don't break
         # when wasm-pack publishes a new incompatible version.
         run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked
 
       - name: Verify wasm-pack version
-        if: steps.desktop_bench.outputs.run == 'true'
+        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
         shell: bash
         run: |
           set -euo pipefail
@@ -139,7 +144,7 @@ jobs:
           fi
 
       - name: Detect Pyodide version (for caching)
-        if: steps.desktop_bench.outputs.run == 'true'
+        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
         id: pyodide
         run: |
           set -euo pipefail
@@ -147,7 +152,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Restore Pyodide asset cache
-        if: steps.desktop_bench.outputs.run == 'true'
+        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
         id: pyodide-cache
         uses: actions/cache/restore@v4
         with:
@@ -155,22 +160,22 @@ jobs:
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
 
       - name: Ensure Pyodide assets are present (populate cache on miss)
-        if: steps.desktop_bench.outputs.run == 'true'
+        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
         run: node apps/desktop/scripts/ensure-pyodide-assets.mjs
 
       - name: Save Pyodide asset cache
-        if: steps.desktop_bench.outputs.run == 'true' && steps.pyodide-cache.outputs.cache-hit != 'true'
+        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full' && steps.pyodide-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
 
       - name: Build desktop frontend assets (Vite → tauri.conf.json build.frontendDist)
-        if: steps.desktop_bench.outputs.run == 'true'
+        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
         run: pnpm build:desktop
 
       - name: Desktop dist asset report
-        if: steps.desktop_bench.outputs.run == 'true'
+        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
         run: node scripts/desktop_dist_asset_report.mjs
         env:
           # Optional: set as GitHub Actions variables to enable gating.
@@ -189,7 +194,7 @@ jobs:
             --locked
 
       - name: Cache cargo-bloat binary
-        if: steps.desktop_bench.outputs.run == 'true'
+        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
         id: cargo-bloat-cache
         uses: actions/cache@v4
         with:
@@ -199,7 +204,7 @@ jobs:
             cargo-bloat-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Install cargo-bloat
-        if: steps.desktop_bench.outputs.run == 'true' && steps.cargo-bloat-cache.outputs.cache-hit != 'true'
+        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full' && steps.cargo-bloat-cache.outputs.cache-hit != 'true'
         continue-on-error: true
         run: cargo install cargo-bloat --locked
 
@@ -210,7 +215,10 @@ jobs:
           FORMULA_RUN_DESKTOP_STARTUP_BENCH: ${{ steps.desktop_bench.outputs.run == 'true' && '1' || '0' }}
           # Enable the optional desktop idle-memory benchmark only when the desktop
           # binary + assets were built in this job.
-          FORMULA_RUN_DESKTOP_MEMORY_BENCH: ${{ steps.desktop_bench.outputs.run == 'true' && '1' || '0' }}
+          FORMULA_RUN_DESKTOP_MEMORY_BENCH: ${{ steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full' && '1' || '0' }}
+          # Desktop startup benchmark kind: `shell` is lightweight (no apps/desktop/dist required),
+          # while `full` measures end-to-end app bootstrap.
+          FORMULA_DESKTOP_STARTUP_BENCH_KIND: ${{ steps.desktop_bench.outputs.kind }}
           # Keep PR runtime reasonable; use more iterations on main for stable signals.
           FORMULA_DESKTOP_STARTUP_RUNS: ${{ steps.desktop_bench.outputs.runs }}
           FORMULA_DESKTOP_MEMORY_RUNS: ${{ steps.desktop_bench.outputs.runs }}
@@ -246,7 +254,7 @@ jobs:
           fail-on-alert: true
 
       - name: Enforce desktop idle RSS target (MB)
-        if: always() && steps.desktop_bench.outputs.run == 'true'
+        if: always() && steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
         run: |
           node - <<'NODE'
           const fs = require('node:fs');
@@ -278,7 +286,7 @@ jobs:
           NODE
           
       - name: Report desktop binary size breakdown (cargo-bloat)
-        if: always() && steps.desktop_bench.outputs.run == 'true' && steps.build_desktop_binary.outcome == 'success'
+        if: always() && steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full' && steps.build_desktop_binary.outcome == 'success'
         # Informational by default. To turn this into a gate, set the repo variable
         # `FORMULA_ENFORCE_DESKTOP_BINARY_SIZE=1` (and a `FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB` budget).
         continue-on-error: ${{ !(vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == '1' || vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == 'true' || vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == 'yes' || vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == 'on') }}

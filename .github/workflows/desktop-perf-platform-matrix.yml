@@ -153,6 +153,7 @@ jobs:
           set -euo pipefail
           mkdir -p perf-artifacts
           node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-startup-runner.ts \
+            --full \
             --runs 5 \
             --timeout-ms 20000 \
             --json perf-artifacts/desktop-startup-metrics.json \
