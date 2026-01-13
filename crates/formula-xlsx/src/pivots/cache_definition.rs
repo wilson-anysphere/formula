@@ -324,7 +324,8 @@ fn parse_shared_item_empty(e: &BytesStart<'_>) -> Option<PivotCacheValue> {
         b"b" => Some(parse_shared_bool(attr_value_local(e, b"v"))),
         b"e" => Some(parse_shared_error(attr_value_local(e, b"v"))),
         b"d" => Some(parse_shared_datetime(attr_value_local(e, b"v"))),
-        b"x" => Some(parse_shared_index(attr_value_local(e, b"v"))),
+        // `<x>` is record-level (shared item index) and should not be treated as a shared item.
+        b"x" => None,
         _ => None,
     }
 }
@@ -370,15 +371,11 @@ fn parse_shared_item_start<R: std::io::BufRead>(
             };
             Ok(Some(parse_shared_datetime(v)))
         }
+        // `<x>` is record-level (shared item index) and should not be treated as a shared item.
         b"x" => {
-            let v = match attr_v {
-                Some(v) => {
-                    skip_to_end(reader, e.name(), skip_buf);
-                    Some(v)
-                }
-                None => value_text(reader)?,
-            };
-            Ok(Some(parse_shared_index(v)))
+            // Still advance the reader so the outer parse loop stays in sync.
+            skip_to_end(reader, e.name(), skip_buf);
+            Ok(None)
         }
         b"s" => {
             let v = match attr_v {
@@ -448,16 +445,6 @@ fn parse_shared_datetime(v: Option<String>) -> PivotCacheValue {
         return PivotCacheValue::Missing;
     };
     PivotCacheValue::DateTime(v)
-}
-
-fn parse_shared_index(v: Option<String>) -> PivotCacheValue {
-    let Some(v) = v else {
-        return PivotCacheValue::Missing;
-    };
-    let Ok(idx) = v.trim().parse::<u32>() else {
-        return PivotCacheValue::Missing;
-    };
-    PivotCacheValue::Index(idx)
 }
 
 fn parse_shared_string(v: Option<String>) -> PivotCacheValue {

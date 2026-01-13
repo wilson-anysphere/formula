@@ -354,8 +354,8 @@ impl XlsxPackage {
                     None
                 };
 
-                // When the `rdRichValue` tables are missing we cannot recover `CalcOrigin`, so
-                // report it as `0` (unknown) rather than guessing.
+                // When the rdRichValue local-image schema/tables are missing we cannot recover
+                // `CalcOrigin`, so report it as `0` (unknown) rather than guessing.
                 let mut calc_origin: u32 = 0;
                 let mut alt_text: Option<String> = None;
 
