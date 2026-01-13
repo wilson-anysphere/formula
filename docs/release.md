@@ -681,6 +681,10 @@ Also verify **cross-origin isolation** is enabled in the packaged app (required 
 - Or in an installed build: ensure there is no startup toast complaining about missing cross-origin isolation, and (if you have DevTools)
   confirm `globalThis.crossOriginIsolated === true`.
 
+CI note: tagged releases run this check on macOS/Windows/Linux before uploading artifacts. If you need to temporarily skip the
+check on macOS/Windows (e.g. a hosted-runner regression makes it flaky), set the GitHub Actions variable
+`FORMULA_COI_CHECK_ALL_PLATFORMS=0` to keep the Linux check while disabling the non-Linux ones.
+
 ## 6) Bundle size reporting + size gate (tagged releases enforced)
 
 The release workflow reports the size of each generated installer/bundle (DMG / MSI / EXE /

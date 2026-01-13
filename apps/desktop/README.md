@@ -171,6 +171,10 @@ pnpm -C apps/desktop check:coi
 This builds the production frontend + a release desktop binary and launches it in a special mode that exits with
 success/failure after evaluating `globalThis.crossOriginIsolated`, `SharedArrayBuffer`, and basic Worker support inside the WebView.
 
+CI note: tagged desktop releases run this check on macOS/Windows/Linux before uploading artifacts. To temporarily skip the
+check on macOS/Windows (while keeping the Linux signal), set the GitHub Actions variable
+`FORMULA_COI_CHECK_ALL_PLATFORMS=0`.
+
 ### Manual check
 
 1. Build a production desktop binary:
