@@ -147,8 +147,14 @@ test("CursorTabCompletionClient forces Content-Type to application/json even if 
   const completion = await client.completeTabCompletion({ input: "=", cursorPosition: 1, cellA1: "A1" });
   assert.equal(completion, "ok");
   assert.equal(headersSeen?.["x-cursor-test-auth"], "yes");
-  assert.equal(headersSeen?.["content-type"] ?? headersSeen?.["Content-Type"], "application/json");
-  assert.ok(!("Content-Type" in (headersSeen ?? {})), "Expected Content-Type to be normalized to lowercase");
+  const hasUpper = Object.prototype.hasOwnProperty.call(headersSeen ?? {}, "Content-Type");
+  const hasLower = Object.prototype.hasOwnProperty.call(headersSeen ?? {}, "content-type");
+  assert.equal(
+    (hasUpper ? 1 : 0) + (hasLower ? 1 : 0),
+    1,
+    "Expected exactly one Content-Type header key (no duplicates by casing)",
+  );
+  assert.equal(headersSeen?.["Content-Type"] ?? headersSeen?.["content-type"], "application/json");
 });
 
 test("CursorTabCompletionClient resolves to empty string when an external AbortSignal is aborted", async () => {

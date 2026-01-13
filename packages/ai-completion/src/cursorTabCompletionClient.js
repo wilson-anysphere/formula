@@ -65,21 +65,25 @@ export class CursorTabCompletionClient {
           : null;
       if (controller.signal.aborted) return "";
 
-      // Use lowercase so tests (and any header-inspecting consumers) can treat this as a plain
-      // record without worrying about case. Fetch treats header keys as case-insensitive.
+      // Merge Cursor-managed auth headers while forcing JSON Content-Type.
       //
-      // IMPORTANT: ensure we only send a single JSON Content-Type header. If we pass both
+      // IMPORTANT: ensure we only send a single Content-Type header. If we pass both
       // `Content-Type` and `content-type`, fetch() can combine them into a single comma-separated
       // value (e.g. "text/plain, application/json"), which can break server-side JSON parsing.
+      //
+      // Preserve header casing from `getAuthHeaders()` for compatibility with custom `fetchImpl`
+      // implementations that inspect `init.headers` as a plain object.
       /** @type {Record<string, string>} */
       const headers = {};
-      for (const [key, value] of Object.entries(authHeaders ?? {})) {
-        if (!key) continue;
-        if (value === undefined || value === null) continue;
-        if (key.toLowerCase() === "content-type") continue;
-        headers[key.toLowerCase()] = String(value);
+      if (authHeaders && typeof authHeaders === "object") {
+        for (const [key, value] of Object.entries(authHeaders)) {
+          if (!key) continue;
+          if (value === undefined || value === null) continue;
+          if (key.toLowerCase() === "content-type") continue;
+          headers[key] = String(value);
+        }
       }
-      headers["content-type"] = "application/json";
+      headers["Content-Type"] = "application/json";
       if (controller.signal.aborted) return "";
 
       const res = await this.fetchImpl(this.endpointUrl, {
