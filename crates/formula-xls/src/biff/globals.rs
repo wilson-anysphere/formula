@@ -88,6 +88,13 @@ const WINDOW1_GRBIT_HIDDEN: u16 = 0x0001;
 const WINDOW1_GRBIT_ICONIC: u16 = 0x0002;
 const WINDOW1_GRBIT_MAXIMIZED: u16 = 0x0040;
 
+// Cap the number of workbook-global warnings we retain.
+//
+// Malformed/corrupt `.xls` files may contain many truncated records; without a cap, the warnings
+// vector can grow without bound and consume large amounts of memory.
+const MAX_GLOBAL_WARNINGS: usize = 100;
+const GLOBAL_WARNINGS_SUPPRESSED_MSG: &str = "additional workbook-global warnings suppressed";
+
 fn strip_embedded_nuls(s: &mut String) {
     if s.contains('\0') {
         s.retain(|c| c != '\0');
@@ -114,6 +121,19 @@ fn dt_to_sheet_type(dt: u8) -> Option<BoundSheetType> {
         0x02 => Some(BoundSheetType::Chart),
         0x06 => Some(BoundSheetType::VisualBasicModule),
         _ => None,
+    }
+}
+
+fn push_warning(out: &mut BiffWorkbookGlobals, msg: String) {
+    if out.warnings.len() < MAX_GLOBAL_WARNINGS {
+        out.warnings.push(msg);
+        return;
+    }
+
+    // Once we hit the cap, emit a single note so callers/users know warnings were dropped.
+    if out.warnings.len() == MAX_GLOBAL_WARNINGS {
+        out.warnings
+            .push(GLOBAL_WARNINGS_SUPPRESSED_MSG.to_string());
     }
 }
 
@@ -828,7 +848,7 @@ pub(crate) fn parse_biff_workbook_globals(
         let record = match record {
             Ok(record) => record,
             Err(err) => {
-                out.warnings.push(format!("malformed BIFF record: {err}"));
+                push_warning(&mut out, format!("malformed BIFF record: {err}"));
                 break;
             }
         };
@@ -860,7 +880,7 @@ pub(crate) fn parse_biff_workbook_globals(
             // PROTECT [MS-XLS 2.4.203] (workbook globals: lock structure)
             RECORD_PROTECT => {
                 if data.len() < 2 {
-                    out.warnings.push(format!(
+                    push_warning(&mut out, format!(
                         "truncated PROTECT record at offset {}",
                         record.offset
                     ));
@@ -872,7 +892,7 @@ pub(crate) fn parse_biff_workbook_globals(
             // WINDOWPROTECT [MS-XLS 2.4.347]
             RECORD_WINDOWPROTECT => {
                 if data.len() < 2 {
-                    out.warnings.push(format!(
+                    push_warning(&mut out, format!(
                         "truncated WINDOWPROTECT record at offset {}",
                         record.offset
                     ));
@@ -884,7 +904,7 @@ pub(crate) fn parse_biff_workbook_globals(
             // PASSWORD [MS-XLS 2.4.191]
             RECORD_PASSWORD => {
                 if data.len() < 2 {
-                    out.warnings.push(format!(
+                    push_warning(&mut out, format!(
                         "truncated PASSWORD record at offset {}",
                         record.offset
                     ));
@@ -903,7 +923,7 @@ pub(crate) fn parse_biff_workbook_globals(
                 // Window geometry/state.
                 if out.workbook_window.is_none() {
                     if data.len() < 8 {
-                        out.warnings.push(format!(
+                        push_warning(&mut out, format!(
                             "WINDOW1 record too short to read window geometry at offset {} (len={})",
                             record.offset,
                             data.len()
@@ -916,7 +936,7 @@ pub(crate) fn parse_biff_workbook_globals(
                         let height = u16::from_le_bytes([data[6], data[7]]) as u32;
 
                         let state = if data.len() < 10 {
-                            out.warnings.push(format!(
+                            push_warning(&mut out, format!(
                                 "WINDOW1 record too short to read window state flags at offset {} (len={})",
                                 record.offset,
                                 data.len()
@@ -954,8 +974,10 @@ pub(crate) fn parse_biff_workbook_globals(
                 }
 
                 if data.len() < 12 {
-                    out.warnings
-                        .push("WINDOW1 record too short to read active tab index".to_string());
+                    push_warning(
+                        &mut out,
+                        "WINDOW1 record too short to read active tab index".to_string(),
+                    );
                 } else if out.active_tab_index.is_none() {
                     let tab = u16::from_le_bytes([data[10], data[11]]);
                     out.active_tab_index = Some(tab);
@@ -973,7 +995,7 @@ pub(crate) fn parse_biff_workbook_globals(
             // CALCCOUNT [MS-XLS 2.4.40]
             RECORD_CALCCOUNT => {
                 if data.len() < 2 {
-                    out.warnings.push(format!(
+                    push_warning(&mut out, format!(
                         "truncated CALCCOUNT record at offset {}",
                         record.offset
                     ));
@@ -985,7 +1007,7 @@ pub(crate) fn parse_biff_workbook_globals(
             // CALCMODE [MS-XLS 2.4.41]
             RECORD_CALCMODE => {
                 if data.len() < 2 {
-                    out.warnings.push(format!(
+                    push_warning(&mut out, format!(
                         "truncated CALCMODE record at offset {}",
                         record.offset
                     ));
@@ -1001,7 +1023,7 @@ pub(crate) fn parse_biff_workbook_globals(
                 if let Some(mode) = mode {
                     out.calculation_mode = Some(mode);
                 } else {
-                    out.warnings.push(format!(
+                    push_warning(&mut out, format!(
                         "ignored unknown CALCMODE value {raw} at offset {}",
                         record.offset
                     ));
@@ -1010,7 +1032,7 @@ pub(crate) fn parse_biff_workbook_globals(
             // PRECISION [MS-XLS 2.4.201]
             RECORD_PRECISION => {
                 if data.len() < 2 {
-                    out.warnings.push(format!(
+                    push_warning(&mut out, format!(
                         "truncated PRECISION record at offset {}",
                         record.offset
                     ));
@@ -1023,7 +1045,7 @@ pub(crate) fn parse_biff_workbook_globals(
             // DELTA [MS-XLS 2.4.76]
             RECORD_DELTA => {
                 if data.len() < 8 {
-                    out.warnings.push(format!(
+                    push_warning(&mut out, format!(
                         "truncated DELTA record at offset {}",
                         record.offset
                     ));
@@ -1036,7 +1058,7 @@ pub(crate) fn parse_biff_workbook_globals(
             // ITERATION [MS-XLS 2.4.118]
             RECORD_ITERATION => {
                 if data.len() < 2 {
-                    out.warnings.push(format!(
+                    push_warning(&mut out, format!(
                         "truncated ITERATION record at offset {}",
                         record.offset
                     ));
@@ -1065,13 +1087,15 @@ pub(crate) fn parse_biff_workbook_globals(
             // PALETTE [MS-XLS 2.4.155]
             RECORD_PALETTE => {
                 if data.len() < 2 {
-                    out.warnings
-                        .push(format!("truncated PALETTE record at offset {}", record.offset));
+                    push_warning(
+                        &mut out,
+                        format!("truncated PALETTE record at offset {}", record.offset),
+                    );
                 } else {
                     let count = u16::from_le_bytes([data[0], data[1]]) as usize;
                     let expected_len = 2usize.saturating_add(count.saturating_mul(4));
                     if data.len() < expected_len {
-                        out.warnings.push(format!(
+                        push_warning(&mut out, format!(
                             "truncated PALETTE record at offset {} (ccv={count}, len={}, expected={expected_len})",
                             record.offset,
                             data.len()
@@ -1086,7 +1110,7 @@ pub(crate) fn parse_biff_workbook_globals(
             // FONT [MS-XLS 2.4.92]
             RECORD_FONT => match parse_biff_font_record(data, biff, codepage) {
                 Ok(font) => out.fonts.push(font),
-                Err(err) => out.warnings.push(format!("failed to parse FONT record: {err}")),
+                Err(err) => push_warning(&mut out, format!("failed to parse FONT record: {err}")),
             },
             // XF [MS-XLS 2.4.353]
             RECORD_XF => {
@@ -1097,7 +1121,7 @@ pub(crate) fn parse_biff_workbook_globals(
             // SAVERECALC [MS-XLS 2.4.248]
             RECORD_SAVERECALC => {
                 if data.len() < 2 {
-                    out.warnings.push(format!(
+                    push_warning(&mut out, format!(
                         "truncated SAVERECALC record at offset {}",
                         record.offset
                     ));
@@ -1119,7 +1143,9 @@ pub(crate) fn parse_biff_workbook_globals(
                     saw_external_supbook = true;
                 }
                 out.extern_sheets.extend(parsed.entries);
-                out.warnings.extend(parsed.warnings);
+                for warning in parsed.warnings {
+                    push_warning(&mut out, warning);
+                }
             }
             // SHEETEXT [MS-XLS 2.4.269]
             //
@@ -1128,7 +1154,7 @@ pub(crate) fn parse_biff_workbook_globals(
                 match parse_biff_sheetext_tab_color(data) {
                     Ok(color) => out.sheet_tab_colors.push(color),
                     Err(err) => {
-                        out.warnings.push(format!(
+                        push_warning(&mut out, format!(
                             "failed to parse BIFF SHEETEXT record at offset {}: {err}",
                             record.offset
                         ));
@@ -1148,14 +1174,16 @@ pub(crate) fn parse_biff_workbook_globals(
     }
 
     if saw_external_supbook {
-        out.warnings.push(
+        push_warning(
+            &mut out,
             "workbook contains external SupBook references (EXTERNSHEET); external workbook refs are not yet supported"
                 .to_string(),
         );
     }
 
     if continuation_parse_failed {
-        out.warnings.push(
+        push_warning(
+            &mut out,
             "failed to parse one or more continued BIFF FORMAT records; number format codes may be truncated"
                 .to_string(),
         );
@@ -1166,8 +1194,10 @@ pub(crate) fn parse_biff_workbook_globals(
         // workbook-global EOF record. Treat this as a warning and return any
         // partial data we managed to parse so importers can still recover number
         // formats/date system where possible.
-        out.warnings
-            .push("unexpected end of workbook globals stream (missing EOF)".to_string());
+        push_warning(
+            &mut out,
+            "unexpected end of workbook globals stream (missing EOF)".to_string(),
+        );
     }
 
     if !out.palette.is_empty() {
@@ -2010,6 +2040,29 @@ mod tests {
             globals.warnings.iter().any(|w| w.contains("missing EOF")),
             "expected missing-EOF warning, got {:?}",
             globals.warnings
+        );
+    }
+
+    #[test]
+    fn globals_warnings_are_capped() {
+        // Build a workbook-global stream containing many malformed records that each produce a
+        // warning. Without a cap, this would grow `BiffWorkbookGlobals.warnings` without bound.
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // PROTECT records with a payload shorter than 2 bytes produce a warning.
+        for _ in 0..(MAX_GLOBAL_WARNINGS + 50) {
+            stream.extend_from_slice(&record(RECORD_PROTECT, &[]));
+        }
+
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let globals =
+            parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(globals.warnings.len(), MAX_GLOBAL_WARNINGS + 1);
+        assert_eq!(
+            globals.warnings.last().map(String::as_str),
+            Some(GLOBAL_WARNINGS_SUPPRESSED_MSG)
         );
     }
 
