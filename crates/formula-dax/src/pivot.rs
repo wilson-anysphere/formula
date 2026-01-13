@@ -551,7 +551,8 @@ fn plan_pivot_expr(
             }
         },
         Expr::BinaryOp { op, left, right } => match op {
-            BinaryOp::Add
+            BinaryOp::Concat
+            | BinaryOp::Add
             | BinaryOp::Subtract
             | BinaryOp::Multiply
             | BinaryOp::Divide
