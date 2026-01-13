@@ -4,8 +4,11 @@ use formula_offcrypto::{parse_encrypted_package_header, parse_encryption_info};
 
 /// Compile-only smoke test for `wasm32-unknown-unknown`.
 ///
-/// CI can run:
-/// `cargo test -p formula-offcrypto --target wasm32-unknown-unknown --no-run`
+/// CI compiles this via:
+/// `cargo check -p formula-offcrypto --target wasm32-unknown-unknown --all-targets --locked`
+///
+/// Note: `cargo test -p formula-offcrypto --target wasm32-unknown-unknown` requires the
+/// `wasm-bindgen-test-runner` binary; use `--no-run` for compile-only verification.
 #[test]
 fn wasm_compile_smoke() {
     // `EncryptedPackage` always begins with an 8-byte (u64 LE) original size.
