@@ -71,7 +71,7 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
       aria-modal="true"
       aria-labelledby={titleId}
       aria-describedby={error ? errorId : undefined}
-      aria-busy={running}
+      aria-busy={running ? true : undefined}
       data-testid="goal-seek-dialog"
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;
@@ -119,7 +119,7 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
               }}
               disabled={running}
               inputMode="decimal"
-              aria-invalid={invalidField === "targetValue"}
+              aria-invalid={invalidField === "targetValue" ? true : undefined}
               aria-describedby={invalidField === "targetValue" ? errorId : undefined}
             />
           </label>

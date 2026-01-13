@@ -90,7 +90,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
       className="what-if-panel"
       role="region"
       aria-label={t("whatIf.monteCarlo.title")}
-      aria-busy={running}
+      aria-busy={running ? true : undefined}
       data-testid="monte-carlo-wizard"
     >
       <h3 className="what-if-panel__title">{t("whatIf.monteCarlo.title")}</h3>
@@ -116,7 +116,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
             }}
             disabled={running}
             inputMode="numeric"
-            aria-invalid={invalidField === "iterations"}
+            aria-invalid={invalidField === "iterations" ? true : undefined}
             aria-describedby={invalidField === "iterations" && error ? errorId : undefined}
           />
         </label>
@@ -141,7 +141,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
             disabled={running}
             spellCheck={false}
             autoCapitalize="off"
-            aria-invalid={invalidField === "outputCells"}
+            aria-invalid={invalidField === "outputCells" ? true : undefined}
             aria-describedby={invalidField === "outputCells" && error ? errorId : undefined}
           />
         </label>

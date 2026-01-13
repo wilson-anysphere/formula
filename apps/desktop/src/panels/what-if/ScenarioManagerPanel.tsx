@@ -112,7 +112,13 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
   }
 
   return (
-    <div className="what-if-panel" role="region" aria-label={t("whatIf.scenario.title")} aria-busy={busy} data-testid="scenario-manager-panel">
+    <div
+      className="what-if-panel"
+      role="region"
+      aria-label={t("whatIf.scenario.title")}
+      aria-busy={busy ? true : undefined}
+      data-testid="scenario-manager-panel"
+    >
       <h3 className="what-if-panel__title">{t("whatIf.scenario.title")}</h3>
 
       {error ? (
@@ -187,7 +193,7 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
           }}
           spellCheck={false}
           autoCapitalize="off"
-          aria-invalid={invalidField === "resultCells"}
+          aria-invalid={invalidField === "resultCells" ? true : undefined}
           disabled={busy}
           aria-describedby={invalidField === "resultCells" && error ? errorId : undefined}
         />
