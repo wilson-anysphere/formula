@@ -230,6 +230,67 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "DAYS",
+    description: "Returns the number of days between two dates.",
+    args: [
+      { name: "end_date", type: "value" },
+      { name: "start_date", type: "value" },
+    ],
+  },
+  {
+    name: "DAYS360",
+    description: "Returns the number of days between two dates based on a 360-day year.",
+    args: [
+      { name: "start_date", type: "value" },
+      { name: "end_date", type: "value" },
+      { name: "method", type: "boolean", optional: true },
+    ],
+  },
+  {
+    name: "YEARFRAC",
+    description: "Returns the year fraction representing the number of whole days between start_date and end_date.",
+    args: [
+      { name: "start_date", type: "value" },
+      { name: "end_date", type: "value" },
+      { name: "basis", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "DATEVALUE",
+    description: "Converts a date in the form of text to a serial number.",
+    args: [
+      { name: "date_text", type: "value" },
+    ],
+  },
+  {
+    name: "TIMEVALUE",
+    description: "Converts a time in the form of text to a serial number.",
+    args: [
+      { name: "time_text", type: "value" },
+    ],
+  },
+  {
+    name: "HOUR",
+    description: "Converts a serial number to an hour.",
+    args: [
+      { name: "serial_number", type: "value" },
+    ],
+  },
+  {
+    name: "MINUTE",
+    description: "Converts a serial number to a minute.",
+    args: [
+      { name: "serial_number", type: "value" },
+    ],
+  },
+  {
+    name: "SECOND",
+    description: "Converts a serial number to a second.",
+    args: [
+      { name: "serial_number", type: "value" },
+    ],
+  },
+  {
     name: "WORKDAY.INTL",
     description: "Returns a date that is a specified number of working days before or after a start date with custom weekends.",
     args: [

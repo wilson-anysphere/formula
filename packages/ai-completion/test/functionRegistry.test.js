@@ -218,4 +218,16 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
     registry.getFunction("HYPERLINK")?.args?.[1]?.optional,
     "Expected HYPERLINK friendly_name to be optional"
   );
+
+  // Date/time helpers with more descriptive arg naming
+  assert.equal(registry.getFunction("DAYS")?.args?.[0]?.name, "end_date", "Expected DAYS arg1 to be end_date");
+  assert.equal(registry.getFunction("DAYS360")?.args?.[2]?.name, "method", "Expected DAYS360 arg3 to be method");
+  assert.equal(registry.getArgType("DAYS360", 2), "boolean", "Expected DAYS360 method to be boolean");
+  assert.equal(registry.getFunction("YEARFRAC")?.args?.[2]?.name, "basis", "Expected YEARFRAC arg3 to be basis");
+  assert.equal(registry.getArgType("YEARFRAC", 2), "number", "Expected YEARFRAC basis to be number");
+  assert.equal(
+    registry.getFunction("DATEVALUE")?.args?.[0]?.name,
+    "date_text",
+    "Expected DATEVALUE arg1 to be date_text"
+  );
 });
