@@ -1,4 +1,5 @@
 import { t } from "../../i18n/index.js";
+import { resolveCssVar } from "../../theme/cssVars.js";
 
 function parseHexColor(color) {
   const match = /^#?([0-9a-f]{6})$/i.exec(color);
@@ -91,7 +92,7 @@ export class PresenceRenderer {
       badgePaddingY = 3,
       badgeOffsetX = 8,
       badgeOffsetY = -18,
-      font = "12px system-ui, sans-serif",
+      font,
     } = options ?? {};
 
     this.selectionFillAlpha = selectionFillAlpha;
@@ -101,7 +102,8 @@ export class PresenceRenderer {
     this.badgePaddingY = badgePaddingY;
     this.badgeOffsetX = badgeOffsetX;
     this.badgeOffsetY = badgeOffsetY;
-    this.font = font;
+    const fontFamily = resolveCssVar("--font-sans", { fallback: "system-ui, sans-serif" });
+    this.font = font ?? `12px ${fontFamily}`;
 
     this._badgeWidthCache = new Map();
   }

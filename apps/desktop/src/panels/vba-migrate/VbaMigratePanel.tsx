@@ -647,7 +647,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
   }
 
   const monospace = {
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    fontFamily: "var(--font-mono)",
     fontSize: 12,
   } as const;
 

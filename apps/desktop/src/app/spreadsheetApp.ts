@@ -5245,7 +5245,7 @@ export class SpreadsheetApp {
     ctx.lineTo(this.width, originY + 0.5);
     ctx.stroke();
 
-    const fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    const fontFamily = resolveCssVar("--font-sans", { fallback: "system-ui, sans-serif" });
     const fontSizePx = 14;
     const defaultTextColor = resolveCssVar("--formula-grid-cell-text", { fallback: resolveCssVar("--text-primary", { fallback: "CanvasText" }) });
     const errorTextColor = resolveCssVar("--formula-grid-error-text", { fallback: resolveCssVar("--error", { fallback: defaultTextColor }) });
@@ -5444,7 +5444,7 @@ export class SpreadsheetApp {
 
     // Header labels.
     ctx.fillStyle = resolveCssVar("--formula-grid-header-text", { fallback: resolveCssVar("--text-primary", { fallback: "CanvasText" }) });
-    ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    ctx.font = `12px ${fontFamily}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
