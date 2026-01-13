@@ -1523,6 +1523,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/verify-tauri-latest-json.mjs "${{ needs.validate-version.outputs.release_tag }}"
 
+      - name: Verify updater manifest signature matches embedded pubkey
+        run: node scripts/ci/verify-updater-manifest-signature.mjs latest.json latest.json.sig
+
       - name: Verify updater asset set (installers + signatures)
         env:
           # This validator also uses the GitHub API to read/download assets from the draft release.
