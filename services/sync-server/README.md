@@ -460,6 +460,12 @@ Notable metrics (prefix `sync_server_`):
   - `SYNC_SERVER_MESSAGE_WINDOW_MS`
   - Set either to `0` to disable.
 
+- Per-IP aggregate message rate limiting (across all websocket connections):
+
+  - `SYNC_SERVER_MAX_MESSAGES_PER_IP_WINDOW`
+  - `SYNC_SERVER_IP_MESSAGE_WINDOW_MS`
+  - Set either to `0` to disable.
+
 - Per-document message rate limiting:
 
   - `SYNC_SERVER_MAX_MESSAGES_PER_DOC_WINDOW`

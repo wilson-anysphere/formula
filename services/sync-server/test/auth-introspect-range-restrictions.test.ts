@@ -205,6 +205,8 @@ test("auth:introspect enforces rangeRestrictions and rejects forbidden cell writ
       maxMessageBytes: 2 * 1024 * 1024,
       maxMessagesPerWindow: 5_000,
       messageWindowMs: 10_000,
+      maxMessagesPerIpWindow: 0,
+      ipMessageWindowMs: 0,
       maxAwarenessStateBytes: 64 * 1024,
       maxAwarenessEntries: 10,
       maxMessagesPerDocWindow: 10_000,
@@ -280,4 +282,3 @@ test("auth:introspect enforces rangeRestrictions and rejects forbidden cell writ
   t.after(() => persisted.destroy());
   assert.equal(getCellValue(persisted, cellKey), "base");
 });
-

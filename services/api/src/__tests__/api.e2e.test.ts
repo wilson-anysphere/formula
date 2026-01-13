@@ -168,6 +168,8 @@ describe("API e2e: auth + RBAC + sync token", () => {
           maxMessageBytes: 2 * 1024 * 1024,
           maxMessagesPerWindow: 5_000,
           messageWindowMs: 10_000,
+          maxMessagesPerIpWindow: 0,
+          ipMessageWindowMs: 0,
           maxAwarenessStateBytes: 64 * 1024,
           maxAwarenessEntries: 10,
           maxMessagesPerDocWindow: 10_000,
