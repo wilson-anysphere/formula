@@ -809,12 +809,32 @@ jobs:
           set -euo pipefail
 
           echo "Validating macOS release artifacts are notarized and stapled (Gatekeeper-ready)."
-          echo "Search root: $(pwd)"
+          echo "Working dir: $(pwd)"
 
-          if [[ ! -d target ]]; then
-            echo "::error::Expected build output directory 'apps/desktop/src-tauri/target' does not exist."
+          # Tauri builds may emit bundles under either:
+          # - apps/desktop/src-tauri/target (tauri sets CARGO_TARGET_DIR)
+          # - <repo>/target (Cargo workspace default)
+          #
+          # Search both so we fail only when the artifacts truly are missing.
+          target_roots=()
+          if [[ -n "${GITHUB_WORKSPACE:-}" ]]; then
+            [[ -d "$GITHUB_WORKSPACE/apps/desktop/src-tauri/target" ]] && target_roots+=("$GITHUB_WORKSPACE/apps/desktop/src-tauri/target")
+            [[ -d "$GITHUB_WORKSPACE/target" ]] && target_roots+=("$GITHUB_WORKSPACE/target")
+          else
+            [[ -d target ]] && target_roots+=("$(pwd)/target")
+            [[ -d ../../../target ]] && target_roots+=("$(cd ../../../target && pwd)")
+          fi
+
+          if [[ ${#target_roots[@]} -eq 0 ]]; then
+            echo "::error::No Cargo target directory found to scan for macOS bundle artifacts."
+            echo "Looked for:"
+            echo "  - apps/desktop/src-tauri/target"
+            echo "  - target"
             exit 1
           fi
+
+          echo "Target directories:"
+          printf '  - %s\n' "${target_roots[@]}"
 
           # Tauri bundler outputs (examples):
           # - target/release/bundle/dmg/*.dmg
@@ -824,19 +844,19 @@ jobs:
           # Avoid scanning the entire Cargo target directory (can be huge); only look in the expected
           # `release/bundle` directories.
           bundle_dirs=()
-          if [[ -d target/release/bundle ]]; then
-            bundle_dirs+=("target/release/bundle")
-          fi
-          for dir in target/*/release/bundle; do
-            [[ -d "$dir" ]] || continue
-            bundle_dirs+=("$dir")
+          for root in "${target_roots[@]}"; do
+            if [[ -d "$root/release/bundle" ]]; then
+              bundle_dirs+=("$root/release/bundle")
+            fi
+            for dir in "$root"/*/release/bundle; do
+              [[ -d "$dir" ]] || continue
+              bundle_dirs+=("$dir")
+            done
           done
 
           if [[ ${#bundle_dirs[@]} -eq 0 ]]; then
-            echo "::error::No Tauri bundle directories found under apps/desktop/src-tauri/target."
-            echo "Expected at least one of:"
-            echo "  - apps/desktop/src-tauri/target/release/bundle"
-            echo "  - apps/desktop/src-tauri/target/<triple>/release/bundle"
+            echo "::error::No Tauri bundle directories found under the Cargo target directories."
+            echo "Expected at least one: target/**/release/bundle"
             exit 1
           fi
 
