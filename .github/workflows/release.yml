@@ -981,3 +981,181 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/ci/validate-updater-manifest.mjs "${{ github.ref_name }}"
+  verify-release-assets:
+    name: Verify GitHub Release assets (multi-arch safe)
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate release assets are present and uniquely named per target
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          repo="${GITHUB_REPOSITORY}"
+          tag="${TAG_NAME}"
+
+          api_url="https://api.github.com/repos/${repo}/releases/tags/${tag}"
+          retry_delays=(2 4 8 12 20)
+
+          fetch_release() {
+            curl -sSfL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "${api_url}"
+          }
+
+          # Returns 0 if all required assets are present; 1 otherwise.
+          assets_ready() {
+            local json="$1"
+
+            local missing=0
+
+            count_matches() {
+              local re="$1"
+              echo "$json" | jq -r --arg re "$re" '[.assets[].name | select(test($re; "i"))] | length'
+            }
+
+            require_min() {
+              local label="$1"
+              local re="$2"
+              local min="$3"
+              local count
+              count="$(count_matches "$re")"
+              if [[ "$count" -lt "$min" ]]; then
+                echo "missing: ${label} (pattern: ${re}, found: ${count}, expected >= ${min})" >&2
+                missing=1
+              fi
+            }
+
+            require_min "latest.json" '^latest\.json$' 1
+            require_min "latest.json.sig" '^latest\.json\.sig$' 1
+            require_min "macOS DMG" '\.dmg$' 1
+            require_min "macOS app archive (.app.tar.gz)" '\.app\.tar\.gz$' 1
+
+            # Windows multi-arch: ensure distinct installers per architecture were uploaded.
+            require_min "Windows x64 MSI" '(x64|x86_64).*\.msi$' 1
+            require_min "Windows x64 EXE" '(x64|x86_64).*\.exe$' 1
+            require_min "Windows arm64 MSI" '(arm64|aarch64).*\.msi$' 1
+            require_min "Windows arm64 EXE" '(arm64|aarch64).*\.exe$' 1
+
+            # Linux artifacts shipped on tagged releases.
+            require_min "Linux AppImage" '\.AppImage$' 1
+            require_min "Linux DEB" '\.deb$' 1
+            require_min "Linux RPM" '\.rpm$' 1
+
+            windows_archless_count="$(echo "$json" | jq -r '[.assets[].name
+              | select(test("\\.(msi|exe)$"; "i"))
+              | select(test("(x64|x86_64|arm64|aarch64)"; "i") | not)
+            ] | length')"
+            if [[ "$windows_archless_count" -ne 0 ]]; then
+              echo "missing: found ${windows_archless_count} Windows installer asset(s) without an arch token" >&2
+              missing=1
+            fi
+
+            [[ "$missing" -eq 0 ]]
+          }
+
+          release_json="$(fetch_release)"
+          if ! assets_ready "$release_json"; then
+            for delay in "${retry_delays[@]}"; do
+              echo "Release assets not fully visible yet; retrying in ${delay}s..." >&2
+              sleep "$delay"
+              release_json="$(fetch_release)"
+              if assets_ready "$release_json"; then
+                break
+              fi
+            done
+          fi
+
+          if ! assets_ready "$release_json"; then
+            echo "::error::Release asset verification failed after retries." >&2
+            echo "$release_json" | jq -r '.assets[].name' | sort | sed 's/^/::error:: - /' || true
+            exit 1
+          fi
+
+          release_url="$(echo "$release_json" | jq -r '.html_url')"
+          draft="$(echo "$release_json" | jq -r '.draft')"
+          asset_count="$(echo "$release_json" | jq -r '.assets | length')"
+
+          echo "Release: ${tag} (draft=${draft})"
+          echo "URL: ${release_url}"
+          echo "Assets: ${asset_count}"
+          echo
+
+          mapfile -t asset_names < <(echo "$release_json" | jq -r '.assets[].name' | sort)
+          printf '%s\n' "${asset_names[@]}"
+
+          dup_names="$(printf '%s\n' "${asset_names[@]}" | sort | uniq -d || true)"
+          if [[ -n "${dup_names}" ]]; then
+            echo "::error::Duplicate asset names found on the release (unexpected):"
+            echo "${dup_names}"
+            exit 1
+          fi
+
+          bucket_for() {
+            local name="$1"
+            local base="$name"
+            [[ "$base" == *.sig ]] && base="${base%.sig}"
+
+            shopt -s nocasematch
+            if [[ "$base" == "latest.json" ]]; then
+              echo "updater-manifest"
+            elif [[ "$base" == *.msi || "$base" == *.exe ]]; then
+              if [[ "$base" =~ (arm64|aarch64) ]]; then
+                echo "windows-arm64"
+              elif [[ "$base" =~ (x64|x86_64) ]]; then
+                echo "windows-x64"
+              else
+                echo "windows-unknown"
+              fi
+            elif [[ "$base" == *.dmg || "$base" == *.app.tar.gz ]]; then
+              if [[ "$base" =~ universal ]]; then
+                echo "macos-universal"
+              elif [[ "$base" =~ (arm64|aarch64) ]]; then
+                echo "macos-arm64"
+              elif [[ "$base" =~ (x64|x86_64) ]]; then
+                echo "macos-x64"
+              else
+                echo "macos-unknown"
+              fi
+            elif [[ "$base" == *.deb || "$base" == *.rpm || "$base" == *.AppImage || "$base" == *.AppImage.tar.gz ]]; then
+              if [[ "$base" =~ (amd64|x86_64|x64) ]]; then
+                echo "linux-x64"
+              elif [[ "$base" =~ (arm64|aarch64) ]]; then
+                echo "linux-arm64"
+              else
+                echo "linux-unknown"
+              fi
+            else
+              echo "other"
+            fi
+            shopt -u nocasematch
+          }
+
+          declare -A bucket_assets
+          for name in "${asset_names[@]}"; do
+            bucket="$(bucket_for "$name")"
+            bucket_assets["$bucket"]+="${name}"$'\n'
+          done
+
+          {
+            echo "## Release assets (${tag})"
+            echo
+            echo "| Bucket | Asset |"
+            echo "| --- | --- |"
+            for bucket in macos-universal windows-x64 windows-arm64 linux-x64 updater-manifest other macos-unknown windows-unknown linux-unknown macos-x64 macos-arm64 linux-arm64; do
+              [[ -z "${bucket_assets[$bucket]+x}" ]] && continue
+              while IFS= read -r name; do
+                [[ -z "$name" ]] && continue
+                echo "| ${bucket} | \`${name}\` |"
+              done <<< "${bucket_assets[$bucket]}"
+            done
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo
+          echo "Release asset verification passed."
