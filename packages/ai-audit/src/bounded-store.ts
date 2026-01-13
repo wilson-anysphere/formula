@@ -1,5 +1,6 @@
 import type { AIAuditStore } from "./store.ts";
 import type { AIAuditEntry, AuditListFilters, ToolCallLog } from "./types.ts";
+import { stableStringify } from "./stable-json.ts";
 
 export interface BoundedAIAuditStoreOptions {
   /**
@@ -238,11 +239,7 @@ function truncateString(value: string, maxLength: number): string {
 
 function safeJsonStringify(value: unknown): string {
   try {
-    const json = JSON.stringify(value);
-    if (typeof json === "string") return json;
-    // JSON.stringify can return `undefined` for unsupported values (e.g. undefined, functions).
-    // Preserve a JSON-parseable representation by stringifying their string form instead.
-    return JSON.stringify(String(value));
+    return stableStringify(value);
   } catch {
     try {
       const json = JSON.stringify(String(value));
