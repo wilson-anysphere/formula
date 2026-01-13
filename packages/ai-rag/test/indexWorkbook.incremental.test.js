@@ -818,6 +818,28 @@ test("indexWorkbook rejects when embedder returns an invalid vector entry (no pa
   assert.deepEqual(upserted, []);
 });
 
+test("indexWorkbook rejects when embedder returns non-finite vector values (no partial writes)", async () => {
+  const workbook = makeWorkbookTwoTables();
+  const store = new InMemoryVectorStore({ dimension: 128 });
+
+  const embedder = {
+    async embedTexts(texts) {
+      return texts.map((_, i) => {
+        const vec = new Float32Array(128);
+        vec[0] = i === 0 ? 0 : Number.NaN;
+        return vec;
+      });
+    },
+  };
+
+  await assert.rejects(
+    indexWorkbook({ workbook, vectorStore: store, embedder }),
+    /invalid vector value/
+  );
+
+  assert.deepEqual(await store.list({ workbookId: workbook.id, includeVector: false }), []);
+});
+
 test("indexWorkbook rejects when embedder vectors have the wrong dimension (no partial writes)", async () => {
   const workbook = makeWorkbookTwoTables();
   const store = new InMemoryVectorStore({ dimension: 128 });

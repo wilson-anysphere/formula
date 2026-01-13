@@ -289,7 +289,7 @@ export async function indexWorkbook(params) {
     for (let i = 0; i < vectors.length; i += 1) {
       const vec = vectors[i];
       const len = vec?.length;
-      if (!Number.isFinite(len)) {
+      if (!Number.isFinite(len) || len <= 0) {
         throw new Error(
           `embedder.embedTexts returned an invalid vector for id=${toUpsert[i].id}: expected an array-like vector with a finite length`
         );
@@ -298,6 +298,14 @@ export async function indexWorkbook(params) {
         throw new Error(
           `Vector dimension mismatch for id=${toUpsert[i].id}: expected ${expectedDim}, got ${len}`
         );
+      }
+      for (let j = 0; j < len; j += 1) {
+        const value = vec[j];
+        if (!Number.isFinite(value)) {
+          throw new Error(
+            `embedder.embedTexts returned an invalid vector value for id=${toUpsert[i].id} at index=${j}: expected a finite number`
+          );
+        }
       }
     }
   }
