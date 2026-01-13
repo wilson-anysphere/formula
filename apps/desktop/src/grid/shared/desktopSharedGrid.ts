@@ -75,7 +75,6 @@ function looksLikeExternalHyperlink(text: string): boolean {
   return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed);
 }
 
-
 export class DesktopSharedGrid {
   readonly renderer: CanvasGridRenderer;
 

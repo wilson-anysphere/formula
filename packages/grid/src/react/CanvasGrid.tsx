@@ -408,7 +408,10 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           : `row ${selection.row + 1}, column ${selection.col + 1}`;
 
       const cell = providerRef.current.getCell(selection.row, selection.col);
-      const valueText = formatCellDisplayText(cell?.value ?? null);
+      let valueText = formatCellDisplayText(cell?.value ?? null);
+      if (valueText.trim() === "" && cell?.image) {
+        valueText = cell.image.altText?.trim() ? cell.image.altText : "[Image]";
+      }
       const valueDescription = valueText.trim() === "" ? "blank" : valueText;
       const label = `Cell ${address}, value ${valueDescription}.`;
 

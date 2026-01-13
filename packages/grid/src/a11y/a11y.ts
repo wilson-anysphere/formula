@@ -39,7 +39,10 @@ export function describeCell(
     row0 >= 0 && col0 >= 0 ? toA1Address(row0, col0) : `row ${selection.row + 1}, column ${selection.col + 1}`;
 
   const cell = provider.getCell(selection.row, selection.col);
-  const valueText = formatCellDisplayText(cell?.value ?? null);
+  let valueText = formatCellDisplayText(cell?.value ?? null);
+  if (valueText.trim() === "" && cell?.image) {
+    valueText = cell.image.altText?.trim() ? cell.image.altText : "[Image]";
+  }
   const valueDescription = valueText.trim() === "" ? "blank" : valueText;
 
   let selectionDescription = "none";
@@ -83,4 +86,3 @@ export function applySrOnlyStyle(el: HTMLElement): void {
   el.style.whiteSpace = SR_ONLY_STYLE.whiteSpace;
   el.style.border = SR_ONLY_STYLE.border;
 }
-
