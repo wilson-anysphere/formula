@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 
 use formula_model::{CellRef, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 
-use super::records;
+use super::{records, rgce};
 
 // Worksheet record ids (BIFF8).
 // See [MS-XLS]:
@@ -157,17 +157,17 @@ pub(crate) fn parse_biff8_shrfmla_record(
     if let Ok(rgce) = parse_shrfmla_with_refu(&mut c) {
         return Ok(ParsedSharedFormulaRecord { rgce });
     }
-    // Layout B: RefU (6) + cce (2). Some producers omit `cUse`.
-    let mut c = cursor.clone();
-    if let Ok(rgce) = parse_shrfmla_with_refu_no_cuse(&mut c) {
-        return Ok(ParsedSharedFormulaRecord { rgce });
-    }
-    // Layout C: Ref8 (8) + cUse (2) + cce (2).
+    // Layout B: Ref8 (8) + cUse (2) + cce (2).
     let mut c = cursor.clone();
     if let Ok(rgce) = parse_shrfmla_with_ref8(&mut c) {
         return Ok(ParsedSharedFormulaRecord { rgce });
     }
-    // Layout D: Ref8 (8) + cce (2). Some producers omit `cUse`.
+    // Layout C (non-standard): RefU (6) + cce (2) (no cUse).
+    let mut c = cursor.clone();
+    if let Ok(rgce) = parse_shrfmla_with_refu_no_cuse(&mut c) {
+        return Ok(ParsedSharedFormulaRecord { rgce });
+    }
+    // Layout D (non-standard): Ref8 (8) + cce (2) (no cUse).
     let mut c = cursor;
     if let Ok(rgce) = parse_shrfmla_with_ref8_no_cuse(&mut c) {
         return Ok(ParsedSharedFormulaRecord { rgce });
@@ -666,7 +666,6 @@ fn parse_shrfmla_with_ref8(cursor: &mut FragmentCursor<'_>) -> Result<Vec<u8>, S
 fn parse_shrfmla_with_ref8_no_cuse(cursor: &mut FragmentCursor<'_>) -> Result<Vec<u8>, String> {
     // ref (rwFirst:u16, rwLast:u16, colFirst:u16, colLast:u16)
     cursor.skip_bytes(8)?;
-    // cce
     let cce = cursor.read_u16_le()? as usize;
     cursor.read_biff8_rgce(cce)
 }
@@ -1045,6 +1044,434 @@ impl<'a> FragmentCursor<'a> {
 
         Ok(out)
     }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Non-standard `PtgExp` / `PtgTbl` payload width recovery
+// -------------------------------------------------------------------------------------------------
+//
+// BIFF8 specifies a 4-byte payload for `PtgExp` / `PtgTbl` tokens:
+//   [rw: u16][col: u16]
+//
+// In the wild, some producers embed wider row/col values (e.g. BIFF12/XLSB-like u32 fields) even
+// inside `.xls` files. Libraries that assume the 4-byte payload can panic or fail to resolve the
+// token back to a SHRFMLA/ARRAY/TABLE definition.
+//
+// This section implements a narrow best-effort parser that:
+// - Accepts multiple payload widths (u32/u32, u32/u16, u16/u16)
+// - Chooses the first candidate that matches a SHRFMLA/ARRAY/TABLE definition and contains the
+//   current cell in that definition’s range
+// - Only applies to non-canonical token stream lengths (`cce != 5`) to avoid changing behavior for
+//   normal BIFF8 encodings.
+
+const BIFF8_MAX_ROW0: u32 = u16::MAX as u32;
+const BIFF8_MAX_COL0: u32 = 0x00FF;
+
+#[derive(Debug, Default)]
+pub(crate) struct ParsedWorksheetExpFormulas {
+    /// Resolved formulas keyed by cell reference (0-based).
+    pub(crate) formulas: HashMap<CellRef, String>,
+    /// Non-fatal issues encountered while resolving/decoding.
+    pub(crate) warnings: Vec<String>,
+}
+
+/// Return plausible `(row, col)` base-cell coordinate candidates for a BIFF8 `PtgExp`/`PtgTbl`
+/// payload.
+///
+/// Candidates are returned in preference order:
+/// - row u32 + col u32 (8 bytes)
+/// - row u32 + col u16 (6 bytes)
+/// - row u16 + col u16 (4 bytes)
+///
+/// Candidates are filtered to BIFF8/Excel 2003 bounds (row <= 65535, col <= 255).
+pub(crate) fn ptgexp_candidates(payload: &[u8]) -> Vec<(u32, u32)> {
+    const MAX_ROW: u32 = BIFF8_MAX_ROW0;
+    const MAX_COL: u32 = BIFF8_MAX_COL0;
+
+    let mut candidates: Vec<(u32, u32, usize)> = Vec::new();
+
+    if payload.len() >= 8 {
+        let row = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+        let col = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+        if row <= MAX_ROW && col <= MAX_COL {
+            candidates.push((row, col, 8));
+        }
+    }
+
+    if payload.len() >= 6 {
+        let row = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+        let col = u16::from_le_bytes([payload[4], payload[5]]) as u32;
+        if row <= MAX_ROW && col <= MAX_COL {
+            candidates.push((row, col, 6));
+        }
+    }
+
+    if payload.len() >= 4 {
+        let row = u16::from_le_bytes([payload[0], payload[1]]) as u32;
+        let col = u16::from_le_bytes([payload[2], payload[3]]) as u32;
+        if row <= MAX_ROW && col <= MAX_COL {
+            candidates.push((row, col, 4));
+        }
+    }
+
+    // Prefer wider payload interpretations deterministically.
+    candidates.sort_by_key(|(_, _, n)| *n);
+    candidates.reverse();
+
+    // Deduplicate coordinates while preserving width preference (avoid spurious ambiguity warnings
+    // when the upper bytes are all zero).
+    let mut out: Vec<(u32, u32)> = Vec::new();
+    for (r, c, _) in candidates {
+        if !out.iter().any(|(rr, cc)| *rr == r && *cc == c) {
+            out.push((r, c));
+        }
+    }
+    out
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ExpKind {
+    Exp,
+    Tbl,
+}
+
+#[derive(Debug, Clone)]
+struct PendingExp {
+    kind: ExpKind,
+    cell: CellRef,
+    payload: Vec<u8>,
+}
+
+fn range_contains_cell(range: (CellRef, CellRef), cell: CellRef) -> bool {
+    cell.row >= range.0.row
+        && cell.row <= range.1.row
+        && cell.col >= range.0.col
+        && cell.col <= range.1.col
+}
+
+fn parse_formula_record_for_wide_ptgexp(
+    record: &records::LogicalBiffRecord<'_>,
+) -> Result<Option<PendingExp>, String> {
+    // FORMULA record header is 22 bytes before rgce.
+    let data = record.data.as_ref();
+    if data.len() < 22 {
+        return Ok(None);
+    }
+    let row = u16::from_le_bytes([data[0], data[1]]) as u32;
+    let col = u16::from_le_bytes([data[2], data[3]]) as u32;
+    if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
+        return Ok(None);
+    }
+    let cell = CellRef::new(row, col);
+
+    let cce = u16::from_le_bytes([data[20], data[21]]) as usize;
+    let rgce_start = 22usize;
+    let rgce_end = rgce_start
+        .checked_add(cce)
+        .ok_or_else(|| "FORMULA cce overflow".to_string())?;
+    if data.len() < rgce_end {
+        return Err(format!(
+            "truncated FORMULA rgce payload at offset {} (cce={cce}, have {} bytes)",
+            record.offset,
+            data.len().saturating_sub(rgce_start)
+        ));
+    }
+    let rgce = &data[rgce_start..rgce_end];
+    let Some((&ptg, payload)) = rgce.split_first() else {
+        return Ok(None);
+    };
+
+    let kind = match ptg {
+        0x01 => ExpKind::Exp,
+        0x02 => ExpKind::Tbl,
+        _ => return Ok(None),
+    };
+
+    // Canonical BIFF8 payload is 4 bytes => cce=5 including ptg.
+    if rgce.len() == 5 {
+        return Ok(None);
+    }
+
+    Ok(Some(PendingExp {
+        kind,
+        cell,
+        payload: payload.to_vec(),
+    }))
+}
+
+/// Decode formulas for BIFF8 cells whose `FORMULA.rgce` begins with `PtgExp` / `PtgTbl` and uses a
+/// non-canonical payload width (i.e. `cce != 5`).
+///
+/// This is intended as a narrow robustness fallback when upstream decoders cannot resolve
+/// wide-payload encodings back to the corresponding SHRFMLA/ARRAY/TABLE record.
+pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
+    workbook_stream: &[u8],
+    start: usize,
+    ctx: &rgce::RgceDecodeContext<'_>,
+) -> Result<ParsedWorksheetExpFormulas, String> {
+    let mut out = ParsedWorksheetExpFormulas::default();
+
+    let allows_continuation = |id: u16| {
+        id == RECORD_FORMULA || id == RECORD_SHRFMLA || id == RECORD_ARRAY || id == RECORD_TABLE
+    };
+    let mut iter = records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
+
+    let mut shrfmla: HashMap<CellRef, Biff8ShrFmlaRecord> = HashMap::new();
+    let mut array: HashMap<CellRef, Biff8ArrayRecord> = HashMap::new();
+    let mut table: HashMap<CellRef, Biff8TableRecord> = HashMap::new();
+    let mut pending: Vec<PendingExp> = Vec::new();
+
+    while let Some(next) = iter.next() {
+        let record = match next {
+            Ok(r) => r,
+            Err(err) => {
+                out.warnings
+                    .push(format!("malformed BIFF record in worksheet stream: {err}"));
+                break;
+            }
+        };
+
+        if record.offset != start && records::is_bof_record(record.record_id) {
+            break;
+        }
+        if record.record_id == records::RECORD_EOF {
+            break;
+        }
+
+        match record.record_id {
+            RECORD_SHRFMLA => {
+                let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
+                    out.warnings.push(format!(
+                        "failed to parse SHRFMLA range at offset {} (len={})",
+                        record.offset,
+                        record.data.len()
+                    ));
+                    continue;
+                };
+                let anchor = range.0;
+                match parse_biff8_shrfmla_record(&record) {
+                    Ok(parsed) => {
+                        shrfmla.insert(
+                            anchor,
+                            Biff8ShrFmlaRecord {
+                                range,
+                                rgce: parsed.rgce,
+                            },
+                        );
+                    }
+                    Err(err) => out.warnings.push(format!(
+                        "failed to parse SHRFMLA record at offset {}: {err}",
+                        record.offset
+                    )),
+                }
+            }
+            RECORD_ARRAY => {
+                let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
+                    out.warnings.push(format!(
+                        "failed to parse ARRAY range at offset {} (len={})",
+                        record.offset,
+                        record.data.len()
+                    ));
+                    continue;
+                };
+                let anchor = range.0;
+                match parse_biff8_array_record(&record) {
+                    Ok(parsed) => {
+                        array.insert(
+                            anchor,
+                            Biff8ArrayRecord {
+                                range,
+                                rgce: parsed.rgce,
+                            },
+                        );
+                    }
+                    Err(err) => out.warnings.push(format!(
+                        "failed to parse ARRAY record at offset {}: {err}",
+                        record.offset
+                    )),
+                }
+            }
+            RECORD_TABLE => {
+                let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
+                    out.warnings.push(format!(
+                        "failed to parse TABLE range at offset {} (len={})",
+                        record.offset,
+                        record.data.len()
+                    ));
+                    continue;
+                };
+                let anchor = range.0;
+                table.insert(
+                    anchor,
+                    Biff8TableRecord {
+                        range,
+                        data: record.data.as_ref().to_vec(),
+                    },
+                );
+            }
+            RECORD_FORMULA => match parse_formula_record_for_wide_ptgexp(&record) {
+                Ok(Some(p)) => pending.push(p),
+                Ok(None) => {}
+                Err(err) => out.warnings.push(err),
+            },
+            _ => {}
+        }
+    }
+
+    if pending.is_empty() {
+        return Ok(out);
+    }
+
+    for exp in pending {
+        let candidates = ptgexp_candidates(&exp.payload);
+        if candidates.is_empty() {
+            out.warnings.push(format!(
+                "cell {}: {:?} token has no in-bounds coordinate candidates (payload_len={})",
+                exp.cell.to_a1(),
+                exp.kind,
+                exp.payload.len()
+            ));
+            continue;
+        }
+
+        let mut matches: Vec<(u32, u32)> = Vec::new();
+        for &(base_row, base_col) in &candidates {
+            let base_cell = CellRef::new(base_row, base_col);
+
+            let has_match = match exp.kind {
+                ExpKind::Exp => {
+                    shrfmla
+                        .get(&base_cell)
+                        .is_some_and(|d| range_contains_cell(d.range, exp.cell))
+                        || array
+                            .get(&base_cell)
+                            .is_some_and(|d| range_contains_cell(d.range, exp.cell))
+                        || table
+                            .get(&base_cell)
+                            .is_some_and(|d| range_contains_cell(d.range, exp.cell))
+                }
+                ExpKind::Tbl => {
+                    table
+                        .get(&base_cell)
+                        .is_some_and(|d| range_contains_cell(d.range, exp.cell))
+                        || shrfmla
+                            .get(&base_cell)
+                            .is_some_and(|d| range_contains_cell(d.range, exp.cell))
+                        || array
+                            .get(&base_cell)
+                            .is_some_and(|d| range_contains_cell(d.range, exp.cell))
+                }
+            };
+
+            if has_match {
+                matches.push((base_row, base_col));
+            }
+        }
+
+        let Some(&(base_row, base_col)) = matches.first() else {
+            out.warnings.push(format!(
+                "cell {}: {:?} token base cell could not be resolved: candidates={candidates:?}",
+                exp.cell.to_a1(),
+                exp.kind
+            ));
+            continue;
+        };
+
+        if matches.len() > 1 {
+            out.warnings.push(format!(
+                "cell {}: {:?} token has multiple base-cell candidates that match definitions: {matches:?}; choosing ({base_row},{base_col})",
+                exp.cell.to_a1(),
+                exp.kind
+            ));
+        }
+
+        let base_cell = CellRef::new(base_row, base_col);
+        let decoded = match exp.kind {
+            ExpKind::Exp => {
+                if let Some(def) = shrfmla
+                    .get(&base_cell)
+                    .filter(|d| range_contains_cell(d.range, exp.cell))
+                {
+                    rgce::decode_biff8_rgce_with_base(
+                        &def.rgce,
+                        ctx,
+                        Some(rgce::CellCoord::new(exp.cell.row, exp.cell.col)),
+                    )
+                } else if let Some(def) = array
+                    .get(&base_cell)
+                    .filter(|d| range_contains_cell(d.range, exp.cell))
+                {
+                    rgce::decode_biff8_rgce_with_base(
+                        &def.rgce,
+                        ctx,
+                        Some(rgce::CellCoord::new(def.range.0.row, def.range.0.col)),
+                    )
+                } else if table
+                    .get(&base_cell)
+                    .is_some_and(|d| range_contains_cell(d.range, exp.cell))
+                {
+                    out.warnings.push(format!(
+                        "cell {}: TABLE formula decoding is not supported; rendering #UNKNOWN!",
+                        exp.cell.to_a1()
+                    ));
+                    out.formulas.insert(exp.cell, "#UNKNOWN!".to_string());
+                    continue;
+                } else {
+                    out.warnings.push(format!(
+                        "cell {}: {:?} token resolution inconsistency: base=({base_row},{base_col}) candidates={candidates:?}",
+                        exp.cell.to_a1(),
+                        exp.kind
+                    ));
+                    continue;
+                }
+            }
+            ExpKind::Tbl => {
+                if table
+                    .get(&base_cell)
+                    .is_some_and(|d| range_contains_cell(d.range, exp.cell))
+                {
+                    out.warnings.push(format!(
+                        "cell {}: TABLE formula decoding is not supported; rendering #UNKNOWN!",
+                        exp.cell.to_a1()
+                    ));
+                    out.formulas.insert(exp.cell, "#UNKNOWN!".to_string());
+                    continue;
+                } else if let Some(def) = shrfmla
+                    .get(&base_cell)
+                    .filter(|d| range_contains_cell(d.range, exp.cell))
+                {
+                    rgce::decode_biff8_rgce_with_base(
+                        &def.rgce,
+                        ctx,
+                        Some(rgce::CellCoord::new(exp.cell.row, exp.cell.col)),
+                    )
+                } else if let Some(def) = array
+                    .get(&base_cell)
+                    .filter(|d| range_contains_cell(d.range, exp.cell))
+                {
+                    rgce::decode_biff8_rgce_with_base(
+                        &def.rgce,
+                        ctx,
+                        Some(rgce::CellCoord::new(def.range.0.row, def.range.0.col)),
+                    )
+                } else {
+                    out.warnings.push(format!(
+                        "cell {}: {:?} token resolution inconsistency: base=({base_row},{base_col}) candidates={candidates:?}",
+                        exp.cell.to_a1(),
+                        exp.kind
+                    ));
+                    continue;
+                }
+            }
+        };
+
+        for w in decoded.warnings {
+            out.warnings.push(format!("cell {}: {w}", exp.cell.to_a1()));
+        }
+        out.formulas.insert(exp.cell, decoded.text);
+    }
+
+    Ok(out)
 }
 
 #[cfg(test)]

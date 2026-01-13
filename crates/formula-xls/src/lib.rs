@@ -440,9 +440,7 @@ fn import_xls_path_with_biff_reader(
             // patching BIFF5 streams (different NAME layout) to keep `.xls` import best-effort.
             let sanitized = match biff_version.unwrap_or_else(|| biff::detect_biff_version(stream))
             {
-                biff::BiffVersion::Biff8 => {
-                    sanitize_biff8_continued_name_records_for_calamine(stream)
-                }
+                biff::BiffVersion::Biff8 => sanitize_biff8_stream_for_calamine(stream),
                 biff::BiffVersion::Biff5 => None,
             };
             let xls_bytes = build_in_memory_xls(sanitized.as_deref().unwrap_or(stream))?;
@@ -1703,11 +1701,11 @@ fn import_xls_path_with_biff_reader(
             }
         }
 
-        // BIFF8 `PtgExp` formulas (shared formulas + array/CSE formulas).
+        // BIFF8 `PtgExp`/`PtgTbl` formulas (shared formulas + array/CSE formulas + legacy table formulas).
         //
-        // Calamine does not resolve `PtgExp` references. Recover formulas by scanning the raw
-        // worksheet substream for `SHRFMLA` (shared formula) and `ARRAY` (array formula)
-        // definition records.
+        // Calamine does not resolve `PtgExp`/`PtgTbl` references. Recover formulas by scanning the
+        // raw worksheet substream for `SHRFMLA` (shared formula), `ARRAY` (array formula), and
+        // `TABLE` definition records.
         //
         // Fallback behaviors:
         // - If definition records are missing/corrupt but the base cell still stores a full
@@ -1738,6 +1736,54 @@ fn import_xls_path_with_biff_reader(
                         supbooks: &biff_rgce_supbooks,
                         defined_names: &biff_rgce_defined_names,
                     };
+
+                    // Best-effort: resolve `PtgExp`/`PtgTbl` formulas directly from the worksheet
+                    // substream, including non-standard base-cell coordinate widths.
+                    match biff::worksheet_formulas::parse_biff8_worksheet_ptgexp_formulas(
+                        workbook_stream,
+                        sheet_info.offset,
+                        &ctx,
+                    ) {
+                        Ok(parsed) => {
+                            for warning in parsed.warnings {
+                                push_import_warning(
+                                    &mut warnings,
+                                    format!(
+                                        "failed to fully decode `.xls` formulas in sheet `{sheet_name}`: {warning}"
+                                    ),
+                                    &mut warnings_suppressed,
+                                );
+                            }
+                            for (cell_ref, formula) in parsed.formulas {
+                                let anchor = sheet.merged_regions.resolve_cell(cell_ref);
+                                if sheet
+                                    .formula(anchor)
+                                    .is_some_and(|f| f != ErrorValue::Unknown.as_str())
+                                {
+                                    continue;
+                                }
+                                let Some(normalized) = normalize_formula_text(&formula) else {
+                                    continue;
+                                };
+                                sheet.set_formula(anchor, Some(normalized));
+                                if let Some(resolved) = style_id_for_cell_xf(
+                                    xf_style_ids.as_deref(),
+                                    sheet_cell_xfs,
+                                    anchor,
+                                ) {
+                                    sheet.set_style_id(anchor, resolved);
+                                }
+                            }
+                        }
+                        Err(err) => push_import_warning(
+                            &mut warnings,
+                            format!(
+                                "failed to parse `.xls` PtgExp/PtgTbl formulas for sheet `{sheet_name}` from workbook stream: {err}"
+                            ),
+                            &mut warnings_suppressed,
+                            ),
+                    }
+
                     let mut apply_recovered_formulas =
                         |mut recovered: biff::formulas::PtgExpFallbackResult,
                          override_existing: bool,
@@ -4441,6 +4487,69 @@ fn import_biff8_shared_formulas(
             }
         }
     }
+}
+
+fn sanitize_biff8_stream_for_calamine(stream: &[u8]) -> Option<Vec<u8>> {
+    let mut sanitized = sanitize_biff8_continued_name_records_for_calamine(stream);
+    let base = sanitized.as_deref().unwrap_or(stream);
+    if let Some(patched) = sanitize_biff8_wide_ptgexp_formulas_for_calamine(base) {
+        sanitized = Some(patched);
+    }
+    sanitized
+}
+
+fn sanitize_biff8_wide_ptgexp_formulas_for_calamine(stream: &[u8]) -> Option<Vec<u8>> {
+    // Calamine assumes BIFF8 `PtgExp`/`PtgTbl` payloads are always 4 bytes (rw u16 + col u16).
+    // Some producers emit wider row/col widths even in `.xls` files, which can cause calamine to
+    // misalign the token stream and panic.
+    //
+    // Work around this by clamping `FORMULA.cce` to 5 bytes (ptg + 4-byte payload) for formulas
+    // whose `rgce` begins with `PtgExp`/`PtgTbl` and whose `cce` exceeds the BIFF8 minimum. This
+    // keeps record sizes stable (no shifting) while avoiding calamine's token-parser panic. We
+    // still recover the correct formula text later via our own BIFF parser using the original
+    // workbook stream.
+    const RECORD_FORMULA: u16 = 0x0006;
+    const PTG_EXP: u8 = 0x01;
+    const PTG_TBL: u8 = 0x02;
+
+    let mut out: Option<Vec<u8>> = None;
+    let mut iter = biff::records::BiffRecordIter::from_offset(stream, 0).ok()?;
+
+    while let Some(next) = iter.next() {
+        let record = match next {
+            Ok(r) => r,
+            Err(_) => break,
+        };
+        if record.record_id != RECORD_FORMULA {
+            continue;
+        }
+        let data = record.data;
+        if data.len() < 22 {
+            continue;
+        }
+        let cce = u16::from_le_bytes([data[20], data[21]]) as usize;
+        if cce <= 5 {
+            continue;
+        }
+        if data.len() < 22 + cce {
+            continue;
+        }
+        let rgce = &data[22..22 + cce];
+        let Some(&ptg) = rgce.first() else {
+            continue;
+        };
+        if ptg != PTG_EXP && ptg != PTG_TBL {
+            continue;
+        }
+
+        let out = out.get_or_insert_with(|| stream.to_vec());
+        let cce_offset = record.offset + 4 + 20;
+        if cce_offset + 2 <= out.len() {
+            out[cce_offset..cce_offset + 2].copy_from_slice(&5u16.to_le_bytes());
+        }
+    }
+
+    out
 }
 
 fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<Vec<u8>> {
