@@ -314,6 +314,134 @@ jobs:
             exit 1
           }
 
+      - name: Validate macOS notarization + stapling (Gatekeeper)
+        if: ${{ matrix.platform == 'macos-latest' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+        working-directory: apps/desktop/src-tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Validating macOS release artifacts are notarized and stapled (Gatekeeper-ready)."
+          echo "Search root: $(pwd)"
+
+          if [[ ! -d target ]]; then
+            echo "::error::Expected build output directory 'apps/desktop/src-tauri/target' does not exist."
+            exit 1
+          fi
+
+          # Tauri bundler outputs (examples):
+          # - target/release/bundle/dmg/*.dmg
+          # - target/release/bundle/macos/*.app
+          # - target/<triple>/release/bundle/... (when building for non-host targets)
+          mapfile -t dmgs < <(find target -type f -path "*/release/bundle/*/*.dmg" -print | sort)
+          mapfile -t apps < <(find target -type d -path "*/release/bundle/*/*.app" -print | sort)
+
+          if [[ ${#dmgs[@]} -eq 0 && ${#apps[@]} -eq 0 ]]; then
+            echo "::error::No macOS bundle artifacts (.dmg or .app) were found under target/**/release/bundle/**."
+            echo "This step runs only when APPLE_* notarization secrets are configured, and is meant to"
+            echo "guarantee tagged releases produce Gatekeeper-ready artifacts (notarized + stapled)."
+            echo
+            echo "Expected output paths include:"
+            echo "  apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg"
+            echo "  apps/desktop/src-tauri/target/release/bundle/macos/*.app"
+            exit 1
+          fi
+
+          echo "Found artifacts:"
+          if [[ ${#dmgs[@]} -gt 0 ]]; then
+            printf '  - %s\n' "${dmgs[@]}"
+          fi
+          if [[ ${#apps[@]} -gt 0 ]]; then
+            printf '  - %s\n' "${apps[@]}"
+          fi
+
+          fail=0
+
+          validate_dmg() {
+            local dmg="$1"
+            echo "::group::Validate notarization for DMG: $dmg"
+
+            # Requires the DMG to have a stapled ticket for offline Gatekeeper validation.
+            if ! xcrun stapler validate "$dmg"; then
+              echo "::error::DMG is not stapled (missing notarization ticket): $dmg"
+              fail=1
+            fi
+
+            # Gatekeeper assessment for disk images.
+            if ! spctl -a -vv --type open "$dmg"; then
+              echo "::error::Gatekeeper rejected DMG (not notarized?): $dmg"
+              fail=1
+            fi
+
+            echo "::endgroup::"
+          }
+
+          validate_app() {
+            local app="$1"
+            echo "::group::Validate notarization for app: $app"
+
+            if ! xcrun stapler validate "$app"; then
+              echo "::error::App bundle is not stapled (missing notarization ticket): $app"
+              fail=1
+            fi
+
+            # Gatekeeper assessment for executables / app bundles.
+            if ! spctl -a -vv --type execute "$app"; then
+              echo "::error::Gatekeeper rejected app bundle (not notarized?): $app"
+              fail=1
+            fi
+
+            echo "::endgroup::"
+          }
+
+          for dmg in "${dmgs[@]}"; do
+            validate_dmg "$dmg"
+          done
+
+          for app in "${apps[@]}"; do
+            validate_app "$app"
+          done
+
+          # Some setups only publish a DMG; if no standalone .app bundle is present, validate the
+          # app inside the DMG as well.
+          if [[ ${#apps[@]} -eq 0 && ${#dmgs[@]} -gt 0 ]]; then
+            dmg="${dmgs[0]}"
+            mount_dir="$(mktemp -d)"
+            echo "::group::No standalone .app found; validating the .app inside DMG: $dmg"
+
+            if hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir" >/dev/null; then
+              mapfile -t mounted_apps < <(find "$mount_dir" -maxdepth 2 -type d -name "*.app" -print | sort)
+              if [[ ${#mounted_apps[@]} -eq 0 ]]; then
+                echo "::error::Mounted DMG but did not find a .app bundle inside: $dmg"
+                fail=1
+              else
+                for app in "${mounted_apps[@]}"; do
+                  validate_app "$app"
+                done
+              fi
+              hdiutil detach "$mount_dir" >/dev/null || hdiutil detach "$mount_dir" -force >/dev/null || true
+            else
+              echo "::error::Failed to mount DMG for validation: $dmg"
+              fail=1
+            fi
+
+            rm -rf "$mount_dir" || true
+            echo "::endgroup::"
+          fi
+
+          if [[ "$fail" -ne 0 ]]; then
+            echo "::error::macOS notarization/stapling validation failed."
+            echo "The release build produced artifacts, but at least one was rejected by Gatekeeper or"
+            echo "missing a stapled notarization ticket."
+            echo
+            echo "Troubleshooting:"
+            echo "  - Confirm APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID (and signing cert/identity) are configured."
+            echo "  - Check the tauri-action logs for notarization/stapling output."
+            exit 1
+          fi
+
+          echo "macOS notarization/stapling validation passed."
+
       - name: Report desktop bundle sizes
         env:
           # Optional: set these as GitHub Actions "Variables" to enable gating.
