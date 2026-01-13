@@ -934,6 +934,9 @@ impl<'a> CompileCtx<'a> {
             // references to ranges so XMATCH/XLOOKUP can treat them uniformly.
             Function::XMatch => arg_idx == 1,
             Function::XLookup => arg_idx == 1 || arg_idx == 2,
+            // OFFSET's first argument is reference-valued: even a single-cell ref like `A1` must
+            // preserve reference semantics so the runtime can compute the shifted rectangle.
+            Function::Offset => arg_idx == 0,
             Function::Row | Function::Column | Function::Rows | Function::Columns => true,
             Function::Rand | Function::RandBetween => false,
             _ => false,

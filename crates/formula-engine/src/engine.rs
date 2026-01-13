@@ -2892,7 +2892,6 @@ impl Engine {
                 } else {
                     trace.borrow().precedents()
                 };
-
                 let expr = compiled.ast();
 
                 let cell_id = cell_id_from_key(*k);
@@ -8716,6 +8715,18 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         (rows, cols)
     }
 
+    fn resolve_sheet_name(&self, name: &str) -> Option<usize> {
+        self.snapshot
+            .sheet_names_by_id
+            .iter()
+            .position(|candidate| match candidate.as_deref() {
+                Some(candidate) => {
+                    crate::value::cmp_case_insensitive(candidate, name) == Ordering::Equal
+                }
+                None => false,
+            })
+    }
+
     fn spill_origin(&self, sheet_id: usize, addr: CellAddr) -> Option<CellAddr> {
         self.snapshot.spill_origin(sheet_id, addr)
     }
@@ -9077,6 +9088,10 @@ fn bytecode_expr_is_eligible_inner(
                         BytecodeLocalBindingKind::Scalar
                     }
                 }
+                // OFFSET/INDIRECT produce reference values (ranges). Treat them conservatively as
+                // range-like so LET bindings cannot smuggle them into scalar-only bytecode
+                // contexts.
+                Function::Offset | Function::Indirect => BytecodeLocalBindingKind::Range,
                 Function::Row
                 | Function::Column
                 | Function::IsError
@@ -9289,6 +9304,9 @@ fn bytecode_expr_is_eligible_inner(
                     [arg] => choose_index_is_guaranteed_scalar(arg, lexical_scopes),
                     _ => true,
                 },
+                // OFFSET/INDIRECT are reference-valued and can spill; they are not scalar-safe as
+                // CHOOSE/SWITCH indices.
+                Function::Offset | Function::Indirect => false,
                 // All other supported functions in the bytecode backend return scalars.
                 _ => true,
             },
@@ -9604,6 +9622,42 @@ fn bytecode_expr_is_eligible_inner(
                 }
                 args.iter()
                     .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+            }
+            bytecode::ast::Function::Offset => {
+                // OFFSET returns a reference/range value. Only allow it in contexts that allow
+                // reference values to propagate (spills or range-taking functions).
+                if !allow_range {
+                    return false;
+                }
+                if !(3..=5).contains(&args.len()) {
+                    return false;
+                }
+                // base is reference-valued.
+                let base_ok = bytecode_expr_is_eligible_inner(&args[0], true, false, lexical_scopes);
+                // rows/cols/height/width are scalar arguments, but Excel applies implicit
+                // intersection when they are provided as references. Allow reference values but
+                // reject array literals in these scalar positions.
+                let mut scalar_ok = true;
+                for arg in &args[1..] {
+                    if !bytecode_expr_is_eligible_inner(arg, true, false, lexical_scopes) {
+                        scalar_ok = false;
+                        break;
+                    }
+                }
+                base_ok && scalar_ok
+            }
+            bytecode::ast::Function::Indirect => {
+                // INDIRECT returns a reference/range value, so only allow it in range contexts.
+                if !allow_range {
+                    return false;
+                }
+                if args.is_empty() || args.len() > 2 {
+                    return false;
+                }
+                // Both arguments are scalar (text + optional bool), but accept references via
+                // implicit intersection.
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, true, false, lexical_scopes))
             }
             bytecode::ast::Function::Rand => args.is_empty(),
             bytecode::ast::Function::RandBetween => {

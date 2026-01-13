@@ -1891,6 +1891,8 @@ pub fn call_function(
         Function::Rows => fn_rows(args, base),
         Function::Columns => fn_columns(args, base),
         Function::Address => fn_address(args),
+        Function::Offset => fn_offset(args, grid, base),
+        Function::Indirect => fn_indirect(args, grid, base),
         Function::XMatch => fn_xmatch(args, grid, base),
         Function::XLookup => fn_xlookup(args, grid, base),
         Function::Unknown(_) => Value::Error(ErrorKind::Name),
@@ -4827,6 +4829,257 @@ fn fn_address(args: &[Value]) -> Value {
         Value::Text(Arc::from(format!("{prefix}{addr}")))
     } else {
         Value::Text(Arc::from(addr))
+    }
+}
+
+fn fn_offset(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if !(3..=5).contains(&args.len()) {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let current_sheet = thread_current_sheet_id() as usize;
+
+    let (sheet, base_range) = match &args[0] {
+        Value::Range(r) => (current_sheet, r.resolve(base)),
+        Value::MultiRange(r) => match r.areas.as_ref() {
+            [] => return Value::Error(ErrorKind::Ref),
+            [only] => (only.sheet, only.range.resolve(base)),
+            _ => return Value::Error(ErrorKind::Value),
+        },
+        Value::Error(e) => return Value::Error(*e),
+        _ => return Value::Error(ErrorKind::Value),
+    };
+
+    let rows = match match &args[1] {
+        Value::Range(_) | Value::MultiRange(_) => {
+            apply_implicit_intersection(args[1].clone(), grid, base)
+        }
+        _ => args[1].clone(),
+    } {
+        Value::Error(e) => return Value::Error(e),
+        v => match coerce_to_i64(&v) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        },
+    };
+
+    let cols = match match &args[2] {
+        Value::Range(_) | Value::MultiRange(_) => {
+            apply_implicit_intersection(args[2].clone(), grid, base)
+        }
+        _ => args[2].clone(),
+    } {
+        Value::Error(e) => return Value::Error(e),
+        v => match coerce_to_i64(&v) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        },
+    };
+
+    let default_height = i64::from(base_range.rows());
+    let default_width = i64::from(base_range.cols());
+
+    let height = if let Some(arg) = args.get(3) {
+        match match arg {
+            Value::Range(_) | Value::MultiRange(_) => apply_implicit_intersection(arg.clone(), grid, base),
+            _ => arg.clone(),
+        } {
+            Value::Error(e) => return Value::Error(e),
+            v => match coerce_to_i64(&v) {
+                Ok(n) => n,
+                Err(e) => return Value::Error(e),
+            },
+        }
+    } else {
+        default_height
+    };
+
+    let width = if let Some(arg) = args.get(4) {
+        match match arg {
+            Value::Range(_) | Value::MultiRange(_) => apply_implicit_intersection(arg.clone(), grid, base),
+            _ => arg.clone(),
+        } {
+            Value::Error(e) => return Value::Error(e),
+            v => match coerce_to_i64(&v) {
+                Ok(n) => n,
+                Err(e) => return Value::Error(e),
+            },
+        }
+    } else {
+        default_width
+    };
+
+    if height < 1 || width < 1 {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    let start_row = (base_range.row_start as i64) + rows;
+    let start_col = (base_range.col_start as i64) + cols;
+    let end_row = start_row + height - 1;
+    let end_col = start_col + width - 1;
+
+    let within_i32 = |n: i64| n >= 0 && i32::try_from(n).is_ok();
+    if !within_i32(start_row)
+        || !within_i32(start_col)
+        || !within_i32(end_row)
+        || !within_i32(end_col)
+    {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    let start = Ref::new(start_row as i32, start_col as i32, true, true);
+    let end = Ref::new(end_row as i32, end_col as i32, true, true);
+    let range = RangeRef::new(start, end);
+
+    if sheet == current_sheet {
+        Value::Range(range)
+    } else {
+        Value::MultiRange(MultiRangeRef::new(
+            vec![SheetRangeRef::new(sheet, range)].into(),
+        ))
+    }
+}
+
+fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.is_empty() || args.len() > 2 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let text_val = match &args[0] {
+        Value::Range(_) | Value::MultiRange(_) => {
+            apply_implicit_intersection(args[0].clone(), grid, base)
+        }
+        _ => args[0].clone(),
+    };
+    let text = match coerce_to_string(&text_val) {
+        Ok(s) => s,
+        Err(e) => return Value::Error(e),
+    };
+
+    let a1 = if args.len() == 2 {
+        let a1_val = match &args[1] {
+            Value::Range(_) | Value::MultiRange(_) => {
+                apply_implicit_intersection(args[1].clone(), grid, base)
+            }
+            _ => args[1].clone(),
+        };
+        match coerce_to_bool(&a1_val) {
+            Ok(b) => b,
+            Err(e) => return Value::Error(e),
+        }
+    } else {
+        true
+    };
+
+    let ref_text = text.trim();
+    if ref_text.is_empty() {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    let parsed = match crate::parse_formula(
+        ref_text,
+        crate::ParseOptions {
+            locale: crate::LocaleConfig::en_us(),
+            reference_style: if a1 {
+                crate::ReferenceStyle::A1
+            } else {
+                crate::ReferenceStyle::R1C1
+            },
+            normalize_relative_to: None,
+        },
+    ) {
+        Ok(ast) => ast,
+        Err(_) => return Value::Error(ErrorKind::Ref),
+    };
+
+    let current_sheet = thread_current_sheet_id() as usize;
+    let Ok(origin_row) = u32::try_from(base.row) else {
+        return Value::Error(ErrorKind::Ref);
+    };
+    let Ok(origin_col) = u32::try_from(base.col) else {
+        return Value::Error(ErrorKind::Ref);
+    };
+    let origin_ast = crate::CellAddr::new(origin_row, origin_col);
+
+    let lowered = crate::eval::lower_ast(&parsed, if a1 { None } else { Some(origin_ast) });
+
+    fn resolve_sheet(grid: &dyn Grid, sheet: &crate::eval::SheetReference<String>) -> Option<usize> {
+        match sheet {
+            crate::eval::SheetReference::Current => Some(thread_current_sheet_id() as usize),
+            crate::eval::SheetReference::Sheet(name) => grid.resolve_sheet_name(name),
+            crate::eval::SheetReference::SheetRange(start, end) => {
+                let start_id = grid.resolve_sheet_name(start)?;
+                let end_id = grid.resolve_sheet_name(end)?;
+                (start_id == end_id).then_some(start_id)
+            }
+            crate::eval::SheetReference::External(_) => None,
+        }
+    }
+
+    fn resolve_coord(n: u32, max: i32) -> Option<i32> {
+        if n == crate::eval::CellAddr::SHEET_END {
+            Some(max)
+        } else {
+            i32::try_from(n).ok()
+        }
+    }
+
+    let make_range_value =
+        |sheet: usize, start: crate::eval::CellAddr, end: crate::eval::CellAddr| -> Value {
+            let (rows, cols) = grid.bounds_on_sheet(sheet);
+            if rows <= 0 || cols <= 0 {
+                return Value::Error(ErrorKind::Ref);
+            }
+            let max_row = rows - 1;
+            let max_col = cols - 1;
+
+            let Some(start_row) = resolve_coord(start.row, max_row) else {
+                return Value::Error(ErrorKind::Ref);
+            };
+            let Some(start_col) = resolve_coord(start.col, max_col) else {
+                return Value::Error(ErrorKind::Ref);
+            };
+            let Some(end_row) = resolve_coord(end.row, max_row) else {
+                return Value::Error(ErrorKind::Ref);
+            };
+            let Some(end_col) = resolve_coord(end.col, max_col) else {
+                return Value::Error(ErrorKind::Ref);
+            };
+
+            if start_row < 0 || start_col < 0 || end_row < 0 || end_col < 0 {
+                return Value::Error(ErrorKind::Ref);
+            }
+
+            let range = RangeRef::new(
+                Ref::new(start_row, start_col, true, true),
+                Ref::new(end_row, end_col, true, true),
+            );
+
+            if sheet == current_sheet {
+                Value::Range(range)
+            } else {
+                Value::MultiRange(MultiRangeRef::new(
+                    vec![SheetRangeRef::new(sheet, range)].into(),
+                ))
+            }
+        };
+
+    match lowered {
+        crate::eval::Expr::CellRef(r) => {
+            let Some(sheet_id) = resolve_sheet(grid, &r.sheet) else {
+                return Value::Error(ErrorKind::Ref);
+            };
+            make_range_value(sheet_id, r.addr, r.addr)
+        }
+        crate::eval::Expr::RangeRef(r) => {
+            let Some(sheet_id) = resolve_sheet(grid, &r.sheet) else {
+                return Value::Error(ErrorKind::Ref);
+            };
+            make_range_value(sheet_id, r.start, r.end)
+        }
+        crate::eval::Expr::Error(e) => Value::Error(ErrorKind::from(e)),
+        crate::eval::Expr::NameRef(_) => Value::Error(ErrorKind::Ref),
+        _ => Value::Error(ErrorKind::Ref),
     }
 }
 

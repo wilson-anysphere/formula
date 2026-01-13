@@ -131,6 +131,8 @@ pub enum Function {
     Rows,
     Columns,
     Address,
+    Offset,
+    Indirect,
     XLookup,
     XMatch,
     Unknown(Arc<str>),
@@ -235,6 +237,8 @@ impl Function {
             "ROWS" => Function::Rows,
             "COLUMNS" => Function::Columns,
             "ADDRESS" => Function::Address,
+            "OFFSET" => Function::Offset,
+            "INDIRECT" => Function::Indirect,
             other => Function::Unknown(Arc::from(other)),
         }
     }
@@ -334,6 +338,8 @@ impl Function {
             Function::Rows => "ROWS",
             Function::Columns => "COLUMNS",
             Function::Address => "ADDRESS",
+            Function::Offset => "OFFSET",
+            Function::Indirect => "INDIRECT",
             Function::XLookup => "XLOOKUP",
             Function::XMatch => "XMATCH",
             Function::Unknown(s) => s,

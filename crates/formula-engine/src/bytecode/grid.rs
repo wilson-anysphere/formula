@@ -128,6 +128,16 @@ pub trait Grid: Sync {
         self.bounds()
     }
 
+    /// Resolve a worksheet display name to an internal sheet id.
+    ///
+    /// This is used by volatile reference functions like `INDIRECT` that parse sheet names at
+    /// runtime. Multi-sheet backends (like the engine) should override this. Single-sheet
+    /// backends can rely on the default implementation, which does not resolve any names.
+    #[inline]
+    fn resolve_sheet_name(&self, _name: &str) -> Option<usize> {
+        None
+    }
+
     #[inline]
     fn in_bounds(&self, coord: CellCoord) -> bool {
         let (rows, cols) = self.bounds();
