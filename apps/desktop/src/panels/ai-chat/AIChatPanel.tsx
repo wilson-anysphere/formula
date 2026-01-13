@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Attachment, ChatMessage } from "./types.js";
-import { showQuickPick } from "../../extensions/ui.js";
+import { showQuickPick, showToast } from "../../extensions/ui.js";
 import type {
   ChatStreamEvent,
   LLMClient,
@@ -162,6 +162,14 @@ export function AIChatPanel(props: AIChatPanelProps) {
       if (prev.some((a) => a.type === next.type && a.reference === next.reference)) return prev;
       return [...prev, next];
     });
+  }
+
+  function toastBestEffort(message: string, type: "info" | "warning" | "error" = "info") {
+    try {
+      showToast(message, type);
+    } catch {
+      // `showToast` requires a #toast-root; unit tests don't always include it.
+    }
   }
 
   function removeAttachmentAt(index: number) {
@@ -437,8 +445,22 @@ export function AIChatPanel(props: AIChatPanelProps) {
               title={!selectionAttachmentPreview ? t("chat.attachSelection.disabled") : undefined}
               onClick={() => {
                 const attachment = safeInvoke(props.getSelectionAttachment);
-                if (!attachment) return;
+                if (!attachment) {
+                  toastBestEffort(t("chat.attachSelection.disabled"));
+                  return;
+                }
                 addAttachment(attachment);
+                const clampInfo = (attachment as any)?.data?.clamped;
+                if (clampInfo && typeof clampInfo === "object") {
+                  toastBestEffort(
+                    tWithVars("chat.attachSelection.clamped", {
+                      original: (clampInfo as any).originalCellCount ?? (clampInfo as any).original ?? "",
+                      attached: (clampInfo as any).attachedCellCount ?? (clampInfo as any).attached ?? "",
+                      max: (clampInfo as any).maxCells ?? (clampInfo as any).max ?? "",
+                    }),
+                    "warning",
+                  );
+                }
               }}
             >
               {t("chat.attachSelection")}
@@ -458,11 +480,14 @@ export function AIChatPanel(props: AIChatPanelProps) {
                 type="button"
                 className="ai-chat-panel__attachment-button"
                 data-testid="ai-chat-attach-formula"
-                disabled={sending || !formulaAttachmentPreview}
+                disabled={sending}
                 title={!formulaAttachmentPreview ? t("chat.attachFormula.disabled") : undefined}
                 onClick={() => {
                   const attachment = safeInvoke(props.getFormulaAttachment);
-                  if (!attachment) return;
+                  if (!attachment) {
+                    toastBestEffort(t("chat.attachFormula.disabled"));
+                    return;
+                  }
                   addAttachment(attachment);
                 }}
               >

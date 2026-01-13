@@ -286,9 +286,23 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
     if (!sheetId || !range) return null;
 
     const displayName = sheetNameResolver?.getSheetNameById(sheetId) ?? sheetId;
-    const clamped = clampRangeToMaxCells(range as any, DEFAULT_EXTENSION_RANGE_CELL_LIMIT);
+    const normalized = normalizeExtensionRange(range as any);
+    const originalSize = getExtensionRangeSize(normalized);
+    const clamped = clampRangeToMaxCells(normalized, DEFAULT_EXTENSION_RANGE_CELL_LIMIT);
+    const clampedSize = getExtensionRangeSize(clamped);
     const reference = `${formatSheetNameForA1(displayName)}!${rangeToA1Selection(clamped)}`;
-    return { type: "range", reference } as const;
+    const data =
+      originalSize.cellCount > DEFAULT_EXTENSION_RANGE_CELL_LIMIT
+        ? {
+            source: "selection",
+            clamped: {
+              originalCellCount: originalSize.cellCount,
+              attachedCellCount: clampedSize.cellCount,
+              maxCells: DEFAULT_EXTENSION_RANGE_CELL_LIMIT,
+            },
+          }
+        : undefined;
+    return { type: "range", reference, ...(data ? { data } : {}) } as const;
   }, [props.getSelection, sheetNameResolver]);
 
   const getFormulaAttachment = useCallback(() => {

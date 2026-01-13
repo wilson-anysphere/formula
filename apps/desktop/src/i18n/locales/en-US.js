@@ -26,6 +26,8 @@ export const enUS = {
   "chat.pendingAttachments": "Pending attachments:",
   "chat.attachSelection": "Attach selection",
   "chat.attachSelection.disabled": "No selection available",
+  "chat.attachSelection.clamped":
+    "Selection is too large ({original} cells). Attached {attached} cells (limit {max}).",
   "chat.attachTable": "Attach table",
   "chat.attachTable.placeholder": "Select a table to attach",
   "chat.attachTable.disabled": "No tables available",
