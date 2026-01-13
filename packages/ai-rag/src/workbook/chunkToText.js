@@ -20,6 +20,24 @@ function formatScalar(value) {
 }
 
 /**
+ * Ensure header labels are unique so sample rows can be parsed as key/value pairs
+ * without ambiguity (duplicate header names are common in messy spreadsheets).
+ *
+ * @param {string[]} headers
+ */
+function dedupeHeaders(headers) {
+  /** @type {Map<string, number>} */
+  const seen = new Map();
+  return headers.map((h) => {
+    const base = String(h);
+    const count = seen.get(base) ?? 0;
+    seen.set(base, count + 1);
+    if (count === 0) return base;
+    return `${base}_${count + 1}`;
+  });
+}
+
+/**
  * @param {number} total
  * @param {number} shown
  */
@@ -116,10 +134,12 @@ export function chunkToText(chunk, opts) {
   const rowColCount = Math.max(0, Math.min(sampledColCount, maxColumnsForRows));
   const headerNames =
     headerRow === 0
-      ? Array.from({ length: Math.max(schemaColCount, rowColCount) }, (_, c) => {
+      ? dedupeHeaders(
+          Array.from({ length: Math.max(schemaColCount, rowColCount) }, (_, c) => {
           const h = formatScalar(cells[0]?.[c]?.v);
           return h || `Column${c + 1}`;
         })
+        )
       : null;
 
   if (sampledColCount > 0) {

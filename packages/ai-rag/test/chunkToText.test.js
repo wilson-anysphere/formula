@@ -55,6 +55,24 @@ test("chunkToText falls back to Column<N> when a header cell is empty", () => {
   assert.match(text, /Name=Alice/);
 });
 
+test("chunkToText disambiguates duplicate header names in labeled rows", () => {
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 2 },
+    cells: [
+      [{ v: "Value" }, { v: "Value" }, { v: "Value" }],
+      [{ v: 1 }, { v: 2 }, { v: 3 }],
+    ],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /Value=1/);
+  assert.match(text, /Value_2=2/);
+  assert.match(text, /Value_3=3/);
+});
+
 test("chunkToText caps wide tables with an explicit truncation indicator", () => {
   const colCount = 25;
   const headers = Array.from({ length: colCount }, (_, i) => ({ v: `H${i + 1}` }));
