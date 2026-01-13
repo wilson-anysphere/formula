@@ -179,7 +179,7 @@ function main() {
       `Missing/empty GitHub Actions repository secrets (Settings → Secrets and variables → Actions):`,
       ...missing.map((name) => name),
       `Generate a new keypair (prints public + private key):`,
-      `  (cd apps/desktop/src-tauri && tauri signer generate)`,
+      `  (cd apps/desktop/src-tauri && cargo tauri signer generate)`,
       `  # Agents: (cd apps/desktop/src-tauri && bash ../../../scripts/cargo_agent.sh tauri signer generate)`,
       `See docs/release.md ("Tauri updater keys").`,
     ]);
