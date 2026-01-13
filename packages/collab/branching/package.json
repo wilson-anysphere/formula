@@ -7,8 +7,8 @@
     ".": "./index.js"
   },
   "main": "index.js",
+  "types": "index.d.ts",
   "dependencies": {
     "@formula/collab-yjs-utils": "workspace:*"
   }
 }
-
