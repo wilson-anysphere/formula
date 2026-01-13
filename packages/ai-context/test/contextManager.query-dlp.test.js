@@ -4,6 +4,7 @@ import test from "node:test";
 import { ContextManager } from "../src/contextManager.js";
 import { InMemoryVectorStore, RagIndex } from "../src/rag.js";
 import { DLP_ACTION } from "../../security/dlp/src/actions.js";
+import { DlpViolationError } from "../../security/dlp/src/errors.js";
 
 class CapturingEmbedder {
   constructor() {
@@ -56,3 +57,42 @@ test("buildContext: redacts sensitive query before sheet-level RAG embedding whe
   assert.doesNotMatch(embedder.seen.join("\n"), /alice@example\.com/);
 });
 
+test("buildContext: heuristic Restricted findings can block when policy requires", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, redactor: (text) => text });
+
+  /** @type {any[]} */
+  const auditEvents = [];
+  const auditLogger = { log: (event) => auditEvents.push(event) };
+
+  await assert.rejects(
+    cm.buildContext({
+      sheet: {
+        name: "Sheet1",
+        values: [["Email"], ["alice@example.com"]],
+      },
+      query: "anything",
+      dlp: {
+        documentId: "doc-1",
+        sheetId: "Sheet1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: false,
+            },
+          },
+        },
+        classificationRecords: [],
+        auditLogger,
+      },
+    }),
+    (err) => err instanceof DlpViolationError,
+  );
+
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditEvents[0]?.type, "ai.context");
+  assert.equal(cm.ragIndex.store.size, 0);
+});
