@@ -14,6 +14,7 @@ test("index.js is fully typed for TS consumers", async () => {
  import {
    EXCEL_MAX_COLS,
    EXCEL_MAX_ROWS,
+   ContextManager,
    classifyText,
    extractWorkbookSchema,
    summarizeWorkbookSchema,
@@ -21,17 +22,17 @@ test("index.js is fully typed for TS consumers", async () => {
    RagIndex,
    isLikelyHeaderRow,
    headSampleRows,
-  tailSampleRows,
-  systematicSampleRows,
-  randomSampleRows,
-  stratifiedSampleRows,
-  scoreRegionForQuery,
-  pickBestRegionForQuery,
-  type RegionType,
-  type RegionRef,
-  type SystematicSamplingOptions,
-} from "../src/index.js";
-import type { SheetSchema } from "../src/schema.js";
+   tailSampleRows,
+   systematicSampleRows,
+   randomSampleRows,
+   stratifiedSampleRows,
+   scoreRegionForQuery,
+   pickBestRegionForQuery,
+   type RegionType,
+   type RegionRef,
+   type SystematicSamplingOptions,
+ } from "../src/index.js";
+ import type { SheetSchema } from "../src/schema.js";
  
 type IsAny<T> = 0 extends (1 & T) ? true : false;
 type Assert<T extends true> = T;
@@ -99,15 +100,19 @@ type _WorkbookSchema_NotAny = Assert<IsAny<WorkbookSchema> extends false ? true 
 void EXCEL_MAX_ROWS;
 void EXCEL_MAX_COLS;
 const parsed = parseA1Range("$A$1:B2");
-const dlp = classifyText("test@example.com");
-void dlp;
-const index = new RagIndex();
-void index;
-void headSampleRows([1, 2, 3], 2);
-void tailSampleRows([1, 2, 3], 2);
-void systematicSampleRows([1, 2, 3, 4], 2, { seed: 1 });
-void randomSampleRows([1, 2, 3, 4], 2, { seed: 1 });
-void stratifiedSampleRows([{ k: "a" }, { k: "b" }], 1, { getStratum: (r) => r.k, seed: 1 });
+ const dlp = classifyText("test@example.com");
+ void dlp;
+ const index = new RagIndex();
+ void index;
+ void headSampleRows([1, 2, 3], 2);
+ void tailSampleRows([1, 2, 3], 2);
+ void systematicSampleRows([1, 2, 3, 4], 2, { seed: 1 });
+ void randomSampleRows([1, 2, 3, 4], 2, { seed: 1 });
+ void stratifiedSampleRows([{ k: "a" }, { k: "b" }], 1, { getStratum: (r) => r.k, seed: 1 });
+ const cm = new ContextManager();
+ void cm.buildContext({ sheet: { name: "Sheet1", values: [[1]] }, query: "hi", samplingStrategy: "systematic" });
+ // @ts-expect-error - samplingStrategy must be a supported strategy string.
+ void cm.buildContext({ sheet: { name: "Sheet1", values: [[1]] }, query: "hi", samplingStrategy: "bogus" });
  const wbSchema = extractWorkbookSchema({
    id: "wb1",
    sheets: [{ name: "Sheet1", cells: [[{ v: "Header" }], [{ v: 1 }]] }],
@@ -116,10 +121,10 @@ void stratifiedSampleRows([{ k: "a" }, { k: "b" }], 1, { getStratum: (r) => r.k,
  wbSchema.tables[0]?.rangeA1;
  void summarizeWorkbookSchema(wbSchema);
  const schema: SheetSchema = { name: "Sheet1", tables: [], namedRanges: [], dataRegions: [] };
-const ref: RegionRef = { type: "table", index: 0 };
-scoreRegionForQuery(ref, schema, "revenue");
-pickBestRegionForQuery(schema, "revenue");
-void parsed;
+ const ref: RegionRef = { type: "table", index: 0 };
+ scoreRegionForQuery(ref, schema, "revenue");
+ pickBestRegionForQuery(schema, "revenue");
+ void parsed;
 `;
 
   await writeFile(entryFile, source, "utf8");
