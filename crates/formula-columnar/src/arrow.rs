@@ -162,14 +162,16 @@ pub(crate) fn column_type_from_field(field: &Field) -> Result<ColumnType, ArrowI
 
     // Fall back to the physical Arrow data type.
     Ok(match field.data_type() {
-        DataType::Float64 => ColumnType::Number,
+        DataType::Float32 | DataType::Float64 => ColumnType::Number,
         DataType::Boolean => ColumnType::Boolean,
         DataType::Utf8 | DataType::LargeUtf8 => ColumnType::String,
         DataType::Dictionary(_, value) => match value.as_ref() {
             DataType::Utf8 | DataType::LargeUtf8 => ColumnType::String,
             other => return Err(ArrowInteropError::UnsupportedDictionaryValueType(other.clone())),
         },
-        DataType::Int64 => ColumnType::Number,
+        DataType::Int32 | DataType::UInt32 | DataType::Int64 | DataType::UInt64 => {
+            ColumnType::Number
+        }
         other => return Err(ArrowInteropError::UnsupportedDataType(other.clone())),
     })
 }
@@ -185,6 +187,13 @@ pub(crate) fn value_from_array(
 
     match column_type {
         ColumnType::Number => match array.data_type() {
+            DataType::Float32 => {
+                let arr = array
+                    .as_any()
+                    .downcast_ref::<arrow_array::Float32Array>()
+                    .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
+                Ok(Value::Number(arr.value(row) as f64))
+            }
             DataType::Float64 => {
                 let arr = array
                     .as_any()
@@ -192,10 +201,31 @@ pub(crate) fn value_from_array(
                     .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
                 Ok(Value::Number(arr.value(row)))
             }
+            DataType::Int32 => {
+                let arr = array
+                    .as_any()
+                    .downcast_ref::<arrow_array::Int32Array>()
+                    .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
+                Ok(Value::Number(arr.value(row) as f64))
+            }
+            DataType::UInt32 => {
+                let arr = array
+                    .as_any()
+                    .downcast_ref::<arrow_array::UInt32Array>()
+                    .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
+                Ok(Value::Number(arr.value(row) as f64))
+            }
             DataType::Int64 => {
                 let arr = array
                     .as_any()
                     .downcast_ref::<arrow_array::Int64Array>()
+                    .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
+                Ok(Value::Number(arr.value(row) as f64))
+            }
+            DataType::UInt64 => {
+                let arr = array
+                    .as_any()
+                    .downcast_ref::<arrow_array::UInt64Array>()
                     .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
                 Ok(Value::Number(arr.value(row) as f64))
             }
