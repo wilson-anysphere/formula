@@ -295,3 +295,35 @@ test("buildContext: DLP REDACT handles cyclic attachment data without crashing",
   assert.doesNotMatch(out.promptContext, /123-45-6789/);
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
+
+test("buildContext: DLP REDACT redacts heuristic-sensitive strings in object keys", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [["Email"], ["alice@example.com"]],
+    },
+    query: "anything",
+    attachments: [
+      {
+        type: "chart",
+        reference: "KeyLeak",
+        // Sensitive string used as an object key (could leak through JSON serialization).
+        data: { "alice@example.com": "ok" },
+      },
+    ],
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: makePolicy(),
+      classificationRecords: [],
+    },
+  });
+
+  assert.doesNotMatch(out.promptContext, /alice@example\.com/);
+  assert.match(out.promptContext, /\[REDACTED_KEY/);
+});

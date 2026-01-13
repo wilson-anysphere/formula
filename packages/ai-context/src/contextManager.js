@@ -2071,9 +2071,35 @@ function redactStructuredValue(value, redactor, options = {}) {
 
   /** @type {any} */
   const out = {};
+  /** @type {Set<string>} */
+  const usedKeys = new Set();
+  let redactedKeyIndex = 0;
   for (const [key, v] of entries) {
     throwIfAborted(signal);
-    out[key] = redactStructuredValue(v, redactor, {
+    let outKey = key;
+    if (!restrictedAllowed) {
+      const redactedKey = redactor(key);
+      if (classifyText(redactedKey).level === "sensitive") {
+        // If the key itself is sensitive and redaction did not remove the pattern,
+        // replace it entirely with a stable placeholder.
+        outKey = `[REDACTED_KEY_${redactedKeyIndex++}]`;
+      } else if (redactedKey !== key) {
+        // Prefer the redactor's placeholder when it successfully removes the sensitive
+        // pattern (e.g. `[REDACTED_EMAIL]`).
+        outKey = redactedKey;
+      }
+    }
+
+    // Ensure we do not overwrite sibling keys if multiple keys redact to the same placeholder.
+    if (usedKeys.has(outKey)) {
+      const base = outKey;
+      let suffix = 1;
+      while (usedKeys.has(`${base}_${suffix}`)) suffix += 1;
+      outKey = `${base}_${suffix}`;
+    }
+    usedKeys.add(outKey);
+
+    out[outKey] = redactStructuredValue(v, redactor, {
       signal,
       includeRestrictedContent,
       policyAllowsRestrictedContent,
