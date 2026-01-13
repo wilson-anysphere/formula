@@ -38,7 +38,8 @@ fi
 ##
 
 die() {
-  echo "error: $*" >&2
+  # Use a GitHub Actions error annotation when possible; still readable locally.
+  echo "::error::check-appimage: $*" >&2
   exit 1
 }
 
@@ -287,6 +288,7 @@ main() {
 
   echo "Found ${#appimages[@]} AppImage artifact(s)."
   for appimage in "${appimages[@]}"; do
+    echo "::group::check-appimage: $appimage"
     echo "==> Checking AppImage: $appimage"
 
     if [ ! -s "$appimage" ]; then
@@ -376,6 +378,7 @@ main() {
     rm -rf "$tmp"
     trap - EXIT
     echo "OK: $appimage"
+    echo "::endgroup::"
   done
 }
 
