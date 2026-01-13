@@ -145,6 +145,8 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(sw, "Expected SWITCH to have a curated signature");
   assert.equal(sw?.args?.[0]?.name, "expression", "Expected SWITCH arg1 name to be expression");
   assert.ok(sw?.args?.[1]?.repeating, "Expected SWITCH value1 to mark a repeating group");
+  assert.ok(registry.getFunction("IFERROR"), "Expected IFERROR to have a curated signature");
+  assert.ok(registry.getFunction("IFNA"), "Expected IFNA to have a curated signature");
 
   // Legacy descriptive stats
   assert.ok(registry.isRangeArg("PERCENTILE", 0), "Expected PERCENTILE array to be a range");
@@ -203,4 +205,13 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("WORKDAY.INTL", 3), "Expected WORKDAY.INTL holidays to be a range");
   assert.ok(registry.isRangeArg("NETWORKDAYS", 2), "Expected NETWORKDAYS holidays to be a range");
   assert.ok(registry.isRangeArg("NETWORKDAYS.INTL", 3), "Expected NETWORKDAYS.INTL holidays to be a range");
+
+  // String-only parameters where suggesting cell refs is undesirable (argument hinting)
+  assert.equal(registry.getArgType("DATEDIF", 2), "string", "Expected DATEDIF unit to be a string");
+  assert.equal(registry.getArgType("TEXT", 1), "string", "Expected TEXT format_text to be a string");
+  assert.equal(registry.getArgType("HYPERLINK", 0), "string", "Expected HYPERLINK link_location to be a string");
+  assert.ok(
+    registry.getFunction("HYPERLINK")?.args?.[1]?.optional,
+    "Expected HYPERLINK friendly_name to be optional"
+  );
 });

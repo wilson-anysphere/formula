@@ -221,6 +221,15 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "DATEDIF",
+    description: "Calculates the number of days, months, or years between two dates.",
+    args: [
+      { name: "start_date", type: "value" },
+      { name: "end_date", type: "value" },
+      { name: "unit", type: "string" },
+    ],
+  },
+  {
     name: "WORKDAY.INTL",
     description: "Returns a date that is a specified number of working days before or after a start date with custom weekends.",
     args: [
@@ -1268,6 +1277,22 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "IFERROR",
+    description: "Returns a value you specify if a formula evaluates to an error; otherwise returns the formula result.",
+    args: [
+      { name: "value", type: "value" },
+      { name: "value_if_error", type: "value" },
+    ],
+  },
+  {
+    name: "IFNA",
+    description: "Returns a value you specify if a formula evaluates to the #N/A error; otherwise returns the formula result.",
+    args: [
+      { name: "value", type: "value" },
+      { name: "value_if_na", type: "value" },
+    ],
+  },
+  {
     name: "CONCAT",
     description: "Combines the text from multiple ranges and/or strings.",
     args: [
@@ -1551,10 +1576,26 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "HYPERLINK",
+    description: "Creates a shortcut or jump that opens a document stored on a network server, an intranet, or the Internet.",
+    args: [
+      { name: "link_location", type: "string" },
+      { name: "friendly_name", type: "string", optional: true },
+    ],
+  },
+  {
     name: "SHEETS",
     description: "Returns the number of sheets in a reference.",
     args: [
       { name: "reference", type: "range", optional: true },
+    ],
+  },
+  {
+    name: "TEXT",
+    description: "Formats a number and converts it to text.",
+    args: [
+      { name: "value", type: "value" },
+      { name: "format_text", type: "string" },
     ],
   },
 ];
