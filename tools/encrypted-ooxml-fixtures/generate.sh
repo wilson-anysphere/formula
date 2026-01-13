@@ -50,6 +50,41 @@ CLASSES_DIR="${CACHE_DIR}/classes"
 
 mkdir -p "${JARS_DIR}" "${CLASSES_DIR}"
 
+hash_cmd() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    echo "sha256sum"
+    return 0
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    # `shasum -a 256` is available on macOS and most CI images.
+    echo "shasum -a 256"
+    return 0
+  fi
+  if command -v openssl >/dev/null 2>&1; then
+    echo "openssl dgst -sha256"
+    return 0
+  fi
+  return 1
+}
+
+HASH_TOOL="$(hash_cmd || true)"
+if [[ -z "${HASH_TOOL}" ]]; then
+  echo "ERROR: No SHA256 tool found (need sha256sum, shasum, or openssl)" >&2
+  exit 2
+fi
+
+sha256_file() {
+  local path="$1"
+  if [[ "${HASH_TOOL}" == "openssl dgst -sha256" ]]; then
+    # openssl output format: SHA256(filename)= <hash>
+    openssl dgst -sha256 "${path}" | awk '{print $NF}'
+    return 0
+  fi
+  # sha256sum / shasum format: <hash>  <filename>
+  # shellcheck disable=SC2086
+  ${HASH_TOOL} "${path}" | awk '{print $1}'
+}
+
 download_jar() {
   local filename="$1"
   local url="$2"
@@ -58,7 +93,7 @@ download_jar() {
 
   if [[ -f "${dest}" ]]; then
     local actual_sha
-    actual_sha="$(sha256sum "${dest}" | awk '{print $1}')"
+    actual_sha="$(sha256_file "${dest}")"
     if [[ "${actual_sha}" == "${expected_sha}" ]]; then
       return 0
     fi
@@ -70,7 +105,7 @@ download_jar() {
   curl -sSL --fail -o "${dest}.tmp" "${url}"
 
   local actual_sha
-  actual_sha="$(sha256sum "${dest}.tmp" | awk '{print $1}')"
+  actual_sha="$(sha256_file "${dest}.tmp")"
   if [[ "${actual_sha}" != "${expected_sha}" ]]; then
     echo "SHA256 mismatch for ${filename} (expected ${expected_sha}, got ${actual_sha})" >&2
     rm -f "${dest}.tmp"
