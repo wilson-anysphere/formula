@@ -758,13 +758,22 @@ fn write_new_row<W: Write>(
         row_start.push_attribute(("hidden", "1"));
     }
 
-    let outline_level_str =
-        (outline_entry.level > 0).then(|| outline_entry.level.to_string());
+    let outline_level_str = (outline_entry.level > 0).then(|| outline_entry.level.to_string());
     if let Some(level_str) = &outline_level_str {
         row_start.push_attribute(("outlineLevel", level_str.as_str()));
     }
     if outline_entry.collapsed {
         row_start.push_attribute(("collapsed", "1"));
+    }
+
+    let style_xf_str = row_props
+        .and_then(|props| props.style_id)
+        .filter(|style_id| *style_id != 0)
+        .and_then(|style_id| style_to_xf.get(&style_id).copied())
+        .map(|xf| xf.to_string());
+    if let Some(style_xf_str) = &style_xf_str {
+        row_start.push_attribute(("s", style_xf_str.as_str()));
+        row_start.push_attribute(("customFormat", "1"));
     }
 
     writer.write_event(Event::Start(row_start))?;

@@ -688,12 +688,21 @@ fn build_parts(
         parts.get(&styles_part_name).map(|b| b.as_slice()),
         &mut style_table,
     )?;
-    let style_ids = doc
-        .workbook
-        .sheets
-        .iter()
-        .flat_map(|sheet| sheet.iter_cells().map(|(_, cell)| cell.style_id))
-        .filter(|style_id| *style_id != 0);
+    // Collect all style ids referenced by the workbook so `styles.xml` includes corresponding
+    // `<xf>` entries and we can map model `style_id` -> SpreadsheetML `cellXf` index.
+    //
+    // This includes:
+    // - per-cell styles (`c/@s`)
+    // - per-row default styles (`row/@s`)
+    // - per-column default styles (`col/@style`)
+    let style_ids = doc.workbook.sheets.iter().flat_map(|sheet| {
+        sheet
+            .iter_cells()
+            .map(|(_, cell)| cell.style_id)
+            .chain(sheet.row_properties.values().filter_map(|props| props.style_id))
+            .chain(sheet.col_properties.values().filter_map(|props| props.style_id))
+    });
+    let style_ids = style_ids.filter(|style_id| *style_id != 0);
     let style_to_xf = styles_editor.ensure_styles_for_style_ids(style_ids, &style_table)?;
     // Preserve workbooks that omit a `styles.xml` part: if the source package didn't have one and
     // the model doesn't reference any non-default style IDs, keep the part absent on round-trip.
@@ -884,7 +893,7 @@ fn build_parts(
         // If callers mutate only `sheet.outline.cols` (including clearing outline levels), we
         // still need to rewrite `<cols>` so the outline metadata is preserved/emitted.
         let outline_cols_changed = if let Some(orig) = orig {
-            let desired = cols_xml_props_from_sheet(sheet);
+            let desired = cols_xml_props_from_sheet(sheet, &style_to_xf);
             let orig_xml = std::str::from_utf8(orig).map_err(|e| {
                 WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
             })?;
@@ -1046,7 +1055,7 @@ fn build_parts(
         }
         if is_new_sheet || cols_changed || outline_cols_changed {
             let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(&sheet_xml)?;
-            let cols_xml = render_cols(sheet, worksheet_prefix.as_deref());
+            let cols_xml = render_cols(sheet, worksheet_prefix.as_deref(), &style_to_xf);
             sheet_xml = update_cols_xml(&sheet_xml, &cols_xml)?;
         }
         if is_new_sheet || merges_changed {
@@ -2804,6 +2813,7 @@ fn parse_cols_xml_props(xml: &str) -> Result<BTreeMap<u32, ColXmlProps>, WriteEr
                 let mut hidden = false;
                 let mut outline_level: u8 = 0;
                 let mut collapsed = false;
+                let mut style_xf: Option<u32> = None;
 
                 for attr in e.attributes() {
                     let attr = attr?;
@@ -2813,6 +2823,13 @@ fn parse_cols_xml_props(xml: &str) -> Result<BTreeMap<u32, ColXmlProps>, WriteEr
                         b"max" => max = val.parse().ok(),
                         b"width" => width = val.parse().ok(),
                         b"customWidth" => custom_width = Some(parse_xml_bool(&val)),
+                        b"style" => {
+                            if let Ok(xf) = val.parse::<u32>() {
+                                if xf != 0 {
+                                    style_xf = Some(xf);
+                                }
+                            }
+                        }
                         b"hidden" => hidden = parse_xml_bool(&val),
                         b"outlineLevel" => outline_level = val.parse().unwrap_or(0),
                         b"collapsed" => collapsed = parse_xml_bool(&val),
@@ -2832,7 +2849,7 @@ fn parse_cols_xml_props(xml: &str) -> Result<BTreeMap<u32, ColXmlProps>, WriteEr
                     width
                 };
 
-                if width.is_none() && !hidden && outline_level == 0 && !collapsed {
+                if width.is_none() && style_xf.is_none() && !hidden && outline_level == 0 && !collapsed {
                     continue;
                 }
 
@@ -2843,11 +2860,15 @@ fn parse_cols_xml_props(xml: &str) -> Result<BTreeMap<u32, ColXmlProps>, WriteEr
                     let entry = map.entry(col_1_based).or_insert_with(|| ColXmlProps {
                         width: None,
                         hidden: false,
+                        style_xf: None,
                         outline_level: 0,
                         collapsed: false,
                     });
                     if let Some(width) = width {
                         entry.width = Some(width);
+                    }
+                    if style_xf.is_some() {
+                        entry.style_xf = style_xf;
                     }
                     entry.hidden |= hidden;
                     entry.outline_level = entry.outline_level.max(outline_level);
@@ -5108,7 +5129,7 @@ fn write_worksheet_xml(
     }
 
     let dimension = dimension::worksheet_dimension_range(sheet).to_string();
-    let cols_xml = render_cols(sheet, None);
+    let cols_xml = render_cols(sheet, None, style_to_xf);
     let sheet_protection_xml = render_sheet_protection(&sheet.sheet_protection, None);
     let conditional_formatting_xml = render_conditional_formatting(sheet, local_to_global_dxf);
     let sheet_data_xml = render_sheet_data(
@@ -5527,11 +5548,15 @@ fn patch_worksheet_dimension(
 struct ColXmlProps {
     width: Option<f32>,
     hidden: bool,
+    style_xf: Option<u32>,
     outline_level: u8,
     collapsed: bool,
 }
 
-fn cols_xml_props_from_sheet(sheet: &Worksheet) -> BTreeMap<u32, ColXmlProps> {
+fn cols_xml_props_from_sheet(
+    sheet: &Worksheet,
+    style_to_xf: &HashMap<u32, u32>,
+) -> BTreeMap<u32, ColXmlProps> {
     // OOXML column indices are 1-based. The model stores `col_properties` 0-based, and
     // `outline.cols` 1-based.
     let mut col_xml_props: BTreeMap<u32, ColXmlProps> = BTreeMap::new();
@@ -5540,11 +5565,16 @@ fn cols_xml_props_from_sheet(sheet: &Worksheet) -> BTreeMap<u32, ColXmlProps> {
         if col_1 == 0 || col_1 > formula_model::EXCEL_MAX_COLS {
             continue;
         }
+        let style_xf = props
+            .style_id
+            .filter(|style_id| *style_id != 0)
+            .and_then(|style_id| style_to_xf.get(&style_id).copied());
         col_xml_props.insert(
             col_1,
             ColXmlProps {
                 width: props.width,
                 hidden: props.hidden,
+                style_xf,
                 outline_level: 0,
                 collapsed: false,
             },
@@ -5568,6 +5598,7 @@ fn cols_xml_props_from_sheet(sheet: &Worksheet) -> BTreeMap<u32, ColXmlProps> {
             .or_insert_with(|| ColXmlProps {
                 width: None,
                 hidden: entry.hidden.is_hidden(),
+                style_xf: None,
                 outline_level: entry.level,
                 collapsed: entry.collapsed,
             });
@@ -5576,11 +5607,11 @@ fn cols_xml_props_from_sheet(sheet: &Worksheet) -> BTreeMap<u32, ColXmlProps> {
     col_xml_props
 }
 
-fn render_cols(sheet: &Worksheet, prefix: Option<&str>) -> String {
+fn render_cols(sheet: &Worksheet, prefix: Option<&str>, style_to_xf: &HashMap<u32, u32>) -> String {
     let cols_tag = crate::xml::prefixed_tag(prefix, "cols");
     let col_tag = crate::xml::prefixed_tag(prefix, "col");
 
-    let col_xml_props = cols_xml_props_from_sheet(sheet);
+    let col_xml_props = cols_xml_props_from_sheet(sheet, style_to_xf);
 
     if col_xml_props.is_empty() {
         return String::new();
@@ -5625,6 +5656,9 @@ fn render_col_range(
     let min = start_col_1;
     let max = end_col_1;
     s.push_str(&format!(r#"<{col_tag} min="{min}" max="{max}""#));
+    if let Some(style_xf) = props.style_xf {
+        s.push_str(&format!(r#" style="{style_xf}" customFormat="1""#));
+    }
     if let Some(width) = props.width {
         s.push_str(&format!(r#" width="{width}""#));
         s.push_str(r#" customWidth="1""#);
@@ -5823,7 +5857,7 @@ fn render_sheet_data(
         rows.insert(cell_ref.row + 1, ());
     }
     for (row, props) in sheet.row_properties.iter() {
-        if props.height.is_some() || props.hidden {
+        if props.height.is_some() || props.hidden || props.style_id.is_some_and(|id| id != 0) {
             rows.insert(row + 1, ());
         }
     }
@@ -5865,6 +5899,11 @@ fn render_sheet_data(
             }
             if row_props.hidden {
                 out.push_str(r#" hidden="1""#);
+            }
+            if let Some(style_id) = row_props.style_id.filter(|id| *id != 0) {
+                if let Some(style_xf) = style_to_xf.get(&style_id).copied() {
+                    out.push_str(&format!(r#" s="{style_xf}" customFormat="1""#));
+                }
             }
         }
         if outline_entry.level > 0 {
@@ -5947,7 +5986,7 @@ fn render_sheet_data_columnar(
         extra_rows.insert(cell_ref.row + 1, ());
     }
     for (row, props) in sheet.row_properties.iter() {
-        if props.height.is_some() || props.hidden {
+        if props.height.is_some() || props.hidden || props.style_id.is_some_and(|id| id != 0) {
             extra_rows.insert(row + 1, ());
         }
     }
@@ -6021,6 +6060,11 @@ fn render_sheet_data_columnar(
             }
             if row_props.hidden {
                 row_attrs.push_str(r#" hidden="1""#);
+            }
+            if let Some(style_id) = row_props.style_id.filter(|id| *id != 0) {
+                if let Some(style_xf) = style_to_xf.get(&style_id).copied() {
+                    row_attrs.push_str(&format!(r#" s="{style_xf}" customFormat="1""#));
+                }
             }
         }
         if outline_entry.level > 0 {
