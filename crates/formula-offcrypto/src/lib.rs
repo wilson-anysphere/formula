@@ -230,9 +230,9 @@ pub enum OffcryptoError {
     UnsupportedVersion { major: u16, minor: u16 },
     /// The encryption schema is known but not supported by the selected decryption mode.
     ///
-    /// This is primarily used by the "Standard-only" decrypt entrypoint to reject Agile inputs
-    /// before attempting any password verification (avoiding misreporting `InvalidPassword`).
-    UnsupportedEncryptionType { encryption_type: EncryptionType },
+    /// For example: attempting to decrypt an Agile-encrypted OOXML package using a
+    /// Standard-only decryptor.
+    UnsupportedEncryption { encryption_type: EncryptionType },
     /// Ciphertext length must be a multiple of 16 bytes for AES-ECB.
     InvalidCiphertextLength { len: usize },
     /// Invalid AES key length (expected 16, 24, or 32 bytes).
@@ -315,14 +315,6 @@ impl PartialEq for OffcryptoError {
             }
             (Self::InvalidPassword, Self::InvalidPassword) => true,
             (
-                Self::UnsupportedEncryptionType {
-                    encryption_type: a,
-                },
-                Self::UnsupportedEncryptionType {
-                    encryption_type: b,
-                },
-            ) => a == b,
-            (
                 Self::UnsupportedEncryption {
                     encryption_type: a,
                 },
@@ -369,7 +361,7 @@ impl fmt::Display for OffcryptoError {
             OffcryptoError::UnsupportedVersion { major, minor } => {
                 write!(f, "unsupported EncryptionInfo version {major}.{minor}")
             }
-            OffcryptoError::UnsupportedEncryptionType { encryption_type } => {
+            OffcryptoError::UnsupportedEncryption { encryption_type } => {
                 write!(f, "unsupported encryption type {encryption_type:?}")
             }
             OffcryptoError::InvalidCiphertextLength { len } => write!(
@@ -643,7 +635,7 @@ pub fn decrypt_standard_only(
                 aes_ecb_decrypt_in_place(key.as_slice(), pt)
             })
         }
-        EncryptionInfo::Agile { .. } => Err(OffcryptoError::UnsupportedEncryptionType {
+        EncryptionInfo::Agile { .. } => Err(OffcryptoError::UnsupportedEncryption {
             encryption_type: EncryptionType::Agile,
         }),
         EncryptionInfo::Unsupported { version } => {
@@ -662,7 +654,6 @@ pub fn decrypt_standard_only(
         }
     }
 }
-
 #[derive(Debug, Clone)]
 struct NamespaceFrame {
     decls: Vec<(Vec<u8> /* prefix */, Vec<u8> /* uri */)>,
