@@ -10,12 +10,19 @@ import type { RangeAddress as A1RangeAddress } from "../spreadsheet/a1.js";
 import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js";
 import { parseA1Range } from "../charts/a1.js";
 import { emuToPx } from "../charts/overlay.js";
+import { chartAnchorToDrawingAnchor } from "../charts/chartAnchorToDrawingAnchor";
 import { ChartStore, type ChartRecord } from "../charts/chartStore";
 import { ChartRendererAdapter, type ChartStore as ChartRendererStore } from "../charts/chartRendererAdapter";
 import type { ChartModel } from "../charts/renderChart";
 import { FormulaChartModelStore } from "../charts/formulaChartModelStore";
 import { FALLBACK_CHART_THEME, type ChartTheme } from "../charts/theme";
-import { DrawingOverlay, type GridGeometry as DrawingGridGeometry, type Viewport as DrawingViewport } from "../drawings/overlay";
+import {
+  DrawingOverlay,
+  anchorToRectPx,
+  pxToEmu,
+  type GridGeometry as DrawingGridGeometry,
+  type Viewport as DrawingViewport,
+} from "../drawings/overlay";
 import type { DrawingObject, ImageEntry, ImageStore } from "../drawings/types";
 import { convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
@@ -902,8 +909,25 @@ export class SpreadsheetApp {
 
   private readonly chartStore: ChartStore;
   private chartTheme: ChartTheme = FALLBACK_CHART_THEME;
+  private selectedChartId: string | null = null;
   private readonly chartModels = new Map<string, ChartModel>();
   private readonly chartRenderer: ChartRendererAdapter;
+  private readonly chartOverlayImages: ImageStore = { get: () => undefined, set: () => {} };
+  private chartOverlayGeom: DrawingGridGeometry | null = null;
+  private chartSelectionOverlay: DrawingOverlay | null = null;
+  private chartSelectionCanvas: HTMLCanvasElement | null = null;
+  private chartDragState:
+    | {
+        pointerId: number;
+        chartId: string;
+        mode: "move" | "resize";
+        resizeHandle?: "nw" | "ne" | "sw" | "se";
+        startClientX: number;
+        startClientY: number;
+        startAnchor: ChartRecord["anchor"];
+      }
+    | null = null;
+  private chartDragAbort: AbortController | null = null;
 
   private commentsPanel!: HTMLDivElement;
   private commentsPanelThreads!: HTMLDivElement;
@@ -1428,6 +1452,21 @@ export class SpreadsheetApp {
       this.chartCanvas.classList.add("grid-canvas--shared-chart");
     }
 
+    this.chartOverlayGeom = {
+      cellOriginPx: (cell) => this.chartCellOriginPx(cell),
+      cellSizePx: (cell) => this.chartCellSizePx(cell),
+    };
+
+    this.chartSelectionCanvas = document.createElement("canvas");
+    this.chartSelectionCanvas.className = "grid-canvas chart-selection-canvas";
+    this.chartSelectionCanvas.setAttribute("aria-hidden", "true");
+    this.chartSelectionCanvas.style.pointerEvents = "none";
+    if (this.gridMode === "shared") {
+      // Match the selection canvas z-index so chart handles are drawn above charts in shared mode.
+      this.chartSelectionCanvas.classList.add("grid-canvas--shared-selection");
+    }
+    this.chartSelectionOverlay = new DrawingOverlay(this.chartSelectionCanvas, this.chartOverlayImages, this.chartOverlayGeom);
+
     this.referenceCanvas = document.createElement("canvas");
     this.referenceCanvas.className = "grid-canvas grid-canvas--content";
     this.referenceCanvas.setAttribute("aria-hidden", "true");
@@ -1456,6 +1495,7 @@ export class SpreadsheetApp {
     this.root.appendChild(this.auditingCanvas);
     if (this.presenceCanvas) this.root.appendChild(this.presenceCanvas);
     this.root.appendChild(this.selectionCanvas);
+    this.root.appendChild(this.chartSelectionCanvas);
 
     // Avoid allocating a fresh `{row,col}` object for every chart cell lookup.
     const chartCoordScratch = { row: 0, col: 0 };
@@ -1961,6 +2001,16 @@ export class SpreadsheetApp {
         signal: this.domAbort.signal
       });
     }
+
+    // Chart interactions use hit testing against chart bounds rather than enabling pointer
+    // events on the chart DOM itself (charts remain `pointer-events: none` so grid scrolling
+    // and selection behave consistently). Use a capture listener so we can intercept
+    // chart pointerdowns before grid selection handlers run.
+    this.root.addEventListener("pointerdown", (e) => this.onChartPointerDownCapture(e), {
+      capture: true,
+      passive: false,
+      signal: this.domAbort.signal,
+    });
 
     // If the user copies/cuts from an input/contenteditable (formula bar, comments, etc),
     // the system clipboard content changes and any prior "internal copy" context used for
@@ -2826,6 +2876,9 @@ export class SpreadsheetApp {
     this.sheetViewBinder?.destroy();
     this.sheetViewBinder = null;
     this.domAbort.abort();
+    this.chartDragAbort?.abort();
+    this.chartDragAbort = null;
+    this.chartDragState = null;
     this.setCollabUndoService(null);
     this.collabPermissionsUnsubscribe?.();
     this.collabPermissionsUnsubscribe = null;
@@ -3888,6 +3941,10 @@ export class SpreadsheetApp {
 
   listCharts(): readonly ChartRecord[] {
     return this.chartStore.listCharts();
+  }
+
+  getSelectedChartId(): string | null {
+    return this.selectedChartId;
   }
 
   private enqueueWasmSync(task: (engine: EngineClient) => Promise<void>): Promise<void> {
@@ -7064,6 +7121,486 @@ export class SpreadsheetApp {
     };
   }
 
+  private chartCellOriginPx(cell: { row: number; col: number }): { x: number; y: number } {
+    if (this.sharedGrid) {
+      const headerRows = this.sharedHeaderRows();
+      const headerCols = this.sharedHeaderCols();
+      const gridRow = cell.row + headerRows;
+      const gridCol = cell.col + headerCols;
+
+      const headerWidth = headerCols > 0 ? this.sharedGrid.renderer.scroll.cols.totalSize(headerCols) : 0;
+      const headerHeight = headerRows > 0 ? this.sharedGrid.renderer.scroll.rows.totalSize(headerRows) : 0;
+
+      return {
+        x: this.sharedGrid.renderer.scroll.cols.positionOf(gridCol) - headerWidth,
+        y: this.sharedGrid.renderer.scroll.rows.positionOf(gridRow) - headerHeight,
+      };
+    }
+
+    return {
+      x: this.visualIndexForCol(cell.col) * this.cellWidth,
+      y: this.visualIndexForRow(cell.row) * this.cellHeight,
+    };
+  }
+
+  private chartCellSizePx(cell: { row: number; col: number }): { width: number; height: number } {
+    if (this.sharedGrid) {
+      const headerRows = this.sharedHeaderRows();
+      const headerCols = this.sharedHeaderCols();
+      const gridRow = cell.row + headerRows;
+      const gridCol = cell.col + headerCols;
+      return {
+        width: this.sharedGrid.renderer.getColWidth(gridCol),
+        height: this.sharedGrid.renderer.getRowHeight(gridRow),
+      };
+    }
+
+    return { width: this.cellWidth, height: this.cellHeight };
+  }
+
+  private setSelectedChartId(id: string | null): void {
+    const next = id && String(id).trim() !== "" ? String(id) : null;
+    if (next === this.selectedChartId) return;
+    this.selectedChartId = next;
+    this.renderChartSelectionOverlay();
+  }
+
+  private chartIdToDrawingId(chartId: string): number {
+    const match = /^chart_(\d+)$/.exec(chartId);
+    if (match) {
+      const parsed = Number(match[1]);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+    let hash = 0;
+    for (let i = 0; i < chartId.length; i += 1) {
+      hash = (hash * 31 + chartId.charCodeAt(i)) | 0;
+    }
+    return Math.max(1, Math.abs(hash));
+  }
+
+  private chartOverlayLayout(sharedViewport?: GridViewportState): {
+    originX: number;
+    originY: number;
+    frozenBoundaryX: number;
+    frozenBoundaryY: number;
+    paneRects: Record<"topLeft" | "topRight" | "bottomLeft" | "bottomRight", { x: number; y: number; width: number; height: number }>;
+  } {
+    if (this.sharedGrid) {
+      const viewport = sharedViewport ?? this.sharedGrid.renderer.scroll.getViewportState();
+      const headerRows = this.sharedHeaderRows();
+      const headerCols = this.sharedHeaderCols();
+      const headerWidth = headerCols > 0 ? this.sharedGrid.renderer.scroll.cols.totalSize(headerCols) : 0;
+      const headerHeight = headerRows > 0 ? this.sharedGrid.renderer.scroll.rows.totalSize(headerRows) : 0;
+      const headerWidthClamped = Math.min(headerWidth, viewport.width);
+      const headerHeightClamped = Math.min(headerHeight, viewport.height);
+
+      const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
+      const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
+
+      const frozenContentWidth = Math.max(0, frozenWidthClamped - headerWidthClamped);
+      const frozenContentHeight = Math.max(0, frozenHeightClamped - headerHeightClamped);
+
+      const cellAreaWidth = Math.max(0, viewport.width - headerWidthClamped);
+      const cellAreaHeight = Math.max(0, viewport.height - headerHeightClamped);
+
+      const scrollableWidth = Math.max(0, cellAreaWidth - frozenContentWidth);
+      const scrollableHeight = Math.max(0, cellAreaHeight - frozenContentHeight);
+
+      return {
+        originX: headerWidthClamped,
+        originY: headerHeightClamped,
+        frozenBoundaryX: frozenWidthClamped,
+        frozenBoundaryY: frozenHeightClamped,
+        paneRects: {
+          topLeft: { x: 0, y: 0, width: frozenContentWidth, height: frozenContentHeight },
+          topRight: { x: frozenContentWidth, y: 0, width: scrollableWidth, height: frozenContentHeight },
+          bottomLeft: { x: 0, y: frozenContentHeight, width: frozenContentWidth, height: scrollableHeight },
+          bottomRight: { x: frozenContentWidth, y: frozenContentHeight, width: scrollableWidth, height: scrollableHeight },
+        },
+      };
+    }
+
+    const originX = this.rowHeaderWidth;
+    const originY = this.colHeaderHeight;
+    const cellAreaWidth = Math.max(0, this.width - originX);
+    const cellAreaHeight = Math.max(0, this.height - originY);
+    const frozenContentWidth = Math.min(cellAreaWidth, this.frozenWidth);
+    const frozenContentHeight = Math.min(cellAreaHeight, this.frozenHeight);
+    const scrollableWidth = Math.max(0, cellAreaWidth - frozenContentWidth);
+    const scrollableHeight = Math.max(0, cellAreaHeight - frozenContentHeight);
+    return {
+      originX,
+      originY,
+      frozenBoundaryX: originX + frozenContentWidth,
+      frozenBoundaryY: originY + frozenContentHeight,
+      paneRects: {
+        topLeft: { x: 0, y: 0, width: frozenContentWidth, height: frozenContentHeight },
+        topRight: { x: frozenContentWidth, y: 0, width: scrollableWidth, height: frozenContentHeight },
+        bottomLeft: { x: 0, y: frozenContentHeight, width: frozenContentWidth, height: scrollableHeight },
+        bottomRight: { x: frozenContentWidth, y: frozenContentHeight, width: scrollableWidth, height: scrollableHeight },
+      },
+    };
+  }
+
+  private chartPointPxToAnchorPoint(point: { x: number; y: number }): {
+    col: number;
+    row: number;
+    colOffEmu: number;
+    rowOffEmu: number;
+  } {
+    const x = Math.max(0, point.x);
+    const y = Math.max(0, point.y);
+
+    if (this.sharedGrid) {
+      const renderer = this.sharedGrid.renderer;
+      const cols = renderer.scroll.cols;
+      const rows = renderer.scroll.rows;
+      const headerRows = this.sharedHeaderRows();
+      const headerCols = this.sharedHeaderCols();
+      const headerWidth = headerCols > 0 ? cols.totalSize(headerCols) : 0;
+      const headerHeight = headerRows > 0 ? rows.totalSize(headerRows) : 0;
+      const counts = renderer.scroll.getCounts();
+      const maxGridCol = Math.max(0, counts.colCount - 1);
+      const maxGridRow = Math.max(0, counts.rowCount - 1);
+
+      const gridCol = cols.indexAt(x + headerWidth, { min: headerCols, maxInclusive: maxGridCol });
+      const gridRow = rows.indexAt(y + headerHeight, { min: headerRows, maxInclusive: maxGridRow });
+
+      const col = Math.max(0, gridCol - headerCols);
+      const row = Math.max(0, gridRow - headerRows);
+
+      const originX = cols.positionOf(gridCol) - headerWidth;
+      const originY = rows.positionOf(gridRow) - headerHeight;
+      return {
+        col,
+        row,
+        colOffEmu: Math.round(pxToEmu(x - originX)),
+        rowOffEmu: Math.round(pxToEmu(y - originY)),
+      };
+    }
+
+    const colVisual = Math.floor(x / this.cellWidth);
+    const rowVisual = Math.floor(y / this.cellHeight);
+
+    const hasCols = this.colIndexByVisual.length > 0;
+    const hasRows = this.rowIndexByVisual.length > 0;
+
+    const safeColVisual = hasCols ? Math.max(0, Math.min(this.colIndexByVisual.length - 1, colVisual)) : Math.max(0, colVisual);
+    const safeRowVisual = hasRows ? Math.max(0, Math.min(this.rowIndexByVisual.length - 1, rowVisual)) : Math.max(0, rowVisual);
+
+    const col = (hasCols ? this.colIndexByVisual[safeColVisual] : safeColVisual) ?? safeColVisual;
+    const row = (hasRows ? this.rowIndexByVisual[safeRowVisual] : safeRowVisual) ?? safeRowVisual;
+
+    const originX = safeColVisual * this.cellWidth;
+    const originY = safeRowVisual * this.cellHeight;
+    return {
+      col,
+      row,
+      colOffEmu: Math.round(pxToEmu(x - originX)),
+      rowOffEmu: Math.round(pxToEmu(y - originY)),
+    };
+  }
+
+  private computeChartAnchorFromRectPx(
+    anchorKind: ChartRecord["anchor"]["kind"],
+    rect: { x: number; y: number; width: number; height: number },
+  ): ChartRecord["anchor"] {
+    const x = Math.max(0, rect.x);
+    const y = Math.max(0, rect.y);
+    const width = Math.max(1, rect.width);
+    const height = Math.max(1, rect.height);
+
+    if (anchorKind === "absolute") {
+      return {
+        kind: "absolute",
+        xEmu: Math.round(pxToEmu(x)),
+        yEmu: Math.round(pxToEmu(y)),
+        cxEmu: Math.round(pxToEmu(width)),
+        cyEmu: Math.round(pxToEmu(height)),
+      };
+    }
+
+    if (anchorKind === "oneCell") {
+      const from = this.chartPointPxToAnchorPoint({ x, y });
+      return {
+        kind: "oneCell",
+        fromCol: from.col,
+        fromRow: from.row,
+        fromColOffEmu: from.colOffEmu,
+        fromRowOffEmu: from.rowOffEmu,
+        cxEmu: Math.round(pxToEmu(width)),
+        cyEmu: Math.round(pxToEmu(height)),
+      };
+    }
+
+    // twoCell
+    const from = this.chartPointPxToAnchorPoint({ x, y });
+    const to = this.chartPointPxToAnchorPoint({ x: x + width, y: y + height });
+    return {
+      kind: "twoCell",
+      fromCol: from.col,
+      fromRow: from.row,
+      fromColOffEmu: from.colOffEmu,
+      fromRowOffEmu: from.rowOffEmu,
+      toCol: to.col,
+      toRow: to.row,
+      toColOffEmu: to.colOffEmu,
+      toRowOffEmu: to.rowOffEmu,
+    };
+  }
+
+  private renderChartSelectionOverlay(): void {
+    const geom = this.chartOverlayGeom;
+    const overlay = this.chartSelectionOverlay;
+    if (!geom || !overlay) return;
+
+    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
+    const selected = this.selectedChartId ? charts.find((chart) => chart.id === this.selectedChartId) : null;
+
+    const { frozenRows, frozenCols } = this.getFrozen();
+    const layout = this.chartOverlayLayout();
+    const viewport: DrawingViewport = {
+      scrollX: this.scrollX,
+      scrollY: this.scrollY,
+      width: this.width,
+      height: this.height,
+      dpr: this.dpr,
+      frozenRows,
+      frozenCols,
+      frozenWidthPx: layout.frozenBoundaryX,
+      frozenHeightPx: layout.frozenBoundaryY,
+      headerOffsetX: layout.originX,
+      headerOffsetY: layout.originY,
+    };
+    overlay.resize(viewport);
+
+    if (!selected) {
+      overlay.setSelectedId(null);
+      void overlay.render([], viewport, { drawObjects: false });
+      return;
+    }
+
+    const drawingId = this.chartIdToDrawingId(selected.id);
+    const obj: DrawingObject = {
+      id: drawingId,
+      kind: { type: "chart", chartId: selected.id },
+      anchor: chartAnchorToDrawingAnchor(selected.anchor),
+      zOrder: 0,
+    };
+    overlay.setSelectedId(drawingId);
+    void overlay.render([obj], viewport, { drawObjects: false });
+  }
+
+  private hitTestChartAtClientPoint(clientX: number, clientY: number): {
+    chart: ChartRecord;
+    rect: { left: number; top: number; width: number; height: number };
+    pane: { key: "topLeft" | "topRight" | "bottomLeft" | "bottomRight"; rect: { x: number; y: number; width: number; height: number } };
+    pointInCellArea: { x: number; y: number };
+  } | null {
+    this.maybeRefreshRootPosition({ force: true });
+    const layout = this.chartOverlayLayout(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+    const x = clientX - this.rootLeft - layout.originX;
+    const y = clientY - this.rootTop - layout.originY;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
+    if (charts.length === 0) return null;
+
+    const intersect = (
+      a: { left: number; top: number; width: number; height: number },
+      b: { left: number; top: number; width: number; height: number },
+    ): { left: number; top: number; width: number; height: number } | null => {
+      const left = Math.max(a.left, b.left);
+      const top = Math.max(a.top, b.top);
+      const right = Math.min(a.left + a.width, b.left + b.width);
+      const bottom = Math.min(a.top + a.height, b.top + b.height);
+      const width = right - left;
+      const height = bottom - top;
+      if (width <= 0 || height <= 0) return null;
+      return { left, top, width, height };
+    };
+
+    const { frozenRows, frozenCols } = this.getFrozen();
+    for (let i = charts.length - 1; i >= 0; i -= 1) {
+      const chart = charts[i]!;
+      const rect = this.chartAnchorToViewportRect(chart.anchor);
+      if (!rect) continue;
+      const fromRow = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromRow : Number.POSITIVE_INFINITY;
+      const fromCol = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromCol : Number.POSITIVE_INFINITY;
+      const inFrozenRows = fromRow < frozenRows;
+      const inFrozenCols = fromCol < frozenCols;
+      const paneKey: "topLeft" | "topRight" | "bottomLeft" | "bottomRight" =
+        inFrozenRows && inFrozenCols
+          ? "topLeft"
+          : inFrozenRows && !inFrozenCols
+            ? "topRight"
+            : !inFrozenRows && inFrozenCols
+              ? "bottomLeft"
+              : "bottomRight";
+      const paneRect = layout.paneRects[paneKey];
+
+      const visible = intersect(rect, { left: paneRect.x, top: paneRect.y, width: paneRect.width, height: paneRect.height });
+      if (!visible) continue;
+      if (x < visible.left || x > visible.left + visible.width) continue;
+      if (y < visible.top || y > visible.top + visible.height) continue;
+
+      return {
+        chart,
+        rect,
+        pane: { key: paneKey, rect: paneRect },
+        pointInCellArea: { x, y },
+      };
+    }
+
+    return null;
+  }
+
+  private chartResizeHandleAtPoint(hit: {
+    rect: { left: number; top: number; width: number; height: number };
+    pointInCellArea: { x: number; y: number };
+  }): "nw" | "ne" | "sw" | "se" | null {
+    const handle = 8;
+    const half = handle / 2;
+    const px = hit.pointInCellArea.x;
+    const py = hit.pointInCellArea.y;
+    const corners: Array<{ handle: "nw" | "ne" | "sw" | "se"; x: number; y: number }> = [
+      { handle: "se", x: hit.rect.left + hit.rect.width, y: hit.rect.top + hit.rect.height },
+      { handle: "sw", x: hit.rect.left, y: hit.rect.top + hit.rect.height },
+      { handle: "ne", x: hit.rect.left + hit.rect.width, y: hit.rect.top },
+      { handle: "nw", x: hit.rect.left, y: hit.rect.top },
+    ];
+
+    for (const corner of corners) {
+      if (px >= corner.x - half && px <= corner.x + half && py >= corner.y - half && py <= corner.y + half) {
+        return corner.handle;
+      }
+    }
+    return null;
+  }
+
+  private onChartPointerDownCapture(e: PointerEvent): void {
+    if (this.disposed) return;
+    if (e.button !== 0) return;
+
+    const hit = this.hitTestChartAtClientPoint(e.clientX, e.clientY);
+    if (!hit) {
+      if (this.selectedChartId != null) this.setSelectedChartId(null);
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const wasSelected = this.selectedChartId === hit.chart.id;
+    this.setSelectedChartId(hit.chart.id);
+    this.focus();
+
+    const resizeHandle = wasSelected ? this.chartResizeHandleAtPoint(hit) : null;
+    const mode = resizeHandle ? "resize" : "move";
+
+    this.chartDragAbort?.abort();
+    this.chartDragAbort = new AbortController();
+
+    this.chartDragState = {
+      pointerId: e.pointerId,
+      chartId: hit.chart.id,
+      mode,
+      ...(resizeHandle ? { resizeHandle } : {}),
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startAnchor: { ...(hit.chart.anchor as any) },
+    };
+
+    const signal = this.chartDragAbort.signal;
+    const onMove = (ev: PointerEvent) => this.onChartDragPointerMove(ev);
+    const onUp = (ev: PointerEvent) => this.onChartDragPointerUp(ev);
+    window.addEventListener("pointermove", onMove, { capture: true, passive: false, signal });
+    window.addEventListener("pointerup", onUp, { capture: true, passive: false, signal });
+    window.addEventListener("pointercancel", onUp, { capture: true, passive: false, signal });
+  }
+
+  private onChartDragPointerMove(e: PointerEvent): void {
+    const state = this.chartDragState;
+    if (!state) return;
+    if (e.pointerId !== state.pointerId) return;
+    const geom = this.chartOverlayGeom;
+    if (!geom) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const dx = e.clientX - state.startClientX;
+    const dy = e.clientY - state.startClientY;
+
+    const startDrawingAnchor = chartAnchorToDrawingAnchor(state.startAnchor as any);
+    const startRect = anchorToRectPx(startDrawingAnchor, geom);
+
+    const minSize = 20;
+    const nextRect = (() => {
+      if (state.mode === "move") {
+        return { x: startRect.x + dx, y: startRect.y + dy, width: startRect.width, height: startRect.height };
+      }
+
+      const handle = state.resizeHandle ?? "se";
+      let x = startRect.x;
+      let y = startRect.y;
+      let width = startRect.width;
+      let height = startRect.height;
+
+      if (handle === "se") {
+        width = width + dx;
+        height = height + dy;
+      } else if (handle === "sw") {
+        x = x + dx;
+        width = width - dx;
+        height = height + dy;
+      } else if (handle === "ne") {
+        y = y + dy;
+        width = width + dx;
+        height = height - dy;
+      } else {
+        // nw
+        x = x + dx;
+        y = y + dy;
+        width = width - dx;
+        height = height - dy;
+      }
+
+      if (width < minSize) {
+        const delta = minSize - width;
+        width = minSize;
+        if (handle === "sw" || handle === "nw") {
+          x -= delta;
+        }
+      }
+      if (height < minSize) {
+        const delta = minSize - height;
+        height = minSize;
+        if (handle === "ne" || handle === "nw") {
+          y -= delta;
+        }
+      }
+
+      return { x, y, width, height };
+    })();
+
+    const nextAnchor = this.computeChartAnchorFromRectPx(state.startAnchor.kind, nextRect);
+    this.chartStore.updateChartAnchor(state.chartId, nextAnchor);
+  }
+
+  private onChartDragPointerUp(e: PointerEvent): void {
+    const state = this.chartDragState;
+    if (!state) return;
+    if (e.pointerId !== state.pointerId) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    this.chartDragState = null;
+    this.chartDragAbort?.abort();
+    this.chartDragAbort = null;
+  }
+
   private renderCharts(renderContent: boolean): void {
     const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
     const keep = new Set<string>();
@@ -7359,6 +7896,11 @@ export class SpreadsheetApp {
       if (keep.has(id)) continue;
       this.chartModels.delete(id);
     }
+
+    if (this.selectedChartId != null && !keep.has(this.selectedChartId)) {
+      this.selectedChartId = null;
+    }
+    this.renderChartSelectionOverlay();
   }
 
   private syncDrawingOverlayViewport(sharedViewport?: GridViewportState): DrawingViewport {

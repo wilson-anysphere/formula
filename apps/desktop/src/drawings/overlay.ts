@@ -158,7 +158,7 @@ export class DrawingOverlay {
     this.ctx.setTransform(viewport.dpr, 0, 0, viewport.dpr, 0, 0);
   }
 
-  async render(objects: DrawingObject[], viewport: Viewport): Promise<void> {
+  async render(objects: DrawingObject[], viewport: Viewport, options?: { drawObjects?: boolean }): Promise<void> {
     this.renderSeq += 1;
     const seq = this.renderSeq;
 
@@ -175,206 +175,209 @@ export class DrawingOverlay {
 
     const colors = resolveOverlayColorTokens();
     const ordered = [...objects].sort((a, b) => a.zOrder - b.zOrder);
+    const drawObjects = options?.drawObjects !== false;
 
     const paneLayout = resolvePaneLayout(viewport, this.geom);
     const viewportRect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
 
-    for (const obj of ordered) {
-      if (seq !== this.renderSeq) return;
-      if (signal?.aborted) return;
-      if (seq !== this.renderSeq) return;
-      const rect = anchorToRectPx(obj.anchor, this.geom);
-      const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
-      const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
-      const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
-      const screenRect = {
-        x: rect.x - scrollX + paneLayout.headerOffsetX,
-        y: rect.y - scrollY + paneLayout.headerOffsetY,
-        width: rect.width,
-        height: rect.height,
-      };
-      const clipRect = paneLayout.quadrants[pane.quadrant];
-      const aabb = getAabbForObject(screenRect, obj.transform);
+    if (drawObjects) {
+      for (const obj of ordered) {
+        if (seq !== this.renderSeq) return;
+        if (signal?.aborted) return;
+        if (seq !== this.renderSeq) return;
+        const rect = anchorToRectPx(obj.anchor, this.geom);
+        const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
+        const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
+        const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
+        const screenRect = {
+          x: rect.x - scrollX + paneLayout.headerOffsetX,
+          y: rect.y - scrollY + paneLayout.headerOffsetY,
+          width: rect.width,
+          height: rect.height,
+        };
+        const clipRect = paneLayout.quadrants[pane.quadrant];
+        const aabb = getAabbForObject(screenRect, obj.transform);
 
-      if (clipRect.width <= 0 || clipRect.height <= 0) continue;
-      // Skip objects that are fully outside of their pane quadrant.
-      if (!intersects(aabb, clipRect)) continue;
-      // Paranoia: clip rects are expected to be within the viewport, but keep the
-      // early-out for callers providing custom layouts.
-      if (!intersects(clipRect, viewportRect)) continue;
+        if (clipRect.width <= 0 || clipRect.height <= 0) continue;
+        // Skip objects that are fully outside of their pane quadrant.
+        if (!intersects(aabb, clipRect)) continue;
+        // Paranoia: clip rects are expected to be within the viewport, but keep the
+        // early-out for callers providing custom layouts.
+        if (!intersects(clipRect, viewportRect)) continue;
 
-      const withClip = (fn: () => void) => {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
-        ctx.clip();
-        try {
-          fn();
-        } finally {
-          ctx.restore();
-        }
-      };
-
-      if (!intersects(aabb, viewportRect)) {
-        continue;
-      }
-
-      if (obj.kind.type === "image") {
-        const entry = this.images.get(obj.kind.imageId);
-        if (entry) {
+        const withClip = (fn: () => void) => {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
+          ctx.clip();
           try {
-            const bitmap = await this.bitmapCache.get(entry, signal ? { signal } : undefined);
-            if (signal?.aborted) return;
-            if (seq !== this.renderSeq) return;
-            withClip(() => {
-              ctx.drawImage(bitmap, screenRect.x, screenRect.y, screenRect.width, screenRect.height);
-            });
-            continue;
-          } catch (err) {
-            if (signal?.aborted || isAbortError(err)) return;
-            if (seq !== this.renderSeq) return;
-            // Fall through to placeholder rendering.
+            fn();
+          } finally {
+            ctx.restore();
+          }
+        };
+
+        if (!intersects(aabb, viewportRect)) {
+          continue;
+        }
+
+        if (obj.kind.type === "image") {
+          const entry = this.images.get(obj.kind.imageId);
+          if (entry) {
+            try {
+              const bitmap = await this.bitmapCache.get(entry, signal ? { signal } : undefined);
+              if (signal?.aborted) return;
+              if (seq !== this.renderSeq) return;
+              withClip(() => {
+                ctx.drawImage(bitmap, screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+              });
+              continue;
+            } catch (err) {
+              if (signal?.aborted || isAbortError(err)) return;
+              if (seq !== this.renderSeq) return;
+              // Fall through to placeholder rendering.
+            }
           }
         }
-      }
 
-      if (obj.kind.type === "chart") {
-        const chartId = obj.kind.chartId;
-        if (this.chartRenderer && typeof chartId === "string" && chartId.length > 0) {
-          let rendered = false;
-          withClip(() => {
-            ctx.save();
-            try {
-              ctx.beginPath();
-              ctx.rect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
-              ctx.clip();
-              this.chartRenderer!.renderToCanvas(ctx, chartId, screenRect);
-              rendered = true;
-            } catch {
-              rendered = false;
-            } finally {
-              ctx.restore();
-            }
-          });
-
-          if (rendered) continue;
-        }
-      }
-
-      if (obj.kind.type === "shape") {
-        const rawXml = (obj.kind as any).rawXml ?? (obj.kind as any).raw_xml;
-        const rawXmlText = typeof rawXml === "string" ? rawXml : "";
-
-        // Parse `<xdr:txBody>` once and cache; avoid reparsing XML on every frame.
-        let cachedText = this.shapeTextCache.get(obj.id);
-        if (!cachedText || cachedText.rawXml !== rawXmlText) {
-          cachedText = { rawXml: rawXmlText, parsed: parseDrawingMLShapeText(rawXmlText) };
-          this.shapeTextCache.set(obj.id, cachedText);
-        }
-        const textLayout = cachedText.parsed;
-        const textParsed = textLayout !== null;
-        const hasText = textLayout ? textLayout.textRuns.map((r) => r.text).join("").trim().length > 0 : false;
-
-        let rendered = false;
-        let spec: ShapeRenderSpec | null = null;
-        try {
-          spec = rawXmlText ? parseShapeRenderSpec(rawXmlText) : null;
-        } catch {
-          spec = null;
-        }
-
-        if (spec) {
-          const specToDraw = hasText ? { ...spec, label: undefined } : spec;
-          withClip(() => {
-            try {
-              withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
-                drawShape(ctx, localRect, specToDraw, colors);
-                if (hasText) {
-                  renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel });
-                }
-              });
-              rendered = true;
-            } catch {
-              rendered = false;
-            }
-          });
-          if (rendered) continue;
-        }
-
-        // If we couldn't render the shape geometry but we did successfully parse text,
-        // still render the text within the anchored bounds (and skip placeholders).
-        if (hasText) {
-          withClip(() => {
-            withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
+        if (obj.kind.type === "chart") {
+          const chartId = obj.kind.chartId;
+          if (this.chartRenderer && typeof chartId === "string" && chartId.length > 0) {
+            let rendered = false;
+            withClip(() => {
               ctx.save();
               try {
                 ctx.beginPath();
-                ctx.rect(localRect.x, localRect.y, localRect.width, localRect.height);
+                ctx.rect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
                 ctx.clip();
-                renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel });
+                this.chartRenderer!.renderToCanvas(ctx, chartId, screenRect);
+                rendered = true;
+              } catch {
+                rendered = false;
               } finally {
                 ctx.restore();
               }
             });
-          });
-          continue;
+
+            if (rendered) continue;
+          }
         }
 
-        // Shape parsed but has no text: keep an empty bounds placeholder (no label).
-        if (textParsed) {
-          withClip(() => {
-            ctx.save();
-            ctx.strokeStyle = colors.placeholderOtherStroke;
-            ctx.lineWidth = 1;
-            ctx.setLineDash([4, 2]);
-            if (hasNonIdentityTransform(obj.transform)) {
-              drawTransformedRect(ctx, screenRect, obj.transform!);
-            } else {
-              ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
-            }
-            ctx.restore();
-          });
-          continue;
+        if (obj.kind.type === "shape") {
+          const rawXml = (obj.kind as any).rawXml ?? (obj.kind as any).raw_xml;
+          const rawXmlText = typeof rawXml === "string" ? rawXml : "";
+
+          // Parse `<xdr:txBody>` once and cache; avoid reparsing XML on every frame.
+          let cachedText = this.shapeTextCache.get(obj.id);
+          if (!cachedText || cachedText.rawXml !== rawXmlText) {
+            cachedText = { rawXml: rawXmlText, parsed: parseDrawingMLShapeText(rawXmlText) };
+            this.shapeTextCache.set(obj.id, cachedText);
+          }
+          const textLayout = cachedText.parsed;
+          const textParsed = textLayout !== null;
+          const hasText = textLayout ? textLayout.textRuns.map((r) => r.text).join("").trim().length > 0 : false;
+
+          let rendered = false;
+          let spec: ShapeRenderSpec | null = null;
+          try {
+            spec = rawXmlText ? parseShapeRenderSpec(rawXmlText) : null;
+          } catch {
+            spec = null;
+          }
+
+          if (spec) {
+            const specToDraw = hasText ? { ...spec, label: undefined } : spec;
+            withClip(() => {
+              try {
+                withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
+                  drawShape(ctx, localRect, specToDraw, colors);
+                  if (hasText) {
+                    renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel });
+                  }
+                });
+                rendered = true;
+              } catch {
+                rendered = false;
+              }
+            });
+            if (rendered) continue;
+          }
+
+          // If we couldn't render the shape geometry but we did successfully parse text,
+          // still render the text within the anchored bounds (and skip placeholders).
+          if (hasText) {
+            withClip(() => {
+              withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
+                ctx.save();
+                try {
+                  ctx.beginPath();
+                  ctx.rect(localRect.x, localRect.y, localRect.width, localRect.height);
+                  ctx.clip();
+                  renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel });
+                } finally {
+                  ctx.restore();
+                }
+              });
+            });
+            continue;
+          }
+
+          // Shape parsed but has no text: keep an empty bounds placeholder (no label).
+          if (textParsed) {
+            withClip(() => {
+              ctx.save();
+              ctx.strokeStyle = colors.placeholderOtherStroke;
+              ctx.lineWidth = 1;
+              ctx.setLineDash([4, 2]);
+              if (hasNonIdentityTransform(obj.transform)) {
+                drawTransformedRect(ctx, screenRect, obj.transform!);
+              } else {
+                ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+              }
+              ctx.restore();
+            });
+            continue;
+          }
         }
+
+        // Placeholder rendering for shapes/charts/unknown.
+        withClip(() => {
+          ctx.save();
+          const rawXml =
+            // Some integration layers still pass through snake_case from the Rust model.
+            (obj.kind as any).rawXml ?? (obj.kind as any).raw_xml;
+          const isGFrame = isGraphicFrame(rawXml);
+          const isUnknown = obj.kind.type === "unknown";
+
+          ctx.strokeStyle =
+            obj.kind.type === "chart"
+              ? colors.placeholderChartStroke
+              : isUnknown || isGFrame
+                ? colors.placeholderGraphicFrameStroke
+                : colors.placeholderOtherStroke;
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 2]);
+          if (hasNonIdentityTransform(obj.transform)) {
+            drawTransformedRect(ctx, screenRect, obj.transform!);
+          } else {
+            ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+          }
+          ctx.setLineDash([]);
+          ctx.fillStyle = colors.placeholderLabel;
+          ctx.globalAlpha = 0.6;
+          ctx.font = "12px sans-serif";
+          const explicitLabel = obj.kind.label?.trim();
+          const placeholderLabel =
+            explicitLabel && explicitLabel.length > 0
+              ? explicitLabel
+              : // Avoid labeling chart placeholders as "GraphicFrame" — charts already have a distinct kind.
+                obj.kind.type !== "chart"
+                ? graphicFramePlaceholderLabel(rawXml) ?? obj.kind.type
+                : obj.kind.type;
+          ctx.fillText(placeholderLabel, screenRect.x + 4, screenRect.y + 14);
+          ctx.restore();
+        });
       }
-
-      // Placeholder rendering for shapes/charts/unknown.
-      withClip(() => {
-        ctx.save();
-        const rawXml =
-          // Some integration layers still pass through snake_case from the Rust model.
-          (obj.kind as any).rawXml ?? (obj.kind as any).raw_xml;
-        const isGFrame = isGraphicFrame(rawXml);
-        const isUnknown = obj.kind.type === "unknown";
-
-        ctx.strokeStyle =
-          obj.kind.type === "chart"
-            ? colors.placeholderChartStroke
-            : isUnknown || isGFrame
-              ? colors.placeholderGraphicFrameStroke
-              : colors.placeholderOtherStroke;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 2]);
-        if (hasNonIdentityTransform(obj.transform)) {
-          drawTransformedRect(ctx, screenRect, obj.transform!);
-        } else {
-          ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
-        }
-        ctx.setLineDash([]);
-        ctx.fillStyle = colors.placeholderLabel;
-        ctx.globalAlpha = 0.6;
-        ctx.font = "12px sans-serif";
-        const explicitLabel = obj.kind.label?.trim();
-        const placeholderLabel =
-          explicitLabel && explicitLabel.length > 0
-            ? explicitLabel
-            : // Avoid labeling chart placeholders as "GraphicFrame" — charts already have a distinct kind.
-              obj.kind.type !== "chart"
-              ? graphicFramePlaceholderLabel(rawXml) ?? obj.kind.type
-              : obj.kind.type;
-        ctx.fillText(placeholderLabel, screenRect.x + 4, screenRect.y + 14);
-        ctx.restore();
-      });
     }
 
     // Selection overlay.

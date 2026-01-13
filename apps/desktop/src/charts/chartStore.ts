@@ -143,6 +143,24 @@ export class ChartStore {
     return this.charts;
   }
 
+  updateChartAnchor(chartId: string, anchor: ChartAnchor): void {
+    const id = String(chartId ?? "");
+    if (!id) return;
+
+    let changed = false;
+    const next = this.charts.map((chart) => {
+      if (chart.id !== id) return chart;
+      changed = true;
+      return {
+        ...chart,
+        anchor: { ...(anchor as any) },
+      };
+    });
+    if (!changed) return;
+    this.charts = next;
+    this.options.onChange?.();
+  }
+
   setDefaultSheet(sheetId: string): void {
     this.options.defaultSheet = sheetId;
   }
