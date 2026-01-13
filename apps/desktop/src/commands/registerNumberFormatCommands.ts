@@ -126,7 +126,7 @@ export function registerNumberFormatCommands(params: {
   register("format.numberFormat.longDate", "command.format.numberFormat.longDate", () =>
     applyFormattingToSelection(
       t("command.format.numberFormat.longDate"),
-      (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "date"),
+      applyConstantNumberFormatPatch({ numberFormat: "yyyy-mm-dd" }),
       { forceBatch: true },
     ),
   );
