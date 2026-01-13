@@ -58,18 +58,17 @@ export function suggestRanges(params) {
   const arg = (currentArgText ?? "").trim();
   if (arg.length === 0) return [];
 
-  // Only handle simple column/cell prefixes for now (A, A1, $A$1, etc).
-  const match = /^(\$?)([A-Za-z]{1,3})(?:(\$?)(\d+))?$/.exec(arg);
-  if (!match) return [];
+  // Only handle conservative A1-style column/cell prefixes, plus partial range syntax:
+  // - A / A1 / $A$1
+  // - A: / A1:
+  // - A:A / A1:A
+  const parsed = parseColumnRangePrefix(arg);
+  if (!parsed) return [];
 
-  const colPrefix = match[1] === "$" ? "$" : "";
-  const colToken = match[2];
-  const colLetters = colToken.toUpperCase();
-  const colIndex = safeColumnLetterToIndex(colLetters);
+  const colIndex = safeColumnLetterToIndex(parsed.colLetters);
   if (colIndex === null) return [];
 
-  const rowPrefix = match[3] === "$" ? "$" : "";
-  const explicitRow = match[4] ? Number(match[4]) : null;
+  const explicitRow = parsed.explicitRow;
   if (explicitRow !== null && (!Number.isInteger(explicitRow) || explicitRow <= 0)) return [];
 
   /** @type {RangeSuggestion[]} */
@@ -98,8 +97,8 @@ export function suggestRanges(params) {
 
   if (contiguous) {
     const { startRow, endRow, numericRatio } = contiguous;
-    const startA1 = `${colPrefix}${colToken}${rowPrefix}${startRow + 1}`;
-    const endA1 = `${colPrefix}${colToken}${rowPrefix}${endRow + 1}`;
+    const startA1 = `${parsed.startColPrefix}${parsed.startColToken}${parsed.rowPrefix}${startRow + 1}`;
+    const endA1 = `${parsed.endColPrefix}${parsed.endColToken}${parsed.rowPrefix}${endRow + 1}`;
     const range = `${startA1}:${endA1}`;
 
     // Confidence heuristic:
@@ -127,9 +126,9 @@ export function suggestRanges(params) {
     );
     if (table) {
       const { endCol, confidence } = table;
-      const endLetters = applyColumnCase(columnIndexToLetter(endCol), colToken);
-      const startCell = `${colPrefix}${colToken}${rowPrefix}${tableStartRow + 1}`;
-      const endCell = `${colPrefix}${endLetters}${rowPrefix}${tableEndRow + 1}`;
+      const endLetters = applyColumnCase(columnIndexToLetter(endCol), parsed.startColToken);
+      const startCell = `${parsed.startColPrefix}${parsed.startColToken}${parsed.rowPrefix}${tableStartRow + 1}`;
+      const endCell = `${parsed.startColPrefix}${endLetters}${parsed.rowPrefix}${tableEndRow + 1}`;
       const tableReason = toTableReason(contiguousReason);
       tableSuggestion = {
         range: `${startCell}:${endCell}`,
@@ -140,7 +139,7 @@ export function suggestRanges(params) {
   }
 
   suggestions.push({
-    range: `${colPrefix}${colToken}:${colPrefix}${colToken}`,
+    range: `${parsed.startColPrefix}${parsed.startColToken}:${parsed.endColPrefix}${parsed.endColToken}`,
     confidence: 0.3,
     reason: "entire_column",
   });
@@ -153,6 +152,148 @@ export function suggestRanges(params) {
 }
 
 const EXCEL_MAX_COL_INDEX = 16383; // XFD (1-based 16384)
+
+/**
+ * Parse a conservative subset of A1 range-prefix syntax.
+ *
+ * Supported forms:
+ * - A / A1 / $A$1
+ * - A: / A1:
+ * - A:A / A1:A
+ *
+ * Notes:
+ * - We only support ranges within a single column. If the end column differs from the
+ *   start column, return null (avoid suggesting wrong ranges for 2D selections).
+ * - If a partial range has no explicit end token (e.g. "A1:"), the end column inherits
+ *   the start column token/prefix (matching the existing single-token behavior).
+ *
+ * @param {string} arg
+ * @returns {{
+ *   colLetters: string,
+ *   explicitRow: number | null,
+ *   rowPrefix: string,
+ *   startColPrefix: string,
+ *   startColToken: string,
+ *   endColPrefix: string,
+ *   endColToken: string,
+ * } | null}
+ */
+function parseColumnRangePrefix(arg) {
+  if (typeof arg !== "string") return null;
+  const text = arg.trim();
+  if (text.length === 0) return null;
+
+  const firstColon = text.indexOf(":");
+  if (firstColon === -1) {
+    const start = parseA1PrefixToken(text);
+    if (!start) return null;
+    return {
+      colLetters: start.colLetters,
+      explicitRow: start.explicitRow,
+      rowPrefix: start.rowPrefix,
+      startColPrefix: start.colPrefix,
+      startColToken: start.colToken,
+      endColPrefix: start.colPrefix,
+      endColToken: start.colToken,
+    };
+  }
+
+  // Be conservative: only handle a single colon.
+  if (text.indexOf(":", firstColon + 1) !== -1) return null;
+
+  const left = text.slice(0, firstColon);
+  const right = text.slice(firstColon + 1);
+  if (left.length === 0) return null;
+
+  const start = parseA1PrefixToken(left);
+  if (!start) return null;
+
+  // "A1:" (no end token yet) - treat as a range anchored at the start column.
+  if (right.length === 0) {
+    return {
+      colLetters: start.colLetters,
+      explicitRow: start.explicitRow,
+      rowPrefix: start.rowPrefix,
+      startColPrefix: start.colPrefix,
+      startColToken: start.colToken,
+      endColPrefix: start.colPrefix,
+      endColToken: start.colToken,
+    };
+  }
+
+  // End token is column-only (no row digits) so "A1:A" / "$A:$A" works.
+  const end = parseColumnToken(right);
+  if (!end) return null;
+
+  // Only support single-column ranges (avoid suggesting wrong multi-column ranges).
+  if (end.colLetters !== start.colLetters) return null;
+
+  return {
+    colLetters: start.colLetters,
+    explicitRow: start.explicitRow,
+    rowPrefix: start.rowPrefix,
+    startColPrefix: start.colPrefix,
+    startColToken: start.colToken,
+    endColPrefix: end.colPrefix,
+    endColToken: end.colToken,
+  };
+}
+
+/**
+ * Parse an A1 column/cell prefix token (no sheet name; no range colon).
+ *
+ * Examples:
+ * - A
+ * - $A
+ * - A1
+ * - A$1
+ * - $A$1
+ *
+ * @param {string} token
+ * @returns {{
+ *   colPrefix: string,
+ *   colToken: string,
+ *   colLetters: string,
+ *   rowPrefix: string,
+ *   explicitRow: number | null,
+ * } | null}
+ */
+function parseA1PrefixToken(token) {
+  if (typeof token !== "string") return null;
+  const match = /^(\$?)([A-Za-z]{1,3})(?:(\$?)(\d+))?$/.exec(token.trim());
+  if (!match) return null;
+
+  const colPrefix = match[1] === "$" ? "$" : "";
+  const colToken = match[2];
+  const colLetters = colToken.toUpperCase();
+
+  const rowPrefix = match[3] === "$" ? "$" : "";
+  const explicitRow = match[4] ? Number(match[4]) : null;
+  if (explicitRow !== null && (!Number.isInteger(explicitRow) || explicitRow <= 0)) return null;
+
+  return { colPrefix, colToken, colLetters, rowPrefix, explicitRow };
+}
+
+/**
+ * Parse a column-only reference (no row digits).
+ *
+ * Examples:
+ * - A
+ * - $A
+ *
+ * @param {string} token
+ * @returns {{ colPrefix: string, colToken: string, colLetters: string } | null}
+ */
+function parseColumnToken(token) {
+  if (typeof token !== "string") return null;
+  const match = /^(\$?)([A-Za-z]{1,3})$/.exec(token.trim());
+  if (!match) return null;
+
+  const colPrefix = match[1] === "$" ? "$" : "";
+  const colToken = match[2];
+  const colLetters = colToken.toUpperCase();
+  return { colPrefix, colToken, colLetters };
+}
 
 function safeColumnLetterToIndex(letters) {
   try {

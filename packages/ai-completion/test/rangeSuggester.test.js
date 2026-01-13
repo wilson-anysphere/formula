@@ -172,6 +172,50 @@ test("suggestRanges preserves absolute column/row prefixes in A1 output", () => 
   assert.equal(absBoth[0].range, "$A$1:$A$3");
 });
 
+test("suggestRanges completes partial A1 range syntax (A1: -> A1:A10)", () => {
+  const ctx = createColumnAContext(Array.from({ length: 10 }, (_, i) => [i, i + 1]));
+
+  const suggestions = suggestRanges({
+    currentArgText: "A1:",
+    cellRef: { row: 20, col: 0 }, // arbitrary; explicit start cell bounds the scan
+    surroundingCells: ctx,
+  });
+
+  assert.equal(suggestions[0].range, "A1:A10");
+});
+
+test("suggestRanges accepts partial column range syntax (A: -> A1:A3)", () => {
+  const ctx = createColumnAContext([
+    [0, 10],
+    [1, 20],
+    [2, 30],
+  ]);
+
+  const suggestions = suggestRanges({
+    currentArgText: "A:",
+    cellRef: { row: 3, col: 0 }, // row 4, below data
+    surroundingCells: ctx,
+  });
+
+  assert.equal(suggestions[0].range, "A1:A3");
+});
+
+test("suggestRanges is conservative for multi-column prefixes (A1:B -> no suggestions)", () => {
+  const ctx = createColumnAContext([
+    [0, 10],
+    [1, 20],
+    [2, 30],
+  ]);
+
+  const suggestions = suggestRanges({
+    currentArgText: "A1:B",
+    cellRef: { row: 3, col: 0 },
+    surroundingCells: ctx,
+  });
+
+  assert.deepEqual(suggestions, []);
+});
+
 test("suggestRanges suggests a 2D table range when adjacent columns form a rectangular block", () => {
   /** @type {Array<[number, number, any]>} */
   const cells = [];
@@ -241,7 +285,7 @@ test("suggestRanges does not suggest a 2D table range when only one column is po
   });
 
   assert.ok(
-    !suggestions.some((s) => /A\d+:[B-Z]/.test(s.range)),
+    !suggestions.some((s) => /A\\d+:[B-Z]/.test(s.range)),
     `Expected no multi-column A1 range suggestions, got: ${suggestions.map((s) => s.range).join(", ")}`
   );
 });
