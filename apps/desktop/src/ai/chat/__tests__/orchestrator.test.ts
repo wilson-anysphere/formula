@@ -18,6 +18,7 @@ import { AiChatOrchestratorError, createAiChatOrchestrator } from "../orchestrat
 import { ChartStore } from "../../../charts/chartStore";
 import { createDesktopRagService } from "../../rag/ragService.js";
 import { DocumentControllerSpreadsheetApi } from "../../tools/documentControllerSpreadsheetApi.js";
+import { createSheetNameResolverFromIdToNameMap } from "../../../sheet/sheetNameResolver.js";
 
 import { getAiDlpAuditLogger, resetAiDlpAuditLoggerForTests } from "../../dlp/aiDlp.js";
 
@@ -987,6 +988,50 @@ describe("ai chat orchestrator", () => {
 
     const firstRequest = mock.requests[0];
     expect(firstRequest.messages?.[0]?.content).toContain("Workbook summary");
+  });
+
+  it("resolves display sheet names in tool calls when sheetNameResolver is provided (prevents phantom sheets)", async () => {
+    const controller = new DocumentController();
+    controller.setRangeValues("Sheet2", "A1", [
+      ["Region", "Revenue"],
+      ["North", 1000],
+      ["South", 2000],
+    ]);
+
+    const sheetNameResolver = createSheetNameResolverFromIdToNameMap(new Map([["Sheet2", "Budget"]]));
+
+    const embedder = new HashEmbedder({ dimension: 64 });
+    const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+    const contextManager = new ContextManager({
+      tokenBudgetTokens: 800,
+      workbookRag: { vectorStore, embedder, topK: 3 },
+    });
+
+    const auditStore = new LocalStorageAIAuditStore({ key: "test_audit_sheet_name_resolver_chat" });
+    const mock = createMockLlmClient({ cell: "Budget!C1", value: 99 });
+    const onApprovalRequired = vi.fn(async () => true);
+
+    const orchestrator = createAiChatOrchestrator({
+      documentController: controller,
+      workbookId: "wb_chat_display_names",
+      llmClient: mock.client as any,
+      model: "mock-model",
+      getActiveSheetId: () => "Sheet2",
+      sheetNameResolver,
+      auditStore,
+      sessionId: "session_chat_display_names",
+      contextManager,
+      onApprovalRequired,
+      previewOptions: { approval_cell_threshold: 0 },
+    });
+
+    const result = await orchestrator.sendMessage({ text: "Set Budget!C1 to 99", history: [] });
+
+    expect(result.finalText).toBe("ok");
+    expect(controller.getCell("Sheet2", "C1").value).toBe(99);
+    expect(controller.getSheetIds()).toContain("Sheet2");
+    expect(controller.getSheetIds()).not.toContain("Budget");
+    expect(onApprovalRequired).toHaveBeenCalledTimes(1);
   });
 
   it("creates a default ContextManager when none is provided", async () => {
