@@ -89,10 +89,7 @@ impl DrawingPart {
                 preserved.insert("xlsx.embed_rel_id".to_string(), embed.clone());
                 preserved.insert("xlsx.pic_xml".to_string(), pic_xml);
 
-                let size = extract_size_from_pic(&pic).or_else(|| match anchor {
-                    Anchor::OneCell { ext, .. } | Anchor::Absolute { ext, .. } => Some(ext),
-                    Anchor::TwoCell { .. } => None,
-                });
+                let size = extract_size_from_transform(&pic).or_else(|| size_from_anchor(anchor));
 
                 objects.push(DrawingObject {
                     id,
@@ -110,12 +107,13 @@ impl DrawingPart {
                 .find(|n| n.is_element() && n.tag_name().name() == "sp")
             {
                 let (id, sp_xml) = parse_named_node(&sp, drawing_xml, "cNvPr")?;
+                let size = extract_size_from_transform(&sp).or_else(|| size_from_anchor(anchor));
                 objects.push(DrawingObject {
                     id,
                     kind: DrawingObjectKind::Shape { raw_xml: sp_xml },
                     anchor,
                     z_order: z as i32,
-                    size: None,
+                    size,
                     preserved: Default::default(),
                 });
                 continue;
@@ -132,6 +130,7 @@ impl DrawingPart {
                     .and_then(|n| n.attribute((REL_NS, "id")).or_else(|| n.attribute("r:id")))
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| "unknown".to_string());
+                let size = extract_size_from_transform(&frame).or_else(|| size_from_anchor(anchor));
                 objects.push(DrawingObject {
                     id,
                     kind: DrawingObjectKind::ChartPlaceholder {
@@ -140,7 +139,7 @@ impl DrawingPart {
                     },
                     anchor,
                     z_order: z as i32,
-                    size: None,
+                    size,
                     preserved: Default::default(),
                 });
                 continue;
@@ -490,9 +489,23 @@ fn slice_node_xml(node: &roxmltree::Node<'_, '_>, doc: &str) -> Option<String> {
     doc.get(range).map(|s| s.to_string())
 }
 
-fn extract_size_from_pic(pic_node: &roxmltree::Node<'_, '_>) -> Option<EmuSize> {
-    let ext = pic_node
+fn size_from_anchor(anchor: Anchor) -> Option<EmuSize> {
+    match anchor {
+        Anchor::OneCell { ext, .. } | Anchor::Absolute { ext, .. } => Some(ext),
+        Anchor::TwoCell { .. } => None,
+    }
+}
+
+/// Best-effort `a:xfrm/a:ext` extraction.
+///
+/// This is used to populate `DrawingObject.size`, particularly for `xdr:twoCellAnchor`
+/// objects where the anchor itself does not include an `<xdr:ext>`.
+fn extract_size_from_transform(node: &roxmltree::Node<'_, '_>) -> Option<EmuSize> {
+    let xfrm = node
         .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "xfrm")?;
+    let ext = xfrm
+        .children()
         .find(|n| n.is_element() && n.tag_name().name() == "ext")?;
     let cx = ext.attribute("cx")?.parse::<i64>().ok()?;
     let cy = ext.attribute("cy")?.parse::<i64>().ok()?;
