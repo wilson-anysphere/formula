@@ -186,6 +186,17 @@ describe("dev collab encryption toggle", () => {
     });
     await flushBinderWork();
     expect(documentWithoutKey.getCell("Sheet1", { row: 0, col: 0 }).value).toBe("###");
+
+    // Attempting a local edit without the key should be rejected by the binder-installed
+    // canEditCell guard (so we never write plaintext into an encrypted cell).
+    const encBefore = yCell?.get("enc");
+    documentWithoutKey.setCellValue("Sheet1", { row: 0, col: 0 }, "hacked");
+    await flushBinderWork();
+    expect(documentWithoutKey.getCell("Sheet1", { row: 0, col: 0 }).value).toBe("###");
+    const yCellAfter = sessionWithKey.cells.get(cellKey) as any;
+    expect(yCellAfter?.get("enc")).toEqual(encBefore);
+    expect(yCellAfter?.get("value")).toBeUndefined();
+    expect(yCellAfter?.get("formula")).toBeUndefined();
     binder2.destroy();
   });
 });
