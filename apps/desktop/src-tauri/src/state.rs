@@ -6024,6 +6024,10 @@ mod tests {
             ],
             workbook_pivot_caches: None,
             workbook_pivot_cache_rels: Vec::new(),
+            workbook_slicer_caches: None,
+            workbook_slicer_cache_rels: Vec::new(),
+            workbook_timeline_caches: None,
+            workbook_timeline_cache_rels: Vec::new(),
             sheet_pivot_tables: pivot_tables,
         });
 
@@ -6183,6 +6187,10 @@ mod tests {
             ],
             workbook_pivot_caches: None,
             workbook_pivot_cache_rels: Vec::new(),
+            workbook_slicer_caches: None,
+            workbook_slicer_cache_rels: Vec::new(),
+            workbook_timeline_caches: None,
+            workbook_timeline_cache_rels: Vec::new(),
             sheet_pivot_tables: BTreeMap::from([
                 (
                     "Sheet1".to_string(),
@@ -6361,6 +6369,10 @@ mod tests {
             ],
             workbook_pivot_caches: None,
             workbook_pivot_cache_rels: Vec::new(),
+            workbook_slicer_caches: None,
+            workbook_slicer_cache_rels: Vec::new(),
+            workbook_timeline_caches: None,
+            workbook_timeline_cache_rels: Vec::new(),
             sheet_pivot_tables: BTreeMap::new(),
         });
 
@@ -6419,6 +6431,10 @@ mod tests {
             ],
             workbook_pivot_caches: None,
             workbook_pivot_cache_rels: Vec::new(),
+            workbook_slicer_caches: None,
+            workbook_slicer_cache_rels: Vec::new(),
+            workbook_timeline_caches: None,
+            workbook_timeline_cache_rels: Vec::new(),
             sheet_pivot_tables: BTreeMap::new(),
         });
 
@@ -6486,6 +6502,10 @@ mod tests {
             ],
             workbook_pivot_caches: None,
             workbook_pivot_cache_rels: Vec::new(),
+            workbook_slicer_caches: None,
+            workbook_slicer_cache_rels: Vec::new(),
+            workbook_timeline_caches: None,
+            workbook_timeline_cache_rels: Vec::new(),
             sheet_pivot_tables: BTreeMap::new(),
         });
 

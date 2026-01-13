@@ -8262,6 +8262,102 @@ mod tests {
         server.await.expect("server task");
     }
 
+    #[tokio::test]
+    async fn marketplace_json_limit_allows_small_json() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let addr = listener.local_addr().expect("listener addr");
+
+        let body = br#"{"ok":true}"#.to_vec();
+        let body_len = body.len();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf).await;
+
+            let headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {body_len}\r\nConnection: close\r\n\r\n"
+            );
+            stream
+                .write_all(headers.as_bytes())
+                .await
+                .expect("write headers");
+            stream.write_all(&body).await.expect("write body");
+            let _ = stream.shutdown().await;
+        });
+
+        let url = format!("http://{addr}/search");
+        let mut response = reqwest::Client::new()
+            .get(url)
+            .send()
+            .await
+            .expect("client request");
+
+        let bytes =
+            crate::network_limits::read_response_body_with_limit(&mut response, 1024, "test")
+                .await
+                .expect("expected JSON body to be within limit");
+        let parsed = serde_json::from_slice::<JsonValue>(&bytes).expect("parse JSON");
+        assert_eq!(parsed, serde_json::json!({ "ok": true }));
+
+        server.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn marketplace_json_limit_rejects_oversized_json_without_content_length() {
+        // Omit Content-Length to ensure the limit is enforced while streaming.
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let addr = listener.local_addr().expect("listener addr");
+
+        let limit_bytes = 64usize;
+        let payload = format!(r#"{{"data":"{}"}}"#, "a".repeat(128)).into_bytes();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf).await;
+
+            let headers =
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+            stream
+                .write_all(headers.as_bytes())
+                .await
+                .expect("write headers");
+            // Write in chunks to exercise streaming limit enforcement.
+            for chunk in payload.chunks(16) {
+                if stream.write_all(chunk).await.is_err() {
+                    break;
+                }
+            }
+            let _ = stream.shutdown().await;
+        });
+
+        let url = format!("http://{addr}/search");
+        let mut response = reqwest::Client::new()
+            .get(url)
+            .send()
+            .await
+            .expect("client request");
+
+        let err = crate::network_limits::read_response_body_with_limit(
+            &mut response,
+            limit_bytes,
+            "marketplace_json_test",
+        )
+        .await
+        .expect_err("expected JSON body size to be rejected");
+        assert!(
+            err.contains("Response body too large") && err.contains(&limit_bytes.to_string()),
+            "unexpected error: {err}"
+        );
+
+        server.await.expect("server task");
+    }
+
     #[test]
     fn ipc_network_scheme_policy_allows_https_everywhere() {
         let url = Url::parse("https://example.com/").expect("parse url");
