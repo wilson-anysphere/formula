@@ -23,6 +23,7 @@ import {
   type GridGeometry as DrawingGridGeometry,
   type Viewport as DrawingViewport,
 } from "../drawings/overlay";
+import { hitTestResizeHandle, type ResizeHandle } from "../drawings/selectionHandles";
 import type { DrawingObject, ImageEntry, ImageStore } from "../drawings/types";
 import { convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
@@ -982,7 +983,7 @@ export class SpreadsheetApp {
         pointerId: number;
         chartId: string;
         mode: "move" | "resize";
-        resizeHandle?: "nw" | "ne" | "sw" | "se";
+        resizeHandle?: ResizeHandle;
         startClientX: number;
         startClientY: number;
         startAnchor: ChartRecord["anchor"];
@@ -1523,7 +1524,9 @@ export class SpreadsheetApp {
     };
 
     this.chartSelectionCanvas = document.createElement("canvas");
-    this.chartSelectionCanvas.className = "grid-canvas chart-selection-canvas";
+    // Use the selection-layer z-index so chart handles sit above charts (and above the
+    // legacy selection canvas, where applicable).
+    this.chartSelectionCanvas.className = "grid-canvas grid-canvas--selection chart-selection-canvas";
     this.chartSelectionCanvas.setAttribute("aria-hidden", "true");
     if (this.gridMode === "shared") {
       // Match the selection canvas z-index so chart handles are drawn above charts in shared mode.
@@ -7773,24 +7776,12 @@ export class SpreadsheetApp {
   private chartResizeHandleAtPoint(hit: {
     rect: { left: number; top: number; width: number; height: number };
     pointInCellArea: { x: number; y: number };
-  }): "nw" | "ne" | "sw" | "se" | null {
-    const handle = 8;
-    const half = handle / 2;
-    const px = hit.pointInCellArea.x;
-    const py = hit.pointInCellArea.y;
-    const corners: Array<{ handle: "nw" | "ne" | "sw" | "se"; x: number; y: number }> = [
-      { handle: "se", x: hit.rect.left + hit.rect.width, y: hit.rect.top + hit.rect.height },
-      { handle: "sw", x: hit.rect.left, y: hit.rect.top + hit.rect.height },
-      { handle: "ne", x: hit.rect.left + hit.rect.width, y: hit.rect.top },
-      { handle: "nw", x: hit.rect.left, y: hit.rect.top },
-    ];
-
-    for (const corner of corners) {
-      if (px >= corner.x - half && px <= corner.x + half && py >= corner.y - half && py <= corner.y + half) {
-        return corner.handle;
-      }
-    }
-    return null;
+  }): ResizeHandle | null {
+    return hitTestResizeHandle(
+      { x: hit.rect.left, y: hit.rect.top, width: hit.rect.width, height: hit.rect.height },
+      hit.pointInCellArea.x,
+      hit.pointInCellArea.y,
+    );
   }
 
   private onChartPointerDownCapture(e: PointerEvent): void {
@@ -7862,36 +7853,38 @@ export class SpreadsheetApp {
       let width = startRect.width;
       let height = startRect.height;
 
-      if (handle === "se") {
+      const fromWest = handle === "w" || handle === "nw" || handle === "sw";
+      const fromEast = handle === "e" || handle === "ne" || handle === "se";
+      const fromNorth = handle === "n" || handle === "ne" || handle === "nw";
+      const fromSouth = handle === "s" || handle === "sw" || handle === "se";
+
+      if (fromEast) {
         width = width + dx;
-        height = height + dy;
-      } else if (handle === "sw") {
+      }
+      if (fromWest) {
         x = x + dx;
         width = width - dx;
+      }
+
+      if (fromSouth) {
         height = height + dy;
-      } else if (handle === "ne") {
+      }
+      if (fromNorth) {
         y = y + dy;
-        width = width + dx;
-        height = height - dy;
-      } else {
-        // nw
-        x = x + dx;
-        y = y + dy;
-        width = width - dx;
         height = height - dy;
       }
 
       if (width < minSize) {
         const delta = minSize - width;
         width = minSize;
-        if (handle === "sw" || handle === "nw") {
+        if (fromWest) {
           x -= delta;
         }
       }
       if (height < minSize) {
         const delta = minSize - height;
         height = minSize;
-        if (handle === "ne" || handle === "nw") {
+        if (fromNorth) {
           y -= delta;
         }
       }

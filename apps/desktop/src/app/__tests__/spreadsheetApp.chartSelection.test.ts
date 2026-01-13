@@ -214,6 +214,68 @@ describe("SpreadsheetApp chart selection + drag", () => {
     root.remove();
   });
 
+  it("resizing a selected chart updates its twoCell anchor", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const result = app.addChart({
+      chart_type: "bar",
+      data_range: "A2:B5",
+      title: "Resize Chart",
+      position: "A1",
+    });
+
+    const before = app.listCharts().find((c) => c.id === result.chart_id);
+    expect(before).toBeTruthy();
+    expect(before!.anchor.kind).toBe("twoCell");
+
+    const beforeAnchor = before!.anchor as any;
+    expect(beforeAnchor.fromCol).toBe(0);
+    expect(beforeAnchor.fromRow).toBe(0);
+
+    const rect = (app as any).chartAnchorToViewportRect(before!.anchor);
+    expect(rect).not.toBeNull();
+
+    const layout = (app as any).chartOverlayLayout();
+    const originX = layout.originX as number;
+    const originY = layout.originY as number;
+
+    // First click selects the chart.
+    const selectX = originX + rect.left + 10;
+    const selectY = originY + rect.top + 10;
+    dispatchPointerEvent(root, "pointerdown", { clientX: selectX, clientY: selectY, pointerId: 31 });
+    dispatchPointerEvent(window, "pointerup", { clientX: selectX, clientY: selectY, pointerId: 31 });
+    expect(app.getSelectedChartId()).toBe(result.chart_id);
+
+    // Second click on the bottom-right handle starts a resize drag.
+    const handleX = originX + rect.left + rect.width;
+    const handleY = originY + rect.top + rect.height;
+    const endX = handleX + 110; // increase width by ~1 column (default col width = 100)
+    const endY = handleY;
+
+    dispatchPointerEvent(root, "pointerdown", { clientX: handleX, clientY: handleY, pointerId: 32 });
+    dispatchPointerEvent(window, "pointermove", { clientX: endX, clientY: endY, pointerId: 32 });
+    dispatchPointerEvent(window, "pointerup", { clientX: endX, clientY: endY, pointerId: 32 });
+
+    const after = app.listCharts().find((c) => c.id === result.chart_id);
+    expect(after).toBeTruthy();
+    expect(after!.anchor.kind).toBe("twoCell");
+
+    const afterAnchor = after!.anchor as any;
+    expect(afterAnchor.fromCol).toBe(beforeAnchor.fromCol);
+    expect(afterAnchor.fromRow).toBe(beforeAnchor.fromRow);
+    expect(afterAnchor.toCol).toBe(beforeAnchor.toCol + 1);
+    expect(afterAnchor.toRow).toBe(beforeAnchor.toRow);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("hit testing respects shared-grid pane clipping (frozen panes)", () => {
     const root = createRoot();
     const status = {
