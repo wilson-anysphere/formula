@@ -40,9 +40,10 @@ test("Typing = suggests starter functions like SUM(", async () => {
     surroundingCells: createMockCellContext({}),
   });
 
-  assert.ok(
-    suggestions.some((s) => s.text === "=SUM("),
-    `Expected a SUM starter suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  assert.deepEqual(
+    suggestions.map((s) => s.text),
+    ["=SUM(", "=AVERAGE(", "=IF(", "=XLOOKUP(", "=VLOOKUP("],
+    `Expected stable starter ordering, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 
@@ -57,9 +58,10 @@ test("Typing =<space> suggests starter functions (pure insertion)", async () => 
     surroundingCells: createMockCellContext({}),
   });
 
-  assert.ok(
-    suggestions.some((s) => s.text === "= SUM("),
-    `Expected a SUM starter suggestion preserving the space, got: ${suggestions.map((s) => s.text).join(", ")}`
+  assert.deepEqual(
+    suggestions.map((s) => s.text),
+    ["= SUM(", "= AVERAGE(", "= IF(", "= XLOOKUP(", "= VLOOKUP("],
+    `Expected stable starter ordering preserving the space, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 
