@@ -31,4 +31,9 @@ describe("FormulaDiffView", () => {
     const html = renderToStaticMarkup(React.createElement(FormulaDiffView, { before: null, after: "=IF(A1=0,1,2)" }));
     expect(html).toContain("IF(A1 = 0, 1, 2)");
   });
+
+  it("re-adds quotes around quoted sheet names", () => {
+    const html = renderToStaticMarkup(React.createElement(FormulaDiffView, { before: null, after: "='My Sheet'!A1" }));
+    expect(html).toMatch(/(?:'|&#x27;)My Sheet(?:'|&#x27;)!A1/);
+  });
 });

@@ -28,8 +28,14 @@ function escapeExcelString(value: string): string {
   return value.replaceAll(`"`, `""`);
 }
 
+function escapeExcelSheetName(value: string): string {
+  // Excel escapes apostrophes inside quoted sheet names by doubling: ''.
+  return value.replaceAll(`'`, `''`);
+}
+
 function tokenToText(token: Token): string {
   if (token.type === "string") return `"${escapeExcelString(token.value)}"`;
+  if (token.type === "ident" && /\s/.test(token.value)) return `'${escapeExcelSheetName(token.value)}'`;
   return token.value;
 }
 
