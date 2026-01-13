@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseTauriUpdaterPubkey } from "./tauri-minisign.mjs";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const configPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
@@ -389,7 +390,22 @@ function main() {
   // leading to broken auto-update behavior despite a successful build.
   const pubkeyValue = updater?.pubkey;
   if (typeof pubkeyValue === "string" && pubkeyValue.trim().length > 0) {
-    const pubkey = analyzeMinisignKey(pubkeyValue);
+    /** @type {{ kind: "public"; keyIdHex: string } | null} */
+    let pubkey = null;
+    try {
+      const parsed = parseTauriUpdaterPubkey(pubkeyValue);
+      if (parsed.keyId) {
+        pubkey = { kind: "public", keyIdHex: parsed.keyId };
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      errBlock(`Invalid updater public key`, [
+        `Failed to parse ${relativeConfigPath} → plugins.updater.pubkey as a Tauri/minisign public key.`,
+        `Error: ${msg}`,
+      ]);
+      err(`\nUpdater signing secrets preflight failed. Fix the updater public key above before tagging a release.\n`);
+      return;
+    }
     const secret = analyzeMinisignKey(privateKey);
     if (pubkey?.kind === "public" && secret?.kind === "secret") {
       if (pubkey.keyIdHex !== secret.keyIdHex) {
