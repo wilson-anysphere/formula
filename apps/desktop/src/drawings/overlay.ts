@@ -1,4 +1,4 @@
-import type { Anchor, DrawingObject, DrawingTransform, ImageStore, Rect } from "./types";
+import type { Anchor, DrawingObject, DrawingTransform, ImageEntry, ImageStore, Rect } from "./types";
 import { ImageBitmapCache } from "./imageBitmapCache";
 import { graphicFramePlaceholderLabel, isGraphicFrame, parseShapeRenderSpec, type ShapeRenderSpec } from "./shapeRenderer";
 import { parseDrawingMLShapeText, type ShapeTextLayout, type ShapeTextRun } from "./drawingml/shapeText";
@@ -679,6 +679,16 @@ export class DrawingOverlay {
    */
   setSelectedId(id: number | null): void {
     this.selectedId = id;
+  }
+
+  /**
+   * Eagerly decode an ImageEntry into an ImageBitmap.
+   *
+   * Intended for insertion flows so the first render after inserting a picture
+   * can reuse an already-decoding promise.
+   */
+  preloadImage(entry: ImageEntry): Promise<ImageBitmap> {
+    return this.bitmapCache.preload(entry);
   }
 
   /**

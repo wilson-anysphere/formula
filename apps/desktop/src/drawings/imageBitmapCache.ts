@@ -6,7 +6,7 @@ export interface ImageBitmapCacheOptions {
    *
    * A value of 0 disables bitmap caching (but still dedupes concurrent decodes).
    *
-   * @defaultValue 256
+   * @defaultValue 128
    */
   maxEntries?: number;
 
@@ -105,13 +105,23 @@ export class ImageBitmapCache {
 
   constructor(options: ImageBitmapCacheOptions = {}) {
     const max = options.maxEntries;
-    this.maxEntries = ImageBitmapCache.normalizeMaxEntries(max ?? 256);
+    this.maxEntries = ImageBitmapCache.normalizeMaxEntries(max ?? 128);
     this.negativeCacheMs = options.negativeCacheMs ?? 0;
   }
 
   setMaxEntries(maxEntries: number): void {
     this.maxEntries = ImageBitmapCache.normalizeMaxEntries(maxEntries);
     this.evictIfNeeded();
+  }
+
+  /**
+   * Eagerly decode an image into an ImageBitmap.
+   *
+   * This is intended for insert flows so the subsequent render can draw using an
+   * already-decoded (or decoding) bitmap.
+   */
+  preload(entry: ImageEntry): Promise<ImageBitmap> {
+    return this.get(entry);
   }
 
   get(entry: ImageEntry, opts: ImageBitmapCacheGetOptions = {}): Promise<ImageBitmap> {
@@ -325,7 +335,7 @@ export class ImageBitmapCache {
   }
 
   private static normalizeMaxEntries(value: number): number {
-    if (!Number.isFinite(value)) return 256;
+    if (!Number.isFinite(value)) return 128;
     // Clamp to a small-ish non-negative integer to avoid pathological behavior.
     return Math.max(0, Math.floor(value));
   }
@@ -336,9 +346,8 @@ export class ImageBitmapCache {
     }
 
     try {
-      const buffer = new ArrayBuffer(entry.bytes.byteLength);
-      new Uint8Array(buffer).set(entry.bytes);
-      const blob = new Blob([buffer], { type: entry.mimeType });
+      // Blob construction already clones ArrayBufferView bytes; avoid a second manual copy.
+      const blob = new Blob([entry.bytes], { type: entry.mimeType });
       // `createImageBitmap` should always return a promise, but tests and
       // polyfills are not always well-behaved. Normalize to a promise so our
       // callers and internal bookkeeping remain predictable.

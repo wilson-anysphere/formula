@@ -6,6 +6,7 @@ import type { ImageEntry } from "../types";
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function makeEntry(id = "img_1"): ImageEntry {
@@ -45,6 +46,67 @@ describe("ImageBitmapCache", () => {
     expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
   });
 
+  it("dedupes concurrent preload calls", async () => {
+    let resolveBitmap: ((value: ImageBitmap) => void) | null = null;
+
+    const createImageBitmapMock = vi.fn(
+      () =>
+        new Promise<ImageBitmap>((resolve) => {
+          resolveBitmap = resolve;
+        }),
+    );
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 16, negativeCacheMs: 0 });
+    const img = makeEntry("img_1");
+
+    const p1 = cache.preload(img);
+    const p2 = cache.preload(img);
+
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+    // The cache should return the same in-flight promise for a given image id.
+    expect(p2).toBe(p1);
+
+    const bitmap = { id: "decoded" } as any as ImageBitmap;
+    resolveBitmap?.(bitmap);
+
+    const [b1, b2] = await Promise.all([p1, p2]);
+    expect(b1).toBe(bitmap);
+    expect(b2).toBe(bitmap);
+  });
+
+  it("evicts least-recently-used resolved bitmaps when over the limit", async () => {
+    let decodeCount = 0;
+    const createImageBitmapMock = vi.fn(async () => ({ id: `bitmap_${decodeCount++}` } as any as ImageBitmap));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 2, negativeCacheMs: 0 });
+    const a = makeEntry("a");
+    const b = makeEntry("b");
+    const c = makeEntry("c");
+
+    // Fill the cache with a and b.
+    await cache.get(a);
+    await cache.get(b);
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
+
+    // Touch a so b becomes the LRU entry.
+    await cache.get(a);
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
+
+    // Inserting c should evict b.
+    await cache.get(c);
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(3);
+
+    // a is still cached.
+    await cache.get(a);
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(3);
+
+    // b was evicted, so fetching it again should trigger another decode.
+    await cache.get(b);
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(4);
+  });
+
   it("removes a failed decode from the cache and allows a subsequent retry", async () => {
     const cache = new ImageBitmapCache({ negativeCacheMs: 0 });
     const entry = makeEntry();
@@ -52,10 +114,7 @@ describe("ImageBitmapCache", () => {
     const err = new Error("bad bytes");
     const bitmap = {} as ImageBitmap;
 
-    const createImageBitmapMock = vi
-      .fn()
-      .mockRejectedValueOnce(err)
-      .mockResolvedValueOnce(bitmap);
+    const createImageBitmapMock = vi.fn().mockRejectedValueOnce(err).mockResolvedValueOnce(bitmap);
     vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
 
     await expect(cache.get(entry)).rejects.toBe(err);
@@ -83,8 +142,7 @@ describe("ImageBitmapCache", () => {
 
     await expect(inflight).rejects.toMatchObject({ name: "AbortError" });
 
-    // Let the underlying decode complete to ensure there are no unhandled
-    // promise rejections during the test run.
+    // Let the underlying decode complete to ensure there are no unhandled promise rejections.
     resolveDecode({} as ImageBitmap);
     await Promise.resolve();
 
@@ -148,8 +206,7 @@ describe("ImageBitmapCache", () => {
     // Drop the cache entry while the decode is still in-flight.
     cache.invalidate(entry.id);
 
-    // When the decode eventually resolves, the bitmap should be closed since no
-    // one is still awaiting it.
+    // When the decode eventually resolves, the bitmap should be closed since no one is still awaiting it.
     resolveDecode(bitmap);
     await Promise.resolve();
 

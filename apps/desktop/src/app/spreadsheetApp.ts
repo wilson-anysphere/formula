@@ -4535,6 +4535,14 @@ export class SpreadsheetApp {
         } catch {
           // Best-effort: never fail picture insertion due to collab image propagation.
         }
+        // Kick off ImageBitmap decode immediately so the first overlay paint can
+        // reuse an already-decoding promise (avoids blocking on decode during
+        // the render pass right after insertion).
+        const imageEntry: ImageEntry = { id: imageId, bytes, mimeType };
+        void this.drawingOverlay
+          .preloadImage(imageEntry)
+          // Insertion should succeed even if bitmap decode fails.
+          .catch(() => {});
 
         const fromCol = startCol + i * (DEFAULT_PICTURE_WIDTH_COLS + DEFAULT_PICTURE_GAP_COLS);
         const fromRow = startRow;
