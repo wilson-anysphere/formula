@@ -1,19 +1,10 @@
 import { isCellEmpty, normalizeRange, parseA1Range, rangeToA1 } from "./a1.js";
+import { throwIfAborted } from "./abort.js";
 
 // Detecting connected regions in a dense matrix requires an O(rows*cols) visited grid.
 // Cap the scan to avoid catastrophic allocations when callers accidentally pass
 // Excel-scale ranges (1,048,576 x 16,384).
 const DEFAULT_DATA_REGION_SCAN_CELL_LIMIT = 200_000;
-
-function createAbortError(message = "Aborted") {
-  const err = new Error(message);
-  err.name = "AbortError";
-  return err;
-}
-
-function throwIfAborted(signal) {
-  if (signal?.aborted) throw createAbortError();
-}
 
 /**
  * @typedef {"empty"|"number"|"boolean"|"date"|"string"|"formula"|"mixed"} InferredType

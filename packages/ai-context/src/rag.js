@@ -1,15 +1,6 @@
 import { isCellEmpty, normalizeRange, parseA1Range, rangeToA1 } from "./a1.js";
 import { extractSheetSchema } from "./schema.js";
-
-function createAbortError(message = "Aborted") {
-  const err = new Error(message);
-  err.name = "AbortError";
-  return err;
-}
-
-function throwIfAborted(signal) {
-  if (signal?.aborted) throw createAbortError();
-}
+import { throwIfAborted } from "./abort.js";
 
 /**
  * @param {string} input

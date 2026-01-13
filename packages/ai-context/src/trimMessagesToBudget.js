@@ -1,50 +1,10 @@
 import { DEFAULT_TOKEN_ESTIMATOR } from "./tokenBudget.js";
+import { awaitWithAbort, throwIfAborted } from "./abort.js";
 
 export const CONTEXT_SUMMARY_MARKER = "[CONTEXT_SUMMARY]";
 const DEFAULT_SUMMARY_MAX_TOKENS = 256;
 const DEFAULT_KEEP_LAST_MESSAGES = 40;
 const TRIM_SUFFIX = "\n…(trimmed to fit context budget)…";
-
-function createAbortError(message = "Aborted") {
-  const err = new Error(message);
-  err.name = "AbortError";
-  return err;
-}
-
-function throwIfAborted(signal) {
-  if (signal?.aborted) throw createAbortError();
-}
-
-/**
- * Await a promise but reject early if the AbortSignal is triggered.
- *
- * This cannot cancel underlying work, but it ensures callers stop waiting promptly.
- *
- * @template T
- * @param {Promise<T> | T} promise
- * @param {AbortSignal | undefined} signal
- * @returns {Promise<T>}
- */
-function awaitWithAbort(promise, signal) {
-  if (!signal) return Promise.resolve(promise);
-  if (signal.aborted) return Promise.reject(createAbortError());
-
-  return new Promise((resolve, reject) => {
-    const onAbort = () => reject(createAbortError());
-    signal.addEventListener("abort", onAbort, { once: true });
-
-    Promise.resolve(promise).then(
-      (value) => {
-        signal.removeEventListener("abort", onAbort);
-        resolve(value);
-      },
-      (error) => {
-        signal.removeEventListener("abort", onAbort);
-        reject(error);
-      }
-    );
-  });
-}
 
 /**
  * @param {any} message

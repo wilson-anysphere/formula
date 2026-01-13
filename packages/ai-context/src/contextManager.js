@@ -3,6 +3,7 @@ import { RagIndex } from "./rag.js";
 import { DEFAULT_TOKEN_ESTIMATOR, packSectionsToTokenBudget, stableJsonStringify } from "./tokenBudget.js";
 import { randomSampleRows, stratifiedSampleRows } from "./sampling.js";
 import { classifyText, redactText } from "./dlp.js";
+import { awaitWithAbort, throwIfAborted } from "./abort.js";
 
 import { indexWorkbook } from "../../ai-rag/src/pipeline/indexWorkbook.js";
 import { workbookFromSpreadsheetApi } from "../../ai-rag/src/workbook/fromSpreadsheetApi.js";
@@ -19,48 +20,6 @@ import { DlpViolationError } from "../../security/dlp/src/errors.js";
 
 const DEFAULT_CLASSIFICATION_RANK = classificationRank(CLASSIFICATION_LEVEL.PUBLIC);
 const RESTRICTED_CLASSIFICATION_RANK = classificationRank(CLASSIFICATION_LEVEL.RESTRICTED);
-
-function createAbortError(message = "Aborted") {
-  const err = new Error(message);
-  err.name = "AbortError";
-  return err;
-}
-
-function throwIfAborted(signal) {
-  if (signal?.aborted) throw createAbortError();
-}
-
-/**
- * Await a promise but reject early if the AbortSignal is triggered.
- *
- * This cannot cancel underlying work (e.g. embedding requests), but it ensures callers can
- * stop waiting promptly when a request is canceled.
- *
- * @template T
- * @param {Promise<T> | T} promise
- * @param {AbortSignal | undefined} signal
- * @returns {Promise<T>}
- */
-function awaitWithAbort(promise, signal) {
-  if (!signal) return Promise.resolve(promise);
-  if (signal.aborted) return Promise.reject(createAbortError());
-
-  return new Promise((resolve, reject) => {
-    const onAbort = () => reject(createAbortError());
-    signal.addEventListener("abort", onAbort, { once: true });
-
-    Promise.resolve(promise).then(
-      (value) => {
-        signal.removeEventListener("abort", onAbort);
-        resolve(value);
-      },
-      (error) => {
-        signal.removeEventListener("abort", onAbort);
-        reject(error);
-      }
-    );
-  });
-}
 
 /**
  * @typedef {{ type: "range"|"formula"|"table"|"chart", reference: string, data?: any }} Attachment

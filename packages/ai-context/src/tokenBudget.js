@@ -1,3 +1,5 @@
+import { throwIfAborted } from "./abort.js";
+
 /**
  * Fast, model-agnostic token estimate. Works well enough for enforcing a budget
  * in a UI context manager; exact tokenization is model-specific and can be added
@@ -8,16 +10,6 @@
  */
 export function estimateTokens(text, estimator = DEFAULT_TOKEN_ESTIMATOR) {
   return estimator.estimateTextTokens(text);
-}
-
-function createAbortError(message = "Aborted") {
-  const err = new Error(message);
-  err.name = "AbortError";
-  return err;
-}
-
-function throwIfAborted(signal) {
-  if (signal?.aborted) throw createAbortError();
 }
 
 /**
