@@ -257,6 +257,10 @@ describe("FormulaBarView tab completion (integration)", () => {
 
   it("does not create phantom sheets when suggesting sheet-qualified ranges", async () => {
     const doc = new DocumentController();
+    // The completion controller may read from the active sheet as part of suggestion/preview
+    // generation. Seed the active sheet so the test focuses on ensuring we *don't* materialize
+    // unknown sheets (e.g. Sheet2) via read paths.
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, 1);
 
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -280,7 +284,7 @@ describe("FormulaBarView tab completion (integration)", () => {
       },
     });
 
-    expect(doc.getSheetIds()).toEqual([]);
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
 
     view.focus({ cursor: "end" });
     view.textarea.value = "=SUM(Sheet2!A";

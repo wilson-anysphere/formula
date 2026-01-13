@@ -1,0 +1,157 @@
+/*
+  Styles for the VBA Migrate panel (VbaMigratePanel.tsx).
+
+  This file intentionally uses only design tokens from `tokens.css` and does not
+  hardcode colors (enforced by `apps/desktop/test/noHardcodedColors.test.js`).
+*/
+
+.vba-migrate-panel {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.vba-migrate-panel__sidebar {
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  padding: 12px;
+  gap: 12px;
+  box-sizing: border-box;
+  overflow: auto;
+}
+
+.vba-migrate-panel__secondary-text {
+  color: var(--text-secondary);
+}
+
+.vba-migrate-panel__error-text {
+  color: var(--error);
+  font-size: 12px;
+}
+
+.vba-migrate-panel__body {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  box-sizing: border-box;
+  display: flex;
+  gap: 12px;
+}
+
+.vba-migrate-panel__card {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.vba-migrate-panel__card--overflow-hidden {
+  overflow: hidden;
+}
+
+.vba-migrate-panel__card-header {
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+
+.vba-migrate-panel__card-header--row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vba-migrate-panel__section {
+  padding: 10px;
+}
+
+.vba-migrate-panel__section--divider {
+  border-bottom: 1px solid var(--border);
+}
+
+.vba-migrate-panel__details {
+  border-top: 1px solid var(--border);
+}
+
+.vba-migrate-panel__details-summary {
+  cursor: pointer;
+  padding: 10px;
+  font-weight: 600;
+}
+
+.vba-migrate-panel__details-pre {
+  margin: 0;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  white-space: pre-wrap;
+}
+
+.vba-migrate-panel__mono {
+  font-family: var(--font-mono);
+}
+
+.vba-migrate-panel__mono-sm {
+  font-size: 12px;
+}
+
+.vba-migrate-panel__code-textarea {
+  flex: 1;
+  min-height: 0;
+  border: none;
+  outline: none;
+  padding: 10px;
+  resize: none;
+  background: transparent;
+  color: inherit;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.vba-migrate-panel__module-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.vba-migrate-panel__module-item {
+  margin-bottom: 6px;
+}
+
+.vba-migrate-panel__module-button {
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  color: inherit;
+  border-radius: 6px;
+  font-size: 12px;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+}
+
+.vba-migrate-panel__module-button[data-selected="true"] {
+  background: var(--selection-bg);
+}
+
+.vba-migrate-panel__entrypoint-label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.vba-migrate-panel__entrypoint-control {
+  padding: 4px 6px;
+}
+
+.vba-migrate-panel__subheader {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
