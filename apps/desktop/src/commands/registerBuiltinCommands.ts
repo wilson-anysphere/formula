@@ -8,12 +8,12 @@ import { showQuickPick, showToast } from "../extensions/ui.js";
 import { getPasteSpecialMenuItems } from "../clipboard/pasteSpecial.js";
 import type { ThemeController } from "../theme/themeController.js";
 import { cycleWorkbenchFocusRegion, type WorkbenchFocusCycleDeps } from "./workbenchFocusCycle.js";
+import { registerNumberFormatCommands } from "./registerNumberFormatCommands.js";
 import { DEFAULT_GRID_LIMITS } from "../selection/selection.js";
 import type { GridLimits, Range } from "../selection/types";
 import { DEFAULT_DESKTOP_LOAD_MAX_COLS, DEFAULT_DESKTOP_LOAD_MAX_ROWS } from "../workbook/load/clampUsedRange.js";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize, normalizeSelectionRange } from "../formatting/selectionSizeGuard.js";
 import {
-  applyNumberFormatPreset,
   NUMBER_FORMATS,
   setFillColor,
   setFontColor,
@@ -281,6 +281,19 @@ export function registerBuiltinCommands(params: {
       return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 11;
     } catch {
       return 11;
+    }
+  };
+
+  const activeCellNumberFormat = (): string | null => {
+    try {
+      const sheetId = (app as any).getCurrentSheetId?.();
+      const cell = (app as any).getActiveCell?.();
+      const docAny = (app as any).getDocument?.();
+      if (!sheetId || !cell || !docAny) return null;
+      const format = docAny.getCellFormat?.(sheetId, cell)?.numberFormat;
+      return typeof format === "string" && format.trim() ? format : null;
+    } catch {
+      return null;
     }
   };
 
@@ -1562,41 +1575,13 @@ export function registerBuiltinCommands(params: {
     },
   );
 
-  commandRegistry.registerBuiltinCommand(
-    "format.numberFormat.currency",
-    t("command.format.numberFormat.currency"),
-    () =>
-      applyFormattingToSelection(
-        t("command.format.numberFormat.currency"),
-        (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "currency"),
-        { forceBatch: true },
-      ),
-    { category: commandCategoryFormat, icon: null, keywords: ["currency", "number format"] },
-  );
-
-  commandRegistry.registerBuiltinCommand(
-    "format.numberFormat.percent",
-    t("command.format.numberFormat.percent"),
-    () =>
-      applyFormattingToSelection(
-        t("command.format.numberFormat.percent"),
-        (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "percent"),
-        { forceBatch: true },
-      ),
-    { category: commandCategoryFormat, icon: null, keywords: ["percent", "number format"] },
-  );
-
-  commandRegistry.registerBuiltinCommand(
-    "format.numberFormat.date",
-    t("command.format.numberFormat.date"),
-    () =>
-      applyFormattingToSelection(
-        t("command.format.numberFormat.date"),
-        (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "date"),
-        { forceBatch: true },
-      ),
-    { category: commandCategoryFormat, icon: null, keywords: ["date", "number format"] },
-  );
+  registerNumberFormatCommands({
+    commandRegistry,
+    applyFormattingToSelection,
+    getActiveCellNumberFormat: activeCellNumberFormat,
+    t,
+    category: commandCategoryFormat,
+  });
 
   commandRegistry.registerBuiltinCommand(
     "format.openFormatCells",
