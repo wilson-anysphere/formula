@@ -12,6 +12,7 @@ export class FormulaChartModelStore implements ChartStore {
   private readonly models = new Map<string, ChartModel>();
   private readonly data = new Map<string, Partial<ResolvedChartData>>();
   private readonly themes = new Map<string, Partial<ChartTheme>>();
+  private defaultTheme: Partial<ChartTheme> | undefined;
 
   static chartIdFromSheetObject(sheetId: string, drawingObjectId: string | number): string {
     return `${sheetId}:${String(drawingObjectId)}`;
@@ -30,7 +31,7 @@ export class FormulaChartModelStore implements ChartStore {
   }
 
   getChartTheme(chartId: string): Partial<ChartTheme> | undefined {
-    return this.themes.get(chartId);
+    return this.themes.get(chartId) ?? this.defaultTheme;
   }
 
   setChartModel(chartId: string, model: ChartModel): void {
@@ -53,6 +54,16 @@ export class FormulaChartModelStore implements ChartStore {
   setChartTheme(chartId: string, theme: Partial<ChartTheme> | undefined): void {
     if (!theme) this.themes.delete(chartId);
     else this.themes.set(chartId, theme);
+  }
+
+  /**
+   * Set a theme patch applied to all charts when no per-chart theme is present.
+   *
+   * This is convenient for aligning imported chart rendering with the workbook's
+   * theme palette without having to enumerate every chart id.
+   */
+  setDefaultTheme(theme: Partial<ChartTheme> | undefined): void {
+    this.defaultTheme = theme;
   }
 
   clear(): void {

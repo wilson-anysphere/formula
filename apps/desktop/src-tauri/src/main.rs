@@ -1194,6 +1194,7 @@ fn main() {
             commands::get_workbook_theme_palette,
             commands::list_defined_names,
             commands::list_tables,
+            commands::list_imported_chart_models,
             commands::get_precedents,
             commands::get_dependents,
             commands::set_cell,

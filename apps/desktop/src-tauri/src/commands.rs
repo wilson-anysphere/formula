@@ -5,6 +5,8 @@ use serde::{de, Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value as JsonValue;
 #[cfg(feature = "desktop")]
+use formula_model::charts::ChartModel as FormulaChartModel;
+#[cfg(feature = "desktop")]
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -188,6 +190,23 @@ pub struct TableInfo {
     pub end_row: usize,
     pub end_col: usize,
     pub columns: Vec<String>,
+}
+
+/// JSON payload for charts imported from an XLSX package.
+///
+/// The `model` field is the JSON-serialized Rust `formula_model::charts::ChartModel` so the
+/// frontend can convert it into the UI chart layout model and render via `ChartRendererAdapter`.
+#[cfg(feature = "desktop")]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ImportedChartModelInfo {
+    pub chart_id: String,
+    /// Relationship id inside the drawing part (`rId*`).
+    pub rel_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawing_object_id: Option<u32>,
+    pub model: FormulaChartModel,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1696,6 +1715,79 @@ pub fn list_tables(state: State<'_, SharedAppState>) -> Result<Vec<TableInfo>, S
         .collect();
 
     Ok(tables)
+}
+
+/// Extract chart models from the opened XLSX package (when available).
+///
+/// This is used by the frontend to render imported DrawingML `<xdr:graphicFrame>` chart objects
+/// (which are represented as `ChartPlaceholder` in the drawing layer model) using the existing
+/// canvas chart renderer (`ChartRendererAdapter`).
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn list_imported_chart_models(
+    window: tauri::WebviewWindow,
+    state: State<'_, SharedAppState>,
+) -> Result<Vec<ImportedChartModelInfo>, String> {
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "imported chart model extraction",
+        ipc_origin::Verb::Are,
+    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "imported chart model extraction", ipc_origin::Verb::Are)?;
+
+    let origin_bytes = {
+        let state = state.inner().lock().unwrap();
+        let Ok(workbook) = state.get_workbook() else {
+            return Ok(Vec::new());
+        };
+        workbook.origin_xlsx_bytes.clone()
+    };
+
+    let Some(origin_bytes) = origin_bytes else {
+        return Ok(Vec::new());
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        // Best-effort: chart parsing should never prevent workbook interactions.
+        let pkg = match formula_xlsx::XlsxPackage::from_bytes(origin_bytes.as_ref()) {
+            Ok(pkg) => pkg,
+            Err(_) => return Ok::<_, String>(Vec::new()),
+        };
+
+        let chart_objects = match pkg.extract_chart_objects() {
+            Ok(objs) => objs,
+            Err(_) => return Ok::<_, String>(Vec::new()),
+        };
+
+        let mut out = Vec::new();
+        for obj in chart_objects {
+            let Some(model) = obj.model else {
+                continue;
+            };
+
+            let chart_id = match (obj.sheet_name.as_deref(), obj.drawing_object_id) {
+                (Some(sheet_name), Some(object_id)) => format!("{sheet_name}:{object_id}"),
+                _ => {
+                    // Fallback: when we cannot resolve the sheet/object id, fall back to a stable
+                    // id based on the drawing part + relationship id.
+                    format!("{}:{}", obj.drawing_part, obj.drawing_rel_id)
+                }
+            };
+
+            out.push(ImportedChartModelInfo {
+                chart_id,
+                rel_id: obj.drawing_rel_id,
+                sheet_name: obj.sheet_name,
+                drawing_object_id: obj.drawing_object_id,
+                model,
+            });
+        }
+
+        Ok::<_, String>(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(feature = "desktop")]

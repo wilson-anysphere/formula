@@ -70,6 +70,17 @@ export class TauriWorkbookBackend implements WorkbookBackend {
     return (payload as TableInfo[]) ?? [];
   }
 
+  /**
+   * Desktop-only: fetch chart models parsed from the opened XLSX package.
+   *
+   * These are JSON-serialized Rust `formula_model::charts::ChartModel` values keyed by a
+   * stable `chart_id` (recommended: `${sheetId}:${drawingObjectId}`).
+   */
+  async listImportedChartModels(): Promise<unknown[]> {
+    const payload = await this.invoke("list_imported_chart_models");
+    return (payload as unknown[]) ?? [];
+  }
+
   async saveWorkbook(path?: string): Promise<void> {
     const args: Record<string, unknown> = {};
     if (path) args.path = path;

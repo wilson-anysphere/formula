@@ -9143,6 +9143,16 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     app.setChartTheme(chartThemeFromWorkbookPalette(null));
   }
 
+  // Populate chart models extracted from imported XLSX chart parts so DrawingML chart placeholders
+  // can be rendered via the canvas chart renderer.
+  try {
+    const imported = await tauriBackend.listImportedChartModels();
+    app.setImportedChartModels(imported);
+  } catch (err) {
+    console.warn("[formula][desktop] Failed to load imported chart models:", err);
+    app.setImportedChartModels([]);
+  }
+
   doc.markSaved();
 
   // Default to the first *visible* sheet so hidden sheets are never activated

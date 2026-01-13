@@ -41,6 +41,7 @@
         { "command": "install_downloaded_update" },
         { "command": "list_defined_names" },
         { "command": "list_dir" },
+        { "command": "list_imported_chart_models" },
         { "command": "list_macros" },
         { "command": "list_pivot_tables" },
         { "command": "list_tables" },

@@ -37,6 +37,7 @@
           "install_downloaded_update",
           "list_defined_names",
           "list_dir",
+          "list_imported_chart_models",
           "list_macros",
           "list_pivot_tables",
           "list_tables",

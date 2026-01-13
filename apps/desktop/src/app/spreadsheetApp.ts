@@ -3941,7 +3941,80 @@ export class SpreadsheetApp {
 
   setChartTheme(theme: ChartTheme): void {
     this.chartTheme = theme;
+    // Keep imported chart rendering aligned with the workbook palette too.
+    this.formulaChartModelStore.setDefaultTheme({ seriesColors: theme.seriesColors });
     this.renderCharts(true);
+  }
+
+  /**
+   * Populate the imported-chart model store from JSON-serialized Rust `ChartModel`s.
+   *
+   * Expected input shape (best-effort; callers may omit fields):
+   * - `{ chart_id: string, rel_id?: string, model: unknown }` (snake_case; Tauri)
+   * - `{ chartId: string, relId?: string, model: unknown }` (camelCase)
+   */
+  setImportedChartModels(entries: unknown): void {
+    this.formulaChartModelStore.clear();
+
+    if (!Array.isArray(entries)) {
+      this.renderDrawings();
+      return;
+    }
+
+    for (const entry of entries) {
+      if (!entry || typeof entry !== "object") continue;
+      const e = entry as any;
+      const model = e.model;
+      if (model == null) continue;
+
+      let chartId: string | null =
+        typeof e.chart_id === "string"
+          ? e.chart_id
+          : typeof e.chartId === "string"
+            ? e.chartId
+            : null;
+
+      if (!chartId) {
+        const sheetName =
+          typeof e.sheet_name === "string"
+            ? e.sheet_name
+            : typeof e.sheetName === "string"
+              ? e.sheetName
+              : null;
+        const drawingObjectId =
+          typeof e.drawing_object_id === "number"
+            ? e.drawing_object_id
+            : typeof e.drawingObjectId === "number"
+              ? e.drawingObjectId
+              : null;
+        if (sheetName && drawingObjectId != null) {
+          chartId = FormulaChartModelStore.chartIdFromSheetObject(sheetName, drawingObjectId);
+        }
+      }
+
+      const relId: string | null =
+        typeof e.rel_id === "string"
+          ? e.rel_id
+          : typeof e.relId === "string"
+            ? e.relId
+            : null;
+
+      try {
+        if (chartId && chartId.trim() !== "") {
+          this.formulaChartModelStore.setFormulaModelChartModel(chartId, model);
+        }
+        // Back-compat: some drawing adapters may identify charts by the drawing relationship id
+        // (`rId*`) when sheet/object context isn't available.
+        if (relId && relId.trim() !== "" && relId !== chartId) {
+          this.formulaChartModelStore.setFormulaModelChartModel(relId, model);
+        }
+      } catch {
+        // Best-effort: ignore malformed chart models so other charts still render.
+      }
+    }
+
+    // Re-render the drawings overlay so chart placeholders can upgrade to real charts.
+    this.renderDrawings();
   }
 
   listCharts(): readonly ChartRecord[] {
