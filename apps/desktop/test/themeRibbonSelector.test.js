@@ -36,9 +36,17 @@ test("Ribbon schema includes the Theme selector dropdown (View → Appearance)",
   }
 });
 
-test("Desktop ribbon command ids for theme switching are handled in main.ts", () => {
+test("Desktop theme switching commands are wired via registerBuiltinCommands", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = fs.readFileSync(mainPath, "utf8");
+
+  // Theme switching is wired through the shared CommandRegistry so ribbon, command palette, and
+  // keybindings share the same implementation.
+  assert.match(main, /\bregisterBuiltinCommands\s*\(\s*\{[\s\S]*?\bthemeController\b/);
+  assert.match(main, /\brefreshRibbonUiState\s*:\s*scheduleRibbonSelectionFormatStateUpdate\b/);
+
+  const commandsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
+  const commands = fs.readFileSync(commandsPath, "utf8");
 
   const expectations = [
     { commandId: "view.appearance.theme.system", preference: "system" },
@@ -48,26 +56,16 @@ test("Desktop ribbon command ids for theme switching are handled in main.ts", ()
   ];
 
   for (const { commandId, preference } of expectations) {
-    const caseBlockMatch = main.match(
-      new RegExp(
-        `case\\s+["']${escapeRegExp(commandId)}["']:\\s*([\\s\\S]*?)(?=\\n\\s*case\\s+["']|\\n\\s*default:|\\n\\s*\\})`,
-        "m",
-      ),
+    const pattern = new RegExp(
+      `commandRegistry\\.registerBuiltinCommand\\([\\s\\S]*?["']${escapeRegExp(
+        commandId,
+      )}["'][\\s\\S]*?themeController\\.setThemePreference\\(["']${escapeRegExp(preference)}["']\\)`,
+      "m",
     );
-    assert.ok(caseBlockMatch, `Expected to find switch case for ${commandId}`);
-    const caseBlock = caseBlockMatch[1] ?? "";
-
     assert.match(
-      caseBlock,
-      new RegExp(`\\bthemeController\\.setThemePreference\\(["']${escapeRegExp(preference)}["']\\)`),
-      `Expected ${commandId} to call themeController.setThemePreference("${preference}")`,
-    );
-
-    // Theme switching should update ribbon UI state immediately (label + related controls).
-    assert.match(
-      caseBlock,
-      /\bscheduleRibbonSelectionFormatStateUpdate\s*\(\s*\)\s*;/,
-      `Expected ${commandId} to call scheduleRibbonSelectionFormatStateUpdate() after changing theme`,
+      commands,
+      pattern,
+      `Expected registerBuiltinCommands.ts to handle ${commandId} by calling themeController.setThemePreference("${preference}")`,
     );
   }
 });

@@ -73,7 +73,8 @@ describe("Ribbon theme selector", () => {
     const layoutController = {} as any;
     const app = { focus: vi.fn() } as any;
 
-    let preference: "system" | "light" | "dark" | "high-contrast" = "system";
+    // Default theme preference is Light (not System) for new users.
+    let preference: "system" | "light" | "dark" | "high-contrast" = "light";
     const themeController = {
       setThemePreference: vi.fn((next: string) => {
         preference = next as typeof preference;
@@ -92,7 +93,7 @@ describe("Ribbon theme selector", () => {
           case "high-contrast":
             return "High Contrast";
           default:
-            return "System";
+            return "Light";
         }
       })();
 
@@ -134,7 +135,7 @@ describe("Ribbon theme selector", () => {
     const themeLabel = () =>
       container.querySelector<HTMLButtonElement>('[data-testid="theme-selector"]')?.querySelector(".ribbon-button__label")?.textContent?.trim() ??
       "";
-    expect(themeLabel()).toBe("Theme: System");
+    expect(themeLabel()).toBe("Theme: Light");
 
     act(() => {
       trigger!.click();

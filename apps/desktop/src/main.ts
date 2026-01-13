@@ -2119,7 +2119,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
         case "high-contrast":
           return "High Contrast";
         default:
-          return "System";
+          // Default to the UX baseline.
+          return "Light";
       }
     })();
 
