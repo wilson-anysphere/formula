@@ -35,8 +35,9 @@ describe("ai-audit browser bundling", () => {
         resolveDir: pkgRoot,
         contents: `
           import { AIAuditRecorder, LocalStorageAIAuditStore } from "@formula/ai-audit";
+          import { BoundedAIAuditStore } from "@formula/ai-audit";
           import { LocalStorageAIAuditStore as FromBrowserSubpath } from "@formula/ai-audit/browser";
-          console.log(AIAuditRecorder, LocalStorageAIAuditStore, FromBrowserSubpath);
+          console.log(AIAuditRecorder, LocalStorageAIAuditStore, FromBrowserSubpath, BoundedAIAuditStore);
         `
       }
     });
