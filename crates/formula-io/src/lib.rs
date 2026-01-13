@@ -8,10 +8,10 @@ use encoding_rs::{UTF_16BE, UTF_16LE, WINDOWS_1252};
 use formula_fs::{atomic_write, AtomicWriteError};
 use formula_model::import::{import_csv_into_workbook, CsvImportError, CsvOptions};
 use formula_model::sanitize_sheet_name;
+use std::io::{Read, Seek};
 pub use formula_xls as xls;
 pub use formula_xlsb as xlsb;
 pub use formula_xlsx as xlsx;
-use std::io::{Read, Seek};
 
 mod encryption_info;
 pub mod offcrypto;
@@ -201,6 +201,12 @@ pub enum Error {
         #[source]
         source: std::io::Error,
     },
+    #[error("failed to encrypt workbook `{path}`: {source}")]
+    EncryptWorkbook {
+        path: PathBuf,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("failed to save workbook package to `{path}`: {source}")]
     SaveXlsxPackage {
         path: PathBuf,
@@ -318,6 +324,40 @@ impl std::fmt::Debug for OpenOptions {
         let password = self.password.as_ref().map(|_| "<redacted>");
         f.debug_struct("OpenOptions")
             .field("password", &password)
+            .finish()
+    }
+}
+
+/// Supported encryption schemes when saving password-protected workbooks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveEncryptionScheme {
+    /// MS-OFFCRYPTO Agile encryption (ECMA-376 4.4; default for modern Excel).
+    Agile,
+    /// MS-OFFCRYPTO Standard/CryptoAPI encryption (ECMA-376 2.2/3.2/4.2; older Excel).
+    Standard,
+}
+
+impl Default for SaveEncryptionScheme {
+    fn default() -> Self {
+        Self::Agile
+    }
+}
+
+/// Options for saving workbooks.
+#[derive(Clone, Default)]
+pub struct SaveOptions {
+    /// Password used to encrypt the output workbook (Office-encrypted OLE wrapper).
+    pub password: Option<String>,
+    /// Encryption scheme used when `password` is set.
+    pub encryption_scheme: SaveEncryptionScheme,
+}
+
+impl std::fmt::Debug for SaveOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let password = self.password.as_ref().map(|_| "<redacted>");
+        f.debug_struct("SaveOptions")
+            .field("password", &password)
+            .field("encryption_scheme", &self.encryption_scheme)
             .finish()
     }
 }
@@ -1421,8 +1461,7 @@ pub fn open_workbook_model_with_password(
     )
 }
 
-/// Open a spreadsheet workbook from disk, optionally providing a password for encrypted
-/// workbooks.
+/// Open a spreadsheet workbook from disk, optionally providing a password for encrypted workbooks.
 ///
 /// - For password-protected legacy `.xls` workbooks (BIFF `FILEPASS`), this will attempt to decrypt
 ///   the workbook stream using `formula-xls` when `password` is provided.
@@ -1547,7 +1586,6 @@ fn encrypted_ooxml_error_from_path(path: &Path, password: Option<&str>) -> Optio
     let mut ole = cfb::CompoundFile::open(file).ok()?;
     encrypted_ooxml_error(&mut ole, path, password)
 }
-
 fn stream_exists<R: std::io::Read + std::io::Write + std::io::Seek>(
     ole: &mut cfb::CompoundFile<R>,
     name: &str,
@@ -2743,9 +2781,7 @@ fn encrypted_ooxml_error<R: std::io::Read + std::io::Write + std::io::Seek>(
                 path: path.to_path_buf(),
             });
         }
-        return Some(Error::InvalidPassword {
-            path: path.to_path_buf(),
-        });
+        return None;
     }
 
     let is_agile = version_major == 4 && version_minor == 4;
@@ -4065,6 +4101,76 @@ fn open_parquet_model_workbook(path: &Path) -> Result<formula_model::Workbook, E
 ///   or exported to `.xlsx` depending on the output extension.
 /// - [`Workbook::Model`] is exported as `.xlsx` via [`formula_xlsx::write_workbook`].
 pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), Error> {
+    save_workbook_with_options(workbook, path, SaveOptions::default())
+}
+
+#[cfg(feature = "encrypted-workbooks")]
+fn encrypt_options_from_save_options(options: &SaveOptions) -> formula_office_crypto::EncryptOptions {
+    match options.encryption_scheme {
+        SaveEncryptionScheme::Agile => formula_office_crypto::EncryptOptions::default(),
+        SaveEncryptionScheme::Standard => formula_office_crypto::EncryptOptions {
+            scheme: formula_office_crypto::EncryptionScheme::Standard,
+            // Standard/CryptoAPI encryption uses fixed SHA-1 + 50k spin count (Excel-compatible).
+            hash_algorithm: formula_office_crypto::HashAlgorithm::Sha1,
+            spin_count: 50_000,
+            // Default to AES-128 for broad compatibility with older Office versions.
+            key_bits: 128,
+        },
+    }
+}
+
+/// Save a workbook to disk with additional options (e.g. password-based encryption).
+pub fn save_workbook_with_options(
+    workbook: &Workbook,
+    path: impl AsRef<Path>,
+    options: SaveOptions,
+) -> Result<(), Error> {
+    if options.password.is_none() {
+        return save_workbook_impl(workbook, path);
+    }
+
+    let path = path.as_ref();
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    // Even if encrypted workbook support is disabled, preserve the existing explicit unsupported
+    // extension error for legacy `.xls` output.
+    match ext.as_str() {
+        "xlsx" | "xlsm" | "xltx" | "xltm" | "xlam" | "xlsb" => {}
+        other => {
+            return Err(Error::UnsupportedExtension {
+                path: path.to_path_buf(),
+                extension: other.to_string(),
+            })
+        }
+    }
+    if ext == "xlsb" && !matches!(workbook, Workbook::Xlsb(_)) {
+        return Err(Error::UnsupportedExtension {
+            path: path.to_path_buf(),
+            extension: ext,
+        });
+    }
+
+    #[cfg(not(feature = "encrypted-workbooks"))]
+    {
+        return Err(Error::UnsupportedEncryption {
+            path: path.to_path_buf(),
+            kind: "workbook encryption is not supported; rebuild with the `formula-io/encrypted-workbooks` feature".to_string(),
+        });
+    }
+
+    #[cfg(feature = "encrypted-workbooks")]
+    {
+        let password = options.password.as_deref().expect("checked is_some above");
+        let encrypt_opts = encrypt_options_from_save_options(&options);
+        save_workbook_office_encrypted_ooxml(workbook, path, password, encrypt_opts, None)
+    }
+}
+
+fn save_workbook_impl(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), Error> {
     let path = path.as_ref();
     let ext = path
         .extension()
@@ -4219,13 +4325,14 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
 }
 
 #[cfg(feature = "encrypted-workbooks")]
-fn save_workbook_encrypted_ooxml(
+fn save_workbook_office_encrypted_ooxml(
     workbook: &Workbook,
     path: &Path,
     password: &str,
-    preserved_ole: &formula_office_crypto::OleEntries,
+    encrypt_opts: formula_office_crypto::EncryptOptions,
+    preserved_ole: Option<&formula_office_crypto::OleEntries>,
 ) -> Result<(), Error> {
-    use std::io::{Cursor, Write as _};
+    use std::io::Write as _;
 
     let ext = path
         .extension()
@@ -4234,119 +4341,13 @@ fn save_workbook_encrypted_ooxml(
         .to_ascii_lowercase();
 
     // Serialize the workbook to an OOXML ZIP package in memory (avoid writing plaintext to disk).
-    let zip_bytes: Vec<u8> = match workbook {
-        Workbook::Xlsx(package) => match ext.as_str() {
-            "xlsx" | "xlsm" | "xltx" | "xltm" | "xlam" => {
-                let kind =
-                    xlsx::WorkbookKind::from_extension(&ext).expect("handled by match arm above");
-
-                let mut out = package.clone();
-                let should_strip_macros = kind.is_macro_free() && out.macro_presence().any();
-                if should_strip_macros {
-                    out.remove_vba_project_with_kind(kind)
-                        .map_err(|source| Error::SaveXlsxPackage {
-                            path: path.to_path_buf(),
-                            source,
-                        })?;
-                } else {
-                    out.enforce_workbook_kind(kind)
-                        .map_err(|source| Error::SaveXlsxPackage {
-                            path: path.to_path_buf(),
-                            source,
-                        })?;
-                }
-
-                out.write_to_bytes().map_err(|source| Error::SaveXlsxPackage {
-                    path: path.to_path_buf(),
-                    source,
-                })?
-            }
-            other => {
-                return Err(Error::UnsupportedExtension {
-                    path: path.to_path_buf(),
-                    extension: other.to_string(),
-                })
-            }
-        },
-        Workbook::Xls(result) => match ext.as_str() {
-            "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind = xlsx::WorkbookKind::from_extension(&ext)
-                    .expect("handled by match arm above");
-                let mut cursor = Cursor::new(Vec::new());
-                xlsx::write_workbook_to_writer_with_kind(&result.workbook, &mut cursor, kind)
-                    .map_err(|source| Error::SaveXlsxExport {
-                        path: path.to_path_buf(),
-                        source,
-                    })?;
-                cursor.into_inner()
-            }
-            other => {
-                return Err(Error::UnsupportedExtension {
-                    path: path.to_path_buf(),
-                    extension: other.to_string(),
-                })
-            }
-        },
-        Workbook::Xlsb(wb) => match ext.as_str() {
-            "xlsb" => {
-                let mut cursor = Cursor::new(Vec::new());
-                wb.save_as_to_writer(&mut cursor)
-                    .map_err(|source| Error::SaveXlsbPackage {
-                        path: path.to_path_buf(),
-                        source,
-                    })?;
-                cursor.into_inner()
-            }
-            "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind = xlsx::WorkbookKind::from_extension(&ext)
-                    .expect("handled by match arm above");
-                let model = xlsb_to_model_workbook(wb).map_err(|source| Error::SaveXlsbExport {
-                    path: path.to_path_buf(),
-                    source,
-                })?;
-                let mut cursor = Cursor::new(Vec::new());
-                xlsx::write_workbook_to_writer_with_kind(&model, &mut cursor, kind).map_err(
-                    |source| Error::SaveXlsxExport {
-                        path: path.to_path_buf(),
-                        source,
-                    },
-                )?;
-                cursor.into_inner()
-            }
-            other => {
-                return Err(Error::UnsupportedExtension {
-                    path: path.to_path_buf(),
-                    extension: other.to_string(),
-                })
-            }
-        },
-        Workbook::Model(model) => match ext.as_str() {
-            "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind = xlsx::WorkbookKind::from_extension(&ext)
-                    .expect("handled by match arm above");
-                let mut cursor = Cursor::new(Vec::new());
-                xlsx::write_workbook_to_writer_with_kind(model, &mut cursor, kind).map_err(
-                    |source| Error::SaveXlsxExport {
-                        path: path.to_path_buf(),
-                        source,
-                    },
-                )?;
-                cursor.into_inner()
-            }
-            other => {
-                return Err(Error::UnsupportedExtension {
-                    path: path.to_path_buf(),
-                    extension: other.to_string(),
-                })
-            }
-        },
-    };
+    let zip_bytes = workbook_to_ooxml_zip_bytes(workbook, path, &ext)?;
 
     let ole_bytes = formula_office_crypto::encrypt_package_to_ole_with_entries(
         &zip_bytes,
         password,
-        formula_office_crypto::EncryptOptions::default(),
-        Some(preserved_ole),
+        encrypt_opts,
+        preserved_ole,
     )
     .map_err(|source| Error::SaveOoxmlEncryption {
         path: path.to_path_buf(),
@@ -4365,6 +4366,131 @@ fn save_workbook_encrypted_ooxml(
             source,
         }),
     }
+}
+
+#[cfg(feature = "encrypted-workbooks")]
+fn workbook_to_ooxml_zip_bytes(
+    workbook: &Workbook,
+    path: &Path,
+    ext: &str,
+) -> Result<Vec<u8>, Error> {
+    use std::io::Cursor;
+
+    match workbook {
+        Workbook::Xlsx(package) => match ext {
+            "xlsx" | "xlsm" | "xltx" | "xltm" | "xlam" => {
+                let kind =
+                    xlsx::WorkbookKind::from_extension(ext).expect("handled by match arm above");
+                let mut out = package.clone();
+
+                let should_strip_macros = kind.is_macro_free() && out.macro_presence().any();
+                if should_strip_macros {
+                    out.remove_vba_project_with_kind(kind)
+                        .map_err(|source| Error::SaveXlsxPackage {
+                            path: path.to_path_buf(),
+                            source,
+                        })?;
+                } else {
+                    out.enforce_workbook_kind(kind)
+                        .map_err(|source| Error::SaveXlsxPackage {
+                            path: path.to_path_buf(),
+                            source,
+                        })?;
+                }
+
+                out.write_to_bytes().map_err(|source| Error::SaveXlsxPackage {
+                    path: path.to_path_buf(),
+                    source,
+                })
+            }
+            other => Err(Error::UnsupportedExtension {
+                path: path.to_path_buf(),
+                extension: other.to_string(),
+            }),
+        },
+        Workbook::Xls(result) => match ext {
+            "xlsx" | "xltx" | "xltm" | "xlam" => {
+                let kind =
+                    xlsx::WorkbookKind::from_extension(ext).expect("handled by match arm above");
+                let mut cursor = Cursor::new(Vec::new());
+                xlsx::write_workbook_to_writer_with_kind(&result.workbook, &mut cursor, kind)
+                    .map_err(|source| Error::SaveXlsxExport {
+                        path: path.to_path_buf(),
+                        source,
+                    })?;
+                Ok(cursor.into_inner())
+            }
+            other => Err(Error::UnsupportedExtension {
+                path: path.to_path_buf(),
+                extension: other.to_string(),
+            }),
+        },
+        Workbook::Xlsb(wb) => match ext {
+            "xlsb" => {
+                let mut cursor = Cursor::new(Vec::new());
+                wb.save_as_to_writer(&mut cursor)
+                    .map_err(|source| Error::SaveXlsbPackage {
+                        path: path.to_path_buf(),
+                        source,
+                    })?;
+                Ok(cursor.into_inner())
+            }
+            "xlsx" | "xltx" | "xltm" | "xlam" => {
+                let kind =
+                    xlsx::WorkbookKind::from_extension(ext).expect("handled by match arm above");
+                let model = xlsb_to_model_workbook(wb).map_err(|source| Error::SaveXlsbExport {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+                let mut cursor = Cursor::new(Vec::new());
+                xlsx::write_workbook_to_writer_with_kind(&model, &mut cursor, kind).map_err(
+                    |source| Error::SaveXlsxExport {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                )?;
+                Ok(cursor.into_inner())
+            }
+            other => Err(Error::UnsupportedExtension {
+                path: path.to_path_buf(),
+                extension: other.to_string(),
+            }),
+        },
+        Workbook::Model(model) => match ext {
+            "xlsx" | "xltx" | "xltm" | "xlam" => {
+                let kind =
+                    xlsx::WorkbookKind::from_extension(ext).expect("handled by match arm above");
+                let mut cursor = Cursor::new(Vec::new());
+                xlsx::write_workbook_to_writer_with_kind(model, &mut cursor, kind).map_err(
+                    |source| Error::SaveXlsxExport {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                )?;
+                Ok(cursor.into_inner())
+            }
+            other => Err(Error::UnsupportedExtension {
+                path: path.to_path_buf(),
+                extension: other.to_string(),
+            }),
+        },
+    }
+}
+
+#[cfg(feature = "encrypted-workbooks")]
+fn save_workbook_encrypted_ooxml(
+    workbook: &Workbook,
+    path: &Path,
+    password: &str,
+    preserved_ole: &formula_office_crypto::OleEntries,
+) -> Result<(), Error> {
+    save_workbook_office_encrypted_ooxml(
+        workbook,
+        path,
+        password,
+        formula_office_crypto::EncryptOptions::default(),
+        Some(preserved_ole),
+    )
 }
 
 fn xlsb_error_code_to_model_error(code: u8) -> formula_model::ErrorValue {

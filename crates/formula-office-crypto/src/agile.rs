@@ -875,8 +875,8 @@ pub(crate) fn encrypt_agile_encrypted_package(
     let enc_kv_b64 = b64.encode(enc_kv);
     let enc_hmac_key_b64 = b64.encode(encrypted_hmac_key);
     let enc_hmac_value_b64 = b64.encode(encrypted_hmac_value);
-
     let hash_size = hash_alg.digest_len();
+
     let xml = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
