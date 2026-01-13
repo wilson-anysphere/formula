@@ -244,14 +244,16 @@ export class SqliteVectorStore {
     }
 
     let existing = null;
+    let loadFailed = false;
     try {
       existing = await storage.load();
     } catch (err) {
       if (!resetOnCorrupt) throw err;
+      loadFailed = true;
       await clearPersistedBytes();
       existing = null;
     }
-    const hadExisting = Boolean(existing);
+    const hadExisting = Boolean(existing) || loadFailed;
 
     /**
      * @param {any} db
@@ -271,12 +273,25 @@ export class SqliteVectorStore {
     let store;
     if (!existing) {
       store = initStore(new SQL.Database());
-      // Initializing a brand new in-memory DB will insert meta rows (dimension,
-      // schema version) and mark the store dirty. However, when there is no
-      // persisted payload yet, we don't want `close()` to immediately write an
-      // empty SQLite file to storage — persist only after the first real
-      // mutation (upsert/delete/etc) triggers `_dirty`.
-      store._dirty = false;
+      if (!hadExisting) {
+        // Initializing a brand new in-memory DB will insert meta rows (dimension,
+        // schema version) and mark the store dirty. However, when there is no
+        // persisted payload yet, we don't want `close()` to immediately write an
+        // empty SQLite file to storage — persist only after the first real
+        // mutation (upsert/delete/etc) triggers `_dirty`.
+        store._dirty = false;
+      } else {
+        // Loading the persisted payload threw (e.g. a corrupted base64 decode in a
+        // BinaryStorage implementation). Best-effort persist an empty DB so future
+        // opens don't repeatedly hit the load error even when `remove()` isn't
+        // supported.
+        try {
+          store._dirty = true;
+          await store._persist();
+        } catch {
+          // ignore
+        }
+      }
       return store;
     }
 

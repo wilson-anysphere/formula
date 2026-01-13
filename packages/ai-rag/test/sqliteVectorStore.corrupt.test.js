@@ -94,3 +94,36 @@ test(
     assert.deepEqual(Array.from(stored.slice(0, 16)), expectedHeader);
   }
 );
+
+test(
+  "SqliteVectorStore resetOnCorrupt overwrites when storage.load throws (no remove)",
+  { skip: !sqlJsAvailable },
+  async () => {
+    let throws = true;
+    /** @type {Uint8Array | null} */
+    let stored = null;
+    let saves = 0;
+
+    const storage = {
+      async load() {
+        if (throws) {
+          throws = false;
+          throw new Error("corrupt base64");
+        }
+        return stored ? new Uint8Array(stored) : null;
+      },
+      async save(data) {
+        saves += 1;
+        stored = new Uint8Array(data);
+      },
+    };
+
+    await SqliteVectorStore.create({ storage, dimension: 3, autoSave: false, resetOnCorrupt: true });
+    assert.ok(saves >= 1, "expected SqliteVectorStore to overwrite corrupted payload via save()");
+    assert.ok(stored && stored.length >= 16);
+    const expectedHeader = [
+      83, 81, 76, 105, 116, 101, 32, 102, 111, 114, 109, 97, 116, 32, 51, 0,
+    ];
+    assert.deepEqual(Array.from(stored.slice(0, 16)), expectedHeader);
+  }
+);
