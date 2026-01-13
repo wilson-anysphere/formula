@@ -88,7 +88,7 @@ test("ScriptEditorPanel avoids static inline styles and uses token-based classes
 
   // Sanity-check that the fallback editor is styled as a code editor (monospace) and non-resizable.
   assert.match(css, /\.script-editor__fallback-editor\s*\{/);
-  assert.match(css, /\.script-editor__fallback-editor\s*\{[^}]*ui-monospace[^}]*\}/s);
+  assert.match(css, /\.script-editor__fallback-editor\s*\{[^}]*var\(--font-mono\)[^}]*\}/s);
   assert.match(css, /\.script-editor__fallback-editor\s*\{[^}]*\bresize:\s*none\b[^}]*\}/s);
 
   // Preserve the console sizing/overflow behavior (important for output visibility).
