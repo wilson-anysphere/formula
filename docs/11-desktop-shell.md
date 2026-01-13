@@ -127,6 +127,10 @@ pnpm perf:desktop-memory
 This reports `idleRssMb`, which is the **resident set size (RSS)** of the desktop process *plus its child processes*,
 sampled after the app becomes interactive and a short "settle" delay.
 
+Note: on **Windows**, we approximate this using the process tree **Working Set** (the closest analogue exposed by the OS),
+so cross-platform comparisons should treat the memory number as "MB of working-set/RSS-ish footprint" rather than a
+bit-for-bit identical metric.
+
 Note: when running headless via Xvfb, the runner attempts to exclude the Xvfb server process from the RSS total (it is not
 part of the app’s steady-state memory footprint).
 
