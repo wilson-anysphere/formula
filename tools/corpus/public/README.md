@@ -33,3 +33,6 @@ This will:
 - upsert `tools/corpus/public/expectations.json`
 
 By default the command refuses to overwrite existing fixtures/expectations; re-run with `--force` if needed.
+
+Note: the command runs corpus triage (same as `python -m tools.corpus.triage`), which builds/executes a small Rust
+helper binary. A Rust toolchain is required locally.

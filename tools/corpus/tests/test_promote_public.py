@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from tools.corpus.promote_public import (
+    _coerce_display_name,
     extract_public_expectations,
     update_public_expectations_file,
     upsert_expectations_entry,
@@ -13,6 +14,20 @@ from tools.corpus.promote_public import (
 
 
 class PromotePublicExpectationsTests(unittest.TestCase):
+    def test_coerce_display_name_appends_extension(self) -> None:
+        self.assertEqual(_coerce_display_name("my-case", default_ext=".xlsx"), "my-case.xlsx")
+
+    def test_coerce_display_name_strips_b64_suffix(self) -> None:
+        self.assertEqual(
+            _coerce_display_name("my-case.xlsx.b64", default_ext=".xlsx"), "my-case.xlsx"
+        )
+
+    def test_coerce_display_name_rejects_path_separators(self) -> None:
+        with self.assertRaises(ValueError):
+            _coerce_display_name("foo/bar", default_ext=".xlsx")
+        with self.assertRaises(ValueError):
+            _coerce_display_name("foo\\bar", default_ext=".xlsx")
+
     def test_extract_public_expectations_happy_path(self) -> None:
         report = {"result": {"open_ok": True, "round_trip_ok": False, "diff_critical_count": 7}}
         entry = extract_public_expectations(report)
@@ -90,4 +105,3 @@ class PromotePublicExpectationsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

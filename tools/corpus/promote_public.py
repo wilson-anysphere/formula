@@ -148,13 +148,24 @@ def _coerce_display_name(name: str, *, default_ext: str) -> str:
     name = name.strip()
     if not name:
         raise ValueError("--name must not be empty")
+
+    # Hard safety: this value becomes a filename under `tools/corpus/public/`.
+    # Reject path separators to avoid accidental path traversal / writing outside the corpus dir.
+    if any(sep in name for sep in ("/", "\\", "\x00")) or name in {".", ".."}:
+        raise ValueError("--name must be a filename (no path separators)")
+
     if name.endswith((".xlsx", ".xlsm")):
         return name
     if name.endswith(".b64"):
         # Be helpful if the user passes the fixture filename itself.
         name = name[: -len(".b64")]
     if not name.endswith((".xlsx", ".xlsm")):
+        default_ext = default_ext or ".xlsx"
+        if default_ext not in {".xlsx", ".xlsm"}:
+            default_ext = ".xlsx"
         name += default_ext
+    if any(sep in name for sep in ("/", "\\", "\x00")) or name in {".", ".."}:
+        raise ValueError("--name must be a filename (no path separators)")
     return name
 
 
@@ -212,9 +223,10 @@ def main() -> int:
     args = parser.parse_args()
 
     wb_in = read_workbook_input(args.input)
-    display_name = (
-        _coerce_display_name(args.name, default_ext=Path(wb_in.display_name).suffix) if args.name else wb_in.display_name
-    )
+    default_ext = Path(wb_in.display_name).suffix
+    if default_ext not in {".xlsx", ".xlsm"}:
+        default_ext = ".xlsx"
+    display_name = _coerce_display_name(args.name or wb_in.display_name, default_ext=default_ext)
 
     # Note: `WorkbookInput` must not contain local paths; use `display_name`.
     workbook_bytes = wb_in.data
