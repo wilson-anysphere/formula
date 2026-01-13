@@ -2159,21 +2159,28 @@ export class SpreadsheetApp {
             return token ? `${token}!` : "";
           };
 
-          const isValidDocRange = (range: any): range is { startRow: number; endRow: number; startCol: number; endCol: number } => {
-            if (!range) return false;
+          const normalizeDocRange = (range: any): Range | null => {
+            if (!range) return null;
             const { startRow, endRow, startCol, endCol } = range as any;
-            return (
-              Number.isInteger(startRow) &&
-              Number.isInteger(endRow) &&
-              Number.isInteger(startCol) &&
-              Number.isInteger(endCol) &&
-              startRow >= 0 &&
-              endRow >= 0 &&
-              startCol >= 0 &&
-              endCol >= 0 &&
-              startRow <= endRow &&
-              startCol <= endCol
-            );
+            if (
+              !Number.isInteger(startRow) ||
+              !Number.isInteger(endRow) ||
+              !Number.isInteger(startCol) ||
+              !Number.isInteger(endCol) ||
+              startRow < 0 ||
+              endRow < 0 ||
+              startCol < 0 ||
+              endCol < 0
+            ) {
+              return null;
+            }
+
+            return {
+              startRow: Math.min(startRow, endRow),
+              endRow: Math.max(startRow, endRow),
+              startCol: Math.min(startCol, endCol),
+              endCol: Math.max(startCol, endCol),
+            };
           };
 
           const namedRanges: NameBoxMenuItem[] = [];
@@ -2183,11 +2190,11 @@ export class SpreadsheetApp {
             if (!name) continue;
 
             const sheetName = typeof e?.sheetName === "string" ? e.sheetName.trim() : "";
-            const range = e?.range;
-            const reference = isValidDocRange(range)
+            const normalized = normalizeDocRange(e?.range);
+            const reference = normalized
               ? sheetName
-                ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}`
-                : rangeToA1(range)
+                ? `${formatSheetPrefix(sheetName)}${rangeToA1(normalized)}`
+                : rangeToA1(normalized)
               : null;
             namedRanges.push({ label: name, reference });
           }
@@ -2197,6 +2204,7 @@ export class SpreadsheetApp {
             const table: any = entry as any;
             const name = typeof table?.name === "string" ? table.name.trim() : "";
             if (!name) continue;
+            const sheetName = typeof table?.sheetName === "string" ? table.sheetName.trim() : "";
 
             const range = {
               startRow: table?.startRow,
@@ -2204,7 +2212,13 @@ export class SpreadsheetApp {
               startCol: table?.startCol,
               endCol: table?.endCol,
             };
-            const reference = isValidDocRange(range) ? `${name}[#All]` : null;
+            const normalized = normalizeDocRange(range);
+            const structuredOk = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
+            const reference = normalized && sheetName
+              ? structuredOk
+                ? `${name}[#All]`
+                : `${formatSheetPrefix(sheetName)}${rangeToA1(normalized)}`
+              : null;
             // Tables should always navigate when selectable. If the table metadata is incomplete/invalid,
             // surface it as a disabled entry rather than offering a broken Go To.
             tables.push({ label: name, reference, enabled: reference != null });
