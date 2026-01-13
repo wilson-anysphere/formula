@@ -112,12 +112,13 @@ export async function createDefaultAIAuditStore(options: CreateDefaultAIAuditSto
   }
 
   // Automatic defaults.
-  if (isNodeRuntime()) {
-    return wrap(createMemory());
-  }
-
+  //
+  // Prefer IndexedDB when it's available (even in Node test environments via
+  // `fake-indexeddb`), otherwise fall back to a browser-appropriate localStorage
+  // store when usable.
   const indexed = await createIndexedDb();
   if (indexed) return wrap(indexed);
+  if (isNodeRuntime()) return wrap(createMemory());
   if (isLocalStorageAvailable()) return wrap(createLocalStorage());
   return wrap(createMemory());
 }

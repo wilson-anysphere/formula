@@ -9,7 +9,6 @@ import { MemoryAIAuditStore } from "../src/memory-store.js";
 const originalGlobals = {
   indexedDB: Object.getOwnPropertyDescriptor(globalThis as any, "indexedDB"),
   IDBKeyRange: Object.getOwnPropertyDescriptor(globalThis as any, "IDBKeyRange"),
-  nodeVersion: Object.getOwnPropertyDescriptor(process.versions, "node"),
 };
 
 afterEach(() => {
@@ -27,9 +26,6 @@ afterEach(() => {
     delete (globalThis as any).IDBKeyRange;
   }
 
-  if (originalGlobals.nodeVersion) {
-    Object.defineProperty(process.versions, "node", originalGlobals.nodeVersion);
-  }
 });
 
 function unwrap(store: unknown): unknown {
@@ -46,9 +42,6 @@ describe("createDefaultAIAuditStore (node)", () => {
   });
 
   it("chooses IndexedDbAIAuditStore when indexedDB is present (fake-indexeddb)", async () => {
-    if (originalGlobals.nodeVersion) {
-      Object.defineProperty(process.versions, "node", { value: undefined, configurable: true });
-    }
     Object.defineProperty(globalThis as any, "indexedDB", { value: indexedDB, configurable: true });
     Object.defineProperty(globalThis as any, "IDBKeyRange", { value: IDBKeyRange, configurable: true });
 
