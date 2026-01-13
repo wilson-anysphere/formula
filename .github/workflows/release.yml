@@ -474,19 +474,59 @@ jobs:
             throw "Windows SDK lib root not found at $sdkLibRoot. Windows ARM64 builds require the Windows 10/11 SDK with ARM64 libraries."
           }
 
-          $sdkVersionDir = Get-ChildItem -Path $sdkLibRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
-          if (!$sdkVersionDir) {
+          function Find-SdkArm64($root) {
+            $dirs = @(Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+            foreach ($dir in $dirs) {
+              $um = Join-Path $dir.FullName "um\arm64"
+              $ucrt = Join-Path $dir.FullName "ucrt\arm64"
+              if ((Test-Path $um) -and (Test-Path $ucrt)) {
+                return [pscustomobject]@{ VersionDir = $dir; Um = $um; Ucrt = $ucrt; AllDirs = $dirs }
+              }
+            }
+            return [pscustomobject]@{ VersionDir = $null; Um = $null; Ucrt = $null; AllDirs = $dirs }
+          }
+
+          $sdkInfo = Find-SdkArm64 $sdkLibRoot
+          if (-not $sdkInfo.AllDirs -or $sdkInfo.AllDirs.Count -eq 0) {
             throw "No Windows SDK lib versions found under $sdkLibRoot. Windows ARM64 builds require a Windows SDK installation with ARM64 libraries."
           }
 
-          $sdkUmArm64 = Join-Path $sdkVersionDir.FullName "um\arm64"
-          $sdkUcrtArm64 = Join-Path $sdkVersionDir.FullName "ucrt\arm64"
-          if (!(Test-Path $sdkUmArm64)) {
-            throw "Windows SDK ARM64 UM libraries not found at $sdkUmArm64. The runner image may be missing the Windows SDK ARM64 components."
+          if (-not $sdkInfo.VersionDir) {
+            # Some runner images can have the Windows SDK installed without the ARM64 lib subset.
+            # Attempt to add the matching Windows 10 SDK component via the Visual Studio installer.
+            $candidateName = $sdkInfo.AllDirs[0].Name
+            $sdkBuild = $null
+            if ($candidateName -match '^10\.0\.(\d+)\.\d+$') {
+              $sdkBuild = $Matches[1]
+            }
+            if (-not $sdkBuild) {
+              # Reasonable fallback for windows-2022 images (10.0.20348.0).
+              $sdkBuild = "20348"
+            }
+
+            $sdkComponent = "Microsoft.VisualStudio.Component.Windows10SDK.$sdkBuild"
+            Write-Host "Windows SDK ARM64 libs not found; installing Visual Studio component $sdkComponent"
+            $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+            if (!(Test-Path $vsInstaller)) {
+              throw "Visual Studio installer not found at $vsInstaller"
+            }
+            & $vsInstaller modify --installPath $installPath --add $sdkComponent --includeRecommended --passive --norestart
+            $exitCode = $LASTEXITCODE
+            # 3010 is a common "success, reboot required" code for Windows installers.
+            if ($exitCode -ne 0 -and $exitCode -ne 3010) {
+              throw "vs_installer.exe failed with exit code $exitCode while installing Windows SDK component $sdkComponent."
+            }
+
+            $sdkInfo = Find-SdkArm64 $sdkLibRoot
           }
-          if (!(Test-Path $sdkUcrtArm64)) {
-            throw "Windows SDK ARM64 UCRT libraries not found at $sdkUcrtArm64. The runner image may be missing the Windows SDK ARM64 components."
+
+          if (-not $sdkInfo.VersionDir) {
+            throw "Windows SDK ARM64 UM/UCRT libraries were not found under $sdkLibRoot. The runner image may be missing the Windows SDK ARM64 components."
           }
+
+          $sdkVersionDir = $sdkInfo.VersionDir
+          $sdkUmArm64 = $sdkInfo.Um
+          $sdkUcrtArm64 = $sdkInfo.Ucrt
 
           Write-Host "windows-arm64-toolchain: OK"
           Write-Host " - MSVC: $($msvcVersionDir.FullName)"
