@@ -430,6 +430,12 @@ jobs:
       - name: "Guard: Windows Authenticode timestamp URL uses HTTPS"
         run: node scripts/ci/check-windows-timestamp-url.mjs
 
+      - name: Guard: Windows WebView2 installer configuration (webviewInstallMode)
+        run: node scripts/ci/check-webview2-install-mode.mjs
+
+      - name: Guard: Windows downgrade / rollback support (allowDowngrades)
+        run: node scripts/ci/check-windows-allow-downgrades.mjs
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
