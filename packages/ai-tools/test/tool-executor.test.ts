@@ -511,6 +511,34 @@ describe("ToolExecutor", () => {
     expect(() => JSON.stringify(result)).not.toThrow();
   });
 
+  it("read_range tolerates missing/invalid CellData entries from SpreadsheetApi.readRange", async () => {
+    const spreadsheet: any = {
+      listSheets: () => ["Sheet1"],
+      listNonEmptyCells: () => [],
+      getCell: () => ({ value: null }),
+      setCell: () => {},
+      readRange: () => [[undefined]],
+      writeRange: () => {},
+      applyFormatting: () => 0,
+      getLastUsedRow: () => 0,
+      clone() {
+        return this;
+      },
+    };
+    const executor = new ToolExecutor(spreadsheet);
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A1" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+    expect(result.data?.values).toEqual([[null]]);
+    expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
   it("read_range truncates huge string cell payloads (per-cell) and stays JSON-serializable", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);
