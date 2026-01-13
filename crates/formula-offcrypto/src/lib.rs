@@ -867,6 +867,100 @@ pub fn parse_encrypted_package_header(
     Ok(EncryptedPackageHeader { original_size })
 }
 
+/// Which encryption schema the `EncryptionInfo` stream uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EncryptionType {
+    Agile,
+    Standard,
+}
+
+/// A best-effort summary of an `EncryptionInfo` stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EncryptionInfoSummary {
+    pub encryption_type: EncryptionType,
+    pub agile: Option<AgileEncryptionInfoSummary>,
+    pub standard: Option<StandardEncryptionInfoSummary>,
+}
+
+/// Minimal information useful for prompting users about Agile encryption.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgileEncryptionInfoSummary {
+    pub hash_algorithm: HashAlgorithm,
+    pub spin_count: u32,
+    pub key_bits: u32,
+}
+
+/// Minimal information useful for prompting users about Standard encryption.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StandardEncryptionInfoSummary {
+    pub alg_id: StandardAlgId,
+    pub key_size: u32,
+}
+
+/// Subset of CryptoAPI `ALG_ID` values used for Standard Office encryption.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StandardAlgId {
+    Aes128,
+    Aes192,
+    Aes256,
+    Unknown(u32),
+}
+
+impl StandardAlgId {
+    fn from_raw(raw: u32) -> Self {
+        match raw {
+            // CryptoAPI constants:
+            // https://learn.microsoft.com/en-us/windows/win32/seccrypto/alg-id
+            0x0000_660E => Self::Aes128,
+            0x0000_660F => Self::Aes192,
+            0x0000_6610 => Self::Aes256,
+            other => Self::Unknown(other),
+        }
+    }
+}
+
+/// Inspect an `EncryptionInfo` stream without requiring a password.
+///
+/// Supported schemas:
+/// - Standard (`3.2`): extracts `EncryptionHeader.algId` and `EncryptionHeader.keySize`
+/// - Agile (`4.4`): extracts `hashAlgorithm`, `spinCount`, and `keyBits` from the password
+///   `encryptedKey` element in the XML payload
+pub fn inspect_encryption_info(
+    encryption_info: &[u8],
+) -> Result<EncryptionInfoSummary, OffcryptoError> {
+    match parse_encryption_info(encryption_info)? {
+        EncryptionInfo::Standard { header, .. } => Ok(EncryptionInfoSummary {
+            encryption_type: EncryptionType::Standard,
+            agile: None,
+            standard: Some(StandardEncryptionInfoSummary {
+                alg_id: StandardAlgId::from_raw(header.alg_id),
+                key_size: header.key_size_bits,
+            }),
+        }),
+        EncryptionInfo::Agile { info, .. } => {
+            let key_bits = u32::try_from(info.password_key_bits).map_err(|_| {
+                OffcryptoError::InvalidEncryptionInfo {
+                    context: "encryptedKey.keyBits too large",
+                }
+            })?;
+
+            Ok(EncryptionInfoSummary {
+                encryption_type: EncryptionType::Agile,
+                agile: Some(AgileEncryptionInfoSummary {
+                    hash_algorithm: info.password_hash_algorithm,
+                    spin_count: info.spin_count,
+                    key_bits,
+                }),
+                standard: None,
+            })
+        }
+        EncryptionInfo::Unsupported { version } => Err(OffcryptoError::UnsupportedVersion {
+            major: version.major,
+            minor: version.minor,
+        }),
+    }
+}
+
 fn password_to_utf16le_bytes(password: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(password.len() * 2);
     for unit in password.encode_utf16() {
@@ -1214,6 +1308,85 @@ mod tests {
         assert_eq!(info.encrypted_key_value, vec![5, 6, 7, 8]);
         assert_eq!(info.encrypted_verifier_hash_input, vec![9, 10, 11, 12]);
         assert_eq!(info.encrypted_verifier_hash_value, vec![13, 14, 15, 16]);
+    }
+
+    #[test]
+    fn inspects_minimal_agile_encryption_info() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+    xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+  <keyData saltValue="AAECAwQFBgcICQoLDA0ODw==" hashAlgorithm="SHA256" blockSize="16"/>
+  <dataIntegrity encryptedHmacKey="EBESEw==" encryptedHmacValue="qrvM"/>
+  <keyEncryptors>
+    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+      <p:encryptedKey spinCount="100000" saltValue="AQIDBA==" hashAlgorithm="SHA512" keyBits="256"
+        encryptedKeyValue="BQYHCA=="
+        encryptedVerifierHashInput="CQoLDA=="
+        encryptedVerifierHashValue="DQ4PEA=="/>
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>
+"#;
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(xml.as_bytes());
+
+        let summary = inspect_encryption_info(&bytes).expect("inspect");
+        assert_eq!(summary.encryption_type, EncryptionType::Agile);
+        assert_eq!(
+            summary.agile,
+            Some(AgileEncryptionInfoSummary {
+                hash_algorithm: HashAlgorithm::Sha512,
+                spin_count: 100_000,
+                key_bits: 256,
+            })
+        );
+        assert!(summary.standard.is_none());
+    }
+
+    #[test]
+    fn inspects_minimal_standard_encryption_info() {
+        // Minimal Standard EncryptionInfo buffer sufficient for `parse_encryption_info`:
+        // - version (3.2)
+        // - header size + header
+        // - verifier with saltSize=0, encryptedVerifier (16 bytes), verifierHashSize, and empty hash bytes
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&3u16.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u32.to_le_bytes()); // flags
+        header.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
+        header.extend_from_slice(&0x0000_6610u32.to_le_bytes()); // algId = CALG_AES_256
+        header.extend_from_slice(&0u32.to_le_bytes()); // algIdHash
+        header.extend_from_slice(&256u32.to_le_bytes()); // keySize
+        header.extend_from_slice(&0u32.to_le_bytes()); // providerType
+        header.extend_from_slice(&0u32.to_le_bytes()); // reserved1
+        header.extend_from_slice(&0u32.to_le_bytes()); // reserved2
+
+        bytes.extend_from_slice(&(header.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&header);
+
+        // EncryptionVerifier
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // saltSize
+        bytes.extend_from_slice(&[0u8; 16]); // encryptedVerifier
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // verifierHashSize
+        // encryptedVerifierHash is empty
+
+        let summary = inspect_encryption_info(&bytes).expect("inspect");
+        assert_eq!(summary.encryption_type, EncryptionType::Standard);
+        assert_eq!(
+            summary.standard,
+            Some(StandardEncryptionInfoSummary {
+                alg_id: StandardAlgId::Aes256,
+                key_size: 256,
+            })
+        );
+        assert!(summary.agile.is_none());
     }
 }
 
