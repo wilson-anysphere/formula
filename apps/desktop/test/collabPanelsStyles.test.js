@@ -8,9 +8,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("Collab Version History / Branch Manager panels are class-driven + styled via workspace.css", () => {
   const rendererPath = path.join(__dirname, "..", "src", "panels", "panelBodyRenderer.tsx");
+  const versionHistoryPath = path.join(
+    __dirname,
+    "..",
+    "src",
+    "panels",
+    "version-history",
+    "CollabVersionHistoryPanel.tsx",
+  );
   const cssPath = path.join(__dirname, "..", "src", "styles", "workspace.css");
 
   const renderer = fs.readFileSync(rendererPath, "utf8");
+  const versionHistory = fs.readFileSync(versionHistoryPath, "utf8");
   const css = fs.readFileSync(cssPath, "utf8");
 
   // Avoid React inline styles in the collab panels.
@@ -20,10 +29,18 @@ test("Collab Version History / Branch Manager panels are class-driven + styled v
     "panelBodyRenderer.tsx should not use React inline styles; collab panels should use workspace.css classes instead",
   );
 
-  // Sanity-check that the React markup actually uses the shared classes.
-  for (const className of ["collab-panel__message", "collab-panel__message--error", "collab-version-history"]) {
-    assert.ok(renderer.includes(className), `Expected panelBodyRenderer.tsx to render className=\"${className}\"`);
+  // Sanity-check that the panels actually use the shared classes.
+  for (const className of ["collab-panel__message", "collab-panel__message--error"]) {
+    assert.ok(renderer.includes(className), `Expected panelBodyRenderer.tsx to render className="${className}"`);
   }
+  assert.ok(
+    renderer.includes("CollabVersionHistoryPanel"),
+    "Expected panelBodyRenderer.tsx to reference the CollabVersionHistoryPanel component",
+  );
+  assert.ok(
+    versionHistory.includes("collab-version-history"),
+    'Expected CollabVersionHistoryPanel.tsx to render className="collab-version-history"',
+  );
 
   const requiredSelectors = [
     // Shared message styling (loading/errors).

@@ -19,6 +19,15 @@ function extractSection(source, startMarker, endMarker) {
 test("panelBodyRenderer.tsx avoids inline styles (class-driven panel mounts)", () => {
   const filePath = path.join(__dirname, "..", "src", "panels", "panelBodyRenderer.tsx");
   const source = fs.readFileSync(filePath, "utf8");
+  const versionHistoryPath = path.join(
+    __dirname,
+    "..",
+    "src",
+    "panels",
+    "version-history",
+    "CollabVersionHistoryPanel.tsx",
+  );
+  const versionHistorySource = fs.readFileSync(versionHistoryPath, "utf8");
 
   assert.equal(
     /<[^>]*\bstyle\s*=\s*\{/.test(source),
@@ -66,7 +75,7 @@ test("panelBodyRenderer.tsx avoids inline styles (class-driven panel mounts)", (
     );
   }
 
-  const versionHistorySection = extractSection(source, "function CollabVersionHistoryPanel", "function CollabBranchManagerPanel");
+  const versionHistorySection = versionHistorySource;
   assert.equal(
     /\bstyle=\{\{/.test(versionHistorySection),
     false,
