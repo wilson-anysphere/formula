@@ -126,6 +126,8 @@ pnpm dev:sync
 | `SYNC_SERVER_PERSISTENCE_BACKEND` | `leveldb` or `file` |
 | `SYNC_SERVER_PERSISTENCE_ENCRYPTION` | `keyring` for encryption at rest |
 | `SYNC_SERVER_MAX_MESSAGE_BYTES` | Max websocket message size (defaults to 2MB; see close code `1009`) |
+| `SYNC_SERVER_MAX_URL_BYTES` | Max websocket upgrade URL size in bytes (default: 8192; set to `0` to disable; rejects with HTTP `414`) |
+| `SYNC_SERVER_MAX_TOKEN_BYTES` | Max auth token size in bytes (default: 4096; set to `0` to disable; rejects with HTTP `414`) |
 
 Note: large in-doc history payloads (e.g. version snapshots stored under `versions*` and branch commits stored under `branching:*`) can exceed this limit if written as a single Yjs update. `@formula/collab-versioning` now defaults to streaming snapshot writes (chunked across multiple Yjs transactions/updates) to avoid 1009 disconnects for large workbooks. See [`docs/06-collaboration.md`](../docs/06-collaboration.md) for tuning via `yjsStoreOptions`.
 

@@ -114,3 +114,8 @@ The sync server forwards `clientIp` and `userAgent` to the introspection endpoin
   to reduce load on the API and prevent cached results from being replayed across documents or IPs.
 - Introspection is fail-closed by default: if the API cannot be reached (timeouts, network errors, 5xx), the WebSocket upgrade is rejected.
 - Revocation latency is bounded by `SYNC_SERVER_INTROSPECT_CACHE_MS`.
+- As defense-in-depth against pathological WebSocket upgrade requests, the sync server can also enforce byte limits on the
+  upgrade URL and auth token:
+  - `SYNC_SERVER_MAX_URL_BYTES` (default: `8192`; set to `0` to disable)
+  - `SYNC_SERVER_MAX_TOKEN_BYTES` (default: `4096`; set to `0` to disable)
+  - If exceeded, the upgrade is rejected with HTTP `414`.
