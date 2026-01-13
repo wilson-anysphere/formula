@@ -1545,12 +1545,35 @@ fn comment_kind_rank(kind: CommentKind) -> u8 {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
+struct SheetViewSelectionSettings {
+    active_cell: CellRef,
+    sqref: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 struct SheetViewSettings {
     /// Zoom scale as an integer percentage (100 = 100%).
     zoom_scale: u32,
+
+    /// Frozen pane row count (top).
     frozen_rows: u32,
+    /// Frozen pane column count (left).
     frozen_cols: u32,
+
+    /// Horizontal split position (non-freeze panes).
+    x_split: Option<f32>,
+    /// Vertical split position (non-freeze panes).
+    y_split: Option<f32>,
+
+    /// Top-left visible cell for the bottom-right pane (`pane/@topLeftCell`).
+    top_left_cell: Option<CellRef>,
+
+    show_grid_lines: bool,
+    show_headings: bool,
+    show_zeros: bool,
+
+    selection: Option<SheetViewSelectionSettings>,
 }
 
 impl Default for SheetViewSettings {
@@ -1559,24 +1582,93 @@ impl Default for SheetViewSettings {
             zoom_scale: 100,
             frozen_rows: 0,
             frozen_cols: 0,
+            x_split: None,
+            y_split: None,
+            top_left_cell: None,
+            show_grid_lines: true,
+            show_headings: true,
+            show_zeros: true,
+            selection: None,
         }
     }
 }
 
 impl SheetViewSettings {
     fn from_sheet(sheet: &Worksheet) -> Self {
+        let view_is_default = sheet.view == formula_model::SheetView::default();
+
+        let zoom = if view_is_default {
+            sheet.zoom
+        } else {
+            sheet.view.zoom
+        };
+
         // Excel stores this as an integer percentage (`zoomScale="120"`).
-        let mut zoom_scale = (sheet.zoom * 100.0).round() as i64;
+        let mut zoom_scale = (zoom * 100.0).round() as i64;
         zoom_scale = zoom_scale.max(10).min(400);
+
+        let (frozen_rows, frozen_cols) = if view_is_default {
+            (sheet.frozen_rows, sheet.frozen_cols)
+        } else {
+            (sheet.view.pane.frozen_rows, sheet.view.pane.frozen_cols)
+        };
+
+        // We only serialize split offsets when there is no frozen pane state.
+        let (x_split, y_split) = if view_is_default || frozen_rows > 0 || frozen_cols > 0 {
+            (None, None)
+        } else {
+            (sheet.view.pane.x_split, sheet.view.pane.y_split)
+        };
+
+        let mut top_left_cell = if view_is_default {
+            None
+        } else {
+            sheet.view.pane.top_left_cell
+        };
+        if top_left_cell.is_none() && (frozen_rows > 0 || frozen_cols > 0) {
+            top_left_cell = Some(CellRef::new(frozen_rows, frozen_cols));
+        }
+
+        let (show_grid_lines, show_headings, show_zeros, selection) = if view_is_default {
+            (true, true, true, None)
+        } else {
+            let selection = sheet.view.selection.as_ref().map(|sel| SheetViewSelectionSettings {
+                active_cell: sel.active_cell,
+                sqref: sel.sqref(),
+            });
+            (
+                sheet.view.show_grid_lines,
+                sheet.view.show_headings,
+                sheet.view.show_zeros,
+                selection,
+            )
+        };
+
         Self {
             zoom_scale: zoom_scale as u32,
-            frozen_rows: sheet.frozen_rows,
-            frozen_cols: sheet.frozen_cols,
+            frozen_rows,
+            frozen_cols,
+            x_split,
+            y_split,
+            top_left_cell,
+            show_grid_lines,
+            show_headings,
+            show_zeros,
+            selection,
         }
     }
 
-    fn is_default(self) -> bool {
-        self.zoom_scale == 100 && self.frozen_rows == 0 && self.frozen_cols == 0
+    fn is_default(&self) -> bool {
+        self.zoom_scale == 100
+            && self.frozen_rows == 0
+            && self.frozen_cols == 0
+            && self.x_split.is_none()
+            && self.y_split.is_none()
+            && self.top_left_cell.is_none()
+            && self.show_grid_lines
+            && self.show_headings
+            && self.show_zeros
+            && self.selection.is_none()
     }
 }
 
@@ -1618,20 +1710,38 @@ fn parse_sheet_view_settings(xml: &str) -> Result<SheetViewSettings, WriteError>
                 in_sheet_view = true;
                 for attr in e.attributes() {
                     let attr = attr?;
-                    if attr.key.as_ref() == b"zoomScale" {
-                        if let Ok(scale) = attr.unescape_value()?.parse::<u32>() {
-                            settings.zoom_scale = scale;
+                    let val = attr.unescape_value()?.into_owned();
+                    match attr.key.as_ref() {
+                        b"zoomScale" => {
+                            if let Ok(scale) = val.parse::<u32>() {
+                                settings.zoom_scale = scale;
+                            }
                         }
+                        b"showGridLines" => settings.show_grid_lines = parse_xml_bool(&val),
+                        b"showHeadings" | b"showRowColHeaders" => {
+                            settings.show_headings = parse_xml_bool(&val)
+                        }
+                        b"showZeros" => settings.show_zeros = parse_xml_bool(&val),
+                        _ => {}
                     }
                 }
             }
             Event::Empty(e) if e.local_name().as_ref() == b"sheetView" => {
                 for attr in e.attributes() {
                     let attr = attr?;
-                    if attr.key.as_ref() == b"zoomScale" {
-                        if let Ok(scale) = attr.unescape_value()?.parse::<u32>() {
-                            settings.zoom_scale = scale;
+                    let val = attr.unescape_value()?.into_owned();
+                    match attr.key.as_ref() {
+                        b"zoomScale" => {
+                            if let Ok(scale) = val.parse::<u32>() {
+                                settings.zoom_scale = scale;
+                            }
                         }
+                        b"showGridLines" => settings.show_grid_lines = parse_xml_bool(&val),
+                        b"showHeadings" | b"showRowColHeaders" => {
+                            settings.show_headings = parse_xml_bool(&val)
+                        }
+                        b"showZeros" => settings.show_zeros = parse_xml_bool(&val),
+                        _ => {}
                     }
                 }
             }
@@ -1639,25 +1749,71 @@ fn parse_sheet_view_settings(xml: &str) -> Result<SheetViewSettings, WriteError>
                 in_sheet_view = false;
                 drop(e);
             }
-            Event::Start(e) | Event::Empty(e)
-                if in_sheet_view && e.local_name().as_ref() == b"pane" =>
-            {
+            Event::Start(e) | Event::Empty(e) if in_sheet_view && e.local_name().as_ref() == b"pane" => {
                 let mut state: Option<String> = None;
-                let mut x_split: Option<u32> = None;
-                let mut y_split: Option<u32> = None;
+                let mut x_split: Option<String> = None;
+                let mut y_split: Option<String> = None;
+                let mut top_left_cell: Option<CellRef> = None;
+
                 for attr in e.attributes() {
                     let attr = attr?;
                     let val = attr.unescape_value()?.into_owned();
                     match attr.key.as_ref() {
                         b"state" => state = Some(val),
-                        b"xSplit" => x_split = val.parse().ok(),
-                        b"ySplit" => y_split = val.parse().ok(),
+                        b"xSplit" => x_split = Some(val),
+                        b"ySplit" => y_split = Some(val),
+                        b"topLeftCell" => {
+                            top_left_cell = CellRef::from_a1(&val).ok();
+                        }
                         _ => {}
                     }
                 }
-                if matches!(state.as_deref(), Some("frozen") | Some("frozenSplit")) {
-                    settings.frozen_cols = x_split.unwrap_or(0);
-                    settings.frozen_rows = y_split.unwrap_or(0);
+
+                match state.as_deref() {
+                    Some("frozen") | Some("frozenSplit") => {
+                        settings.frozen_cols = x_split.as_deref().and_then(|v| v.parse().ok()).unwrap_or(0);
+                        settings.frozen_rows = y_split.as_deref().and_then(|v| v.parse().ok()).unwrap_or(0);
+                        settings.x_split = None;
+                        settings.y_split = None;
+                        settings.top_left_cell = top_left_cell.or_else(|| {
+                            if settings.frozen_rows > 0 || settings.frozen_cols > 0 {
+                                Some(CellRef::new(settings.frozen_rows, settings.frozen_cols))
+                            } else {
+                                None
+                            }
+                        });
+                    }
+                    Some("split") => {
+                        settings.x_split = x_split.as_deref().and_then(|v| v.parse().ok());
+                        settings.y_split = y_split.as_deref().and_then(|v| v.parse().ok());
+                        settings.top_left_cell = top_left_cell;
+                    }
+                    _ => {
+                        // Best-effort: if no explicit state is set, treat the presence of split
+                        // offsets as a split pane.
+                        settings.x_split = x_split.as_deref().and_then(|v| v.parse().ok());
+                        settings.y_split = y_split.as_deref().and_then(|v| v.parse().ok());
+                        settings.top_left_cell = top_left_cell;
+                    }
+                }
+            }
+            Event::Start(e) | Event::Empty(e)
+                if in_sheet_view && e.local_name().as_ref() == b"selection" =>
+            {
+                let mut active_cell: Option<CellRef> = None;
+                let mut sqref: Option<String> = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    let val = attr.unescape_value()?.into_owned();
+                    match attr.key.as_ref() {
+                        b"activeCell" => active_cell = CellRef::from_a1(&val).ok(),
+                        b"sqref" => sqref = Some(val),
+                        _ => {}
+                    }
+                }
+                if let Some(active_cell) = active_cell {
+                    let sqref = sqref.unwrap_or_else(|| active_cell.to_a1());
+                    settings.selection = Some(SheetViewSelectionSettings { active_cell, sqref });
                 }
             }
             _ => {}
@@ -1708,6 +1864,7 @@ fn render_sheet_views_section(views: SheetViewSettings, prefix: Option<&str>) ->
     let sheet_views_tag = crate::xml::prefixed_tag(prefix, "sheetViews");
     let sheet_view_tag = crate::xml::prefixed_tag(prefix, "sheetView");
     let pane_tag = crate::xml::prefixed_tag(prefix, "pane");
+    let selection_tag = crate::xml::prefixed_tag(prefix, "selection");
 
     let mut out = String::new();
     out.push('<');
@@ -1716,11 +1873,26 @@ fn render_sheet_views_section(views: SheetViewSettings, prefix: Option<&str>) ->
     out.push('<');
     out.push_str(&sheet_view_tag);
     out.push_str(" workbookViewId=\"0\"");
+    if !views.show_grid_lines {
+        out.push_str(r#" showGridLines="0""#);
+    }
+    if !views.show_headings {
+        out.push_str(r#" showHeadings="0""#);
+    }
+    if !views.show_zeros {
+        out.push_str(r#" showZeros="0""#);
+    }
     if views.zoom_scale != 100 {
         out.push_str(&format!(r#" zoomScale="{}""#, views.zoom_scale));
     }
 
-    if views.frozen_rows == 0 && views.frozen_cols == 0 {
+    let has_pane = views.frozen_rows > 0
+        || views.frozen_cols > 0
+        || views.x_split.is_some()
+        || views.y_split.is_some();
+    let has_selection = views.selection.is_some();
+
+    if !has_pane && !has_selection {
         out.push_str("/></");
         out.push_str(&sheet_views_tag);
         out.push('>');
@@ -1728,31 +1900,100 @@ fn render_sheet_views_section(views: SheetViewSettings, prefix: Option<&str>) ->
     }
 
     out.push('>');
-    out.push('<');
-    out.push_str(&pane_tag);
-    if views.frozen_cols > 0 {
-        out.push_str(&format!(r#" xSplit="{}""#, views.frozen_cols));
-    }
-    if views.frozen_rows > 0 {
-        out.push_str(&format!(r#" ySplit="{}""#, views.frozen_rows));
-    }
-    let top_left = CellRef::new(views.frozen_rows, views.frozen_cols).to_a1();
-    out.push_str(&format!(r#" topLeftCell="{}""#, escape_attr(&top_left)));
 
-    let active_pane = if views.frozen_rows > 0 && views.frozen_cols > 0 {
-        "bottomRight"
-    } else if views.frozen_rows > 0 {
-        "bottomLeft"
-    } else {
-        "topRight"
-    };
-    out.push_str(&format!(r#" activePane="{active_pane}" state="frozen"/>"#));
+    if has_pane {
+        out.push('<');
+        out.push_str(&pane_tag);
+
+        let frozen = views.frozen_rows > 0 || views.frozen_cols > 0;
+        let x_present = if frozen {
+            views.frozen_cols > 0
+        } else {
+            views.x_split.is_some()
+        };
+        let y_present = if frozen {
+            views.frozen_rows > 0
+        } else {
+            views.y_split.is_some()
+        };
+
+        let state = if frozen { "frozen" } else { "split" };
+        out.push_str(&format!(r#" state="{state}""#));
+
+        if frozen {
+            if views.frozen_cols > 0 {
+                out.push_str(&format!(r#" xSplit="{}""#, views.frozen_cols));
+            }
+            if views.frozen_rows > 0 {
+                out.push_str(&format!(r#" ySplit="{}""#, views.frozen_rows));
+            }
+        } else {
+            if let Some(x_split) = views.x_split {
+                out.push_str(&format!(r#" xSplit="{}""#, format_sheet_view_split(x_split)));
+            }
+            if let Some(y_split) = views.y_split {
+                out.push_str(&format!(r#" ySplit="{}""#, format_sheet_view_split(y_split)));
+            }
+        }
+
+        if let Some(top_left_cell) = views.top_left_cell.or_else(|| {
+            if frozen {
+                Some(CellRef::new(views.frozen_rows, views.frozen_cols))
+            } else {
+                None
+            }
+        }) {
+            let top_left = top_left_cell.to_a1();
+            out.push_str(&format!(r#" topLeftCell="{}""#, escape_attr(&top_left)));
+        }
+
+        let active_pane = if x_present && y_present {
+            "bottomRight"
+        } else if y_present {
+            "bottomLeft"
+        } else {
+            "topRight"
+        };
+        out.push_str(&format!(r#" activePane="{active_pane}"/>"#));
+    }
+
+    if let Some(selection) = &views.selection {
+        out.push('<');
+        out.push_str(&selection_tag);
+        out.push_str(&format!(
+            r#" activeCell="{}" sqref="{}"/>"#,
+            escape_attr(&selection.active_cell.to_a1()),
+            escape_attr(&selection.sqref)
+        ));
+    }
+
     out.push_str("</");
     out.push_str(&sheet_view_tag);
     out.push_str("></");
     out.push_str(&sheet_views_tag);
     out.push('>');
     out
+}
+
+fn format_sheet_view_split(val: f32) -> String {
+    if !val.is_finite() {
+        return "0".to_string();
+    }
+    // For deterministic fixtures, trim trailing zeros (e.g. `1.0` -> `1`).
+    let mut s = format!("{val}");
+    if s.contains('.') {
+        while s.ends_with('0') {
+            s.pop();
+        }
+        if s.ends_with('.') {
+            s.pop();
+        }
+    }
+    if s.is_empty() {
+        "0".to_string()
+    } else {
+        s
+    }
 }
 
 fn update_sheet_views_xml(sheet_xml: &str, views: SheetViewSettings) -> Result<String, WriteError> {
