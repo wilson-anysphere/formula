@@ -463,6 +463,11 @@ pub enum OffcryptoError {
     UnsupportedNonCryptoApiStandardEncryption,
     /// Standard `EncryptionHeader.Flags` does not match the declared algorithm.
     InvalidFlags { flags: u32, alg_id: u32 },
+    /// Agile `EncryptionInfo` does not include a password key encryptor.
+    ///
+    /// Agile encryption can specify multiple `<keyEncryptor>` entries under `<keyEncryptors>`
+    /// (password, certificate, etc). Formula currently supports only password-based decryption.
+    UnsupportedKeyEncryptor { available: Vec<String> },
     /// Ciphertext length must be a multiple of 16 bytes for AES-ECB.
     InvalidCiphertextLength { len: usize },
     /// Invalid AES key length (expected 16, 24, or 32 bytes).
@@ -529,6 +534,20 @@ impl fmt::Display for OffcryptoError {
                 f,
                 "invalid Standard EncryptionHeader flags for algId: flags=0x{flags:08x}, algId=0x{alg_id:08x}"
             ),
+            OffcryptoError::UnsupportedKeyEncryptor { available } => {
+                if available.is_empty() {
+                    write!(
+                        f,
+                        "unsupported key encryptor: password keyEncryptor is not present"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "unsupported key encryptor: password keyEncryptor is not present (available: {})",
+                        available.join(", ")
+                    )
+                }
+            }
             OffcryptoError::InvalidCiphertextLength { len } => write!(
                 f,
                 "ciphertext length must be a multiple of 16 bytes for AES-ECB, got {len}"
@@ -820,57 +839,6 @@ pub fn decrypt_standard_only(
         }
     }
 }
-#[derive(Debug, Clone)]
-struct NamespaceFrame {
-    decls: Vec<(Vec<u8> /* prefix */, Vec<u8> /* uri */)>,
-}
-
-fn push_namespace_frame<'a>(
-    stack: &mut Vec<NamespaceFrame>,
-    elem: &quick_xml::events::BytesStart<'a>,
-) -> Result<(), OffcryptoError> {
-    let mut frame = NamespaceFrame { decls: Vec::new() };
-
-    for attr in elem.attributes().with_checks(false) {
-        let attr = attr.map_err(|_| OffcryptoError::InvalidEncryptionInfo {
-            context: "invalid XML attribute",
-        })?;
-        let key = attr.key.as_ref();
-        let value = attr.value.as_ref();
-
-        if key == b"xmlns" {
-            frame.decls.push((Vec::new(), value.to_vec()));
-        } else if let Some(prefix) = key.strip_prefix(b"xmlns:") {
-            frame.decls.push((prefix.to_vec(), value.to_vec()));
-        }
-    }
-
-    stack.push(frame);
-    Ok(())
-}
-
-fn pop_namespace_frame(stack: &mut Vec<NamespaceFrame>) {
-    stack.pop();
-}
-
-fn resolve_namespace_uri<'a>(stack: &'a [NamespaceFrame], prefix: &[u8]) -> Option<&'a [u8]> {
-    for frame in stack.iter().rev() {
-        for (p, uri) in &frame.decls {
-            if p.as_slice() == prefix {
-                return Some(uri.as_slice());
-            }
-        }
-    }
-    None
-}
-
-fn element_prefix(name: &[u8]) -> &[u8] {
-    name.iter()
-        .rposition(|b| *b == b':')
-        .map(|idx| &name[..idx])
-        .unwrap_or(&[])
-}
-
 fn local_name(name: &[u8]) -> &[u8] {
     name.iter()
         .rposition(|b| *b == b':')
@@ -1056,12 +1024,10 @@ fn parse_agile_encryption_info_xml(xml_bytes: &[u8]) -> Result<AgileEncryptionIn
 }
 
 fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo, OffcryptoError> {
-
     let mut reader = XmlReader::from_str(xml);
     reader.config_mut().trim_text(true);
 
     let mut buf = Vec::new();
-    let mut ns_stack: Vec<NamespaceFrame> = Vec::new();
 
     let mut key_data_salt: Option<Vec<u8>> = None;
     let mut key_data_hash_algorithm: Option<HashAlgorithm> = None;
@@ -1078,6 +1044,15 @@ fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo,
     let mut encrypted_verifier_hash_input: Option<Vec<u8>> = None;
     let mut encrypted_verifier_hash_value: Option<Vec<u8>> = None;
 
+    // We need to pick the password key encryptor by URI, not by XML namespace/prefix.
+    //
+    // Some encrypted workbooks include multiple key encryptors (e.g. password + certificate),
+    // and some include *no* password key encryptor at all (no password namespace). In that case,
+    // return a clear `UnsupportedKeyEncryptor` error listing which key encryptors were present.
+    let mut key_encryptor_uri_stack: Vec<String> = Vec::new();
+    let mut available_key_encryptor_uris: Vec<String> = Vec::new();
+    let mut saw_password_key_encryptor = false;
+
     loop {
         let event = reader.read_event_into(&mut buf).map_err(|_| {
             OffcryptoError::InvalidEncryptionInfo {
@@ -1087,10 +1062,23 @@ fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo,
 
         match event {
             XmlEvent::Start(e) => {
-                push_namespace_frame(&mut ns_stack, &e)?;
+                if e.local_name().as_ref() == b"keyEncryptor" {
+                    let uri = parse_key_encryptor_uri(&e)?;
+                    if !available_key_encryptor_uris.contains(&uri) {
+                        available_key_encryptor_uris.push(uri.clone());
+                    }
+                    if uri == PASSWORD_KEY_ENCRYPTOR_NS {
+                        saw_password_key_encryptor = true;
+                    }
+                    key_encryptor_uri_stack.push(uri);
+                }
+
+                let in_password_key_encryptor = key_encryptor_uri_stack
+                    .last()
+                    .is_some_and(|uri| uri == PASSWORD_KEY_ENCRYPTOR_NS);
                 parse_agile_element(
-                    &mut ns_stack,
                     &e,
+                    in_password_key_encryptor,
                     &mut key_data_salt,
                     &mut key_data_hash_algorithm,
                     &mut key_data_block_size,
@@ -1106,10 +1094,22 @@ fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo,
                 )?;
             }
             XmlEvent::Empty(e) => {
-                push_namespace_frame(&mut ns_stack, &e)?;
+                if e.local_name().as_ref() == b"keyEncryptor" {
+                    let uri = parse_key_encryptor_uri(&e)?;
+                    if !available_key_encryptor_uris.contains(&uri) {
+                        available_key_encryptor_uris.push(uri.clone());
+                    }
+                    if uri == PASSWORD_KEY_ENCRYPTOR_NS {
+                        saw_password_key_encryptor = true;
+                    }
+                }
+
+                let in_password_key_encryptor = key_encryptor_uri_stack
+                    .last()
+                    .is_some_and(|uri| uri == PASSWORD_KEY_ENCRYPTOR_NS);
                 parse_agile_element(
-                    &mut ns_stack,
                     &e,
+                    in_password_key_encryptor,
                     &mut key_data_salt,
                     &mut key_data_hash_algorithm,
                     &mut key_data_block_size,
@@ -1123,9 +1123,12 @@ fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo,
                     &mut encrypted_verifier_hash_input,
                     &mut encrypted_verifier_hash_value,
                 )?;
-                pop_namespace_frame(&mut ns_stack);
             }
-            XmlEvent::End(_) => pop_namespace_frame(&mut ns_stack),
+            XmlEvent::End(e) => {
+                if local_name(e.name().as_ref()) == b"keyEncryptor" {
+                    key_encryptor_uri_stack.pop();
+                }
+            }
             XmlEvent::Eof => break,
             _ => {}
         }
@@ -1149,22 +1152,39 @@ fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo,
         buf.clear();
     }
 
+    let key_data_salt = key_data_salt.ok_or(OffcryptoError::InvalidEncryptionInfo {
+        context: "missing <keyData> element",
+    })?;
+    let key_data_hash_algorithm =
+        key_data_hash_algorithm.ok_or(OffcryptoError::InvalidEncryptionInfo {
+            context: "missing <keyData> element",
+        })?;
+    let key_data_block_size = key_data_block_size.ok_or(OffcryptoError::InvalidEncryptionInfo {
+        context: "missing <keyData> element",
+    })?;
+
+    let encrypted_hmac_key = encrypted_hmac_key.ok_or(OffcryptoError::InvalidEncryptionInfo {
+        context: "missing <dataIntegrity> element",
+    })?;
+    let encrypted_hmac_value =
+        encrypted_hmac_value.ok_or(OffcryptoError::InvalidEncryptionInfo {
+            context: "missing <dataIntegrity> element",
+        })?;
+
+    // If no password key encryptor is present at all, return a targeted error instead of a generic
+    // "missing password <encryptedKey>" message.
+    if spin_count.is_none() && !saw_password_key_encryptor {
+        return Err(OffcryptoError::UnsupportedKeyEncryptor {
+            available: available_key_encryptor_uris,
+        });
+    }
+
     Ok(AgileEncryptionInfo {
-        key_data_salt: key_data_salt.ok_or(OffcryptoError::InvalidEncryptionInfo {
-            context: "missing <keyData> element",
-        })?,
-        key_data_hash_algorithm: key_data_hash_algorithm.ok_or(OffcryptoError::InvalidEncryptionInfo {
-            context: "missing <keyData> element",
-        })?,
-        key_data_block_size: key_data_block_size.ok_or(OffcryptoError::InvalidEncryptionInfo {
-            context: "missing <keyData> element",
-        })?,
-        encrypted_hmac_key: encrypted_hmac_key.ok_or(OffcryptoError::InvalidEncryptionInfo {
-            context: "missing <dataIntegrity> element",
-        })?,
-        encrypted_hmac_value: encrypted_hmac_value.ok_or(OffcryptoError::InvalidEncryptionInfo {
-            context: "missing <dataIntegrity> element",
-        })?,
+        key_data_salt,
+        key_data_hash_algorithm,
+        key_data_block_size,
+        encrypted_hmac_key,
+        encrypted_hmac_value,
         spin_count: spin_count.ok_or(OffcryptoError::InvalidEncryptionInfo {
             context: "missing password <encryptedKey> element",
         })?,
@@ -1195,8 +1215,8 @@ fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo,
 
 #[allow(clippy::too_many_arguments)]
 fn parse_agile_element<'a>(
-    ns_stack: &mut Vec<NamespaceFrame>,
     e: &quick_xml::events::BytesStart<'a>,
+    in_password_key_encryptor: bool,
     key_data_salt: &mut Option<Vec<u8>>,
     key_data_hash_algorithm: &mut Option<HashAlgorithm>,
     key_data_block_size: &mut Option<usize>,
@@ -1223,10 +1243,7 @@ fn parse_agile_element<'a>(
             *encrypted_hmac_value = Some(value);
         }
         b"encryptedKey" => {
-            let name = e.name();
-            let prefix = element_prefix(name.as_ref());
-            let ns_uri = resolve_namespace_uri(ns_stack, prefix);
-            if ns_uri == Some(PASSWORD_KEY_ENCRYPTOR_NS.as_bytes()) {
+            if in_password_key_encryptor {
                 let (
                     sc,
                     salt,
@@ -1248,6 +1265,30 @@ fn parse_agile_element<'a>(
         _ => {}
     }
     Ok(())
+}
+
+fn parse_key_encryptor_uri<'a>(
+    e: &quick_xml::events::BytesStart<'a>,
+) -> Result<String, OffcryptoError> {
+    let mut uri: Option<String> = None;
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr.map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+            context: "invalid XML attribute",
+        })?;
+        let key = local_name(attr.key.as_ref());
+        if key != b"uri" {
+            continue;
+        }
+        let value = attr.value.as_ref();
+        let s = std::str::from_utf8(value).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+            context: "invalid UTF-8 attribute value",
+        })?;
+        uri = Some(s.trim().to_string());
+    }
+
+    uri.ok_or(OffcryptoError::InvalidEncryptionInfo {
+        context: "missing keyEncryptor.uri",
+    })
 }
 
 fn parse_key_data_attrs<'a>(
@@ -3023,6 +3064,97 @@ mod tests {
         assert_eq!(
             info.encrypted_verifier_hash_value,
             (0x40u8..0x60).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn parses_agile_prefers_password_key_encryptor_when_multiple_present() {
+        let key_data_salt: Vec<u8> = (0u8..16).collect();
+        let encrypted_hmac_key: Vec<u8> = (0x10u8..0x30).collect();
+        let encrypted_hmac_value: Vec<u8> = (0xA0u8..0xC0).collect();
+        let password_salt: Vec<u8> = (1u8..17).collect();
+        let encrypted_key_value: Vec<u8> = (0x20u8..0x40).collect();
+        let encrypted_verifier_hash_input: Vec<u8> = (0x30u8..0x50).collect();
+        let encrypted_verifier_hash_value: Vec<u8> = (0x40u8..0x60).collect();
+
+        let key_data_salt_b64 = STANDARD.encode(&key_data_salt);
+        let encrypted_hmac_key_b64 = STANDARD.encode(&encrypted_hmac_key);
+        let encrypted_hmac_value_b64 = STANDARD.encode(&encrypted_hmac_value);
+        let password_salt_b64 = STANDARD.encode(&password_salt);
+        let encrypted_key_value_b64 = STANDARD.encode(&encrypted_key_value);
+        let encrypted_verifier_hash_input_b64 = STANDARD.encode(&encrypted_verifier_hash_input);
+        let encrypted_verifier_hash_value_b64 = STANDARD.encode(&encrypted_verifier_hash_value);
+
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+    xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password"
+    xmlns:c="http://schemas.microsoft.com/office/2006/keyEncryptor/certificate">
+  <keyData saltValue="{key_data_salt_b64}" hashAlgorithm="SHA256" blockSize="16"/>
+  <dataIntegrity encryptedHmacKey="{encrypted_hmac_key_b64}" encryptedHmacValue="{encrypted_hmac_value_b64}"/>
+  <keyEncryptors>
+    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/certificate">
+      <c:encryptedKey dummy="1"/>
+    </keyEncryptor>
+    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+      <p:encryptedKey spinCount="100000" saltValue="{password_salt_b64}" hashAlgorithm="SHA512" keyBits="256"
+        encryptedKeyValue="{encrypted_key_value_b64}"
+        encryptedVerifierHashInput="{encrypted_verifier_hash_input_b64}"
+        encryptedVerifierHashValue="{encrypted_verifier_hash_value_b64}"/>
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>
+"#
+        );
+
+        let info = parse_agile_info(xml.as_bytes());
+
+        // These should come from the password key encryptor (not the certificate key encryptor).
+        assert_eq!(info.spin_count, 100_000);
+        assert_eq!(info.password_salt, password_salt);
+        assert_eq!(info.password_hash_algorithm, HashAlgorithm::Sha512);
+        assert_eq!(info.password_key_bits, 256);
+        assert_eq!(info.encrypted_key_value, encrypted_key_value);
+        assert_eq!(info.encrypted_verifier_hash_input, encrypted_verifier_hash_input);
+        assert_eq!(info.encrypted_verifier_hash_value, encrypted_verifier_hash_value);
+    }
+
+    #[test]
+    fn agile_missing_password_key_encryptor_returns_unsupported() {
+        let certificate_uri = "http://schemas.microsoft.com/office/2006/keyEncryptor/certificate";
+
+        let key_data_salt: Vec<u8> = (0u8..16).collect();
+        let encrypted_hmac_key: Vec<u8> = (0x10u8..0x30).collect();
+        let encrypted_hmac_value: Vec<u8> = (0xA0u8..0xC0).collect();
+
+        let key_data_salt_b64 = STANDARD.encode(&key_data_salt);
+        let encrypted_hmac_key_b64 = STANDARD.encode(&encrypted_hmac_key);
+        let encrypted_hmac_value_b64 = STANDARD.encode(&encrypted_hmac_value);
+
+        // Note: no `xmlns:p` here because the password namespace is absent when no password
+        // keyEncryptor is present.
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+    xmlns:c="{certificate_uri}">
+  <keyData saltValue="{key_data_salt_b64}" hashAlgorithm="SHA256" blockSize="16"/>
+  <dataIntegrity encryptedHmacKey="{encrypted_hmac_key_b64}" encryptedHmacValue="{encrypted_hmac_value_b64}"/>
+  <keyEncryptors>
+    <keyEncryptor uri="{certificate_uri}">
+      <c:encryptedKey dummy="1"/>
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>
+"#
+        );
+
+        let bytes = build_agile_encryption_info_stream(xml.as_bytes());
+        let err = parse_encryption_info(&bytes).expect_err("should error");
+        assert_eq!(
+            err,
+            OffcryptoError::UnsupportedKeyEncryptor {
+                available: vec![certificate_uri.to_string()]
+            }
         );
     }
 
