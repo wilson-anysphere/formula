@@ -144,6 +144,24 @@ pub(crate) fn decrypt_workbook_stream(
     let mut iter = records::BiffRecordIter::from_offset(workbook_stream, 0)
         .map_err(DecryptError::InvalidFilePass)?;
 
+    // Require a valid BIFF workbook stream (must start with BOF) to avoid accidentally treating
+    // arbitrary byte buffers as encrypted just because they contain the FILEPASS record id.
+    let first = match iter.next() {
+        Some(Ok(record)) => record,
+        Some(Err(err)) => return Err(DecryptError::InvalidFilePass(err)),
+        None => {
+            return Err(DecryptError::InvalidFilePass(
+                "empty workbook stream".to_string(),
+            ))
+        }
+    };
+    if !records::is_bof_record(first.record_id) {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "workbook stream does not start with BOF (found 0x{:04X})",
+            first.record_id
+        )));
+    }
+
     while let Some(next) = iter.next() {
         let record = next.map_err(DecryptError::InvalidFilePass)?;
 
@@ -368,5 +386,18 @@ mod tests {
 
         let err = decrypt_workbook_stream(&mut stream, "pw").expect_err("expected error");
         assert_eq!(err, DecryptError::NoFilePass);
+    }
+
+    #[test]
+    fn decrypt_workbook_stream_rejects_stream_without_bof() {
+        let mut stream = [
+            record(0x0001, &[0xAA]),
+            record(records::RECORD_FILEPASS, &[]),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let err = decrypt_workbook_stream(&mut stream, "pw").expect_err("expected error");
+        assert!(matches!(err, DecryptError::InvalidFilePass(_)));
     }
 }
