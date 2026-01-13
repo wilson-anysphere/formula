@@ -143,6 +143,7 @@ export function suggestRanges(params: {
   surroundingCells: SurroundingCellsContext;
   sheetName?: string;
   maxScanRows?: number;
+  maxScanCols?: number;
 }): RangeSuggestion[];
 
 export interface PatternSuggestion {
