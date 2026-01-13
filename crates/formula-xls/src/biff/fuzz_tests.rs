@@ -259,14 +259,15 @@ proptest! {
                     assert!(range.start.col <= range.end.col);
                 }
 
-                // Manual page breaks (re-exported by the parent `biff` module).
-                let _ = super::parse_biff_sheet_manual_page_breaks(&buf, 0)
+                // Manual page breaks.
+                let _ = sheet::parse_biff_sheet_manual_page_breaks(&buf, 0)
                     .expect("offset 0 should always be in-bounds");
 
                 // Print settings helper (page setup + margins + manual page breaks).
                 let print = super::parse_biff_sheet_print_settings(&buf, 0)
                     .expect("offset 0 should always be in-bounds");
-                let margins = &print.page_setup.margins;
+                let page_setup = print.page_setup.unwrap_or_default();
+                let margins = &page_setup.margins;
                 assert!(margins.left.is_finite());
                 assert!(margins.right.is_finite());
                 assert!(margins.top.is_finite());

@@ -599,6 +599,7 @@ pub(crate) fn parse_biff_sheet_view_state(
 }
 
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub(crate) struct BiffSheetManualPageBreaks {
     pub(crate) manual_page_breaks: ManualPageBreaks,
     pub(crate) warnings: Vec<String>,
@@ -612,6 +613,7 @@ pub(crate) struct BiffSheetManualPageBreaks {
 ///
 /// This scan is resilient to malformed records: payload-level parse failures are surfaced as
 /// warnings and otherwise ignored.
+#[allow(dead_code)]
 pub(crate) fn parse_biff_sheet_manual_page_breaks(
     workbook_stream: &[u8],
     start: usize,

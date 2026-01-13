@@ -771,7 +771,6 @@ fn import_xls_path_with_biff_reader(
                 }
             }
         }
-
         let sheet = out
             .sheet_mut(sheet_id)
             .expect("sheet id should exist immediately after add");
