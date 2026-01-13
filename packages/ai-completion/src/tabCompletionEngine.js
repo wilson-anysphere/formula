@@ -894,6 +894,50 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "3", displayText: "3 (ignore nested + hidden + errors)", confidence: 0.62 },
     ],
   },
+  "CEILING.MATH": {
+    // mode
+    2: [
+      { replacement: "0", displayText: "0 (default; negatives toward 0)", confidence: 0.64 },
+      { replacement: "1", displayText: "1 (negatives away from 0)", confidence: 0.63 },
+    ],
+  },
+  "FLOOR.MATH": {
+    // mode
+    2: [
+      { replacement: "0", displayText: "0 (default; negatives away from 0)", confidence: 0.64 },
+      { replacement: "1", displayText: "1 (negatives toward 0)", confidence: 0.63 },
+    ],
+  },
+  QUARTILE: {
+    // quart
+    1: [
+      { replacement: "1", displayText: "1 (1st quartile / 25%)", confidence: 0.66 },
+      { replacement: "2", displayText: "2 (median / 50%)", confidence: 0.65 },
+      { replacement: "3", displayText: "3 (3rd quartile / 75%)", confidence: 0.64 },
+      { replacement: "0", displayText: "0 (minimum)", confidence: 0.62 },
+      { replacement: "4", displayText: "4 (maximum)", confidence: 0.61 },
+    ],
+  },
+  "QUARTILE.INC": {
+    // quart
+    1: [
+      { replacement: "1", displayText: "1 (1st quartile / 25%)", confidence: 0.66 },
+      { replacement: "2", displayText: "2 (median / 50%)", confidence: 0.65 },
+      { replacement: "3", displayText: "3 (3rd quartile / 75%)", confidence: 0.64 },
+      { replacement: "0", displayText: "0 (minimum)", confidence: 0.62 },
+      { replacement: "4", displayText: "4 (maximum)", confidence: 0.61 },
+    ],
+  },
+  "QUARTILE.EXC": {
+    // quart
+    1: [
+      { replacement: "1", displayText: "1 (1st quartile / 25%)", confidence: 0.66 },
+      { replacement: "2", displayText: "2 (median / 50%)", confidence: 0.65 },
+      { replacement: "3", displayText: "3 (3rd quartile / 75%)", confidence: 0.64 },
+      { replacement: "0", displayText: "0 (minimum)", confidence: 0.62 },
+      { replacement: "4", displayText: "4 (maximum)", confidence: 0.61 },
+    ],
+  },
   "T.TEST": {
     // tails
     2: [

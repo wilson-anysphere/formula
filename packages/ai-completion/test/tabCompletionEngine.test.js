@@ -1860,6 +1860,67 @@ test("WEEKNUM return_type suggests 1, 2, 21", async () => {
   );
 });
 
+test("CEILING.MATH mode suggests 0 and 1", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=CEILING.MATH(-5.5, 2, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=CEILING.MATH(-5.5, 2, 0"),
+    `Expected CEILING.MATH to suggest mode=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=CEILING.MATH(-5.5, 2, 1"),
+    `Expected CEILING.MATH to suggest mode=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("FLOOR.MATH mode suggests 0 and 1", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=FLOOR.MATH(-5.5, 2, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=FLOOR.MATH(-5.5, 2, 0"),
+    `Expected FLOOR.MATH to suggest mode=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=FLOOR.MATH(-5.5, 2, 1"),
+    `Expected FLOOR.MATH to suggest mode=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("QUARTILE.INC quart suggests 1, 2, 3, 0, 4", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=QUARTILE.INC(A1:A10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const q of ["1", "2", "3", "0", "4"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=QUARTILE.INC(A1:A10, ${q}`),
+      `Expected QUARTILE.INC to suggest quart=${q}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("TabCompletionEngine caches suggestions by context key", async () => {
   let callCount = 0;
   const completionClient = {
