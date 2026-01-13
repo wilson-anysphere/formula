@@ -168,9 +168,26 @@ test.describe("drawing + image rendering regressions", () => {
 
     await gotoDesktop(page);
 
-    // Ensure the built-in overlay container exists (charts + drawings).
-    await expect(page.locator(".chart-layer")).toHaveCount(1);
+    // Ensure the built-in overlay canvases exist (charts + drawings).
+    await expect(page.locator("canvas.grid-canvas--chart")).toHaveCount(1);
     await expect(page.getByTestId("drawing-layer-canvas")).toHaveCount(1);
+
+    // Regression guard: overlay stacking should be deterministic across modes
+    // (drawings above cell content, charts above drawings, selection above all).
+    const z = await page.evaluate(() => {
+      const drawing = document.querySelector(".drawing-layer");
+      const chart = document.querySelector(".grid-canvas--chart");
+      const selection = document.querySelector(".grid-canvas--selection");
+      if (!drawing || !chart || !selection) return null;
+      return {
+        drawing: getComputedStyle(drawing).zIndex,
+        chart: getComputedStyle(chart).zIndex,
+        selection: getComputedStyle(selection).zIndex,
+      };
+    });
+    expect(z).not.toBeNull();
+    expect(Number(z!.drawing)).toBeLessThan(Number(z!.chart));
+    expect(Number(z!.chart)).toBeLessThan(Number(z!.selection));
 
     const result = await page.evaluate(async ({ fixture }) => {
       const { anchorToRectPx } = await import("/src/drawings/overlay.ts");
