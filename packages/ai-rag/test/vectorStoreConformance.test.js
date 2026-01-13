@@ -164,6 +164,30 @@ function defineVectorStoreConformanceSuite(name, createStore, opts) {
           name: "AbortError",
         });
       });
+
+      await t.test("deleteWorkbook(workbookId) removes only that workbook's records", async () => {
+        await store.upsert([
+          { id: "dw-a", vector: [1, 0, 0], metadata: { workbookId: "wb-delete-1" } },
+          { id: "dw-b", vector: [0, 1, 0], metadata: { workbookId: "wb-delete-1" } },
+          { id: "dw-c", vector: [0, 0, 1], metadata: { workbookId: "wb-delete-2" } },
+        ]);
+
+        const deleted = await store.deleteWorkbook("wb-delete-1");
+        assert.equal(deleted, 2);
+
+        const remainingForDeleted = await store.list({ workbookId: "wb-delete-1", includeVector: false });
+        assert.deepEqual(remainingForDeleted, []);
+
+        const remainingForOther = await store.list({ workbookId: "wb-delete-2", includeVector: false });
+        assert.equal(remainingForOther.length, 1);
+        assert.equal(remainingForOther[0].id, "dw-c");
+      });
+
+      await t.test("clear() removes all records", async () => {
+        await store.clear();
+        const all = await store.list({ includeVector: false });
+        assert.deepEqual(all, []);
+      });
     } finally {
       await store.close?.();
     }

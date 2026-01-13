@@ -169,12 +169,11 @@ export function dedupeOverlappingResults(results, opts = {}) {
 
   /** @type {typeof decorated} */
   const kept = [];
-  /** @type {Set<string>} */
   const seenIds = new Set();
 
   for (const cand of decorated) {
-    if (cand.id && seenIds.has(cand.id)) continue;
-    if (cand.id) seenIds.add(cand.id);
+    if (seenIds.has(cand.id)) continue;
+    seenIds.add(cand.id);
 
     const meta = cand.value?.metadata ?? {};
     const workbookId = meta.workbookId;
