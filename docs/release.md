@@ -410,6 +410,16 @@ in the release workflow):
 rustup target add aarch64-pc-windows-msvc
 ```
 
+Windows ARM64 builds also require a Windows SDK installation with **ARM64** libraries present
+(UM + UCRT). CI sanity-checks for directories like:
+
+- `C:\Program Files (x86)\Windows Kits\10\Lib\<version>\um\arm64`
+- `C:\Program Files (x86)\Windows Kits\10\Lib\<version>\ucrt\arm64`
+
+When cross-compiling locally from an x64 Windows machine, run the build in a Visual Studio
+Developer Prompt configured for **amd64 → arm64** (CI uses `ilammy/msvc-dev-cmd` with `arch:
+amd64_arm64`).
+
 GitHub-hosted runner images do not always include this workload by default. The release workflow
 checks for a complete ARM64 MSVC + SDK toolchain:
 
