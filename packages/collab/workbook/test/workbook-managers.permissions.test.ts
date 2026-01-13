@@ -103,6 +103,11 @@ describe.each(SOURCES)("$label permission-aware workbook managers", (source) => 
     const nested = (metadataMgr.metadata as any).get("nested");
     expect(nested).toBeTruthy();
     expect(() => (nested as any).push([new Y.Map()])).toThrow(/read-?only/i);
+    // Ensure slice/map read helpers also return guarded nested values.
+    const sliced = (nested as any).slice();
+    expect(Array.isArray(sliced)).toBe(true);
+    expect(() => sliced[0].set("x", 1)).toThrow(/read-?only/i);
+    expect(() => (nested as any).map((v: any) => v.set("x", 1))).toThrow(/read-?only/i);
     expect(metadataMgr.get("foo")).toBeUndefined();
     expect(session.metadata.get("foo")).toBeUndefined();
     expect((doc.getMap("metadata").get("nested") as any)?.length ?? 0).toBe(1);

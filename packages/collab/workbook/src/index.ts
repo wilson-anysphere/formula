@@ -781,6 +781,21 @@ function createPermissionAwareYArrayProxy<T>(params: {
         };
       }
 
+      if (wrapValue && prop === "slice") {
+        return (...args: any[]) => {
+          const out = Reflect.apply(value, target, args);
+          return Array.isArray(out) ? out.map((v) => wrapValue(v) as any) : out;
+        };
+      }
+
+      if (wrapValue && prop === "map") {
+        return (cb: (...args: any[]) => any) => {
+          return Reflect.apply(value, target, [
+            (v: any, idx: number) => cb(wrapValue(v), idx, receiver),
+          ]);
+        };
+      }
+
       if (wrapValue && prop === "forEach") {
         return (cb: (...args: any[]) => void, thisArg?: any) => {
           return Reflect.apply(value, target, [
