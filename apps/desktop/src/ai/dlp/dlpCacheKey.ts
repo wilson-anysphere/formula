@@ -193,6 +193,8 @@ function hashJsonArray(keys: string[]): { length: number; hash: string } {
 export function computeDlpCacheKey(dlp: any): string {
   if (!dlp) return "no_dlp";
 
+  const includeRestrictedContent = Boolean(dlp.includeRestrictedContent ?? dlp.include_restricted_content ?? false);
+
   // Allow callers to pre-compute and attach the key (or reuse a previously computed
   // key) to avoid re-hashing large policies / record sets in hot paths.
   try {
@@ -200,13 +202,17 @@ export function computeDlpCacheKey(dlp: any): string {
       const hasExplicitRecords = Array.isArray((dlp as any).classificationRecords) || Array.isArray((dlp as any).classification_records);
       const hasStore = Boolean((dlp as any).classificationStore || (dlp as any).classification_store);
       const existing = (dlp as any).cacheKey ?? (dlp as any).cache_key;
-      if ((hasExplicitRecords || !hasStore) && typeof existing === "string" && existing.trim()) return existing.trim();
+      if ((hasExplicitRecords || !hasStore) && typeof existing === "string" && existing.trim()) {
+        const trimmed = existing.trim();
+        // Ensure a cached key cannot be reused if includeRestrictedContent was toggled on the
+        // same object (cache keys are prefixed by incl/excl).
+        const expectedPrefix = `dlp:${includeRestrictedContent ? "incl" : "excl"}:`;
+        if (trimmed.startsWith(expectedPrefix)) return trimmed;
+      }
     }
   } catch {
     // ignore
   }
-
-  const includeRestrictedContent = Boolean(dlp.includeRestrictedContent ?? dlp.include_restricted_content ?? false);
 
   const policyJson = safeStableJsonStringify(dlp.policy ?? null);
   const policyKey = `${policyJson.length}:${hashString(policyJson)}`;

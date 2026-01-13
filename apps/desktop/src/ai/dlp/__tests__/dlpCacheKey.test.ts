@@ -20,8 +20,8 @@ describe("computeDlpCacheKey", () => {
   });
 
   it("returns a precomputed cacheKey when present", () => {
-    const dlp = { cacheKey: "dlp:precomputed" };
-    expect(computeDlpCacheKey(dlp)).toBe("dlp:precomputed");
+    const dlp = { cacheKey: "dlp:excl:precomputed" };
+    expect(computeDlpCacheKey(dlp)).toBe("dlp:excl:precomputed");
   });
 
   it("does not reuse cacheKey when only a classification store is provided (store may change)", () => {
@@ -31,7 +31,7 @@ describe("computeDlpCacheKey", () => {
       include_restricted_content: false,
       // If this value were trusted unconditionally, it could cause stale cache reuse when the
       // underlying store contents change.
-      cacheKey: "dlp:stale",
+      cacheKey: "dlp:excl:stale",
     };
 
     let records: any[] = [

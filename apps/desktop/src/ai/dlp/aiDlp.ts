@@ -56,6 +56,12 @@ type AiCloudDlpCacheEntry = {
   policy: any;
   classificationRecords: Array<{ selector: any; classification: any }>;
   classificationStore: LocalClassificationStore;
+  /**
+   * Cached DLP cache key for `policy` + `classificationRecords` (includeRestrictedContent=false).
+   *
+   * Used to avoid re-hashing large policies/record sets on every message.
+   */
+  cacheKey: string;
   hasDlpConfig: boolean;
 };
 
@@ -201,6 +207,7 @@ function memoizedDlpData(params: { storage: StorageLike; documentId: string; org
   }
 
   const hasDlpConfig = Boolean(storedOrgPolicy || storedDocumentPolicy || classificationRecords.length > 0);
+  const dlpCacheKey = computeDlpCacheKey({ policy, classificationRecords, includeRestrictedContent: false });
 
   const next: AiCloudDlpCacheEntry = {
     storageToken,
@@ -212,6 +219,7 @@ function memoizedDlpData(params: { storage: StorageLike; documentId: string; org
     policy,
     classificationRecords,
     classificationStore,
+    cacheKey: dlpCacheKey,
     hasDlpConfig,
   };
 
@@ -269,13 +277,15 @@ export function getAiCloudDlpOptions(params: {
   let policy: any;
   let classificationStore: LocalClassificationStore;
   let classificationRecords: Array<{ selector: any; classification: any }>;
+  let cacheKey: string | null = null;
 
   if (localStorage !== null) {
-    ({ policy, classificationRecords, classificationStore } = memoizedDlpData({ storage, documentId: params.documentId, orgId }));
+    ({ policy, classificationRecords, classificationStore, cacheKey } = memoizedDlpData({ storage, documentId: params.documentId, orgId }));
   } else {
     policy = loadEffectivePolicy({ documentId: params.documentId, orgId, storage });
     classificationStore = new LocalClassificationStore({ storage });
     classificationRecords = classificationStore.list(params.documentId);
+    cacheKey = computeDlpCacheKey({ policy, classificationRecords, includeRestrictedContent: false });
   }
 
   const auditLogger = getAiDlpAuditLogger();
@@ -299,13 +309,18 @@ export function getAiCloudDlpOptions(params: {
     audit_logger: auditLogger
   };
 
-  const cacheKey = computeDlpCacheKey(out);
-  // `computeDlpCacheKey` may memoize `cacheKey` as a non-writable property. Avoid
-  // assigning to it directly; just attach the snake_case alias for tool surfaces.
-  try {
-    Object.defineProperty(out, "cache_key", { value: cacheKey, enumerable: false, configurable: true });
-  } catch {
-    out.cache_key = cacheKey;
+  // Attach the precomputed key so downstream call sites can skip hashing.
+  if (cacheKey) {
+    try {
+      Object.defineProperty(out, "cacheKey", { value: cacheKey, enumerable: false, configurable: true });
+    } catch {
+      // ignore
+    }
+    try {
+      Object.defineProperty(out, "cache_key", { value: cacheKey, enumerable: false, configurable: true });
+    } catch {
+      // ignore
+    }
   }
   return out;
 }
@@ -352,11 +367,16 @@ export function maybeGetAiCloudDlpOptions(params: {
     audit_logger: auditLogger
   };
 
-  const cacheKey = computeDlpCacheKey(out);
+  const cacheKey = memoized.cacheKey;
+  try {
+    Object.defineProperty(out, "cacheKey", { value: cacheKey, enumerable: false, configurable: true });
+  } catch {
+    // ignore
+  }
   try {
     Object.defineProperty(out, "cache_key", { value: cacheKey, enumerable: false, configurable: true });
   } catch {
-    out.cache_key = cacheKey;
+    // ignore
   }
   return out;
 }
