@@ -217,6 +217,35 @@ test("ChunkedLocalStorageBinaryStorage round-trips multi-MB payloads via browser
   }
 });
 
+test("ChunkedLocalStorageBinaryStorage clears corrupted base64 chunk payloads on load", async () => {
+  const storage = new ChunkedLocalStorageBinaryStorage({
+    namespace: "formula.test.rag",
+    workbookId: "corrupt-chunk",
+    chunkSizeChars: 8,
+  });
+
+  const originalBuffer = (globalThis as any).Buffer;
+  try {
+    // Force the browser decode path so invalid base64 throws (Buffer's base64 decoder is permissive).
+    (globalThis as any).Buffer = undefined;
+
+    const ls = getTestLocalStorage();
+    ls.setItem(`${storage.key}:meta`, JSON.stringify({ chunks: 2 }));
+    ls.setItem(`${storage.key}:0`, "not-base64");
+    ls.setItem(`${storage.key}:1`, "AAAA");
+
+    const loaded = await storage.load();
+    expect(loaded).toBeNull();
+
+    // Corrupted payloads should be cleared so the next load is a clean miss.
+    expect(listKeysWithPrefix(ls, `${storage.key}:`)).toEqual([]);
+    expect(ls.getItem(storage.key)).toBeNull();
+  } finally {
+    getTestLocalStorage().clear();
+    (globalThis as any).Buffer = originalBuffer;
+  }
+});
+
 test("ChunkedLocalStorageBinaryStorage does not corrupt existing data if a save fails mid-write", async () => {
   const storage = new ChunkedLocalStorageBinaryStorage({
     namespace: "formula.test.rag",
