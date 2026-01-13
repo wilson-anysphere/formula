@@ -36,7 +36,7 @@ Recommended structure:
 
 ```
 tools/corpus/private/
-  originals/   # encrypted originals (*.enc)
+  originals/   # encrypted originals (*.enc) (encrypted-at-rest by the corpus tooling; not Excel “password to open” encryption)
   sanitized/   # sanitized workbooks (plaintext, safe-ish)
   metadata/    # ingest metadata + sanitize options
   reports/     # per-workbook triage reports (json)
