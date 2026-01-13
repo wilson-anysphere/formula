@@ -44,6 +44,83 @@ export class LocalStorageBinaryStorage {
   }
 }
 
+export class IndexedDBBinaryStorage {
+  /**
+   * IndexedDB-backed persistence for binary payloads (e.g. sql.js exports).
+   *
+   * Notes:
+   * - Uses a single object store keyed by `${namespace}:${workbookId}`.
+   * - Falls back gracefully when `indexedDB` is unavailable (e.g. Node, restricted
+   *   browser contexts):
+   *   - `load()` returns null
+   *   - `save()` is a no-op
+   *
+   * @param {{ workbookId: string, namespace?: string, dbName?: string }} opts
+   */
+  constructor(opts) {
+    if (!opts?.workbookId) throw new Error("IndexedDBBinaryStorage requires workbookId");
+    this.namespace = opts.namespace ?? "formula.ai-rag.sqlite";
+    this.dbName = opts.dbName ?? "formula.ai-rag.binary-storage";
+    this.key = `${this.namespace}:${opts.workbookId}`;
+    this.storeName = "binary";
+    /** @type {Promise<IDBDatabase> | null} */
+    this._dbPromise = null;
+  }
+
+  async load() {
+    const db = await this._openOrNull();
+    if (!db) return null;
+    try {
+      const value = await idbTransaction(db, this.storeName, "readonly", (store) => store.get(this.key));
+      if (value == null) return null;
+      return await normalizeBinary(value);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * @param {Uint8Array} data
+   */
+  async save(data) {
+    const db = await this._openOrNull();
+    if (!db) return;
+    try {
+      // Store a tight ArrayBuffer slice to avoid persisting unrelated bytes when `data` is a view.
+      const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+      await idbWrite(db, this.storeName, (store) => store.put(buffer, this.key));
+    } catch {
+      // Best-effort persistence. If IndexedDB writes fail (quota / permissions),
+      // we intentionally do not throw to keep callers usable in restricted contexts.
+    }
+  }
+
+  async _openOrNull() {
+    const idb = getIndexedDBOrNull();
+    if (!idb) return null;
+    if (this._dbPromise) return this._dbPromise.catch(() => null);
+
+    this._dbPromise = new Promise((resolve, reject) => {
+      const request = idb.open(this.dbName, 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(this.storeName)) {
+          db.createObjectStore(this.storeName);
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
+      request.onblocked = () => reject(new Error("IndexedDB open blocked"));
+    });
+
+    try {
+      return await this._dbPromise;
+    } catch {
+      return null;
+    }
+  }
+}
+
 /**
  * localStorage is not always available:
  * - Node >=25 exposes an experimental `globalThis.localStorage` that throws unless
@@ -124,4 +201,90 @@ export function fromBase64(encoded) {
     }
   }
   return bytes;
+}
+
+function getIndexedDBOrNull() {
+  try {
+    // eslint-disable-next-line no-undef
+    const idb = typeof indexedDB !== "undefined" ? indexedDB : undefined;
+    if (idb && typeof idb.open === "function") return idb;
+  } catch {
+    // ignore
+  }
+  try {
+    const idb = globalThis?.indexedDB;
+    if (idb && typeof idb.open === "function") return idb;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+/**
+ * @template T
+ * @param {IDBDatabase} db
+ * @param {string} storeName
+ * @param {"readonly" | "readwrite"} mode
+ * @param {(store: IDBObjectStore) => IDBRequest<T>} requestFn
+ * @returns {Promise<T>}
+ */
+function idbTransaction(db, storeName, mode, requestFn) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, mode);
+    const store = tx.objectStore(storeName);
+    /** @type {T} */
+    let value;
+    const req = requestFn(store);
+
+    req.onsuccess = () => {
+      value = req.result;
+    };
+    req.onerror = () => reject(req.error ?? new Error("IndexedDB request failed"));
+
+    tx.oncomplete = () => resolve(value);
+    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
+    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
+  });
+}
+
+/**
+ * @param {IDBDatabase} db
+ * @param {string} storeName
+ * @param {(store: IDBObjectStore) => void} fn
+ * @returns {Promise<void>}
+ */
+function idbWrite(db, storeName, fn) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readwrite");
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
+    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
+    fn(tx.objectStore(storeName));
+  });
+}
+
+/**
+ * @param {any} value
+ * @returns {Promise<Uint8Array>}
+ */
+async function normalizeBinary(value) {
+  if (value instanceof Uint8Array) return new Uint8Array(value);
+  if (value instanceof ArrayBuffer) return new Uint8Array(value.slice(0));
+  if (value && typeof value === "object" && value.buffer instanceof ArrayBuffer) {
+    // Structured clone can yield `{ buffer, byteOffset, byteLength }` shapes for typed arrays.
+    const offset = typeof value.byteOffset === "number" ? value.byteOffset : 0;
+    const length =
+      typeof value.byteLength === "number"
+        ? value.byteLength
+        : typeof value.length === "number"
+          ? value.length
+          : value.buffer.byteLength;
+    const view = new Uint8Array(value.buffer, offset, length);
+    return new Uint8Array(view);
+  }
+  if (typeof Blob !== "undefined" && value instanceof Blob) {
+    const buffer = await value.arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+  throw new Error("Invalid binary blob in IndexedDB record");
 }

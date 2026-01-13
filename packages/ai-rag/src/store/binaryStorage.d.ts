@@ -15,3 +15,11 @@ export class LocalStorageBinaryStorage implements BinaryStorage {
   save(data: Uint8Array): Promise<void>;
 }
 
+export class IndexedDBBinaryStorage implements BinaryStorage {
+  constructor(opts: { workbookId: string; namespace?: string; dbName?: string });
+  readonly dbName: string;
+  readonly key: string;
+  readonly namespace: string;
+  load(): Promise<Uint8Array | null>;
+  save(data: Uint8Array): Promise<void>;
+}
