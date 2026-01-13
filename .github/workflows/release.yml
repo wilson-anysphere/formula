@@ -75,6 +75,10 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install macOS Rust targets (universal build)
+        if: matrix.platform == 'macos-latest'
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -122,7 +126,39 @@ jobs:
         if: matrix.platform == 'ubuntu-24.04'
         run: pnpm -C apps/desktop check:coi
 
+      - name: Build and upload release assets (macOS universal)
+        if: matrix.platform == 'macos-latest'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          # Tauri updater signing (required for auto-update; see docs/release.md)
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+          # Optional platform code signing (see docs/release.md)
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          args: --target universal-apple-darwin
+          tagName: ${{ github.ref_name }}
+          releaseName: Formula ${{ github.ref_name }}
+          releaseBody: |
+            Automated build for ${{ github.ref_name }}.
+            See the assets below for the installers/bundles.
+          releaseDraft: true
+          prerelease: false
+
       - name: Build and upload release assets
+        if: matrix.platform != 'macos-latest'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -198,6 +234,50 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Verify macOS universal binary (lipo)
+        if: matrix.platform == 'macos-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          # Prefer the universal target output when present (Tauri's universal build writes
+          # to `target/universal-apple-darwin/...`). Fall back to searching the entire
+          # target dir so we fail loudly with useful debugging output if layouts change.
+          candidates=(
+            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Formula.app/Contents/MacOS/formula-desktop
+          )
+
+          bin_path=""
+          for candidate in "${candidates[@]}"; do
+            if [[ -f "$candidate" ]]; then
+              bin_path="$candidate"
+              break
+            fi
+          done
+
+          if [[ -z "$bin_path" ]]; then
+            bin_path="$(find apps/desktop/src-tauri/target -type f -path "*/universal-apple-darwin/*/Formula.app/Contents/MacOS/formula-desktop" | head -n 1 || true)"
+          fi
+
+          if [[ -z "$bin_path" ]]; then
+            bin_path="$(find apps/desktop/src-tauri/target -type f -path "*Formula.app/Contents/MacOS/formula-desktop" | head -n 1 || true)"
+          fi
+
+          if [[ -z "$bin_path" ]]; then
+            echo "::error::Could not find packaged macOS app binary (expected **/Formula.app/Contents/MacOS/formula-desktop)"
+            echo "Searched under: apps/desktop/src-tauri/target"
+            echo "Formula.app bundles found:"
+            find apps/desktop/src-tauri/target -type d -name "Formula.app" -print || true
+            exit 1
+          fi
+
+          echo "Found packaged app binary: $bin_path"
+          info="$(lipo -info "$bin_path" | tee /dev/stderr)"
+
+          echo "$info" | grep -q "x86_64" || { echo "::error::macOS binary is missing x86_64 slice"; exit 1; }
+          echo "$info" | grep -q "arm64" || { echo "::error::macOS binary is missing arm64 slice"; exit 1; }
 
       - name: Report desktop bundle sizes
         env:
