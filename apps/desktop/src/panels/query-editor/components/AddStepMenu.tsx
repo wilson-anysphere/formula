@@ -279,6 +279,8 @@ export function AddStepMenu(props: {
                         if (item.disabled) return;
                         props.onAddStep(item.create());
                         setMenuOpen(false);
+                        // Menu selection should return focus to the trigger (menu-button pattern).
+                        queueMicrotask(() => menuTriggerRef.current?.focus());
                       }}
                     >
                       {item.label}
