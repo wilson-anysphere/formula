@@ -88,11 +88,15 @@ jobs:
             throw "MSVC toolset directory not found under $msvcRoot"
           }
           $arm64LibDir = Join-Path $msvcVersionDir.FullName "lib\arm64"
-          if (Test-Path $arm64LibDir) {
-            Write-Host "MSVC ARM64 libs already present at $arm64LibDir"
+          $arm64BinDir = Join-Path $msvcVersionDir.FullName "bin\Hostx64\arm64"
+          $arm64Cl = Join-Path $arm64BinDir "cl.exe"
+          if ((Test-Path $arm64LibDir) -and (Test-Path $arm64Cl)) {
+            Write-Host "MSVC ARM64 tools already present:"
+            Write-Host "  - libs: $arm64LibDir"
+            Write-Host "  - cl.exe: $arm64Cl"
             exit 0
           }
-          Write-Host "MSVC ARM64 libs not found; installing Visual Studio component Microsoft.VisualStudio.Component.VC.Tools.ARM64"
+          Write-Host "MSVC ARM64 toolchain not found; installing Visual Studio component Microsoft.VisualStudio.Component.VC.Tools.ARM64"
           $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
           if (!(Test-Path $vsInstaller)) {
             throw "Visual Studio installer not found at $vsInstaller"
@@ -105,8 +109,10 @@ jobs:
           }
           $msvcVersionDir = Get-ChildItem -Path $msvcRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
           $arm64LibDir = Join-Path $msvcVersionDir.FullName "lib\arm64"
-          if (!(Test-Path $arm64LibDir)) {
-            throw "MSVC ARM64 libraries were not found after installation. GitHub-hosted runners may not include the required MSVC ARM64 workload; use a self-hosted runner with ARM64 build tools preinstalled."
+          $arm64BinDir = Join-Path $msvcVersionDir.FullName "bin\Hostx64\arm64"
+          $arm64Cl = Join-Path $arm64BinDir "cl.exe"
+          if (!(Test-Path $arm64LibDir) -or !(Test-Path $arm64Cl)) {
+            throw "MSVC ARM64 build tools were not found after installation. Expected:\n  - $arm64LibDir\n  - $arm64Cl\nGitHub-hosted runners may not include the required MSVC ARM64 workload; use a self-hosted runner with ARM64 build tools preinstalled."
           }
 
       - name: Install WiX Toolset (required for MSI builds)
@@ -171,6 +177,31 @@ jobs:
         run: |
           cd apps/desktop
           cargo tauri build --target aarch64-pc-windows-msvc --bundles msi,nsis
+
+      - name: Verify compiled desktop executable is ARM64
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $target = "aarch64-pc-windows-msvc"
+          $releaseDir = "apps/desktop/src-tauri/target/$target/release"
+          if (!(Test-Path $releaseDir)) {
+            throw "Expected Rust release directory not found: $releaseDir"
+          }
+          $exe = Get-ChildItem -Path $releaseDir -Recurse -File -Filter "formula-desktop.exe" | Select-Object -First 1
+          if (-not $exe) {
+            throw "Expected compiled binary formula-desktop.exe not found under: $releaseDir"
+          }
+          $dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue
+          if (-not $dumpbin) {
+            throw "dumpbin.exe not found on PATH (expected after MSVC dev-cmd setup)."
+          }
+          $headers = & dumpbin.exe /headers $exe.FullName
+          $joined = ($headers -join "`n")
+          $machineLine = ($headers | Select-String -Pattern "machine" -CaseSensitive:$false | Select-Object -First 1).ToString()
+          Write-Host "dumpbin machine line: $machineLine"
+          if ($joined -notmatch "machine \\(AA64\\)") {
+            throw "Expected ARM64 machine type (AA64) in PE headers for $($exe.FullName). If this is x64, the ARM64 target toolchain/environment is misconfigured."
+          }
 
       - name: Verify bundles exist
         shell: pwsh

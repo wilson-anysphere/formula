@@ -357,31 +357,39 @@ jobs:
             throw "MSVC toolset directory not found under $msvcRoot"
           }
           $arm64LibDir = Join-Path $msvcVersionDir.FullName "lib\arm64"
-          if (!(Test-Path $arm64LibDir)) {
-            Write-Host "MSVC ARM64 libs not found; installing Visual Studio component Microsoft.VisualStudio.Component.VC.Tools.ARM64"
-          $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
-          if (!(Test-Path $vsInstaller)) {
-            throw "Visual Studio installer not found at $vsInstaller"
-          }
-          & $vsInstaller modify --installPath $installPath --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --includeRecommended --passive --norestart
-          $exitCode = $LASTEXITCODE
-          # 3010 is a common "success, reboot required" code for Windows installers.
-          if ($exitCode -ne 0 -and $exitCode -ne 3010) {
-            throw "vs_installer.exe failed with exit code $exitCode while installing MSVC ARM64 components."
-          }
-          $msvcVersionDir = Get-ChildItem -Path $msvcRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
-          $arm64LibDir = Join-Path $msvcVersionDir.FullName "lib\arm64"
-          if (!(Test-Path $arm64LibDir)) {
-            throw "MSVC ARM64 libraries were not found after installation. Windows ARM64 builds require the MSVC ARM64 toolchain to be present on the runner."
-          }
+          $arm64BinDir = Join-Path $msvcVersionDir.FullName "bin\Hostx64\arm64"
+          $arm64Cl = Join-Path $arm64BinDir "cl.exe"
+          $arm64LinkExe = Join-Path $arm64BinDir "link.exe"
+          $hasArm64Toolchain = (Test-Path $arm64LibDir) -and (Test-Path $arm64Cl) -and (Test-Path $arm64LinkExe)
+
+          if (-not $hasArm64Toolchain) {
+            Write-Host "MSVC ARM64 toolchain not found; installing Visual Studio component Microsoft.VisualStudio.Component.VC.Tools.ARM64"
+            $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+            if (!(Test-Path $vsInstaller)) {
+              throw "Visual Studio installer not found at $vsInstaller"
+            }
+            & $vsInstaller modify --installPath $installPath --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --includeRecommended --passive --norestart
+            $exitCode = $LASTEXITCODE
+            # 3010 is a common "success, reboot required" code for Windows installers.
+            if ($exitCode -ne 0 -and $exitCode -ne 3010) {
+              throw "vs_installer.exe failed with exit code $exitCode while installing MSVC ARM64 components."
+            }
+
+            $msvcVersionDir = Get-ChildItem -Path $msvcRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+            $arm64LibDir = Join-Path $msvcVersionDir.FullName "lib\arm64"
+            $arm64BinDir = Join-Path $msvcVersionDir.FullName "bin\Hostx64\arm64"
+            $arm64Cl = Join-Path $arm64BinDir "cl.exe"
+            $arm64LinkExe = Join-Path $arm64BinDir "link.exe"
           }
 
-          # Additional sanity checks so ARM64 builds fail with a clear error *before* hitting cryptic
-          # linker failures (or accidentally building for the host architecture).
-          $arm64LinkExe = Join-Path $msvcVersionDir.FullName "bin\Hostx64\arm64\link.exe"
-          if (!(Test-Path $arm64LinkExe)) {
-            throw "MSVC ARM64 linker not found at $arm64LinkExe. The runner image is missing the ARM64 MSVC toolchain required for aarch64-pc-windows-msvc."
+          if (!(Test-Path $arm64LibDir) -or !(Test-Path $arm64Cl) -or !(Test-Path $arm64LinkExe)) {
+            throw "MSVC ARM64 build tools were not found. Expected:\n  - $arm64LibDir\n  - $arm64Cl\n  - $arm64LinkExe\nWindows ARM64 builds require the MSVC ARM64 toolchain to be present on the runner."
           }
+
+          Write-Host "MSVC ARM64 tools present:"
+          Write-Host "  - libs: $arm64LibDir"
+          Write-Host "  - cl.exe: $arm64Cl"
+          Write-Host "  - link.exe: $arm64LinkExe"
 
           $sdkLibRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\Lib"
           if (!(Test-Path $sdkLibRoot)) {
@@ -734,6 +742,32 @@ jobs:
           # action install a floating `@tauri-apps/cli@v2` toolchain.
           tauriScript: cargo tauri
           args: ${{ matrix.tauri_args }}
+
+      - name: Verify Windows ARM64 binary architecture (AA64)
+        if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $target = "${{ matrix.rust_target }}"
+          $releaseDir = "apps/desktop/src-tauri/target/$target/release"
+          if (-not (Test-Path $releaseDir)) {
+            throw "windows-arm64: Expected Rust release directory not found: $releaseDir"
+          }
+          $exe = Get-ChildItem -Path $releaseDir -Recurse -File -Filter "formula-desktop.exe" | Select-Object -First 1
+          if (-not $exe) {
+            throw "windows-arm64: Expected compiled binary formula-desktop.exe not found under: $releaseDir"
+          }
+          $dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue
+          if (-not $dumpbin) {
+            throw "windows-arm64: dumpbin.exe not found on PATH (expected after MSVC dev-cmd setup)."
+          }
+          $headers = & dumpbin.exe /headers $exe.FullName
+          $joined = ($headers -join "`n")
+          $machineLine = ($headers | Select-String -Pattern "machine" -CaseSensitive:$false | Select-Object -First 1).ToString()
+          Write-Host "windows-arm64: dumpbin machine line: $machineLine"
+          if ($joined -notmatch "machine \\(AA64\\)") {
+            throw "windows-arm64: Expected ARM64 machine type (AA64) in PE headers for $($exe.FullName). If this is x64, the ARM64 target toolchain/environment is misconfigured."
+          }
 
       - name: Smoke test produced AppImage (extract + ldd + arch)
         if: runner.os == 'Linux'
