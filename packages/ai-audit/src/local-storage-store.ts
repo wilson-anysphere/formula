@@ -65,7 +65,9 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
     }
     if (mode) {
       const modes = Array.isArray(mode) ? mode : [mode];
-      filtered = filtered.filter((entry) => modes.includes(entry.mode));
+      if (modes.length > 0) {
+        filtered = filtered.filter((entry) => modes.includes(entry.mode));
+      }
     }
     if (typeof after_timestamp_ms === "number") {
       filtered = filtered.filter((entry) => entry.timestamp_ms >= after_timestamp_ms);

@@ -36,12 +36,12 @@ class MemoryLocalStorage implements Storage {
   }
 }
 
-function makeEntry(id: string, timestamp_ms: number): AIAuditEntry {
+function makeEntry(id: string, timestamp_ms: number, mode: AIAuditEntry["mode"] = "chat"): AIAuditEntry {
   return {
     id,
     timestamp_ms,
     session_id: "session-1",
-    mode: "chat",
+    mode,
     input: { prompt: id },
     model: "unit-test-model",
     tool_calls: []
@@ -128,7 +128,19 @@ describe("AuditListFilters (time ranges + cursor pagination)", () => {
           await cleanup?.();
         }
       });
+
+      it("treats an empty mode array as no mode filter", async () => {
+        const { store, cleanup } = await create();
+        try {
+          await store.logEntry(makeEntry("chat-1", 1000, "chat"));
+          await store.logEntry(makeEntry("inline-1", 2000, "inline_edit"));
+
+          const entries = await store.listEntries({ mode: [] });
+          expect(entries.map((e) => e.id)).toEqual(["inline-1", "chat-1"]);
+        } finally {
+          await cleanup?.();
+        }
+      });
     });
   }
 });
-

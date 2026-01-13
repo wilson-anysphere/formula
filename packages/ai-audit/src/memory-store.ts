@@ -44,7 +44,9 @@ export class MemoryAIAuditStore implements AIAuditStore {
     }
     if (mode) {
       const modes = Array.isArray(mode) ? mode : [mode];
-      results = results.filter((entry) => modes.includes(entry.mode));
+      if (modes.length > 0) {
+        results = results.filter((entry) => modes.includes(entry.mode));
+      }
     }
     if (typeof after_timestamp_ms === "number") {
       results = results.filter((entry) => entry.timestamp_ms >= after_timestamp_ms);
