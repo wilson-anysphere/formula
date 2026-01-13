@@ -1096,6 +1096,28 @@ pub fn build_page_setup_percent_scaling_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a minimal BIFF8 `.xls` fixture containing a single worksheet with page margin records but
+/// **no** `SETUP` record.
+///
+/// This validates that legacy margin records alone (`LEFTMARGIN`/`RIGHTMARGIN`/`TOPMARGIN`/
+/// `BOTTOMMARGIN`) are sufficient to populate non-default [`formula_model::PageMargins`].
+pub fn build_margins_without_setup_fixture_xls() -> Vec<u8> {
+    // `build_single_sheet_workbook_stream` always emits a single cell XF at index 16 (after 16
+    // style XFs).
+    let sheet_stream = build_margins_without_setup_sheet_stream(16, 1.25, 1.5, 0.5, 2.25);
+    let workbook_stream = build_single_sheet_workbook_stream("Sheet1", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing worksheet page setup + margins + manual page breaks,
 /// using fit-to scaling (`WSBOOL.fFitToPage=1`, `SETUP.iFitWidth=2`, `SETUP.iFitHeight=3`).
 pub fn build_page_setup_fit_to_scaling_fixture_xls() -> Vec<u8> {
@@ -7973,6 +7995,41 @@ fn build_empty_sheet_stream(xf_general: u16) -> Vec<u8> {
         RECORD_NUMBER,
         &number_cell(0, 0, xf_general, 0.0),
     );
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_margins_without_setup_sheet_stream(
+    xf_cell: u16,
+    left: f64,
+    right: f64,
+    top: f64,
+    bottom: f64,
+) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) => A1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Page margin records (no SETUP record).
+    push_record(&mut sheet, RECORD_LEFTMARGIN, &left.to_le_bytes());
+    push_record(&mut sheet, RECORD_RIGHTMARGIN, &right.to_le_bytes());
+    push_record(&mut sheet, RECORD_TOPMARGIN, &top.to_le_bytes());
+    push_record(&mut sheet, RECORD_BOTTOMMARGIN, &bottom.to_le_bytes());
+
+    // A1: a single cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
 }
