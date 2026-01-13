@@ -43,7 +43,7 @@ test("CollabSession setCells writes the same Yjs shape as individual setCell* ca
 
 test("CollabSession setCells rejects entire batch when any cell is not editable (permissions) and leaves doc unchanged", async () => {
   const doc = new Y.Doc();
-  const session = createCollabSession({ doc });
+  const session = createCollabSession({ doc, schema: { autoInit: false } });
 
   session.setPermissions({
     role: "editor",
@@ -62,6 +62,8 @@ test("CollabSession setCells rejects entire batch when any cell is not editable 
     ],
   });
 
+  const before = Y.encodeStateAsUpdate(doc);
+
   await assert.rejects(
     session.setCells([
       { cellKey: "Sheet1:0:0", value: "allowed" },
@@ -70,9 +72,42 @@ test("CollabSession setCells rejects entire batch when any cell is not editable 
     (err) => String(err?.message ?? err).includes("Sheet1:0:1"),
   );
 
+  const after = Y.encodeStateAsUpdate(doc);
+  assert.equal(Buffer.from(before).equals(Buffer.from(after)), true);
+
   assert.deepEqual(session.cells.toJSON(), {});
   assert.equal(session.cells.has("Sheet1:0:0"), false);
   assert.equal(session.cells.has("Sheet1:0:1"), false);
+
+  session.destroy();
+  doc.destroy();
+});
+
+test("CollabSession setCells enforces viewer role permissions (no Yjs mutation)", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc, schema: { autoInit: false } });
+  session.setPermissions({ role: "viewer", userId: "u-viewer", rangeRestrictions: [] });
+
+  const before = Y.encodeStateAsUpdate(doc);
+  await assert.rejects(
+    session.setCells([{ cellKey: "Sheet1:0:0", value: "hacked" }]),
+    /Permission denied/,
+  );
+  const after = Y.encodeStateAsUpdate(doc);
+  assert.equal(Buffer.from(before).equals(Buffer.from(after)), true);
+  assert.equal(session.cells.has("Sheet1:0:0"), false);
+
+  session.destroy();
+  doc.destroy();
+});
+
+test("CollabSession setCells ignorePermissions bypasses permission checks (but still respects encryption invariants)", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc, schema: { autoInit: false } });
+  session.setPermissions({ role: "viewer", userId: "u-viewer", rangeRestrictions: [] });
+
+  await session.setCells([{ cellKey: "Sheet1:0:0", value: "allowed" }], { ignorePermissions: true });
+  assert.equal((await session.getCell("Sheet1:0:0"))?.value, "allowed");
 
   session.destroy();
   doc.destroy();
@@ -113,4 +148,3 @@ test("CollabSession setCells encrypts protected cells and never writes plaintext
   session.destroy();
   doc.destroy();
 });
-

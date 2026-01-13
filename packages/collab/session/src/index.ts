@@ -2511,7 +2511,7 @@ export class CollabSession {
       for (const update of planned) {
         if (!update.parsed) throw new Error(`Invalid cellKey: ${update.cellKey}`);
         if (!this.canEditCell(update.parsed)) {
-          throw new Error(`Cell not editable: ${update.cellKey}`);
+          throw new Error(`Permission denied: cannot edit cell ${makeCellKey(update.parsed)}`);
         }
       }
     }
