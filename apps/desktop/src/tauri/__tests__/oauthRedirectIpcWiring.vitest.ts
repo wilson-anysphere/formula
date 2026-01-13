@@ -14,7 +14,7 @@ describe("oauthRedirectIpc wiring", () => {
       .replace(/\/\*[\s\S]*?\*\//g, "")
       // Strip full-line `// ...` comments; we intentionally do *not* attempt to remove
       // inline `//` comments because `main.ts` contains many `https://...` strings.
-      .split("\n")
+      .split(/\r?\n/)
       .filter((line) => !line.trimStart().startsWith("//"))
       .join("\n");
 
