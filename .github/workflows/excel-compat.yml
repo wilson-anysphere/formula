@@ -3,6 +3,8 @@ name: Excel Compatibility (Oracle)
 on:
   pull_request:
     paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
       - "crates/**"
       - "tools/excel-oracle/**"
       - "tests/compatibility/excel-oracle/**"
@@ -10,6 +12,8 @@ on:
   push:
     branches: [main]
     paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
       - "crates/**"
       - "tools/excel-oracle/**"
       - "tests/compatibility/excel-oracle/**"
