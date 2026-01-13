@@ -1,6 +1,6 @@
 use sha1::{Digest as _, Sha1};
 use thiserror::Error;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::biff::encryption::rc4::Rc4;
 use crate::ct::ct_eq;
@@ -156,11 +156,11 @@ fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
 }
 
 fn utf16le_bytes(s: &str) -> Zeroizing<Vec<u8>> {
-    let mut out = Vec::with_capacity(s.len().saturating_mul(2));
+    let mut out = Zeroizing::new(Vec::with_capacity(s.len().saturating_mul(2)));
     for unit in s.encode_utf16() {
         out.extend_from_slice(&unit.to_le_bytes());
     }
-    Zeroizing::new(out)
+    out
 }
 
 fn sha1_bytes(chunks: &[&[u8]]) -> [u8; 20] {
@@ -168,9 +168,10 @@ fn sha1_bytes(chunks: &[&[u8]]) -> [u8; 20] {
     for chunk in chunks {
         hasher.update(chunk);
     }
-    let digest = hasher.finalize();
+    let mut digest = hasher.finalize();
     let mut out = [0u8; 20];
     out.copy_from_slice(&digest);
+    digest.as_mut_slice().zeroize();
     out
 }
 
@@ -425,24 +426,27 @@ fn parse_cryptoapi_encryption_info(bytes: &[u8]) -> Result<CryptoApiEncryptionIn
     Ok(CryptoApiEncryptionInfo { header, verifier })
 }
 
-fn derive_key_material(password: &str, salt: &[u8]) -> [u8; 20] {
+fn derive_key_material(password: &str, salt: &[u8]) -> Zeroizing<[u8; 20]> {
     // CryptoAPI password hashing [MS-OFFCRYPTO]:
     //   H0 = SHA1(salt + UTF16LE(password))
     //   for i in 0..49999: H0 = SHA1(i_le32 + H0)
     let pw_bytes = utf16le_bytes(password);
-    let mut hash: Zeroizing<[u8; 20]> = Zeroizing::new(sha1_bytes(&[salt, pw_bytes.as_slice()]));
+    let mut hash = Zeroizing::new(sha1_bytes(&[salt, &pw_bytes]));
+    drop(pw_bytes);
 
     for i in 0..PASSWORD_HASH_ITERATIONS {
         let iter = i.to_le_bytes();
-        *hash = sha1_bytes(&[&iter, &hash[..]]);
+        let mut next = sha1_bytes(&[&iter, &hash[..]]);
+        hash[..].copy_from_slice(&next);
+        next.zeroize();
     }
 
-    *hash
+    hash
 }
 
-fn derive_block_key(key_material: &[u8; 20], block: u32, key_len: usize) -> Vec<u8> {
+fn derive_block_key(key_material: &[u8; 20], block: u32, key_len: usize) -> Zeroizing<Vec<u8>> {
     let block_bytes = block.to_le_bytes();
-    let digest = sha1_bytes(&[key_material, &block_bytes]);
+    let mut digest = sha1_bytes(&[key_material, &block_bytes]);
 
     // Office/WinCrypt quirk: 40-bit RC4 keys are expressed as a 128-bit (16-byte) key where the
     // low 40 bits are set and the remaining 88 bits are zero. Using the raw 5-byte key changes the
@@ -450,14 +454,17 @@ fn derive_block_key(key_material: &[u8; 20], block: u32, key_len: usize) -> Vec<
     //
     // [MS-OFFCRYPTO] calls this out for CryptoAPI RC4; Excel uses the same convention for BIFF8
     // `FILEPASS` CryptoAPI encryption.
-    if key_len == 5 {
+    let key = if key_len == 5 {
         let mut key = Vec::with_capacity(16);
         key.extend_from_slice(&digest[..5]);
         key.resize(16, 0);
         key
     } else {
         digest[..key_len].to_vec()
-    }
+    };
+
+    digest.zeroize();
+    Zeroizing::new(key)
 }
 
 fn rc4_discard(rc4: &mut Rc4, mut n: usize) {
@@ -486,8 +493,9 @@ fn decrypt_range_by_offset(
         let in_block = stream_pos % PAYLOAD_BLOCK_SIZE;
         let take = remaining.min(PAYLOAD_BLOCK_SIZE - in_block);
 
-        let key: Zeroizing<Vec<u8>> = Zeroizing::new(derive_block_key(key_material, block, key_len));
-        let mut rc4 = Rc4::new(key.as_slice());
+        let key = derive_block_key(key_material, block, key_len);
+        let mut rc4 = Rc4::new(&key[..]);
+        drop(key);
         rc4_discard(&mut rc4, in_block);
         rc4.apply_keystream(&mut bytes[pos..pos + take]);
 
@@ -511,6 +519,12 @@ mod filepass_tests {
     use crate::ct::{ct_eq_call_count, reset_ct_eq_calls};
     use formula_model::{CellRef, VerticalAlignment};
     use std::path::PathBuf;
+
+    #[test]
+    fn rc4_cipher_implements_zeroize() {
+        fn assert_zeroize<T: Zeroize>() {}
+        assert_zeroize::<Rc4>();
+    }
 
     fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
         let mut out = Vec::with_capacity(4 + payload.len());
@@ -591,7 +605,7 @@ mod filepass_tests {
         expected.resize(16, 0);
 
         let got = derive_block_key(&key_material, block, 5);
-        assert_eq!(got, expected);
+        assert_eq!(got.as_slice(), expected.as_slice());
         assert_eq!(got.len(), 16);
         assert!(got[5..].iter().all(|b| *b == 0));
     }
@@ -615,14 +629,10 @@ mod filepass_tests {
             0xAA, 0x7C, 0x36,
         ];
 
-        assert_eq!(
-            derive_block_key(&key_material, 0, 16),
-            expected_key_block0
-        );
-        assert_eq!(
-            derive_block_key(&key_material, 1, 16),
-            expected_key_block1
-        );
+        let key0 = derive_block_key(&key_material, 0, 16);
+        assert_eq!(key0.as_slice(), expected_key_block0.as_slice());
+        let key1 = derive_block_key(&key_material, 1, 16);
+        assert_eq!(key1.as_slice(), expected_key_block1.as_slice());
     }
 
     #[test]
@@ -640,7 +650,7 @@ mod filepass_tests {
         ];
 
         // Derive key material per MS-OFFCRYPTO (SHA1).
-        let key_material = derive_key_material(password, &salt);
+        let key_material = *derive_key_material(password, &salt);
 
         // Build the verifier fields (encrypted with block 0 key).
         let verifier_plain: [u8; 16] = [
@@ -972,8 +982,9 @@ struct PayloadRc4<'a> {
 
 impl<'a> PayloadRc4<'a> {
     fn new(key_material: &'a [u8; 20], key_len: usize) -> Self {
-        let key: Zeroizing<Vec<u8>> = Zeroizing::new(derive_block_key(key_material, 0, key_len));
-        let rc4 = Rc4::new(key.as_slice());
+        let key = derive_block_key(key_material, 0, key_len);
+        let rc4 = Rc4::new(&key[..]);
+        drop(key);
         Self {
             key_material,
             key_len,
@@ -985,9 +996,9 @@ impl<'a> PayloadRc4<'a> {
 
     fn rekey(&mut self) {
         self.block = self.block.wrapping_add(1);
-        let key: Zeroizing<Vec<u8>> =
-            Zeroizing::new(derive_block_key(self.key_material, self.block, self.key_len));
-        self.rc4 = Rc4::new(key.as_slice());
+        let key = derive_block_key(self.key_material, self.block, self.key_len);
+        self.rc4 = Rc4::new(&key[..]);
+        drop(key);
         self.pos_in_block = 0;
     }
 
@@ -1048,19 +1059,18 @@ fn verify_password(
     }
 
     // Derive the base key material and decrypt the verifier using block 0.
-    let key_material: Zeroizing<[u8; 20]> =
-        Zeroizing::new(derive_key_material(password, &info.verifier.salt));
-    let key0: Zeroizing<Vec<u8>> = Zeroizing::new(derive_block_key(&key_material, 0, key_len));
-    let mut rc4 = Rc4::new(key0.as_slice());
+    let key_material = derive_key_material(password, &info.verifier.salt);
+    let key0 = derive_block_key(&*key_material, 0, key_len);
+    let mut rc4 = Rc4::new(&key0[..]);
+    drop(key0);
 
-    let mut verifier: Zeroizing<[u8; 16]> = Zeroizing::new(info.verifier.encrypted_verifier);
+    let mut verifier = Zeroizing::new(info.verifier.encrypted_verifier);
     rc4.apply_keystream(&mut verifier[..]);
 
-    let mut verifier_hash: Zeroizing<Vec<u8>> =
-        Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
+    let mut verifier_hash = Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
     rc4.apply_keystream(&mut verifier_hash[..]);
 
-    let expected: Zeroizing<[u8; 20]> = Zeroizing::new(sha1_bytes(&[&verifier[..]]));
+    let expected = Zeroizing::new(sha1_bytes(&[&verifier[..]]));
     if verifier_hash.len() < verifier_hash_size {
         return Err(DecryptError::InvalidFormat(format!(
             "EncryptedVerifierHash length {} shorter than VerifierHashSize {verifier_hash_size}",
@@ -1105,19 +1115,18 @@ fn verify_password_legacy(
         )));
     }
 
-    let key_material: Zeroizing<[u8; 20]> =
-        Zeroizing::new(derive_key_material_legacy(password, &info.verifier.salt)?);
-    let key0: Zeroizing<Vec<u8>> = Zeroizing::new(derive_block_key(&key_material, 0, key_len));
-    let mut rc4 = Rc4::new(key0.as_slice());
+    let key_material = Zeroizing::new(derive_key_material_legacy(password, &info.verifier.salt)?);
+    let key0 = derive_block_key(&*key_material, 0, key_len);
+    let mut rc4 = Rc4::new(&key0[..]);
+    drop(key0);
 
-    let mut verifier: Zeroizing<[u8; 16]> = Zeroizing::new(info.verifier.encrypted_verifier);
+    let mut verifier = Zeroizing::new(info.verifier.encrypted_verifier);
     rc4.apply_keystream(&mut verifier[..]);
 
-    let mut verifier_hash: Zeroizing<Vec<u8>> =
-        Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
+    let mut verifier_hash = Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
     rc4.apply_keystream(&mut verifier_hash[..]);
 
-    let expected: Zeroizing<[u8; 20]> = Zeroizing::new(sha1_bytes(&[&verifier[..]]));
+    let expected = Zeroizing::new(sha1_bytes(&[&verifier[..]]));
     if verifier_hash.len() < verifier_hash_size {
         return Err(DecryptError::InvalidFormat(format!(
             "EncryptedVerifierHash length {} shorter than VerifierHashSize {verifier_hash_size}",

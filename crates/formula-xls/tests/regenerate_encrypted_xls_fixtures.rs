@@ -131,10 +131,15 @@ fn xf_record(font_idx: u16, fmt_idx: u16, is_style_xf: bool, alignment: u8) -> [
     let flags: u16 = XF_FLAG_LOCKED | if is_style_xf { XF_FLAG_STYLE } else { 0 };
     out[4..6].copy_from_slice(&flags.to_le_bytes());
 
-    // BIFF8 alignment byte:
+    // BIFF8 alignment byte (horizontal + vertical + wrap).
+    //
     // - bits 0-2: horizontal alignment (0 = General)
     // - bit 3: wrap
     // - bits 4-6: vertical alignment (0 = Top, 2 = Bottom (default))
+    //
+    // The CryptoAPI fixture uses a non-default vertical alignment ("Top", 0x00) for the *cell*
+    // XF so decrypted workbooks exercise post-decryption style parsing. Style XFs keep Excel's
+    // defaults ("Bottom", 0x20).
     out[6] = alignment;
 
     // Attribute flags: apply all so fixture cell XFs don't rely on inheritance.

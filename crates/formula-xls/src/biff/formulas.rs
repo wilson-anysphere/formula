@@ -205,7 +205,9 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
     sheet_offset: usize,
     ctx: &rgce::RgceDecodeContext<'_>,
 ) -> Result<PtgExpFallbackResult, String> {
-    let allows_continuation = |id: u16| id == worksheet_formulas::RECORD_FORMULA;
+    let allows_continuation = |id: u16| {
+        id == worksheet_formulas::RECORD_FORMULA || id == worksheet_formulas::RECORD_SHRFMLA
+    };
     let mut iter = records::LogicalBiffRecordIter::from_offset(
         workbook_stream,
         sheet_offset,
@@ -215,8 +217,52 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
     // Collect all cell formula rgce bytes first so PtgExp followers can reference bases that
     // appear later in the stream.
     let mut rgce_by_cell: HashMap<(u32, u32), Vec<u8>> = HashMap::new();
+    let mut shrfmla_by_cell: HashMap<(u32, u32), Vec<u8>> = HashMap::new();
     let mut ptgexp_cells: Vec<(u32, u32, u32, u32, worksheet_formulas::FormulaGrbit)> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
+
+    // Ref8 columns can carry flags in their high bits; mask down to the 14-bit payload.
+    const REF8_COL_MASK: u16 = 0x3FFF;
+    let parse_shrfmla_anchor = |data: &[u8]| -> Option<(u32, u32)> {
+        // Prefer Ref8 when it decodes to classic `.xls` column bounds (<=255). Some producers store
+        // Ref8 even when RefU would suffice.
+        if let Some(chunk) = data.get(0..8) {
+            let rw_first = u16::from_le_bytes([chunk[0], chunk[1]]);
+            let rw_last = u16::from_le_bytes([chunk[2], chunk[3]]);
+            let col_first_raw = u16::from_le_bytes([chunk[4], chunk[5]]);
+            let col_last_raw = u16::from_le_bytes([chunk[6], chunk[7]]);
+            let col_first = col_first_raw & REF8_COL_MASK;
+            let col_last = col_last_raw & REF8_COL_MASK;
+            if rw_first <= rw_last && col_first <= col_last && col_first <= 0x00FF && col_last <= 0x00FF
+            {
+                return Some((rw_first as u32, col_first as u32));
+            }
+        }
+
+        if let Some(chunk) = data.get(0..6) {
+            let rw_first = u16::from_le_bytes([chunk[0], chunk[1]]);
+            let rw_last = u16::from_le_bytes([chunk[2], chunk[3]]);
+            let col_first = chunk[4] as u16;
+            let col_last = chunk[5] as u16;
+            if rw_first <= rw_last && col_first <= col_last {
+                return Some((rw_first as u32, col_first as u32));
+            }
+        }
+
+        if let Some(chunk) = data.get(0..8) {
+            let rw_first = u16::from_le_bytes([chunk[0], chunk[1]]);
+            let rw_last = u16::from_le_bytes([chunk[2], chunk[3]]);
+            let col_first_raw = u16::from_le_bytes([chunk[4], chunk[5]]);
+            let col_last_raw = u16::from_le_bytes([chunk[6], chunk[7]]);
+            let col_first = col_first_raw & REF8_COL_MASK;
+            let col_last = col_last_raw & REF8_COL_MASK;
+            if rw_first <= rw_last && col_first <= col_last {
+                return Some((rw_first as u32, col_first as u32));
+            }
+        }
+
+        None
+    };
 
     while let Some(next) = iter.next() {
         let record = match next {
@@ -233,29 +279,53 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
         if record.record_id == records::RECORD_EOF {
             break;
         }
-        if record.record_id != worksheet_formulas::RECORD_FORMULA {
-            continue;
-        }
 
-        let parsed = match worksheet_formulas::parse_biff8_formula_record(&record) {
-            Ok(parsed) => parsed,
-            Err(err) => {
-                warnings.push(format!(
-                    "failed to parse FORMULA record at offset {} in worksheet stream: {err}",
-                    record.offset
-                ));
-                continue;
+        match record.record_id {
+            worksheet_formulas::RECORD_FORMULA => {
+                let parsed = match worksheet_formulas::parse_biff8_formula_record(&record) {
+                    Ok(parsed) => parsed,
+                    Err(err) => {
+                        warnings.push(format!(
+                            "failed to parse FORMULA record at offset {} in worksheet stream: {err}",
+                            record.offset
+                        ));
+                        continue;
+                    }
+                };
+                let row = parsed.row as u32;
+                let col = parsed.col as u32;
+                let grbit = parsed.grbit;
+                let rgce = parsed.rgce;
+
+                rgce_by_cell.insert((row, col), rgce.clone());
+
+                if let Some((base_row, base_col)) = parse_ptg_exp(&rgce) {
+                    ptgexp_cells.push((row, col, base_row, base_col, grbit));
+                }
             }
-        };
-        let row = parsed.row as u32;
-        let col = parsed.col as u32;
-        let grbit = parsed.grbit;
-        let rgce = parsed.rgce;
+            worksheet_formulas::RECORD_SHRFMLA => {
+                let Some((row, col)) = parse_shrfmla_anchor(record.data.as_ref()) else {
+                    warnings.push(format!(
+                        "failed to parse SHRFMLA range header at offset {} (len={})",
+                        record.offset,
+                        record.data.len()
+                    ));
+                    continue;
+                };
 
-        rgce_by_cell.insert((row, col), rgce.clone());
-
-        if let Some((base_row, base_col)) = parse_ptg_exp(&rgce) {
-            ptgexp_cells.push((row, col, base_row, base_col, grbit));
+                let parsed = match worksheet_formulas::parse_biff8_shrfmla_record(&record) {
+                    Ok(parsed) => parsed,
+                    Err(err) => {
+                        warnings.push(format!(
+                            "failed to parse SHRFMLA record at offset {} in worksheet stream: {err}",
+                            record.offset
+                        ));
+                        continue;
+                    }
+                };
+                shrfmla_by_cell.insert((row, col), parsed.rgce);
+            }
+            _ => {}
         }
     }
 
@@ -272,25 +342,31 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
             continue;
         };
 
-        if base_rgce.first().copied() == Some(0x01) {
-            // Base cell also stores PtgExp; without SHRFMLA/ARRAY we can't resolve.
-            let expected = match grbit.membership_hint() {
-                Some(FormulaMembershipHint::Shared) => "missing SHRFMLA definition",
-                Some(FormulaMembershipHint::Array) => "missing ARRAY definition",
-                Some(FormulaMembershipHint::Table) => {
-                    "unexpected fTbl set (expected TABLE definition)"
-                }
-                None => "missing SHRFMLA/ARRAY definition",
-            };
-            warnings.push(format!(
-                "failed to recover shared formula at {}: base cell {} stores PtgExp ({expected})",
-                CellRef::new(row, col).to_a1(),
-                CellRef::new(base_row, base_col).to_a1()
-            ));
-            continue;
+        let mut base_rgce_bytes: &[u8] = base_rgce;
+        if base_rgce_bytes.first().copied() == Some(0x01) {
+            // Base cell stores PtgExp; attempt to resolve via SHRFMLA before giving up.
+            if let Some(shared_rgce) = shrfmla_by_cell.get(&(base_row, base_col)) {
+                base_rgce_bytes = shared_rgce;
+            } else {
+                let expected = match grbit.membership_hint() {
+                    Some(FormulaMembershipHint::Shared) => "missing SHRFMLA definition",
+                    Some(FormulaMembershipHint::Array) => "missing ARRAY definition",
+                    Some(FormulaMembershipHint::Table) => {
+                        "unexpected fTbl set (expected TABLE definition)"
+                    }
+                    None => "missing SHRFMLA/ARRAY definition",
+                };
+                warnings.push(format!(
+                    "failed to recover shared formula at {}: base cell {} stores PtgExp ({expected})",
+                    CellRef::new(row, col).to_a1(),
+                    CellRef::new(base_row, base_col).to_a1()
+                ));
+                continue;
+            }
         }
 
-        let Some(materialized) = materialize_biff8_rgce(base_rgce, base_row, base_col, row, col)
+        let Some(materialized) =
+            materialize_biff8_rgce(base_rgce_bytes, base_row, base_col, row, col)
         else {
             warnings.push(format!(
                 "failed to recover shared formula at {}: could not materialize base rgce from {} (unsupported or malformed tokens)",

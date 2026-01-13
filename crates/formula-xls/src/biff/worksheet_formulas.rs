@@ -155,22 +155,30 @@ pub(crate) fn parse_biff8_shrfmla_record(
     // Layout A: RefU (6) + cUse (2) + cce (2).
     let mut c = cursor.clone();
     if let Ok(rgce) = parse_shrfmla_with_refu(&mut c) {
-        return Ok(ParsedSharedFormulaRecord { rgce });
+        if !rgce.is_empty() {
+            return Ok(ParsedSharedFormulaRecord { rgce });
+        }
     }
     // Layout B: Ref8 (8) + cUse (2) + cce (2).
     let mut c = cursor.clone();
     if let Ok(rgce) = parse_shrfmla_with_ref8(&mut c) {
-        return Ok(ParsedSharedFormulaRecord { rgce });
+        if !rgce.is_empty() {
+            return Ok(ParsedSharedFormulaRecord { rgce });
+        }
     }
-    // Layout C (non-standard): RefU (6) + cce (2) (no cUse).
+    // Layout C: RefU (6) + cce (2) (cUse omitted).
     let mut c = cursor.clone();
     if let Ok(rgce) = parse_shrfmla_with_refu_no_cuse(&mut c) {
-        return Ok(ParsedSharedFormulaRecord { rgce });
+        if !rgce.is_empty() {
+            return Ok(ParsedSharedFormulaRecord { rgce });
+        }
     }
-    // Layout D (non-standard): Ref8 (8) + cce (2) (no cUse).
+    // Layout D: Ref8 (8) + cce (2) (cUse omitted).
     let mut c = cursor;
     if let Ok(rgce) = parse_shrfmla_with_ref8_no_cuse(&mut c) {
-        return Ok(ParsedSharedFormulaRecord { rgce });
+        if !rgce.is_empty() {
+            return Ok(ParsedSharedFormulaRecord { rgce });
+        }
     }
 
     Err("unrecognized SHRFMLA record layout".to_string())
@@ -670,10 +678,7 @@ fn parse_shrfmla_with_ref8_no_cuse(cursor: &mut FragmentCursor<'_>) -> Result<Ve
     cursor.read_biff8_rgce(cce)
 }
 
-fn parse_array_with_refu(
-    cursor: &mut FragmentCursor<'_>,
-    reserved_len: usize,
-) -> Result<Vec<u8>, String> {
+fn parse_array_with_refu(cursor: &mut FragmentCursor<'_>, reserved_len: usize) -> Result<Vec<u8>, String> {
     // ref (rwFirst:u16, rwLast:u16, colFirst:u8, colLast:u8)
     cursor.skip_bytes(2 + 2 + 1 + 1)?;
     cursor.skip_bytes(reserved_len)?;

@@ -1,5 +1,6 @@
 use md5::Md5;
 use sha1::{Digest as _, Sha1};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::ct::ct_eq;
 
@@ -9,19 +10,25 @@ use super::rc4::Rc4;
 pub(crate) const CALG_MD5: u32 = 0x0000_8003;
 pub(crate) const CALG_SHA1: u32 = 0x0000_8004;
 
-fn cryptoapi_hash2(alg_id_hash: u32, a: &[u8], b: &[u8]) -> Vec<u8> {
+fn cryptoapi_hash2(alg_id_hash: u32, a: &[u8], b: &[u8]) -> Zeroizing<Vec<u8>> {
     match alg_id_hash {
         CALG_MD5 => {
             let mut h = Md5::new();
             h.update(a);
             h.update(b);
-            h.finalize().to_vec()
+            let mut digest = h.finalize();
+            let out = digest.to_vec();
+            digest.as_mut_slice().zeroize();
+            Zeroizing::new(out)
         }
         CALG_SHA1 => {
             let mut h = Sha1::new();
             h.update(a);
             h.update(b);
-            h.finalize().to_vec()
+            let mut digest = h.finalize();
+            let out = digest.to_vec();
+            digest.as_mut_slice().zeroize();
+            Zeroizing::new(out)
         }
         other => panic!("unsupported CryptoAPI hash alg_id_hash=0x{other:08X}"),
     }
@@ -44,35 +51,42 @@ pub(crate) fn derive_biff8_cryptoapi_key(
     spin_count: u32,
     block_index: u32,
     key_len: usize,
-) -> Vec<u8> {
+) -> Zeroizing<Vec<u8>> {
     assert!(key_len > 0, "key_len must be > 0");
 
-    let pw_bytes: Vec<u8> = password
-        .encode_utf16()
-        .flat_map(|c| c.to_le_bytes())
-        .collect();
+    let pw_bytes: Zeroizing<Vec<u8>> = Zeroizing::new(
+        password
+            .encode_utf16()
+            .flat_map(|c| c.to_le_bytes())
+            .collect(),
+    );
 
     // Initial hash: H0 = Hash(salt || password_utf16le)
-    let mut hash = cryptoapi_hash2(alg_id_hash, salt, &pw_bytes);
+    let mut hash = cryptoapi_hash2(alg_id_hash, salt, &pw_bytes[..]);
+    drop(pw_bytes);
 
     // Spin: Hi+1 = Hash(i_le || Hi)
     for i in 0..spin_count {
         let i_bytes = i.to_le_bytes();
-        hash = cryptoapi_hash2(alg_id_hash, &i_bytes, &hash);
+        hash = cryptoapi_hash2(alg_id_hash, &i_bytes, &hash[..]);
     }
 
     // Final block key hash: H = Hash(Hspin || block_index_le)
     let block_bytes = block_index.to_le_bytes();
-    let block_hash = cryptoapi_hash2(alg_id_hash, &hash, &block_bytes);
+    let block_hash = cryptoapi_hash2(alg_id_hash, &hash[..], &block_bytes);
+    drop(hash);
 
-    if key_len == 5 {
+    let key = if key_len == 5 {
+        // CryptoAPI represents a "40-bit" RC4 key as a 128-bit key with the upper bits zeroed.
         let mut key = Vec::with_capacity(16);
         key.extend_from_slice(&block_hash[..5]);
         key.resize(16, 0);
-        return key;
-    }
-
-    block_hash[..key_len.min(block_hash.len())].to_vec()
+        key
+    } else {
+        block_hash[..key_len.min(block_hash.len())].to_vec()
+    };
+    drop(block_hash);
+    Zeroizing::new(key)
 }
 
 /// Decrypt the CryptoAPI verifier and verifier hash.
@@ -85,18 +99,19 @@ pub(crate) fn decrypt_biff8_cryptoapi_verifier(
     encrypted_verifier: &[u8; 16],
     encrypted_verifier_hash: &[u8; 20],
     key_len: usize,
-) -> ([u8; 16], [u8; 20]) {
+) -> (Zeroizing<[u8; 16]>, Zeroizing<[u8; 20]>) {
     let key = derive_biff8_cryptoapi_key(CALG_SHA1, password, salt, spin_count, 0, key_len);
-    let mut rc4 = Rc4::new(&key);
+    let mut rc4 = Rc4::new(&key[..]);
+    drop(key);
 
-    let mut buf = [0u8; 36];
+    let mut buf = Zeroizing::new([0u8; 36]);
     buf[..16].copy_from_slice(encrypted_verifier);
     buf[16..].copy_from_slice(encrypted_verifier_hash);
-    rc4.apply_keystream(&mut buf);
+    rc4.apply_keystream(&mut buf[..]);
 
-    let mut verifier = [0u8; 16];
+    let mut verifier = Zeroizing::new([0u8; 16]);
     verifier.copy_from_slice(&buf[..16]);
-    let mut verifier_hash = [0u8; 20];
+    let mut verifier_hash = Zeroizing::new([0u8; 20]);
     verifier_hash.copy_from_slice(&buf[16..]);
     (verifier, verifier_hash)
 }
@@ -119,9 +134,11 @@ pub(crate) fn validate_biff8_cryptoapi_password(
         key_len,
     );
     let mut sha1 = Sha1::new();
-    sha1.update(&verifier);
-    let expected = sha1.finalize();
-    ct_eq(expected.as_slice(), &verifier_hash)
+    sha1.update(&verifier[..]);
+    let mut expected = sha1.finalize();
+    let ok = ct_eq(expected.as_slice(), &verifier_hash[..]);
+    expected.as_mut_slice().zeroize();
+    ok
 }
 
 #[cfg(test)]
@@ -132,15 +149,15 @@ mod tests {
     fn cryptoapi_key_derivation_and_verifier_decrypt_matches_vector() {
         let password = "SecretPassword";
         let salt: [u8; 16] = [
-            0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC,
-            0xAD, 0xAE, 0xAF,
+            0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD,
+            0xAE, 0xAF,
         ];
         let spin_count: u32 = 50_000;
         let key_len: usize = 16; // 128-bit
 
         let expected_key: [u8; 16] = [
-            0x3D, 0x7D, 0x0B, 0x04, 0x2E, 0xCF, 0x02, 0xA7, 0xBC, 0xE1, 0x26, 0xA1, 0xE2,
-            0x20, 0xE2, 0xC8,
+            0x3D, 0x7D, 0x0B, 0x04, 0x2E, 0xCF, 0x02, 0xA7, 0xBC, 0xE1, 0x26, 0xA1, 0xE2, 0x20,
+            0xE2, 0xC8,
         ];
         let expected_key_block1: [u8; 16] = [
             0xF8, 0x06, 0xD7, 0x4E, 0x99, 0x94, 0x8E, 0xE8, 0xD3, 0x68, 0xD6, 0x1C, 0xEA,
@@ -148,30 +165,31 @@ mod tests {
         ];
 
         let encrypted_verifier: [u8; 16] = [
-            0xBB, 0xFF, 0x8B, 0x22, 0x0E, 0x9A, 0x35, 0x3E, 0x6E, 0xC5, 0xE1, 0x4A, 0x40,
-            0x98, 0x63, 0xA2,
+            0xBB, 0xFF, 0x8B, 0x22, 0x0E, 0x9A, 0x35, 0x3E, 0x6E, 0xC5, 0xE1, 0x4A, 0x40, 0x98,
+            0x63, 0xA2,
         ];
         let encrypted_verifier_hash: [u8; 20] = [
-            0xF5, 0xDB, 0x86, 0xB1, 0x65, 0x02, 0xB7, 0xED, 0xFE, 0x95, 0x97, 0x6F, 0x97,
-            0xD0, 0x27, 0x35, 0xC2, 0x63, 0x26, 0xA0,
+            0xF5, 0xDB, 0x86, 0xB1, 0x65, 0x02, 0xB7, 0xED, 0xFE, 0x95, 0x97, 0x6F, 0x97, 0xD0,
+            0x27, 0x35, 0xC2, 0x63, 0x26, 0xA0,
         ];
 
         let expected_verifier: [u8; 16] = [
-            0xF0, 0xE1, 0xD2, 0xC3, 0xB4, 0xA5, 0x96, 0x87, 0x78, 0x69, 0x5A, 0x4B, 0x3C,
-            0x2D, 0x1E, 0x0F,
+            0xF0, 0xE1, 0xD2, 0xC3, 0xB4, 0xA5, 0x96, 0x87, 0x78, 0x69, 0x5A, 0x4B, 0x3C, 0x2D,
+            0x1E, 0x0F,
         ];
         let expected_verifier_hash: [u8; 20] = [
-            0x93, 0xEC, 0x7C, 0x96, 0x8F, 0x9A, 0x40, 0xFE, 0xDA, 0x5C, 0x38, 0x55, 0xF1,
-            0x37, 0x82, 0x29, 0xD7, 0xE0, 0x0C, 0x53,
+            0x93, 0xEC, 0x7C, 0x96, 0x8F, 0x9A, 0x40, 0xFE, 0xDA, 0x5C, 0x38, 0x55, 0xF1, 0x37,
+            0x82, 0x29, 0xD7, 0xE0, 0x0C, 0x53,
         ];
 
         let derived_key =
             derive_biff8_cryptoapi_key(CALG_SHA1, password, &salt, spin_count, 0, key_len);
-        assert_eq!(derived_key, expected_key, "derived_key mismatch");
+        assert_eq!(&derived_key[..], &expected_key, "derived_key mismatch");
         let derived_key_block1 =
             derive_biff8_cryptoapi_key(CALG_SHA1, password, &salt, spin_count, 1, key_len);
         assert_eq!(
-            derived_key_block1, expected_key_block1,
+            &derived_key_block1[..],
+            &expected_key_block1,
             "derived_key(block=1) mismatch"
         );
 
@@ -183,8 +201,12 @@ mod tests {
             &encrypted_verifier_hash,
             key_len,
         );
-        assert_eq!(verifier, expected_verifier, "verifier mismatch");
-        assert_eq!(verifier_hash, expected_verifier_hash, "verifier_hash mismatch");
+        assert_eq!(&verifier[..], &expected_verifier, "verifier mismatch");
+        assert_eq!(
+            &verifier_hash[..],
+            &expected_verifier_hash,
+            "verifier_hash mismatch"
+        );
 
         assert!(validate_biff8_cryptoapi_password(
             password,
@@ -253,6 +275,6 @@ mod tests {
         let key_40 = derive_biff8_cryptoapi_key(CALG_MD5, password, &salt, spin_count, 0, 5);
         let mut expected_40 = vec![0x69, 0xBA, 0xDC, 0xAE, 0x24];
         expected_40.resize(16, 0);
-        assert_eq!(key_40, expected_40);
+        assert_eq!(key_40.as_slice(), expected_40.as_slice());
     }
 }

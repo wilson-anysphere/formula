@@ -1,7 +1,7 @@
 use md5::{Digest as _, Md5};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::ct::ct_eq;
-use zeroize::Zeroize;
 
 /// Minimal RC4 stream cipher implementation (KSA + PRGA).
 ///
@@ -25,9 +25,7 @@ impl Rc4 {
         let mut j: u8 = 0;
         for i in 0..256u16 {
             let idx = i as usize;
-            j = j
-                .wrapping_add(s[idx])
-                .wrapping_add(key[idx % key.len()]);
+            j = j.wrapping_add(s[idx]).wrapping_add(key[idx % key.len()]);
             s.swap(idx, j as usize);
         }
 
@@ -46,11 +44,17 @@ impl Rc4 {
     }
 }
 
+impl Zeroize for Rc4 {
+    fn zeroize(&mut self) {
+        self.s.zeroize();
+        self.i = 0;
+        self.j = 0;
+    }
+}
+
 impl Drop for Rc4 {
     fn drop(&mut self) {
-        self.s.zeroize();
-        self.i.zeroize();
-        self.j.zeroize();
+        self.zeroize();
     }
 }
 
@@ -64,7 +68,7 @@ pub(crate) fn derive_biff8_rc4_key(
     salt: &[u8; 16],
     block_index: u32,
     key_len: usize,
-) -> Vec<u8> {
+) -> Zeroizing<Vec<u8>> {
     assert!(key_len > 0, "key_len must be > 0");
 
     // Excel 97-2003 Standard Encryption only considers the first 15 UTF-16 code units of the
@@ -73,22 +77,27 @@ pub(crate) fn derive_biff8_rc4_key(
 
     // H0 = MD5(password_utf16le)
     let mut md5 = Md5::new();
-    md5.update(&pw_bytes);
-    let h0 = md5.finalize();
+    md5.update(&*pw_bytes);
+    let mut h0 = md5.finalize();
+    drop(pw_bytes);
 
     // H1 = MD5(H0 || salt)
     let mut md5 = Md5::new();
     md5.update(&h0);
     md5.update(salt);
-    let h1 = md5.finalize();
+    let mut h1 = md5.finalize();
+    h0.as_mut_slice().zeroize();
 
     // H2 = MD5(H1 || block_index_le)
     let mut md5 = Md5::new();
     md5.update(&h1);
     md5.update(&block_index.to_le_bytes());
-    let h2 = md5.finalize();
+    let mut h2 = md5.finalize();
+    h1.as_mut_slice().zeroize();
 
-    h2[..key_len.min(h2.len())].to_vec()
+    let key = h2[..key_len.min(h2.len())].to_vec();
+    h2.as_mut_slice().zeroize();
+    Zeroizing::new(key)
 }
 
 /// Decrypt the legacy RC4 verifier and verifier hash.
@@ -100,18 +109,19 @@ pub(crate) fn decrypt_biff8_rc4_verifier(
     encrypted_verifier: &[u8; 16],
     encrypted_verifier_hash: &[u8; 16],
     key_len: usize,
-) -> ([u8; 16], [u8; 16]) {
+) -> (Zeroizing<[u8; 16]>, Zeroizing<[u8; 16]>) {
     let key = derive_biff8_rc4_key(password, salt, 0, key_len);
-    let mut rc4 = Rc4::new(&key);
+    let mut rc4 = Rc4::new(&key[..]);
+    drop(key);
 
-    let mut buf = [0u8; 32];
+    let mut buf = Zeroizing::new([0u8; 32]);
     buf[..16].copy_from_slice(encrypted_verifier);
     buf[16..].copy_from_slice(encrypted_verifier_hash);
-    rc4.apply_keystream(&mut buf);
+    rc4.apply_keystream(&mut buf[..]);
 
-    let mut verifier = [0u8; 16];
+    let mut verifier = Zeroizing::new([0u8; 16]);
     verifier.copy_from_slice(&buf[..16]);
-    let mut verifier_hash = [0u8; 16];
+    let mut verifier_hash = Zeroizing::new([0u8; 16]);
     verifier_hash.copy_from_slice(&buf[16..]);
     (verifier, verifier_hash)
 }
@@ -124,18 +134,31 @@ pub(crate) fn validate_biff8_rc4_password(
     encrypted_verifier_hash: &[u8; 16],
     key_len: usize,
 ) -> bool {
-    let (verifier, verifier_hash) =
-        decrypt_biff8_rc4_verifier(password, salt, encrypted_verifier, encrypted_verifier_hash, key_len);
+    let (verifier, verifier_hash) = decrypt_biff8_rc4_verifier(
+        password,
+        salt,
+        encrypted_verifier,
+        encrypted_verifier_hash,
+        key_len,
+    );
 
     let mut md5 = Md5::new();
-    md5.update(&verifier);
-    let expected = md5.finalize();
-    ct_eq(expected.as_slice(), &verifier_hash)
+    md5.update(&verifier[..]);
+    let mut expected = md5.finalize();
+    let ok = ct_eq(expected.as_slice(), &verifier_hash[..]);
+    expected.as_mut_slice().zeroize();
+    ok
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rc4_cipher_implements_zeroize() {
+        fn assert_zeroize<T: Zeroize>() {}
+        assert_zeroize::<Rc4>();
+    }
 
     // Deterministic vector generated from Excel's documented algorithms (MD5 + RC4), using:
     // - password = "SecretPassword"
@@ -160,28 +183,29 @@ mod tests {
         let expected_key_block1: [u8; 5] = [0x8E, 0xE6, 0xCF, 0x4E, 0x3C];
 
         let encrypted_verifier: [u8; 16] = [
-            0x3A, 0xAE, 0x87, 0x68, 0x86, 0xB8, 0x19, 0xF4, 0x34, 0x28, 0x11, 0x4A, 0x4F,
-            0x62, 0xA8, 0x70,
+            0x3A, 0xAE, 0x87, 0x68, 0x86, 0xB8, 0x19, 0xF4, 0x34, 0x28, 0x11, 0x4A, 0x4F, 0x62,
+            0xA8, 0x70,
         ];
         let encrypted_verifier_hash: [u8; 16] = [
-            0xBD, 0x24, 0x21, 0xEE, 0xEB, 0x88, 0x08, 0x35, 0x01, 0xEC, 0x4F, 0xA5, 0x26,
-            0xF3, 0xFD, 0x9A,
+            0xBD, 0x24, 0x21, 0xEE, 0xEB, 0x88, 0x08, 0x35, 0x01, 0xEC, 0x4F, 0xA5, 0x26, 0xF3,
+            0xFD, 0x9A,
         ];
 
         let expected_verifier: [u8; 16] = [
-            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
-            0x0D, 0x0E, 0x0F,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F,
         ];
         let expected_verifier_hash: [u8; 16] = [
-            0x1A, 0xC1, 0xEF, 0x01, 0xE9, 0x6C, 0xAF, 0x1B, 0xE0, 0xD3, 0x29, 0x33, 0x1A,
-            0x4F, 0xC2, 0xA8,
+            0x1A, 0xC1, 0xEF, 0x01, 0xE9, 0x6C, 0xAF, 0x1B, 0xE0, 0xD3, 0x29, 0x33, 0x1A, 0x4F,
+            0xC2, 0xA8,
         ];
 
         let derived_key = derive_biff8_rc4_key(password, &salt, 0, key_len);
-        assert_eq!(derived_key, expected_key, "derived_key mismatch");
+        assert_eq!(&derived_key[..], &expected_key, "derived_key mismatch");
         let derived_key_block1 = derive_biff8_rc4_key(password, &salt, 1, key_len);
         assert_eq!(
-            derived_key_block1, expected_key_block1,
+            &derived_key_block1[..],
+            &expected_key_block1,
             "derived_key(block=1) mismatch"
         );
 
@@ -192,8 +216,12 @@ mod tests {
             &encrypted_verifier_hash,
             key_len,
         );
-        assert_eq!(verifier, expected_verifier, "verifier mismatch");
-        assert_eq!(verifier_hash, expected_verifier_hash, "verifier_hash mismatch");
+        assert_eq!(&verifier[..], &expected_verifier, "verifier mismatch");
+        assert_eq!(
+            &verifier_hash[..],
+            &expected_verifier_hash,
+            "verifier_hash mismatch"
+        );
 
         assert!(validate_biff8_rc4_password(
             password,

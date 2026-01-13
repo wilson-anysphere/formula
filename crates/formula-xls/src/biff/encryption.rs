@@ -16,6 +16,7 @@
 
 use md5::{Digest as _, Md5};
 use thiserror::Error;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::ct::ct_eq;
 
@@ -338,8 +339,8 @@ pub(crate) fn decrypt_workbook_stream(
 ) -> Result<(), DecryptError> {
     let biff_version = super::detect_biff_version(workbook_stream);
 
-    let mut iter =
-        records::BiffRecordIter::from_offset(workbook_stream, 0).map_err(DecryptError::InvalidFilePass)?;
+    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, 0)
+        .map_err(DecryptError::InvalidFilePass)?;
 
     // Require a valid BIFF workbook stream (must start with BOF) to avoid accidentally treating
     // arbitrary byte buffers as encrypted just because they contain the FILEPASS record id.
@@ -764,11 +765,12 @@ struct FilePassRc4 {
     /// Encrypted verifier hash (16 bytes, MD5).
     encrypted_verifier_hash: [u8; 16],
 }
-
 fn parse_filepass_rc4(payload: &[u8]) -> Result<FilePassRc4, DecryptError> {
     // FILEPASS payload begins with wEncryptionType (u16).
     if payload.len() < 2 {
-        return Err(DecryptError::InvalidFilePass("truncated FILEPASS record".to_string()));
+        return Err(DecryptError::InvalidFilePass(
+            "truncated FILEPASS record".to_string(),
+        ));
     }
     let encryption_type = u16::from_le_bytes([payload[0], payload[1]]);
     if encryption_type != BIFF8_ENCRYPTION_TYPE_RC4 {
@@ -828,11 +830,11 @@ fn parse_filepass_rc4(payload: &[u8]) -> Result<FilePassRc4, DecryptError> {
     })
 }
 
-fn password_to_utf16le(password: &str) -> Vec<u8> {
+fn password_to_utf16le(password: &str) -> Zeroizing<Vec<u8>> {
     // Excel 97-2003 passwords are limited to 15 characters for legacy RC4 encryption.
     //
     // Use UTF-16LE and truncate to 15 UTF-16 code units.
-    let mut out = Vec::with_capacity(password.len().min(15) * 2);
+    let mut out = Zeroizing::new(Vec::with_capacity(password.len().min(15) * 2));
     for u in password.encode_utf16().take(15) {
         out.extend_from_slice(&u.to_le_bytes());
     }
@@ -844,12 +846,22 @@ fn derive_rc4_intermediate_key(password: &str, salt: &[u8; 16]) -> [u8; 16] {
     // - password_hash = MD5(UTF16LE(password))
     // - intermediate_key = MD5(password_hash + salt)
     let password_bytes = password_to_utf16le(password);
-    let password_hash: [u8; 16] = Md5::digest(&password_bytes).into();
+    let mut md5 = Md5::new();
+    md5.update(&password_bytes[..]);
+    let mut digest = md5.finalize();
+    drop(password_bytes);
+    let mut password_hash = Zeroizing::new([0u8; 16]);
+    password_hash.copy_from_slice(&digest);
+    digest.as_mut_slice().zeroize();
 
     let mut h = Md5::new();
-    h.update(password_hash);
+    h.update(&*password_hash);
     h.update(salt);
-    h.finalize().into()
+    let mut digest = h.finalize();
+    let mut out = [0u8; 16];
+    out.copy_from_slice(&digest);
+    digest.as_mut_slice().zeroize();
+    out
 }
 
 fn derive_rc4_block_key(intermediate_key: &[u8; 16], block: u32) -> [u8; 16] {
@@ -857,7 +869,11 @@ fn derive_rc4_block_key(intermediate_key: &[u8; 16], block: u32) -> [u8; 16] {
     let mut h = Md5::new();
     h.update(intermediate_key);
     h.update(block.to_le_bytes());
-    h.finalize().into()
+    let mut digest = h.finalize();
+    let mut out = [0u8; 16];
+    out.copy_from_slice(&digest);
+    digest.as_mut_slice().zeroize();
+    out
 }
 
 /// Applies BIFF8 RC4 encryption/decryption to a byte stream representing *record data* (not record
@@ -874,8 +890,9 @@ struct Rc4BiffStream {
 
 impl Rc4BiffStream {
     fn new(intermediate_key: [u8; 16], key_len: usize) -> Self {
-        let block_key = derive_rc4_block_key(&intermediate_key, 0);
+        let mut block_key = derive_rc4_block_key(&intermediate_key, 0);
         let cipher = Rc4::new(&block_key[..key_len]);
+        block_key.zeroize();
         Self {
             intermediate_key,
             key_len,
@@ -886,8 +903,9 @@ impl Rc4BiffStream {
     }
 
     fn rekey(&mut self) {
-        let block_key = derive_rc4_block_key(&self.intermediate_key, self.block);
+        let mut block_key = derive_rc4_block_key(&self.intermediate_key, self.block);
         self.cipher = Rc4::new(&block_key[..self.key_len]);
+        block_key.zeroize();
     }
 
     fn apply(&mut self, mut data: &mut [u8]) {
@@ -907,26 +925,41 @@ impl Rc4BiffStream {
     }
 }
 
+impl Drop for Rc4BiffStream {
+    fn drop(&mut self) {
+        self.intermediate_key.zeroize();
+        // Ensure the expanded key schedule doesn't linger beyond the decryptor's lifetime.
+        self.cipher.zeroize();
+        self.block = 0;
+        self.pos_in_block = 0;
+    }
+}
+
 fn verify_rc4_password(filepass: &FilePassRc4, password: &str) -> Result<[u8; 16], DecryptError> {
-    let intermediate_key = derive_rc4_intermediate_key(password, &filepass.salt);
-    let block_key = derive_rc4_block_key(&intermediate_key, 0);
+    let intermediate_key = Zeroizing::new(derive_rc4_intermediate_key(password, &filepass.salt));
+    let mut block_key = derive_rc4_block_key(&*intermediate_key, 0);
     let mut rc4 = Rc4::new(&block_key[..filepass.key_len]);
+    block_key.zeroize();
 
     // Decrypt verifier + verifier hash.
-    let mut buf = [0u8; 32];
+    let mut buf = Zeroizing::new([0u8; 32]);
     buf[0..16].copy_from_slice(&filepass.encrypted_verifier);
     buf[16..32].copy_from_slice(&filepass.encrypted_verifier_hash);
-    rc4.apply_keystream(&mut buf);
+    rc4.apply_keystream(&mut buf[..]);
 
     let verifier = &buf[0..16];
     let verifier_hash = &buf[16..32];
-    let expected_hash: [u8; 16] = Md5::digest(verifier).into();
+    let mut md5 = Md5::new();
+    md5.update(verifier);
+    let mut expected_hash = md5.finalize();
+    let ok = ct_eq(verifier_hash, expected_hash.as_slice());
+    expected_hash.as_mut_slice().zeroize();
 
-    if !ct_eq(verifier_hash, expected_hash.as_slice()) {
+    if !ok {
         return Err(DecryptError::WrongPassword);
     }
 
-    Ok(intermediate_key)
+    Ok(*intermediate_key)
 }
 
 fn decrypt_biff8_rc4_standard(
@@ -936,8 +969,8 @@ fn decrypt_biff8_rc4_standard(
     filepass_payload: &[u8],
 ) -> Result<(), DecryptError> {
     let filepass = parse_filepass_rc4(filepass_payload)?;
-    let intermediate_key = verify_rc4_password(&filepass, password)?;
-    let mut rc4_stream = Rc4BiffStream::new(intermediate_key, filepass.key_len);
+    let mut rc4_stream =
+        Rc4BiffStream::new(verify_rc4_password(&filepass, password)?, filepass.key_len);
 
     // Decrypt record payloads after FILEPASS.
     let mut offset = encrypted_start;
@@ -953,9 +986,9 @@ fn decrypt_biff8_rc4_standard(
         let len =
             u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
 
-        let data_start = offset
-            .checked_add(4)
-            .ok_or_else(|| DecryptError::InvalidFilePass("BIFF record offset overflow".to_string()))?;
+        let data_start = offset.checked_add(4).ok_or_else(|| {
+            DecryptError::InvalidFilePass("BIFF record offset overflow".to_string())
+        })?;
         let data_end = data_start.checked_add(len).ok_or_else(|| {
             DecryptError::InvalidFilePass("BIFF record length overflow".to_string())
         })?;
@@ -1393,9 +1426,8 @@ mod tests {
             if workbook_stream.len() - offset < 4 {
                 return Err("truncated record header".to_string());
             }
-            let len =
-                u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]])
-                    as usize;
+            let len = u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]])
+                as usize;
             let data_start = offset + 4;
             let data_end = data_start + len;
             if data_end > workbook_stream.len() {
@@ -1687,8 +1719,13 @@ mod tests {
         let encrypted_start = filepass_offset + 4 + filepass_len;
 
         let intermediate_key = derive_rc4_intermediate_key(password, &salt);
-        encrypt_record_payloads_in_place(&mut encrypted, encrypted_start, intermediate_key, key_len)
-            .expect("encrypt");
+        encrypt_record_payloads_in_place(
+            &mut encrypted,
+            encrypted_start,
+            intermediate_key,
+            key_len,
+        )
+        .expect("encrypt");
 
         // Now decrypt and ensure we get the original plaintext.
         decrypt_workbook_stream(&mut encrypted, password).expect("decrypt");
@@ -1735,8 +1772,13 @@ mod tests {
         ]) as usize;
         let encrypted_start = filepass_offset + 4 + filepass_len;
         let intermediate_key = derive_rc4_intermediate_key(password, &salt);
-        encrypt_record_payloads_in_place(&mut encrypted, encrypted_start, intermediate_key, key_len)
-            .expect("encrypt");
+        encrypt_record_payloads_in_place(
+            &mut encrypted,
+            encrypted_start,
+            intermediate_key,
+            key_len,
+        )
+        .expect("encrypt");
 
         // Decrypt and assert we recover the original bytes.
         decrypt_workbook_stream(&mut encrypted, password).expect("decrypt");
