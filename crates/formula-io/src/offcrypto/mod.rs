@@ -8,6 +8,7 @@
 //! the password + salt + a 50000-iteration SHA-1 spin loop. That variant is documented in
 //! `docs/offcrypto-standard-cryptoapi-rc4.md`.
 
+pub mod cryptoapi;
 pub mod encrypted_package;
 
 pub use encrypted_package::{
