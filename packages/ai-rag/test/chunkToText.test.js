@@ -92,11 +92,12 @@ test("chunkToText formats Error values with name + message", () => {
     title: "Example",
     sheetName: "Sheet1",
     rect: { r0: 0, c0: 0, r1: 1, c1: 0 },
-    cells: [[{ v: "Result" }], [{ v: Object.assign(new Error("boom"), { name: "Div0" }) }]],
+    cells: [[{ v: "Result" }], [{ v: Object.assign(new Error("boom | bang"), { name: "Div0" }) }]],
   };
 
   const text = chunkToText(chunk, { sampleRows: 1 });
-  assert.match(text, /Result=Div0: boom/);
+  assert.match(text, /Result=Div0: boom ¦ bang/);
+  assert.doesNotMatch(text, /\|/);
 });
 
 test("chunkToText prefers object.text when present", () => {

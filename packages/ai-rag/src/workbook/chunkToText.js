@@ -16,7 +16,9 @@ function formatScalar(value) {
   if (value instanceof Error) {
     const message = typeof value.message === "string" ? value.message.trim() : "";
     const name = typeof value.name === "string" && value.name.trim() ? value.name.trim() : "Error";
-    return message ? `${name}: ${message}` : name;
+    // Re-run through the string path so we inherit whitespace normalization,
+    // pipe escaping, and truncation.
+    return formatScalar(message ? `${name}: ${message}` : name);
   }
   if (typeof value === "object") {
     // Some backends surface rich cell values (e.g. structured types / rich text).
