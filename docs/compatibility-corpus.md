@@ -336,6 +336,9 @@ Note: when `--input` already points at the canonical `tools/corpus/public/*.b64`
 present, the command exits successfully without running triage (no Rust toolchain required). Pass `--force` to re-run
 triage and refresh the expectations entry.
 
+For `.xlsb` inputs, `--sanitize` and leak scanning are not supported; provide an already-sanitized workbook and pass
+`--confirm-sanitized`.
+
 ### Generate a unified compatibility scorecard (corpus + Excel-oracle)
 
 The corpus dashboard captures **read + round-trip** behavior, while the Excel-oracle harness captures

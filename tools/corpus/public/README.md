@@ -26,6 +26,11 @@ python -m tools.corpus.promote_public \
   --sanitize
 ```
 
+Notes:
+
+- `--sanitize` currently supports `.xlsx` / `.xlsm` inputs only.
+- `.xlsb` inputs require `--confirm-sanitized` (leak scanning is ZIP/XLSX based).
+
 This will:
 
 - write `tools/corpus/public/<name>.(xlsx|xlsm|xlsb).b64`
