@@ -238,6 +238,52 @@ describe("ToolExecutor include_formula_values", () => {
     expect(result.data.anomalies[0]?.value).toBe(100);
   });
 
+  it("detect_anomalies can include formula values under DLP ALLOW decisions when enabled", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { value: 1 });
+    workbook.setCell(parseA1Cell("Sheet1!A3"), { value: 1 });
+    workbook.setCell(parseA1Cell("Sheet1!A4"), { formula: "=100", value: 100 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      include_formula_values: true,
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true,
+            },
+          },
+        },
+        audit_logger,
+      },
+    });
+
+    const result = await executor.execute({
+      name: "detect_anomalies",
+      parameters: { range: "Sheet1!A1:A4", method: "zscore", threshold: 1.4 },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("detect_anomalies");
+    if (!result.ok || result.tool !== "detect_anomalies") throw new Error("Unexpected tool result");
+    if (!result.data || result.data.method !== "zscore") throw new Error("Unexpected anomaly result");
+
+    expect(result.data.anomalies.map((a) => a.cell)).toEqual(["Sheet1!A4"]);
+    expect(result.data.anomalies[0]?.value).toBe(100);
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event.decision?.decision).toBe("allow");
+    expect(event.redactedCellCount).toBe(0);
+  });
+
   it("create_pivot_table can include numeric values from formula cells when enabled", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Category" });
@@ -276,6 +322,63 @@ describe("ToolExecutor include_formula_values", () => {
     await executor.execute({ name: "write_cell", parameters: { cell: "Sheet1!C2", value: 1 } });
     expect(workbook.getCell(parseA1Cell("Sheet1!E2")).value).toBe(30);
     expect(workbook.getCell(parseA1Cell("Sheet1!E3")).value).toBe(30);
+  });
+
+  it("create_pivot_table can include formula values under DLP ALLOW decisions when enabled", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Category" });
+    workbook.setCell(parseA1Cell("Sheet1!B1"), { value: "Value" });
+    workbook.setCell(parseA1Cell("Sheet1!C1"), { value: "Unused" });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { value: "A" });
+    workbook.setCell(parseA1Cell("Sheet1!B2"), { formula: "=1+9", value: "10" });
+    workbook.setCell(parseA1Cell("Sheet1!C2"), { value: 0 });
+    workbook.setCell(parseA1Cell("Sheet1!A3"), { value: "A" });
+    workbook.setCell(parseA1Cell("Sheet1!B3"), { value: "20" });
+    workbook.setCell(parseA1Cell("Sheet1!C3"), { value: 0 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      include_formula_values: true,
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true,
+            },
+          },
+        },
+        audit_logger,
+      },
+    });
+
+    const result = await executor.execute({
+      name: "create_pivot_table",
+      parameters: {
+        source_range: "Sheet1!A1:C3",
+        destination: "Sheet1!D1",
+        rows: ["Category"],
+        columns: [],
+        values: [{ field: "Value", aggregation: "sum" }],
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("create_pivot_table");
+    if (!result.ok || result.tool !== "create_pivot_table") throw new Error("Unexpected tool result");
+    expect(result.data?.destination_range).toBe("Sheet1!D1:E3");
+
+    expect(workbook.getCell(parseA1Cell("Sheet1!E2")).value).toBe(30);
+    expect(workbook.getCell(parseA1Cell("Sheet1!E3")).value).toBe(30);
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event.decision?.decision).toBe("allow");
+    expect(event.redactedCellCount).toBe(0);
   });
 
   it("does not surface formula values under DLP REDACT decisions even when enabled", async () => {
