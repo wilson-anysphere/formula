@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use formula_model::charts::{Chart, ChartKind, ChartType};
+use formula_model::charts::{Chart, ChartKind, ChartModel, ChartType};
 use roxmltree::Document;
 
 use crate::charts::parse_chart;
@@ -304,7 +304,28 @@ impl XlsxPackage {
                     }
                 });
 
-                let mut model = if let Some(chart_ex_part) = chart_ex.as_ref() {
+                let chart_space_model = if chart.path.is_empty() || chart.bytes.is_empty() {
+                    None
+                } else {
+                    match parse_chart_space(&chart.bytes, &chart.path) {
+                        Ok(model) => Some(model),
+                        Err(err) => {
+                            diagnostics.push(ChartDiagnostic {
+                                severity: ChartDiagnosticSeverity::Warning,
+                                message: format!(
+                                    "failed to parse chartSpace part {}: {}",
+                                    chart.path,
+                                    format_chart_space_error(&err)
+                                ),
+                                part: Some(chart.path.clone()),
+                                xpath: None,
+                            });
+                            None
+                        }
+                    }
+                };
+
+                let chart_ex_model = if let Some(chart_ex_part) = chart_ex.as_ref() {
                     match parse_chart_ex(&chart_ex_part.bytes, &chart_ex_part.path) {
                         Ok(model) => {
                             if let ChartKind::Unknown { name } = &model.chart_kind {
@@ -336,25 +357,24 @@ impl XlsxPackage {
                             None
                         }
                     }
-                } else if chart.path.is_empty() || chart.bytes.is_empty() {
-                    None
                 } else {
-                    match parse_chart_space(&chart.bytes, &chart.path) {
-                        Ok(model) => Some(model),
-                        Err(err) => {
-                            diagnostics.push(ChartDiagnostic {
-                                severity: ChartDiagnosticSeverity::Warning,
-                                message: format!(
-                                    "failed to parse chartSpace part {}: {}",
-                                    chart.path,
-                                    format_chart_space_error(&err)
-                                ),
-                                part: Some(chart.path.clone()),
-                                xpath: None,
-                            });
-                            None
-                        }
-                    }
+                    None
+                };
+
+                let mut model = match (chart_space_model, chart_ex_model) {
+                    (Some(chart_space_model), Some(chart_ex_model)) => Some(merge_chart_models(
+                        chart_space_model,
+                        chart_ex_model,
+                        &chart.path,
+                        chart_ex
+                            .as_ref()
+                            .map(|p| p.path.as_str())
+                            .unwrap_or_default(),
+                        &mut diagnostics,
+                    )),
+                    (Some(chart_space_model), None) => Some(chart_space_model),
+                    (None, Some(chart_ex_model)) => Some(chart_ex_model),
+                    (None, None) => None,
                 };
 
                 if let Some(model) = model.as_mut() {
@@ -560,4 +580,143 @@ fn format_chart_style_error(err: &ChartStyleParseError) -> String {
 
 fn format_chart_color_style_error(err: &ChartColorStyleParseError) -> String {
     err.to_string()
+}
+
+fn merge_chart_models(
+    chart_space: ChartModel,
+    chart_ex: ChartModel,
+    chart_space_part: &str,
+    chart_ex_part: &str,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+) -> ChartModel {
+    let chart_space_series_len = chart_space.series.len();
+    let chart_ex_series_len = chart_ex.series.len();
+    let chart_space_axes_len = chart_space.axes.len();
+    let chart_ex_axes_len = chart_ex.axes.len();
+
+    let mut merged = chart_space;
+
+    // Chart kind: prefer ChartEx if it appears to be a meaningful subtype (e.g. "ChartEx:waterfall")
+    // rather than the parser placeholder (e.g. "ChartEx:unknown").
+    if chart_ex_kind_is_specific(&chart_ex.chart_kind) {
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: format!(
+                "model.chart_kind: using ChartEx {chart_ex_kind:?} (chartSpace was {chart_space_kind:?})",
+                chart_ex_kind = &chart_ex.chart_kind,
+                chart_space_kind = &merged.chart_kind,
+            ),
+            part: Some(chart_ex_part.to_string()),
+            xpath: None,
+        });
+        merged.chart_kind = chart_ex.chart_kind.clone();
+    } else {
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: format!(
+                "model.chart_kind: using chartSpace {chart_space_kind:?} (ChartEx was {chart_ex_kind:?})",
+                chart_space_kind = &merged.chart_kind,
+                chart_ex_kind = &chart_ex.chart_kind,
+            ),
+            part: Some(chart_space_part.to_string()),
+            xpath: None,
+        });
+    }
+
+    // Title / legend: prefer ChartEx when present (future-proofing, as ChartEx parsing is still incomplete).
+    if chart_ex.title.is_some() {
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: "model.title: using ChartEx".to_string(),
+            part: Some(chart_ex_part.to_string()),
+            xpath: None,
+        });
+        merged.title = chart_ex.title.clone();
+    } else {
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: "model.title: using chartSpace".to_string(),
+            part: Some(chart_space_part.to_string()),
+            xpath: None,
+        });
+    }
+
+    if chart_ex.legend.is_some() {
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: "model.legend: using ChartEx".to_string(),
+            part: Some(chart_ex_part.to_string()),
+            xpath: None,
+        });
+        merged.legend = chart_ex.legend.clone();
+    } else {
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: "model.legend: using chartSpace".to_string(),
+            part: Some(chart_space_part.to_string()),
+            xpath: None,
+        });
+    }
+
+    // Series / axes: fall back to chartSpace when ChartEx doesn't produce as many objects.
+    if chart_space_series_len > chart_ex_series_len {
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: format!(
+                "model.series: using chartSpace (chartSpace={chart_space_series_len}, ChartEx={chart_ex_series_len})",
+            ),
+            part: Some(chart_space_part.to_string()),
+            xpath: None,
+        });
+    } else {
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: format!(
+                "model.series: using ChartEx (ChartEx={chart_ex_series_len}, chartSpace={chart_space_series_len})",
+            ),
+            part: Some(chart_ex_part.to_string()),
+            xpath: None,
+        });
+        merged.series = chart_ex.series.clone();
+    }
+
+    if chart_space_axes_len > chart_ex_axes_len {
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: format!(
+                "model.axes: using chartSpace (chartSpace={chart_space_axes_len}, ChartEx={chart_ex_axes_len})",
+            ),
+            part: Some(chart_space_part.to_string()),
+            xpath: None,
+        });
+    } else {
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: format!(
+                "model.axes: using ChartEx (ChartEx={chart_ex_axes_len}, chartSpace={chart_space_axes_len})",
+            ),
+            part: Some(chart_ex_part.to_string()),
+            xpath: None,
+        });
+        merged.axes = chart_ex.axes.clone();
+    }
+
+    // Preserve whichever diagnostics are available from both models.
+    merged.diagnostics.extend(chart_ex.diagnostics);
+
+    merged
+}
+
+fn chart_ex_kind_is_specific(kind: &ChartKind) -> bool {
+    let ChartKind::Unknown { name } = kind else {
+        // A fully-modeled ChartEx kind would be represented as a concrete enum variant. Treat it as specific.
+        return true;
+    };
+
+    let Some(kind) = name.strip_prefix("ChartEx:") else {
+        return false;
+    };
+
+    let kind = kind.trim();
+    !kind.is_empty() && !kind.eq_ignore_ascii_case("unknown")
 }
