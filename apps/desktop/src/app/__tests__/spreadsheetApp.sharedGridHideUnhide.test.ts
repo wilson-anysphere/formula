@@ -168,5 +168,57 @@ describe("SpreadsheetApp shared-grid hide/unhide", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
-});
 
+  it("does not leak user-hidden rows across sheets", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("shared");
+
+      // Ensure Sheet2 exists.
+      const doc = app.getDocument();
+      doc.setCellValue("Sheet2", { row: 0, col: 0 }, "X");
+
+      const sharedGrid = (app as any).sharedGrid;
+      const renderer = sharedGrid.renderer;
+      const headerRows = 1;
+      const gridRow = headerRows + 0; // doc row 0
+      const hiddenSize = 2 * renderer.getZoom();
+      const defaultRowHeight = renderer.getRowHeight(gridRow);
+
+      // Hide row 1 (doc row 0) on Sheet1.
+      const sheet1 = app.getCurrentSheetId();
+      app.hideRows([0]);
+
+      const provider1 = (app as any).usedRangeProvider();
+      expect(provider1.isRowHidden(0)).toBe(true);
+      expect(renderer.getRowHeight(gridRow)).toBeCloseTo(hiddenSize, 6);
+
+      // Switching sheets should not inherit hidden state.
+      app.activateSheet("Sheet2");
+      const provider2 = (app as any).usedRangeProvider();
+      expect(provider2.isRowHidden(0)).toBe(false);
+      expect(renderer.getRowHeight(gridRow)).toBeCloseTo(defaultRowHeight, 6);
+
+      // Switching back should restore Sheet1's hidden row.
+      app.activateSheet(sheet1);
+      const provider3 = (app as any).usedRangeProvider();
+      expect(provider3.isRowHidden(0)).toBe(true);
+      expect(renderer.getRowHeight(gridRow)).toBeCloseTo(hiddenSize, 6);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+});
