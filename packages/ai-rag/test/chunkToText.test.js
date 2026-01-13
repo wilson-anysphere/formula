@@ -124,6 +124,19 @@ test("chunkToText includes A1-like cell addresses for formulaRegion samples", ()
   assert.match(text, /E2:=B2\/C2/);
 });
 
+test("chunkToText includes computed values for formulaRegion entries when available", () => {
+  const chunk = {
+    kind: "formulaRegion",
+    title: "Formula region E1",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 4, r1: 0, c1: 4 },
+    cells: [[{ f: "=SUM(B2:B3)", v: 300 }]],
+  };
+
+  const text = chunkToText(chunk);
+  assert.match(text, /E1:=SUM\(B2:B3\)=300/);
+});
+
 test("chunkToText truncates long formulas inside formulaRegion samples", () => {
   const longFormula = `=${"A".repeat(80)}`;
   const chunk = {
@@ -152,4 +165,18 @@ test("chunkToText reports when formulaRegion samples are truncated", () => {
   const text = chunkToText(chunk);
   assert.match(text, /… \(\+1 more formulas\)/);
   assert.doesNotMatch(text, /\bA13:=/);
+});
+
+test("chunkToText includes computed values for non-header formula cells when available", () => {
+  const chunk = {
+    kind: "dataRegion",
+    title: "Test",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 0, c1: 0 },
+    cells: [[{ f: "=A1*2", v: 2 }]],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /=A1\*2=2/);
+  assert.doesNotMatch(text, /==A1\*2/);
 });

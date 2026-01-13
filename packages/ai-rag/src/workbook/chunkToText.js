@@ -170,10 +170,13 @@ export function chunkToText(chunk, opts) {
     const formulas = [];
     for (let r = 0; r < cells.length && formulas.length < MAX_FORMULA_SAMPLES; r += 1) {
       for (let c = 0; c < (cells[r]?.length ?? 0) && formulas.length < MAX_FORMULA_SAMPLES; c += 1) {
-        const f = cells[r][c]?.f;
+        const cell = cells[r][c] || {};
+        const f = cell.f;
         if (!f) continue;
         const addr = cellToA1(chunk.rect.r0 + r, chunk.rect.c0 + c);
-        formulas.push(`${addr}:${formatScalar(f)}`);
+        const value = formatScalar(cell.v);
+        const formula = formatScalar(f);
+        formulas.push(value ? `${addr}:${formula}=${value}` : `${addr}:${formula}`);
       }
     }
     const extraFormulas = formulaCount - formulas.length;
@@ -196,8 +199,13 @@ export function chunkToText(chunk, opts) {
             row.push(`${header}=${formatScalar(cell.v)}`);
           }
         } else {
-          if (cell.f) row.push(formatScalar(cell.f));
-          else row.push(formatScalar(cell.v));
+          if (cell.f) {
+            const formula = formatScalar(cell.f);
+            const value = formatScalar(cell.v);
+            row.push(value ? `${formula}=${value}` : formula);
+          } else {
+            row.push(formatScalar(cell.v));
+          }
         }
       }
       const extra = formatExtraColumns(fullColCount, rowColCount);
