@@ -77,6 +77,12 @@ export interface ShapeRenderSpec {
   label?: string;
   /** Best-effort label color extracted from the first paragraph's run properties. */
   labelColor?: string;
+  /** Best-effort label font size (in CSS pixels). */
+  labelFontSizePx?: number;
+  /** Best-effort label font family (e.g. Calibri). */
+  labelFontFamily?: string;
+  /** Best-effort label bold flag. */
+  labelBold?: boolean;
 }
 
 const DRAWINGML_NAMESPACES = {
@@ -421,25 +427,62 @@ function parseLabel(root: XmlElementLike): string | undefined {
   return text.split(/\r?\n/, 1)[0]!.trim();
 }
 
-function parseLabelColor(root: XmlElementLike): string | undefined {
-  const txBody = findFirstDescendantByLocalName(root, "txBody");
-  if (!txBody) return undefined;
-  const p = findFirstDescendantByLocalName(txBody, "p");
-  if (!p) return undefined;
+function parseFontSizePx(node: XmlElementLike | null): number | undefined {
+  if (!node) return undefined;
+  const szAttr = getAttribute(node, "sz");
+  if (!szAttr) return undefined;
+  const sz = Number.parseInt(szAttr, 10);
+  if (!Number.isFinite(sz) || sz <= 0) return undefined;
+  const pt = sz / 100;
+  // 1pt = 1/72in; 1in = 96px.
+  return (pt * 96) / 72;
+}
 
-  // Try to resolve a color from the first paragraph's run properties.
-  // Prefer explicit run properties (`a:rPr`) over defaults (`a:defRPr`).
-  const candidates = ["rPr", "defRPr"];
-  for (const name of candidates) {
-    const node = findFirstDescendant(
-      p,
-      (n) => localName(n) === name && findFirstDescendantByLocalName(n, "srgbClr") != null,
-    );
-    if (!node) continue;
-    const color = parseSrgbColor(node);
-    if (color) return color;
-  }
+function parseBold(node: XmlElementLike | null): boolean | undefined {
+  if (!node) return undefined;
+  const bAttr = getAttribute(node, "b");
+  if (bAttr == null) return undefined;
+  const normalized = bAttr.trim().toLowerCase();
+  if (normalized === "1" || normalized === "true") return true;
+  if (normalized === "0" || normalized === "false") return false;
   return undefined;
+}
+
+function parseTypeface(node: XmlElementLike | null): string | undefined {
+  if (!node) return undefined;
+  const latin = findFirstDescendantByLocalName(node, "latin");
+  if (!latin) return undefined;
+  const face = getAttribute(latin, "typeface");
+  const trimmed = face?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+function parseLabelStyle(root: XmlElementLike): {
+  color?: string;
+  fontSizePx?: number;
+  fontFamily?: string;
+  bold?: boolean;
+} {
+  const txBody = findFirstDescendantByLocalName(root, "txBody");
+  if (!txBody) return {};
+  const p = findFirstDescendantByLocalName(txBody, "p");
+  if (!p) return {};
+
+  const defRPr = findFirstDescendantByLocalName(p, "defRPr");
+  const firstRun = findFirstDescendantByLocalName(p, "r");
+  const runPr = firstRun ? findFirstDescendantByLocalName(firstRun, "rPr") : null;
+
+  const color = parseSrgbColor(runPr ?? defRPr ?? p) ?? parseSrgbColor(defRPr ?? p) ?? undefined;
+  const fontSizePx = parseFontSizePx(runPr) ?? parseFontSizePx(defRPr);
+  const fontFamily = parseTypeface(runPr) ?? parseTypeface(defRPr);
+  const bold = parseBold(runPr) ?? parseBold(defRPr);
+
+  const style: { color?: string; fontSizePx?: number; fontFamily?: string; bold?: boolean } = {};
+  if (color) style.color = color;
+  if (typeof fontSizePx === "number" && Number.isFinite(fontSizePx)) style.fontSizePx = fontSizePx;
+  if (fontFamily) style.fontFamily = fontFamily;
+  if (typeof bold === "boolean") style.bold = bold;
+  return style;
 }
 
 function cacheResult(rawXml: string, spec: ShapeRenderSpec | null): ShapeRenderSpec | null {
@@ -476,7 +519,7 @@ export function parseShapeRenderSpec(rawXml: string): ShapeRenderSpec | null {
   if (!geometry) return cacheResult(rawXml, null);
 
   const label = parseLabel(root);
-  const labelColor = label ? parseLabelColor(root) : undefined;
+  const labelStyle = label ? parseLabelStyle(root) : null;
 
   const spec: ShapeRenderSpec = {
     geometry:
@@ -487,7 +530,10 @@ export function parseShapeRenderSpec(rawXml: string): ShapeRenderSpec | null {
     stroke: parseStroke(spPr),
     label,
   };
-  if (labelColor) spec.labelColor = labelColor;
+  if (labelStyle?.color) spec.labelColor = labelStyle.color;
+  if (typeof labelStyle?.fontSizePx === "number") spec.labelFontSizePx = labelStyle.fontSizePx;
+  if (labelStyle?.fontFamily) spec.labelFontFamily = labelStyle.fontFamily;
+  if (typeof labelStyle?.bold === "boolean") spec.labelBold = labelStyle.bold;
 
   return cacheResult(rawXml, spec);
 }

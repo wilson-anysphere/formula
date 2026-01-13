@@ -112,9 +112,10 @@ describe("parseShapeRenderSpec", () => {
             <a:pPr algn="ctr">
               <a:defRPr sz="1400">
                 <a:solidFill><a:srgbClr val="00FF00"/></a:solidFill>
+                <a:latin typeface="Calibri"/>
               </a:defRPr>
             </a:pPr>
-            <a:r><a:t>Hello Shape</a:t></a:r>
+            <a:r><a:rPr b="1"/><a:t>Hello Shape</a:t></a:r>
           </a:p>
         </xdr:txBody>
         <xdr:spPr>
@@ -123,9 +124,13 @@ describe("parseShapeRenderSpec", () => {
       </xdr:sp>
     `;
 
-    expect(parseShapeRenderSpec(raw)).toMatchObject({
+    const spec = parseShapeRenderSpec(raw);
+    expect(spec).toMatchObject({
       label: "Hello Shape",
       labelColor: "#00FF00",
+      labelFontFamily: "Calibri",
+      labelBold: true,
     });
+    expect(spec?.labelFontSizePx).toBeCloseTo(18.666, 2);
   });
 });

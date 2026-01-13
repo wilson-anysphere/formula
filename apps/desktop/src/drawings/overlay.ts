@@ -455,8 +455,13 @@ function drawShape(
   if (spec.label) {
     ctx.fillStyle = spec.labelColor ?? colors.placeholderLabel;
     ctx.globalAlpha = 0.8;
-    ctx.font = "12px sans-serif";
-    ctx.fillText(spec.label, rect.x + 4, rect.y + 14);
+    const size = typeof spec.labelFontSizePx === "number" && Number.isFinite(spec.labelFontSizePx) ? spec.labelFontSizePx : 12;
+    const family = spec.labelFontFamily?.trim() ? spec.labelFontFamily : "sans-serif";
+    const weight = spec.labelBold ? "bold " : "";
+    ctx.font = `${weight}${size}px ${family}`;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    ctx.fillText(spec.label, rect.x + 4, rect.y + 4);
   }
 }
 
