@@ -223,6 +223,10 @@ Important: timelines are not representable as a pure “allowed set” without e
   - It lives in the model crate but performs computation, which violates the desired crate boundary.
 - `formula-engine::pivot` contains the newer cache-backed pivot engine and defines its own pivot config/value types.
 - `formula-xlsx` currently contains a direct bridge from OpenXML pivots → `formula-engine::pivot` types (`crates/formula-xlsx/src/pivots/engine_bridge.rs`).
+- Slicers/timelines:
+  - `formula-xlsx` can parse slicer/timeline parts and convert selection state into `formula_model::pivots::slicers::RowFilter`.
+  - The **legacy** `formula-model::pivots::PivotManager` applies those filters when refreshing its in-memory pivot.
+  - The **new** `formula-engine::pivot` path currently models filters as `PivotConfig.filter_fields` (allowed-value sets) and is not yet wired to consume workbook slicer/timeline state directly.
 
 ### Migration plan (what future work should converge to)
 
@@ -241,6 +245,9 @@ These are present in the schema in some form but are not fully evaluated end-to-
 - **Calculated fields / calculated items**:
   - Definitions exist (name + formula text),
   - but evaluation is not yet implemented in the new engine path.
+- **Slicer/timeline integration in the new engine path**:
+  - Selection parsing exists (`formula-xlsx`) and model-level filter types exist (`formula-model`),
+  - but end-to-end “change slicer selection → engine refresh pivot output” is not yet unified under the `formula-engine::pivot` compute path.
 - **Full OpenXML parity**:
   - many pivot/table style and layout knobs are preserved for round-trip,
   - but may be ignored by the compute engine.
@@ -269,4 +276,3 @@ These are present in the schema in some form but are not fully evaluated end-to-
 - OpenXML slicer/timeline parsing + mapping helpers: `crates/formula-xlsx/src/pivots/slicers/mod.rs`
 - Data Model pivot computation: `crates/formula-dax/src/pivot.rs`
 - WASM/JS API crate: `crates/formula-wasm/`
-
