@@ -124,16 +124,10 @@ pub fn collect_xls_formula_diagnostics(path: &Path) -> Result<WorkbookFormulaDia
     Ok(out)
 }
 
-// Worksheet record ids we care about.
+// Worksheet record ids we care about (BIFF8).
 //
-// See [MS-XLS] sections:
-// - FORMULA: 2.4.127
-// - SHRFMLA: 2.4.275 (BIFF8 shared formulas)
-// - ARRAY: 2.4.16
-// - TABLE: 2.4.328
-const RECORD_FORMULA: u16 = 0x0006;
-const RECORD_SHRFMLA: u16 = 0x04BC;
-const RECORD_ARRAY: u16 = 0x0221;
+// `FORMULA`, `SHRFMLA`, and `ARRAY` are parsed via `biff::worksheet_formulas` so we can handle
+// `CONTINUE` boundaries correctly.
 const RECORD_TABLE: u16 = 0x0236;
 
 /// Collect formula stats from a worksheet substream starting at `start`.
@@ -156,7 +150,17 @@ fn collect_sheet_formula_stats(
     let mut ptgexp_refs: Vec<(u16, u16)> = Vec::new();
     let mut ptgtbl_refs: Vec<(u16, u16)> = Vec::new();
 
-    let mut iter = match biff::records::BiffRecordIter::from_offset(workbook_stream, start) {
+    let allows_continuation = |record_id: u16| {
+        record_id == biff::worksheet_formulas::RECORD_FORMULA
+            || record_id == biff::worksheet_formulas::RECORD_SHRFMLA
+            || record_id == biff::worksheet_formulas::RECORD_ARRAY
+            || record_id == RECORD_TABLE
+    };
+    let mut iter = match biff::records::LogicalBiffRecordIter::from_offset(
+        workbook_stream,
+        start,
+        allows_continuation,
+    ) {
         Ok(it) => it,
         Err(err) => {
             stats.record_parse_errors += 1;
@@ -181,15 +185,15 @@ fn collect_sheet_formula_stats(
         }
 
         match record.record_id {
-            RECORD_FORMULA => {
+            biff::worksheet_formulas::RECORD_FORMULA => {
                 stats.formula_records += 1;
-                match parse_formula_record(record.data) {
-                    Ok(info) => {
-                        if let Some(&ptg) = info.rgce.first() {
+                match biff::worksheet_formulas::parse_biff8_formula_record(&record) {
+                    Ok(parsed) => {
+                        if let Some(&ptg) = parsed.rgce.first() {
                             match ptg {
                                 0x01 => {
                                     stats.formula_ptgexp += 1;
-                                    if let Some(base) = parse_ptg_ref_cell(info.rgce) {
+                                    if let Some(base) = parse_ptg_ref_cell(&parsed.rgce) {
                                         ptgexp_refs.push(base);
                                     } else {
                                         stats.payload_parse_errors += 1;
@@ -201,7 +205,7 @@ fn collect_sheet_formula_stats(
                                 }
                                 0x02 => {
                                     stats.formula_ptgtbl += 1;
-                                    if let Some(base) = parse_ptg_ref_cell(info.rgce) {
+                                    if let Some(base) = parse_ptg_ref_cell(&parsed.rgce) {
                                         ptgtbl_refs.push(base);
                                     } else {
                                         stats.payload_parse_errors += 1;
@@ -212,7 +216,7 @@ fn collect_sheet_formula_stats(
                                     }
                                 }
                                 _ => {
-                                    explicit_formula_cells.insert((info.row, info.col));
+                                    explicit_formula_cells.insert((parsed.row, parsed.col));
                                 }
                             }
                         }
@@ -226,31 +230,49 @@ fn collect_sheet_formula_stats(
                     }
                 }
             }
-            RECORD_SHRFMLA => {
+            biff::worksheet_formulas::RECORD_SHRFMLA => {
                 stats.shrfmla_records += 1;
-                match parse_record_base_cell(record.data) {
-                    Some(base) => {
-                        shared_bases.insert(base);
-                    }
-                    None => {
+                match biff::worksheet_formulas::parse_biff8_shrfmla_record(&record) {
+                    Ok(_) => match parse_record_base_cell(record.data.as_ref()) {
+                        Some(base) => {
+                            shared_bases.insert(base);
+                        }
+                        None => {
+                            stats.payload_parse_errors += 1;
+                            errors.push(format!(
+                                "failed to parse SHRFMLA base cell at offset {}",
+                                record.offset
+                            ));
+                        }
+                    },
+                    Err(err) => {
                         stats.payload_parse_errors += 1;
                         errors.push(format!(
-                            "failed to parse SHRFMLA base cell at offset {}",
+                            "failed to parse SHRFMLA record at offset {}: {err}",
                             record.offset
                         ));
                     }
                 }
             }
-            RECORD_ARRAY => {
+            biff::worksheet_formulas::RECORD_ARRAY => {
                 stats.array_records += 1;
-                match parse_record_base_cell(record.data) {
-                    Some(base) => {
-                        array_bases.insert(base);
-                    }
-                    None => {
+                match biff::worksheet_formulas::parse_biff8_array_record(&record) {
+                    Ok(_) => match parse_record_base_cell(record.data.as_ref()) {
+                        Some(base) => {
+                            array_bases.insert(base);
+                        }
+                        None => {
+                            stats.payload_parse_errors += 1;
+                            errors.push(format!(
+                                "failed to parse ARRAY base cell at offset {}",
+                                record.offset
+                            ));
+                        }
+                    },
+                    Err(err) => {
                         stats.payload_parse_errors += 1;
                         errors.push(format!(
-                            "failed to parse ARRAY base cell at offset {}",
+                            "failed to parse ARRAY record at offset {}: {err}",
                             record.offset
                         ));
                     }
@@ -258,7 +280,7 @@ fn collect_sheet_formula_stats(
             }
             RECORD_TABLE => {
                 stats.table_records += 1;
-                match parse_record_base_cell(record.data) {
+                match parse_record_base_cell(record.data.as_ref()) {
                     Some(base) => {
                         table_bases.insert(base);
                     }
@@ -293,45 +315,6 @@ fn collect_sheet_formula_stats(
     }
 
     (stats, errors)
-}
-
-struct FormulaRecordInfo<'a> {
-    row: u16,
-    col: u16,
-    rgce: &'a [u8],
-}
-
-// BIFF8 FORMULA record layout [MS-XLS 2.4.127]:
-// - Cell (rw:u16, col:u16, ixfe:u16)        6 bytes
-// - result                                  8 bytes
-// - grbit                                   2 bytes
-// - chn (calculation chain)                 4 bytes
-// - cce                                     2 bytes
-// - rgce                                    cce bytes
-const FORMULA_CCE_OFFSET: usize = 6 + 8 + 2 + 4;
-
-fn parse_formula_record(data: &[u8]) -> Result<FormulaRecordInfo<'_>, String> {
-    if data.len() < FORMULA_CCE_OFFSET + 2 {
-        return Err(format!(
-            "record too short (expected >= {} bytes, got {})",
-            FORMULA_CCE_OFFSET + 2,
-            data.len()
-        ));
-    }
-
-    let row = u16::from_le_bytes([data[0], data[1]]);
-    let col = u16::from_le_bytes([data[2], data[3]]);
-
-    let cce = u16::from_le_bytes([data[FORMULA_CCE_OFFSET], data[FORMULA_CCE_OFFSET + 1]]) as usize;
-    let rgce_start = FORMULA_CCE_OFFSET + 2;
-    let rgce_end = rgce_start
-        .checked_add(cce)
-        .ok_or_else(|| "cce overflow".to_string())?;
-    let rgce = data
-        .get(rgce_start..rgce_end)
-        .ok_or_else(|| "rgce extends past end of record".to_string())?;
-
-    Ok(FormulaRecordInfo { row, col, rgce })
 }
 
 fn parse_ptg_ref_cell(rgce: &[u8]) -> Option<(u16, u16)> {
@@ -408,28 +391,30 @@ mod tests {
         payload.extend_from_slice(&0u32.to_le_bytes()); // chn
         payload.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
         payload.extend_from_slice(rgce);
-        record(RECORD_FORMULA, &payload)
+        record(biff::worksheet_formulas::RECORD_FORMULA, &payload)
     }
 
     #[test]
     fn collects_shared_array_table_formula_stats_from_synthetic_sheet_stream() {
         // Synthetic worksheet substream:
-        // - SHRFMLA base @ (0,0)
+        // - SHRFMLA base @ (0,0) (valid payload; used to resolve one PtgExp)
         // - TABLE base @ (2,2)
-        // - 5 FORMULA records:
-        //   - (0,0) explicit formula
+        // - 4 FORMULA records:
         //   - (0,1) PtgExp -> (0,0) (resolved)
         //   - (1,0) PtgExp -> (9,9) (unresolved)
         //   - (2,2) PtgTbl -> (2,2) (resolved)
         //   - (3,3) PtgTbl -> (6,6) (unresolved)
 
-        let shrfmla_payload = [
-            0u16.to_le_bytes(),
-            0u16.to_le_bytes(),
-            0u16.to_le_bytes(),
-            1u16.to_le_bytes(),
-        ]
-        .concat(); // Ref8: rows 0..0, cols 0..1
+        // SHRFMLA: Ref8 (rows 0..0, cols 0..1) + cUse + cce + rgce.
+        let shrfmla_rgce = vec![0x16]; // PtgMissArg (simple 1-byte token)
+        let mut shrfmla_payload = Vec::new();
+        shrfmla_payload.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        shrfmla_payload.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+        shrfmla_payload.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        shrfmla_payload.extend_from_slice(&1u16.to_le_bytes()); // colLast
+        shrfmla_payload.extend_from_slice(&0u16.to_le_bytes()); // cUse
+        shrfmla_payload.extend_from_slice(&(shrfmla_rgce.len() as u16).to_le_bytes()); // cce
+        shrfmla_payload.extend_from_slice(&shrfmla_rgce);
         let table_payload = [
             2u16.to_le_bytes(),
             2u16.to_le_bytes(),
@@ -439,11 +424,11 @@ mod tests {
         .concat(); // Ref8: rows 2..2, cols 2..2
 
         let mut stream: Vec<u8> = Vec::new();
-        stream.extend(record(RECORD_SHRFMLA, &shrfmla_payload));
+        stream.extend(record(
+            biff::worksheet_formulas::RECORD_SHRFMLA,
+            &shrfmla_payload,
+        ));
         stream.extend(record(RECORD_TABLE, &table_payload));
-
-        // Explicit formula rgce: a single token that does not carry extra payload.
-        stream.extend(formula_record(0, 0, &[0x16]));
 
         // PtgExp: [0x01][rw:u16][col:u16]
         stream.extend(formula_record(0, 1, &[0x01, 0x00, 0x00, 0x00, 0x00]));
@@ -461,7 +446,7 @@ mod tests {
         assert_eq!(
             stats,
             SheetFormulaStats {
-                formula_records: 5,
+                formula_records: 4,
                 formula_ptgexp: 2,
                 formula_ptgtbl: 2,
                 shrfmla_records: 1,
