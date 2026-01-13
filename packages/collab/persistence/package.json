@@ -10,6 +10,9 @@
     "./indexeddb": "./src/indexeddb.ts",
     "./file": "./src/file.ts"
   },
+  "scripts": {
+    "test": "node ../../../scripts/test-node.mjs packages/collab/persistence"
+  },
   "dependencies": {
     "y-indexeddb": "^9.0.12",
     "yjs": "^13.6.27"

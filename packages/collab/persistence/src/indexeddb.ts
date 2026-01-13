@@ -3,6 +3,17 @@ import { IndexeddbPersistence } from "y-indexeddb";
 
 import type { CollabPersistence, CollabPersistenceBinding } from "./index.js";
 
+type FlushOptions = {
+  /**
+   * When true (default), `flush()` will compact the `updates` object store by clearing it
+   * and writing a single snapshot update.
+   *
+   * This prevents `flush()` from growing IndexedDB without bound by appending snapshot
+   * records.
+   */
+  compact?: boolean;
+};
+
 type Entry = {
   doc: Y.Doc;
   persistence: IndexeddbPersistence;
@@ -10,6 +21,12 @@ type Entry = {
   resolveDestroyed: () => void;
   onDocDestroy: () => void;
   onDocUpdate: (update: Uint8Array, origin: unknown) => void;
+  /**
+   * True once y-indexeddb finishes the initial load/apply cycle (`whenSynced`).
+   *
+   * We only start counting updates for compaction once synced so hydration replays
+   * don't immediately trigger compaction.
+   */
   synced: boolean;
 };
 
@@ -23,14 +40,14 @@ export type IndexedDbCollabPersistenceOptions = {
    * log into a snapshot update.
    *
    * - Set to `0` to disable automatic compaction.
-   * - Defaults to `500` (chosen to keep load/replay bounded without rewriting snapshots
-   *   on every small edit).
+   * - Defaults to `500` (keeps load/replay bounded without rewriting snapshots on
+   *   every small edit).
    */
   maxUpdates?: number;
   /**
    * Debounce delay (ms) before running a scheduled compaction once `maxUpdates` is exceeded.
    *
-   * This avoids rewriting large snapshots repeatedly during bursts of edits.
+   * This avoids rewriting snapshots repeatedly during bursts of edits.
    */
   compactDebounceMs?: number;
 };
@@ -39,6 +56,24 @@ function normalizeNonNegativeInt(value: unknown, fallback: number): number {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
   return Math.max(0, Math.trunc(num));
+}
+
+function transactionDone(tx: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const finishError = () => reject((tx as any).error ?? new Error("IndexedDB transaction failed"));
+    const finishOk = () => resolve();
+
+    // Prefer EventTarget listeners when available.
+    if (typeof (tx as any)?.addEventListener === "function") {
+      (tx as any).addEventListener("complete", finishOk, { once: true });
+      (tx as any).addEventListener("error", finishError, { once: true });
+      (tx as any).addEventListener("abort", finishError, { once: true });
+    } else {
+      (tx as any).oncomplete = finishOk;
+      (tx as any).onerror = finishError;
+      (tx as any).onabort = finishError;
+    }
+  });
 }
 
 /**
@@ -219,10 +254,18 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
    *
    * This guarantees that all in-memory state at the time of the call is durable
    * (even if some incremental updates are still in flight).
+   *
+   * By default, `flush()` also compacts the update log so IndexedDB does not grow
+   * without bound.
    */
-  async flush(docId: string): Promise<void> {
+  async flush(docId: string, opts: FlushOptions = {}): Promise<void> {
     const entry = this.entries.get(docId);
     if (!entry) return;
+
+    if (opts.compact ?? true) {
+      await this.compact(docId);
+      return;
+    }
 
     await this.enqueue(docId, async () => {
       const ready = await Promise.race([
@@ -234,38 +277,37 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
       const db = entry.persistence.db;
       if (!db) return;
 
-      const snapshot = Y.encodeStateAsUpdate(entry.doc);
+      let snapshot: Uint8Array;
+      try {
+        snapshot = Y.encodeStateAsUpdate(entry.doc);
+      } catch {
+        return;
+      }
 
-      await new Promise<void>((resolve, reject) => {
+      const txPromise = new Promise<void>((resolve, reject) => {
         try {
           const tx = (db as any).transaction([UPDATES_STORE_NAME], "readwrite");
-          const finishError = () => reject((tx as any).error ?? new Error("IndexedDB flush transaction failed"));
-          const finishOk = () => resolve();
-
-          // Prefer EventTarget listeners when available.
-          if (typeof tx?.addEventListener === "function") {
-            tx.addEventListener("complete", finishOk, { once: true });
-            tx.addEventListener("error", finishError, { once: true });
-            tx.addEventListener("abort", finishError, { once: true });
-          } else {
-            (tx as any).oncomplete = finishOk;
-            (tx as any).onerror = finishError;
-            (tx as any).onabort = finishError;
-          }
-
+          void transactionDone(tx).then(resolve, reject);
           const store = (tx as any).objectStore(UPDATES_STORE_NAME);
           store.add(snapshot);
         } catch (err) {
           reject(err);
         }
       });
+      const outcome = await Promise.race([
+        txPromise.then(() => "ok" as const),
+        entry.destroyed.then(() => "destroyed" as const),
+      ]);
+      if (outcome === "destroyed") {
+        void txPromise.catch(() => {
+          // ignore
+        });
+      }
     });
   }
 
   /**
    * Compact the IndexedDB update log for `docId` by rewriting it to a single snapshot update.
-   *
-   * This is best-effort and should be treated as a performance optimization (it reduces load/replay cost).
    */
   async compact(docId: string): Promise<void> {
     const entry = this.entries.get(docId);
@@ -286,24 +328,18 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
       const db = entry.persistence.db;
       if (!db) return;
 
-      const snapshot = Y.encodeStateAsUpdate(entry.doc);
+      let snapshot: Uint8Array;
+      try {
+        snapshot = Y.encodeStateAsUpdate(entry.doc);
+      } catch {
+        // If the doc is concurrently destroyed, treat compaction as a no-op.
+        return;
+      }
 
-      await new Promise<void>((resolve, reject) => {
+      const txPromise = new Promise<void>((resolve, reject) => {
         try {
           const tx = (db as any).transaction([UPDATES_STORE_NAME], "readwrite");
-          const finishError = () => reject((tx as any).error ?? new Error("IndexedDB compaction transaction failed"));
-          const finishOk = () => resolve();
-
-          if (typeof tx?.addEventListener === "function") {
-            tx.addEventListener("complete", finishOk, { once: true });
-            tx.addEventListener("error", finishError, { once: true });
-            tx.addEventListener("abort", finishError, { once: true });
-          } else {
-            (tx as any).oncomplete = finishOk;
-            (tx as any).onerror = finishError;
-            (tx as any).onabort = finishError;
-          }
-
+          void transactionDone(tx).then(resolve, reject);
           const store = (tx as any).objectStore(UPDATES_STORE_NAME);
           store.clear();
           store.add(snapshot);
@@ -311,6 +347,16 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
           reject(err);
         }
       });
+      const outcome = await Promise.race([
+        txPromise.then(() => "ok" as const),
+        entry.destroyed.then(() => "destroyed" as const),
+      ]);
+      if (outcome === "destroyed") {
+        void txPromise.catch(() => {
+          // ignore
+        });
+        return;
+      }
 
       this.updateCounts.set(docId, 0);
     });
@@ -332,3 +378,4 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
     tmpDoc.destroy();
   }
 }
+
