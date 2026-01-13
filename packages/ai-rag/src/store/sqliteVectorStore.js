@@ -277,6 +277,14 @@ export class SqliteVectorStore {
   }
 
   /**
+   * Alias for {@link compact}. Kept for API discoverability for users familiar
+   * with SQLite's `VACUUM` terminology.
+   */
+  async vacuum() {
+    await this.compact();
+  }
+
+  /**
    * @param {string} id
    */
   async get(id) {
