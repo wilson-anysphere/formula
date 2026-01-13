@@ -52,6 +52,10 @@ manually from GitHub Actions:
 If you set **upload=true**, the workflow will create/update a **draft** GitHub Release and attach
 assets (matching the tag-driven behavior). This requires providing either `tag` or `version`.
 
+Note: `upload=true` runs the same version validation as a tagged release (the tag/version must
+match `apps/desktop/src-tauri/tauri.conf.json`), so for ad-hoc pipeline tests without bumping the
+app version, prefer `upload=false`.
+
 ## Preflight validations (CI enforced)
 
 The release workflow runs a couple of lightweight preflight scripts before it spends time building
