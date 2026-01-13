@@ -534,6 +534,33 @@ describe("ToolExecutor", () => {
     expect(() => JSON.stringify(result)).not.toThrow();
   });
 
+  it("read_range never throws when a cell value cannot be stringified or coerced", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    const bad = {
+      toJSON() {
+        throw new Error("nope");
+      },
+      toString() {
+        throw new Error("also nope");
+      },
+    };
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: bad as any });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A1" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.values).toEqual([["[Unserializable cell value]"]]);
+    expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
   it("read_range enforces max_read_range_chars based on normalized output size", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);

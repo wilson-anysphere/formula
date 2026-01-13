@@ -27,6 +27,7 @@ function normalizeFormulaTextOpt(value: unknown): string | null {
 }
 
 const DEFAULT_READ_RANGE_MAX_CELL_CHARS = 10_000;
+const UNSERIALIZABLE_CELL_VALUE_PLACEHOLDER = "[Unserializable cell value]";
 
 function truncateCellString(value: string, maxChars: number): string {
   const limit = Number.isFinite(maxChars) ? Math.max(0, Math.floor(maxChars)) : DEFAULT_READ_RANGE_MAX_CELL_CHARS;
@@ -34,6 +35,20 @@ function truncateCellString(value: string, maxChars: number): string {
   if (value.length <= limit) return value;
   const truncated = value.length - limit;
   return `${value.slice(0, limit)}…[truncated ${truncated} chars]`;
+}
+
+function stringifyCellValue(value: unknown): string {
+  try {
+    const json = JSON.stringify(value);
+    if (typeof json === "string") return json;
+  } catch {
+    // ignore
+  }
+  try {
+    return String(value);
+  } catch {
+    return UNSERIALIZABLE_CELL_VALUE_PLACEHOLDER;
+  }
 }
 
 function normalizeCellOutput(value: unknown, opts: { maxChars?: number } = {}): CellScalar {
@@ -45,14 +60,7 @@ function normalizeCellOutput(value: unknown, opts: { maxChars?: number } = {}): 
   if (typeof value === "string") return truncateCellString(value, maxChars);
   if (typeof value === "number" || typeof value === "boolean") return value;
 
-  let serialized: string;
-  try {
-    const json = JSON.stringify(value);
-    serialized = typeof json === "string" ? json : String(value);
-  } catch {
-    serialized = String(value);
-  }
-  return truncateCellString(serialized, maxChars);
+  return truncateCellString(stringifyCellValue(value), maxChars);
 }
 
 function normalizeFormulaOutput(value: unknown): string | null {
