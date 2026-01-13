@@ -59,6 +59,9 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
 
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Install Linux dependencies (Tauri/WebView + headless display)
         if: matrix.os == 'ubuntu-24.04'
         run: |
@@ -122,11 +125,95 @@ jobs:
             --json perf-artifacts/desktop-idle-memory-metrics.json \
             --allow-ci 2>&1 | tee perf-artifacts/desktop-idle-memory.log
 
+      - name: Summarize + merge perf artifacts
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p perf-artifacts
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          
+          function readJsonMaybe(p) {
+            try {
+              return JSON.parse(fs.readFileSync(p, "utf8"));
+            } catch {
+              return null;
+            }
+          }
+          
+          const startupPath = path.resolve("perf-artifacts/desktop-startup-metrics.json");
+          const memoryPath = path.resolve("perf-artifacts/desktop-idle-memory-metrics.json");
+          const startup = readJsonMaybe(startupPath);
+          const idleMemory = readJsonMaybe(memoryPath);
+          
+          const merged = {
+            generatedAt: new Date().toISOString(),
+            git: { sha: process.env.GITHUB_SHA || null, ref: process.env.GITHUB_REF || null },
+            runner: {
+              os: process.env.RUNNER_OS || null,
+              arch: process.env.RUNNER_ARCH || null,
+              name: process.env.RUNNER_NAME || null,
+            },
+            startup,
+            idleMemory,
+          };
+          
+          fs.writeFileSync(
+            path.resolve("perf-artifacts/desktop-perf-metrics.json"),
+            JSON.stringify(merged, null, 2),
+            "utf8",
+          );
+          
+          const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+          if (!summaryPath) process.exit(0);
+          
+          function fmt(n, digits = 1) {
+            if (typeof n !== "number" || !Number.isFinite(n)) return "n/a";
+            return n.toFixed(digits);
+          }
+          
+          const lines = [];
+          lines.push(`## Desktop perf summary (${process.env.RUNNER_OS ?? "unknown"})`);
+          lines.push("");
+          lines.push("| Metric | p50 | p95 | Notes |");
+          lines.push("|---|---:|---:|---|");
+          
+          if (startup?.summary) {
+            const s = startup.summary;
+            lines.push(
+              `| startup.windowVisible (ms) | ${fmt(s.windowVisible?.p50)} | ${fmt(s.windowVisible?.p95)} | target=${s.windowVisible?.targetMs ?? "n/a"} enforced=${s.enforce ? 1 : 0} |`,
+            );
+            lines.push(
+              `| startup.firstRender (ms) | ${fmt(s.firstRender?.p50)} | ${fmt(s.firstRender?.p95)} | |`,
+            );
+            lines.push(
+              `| startup.tti (ms) | ${fmt(s.tti?.p50)} | ${fmt(s.tti?.p95)} | target=${s.tti?.targetMs ?? "n/a"} enforced=${s.enforce ? 1 : 0} |`,
+            );
+          } else {
+            lines.push("| startup | n/a | n/a | missing desktop-startup-metrics.json |");
+          }
+          
+          if (idleMemory?.summary) {
+            const m = idleMemory.summary;
+            lines.push(
+              `| idleMemory.rss (mb) | ${fmt(m.idleRssMb?.p50, 1)} | ${fmt(m.idleRssMb?.p95, 1)} | idleWaitMs=${idleMemory.idleWaitMs ?? "n/a"} |`,
+            );
+          } else {
+            lines.push("| idleMemory | n/a | n/a | missing desktop-idle-memory-metrics.json |");
+          }
+          
+          lines.push("");
+          fs.appendFileSync(summaryPath, lines.join("\n") + "\n", "utf8");
+          NODE
+
       - name: Upload desktop perf artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: desktop-perf-${{ matrix.os }}
+          if-no-files-found: warn
           path: |
             perf-artifacts/*.json
             perf-artifacts/*.log
