@@ -28,7 +28,8 @@ fn warns_on_filtermode_and_preserves_autofilter_dropdown_range() {
         .expect("expected sheet.auto_filter to be set");
     assert_eq!(af.range, Range::from_a1("A1:B3").expect("valid range"));
 
-    let warning_substr = "sheet `Filtered` has FILTERMODE (filtered rows); filter criteria/hidden rows are not preserved on import";
+    let warning_substr =
+        "sheet `Filtered` has FILTERMODE (filtered rows); filtered row visibility is not preserved on import";
     let matching: Vec<&formula_xls::ImportWarning> = result
         .warnings
         .iter()
@@ -93,7 +94,8 @@ fn warns_on_filtermode_and_sets_autofilter_from_sheet_stream_when_filterdatabase
         result.workbook.defined_names
     );
 
-    let warning_substr = "sheet `FilteredNoDb` has FILTERMODE (filtered rows); filter criteria/hidden rows are not preserved on import";
+    let warning_substr =
+        "sheet `FilteredNoDb` has FILTERMODE (filtered rows); filtered row visibility is not preserved on import";
     let matching: Vec<&formula_xls::ImportWarning> = result
         .warnings
         .iter()
@@ -132,7 +134,8 @@ fn warns_on_filtermode_and_sets_autofilter_from_dimensions_when_autofilterinfo_m
         result.workbook.defined_names
     );
 
-    let warning_substr = "sheet `FilterModeOnly` has FILTERMODE (filtered rows); filter criteria/hidden rows are not preserved on import";
+    let warning_substr =
+        "sheet `FilterModeOnly` has FILTERMODE (filtered rows); filtered row visibility is not preserved on import";
     let matching: Vec<&formula_xls::ImportWarning> = result
         .warnings
         .iter()

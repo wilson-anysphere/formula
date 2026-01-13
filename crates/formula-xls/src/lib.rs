@@ -382,6 +382,10 @@ fn import_xls_path_with_biff_reader(
     let mut cell_xf_indices: Option<Vec<HashMap<CellRef, u16>>> = None;
     let mut cell_xf_parse_failed: Option<Vec<bool>> = None;
     let mut filter_database_ranges: Option<HashMap<usize, Range>> = None;
+    // Map output worksheet ids to their BIFF worksheet substream offsets. Used for best-effort
+    // parsing of sheet-local metadata like AutoFilter criteria.
+    let mut sheet_stream_offsets_by_sheet_id: HashMap<formula_model::WorksheetId, usize> =
+        HashMap::new();
 
     if let Some(workbook_stream) = workbook_stream.as_deref() {
         let detected_biff_version =
@@ -781,6 +785,16 @@ fn import_xls_path_with_biff_reader(
         }
 
         if let Some(biff_idx) = biff_idx {
+            // Cache the worksheet substream offset (BoundSheetInfo.offset) so later best-effort
+            // parsers (e.g. AutoFilter criteria) can scan the sheet stream.
+            if let Some(offset) = biff_sheets
+                .as_ref()
+                .and_then(|sheets| sheets.get(biff_idx))
+                .map(|info| info.offset)
+            {
+                sheet_stream_offsets_by_sheet_id.insert(sheet.id, offset);
+            }
+
             let filter_database_range = filter_database_ranges
                 .as_ref()
                 .and_then(|ranges| ranges.get(&biff_idx))
@@ -803,10 +817,11 @@ fn import_xls_path_with_biff_reader(
 
                 if props.filter_mode {
                     // BIFF `FILTERMODE` indicates that some rows are currently hidden by a filter.
-                    // We do not yet import filter criteria or filtered row visibility, so warn to
-                    // avoid surprising data changes on import.
+                    // We do not preserve filtered-row visibility as user-hidden rows; the model
+                    // does not have a dedicated "filtered hidden" bit, and preserving them as
+                    // user-hidden would be misleading.
                     warnings.push(ImportWarning::new(format!(
-                        "sheet `{sheet_name}` has FILTERMODE (filtered rows); filter criteria/hidden rows are not preserved on import"
+                        "sheet `{sheet_name}` has FILTERMODE (filtered rows); filtered row visibility is not preserved on import"
                     )));
                 }
             }
@@ -2017,6 +2032,49 @@ fn import_xls_path_with_biff_reader(
                     sort_state: None,
                     raw_xml: Vec::new(),
                 });
+            }
+        }
+    }
+
+    // Best-effort import of AutoFilter criteria from worksheet AUTOFILTER records.
+    //
+    // This is intentionally resilient: malformed records are surfaced as warnings but do not fail
+    // the overall import.
+    if let (Some(workbook_stream_bytes), Some(biff_version), Some(codepage)) = (
+        workbook_stream.as_deref(),
+        biff_version,
+        biff_codepage,
+    ) {
+        for sheet in out.sheets.iter_mut() {
+            let Some(af) = sheet.auto_filter.as_mut() else {
+                continue;
+            };
+            let Some(&offset) = sheet_stream_offsets_by_sheet_id.get(&sheet.id) else {
+                continue;
+            };
+
+            match biff::parse_biff_sheet_autofilter_criteria(
+                workbook_stream_bytes,
+                offset,
+                biff_version,
+                codepage,
+                af.range,
+            ) {
+                Ok(mut parsed) => {
+                    if !parsed.filter_columns.is_empty() {
+                        af.filter_columns = std::mem::take(&mut parsed.filter_columns);
+                    }
+                    warnings.extend(parsed.warnings.drain(..).map(|w| {
+                        ImportWarning::new(format!(
+                            "failed to import `.xls` AutoFilter criteria for sheet `{}`: {w}",
+                            sheet.name
+                        ))
+                    }));
+                }
+                Err(err) => warnings.push(ImportWarning::new(format!(
+                    "failed to import `.xls` AutoFilter criteria for sheet `{}`: {err}",
+                    sheet.name
+                ))),
             }
         }
     }
