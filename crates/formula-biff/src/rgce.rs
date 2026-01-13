@@ -289,7 +289,7 @@ fn decode_array_constant(
 ///
 /// The returned string does **not** include a leading `=`.
 pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
-    decode_rgce_impl(rgce, None)
+    decode_rgce_impl(rgce, None, None)
 }
 
 /// Best-effort decode of a BIFF12 `rgce` token stream into formula text, using a trailing `rgcb`
@@ -297,10 +297,32 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
 ///
 /// The returned string does **not** include a leading `=`.
 pub fn decode_rgce_with_rgcb(rgce: &[u8], rgcb: &[u8]) -> Result<String, DecodeRgceError> {
-    decode_rgce_impl(rgce, Some(rgcb))
+    decode_rgce_impl(rgce, Some(rgcb), None)
 }
 
-fn decode_rgce_impl(rgce: &[u8], rgcb: Option<&[u8]>) -> Result<String, DecodeRgceError> {
+/// Best-effort decode of a BIFF12 `rgce` token stream into formula text, using a base cell for
+/// relative-reference tokens.
+///
+/// Excel encodes certain formulas (notably in shared formulas) using relative-reference tokens
+/// like `PtgRefN` / `PtgAreaN` that store offsets from the formula's origin cell. This helper
+/// converts those relative offsets into A1-style references using the provided base coordinates.
+///
+/// `base_row0` and `base_col0` are **0-indexed** cell coordinates (`A1` is `(0, 0)`).
+///
+/// The returned string does **not** include a leading `=`.
+pub fn decode_rgce_with_base(
+    rgce: &[u8],
+    base_row0: u32,
+    base_col0: u32,
+) -> Result<String, DecodeRgceError> {
+    decode_rgce_impl(rgce, None, Some((base_row0, base_col0)))
+}
+
+fn decode_rgce_impl(
+    rgce: &[u8],
+    rgcb: Option<&[u8]>,
+    base: Option<(u32, u32)>,
+) -> Result<String, DecodeRgceError> {
     if rgce.is_empty() {
         return Ok(String::new());
     }
@@ -1008,6 +1030,111 @@ fn decode_rgce_impl(rgce: &[u8], rgcb: Option<&[u8]>) -> Result<String, DecodeRg
                 }
                 i += cce;
             }
+            // PtgRefErr: [row: u32][col: u16]
+            0x2A | 0x4A | 0x6A => {
+                if input.len() < 6 {
+                    return Err(DecodeRgceError::UnexpectedEof);
+                }
+                input = &input[6..];
+                stack.push(ExprFragment::new("#REF!".to_string()));
+            }
+            // PtgAreaErr: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
+            0x2B | 0x4B | 0x6B => {
+                if input.len() < 12 {
+                    return Err(DecodeRgceError::UnexpectedEof);
+                }
+                input = &input[12..];
+                stack.push(ExprFragment::new("#REF!".to_string()));
+            }
+            // PtgRefN: [row_off: i32][col_off: i16]
+            0x2C | 0x4C | 0x6C => {
+                if input.len() < 6 {
+                    return Err(DecodeRgceError::UnexpectedEof);
+                }
+                let Some((base_row0, base_col0)) = base else {
+                    return Err(DecodeRgceError::UnsupportedToken { ptg });
+                };
+
+                let row_off =
+                    i32::from_le_bytes([input[0], input[1], input[2], input[3]]) as i64;
+                let col_off = i16::from_le_bytes([input[4], input[5]]) as i64;
+                input = &input[6..];
+
+                const MAX_ROW0: i64 = 1_048_575;
+                const MAX_COL0: i64 = 0x3FFF;
+                let abs_row0 = base_row0 as i64 + row_off;
+                let abs_col0 = base_col0 as i64 + col_off;
+                if abs_row0 < 0 || abs_row0 > MAX_ROW0 || abs_col0 < 0 || abs_col0 > MAX_COL0 {
+                    stack.push(ExprFragment::new("#REF!".to_string()));
+                } else {
+                    stack.push(ExprFragment::new(format_cell_ref_a1(
+                        abs_row0 as u32,
+                        abs_col0 as u32,
+                    )));
+                }
+            }
+            // PtgAreaN: [rowFirst_off: i32][rowLast_off: i32][colFirst_off: i16][colLast_off: i16]
+            0x2D | 0x4D | 0x6D => {
+                if input.len() < 12 {
+                    return Err(DecodeRgceError::UnexpectedEof);
+                }
+                let Some((base_row0, base_col0)) = base else {
+                    return Err(DecodeRgceError::UnsupportedToken { ptg });
+                };
+
+                let row1_off =
+                    i32::from_le_bytes([input[0], input[1], input[2], input[3]]) as i64;
+                let row2_off =
+                    i32::from_le_bytes([input[4], input[5], input[6], input[7]]) as i64;
+                let col1_off = i16::from_le_bytes([input[8], input[9]]) as i64;
+                let col2_off = i16::from_le_bytes([input[10], input[11]]) as i64;
+                input = &input[12..];
+
+                const MAX_ROW0: i64 = 1_048_575;
+                const MAX_COL0: i64 = 0x3FFF;
+                let abs_row1 = base_row0 as i64 + row1_off;
+                let abs_row2 = base_row0 as i64 + row2_off;
+                let abs_col1 = base_col0 as i64 + col1_off;
+                let abs_col2 = base_col0 as i64 + col2_off;
+
+                if abs_row1 < 0
+                    || abs_row1 > MAX_ROW0
+                    || abs_row2 < 0
+                    || abs_row2 > MAX_ROW0
+                    || abs_col1 < 0
+                    || abs_col1 > MAX_COL0
+                    || abs_col2 < 0
+                    || abs_col2 > MAX_COL0
+                {
+                    stack.push(ExprFragment::new("#REF!".to_string()));
+                } else {
+                    let start = format_cell_ref_a1(abs_row1 as u32, abs_col1 as u32);
+                    let end = format_cell_ref_a1(abs_row2 as u32, abs_col2 as u32);
+
+                    let is_single_cell = abs_row1 == abs_row2 && abs_col1 == abs_col2;
+                    let is_value_class = (ptg & 0x60) == 0x40;
+
+                    let mut text = String::new();
+                    if is_value_class && !is_single_cell {
+                        // Preserve legacy implicit intersection semantics.
+                        text.push('@');
+                    }
+                    if is_single_cell {
+                        text.push_str(&start);
+                    } else {
+                        text.push_str(&start);
+                        text.push(':');
+                        text.push_str(&end);
+                    }
+
+                    let mut frag = ExprFragment::new(text);
+                    if is_value_class && !is_single_cell {
+                        // Unary `@` has the same precedence as unary +/- in our formula parser.
+                        frag.precedence = 70;
+                    }
+                    stack.push(frag);
+                }
+            }
             // PtgNameX: [ixti: u16][nameIndex: u16]
             0x39 | 0x59 | 0x79 => {
                 if rgce.len().saturating_sub(i) < 4 {
@@ -1143,6 +1270,13 @@ fn format_cell_ref_from_field(row0: u32, col_field: u16) -> String {
         out.push('$');
     }
     out.push_str(&row1.to_string());
+    out
+}
+
+fn format_cell_ref_a1(row0: u32, col0: u32) -> String {
+    let mut out = String::new();
+    push_column(col0, &mut out);
+    out.push_str(&(row0 + 1).to_string());
     out
 }
 
