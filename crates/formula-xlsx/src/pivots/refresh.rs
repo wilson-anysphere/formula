@@ -1636,4 +1636,149 @@ mod tests {
             .count();
         assert_eq!(record_count, 2);
     }
+
+    #[test]
+    fn refresh_pivot_cache_supports_named_range_worksheet_source() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+  <definedNames>
+    <definedName name="MyNamedRange">Sheet1!$A$1:$B$3</definedName>
+  </definedNames>
+</workbook>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        // Named range points at A1:B3 (header + 2 records).
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Name</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>Age</t></is></c>
+    </row>
+    <row r="2">
+      <c r="A2" t="inlineStr"><is><t>Alice</t></is></c>
+      <c r="B2"><v>30</v></c>
+    </row>
+    <row r="3">
+      <c r="A3" t="inlineStr"><is><t>Bob</t></is></c>
+      <c r="B3"><v>25</v></c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+        // `worksheetSource/@name` points at the defined name instead of an A1 range.
+        let cache_definition_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" recordCount="0">
+  <cacheSource type="worksheet">
+    <worksheetSource name="MyNamedRange"/>
+  </cacheSource>
+  <cacheFields count="1">
+    <cacheField name="OldField" numFmtId="0"/>
+  </cacheFields>
+</pivotCacheDefinition>"#;
+
+        let cache_definition_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords" Target="pivotCacheRecords1.xml"/>
+</Relationships>"#;
+
+        let cache_records_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0"/>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/pivotCache/pivotCacheDefinition1.xml", options)
+            .unwrap();
+        zip.write_all(cache_definition_xml.as_bytes()).unwrap();
+
+        zip.start_file(
+            "xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels",
+            options,
+        )
+        .unwrap();
+        zip.write_all(cache_definition_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/pivotCache/pivotCacheRecords1.xml", options)
+            .unwrap();
+        zip.write_all(cache_records_xml.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        pkg.refresh_pivot_cache_from_worksheet("xl/pivotCache/pivotCacheDefinition1.xml")
+            .expect("refresh");
+
+        let updated_def =
+            std::str::from_utf8(pkg.part("xl/pivotCache/pivotCacheDefinition1.xml").unwrap())
+                .unwrap();
+        let doc = Document::parse(updated_def).expect("parse updated cache definition");
+        let root = doc.root_element();
+        assert_eq!(root.attribute("recordCount"), Some("2"));
+        let cache_fields = root
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "cacheFields")
+            .expect("cacheFields");
+        assert_eq!(cache_fields.attribute("count"), Some("2"));
+        let field_names: Vec<_> = cache_fields
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name() == "cacheField")
+            .filter_map(|n| n.attribute("name"))
+            .collect();
+        assert_eq!(field_names, vec!["Name", "Age"]);
+
+        let updated_records =
+            std::str::from_utf8(pkg.part("xl/pivotCache/pivotCacheRecords1.xml").unwrap()).unwrap();
+        let doc = Document::parse(updated_records).expect("parse updated cache records");
+        let root = doc.root_element();
+        assert_eq!(root.attribute("count"), Some("2"));
+
+        let record_values: Vec<Vec<(String, String)>> = root
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name() == "r")
+            .map(|r| {
+                r.children()
+                    .filter(|n| n.is_element())
+                    .map(|n| {
+                        (
+                            n.tag_name().name().to_string(),
+                            n.attribute("v").unwrap_or_default().to_string(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert_eq!(
+            record_values,
+            vec![
+                vec![
+                    ("s".to_string(), "Alice".to_string()),
+                    ("n".to_string(), "30".to_string()),
+                ],
+                vec![
+                    ("s".to_string(), "Bob".to_string()),
+                    ("n".to_string(), "25".to_string()),
+                ],
+            ]
+        );
+    }
 }
