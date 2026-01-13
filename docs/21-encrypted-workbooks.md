@@ -409,6 +409,8 @@ When implementing (or calling) encrypted-workbook support:
 
 - **MS-OFFCRYPTO** — Office Document Cryptography Structure Specification  
   https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/
+- **MS-CFB** — Compound File Binary File Format (OLE Structured Storage)  
+  https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cfb/
 - **MS-XLS** — Excel Binary File Format (`FILEPASS`, BIFF globals)  
   https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-xls/
 - **MS-XLSX** — Office Open XML SpreadsheetML Package Structure  
