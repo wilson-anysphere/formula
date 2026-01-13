@@ -28,9 +28,9 @@ function run(cmd, args, { cwd = desktopDir, env = process.env, shell = process.p
 }
 
 async function main() {
-  // Keep this script fast and cross-platform. We want to analyze the Vite/Rollup
-  // bundle, so we invoke the build steps directly instead of going through `pnpm build`
-  // (which would also run the workspace `prebuild` hook to rebuild the Rust/WASM engine).
+  // Keep this script cross-platform and resilient. We set the env var and run the
+  // Vite build directly (mirroring the `build` script body) to generate bundle stats,
+  // without relying on the workspace `prebuild` hook.
   const env = { ...process.env, VITE_BUNDLE_ANALYZE: "1" };
 
   const pyodideCode = await run(process.execPath, ["scripts/ensure-pyodide-assets.mjs"], { env });

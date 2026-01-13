@@ -13,6 +13,8 @@ This enables `rollup-plugin-visualizer` via `VITE_BUNDLE_ANALYZE=1` and writes t
 - `apps/desktop/dist/bundle-stats.html` (interactive treemap)
 - `apps/desktop/dist/bundle-stats.json` (raw data)
 
+Note: `pnpm -C apps/desktop build:analyze` sets `VITE_BUNDLE_ANALYZE=1` automatically.
+
 Normal builds (`pnpm -C apps/desktop build`) are unchanged unless `VITE_BUNDLE_ANALYZE=1` is set.
 
 ## JS bundle size budgets (CI guard)
