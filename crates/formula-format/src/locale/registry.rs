@@ -140,17 +140,15 @@ fn normalize_locale_id(id: &str) -> Option<&'static str> {
 
     // Parse BCP-47 tags and variants such as `de-CH-1996` or `fr-Latn-FR-u-nu-latn`. We only care
     // about the language + optional region, ignoring script/variants/extensions.
-    let parts: Vec<&str> = key.split('-').filter(|p| !p.is_empty()).collect();
-    let lang = *parts.first()?;
-    let mut idx = 1;
-    if parts
-        .get(idx)
-        .is_some_and(|p| p.len() == 4 && p.chars().all(|c| c.is_ascii_alphabetic()))
-    {
-        idx += 1;
+    let mut parts = key.split('-').filter(|p| !p.is_empty());
+    let lang = parts.next()?;
+    let mut next = parts.next();
+    // Optional script subtag (4 alpha characters) comes before the region.
+    if next.is_some_and(|p| p.len() == 4 && p.chars().all(|c| c.is_ascii_alphabetic())) {
+        next = parts.next();
     }
 
-    let region = parts.get(idx).copied().filter(|p| {
+    let region = next.filter(|p| {
         (p.len() == 2 && p.chars().all(|c| c.is_ascii_alphabetic()))
             || (p.len() == 3 && p.chars().all(|c| c.is_ascii_digit()))
     });
