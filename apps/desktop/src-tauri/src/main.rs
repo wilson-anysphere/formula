@@ -208,7 +208,16 @@ fn should_log_startup_metrics() -> bool {
     if cfg!(debug_assertions) {
         return true;
     }
-    match std::env::var("FORMULA_STARTUP_METRICS") {
+    env_flag_truthy("FORMULA_STARTUP_METRICS")
+}
+
+#[cfg(not(debug_assertions))]
+fn should_disable_startup_update_check() -> bool {
+    env_flag_truthy("FORMULA_DISABLE_STARTUP_UPDATE_CHECK")
+}
+
+fn env_flag_truthy(name: &str) -> bool {
+    match std::env::var(name) {
         Ok(raw) => {
             let v = raw.trim().to_ascii_lowercase();
             !(v.is_empty() || v == "0" || v == "false")
@@ -1487,40 +1496,42 @@ fn main() {
             // in release builds; users can also trigger checks from the tray menu.
             #[cfg(not(debug_assertions))]
             {
-                // Tauri does not guarantee that emitted events are queued before JS listeners are
-                // registered. To avoid dropping fast startup update notifications, the frontend
-                // emits `updater-ui-ready` once it has installed its updater event listeners.
-                // Only then do we run the startup update check.
-                let handle = app.handle().clone();
-                let started = Arc::new(AtomicBool::new(false));
-                let listener = Arc::new(Mutex::new(None));
+                if !should_disable_startup_update_check() {
+                    // Tauri does not guarantee that emitted events are queued before JS listeners are
+                    // registered. To avoid dropping fast startup update notifications, the frontend
+                    // emits `updater-ui-ready` once it has installed its updater event listeners.
+                    // Only then do we run the startup update check.
+                    let handle = app.handle().clone();
+                    let started = Arc::new(AtomicBool::new(false));
+                    let listener = Arc::new(Mutex::new(None));
 
-                let started_for_listener = started.clone();
-                let listener_for_listener = listener.clone();
-                let handle_for_listener = handle.clone();
+                    let started_for_listener = started.clone();
+                    let listener_for_listener = listener.clone();
+                    let handle_for_listener = handle.clone();
 
-                let id = handle.listen("updater-ui-ready", move |_| {
-                    if started_for_listener.swap(true, Ordering::SeqCst) {
-                        return;
-                    }
+                    let id = handle.listen("updater-ui-ready", move |_| {
+                        if started_for_listener.swap(true, Ordering::SeqCst) {
+                            return;
+                        }
 
-                    if let Some(id) = listener_for_listener.lock().unwrap().take() {
-                        handle_for_listener.unlisten(id);
-                    }
+                        if let Some(id) = listener_for_listener.lock().unwrap().take() {
+                            handle_for_listener.unlisten(id);
+                        }
 
-                    updater::spawn_update_check(
-                        &handle_for_listener,
-                        updater::UpdateCheckSource::Startup,
-                    );
-                });
+                        updater::spawn_update_check(
+                            &handle_for_listener,
+                            updater::UpdateCheckSource::Startup,
+                        );
+                    });
 
-                *listener.lock().unwrap() = Some(id);
+                    *listener.lock().unwrap() = Some(id);
 
-                // Extremely defensive: if the readiness signal fires before we store `id`, make
-                // sure the listener is still unregistered.
-                if started.load(Ordering::SeqCst) {
-                    if let Some(id) = listener.lock().unwrap().take() {
-                        handle.unlisten(id);
+                    // Extremely defensive: if the readiness signal fires before we store `id`, make
+                    // sure the listener is still unregistered.
+                    if started.load(Ordering::SeqCst) {
+                        if let Some(id) = listener.lock().unwrap().take() {
+                            handle.unlisten(id);
+                        }
                     }
                 }
             }

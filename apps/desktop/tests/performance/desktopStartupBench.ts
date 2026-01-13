@@ -12,6 +12,12 @@ import {
   type StartupMetrics,
 } from './desktopStartupRunnerShared.ts';
 
+// Benchmark environment knobs:
+// - `FORMULA_DISABLE_STARTUP_UPDATE_CHECK=1` prevents the release updater from running a
+//   background check/download on startup, which can add nondeterministic CPU/memory/network
+//   activity and skew startup/idle-memory benchmarks.
+// - `FORMULA_STARTUP_METRICS=1` enables the Rust-side one-line startup metrics log we parse.
+
 function buildResult(name: string, values: number[], targetMs: number): BenchmarkResult {
   const sorted = [...values].sort((a, b) => a - b);
   const avg = mean(sorted);
@@ -34,7 +40,6 @@ function buildResult(name: string, values: number[], targetMs: number): Benchmar
     passed: p95 <= targetMs,
   };
 }
-
 export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> {
   if (process.env.FORMULA_RUN_DESKTOP_STARTUP_BENCH !== '1') {
     return [];
@@ -54,7 +59,13 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   for (let i = 0; i < runs; i += 1) {
     // eslint-disable-next-line no-console
     console.log(`[desktop-startup] run ${i + 1}/${runs}...`);
-    metrics.push(await runOnce({ binPath, timeoutMs, envOverrides: {} }));
+    metrics.push(
+      await runOnce({
+        binPath,
+        timeoutMs,
+        envOverrides: { FORMULA_DISABLE_STARTUP_UPDATE_CHECK: '1' },
+      }),
+    );
   }
 
   const windowVisible = metrics.map((m) => m.windowVisibleMs);

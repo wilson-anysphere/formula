@@ -8,6 +8,12 @@ import {
   type StartupMetrics,
 } from "./desktopStartupRunnerShared.ts";
 
+// Benchmark environment knobs:
+// - `FORMULA_DISABLE_STARTUP_UPDATE_CHECK=1` prevents the release updater from running a
+//   background check/download on startup, which can add nondeterministic CPU/memory/network
+//   activity and skew startup/idle-memory measurements.
+// - `FORMULA_STARTUP_METRICS=1` enables the Rust-side one-line startup metrics log we parse.
+
 type Summary = {
   runs: number;
   windowVisible: { p50: number; p95: number };
@@ -74,7 +80,13 @@ async function main(): Promise<void> {
   for (let i = 0; i < runs; i += 1) {
     // eslint-disable-next-line no-console
     console.log(`[desktop-startup] run ${i + 1}/${runs}...`);
-    results.push(await runOnce({ binPath, timeoutMs, envOverrides: {} }));
+    results.push(
+      await runOnce({
+        binPath,
+        timeoutMs,
+        envOverrides: { FORMULA_DISABLE_STARTUP_UPDATE_CHECK: "1" },
+      }),
+    );
   }
 
   const windowVisible = results.map((r) => r.windowVisibleMs).sort((a, b) => a - b);
