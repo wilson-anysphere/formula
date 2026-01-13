@@ -75,6 +75,7 @@ def _ensure_full_diff_entries(
     rust_out = triage_mod._run_rust_triage(  # noqa: SLF001 (internal reuse)
         rust_exe,
         workbook.data,
+        workbook_name=workbook.display_name,
         diff_ignore=diff_ignore,
         diff_limit=diff_limit,
         recalc=False,
@@ -91,6 +92,7 @@ def _ensure_full_diff_entries(
         rust_out = triage_mod._run_rust_triage(  # noqa: SLF001 (internal reuse)
             rust_exe,
             workbook.data,
+            workbook_name=workbook.display_name,
             diff_ignore=diff_ignore,
             diff_limit=total,
             recalc=False,
@@ -540,6 +542,11 @@ def main() -> int:
         help="Additional part path to ignore during diff (can be repeated).",
     )
     parser.add_argument(
+        "--no-default-diff-ignore",
+        action="store_true",
+        help="Do not ignore default noisy parts (docProps/*).",
+    )
+    parser.add_argument(
         "--diff-limit",
         type=int,
         default=25000,
@@ -569,7 +576,10 @@ def main() -> int:
     workbook = read_workbook_input(args.input, fernet_key=fernet_key)
 
     rust_exe = triage_mod._build_rust_helper()  # noqa: SLF001 (internal reuse)
-    diff_ignore = set(triage_mod.DEFAULT_DIFF_IGNORE) | {p for p in args.diff_ignore if p}
+    diff_ignore = triage_mod._compute_diff_ignore(  # noqa: SLF001 (internal reuse)
+        diff_ignore=args.diff_ignore,
+        use_default=not args.no_default_diff_ignore,
+    )
 
     summary = minimize_workbook(
         workbook,
