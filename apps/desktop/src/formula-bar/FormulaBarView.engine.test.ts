@@ -154,8 +154,10 @@ describe("FormulaBarView WASM editor tooling integration", () => {
 
     view.setActiveCell({ address: "A1", input: "", value: null });
     view.focus({ cursor: "end" });
-    view.textarea.value = "=ROUND(1, 2)";
-    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    const draft = "=ROUND(1, 2)";
+    const cursor = draft.indexOf("1") + 1;
+    view.textarea.value = draft;
+    view.textarea.setSelectionRange(cursor, cursor);
     view.textarea.dispatchEvent(new Event("input"));
     await flushTooling();
 
