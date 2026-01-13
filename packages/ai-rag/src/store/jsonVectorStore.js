@@ -40,8 +40,9 @@ export class JsonVectorStore extends InMemoryVectorStore {
    *   resetOnCorrupt?: boolean
    * }} opts
    * @param {boolean} [opts.resetOnCorrupt]
-   *   When true, invalid persisted payloads are cleared (via `storage.remove()` when
-   *   available) and the store loads as empty. When false, invalid payloads are
+   *   When true (default), invalid persisted payloads are cleared (via
+   *   `storage.remove()` when available, otherwise by overwriting with an empty
+   *   payload) and the store loads as empty. When false, invalid payloads are
    *   ignored but left in storage (matching the historical behaviour).
    */
   constructor(opts) {
