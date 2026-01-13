@@ -74,6 +74,55 @@ where
     }
 }
 
+/// Convert a parsed slicer selection into a pivot-engine filter field, using `resolve` to map
+/// slicer item keys to typed [`formula_engine::pivot::PivotKeyPart`]s.
+///
+/// This is useful when slicer cache items are stored as indices (`x`) into a pivot cache
+/// shared-items table; callers can resolve those indices to typed values when available.
+///
+/// If Excel does not persist explicit selection state, slicers behave as "All selected".
+/// This is represented by `selection.selected_items = None`, which becomes
+/// `FilterField { allowed: None }`.
+pub fn slicer_selection_to_engine_filter_field_with_resolver(
+    field: impl Into<String>,
+    selection: &SlicerSelectionState,
+    mut resolve: impl FnMut(&str) -> Option<formula_engine::pivot::PivotKeyPart>,
+) -> formula_engine::pivot::FilterField {
+    let allowed = match &selection.selected_items {
+        None => None,
+        Some(items) => {
+            let mut selected = HashSet::with_capacity(items.len());
+            for item in items {
+                selected.insert(resolve(item).unwrap_or_else(|| {
+                    formula_engine::pivot::PivotKeyPart::Text(item.clone())
+                }));
+            }
+            Some(selected)
+        }
+    };
+
+    formula_engine::pivot::FilterField {
+        source_field: field.into(),
+        allowed,
+    }
+}
+
+/// Convert a parsed timeline selection into a pivot-engine filter field.
+///
+/// The pivot engine's filter system currently only supports an allow-list of discrete values.
+/// Timeline selections are defined as a date range, which cannot be represented without knowing
+/// the set of date values in the underlying cache. For now we return `allowed: None` and leave
+/// range filtering to the caller.
+pub fn timeline_selection_to_engine_filter_field(
+    field: impl Into<String>,
+    _selection: &TimelineSelectionState,
+) -> formula_engine::pivot::FilterField {
+    formula_engine::pivot::FilterField {
+        source_field: field.into(),
+        allowed: None,
+    }
+}
+
 /// Convert a parsed timeline selection into a model-level row filter.
 ///
 /// If the ISO date strings cannot be parsed, the corresponding endpoint is left unset.
@@ -1071,4 +1120,50 @@ fn parse_timeline_cache_xml(xml: &[u8]) -> Result<ParsedTimelineCacheXml, XlsxEr
         level,
         pivot_table_rids,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn slicer_selection_to_engine_filter_field_items() {
+        let mut selected_items = HashSet::new();
+        selected_items.insert("East".to_string());
+        let selection = SlicerSelectionState {
+            available_items: Vec::new(),
+            selected_items: Some(selected_items),
+        };
+
+        let actual =
+            slicer_selection_to_engine_filter_field_with_resolver("Region", &selection, |_| None);
+
+        let mut expected_allowed = HashSet::new();
+        expected_allowed.insert(formula_engine::pivot::PivotKeyPart::Text("East".to_string()));
+        let expected = formula_engine::pivot::FilterField {
+            source_field: "Region".to_string(),
+            allowed: Some(expected_allowed),
+        };
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn slicer_selection_to_engine_filter_field_all() {
+        let selection = SlicerSelectionState {
+            available_items: Vec::new(),
+            selected_items: None,
+        };
+
+        let actual =
+            slicer_selection_to_engine_filter_field_with_resolver("Region", &selection, |_| None);
+
+        let expected = formula_engine::pivot::FilterField {
+            source_field: "Region".to_string(),
+            allowed: None,
+        };
+
+        assert_eq!(actual, expected);
+    }
 }
