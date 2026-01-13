@@ -324,6 +324,27 @@ globalThis.crossOriginIsolated
 typeof SharedArrayBuffer !== "undefined"
 ```
 
+## Production/Tauri: clipboard smoke check
+
+The packaged Tauri app should be able to round-trip key clipboard formats (at minimum `text/plain`, `text/html`, and
+`image/png`) via the native clipboard backends. This helps catch OS-specific regressions in Windows CF_HTML/PNG handling,
+macOS pasteboard conversions, etc.
+
+### Quick check (opt-in)
+
+Run the automated smoke check:
+
+```bash
+pnpm -C apps/desktop check:clipboard
+```
+
+This builds the production frontend + a release desktop binary and launches it in a special mode that writes/reads
+clipboard formats and exits with:
+
+- `0` on success
+- `1` on functional failure (clipboard APIs available but incorrect)
+- `2` on internal error/timeout (e.g. backend unavailable)
+
 ## Extensions / Marketplace (Tauri/WebView runtime — no Node)
 
 Formula Desktop runs extensions inside the **WebView** runtime (no Electron-style Node integration).

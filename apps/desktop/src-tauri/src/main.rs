@@ -8,6 +8,7 @@ mod menu;
 mod shortcuts;
 mod tray;
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use desktop::clipboard;
 use desktop::commands;
 use desktop::ed25519_verifier;
@@ -971,6 +972,453 @@ async fn oauth_loopback_listen(
     Ok(())
 }
 
+fn normalize_base64_for_smoke_check(mut base64: &str) -> &str {
+    base64 = base64.trim();
+    if base64
+        .get(0..5)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("data:"))
+    {
+        // Scan only a small prefix for the comma separator so malformed inputs like
+        // `data:AAAAA...` don't force an O(n) search over huge payloads.
+        let comma = base64
+            .as_bytes()
+            .iter()
+            .take(1024)
+            .position(|&b| b == b',');
+        if let Some(comma) = comma {
+            base64 = &base64[comma + 1..];
+        } else {
+            // Malformed data URL (missing comma separator). Treat as empty so we don't
+            // accidentally decode `data:...` as base64.
+            return "";
+        }
+    }
+    base64.trim()
+}
+
+fn describe_clipboard_content(content: &clipboard::ClipboardContent) -> String {
+    let text = content
+        .text
+        .as_ref()
+        .map(|s| format!("text={}B", s.as_bytes().len()))
+        .unwrap_or_else(|| "text=<none>".to_string());
+    let html = content
+        .html
+        .as_ref()
+        .map(|s| format!("html={}B", s.as_bytes().len()))
+        .unwrap_or_else(|| "html=<none>".to_string());
+    let rtf = content
+        .rtf
+        .as_ref()
+        .map(|s| format!("rtf={}B", s.as_bytes().len()))
+        .unwrap_or_else(|| "rtf=<none>".to_string());
+    let png = content
+        .image_png_base64
+        .as_ref()
+        .map(|s| format!("png_base64={} chars", s.len()))
+        .unwrap_or_else(|| "png=<none>".to_string());
+    format!("{text} {html} {rtf} {png}")
+}
+
+fn clipboard_smoke_check_write(
+    _app: &tauri::AppHandle,
+    payload: clipboard::ClipboardWritePayload,
+) -> Result<(), clipboard::ClipboardError> {
+    #[cfg(target_os = "macos")]
+    {
+        // Clipboard APIs on macOS call into AppKit, which is not thread-safe. Dispatch to the
+        // main thread before touching NSPasteboard.
+        use tauri::Manager as _;
+        return _app
+            .run_on_main_thread(move || clipboard::write(&payload))
+            .map_err(|e| clipboard::ClipboardError::OperationFailed(e.to_string()))?;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        clipboard::write(&payload)
+    }
+}
+
+fn clipboard_smoke_check_read(
+    _app: &tauri::AppHandle,
+) -> Result<clipboard::ClipboardContent, clipboard::ClipboardError> {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::Manager as _;
+        return _app
+            .run_on_main_thread(clipboard::read)
+            .map_err(|e| clipboard::ClipboardError::OperationFailed(e.to_string()))?;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        clipboard::read()
+    }
+}
+
+fn clipboard_smoke_check_read_until(
+    app: &tauri::AppHandle,
+    attempts: usize,
+    delay: Duration,
+    predicate: impl Fn(&clipboard::ClipboardContent) -> bool,
+) -> Result<(clipboard::ClipboardContent, bool), clipboard::ClipboardError> {
+    let mut last: Option<clipboard::ClipboardContent> = None;
+    for _ in 0..attempts {
+        let content = clipboard_smoke_check_read(app)?;
+        if predicate(&content) {
+            return Ok((content, true));
+        }
+        last = Some(content);
+        std::thread::sleep(delay);
+    }
+    Ok((last.unwrap_or_default(), false))
+}
+
+fn is_valid_png_base64(base64: &str) -> bool {
+    const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    let normalized = normalize_base64_for_smoke_check(base64);
+    if normalized.is_empty() {
+        return false;
+    }
+    let Ok(decoded) = STANDARD.decode(normalized) else {
+        return false;
+    };
+    decoded.starts_with(&PNG_SIGNATURE) && decoded.len() > PNG_SIGNATURE.len()
+}
+
+fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
+    const READ_ATTEMPTS: usize = 20;
+    const PNG_FIXTURE_BASE64: &str =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO9C9VwAAAAASUVORK5CYII=";
+
+    let delay = Duration::from_millis(50);
+
+    let token = format!("formula-clipboard-smoke-check-{}", Uuid::new_v4());
+    println!("[formula][clipboard-check] token={token}");
+
+    let mut functional_failures: Vec<String> = Vec::new();
+    let mut internal_errors: Vec<String> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+
+    // -----------------------------------------------------------------------
+    // Mandatory: text/plain
+    let expected_text = format!("Formula clipboard smoke check (text/plain): {token}");
+    println!(
+        "[formula][clipboard-check] text/plain: writing {} bytes",
+        expected_text.as_bytes().len()
+    );
+    let text_payload = clipboard::ClipboardWritePayload {
+        text: Some(expected_text.clone()),
+        html: None,
+        rtf: None,
+        image_png_base64: None,
+    };
+    let text_written = match clipboard_smoke_check_write(app, text_payload) {
+        Ok(()) => true,
+        Err(err) => {
+            eprintln!("[formula][clipboard-check] text/plain: write error: {err}");
+            match err {
+                clipboard::ClipboardError::OperationFailed(_) => {
+                    functional_failures.push(format!("text/plain write failed: {err}"));
+                }
+                clipboard::ClipboardError::UnsupportedPlatform
+                | clipboard::ClipboardError::Unavailable(_)
+                | clipboard::ClipboardError::InvalidPayload(_) => {
+                    internal_errors.push(format!("text/plain write error: {err}"));
+                }
+            }
+            false
+        }
+    };
+
+    if text_written {
+        match clipboard_smoke_check_read_until(app, READ_ATTEMPTS, delay, |content| {
+            content.text.as_deref() == Some(&expected_text)
+        }) {
+            Ok((content, ok)) => {
+                if ok {
+                    println!("[formula][clipboard-check] text/plain: OK");
+                } else {
+                    eprintln!(
+                        "[formula][clipboard-check] text/plain: FAIL (expected exact match, got {})",
+                        describe_clipboard_content(&content)
+                    );
+                    functional_failures.push(format!(
+                        "text/plain mismatch: expected {expected_text:?} got {:?}",
+                        content.text
+                    ));
+                }
+            }
+            Err(err) => {
+                eprintln!("[formula][clipboard-check] text/plain: read error: {err}");
+                match err {
+                    clipboard::ClipboardError::OperationFailed(_) => {
+                        functional_failures.push(format!("text/plain read failed: {err}"));
+                    }
+                    clipboard::ClipboardError::UnsupportedPlatform
+                    | clipboard::ClipboardError::Unavailable(_)
+                    | clipboard::ClipboardError::InvalidPayload(_) => {
+                        internal_errors.push(format!("text/plain read error: {err}"));
+                    }
+                }
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Optional: text/html
+    let html_marker = format!("Formula clipboard smoke check (text/html): {token}");
+    let html_payload_str = format!("<div><strong>{html_marker}</strong></div>");
+    println!(
+        "[formula][clipboard-check] text/html: writing {} bytes",
+        html_payload_str.as_bytes().len()
+    );
+    let html_payload = clipboard::ClipboardWritePayload {
+        text: Some(html_marker.clone()),
+        html: Some(html_payload_str.clone()),
+        rtf: None,
+        image_png_base64: None,
+    };
+
+    let html_written = match clipboard_smoke_check_write(app, html_payload) {
+        Ok(()) => true,
+        Err(err) => {
+            match err {
+                clipboard::ClipboardError::UnsupportedPlatform | clipboard::ClipboardError::Unavailable(_) => {
+                    println!("[formula][clipboard-check] text/html: SKIP ({err})");
+                    skipped.push(format!("text/html: {err}"));
+                }
+                clipboard::ClipboardError::InvalidPayload(_) => {
+                    eprintln!("[formula][clipboard-check] text/html: INTERNAL ERROR ({err})");
+                    internal_errors.push(format!("text/html invalid payload: {err}"));
+                }
+                clipboard::ClipboardError::OperationFailed(_) => {
+                    eprintln!("[formula][clipboard-check] text/html: FAIL (write error: {err})");
+                    functional_failures.push(format!("text/html write failed: {err}"));
+                }
+            }
+            false
+        }
+    };
+
+    if html_written {
+        match clipboard_smoke_check_read_until(app, READ_ATTEMPTS, delay, |content| {
+            content
+                .html
+                .as_deref()
+                .is_some_and(|html| !html.trim().is_empty() && html.contains(&html_marker))
+        }) {
+            Ok((content, ok)) => {
+                if ok {
+                    let len = content.html.as_ref().map(|s| s.as_bytes().len()).unwrap_or(0);
+                    println!("[formula][clipboard-check] text/html: OK (read {len} bytes)");
+                } else {
+                    eprintln!(
+                        "[formula][clipboard-check] text/html: FAIL (missing/invalid HTML; got {})",
+                        describe_clipboard_content(&content)
+                    );
+                    functional_failures.push(format!(
+                        "text/html mismatch: expected marker {html_marker:?} in html={:?}",
+                        content.html
+                    ));
+                }
+            }
+            Err(err) => match err {
+                clipboard::ClipboardError::UnsupportedPlatform | clipboard::ClipboardError::Unavailable(_) => {
+                    println!("[formula][clipboard-check] text/html: SKIP (read error: {err})");
+                    skipped.push(format!("text/html read: {err}"));
+                }
+                clipboard::ClipboardError::InvalidPayload(_) => {
+                    eprintln!("[formula][clipboard-check] text/html: INTERNAL ERROR (read error: {err})");
+                    internal_errors.push(format!("text/html read invalid payload: {err}"));
+                }
+                clipboard::ClipboardError::OperationFailed(_) => {
+                    eprintln!("[formula][clipboard-check] text/html: FAIL (read error: {err})");
+                    functional_failures.push(format!("text/html read failed: {err}"));
+                }
+            },
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Optional: text/rtf
+    let rtf_marker = format!("Formula clipboard smoke check (text/rtf): {token}");
+    let rtf_payload_str = format!(
+        "{{\\rtf1\\ansi\\deff0{{\\fonttbl{{\\f0 Arial;}}}}\\f0\\fs20 {rtf_marker}}}"
+    );
+    println!(
+        "[formula][clipboard-check] text/rtf: writing {} bytes",
+        rtf_payload_str.as_bytes().len()
+    );
+    let rtf_payload = clipboard::ClipboardWritePayload {
+        text: Some(rtf_marker.clone()),
+        html: None,
+        rtf: Some(rtf_payload_str.clone()),
+        image_png_base64: None,
+    };
+
+    let rtf_written = match clipboard_smoke_check_write(app, rtf_payload) {
+        Ok(()) => true,
+        Err(err) => {
+            match err {
+                clipboard::ClipboardError::UnsupportedPlatform | clipboard::ClipboardError::Unavailable(_) => {
+                    println!("[formula][clipboard-check] text/rtf: SKIP ({err})");
+                    skipped.push(format!("text/rtf: {err}"));
+                }
+                clipboard::ClipboardError::InvalidPayload(_) => {
+                    eprintln!("[formula][clipboard-check] text/rtf: INTERNAL ERROR ({err})");
+                    internal_errors.push(format!("text/rtf invalid payload: {err}"));
+                }
+                clipboard::ClipboardError::OperationFailed(_) => {
+                    eprintln!("[formula][clipboard-check] text/rtf: FAIL (write error: {err})");
+                    functional_failures.push(format!("text/rtf write failed: {err}"));
+                }
+            }
+            false
+        }
+    };
+
+    if rtf_written {
+        match clipboard_smoke_check_read_until(app, READ_ATTEMPTS, delay, |content| {
+            content
+                .rtf
+                .as_deref()
+                .is_some_and(|rtf| !rtf.trim().is_empty() && rtf.contains(&rtf_marker))
+        }) {
+            Ok((content, ok)) => {
+                if ok {
+                    let len = content.rtf.as_ref().map(|s| s.as_bytes().len()).unwrap_or(0);
+                    println!("[formula][clipboard-check] text/rtf: OK (read {len} bytes)");
+                } else {
+                    eprintln!(
+                        "[formula][clipboard-check] text/rtf: FAIL (missing/invalid RTF; got {})",
+                        describe_clipboard_content(&content)
+                    );
+                    functional_failures.push(format!(
+                        "text/rtf mismatch: expected marker {rtf_marker:?} in rtf={:?}",
+                        content.rtf
+                    ));
+                }
+            }
+            Err(err) => match err {
+                clipboard::ClipboardError::UnsupportedPlatform | clipboard::ClipboardError::Unavailable(_) => {
+                    println!("[formula][clipboard-check] text/rtf: SKIP (read error: {err})");
+                    skipped.push(format!("text/rtf read: {err}"));
+                }
+                clipboard::ClipboardError::InvalidPayload(_) => {
+                    eprintln!("[formula][clipboard-check] text/rtf: INTERNAL ERROR (read error: {err})");
+                    internal_errors.push(format!("text/rtf read invalid payload: {err}"));
+                }
+                clipboard::ClipboardError::OperationFailed(_) => {
+                    eprintln!("[formula][clipboard-check] text/rtf: FAIL (read error: {err})");
+                    functional_failures.push(format!("text/rtf read failed: {err}"));
+                }
+            },
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Optional: image/png (1x1 fixture)
+    println!(
+        "[formula][clipboard-check] image/png: writing {} base64 chars",
+        PNG_FIXTURE_BASE64.len()
+    );
+    let png_payload = clipboard::ClipboardWritePayload {
+        text: None,
+        html: None,
+        rtf: None,
+        image_png_base64: Some(PNG_FIXTURE_BASE64.to_string()),
+    };
+
+    let png_written = match clipboard_smoke_check_write(app, png_payload) {
+        Ok(()) => true,
+        Err(err) => {
+            match err {
+                clipboard::ClipboardError::UnsupportedPlatform | clipboard::ClipboardError::Unavailable(_) => {
+                    println!("[formula][clipboard-check] image/png: SKIP ({err})");
+                    skipped.push(format!("image/png: {err}"));
+                }
+                clipboard::ClipboardError::InvalidPayload(_) => {
+                    eprintln!("[formula][clipboard-check] image/png: INTERNAL ERROR ({err})");
+                    internal_errors.push(format!("image/png invalid payload: {err}"));
+                }
+                clipboard::ClipboardError::OperationFailed(_) => {
+                    eprintln!("[formula][clipboard-check] image/png: FAIL (write error: {err})");
+                    functional_failures.push(format!("image/png write failed: {err}"));
+                }
+            }
+            false
+        }
+    };
+
+    if png_written {
+        match clipboard_smoke_check_read_until(app, READ_ATTEMPTS, delay, |content| {
+            content
+                .image_png_base64
+                .as_deref()
+                .is_some_and(|b64| is_valid_png_base64(b64))
+        }) {
+            Ok((content, ok)) => {
+                if ok {
+                    let len = content.image_png_base64.as_ref().map(|s| s.len()).unwrap_or(0);
+                    println!("[formula][clipboard-check] image/png: OK (read {len} base64 chars)");
+                } else {
+                    eprintln!(
+                        "[formula][clipboard-check] image/png: FAIL (missing/invalid PNG; got {})",
+                        describe_clipboard_content(&content)
+                    );
+                    functional_failures.push("image/png read did not return a valid PNG payload".to_string());
+                }
+            }
+            Err(err) => match err {
+                clipboard::ClipboardError::UnsupportedPlatform | clipboard::ClipboardError::Unavailable(_) => {
+                    println!("[formula][clipboard-check] image/png: SKIP (read error: {err})");
+                    skipped.push(format!("image/png read: {err}"));
+                }
+                clipboard::ClipboardError::InvalidPayload(_) => {
+                    eprintln!("[formula][clipboard-check] image/png: INTERNAL ERROR (read error: {err})");
+                    internal_errors.push(format!("image/png read invalid payload: {err}"));
+                }
+                clipboard::ClipboardError::OperationFailed(_) => {
+                    eprintln!("[formula][clipboard-check] image/png: FAIL (read error: {err})");
+                    functional_failures.push(format!("image/png read failed: {err}"));
+                }
+            },
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Summary + exit code semantics:
+    // - 0: success
+    // - 1: functional failure (clipboard API available but incorrect)
+    // - 2: internal error/timeout (e.g. unavailable backend, eval failure)
+    if !skipped.is_empty() {
+        for item in &skipped {
+            println!("[formula][clipboard-check] skipped: {item}");
+        }
+    }
+
+    if !internal_errors.is_empty() {
+        for err in &internal_errors {
+            eprintln!("[formula][clipboard-check] internal-error: {err}");
+        }
+        eprintln!("[formula][clipboard-check] RESULT=ERROR (exit=2)");
+        return 2;
+    }
+
+    if !functional_failures.is_empty() {
+        for err in &functional_failures {
+            eprintln!("[formula][clipboard-check] failure: {err}");
+        }
+        eprintln!("[formula][clipboard-check] RESULT=FAIL (exit=1)");
+        return 1;
+    }
+
+    println!("[formula][clipboard-check] RESULT=OK (exit=0)");
+    0
+}
+
 fn main() {
     // Record a monotonic startup timestamp as early as possible so we can measure
     // cold start time-to-window-visible / time-to-interactive.
@@ -1731,6 +2179,36 @@ fn main() {
                 // The check mode should be as lightweight as possible so it can run in headless
                 // environments and exit quickly based on the WebView evaluation result.
                 return Ok(());
+            }
+
+            if std::env::args().any(|arg| arg == "--clipboard-smoke-check") {
+                // CI/developer smoke test: validate that the packaged Tauri build can write/read
+                // key clipboard formats (text/plain, text/html, text/rtf, image/png) using the
+                // native clipboard backends.
+                //
+                // Exit codes:
+                // - 0: success
+                // - 1: functional failure (clipboard APIs available but not behaving as expected)
+                // - 2: internal error/timeout (missing window, unavailable backend, etc)
+                const TIMEOUT_SECS: u64 = 20;
+                std::thread::spawn(|| {
+                    std::thread::sleep(Duration::from_secs(TIMEOUT_SECS));
+                    eprintln!(
+                        "[formula][clipboard-check] timed out after {TIMEOUT_SECS}s (check did not complete)"
+                    );
+                    std::process::exit(2);
+                });
+
+                // Ensure the main window exists so the smoke check matches the packaged app's
+                // runtime environment (and so we fail fast if Tauri fails to initialize).
+                let Some(_window) = app.get_webview_window("main") else {
+                    eprintln!("[formula][clipboard-check] missing main window");
+                    std::process::exit(2);
+                };
+
+                let handle = app.handle().clone();
+                let code = run_clipboard_smoke_check(&handle);
+                std::process::exit(code);
             }
 
             tray::init(app)?;
