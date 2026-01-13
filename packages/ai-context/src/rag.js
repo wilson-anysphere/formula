@@ -3,6 +3,18 @@ import { extractSheetSchema } from "./schema.js";
 import { throwIfAborted } from "./abort.js";
 
 /**
+ * @param {any} sheet
+ */
+function normalizeSheetOrigin(sheet) {
+  if (!sheet || typeof sheet !== "object" || !sheet.origin || typeof sheet.origin !== "object") {
+    return { row: 0, col: 0 };
+  }
+  const row = Number.isInteger(sheet.origin.row) && sheet.origin.row >= 0 ? sheet.origin.row : 0;
+  const col = Number.isInteger(sheet.origin.col) && sheet.origin.col >= 0 ? sheet.origin.col : 0;
+  return { row, col };
+}
+
+/**
  * @param {string} input
  */
 function hashString(input) {
@@ -140,38 +152,138 @@ export class InMemoryVectorStore {
 
 /**
  * @param {unknown[][]} values
- * @param {{ startRow: number, startCol: number, endRow: number, endCol: number }} range
  */
-function slice2D(values, range) {
-  /** @type {unknown[][]} */
-  const out = [];
-  for (let r = range.startRow; r <= range.endRow; r++) {
-    const row = values[r] ?? [];
-    out.push(row.slice(range.startCol, range.endCol + 1));
+function getMatrixBounds(values) {
+  const rowCount = Array.isArray(values) ? values.length : 0;
+  let colCount = 0;
+  for (const row of values) {
+    colCount = Math.max(colCount, row?.length ?? 0);
   }
-  return out;
+  return { rowCount, colCount };
 }
 
 /**
- * @param {unknown[][]} matrix
+ * Clamp a rect range (0-based, inclusive) to the bounds of a matrix.
+ *
+ * Returns null when the range does not intersect the provided matrix at all.
+ *
+ * @param {{ rowCount: number, colCount: number }} bounds
+ * @param {{ startRow: number, startCol: number, endRow: number, endCol: number }} range
+ */
+function clampRangeToMatrixBounds(bounds, range) {
+  const rowCount = bounds.rowCount;
+  const colCount = bounds.colCount;
+  if (rowCount === 0 || colCount === 0) return null;
+
+  if (range.endRow < 0 || range.endCol < 0) return null;
+  if (range.startRow >= rowCount || range.startCol >= colCount) return null;
+
+  const startRow = Math.max(0, Math.min(range.startRow, rowCount - 1));
+  const endRow = Math.max(0, Math.min(range.endRow, rowCount - 1));
+  const startCol = Math.max(0, Math.min(range.startCol, colCount - 1));
+  const endCol = Math.max(0, Math.min(range.endCol, colCount - 1));
+
+  if (endRow < startRow || endCol < startCol) return null;
+  return { startRow, startCol, endRow, endCol };
+}
+
+/**
+ * Convert a sub-range of a sheet's value matrix to TSV.
+ *
+ * This is intentionally streaming-ish: it only reads up to `maxRows` rows from `values`
+ * rather than allocating a full `slice2D()` copy of the entire range.
+ *
+ * @param {unknown[][]} values
+ * @param {{ startRow: number, startCol: number, endRow: number, endCol: number }} range
  * @param {{ maxRows: number }} options
  */
-function matrixToTsv(matrix, options) {
+function valuesRangeToTsv(values, range, options) {
   const lines = [];
-  const limit = Math.min(matrix.length, options.maxRows);
-  for (let r = 0; r < limit; r++) {
-    const row = matrix[r];
-    lines.push(row.map((v) => (isCellEmpty(v) ? "" : String(v))).join("\t"));
+  const totalRows = range.endRow - range.startRow + 1;
+  const totalCols = range.endCol - range.startCol + 1;
+  const limit = Math.min(totalRows, options.maxRows);
+
+  for (let rOffset = 0; rOffset < limit; rOffset++) {
+    const row = values[range.startRow + rOffset] ?? [];
+    // Avoid allocating an intermediate row slice; build the line directly.
+    /** @type {string[]} */
+    const cells = new Array(totalCols);
+    for (let cOffset = 0; cOffset < totalCols; cOffset++) {
+      const v = row[range.startCol + cOffset];
+      cells[cOffset] = isCellEmpty(v) ? "" : String(v);
+    }
+    lines.push(cells.join("\t"));
   }
-  if (matrix.length > limit) lines.push(`… (${matrix.length - limit} more rows)`);
+
+  if (totalRows > limit) lines.push(`… (${totalRows - limit} more rows)`);
   return lines.join("\n");
+}
+
+/**
+ * @param {{ startRow: number, endRow: number }} rect
+ * @param {{ windowSize: number, overlap: number, maxChunks: number }} options
+ */
+function splitRectByRowWindows(rect, options) {
+  const rowCount = rect.endRow - rect.startRow + 1;
+  const windowSize = Math.max(1, Math.floor(options.windowSize));
+  const overlap = Math.max(0, Math.min(Math.floor(options.overlap), windowSize - 1));
+  const maxChunks = Math.max(1, Math.floor(options.maxChunks));
+
+  if (maxChunks === 1) {
+    return [{ startRow: rect.startRow, endRow: rect.endRow, index: 0 }];
+  }
+
+  if (rowCount <= windowSize) {
+    return [{ startRow: rect.startRow, endRow: rect.endRow, index: 0 }];
+  }
+
+  // Default stride tries to preserve a small overlap between windows.
+  let step = Math.max(1, windowSize - overlap);
+
+  const idealChunks = Math.ceil((rowCount - windowSize) / step) + 1;
+  if (idealChunks > maxChunks) {
+    // If we'd generate too many chunks, increase the stride to fit within the cap.
+    // This may introduce gaps, but keeps indexing bounded for very tall tables.
+    step = Math.max(1, Math.ceil((rowCount - windowSize) / (maxChunks - 1)));
+  }
+
+  /** @type {{ startRow: number, endRow: number, index: number }[]} */
+  const windows = [];
+  for (let i = 0; i < maxChunks; i++) {
+    const startRow = rect.startRow + i * step;
+    if (startRow > rect.endRow) break;
+    const endRow = Math.min(rect.endRow, startRow + windowSize - 1);
+    windows.push({ startRow, endRow, index: i });
+    if (endRow === rect.endRow) break;
+  }
+
+  // Ensure we always include a trailing window ending at `rect.endRow` so bottom-of-table
+  // queries have something to retrieve, even when `maxChunks` forces a large stride.
+  const last = windows[windows.length - 1];
+  if (last && last.endRow < rect.endRow) {
+    const startRow = Math.max(rect.startRow, rect.endRow - windowSize + 1);
+    const endRow = rect.endRow;
+    if (windows.length < maxChunks) {
+      windows.push({ startRow, endRow, index: windows.length });
+    } else {
+      windows[windows.length - 1] = { startRow, endRow, index: last.index };
+    }
+  }
+
+  return windows;
 }
 
 /**
  * Chunk a sheet by detected regions for a simple RAG pipeline.
  *
- * @param {{ name: string, values: unknown[][] }} sheet
- * @param {{ maxChunkRows?: number, signal?: AbortSignal }} [options]
+ * @param {{ name: string, values: unknown[][], origin?: { row: number, col: number } }} sheet
+ * @param {{
+ *   maxChunkRows?: number,
+ *   splitByRowWindows?: boolean,
+ *   rowOverlap?: number,
+ *   maxChunksPerRegion?: number,
+ *   signal?: AbortSignal
+ * }} [options]
  */
 export function chunkSheetByRegions(sheet, options = {}) {
   return chunkSheetByRegionsWithSchema(sheet, options).chunks;
@@ -181,8 +293,14 @@ export function chunkSheetByRegions(sheet, options = {}) {
  * Chunk a sheet by detected regions for a simple RAG pipeline, reusing a single
  * schema extraction pass.
  *
- * @param {{ name: string, values: unknown[][] }} sheet
- * @param {{ maxChunkRows?: number, signal?: AbortSignal }} [options]
+ * @param {{ name: string, values: unknown[][], origin?: { row: number, col: number } }} sheet
+ * @param {{
+ *   maxChunkRows?: number,
+ *   splitByRowWindows?: boolean,
+ *   rowOverlap?: number,
+ *   maxChunksPerRegion?: number,
+ *   signal?: AbortSignal
+ * }} [options]
  * @returns {{ schema: ReturnType<typeof extractSheetSchema>, chunks: ReturnType<typeof chunkSheetByRegions> }}
  */
 export function chunkSheetByRegionsWithSchema(sheet, options = {}) {
@@ -190,35 +308,60 @@ export function chunkSheetByRegionsWithSchema(sheet, options = {}) {
   throwIfAborted(signal);
   const schema = extractSheetSchema(sheet, { signal });
   const maxChunkRows = options.maxChunkRows ?? 30;
-  const origin =
-    sheet && typeof sheet === "object" && sheet.origin && typeof sheet.origin === "object"
-      ? {
-          row: Number.isInteger(sheet.origin.row) && sheet.origin.row >= 0 ? sheet.origin.row : 0,
-          col: Number.isInteger(sheet.origin.col) && sheet.origin.col >= 0 ? sheet.origin.col : 0,
-        }
-      : { row: 0, col: 0 };
+  const splitByRowWindows = options.splitByRowWindows ?? false;
+  const rowOverlap = options.rowOverlap ?? 3;
+  const maxChunksPerRegion = options.maxChunksPerRegion ?? 50;
+  const origin = normalizeSheetOrigin(sheet);
+  const matrixBounds = getMatrixBounds(sheet.values);
 
-  const chunks = schema.dataRegions.map((region, index) => {
+  /** @type {{ id: string, range: string, text: string, metadata: any }[]} */
+  const chunks = [];
+
+  for (let regionIndex = 0; regionIndex < schema.dataRegions.length; regionIndex++) {
     throwIfAborted(signal);
-    const parsed = parseRangeFromSchemaRange(region.range);
-    const localRange =
-      origin.row === 0 && origin.col === 0
-        ? parsed
-        : normalizeRange({
-            startRow: parsed.startRow - origin.row,
-            endRow: parsed.endRow - origin.row,
-            startCol: parsed.startCol - origin.col,
-            endCol: parsed.endCol - origin.col,
-          });
-    const matrix = slice2D(sheet.values, localRange);
-    const text = matrixToTsv(matrix, { maxRows: maxChunkRows });
-    return {
-      id: `${sheet.name}-region-${index + 1}`,
-      range: region.range,
-      text,
-      metadata: { type: "region", sheetName: sheet.name },
-    };
-  });
+    const region = schema.dataRegions[regionIndex];
+    const parsedAbs = parseRangeFromSchemaRange(region.range);
+
+    const regionRectAbs = normalizeRange(parsedAbs);
+    const windows = splitByRowWindows
+      ? splitRectByRowWindows(
+          { startRow: regionRectAbs.startRow, endRow: regionRectAbs.endRow },
+          { windowSize: maxChunkRows, overlap: rowOverlap, maxChunks: maxChunksPerRegion },
+        )
+      : [{ startRow: regionRectAbs.startRow, endRow: regionRectAbs.endRow, index: 0 }];
+
+    const baseId = `${sheet.name}-region-${regionIndex + 1}`;
+    const originSuffix = origin.row !== 0 || origin.col !== 0 ? `-o${origin.row}x${origin.col}` : "";
+
+    for (const window of windows) {
+      throwIfAborted(signal);
+      const windowRectAbs = {
+        startRow: window.startRow,
+        endRow: window.endRow,
+        startCol: regionRectAbs.startCol,
+        endCol: regionRectAbs.endCol,
+      };
+
+      const windowRangeA1 = rangeToA1({ ...windowRectAbs, sheetName: sheet.name });
+
+      const localRangeRaw = {
+        startRow: windowRectAbs.startRow - origin.row,
+        endRow: windowRectAbs.endRow - origin.row,
+        startCol: windowRectAbs.startCol - origin.col,
+        endCol: windowRectAbs.endCol - origin.col,
+      };
+
+      const localRange = clampRangeToMatrixBounds(matrixBounds, localRangeRaw);
+      const text = localRange ? valuesRangeToTsv(sheet.values, localRange, { maxRows: maxChunkRows }) : "";
+
+      chunks.push({
+        id: `${baseId}${originSuffix}-w${window.index + 1}`,
+        range: windowRangeA1,
+        text,
+        metadata: { type: "region", sheetName: sheet.name, regionRange: region.range },
+      });
+    }
+  }
 
   return { schema, chunks };
 }
@@ -243,14 +386,20 @@ export class RagIndex {
   }
 
   /**
-   * @param {{ name: string, values: unknown[][] }} sheet
-   * @param {{ signal?: AbortSignal, maxChunkRows?: number }} [options]
+   * @param {{ name: string, values: unknown[][], origin?: { row: number, col: number } }} sheet
+   * @param {{
+   *   maxChunkRows?: number,
+   *   splitByRowWindows?: boolean,
+   *   rowOverlap?: number,
+   *   maxChunksPerRegion?: number,
+   *   signal?: AbortSignal
+   * }} [options]
    */
   async indexSheet(sheet, options = {}) {
     const signal = options.signal;
     throwIfAborted(signal);
-    const maxChunkRows = options.maxChunkRows;
-    // `chunkSheetByRegions()` ids are deterministic (sheet name + region index),
+    // `chunkSheetByRegions()` ids are deterministic (sheet name + region index, plus
+    // an optional window index when row-window splitting is enabled),
     // but the number of regions can change over time. Clear the previous region
     // chunks for this sheet so stale chunks don't linger in the store.
     if (typeof this.store.deleteByPrefix === "function") {
@@ -258,7 +407,13 @@ export class RagIndex {
     }
 
     throwIfAborted(signal);
-    const { schema, chunks } = chunkSheetByRegionsWithSchema(sheet, { signal, maxChunkRows });
+    const { schema, chunks } = chunkSheetByRegionsWithSchema(sheet, {
+      signal,
+      maxChunkRows: options.maxChunkRows,
+      splitByRowWindows: options.splitByRowWindows,
+      rowOverlap: options.rowOverlap,
+      maxChunksPerRegion: options.maxChunksPerRegion,
+    });
     const items = [];
     for (const chunk of chunks) {
       throwIfAborted(signal);
@@ -299,34 +454,27 @@ export class RagIndex {
 
 /**
  * Convenience for building a single chunk from a range in a sheet.
- * @param {{ name: string, values: unknown[][] }} sheet
+ * @param {{ name: string, values: unknown[][], origin?: { row: number, col: number } }} sheet
  * @param {{ startRow: number, startCol: number, endRow: number, endCol: number }} range
  * @param {{ maxRows?: number }} [options]
  */
 export function rangeToChunk(sheet, range, options = {}) {
   const normalized = normalizeRange(range);
-  const origin =
-    sheet && typeof sheet === "object" && sheet.origin && typeof sheet.origin === "object"
-      ? {
-          row: Number.isInteger(sheet.origin.row) && sheet.origin.row >= 0 ? sheet.origin.row : 0,
-          col: Number.isInteger(sheet.origin.col) && sheet.origin.col >= 0 ? sheet.origin.col : 0,
-        }
-      : { row: 0, col: 0 };
-  const localRange =
-    origin.row === 0 && origin.col === 0
-      ? normalized
-      : normalizeRange({
-          startRow: normalized.startRow - origin.row,
-          endRow: normalized.endRow - origin.row,
-          startCol: normalized.startCol - origin.col,
-          endCol: normalized.endCol - origin.col,
-        });
-  const matrix = slice2D(sheet.values, localRange);
+  const origin = normalizeSheetOrigin(sheet);
+  const matrixBounds = getMatrixBounds(sheet.values);
+  const localRangeRaw = {
+    startRow: normalized.startRow - origin.row,
+    endRow: normalized.endRow - origin.row,
+    startCol: normalized.startCol - origin.col,
+    endCol: normalized.endCol - origin.col,
+  };
+  const localRange = clampRangeToMatrixBounds(matrixBounds, localRangeRaw);
   const maxRows = options.maxRows ?? 30;
+  const text = localRange ? valuesRangeToTsv(sheet.values, localRange, { maxRows }) : "";
   return {
     id: `${sheet.name}-${rangeToA1({ ...normalized, sheetName: sheet.name })}`,
     range: rangeToA1({ ...normalized, sheetName: sheet.name }),
-    text: matrixToTsv(matrix, { maxRows }),
+    text,
     metadata: { type: "range", sheetName: sheet.name },
   };
 }
