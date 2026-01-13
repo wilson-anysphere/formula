@@ -141,6 +141,14 @@ The flows below describe the intended end-to-end ownership boundaries. The exact
 
 Key property: the workbook model stores the **definition**, not a computed cache.
 
+#### Identity note (PivotTable IDs)
+
+- The **canonical pivot identity** is the model-layer `PivotTableId` (UUID) stored in `formula-model`.
+- `formula-engine::pivot::PivotTable.id` is currently a runtime-only string (`pivot-1`, `pivot-2`, …) used for
+  convenience in tests and transient compute objects; it is **not stable across sessions** and must not be persisted.
+- XLSX pivot parts are identified by *part names/relationships* (`xl/pivotTables/pivotTableN.xml`, rel ids, etc.) and
+  may include user-visible names like `"PivotTable1"`. Import should map these to stable `PivotTableId`s in the model.
+
 #### B) Create pivot (Data Model source)
 
 1. **UI / host** chooses:
