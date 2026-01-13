@@ -1079,7 +1079,12 @@ fn plan_pivot_expr(
                     alternate,
                 }))
             }
-            "SUM" | "AVERAGE" | "MIN" | "MAX" | "DISTINCTCOUNT" | "COUNT" | "COUNTA" => {
+            // Express AVERAGE as SUM / COUNT so downstream rollups (e.g. star-schema pivots) can
+            // aggregate SUM and COUNT independently and compute the final average at the end.
+            //
+            // This matches the engine's AVERAGE semantics (average of numeric values, ignoring
+            // blanks/non-numeric values).
+            "AVERAGE" => {
                 let [arg] = args.as_slice() else {
                     return Ok(None);
                 };
@@ -1095,9 +1100,33 @@ fn plan_pivot_expr(
                         table: table.clone(),
                         column: column.clone(),
                     })?;
+                let sum_idx = ensure_agg(AggregationKind::Sum, Some(idx), agg_specs, agg_map);
+                let count_idx =
+                    ensure_agg(AggregationKind::CountNumbers, Some(idx), agg_specs, agg_map);
+                Ok(Some(PlannedExpr::Divide {
+                    numerator: Box::new(PlannedExpr::AggRef(sum_idx)),
+                    denominator: Box::new(PlannedExpr::AggRef(count_idx)),
+                    alternate: None,
+                }))
+            }
+            "SUM" | "MIN" | "MAX" | "DISTINCTCOUNT" | "COUNT" | "COUNTA" => {
+                let [arg] = args.as_slice() else {
+                    return Ok(None);
+                };
+                let Expr::ColumnRef { table, column } = arg else {
+                    return Ok(None);
+                };
+                if table != base_table_name {
+                    return Ok(None);
+                }
+                let idx = base_table
+                    .column_idx(column)
+                    .ok_or_else(|| DaxError::UnknownColumn {
+                        table: table.clone(),
+                        column: column.clone(),
+                })?;
                 let kind = match name.to_ascii_uppercase().as_str() {
                     "SUM" => AggregationKind::Sum,
-                    "AVERAGE" => AggregationKind::Average,
                     "MIN" => AggregationKind::Min,
                     "MAX" => AggregationKind::Max,
                     "COUNT" => AggregationKind::CountNumbers,
@@ -2724,8 +2753,14 @@ mod tests {
         model
             .add_measure("Total Sales", "SUM(Sales[Amount])")
             .unwrap();
+        model
+            .add_measure("Avg Amount", "AVERAGE(Sales[Amount])")
+            .unwrap();
 
-        let measures = vec![PivotMeasure::new("Total Sales", "[Total Sales]").unwrap()];
+        let measures = vec![
+            PivotMeasure::new("Total Sales", "[Total Sales]").unwrap(),
+            PivotMeasure::new("Avg Amount", "[Avg Amount]").unwrap(),
+        ];
         let group_by = vec![GroupByColumn::new("Customers", "Region")];
 
         let result = pivot_columnar_star_schema_group_by(
@@ -2744,8 +2779,8 @@ mod tests {
         assert_eq!(
             result.rows,
             vec![
-                vec![Value::from("East"), 15.0.into()],
-                vec![Value::from("West"), 7.0.into()],
+                vec![Value::from("East"), 15.0.into(), 7.5.into()],
+                vec![Value::from("West"), 7.0.into(), 7.0.into()],
             ]
         );
     }
