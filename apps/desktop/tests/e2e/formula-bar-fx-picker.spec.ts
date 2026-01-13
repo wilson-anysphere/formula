@@ -22,6 +22,9 @@ test.describe("formula bar - fx function picker", () => {
         app.activateCell({ sheetId, row: 0, col: 4 }, { focus: false, scrollIntoView: false });
       });
       await expect(page.getByTestId("active-cell")).toHaveText("E1");
+      // Ensure any background engine/document syncing triggered by the cell update has settled
+      // before we start interacting with the formula bar.
+      await page.evaluate(() => (window as any).__formulaApp.whenIdle());
 
       // 1) Focus the formula bar.
       await page.getByTestId("formula-highlight").click();
