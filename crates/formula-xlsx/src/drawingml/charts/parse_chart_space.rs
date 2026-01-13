@@ -927,6 +927,14 @@ fn parse_axis_title(
         text.style = Some(style);
     }
 
+    let box_style = title_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "spPr")
+        .and_then(parse_sppr);
+    if let (Some(box_style), Some(text)) = (box_style, parsed.as_mut()) {
+        text.box_style = Some(box_style);
+    }
+
     parsed
 }
 

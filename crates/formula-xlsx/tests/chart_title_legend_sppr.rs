@@ -27,6 +27,18 @@ fn parses_title_and_legend_shape_properties() {
             </c:legend>
             <c:plotArea>
               <c:barChart/>
+              <c:catAx>
+                <c:axId val="123"/>
+                <c:title>
+                  <c:tx><c:v>X Axis</c:v></c:tx>
+                  <c:spPr>
+                    <a:solidFill><a:srgbClr val="FFFF00"/></a:solidFill>
+                    <a:ln w="25400">
+                      <a:solidFill><a:srgbClr val="000000"/></a:solidFill>
+                    </a:ln>
+                  </c:spPr>
+                </c:title>
+              </c:catAx>
             </c:plotArea>
           </c:chart>
         </c:chartSpace>
@@ -53,4 +65,20 @@ fn parses_title_and_legend_shape_properties() {
     };
     assert_eq!(legend_fill.color, Color::Argb(0xFF0000FF));
     assert!(legend_style.line.is_none());
+
+    let axis = model
+        .axes
+        .iter()
+        .find(|axis| axis.id == 123)
+        .expect("axis parsed");
+    let axis_title = axis.title.as_ref().expect("axis title parsed");
+    let axis_box_style = axis_title.box_style.as_ref().expect("axis title spPr parsed");
+    let axis_fill = axis_box_style.fill.as_ref().expect("axis title fill parsed");
+    let FillStyle::Solid(axis_fill) = axis_fill else {
+        panic!("expected axis title fill to be solidFill, got {axis_fill:?}");
+    };
+    assert_eq!(axis_fill.color, Color::Argb(0xFFFFFF00));
+    let axis_line = axis_box_style.line.as_ref().expect("axis title line");
+    assert_eq!(axis_line.width_100pt, Some(200));
+    assert_eq!(axis_line.color, Some(Color::Argb(0xFF000000)));
 }
