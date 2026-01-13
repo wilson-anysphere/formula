@@ -172,6 +172,39 @@ export function getArrayRoot<T = unknown>(doc: Y.Doc, name: string): Y.Array<T> 
   throw new Error(`Unsupported Yjs root type for "${name}": ${existing?.constructor?.name ?? typeof existing}`);
 }
 
+export function getTextRoot(doc: Y.Doc, name: string): Y.Text {
+  const existing = doc.share.get(name);
+  if (!existing) return doc.getText(name);
+
+  const text = getYText(existing);
+  if (text) {
+    return text instanceof Y.Text ? (text as Y.Text) : (replaceForeignRootType({ doc, name, existing: text, create: () => new Y.Text() }) as any);
+  }
+
+  const map = getYMap(existing);
+  if (map) {
+    throw new Error(`Yjs root schema mismatch for "${name}": expected a Y.Text but found a Y.Map`);
+  }
+
+  const array = getYArray(existing);
+  if (array) {
+    throw new Error(`Yjs root schema mismatch for "${name}": expected a Y.Text but found a Y.Array`);
+  }
+
+  if (existing instanceof Y.AbstractType && (existing as any).constructor === Y.AbstractType) {
+    return doc.getText(name);
+  }
+
+  if (isYAbstractType(existing)) {
+    if (doc instanceof Y.Doc) {
+      return replaceForeignRootType({ doc, name, existing, create: () => new Y.Text() }) as any;
+    }
+    return doc.getText(name);
+  }
+
+  throw new Error(`Unsupported Yjs root type for "${name}": ${existing?.constructor?.name ?? typeof existing}`);
+}
+
 function isPlainObject(value: unknown): value is Record<string, any> {
   if (!value || typeof value !== "object") return false;
   if (Array.isArray(value)) return false;
