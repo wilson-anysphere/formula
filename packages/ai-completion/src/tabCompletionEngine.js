@@ -892,6 +892,69 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "3", displayText: "3 (ignore nested + hidden + errors)", confidence: 0.62 },
     ],
   },
+  "T.TEST": {
+    // tails
+    2: [
+      { replacement: "1", displayText: "1 (one-tailed)", confidence: 0.68 },
+      { replacement: "2", displayText: "2 (two-tailed)", confidence: 0.67 },
+    ],
+    // type
+    3: [
+      { replacement: "1", displayText: "1 (paired)", confidence: 0.67 },
+      { replacement: "2", displayText: "2 (two-sample equal variance)", confidence: 0.66 },
+      { replacement: "3", displayText: "3 (two-sample unequal variance)", confidence: 0.65 },
+    ],
+  },
+  TTEST: {
+    // tails
+    2: [
+      { replacement: "1", displayText: "1 (one-tailed)", confidence: 0.68 },
+      { replacement: "2", displayText: "2 (two-tailed)", confidence: 0.67 },
+    ],
+    // type
+    3: [
+      { replacement: "1", displayText: "1 (paired)", confidence: 0.67 },
+      { replacement: "2", displayText: "2 (two-sample equal variance)", confidence: 0.66 },
+      { replacement: "3", displayText: "3 (two-sample unequal variance)", confidence: 0.65 },
+    ],
+  },
+  "RANK.EQ": {
+    // order
+    2: [
+      { replacement: "0", displayText: "0 (descending)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (ascending)", confidence: 0.65 },
+    ],
+  },
+  "RANK.AVG": {
+    // order
+    2: [
+      { replacement: "0", displayText: "0 (descending)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (ascending)", confidence: 0.65 },
+    ],
+  },
+  RANK: {
+    // order
+    2: [
+      { replacement: "0", displayText: "0 (descending)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (ascending)", confidence: 0.65 },
+    ],
+  },
+  WEEKDAY: {
+    // return_type
+    1: [
+      { replacement: "1", displayText: "1 (Sun=1..Sat=7)", confidence: 0.66 },
+      { replacement: "2", displayText: "2 (Mon=1..Sun=7)", confidence: 0.65 },
+      { replacement: "3", displayText: "3 (Mon=0..Sun=6)", confidence: 0.64 },
+    ],
+  },
+  WEEKNUM: {
+    // return_type
+    1: [
+      { replacement: "1", displayText: "1 (week starts Sunday)", confidence: 0.66 },
+      { replacement: "2", displayText: "2 (week starts Monday)", confidence: 0.65 },
+      { replacement: "21", displayText: "21 (ISO week numbering)", confidence: 0.63 },
+    ],
+  },
   VLOOKUP: {
     // range_lookup (TRUE = approx match, FALSE = exact)
     3: [

@@ -1696,6 +1696,123 @@ test("AGGREGATE options suggests common values (0, 4, 6, 7)", async () => {
   );
 });
 
+test("T.TEST tails suggests 1 and 2", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=T.TEST(A1:A10, B1:B10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=T.TEST(A1:A10, B1:B10, 1"),
+    `Expected T.TEST to suggest tails=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=T.TEST(A1:A10, B1:B10, 2"),
+    `Expected T.TEST to suggest tails=2, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("T.TEST type suggests 1, 2, 3", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=T.TEST(A1:A10, B1:B10, 2, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=T.TEST(A1:A10, B1:B10, 2, 1"),
+    `Expected T.TEST to suggest type=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=T.TEST(A1:A10, B1:B10, 2, 2"),
+    `Expected T.TEST to suggest type=2, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=T.TEST(A1:A10, B1:B10, 2, 3"),
+    `Expected T.TEST to suggest type=3, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("RANK.EQ order suggests 0 and 1", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=RANK.EQ(10, A1:A10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=RANK.EQ(10, A1:A10, 0"),
+    `Expected RANK.EQ to suggest order=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=RANK.EQ(10, A1:A10, 1"),
+    `Expected RANK.EQ to suggest order=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("WEEKDAY return_type suggests 1, 2, 3", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=WEEKDAY(A1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=WEEKDAY(A1, 1"),
+    `Expected WEEKDAY to suggest return_type=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=WEEKDAY(A1, 2"),
+    `Expected WEEKDAY to suggest return_type=2, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=WEEKDAY(A1, 3"),
+    `Expected WEEKDAY to suggest return_type=3, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("WEEKNUM return_type suggests 1, 2, 21", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=WEEKNUM(A1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=WEEKNUM(A1, 1"),
+    `Expected WEEKNUM to suggest return_type=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=WEEKNUM(A1, 2"),
+    `Expected WEEKNUM to suggest return_type=2, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=WEEKNUM(A1, 21"),
+    `Expected WEEKNUM to suggest return_type=21, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("TabCompletionEngine caches suggestions by context key", async () => {
   let callCount = 0;
   const completionClient = {
