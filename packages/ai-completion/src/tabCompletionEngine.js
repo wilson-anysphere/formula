@@ -1039,6 +1039,71 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "21", displayText: "21 (ISO week numbering)", confidence: 0.63 },
     ],
   },
+  "FORECAST.ETS": {
+    // seasonality
+    3: [
+      { replacement: "0", displayText: "0 (auto-detect seasonality)", confidence: 0.67 },
+      { replacement: "1", displayText: "1 (no seasonality)", confidence: 0.66 },
+      { replacement: "12", displayText: "12 (monthly seasonality)", confidence: 0.64 },
+      { replacement: "4", displayText: "4 (quarterly seasonality)", confidence: 0.63 },
+    ],
+    // data_completion
+    4: [
+      { replacement: "1", displayText: "1 (interpolate missing points)", confidence: 0.67 },
+      { replacement: "0", displayText: "0 (treat missing points as 0)", confidence: 0.66 },
+    ],
+    // aggregation
+    5: [
+      { replacement: "1", displayText: "1 (AVERAGE)", confidence: 0.67 },
+      { replacement: "7", displayText: "7 (SUM)", confidence: 0.66 },
+      { replacement: "2", displayText: "2 (COUNT)", confidence: 0.64 },
+      { replacement: "4", displayText: "4 (MAX)", confidence: 0.63 },
+      { replacement: "6", displayText: "6 (MIN)", confidence: 0.62 },
+    ],
+  },
+  "FORECAST.ETS.CONFINT": {
+    // confidence_level
+    3: [
+      { replacement: "0.95", displayText: "0.95 (95% confidence)", confidence: 0.67 },
+      { replacement: "0.9", displayText: "0.9 (90% confidence)", confidence: 0.66 },
+      { replacement: "0.99", displayText: "0.99 (99% confidence)", confidence: 0.65 },
+    ],
+    // seasonality
+    4: [
+      { replacement: "0", displayText: "0 (auto-detect seasonality)", confidence: 0.67 },
+      { replacement: "1", displayText: "1 (no seasonality)", confidence: 0.66 },
+      { replacement: "12", displayText: "12 (monthly seasonality)", confidence: 0.64 },
+      { replacement: "4", displayText: "4 (quarterly seasonality)", confidence: 0.63 },
+    ],
+    // data_completion
+    5: [
+      { replacement: "1", displayText: "1 (interpolate missing points)", confidence: 0.67 },
+      { replacement: "0", displayText: "0 (treat missing points as 0)", confidence: 0.66 },
+    ],
+    // aggregation
+    6: [
+      { replacement: "1", displayText: "1 (AVERAGE)", confidence: 0.67 },
+      { replacement: "7", displayText: "7 (SUM)", confidence: 0.66 },
+      { replacement: "2", displayText: "2 (COUNT)", confidence: 0.64 },
+      { replacement: "4", displayText: "4 (MAX)", confidence: 0.63 },
+      { replacement: "6", displayText: "6 (MIN)", confidence: 0.62 },
+    ],
+  },
+  "FORECAST.ETS.SEASONALITY": {
+    // data_completion
+    2: [
+      { replacement: "1", displayText: "1 (interpolate missing points)", confidence: 0.67 },
+      { replacement: "0", displayText: "0 (treat missing points as 0)", confidence: 0.66 },
+    ],
+    // aggregation
+    3: [
+      { replacement: "1", displayText: "1 (AVERAGE)", confidence: 0.67 },
+      { replacement: "7", displayText: "7 (SUM)", confidence: 0.66 },
+      { replacement: "2", displayText: "2 (COUNT)", confidence: 0.64 },
+      { replacement: "4", displayText: "4 (MAX)", confidence: 0.63 },
+      { replacement: "6", displayText: "6 (MIN)", confidence: 0.62 },
+    ],
+  },
   DAYS360: {
     // method
     2: [

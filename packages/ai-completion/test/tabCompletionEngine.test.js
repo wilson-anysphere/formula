@@ -2000,6 +2000,107 @@ test("YEARFRAC basis suggests 0, 1, 2, 3, 4", async () => {
   }
 });
 
+test("FORECAST.ETS seasonality suggests 0, 1, 12, 4", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=FORECAST.ETS(A1, B1:B10, C1:C10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["0", "1", "12", "4"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=FORECAST.ETS(A1, B1:B10, C1:C10, ${v}`),
+      `Expected FORECAST.ETS to suggest seasonality=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
+test("FORECAST.ETS data_completion suggests 1 and 0", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=FORECAST.ETS(A1, B1:B10, C1:C10, , ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=FORECAST.ETS(A1, B1:B10, C1:C10, , 1"),
+    `Expected FORECAST.ETS to suggest data_completion=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=FORECAST.ETS(A1, B1:B10, C1:C10, , 0"),
+    `Expected FORECAST.ETS to suggest data_completion=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("FORECAST.ETS aggregation suggests common values (1, 7)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=FORECAST.ETS(A1, B1:B10, C1:C10, , , ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=FORECAST.ETS(A1, B1:B10, C1:C10, , , 1"),
+    `Expected FORECAST.ETS to suggest aggregation=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=FORECAST.ETS(A1, B1:B10, C1:C10, , , 7"),
+    `Expected FORECAST.ETS to suggest aggregation=7, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("FORECAST.ETS.CONFINT confidence_level suggests 0.95, 0.9, 0.99", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=FORECAST.ETS.CONFINT(A1, B1:B10, C1:C10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["0.95", "0.9", "0.99"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=FORECAST.ETS.CONFINT(A1, B1:B10, C1:C10, ${v}`),
+      `Expected FORECAST.ETS.CONFINT to suggest confidence_level=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
+test("FORECAST.ETS.SEASONALITY data_completion suggests 1 and 0", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=FORECAST.ETS.SEASONALITY(B1:B10, C1:C10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=FORECAST.ETS.SEASONALITY(B1:B10, C1:C10, 1"),
+    `Expected FORECAST.ETS.SEASONALITY to suggest data_completion=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=FORECAST.ETS.SEASONALITY(B1:B10, C1:C10, 0"),
+    `Expected FORECAST.ETS.SEASONALITY to suggest data_completion=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("CEILING.MATH mode suggests 0 and 1", async () => {
   const engine = new TabCompletionEngine();
 
