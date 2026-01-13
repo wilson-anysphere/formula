@@ -174,6 +174,7 @@ import {
   toggleWrap,
   type CellRange,
 } from "./formatting/toolbar.js";
+import { applyFormatAsTablePreset } from "./formatting/formatAsTablePresets.js";
 import { sortSelection } from "./sort-filter/sortSelection.js";
 import { PageSetupDialog, PrintPreviewDialog, type CellRange as PrintCellRange, type PageSetup } from "./print/index.js";
 import {
@@ -8250,6 +8251,29 @@ function handleRibbonCommand(commandId: string): void {
         );
       })();
       return;
+    }
+
+    const formatAsTablePrefix = "home.styles.formatAsTable.";
+    if (commandId.startsWith(formatAsTablePrefix)) {
+      const presetId = commandId.slice(formatAsTablePrefix.length);
+      if (presetId === "light" || presetId === "medium" || presetId === "dark") {
+        applyFormattingToSelection(
+          "Format as Table",
+          (doc, sheetId, ranges) => {
+            if (ranges.length !== 1) {
+              try {
+                showToast("Format as Table currently supports a single rectangular selection.", "warning");
+              } catch {
+                // ignore (e.g. toast root missing in tests)
+              }
+              return true;
+            }
+            return applyFormatAsTablePreset(doc, sheetId, ranges[0], presetId);
+          },
+          { forceBatch: true },
+        );
+        return;
+      }
     }
 
     switch (commandId) {
