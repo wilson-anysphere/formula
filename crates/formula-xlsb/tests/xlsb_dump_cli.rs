@@ -37,6 +37,7 @@ fn xlsb_dump_prints_known_error_literals() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("save patched xlsb");

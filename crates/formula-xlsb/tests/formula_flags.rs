@@ -191,6 +191,7 @@ fn patcher_updates_cached_value_without_changing_flags() {
         new_formula: None,
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     };
     let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
 
@@ -240,6 +241,7 @@ fn patcher_updates_cached_bool_without_changing_flags() {
         new_formula: None,
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     };
     let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
 
@@ -287,6 +289,7 @@ fn patcher_updates_cached_error_without_changing_flags() {
         new_formula: None,
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     };
     let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
 
@@ -337,6 +340,7 @@ fn patcher_updates_cached_string_without_changing_flags() {
         new_formula: None,
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     };
     let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
 
@@ -365,6 +369,7 @@ fn patcher_updates_cached_string_with_reserved_flags_and_4byte_extra() {
         new_formula: None,
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     };
     let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
 
@@ -395,6 +400,7 @@ fn patcher_is_byte_identical_for_noop_brt_fmla_bool_with_extra_bytes() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("patch sheet");
@@ -417,6 +423,7 @@ fn patcher_is_byte_identical_for_noop_brt_fmla_error_with_extra_bytes() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("patch sheet");
@@ -441,6 +448,7 @@ fn patcher_is_byte_identical_for_noop_brt_fmla_string_with_extra_bytes() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("patch sheet");
@@ -474,6 +482,7 @@ fn patcher_requires_new_rgcb_when_replacing_rgce_for_brt_fmla_string_with_existi
             new_formula: Some(new_rgce.clone()),
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect_err("expected InvalidInput when changing rgce without supplying new_rgcb");
@@ -491,6 +500,7 @@ fn patcher_requires_new_rgcb_when_replacing_rgce_for_brt_fmla_string_with_existi
             new_formula: Some(new_rgce.clone()),
             new_rgcb: Some(extra.to_vec()),
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("patch sheet bin with explicit rgcb");
@@ -520,6 +530,7 @@ fn patcher_requires_new_rgcb_when_replacing_rgce_for_brt_fmla_bool_with_existing
             new_formula: Some(new_rgce.clone()),
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect_err("expected InvalidInput when changing rgce without supplying new_rgcb");
@@ -537,6 +548,7 @@ fn patcher_requires_new_rgcb_when_replacing_rgce_for_brt_fmla_bool_with_existing
             new_formula: Some(new_rgce.clone()),
             new_rgcb: Some(extra.to_vec()),
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("patch sheet bin with explicit rgcb");
@@ -566,6 +578,7 @@ fn patcher_requires_new_rgcb_when_replacing_rgce_for_brt_fmla_error_with_existin
             new_formula: Some(new_rgce.clone()),
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect_err("expected InvalidInput when changing rgce without supplying new_rgcb");
@@ -583,6 +596,7 @@ fn patcher_requires_new_rgcb_when_replacing_rgce_for_brt_fmla_error_with_existin
             new_formula: Some(new_rgce.clone()),
             new_rgcb: Some(extra.to_vec()),
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("patch sheet bin with explicit rgcb");

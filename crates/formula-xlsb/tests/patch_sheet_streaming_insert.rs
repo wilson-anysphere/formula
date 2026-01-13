@@ -395,6 +395,7 @@ fn patch_sheet_bin_streaming_insert_matches_in_memory_insert() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         },
         CellEdit {
             row: 4,
@@ -403,6 +404,7 @@ fn patch_sheet_bin_streaming_insert_matches_in_memory_insert() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         },
     ];
 
@@ -430,6 +432,7 @@ fn patch_sheet_bin_streaming_expands_dimension_for_inserts() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         },
         CellEdit {
             row: 4,
@@ -438,6 +441,7 @@ fn patch_sheet_bin_streaming_expands_dimension_for_inserts() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         },
     ];
 
@@ -461,6 +465,7 @@ fn patch_sheet_bin_streaming_noop_insertion_is_byte_identical() {
         new_formula: None,
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     }];
 
     let mut patched_stream = Vec::new();
@@ -486,6 +491,7 @@ fn patch_sheet_bin_streaming_handles_dimension_after_sheetdata() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         },
         CellEdit {
             row: 4,
@@ -494,6 +500,7 @@ fn patch_sheet_bin_streaming_handles_dimension_after_sheetdata() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         },
     ];
 
@@ -523,6 +530,7 @@ fn patch_sheet_bin_streaming_inserts_cells_in_column_order() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         },
         // Insert H1 (after the existing F1 cell).
         CellEdit {
@@ -532,6 +540,7 @@ fn patch_sheet_bin_streaming_inserts_cells_in_column_order() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         },
     ];
 
@@ -558,6 +567,7 @@ fn patch_sheet_bin_streaming_is_lossless_for_noop_value_edit() {
         new_formula: None,
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     }];
 
     let mut patched_stream = Vec::new();
@@ -584,6 +594,7 @@ fn patch_sheet_bin_streaming_inserts_text_cell_as_shared_string_when_isst_provid
         new_formula: None,
         new_rgcb: None,
         shared_string_index: Some(0),
+        new_style: None,
     }];
 
     let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
@@ -618,6 +629,7 @@ fn patch_sheet_bin_streaming_inserts_text_cell_as_inline_string_when_isst_missin
         new_formula: None,
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     }];
 
     let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
@@ -650,6 +662,7 @@ fn patch_sheet_bin_streaming_is_lossless_for_noop_formula_edit() {
         new_formula: None,
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     }];
 
     let mut patched_stream = Vec::new();
@@ -676,6 +689,7 @@ fn patch_sheet_bin_streaming_can_insert_into_empty_sheet() {
         new_formula: None,
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     }];
 
     let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
@@ -703,6 +717,7 @@ fn patch_sheet_bin_streaming_noop_insertions_in_empty_sheet_are_lossless() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         },
         CellEdit {
             row: 5,
@@ -711,6 +726,7 @@ fn patch_sheet_bin_streaming_noop_insertions_in_empty_sheet_are_lossless() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         },
     ];
 
@@ -738,6 +754,7 @@ fn patch_sheet_bin_streaming_inserts_missing_rows_before_first_row() {
         new_formula: None,
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     }];
 
     let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
@@ -765,6 +782,7 @@ fn patch_sheet_bin_streaming_inserts_missing_rows_between_existing_rows() {
         new_formula: None,
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     }];
 
     let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
@@ -800,6 +818,7 @@ fn patch_sheet_bin_streaming_preserves_dimension_header_varint_bytes() {
         new_formula: None,
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     }];
 
     let patched_in_mem = patch_sheet_bin(&tweaked, &edits).expect("patch_sheet_bin");
@@ -841,6 +860,7 @@ fn patch_sheet_bin_streaming_preserves_cell_isst_header_varint_bytes_when_patchi
         new_formula: None,
         new_rgcb: None,
         shared_string_index: Some(1),
+        new_style: None,
     }];
 
     let patched_in_mem = patch_sheet_bin(&tweaked, &edits).expect("patch_sheet_bin");
@@ -884,6 +904,7 @@ fn patch_sheet_bin_streaming_insert_formula_with_rgcb_matches_in_memory() {
         new_formula: Some(rgce.clone()),
         new_rgcb: Some(rgcb.clone()),
         shared_string_index: None,
+        new_style: None,
     }];
 
     let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
@@ -921,6 +942,7 @@ fn patch_sheet_bin_streaming_can_patch_formula_rgcb_bytes() {
         new_formula: None,
         new_rgcb: Some(new_rgcb.clone()),
         shared_string_index: None,
+        new_style: None,
     }];
 
     let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
@@ -956,6 +978,7 @@ fn patch_sheet_bin_streaming_inserts_bool_and_error_cells_matches_in_memory() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         },
         CellEdit {
             row: 4,
@@ -964,6 +987,7 @@ fn patch_sheet_bin_streaming_inserts_bool_and_error_cells_matches_in_memory() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         },
     ];
 
@@ -1004,6 +1028,7 @@ fn patch_sheet_bin_streaming_inserts_formula_bool_and_error_cells_matches_in_mem
             new_formula: Some(rgce_bool_true.clone()),
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         },
         CellEdit {
             row: 4,
@@ -1012,6 +1037,7 @@ fn patch_sheet_bin_streaming_inserts_formula_bool_and_error_cells_matches_in_mem
             new_formula: Some(rgce_err_div0.clone()),
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         },
     ];
 
@@ -1067,6 +1093,7 @@ fn patch_sheet_bin_streaming_inserts_formula_string_cell_matches_in_memory() {
         new_formula: Some(rgce.clone()),
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     }];
 
     let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
@@ -1117,6 +1144,7 @@ fn patch_sheet_bin_streaming_patches_rk_cell_preserving_rk_record_when_possible(
         new_formula: None,
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     }];
 
     let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
@@ -1149,6 +1177,7 @@ fn patch_sheet_bin_streaming_converts_rk_cell_to_float_when_needed() {
         new_formula: None,
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     }];
 
     let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
@@ -1183,6 +1212,7 @@ fn patch_sheet_bin_streaming_patches_shared_string_cell_when_isst_provided() {
         new_formula: None,
         new_rgcb: None,
         shared_string_index: Some(1),
+        new_style: None,
     }];
 
     let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
@@ -1220,6 +1250,7 @@ fn patch_sheet_bin_streaming_converts_shared_string_cell_to_inline_string_when_i
         new_formula: None,
         new_rgcb: None,
         shared_string_index: None,
+        new_style: None,
     }];
 
     let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");

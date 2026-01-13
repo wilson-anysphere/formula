@@ -257,6 +257,7 @@ fn save_with_cell_edits_multi_changes_only_edited_sheet_parts() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     );
     edits_by_sheet.insert(
@@ -268,6 +269,7 @@ fn save_with_cell_edits_multi_changes_only_edited_sheet_parts() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     );
 

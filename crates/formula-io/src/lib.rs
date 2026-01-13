@@ -1512,6 +1512,7 @@ mod tests {
                 new_formula: None,
                 new_rgcb: None,
                 shared_string_index: None,
+                new_style: None,
             });
 
             // Formula that evaluates to the error literal as a constant (PtgErr).
@@ -1522,6 +1523,7 @@ mod tests {
                 new_formula: Some(vec![0x1C, code]),
                 new_rgcb: None,
                 shared_string_index: None,
+                new_style: None,
             });
 
             // Validate after conversion.

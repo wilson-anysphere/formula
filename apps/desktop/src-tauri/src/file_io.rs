@@ -2351,6 +2351,7 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
                         new_formula: None,
                         new_rgcb: None,
                         shared_string_index: None,
+                        new_style: None,
                     },
                 };
                 edits.push(edit);

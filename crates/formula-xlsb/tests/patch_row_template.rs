@@ -118,6 +118,7 @@ fn patch_sheet_bin_inserts_rows_using_source_row_template_payload() {
                 new_formula: None,
                 new_rgcb: None,
                 shared_string_index: None,
+                new_style: None,
             },
             CellEdit {
                 row: 12,
@@ -126,6 +127,7 @@ fn patch_sheet_bin_inserts_rows_using_source_row_template_payload() {
                 new_formula: None,
                 new_rgcb: None,
                 shared_string_index: None,
+                new_style: None,
             },
         ],
     )
@@ -190,6 +192,7 @@ fn patch_sheet_bin_inserts_minimal_row_record_when_no_template_exists() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("patch sheet bin");

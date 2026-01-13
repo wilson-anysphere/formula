@@ -165,6 +165,7 @@ fn patch_sheet_bin_can_insert_into_missing_row_and_expand_dimension() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("patch sheet bin");
@@ -236,6 +237,7 @@ fn patch_sheet_bin_can_insert_formula_with_rgcb_and_expand_dimension() {
             new_formula: Some(encoded.rgce.clone()),
             new_rgcb: Some(encoded.rgcb.clone()),
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("patch sheet bin");
@@ -294,6 +296,7 @@ fn patch_sheet_bin_can_insert_into_existing_row_in_column_order() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("patch sheet bin");
@@ -349,6 +352,7 @@ fn patch_sheet_bin_can_expand_dimension_when_brtwsdim_is_after_sheetdata() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("patch sheet bin");
@@ -380,9 +384,104 @@ fn patch_sheet_bin_does_not_materialize_missing_blank_cells() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("patch sheet bin");
 
     assert_eq!(patched_sheet_bin, sheet_bin);
+}
+
+#[test]
+fn patch_sheet_bin_can_patch_style_without_changing_value() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+
+    let bytes = builder.build_bytes();
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("style-only-update-input.xlsb");
+    let output_path = tmpdir.path().join("style-only-update-output.xlsb");
+    std::fs::write(&input_path, bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open workbook");
+    let sheet_part = wb.sheet_metas()[0].part_path.clone();
+    let sheet_bin = read_zip_part(&input_path, &sheet_part);
+
+    let patched_sheet_bin = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Number(1.0),
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+            new_style: Some(7),
+        }],
+    )
+    .expect("patch sheet bin");
+
+    wb.save_with_part_overrides(
+        &output_path,
+        &HashMap::from([(sheet_part.clone(), patched_sheet_bin)]),
+    )
+    .expect("write patched workbook");
+
+    let wb2 = XlsbWorkbook::open(&output_path).expect("open patched workbook");
+    let sheet = wb2.read_sheet(0).expect("read patched sheet");
+
+    let cell = sheet
+        .cells
+        .iter()
+        .find(|c| (c.row, c.col) == (0, 0))
+        .expect("expected A1 cell");
+    assert_eq!(cell.value, CellValue::Number(1.0));
+    assert_eq!(cell.style, 7);
+}
+
+#[test]
+fn patch_sheet_bin_can_insert_cell_with_style_override() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+
+    let bytes = builder.build_bytes();
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("style-insert-input.xlsb");
+    let output_path = tmpdir.path().join("style-insert-output.xlsb");
+    std::fs::write(&input_path, bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open workbook");
+    let sheet_part = wb.sheet_metas()[0].part_path.clone();
+    let sheet_bin = read_zip_part(&input_path, &sheet_part);
+
+    let patched_sheet_bin = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 1,
+            col: 1,
+            new_value: CellValue::Number(2.0),
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+            new_style: Some(5),
+        }],
+    )
+    .expect("patch sheet bin");
+
+    wb.save_with_part_overrides(
+        &output_path,
+        &HashMap::from([(sheet_part.clone(), patched_sheet_bin)]),
+    )
+    .expect("write patched workbook");
+
+    let wb2 = XlsbWorkbook::open(&output_path).expect("open patched workbook");
+    let sheet = wb2.read_sheet(0).expect("read patched sheet");
+
+    let cell = sheet
+        .cells
+        .iter()
+        .find(|c| (c.row, c.col) == (1, 1))
+        .expect("expected inserted B2 cell");
+    assert_eq!(cell.value, CellValue::Number(2.0));
+    assert_eq!(cell.style, 5);
 }

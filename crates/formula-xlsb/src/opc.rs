@@ -459,6 +459,7 @@ impl XlsbWorkbook {
                 new_value: CellValue::Number(value),
                 new_formula: None,
                 shared_string_index: None,
+                new_style: None,
                 new_rgcb: None,
             }],
         )

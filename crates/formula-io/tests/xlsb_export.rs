@@ -247,6 +247,7 @@ fn xlsb_export_preserves_defined_names_and_ptgname_formulas() {
             new_formula: Some(rgce),
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("patch sheet");

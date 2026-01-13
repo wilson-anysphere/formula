@@ -28,6 +28,12 @@ pub struct CellEdit {
     pub row: u32,
     pub col: u32,
     pub new_value: CellValue,
+    /// Optional style (XF) index override.
+    ///
+    /// - When editing an existing cell record, `None` preserves the existing style index.
+    /// - When inserting a new cell record, `None` uses style index `0` (the default / "Normal"
+    ///   style), matching historical behavior.
+    pub new_style: Option<u32>,
     /// If set, replaces the raw formula token stream (`rgce`) for formula cells.
     pub new_formula: Option<Vec<u8>>,
     /// If set, replaces the trailing BIFF12 `rgcb` payload (a.k.a. `Formula.extra`) that appears
@@ -83,6 +89,7 @@ impl CellEdit {
             row,
             col,
             new_value,
+            new_style: None,
             new_formula: Some(encoded.rgce),
             new_rgcb: Some(encoded.rgcb),
             shared_string_index: None,
@@ -123,6 +130,7 @@ impl CellEdit {
             row,
             col,
             new_value,
+            new_style: None,
             new_formula: Some(encoded.rgce),
             new_rgcb: Some(encoded.rgcb),
             shared_string_index: None,
@@ -208,6 +216,7 @@ impl CellEdit {
             row,
             col,
             new_value,
+            new_style: None,
             new_formula: Some(rgce),
             new_rgcb: None,
             shared_string_index: None,
@@ -407,6 +416,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
 
                 applied[edit_idx] = true;
                 let edit = &edits[edit_idx];
+                let style_out = edit.new_style.unwrap_or(style);
                 advance_insert_cursor(&ordered_edits, &applied, &mut insert_cursor);
 
                 // Track used-range expansion for edits that turn an empty cell into a value.
@@ -422,28 +432,28 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if formula_edit_is_noop(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            patch_fmla_num(&mut writer, payload, col, style, edit)?;
+                            patch_fmla_num(&mut writer, payload, col, style_out, edit)?;
                         }
                     }
                     biff12::FORMULA_STRING => {
                         if formula_string_edit_is_noop(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            patch_fmla_string(&mut writer, payload, col, style, edit)?;
+                            patch_fmla_string(&mut writer, payload, col, style_out, edit)?;
                         }
                     }
                     biff12::FORMULA_BOOL => {
                         if formula_bool_edit_is_noop(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            patch_fmla_bool(&mut writer, payload, col, style, edit)?;
+                            patch_fmla_bool(&mut writer, payload, col, style_out, edit)?;
                         }
                     }
                     biff12::FORMULA_BOOLERR => {
                         if formula_error_edit_is_noop(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            patch_fmla_error(&mut writer, payload, col, style, edit)?;
+                            patch_fmla_error(&mut writer, payload, col, style_out, edit)?;
                         }
                     }
                     biff12::FLOAT => {
@@ -451,7 +461,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
                             reject_formula_payload_edit(edit, row, col)?;
-                            patch_value_cell(&mut writer, col, style, edit)?;
+                            patch_value_cell(&mut writer, col, style_out, edit)?;
                         }
                     }
                     biff12::NUM => {
@@ -459,7 +469,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
                             reject_formula_payload_edit(edit, row, col)?;
-                            patch_rk_cell(&mut writer, col, style, payload, edit)?;
+                            patch_rk_cell(&mut writer, col, style_out, payload, edit)?;
                         }
                     }
                     biff12::CELL_ST => {
@@ -467,7 +477,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
                             reject_formula_payload_edit(edit, row, col)?;
-                            patch_value_cell(&mut writer, col, style, edit)?;
+                            patch_value_cell(&mut writer, col, style_out, edit)?;
                         }
                     }
                     biff12::STRING => {
@@ -487,6 +497,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             // non-canonical encodings) and any unknown trailing payload bytes.
                             // This keeps diffs minimal while still updating the referenced `isst`.
                             let mut patched = payload.to_vec();
+                            patched[4..8].copy_from_slice(&style_out.to_le_bytes());
                             patched[8..12].copy_from_slice(&isst.to_le_bytes());
                             writer.write_raw(&sheet_bin[record_start..payload_start])?;
                             writer.write_raw(&patched)?;
@@ -501,7 +512,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             // `XlsbWorkbook::save_with_cell_edits_streaming_shared_strings`) to
                             // keep shared-string semantics.
                             reject_formula_payload_edit(edit, row, col)?;
-                            patch_value_cell(&mut writer, col, style, edit)?;
+                            patch_value_cell(&mut writer, col, style_out, edit)?;
                         }
                     }
                     biff12::BOOL => {
@@ -509,7 +520,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
                             reject_formula_payload_edit(edit, row, col)?;
-                            patch_value_cell(&mut writer, col, style, edit)?;
+                            patch_value_cell(&mut writer, col, style_out, edit)?;
                         }
                     }
                     biff12::BOOLERR => {
@@ -517,20 +528,20 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
                             reject_formula_payload_edit(edit, row, col)?;
-                            patch_value_cell(&mut writer, col, style, edit)?;
+                            patch_value_cell(&mut writer, col, style_out, edit)?;
                         }
                     }
                     biff12::BLANK => {
-                        if value_edit_is_noop_blank(edit) {
+                        if value_edit_is_noop_blank(style, edit) {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
                             reject_formula_payload_edit(edit, row, col)?;
-                            patch_value_cell(&mut writer, col, style, edit)?;
+                            patch_value_cell(&mut writer, col, style_out, edit)?;
                         }
                     }
                     _ => {
                         reject_formula_payload_edit(edit, row, col)?;
-                        patch_value_cell(&mut writer, col, style, edit)?;
+                        patch_value_cell(&mut writer, col, style_out, edit)?;
                     }
                 }
             }
@@ -652,6 +663,7 @@ fn advance_insert_cursor(ordered: &[usize], applied: &[bool], cursor: &mut usize
 fn insertion_is_noop(edit: &CellEdit) -> bool {
     edit.new_formula.is_none()
         && edit.new_rgcb.is_none()
+        && edit.new_style.is_none()
         && matches!(edit.new_value, CellValue::Blank)
 }
 
@@ -970,7 +982,7 @@ fn write_new_cell_record<W: io::Write>(
     col: u32,
     edit: &CellEdit,
 ) -> Result<(), Error> {
-    let style = 0u32;
+    let style = edit.new_style.unwrap_or(0u32);
     let rgcb = edit.new_rgcb.as_deref().unwrap_or(&[]);
     match (&edit.new_formula, &edit.new_value) {
         (Some(rgce), CellValue::Number(v)) => write_new_fmla_num(writer, col, style, *v, rgce, rgcb),
@@ -1227,6 +1239,13 @@ fn reject_formula_payload_edit(edit: &CellEdit, row: u32, col: u32) -> Result<()
 }
 
 fn formula_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    if let Some(desired_style) = edit.new_style {
+        let existing_style = read_u32(payload, 4)?;
+        if existing_style != desired_style {
+            return Ok(false);
+        }
+    }
+
     let existing_cached = read_f64(payload, 8)?;
     let flags = read_u16(payload, 16)?;
     let _flags = flags; // keep read for bounds checks.
@@ -1252,6 +1271,13 @@ fn formula_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> 
 }
 
 fn formula_string_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    if let Some(desired_style) = edit.new_style {
+        let existing_style = read_u32(payload, 4)?;
+        if existing_style != desired_style {
+            return Ok(false);
+        }
+    }
+
     let desired_cached = match &edit.new_value {
         CellValue::Text(s) => s,
         _ => return Ok(false),
@@ -1289,6 +1315,13 @@ fn formula_string_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, 
 }
 
 fn formula_bool_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    if let Some(desired_style) = edit.new_style {
+        let existing_style = read_u32(payload, 4)?;
+        if existing_style != desired_style {
+            return Ok(false);
+        }
+    }
+
     let desired_cached = match &edit.new_value {
         CellValue::Bool(v) => *v,
         _ => return Ok(false),
@@ -1308,6 +1341,13 @@ fn formula_bool_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Er
 }
 
 fn formula_error_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    if let Some(desired_style) = edit.new_style {
+        let existing_style = read_u32(payload, 4)?;
+        if existing_style != desired_style {
+            return Ok(false);
+        }
+    }
+
     let desired_cached = match &edit.new_value {
         CellValue::Error(v) => *v,
         _ => return Ok(false),
@@ -1330,6 +1370,12 @@ fn value_edit_is_noop_float(payload: &[u8], edit: &CellEdit) -> Result<bool, Err
     if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
         return Ok(false);
     }
+    if let Some(desired_style) = edit.new_style {
+        let existing_style = read_u32(payload, 4)?;
+        if existing_style != desired_style {
+            return Ok(false);
+        }
+    }
     let existing = read_f64(payload, 8)?;
     let desired = match &edit.new_value {
         CellValue::Number(v) => *v,
@@ -1341,6 +1387,12 @@ fn value_edit_is_noop_float(payload: &[u8], edit: &CellEdit) -> Result<bool, Err
 fn value_edit_is_noop_rk(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
     if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
         return Ok(false);
+    }
+    if let Some(desired_style) = edit.new_style {
+        let existing_style = read_u32(payload, 4)?;
+        if existing_style != desired_style {
+            return Ok(false);
+        }
     }
     let existing_rk = read_u32(payload, 8)?;
     let desired = match &edit.new_value {
@@ -1355,6 +1407,12 @@ fn value_edit_is_noop_shared_string(payload: &[u8], edit: &CellEdit) -> Result<b
     if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
         return Ok(false);
     }
+    if let Some(desired_style) = edit.new_style {
+        let existing_style = read_u32(payload, 4)?;
+        if existing_style != desired_style {
+            return Ok(false);
+        }
+    }
     let Some(isst) = edit.shared_string_index else {
         return Ok(false);
     };
@@ -1367,6 +1425,12 @@ fn value_edit_is_noop_shared_string(payload: &[u8], edit: &CellEdit) -> Result<b
 pub(crate) fn value_edit_is_noop_inline_string(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
     if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
         return Ok(false);
+    }
+    if let Some(desired_style) = edit.new_style {
+        let existing_style = read_u32(payload, 4)?;
+        if existing_style != desired_style {
+            return Ok(false);
+        }
     }
     let desired = match &edit.new_value {
         CellValue::Text(s) => s,
@@ -1405,6 +1469,12 @@ fn value_edit_is_noop_bool(payload: &[u8], edit: &CellEdit) -> Result<bool, Erro
     if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
         return Ok(false);
     }
+    if let Some(desired_style) = edit.new_style {
+        let existing_style = read_u32(payload, 4)?;
+        if existing_style != desired_style {
+            return Ok(false);
+        }
+    }
     let desired = match &edit.new_value {
         CellValue::Bool(v) => *v,
         _ => return Ok(false),
@@ -1417,6 +1487,12 @@ fn value_edit_is_noop_error(payload: &[u8], edit: &CellEdit) -> Result<bool, Err
     if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
         return Ok(false);
     }
+    if let Some(desired_style) = edit.new_style {
+        let existing_style = read_u32(payload, 4)?;
+        if existing_style != desired_style {
+            return Ok(false);
+        }
+    }
     let desired = match &edit.new_value {
         CellValue::Error(v) => *v,
         _ => return Ok(false),
@@ -1424,8 +1500,13 @@ fn value_edit_is_noop_error(payload: &[u8], edit: &CellEdit) -> Result<bool, Err
     Ok(read_u8(payload, 8)? == desired)
 }
 
-fn value_edit_is_noop_blank(edit: &CellEdit) -> bool {
-    edit.new_formula.is_none()
+fn value_edit_is_noop_blank(existing_style: u32, edit: &CellEdit) -> bool {
+    let style_unchanged = match edit.new_style {
+        Some(desired) => desired == existing_style,
+        None => true,
+    };
+    style_unchanged
+        && edit.new_formula.is_none()
         && edit.new_rgcb.is_none()
         && matches!(edit.new_value, CellValue::Blank)
 }

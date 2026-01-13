@@ -197,6 +197,7 @@ fn streaming_shared_strings_does_not_touch_sst_for_inserted_formula_string_cells
             // Even if the caller supplies an `isst`, formula cached strings are stored inline and
             // should not affect the shared string table counts.
             shared_string_index: Some(0),
+            new_style: None,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -282,6 +283,7 @@ fn streaming_shared_string_edit_updates_isst_and_preserves_counts() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -320,6 +322,7 @@ fn streaming_shared_string_edit_appends_new_si_and_updates_unique_count() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -360,6 +363,7 @@ fn streaming_shared_string_noop_is_lossless() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -410,6 +414,7 @@ fn streaming_shared_string_noop_rich_sst_is_lossless() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -452,6 +457,7 @@ fn streaming_shared_string_noop_inline_string_does_not_touch_shared_strings() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -498,6 +504,7 @@ fn streaming_shared_strings_repairs_unique_count_when_header_is_incorrect() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -527,6 +534,7 @@ fn streaming_shared_string_total_count_updates_when_cell_leaves_sst() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -561,6 +569,7 @@ fn streaming_shared_string_total_count_updates_when_cell_enters_sst() {
             new_formula: None,
             new_rgcb: None,
             shared_string_index: None,
+            new_style: None,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
