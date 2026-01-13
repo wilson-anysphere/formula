@@ -244,36 +244,58 @@ export class DrawingOverlay {
 
         if (obj.kind.type === "image") {
           const entry = this.images.get(obj.kind.imageId);
-          if (entry) {
-            try {
-              const bitmap = await this.bitmapCache.get(entry, signal ? { signal } : undefined);
-              if (signal?.aborted) return;
-              if (seq !== this.renderSeq) return;
-              withClip(() => {
-                if (hasNonIdentityTransform(obj.transform)) {
-                  withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
-                    ctx.save();
-                    try {
-                      // Clip to the (possibly rotated/flipped) image bounds so we don't
-                      // overdraw neighboring cells when transforms extend beyond the anchor.
-                      ctx.beginPath();
-                      ctx.rect(localRect.x, localRect.y, localRect.width, localRect.height);
-                      ctx.clip();
-                      ctx.drawImage(bitmap, localRect.x, localRect.y, localRect.width, localRect.height);
-                    } finally {
-                      ctx.restore();
-                    }
-                  });
-                } else {
-                  ctx.drawImage(bitmap, screenRect.x, screenRect.y, screenRect.width, screenRect.height);
-                }
-              });
-              continue;
-            } catch (err) {
-              if (signal?.aborted || isAbortError(err)) return;
-              if (seq !== this.renderSeq) return;
-              // Fall through to placeholder rendering.
-            }
+          if (!entry) {
+            // Image metadata can arrive before the bytes are hydrated into the ImageStore
+            // (e.g. collaboration metadata received before IndexedDB hydration). Render a
+            // placeholder box so the image remains visible/selectable until bytes load.
+            withClip(() => {
+              ctx.save();
+              ctx.strokeStyle = colors.placeholderOtherStroke;
+              ctx.lineWidth = 1;
+              ctx.setLineDash([4, 2]);
+              if (hasNonIdentityTransform(obj.transform)) {
+                drawTransformedRect(ctx, screenRect, obj.transform!);
+              } else {
+                ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+              }
+              ctx.setLineDash([]);
+              ctx.fillStyle = colors.placeholderLabel;
+              ctx.globalAlpha = 0.6;
+              ctx.font = "12px sans-serif";
+              ctx.fillText("missing image", screenRect.x + 4, screenRect.y + 14);
+              ctx.restore();
+            });
+            continue;
+          }
+
+          try {
+            const bitmap = await this.bitmapCache.get(entry, signal ? { signal } : undefined);
+            if (signal?.aborted) return;
+            if (seq !== this.renderSeq) return;
+            withClip(() => {
+              if (hasNonIdentityTransform(obj.transform)) {
+                withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
+                  ctx.save();
+                  try {
+                    // Clip to the (possibly rotated/flipped) image bounds so we don't
+                    // overdraw neighboring cells when transforms extend beyond the anchor.
+                    ctx.beginPath();
+                    ctx.rect(localRect.x, localRect.y, localRect.width, localRect.height);
+                    ctx.clip();
+                    ctx.drawImage(bitmap, localRect.x, localRect.y, localRect.width, localRect.height);
+                  } finally {
+                    ctx.restore();
+                  }
+                });
+              } else {
+                ctx.drawImage(bitmap, screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+              }
+            });
+            continue;
+          } catch (err) {
+            if (signal?.aborted || isAbortError(err)) return;
+            if (seq !== this.renderSeq) return;
+            // Fall through to placeholder rendering.
           }
         }
 
