@@ -205,7 +205,7 @@ jobs:
         env:
           # Budgets are interpreted as KiB (1024 bytes). Adjust intentionally when
           # landing changes that affect the initial load footprint.
-          FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB: "3700"
+          FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB: "5000"
           FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB: "3300"
 
       - name: Smoke-check WASM assets

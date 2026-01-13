@@ -31,7 +31,7 @@ function usage() {
       "  node apps/desktop/scripts/bundle-size-check.mjs [--dist <path>]",
       "",
       "Environment (budgets are interpreted as KiB = 1024 bytes):",
-      "  FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB   Total JS (dist/assets/**/*.js) budget.",
+      "  FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB   Total JS (dist/**/*.js) budget.",
       "  FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB   Entry JS budget (scripts referenced by dist/index.html).",
       "",
       "Optional:",
@@ -185,14 +185,11 @@ async function main() {
   }
 
   const distDir = args.distDir ? path.resolve(args.distDir) : defaultDistDir;
-  const assetsDir = path.join(distDir, "assets");
   const indexHtmlPath = path.join(distDir, "index.html");
+  const assetsDir = path.join(distDir, "assets");
 
   if (!(await pathExists(distDir))) {
     throw new Error(`Missing dist directory: ${distDir}\nRun: pnpm -C apps/desktop build`);
-  }
-  if (!(await pathExists(assetsDir))) {
-    throw new Error(`Missing assets directory: ${assetsDir}\nRun: pnpm -C apps/desktop build`);
   }
   if (!(await pathExists(indexHtmlPath))) {
     throw new Error(`Missing index.html: ${indexHtmlPath}\nRun: pnpm -C apps/desktop build`);
@@ -200,7 +197,7 @@ async function main() {
 
   const skipGzip = process.env.FORMULA_DESKTOP_BUNDLE_SIZE_SKIP_GZIP === "1";
 
-  const jsAbsPaths = await collectFiles(assetsDir, (p) => p.endsWith(".js") && !p.endsWith(".js.map"));
+  const jsAbsPaths = await collectFiles(distDir, (p) => p.endsWith(".js") && !p.endsWith(".js.map"));
 
   /** @type {{ absPath: string; relPath: string; bytes: number; gzipBytes: number | null }[]} */
   const jsFiles = [];
@@ -222,6 +219,9 @@ async function main() {
 
   const totalBytes = jsFiles.reduce((sum, f) => sum + f.bytes, 0);
   const totalGzipBytes = skipGzip ? null : jsFiles.reduce((sum, f) => sum + (f.gzipBytes ?? 0), 0);
+  const assetFiles = jsFiles.filter((f) => f.relPath.startsWith("assets/"));
+  const assetsBytes = assetFiles.reduce((sum, f) => sum + f.bytes, 0);
+  const assetsGzipBytes = skipGzip ? null : assetFiles.reduce((sum, f) => sum + (f.gzipBytes ?? 0), 0);
 
   const indexHtml = await readFile(indexHtmlPath, "utf8");
   const entryRelPaths = extractScriptSrcs(indexHtml);
@@ -260,7 +260,7 @@ async function main() {
   if (missingEntry.length > 0) {
     throw new Error(
       [
-        `index.html references JS scripts that were not found in dist/assets:`,
+        `index.html references JS scripts that were not found in dist:`,
         ...missingEntry.map((p) => `- ${p}`),
       ].join("\n"),
     );
@@ -287,14 +287,19 @@ async function main() {
   const lines = [];
   lines.push("### Desktop bundle size (Vite)");
   lines.push("");
-  lines.push(`Measured JS bundles in \`${toPosixPath(path.relative(process.cwd(), assetsDir))}\`.`);
+  lines.push(`Measured JS bundles in \`${toPosixPath(path.relative(process.cwd(), distDir))}\`.`);
   lines.push("");
   lines.push("| Metric | Files | Bytes | KiB | Gzip KiB | Budget (KiB) | Status |");
   lines.push("| --- | ---: | ---: | ---: | ---: | ---: | --- |");
   lines.push(
-    `| Total JS | ${jsFiles.length} | ${fmtInt(totalBytes)} | ${fmtKiB(totalBytes)} | ${
+    `| Total JS (dist/**/*.js) | ${jsFiles.length} | ${fmtInt(totalBytes)} | ${fmtKiB(totalBytes)} | ${
       totalGzipBytes == null ? "—" : fmtKiB(totalGzipBytes)
     } | ${totalBudgetKiB == null ? "—" : totalBudgetKiB} | ${totalStatus.text} |`,
+  );
+  lines.push(
+    `| Total JS (dist/assets/**/*.js) | ${assetFiles.length} | ${fmtInt(assetsBytes)} | ${fmtKiB(assetsBytes)} | ${
+      assetsGzipBytes == null ? "—" : fmtKiB(assetsGzipBytes)
+    } | — | — |`,
   );
   lines.push(
     `| Entry JS (script tags) | ${entryFiles.length} | ${fmtInt(entryBytes)} | ${fmtKiB(entryBytes)} | ${
@@ -344,7 +349,7 @@ async function main() {
 
   const largest = [...jsFiles].sort((a, b) => b.bytes - a.bytes).slice(0, 10);
   lines.push("");
-  lines.push("#### Largest JS bundles (`dist/assets`)");
+  lines.push("#### Largest JS bundles (`dist`)"); // Includes Vite bundles + public assets copied into dist.
   lines.push("");
   lines.push("| File | Bytes | KiB | Gzip KiB |");
   lines.push("| --- | ---: | ---: | ---: |");
@@ -406,4 +411,3 @@ main().catch((err) => {
   console.error(err);
   process.exitCode = 1;
 });
-
