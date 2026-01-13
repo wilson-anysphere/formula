@@ -55,6 +55,149 @@ export function randomSampleRows(rows, sampleSize, options = {}) {
  * @template T
  * @param {T[]} rows
  * @param {number} sampleSize
+ */
+export function headSampleRows(rows, sampleSize) {
+  if (sampleSize <= 0 || rows.length === 0) return [];
+  if (sampleSize >= rows.length) return rows.slice();
+  return rows.slice(0, sampleSize);
+}
+
+/**
+ * Systematic (evenly spaced) sampling without replacement.
+ *
+ * The starting offset is derived deterministically from the provided `seed` / `rng`
+ * unless `options.offset` is provided.
+ *
+ * @template T
+ * @param {T[]} rows
+ * @param {number} sampleSize
+ * @param {{ seed?: number, rng?: () => number, offset?: number }} [options]
+ */
+export function systematicSampleRows(rows, sampleSize, options = {}) {
+  if (sampleSize <= 0 || rows.length === 0) return [];
+  if (sampleSize >= rows.length) return rows.slice();
+
+  const rng = options.rng ?? createSeededRng(options.seed ?? 1);
+  const offsetRaw = options.offset ?? rng();
+  // Force the offset into [0, 1) so callers can pass e.g. 1.25 to mean 0.25.
+  const offset = ((offsetRaw % 1) + 1) % 1;
+
+  const step = rows.length / sampleSize;
+  /** @type {T[]} */
+  const out = [];
+  for (let i = 0; i < sampleSize; i++) {
+    // `step >= 1` because `sampleSize < rows.length` above. This guarantees indices are unique.
+    let idx = Math.floor((i + offset) * step);
+    if (idx >= rows.length) idx = rows.length - 1;
+    out.push(rows[idx]);
+  }
+  return out;
+}
+
+/**
+ * @typedef {{ score: number, key: string }} HeapItem
+ */
+
+/**
+ * @param {HeapItem[]} heap
+ * @param {number} i
+ * @param {number} j
+ */
+function heapSwap(heap, i, j) {
+  const tmp = heap[i];
+  heap[i] = heap[j];
+  heap[j] = tmp;
+}
+
+/**
+ * @param {HeapItem[]} heap
+ * @param {number} idx
+ */
+function heapSiftUp(heap, idx) {
+  while (idx > 0) {
+    const parent = (idx - 1) >> 1;
+    if (heap[parent].score <= heap[idx].score) break;
+    heapSwap(heap, parent, idx);
+    idx = parent;
+  }
+}
+
+/**
+ * @param {HeapItem[]} heap
+ * @param {number} idx
+ */
+function heapSiftDown(heap, idx) {
+  for (;;) {
+    const left = idx * 2 + 1;
+    const right = idx * 2 + 2;
+    let smallest = idx;
+    if (left < heap.length && heap[left].score < heap[smallest].score) smallest = left;
+    if (right < heap.length && heap[right].score < heap[smallest].score) smallest = right;
+    if (smallest === idx) break;
+    heapSwap(heap, idx, smallest);
+    idx = smallest;
+  }
+}
+
+/**
+ * @param {HeapItem[]} heap
+ * @param {HeapItem} item
+ */
+function heapPush(heap, item) {
+  heap.push(item);
+  heapSiftUp(heap, heap.length - 1);
+}
+
+/**
+ * @param {HeapItem[]} heap
+ * @param {HeapItem} item
+ */
+function heapReplaceMin(heap, item) {
+  heap[0] = item;
+  heapSiftDown(heap, 0);
+}
+
+/**
+ * Select `sampleSize` unique stratum keys with probability proportional to stratum size
+ * (weighted sampling without replacement) without constructing an O(totalRows) helper array.
+ *
+ * Implementation: Efraimidis–Spirakis "A-Res" weighted reservoir sampling.
+ *
+ * @param {Array<[string, number[]]>} stratumEntries
+ * @param {number} sampleSize
+ * @param {() => number} rng
+ * @returns {string[]}
+ */
+function sampleStrataWithoutReplacement(stratumEntries, sampleSize, rng) {
+  if (sampleSize <= 0) return [];
+  if (sampleSize >= stratumEntries.length) return stratumEntries.map(([key]) => key);
+
+  /** @type {HeapItem[]} */
+  const heap = [];
+
+  for (const [key, indices] of stratumEntries) {
+    const weight = indices.length;
+    if (weight <= 0) continue;
+    // rng() is in [0, 1). Convert to (0, 1] to avoid generating `Infinity` in log-based variants.
+    const u = 1 - rng();
+    const score = Math.pow(u, 1 / weight);
+
+    if (heap.length < sampleSize) {
+      heapPush(heap, { score, key });
+      continue;
+    }
+    if (score > heap[0].score) {
+      heapReplaceMin(heap, { score, key });
+    }
+  }
+
+  return heap.map((item) => item.key);
+}
+
+/**
+ * @template T
+ * @param {T[]} rows
+ * @param {number} sampleSize
  * @param {{ getStratum: (row: T) => string, seed?: number, rng?: () => number }} options
  */
 export function stratifiedSampleRows(rows, sampleSize, options) {
@@ -81,12 +224,7 @@ export function stratifiedSampleRows(rows, sampleSize, options) {
 
   if (sampleSize < stratumEntries.length) {
     // Not enough room for every stratum: choose strata (weighted by size) and take one each.
-    const weighted = stratumEntries.flatMap(([key, indices]) => Array.from({ length: indices.length }, () => key));
-    const chosen = new Set();
-    while (chosen.size < sampleSize) {
-      const key = weighted[Math.floor(rng() * weighted.length)];
-      chosen.add(key);
-    }
+    const chosen = sampleStrataWithoutReplacement(stratumEntries, sampleSize, rng);
     for (const key of chosen) allocation.set(key, 1);
   } else {
     // Ensure at least one sample per stratum, then distribute the remainder proportionally.

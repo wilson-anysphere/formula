@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { randomSampleRows, stratifiedSampleRows } from "./sampling.js";
+import { headSampleRows, randomSampleRows, stratifiedSampleRows, systematicSampleRows } from "./sampling.js";
 
 describe("sampling", () => {
   it("randomSampleRows is deterministic with a seed and returns unique rows", () => {
@@ -48,5 +48,34 @@ describe("sampling", () => {
     expect(counts.A).toBeGreaterThanOrEqual(1);
     expect(counts.C).toBeGreaterThanOrEqual(1);
   });
-});
 
+  it("stratifiedSampleRows handles large row sets without O(N) weighted helper arrays", () => {
+    const total = 200_000;
+    const strataCount = 100;
+    const keys = Array.from({ length: strataCount }, (_v, i) => `S${i}`);
+    const rows = Array.from({ length: total }, (_v, i) => [keys[i % strataCount], i]);
+
+    const sampledA = stratifiedSampleRows(rows, 10, { getStratum: (r: any) => r[0], seed: 123 });
+    const sampledB = stratifiedSampleRows(rows, 10, { getStratum: (r: any) => r[0], seed: 123 });
+
+    expect(sampledA).toEqual(sampledB);
+    expect(sampledA).toHaveLength(10);
+    expect(new Set(sampledA.map((r: any) => r[0])).size).toBe(10);
+  });
+
+  it("headSampleRows returns the first N rows", () => {
+    const rows = Array.from({ length: 10 }, (_v, i) => i);
+    expect(headSampleRows(rows, 0)).toEqual([]);
+    expect(headSampleRows(rows, 3)).toEqual([0, 1, 2]);
+    expect(headSampleRows(rows, 20)).toEqual(rows);
+  });
+
+  it("systematicSampleRows is deterministic and evenly spaced", () => {
+    const rows = Array.from({ length: 10 }, (_v, i) => i);
+    const sampleA = systematicSampleRows(rows, 4, { seed: 123 });
+    const sampleB = systematicSampleRows(rows, 4, { seed: 123 });
+
+    expect(sampleA).toEqual(sampleB);
+    expect(sampleA).toEqual([1, 4, 6, 9]);
+  });
+});
