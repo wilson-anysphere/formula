@@ -2641,6 +2641,10 @@ export async function bindCollabSessionToDocumentController(options: {
     encryption: session.getEncryptionConfig(),
     canReadCell: (cell) => session.canReadCell(cell),
     canEditCell: (cell) => session.canEditCell(cell),
+    // In read-only collab roles (viewer/commenter) we still want to allow
+    // local-only UI changes (freeze panes, row/col sizing, sheet formatting
+    // defaults), but those must not be written into the shared Yjs document.
+    canWriteSharedState: () => !session.isReadOnly(),
     // Use the standard enterprise mask. The binder also uses this hook for
     // encrypted cells that cannot be decrypted.
     maskCellValue: (value) => maskCellValue(value),

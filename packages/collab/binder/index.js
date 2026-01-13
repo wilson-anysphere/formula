@@ -399,6 +399,18 @@ function sameNormalizedCell(a, b) {
  *   permissions?:
  *     | ((cell: { sheetId: string, row: number, col: number }) => { canRead: boolean, canEdit: boolean })
  *     | { role: string, restrictions?: any[], userId?: string | null },
+ *   /**
+ *    * Controls whether DocumentController-driven shared-state writes (sheet view state,
+ *    * sheet-level formatting defaults, etc) are allowed to be persisted into the Yjs
+ *    * document.
+ *    *
+ *    * In read-only collab roles (viewer/commenter), the UI may still allow local-only
+ *    * interactions like freeze panes and resizing rows/cols. Those interactions should
+ *    * *not* mutate the shared CRDT.
+ *    *
+ *    * Defaults to `true`.
+ *    *\/
+ *   canWriteSharedState?: boolean | (() => boolean),
  *   maskCellValue?: (value: unknown, cell?: { sheetId: string, row: number, col: number }) => unknown,
  *   /**
  *    * When true, suppress per-cell formatting for masked cells (unreadable due to
@@ -445,6 +457,7 @@ export function bindYjsToDocumentController(options) {
     canReadCell = null,
     canEditCell = null,
     permissions = null,
+    canWriteSharedState: canWriteSharedStateRaw = true,
     maskCellValue = defaultMaskCellValue,
     maskCellFormat = false,
     onEditRejected = null,
@@ -461,6 +474,11 @@ export function bindYjsToDocumentController(options) {
       : "off";
   const formulaConflictSemanticsEnabled = formulaConflictsMode !== "off";
   const valueConflictSemanticsEnabled = formulaConflictsMode === "formula+value";
+
+  const canWriteSharedState =
+    typeof canWriteSharedStateRaw === "function"
+      ? canWriteSharedStateRaw
+      : () => canWriteSharedStateRaw !== false;
 
   const { cells, sheets } = getWorkbookRoots(ydoc);
   const YMapCtor = cells?.constructor ?? Y.Map;
@@ -2474,12 +2492,20 @@ export function bindYjsToDocumentController(options) {
    */
   const handleDocumentChange = (payload) => {
     if (applyingRemote) return;
+
+    const allowSharedStateWrites = canWriteSharedState();
+
     const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
     const sheetViewDeltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
-    const formatDeltas = readFormatDeltasFromDocumentChange(payload);
-    const rangeRunDeltas = Array.isArray(payload?.rangeRunDeltas) ? payload.rangeRunDeltas : [];
+    const formatDeltasRaw = readFormatDeltasFromDocumentChange(payload);
+    const rangeRunDeltasRaw = Array.isArray(payload?.rangeRunDeltas) ? payload.rangeRunDeltas : [];
 
-    if (sheetViewDeltas.length > 0) {
+    // In read-only roles, allow these mutations to update local UI state but do not
+    // persist them into the shared Yjs document.
+    const formatDeltas = allowSharedStateWrites ? formatDeltasRaw : [];
+    const rangeRunDeltas = allowSharedStateWrites ? rangeRunDeltasRaw : [];
+
+    if (allowSharedStateWrites && sheetViewDeltas.length > 0) {
       enqueueSheetViewWrite(sheetViewDeltas);
     }
 

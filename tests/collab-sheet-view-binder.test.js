@@ -89,3 +89,75 @@ test("CollabSession sheet view binder syncs frozen panes + axis overrides withou
   docB.destroy();
 });
 
+test("CollabSession sheet view binder does not write view state into Yjs when session role is read-only", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc });
+  // Viewer/commenter roles can make local-only view changes, but must not mutate the shared doc.
+  session.setPermissions({ role: "viewer", rangeRestrictions: [], userId: "viewer-1" });
+
+  const dc = new DocumentController();
+  const binder = bindSheetViewToCollabSession({ session, documentController: dc });
+
+  /** @type {number} */
+  let updates = 0;
+  const onUpdate = () => {
+    updates += 1;
+  };
+
+  try {
+    // Give initial schema/hydration work a chance to settle before we start counting updates.
+    await new Promise((r) => setTimeout(r, 25));
+    updates = 0;
+    doc.on("update", onUpdate);
+
+    // Local UI changes should update DocumentController but not persist into Yjs.
+    dc.setFrozen("Sheet1", 2, 1, { label: "Freeze (local-only)" });
+    dc.setColWidth("Sheet1", 0, 120, { label: "Resize Column (local-only)" });
+    dc.setRowHeight("Sheet1", 1, 40, { label: "Resize Row (local-only)" });
+
+    await new Promise((r) => setTimeout(r, 25));
+    assert.equal(updates, 0, "expected no Yjs updates from local sheet view changes in read-only role");
+
+    assert.deepEqual(dc.getSheetView("Sheet1"), {
+      frozenRows: 2,
+      frozenCols: 1,
+      colWidths: { "0": 120 },
+      rowHeights: { "1": 40 },
+    });
+
+    // Remote Yjs updates should still apply to the DocumentController.
+    updates = 0;
+    doc.transact(
+      () => {
+        const sheet = session.sheets.toArray().find((s) => (s?.get?.("id") ?? s?.id) === "Sheet1") ?? null;
+        assert.ok(sheet, "expected Sheet1 entry in Yjs");
+        // Simulate a remote collaborator overwriting the view state.
+        sheet.set("view", { frozenRows: 0, frozenCols: 3, colWidths: { "0": 200 }, rowHeights: { "1": 10 } });
+      },
+      REMOTE_ORIGIN,
+    );
+
+    await waitForCondition(() => {
+      const view = dc.getSheetView("Sheet1");
+      return (
+        view.frozenRows === 0 &&
+        view.frozenCols === 3 &&
+        view.colWidths?.["0"] === 200 &&
+        view.rowHeights?.["1"] === 10
+      );
+    });
+
+    assert.ok(updates > 0, "expected remote Yjs changes to produce doc updates");
+    assert.deepEqual(dc.getSheetView("Sheet1"), {
+      frozenRows: 0,
+      frozenCols: 3,
+      colWidths: { "0": 200 },
+      rowHeights: { "1": 10 },
+    });
+  } finally {
+    doc.off("update", onUpdate);
+    binder.destroy();
+    session.destroy();
+    doc.destroy();
+  }
+});
