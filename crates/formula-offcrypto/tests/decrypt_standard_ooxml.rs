@@ -32,9 +32,7 @@ fn wrong_password_returns_error() {
 
     let err = decrypt_standard_ooxml_from_bytes(encrypted, "not-the-password")
         .expect_err("expected wrong password to error");
-
-    // The exact error surface comes from `office-crypto`; we only assert that we didn't panic.
-    let _msg = err.to_string();
+    assert!(matches!(err, formula_offcrypto::OffcryptoError::InvalidPassword));
 }
 
 #[test]

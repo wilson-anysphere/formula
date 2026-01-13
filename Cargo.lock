@@ -2239,7 +2239,6 @@ dependencies = [
  "cipher",
  "hex",
  "hmac",
- "office-crypto",
  "quick-xml 0.37.5",
  "sha1",
  "sha2",

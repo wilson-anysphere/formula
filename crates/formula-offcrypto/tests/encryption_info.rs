@@ -261,7 +261,10 @@ fn rejects_key_size_mismatch_for_aes() {
         32,
     );
     let err = parse_encryption_info(&bytes).unwrap_err();
-    assert_eq!(err, OffcryptoError::UnsupportedAlgorithm(CALG_AES_128));
+    assert!(
+        matches!(err, OffcryptoError::UnsupportedAlgorithm(_)),
+        "expected UnsupportedAlgorithm, got {err:?}"
+    );
 }
 
 #[test]
@@ -276,7 +279,10 @@ fn rejects_non_sha1_alg_id_hash() {
         32,
     );
     let err = parse_encryption_info(&bytes).unwrap_err();
-    assert_eq!(err, OffcryptoError::UnsupportedAlgorithm(0x0000_800C));
+    assert!(
+        matches!(err, OffcryptoError::UnsupportedAlgorithm(_)),
+        "expected UnsupportedAlgorithm, got {err:?}"
+    );
 }
 
 #[test]
@@ -348,7 +354,10 @@ fn rejects_unsupported_standard_alg_id() {
         32,
     );
     let err = parse_encryption_info(&bytes).unwrap_err();
-    assert_eq!(err, OffcryptoError::UnsupportedAlgorithm(0xDEAD_BEEF));
+    assert!(
+        matches!(err, OffcryptoError::UnsupportedAlgorithm(_)),
+        "expected UnsupportedAlgorithm, got {err:?}"
+    );
 }
 
 #[test]

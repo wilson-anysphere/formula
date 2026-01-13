@@ -164,7 +164,10 @@ fn standard_derive_key_rejects_non_sha1_alg_id_hash() {
     };
 
     let err = standard_derive_key(&info, PASSWORD).unwrap_err();
-    assert_eq!(err, OffcryptoError::UnsupportedAlgorithm(0));
+    assert_eq!(
+        err,
+        OffcryptoError::UnsupportedAlgorithm("algIdHash=0x00000000".to_string())
+    );
 }
 
 #[test]
@@ -190,7 +193,12 @@ fn standard_derive_key_rejects_key_size_mismatch() {
     };
 
     let err = standard_derive_key(&info, PASSWORD).unwrap_err();
-    assert_eq!(err, OffcryptoError::UnsupportedAlgorithm(0x0000_660E));
+    assert_eq!(
+        err,
+        OffcryptoError::UnsupportedAlgorithm(
+            "keySize=256 mismatch for algId=0x0000660e".to_string()
+        )
+    );
 }
 
 #[test]

@@ -8,6 +8,7 @@ members = [
   "crates/formula-corpus-triage",
   "crates/formula-engine",
   "crates/formula-excel-oracle",
+  "crates/formula-offcrypto",
   "crates/formula-fs",
   "crates/formula-format",
   "crates/formula-io",

@@ -104,17 +104,27 @@ fn validate_standard_encryption_info(info: &StandardEncryptionInfo) -> Result<()
         CALG_AES_128 => 128,
         CALG_AES_192 => 192,
         CALG_AES_256 => 256,
-        other => return Err(OffcryptoError::UnsupportedAlgorithm(other)),
+        other => {
+            return Err(OffcryptoError::UnsupportedAlgorithm(format!(
+                "algId=0x{other:08x}"
+            )))
+        }
     };
 
     if info.header.key_size_bits != expected_key_size {
         // Mirror the parsing behaviour: mismatch means we don't support the declared algorithm
         // parameters.
-        return Err(OffcryptoError::UnsupportedAlgorithm(info.header.alg_id));
+        return Err(OffcryptoError::UnsupportedAlgorithm(format!(
+            "keySize={} mismatch for algId=0x{:08x}",
+            info.header.key_size_bits, info.header.alg_id
+        )));
     }
 
     if info.header.alg_id_hash != CALG_SHA1 {
-        return Err(OffcryptoError::UnsupportedAlgorithm(info.header.alg_id_hash));
+        return Err(OffcryptoError::UnsupportedAlgorithm(format!(
+            "algIdHash=0x{:08x}",
+            info.header.alg_id_hash
+        )));
     }
 
     if info.verifier.salt.len() != 16 {
@@ -210,7 +220,7 @@ pub struct EncryptedPackageHeader {
 }
 
 /// Errors returned by this crate.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OffcryptoError {
     /// Not enough bytes to parse the requested structure.
     Truncated { context: &'static str },
@@ -218,8 +228,10 @@ pub enum OffcryptoError {
     InvalidFormat { context: &'static str },
     /// CSPName was not valid UTF-16LE.
     InvalidCspNameUtf16,
+    /// The encrypted streams are structurally invalid.
+    InvalidStructure(String),
     /// Standard encryption uses an algorithm not supported by the current implementation.
-    UnsupportedAlgorithm(u32),
+    UnsupportedAlgorithm(String),
     /// The stream contents are structurally invalid (e.g. missing required attributes).
     InvalidEncryptionInfo { context: &'static str },
     /// The decrypted package size from the `EncryptedPackage` header does not fit into a `Vec<u8>`.
@@ -254,104 +266,7 @@ pub enum OffcryptoError {
     InvalidVerifierHashLength { len: usize },
     /// Password/key did not pass verifier check.
     InvalidPassword,
-    /// The requested OLE stream was not present in the container.
-    MissingOleStream { stream: &'static str },
-    /// The decrypted bytes do not look like an OOXML ZIP/OPC container.
-    DecryptedPackageNotZip,
-    /// `office-crypto` decryption failed.
-    OfficeCrypto(office_crypto::DecryptError),
-    /// `office-crypto` panicked while attempting to decrypt.
-    OfficeCryptoPanic { message: String },
-    /// I/O error while parsing the OLE container.
-    Io(std::io::Error),
 }
-
-impl PartialEq for OffcryptoError {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Truncated { context: a }, Self::Truncated { context: b }) => a == b,
-            (Self::InvalidFormat { context: a }, Self::InvalidFormat { context: b }) => a == b,
-            (Self::InvalidCspNameUtf16, Self::InvalidCspNameUtf16) => true,
-            (Self::UnsupportedAlgorithm(a), Self::UnsupportedAlgorithm(b)) => a == b,
-            (
-                Self::InvalidEncryptionInfo { context: a },
-                Self::InvalidEncryptionInfo { context: b },
-            ) => a == b,
-            (
-                Self::EncryptedPackageSizeOverflow { total_size: a },
-                Self::EncryptedPackageSizeOverflow { total_size: b },
-            ) => a == b,
-            (
-                Self::EncryptedPackageAllocationFailed { total_size: a },
-                Self::EncryptedPackageAllocationFailed { total_size: b },
-            ) => a == b,
-            (
-                Self::EncryptedPackageSizeMismatch {
-                    total_size: a_size,
-                    ciphertext_len: a_ct,
-                },
-                Self::EncryptedPackageSizeMismatch {
-                    total_size: b_size,
-                    ciphertext_len: b_ct,
-                },
-            ) => a_size == b_size && a_ct == b_ct,
-            (
-                Self::UnsupportedVersion {
-                    major: a_major,
-                    minor: a_minor,
-                },
-                Self::UnsupportedVersion {
-                    major: b_major,
-                    minor: b_minor,
-                },
-            ) => a_major == b_major && a_minor == b_minor,
-            (Self::InvalidCiphertextLength { len: a }, Self::InvalidCiphertextLength { len: b }) => {
-                a == b
-            }
-            (Self::InvalidKeyLength { len: a }, Self::InvalidKeyLength { len: b }) => a == b,
-            (
-                Self::InvalidKeySizeBits { key_size_bits: a },
-                Self::InvalidKeySizeBits { key_size_bits: b },
-            ) => a == b,
-            (
-                Self::DerivedKeyTooLong {
-                    key_size_bits: a_bits,
-                    required_bytes: a_req,
-                    available_bytes: a_avail,
-                },
-                Self::DerivedKeyTooLong {
-                    key_size_bits: b_bits,
-                    required_bytes: b_req,
-                    available_bytes: b_avail,
-                },
-            ) => a_bits == b_bits && a_req == b_req && a_avail == b_avail,
-            (Self::InvalidVerifierHashLength { len: a }, Self::InvalidVerifierHashLength { len: b }) => {
-                a == b
-            }
-            (Self::InvalidPassword, Self::InvalidPassword) => true,
-            (
-                Self::UnsupportedEncryption {
-                    encryption_type: a,
-                },
-                Self::UnsupportedEncryption {
-                    encryption_type: b,
-                },
-            ) => a == b,
-            (Self::MissingOleStream { stream: a }, Self::MissingOleStream { stream: b }) => a == b,
-            (Self::DecryptedPackageNotZip, Self::DecryptedPackageNotZip) => true,
-            (Self::OfficeCrypto(a), Self::OfficeCrypto(b)) => a.to_string() == b.to_string(),
-            (
-                Self::OfficeCryptoPanic { message: a },
-                Self::OfficeCryptoPanic { message: b },
-            ) => a == b,
-            (Self::Io(a), Self::Io(b)) => a.kind() == b.kind() && a.to_string() == b.to_string(),
-            _ => false,
-        }
-    }
-}
-
-impl Eq for OffcryptoError {}
-
 impl fmt::Display for OffcryptoError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -360,9 +275,8 @@ impl fmt::Display for OffcryptoError {
             }
             OffcryptoError::InvalidFormat { context } => write!(f, "invalid format: {context}"),
             OffcryptoError::InvalidCspNameUtf16 => write!(f, "invalid UTF-16LE CSPName"),
-            OffcryptoError::UnsupportedAlgorithm(id) => {
-                write!(f, "unsupported encryption algorithm id 0x{id:08X}")
-            }
+            OffcryptoError::InvalidStructure(msg) => write!(f, "invalid structure: {msg}"),
+            OffcryptoError::UnsupportedAlgorithm(msg) => write!(f, "unsupported algorithm: {msg}"),
             OffcryptoError::InvalidEncryptionInfo { context } => {
                 write!(f, "invalid EncryptionInfo: {context}")
             }
@@ -411,45 +325,11 @@ impl fmt::Display for OffcryptoError {
                 "encrypted verifier hash must be at least 20 bytes after decryption, got {len}"
             ),
             OffcryptoError::InvalidPassword => write!(f, "invalid password or key"),
-            OffcryptoError::MissingOleStream { stream } => {
-                write!(f, "OLE stream not found: {stream}")
-            }
-            OffcryptoError::DecryptedPackageNotZip => write!(
-                f,
-                "decrypted package does not look like a ZIP/OPC container (missing PK signature)"
-            ),
-            OffcryptoError::OfficeCrypto(err) => {
-                write!(f, "office-crypto decryption failed: {err}")
-            }
-            OffcryptoError::OfficeCryptoPanic { message } => {
-                write!(f, "office-crypto decryption panicked: {message}")
-            }
-            OffcryptoError::Io(err) => write!(f, "io error: {err}"),
         }
     }
 }
 
-impl std::error::Error for OffcryptoError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            OffcryptoError::OfficeCrypto(err) => Some(err),
-            OffcryptoError::Io(err) => Some(err),
-            _ => None,
-        }
-    }
-}
-
-impl From<std::io::Error> for OffcryptoError {
-    fn from(err: std::io::Error) -> Self {
-        Self::Io(err)
-    }
-}
-
-impl From<office_crypto::DecryptError> for OffcryptoError {
-    fn from(err: office_crypto::DecryptError) -> Self {
-        Self::OfficeCrypto(err)
-    }
-}
+impl std::error::Error for OffcryptoError {}
 
 struct Reader<'a> {
     bytes: &'a [u8],
@@ -581,13 +461,23 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
         CALG_AES_128 => 128,
         CALG_AES_192 => 192,
         CALG_AES_256 => 256,
-        other => return Err(OffcryptoError::UnsupportedAlgorithm(other)),
+        other => {
+            return Err(OffcryptoError::UnsupportedAlgorithm(format!(
+                "algId=0x{other:08x}"
+            )))
+        }
     };
     if header.key_size_bits != expected_key_size {
-        return Err(OffcryptoError::UnsupportedAlgorithm(header.alg_id));
+        return Err(OffcryptoError::UnsupportedAlgorithm(format!(
+            "keySize={} mismatch for algId=0x{:08x}",
+            header.key_size_bits, header.alg_id
+        )));
     }
     if header.alg_id_hash != CALG_SHA1 {
-        return Err(OffcryptoError::UnsupportedAlgorithm(header.alg_id_hash));
+        return Err(OffcryptoError::UnsupportedAlgorithm(format!(
+            "algIdHash=0x{:08x}",
+            header.alg_id_hash
+        )));
     }
 
     // EncryptionVerifier occupies the remaining bytes after the header.
@@ -652,7 +542,7 @@ pub fn decrypt_standard_only(
             let key = Zeroizing::new(standard_derive_key(&info, password)?);
             standard_verify_key(&info, key.as_slice())?;
 
-            decrypt_encrypted_package(encrypted_package, |_idx, ct, pt| {
+            encrypted_package::decrypt_encrypted_package(encrypted_package, |_idx, ct, pt| {
                 pt.copy_from_slice(ct);
                 aes_ecb_decrypt_in_place(key.as_slice(), pt)
             })
@@ -1734,6 +1624,219 @@ fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoE
     }
 }
 
+/// Standard/ECMA-376 key derivation used by CryptoAPI-based encryption (SHA1 + AES).
+///
+/// This matches the ECMA-376 "Standard" (CryptoAPI) algorithm used by `msoffcrypto-tool`.
+///
+/// - `salt` comes from `EncryptionVerifier.salt`
+/// - `key_size_bits` comes from `EncryptionHeader.keySize` and must be 128/192/256
+pub fn make_key_from_password(
+    password: &str,
+    salt: &[u8],
+    key_size_bits: u32,
+) -> Result<Vec<u8>, OffcryptoError> {
+    let key_len = match key_size_bits {
+        128 | 192 | 256 => (key_size_bits / 8) as usize,
+        other => {
+            return Err(OffcryptoError::UnsupportedAlgorithm(format!(
+                "keySize={other} bits"
+            )))
+        }
+    };
+
+    let password_utf16 = password_to_utf16le_bytes(password);
+
+    // h = sha1(salt || password_utf16le)
+    let mut hasher = Sha1::new();
+    hasher.update(salt);
+    hasher.update(&password_utf16);
+    let mut h: [u8; SHA1_LEN] = hasher.finalize().into();
+
+    // for i in 0..ITER_COUNT: h = sha1(u32le(i) || h)
+    let mut buf = [0u8; 4 + SHA1_LEN];
+    for i in 0..ITER_COUNT {
+        buf[..4].copy_from_slice(&(i as u32).to_le_bytes());
+        buf[4..].copy_from_slice(&h);
+        h = sha1(&buf);
+    }
+
+    // h_final = sha1(h || u32le(0))
+    let mut buf0 = [0u8; SHA1_LEN + 4];
+    buf0[..SHA1_LEN].copy_from_slice(&h);
+    buf0[SHA1_LEN..].copy_from_slice(&0u32.to_le_bytes());
+    let h_final = sha1(&buf0);
+
+    // key = (sha1((0x36*64) ^ h_final) || sha1((0x5c*64) ^ h_final))[..key_len]
+    let mut buf1 = [0x36u8; 64];
+    let mut buf2 = [0x5cu8; 64];
+    for i in 0..SHA1_LEN {
+        buf1[i] ^= h_final[i];
+        buf2[i] ^= h_final[i];
+    }
+    let x1 = sha1(&buf1);
+    let x2 = sha1(&buf2);
+
+    let mut out = [0u8; SHA1_LEN * 2];
+    out[..SHA1_LEN].copy_from_slice(&x1);
+    out[SHA1_LEN..].copy_from_slice(&x2);
+
+    debug_assert!(key_len <= out.len());
+    Ok(out[..key_len].to_vec())
+}
+
+/// Verify a Standard encryption password/key using the encrypted verifier fields.
+pub fn verify_password(
+    key: &[u8],
+    encrypted_verifier: &[u8],
+    encrypted_verifier_hash: &[u8],
+) -> Result<(), OffcryptoError> {
+    if encrypted_verifier.len() != 16 {
+        return Err(OffcryptoError::InvalidStructure(format!(
+            "`encryptedVerifier` must be 16 bytes, got {}",
+            encrypted_verifier.len()
+        )));
+    }
+    if encrypted_verifier_hash.len() % 16 != 0 {
+        return Err(OffcryptoError::InvalidStructure(format!(
+            "`encryptedVerifierHash` length must be a multiple of 16 bytes, got {}",
+            encrypted_verifier_hash.len()
+        )));
+    }
+
+    let mut verifier = [0u8; 16];
+    verifier.copy_from_slice(encrypted_verifier);
+    aes_ecb_decrypt_in_place(key, &mut verifier)?;
+    let expected_hash: [u8; SHA1_LEN] = sha1(&verifier);
+
+    let mut verifier_hash = encrypted_verifier_hash.to_vec();
+    aes_ecb_decrypt_in_place(key, &mut verifier_hash)?;
+    if verifier_hash.len() < SHA1_LEN {
+        return Err(OffcryptoError::InvalidStructure(format!(
+            "decrypted verifier hash must be at least 20 bytes, got {}",
+            verifier_hash.len()
+        )));
+    }
+
+    if util::ct_eq(&expected_hash[..], &verifier_hash[..SHA1_LEN]) {
+        Ok(())
+    } else {
+        Err(OffcryptoError::InvalidPassword)
+    }
+}
+
+/// Decrypt the `EncryptedPackage` stream for Standard (CryptoAPI / AES) encryption using AES-ECB.
+///
+/// The stream format is:
+/// - `u64` original size (LE)
+/// - ciphertext bytes (AES-ECB, block-aligned, no padding)
+pub fn decrypt_encrypted_package_ecb(
+    key: &[u8],
+    encrypted_package: &[u8],
+) -> Result<Vec<u8>, OffcryptoError> {
+    if encrypted_package.len() < 8 {
+        return Err(OffcryptoError::InvalidStructure(format!(
+            "`EncryptedPackage` must be at least 8 bytes, got {}",
+            encrypted_package.len()
+        )));
+    }
+
+    let original_size = u64::from_le_bytes(
+        encrypted_package[..8]
+            .try_into()
+            .expect("slice length checked above"),
+    );
+    let original_size: usize = original_size.try_into().map_err(|_| {
+        OffcryptoError::InvalidStructure("original size does not fit into usize".to_string())
+    })?;
+
+    let ciphertext = &encrypted_package[8..];
+    if ciphertext.len() % 16 != 0 {
+        return Err(OffcryptoError::InvalidStructure(format!(
+            "ciphertext length must be a multiple of 16 bytes, got {}",
+            ciphertext.len()
+        )));
+    }
+
+    let mut plaintext = ciphertext.to_vec();
+    aes_ecb_decrypt_in_place(key, &mut plaintext)?;
+
+    if original_size > plaintext.len() {
+        return Err(OffcryptoError::InvalidStructure(format!(
+            "original size {original_size} exceeds plaintext length {}",
+            plaintext.len()
+        )));
+    }
+
+    plaintext.truncate(original_size);
+    Ok(plaintext)
+}
+
+/// Decrypt a password-protected ECMA-376 (OOXML) file which uses MS-OFFCRYPTO "Standard"
+/// (CryptoAPI / AES) encryption.
+///
+/// `data` must be an OLE Compound File containing the `EncryptionInfo` and `EncryptedPackage`
+/// streams.
+pub fn decrypt_from_bytes(data: &[u8], password: &str) -> Result<Vec<u8>, OffcryptoError> {
+    let cursor = Cursor::new(data);
+    let mut ole = cfb::CompoundFile::open(cursor)
+        .map_err(|e| OffcryptoError::InvalidStructure(format!("failed to open OLE compound file: {e}")))?;
+
+    let mut encryption_info = Vec::new();
+    {
+        let mut stream = ole.open_stream("EncryptionInfo").map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                OffcryptoError::InvalidStructure("missing `EncryptionInfo` stream".to_string())
+            } else {
+                OffcryptoError::InvalidStructure(format!("failed to open `EncryptionInfo`: {e}"))
+            }
+        })?;
+        stream
+            .read_to_end(&mut encryption_info)
+            .map_err(|e| OffcryptoError::InvalidStructure(format!("failed to read `EncryptionInfo`: {e}")))?;
+    }
+
+    let (header, verifier) = match parse_encryption_info(&encryption_info)? {
+        EncryptionInfo::Standard { header, verifier, .. } => (header, verifier),
+        EncryptionInfo::Agile { .. } => {
+            return Err(OffcryptoError::UnsupportedEncryption {
+                encryption_type: EncryptionType::Agile,
+            })
+        }
+        EncryptionInfo::Unsupported { version } => {
+            if version.minor == 3 && matches!(version.major, 3 | 4) {
+                // MS-OFFCRYPTO "Extensible" encryption: known scheme, but not supported by this
+                // Standard-only decryptor.
+                return Err(OffcryptoError::UnsupportedEncryption {
+                    encryption_type: EncryptionType::Extensible,
+                });
+            }
+            return Err(OffcryptoError::UnsupportedVersion {
+                major: version.major,
+                minor: version.minor,
+            });
+        }
+    };
+
+    let key = make_key_from_password(password, &verifier.salt, header.key_size_bits)?;
+    verify_password(&key, &verifier.encrypted_verifier, &verifier.encrypted_verifier_hash)?;
+
+    let mut encrypted_package = Vec::new();
+    {
+        let mut stream = ole.open_stream("EncryptedPackage").map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                OffcryptoError::InvalidStructure("missing `EncryptedPackage` stream".to_string())
+            } else {
+                OffcryptoError::InvalidStructure(format!("failed to open `EncryptedPackage`: {e}"))
+            }
+        })?;
+        stream
+            .read_to_end(&mut encrypted_package)
+            .map_err(|e| OffcryptoError::InvalidStructure(format!("failed to read `EncryptedPackage`: {e}")))?;
+    }
+
+    decrypt_encrypted_package_ecb(&key, &encrypted_package)
+}
+
 /// ECMA-376 Standard Encryption password→key derivation.
 ///
 /// Reference algorithm: `msoffcrypto` `ECMA376Standard.makekey_from_password`.
@@ -2055,77 +2158,13 @@ pub fn agile_secret_key(
 
 /// Decrypt a Standard-encrypted OOXML package (e.g. `.docx`, `.xlsx`) from a raw OLE/CFB wrapper.
 ///
-/// This is a thin wrapper around the upstream MIT-licensed [`office_crypto`] crate. We constrain
-/// support to **ECMA-376 Standard encryption** (CryptoAPI / `EncryptionInfo` `versionMinor == 2`;
-/// `versionMajor ∈ {2,3,4}` in real-world files).
+/// This performs native MS-OFFCRYPTO Standard (CryptoAPI / AES) password verification and
+/// decryption and returns the decrypted OOXML ZIP bytes.
 pub fn decrypt_standard_ooxml_from_bytes(
     raw_ole: Vec<u8>,
     password: &str,
 ) -> Result<Vec<u8>, OffcryptoError> {
-    // 1) Validate that the file's EncryptionInfo version indicates Standard encryption.
-    let encryption_info = read_ole_stream(&raw_ole, "EncryptionInfo")?;
-    let version = EncryptionVersionInfo::parse(&encryption_info)?;
-    let major = version.major;
-    let minor = version.minor;
-    if (major, minor) == (4, 4) {
-        return Err(OffcryptoError::UnsupportedEncryption {
-            encryption_type: EncryptionType::Agile,
-        });
-    }
-    if minor == 3 && matches!(major, 3 | 4) {
-        return Err(OffcryptoError::UnsupportedEncryption {
-            encryption_type: EncryptionType::Extensible,
-        });
-    }
-    let is_standard = minor == 2 && matches!(major, 2 | 3 | 4);
-    if !is_standard {
-        return Err(OffcryptoError::UnsupportedVersion { major, minor });
-    }
-
-    // 2) Decrypt using upstream implementation.
-    let decrypted = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        office_crypto::decrypt_from_bytes(raw_ole, password)
-    })) {
-        Ok(res) => res?,
-        Err(panic) => {
-            let msg = panic
-                .downcast_ref::<&str>()
-                .map(|s| (*s).to_string())
-                .or_else(|| panic.downcast_ref::<String>().cloned())
-                .unwrap_or_else(|| "unknown panic".to_string());
-            return Err(OffcryptoError::OfficeCryptoPanic { message: msg });
-        }
-    };
-
-    // 3) Sanity-check the result is an OOXML ZIP.
-    if !decrypted.starts_with(b"PK") {
-        return Err(OffcryptoError::DecryptedPackageNotZip);
-    }
-    Ok(decrypted)
-}
-
-fn read_ole_stream(raw_ole: &[u8], stream: &'static str) -> Result<Vec<u8>, OffcryptoError> {
-    let cursor = Cursor::new(raw_ole);
-    let mut ole = cfb::CompoundFile::open(cursor)?;
-
-    let mut s = match ole.open_stream(stream) {
-        Ok(s) => s,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            let alt = format!("/{stream}");
-            match ole.open_stream(&alt) {
-                Ok(s) => s,
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                    return Err(OffcryptoError::MissingOleStream { stream });
-                }
-                Err(err) => return Err(OffcryptoError::Io(err)),
-            }
-        }
-        Err(err) => return Err(OffcryptoError::Io(err)),
-    };
-
-    let mut buf = Vec::new();
-    s.read_to_end(&mut buf)?;
-    Ok(buf)
+    decrypt_from_bytes(&raw_ole, password)
 }
 
 #[cfg(test)]
