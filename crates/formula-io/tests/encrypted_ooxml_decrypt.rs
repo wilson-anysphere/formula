@@ -173,8 +173,14 @@ fn errors_on_wrong_password_fixtures() {
     let agile_path = fixture_path("agile.xlsx");
     let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
     let standard_path = fixture_path("standard.xlsx");
+    let agile_unicode_path = fixture_path("agile-unicode.xlsx");
 
-    for path in [&agile_path, &agile_empty_password_path, &standard_path] {
+    for path in [
+        &agile_path,
+        &agile_empty_password_path,
+        &standard_path,
+        &agile_unicode_path,
+    ] {
         assert!(
             matches!(
                 open_workbook_model_with_password(path, Some("wrong-password")),
@@ -183,4 +189,27 @@ fn errors_on_wrong_password_fixtures() {
             "expected InvalidPassword error for {path:?}"
         );
     }
+}
+
+#[test]
+fn decrypts_agile_unicode_password() {
+    let path = fixture_path("agile-unicode.xlsx");
+    let wb = open_model_with_password(&path, "pässwörd");
+    assert_expected_contents(&wb);
+}
+
+#[test]
+fn agile_unicode_password_different_normalization_fails() {
+    // NFC password is "pässwörd" (U+00E4, U+00F6). NFD decomposes those into combining marks.
+    let nfd = "pa\u{0308}sswo\u{0308}rd";
+    assert_ne!(nfd, "pässwörd", "strings should differ before UTF-16 encoding");
+
+    let path = fixture_path("agile-unicode.xlsx");
+    assert!(
+        matches!(
+            open_workbook_model_with_password(&path, Some(nfd)),
+            Err(Error::InvalidPassword { .. })
+        ),
+        "expected InvalidPassword error for NFD-normalized password"
+    );
 }

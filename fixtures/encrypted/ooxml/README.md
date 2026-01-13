@@ -11,6 +11,7 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
 
 - `agile.xlsx` / `standard.xlsx` / `agile-large.xlsx` / `standard-large.xlsx`: `password`
 - `agile-empty-password.xlsx`: empty string (`""`)
+- `agile-unicode.xlsx`: `pässwörd` (Unicode, NFC form)
 
 ## Fixtures
 
@@ -25,6 +26,9 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
 - `agile-empty-password.xlsx` – Agile encrypted OOXML with an **empty** open password.
   - `EncryptionInfo` header version **Major 4 / Minor 4**
   - Decrypts to `plaintext.xlsx` with password `""`
+- `agile-unicode.xlsx` – Agile encrypted OOXML with a Unicode open password.
+  - `EncryptionInfo` header version **Major 4 / Minor 4**
+  - Decrypts to `plaintext.xlsx` with password `pässwörd` (Unicode, NFC form)
 - `plaintext-large.xlsx` – unencrypted ZIP-based workbook, intentionally **> 4096 bytes**.
   - Copied from `fixtures/xlsx/basic/comments.xlsx`.
 - `agile-large.xlsx` – Agile encrypted OOXML.
@@ -69,6 +73,7 @@ You can inspect an encrypted OOXML container (and confirm Agile vs Standard) wit
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-empty-password.xlsx
+bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-unicode.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-large.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard-large.xlsx
 ```
