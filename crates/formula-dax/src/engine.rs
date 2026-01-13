@@ -2062,7 +2062,9 @@ impl DaxEngine {
                     };
 
                     let key = (target_table.clone(), target_column.clone());
-                    clear_columns.insert(key.clone());
+                    if !keep_filters {
+                        clear_columns.insert(key.clone());
+                    }
                     let values = self.distinct_column_values(model, source_col_expr, &eval_filter)?;
                     column_filters.push((key, values));
                 }

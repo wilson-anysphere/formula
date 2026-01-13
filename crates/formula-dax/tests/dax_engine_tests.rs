@@ -414,6 +414,36 @@ fn calculate_treatas_with_empty_source_values_filters_to_empty_set() {
 }
 
 #[test]
+fn calculate_keepfilters_with_treatas_intersects_existing_target_filter() {
+    let model = build_model_without_relationship();
+    let mut filter = FilterContext::empty();
+    filter.set_column_equals("Customers", "Region", "East".into());
+    filter.set_column_equals("Orders", "CustomerId", 2.into());
+
+    let engine = DaxEngine::new();
+
+    let override_value = engine
+        .evaluate(
+            &model,
+            "CALCULATE(SUM(Orders[Amount]), TREATAS(VALUES(Customers[CustomerId]), Orders[CustomerId]))",
+            &filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(override_value, 38.0.into());
+
+    let keep_value = engine
+        .evaluate(
+            &model,
+            "CALCULATE(SUM(Orders[Amount]), KEEPFILTERS(TREATAS(VALUES(Customers[CustomerId]), Orders[CustomerId])))",
+            &filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(keep_value, Value::Blank);
+}
+
+#[test]
 fn relatedtable_supports_iterators() {
     let mut model = build_model();
     model
