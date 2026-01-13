@@ -569,7 +569,8 @@ jobs:
             patchelf \
             squashfs-tools \
             fakeroot \
-            rpm
+            rpm \
+            cpio
 
           # `appimagetool` is distributed as an AppImage and requires the FUSE 2 runtime.
           # Ubuntu 24.04 uses `libfuse2t64` as part of the time_t 64-bit transition.

@@ -24,6 +24,8 @@ require_cmd dpkg-deb
 require_cmd rpm
 require_cmd file
 require_cmd readelf
+require_cmd rpm2cpio
+require_cmd cpio
 
 target_dirs=()
 
@@ -252,6 +254,17 @@ for rpm_path in "${rpms[@]}"; do
   assert_contains_any "$requires" "$rpm_path" "AppIndicator (tray)" "appindicator"
   assert_contains_any "$requires" "$rpm_path" "librsvg2 (icons)" "librsvg"
   assert_contains_any "$requires" "$rpm_path" "OpenSSL (libssl)" "(^|[^a-z0-9])openssl" "libssl\\.so" "libssl"
+
+  # Ensure the packaged binary itself is stripped (no accidental debug/symbol sections shipped).
+  echo "::group::verify-linux-package-deps: stripped binary check (rpm) $(basename "$rpm_path")"
+  tmpdir="$(mktemp -d)"
+  (
+    cd "$tmpdir"
+    rpm2cpio "$rpm_path" | cpio -idm --quiet --no-absolute-filenames
+  )
+  assert_stripped_elf "$tmpdir/usr/bin/formula-desktop" "$(basename "$rpm_path")"
+  rm -rf "$tmpdir"
+  echo "::endgroup::"
 done
 
 echo "verify-linux-package-deps: OK (core runtime dependencies present in .deb and .rpm metadata)"
