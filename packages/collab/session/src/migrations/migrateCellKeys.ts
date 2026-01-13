@@ -124,6 +124,12 @@ function cloneCellValue(value: unknown, MapCtor: new () => Y.Map<unknown>): unkn
   return out;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object") return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 function getCellsMapForDryRun(doc: Y.Doc): CellsMapRead | null {
   const existing = doc.share.get("cells");
   if (!existing) return null;
@@ -253,18 +259,33 @@ function mergeCellValues(params: {
       // undefined anyway).
       if (v !== undefined) hasKey.add(k);
     });
+  } else if (isPlainRecord(canonical)) {
+    for (const [k, v] of Object.entries(canonical)) {
+      out.set(k, cloneYjsValue(v));
+      if (v !== undefined) hasKey.add(k);
+    }
   }
 
   for (const legacy of legacies) {
     const legacyMap = getYMapLike(legacy);
-    if (!legacyMap) continue;
-    legacyMap.forEach((v, k) => {
-      // "merge" is intentionally conservative: keep canonical values when a field
-      // exists, but salvage missing fields from legacy payloads.
-      if (hasKey.has(k)) return;
-      out.set(k, cloneYjsValue(v));
-      if (v !== undefined) hasKey.add(k);
-    });
+    if (legacyMap) {
+      legacyMap.forEach((v, k) => {
+        // "merge" is intentionally conservative: keep canonical values when a field
+        // exists, but salvage missing fields from legacy payloads.
+        if (hasKey.has(k)) return;
+        out.set(k, cloneYjsValue(v));
+        if (v !== undefined) hasKey.add(k);
+      });
+      continue;
+    }
+
+    if (isPlainRecord(legacy)) {
+      for (const [k, v] of Object.entries(legacy)) {
+        if (hasKey.has(k)) continue;
+        out.set(k, cloneYjsValue(v));
+        if (v !== undefined) hasKey.add(k);
+      }
+    }
   }
   return out;
 }

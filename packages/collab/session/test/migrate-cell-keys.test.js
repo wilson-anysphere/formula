@@ -261,6 +261,23 @@ test("migrateLegacyCellKeys conflict=merge preserves canonical values and fills 
   assert.equal(merged.get("modifiedBy"), "u-legacy");
 });
 
+test("migrateLegacyCellKeys conflict=merge supports record-style (plain object) cell payloads", () => {
+  const doc = new Y.Doc();
+  const cells = doc.getMap("cells");
+
+  cells.set("Sheet1:0:0", { value: "canonical", formula: null });
+  cells.set("Sheet1:0,0", { value: "legacy", formula: null, modifiedBy: "u-legacy" });
+
+  const result = migrateLegacyCellKeys(doc, { conflict: "merge" });
+  assert.deepEqual(result, { migrated: 1, removed: 1, collisions: 1 });
+
+  assert.equal(cells.has("Sheet1:0,0"), false);
+  const merged = /** @type {any} */ (cells.get("Sheet1:0:0"));
+  assert.ok(merged instanceof Y.Map);
+  assert.equal(merged.get("value"), "canonical");
+  assert.equal(merged.get("modifiedBy"), "u-legacy");
+});
+
 test("migrateLegacyCellKeys resolves multiple legacy encodings for the same coordinate", () => {
   const doc = new Y.Doc();
   const cells = doc.getMap("cells");
