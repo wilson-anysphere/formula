@@ -525,12 +525,16 @@ function createTauriClipboardProvider() {
     },
 
     async write(payload) {
-      const text = typeof payload.text === "string" ? payload.text : "";
-      const textWithinLimit = utf8WithinLimit(text, MAX_RICH_TEXT_BYTES);
+      const hasText = typeof payload.text === "string";
+      // Preserve whether callers actually provided `text`. Historically we coerced missing
+      // `payload.text` to the empty string, which could unintentionally clobber the user's
+      // clipboard when other formats were dropped by size guards (e.g. oversized images).
+      const text = hasText ? payload.text : "";
+      const textWithinLimit = !hasText || utf8WithinLimit(text, MAX_RICH_TEXT_BYTES);
 
       // Avoid sending extremely large plain-text payloads over the rich clipboard IPC path.
       // For oversized payloads, best-effort write plain text only.
-      if (!textWithinLimit) {
+      if (hasText && !textWithinLimit) {
         if (tauriClipboard?.writeText) {
           try {
             await tauriClipboard.writeText(text);
@@ -555,12 +559,19 @@ function createTauriClipboardProvider() {
 
       const pngBase64 = pngBase64FromImage ?? legacyPngBase64;
 
+      // If the caller didn't provide text and *all* other formats are absent (or were dropped by
+      // size guards), do nothing rather than writing an empty `text/plain` payload.
+      if (!hasText && !html && !rtf && !pngBase64) {
+        return;
+      }
+
       // 1) Prefer rich writes via the native clipboard command when available (Tauri IPC).
       let wrote = false;
       if (typeof tauriInvoke === "function") {
         try {
           /** @type {any} */
-          const richPayload = { text };
+          const richPayload = {};
+          if (hasText) richPayload.text = text;
           if (html) richPayload.html = html;
           if (rtf) richPayload.rtf = rtf;
           if (pngBase64) richPayload.pngBase64 = pngBase64;
@@ -573,7 +584,7 @@ function createTauriClipboardProvider() {
       }
 
       // 1b) Older desktop builds used a `write_clipboard` command for rich formats.
-      if (!wrote && typeof tauriInvoke === "function") {
+      if (!wrote && hasText && typeof tauriInvoke === "function") {
         try {
           await tauriInvoke("write_clipboard", {
             text,
@@ -588,14 +599,19 @@ function createTauriClipboardProvider() {
       }
 
       if (!wrote) {
-        if (tauriClipboard?.writeText) {
-          try {
-            await tauriClipboard.writeText(text);
-          } catch {
+        // Only fall back to plain-text clipboard writes when the caller actually supplied text.
+        // If text was omitted, preserve rich-only writes and avoid clobbering the clipboard with
+        // an empty `text/plain` payload.
+        if (hasText) {
+          if (tauriClipboard?.writeText) {
+            try {
+              await tauriClipboard.writeText(text);
+            } catch {
+              await createWebClipboardProvider().write({ text });
+            }
+          } else {
             await createWebClipboardProvider().write({ text });
           }
-        } else {
-          await createWebClipboardProvider().write({ text });
         }
       }
 
@@ -609,12 +625,14 @@ function createTauriClipboardProvider() {
       const clipboard = globalThis.navigator?.clipboard;
       if (!wrote && html && typeof ClipboardItem !== "undefined" && clipboard?.write) {
         try {
-          await clipboard.write([
-            new ClipboardItem({
-              "text/plain": new Blob([text], { type: "text/plain" }),
-              "text/html": new Blob([html], { type: "text/html" }),
-            }),
-          ]);
+          /** @type {Record<string, Blob>} */
+          const itemPayload = {
+            "text/html": new Blob([html], { type: "text/html" }),
+          };
+          if (hasText) {
+            itemPayload["text/plain"] = new Blob([text], { type: "text/plain" });
+          }
+          await clipboard.write([new ClipboardItem(itemPayload)]);
         } catch {
           // Ignore; some platforms deny rich clipboard writes.
         }
@@ -730,12 +748,13 @@ function createWebClipboardProvider() {
     async write(payload) {
       const clipboard = globalThis.navigator?.clipboard;
 
-      const text = typeof payload.text === "string" ? payload.text : "";
-      const textWithinLimit = utf8WithinLimit(text, MAX_RICH_TEXT_BYTES);
+      const hasText = typeof payload.text === "string";
+      const text = hasText ? payload.text : "";
+      const textWithinLimit = !hasText || utf8WithinLimit(text, MAX_RICH_TEXT_BYTES);
 
       // For very large text payloads, prefer `writeText()` and skip rich ClipboardItem writes to
       // avoid allocating large intermediate Blobs.
-      if (!textWithinLimit) {
+      if (hasText && !textWithinLimit) {
         if (clipboard?.writeText) {
           try {
             await clipboard.writeText(text);
@@ -764,44 +783,48 @@ function createWebClipboardProvider() {
       const rtf = isStringWithinUtf8Limit(payload.rtf, MAX_RICH_TEXT_BYTES) ? payload.rtf : undefined;
       const imagePngBlob = normalizeImagePngBlob(payload.imagePng) ?? normalizeImagePngBlob(payload.pngBase64);
 
+      // If the caller didn't provide text and *all* other formats are absent (or were dropped by
+      // size guards), do nothing rather than overwriting the clipboard with empty text.
+      if (!hasText && !html && !rtf && !imagePngBlob) {
+        return;
+      }
+
       // Prefer writing rich formats when possible.
-      if (typeof ClipboardItem !== "undefined" && clipboard?.write) {
+      const hasNonPlainTextFormats = Boolean(html || rtf || imagePngBlob);
+      if (hasNonPlainTextFormats && typeof ClipboardItem !== "undefined" && clipboard?.write) {
         /** @type {Record<string, Blob>} */
-        const itemPayload = {
-          "text/plain": new Blob([text], { type: "text/plain" }),
-        };
+        const itemPayload = {};
+        if (hasText) itemPayload["text/plain"] = new Blob([text], { type: "text/plain" });
         if (html) itemPayload["text/html"] = new Blob([html], { type: "text/html" });
         if (rtf) itemPayload["text/rtf"] = new Blob([rtf], { type: "text/rtf" });
         if (imagePngBlob) itemPayload["image/png"] = imagePngBlob;
-
-        const hasRichFormats = Object.keys(itemPayload).length > 1;
-
-        if (hasRichFormats) {
-          try {
-            await clipboard.write([new ClipboardItem(itemPayload)]);
-            return;
-          } catch {
-            // Some platforms reject unknown/unsupported types (e.g. image/png, text/rtf).
-            // Retry with the formats we used before introducing optional rich types so
-            // we don't regress HTML clipboard writes.
-            if (html && (rtf || imagePngBlob)) {
-              try {
-                const fallback = new ClipboardItem({
-                  "text/plain": new Blob([text], { type: "text/plain" }),
-                  "text/html": new Blob([html], { type: "text/html" }),
-                });
-                await clipboard.write([fallback]);
-                return;
-              } catch {
-                // Fall back to plain text below.
+        try {
+          await clipboard.write([new ClipboardItem(itemPayload)]);
+          return;
+        } catch {
+          // Some platforms reject unknown/unsupported types (e.g. image/png, text/rtf).
+          // Retry with the formats we used before introducing optional rich types so
+          // we don't regress HTML clipboard writes.
+          if (html && (rtf || imagePngBlob)) {
+            try {
+              /** @type {Record<string, Blob>} */
+              const fallbackPayload = {
+                "text/html": new Blob([html], { type: "text/html" }),
+              };
+              if (hasText) {
+                fallbackPayload["text/plain"] = new Blob([text], { type: "text/plain" });
               }
+              await clipboard.write([new ClipboardItem(fallbackPayload)]);
+              return;
+            } catch {
+              // Fall back to plain text below.
             }
-            // Fall back to plain text below.
           }
+          // Fall back to plain text below.
         }
       }
 
-      if (clipboard?.writeText) {
+      if (hasText && clipboard?.writeText) {
         try {
           await clipboard.writeText(text);
         } catch {

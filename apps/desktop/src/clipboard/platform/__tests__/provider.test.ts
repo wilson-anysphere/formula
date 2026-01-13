@@ -189,6 +189,43 @@ describe("clipboard/platform/provider (desktop Tauri multi-format path)", () => 
     expect(invoke).toHaveBeenCalledWith("clipboard_write", { payload: { text: "hello" } });
   });
 
+  it("write() does not clobber the clipboard with empty text when only oversized rich payloads are provided", async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    const legacyWriteText = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { core: { invoke }, clipboard: { writeText: legacyWriteText } };
+
+    const webWriteText = vi.fn().mockResolvedValue(undefined);
+    setMockNavigatorClipboard({ writeText: webWriteText });
+
+    const provider = await createClipboardProvider();
+    const oversized = new Uint8Array(6 * 1024 * 1024);
+
+    // `ClipboardWritePayload` normally requires text, but callers can still invoke this
+    // with only rich formats (e.g. image-only copy). Ensure we no-op when size guards
+    // drop everything.
+    await provider.write({ imagePng: oversized } as any);
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(legacyWriteText).not.toHaveBeenCalled();
+    expect(webWriteText).not.toHaveBeenCalled();
+  });
+
+  it("web provider: write() no-ops when only oversized rich payloads are provided and no text is present", async () => {
+    // Force the web provider path.
+    (globalThis as any).__TAURI__ = undefined;
+
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const write = vi.fn().mockResolvedValue(undefined);
+    setMockNavigatorClipboard({ writeText, write });
+
+    const provider = await createClipboardProvider();
+    const oversized = new Uint8Array(6 * 1024 * 1024);
+    await provider.write({ imagePng: oversized } as any);
+
+    expect(write).not.toHaveBeenCalled();
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
   it("write() strips data: URL prefixes from payload.pngBase64 before sending to clipboard_write", async () => {
     const invoke = vi.fn().mockResolvedValue(undefined);
     (globalThis as any).__TAURI__ = { core: { invoke } };
