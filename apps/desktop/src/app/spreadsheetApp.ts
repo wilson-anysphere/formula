@@ -96,7 +96,8 @@ import { CommentManager, bindDocToStorage, createCommentManagerForDoc, getCommen
 import type { Comment, CommentAuthor } from "@formula/collab-comments";
 import { bindCollabSessionToDocumentController, createCollabSession, type CollabSession } from "@formula/collab-session";
 import { IndexedDbCollabPersistence } from "@formula/collab-persistence/indexeddb";
-import { getCollabUserIdentity, type CollabUserIdentity } from "../collab/userIdentity";
+import { tryDeriveCollabSessionPermissionsFromJwtToken } from "../collab/jwt";
+import { getCollabUserIdentity, overrideCollabUserIdentityId, type CollabUserIdentity } from "../collab/userIdentity";
 
 import { PresenceRenderer } from "../grid/presence-renderer/presenceRenderer.js";
 import { ConflictUiController } from "../collab/conflicts-ui/conflict-ui-controller.js";
@@ -826,12 +827,28 @@ export class SpreadsheetApp {
             maxCols: DEFAULT_DESKTOP_LOAD_MAX_COLS
           });
     this.selection = createSelection({ row: 0, col: 0 }, this.limits);
-    const collab = opts.collab ?? resolveCollabOptionsFromUrl() ?? resolveCollabOptionsFromStoredConnection(opts.workbookId);
+    const rawCollab = opts.collab ?? resolveCollabOptionsFromUrl() ?? resolveCollabOptionsFromStoredConnection(opts.workbookId);
+    const jwtPermissions = rawCollab?.token ? tryDeriveCollabSessionPermissionsFromJwtToken(rawCollab.token) : null;
+    const collab = rawCollab
+      ? {
+          ...rawCollab,
+          user: jwtPermissions?.userId ? overrideCollabUserIdentityId(rawCollab.user, jwtPermissions.userId) : rawCollab.user,
+        }
+      : null;
+
     const collabEnabled = Boolean(collab);
     this.collabMode = collabEnabled || Boolean(opts.collabMode);
     this.currentUser = collab ? { id: collab.user.id, name: collab.user.name } : { id: "local", name: t("chat.role.user") };
 
     if (collab) {
+      const sessionPermissions = jwtPermissions
+        ? {
+            role: jwtPermissions.role,
+            rangeRestrictions: jwtPermissions.rangeRestrictions,
+            userId: jwtPermissions.userId ?? collab.user.id,
+          }
+        : { role: "editor", rangeRestrictions: [], userId: collab.user.id };
+
       // Best-effort: cache the token for this (wsUrl, docId) in session-scoped storage
       // so UI surfaces (sharing/reconnect) can access it without leaving it in the URL.
       if (collab.token) {
@@ -862,7 +879,7 @@ export class SpreadsheetApp {
         presence: { user: collab.user, activeSheet: this.sheetId },
         // Enable formula/value conflict monitoring in collab mode.
         formulaConflicts: {
-          localUserId: collab.user.id,
+          localUserId: sessionPermissions.userId,
           mode: "formula+value",
           onConflict: (conflict: any) => {
             // Conflicts are surfaced via a minimal DOM UI (ConflictUiController).
@@ -878,7 +895,7 @@ export class SpreadsheetApp {
         },
         // Enable structural conflict monitoring (move/delete-vs-edit/content/format) in collab mode.
         cellConflicts: {
-          localUserId: collab.user.id,
+          localUserId: sessionPermissions.userId,
           onConflict: (conflict: any) => {
             if (this.structuralConflictUi) {
               this.structuralConflictUi.addConflict(conflict);
@@ -893,7 +910,7 @@ export class SpreadsheetApp {
       // Populate `modifiedBy` metadata for any direct `CollabSession.setCell*` writes
       // (used by some conflict resolution + versioning flows) and ensure downstream
       // conflict UX can attribute local edits correctly.
-      this.collabSession.setPermissions({ role: "editor", rangeRestrictions: [], userId: collab.user.id });
+      this.collabSession.setPermissions(sessionPermissions);
 
       this.sheetViewBinder = bindSheetViewToCollabSession({
         session: this.collabSession,
@@ -967,7 +984,7 @@ export class SpreadsheetApp {
         documentController: this.document,
         undoService,
         defaultSheetId: this.sheetId,
-        userId: collab.user.id,
+        userId: sessionPermissions.userId,
         // Opt into binder write semantics required for reliable causal conflict detection.
         // (E.g. represent clears as explicit `formula=null` markers so FormulaConflictMonitor
         // can reason about delete-vs-overwrite concurrency deterministically.)

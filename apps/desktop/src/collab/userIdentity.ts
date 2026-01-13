@@ -220,6 +220,25 @@ export function getCollabUserIdentity(options?: {
   return { id, name: name || defaultNameFromId(id), color };
 }
 
+/**
+ * Create a new identity that preserves the original user's display name, but uses a
+ * stable color derived from the provided id.
+ *
+ * This is useful when the server enforces a canonical user id (e.g. JWT `sub`) that may
+ * differ from the locally generated identity.
+ */
+export function overrideCollabUserIdentityId(identity: CollabUserIdentity, id: string): CollabUserIdentity {
+  const normalizedId = typeof id === "string" ? id.trim() : "";
+  if (!normalizedId) return identity;
+  if (identity.id === normalizedId) return identity;
+
+  return {
+    id: normalizedId,
+    name: identity.name || defaultNameFromId(normalizedId),
+    color: colorFromId(normalizedId),
+  };
+}
+
 /** @internal (tests) */
 export function __resetCollabUserIdentityForTests(): void {
   inMemoryIdentity = null;
