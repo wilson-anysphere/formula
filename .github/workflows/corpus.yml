@@ -191,12 +191,7 @@ jobs:
           if [ "${CORPUS_RUN_RENDER_SMOKE}" = "true" ]; then
             EXTRA_FLAGS+=(--render-smoke)
           fi
-          JOBS="$(python - <<-'PY'
-          	import os
-          	cpu = os.cpu_count() or 1
-          	print(min(4, cpu))
-          	PY
-          )"
+          JOBS="$(python -c 'import os; cpu = os.cpu_count() or 1; print(min(4, cpu))')"
           python -m tools.corpus.triage \
             --corpus-dir tools/corpus/private \
             --input-scope sanitized \
