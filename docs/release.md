@@ -18,6 +18,15 @@ see:
 
 - `docs/desktop-updater-target-mapping.md`
 
+## Rust toolchain pinning (release stability)
+
+Desktop packaging is sensitive to Rust/toolchain changes. This repo pins Rust via
+`rust-toolchain.toml` at the repo root, and CI/release workflows enforce that they install the
+same version.
+
+To upgrade Rust, open a PR that bumps `rust-toolchain.toml` (and any workflow pins/comments that the
+CI guard requests) and rely on CI to validate the new toolchain before tagging a release.
+
 ## Testing the release pipeline (workflow_dispatch)
 
 To test packaging/signing changes without creating a git tag, run the **Desktop Release** workflow
