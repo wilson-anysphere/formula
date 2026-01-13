@@ -170,6 +170,12 @@ export interface WorkbookIndexStats {
   deleted: number;
 }
 
+export interface DlpClassificationRecord {
+  selector: unknown;
+  classification: unknown;
+  [key: string]: unknown;
+}
+
 /**
  * DLP configuration and inputs for ContextManager.
  *
@@ -187,10 +193,10 @@ export interface DlpOptions {
    * Kept intentionally generic to avoid cross-package type coupling.
    */
   policy: unknown;
-  classificationRecords?: Array<{ selector: unknown; classification: unknown }>;
-  classification_records?: Array<{ selector: unknown; classification: unknown }>;
-  classificationStore?: { list(documentId: string): Array<{ selector: unknown; classification: unknown }> };
-  classification_store?: { list(documentId: string): Array<{ selector: unknown; classification: unknown }> };
+  classificationRecords?: DlpClassificationRecord[];
+  classification_records?: DlpClassificationRecord[];
+  classificationStore?: { list(documentId: string): DlpClassificationRecord[] } | null;
+  classification_store?: { list(documentId: string): DlpClassificationRecord[] } | null;
   includeRestrictedContent?: boolean;
   include_restricted_content?: boolean;
   auditLogger?: { log(event: unknown): void };
