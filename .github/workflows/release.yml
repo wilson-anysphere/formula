@@ -344,7 +344,7 @@ jobs:
 
       - name: Build and upload release assets (macOS universal)
         if: runner.os == 'macOS'
-        # Pinned for reproducible releases: avoid upstream `@v0` moving and breaking builds.
+        # Pinned for reproducible releases: avoid upstream floating major tags moving and breaking builds.
         # To upgrade, bump to a newer `v0.x.y` tag in a PR after verifying the release workflow.
         uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
         env:
@@ -366,7 +366,7 @@ jobs:
 
       - name: Build and upload release assets
         if: runner.os != 'macOS'
-        # Pinned for reproducible releases: avoid upstream `@v0` moving and breaking builds.
+        # Pinned for reproducible releases: avoid upstream floating major tags moving and breaking builds.
         # To upgrade, bump to a newer `v0.x.y` tag in a PR after verifying the release workflow.
         uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
         env:
