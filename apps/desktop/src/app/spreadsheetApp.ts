@@ -2940,6 +2940,8 @@ export class SpreadsheetApp {
 
   destroy(): void {
     this.disposed = true;
+    // Ensure overlay caches (ImageBitmaps, parsed XML) are released promptly.
+    this.drawingOverlay?.destroy?.();
     this.sheetViewBinder?.destroy();
     this.sheetViewBinder = null;
     this.domAbort.abort();

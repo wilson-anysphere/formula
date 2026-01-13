@@ -457,6 +457,14 @@ export class DrawingOverlay {
   setSelectedId(id: number | null): void {
     this.selectedId = id;
   }
+
+  destroy(): void {
+    // Cancel any in-flight render and release cached bitmap resources.
+    this.renderAbort?.abort();
+    this.renderAbort = null;
+    this.bitmapCache.clear();
+    this.shapeTextCache.clear();
+  }
 }
 
 function isAbortError(err: unknown): boolean {
