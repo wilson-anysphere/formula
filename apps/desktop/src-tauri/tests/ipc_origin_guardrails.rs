@@ -120,7 +120,17 @@ fn commands_rs_privileged_commands_enforce_origin_guards() {
         "check_for_updates",
         "quit_app",
         "restart_app",
-        // Macro + Python execution.
+        // Macro + Python execution / inspection.
+        "get_macro_security_status",
+        "set_macro_trust",
+        "get_vba_project",
+        "list_macros",
+        "set_macro_ui_context",
+        "validate_vba_migration",
+        "fire_workbook_open",
+        "fire_workbook_before_close",
+        "fire_worksheet_change",
+        "fire_selection_change",
         "run_macro",
         "run_python_script",
         // Power Query secret-bearing state.

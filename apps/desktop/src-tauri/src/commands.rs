@@ -2991,10 +2991,15 @@ pub struct VbaProjectSummary {
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn get_macro_security_status(
+    window: tauri::WebviewWindow,
     workbook_id: Option<String>,
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroSecurityStatus, String> {
+    ipc_origin::ensure_main_window(window.label(), "macros", ipc_origin::Verb::Are)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macros", ipc_origin::Verb::Are)?;
+
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -3011,11 +3016,16 @@ pub async fn get_macro_security_status(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn set_macro_trust(
+    window: tauri::WebviewWindow,
     workbook_id: Option<String>,
     decision: MacroTrustDecision,
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroSecurityStatus, String> {
+    ipc_origin::ensure_main_window(window.label(), "macros", ipc_origin::Verb::Are)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macros", ipc_origin::Verb::Are)?;
+
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -3040,9 +3050,14 @@ pub async fn set_macro_trust(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_vba_project(
+    window: tauri::WebviewWindow,
     workbook_id: Option<String>,
     state: State<'_, SharedAppState>,
 ) -> Result<Option<VbaProjectSummary>, String> {
+    ipc_origin::ensure_main_window(window.label(), "macros", ipc_origin::Verb::Are)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macros", ipc_origin::Verb::Are)?;
+
     let _ = workbook_id;
     let mut state = state.inner().lock().unwrap();
     let Some(project) = state.vba_project().map_err(|e| e.to_string())? else {
@@ -3078,9 +3093,14 @@ pub fn get_vba_project(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn list_macros(
+    window: tauri::WebviewWindow,
     workbook_id: Option<String>,
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<MacroInfo>, String> {
+    ipc_origin::ensure_main_window(window.label(), "macros", ipc_origin::Verb::Are)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macros", ipc_origin::Verb::Are)?;
+
     let _ = workbook_id;
 
     let mut state = state.inner().lock().unwrap();
@@ -3090,6 +3110,7 @@ pub fn list_macros(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn set_macro_ui_context(
+    window: tauri::WebviewWindow,
     workbook_id: Option<String>,
     sheet_id: String,
     active_row: usize,
@@ -3097,6 +3118,10 @@ pub fn set_macro_ui_context(
     selection: Option<MacroSelectionRect>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
+    ipc_origin::ensure_main_window(window.label(), "macros", ipc_origin::Verb::Are)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macros", ipc_origin::Verb::Are)?;
+
     let _ = workbook_id;
     let mut state = state.inner().lock().unwrap();
     let selection = selection.map(|rect| crate::state::CellRect {
@@ -4209,6 +4234,7 @@ fn run_typescript_migration_script(state: &mut AppState, code: &str) -> TypeScri
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn validate_vba_migration(
+    window: tauri::WebviewWindow,
     workbook_id: Option<String>,
     macro_id: String,
     target: MigrationTarget,
@@ -4216,6 +4242,14 @@ pub async fn validate_vba_migration(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MigrationValidationReport, String> {
+    ipc_origin::ensure_main_window(window.label(), "macro migration validation", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(
+        &url,
+        "macro migration validation",
+        ipc_origin::Verb::Is,
+    )?;
+
     crate::ipc_limits::enforce_script_code_size(&code)?;
     let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
@@ -4443,12 +4477,17 @@ fn macro_result_from_outcome(outcome: crate::macros::MacroExecutionOutcome) -> M
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn fire_workbook_open(
+    window: tauri::WebviewWindow,
     workbook_id: Option<String>,
     permissions: Option<Vec<MacroPermission>>,
     timeout_ms: Option<u64>,
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroRunResult, String> {
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
+
     let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
@@ -4479,12 +4518,17 @@ pub async fn fire_workbook_open(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn fire_workbook_before_close(
+    window: tauri::WebviewWindow,
     workbook_id: Option<String>,
     permissions: Option<Vec<MacroPermission>>,
     timeout_ms: Option<u64>,
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroRunResult, String> {
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
+
     let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
@@ -4515,6 +4559,7 @@ pub async fn fire_workbook_before_close(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn fire_worksheet_change(
+    window: tauri::WebviewWindow,
     workbook_id: Option<String>,
     sheet_id: String,
     start_row: usize,
@@ -4526,6 +4571,10 @@ pub async fn fire_worksheet_change(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroRunResult, String> {
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
+
     let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
@@ -4556,6 +4605,7 @@ pub async fn fire_worksheet_change(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn fire_selection_change(
+    window: tauri::WebviewWindow,
     workbook_id: Option<String>,
     sheet_id: String,
     start_row: usize,
@@ -4567,6 +4617,10 @@ pub async fn fire_selection_change(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroRunResult, String> {
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
+
     let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
