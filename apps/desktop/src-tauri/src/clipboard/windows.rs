@@ -110,7 +110,7 @@ fn open_clipboard_with_retry() -> Result<ClipboardGuard, ClipboardError> {
     let mut slept = Duration::from_millis(0);
     let mut lock_holder = None::<(HWND, u32, u32)>;
 
-    retry_with_delays_if(
+    let result = retry_with_delays_if(
         || {
             attempts += 1;
             let res = unsafe { OpenClipboard(None) };
@@ -130,9 +130,28 @@ fn open_clipboard_with_retry() -> Result<ClipboardGuard, ClipboardError> {
             slept += d;
             std::thread::sleep(d);
         },
-    )
-    .map(|()| ClipboardGuard)
-    .map_err(|err| {
+    );
+
+    match result {
+        Ok(()) => {
+            if attempts > 1 {
+                let lock_holder_ctx = lock_holder
+                    .map(|(hwnd, pid, tid)| {
+                        format!(
+                            "open_clipboard_window=0x{:X}, open_clipboard_pid={pid}, open_clipboard_tid={tid}",
+                            hwnd.0 as usize
+                        )
+                    })
+                    .unwrap_or_else(|| "open_clipboard_window=None".to_string());
+                debug_clipboard_log(format_args!(
+                    "OpenClipboard succeeded after {attempts}/{max_attempts} attempts over {}ms sleep (budget {}ms, {lock_holder_ctx})",
+                    slept.as_millis(),
+                    max_total_sleep.as_millis(),
+                ));
+            }
+            Ok(ClipboardGuard)
+        }
+        Err(err) => {
         let last_hresult = err.code().0 as u32;
         let retriable = is_retryable_open_clipboard_error(&err);
         let lock_holder_ctx = lock_holder
@@ -151,7 +170,8 @@ fn open_clipboard_with_retry() -> Result<ClipboardGuard, ClipboardError> {
             ),
             err,
         )
-    })
+        }
+    }
 }
 
 fn register_format(name: &'static str) -> Option<u32> {
