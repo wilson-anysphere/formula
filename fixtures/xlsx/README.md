@@ -42,6 +42,7 @@ fixtures/xlsx/
   conditional-formatting/
   hyperlinks/
   charts/
+  charts-ex/
   pivots/
   macros/
 ```
@@ -104,6 +105,10 @@ tests (see `rich-data/README.md` and check `docProps/app.xml` for provenance).
 - `charts/`:
   - `basic-chart.xlsx` - minimal chart parts (drawing + chart referencing sheet data).
   - `bar.xlsx`, `line.xlsx`, `pie.xlsx`, `scatter.xlsx` - small fixtures for common chart types.
+- `charts-ex/`:
+  - Parser-focused **ChartEx** fixtures (Excel 2016+ “modern” charts) that include real
+    `xl/charts/chartEx1.xml` structures with `cx:*Chart` plot areas and series caches
+    (`cx:strCache` / `cx:numCache`). Used by `crates/formula-xlsx/tests/chart_ex_detection.rs`.
 - `macros/`:
   - `basic.xlsm` - minimal VBA project preservation fixture.
   - `signed-basic.xlsm` - `basic.xlsm` with a `\x05DigitalSignature` stream containing an

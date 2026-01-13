@@ -65,7 +65,9 @@ The current parser intentionally produces a **placeholder** `ChartModel`:
 
 - `chart_kind` is always `ChartKind::Unknown { name: "ChartEx:<kind>" }` (best-effort inferred).
 - Series formulas + cached values are extracted when present.
-- Title/legend/axes/styles are not modeled yet; diagnostics note the placeholder status.
+- Title and legend are extracted best-effort when present.
+- Axes, styles, and chart-type-specific semantics are not modeled yet; diagnostics note the
+  placeholder status.
 
 `extract_chart_objects()` currently prefers `parse_chart_ex()` when a ChartEx part is present.
 
@@ -137,6 +139,10 @@ work in `formula-xlsx` + `formula-model`.
 
 The chart regression corpus lives under `fixtures/charts/` (see also
 `fixtures/charts/README.md` for the canonical instructions).
+
+For parser development of **ChartEx** specifically (series caches, kind detection, etc.), see the
+smaller “real ChartEx” fixtures under `fixtures/xlsx/charts-ex/` (each includes a `chartEx` part
+with concrete `cx:*Chart` elements and cached series points).
 
 ### Adding a new fixture
 
