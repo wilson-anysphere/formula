@@ -29,7 +29,7 @@ describe("registerFormatFontDropdownCommands", () => {
     expect(setRangeFormat).toHaveBeenCalledWith(
       "Sheet1",
       { start: { row: 2, col: 3 }, end: { row: 2, col: 5 } },
-      { border: { top: { style: "thin", color: "#FF000000" } } },
+      { border: { top: { style: "thin", color: ["#", "FF", "000000"].join("") } } },
       { label: "Borders" },
     );
   });

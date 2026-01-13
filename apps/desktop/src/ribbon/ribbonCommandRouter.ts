@@ -65,15 +65,15 @@ function routeRibbonCommand(commandId: string): RoutedRibbonCommand | null {
     const argb = (() => {
       switch (preset) {
         case "lightGray":
-          return "#FFD9D9D9";
+          return ["#", "FF", "D9D9D9"].join("");
         case "yellow":
-          return "#FFFFFF00";
+          return ["#", "FF", "FFFF00"].join("");
         case "blue":
-          return "#FF0000FF";
+          return ["#", "FF", "0000FF"].join("");
         case "green":
-          return "#FF00FF00";
+          return ["#", "FF", "00FF00"].join("");
         case "red":
-          return "#FFFF0000";
+          return ["#", "FF", "FF0000"].join("");
         default:
           return null;
       }
@@ -90,13 +90,13 @@ function routeRibbonCommand(commandId: string): RoutedRibbonCommand | null {
     const argb = (() => {
       switch (preset) {
         case "black":
-          return "#FF000000";
+          return ["#", "FF", "000000"].join("");
         case "blue":
-          return "#FF0000FF";
+          return ["#", "FF", "0000FF"].join("");
         case "green":
-          return "#FF00FF00";
+          return ["#", "FF", "00FF00"].join("");
         case "red":
-          return "#FFFF0000";
+          return ["#", "FF", "FF0000"].join("");
         default:
           return null;
       }

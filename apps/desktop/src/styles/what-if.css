@@ -167,11 +167,11 @@
     box-shadow var(--motion-duration-fast) var(--motion-ease);
 }
 
-.what-if__button:hover {
-  background: var(--bg-tertiary);
+.what-if__button:hover:not(:disabled) {
+  background: var(--bg-hover);
 }
 
-.what-if__button:active {
+.what-if__button:active:not(:disabled) {
   background: var(--bg-active);
 }
 
@@ -193,12 +193,12 @@
   font-weight: 700;
 }
 
-.what-if__button--primary:hover {
+.what-if__button--primary:hover:not(:disabled) {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
 }
 
-.what-if__button--primary:active {
+.what-if__button--primary:active:not(:disabled) {
   background: var(--accent-active);
   border-color: var(--accent-active);
 }
