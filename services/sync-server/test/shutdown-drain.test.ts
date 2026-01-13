@@ -28,6 +28,8 @@ function createConfig(
     persistence: {
       backend: "file",
       compactAfterUpdates: 10,
+      maxQueueDepthPerDoc: 0,
+      maxQueueDepthTotal: 0,
       leveldbDocNameHashing: false,
       encryption: { mode: "off" },
     },
@@ -37,6 +39,8 @@ function createConfig(
     internalAdminToken: null,
     retention: { ttlMs: 0, sweepIntervalMs: 0, tombstoneTtlMs: 7 * 24 * 60 * 60 * 1000 },
     limits: {
+      maxUrlBytes: 8192,
+      maxTokenBytes: 4096,
       maxConnections: 100,
       maxConnectionsPerIp: 25,
       maxConnectionsPerDoc: 0,
@@ -223,4 +227,3 @@ test("stop() enters drain mode, rejects new upgrades, and terminates remaining c
 
   await wsEnded;
 });
-

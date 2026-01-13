@@ -150,6 +150,21 @@ readinessProbe:
 For large datasets, consider adding a `startupProbe` so Kubernetes doesn't restart the pod during
 initial persistence initialization.
 
+### Graceful shutdown / drain mode
+
+On `SIGTERM`/`SIGINT` (or when `server.stop()` is called), sync-server enters **drain mode** to
+support rolling deploys without mass disconnects:
+
+- `GET /readyz` returns `503` with JSON `{ "reason": "draining" }` so load balancers stop routing new
+  connections to the instance.
+- New websocket upgrades are rejected with HTTP `503` and increment
+  `sync_server_ws_connections_rejected_total{reason="draining"}`.
+- Existing websocket clients are allowed to remain connected for up to
+  `SYNC_SERVER_SHUTDOWN_GRACE_MS` (default: `10000`). After the grace period expires, any remaining
+  sockets are force-terminated and the process exits.
+
+Monitor `sync_server_shutdown_draining_current` (set to `1` while draining).
+
 ### Formula deployment gotchas (reserved roots + message size)
 
 These are the two most common collaboration misconfigurations:

@@ -183,6 +183,8 @@ test("auth:introspect enforces rangeRestrictions and rejects forbidden cell writ
     persistence: {
       backend: "file",
       compactAfterUpdates: 10,
+      maxQueueDepthPerDoc: 0,
+      maxQueueDepthTotal: 0,
       leveldbDocNameHashing: false,
       encryption: { mode: "off" },
     },
@@ -198,6 +200,8 @@ test("auth:introspect enforces rangeRestrictions and rejects forbidden cell writ
     internalAdminToken: null,
     retention: { ttlMs: 0, sweepIntervalMs: 0, tombstoneTtlMs: 7 * 24 * 60 * 60 * 1000 },
     limits: {
+      maxUrlBytes: 8192,
+      maxTokenBytes: 4096,
       maxConnections: 100,
       maxConnectionsPerIp: 100,
       maxConnectionsPerDoc: 0,

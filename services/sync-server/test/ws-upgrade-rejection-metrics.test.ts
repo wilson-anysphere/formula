@@ -82,6 +82,8 @@ test("ws upgrade rejection metrics include pre-initialized reasons and increment
     "rate_limit",
     "auth_failure",
     "draining",
+    "url_too_long",
+    "token_too_long",
     "tombstone",
     "retention_purging",
     "max_connections_per_doc",
