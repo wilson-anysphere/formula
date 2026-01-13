@@ -53,11 +53,23 @@ def _human_bytes(size_bytes: int) -> str:
 def _candidate_target_dirs(repo_root: Path) -> list[Path]:
     candidates: list[Path] = []
 
+    # Respect `CARGO_TARGET_DIR` when set (some CI/caching setups override it). Cargo interprets
+    # relative paths relative to the working directory used for the build (repo root in CI).
+    env_target = os.environ.get("CARGO_TARGET_DIR")
+    if env_target:
+        p = Path(env_target)
+        if not p.is_absolute():
+            p = repo_root / p
+        if p.is_dir():
+            candidates.append(p)
+
     # Common locations:
     # - standalone Tauri app: apps/desktop/src-tauri/target
+    # - builds from apps/desktop: apps/desktop/target
     # - workspace build: target/
     for p in (
         repo_root / "apps" / "desktop" / "src-tauri" / "target",
+        repo_root / "apps" / "desktop" / "target",
         repo_root / "target",
     ):
         if p.is_dir():
