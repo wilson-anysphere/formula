@@ -59,6 +59,9 @@ importers:
       '@formula/collab-comments':
         specifier: workspace:*
         version: link:../../packages/collab/comments
+      '@formula/collab-encryption':
+        specifier: workspace:*
+        version: link:../../packages/collab/encryption
       '@formula/collab-persistence':
         specifier: workspace:*
         version: link:../../packages/collab/persistence

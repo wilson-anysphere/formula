@@ -107,6 +107,7 @@ import type { CellRange as FillEngineRange, FillMode as FillHandleMode } from "@
 import { bindSheetViewToCollabSession, type SheetViewBinder } from "../collab/sheetViewBinder";
 import { resolveDevCollabEncryptionFromSearch } from "../collab/devEncryption.js";
 import { CollabEncryptionKeyStore } from "../collab/encryptionKeyStore";
+import { EncryptedRangeManager } from "../collab/encryption-ui/encryptedRangeManager";
 import { loadCollabConnectionForWorkbook } from "../sharing/collabConnectionStore.js";
 import { loadCollabToken, storeCollabToken } from "../sharing/collabTokenStore.js";
 import { showCollabEditRejectedToast } from "../collab/editRejectionToast";
@@ -877,10 +878,11 @@ export class SpreadsheetApp {
   private sharedHoverCellCommentIndexVersion = -1;
 
   private collabSession: CollabSession | null = null;
+  private collabEncryptionKeyStore: CollabEncryptionKeyStore | null = null;
   private readOnly = false;
   private readOnlyRole: string | null = null;
   private collabPermissionsUnsubscribe: (() => void) | null = null;
-  private collabBinder: { destroy: () => void } | null = null;
+  private collabBinder: { destroy: () => void; rehydrate?: () => void } | null = null;
   private collabSelectionUnsubscribe: (() => void) | null = null;
   private collabPresenceUnsubscribe: (() => void) | null = null;
   private conflictUi: ConflictUiController | null = null;
@@ -932,7 +934,7 @@ export class SpreadsheetApp {
       }
     | null = null;
   private dlpContext: ReturnType<typeof createDesktopDlpContext> | null = null;
-
+  private encryptedRangeManager: EncryptedRangeManager | null = null;
   constructor(
     private root: HTMLElement,
     private status: SpreadsheetAppStatusElements,
@@ -1020,6 +1022,7 @@ export class SpreadsheetApp {
             })
           : null;
       const encryptionKeyStore = new CollabEncryptionKeyStore();
+      this.collabEncryptionKeyStore = encryptionKeyStore;
       const encryptionKeyStoreHydrated = encryptionKeyStore.hydrateDoc(collab.docId).catch(() => {});
       let encryptionMetadata: any = null;
 
@@ -1207,6 +1210,8 @@ export class SpreadsheetApp {
           };
         }
       }
+
+      this.encryptedRangeManager = new EncryptedRangeManager({ session: this.collabSession });
 
       // Populate `modifiedBy` metadata for any direct `CollabSession.setCell*` writes
       // (used by some conflict resolution + versioning flows) and ensure downstream
@@ -2801,6 +2806,9 @@ export class SpreadsheetApp {
     this.collabSession?.disconnect?.();
     this.collabSession?.destroy?.();
     this.collabSession = null;
+    this.collabEncryptionKeyStore = null;
+    this.encryptedRangeManager?.destroy();
+    this.encryptedRangeManager = null;
     this.stopCommentsRootObserver?.();
     this.stopCommentsRootObserver = null;
     if (this.commentsDocUpdateListener) {
@@ -3524,6 +3532,24 @@ export class SpreadsheetApp {
 
   getCollabSession(): CollabSession | null {
     return this.collabSession;
+  }
+
+  getCollabEncryptionKeyStore(): CollabEncryptionKeyStore | null {
+    return this.collabEncryptionKeyStore;
+  }
+
+  getEncryptedRangeManager(): EncryptedRangeManager | null {
+    return this.encryptedRangeManager;
+  }
+
+  /**
+   * Force the collab binder to rehydrate from Yjs.
+   *
+   * This is used when local state changes without mutating the shared document
+   * (e.g. importing an encryption key).
+   */
+  rehydrateCollabBinder(): void {
+    this.collabBinder?.rehydrate?.();
   }
 
   /**

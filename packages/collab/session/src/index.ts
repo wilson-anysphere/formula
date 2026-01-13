@@ -2807,7 +2807,7 @@ export function createNamedRangeManagerForSessionWithPermissions(session: Collab
   return createNamedRangeManagerForSessionWithPermissionsImpl(session);
 }
 
-export type DocumentControllerBinder = { destroy: () => void };
+export type DocumentControllerBinder = { destroy: () => void; rehydrate?: () => void };
 
 export async function bindCollabSessionToDocumentController(options: {
   session: CollabSession;

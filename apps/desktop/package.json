@@ -24,6 +24,7 @@
     "@formula/ai-audit": "workspace:*",
     "@formula/ai-completion": "workspace:*",
     "@formula/collab-comments": "workspace:*",
+    "@formula/collab-encryption": "workspace:*",
     "@formula/collab-persistence": "workspace:*",
     "@formula/collab-presence": "workspace:*",
     "@formula/collab-session": "workspace:*",

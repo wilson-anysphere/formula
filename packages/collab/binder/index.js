@@ -2613,6 +2613,17 @@ export function bindYjsToDocumentController(options) {
   hydrateSheetViewsFromYjs();
 
   return {
+    /**
+     * Re-scan the Yjs document and re-apply state into the DocumentController.
+     *
+     * This is primarily used by desktop encryption UX: when a user imports an
+     * encryption key locally (no Yjs document change), we still need to re-run
+     * decryption so previously-masked cells can be revealed without requiring a reload.
+     */
+    rehydrate() {
+      hydrateFromYjs();
+      hydrateSheetViewsFromYjs();
+    },
     destroy() {
       unsubscribe?.();
       cells.unobserveDeep(handleCellsDeepChange);

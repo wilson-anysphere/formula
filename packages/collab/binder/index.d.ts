@@ -190,6 +190,13 @@ export interface BindYjsToDocumentControllerOptions {
 
 export interface BindYjsToDocumentControllerBinding {
   destroy(): void;
+  /**
+   * Re-scan Yjs state and re-apply it into the DocumentController.
+   *
+   * This is primarily used when local decryption state changes (e.g. a user
+   * imports an encryption key) without any Yjs document mutation.
+   */
+  rehydrate(): void;
 }
 
 export function bindYjsToDocumentController(

@@ -1,8 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { visualizer } from "rollup-plugin-visualizer";
 import { defineConfig } from "vite";
+
+const require = createRequire(import.meta.url);
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -14,8 +16,9 @@ const marketplaceSharedEntry = fileURLToPath(new URL("../../shared", import.meta
 const collabUndoEntry = fileURLToPath(new URL("../../packages/collab/undo/index.js", import.meta.url));
 const collabCommentsEntry = fileURLToPath(new URL("../../packages/collab/comments/src/index.ts", import.meta.url));
 const collabSessionEntry = fileURLToPath(new URL("../../packages/collab/session/src/index.ts", import.meta.url));
-const collabVersioningEntry = fileURLToPath(new URL("../../packages/collab/versioning/src/index.ts", import.meta.url));
+const collabEncryptionEntry = fileURLToPath(new URL("../../packages/collab/encryption/src/index.ts", import.meta.url));
 const collabYjsUtilsEntry = fileURLToPath(new URL("../../packages/collab/yjs-utils/src/index.ts", import.meta.url));
+const collabVersioningEntry = fileURLToPath(new URL("../../packages/collab/versioning/src/index.ts", import.meta.url));
 const collabPersistenceEntry = fileURLToPath(new URL("../../packages/collab/persistence/src/index.ts", import.meta.url));
 const collabPersistenceIndexedDbEntry = fileURLToPath(
   new URL("../../packages/collab/persistence/src/indexeddb.ts", import.meta.url),
@@ -28,6 +31,14 @@ const tauriCsp = (JSON.parse(readFileSync(tauriConfigPath, "utf8")) as any)?.app
 const isE2E = process.env.FORMULA_E2E === "1";
 const isPlaywright = process.env.FORMULA_E2E === "0" || process.env.FORMULA_E2E === "1";
 const isBundleAnalyze = process.env.VITE_BUNDLE_ANALYZE === "1";
+const visualizer: null | ((opts: any) => any) = (() => {
+  if (!isBundleAnalyze) return null;
+  try {
+    return (require("rollup-plugin-visualizer") as any).visualizer as (opts: any) => any;
+  } catch {
+    return null;
+  }
+})();
 const cacheDir =
   process.env.FORMULA_E2E === "1"
     ? "node_modules/.vite-e2e-csp"
@@ -86,11 +97,11 @@ export default defineConfig({
   envPrefix: ["VITE_", "DESKTOP_LOAD_"],
   plugins: [
     resolveJsToTs(),
-    ...(isBundleAnalyze
+    ...(typeof visualizer === "function"
       ? [
-          visualizer({
-            filename: "dist/bundle-stats.html",
-            template: "treemap",
+           visualizer({
+             filename: "dist/bundle-stats.html",
+             template: "treemap",
             gzipSize: true,
             brotliSize: true,
           }),
@@ -112,9 +123,9 @@ export default defineConfig({
       { find: "@formula/collab-comments", replacement: collabCommentsEntry },
       { find: "@formula/collab-undo", replacement: collabUndoEntry },
       { find: "@formula/collab-session", replacement: collabSessionEntry },
+      { find: "@formula/collab-encryption", replacement: collabEncryptionEntry },
       { find: "@formula/collab-yjs-utils", replacement: collabYjsUtilsEntry },
       { find: "@formula/collab-versioning", replacement: collabVersioningEntry },
-      { find: "@formula/collab-yjs-utils", replacement: collabYjsUtilsEntry },
       // Workspace packages are linked via pnpm's node_modules symlinks. Some CI/dev environments
       // can run with stale node_modules (e.g. cached installs), which causes Vite to fail to
       // resolve new workspace dependencies. Alias the persistence entrypoints directly to keep

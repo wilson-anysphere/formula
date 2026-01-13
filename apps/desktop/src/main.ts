@@ -116,6 +116,7 @@ import { parseCollabShareLink, serializeCollabShareLink } from "./sharing/collab
 import { saveCollabConnectionForWorkbook, loadCollabConnectionForWorkbook } from "./sharing/collabConnectionStore.js";
 import { loadCollabToken, preloadCollabTokenFromKeychain, storeCollabToken } from "./sharing/collabTokenStore.js";
 import { getWorkbookMutationPermission, READ_ONLY_SHEET_MUTATION_MESSAGE } from "./collab/permissionGuards";
+import { registerEncryptionUiCommands } from "./collab/encryption-ui/registerEncryptionUiCommands";
 import { DesktopExtensionHostManager } from "./extensions/extensionHostManager.js";
 import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
 import { ContextKeyService } from "./extensions/contextKeys.js";
@@ -5047,6 +5048,8 @@ if (
     app.focusAfterSheetNavigation();
   };
   focusAfterSheetNavigationFromCommandRef = focusAfterSheetNavigationFromCommand;
+  registerEncryptionUiCommands({ commandRegistry, app });
+
   extensionPanelBridge = new ExtensionPanelBridge({
     host: extensionHostManager.host as any,
     panelRegistry,
