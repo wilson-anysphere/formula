@@ -482,7 +482,18 @@ export class DrawingOverlay {
         }
 
         if (obj.kind.type === "image") {
-          const entry = this.images.get(obj.kind.imageId);
+          let entry = this.images.get(obj.kind.imageId);
+          if (!entry && typeof this.images.getAsync === "function") {
+            // Best-effort: hydrate missing bytes from a persistent store (e.g. IndexedDB).
+            try {
+              entry = await this.images.getAsync(obj.kind.imageId);
+            } catch {
+              entry = undefined;
+            }
+            if (signal?.aborted) return;
+            if (seq !== this.renderSeq) return;
+          }
+
           if (!entry) {
             // Image metadata can arrive before the bytes are hydrated into the ImageStore
             // (e.g. collaboration metadata received before IndexedDB hydration). Render a

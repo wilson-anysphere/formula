@@ -69,6 +69,12 @@ export interface ImageEntry {
 export interface ImageStore {
   get(id: string): ImageEntry | undefined;
   set(entry: ImageEntry): void;
+  /**
+   * Optional async helpers for stores that can load/persist out-of-process
+   * (e.g. IndexedDB). Callers should treat these as best-effort.
+   */
+  getAsync?(id: string): Promise<ImageEntry | undefined>;
+  setAsync?(entry: ImageEntry): Promise<void>;
 }
 
 export interface Rect {

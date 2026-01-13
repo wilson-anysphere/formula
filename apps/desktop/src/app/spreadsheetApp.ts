@@ -37,6 +37,7 @@ import { insertImageFromFile } from "../drawings/insertImage";
 import { createDrawingObjectId, type Anchor as DrawingAnchor, type DrawingObject, type ImageEntry, type ImageStore } from "../drawings/types";
 import { convertDocumentSheetDrawingsToUiDrawingObjects, convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
 import { decodeBase64ToBytes as decodeClipboardImageBase64ToBytes } from "../drawings/insertImage";
+import { IndexedDbImageStore } from "../drawings/persistence/indexedDbImageStore";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
 import {
@@ -337,7 +338,10 @@ function lookupImageEntry(id: string, images: unknown): ImageEntry | undefined {
 class DocumentImageStore implements ImageStore {
   private readonly fallback = new Map<string, ImageEntry>();
 
-  constructor(private readonly document: DocumentController) {}
+  constructor(
+    private readonly document: DocumentController,
+    private readonly persisted: IndexedDbImageStore,
+  ) {}
 
   get(id: string): ImageEntry | undefined {
     const imageId = String(id ?? "");
@@ -365,17 +369,33 @@ class DocumentImageStore implements ImageStore {
   set(entry: ImageEntry): void {
     if (!entry || typeof entry.id !== "string") return;
 
-    const doc = this.document as any;
-    if (typeof doc.setImage === "function") {
-      try {
-        doc.setImage(entry.id, { bytes: entry.bytes, mimeType: entry.mimeType });
-        return;
-      } catch {
-        // ignore
-      }
-    }
-
+    // Best-effort persistence: never block callers on IndexedDB availability.
+    this.persisted.set(entry);
+    // Keep a session-local cache so synchronous `get()` calls can resolve quickly without
+    // reading from IndexedDB.
     this.fallback.set(entry.id, entry);
+  }
+
+  async getAsync(id: string): Promise<ImageEntry | undefined> {
+    const imageId = String(id ?? "");
+    if (!imageId) return undefined;
+
+    // Fast-path: already present in memory (DocumentController or fallback).
+    const existing = this.get(imageId);
+    if (existing) return existing;
+
+    const loaded = await this.persisted.getAsync(imageId);
+    if (!loaded) return undefined;
+
+    // Cache in-memory so subsequent sync `get()` calls can resolve quickly without
+    // awaiting IndexedDB again. We intentionally do *not* mutate the DocumentController
+    // image store here (that would be undoable / affect snapshots).
+    this.fallback.set(imageId, loaded);
+    return loaded;
+  }
+
+  async setAsync(entry: ImageEntry): Promise<void> {
+    await this.persisted.setAsync(entry);
   }
 }
 
@@ -1169,6 +1189,7 @@ export class SpreadsheetApp {
           user: jwtPermissions?.userId ? overrideCollabUserIdentityId(rawCollab.user, jwtPermissions.userId) : rawCollab.user,
         }
       : null;
+    const localWorkbookId = opts.workbookId ?? collab?.docId ?? "local-workbook";
 
     const collabEnabled = Boolean(collab);
     this.collabMode = collabEnabled || Boolean(opts.collabMode);
@@ -1982,7 +2003,7 @@ export class SpreadsheetApp {
       this.sharedGridZoom = this.sharedGrid.renderer.getZoom();
     }
 
-    this.drawingImages = new DocumentImageStore(this.document);
+    this.drawingImages = new DocumentImageStore(this.document, new IndexedDbImageStore(localWorkbookId));
     if (this.collabSession) {
       // In collab mode, image bytes are not guaranteed to be available locally (e.g. remote inserts,
       // or inserts made on another device without offline persistence). Bind drawing images to Yjs
@@ -2758,7 +2779,7 @@ export class SpreadsheetApp {
       });
     }
 
-    const workbookId = opts.workbookId ?? "local-workbook";
+    const workbookId = localWorkbookId;
     const dlp = createDesktopDlpContext({ documentId: workbookId });
     this.dlpContext = dlp;
     this.aiCellFunctions = new AiCellFunctionEngine({
