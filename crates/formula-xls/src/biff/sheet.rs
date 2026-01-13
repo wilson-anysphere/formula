@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use formula_model::autofilter::{SortCondition, SortState};
 use formula_model::{
-    CellRef, Hyperlink, HyperlinkTarget, ManualPageBreaks, OutlinePr, Range, SheetPane,
-    SheetProtection, SheetSelection, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
+    CellRef, Hyperlink, HyperlinkTarget, ManualPageBreaks, Orientation, OutlinePr, PageSetup, Range,
+    Scaling, SheetPane, SheetProtection, SheetSelection, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
 
 use super::records;
@@ -79,7 +79,16 @@ const RECORD_SCL: u16 = 0x00A0;
 const RECORD_PANE: u16 = 0x0041;
 const RECORD_SELECTION: u16 = 0x001D;
 
-// Print records (worksheet substream).
+// Print/page setup records (worksheet substream).
+// - SETUP: [MS-XLS 2.4.296]
+// - LEFTMARGIN/RIGHTMARGIN/TOPMARGIN/BOTTOMMARGIN: [MS-XLS 2.4.128] etc.
+const RECORD_SETUP: u16 = 0x00A1;
+const RECORD_LEFTMARGIN: u16 = 0x0026;
+const RECORD_RIGHTMARGIN: u16 = 0x0027;
+const RECORD_TOPMARGIN: u16 = 0x0028;
+const RECORD_BOTTOMMARGIN: u16 = 0x0029;
+
+// Manual page breaks (worksheet substream).
 // - VERTICALPAGEBREAKS: [MS-XLS 2.4.349]
 // - HORIZONTALPAGEBREAKS: [MS-XLS 2.4.115]
 const RECORD_VERTICALPAGEBREAKS: u16 = 0x001A;
@@ -182,6 +191,13 @@ pub(crate) struct SheetViewState {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct BiffSheetProtection {
     pub(crate) protection: SheetProtection,
+    pub(crate) warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BiffSheetPrintSettings {
+    pub(crate) page_setup: Option<PageSetup>,
+    pub(crate) manual_page_breaks: ManualPageBreaks,
     pub(crate) warnings: Vec<String>,
 }
 
@@ -580,7 +596,7 @@ pub(crate) fn parse_biff_sheet_manual_page_breaks(
         let record = match next {
             Ok(r) => r,
             Err(err) => {
-                out.warnings.push(format!("malformed BIFF record: {err}"));
+                push_warning_bounded(&mut out.warnings, format!("malformed BIFF record: {err}"));
                 break;
             }
         };
@@ -592,10 +608,20 @@ pub(crate) fn parse_biff_sheet_manual_page_breaks(
         let data = record.data;
         match record.record_id {
             RECORD_HORIZONTALPAGEBREAKS => {
-                parse_horizontal_page_breaks_record(data, record.offset, &mut out);
+                parse_horizontal_page_breaks_record(
+                    data,
+                    record.offset,
+                    &mut out.manual_page_breaks,
+                    &mut out.warnings,
+                );
             }
             RECORD_VERTICALPAGEBREAKS => {
-                parse_vertical_page_breaks_record(data, record.offset, &mut out);
+                parse_vertical_page_breaks_record(
+                    data,
+                    record.offset,
+                    &mut out.manual_page_breaks,
+                    &mut out.warnings,
+                );
             }
             records::RECORD_EOF => break,
             _ => {}
@@ -608,15 +634,17 @@ pub(crate) fn parse_biff_sheet_manual_page_breaks(
 fn parse_horizontal_page_breaks_record(
     data: &[u8],
     record_offset: usize,
-    out: &mut BiffSheetManualPageBreaks,
+    manual_page_breaks: &mut ManualPageBreaks,
+    warnings: &mut Vec<String>,
 ) {
     // HorizontalPageBreaks payload:
     // - cbrk (u16)
     // - HorzBrk[cbrk] (6 bytes each): row (u16), colStart (u16), colEnd (u16)
     if data.len() < 2 {
-        out.warnings.push(format!(
-            "truncated HorizontalPageBreaks record at offset {record_offset}"
-        ));
+        push_warning_bounded(
+            warnings,
+            format!("truncated HorizontalPageBreaks record at offset {record_offset}"),
+        );
         return;
     }
 
@@ -632,30 +660,35 @@ fn parse_horizontal_page_breaks_record(
         parsed = parsed.saturating_add(1);
 
         let row = u16::from_le_bytes([chunk[0], chunk[1]]);
-        out.manual_page_breaks
+        manual_page_breaks
             .row_breaks_after
             .insert(row.saturating_sub(1) as u32);
     }
 
     if parsed < cbrk {
-        out.warnings.push(format!(
-            "truncated HorizontalPageBreaks record at offset {record_offset}: expected {cbrk} breaks, got {parsed}"
-        ));
+        push_warning_bounded(
+            warnings,
+            format!(
+                "truncated HorizontalPageBreaks record at offset {record_offset}: expected {cbrk} breaks, got {parsed}"
+            ),
+        );
     }
 }
 
 fn parse_vertical_page_breaks_record(
     data: &[u8],
     record_offset: usize,
-    out: &mut BiffSheetManualPageBreaks,
+    manual_page_breaks: &mut ManualPageBreaks,
+    warnings: &mut Vec<String>,
 ) {
     // VerticalPageBreaks payload:
     // - cbrk (u16)
     // - VertBrk[cbrk] (6 bytes each): col (u16), rowStart (u16), rowEnd (u16)
     if data.len() < 2 {
-        out.warnings.push(format!(
-            "truncated VerticalPageBreaks record at offset {record_offset}"
-        ));
+        push_warning_bounded(
+            warnings,
+            format!("truncated VerticalPageBreaks record at offset {record_offset}"),
+        );
         return;
     }
 
@@ -671,16 +704,242 @@ fn parse_vertical_page_breaks_record(
         parsed = parsed.saturating_add(1);
 
         let col = u16::from_le_bytes([chunk[0], chunk[1]]);
-        out.manual_page_breaks
+        manual_page_breaks
             .col_breaks_after
             .insert(col.saturating_sub(1) as u32);
     }
 
     if parsed < cbrk {
-        out.warnings.push(format!(
-            "truncated VerticalPageBreaks record at offset {record_offset}: expected {cbrk} breaks, got {parsed}"
-        ));
+        push_warning_bounded(
+            warnings,
+            format!(
+                "truncated VerticalPageBreaks record at offset {record_offset}: expected {cbrk} breaks, got {parsed}"
+            ),
+        );
     }
+}
+
+/// Best-effort parse of worksheet print/page setup settings (margins, scaling, paper size, etc).
+///
+/// This scan is resilient to malformed records: payload-level parse failures are surfaced as
+/// warnings and otherwise ignored.
+pub(crate) fn parse_biff_sheet_print_settings(
+    workbook_stream: &[u8],
+    start: usize,
+) -> Result<BiffSheetPrintSettings, String> {
+    let mut out = BiffSheetPrintSettings::default();
+
+    let mut page_setup = PageSetup::default();
+    let mut saw_any_record = false;
+
+    // We need to consult WSBOOL.fFitToPage to decide whether SETUP.iScale or SETUP.iFit* apply.
+    // Keep the raw SETUP fields around and compute scaling at the end so record order doesn't
+    // matter and "last wins" semantics are respected.
+    let mut setup_scale: Option<u16> = None;
+    let mut setup_fit_width: Option<u16> = None;
+    let mut setup_fit_height: Option<u16> = None;
+    let mut wsbool_fit_to_page: Option<bool> = None;
+
+    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
+
+    while let Some(next) = iter.next() {
+        let record = match next {
+            Ok(r) => r,
+            Err(err) => {
+                push_warning_bounded(&mut out.warnings, format!("malformed BIFF record: {err}"));
+                break;
+            }
+        };
+
+        if record.offset != start && records::is_bof_record(record.record_id) {
+            break;
+        }
+
+        let data = record.data;
+        match record.record_id {
+            // Manual page breaks (best-effort; can be empty).
+            RECORD_HORIZONTALPAGEBREAKS => parse_horizontal_page_breaks_record(
+                data,
+                record.offset,
+                &mut out.manual_page_breaks,
+                &mut out.warnings,
+            ),
+            RECORD_VERTICALPAGEBREAKS => parse_vertical_page_breaks_record(
+                data,
+                record.offset,
+                &mut out.manual_page_breaks,
+                &mut out.warnings,
+            ),
+            // Page setup/margins/scaling.
+            RECORD_SETUP => {
+                saw_any_record = true;
+                // SETUP [MS-XLS 2.4.296]
+                //
+                // Payload (BIFF8):
+                // - iPaperSize:u16
+                // - iScale:u16
+                // - iPageStart:u16 (unused)
+                // - iFitWidth:u16
+                // - iFitHeight:u16
+                // - grbit:u16
+                // - iRes:u16 (unused)
+                // - iVRes:u16 (unused)
+                // - numHdr:Xnum (f64)
+                // - numFtr:Xnum (f64)
+                // - iCopies:u16 (unused)
+                if data.len() < 34 {
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "truncated SETUP record at offset {} (expected 34 bytes, got {})",
+                            record.offset,
+                            data.len()
+                        ),
+                    );
+                    continue;
+                }
+
+                let i_paper_size = u16::from_le_bytes([data[0], data[1]]);
+                let i_scale = u16::from_le_bytes([data[2], data[3]]);
+                let i_fit_width = u16::from_le_bytes([data[6], data[7]]);
+                let i_fit_height = u16::from_le_bytes([data[8], data[9]]);
+                let grbit = u16::from_le_bytes([data[10], data[11]]);
+
+                let num_hdr = f64::from_le_bytes(data[16..24].try_into().unwrap());
+                let num_ftr = f64::from_le_bytes(data[24..32].try_into().unwrap());
+
+                setup_fit_width = Some(i_fit_width);
+                setup_fit_height = Some(i_fit_height);
+
+                // grbit flags:
+                // - fPortrait (bit1): 0=landscape, 1=portrait
+                // - fNoPls (bit2): if set, printer-related fields are undefined and must be ignored
+                // - fNoOrient (bit6): if set, fPortrait must be ignored and orientation defaults to portrait
+                const GRBIT_F_PORTRAIT: u16 = 0x0002;
+                const GRBIT_F_NOPLS: u16 = 0x0004;
+                const GRBIT_F_NOORIENT: u16 = 0x0040;
+
+                let f_no_pls = (grbit & GRBIT_F_NOPLS) != 0;
+                let f_no_orient = (grbit & GRBIT_F_NOORIENT) != 0;
+                let f_portrait = (grbit & GRBIT_F_PORTRAIT) != 0;
+
+                if !f_no_pls {
+                    page_setup.paper_size.code = i_paper_size;
+                    setup_scale = Some(i_scale);
+
+                    page_setup.orientation = if f_no_orient {
+                        Orientation::Portrait
+                    } else if f_portrait {
+                        Orientation::Portrait
+                    } else {
+                        Orientation::Landscape
+                    };
+                }
+
+                if num_hdr.is_finite() {
+                    page_setup.margins.header = num_hdr;
+                } else {
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "invalid header margin in SETUP record at offset {}: {num_hdr}",
+                            record.offset
+                        ),
+                    );
+                }
+
+                if num_ftr.is_finite() {
+                    page_setup.margins.footer = num_ftr;
+                } else {
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "invalid footer margin in SETUP record at offset {}: {num_ftr}",
+                            record.offset
+                        ),
+                    );
+                }
+            }
+            RECORD_LEFTMARGIN | RECORD_RIGHTMARGIN | RECORD_TOPMARGIN | RECORD_BOTTOMMARGIN => {
+                saw_any_record = true;
+                let record_name = match record.record_id {
+                    RECORD_LEFTMARGIN => "LEFTMARGIN",
+                    RECORD_RIGHTMARGIN => "RIGHTMARGIN",
+                    RECORD_TOPMARGIN => "TOPMARGIN",
+                    RECORD_BOTTOMMARGIN => "BOTTOMMARGIN",
+                    _ => unreachable!("checked in match arm"),
+                };
+                if data.len() < 8 {
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "truncated {record_name} record at offset {} (expected 8 bytes, got {})",
+                            record.offset,
+                            data.len()
+                        ),
+                    );
+                    continue;
+                }
+                let value = f64::from_le_bytes(data[0..8].try_into().unwrap());
+                if !value.is_finite() {
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "invalid {record_name} value at offset {}: {value}",
+                            record.offset
+                        ),
+                    );
+                    continue;
+                }
+                match record.record_id {
+                    RECORD_LEFTMARGIN => page_setup.margins.left = value,
+                    RECORD_RIGHTMARGIN => page_setup.margins.right = value,
+                    RECORD_TOPMARGIN => page_setup.margins.top = value,
+                    RECORD_BOTTOMMARGIN => page_setup.margins.bottom = value,
+                    _ => {}
+                }
+            }
+            RECORD_WSBOOL => {
+                // WSBOOL [MS-XLS 2.4.376]
+                // fFitToPage: bit8 (mask 0x0100)
+                if data.len() < 2 {
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "truncated WSBOOL record at offset {} (expected >=2 bytes, got {})",
+                            record.offset,
+                            data.len()
+                        ),
+                    );
+                    continue;
+                }
+                saw_any_record = true;
+                let grbit = u16::from_le_bytes([data[0], data[1]]);
+                wsbool_fit_to_page = Some((grbit & 0x0100) != 0);
+            }
+            records::RECORD_EOF => break,
+            _ => {}
+        }
+    }
+
+    let fit_to_page = wsbool_fit_to_page.unwrap_or(false);
+    if fit_to_page {
+        if let (Some(width), Some(height)) = (setup_fit_width, setup_fit_height) {
+            page_setup.scaling = Scaling::FitTo { width, height };
+        }
+    } else {
+        let scale = setup_scale.unwrap_or(100);
+        page_setup.scaling = Scaling::Percent(if scale == 0 { 100 } else { scale });
+    }
+
+    // Only surface a page setup when it results in a non-default `PageSetup`. Worksheets almost
+    // always contain a `WSBOOL` record (for outline flags), but that does not necessarily imply
+    // any explicit print/page setup metadata.
+    if saw_any_record && page_setup != PageSetup::default() {
+        out.page_setup = Some(page_setup);
+    }
+
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2627,6 +2886,139 @@ mod tests {
         assert_eq!(
             parsed.manual_page_breaks.col_breaks_after,
             BTreeSet::from([2u32])
+        );
+    }
+
+    fn setup_payload(
+        i_paper_size: u16,
+        i_scale: u16,
+        i_fit_width: u16,
+        i_fit_height: u16,
+        grbit: u16,
+        num_hdr: f64,
+        num_ftr: f64,
+    ) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&i_paper_size.to_le_bytes());
+        out.extend_from_slice(&i_scale.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes()); // iPageStart
+        out.extend_from_slice(&i_fit_width.to_le_bytes());
+        out.extend_from_slice(&i_fit_height.to_le_bytes());
+        out.extend_from_slice(&grbit.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes()); // iRes
+        out.extend_from_slice(&0u16.to_le_bytes()); // iVRes
+        out.extend_from_slice(&num_hdr.to_le_bytes());
+        out.extend_from_slice(&num_ftr.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes()); // iCopies
+        out
+    }
+
+    #[test]
+    fn parses_page_setup_margins_and_fit_to_page_scaling() {
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(
+                RECORD_SETUP,
+                &setup_payload(
+                    9,      // A4
+                    77,     // iScale (ignored when fit-to-page)
+                    2,      // iFitWidth
+                    3,      // iFitHeight
+                    0x0000, // landscape (fPortrait=0)
+                    0.5,    // header inches
+                    0.6,    // footer inches
+                ),
+            ),
+            record(RECORD_LEFTMARGIN, &1.0f64.to_le_bytes()),
+            record(RECORD_LEFTMARGIN, &2.0f64.to_le_bytes()), // last wins
+            record(RECORD_RIGHTMARGIN, &1.2f64.to_le_bytes()),
+            record(RECORD_TOPMARGIN, &1.3f64.to_le_bytes()),
+            record(RECORD_BOTTOMMARGIN, &1.4f64.to_le_bytes()),
+            record(RECORD_WSBOOL, &0x0100u16.to_le_bytes()), // fFitToPage=1
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_print_settings(&stream, 0).expect("parse");
+        let setup = parsed.page_setup.expect("expected page_setup");
+        assert_eq!(setup.paper_size.code, 9);
+        assert_eq!(setup.orientation, Orientation::Landscape);
+        assert_eq!(setup.scaling, Scaling::FitTo { width: 2, height: 3 });
+        assert_eq!(setup.margins.left, 2.0);
+        assert_eq!(setup.margins.right, 1.2);
+        assert_eq!(setup.margins.top, 1.3);
+        assert_eq!(setup.margins.bottom, 1.4);
+        assert_eq!(setup.margins.header, 0.5);
+        assert_eq!(setup.margins.footer, 0.6);
+        assert!(
+            parsed.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn parses_percent_scaling_when_fit_to_page_disabled() {
+        let grbit = 0x0002u16; // fPortrait=1
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(
+                RECORD_SETUP,
+                &setup_payload(1, 80, 1, 1, grbit, 0.3, 0.3), // iScale=80%
+            ),
+            record(RECORD_WSBOOL, &0u16.to_le_bytes()), // fFitToPage=0
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_print_settings(&stream, 0).expect("parse");
+        let setup = parsed.page_setup.expect("expected page_setup");
+        assert_eq!(setup.scaling, Scaling::Percent(80));
+    }
+
+    #[test]
+    fn setup_f_nopls_ignores_printer_fields() {
+        // fNoPls=1 => iPaperSize/iScale/fPortrait are undefined and must be ignored.
+        let grbit = 0x0004u16; // fNoPls
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(
+                RECORD_SETUP,
+                &setup_payload(9, 80, 1, 1, grbit, 0.4, 0.5), // values ignored except header/footer
+            ),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_print_settings(&stream, 0).expect("parse");
+        let setup = parsed.page_setup.expect("expected page_setup");
+        assert_eq!(setup.paper_size, PageSetup::default().paper_size);
+        assert_eq!(setup.orientation, Orientation::Portrait);
+        assert_eq!(setup.scaling, Scaling::Percent(100));
+        assert_eq!(setup.margins.header, 0.4);
+        assert_eq!(setup.margins.footer, 0.5);
+    }
+
+    #[test]
+    fn warns_on_truncated_margin_records_and_continues() {
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_TOPMARGIN, &[0xAA, 0xBB]), // truncated
+            record(RECORD_LEFTMARGIN, &1.0f64.to_le_bytes()),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_print_settings(&stream, 0).expect("parse");
+        let setup = parsed.page_setup.expect("expected page_setup");
+        assert_eq!(setup.margins.left, 1.0);
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("truncated TOPMARGIN record")),
+            "expected truncated-TOPMARGIN warning, got {:?}",
+            parsed.warnings
         );
     }
 }
