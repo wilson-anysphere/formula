@@ -664,6 +664,10 @@ jobs:
           projectPath: apps/desktop
           args: ${{ matrix.tauri_args }}
 
+      - name: Smoke test produced AppImage (extract + ldd + arch)
+        if: runner.os == 'Linux'
+        run: bash scripts/ci/check-appimage.sh
+
       - name: Upload desktop bundles (dry run)
         if: needs.validate-version.outputs.upload != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -792,10 +796,6 @@ jobs:
           else
             echo "TAURI_PRIVATE_KEY not configured; skipping updater signature (*.sig) verification."
           fi
-
-      - name: Smoke test produced AppImage (extract + ldd + arch)
-        if: runner.os == 'Linux'
-        run: bash scripts/ci/check-appimage.sh
 
       - name: Verify Linux package dependency metadata (deb + rpm)
         if: matrix.platform == 'ubuntu-24.04'
