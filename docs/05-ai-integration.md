@@ -509,6 +509,8 @@ For semantic search within large datasets:
 - Retrieval: [`packages/ai-rag/src/retrieval/searchWorkbookRag.js`](../packages/ai-rag/src/retrieval/searchWorkbookRag.js)
 - Vector stores: [`packages/ai-rag/src/store/sqliteVectorStore.js`](../packages/ai-rag/src/store/sqliteVectorStore.js) (browser) and
   [`packages/ai-rag/src/store/inMemoryVectorStore.js`](../packages/ai-rag/src/store/inMemoryVectorStore.js) (tests)
+  - Tip: If you delete many chunks (e.g. the workbook structure changes drastically), call
+    `await vectorStore.compact()` (alias: `vacuum()`) to run SQLite `VACUUM` and reclaim persisted storage space.
 
 ```typescript
 // Desktop: build workbook RAG context for a user query (schema + retrieved chunks).
