@@ -67,6 +67,44 @@ test("rerankWorkbookResults uses deterministic ordering when adjusted scores tie
   assert.deepEqual(reranked.map((r) => r.id), ["a", "b"]);
 });
 
+test("rerankWorkbookResults boosts results whose title/sheetName match query tokens", () => {
+  const query = "revenue";
+  const results = [
+    {
+      id: "no-match",
+      score: 0.5,
+      metadata: { kind: "dataRegion", title: "Costs", sheetName: "Sheet1", tokenCount: 10 },
+    },
+    {
+      id: "match-title",
+      score: 0.5,
+      metadata: { kind: "dataRegion", title: "RevenueSummary", sheetName: "Sheet1", tokenCount: 10 },
+    },
+  ];
+
+  const reranked = rerankWorkbookResults(query, results);
+  assert.deepEqual(reranked.map((r) => r.id), ["match-title", "no-match"]);
+});
+
+test("rerankWorkbookResults penalizes very large chunks to favor concise context", () => {
+  const query = "";
+  const results = [
+    {
+      id: "large",
+      score: 0.51,
+      metadata: { kind: "dataRegion", title: "A", sheetName: "Sheet1", tokenCount: 10_000 },
+    },
+    {
+      id: "small",
+      score: 0.5,
+      metadata: { kind: "dataRegion", title: "B", sheetName: "Sheet1", tokenCount: 50 },
+    },
+  ];
+
+  const reranked = rerankWorkbookResults(query, results);
+  assert.deepEqual(reranked.map((r) => r.id), ["small", "large"]);
+});
+
 test("dedupeOverlappingResults removes near-duplicate overlapping chunks (keeps highest score)", () => {
   const results = [
     // Lower-score duplicate comes first intentionally.
