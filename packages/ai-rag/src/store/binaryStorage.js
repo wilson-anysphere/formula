@@ -408,13 +408,15 @@ export class ChunkedLocalStorageBinaryStorage {
         }
       }
 
+      const storageLen = typeof storage.length === "number" && Number.isFinite(storage.length) ? storage.length : null;
+
       const canUseOldChunks =
         oldChunks != null &&
         // Avoid pathological loops when meta is corrupted.
         oldChunks <= 100_000 &&
         oldChunks > chunks &&
-        // Sanity check against actual key count to avoid deleting an absurd range.
-        oldChunks <= storage.length + 1;
+        // When possible, sanity check against actual key count to avoid deleting an absurd range.
+        (storageLen == null || oldChunks <= storageLen + 1);
 
       if (canUseOldChunks) {
         for (let i = chunks; i < oldChunks; i += 1) {
@@ -423,6 +425,11 @@ export class ChunkedLocalStorageBinaryStorage {
       } else {
         // Fallback: scan localStorage and remove any chunk keys >= the new chunk count.
         // This handles cases where the old meta is missing/corrupted.
+        if (typeof storage.key !== "function" || typeof storage.length !== "number") {
+          // Storage implementation is missing `key()`/`length` (non-standard). We can't safely scan
+          // for leftover chunks, so skip cleanup.
+          return;
+        }
         const prefix = `${this.key}:`;
         /** @type {string[]} */
         const keysToRemove = [];
@@ -448,25 +455,61 @@ export class ChunkedLocalStorageBinaryStorage {
     const storage = getLocalStorageOrNull();
     if (!storage) return;
 
-    const prefix = `${this.key}:`;
-    /** @type {string[]} */
-    const keysToRemove = [];
-    for (let i = 0; i < storage.length; i += 1) {
-      const key = storage.key(i);
-      if (!key) continue;
-      if (key === this.metaKey) {
-        keysToRemove.push(key);
-        continue;
+    /** @type {number | null} */
+    let chunkCount = null;
+    try {
+      const raw = storage.getItem?.(this.metaKey);
+      if (raw) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const meta = JSON.parse(raw);
+        const n = meta?.chunks;
+        if (Number.isInteger(n) && n >= 0 && n <= 100_000) chunkCount = n;
       }
-      if (!key.startsWith(prefix)) continue;
-      const suffix = key.slice(prefix.length);
-      if (!/^\d+$/.test(suffix)) continue;
-      keysToRemove.push(key);
+    } catch {
+      // ignore
     }
 
-    for (const key of keysToRemove) {
+    if (chunkCount != null) {
+      for (let i = 0; i < chunkCount; i += 1) {
+        try {
+          storage.removeItem?.(`${this.key}:${i}`);
+        } catch {
+          // ignore
+        }
+      }
       try {
-        storage.removeItem?.(key);
+        storage.removeItem?.(this.metaKey);
+      } catch {
+        // ignore
+      }
+    } else if (typeof storage.key === "function" && typeof storage.length === "number") {
+      const prefix = `${this.key}:`;
+      /** @type {string[]} */
+      const keysToRemove = [];
+      for (let i = 0; i < storage.length; i += 1) {
+        const key = storage.key(i);
+        if (!key) continue;
+        if (key === this.metaKey) {
+          keysToRemove.push(key);
+          continue;
+        }
+        if (!key.startsWith(prefix)) continue;
+        const suffix = key.slice(prefix.length);
+        if (!/^\d+$/.test(suffix)) continue;
+        keysToRemove.push(key);
+      }
+
+      for (const key of keysToRemove) {
+        try {
+          storage.removeItem?.(key);
+        } catch {
+          // ignore
+        }
+      }
+    } else {
+      // Best-effort: at least clear meta so future loads don't attempt to read chunks.
+      try {
+        storage.removeItem?.(this.metaKey);
       } catch {
         // ignore
       }
