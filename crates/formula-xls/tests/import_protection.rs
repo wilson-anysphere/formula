@@ -59,23 +59,33 @@ fn warns_on_truncated_biff_protection_records_but_continues() {
     // Warnings surfaced for truncated payloads.
     let warnings: Vec<&str> = result.warnings.iter().map(|w| w.message.as_str()).collect();
     assert!(
-        warnings.iter().any(|w| w.contains("truncated PROTECT record")),
+        warnings
+            .iter()
+            .any(|w| w.contains("truncated PROTECT record")),
         "expected truncated PROTECT warning, got: {warnings:?}"
     );
     assert!(
-        warnings.iter().any(|w| w.contains("truncated WINDOWPROTECT record")),
+        warnings
+            .iter()
+            .any(|w| w.contains("truncated WINDOWPROTECT record")),
         "expected truncated WINDOWPROTECT warning, got: {warnings:?}"
     );
     assert!(
-        warnings.iter().any(|w| w.contains("truncated PASSWORD record")),
+        warnings
+            .iter()
+            .any(|w| w.contains("truncated PASSWORD record")),
         "expected truncated PASSWORD warning, got: {warnings:?}"
     );
     assert!(
-        warnings.iter().any(|w| w.contains("truncated OBJPROTECT record")),
+        warnings
+            .iter()
+            .any(|w| w.contains("truncated OBJPROTECT record")),
         "expected truncated OBJPROTECT warning, got: {warnings:?}"
     );
     assert!(
-        warnings.iter().any(|w| w.contains("truncated SCENPROTECT record")),
+        warnings
+            .iter()
+            .any(|w| w.contains("truncated SCENPROTECT record")),
         "expected truncated SCENPROTECT warning, got: {warnings:?}"
     );
 }
@@ -114,6 +124,40 @@ fn imports_biff_sheet_protection_allow_flags() {
 }
 
 #[test]
+fn imports_biff_sheet_protection_allow_flags_from_continued_feat_record() {
+    let bytes =
+        xls_fixture_builder::build_sheet_protection_allow_flags_feat_continued_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheets
+        .first()
+        .expect("fixture should contain one sheet");
+    let p = &sheet.sheet_protection;
+
+    assert_eq!(p.enabled, true);
+    assert_eq!(p.password_hash, Some(0xCBEB));
+
+    // Allow flags imported from a FEAT record split across CONTINUE.
+    assert_eq!(p.select_locked_cells, false);
+    assert_eq!(p.select_unlocked_cells, true);
+    assert_eq!(p.format_cells, true);
+    assert_eq!(p.format_columns, true);
+    assert_eq!(p.insert_columns, true);
+    assert_eq!(p.insert_hyperlinks, true);
+    assert_eq!(p.delete_rows, true);
+    assert_eq!(p.sort, true);
+    assert_eq!(p.auto_filter, true);
+
+    assert!(
+        result.warnings.is_empty(),
+        "expected no warnings, got: {:?}",
+        result.warnings
+    );
+}
+
+#[test]
 fn warns_on_malformed_feat_protection_record_but_continues() {
     let bytes = xls_fixture_builder::build_sheet_protection_allow_flags_malformed_fixture_xls();
     let result = import_fixture(&bytes);
@@ -135,7 +179,9 @@ fn warns_on_malformed_feat_protection_record_but_continues() {
     // Malformed FEAT record surfaces a warning but does not abort import.
     let warnings: Vec<&str> = result.warnings.iter().map(|w| w.message.as_str()).collect();
     assert!(
-        warnings.iter().any(|w| w.contains("failed to parse FEAT record")),
+        warnings
+            .iter()
+            .any(|w| w.contains("failed to parse FEAT record")),
         "expected FEAT warning, got: {warnings:?}"
     );
 }

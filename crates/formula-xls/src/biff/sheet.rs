@@ -201,10 +201,19 @@ pub(crate) fn parse_biff_sheet_protection(
 ) -> Result<BiffSheetProtection, String> {
     let mut out = BiffSheetProtection::default();
 
-    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
+    // FEAT* records can legally be split across one or more `CONTINUE` records. Use the logical
+    // iterator so we can reassemble those fragments before decoding.
+    let allows_continuation = |record_id: u16| {
+        matches!(
+            record_id,
+            RECORD_FEATHEADR | RECORD_FEAT | RECORD_FEATHEADR11 | RECORD_FEAT11
+        )
+    };
+    let iter =
+        records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
 
-    while let Some(next) = iter.next() {
-        let record = match next {
+    for record in iter {
+        let record = match record {
             Ok(r) => r,
             Err(err) => {
                 out.warnings.push(format!("malformed BIFF record: {err}"));
@@ -216,7 +225,7 @@ pub(crate) fn parse_biff_sheet_protection(
             break;
         }
 
-        let data = record.data;
+        let data = record.data.as_ref();
         match record.record_id {
             RECORD_PROTECT => {
                 if data.len() < 2 {
@@ -1262,7 +1271,10 @@ fn parse_sort_record_best_effort(data: &[u8]) -> Result<Option<SortState>, Strin
 
         let descending = orders[i] != 0;
         conditions.push(SortCondition {
-            range: Range::new(CellRef::new(start_row, key_col), CellRef::new(end_row, key_col)),
+            range: Range::new(
+                CellRef::new(start_row, key_col),
+                CellRef::new(end_row, key_col),
+            ),
             descending,
         });
     }

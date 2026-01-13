@@ -992,8 +992,8 @@ pub fn build_note_comment_txo_cch_text_zero_fixture_xls() -> Vec<u8> {
 /// This exercises a combination of real-world corruption patterns:
 /// - missing/zero `cchText` requiring us to infer the length from the continuation area
 /// - missing BIFF8 flags byte on a subsequent fragment
-pub fn build_note_comment_txo_cch_text_zero_missing_flags_in_second_fragment_fixture_xls(
-) -> Vec<u8> {
+pub fn build_note_comment_txo_cch_text_zero_missing_flags_in_second_fragment_fixture_xls() -> Vec<u8>
+{
     let workbook_stream =
         build_note_comment_txo_cch_text_zero_missing_flags_in_second_fragment_workbook_stream();
 
@@ -1872,6 +1872,26 @@ pub fn build_sheet_protection_allow_flags_fixture_xls() -> Vec<u8> {
     let sheet_stream = build_sheet_protection_allow_flags_sheet_stream(false);
     let workbook_stream =
         build_single_sheet_workbook_stream("ProtectedAllowFlags", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture with worksheet protection enabled and the richer allow flags stored
+/// in a `FEAT` record that is split across a `CONTINUE` record.
+///
+/// This exercises best-effort reassembly of continued FEAT records in the worksheet substream.
+pub fn build_sheet_protection_allow_flags_feat_continued_fixture_xls() -> Vec<u8> {
+    let sheet_stream = build_sheet_protection_allow_flags_feat_continued_sheet_stream();
+    let workbook_stream =
+        build_single_sheet_workbook_stream("ProtectedAllowFlagsFeatCont", &sheet_stream, 1252);
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -2816,7 +2836,8 @@ fn build_note_comment_txo_cch_text_zero_workbook_stream() -> Vec<u8> {
     )
 }
 
-fn build_note_comment_txo_cch_text_zero_missing_flags_in_second_fragment_workbook_stream() -> Vec<u8> {
+fn build_note_comment_txo_cch_text_zero_missing_flags_in_second_fragment_workbook_stream() -> Vec<u8>
+{
     build_single_sheet_workbook_stream(
         "NotesTxoCchZeroNoFlagsMid",
         &build_note_comment_txo_cch_text_zero_missing_flags_in_second_fragment_sheet_stream(),
@@ -2880,7 +2901,8 @@ fn build_note_comment_missing_txo_header_workbook_stream() -> Vec<u8> {
     )
 }
 
-fn build_note_comment_missing_txo_header_missing_flags_in_second_fragment_workbook_stream() -> Vec<u8> {
+fn build_note_comment_missing_txo_header_missing_flags_in_second_fragment_workbook_stream(
+) -> Vec<u8> {
     build_single_sheet_workbook_stream(
         "NotesMissingTxoHeaderNoFlagsMid",
         &build_note_comment_missing_txo_header_missing_flags_in_second_fragment_sheet_stream(),
@@ -3812,7 +3834,8 @@ fn build_note_comment_missing_txo_header_sheet_stream() -> Vec<u8> {
     sheet
 }
 
-fn build_note_comment_missing_txo_header_missing_flags_in_second_fragment_sheet_stream() -> Vec<u8> {
+fn build_note_comment_missing_txo_header_missing_flags_in_second_fragment_sheet_stream() -> Vec<u8>
+{
     const OBJECT_ID: u16 = 1;
     const AUTHOR: &str = "Alice";
     const TEXT: &str = "Hello";
@@ -6656,6 +6679,42 @@ fn build_sheet_protection_allow_flags_sheet_stream(include_malformed_feat: bool)
     sheet
 }
 
+fn build_sheet_protection_allow_flags_feat_continued_sheet_stream() -> Vec<u8> {
+    // Same allow-flag mask as `build_sheet_protection_allow_flags_sheet_stream`, but store it in a
+    // continued FEAT record (without FEATHEADR) so the importer must reassemble across `CONTINUE`.
+    let allow_mask: u16 = 0x0EAE;
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Basic worksheet protection records.
+    push_record(&mut sheet, RECORD_PROTECT, &1u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_PASSWORD, &0xCBEBu16.to_le_bytes()); // "test" hash
+    push_record(&mut sheet, RECORD_OBJPROTECT, &0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_SCENPROTECT, &0u16.to_le_bytes());
+
+    // FEAT record split across CONTINUE: write everything up to (but excluding) the allow-mask
+    // bytes, then write the remaining allow-mask bytes in a continuation record.
+    let feat_payload = feat_record_sheet_protection_allow_mask(allow_mask);
+    let split = feat_payload.len().saturating_sub(2);
+    push_record(&mut sheet, RECORD_FEAT, &feat_payload[..split]);
+    push_record(&mut sheet, RECORD_CONTINUE, &feat_payload[split..]);
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
 fn build_tab_color_sheet_stream() -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
     push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
@@ -7304,7 +7363,8 @@ fn hlink_external_url_malformed_tooltip_len(
 
     // URL moniker CLSID: 79EAC9E0-BAF9-11CE-8C82-00AA004BA90B (COM GUID little-endian fields).
     const CLSID_URL_MONIKER: [u8; 16] = [
-        0xE0, 0xC9, 0xEA, 0x79, 0xF9, 0xBA, 0xCE, 0x11, 0x8C, 0x82, 0x00, 0xAA, 0x00, 0x4B, 0xA9, 0x0B,
+        0xE0, 0xC9, 0xEA, 0x79, 0xF9, 0xBA, 0xCE, 0x11, 0x8C, 0x82, 0x00, 0xAA, 0x00, 0x4B, 0xA9,
+        0x0B,
     ];
 
     let link_opts = LINK_OPTS_HAS_MONIKER | LINK_OPTS_HAS_DISPLAY | LINK_OPTS_HAS_TOOLTIP;
@@ -8367,9 +8427,11 @@ fn build_autofilter_sort_workbook_stream() -> Vec<u8> {
         &mut sheet,
         RECORD_SORT,
         &sort_record_payload(
-            0, 4, // rows (rwFirst..rwLast) => A1:C5
-            0, 2, // cols (colFirst..colLast)
-            true, // has header row
+            0,
+            4, // rows (rwFirst..rwLast) => A1:C5
+            0,
+            2,               // cols (colFirst..colLast)
+            true,            // has header row
             &[(1u16, true)], // key: column B descending
         ),
     );
