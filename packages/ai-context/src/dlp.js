@@ -5,11 +5,195 @@
 
 const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const SSN_RE = /\b\d{3}-\d{2}-\d{4}\b/g;
-const CREDIT_CARD_RE = /\b(?:\d[ -]*?){13,16}\b/g;
+// Candidate detector only. Use Luhn validation before classifying/redacting.
+const CREDIT_CARD_CANDIDATE_RE = /\b(?:\d[ -]*?){13,19}\b/g;
+
+// Phone numbers are noisy; keep the patterns conservative and validate digit count.
+// - International: require '+' prefix (E.164-like)
+// - US: require separators / parentheses, optionally prefixed with +1
+const PHONE_INTL_CANDIDATE_RE = /\+\d[\d\s().-]{7,}\d/g;
+const PHONE_US_CANDIDATE_RE = /(?:\+1[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]\d{3}[\s.-]\d{4}(?:\s*(?:ext|x|#)\s*\d{1,5})?/g;
+
+// Conservative token detectors. Keep patterns specific to reduce false positives.
+const API_KEY_RE =
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{36}\b|\bxox[baprs]-\d{10,13}-\d{10,13}-[A-Za-z0-9]{24,64}\b/g;
+
+// Candidate detector only. Validate IBAN checksum (mod 97) before classifying/redacting.
+//
+// Note: require an ending digit to avoid common over-matches like:
+//   "GB82 ... 32 key=..."
+// where a greedy `...{11,30}` can swallow trailing identifiers.
+const IBAN_CANDIDATE_RE = /\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]){10,29}\d\b/gi;
 
 function hasMatch(re, text) {
   re.lastIndex = 0;
   return re.test(text);
+}
+
+/**
+ * @param {string} value
+ */
+function digitsOnly(value) {
+  return String(value).replace(/\D/g, "");
+}
+
+/**
+ * @param {string} digits
+ */
+function isAllSameDigit(digits) {
+  if (!digits) return false;
+  for (let i = 1; i < digits.length; i++) {
+    if (digits[i] !== digits[0]) return false;
+  }
+  return true;
+}
+
+/**
+ * Luhn checksum validation.
+ * @param {string} digits
+ */
+function luhnIsValid(digits) {
+  let sum = 0;
+  let shouldDouble = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    const code = digits.charCodeAt(i) - 48;
+    if (code < 0 || code > 9) return false;
+    let n = code;
+    if (shouldDouble) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
+    sum += n;
+    shouldDouble = !shouldDouble;
+  }
+  return sum % 10 === 0;
+}
+
+/**
+ * @param {string} candidate
+ */
+function isValidCreditCard(candidate) {
+  const digits = digitsOnly(candidate);
+  if (digits.length < 13 || digits.length > 19) return false;
+  // 0 isn't a valid industry identifier and all-same digits are almost certainly noise.
+  if (digits[0] === "0" || isAllSameDigit(digits)) return false;
+  return luhnIsValid(digits);
+}
+
+/**
+ * @param {string} text
+ */
+function hasValidCreditCard(text) {
+  CREDIT_CARD_CANDIDATE_RE.lastIndex = 0;
+  for (let match; (match = CREDIT_CARD_CANDIDATE_RE.exec(text)); ) {
+    if (isValidCreditCard(match[0])) return true;
+  }
+  return false;
+}
+
+/**
+ * @param {string} candidate
+ */
+function isValidPhone(candidate) {
+  const raw = String(candidate);
+  const digits = digitsOnly(raw);
+  if (raw.includes("+")) {
+    // International (+ prefix required by regex): allow 10-15 digits as a conservative E.164-ish bound.
+    if (digits.length < 10 || digits.length > 15) return false;
+    return digits[0] !== "0";
+  }
+  // US-ish. Accept 10 digits, or 11 with leading 1.
+  if (digits.length === 10) return true;
+  if (digits.length === 11 && digits[0] === "1") return true;
+  return false;
+}
+
+/**
+ * @param {string} text
+ */
+function hasValidPhoneNumber(text) {
+  PHONE_INTL_CANDIDATE_RE.lastIndex = 0;
+  for (let match; (match = PHONE_INTL_CANDIDATE_RE.exec(text)); ) {
+    if (isValidPhone(match[0])) return true;
+  }
+  PHONE_US_CANDIDATE_RE.lastIndex = 0;
+  for (let match; (match = PHONE_US_CANDIDATE_RE.exec(text)); ) {
+    if (isValidPhone(match[0])) return true;
+  }
+  return false;
+}
+
+/**
+ * @param {string} candidate
+ */
+function normalizeIban(candidate) {
+  return String(candidate).replace(/\s+/g, "").toUpperCase();
+}
+
+/**
+ * IBAN checksum validation (ISO 13616 mod 97).
+ * @param {string} candidate
+ */
+function isValidIban(candidate) {
+  const iban = normalizeIban(candidate);
+  if (iban.length < 15 || iban.length > 34) return false;
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]+$/.test(iban)) return false;
+
+  const rearranged = iban.slice(4) + iban.slice(0, 4);
+  let remainder = 0;
+  for (let i = 0; i < rearranged.length; i++) {
+    const ch = rearranged[i];
+    const code = ch.charCodeAt(0);
+    if (code >= 48 && code <= 57) {
+      remainder = (remainder * 10 + (code - 48)) % 97;
+      continue;
+    }
+    // A=10, B=11, ..., Z=35
+    if (code >= 65 && code <= 90) {
+      const value = code - 55;
+      remainder = (remainder * 100 + value) % 97;
+      continue;
+    }
+    return false;
+  }
+
+  return remainder === 1;
+}
+
+/**
+ * IBAN candidate regexes can be greedy when the input contains adjacent identifiers
+ * (e.g. `iban=GB82 ... 32 key=...`). Attempt to trim trailing whitespace-delimited
+ * tokens to recover the valid IBAN without leaking it in redaction output.
+ *
+ * @param {string} candidate
+ * @returns {{ iban: string, suffix: string } | null}
+ */
+function extractValidIban(candidate) {
+  const raw = String(candidate);
+  if (isValidIban(raw)) return { iban: raw, suffix: "" };
+
+  let trimmed = raw;
+  while (true) {
+    const next = trimmed.replace(/\s+[A-Za-z0-9]+$/, "");
+    if (next === trimmed) break;
+    trimmed = next;
+    if (isValidIban(trimmed)) {
+      return { iban: trimmed, suffix: raw.slice(trimmed.length) };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * @param {string} text
+ */
+function hasValidIban(text) {
+  IBAN_CANDIDATE_RE.lastIndex = 0;
+  for (let match; (match = IBAN_CANDIDATE_RE.exec(text)); ) {
+    if (extractValidIban(match[0])) return true;
+  }
+  return false;
 }
 
 /**
@@ -19,7 +203,10 @@ export function classifyText(text) {
   const findings = [];
   if (hasMatch(EMAIL_RE, text)) findings.push("email");
   if (hasMatch(SSN_RE, text)) findings.push("ssn");
-  if (hasMatch(CREDIT_CARD_RE, text)) findings.push("credit_card");
+  if (hasValidCreditCard(text)) findings.push("credit_card");
+  if (hasValidPhoneNumber(text)) findings.push("phone_number");
+  if (hasMatch(API_KEY_RE, text)) findings.push("api_key");
+  if (hasValidIban(text)) findings.push("iban");
   const level = findings.length > 0 ? "sensitive" : "public";
   return { level, findings };
 }
@@ -29,7 +216,15 @@ export function classifyText(text) {
  */
 export function redactText(text) {
   return String(text)
+    .replace(API_KEY_RE, "[REDACTED_API_KEY]")
     .replace(EMAIL_RE, "[REDACTED_EMAIL]")
     .replace(SSN_RE, "[REDACTED_SSN]")
-    .replace(CREDIT_CARD_RE, "[REDACTED_CREDIT_CARD]");
+    .replace(IBAN_CANDIDATE_RE, (match) => {
+      const extracted = extractValidIban(match);
+      if (!extracted) return match;
+      return `[REDACTED_IBAN]${extracted.suffix}`;
+    })
+    .replace(PHONE_INTL_CANDIDATE_RE, (match) => (isValidPhone(match) ? "[REDACTED_PHONE]" : match))
+    .replace(PHONE_US_CANDIDATE_RE, (match) => (isValidPhone(match) ? "[REDACTED_PHONE]" : match))
+    .replace(CREDIT_CARD_CANDIDATE_RE, (match) => (isValidCreditCard(match) ? "[REDACTED_CREDIT_CARD]" : match));
 }
