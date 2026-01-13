@@ -352,6 +352,8 @@ def main() -> int:
     calc_notes_parts: list[str] = []
     if oracle is not None:
         calc_notes_parts.append(f"mismatch rate={_fmt_pct(calc_mismatch_rate)}")
+        if calc_mismatches is not None and calc_total is not None:
+            calc_notes_parts.append(f"mismatches={calc_mismatches}/{calc_total}")
         if oracle.max_mismatch_rate is not None:
             calc_notes_parts.append(f"max={_fmt_pct(oracle.max_mismatch_rate)}")
     calc_notes = ", ".join(calc_notes_parts) if calc_notes_parts else "—"
