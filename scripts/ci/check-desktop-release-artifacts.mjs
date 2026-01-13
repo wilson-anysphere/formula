@@ -15,6 +15,12 @@
  * - Per-OS required artifacts exist (installers + updater archives) and have matching `.sig` files
  * - Updater metadata exists: `latest.json` + `latest.json.sig`
  *
+ * Fork/dry-run behavior:
+ * - On forks (or any run) where updater signing secrets are not configured, CI may choose to
+ *   validate that *installer artifacts* exist without enforcing updater signature files (`*.sig`).
+ * - This is controlled via `FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES` and
+ *   `FORMULA_HAS_TAURI_UPDATER_KEY` env vars (see `.github/workflows/release.yml`).
+ *
  * Usage:
  *   node scripts/ci/check-desktop-release-artifacts.mjs
  *   node scripts/ci/check-desktop-release-artifacts.mjs --os linux
@@ -50,6 +56,20 @@ function normalizeOs(raw) {
   if (val === "macos") return "macos";
   if (val === "windows") return "windows";
   return null;
+}
+
+/**
+ * @param {string} name
+ * @returns {boolean | undefined}
+ */
+function envBool(name) {
+  const raw = process.env[name];
+  if (raw === undefined) return undefined;
+  const val = raw.trim().toLowerCase();
+  if (!val) return undefined;
+  if (val === "1" || val === "true" || val === "yes") return true;
+  if (val === "0" || val === "false" || val === "no") return false;
+  return undefined;
 }
 
 /**
@@ -407,10 +427,6 @@ function requirementsForOs(os) {
   if (os === "macos") {
     return [
       { label: "macOS installer (.dmg)", matchBase: (p) => p.endsWith(".dmg") },
-      {
-        label: "macOS updater archive (.app.tar.gz/.tar.gz)",
-        matchBase: (p) => p.endsWith(".tar.gz") || p.endsWith(".tgz"),
-      },
     ];
   }
   if (os === "windows") {
@@ -432,9 +448,12 @@ function requirementsForOs(os) {
 /**
  * @param {string} os
  * @param {{ allFiles: string[], byKind: Map<string, string[]>, fileSet: Set<string> }} scan
+ * @param {{ requireUpdaterSignatures: boolean }} opts
  * @returns {{ ok: boolean, failures: string[], requirementRows: Array<Array<string | number>> }}
  */
-function validate(os, scan) {
+function validate(os, scan, opts) {
+  const requireUpdaterSignatures = opts.requireUpdaterSignatures;
+
   /** @type {string[]} */
   const failures = [];
   /** @type {Array<Array<string | number>>} */
@@ -444,10 +463,15 @@ function validate(os, scan) {
    * @param {string} label
    * @param {string[]} baseFiles
    */
-  function validateBaseWithSig(label, baseFiles) {
+  function validateBase(label, baseFiles) {
     if (baseFiles.length === 0) {
       failures.push(`Missing ${label}.`);
       requirementRows.push([label, "MISSING", 0, ""]);
+      return;
+    }
+
+    if (!requireUpdaterSignatures) {
+      requirementRows.push([label, "OK (unsigned)", baseFiles.length, relPath(baseFiles[0])]);
       return;
     }
 
@@ -471,14 +495,26 @@ function validate(os, scan) {
     requirementRows.push([label, "OK", baseFiles.length, relPath(baseFiles[0])]);
   }
 
-  // Updater metadata (required for all OSes).
-  const latestJsonFiles = scan.allFiles.filter((p) => path.basename(p) === "latest.json");
-  validateBaseWithSig("Updater metadata (latest.json)", latestJsonFiles);
+  // Updater metadata is only meaningful when updater signatures are enabled.
+  if (requireUpdaterSignatures) {
+    const latestJsonFiles = scan.allFiles.filter((p) => path.basename(p) === "latest.json");
+    validateBase("Updater metadata (latest.json)", latestJsonFiles);
+  } else {
+    requirementRows.push(["Updater metadata (latest.json)", "SKIPPED", 0, ""]);
+  }
 
   // OS-specific requirements.
-  for (const req of requirementsForOs(os)) {
+  const osReqs = requirementsForOs(os);
+  if (os === "macos" && requireUpdaterSignatures) {
+    osReqs.push({
+      label: "macOS updater archive (.app.tar.gz/.tar.gz)",
+      matchBase: (p) => p.endsWith(".tar.gz") || p.endsWith(".tgz"),
+    });
+  }
+
+  for (const req of osReqs) {
     const baseFiles = scan.allFiles.filter(req.matchBase);
-    validateBaseWithSig(req.label, baseFiles);
+    validateBase(req.label, baseFiles);
   }
 
   return { ok: failures.length === 0, failures, requirementRows };
@@ -532,7 +568,21 @@ function main() {
   }
 
   const scan = scanBundleDirs(bundleDirs);
-  const result = validate(os, scan);
+
+  // In the upstream repo we require updater signatures (so auto-update always works). For forks or
+  // dry-run builds, CI may disable signature validation when the required secrets are not present.
+  const requireUpdaterSignatures = envBool("FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES") ?? true;
+  const hasUpdaterKey = envBool("FORMULA_HAS_TAURI_UPDATER_KEY") ?? false;
+
+  if (requireUpdaterSignatures && !hasUpdaterKey) {
+    dieBlock("Updater signature validation is required but TAURI_PRIVATE_KEY is not configured.", [
+      `Set the TAURI_PRIVATE_KEY secret in GitHub Actions to enable updater signatures.`,
+      `Or (forks/dry-runs) set FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES=false to skip signature validation.`,
+    ]);
+    return;
+  }
+
+  const result = validate(os, scan, { requireUpdaterSignatures });
 
   if (!result.ok) {
     console.error(`\nDesktop release artifact check failed (os=${os}).\n`);

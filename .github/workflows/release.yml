@@ -63,7 +63,12 @@ jobs:
       - name: Validate Tauri updater signing secrets
         # This workflow currently only runs on tags, but keep the guard so future
         # workflow_dispatch runs on branches don't require release secrets.
-        if: startsWith(github.ref, 'refs/tags/')
+        #
+        # Forks/dry-runs often do not configure release secrets. We always validate updater
+        # signing secrets in the upstream repo (so official releases can't ship without
+        # auto-update signatures), and validate in forks only when the user has configured their
+        # own updater keys.
+        if: startsWith(github.ref, 'refs/tags/') && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
         run: node scripts/ci/check-tauri-updater-secrets.mjs
         env:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
@@ -414,7 +419,6 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-
           $target = "${{ matrix.rust_target }}"
           if ([string]::IsNullOrWhiteSpace($target)) {
             throw "windows-bundle: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
@@ -451,10 +455,13 @@ jobs:
         if: matrix.platform == 'ubuntu-24.04'
         shell: bash
         env:
-          # Updater signature files (`*.sig`) are only generated when the updater private key is
-          # configured. Forks/dry-runs often have no secrets, so we skip `.sig` validation there
-          # while still ensuring the bundle artifacts themselves were produced.
           FORMULA_HAS_TAURI_UPDATER_KEY: ${{ secrets.TAURI_PRIVATE_KEY != '' }}
+          # Updater signature files (`*.sig`) are only generated when the updater private key is
+          # configured. Forks/dry-runs often have no secrets, so we skip `.sig` validation there.
+          #
+          # In the upstream repo we *require* updater signatures to avoid accidentally publishing
+          # a release without auto-update metadata/signatures.
+          FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES: ${{ github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '' }}
         run: |
           set -euo pipefail
 
@@ -493,7 +500,12 @@ jobs:
             exit 1
           fi
 
-          if [[ "${FORMULA_HAS_TAURI_UPDATER_KEY}" == "true" ]]; then
+          if [[ "${FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES}" == "true" && "${FORMULA_HAS_TAURI_UPDATER_KEY}" != "true" ]]; then
+            echo "TAURI_PRIVATE_KEY is required to validate updater signatures but is not configured." >&2
+            exit 1
+          fi
+
+          if [[ "${FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES}" == "true" ]]; then
             # Ensure updater signature files exist for each bundle type.
             for artifact in "${appimages[@]}" "${debs[@]}" "${rpms[@]}"; do
               if [[ ! -f "${artifact}.sig" ]]; then
@@ -913,6 +925,9 @@ jobs:
           $sigs | ForEach-Object { Write-Host "- $($_.FullName)" }
 
       - name: Validate desktop release artifacts
+        env:
+          FORMULA_HAS_TAURI_UPDATER_KEY: ${{ secrets.TAURI_PRIVATE_KEY != '' }}
+          FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES: ${{ github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '' }}
         run: node scripts/ci/check-desktop-release-artifacts.mjs
 
       - name: Smoke test Linux .deb install in clean Ubuntu container
@@ -989,6 +1004,11 @@ jobs:
   validate-updater-manifest:
     name: Validate combined updater manifest (latest.json)
     needs: build
+    # Validating the updater manifest requires updater signatures (`latest.json.sig`), which are
+    # only produced when the TAURI_PRIVATE_KEY secret is configured. We always validate in the
+    # upstream repo (to avoid accidentally shipping an unsigned updater manifest) and validate in
+    # forks only when the user has configured their own updater key secrets.
+    if: github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != ''
     runs-on: ubuntu-24.04
     permissions:
       contents: read
