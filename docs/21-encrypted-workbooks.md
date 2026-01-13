@@ -7,6 +7,22 @@ certain parts of the workbook, but the file contents are not encrypted).
 Formula’s goal is to open encrypted spreadsheets when possible, surface **actionable** errors when
 not, and avoid security pitfalls (like accidentally persisting decrypted bytes to disk).
 
+## Status (current behavior vs intended behavior)
+
+**Current behavior (in this repo today):**
+
+- Encrypted workbooks are **detected** and rejected with a clear error:
+  - `formula-io` returns `formula_io::Error::EncryptedWorkbook`.
+  - The desktop app surfaces an “encrypted workbook not supported” message.
+- Password-based decryption is not yet wired into the public open APIs, so callers cannot supply a
+  password to open an encrypted workbook.
+
+**Intended behavior (when decryption + password plumbing is implemented):**
+
+- Support opening Excel-encrypted workbooks without writing decrypted bytes to disk.
+- Distinguish “password required” vs “invalid password” vs “unsupported encryption scheme”
+  (see [Error semantics](#error-semantics)).
+
 ---
 
 ## Terminology: protection vs encryption (do not confuse these)
@@ -148,9 +164,12 @@ Notes:
   to the relevant spec requirements (typically UTF-16LE for key derivation).
 - Callers should avoid logging passwords or embedding them in error messages.
 
+If you call the current APIs (`open_workbook` / `open_workbook_model`) on an encrypted workbook,
+they will return `Error::EncryptedWorkbook` until password support is integrated.
+
 ### Desktop app flow (IPC + password prompt)
 
-In the desktop app, the file-open path is interactive. The typical flow is:
+In the desktop app, the file-open path is interactive. The intended flow is:
 
 1. Frontend requests open: `openWorkbook({ path })`
 2. Backend attempts to open without a password.
@@ -189,6 +208,9 @@ Encrypted workbook handling should distinguish at least these cases:
 
 These distinctions matter for UX and telemetry: “needs password” is a normal user workflow, while
 “unsupported scheme” is an engineering coverage gap.
+
+Until password-based decryption is implemented, Formula will generally surface a single
+“encrypted workbook not supported” error instead of distinguishing the cases above.
 
 ---
 
