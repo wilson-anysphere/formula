@@ -268,4 +268,27 @@ describe("serializeAuditEntries", () => {
     expect(parsed[0].input["__proto__"]).toEqual({ polluted: true });
     expect(({} as any).polluted).toBeUndefined();
   });
+
+  it("handles toJSON() methods that return self (no infinite recursion)", () => {
+    const input: any = { a: 1 };
+    input.toJSON = function () {
+      return this;
+    };
+
+    const entries: AIAuditEntry[] = [
+      {
+        id: "audit-1",
+        timestamp_ms: 1,
+        session_id: "session",
+        mode: "chat",
+        input,
+        model: "unit-test-model",
+        tool_calls: [],
+      },
+    ];
+
+    const output = serializeAuditEntries(entries, { format: "json", redactToolResults: false });
+    const parsed = JSON.parse(output) as any[];
+    expect(parsed[0].input).toBe("[Circular]");
+  });
 });

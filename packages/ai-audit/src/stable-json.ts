@@ -60,16 +60,22 @@ export function stableJsonValue(value: unknown, ancestors: WeakSet<object>): unk
 
   const obj = value as Record<string, unknown>;
 
-  // Preserve JSON.stringify behavior for objects with toJSON (e.g. Date).
+  if (ancestors.has(obj)) return CIRCULAR_PLACEHOLDER;
+
+  // Preserve JSON.stringify behavior for objects with toJSON (e.g. Date), but guard
+  // against pathological implementations like `toJSON() { return this; }` by treating
+  // self-references as circular.
   if (typeof (obj as { toJSON?: unknown }).toJSON === "function") {
+    ancestors.add(obj);
     try {
       return stableJsonValue((obj as { toJSON: () => unknown }).toJSON(), ancestors);
     } catch {
       return UNSERIALIZABLE_PLACEHOLDER;
+    } finally {
+      ancestors.delete(obj);
     }
   }
 
-  if (ancestors.has(obj)) return CIRCULAR_PLACEHOLDER;
   ancestors.add(obj);
 
   // Use a null-prototype object to avoid special-casing keys like `__proto__`
