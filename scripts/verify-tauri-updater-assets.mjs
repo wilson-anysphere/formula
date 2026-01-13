@@ -767,8 +767,14 @@ async function verifyOnce({ apiBase, repo, tag, token, wantsManifestSig }) {
         );
       }
       if (expectedArchForAsset && !archMatchesAssetName(expectedArchForAsset, assetName)) {
+        const archHint =
+          expectedArchForAsset === "x86_64"
+            ? "x86_64/x64/amd64"
+            : expectedArchForAsset === "aarch64"
+              ? "arm64/aarch64"
+              : expectedArchForAsset;
         missing.push(
-          `Updater asset arch mismatch for ${platformKey}: ${assetName} (expected filename to include ${expectedArchForAsset} / x64 / arm64 token)`,
+          `Updater asset arch mismatch for ${platformKey}: ${assetName} (expected ${archHint} token in filename)`,
         );
       }
 
