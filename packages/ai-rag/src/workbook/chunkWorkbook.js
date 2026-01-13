@@ -25,6 +25,15 @@ function isFormulaCell(cell) {
   return !!(cell && cell.f != null && String(cell.f).trim() !== "");
 }
 
+function hasNonFormulaNonEmptyCell(cells) {
+  for (const row of cells) {
+    for (const cell of row) {
+      if (isNonEmptyCell(cell) && !isFormulaCell(cell)) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Packed coordinate key used to avoid allocating `${row},${col}` strings for
  * region detection.
@@ -551,6 +560,15 @@ function chunkWorkbook(workbook, options = {}) {
     for (const region of dataRegions) {
       throwIfAborted(signal);
       const rect = region.rect;
+      const cells = extractCells(sheet, rect, {
+        maxRows: extractMaxRows,
+        maxCols: extractMaxCols,
+      });
+
+      // If this region is entirely formulas, prefer a formulaRegion chunk instead of
+      // emitting a redundant dataRegion chunk that would suppress it.
+      if (!hasNonFormulaNonEmptyCell(cells)) continue;
+
       const coordKey = `${rect.r0},${rect.c0},${rect.r1},${rect.c1}`;
       const suffix = region.isTruncationFallback ? `truncated::${coordKey}` : coordKey;
       const id = `${workbook.id}::${sheet.name}::dataRegion::${suffix}`;
@@ -563,10 +581,7 @@ function chunkWorkbook(workbook, options = {}) {
           ? `Data region (truncated) ${rectToA1(rect)}`
           : `Data region ${rectToA1(rect)}`,
         rect,
-        cells: extractCells(sheet, rect, {
-          maxRows: extractMaxRows,
-          maxCols: extractMaxCols,
-        }),
+        cells,
         meta: region.isTruncationFallback
           ? {
               truncated: true,
@@ -575,6 +590,8 @@ function chunkWorkbook(workbook, options = {}) {
             }
           : undefined,
       });
+      occupied.push({ sheetName: sheet.name, rect });
+      existingRects.push(rect);
     }
 
     const formulaDetection = detectRegions(sheet, isFormulaCell, {

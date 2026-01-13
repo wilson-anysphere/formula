@@ -67,6 +67,48 @@ test("chunkWorkbook detects formula-heavy regions", () => {
   assert.ok(formulaRegions[0].cells.some((row) => row.some((cell) => cell.f)), "expected formulas in chunk cells");
 });
 
+test("chunkWorkbook suppresses formulaRegion chunks that overlap a dataRegion", () => {
+  const workbook = {
+    id: "wb1",
+    sheets: [
+      {
+        name: "Sheet1",
+        // Mixed data + formulas in one connected non-empty block A1:C3.
+        cells: [
+          [{ v: "Item" }, { v: "Price" }, { v: "Taxed" }],
+          [{ v: "A" }, { v: 10 }, { f: "=B2*1.1" }],
+          [{ v: "B" }, { v: 20 }, { f: "=B3*1.1" }],
+        ],
+      },
+    ],
+    tables: [],
+    namedRanges: [],
+  };
+
+  const chunks = chunkWorkbook(workbook);
+  assert.equal(chunks.filter((c) => c.kind === "dataRegion").length, 1);
+  assert.equal(chunks.filter((c) => c.kind === "formulaRegion").length, 0);
+});
+
+test("chunkWorkbook still produces standalone formulaRegion chunks", () => {
+  const workbook = {
+    id: "wb1",
+    sheets: [
+      {
+        name: "Sheet1",
+        cells: [[{ f: "=1+1" }], [{ f: "=2+2" }]],
+      },
+    ],
+    tables: [],
+    namedRanges: [],
+  };
+
+  const chunks = chunkWorkbook(workbook);
+  const formulaRegions = chunks.filter((c) => c.kind === "formulaRegion");
+  assert.equal(formulaRegions.length, 1);
+  assert.deepEqual(formulaRegions[0].rect, { r0: 0, c0: 0, r1: 1, c1: 0 });
+});
+
 test("chunkWorkbook respects AbortSignal", () => {
   const workbook = makeWorkbook();
   const abortController = new AbortController();
