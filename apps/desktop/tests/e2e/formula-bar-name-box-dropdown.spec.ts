@@ -74,5 +74,47 @@ test.describe("formula bar name box dropdown", () => {
     await expect(page.getByTestId("active-cell")).toHaveText("A5");
     await expect(page.getByTestId("selection-range")).toHaveText("A5:B6");
   });
-});
 
+  test("keyboard navigation (ArrowDown + Enter) selects items in the dropdown", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      const workbook = app.getSearchWorkbook?.();
+      if (!workbook) throw new Error("Missing search workbook adapter");
+
+      // Ensure the menu is deterministic for keyboard navigation.
+      workbook.clearSchema?.();
+
+      // Define two named ranges so we can arrow between them. The menu sorts
+      // alphabetically, so A should be focused first.
+      workbook.defineName("E2E_Dropdown_A", {
+        sheetName: app.getCurrentSheetId(),
+        range: { startRow: 1, startCol: 1, endRow: 2, endCol: 2 }, // B2:C3
+      });
+      workbook.defineName("E2E_Dropdown_B", {
+        sheetName: app.getCurrentSheetId(),
+        range: { startRow: 4, startCol: 3, endRow: 5, endCol: 4 }, // D5:E6
+      });
+    });
+
+    await page.getByTestId("name-box-dropdown").click();
+
+    const quickPick = page.getByTestId("quick-pick");
+    await expect(quickPick).toBeVisible();
+
+    const first = quickPick.getByRole("button", { name: /E2E_Dropdown_A/ });
+    const second = quickPick.getByRole("button", { name: /E2E_Dropdown_B/ });
+
+    await expect(first).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(second).toBeFocused();
+
+    await page.keyboard.press("Enter");
+    await expect(quickPick).toBeHidden();
+
+    await expect(page.getByTestId("active-cell")).toHaveText("D5");
+    await expect(page.getByTestId("selection-range")).toHaveText("D5:E6");
+  });
+});
