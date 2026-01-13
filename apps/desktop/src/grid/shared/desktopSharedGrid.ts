@@ -1,5 +1,6 @@
 import type {
   CellProvider,
+  CellProviderUpdate,
   CellRange,
   FillCommitEvent,
   FillMode,
@@ -139,9 +140,16 @@ export class DesktopSharedGrid {
   private resizePointerId: number | null = null;
   private resizeDrag: ResizeDragState | null = null;
 
-  private lastAnnounced: { selection: { row: number; col: number } | null; range: CellRange | null } = {
+  private lastAnnounced: {
+    selection: { row: number; col: number } | null;
+    range: CellRange | null;
+    statusText: string;
+    activeCellLabel: string;
+  } = {
     selection: null,
-    range: null
+    range: null,
+    statusText: "",
+    activeCellLabel: ""
   };
 
   private lastEmittedViewport: GridViewportState | null = null;
@@ -257,6 +265,30 @@ export class DesktopSharedGrid {
 
     this.renderer.setFrozen(this.frozenRows, this.frozenCols);
     this.renderer.setFillHandleEnabled(this.interactionMode === "default" && Boolean(this.callbacks.onFillCommit));
+
+    if (this.provider.subscribe) {
+      this.disposeFns.push(
+        this.provider.subscribe((update: CellProviderUpdate) => {
+          const selection = this.renderer.getSelection();
+          if (!selection) return;
+
+          if (update.type === "invalidateAll") {
+            this.announceSelection(selection, this.renderer.getSelectionRange());
+            return;
+          }
+
+          const range = update.range;
+          if (
+            selection.row >= range.startRow &&
+            selection.row < range.endRow &&
+            selection.col >= range.startCol &&
+            selection.col < range.endCol
+          ) {
+            this.announceSelection(selection, this.renderer.getSelectionRange());
+          }
+        })
+      );
+    }
 
     // Keep desktop shared scrollbars in sync with renderer viewport changes (axis size overrides,
     // frozen pane updates, zoom, resize, etc) even when scroll offsets do not change.
@@ -478,16 +510,21 @@ export class DesktopSharedGrid {
   }
 
   private announceSelection(selection: { row: number; col: number } | null, range: CellRange | null): void {
+    const statusText = describeCell(selection, range, this.provider, this.headerRows, this.headerCols);
+    const activeCellLabel = selection ? describeActiveCellLabel(selection, this.provider, this.headerRows, this.headerCols) ?? "" : "";
+
     if (
       (this.lastAnnounced.selection?.row ?? null) === (selection?.row ?? null) &&
       (this.lastAnnounced.selection?.col ?? null) === (selection?.col ?? null) &&
-      rangesEqual(this.lastAnnounced.range, range)
+      rangesEqual(this.lastAnnounced.range, range) &&
+      this.lastAnnounced.statusText === statusText &&
+      this.lastAnnounced.activeCellLabel === activeCellLabel
     ) {
       return;
     }
 
-    this.lastAnnounced = { selection, range };
-    this.a11yStatusEl.textContent = describeCell(selection, range, this.provider, this.headerRows, this.headerCols);
+    this.lastAnnounced = { selection, range, statusText, activeCellLabel };
+    this.a11yStatusEl.textContent = statusText;
 
     if (!selection) {
       this.container.removeAttribute("aria-activedescendant");
@@ -510,7 +547,7 @@ export class DesktopSharedGrid {
     this.a11yActiveCellEl.setAttribute("aria-selected", "true");
     this.container.setAttribute("aria-activedescendant", this.a11yActiveCellId);
 
-    this.a11yActiveCellEl.textContent = describeActiveCellLabel(selection, this.provider, this.headerRows, this.headerCols) ?? "";
+    this.a11yActiveCellEl.textContent = activeCellLabel;
   }
 
   private emitScroll(): void {
