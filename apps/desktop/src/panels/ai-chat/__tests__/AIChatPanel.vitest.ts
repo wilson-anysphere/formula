@@ -547,4 +547,136 @@ describe("AIChatPanel attachments UI", () => {
       root.unmount();
     });
   });
+
+  it("can attach a table via quick pick and includes it on the user message", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const sendMessage = vi.fn(async () => {
+      return { messages: [], final: "Ok" };
+    });
+
+    const getTableOptions = vi.fn(() => [{ name: "SalesTable", description: "Sheet1!A1:C10" }]);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          systemPrompt: "system",
+          sendMessage,
+          getTableOptions,
+        }),
+      );
+    });
+
+    const attachTableBtn = container.querySelector('[data-testid="ai-chat-attach-table"]') as HTMLButtonElement | null;
+    expect(attachTableBtn).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      attachTableBtn!.click();
+    });
+
+    const quickPickItem = document.body.querySelector('[data-testid="quick-pick-item-0"]') as HTMLButtonElement | null;
+    expect(quickPickItem).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      quickPickItem!.click();
+    });
+
+    await act(async () => {
+      await waitFor(() => (container.textContent?.includes("table: SalesTable") ?? false));
+    });
+
+    const input = container.querySelector("input") as HTMLInputElement | null;
+    const sendButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Send") as HTMLButtonElement | undefined;
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    expect(sendButton).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      setNativeInputValue(input!, "Hello");
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
+      input!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await act(async () => {
+      sendButton!.click();
+      await waitFor(() => sendMessage.mock.calls.length === 1);
+    });
+
+    const callArgs = sendMessage.mock.calls[0]?.[0] as any;
+    expect(callArgs.attachments).toEqual([{ type: "table", reference: "SalesTable" }]);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("can attach a chart via quick pick and includes it on the user message", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const sendMessage = vi.fn(async () => {
+      return { messages: [], final: "Ok" };
+    });
+
+    const getChartOptions = vi.fn(() => [{ id: "chart_1", label: "Revenue Chart", description: "Sheet1 • bar" }]);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          systemPrompt: "system",
+          sendMessage,
+          getChartOptions,
+        }),
+      );
+    });
+
+    const attachChartBtn = container.querySelector('[data-testid="ai-chat-attach-chart"]') as HTMLButtonElement | null;
+    expect(attachChartBtn).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      attachChartBtn!.click();
+    });
+
+    const quickPickItem = document.body.querySelector('[data-testid="quick-pick-item-0"]') as HTMLButtonElement | null;
+    expect(quickPickItem).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      quickPickItem!.click();
+    });
+
+    await act(async () => {
+      await waitFor(() => (container.textContent?.includes("chart: chart_1") ?? false));
+    });
+
+    const input = container.querySelector("input") as HTMLInputElement | null;
+    const sendButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Send") as HTMLButtonElement | undefined;
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    expect(sendButton).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      setNativeInputValue(input!, "Hello");
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
+      input!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await act(async () => {
+      sendButton!.click();
+      await waitFor(() => sendMessage.mock.calls.length === 1);
+    });
+
+    const callArgs = sendMessage.mock.calls[0]?.[0] as any;
+    expect(callArgs.attachments).toEqual([{ type: "chart", reference: "chart_1" }]);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });
