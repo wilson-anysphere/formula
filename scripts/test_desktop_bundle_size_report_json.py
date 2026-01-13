@@ -57,7 +57,7 @@ class DesktopBundleSizeReportJsonTests(unittest.TestCase):
 
             proc = self._run(repo_root, ["--json", str(json_rel), "--limit-mb", "12"])
             self.assertEqual(proc.returncode, 1)
-            self.assertNotIn("## Desktop bundle sizes", proc.stdout)
+            self.assertNotIn("## Desktop installer artifact sizes", proc.stdout)
 
             report = self._read_report(repo_root, json_rel)
             self._assert_basic_schema(report)
@@ -81,7 +81,7 @@ class DesktopBundleSizeReportJsonTests(unittest.TestCase):
 
             proc = self._run(repo_root, ["--json", str(json_rel), "--limit-mb", "1"])
             self.assertEqual(proc.returncode, 0)
-            self.assertIn("## Desktop bundle sizes", proc.stdout)
+            self.assertIn("## Desktop installer artifact sizes", proc.stdout)
 
             report = self._read_report(repo_root, json_rel)
             self._assert_basic_schema(report)
@@ -115,4 +115,3 @@ class DesktopBundleSizeReportJsonTests(unittest.TestCase):
             self._assert_basic_schema(report)
             self.assertTrue(report["enforce"])
             self.assertEqual(report["over_limit_count"], 1)
-
