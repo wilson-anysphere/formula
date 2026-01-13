@@ -16,6 +16,7 @@ const collabSessionEntry = resolve(repoRoot, "packages/collab/session/src/index.
 const collabVersioningEntry = resolve(repoRoot, "packages/collab/versioning/src/index.ts");
 const collabPersistenceEntry = resolve(repoRoot, "packages/collab/persistence/src/index.ts");
 const collabPersistenceIndexedDbEntry = resolve(repoRoot, "packages/collab/persistence/src/indexeddb.ts");
+const collabYjsUtilsEntry = resolve(repoRoot, "packages/collab/yjs-utils/src/index.ts");
 const marketplaceSharedEntry = resolve(repoRoot, "shared");
 const extensionMarketplaceEntry = resolve(repoRoot, "packages/extension-marketplace/src/index.ts");
 const spreadsheetFrontendTokenizerEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/formula/tokenizeFormula.ts");
@@ -61,6 +62,7 @@ export default defineConfig({
       { find: "@formula/collab-versioning", replacement: collabVersioningEntry },
       { find: "@formula/collab-persistence/indexeddb", replacement: collabPersistenceIndexedDbEntry },
       { find: /^@formula\/collab-persistence$/, replacement: collabPersistenceEntry },
+      { find: "@formula/collab-yjs-utils", replacement: collabYjsUtilsEntry },
       // `@formula/spreadsheet-frontend/formula/tokenizeFormula` is a subpath export used by the
       // desktop formula bar highlight code. Alias it directly so Vitest stays resilient in
       // cached/stale `node_modules` environments that may not include the latest package exports.
