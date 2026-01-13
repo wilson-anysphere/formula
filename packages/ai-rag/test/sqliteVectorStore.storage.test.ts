@@ -115,13 +115,14 @@ maybeTest("SqliteVectorStore can reset persisted DB on dimension mismatch", asyn
   await store2.close();
 });
 
-maybeTest("SqliteVectorStore.compact() VACUUMs and persists a smaller DB", async () => {
+maybeTest("SqliteVectorStore.compact() VACUUMs and persists a smaller DB (even with autoSave:false)", async () => {
   const storage = new LocalStorageBinaryStorage({
     namespace: "formula.test.rag.sqlite",
     workbookId: "sqlite-store-compact",
   });
 
-  const store1 = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: true });
+  // Create a large DB snapshot.
+  const store1 = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: false });
 
   const payload = "x".repeat(1024);
   const total = 400;
@@ -132,38 +133,45 @@ maybeTest("SqliteVectorStore.compact() VACUUMs and persists a smaller DB", async
   }));
 
   await store1.upsert(records);
+  // Persist the initial snapshot. (`autoSave:false` skips persisting on upsert.)
+  await store1.close();
 
-  // Delete most records so the DB accumulates free pages.
+  // Reopen, delete most records so the DB accumulates free pages, and persist the
+  // post-delete (but un-compacted) snapshot.
+  const store2 = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: false });
   const remaining = 10;
   const deleteIds = Array.from({ length: total - remaining }, (_, i) => `rec-${i}`);
-  await store1.delete(deleteIds);
+  await store2.delete(deleteIds);
+  await store2.close();
 
   const before = (await storage.load())?.byteLength ?? 0;
+  expect(before).toBeGreaterThan(0);
 
   // Compact and ensure the store is still usable (dot() function still registered).
-  await store1.compact();
+  const store3 = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: false });
+  await store3.compact();
 
   const after = (await storage.load())?.byteLength ?? 0;
   expect(after).toBeGreaterThan(0);
   expect(after).toBeLessThan(before);
 
   const remainingId = `rec-${total - 1}`;
-  const rec = await store1.get(remainingId);
+  const rec = await store3.get(remainingId);
   expect(rec?.metadata?.i).toBe(total - 1);
 
-  const hits = await store1.query([1, 0, 0], 5, { workbookId: "wb" });
+  const hits = await store3.query([1, 0, 0], 5, { workbookId: "wb" });
   expect(hits.length).toBeGreaterThan(0);
 
-  await store1.close();
+  await store3.close();
 
   // Reload from persisted storage and ensure queries still work.
-  const store2 = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: false });
-  const rec2 = await store2.get(remainingId);
+  const store4 = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: false });
+  const rec2 = await store4.get(remainingId);
   expect(rec2?.metadata?.i).toBe(total - 1);
 
-  const hits2 = await store2.query([1, 0, 0], 5, { workbookId: "wb" });
+  const hits2 = await store4.query([1, 0, 0], 5, { workbookId: "wb" });
   expect(hits2.length).toBeGreaterThan(0);
-  await store2.close();
+  await store4.close();
 });
 
 class CountingBinaryStorage {
