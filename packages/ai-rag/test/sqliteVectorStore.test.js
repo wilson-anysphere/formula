@@ -521,3 +521,28 @@ test(
     }
   }
 );
+
+test(
+  "SqliteVectorStore dot() throws when blobs have matching but non-store dimension",
+  { skip: !sqlJsAvailable },
+  async () => {
+    const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
+    try {
+      const badVec = new Uint8Array(new Float32Array([1, 0]).buffer);
+      const stmt = store._db.prepare("SELECT dot(?, ?) AS score;");
+      try {
+        stmt.bind([badVec, badVec]);
+        await assert.rejects(
+          async () => {
+            stmt.step();
+          },
+          /expected 3/
+        );
+      } finally {
+        stmt.free();
+      }
+    } finally {
+      await store.close();
+    }
+  }
+);
