@@ -14,7 +14,7 @@
  *    (if present) against locally-built Tauri bundles.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
@@ -186,6 +186,8 @@ function runAndCapture(command, args, opts = {}) {
  * @property {string[]} args
  * @property {NodeJS.ProcessEnv} [env]
  * @property {boolean} [skipIfMissing]
+ * @property {string} [fileToCheck]
+ * @property {string} [skipReason]
  */
 
 /**
@@ -202,14 +204,19 @@ function runAndCapture(command, args, opts = {}) {
  */
 function runStep(step) {
   return new Promise((resolve) => {
-    const scriptPath = step.args[0];
-    if (step.skipIfMissing && typeof scriptPath === "string" && scriptPath.endsWith(".mjs")) {
-      if (!existsSync(scriptPath)) {
+    if (step.skipReason) {
+      resolve({ step, status: "skip", exitCode: null, reason: step.skipReason });
+      return;
+    }
+
+    const checkPath = step.fileToCheck ?? step.args[0];
+    if (step.skipIfMissing && typeof checkPath === "string" && checkPath.length > 0) {
+      if (!existsSync(checkPath)) {
         resolve({
           step,
           status: "skip",
           exitCode: null,
-          reason: `Missing file: ${path.relative(repoRoot, scriptPath)}`,
+          reason: `Missing file: ${path.relative(repoRoot, checkPath)}`,
         });
         return;
       }
@@ -253,6 +260,112 @@ function platformKey(platform) {
   return platform;
 }
 
+function pickPowerShellCommand() {
+  // Prefer PowerShell 7 (`pwsh`) when available; fall back to Windows PowerShell
+  // (`powershell`) on older environments.
+  for (const cmd of ["pwsh", "powershell"]) {
+    const res = spawnSync(cmd, ["-NoProfile", "-Command", "$PSVersionTable.PSVersion.Major"], {
+      stdio: "ignore",
+    });
+    if (!res.error) return cmd;
+  }
+  return "pwsh";
+}
+
+/**
+ * Best-effort check: do we appear to have any local Tauri `release/bundle` output directories?
+ * This avoids surprising `--local-bundles` failures when the user hasn't built anything yet.
+ */
+async function detectLocalBundleOutputs() {
+  /** @type {string[]} */
+  const roots = [];
+
+  if (process.env.CARGO_TARGET_DIR) {
+    const raw = process.env.CARGO_TARGET_DIR.trim();
+    if (raw) {
+      roots.push(path.isAbsolute(raw) ? raw : path.join(repoRoot, raw));
+    }
+  }
+
+  roots.push(
+    path.join(repoRoot, "apps", "desktop", "src-tauri", "target"),
+    path.join(repoRoot, "apps", "desktop", "target"),
+    path.join(repoRoot, "target")
+  );
+
+  for (const root of roots) {
+    if (!existsSync(root)) continue;
+
+    if (existsSync(path.join(root, "release", "bundle"))) return true;
+
+    // Tauri sometimes nests by target triple:
+    //   <target>/<triple>/release/bundle/...
+    try {
+      const children = await readdir(root, { withFileTypes: true });
+      for (const child of children) {
+        if (!child.isDirectory()) continue;
+        if (existsSync(path.join(root, child.name, "release", "bundle"))) return true;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return false;
+}
+
+/**
+ * @param {string} validatorPath
+ * @param {string} key
+ * @returns {Step}
+ */
+function makeValidatorStep(validatorPath, key) {
+  const base = path.basename(validatorPath);
+  const ext = path.extname(base).toLowerCase();
+
+  if (ext === ".mjs") {
+    return {
+      id: `local-bundles:${base}`,
+      title: `Validate local bundles (${key}): ${base}`,
+      command: process.execPath,
+      args: [validatorPath],
+      skipIfMissing: true,
+      fileToCheck: validatorPath,
+    };
+  }
+
+  if (ext === ".sh") {
+    return {
+      id: `local-bundles:${base}`,
+      title: `Validate local bundles (${key}): ${base}`,
+      command: "bash",
+      args: [validatorPath],
+      skipIfMissing: true,
+      fileToCheck: validatorPath,
+    };
+  }
+
+  if (ext === ".ps1") {
+    const pwsh = pickPowerShellCommand();
+    return {
+      id: `local-bundles:${base}`,
+      title: `Validate local bundles (${key}): ${base}`,
+      command: pwsh,
+      args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", validatorPath],
+      skipIfMissing: true,
+      fileToCheck: validatorPath,
+    };
+  }
+
+  return {
+    id: `local-bundles:${base}`,
+    title: `Validate local bundles (${key}): ${base}`,
+    command: process.execPath,
+    args: [],
+    skipReason: `Unsupported validator script type: ${base}`,
+  };
+}
+
 /**
  * Discover local bundle validator scripts for the current platform.
  *
@@ -266,20 +379,32 @@ async function discoverLocalBundleValidators(scriptsDir, key) {
   /** @type {string[]} */
   const discovered = [];
   const entries = await readdir(scriptsDir, { withFileTypes: true });
+
+  const allowedExt = new Set([".mjs", ".sh", ".ps1"]);
+  const keywords = [
+    "bundle",
+    "bundles",
+    "installer",
+    "appimage",
+    "dmg",
+    "msi",
+    "nsis",
+    "rpm",
+    "deb",
+  ];
+
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     const name = entry.name;
-    if (!name.endsWith(".mjs")) continue;
+    const ext = path.extname(name).toLowerCase();
+    if (!allowedExt.has(ext)) continue;
 
-    // Target only bundle validators (avoid running unrelated scripts).
-    const isValidator =
-      name.startsWith("validate-") &&
-      (name.includes("bundle") || name.includes("bundles") || name.includes("installer"));
-    if (!isValidator) continue;
+    const lower = name.toLowerCase();
+    if (!lower.startsWith("validate-")) continue;
+    if (!keywords.some((k) => lower.includes(k))) continue;
 
     // Platform filter: run scripts explicitly scoped to this OS, and also any
     // generic desktop bundle validators (e.g. validate-desktop-bundles.mjs).
-    const lower = name.toLowerCase();
     const platformSpecific =
       lower.includes(key) ||
       (key === "macos" && lower.includes("darwin")) ||
@@ -293,11 +418,29 @@ async function discoverLocalBundleValidators(scriptsDir, key) {
   }
 
   // Stable, explicit fallback names (if the discovery heuristic misses).
+  const explicitFallbacks =
+    key === "macos"
+      ? ["validate-macos-bundle.sh"]
+      : key === "windows"
+        ? ["validate-windows-bundles.ps1"]
+        : key === "linux"
+          ? ["validate-linux-appimage.sh", "validate-linux-rpm.sh"]
+          : [];
+
   const fallbacks = [
+    ...explicitFallbacks,
     `validate-desktop-bundle-${key}.mjs`,
+    `validate-desktop-bundle-${key}.sh`,
+    `validate-desktop-bundle-${key}.ps1`,
     `validate-desktop-bundles-${key}.mjs`,
+    `validate-desktop-bundles-${key}.sh`,
+    `validate-desktop-bundles-${key}.ps1`,
     `validate-${key}-bundle.mjs`,
+    `validate-${key}-bundle.sh`,
+    `validate-${key}-bundle.ps1`,
     `validate-${key}-bundles.mjs`,
+    `validate-${key}-bundles.sh`,
+    `validate-${key}-bundles.ps1`,
   ]
     .map((n) => path.join(scriptsDir, n))
     .filter((p) => existsSync(p));
@@ -400,25 +543,17 @@ async function main() {
   if (localBundlesRequested) {
     const key = platformKey(process.platform);
     const scriptsDir = path.join(repoRoot, "scripts");
-    const bundleDir = path.join(
-      repoRoot,
-      "apps",
-      "desktop",
-      "src-tauri",
-      "target",
-      "release",
-      "bundle"
-    );
 
-    if (!existsSync(bundleDir)) {
+    const hasBundles = await detectLocalBundleOutputs();
+    if (!hasBundles) {
       steps.push({
         id: "local-bundles",
         title: `Local bundle validation (${key})`,
         command: process.execPath,
-        args: [path.join(repoRoot, "scripts", "nonexistent-local-bundles-placeholder.mjs")],
-        skipIfMissing: true,
+        args: [],
+        skipReason:
+          "No local Tauri bundles found (expected output under apps/desktop/src-tauri/target/**/release/bundle). Build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build",
       });
-      // We'll override the placeholder to a skip result via summary.
     } else {
       const validators = await discoverLocalBundleValidators(scriptsDir, key);
       if (validators.length === 0) {
@@ -426,18 +561,12 @@ async function main() {
           id: "local-bundles",
           title: `Local bundle validation (${key})`,
           command: process.execPath,
-          args: [path.join(repoRoot, "scripts", "nonexistent-local-bundles-placeholder.mjs")],
-          skipIfMissing: true,
+          args: [],
+          skipReason: `No local bundle validator scripts found for platform "${key}" in scripts/.`,
         });
       } else {
         for (const validator of validators) {
-          steps.push({
-            id: `local-bundles:${path.basename(validator)}`,
-            title: `Validate local bundles (${key}): ${path.basename(validator)}`,
-            command: process.execPath,
-            args: [validator],
-            skipIfMissing: true,
-          });
+          steps.push(makeValidatorStep(validator, key));
         }
       }
     }
@@ -446,34 +575,6 @@ async function main() {
   /** @type {StepResult[]} */
   const results = [];
   for (const step of steps) {
-    // Special-case: our placeholder "local bundles" step is always a skip, but
-    // we want a helpful reason string.
-    if (
-      step.id === "local-bundles" &&
-      step.args[0]?.includes("nonexistent-local-bundles-placeholder.mjs")
-    ) {
-      const key = platformKey(process.platform);
-      const bundleDir = path.join(
-        repoRoot,
-        "apps",
-        "desktop",
-        "src-tauri",
-        "target",
-        "release",
-        "bundle"
-      );
-      const exists = existsSync(bundleDir);
-      results.push({
-        step,
-        status: "skip",
-        exitCode: null,
-        reason: !exists
-          ? `No local bundles found at ${path.relative(repoRoot, bundleDir)} (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)`
-          : `No local bundle validator scripts found for platform "${key}" in scripts/ (expected from bundle validator tasks).`,
-      });
-      continue;
-    }
-
     results.push(await runStep(step));
   }
 
