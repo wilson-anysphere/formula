@@ -106,8 +106,24 @@ export function suggestRanges(params) {
     contiguous = findContiguousBlockDown(surroundingCells, colIndex, explicitRow - 1, maxScanRows, sheetName);
     contiguousReason = "contiguous_down_from_start";
   } else {
-    contiguous = findContiguousBlockAbove(surroundingCells, colIndex, cellRef.row - 1, maxScanRows, sheetName);
+    // When the active cell isn't in the referenced column, include the current row
+    // in the scan. This enables "in-block" formulas like B5 =SUM(A) to capture the
+    // full contiguous column block around that row, rather than only the portion above.
+    const aboveFromRow = cellRef.row - (cellRef.col === colIndex ? 1 : 0);
+    contiguous = findContiguousBlockAbove(surroundingCells, colIndex, aboveFromRow, maxScanRows, sheetName);
     contiguousReason = "contiguous_above_current_cell";
+    // If we included the current row in the scan (active cell is in a different column),
+    // extend the block downward so we capture the full contiguous run.
+    if (contiguous && cellRef.col !== colIndex) {
+      contiguous = extendContiguousBlockDown(
+        surroundingCells,
+        colIndex,
+        contiguous.rawStartRow ?? contiguous.startRow,
+        contiguous.rawEndRow ?? contiguous.endRow,
+        maxScanRows,
+        sheetName,
+      );
+    }
     if (!contiguous) {
       // When the active cell isn't in the referenced column, it's safe (and often
       // desirable) to include data from the same row (e.g. formula in B2 summing A2:A11).
@@ -394,6 +410,28 @@ function findContiguousBlockAbove(ctx, col, fromRow, maxScanRows, sheetName) {
   const rawEndRow = endRow;
 
   const trimmed = trimNonNumericEdgesIfMostlyNumeric(ctx, col, startRow, endRow, sheetName);
+  return {
+    startRow: trimmed.startRow,
+    endRow: trimmed.endRow,
+    numericRatio: trimmed.numericRatio,
+    rawStartRow,
+    rawEndRow,
+  };
+}
+
+function extendContiguousBlockDown(ctx, col, startRow, endRow, maxScanRows, sheetName) {
+  if (startRow < 0) return null;
+  if (!Number.isInteger(startRow) || !Number.isInteger(endRow) || endRow < startRow) return null;
+
+  let rawEndRow = endRow;
+  let scanned = 0;
+  while (scanned < maxScanRows && !isEmptyCell(ctx.getCellValue(rawEndRow + 1, col, sheetName))) {
+    rawEndRow++;
+    scanned++;
+  }
+
+  const rawStartRow = startRow;
+  const trimmed = trimNonNumericEdgesIfMostlyNumeric(ctx, col, rawStartRow, rawEndRow, sheetName);
   return {
     startRow: trimmed.startRow,
     endRow: trimmed.endRow,

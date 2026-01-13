@@ -106,6 +106,18 @@ test("suggestRanges downward fallback includes same-row data when the active cel
   assert.ok(suggestions.some((s) => s.range === "A2:A11"));
 });
 
+test("suggestRanges returns the full contiguous block when the active cell is inside the block (different column)", () => {
+  const ctx = createColumnAContext(Array.from({ length: 10 }, (_, i) => [i, i + 1])); // A1..A10
+
+  const suggestions = suggestRanges({
+    currentArgText: "A",
+    cellRef: { row: 4, col: 1 }, // B5, inside the A1..A10 block
+    surroundingCells: ctx,
+  });
+
+  assert.equal(suggestions[0].range, "A1:A10");
+});
+
 test("suggestRanges trims non-numeric header rows when scanning downwards", () => {
   const ctx = createColumnAContext([
     [1, "Header"], // A2
