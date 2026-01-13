@@ -270,12 +270,14 @@ test.describe("drawing + image rendering regressions", () => {
       const renderer = sharedGrid.renderer;
       if (!renderer) throw new Error("Missing shared grid renderer");
 
-      // Install a deterministic image resolver backed by the fixture's `xl/media/image1.png`.
+      // Store the fixture's `xl/media/image1.png` bytes in the app's image store so the
+      // normal shared-grid imageResolver path is exercised (DesktopImageStore -> Blob -> ImageBitmap).
       const bytes = Uint8Array.from(atob(fixture.imagePngBase64), (c) => c.charCodeAt(0));
-      (renderer as any).imageResolver = async (imageId: string) => {
-        if (imageId === fixture.imageId) return bytes;
-        return null;
-      };
+      const store = (app as any).imageStore;
+      if (!store || typeof store.set !== "function") {
+        throw new Error("Missing SpreadsheetApp.imageStore");
+      }
+      store.set(fixture.imageId, { bytes, mimeType: "image/png" });
       if (typeof renderer.clearImageCache === "function") {
         renderer.clearImageCache();
       }
