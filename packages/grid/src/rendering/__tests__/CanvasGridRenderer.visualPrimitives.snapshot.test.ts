@@ -312,8 +312,8 @@ describe("CanvasGridRenderer visual primitive snapshots (recorded draw calls)", 
     const provider: CellProvider = {
       getCell: (row, col) => {
         if (row !== 0) return null;
-        if (col === 0) return { row, col, value: null, comment: { resolved: false } };
-        if (col === 1) return { row, col, value: null, comment: { resolved: true } };
+        if (col === 0) return { row, col, value: "A", comment: { resolved: false } };
+        if (col === 1) return { row, col, value: "B", comment: { resolved: true } };
         return null;
       }
     };
@@ -368,6 +368,22 @@ describe("CanvasGridRenderer visual primitive snapshots (recorded draw calls)", 
         triangles.push(window);
       }
     }
+
+    const textAIndex = contentCalls.findIndex((call) => call[0] === "fillText" && call[2] === "A");
+    const textBIndex = contentCalls.findIndex((call) => call[0] === "fillText" && call[2] === "B");
+    expect(textAIndex).toBeGreaterThanOrEqual(0);
+    expect(textBIndex).toBeGreaterThanOrEqual(0);
+    expect(textAIndex).toBeLessThan(textBIndex);
+
+    const unresolvedFillIndex = contentCalls.findIndex(
+      (call) => call[0] === "fill" && (call[1] as { fillStyle?: unknown } | undefined)?.fillStyle === "#ff0000"
+    );
+    const resolvedFillIndex = contentCalls.findIndex(
+      (call) => call[0] === "fill" && (call[1] as { fillStyle?: unknown } | undefined)?.fillStyle === "#00ff00"
+    );
+    expect(unresolvedFillIndex).toBeGreaterThan(textAIndex);
+    expect(unresolvedFillIndex).toBeLessThan(textBIndex);
+    expect(resolvedFillIndex).toBeGreaterThan(textBIndex);
 
     expect(triangles).toMatchInlineSnapshot(`
       [
@@ -447,7 +463,7 @@ describe("CanvasGridRenderer visual primitive snapshots (recorded draw calls)", 
     `);
   });
 
-  it("renders remote presence selection + cursor + name badge with stable draw calls", () => {
+  it("renders remote presence overlays on top of local selection primitives (stable ordering)", () => {
     const provider: CellProvider = { getCell: () => null };
 
     const gridCalls: RecordedCall[] = [];
@@ -477,10 +493,16 @@ describe("CanvasGridRenderer visual primitive snapshots (recorded draw calls)", 
       rowCount: 3,
       colCount: 3,
       defaultRowHeight: 20,
-      defaultColWidth: 50
+      defaultColWidth: 50,
+      theme: {
+        selectionFill: "rgba(0,255,0,0.25)",
+        selectionBorder: "#00aa00",
+        selectionHandle: "#0000ff"
+      }
     });
     renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
     renderer.resize(240, 120, 1);
+    renderer.setSelectionRange({ startRow: 0, endRow: 2, startCol: 0, endCol: 2 });
 
     const presences: GridPresence[] = [
       {
@@ -498,6 +520,56 @@ describe("CanvasGridRenderer visual primitive snapshots (recorded draw calls)", 
     const drawCalls = selectionCalls.filter((c) => c[0] === "fillRect" || c[0] === "strokeRect" || c[0] === "fillText");
     expect(drawCalls).toMatchInlineSnapshot(`
       [
+        [
+          "fillRect",
+          {
+            "fillStyle": "rgba(0,255,0,0.25)",
+            "globalAlpha": 1,
+          },
+          0,
+          0,
+          100,
+          40,
+        ],
+        [
+          "strokeRect",
+          {
+            "globalAlpha": 1,
+            "lineCap": "butt",
+            "lineDash": [],
+            "lineWidth": 2,
+            "strokeStyle": "#00aa00",
+          },
+          1,
+          1,
+          98,
+          38,
+        ],
+        [
+          "fillRect",
+          {
+            "fillStyle": "#0000ff",
+            "globalAlpha": 1,
+          },
+          96,
+          36,
+          8,
+          8,
+        ],
+        [
+          "strokeRect",
+          {
+            "globalAlpha": 1,
+            "lineCap": "butt",
+            "lineDash": [],
+            "lineWidth": 2,
+            "strokeStyle": "#00aa00",
+          },
+          1,
+          1,
+          48,
+          18,
+        ],
         [
           "fillRect",
           {
@@ -664,6 +736,104 @@ describe("CanvasGridRenderer visual primitive snapshots (recorded draw calls)", 
     `);
   });
 
+  it("does not expand merged-cell overflow clip rects when the next column is blocked", () => {
+    const merge: CellRange = { startRow: 0, endRow: 1, startCol: 0, endCol: 2 };
+    const text = "X".repeat(30);
+
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row === 0 && col === 0) return { row, col, value: text };
+        if (row === 0 && col === 2) return { row, col, value: "BLOCK" };
+        return null;
+      },
+      getMergedRangesInRange: (range) => {
+        const intersects =
+          range.startRow < merge.endRow &&
+          range.endRow > merge.startRow &&
+          range.startCol < merge.endCol &&
+          range.endCol > merge.startCol;
+        return intersects ? [merge] : [];
+      }
+    };
+
+    const gridCalls: RecordedCall[] = [];
+    const contentCalls: RecordedCall[] = [];
+    const selectionCalls: RecordedCall[] = [];
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, createRecording2dContext({ canvas: gridCanvas, calls: gridCalls })],
+      [contentCanvas, createRecording2dContext({ canvas: contentCanvas, calls: contentCalls })],
+      [selectionCanvas, createRecording2dContext({ canvas: selectionCanvas, calls: selectionCalls })]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const fallback = createRecording2dContext({ canvas: this, calls: [] });
+      contexts.set(this, fallback);
+      return fallback;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 4,
+      defaultRowHeight: 20,
+      defaultColWidth: 50
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(260, 40, 1);
+    renderer.renderImmediately();
+
+    const window = extractCallWindow(contentCalls, (call) => call[0] === "fillText" && call[2] === text);
+    const normalized = window.map((call) => {
+      if (call[0] !== "fillText") return call;
+      const [op, state, ...rest] = call;
+      const { font: _font, ...stateWithoutFont } = state as { font?: string };
+      return [op, stateWithoutFont, ...rest] as RecordedCall;
+    });
+
+    expect(normalized).toMatchInlineSnapshot(`
+      [
+        [
+          "save",
+        ],
+        [
+          "beginPath",
+        ],
+        [
+          "rect",
+          0,
+          0,
+          100,
+          20,
+        ],
+        [
+          "clip",
+        ],
+        [
+          "fillText",
+          {
+            "fillStyle": "#111111",
+            "globalAlpha": 1,
+            "textAlign": "left",
+            "textBaseline": "alphabetic",
+          },
+          "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+          4,
+          13,
+        ],
+        [
+          "restore",
+        ],
+      ]
+    `);
+  });
+
   it("uses a stable default font string for unstyled cell text (monospace adoption snapshot)", () => {
     const provider: CellProvider = {
       getCell: (row, col) => {
@@ -712,6 +882,66 @@ describe("CanvasGridRenderer visual primitive snapshots (recorded draw calls)", 
         {
           "fillStyle": "#111111",
           "font": "normal 400 12px system-ui",
+          "globalAlpha": 1,
+          "textAlign": "left",
+          "textBaseline": "alphabetic",
+        },
+        "A",
+        4,
+        13,
+      ]
+    `);
+  });
+
+  it("uses defaultCellFontFamily when provided (monospace draw-call snapshot)", () => {
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row === 0 && col === 0) return { row, col, value: "A" };
+        return null;
+      }
+    };
+
+    const gridCalls: RecordedCall[] = [];
+    const contentCalls: RecordedCall[] = [];
+    const selectionCalls: RecordedCall[] = [];
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, createRecording2dContext({ canvas: gridCanvas, calls: gridCalls })],
+      [contentCanvas, createRecording2dContext({ canvas: contentCanvas, calls: contentCalls })],
+      [selectionCanvas, createRecording2dContext({ canvas: selectionCanvas, calls: selectionCalls })]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const fallback = createRecording2dContext({ canvas: this, calls: [] });
+      contexts.set(this, fallback);
+      return fallback;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 1,
+      defaultRowHeight: 20,
+      defaultColWidth: 50,
+      defaultCellFontFamily: "monospace"
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(80, 40, 1);
+    renderer.renderImmediately();
+
+    const fillTextCall = contentCalls.find((call) => call[0] === "fillText");
+    expect(fillTextCall).toMatchInlineSnapshot(`
+      [
+        "fillText",
+        {
+          "fillStyle": "#111111",
+          "font": "normal 400 12px monospace",
           "globalAlpha": 1,
           "textAlign": "left",
           "textBaseline": "alphabetic",
