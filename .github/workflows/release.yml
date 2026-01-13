@@ -446,6 +446,9 @@ jobs:
 
           echo "macOS notarization/stapling validation passed."
 
+      - name: Validate desktop release artifacts
+        run: node scripts/ci/check-desktop-release-artifacts.mjs
+
       - name: Report desktop bundle sizes
         env:
           # Optional: set these as GitHub Actions "Variables" to enable gating.
