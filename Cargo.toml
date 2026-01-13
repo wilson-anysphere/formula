@@ -10,7 +10,6 @@ members = [
   "crates/formula-excel-oracle",
   "crates/formula-fs",
   "crates/formula-format",
-  "crates/formula-offcrypto",
   "crates/formula-io",
   "crates/formula-model",
   "crates/formula-office-crypto",
