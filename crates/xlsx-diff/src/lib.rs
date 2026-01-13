@@ -5,8 +5,8 @@
 //! container bytes. This avoids false positives from differing compression or
 //! timestamp metadata while still catching fidelity regressions.
 
-mod part_kind;
 pub mod cli;
+mod part_kind;
 mod rels;
 mod xml;
 
@@ -575,7 +575,8 @@ fn looks_like_xml(bytes: &[u8]) -> bool {
 /// Supports:
 /// - UTF-8, with or without a BOM (BOM is stripped)
 /// - UTF-16LE/UTF-16BE via BOM (`FF FE` / `FE FF`)
-/// - UTF-16LE/UTF-16BE via leading `<\0` / `\0<` patterns
+/// - UTF-16LE/UTF-16BE via leading `<\0` / `\0<` patterns (optionally preceded by ASCII
+///   whitespace when the XML declaration is omitted)
 pub(crate) fn decode_xml_bytes(bytes: &[u8]) -> Result<Cow<'_, str>> {
     if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
         return Ok(Cow::Borrowed(std::str::from_utf8(&bytes[3..])?));
@@ -588,17 +589,11 @@ pub(crate) fn decode_xml_bytes(bytes: &[u8]) -> Result<Cow<'_, str>> {
         return decode_utf16(&bytes[2..], Utf16Endian::Big).map(Cow::Owned);
     }
 
-    // Some UTF-16 encoded XML documents omit a BOM; XML typically starts with `<`.
-    // `<\0` suggests LE (`0x003C`), while `\0<` suggests BE.
-    if bytes.len() >= 2 {
-        if bytes[0] == b'<' && bytes[1] == 0x00 {
-            return decode_utf16(bytes, Utf16Endian::Little).map(Cow::Owned);
-        }
-        if bytes[0] == 0x00 && bytes[1] == b'<' {
-            return decode_utf16(bytes, Utf16Endian::Big).map(Cow::Owned);
-        }
+    if let Some(endian) = sniff_utf16_without_bom(bytes) {
+        return decode_utf16(bytes, endian).map(Cow::Owned);
     }
 
+    // Fall back to UTF-8 (the overwhelmingly common encoding for OOXML parts).
     Ok(Cow::Borrowed(std::str::from_utf8(bytes)?))
 }
 
@@ -623,6 +618,58 @@ fn decode_utf16(bytes: &[u8], endian: Utf16Endian) -> Result<String> {
     }
 
     Ok(String::from_utf16(&words)?)
+}
+
+fn sniff_utf16_without_bom(bytes: &[u8]) -> Option<Utf16Endian> {
+    if bytes.len() < 2 {
+        return None;
+    }
+
+    // Fast path: document starts with `<`.
+    if bytes[0] == b'<' && bytes[1] == 0x00 {
+        return Some(Utf16Endian::Little);
+    }
+    if bytes[0] == 0x00 && bytes[1] == b'<' {
+        return Some(Utf16Endian::Big);
+    }
+
+    // Tolerate (rare) UTF-16 documents that start with ASCII whitespace before `<`.
+    //
+    // Note: leading whitespace is only valid if the XML declaration is omitted,
+    // but we accept it as a pragmatic heuristic for inputs seen in the wild.
+    if bytes[1] == 0x00 && bytes[0].is_ascii_whitespace() {
+        let mut i = 0usize;
+        while i + 1 < bytes.len() {
+            let a = bytes[i];
+            let b = bytes[i + 1];
+            if b == 0x00 && a.is_ascii_whitespace() {
+                i += 2;
+                continue;
+            }
+            if a == b'<' && b == 0x00 {
+                return Some(Utf16Endian::Little);
+            }
+            break;
+        }
+    }
+
+    if bytes[0] == 0x00 && bytes[1].is_ascii_whitespace() {
+        let mut i = 0usize;
+        while i + 1 < bytes.len() {
+            let a = bytes[i];
+            let b = bytes[i + 1];
+            if a == 0x00 && b.is_ascii_whitespace() {
+                i += 2;
+                continue;
+            }
+            if a == 0x00 && b == b'<' {
+                return Some(Utf16Endian::Big);
+            }
+            break;
+        }
+    }
+
+    None
 }
 
 fn severity_for_part(part: &str, strict_calc_chain: bool) -> Severity {
