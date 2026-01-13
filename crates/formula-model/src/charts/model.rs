@@ -195,6 +195,30 @@ pub struct AxisModel {
     /// Tick label text formatting (`c:*Ax/c:txPr`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tick_label_text_style: Option<TextRunStyle>,
+    /// Cross-axis id (`c:*Ax/c:crossAx/@val`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cross_axis_id: Option<u32>,
+    /// Cross behavior (`c:*Ax/c:crosses/@val`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crosses: Option<String>,
+    /// Explicit crossing position (`c:*Ax/c:crossesAt/@val`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crosses_at: Option<f64>,
+    /// Tick mark style (`c:*Ax/c:majorTickMark/@val`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub major_tick_mark: Option<String>,
+    /// Tick mark style (`c:*Ax/c:minorTickMark/@val`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minor_tick_mark: Option<String>,
+    /// Major unit (`c:*Ax/c:majorUnit/@val`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub major_unit: Option<f64>,
+    /// Minor unit (`c:*Ax/c:minorUnit/@val`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minor_unit: Option<f64>,
+    /// Axis title (`c:*Ax/c:title`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<TextModel>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,6 +226,8 @@ pub struct AxisModel {
 pub enum AxisKind {
     Category,
     Value,
+    Date,
+    Series,
     Unknown,
 }
 

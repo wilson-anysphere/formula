@@ -401,14 +401,14 @@ fn parse_axes(
 
     for axis in plot_area_node.children().filter(|n| n.is_element()) {
         let tag = axis.tag_name().name();
-        if tag == "catAx" || tag == "valAx" {
+        if tag == "catAx" || tag == "valAx" || tag == "dateAx" || tag == "serAx" {
             if let Some(axis_model) = parse_axis(axis, diagnostics) {
                 axes.push(axis_model);
             }
             continue;
         }
 
-        // Surface/date axes etc. are currently ignored but can affect rendering.
+        // Surface and other specialized axes are currently ignored but can affect rendering.
         if tag.ends_with("Ax") {
             warn(
                 diagnostics,
@@ -444,6 +444,8 @@ fn parse_axis(
     let kind = match axis_node.tag_name().name() {
         "catAx" => AxisKind::Category,
         "valAx" => AxisKind::Value,
+        "dateAx" => AxisKind::Date,
+        "serAx" => AxisKind::Series,
         _ => AxisKind::Unknown,
     };
 
@@ -498,6 +500,49 @@ fn parse_axis(
         .find(|n| n.is_element() && n.tag_name().name() == "txPr")
         .and_then(parse_txpr);
 
+    let cross_axis_id = axis_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "crossAx")
+        .and_then(|n| n.attribute("val"))
+        .and_then(|v| v.parse::<u32>().ok());
+    let crosses = axis_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "crosses")
+        .and_then(|n| n.attribute("val"))
+        .map(str::to_string);
+    let crosses_at = axis_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "crossesAt")
+        .and_then(|n| n.attribute("val"))
+        .and_then(|v| v.parse::<f64>().ok());
+
+    let major_tick_mark = axis_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "majorTickMark")
+        .and_then(|n| n.attribute("val"))
+        .map(str::to_string);
+    let minor_tick_mark = axis_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "minorTickMark")
+        .and_then(|n| n.attribute("val"))
+        .map(str::to_string);
+
+    let major_unit = axis_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "majorUnit")
+        .and_then(|n| n.attribute("val"))
+        .and_then(|v| v.parse::<f64>().ok());
+    let minor_unit = axis_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "minorUnit")
+        .and_then(|n| n.attribute("val"))
+        .and_then(|v| v.parse::<f64>().ok());
+
+    let title = axis_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "title")
+        .and_then(|title| parse_axis_title(title, diagnostics, id));
+
     Some(AxisModel {
         id,
         kind,
@@ -510,7 +555,37 @@ fn parse_axis(
         major_gridlines_style,
         minor_gridlines_style,
         tick_label_text_style,
+        cross_axis_id,
+        crosses,
+        crosses_at,
+        major_tick_mark,
+        minor_tick_mark,
+        major_unit,
+        minor_unit,
+        title,
     })
+}
+
+fn parse_axis_title(
+    title_node: Node<'_, '_>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    axis_id: u32,
+) -> Option<TextModel> {
+    let tx_node = title_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "tx");
+    let context = format!("axis[{axis_id}].title.tx");
+    let mut parsed = tx_node.and_then(|tx| parse_text_from_tx(tx, diagnostics, &context));
+
+    let style = title_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "txPr")
+        .and_then(parse_txpr);
+    if let (Some(style), Some(text)) = (style, parsed.as_mut()) {
+        text.style = Some(style);
+    }
+
+    parsed
 }
 
 fn parse_axis_position(value: &str, diagnostics: &mut Vec<ChartDiagnostic>) -> AxisPosition {

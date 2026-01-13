@@ -68,7 +68,9 @@
         },
         "numFmt": null,
         "tickLabelPosition": "nextTo",
-        "majorGridlines": false
+        "majorGridlines": false,
+        "crossAxisId": 50010002,
+        "crosses": "autoZero"
       },
       {
         "id": 50010002,
@@ -85,7 +87,9 @@
           "sourceLinked": true
         },
         "tickLabelPosition": "nextTo",
-        "majorGridlines": true
+        "majorGridlines": true,
+        "crossAxisId": 50010001,
+        "crosses": "autoZero"
       }
     ],
     "series": [
