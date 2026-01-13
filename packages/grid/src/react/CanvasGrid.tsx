@@ -2358,6 +2358,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
       event.preventDefault();
 
+      const pointerId = event.pointerId;
       const viewport = renderer.scroll.getViewportState();
       const maxScrollY = viewport.maxScrollY;
       const trackRect = vTrack.getBoundingClientRect();
@@ -2378,6 +2379,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const startScrollY = renderer.scroll.getScroll().y;
 
       const onMove = (moveEvent: PointerEvent) => {
+        if (moveEvent.pointerId !== pointerId) return;
         moveEvent.preventDefault();
         const delta = moveEvent.clientY - startClientY;
         const nextScroll = startScrollY + (delta / thumbTravel) * maxScrollY;
@@ -2385,13 +2387,25 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         syncScrollbars();
       };
 
-      const onUp = () => {
+      const cleanup = () => {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onCancel);
+      };
+
+      const onUp = (upEvent: PointerEvent) => {
+        if (upEvent.pointerId !== pointerId) return;
+        cleanup();
+      };
+
+      const onCancel = (cancelEvent: PointerEvent) => {
+        if (cancelEvent.pointerId !== pointerId) return;
+        cleanup();
       };
 
       window.addEventListener("pointermove", onMove, { passive: false });
       window.addEventListener("pointerup", onUp, { passive: false });
+      window.addEventListener("pointercancel", onCancel, { passive: false });
     };
 
     vThumb.addEventListener("pointerdown", onPointerDown, { passive: false });
@@ -2451,6 +2465,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
       event.preventDefault();
 
+      const pointerId = event.pointerId;
       const viewport = renderer.scroll.getViewportState();
       const maxScrollX = viewport.maxScrollX;
       const trackRect = hTrack.getBoundingClientRect();
@@ -2471,6 +2486,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const startScrollX = renderer.scroll.getScroll().x;
 
       const onMove = (moveEvent: PointerEvent) => {
+        if (moveEvent.pointerId !== pointerId) return;
         moveEvent.preventDefault();
         const delta = moveEvent.clientX - startClientX;
         const nextScroll = startScrollX + (delta / thumbTravel) * maxScrollX;
@@ -2478,13 +2494,25 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         syncScrollbars();
       };
 
-      const onUp = () => {
+      const cleanup = () => {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onCancel);
+      };
+
+      const onUp = (upEvent: PointerEvent) => {
+        if (upEvent.pointerId !== pointerId) return;
+        cleanup();
+      };
+
+      const onCancel = (cancelEvent: PointerEvent) => {
+        if (cancelEvent.pointerId !== pointerId) return;
+        cleanup();
       };
 
       window.addEventListener("pointermove", onMove, { passive: false });
       window.addEventListener("pointerup", onUp, { passive: false });
+      window.addEventListener("pointercancel", onCancel, { passive: false });
     };
 
     hThumb.addEventListener("pointerdown", onPointerDown, { passive: false });
