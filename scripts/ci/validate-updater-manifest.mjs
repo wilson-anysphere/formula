@@ -581,12 +581,12 @@ async function main() {
     /** @type {Array<{ target: string; url: string; expected: string }>} */
     const invalidWindows = [];
 
-    for (const { target, url } of validatedTargets) {
+    for (const { target, url, assetName } of validatedTargets) {
       const family = platformFamilyFromTarget(target);
       if (!family) continue;
 
       if (family === "macos") {
-        if (!(url.endsWith(".app.tar.gz") || url.endsWith(".tar.gz"))) {
+        if (!(assetName.endsWith(".app.tar.gz") || assetName.endsWith(".tar.gz"))) {
           invalidMac.push({
             target,
             url,
@@ -594,7 +594,7 @@ async function main() {
           });
         }
       } else if (family === "linux") {
-        if (!url.endsWith(".AppImage")) {
+        if (!assetName.endsWith(".AppImage")) {
           invalidLinux.push({
             target,
             url,
@@ -602,7 +602,7 @@ async function main() {
           });
         }
       } else if (family === "windows") {
-        const lower = url.toLowerCase();
+        const lower = assetName.toLowerCase();
         if (!(lower.endsWith(".msi") || lower.endsWith(".exe"))) {
           invalidWindows.push({
             target,
@@ -645,6 +645,29 @@ async function main() {
             .slice()
             .sort((a, b) => a.target.localeCompare(b.target))
             .map((t) => `  - ${t.target}: ${t.url} (${t.expected})`),
+        ].join("\n"),
+      );
+    }
+
+    // Asset name uniqueness is an extra safety net: for GitHub Releases, the asset name is the
+    // actual "identity" of the file. If two targets reference the same asset name, they are
+    // colliding even if the URL strings differ (e.g. querystrings/encoding differences).
+    const assetNameToTargets = new Map();
+    for (const { target, assetName } of validatedTargets) {
+      const list = assetNameToTargets.get(assetName) ?? [];
+      list.push(target);
+      assetNameToTargets.set(assetName, list);
+    }
+
+    const duplicateAssets = [...assetNameToTargets.entries()].filter(([, targets]) => targets.length > 1);
+    if (duplicateAssets.length > 0) {
+      errors.push(
+        [
+          `Duplicate platform assets in latest.json (multiple targets reference the same release asset):`,
+          ...duplicateAssets
+            .slice()
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([asset, targets]) => `  - ${targets.slice().sort().join(", ")} → ${asset}`),
         ].join("\n"),
       );
     }
@@ -831,18 +854,31 @@ async function main() {
       platforms && typeof platforms === "object" && !Array.isArray(platforms)
         ? [
             `Manifest platforms (${Object.keys(platforms).length}):`,
-            ...validatedTargets
-              .slice()
-              .sort((a, b) => a.target.localeCompare(b.target))
-              .map(
-                (t) =>
-                  `  - ${t.target} → ${t.assetName}${assetNames.has(t.assetName) ? "" : " (missing asset)"}`,
-              ),
-            ...invalidTargets
-              .slice()
-              .sort((a, b) => a.target.localeCompare(b.target))
-              .map((t) => `  - ${t.target} → INVALID (${t.message})`),
-            "",
+            ...(validatedTargets.length > 0
+              ? [
+                  ``,
+                  `Target → asset:`,
+                  formatTargetAssetTable(
+                    validatedTargets.map((t) => ({
+                      target: t.target,
+                      assetName: assetNames.has(t.assetName)
+                        ? t.assetName
+                        : `${t.assetName} (missing asset)`,
+                    })),
+                  ),
+                ]
+              : []),
+            ...(invalidTargets.length > 0
+              ? [
+                  ``,
+                  `Invalid target entries:`,
+                  ...invalidTargets
+                    .slice()
+                    .sort((a, b) => a.target.localeCompare(b.target))
+                    .map((t) => `  - ${t.target}: ${t.message}`),
+                ]
+              : []),
+            ``,
           ]
         : [];
     fatal(
