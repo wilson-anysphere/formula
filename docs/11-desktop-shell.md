@@ -663,6 +663,7 @@ The loopback listener implementation (`oauth_loopback_listen` in `apps/desktop/s
 - **Method:** `GET` only
 - **Lifetime:** listener stops after the first successful redirect (best-effort “first one wins”) or after ~5 minutes (timeout)
   - Repeated `oauth_loopback_listen` calls for the same `redirect_uri` are treated as a no-op while a listener is already active.
+- **HTTP response:** on success, the listener returns a simple “Sign-in complete” HTML page. If the request uses a different path it returns `404`; non-`GET` requests return `405`.
 
 ##### Redirect forwarding to the frontend (`oauth-redirect` + readiness handshake)
 
