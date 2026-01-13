@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -162,6 +162,55 @@ function parsePsTable(output: string): { pid: number; ppid: number; rssKb: numbe
   return rows;
 }
 
+function readProcChildrenPidsLinux(pid: number): number[] {
+  try {
+    // `/proc/<pid>/task/<pid>/children` contains whitespace-separated child PIDs.
+    // (This is sufficient for our usage here since the xvfb wrapper is single-threaded.)
+    const content = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim();
+    if (!content) return [];
+    return content
+      .split(/\s+/g)
+      .map((token: string) => Number(token))
+      .filter((n: number) => Number.isInteger(n) && n > 0);
+  } catch {
+    return [];
+  }
+}
+
+function readProcExeLinux(pid: number): string | null {
+  try {
+    const target = readlinkSync(`/proc/${pid}/exe`, { encoding: "utf8" });
+    return target.replace(/ \(deleted\)$/, "");
+  } catch {
+    return null;
+  }
+}
+
+function findDesktopPidUnderWrapperLinux(wrapperPid: number, binPath: string): number | null {
+  let binReal = binPath;
+  try {
+    binReal = realpathSync(binPath);
+  } catch {
+    // ignore; best-effort match.
+  }
+
+  const children = readProcChildrenPidsLinux(wrapperPid);
+  for (const pid of children) {
+    const exe = readProcExeLinux(pid);
+    if (!exe) continue;
+    if (exe === binReal || exe === binPath) return pid;
+  }
+
+  // Fallback: look for a process whose exe basename matches `formula-desktop`.
+  for (const pid of children) {
+    const exe = readProcExeLinux(pid);
+    if (!exe) continue;
+    if (exe.endsWith("/formula-desktop")) return pid;
+  }
+
+  return null;
+}
+
 function processTreeRssKb(rootPid: number): number {
   // `ps` RSS is reported in KB on both Linux and macOS.
   // BSD/mac: `ps -ax -o pid= -o ppid= -o rss=`
@@ -307,9 +356,18 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
 
       settleTimer = setTimeout(() => {
         try {
-          const rootPid = child.pid;
-          if (!rootPid || rootPid <= 0) {
+          const wrapperPid = child.pid;
+          if (!wrapperPid || wrapperPid <= 0) {
             throw new Error("Desktop process PID was not available for memory sampling");
+          }
+          let rootPid = wrapperPid;
+          // When running under the xvfb wrapper, the spawned process is a bash script
+          // that also owns the Xvfb server. To keep the reported RSS scoped to the
+          // desktop app (and its WebView children), locate the actual desktop PID and
+          // measure its process tree instead of the wrapper's.
+          if (process.platform === "linux" && useXvfb) {
+            const found = findDesktopPidUnderWrapperLinux(wrapperPid, binPath);
+            if (found) rootPid = found;
           }
           sampledRssMb = processTreeRssKb(rootPid) / 1024;
         } catch (err) {
@@ -447,4 +505,3 @@ async function main(): Promise<void> {
 }
 
 await main();
-
