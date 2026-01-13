@@ -754,6 +754,62 @@ fn group_by_distinct_count_boolean_and_datetime_types() {
 }
 
 #[test]
+fn group_by_distinct_count_works_when_counting_a_key_column() {
+    // When the agg input column is also a GROUP BY key column, the engine should reuse the key
+    // scalar values (no extra decoding cursor). Since the key is constant within the group,
+    // DISTINCTCOUNT should be 1 for non-null keys and 0 for null keys.
+    let schema = vec![
+        ColumnSchema {
+            name: "k".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "v".to_owned(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let rows = vec![
+        vec![Value::String(Arc::<str>::from("A")), Value::Number(1.0)],
+        vec![Value::String(Arc::<str>::from("A")), Value::Number(1.0)],
+        vec![Value::String(Arc::<str>::from("A")), Value::Number(2.0)],
+        vec![Value::String(Arc::<str>::from("A")), Value::Null],
+        vec![Value::String(Arc::<str>::from("B")), Value::Null],
+        vec![Value::String(Arc::<str>::from("B")), Value::Number(3.0)],
+        vec![Value::Null, Value::Null],
+        vec![Value::Null, Value::Number(4.0)],
+    ];
+    let table = build_table(schema, rows);
+
+    let result = table
+        .group_by(&[0, 1], &[AggSpec::distinct_count(1)])
+        .unwrap();
+    let cols = result.to_values();
+
+    let mut lookup = std::collections::HashMap::<String, Value>::new();
+    for r in 0..result.row_count() {
+        let k = match &cols[0][r] {
+            Value::Null => "<null>".to_owned(),
+            Value::String(s) => s.as_ref().to_owned(),
+            other => format!("{other:?}"),
+        };
+        let v = match &cols[1][r] {
+            Value::Null => "<null>".to_owned(),
+            Value::Number(n) => n.to_string(),
+            other => format!("{other:?}"),
+        };
+        lookup.insert(format!("{k}|{v}"), cols[2][r].clone());
+    }
+
+    assert_eq!(lookup.get("A|1"), Some(&Value::Number(1.0)));
+    assert_eq!(lookup.get("A|2"), Some(&Value::Number(1.0)));
+    assert_eq!(lookup.get("A|<null>"), Some(&Value::Number(0.0)));
+    assert_eq!(lookup.get("B|3"), Some(&Value::Number(1.0)));
+    assert_eq!(lookup.get("B|<null>"), Some(&Value::Number(0.0)));
+    assert_eq!(lookup.get("<null>|4"), Some(&Value::Number(1.0)));
+    assert_eq!(lookup.get("<null>|<null>"), Some(&Value::Number(0.0)));
+}
+
+#[test]
 fn hash_join_handles_duplicate_keys() {
     let schema = vec![ColumnSchema {
         name: "k".to_owned(),
