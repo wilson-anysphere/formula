@@ -765,7 +765,7 @@ The command list is large; below are the “core” ones most contributors will 
   - `power_query_refresh_state_get|set`
   - `power_query_state_get|set`
 - **OAuth (desktop redirect capture)**
-  - `oauth_loopback_listen` (starts a temporary RFC 8252 loopback listener for redirect URIs using `http://127.0.0.1:<port>/...`, `http://localhost:<port>/...`, or `http://[::1]:<port>/...`; listener times out after 5 minutes)
+  - `oauth_loopback_listen` (starts a temporary RFC 8252 loopback listener for redirect URIs using `http://127.0.0.1:<port>/...`, `http://localhost:<port>/...`, or `http://[::1]:<port>/...`; listener stops after the first successful redirect or after ~5 minutes)
 - **SQL (connectors / queries)**
   - `sql_query`, `sql_get_schema`
 - **Macros + scripting**
@@ -803,7 +803,7 @@ Events emitted by the Rust host (see `main.rs`, `menu.rs`, `tray.rs`, `updater.r
   - `open-file` (payload: `string[]` paths)
   - `file-dropped` (payload: `string[]` paths)
 - Deep links:
-  - `oauth-redirect` (payload: `string` URL, e.g. `formula://oauth/callback?...`)
+  - `oauth-redirect` (payload: `string` URL, e.g. `formula://oauth/callback?...` or `http://127.0.0.1:4242/oauth/callback?...`)
 - Menu bar:
   - `menu-open`, `menu-new`, `menu-save`, `menu-save-as`, `menu-export-pdf`, `menu-close-window`, `menu-quit`
   - `menu-undo`, `menu-redo`, `menu-cut`, `menu-copy`, `menu-paste`, `menu-paste-special`, `menu-select-all`
