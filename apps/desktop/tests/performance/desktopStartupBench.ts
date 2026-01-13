@@ -211,10 +211,10 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
 
     const webviewLoadedTarget = Number(process.env.FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS ?? '800') || 800;
 
-    // `webview_loaded_ms` is best-effort and historically missing in some runs due to the
-    // frontend->Rust IPC call racing `__TAURI__` initialization. To avoid failing the whole
-    // benchmark suite while the instrumentation is still stabilizing, only report the metric
-    // when we get a sufficiently large sample.
+     // `webview_loaded_ms` is recorded by the Rust host (via a native page-load callback) and
+     // should be available in all runs. Keep this best-effort skip policy anyway so the benchmark
+     // harness can still run against older binaries and so a regression doesn't fail the entire
+     // suite on a small/biased sample.
     //
     // Policy:
     // - If 0 runs report `webview_loaded_ms`, skip the metric entirely.

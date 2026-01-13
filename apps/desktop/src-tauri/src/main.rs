@@ -1088,6 +1088,13 @@ fn main() {
                 return;
             }
 
+            // Some platforms may briefly load an internal blank page during WebView creation.
+            // Avoid treating that as "app page loaded".
+            let url = payload.url().to_string();
+            if url == "about:blank" {
+                return;
+            }
+
             let (webview_loaded_ms, snapshot) = {
                 let mut metrics = match startup_metrics_for_page_load.lock() {
                     Ok(guard) => guard,
