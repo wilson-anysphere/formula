@@ -297,7 +297,8 @@ For workbook-scale retrieval (multiple sheets, persistent indexing, incremental 
 
 ```js
 import { ContextManager } from "./src/index.js";
-import { HashEmbedder, InMemoryVectorStore } from "../ai-rag/src/index.js";
+import { HashEmbedder } from "../ai-rag/src/embedding/hashEmbedder.js";
+import { InMemoryVectorStore } from "../ai-rag/src/store/inMemoryVectorStore.js";
 
 // A SpreadsheetApi-like adapter. `workbookFromSpreadsheetApi` (ai-rag) only needs:
 // - listSheets(): string[]
@@ -790,7 +791,7 @@ If your adapter uses **0-based** coordinates, build the workbook yourself with `
 `buildWorkbookContext()` instead:
 
 ```js
-import { workbookFromSpreadsheetApi } from "../ai-rag/src/index.js";
+import { workbookFromSpreadsheetApi } from "../ai-rag/src/workbook/fromSpreadsheetApi.js";
 
 const workbook = workbookFromSpreadsheetApi({
   spreadsheet,
