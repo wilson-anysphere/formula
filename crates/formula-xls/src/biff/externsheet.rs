@@ -13,6 +13,13 @@ use super::{records, BiffVersion};
 /// See [MS-XLS] 2.4.102 (EXTERNSHEET).
 const RECORD_EXTERNSHEET: u16 = 0x0017;
 
+/// Hard cap on the number of XTI entries we will parse from an `EXTERNSHEET` record.
+///
+/// Corrupt or adversarial files can construct extremely large EXTERNSHEET tables that are not
+/// useful for formula rendering but can consume significant memory. This conservative cap keeps
+/// parsing and allocation bounded while remaining far above typical real-world workbooks.
+const MAX_XTI_ENTRIES: usize = 16_384;
+
 /// An entry in the BIFF8 `EXTERNSHEET` table.
 ///
 /// This corresponds to one `XTI` structure in [MS-XLS] 2.4.102.
@@ -120,18 +127,26 @@ fn parse_externsheet_record(out: &mut ExternSheetTable, data: &[u8], offset: usi
     }
 
     let cxti = u16::from_le_bytes([data[0], data[1]]) as usize;
+    let max_entries = (data.len().saturating_sub(2)) / 6;
     let mut cursor = 2usize;
 
-    out.entries.reserve(cxti);
+    if cxti > max_entries {
+        out.warnings.push(format!(
+            "EXTERNSHEET cxti={cxti} exceeds available data; clamping to {max_entries}"
+        ));
+    }
 
-    for parsed in 0..cxti {
-        if data.len() < cursor + 6 {
-            out.warnings.push(format!(
-                "truncated EXTERNSHEET record at offset {offset}: expected {cxti} XTI entries, got {parsed}"
-            ));
-            break;
-        }
+    let mut to_parse = cxti.min(max_entries);
+    if to_parse > MAX_XTI_ENTRIES {
+        out.warnings.push(format!(
+            "EXTERNSHEET has {to_parse} XTI entries; capping to {MAX_XTI_ENTRIES}"
+        ));
+        to_parse = MAX_XTI_ENTRIES;
+    }
 
+    out.entries.reserve(to_parse);
+
+    for _ in 0..to_parse {
         let supbook = u16::from_le_bytes([data[cursor], data[cursor + 1]]);
         let itab_first = i16::from_le_bytes([data[cursor + 2], data[cursor + 3]]);
         let itab_last = i16::from_le_bytes([data[cursor + 4], data[cursor + 5]]);
@@ -320,8 +335,8 @@ mod tests {
             parsed
                 .warnings
                 .iter()
-                .any(|w| w.contains("truncated EXTERNSHEET")),
-            "expected truncated warning, got {:?}",
+                .any(|w| w.contains("clamping") && w.contains("EXTERNSHEET cxti=")),
+            "expected clamping warning, got {:?}",
             parsed.warnings
         );
     }
@@ -348,5 +363,33 @@ mod tests {
             }]
         );
         assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+    }
+
+    #[test]
+    fn clamps_absurd_cxti_without_allocating() {
+        // Corrupt file: declares an absurd cxti but only provides 1 complete entry worth of bytes.
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0xFFFFu16.to_le_bytes()); // cXTI = 65535
+                                                             // One XTI entry.
+        payload.extend_from_slice(&0u16.to_le_bytes()); // iSupBook
+        payload.extend_from_slice(&0i16.to_le_bytes()); // itabFirst
+        payload.extend_from_slice(&0i16.to_le_bytes()); // itabLast
+
+        let parsed = parse_biff8_externsheet_record_data(&payload, 0);
+        assert_eq!(parsed.entries.len(), 1);
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("clamping") && w.contains("65535")),
+            "expected clamping warning, got {:?}",
+            parsed.warnings
+        );
+        // Ensure we didn't reserve/allocate anywhere near 65535 entries.
+        assert!(
+            parsed.entries.capacity() < 1024,
+            "unexpectedly large capacity={}",
+            parsed.entries.capacity()
+        );
     }
 }
