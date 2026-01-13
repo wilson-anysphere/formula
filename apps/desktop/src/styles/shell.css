@@ -231,9 +231,9 @@ dialog.print-preview-dialog::backdrop {
   justify-content: center;
   padding: 0;
   border: 1px solid var(--formula-grid-line, var(--border));
-  border-radius: 2px;
   background: var(--formula-grid-bg, var(--bg-primary));
   color: var(--formula-grid-cell-text, var(--text-primary));
+  border-radius: var(--radius-xs);
   font: 12px/12px var(--font-sans);
   cursor: pointer;
 }

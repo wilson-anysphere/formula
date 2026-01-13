@@ -425,7 +425,7 @@
   text-decoration-thickness: 2px;
   text-underline-offset: 2px;
   text-decoration-color: var(--error);
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }
 
 .formula-bar-highlight .formula-bar-preview {

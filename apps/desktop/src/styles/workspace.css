@@ -841,7 +841,6 @@
     "Courier New",
     monospace;
 }
-
 .branch-merge__resolution-actions button {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
