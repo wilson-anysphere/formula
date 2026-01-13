@@ -645,10 +645,6 @@ jobs:
             exit 1
           fi
 
-      - name: Smoke check packaged cross-origin isolation (COOP/COEP)
-        # COOP/COEP + Worker support can regress per-platform; run on all release targets.
-        run: pnpm -C apps/desktop check:coi
-
       - name: Cache pinned Tauri CLI binary (cargo-tauri)
         id: tauri-cli-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -728,7 +724,6 @@ jobs:
           # Mark GitHub Releases as prereleases when the semver tag contains a
           # prerelease suffix like `-beta.1` or `-rc.0` (e.g. `v1.2.3-beta.1`).
           prerelease: ${{ contains(needs.validate-version.outputs.release_tag, '-') }}
-
       - name: Build desktop bundles (macOS universal, dry run)
         if: runner.os == 'macOS' && needs.validate-version.outputs.upload != 'true'
         uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
@@ -862,6 +857,12 @@ jobs:
           # action install a floating `@tauri-apps/cli@v2` toolchain.
           tauriScript: cargo tauri
           args: ${{ matrix.tauri_args }}
+
+      - name: Smoke check packaged cross-origin isolation (COOP/COEP)
+        # Run against the already-built Tauri artifacts from the previous step.
+        # Skip Windows ARM64 cross-compile builds (the produced binary isn't runnable on x64 runners).
+        if: runner.os != 'Windows' || matrix.rust_target != 'aarch64-pc-windows-msvc'
+        run: pnpm -C apps/desktop check:coi -- --no-build
 
       - name: Desktop dist asset report
         if: runner.os != 'macOS'
