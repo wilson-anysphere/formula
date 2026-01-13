@@ -153,7 +153,7 @@ export function suggestRanges(params) {
       const { endCol, confidence } = table;
       const endLetters = applyColumnCase(columnIndexToLetter(endCol), parsed.startColToken);
       const startCell = `${parsed.startColPrefix}${parsed.startColToken}${parsed.rowPrefix}${tableStartRow + 1}`;
-      const endCell = `${parsed.startColPrefix}${endLetters}${parsed.rowPrefix}${tableEndRow + 1}`;
+      const endCell = `${parsed.endColPrefix}${endLetters}${parsed.rowPrefix}${tableEndRow + 1}`;
       const tableReason = toTableReason(contiguousReason);
       tableSuggestion = {
         range: `${startCell}:${endCell}`,
