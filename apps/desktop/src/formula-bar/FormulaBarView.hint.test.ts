@@ -6,6 +6,16 @@ import { describe, expect, it } from "vitest";
 
 import { FormulaBarView } from "./FormulaBarView.js";
 
+async function nextFrame(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => resolve());
+    } else {
+      setTimeout(() => resolve(), 0);
+    }
+  });
+}
+
 function getHintEl(host: HTMLElement): HTMLElement {
   const hint = host.querySelector<HTMLElement>('[data-testid="formula-hint"]');
   if (!hint) throw new Error("Expected formula hint element");
@@ -23,7 +33,7 @@ function getSignatureName(host: HTMLElement): string | null {
 }
 
 describe("FormulaBarView function hint UI", () => {
-  it("updates the active parameter as the cursor moves across commas", () => {
+  it("updates the active parameter as the cursor moves across commas", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
@@ -36,23 +46,26 @@ describe("FormulaBarView function hint UI", () => {
     const inFirstArg = view.textarea.value.indexOf(">") + 1;
     view.textarea.setSelectionRange(inFirstArg, inFirstArg);
     view.textarea.dispatchEvent(new Event("input"));
+    await nextFrame();
     expect(getSignatureName(host)).toBe("IF(");
     expect(getActiveParamText(host)).toBe("logical_test");
 
     const inSecondArg = view.textarea.value.indexOf(",1") + 1;
     view.textarea.setSelectionRange(inSecondArg, inSecondArg);
     view.textarea.dispatchEvent(new Event("select"));
+    await nextFrame();
     expect(getActiveParamText(host)).toBe("value_if_true");
 
     const inThirdArg = view.textarea.value.lastIndexOf(",2") + 1;
     view.textarea.setSelectionRange(inThirdArg, inThirdArg);
     view.textarea.dispatchEvent(new Event("select"));
+    await nextFrame();
     expect(getActiveParamText(host)).toBe("[value_if_false]");
 
     host.remove();
   });
 
-  it("uses the innermost function context for nested calls", () => {
+  it("uses the innermost function context for nested calls", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
@@ -65,6 +78,7 @@ describe("FormulaBarView function hint UI", () => {
     const inSumArg = view.textarea.value.indexOf("A1") + 1;
     view.textarea.setSelectionRange(inSumArg, inSumArg);
     view.textarea.dispatchEvent(new Event("input"));
+    await nextFrame();
     expect(getSignatureName(host)).toBe("SUM(");
     expect(getActiveParamText(host)).toBe("number1");
 
@@ -72,6 +86,7 @@ describe("FormulaBarView function hint UI", () => {
     const inIfFirstArgAfterSum = view.textarea.value.indexOf(">") + 1;
     view.textarea.setSelectionRange(inIfFirstArgAfterSum, inIfFirstArgAfterSum);
     view.textarea.dispatchEvent(new Event("select"));
+    await nextFrame();
     expect(getSignatureName(host)).toBe("IF(");
     expect(getActiveParamText(host)).toBe("logical_test");
 
@@ -79,9 +94,9 @@ describe("FormulaBarView function hint UI", () => {
     const inIfSecondArg = view.textarea.value.indexOf(",1") + 1;
     view.textarea.setSelectionRange(inIfSecondArg, inIfSecondArg);
     view.textarea.dispatchEvent(new Event("select"));
+    await nextFrame();
     expect(getActiveParamText(host)).toBe("value_if_true");
 
     host.remove();
   });
 });
-

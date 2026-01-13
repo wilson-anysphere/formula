@@ -6,8 +6,18 @@ import { describe, expect, it } from "vitest";
 
 import { FormulaBarView } from "./FormulaBarView.js";
 
+async function nextFrame(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => resolve());
+    } else {
+      setTimeout(() => resolve(), 0);
+    }
+  });
+}
+
 describe("FormulaBarView named range highlights", () => {
-  it("colors resolved named ranges while editing", () => {
+  it("colors resolved named ranges while editing", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
@@ -28,6 +38,9 @@ describe("FormulaBarView named range highlights", () => {
     view.textarea.setSelectionRange(caret, caret);
     view.textarea.dispatchEvent(new Event("select"));
 
+    // Rendering is scheduled on the next animation frame.
+    await nextFrame();
+
     const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
     const refSpan = highlight?.querySelector<HTMLElement>('span[data-ref-index="0"]');
     expect(refSpan?.textContent).toBe("SalesData");
@@ -40,4 +53,3 @@ describe("FormulaBarView named range highlights", () => {
     host.remove();
   });
 });
-
