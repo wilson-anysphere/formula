@@ -243,3 +243,64 @@ test("fails when minisign pubkey comment key id does not match payload key id", 
   assert.notEqual(proc.status, 0);
   assert.match(proc.stderr, /comment key id/i);
 });
+
+test("fails when minisign signature key id does not match the pubkey key id", () => {
+  const tmp = makeTempDir();
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const rawPubkey = rawEd25519PublicKey(publicKey);
+
+  const pubKeyId = Buffer.from([1, 1, 1, 1, 1, 1, 1, 1]);
+  const sigKeyId = Buffer.from([2, 2, 2, 2, 2, 2, 2, 2]);
+
+  const pubKeyIdHex = Buffer.from(pubKeyId).reverse().toString("hex").toUpperCase();
+  const sigKeyIdHex = Buffer.from(sigKeyId).reverse().toString("hex").toUpperCase();
+
+  const pubPayload = Buffer.concat([Buffer.from([0x45, 0x64]), pubKeyId, rawPubkey]); // "Ed" + keyId + pubkey
+  const pubPayloadLine = pubPayload.toString("base64").replace(/=+$/, "");
+  const minisignPubkeyFile = `untrusted comment: minisign public key: ${pubKeyIdHex}\n${pubPayloadLine}\n`;
+  const tauriPubkey = Buffer.from(minisignPubkeyFile, "utf8").toString("base64");
+
+  const latestJsonPath = path.join(tmp, "latest.json");
+  const latestSigPath = path.join(tmp, "latest.json.sig");
+  const configPath = path.join(tmp, "tauri.conf.json");
+
+  const latestJsonBytes = Buffer.from(JSON.stringify({ version: "0.1.0", platforms: {} }), "utf8");
+  const signature = sign(null, latestJsonBytes, privateKey);
+
+  // Signature payload uses a different key id than the pubkey. (The signature bytes themselves are
+  // valid, but the metadata mismatch should fail fast.)
+  const minisignSigPayload = Buffer.concat([Buffer.from([0x45, 0x64]), sigKeyId, Buffer.from(signature)]);
+  writeFileSync(latestJsonPath, latestJsonBytes);
+  writeFileSync(latestSigPath, minisignSigPayload.toString("base64").replace(/=+$/, ""));
+  writeFileSync(
+    configPath,
+    JSON.stringify({ plugins: { updater: { pubkey: tauriPubkey } } }, null, 2),
+  );
+
+  const proc = run({ configPath, latestJsonPath, latestSigPath });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /key id mismatch/i);
+  assert.match(proc.stderr, new RegExp(sigKeyIdHex));
+  assert.match(proc.stderr, new RegExp(pubKeyIdHex));
+});
+
+test("fails with a clear error when latest.json.sig is not valid base64", () => {
+  const tmp = makeTempDir();
+  const { publicKey } = generateKeyPairSync("ed25519");
+  const rawPubkey = rawEd25519PublicKey(publicKey);
+
+  const latestJsonPath = path.join(tmp, "latest.json");
+  const latestSigPath = path.join(tmp, "latest.json.sig");
+  const configPath = path.join(tmp, "tauri.conf.json");
+
+  writeFileSync(latestJsonPath, "{}");
+  writeFileSync(latestSigPath, "definitely-not-base64");
+  writeFileSync(
+    configPath,
+    JSON.stringify({ plugins: { updater: { pubkey: rawPubkey.toString("base64") } } }, null, 2),
+  );
+
+  const proc = run({ configPath, latestJsonPath, latestSigPath });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /not valid base64/i);
+});
