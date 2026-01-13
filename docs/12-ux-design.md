@@ -588,6 +588,15 @@ For long calculations, show progress in status bar:
 
 ## Theming
 
+Formula is designed **light-first**. The default theme preference is **Light**, with optional **Dark**, **System**, and **High Contrast** modes.
+
+### Theme switching
+
+- **Ribbon:** `View → Theme` (System / Light / Dark / High Contrast)
+- **Command palette:** if theme commands are registered, search for `Theme` (e.g. `Theme: Light`)
+
+Theme preference is persisted (desktop: `localStorage` key `formula.settings.appearance.v1`) and applied on startup by the theme controller (see `apps/desktop/src/theme/themeController.js`) via the `data-theme` attribute on `<html>`.
+
 ### Light Theme (Default)
 
 ```css
@@ -626,24 +635,21 @@ For long calculations, show progress in status bar:
 }
 ```
 
-### System Preference Detection
+### System preference resolution (`Theme: System`)
+
+When the user selects **System**, the app resolves the active theme using media queries:
+
+- `forced-colors` / higher-contrast preferences → `data-theme="high-contrast"`
+- otherwise `prefers-color-scheme: dark` → `data-theme="dark"`
+- otherwise → `data-theme="light"`
+
+This is centralized in `ThemeController` so changes propagate live without requiring a restart.
+If you need to drive theme changes programmatically, use the controller API (the ribbon wires to this):
 
 ```typescript
-const prefersDark = window.matchMedia("(prefers-color-scheme: dark)");
+const themeController = new ThemeController();
+themeController.start(); // applies persisted preference (default: light)
 
-function setTheme(dark: boolean) {
-  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
-}
-
-// Default: Light theme (new users should not automatically follow OS dark mode).
-setTheme(false);
-
-// If the user selects "System" theme preference, follow OS.
-function followSystemTheme() {
-  setTheme(prefersDark.matches);
-  prefersDark.addEventListener("change", (e) => setTheme(e.matches));
-}
-
-// Example usage:
-// if (userThemePreference === "system") followSystemTheme();
+// Opt-in to following OS changes.
+themeController.setThemePreference("system");
 ```

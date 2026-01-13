@@ -334,6 +334,17 @@ class CellRenderer {
 }
 ```
 
+### Shared-grid axis sizing (including Hide/Unhide)
+
+In **shared-grid mode**, row heights and column widths are driven by *sheet view metadata* and applied to the renderer as **axis size overrides** (batched, not per-index setters). This same mechanism is used to support **Hide / Unhide**:
+
+- **Hide**: apply an override that collapses the target row/column (typically to a minimal size)
+- **Unhide**: remove/restore the override so the axis returns to its prior/default size
+
+This keeps the canvas renderer, scroll model, and any secondary panes in sync without needing legacy outline/visibility caches.
+
+> Note: Excel-style **outline grouping controls** (Data → Outline: Group/Ungroup/Show Detail/Hide Detail) may still be implemented only in the legacy renderer even when basic Hide/Unhide is available in shared-grid mode.
+
 ### Batched Drawing
 
 Minimize context state changes by batching similar operations:
@@ -498,6 +509,8 @@ class OverlayManager {
   }
 }
 ```
+
+In shared-grid mode, overlay-driven interactions that affect layout (row/column sizing, Hide/Unhide) should flow through the same **axis size override** path used by the canvas renderer so that visual state is consistent across the grid canvas and any DOM overlays.
 
 ### Expanding Cell Editor
 

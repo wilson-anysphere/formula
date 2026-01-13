@@ -10,7 +10,7 @@
 
 Build the presentation layer: canvas-based grid renderer, formula bar, command palette, panels, and theming. Achieve **60fps scrolling with millions of rows** while maintaining full visual fidelity.
 
-**The goal:** Excel functionality with Cursor polish. Light mode. Professional. Power-user focused.
+**The goal:** Excel functionality with Cursor polish. **Light mode by default**. Professional. Power-user focused.
 
 ---
 
@@ -83,10 +83,11 @@ Screen Space → Canvas Space → Cell Space → Data Space
 - **Full ribbon interface** with all Excel buttons
 - **Sheet tabs** at bottom
 - **Status bar** with Sum/Avg/Count
+- **Hide / Unhide rows and columns** (shared-grid parity)
 - **All Excel keyboard shortcuts** (F2, F4, Ctrl+D, etc.)
 - **Context menus** matching Excel behavior
 
----
+--- 
 
 ## Design Rules
 
