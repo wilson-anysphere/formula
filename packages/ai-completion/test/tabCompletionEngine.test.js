@@ -1961,6 +1961,45 @@ test("WEEKNUM return_type suggests 1, 2, 21", async () => {
   );
 });
 
+test("DAYS360 method suggests TRUE/FALSE with meaning", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=DAYS360(A1, B1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  const us = suggestions.find((s) => s.text === "=DAYS360(A1, B1, FALSE");
+  assert.ok(us, `Expected DAYS360 to suggest FALSE, got: ${suggestions.map((s) => s.text).join(", ")}`);
+  assert.ok((us?.confidence ?? 0) > 0.5, `Expected DAYS360/FALSE to have elevated confidence, got: ${us?.confidence}`);
+
+  const eu = suggestions.find((s) => s.text === "=DAYS360(A1, B1, TRUE");
+  assert.ok(eu, `Expected DAYS360 to suggest TRUE, got: ${suggestions.map((s) => s.text).join(", ")}`);
+  assert.ok((eu?.confidence ?? 0) > 0.5, `Expected DAYS360/TRUE to have elevated confidence, got: ${eu?.confidence}`);
+});
+
+test("YEARFRAC basis suggests 0, 1, 2, 3, 4", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=YEARFRAC(A1, B1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const basis of ["0", "1", "2", "3", "4"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=YEARFRAC(A1, B1, ${basis}`),
+      `Expected YEARFRAC to suggest basis=${basis}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("CEILING.MATH mode suggests 0 and 1", async () => {
   const engine = new TabCompletionEngine();
 

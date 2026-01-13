@@ -1025,6 +1025,23 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "21", displayText: "21 (ISO week numbering)", confidence: 0.63 },
     ],
   },
+  DAYS360: {
+    // method
+    2: [
+      { replacement: "FALSE", displayText: "FALSE (US/NASD method)", confidence: 0.66 },
+      { replacement: "TRUE", displayText: "TRUE (European method)", confidence: 0.65 },
+    ],
+  },
+  YEARFRAC: {
+    // basis
+    2: [
+      { replacement: "0", displayText: "0 (US/NASD 30/360)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (actual/actual)", confidence: 0.65 },
+      { replacement: "2", displayText: "2 (actual/360)", confidence: 0.64 },
+      { replacement: "3", displayText: "3 (actual/365)", confidence: 0.63 },
+      { replacement: "4", displayText: "4 (European 30/360)", confidence: 0.62 },
+    ],
+  },
   VLOOKUP: {
     // range_lookup (TRUE = approx match, FALSE = exact)
     3: [
