@@ -61,7 +61,7 @@ const geom: GridGeometry = {
   cellSizePx: () => ({ width: 0, height: 0 }),
 };
 
-const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 100, height: 100, dpr: 1 };
+const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 100, height: 100, dpr: 1, zoom: 1 };
 
 describe("DrawingOverlay charts", () => {
   it("delegates to chartRenderer when chartId is present", async () => {
@@ -163,5 +163,25 @@ describe("DrawingOverlay charts", () => {
         delete (globalThis as any).getComputedStyle;
       }
     }
+  });
+
+  it("scales chart rect by viewport zoom", async () => {
+    const { ctx } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    let received: { chartId: string; rect: { x: number; y: number; width: number; height: number } } | null = null;
+    const chartRenderer: ChartRenderer = {
+      renderToCanvas: (_renderCtx, chartId, rect) => {
+        received = { chartId, rect };
+      },
+    };
+
+    const overlay = new DrawingOverlay(canvas, images, geom, chartRenderer);
+    await overlay.render([createChartObject("chart_1")], { ...viewport, zoom: 2 });
+
+    expect(received).toEqual({
+      chartId: "chart_1",
+      rect: { x: 10, y: 14, width: 40, height: 20 },
+    });
   });
 });

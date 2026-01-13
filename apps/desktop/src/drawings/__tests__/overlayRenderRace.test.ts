@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DrawingOverlay, pxToEmu, type GridGeometry, type Viewport } from "../overlay";
 import { ImageBitmapCache } from "../imageBitmapCache";
@@ -94,7 +94,17 @@ function createShapeObject({ x, y, id = 2, zOrder = 1 }: { x: number; y: number;
 }
 
 describe("DrawingOverlay async render races", () => {
+  beforeEach(() => {
+    // `DrawingOverlay` only attempts to decode images when `createImageBitmap` is available.
+    // The desktop Vitest environment defaults to `node`, so stub it to exercise the decode paths.
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(() => Promise.resolve({} as unknown as ImageBitmap)) as unknown as typeof createImageBitmap,
+    );
+  });
+
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 

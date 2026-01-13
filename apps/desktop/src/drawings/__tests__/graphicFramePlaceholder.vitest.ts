@@ -93,7 +93,7 @@ const geom: GridGeometry = {
   cellSizePx: () => ({ width: 0, height: 0 }),
 };
 
-const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 100, height: 100, dpr: 1 };
+const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 100, height: 100, dpr: 1, zoom: 1 };
 
 function createUnknownObject(kind: DrawingObject["kind"]): DrawingObject {
   return {

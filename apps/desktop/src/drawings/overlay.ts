@@ -6,10 +6,24 @@ import { getResizeHandleCenters, getRotationHandleCenter, RESIZE_HANDLE_SIZE_PX,
 import { degToRad } from "./transform";
 import { DrawingSpatialIndex } from "./spatialIndex";
 
-import { EMU_PER_INCH, PX_PER_INCH, emuToPx, pxToEmu } from "../shared/emu.js";
+import { EMU_PER_INCH, PX_PER_INCH } from "../shared/emu.js";
 
-export { EMU_PER_INCH, PX_PER_INCH, emuToPx, pxToEmu };
 export const EMU_PER_PX = EMU_PER_INCH / PX_PER_INCH;
+export { EMU_PER_INCH, PX_PER_INCH };
+
+function resolveZoom(raw: number | undefined): number {
+  return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 1;
+}
+
+export function emuToPx(emu: number, zoom?: number): number {
+  const z = resolveZoom(zoom);
+  return (emu / EMU_PER_PX) * z;
+}
+
+export function pxToEmu(px: number, zoom?: number): number {
+  const z = resolveZoom(zoom);
+  return (px * EMU_PER_PX) / z;
+}
 
 type CssVarStyle = Pick<CSSStyleDeclaration, "getPropertyValue">;
 
@@ -193,6 +207,8 @@ export interface Viewport {
    *
    * This is applied when converting DrawingML EMU-derived geometry into
    * screen-space pixels.
+   *
+   * Defaults to 1 for legacy/non-zoomed grids.
    */
   zoom?: number;
   /**
@@ -237,31 +253,30 @@ export interface ChartRenderer {
   destroy?(): void;
 }
 
-export function anchorToRectPx(anchor: Anchor, geom: GridGeometry, zoom: number = 1): Rect {
-  const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+export function anchorToRectPx(anchor: Anchor, geom: GridGeometry, zoom?: number): Rect {
   switch (anchor.type) {
     case "oneCell": {
       const origin = geom.cellOriginPx(anchor.from.cell);
       return {
-        x: origin.x + emuToPx(anchor.from.offset.xEmu) * scale,
-        y: origin.y + emuToPx(anchor.from.offset.yEmu) * scale,
-        width: emuToPx(anchor.size.cx) * scale,
-        height: emuToPx(anchor.size.cy) * scale,
+        x: origin.x + emuToPx(anchor.from.offset.xEmu, zoom),
+        y: origin.y + emuToPx(anchor.from.offset.yEmu, zoom),
+        width: emuToPx(anchor.size.cx, zoom),
+        height: emuToPx(anchor.size.cy, zoom),
       };
     }
     case "twoCell": {
       const fromOrigin = geom.cellOriginPx(anchor.from.cell);
       const toOrigin = geom.cellOriginPx(anchor.to.cell);
 
-      const x1 = fromOrigin.x + emuToPx(anchor.from.offset.xEmu) * scale;
-      const y1 = fromOrigin.y + emuToPx(anchor.from.offset.yEmu) * scale;
+      const x1 = fromOrigin.x + emuToPx(anchor.from.offset.xEmu, zoom);
+      const y1 = fromOrigin.y + emuToPx(anchor.from.offset.yEmu, zoom);
 
       // In DrawingML, `to` specifies the cell *containing* the bottom-right
       // corner (i.e. the first cell strictly outside the shape when the corner
       // lies on a grid boundary). The absolute end point is therefore the
       // origin of the `to` cell plus the offsets.
-      const x2 = toOrigin.x + emuToPx(anchor.to.offset.xEmu) * scale;
-      const y2 = toOrigin.y + emuToPx(anchor.to.offset.yEmu) * scale;
+      const x2 = toOrigin.x + emuToPx(anchor.to.offset.xEmu, zoom);
+      const y2 = toOrigin.y + emuToPx(anchor.to.offset.yEmu, zoom);
 
       return {
         x: Math.min(x1, x2),
@@ -280,10 +295,10 @@ export function anchorToRectPx(anchor: Anchor, geom: GridGeometry, zoom: number 
       // surface.
       const origin = geom.cellOriginPx({ row: 0, col: 0 });
       return {
-        x: origin.x + emuToPx(anchor.pos.xEmu) * scale,
-        y: origin.y + emuToPx(anchor.pos.yEmu) * scale,
-        width: emuToPx(anchor.size.cx) * scale,
-        height: emuToPx(anchor.size.cy) * scale,
+        x: origin.x + emuToPx(anchor.pos.xEmu, zoom),
+        y: origin.y + emuToPx(anchor.pos.yEmu, zoom),
+        width: emuToPx(anchor.size.cx, zoom),
+        height: emuToPx(anchor.size.cy, zoom),
       };
     }
   }
@@ -507,7 +522,7 @@ export class DrawingOverlay {
 
     const cssVarStyle = this.getCssVarStyle();
     const colors = this.colorTokens ?? (this.colorTokens = resolveOverlayColorTokens(cssVarStyle));
-    const zoom = viewport.zoom ?? 1;
+    const zoom = resolveZoom(viewport.zoom);
 
     const paneLayout = resolvePaneLayout(viewport, this.geom);
     const viewportRect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
@@ -1341,8 +1356,8 @@ function drawShape(
   ctx.rect(rect.x, rect.y, rect.width, rect.height);
   ctx.clip();
 
-  const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-  const strokeWidthPx = spec.stroke ? emuToPx(spec.stroke.widthEmu) * scale : 0;
+  const scale = zoom;
+  const strokeWidthPx = spec.stroke ? emuToPx(spec.stroke.widthEmu, zoom) : 0;
   const inset = strokeWidthPx > 0 ? strokeWidthPx / 2 : 0;
   const x = rect.x + inset;
   const y = rect.y + inset;

@@ -162,7 +162,7 @@ describe("drawings selection handles", () => {
       cellSizePx: () => ({ width: 0, height: 0 }),
     };
 
-    const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 500, height: 500, dpr: 1 };
+    const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 500, height: 500, dpr: 1, zoom: 1 };
 
     let objects: DrawingObject[] = [
       {
@@ -335,7 +335,7 @@ describe("drawings selection handles", () => {
       cellSizePx: () => ({ width: 0, height: 0 }),
     };
 
-    const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 500, height: 500, dpr: 1 };
+    const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 500, height: 500, dpr: 1, zoom: 1 };
 
     const initial: DrawingObject = {
       id: 1,

@@ -339,8 +339,8 @@ export class DrawingInteractionController {
     // header areas. Drawings live in the cell area under the headers, so clamp pointer
     // coordinates to the cell-area boundary before converting to sheet-space (avoids jumps
     // when a drag crosses into the header region while scroll offsets are non-zero).
-    const clampedX = Math.max(x, paneLayout.headerOffsetX);
-    const clampedY = Math.max(y, paneLayout.headerOffsetY);
+    const clampedX = paneLayout.headerOffsetX > 0 ? Math.max(x, paneLayout.headerOffsetX) : x;
+    const clampedY = paneLayout.headerOffsetY > 0 ? Math.max(y, paneLayout.headerOffsetY) : y;
     const pointInFrozenCols = clampedX < paneLayout.frozenBoundaryX;
     const pointInFrozenRows = clampedY < paneLayout.frozenBoundaryY;
     const startSheetX = clampedX - paneLayout.headerOffsetX + (pointInFrozenCols ? 0 : viewport.scrollX);
@@ -453,6 +453,9 @@ export class DrawingInteractionController {
 
     if (isContextClick) {
       this.markDrawingContextClick(e);
+      // Allow the downstream `contextmenu` handler to open without initiating a
+      // drag/resize. (Don't stop propagation: right-click selection should still
+      // bubble so consumers can open their own context menus.)
       this.callbacks.requestFocus?.();
       return;
     }
@@ -530,8 +533,8 @@ export class DrawingInteractionController {
       const viewport = this.callbacks.getViewport();
       const zoom = sanitizeZoom(viewport.zoom);
       const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
-      const clampedX = Math.max(x, paneLayout.headerOffsetX);
-      const clampedY = Math.max(y, paneLayout.headerOffsetY);
+      const clampedX = paneLayout.headerOffsetX > 0 ? Math.max(x, paneLayout.headerOffsetX) : x;
+      const clampedY = paneLayout.headerOffsetY > 0 ? Math.max(y, paneLayout.headerOffsetY) : y;
       const pointInFrozenCols = clampedX < paneLayout.frozenBoundaryX;
       const pointInFrozenRows = clampedY < paneLayout.frozenBoundaryY;
       const sheetX = clampedX - paneLayout.headerOffsetX + (pointInFrozenCols ? 0 : viewport.scrollX);
@@ -593,8 +596,8 @@ export class DrawingInteractionController {
       const viewport = this.callbacks.getViewport();
       const zoom = sanitizeZoom(viewport.zoom);
       const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
-      const clampedX = Math.max(x, paneLayout.headerOffsetX);
-      const clampedY = Math.max(y, paneLayout.headerOffsetY);
+      const clampedX = paneLayout.headerOffsetX > 0 ? Math.max(x, paneLayout.headerOffsetX) : x;
+      const clampedY = paneLayout.headerOffsetY > 0 ? Math.max(y, paneLayout.headerOffsetY) : y;
       const pointInFrozenCols = clampedX < paneLayout.frozenBoundaryX;
       const pointInFrozenRows = clampedY < paneLayout.frozenBoundaryY;
       const sheetX = clampedX - paneLayout.headerOffsetX + (pointInFrozenCols ? 0 : viewport.scrollX);

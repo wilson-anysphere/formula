@@ -98,10 +98,10 @@ describe("DrawingOverlay images", () => {
   beforeEach(() => {
     // `DrawingOverlay` guards decode/prefetch behind a `typeof createImageBitmap === "function"` check.
     // These tests stub `bitmapCache.get` directly, but still need a defined `createImageBitmap` so the
-    // overlay takes the decode path.
+    // overlay takes the decode path in the default `node` Vitest environment.
     vi.stubGlobal(
       "createImageBitmap",
-      vi.fn(() => Promise.resolve({} as ImageBitmap)) as unknown as typeof createImageBitmap,
+      vi.fn(() => Promise.resolve({} as unknown as ImageBitmap)) as unknown as typeof createImageBitmap,
     );
   });
 
@@ -145,6 +145,9 @@ describe("DrawingOverlay images", () => {
     const bitmap2 = { tag: "bitmap2" } as unknown as ImageBitmap;
 
     const renderPromise = overlay.render([obj1, obj2], viewport);
+    // `await` of a thenable schedules a microtask to call `.then(...)`, so flush
+    // microtasks before asserting when the overlay started awaiting decode.
+    await Promise.resolve();
 
     expect(getMock).toHaveBeenCalledTimes(2);
     // `await`ing a thenable triggers `.then(...)` via a microtask; yield once so we

@@ -10841,8 +10841,11 @@ export class SpreadsheetApp {
   private chartAnchorToViewportRect(anchor: ChartRecord["anchor"]): { left: number; top: number; width: number; height: number } | null {
     if (!anchor || !("kind" in anchor)) return null;
 
-    const zoom = this.getZoom();
-    const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+    const z = (() => {
+      const raw = this.getZoom();
+      return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 1;
+    })();
+    const emuToViewportPx = (emu: number | null | undefined): number => emuToPx(emu ?? 0) * z;
 
     let left = 0;
     let top = 0;
@@ -10850,10 +10853,10 @@ export class SpreadsheetApp {
     let height = 0;
 
     if (anchor.kind === "absolute") {
-      left = emuToPx(anchor.xEmu) * z;
-      top = emuToPx(anchor.yEmu) * z;
-      width = emuToPx(anchor.cxEmu) * z;
-      height = emuToPx(anchor.cyEmu) * z;
+      left = emuToViewportPx(anchor.xEmu);
+      top = emuToViewportPx(anchor.yEmu);
+      width = emuToViewportPx(anchor.cxEmu);
+      height = emuToViewportPx(anchor.cyEmu);
     } else if (anchor.kind === "oneCell") {
       if (this.sharedGrid) {
         const headerRows = this.sharedHeaderRows();
@@ -10868,18 +10871,18 @@ export class SpreadsheetApp {
         left =
           this.sharedGrid.renderer.scroll.cols.positionOf(gridCol) -
           headerWidth +
-          emuToPx(anchor.fromColOffEmu ?? 0) * z;
+          emuToViewportPx(anchor.fromColOffEmu ?? 0);
         top =
           this.sharedGrid.renderer.scroll.rows.positionOf(gridRow) -
           headerHeight +
-          emuToPx(anchor.fromRowOffEmu ?? 0) * z;
-        width = emuToPx(anchor.cxEmu ?? 0) * z;
-        height = emuToPx(anchor.cyEmu ?? 0) * z;
+          emuToViewportPx(anchor.fromRowOffEmu ?? 0);
+        width = emuToViewportPx(anchor.cxEmu ?? 0);
+        height = emuToViewportPx(anchor.cyEmu ?? 0);
       } else {
-        left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToPx(anchor.fromColOffEmu) * z;
-        top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToPx(anchor.fromRowOffEmu) * z;
-        width = emuToPx(anchor.cxEmu) * z;
-        height = emuToPx(anchor.cyEmu) * z;
+        left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToViewportPx(anchor.fromColOffEmu);
+        top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToViewportPx(anchor.fromRowOffEmu);
+        width = emuToViewportPx(anchor.cxEmu);
+        height = emuToViewportPx(anchor.cyEmu);
       }
     } else if (anchor.kind === "twoCell") {
       if (this.sharedGrid) {
@@ -10898,27 +10901,27 @@ export class SpreadsheetApp {
         left =
           this.sharedGrid.renderer.scroll.cols.positionOf(fromCol) -
           headerWidth +
-          emuToPx(anchor.fromColOffEmu ?? 0) * z;
+          emuToViewportPx(anchor.fromColOffEmu ?? 0);
         top =
           this.sharedGrid.renderer.scroll.rows.positionOf(fromRow) -
           headerHeight +
-          emuToPx(anchor.fromRowOffEmu ?? 0) * z;
+          emuToViewportPx(anchor.fromRowOffEmu ?? 0);
         const right =
           this.sharedGrid.renderer.scroll.cols.positionOf(toCol) -
           headerWidth +
-          emuToPx(anchor.toColOffEmu ?? 0) * z;
+          emuToViewportPx(anchor.toColOffEmu ?? 0);
         const bottom =
           this.sharedGrid.renderer.scroll.rows.positionOf(toRow) -
           headerHeight +
-          emuToPx(anchor.toRowOffEmu ?? 0) * z;
+          emuToViewportPx(anchor.toRowOffEmu ?? 0);
 
         width = Math.max(0, right - left);
         height = Math.max(0, bottom - top);
       } else {
-        left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToPx(anchor.fromColOffEmu) * z;
-        top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToPx(anchor.fromRowOffEmu) * z;
-        const right = this.visualIndexForCol(anchor.toCol) * this.cellWidth + emuToPx(anchor.toColOffEmu) * z;
-        const bottom = this.visualIndexForRow(anchor.toRow) * this.cellHeight + emuToPx(anchor.toRowOffEmu) * z;
+        left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToViewportPx(anchor.fromColOffEmu);
+        top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToViewportPx(anchor.fromRowOffEmu);
+        const right = this.visualIndexForCol(anchor.toCol) * this.cellWidth + emuToViewportPx(anchor.toColOffEmu);
+        const bottom = this.visualIndexForRow(anchor.toRow) * this.cellHeight + emuToViewportPx(anchor.toRowOffEmu);
         width = Math.max(0, right - left);
         height = Math.max(0, bottom - top);
       }
@@ -11963,6 +11966,7 @@ export class SpreadsheetApp {
   } {
     const { frozenRows, frozenCols } = this.getFrozen();
 
+    const zoom = this.getZoom();
     const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
     if (this.sharedGrid) {
@@ -12045,6 +12049,10 @@ export class SpreadsheetApp {
    */
   getDrawingRenderViewport(sharedViewport?: GridViewportState): DrawingViewport {
     const layout = this.computeDrawingViewportLayout(sharedViewport);
+    const zoom = (() => {
+      const raw = this.getZoom();
+      return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 1;
+    })();
 
     // Reset any legacy positioning so the drawing canvas always covers the full grid root.
     this.drawingCanvas.style.left = "0px";
@@ -12059,7 +12067,7 @@ export class SpreadsheetApp {
       width: layout.rootWidth,
       height: layout.rootHeight,
       dpr: this.dpr,
-      zoom: this.getZoom(),
+      zoom,
       headerOffsetX: layout.headerOffsetX,
       headerOffsetY: layout.headerOffsetY,
       frozenRows: layout.frozenRows,
@@ -12087,6 +12095,10 @@ export class SpreadsheetApp {
    */
   getDrawingInteractionViewport(sharedViewport?: GridViewportState): DrawingViewport {
     const layout = this.computeDrawingViewportLayout(sharedViewport);
+    const zoom = (() => {
+      const raw = this.getZoom();
+      return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 1;
+    })();
     const scrollX = this.sharedGrid && sharedViewport ? sharedViewport.scrollX : this.scrollX;
     const scrollY = this.sharedGrid && sharedViewport ? sharedViewport.scrollY : this.scrollY;
     return {
@@ -12095,7 +12107,7 @@ export class SpreadsheetApp {
       width: layout.rootWidth,
       height: layout.rootHeight,
       dpr: this.dpr,
-      zoom: this.getZoom(),
+      zoom,
       headerOffsetX: layout.headerOffsetX,
       headerOffsetY: layout.headerOffsetY,
       frozenRows: layout.frozenRows,
