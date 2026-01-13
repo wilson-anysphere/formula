@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DocumentController } from "../../../document/documentController.js";
+import type { ImageStore } from "../../../drawings/types";
 import { SecondaryGridView } from "../secondaryGridView";
 
 function createMockCanvasContext(): CanvasRenderingContext2D {
@@ -70,6 +71,8 @@ describe("SecondaryGridView in-cell images", () => {
     vi.stubGlobal("createImageBitmap", vi.fn(async () => ({ width: 1, height: 1 } as any)));
   });
 
+  const images: ImageStore = { get: () => undefined, set: () => {} };
+
   it("forwards the image resolver to the underlying CanvasGridRenderer", async () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", { configurable: true, value: 120 });
@@ -93,6 +96,8 @@ describe("SecondaryGridView in-cell images", () => {
       showFormulas: () => false,
       getComputedValue: () => null,
       imageResolver,
+      getDrawingObjects: () => [],
+      images,
     });
 
     gridView.grid.renderer.renderImmediately();
@@ -105,4 +110,3 @@ describe("SecondaryGridView in-cell images", () => {
     container.remove();
   });
 });
-

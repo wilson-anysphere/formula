@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SecondaryGridView } from "../secondaryGridView";
 import { DocumentController } from "../../../document/documentController.js";
+import type { ImageStore } from "../../../drawings/types";
 
 function createMockCanvasContext(): CanvasRenderingContext2D {
   const noop = () => {};
@@ -59,6 +60,8 @@ describe("SecondaryGridView edit commit navigation", () => {
     };
   });
 
+  const images: ImageStore = { get: () => undefined, set: () => {} };
+
   it("commits cell edits and advances selection on Enter (A1 -> A2)", () => {
     const container = document.createElement("div");
     container.tabIndex = 0;
@@ -77,6 +80,8 @@ describe("SecondaryGridView edit commit navigation", () => {
       colCount: 10,
       showFormulas: () => false,
       getComputedValue: () => null,
+      getDrawingObjects: () => [],
+      images,
     });
 
     // Start editing A1 with an initial printable key press.
@@ -125,6 +130,8 @@ describe("SecondaryGridView edit commit navigation", () => {
       colCount: 10,
       showFormulas: () => false,
       getComputedValue: () => null,
+      getDrawingObjects: () => [],
+      images,
     });
 
     // Start editing A1.
@@ -185,6 +192,8 @@ describe("SecondaryGridView edit commit navigation", () => {
       colCount: 10,
       showFormulas: () => false,
       getComputedValue: () => null,
+      getDrawingObjects: () => [],
+      images,
     });
 
     // Start editing A1.

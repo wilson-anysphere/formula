@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SecondaryGridView } from "../secondaryGridView";
 import { DocumentController } from "../../../document/documentController.js";
+import type { ImageStore } from "../../../drawings/types";
 
 function createMockCanvasContext(): CanvasRenderingContext2D {
   const noop = () => {};
@@ -58,6 +59,8 @@ describe("SecondaryGridView sheet view axis overrides", () => {
     };
   });
 
+  const images: ImageStore = { get: () => undefined, set: () => {} };
+
   it("uses CanvasGridRenderer.applyAxisSizeOverrides (no per-index setters)", () => {
     const container = document.createElement("div");
     // Keep viewport 0-sized so the renderer doesn't do any expensive work in jsdom.
@@ -75,7 +78,9 @@ describe("SecondaryGridView sheet view axis overrides", () => {
       rowCount: 10_001,
       colCount: 201,
       showFormulas: () => false,
-      getComputedValue: () => null
+      getComputedValue: () => null,
+      getDrawingObjects: () => [],
+      images,
     });
 
     // Seed a sheet view with many overrides (bypass DocumentController deltas to keep the test
@@ -126,7 +131,9 @@ describe("SecondaryGridView sheet view axis overrides", () => {
       rowCount: 100,
       colCount: 50,
       showFormulas: () => false,
-      getComputedValue: () => null
+      getComputedValue: () => null,
+      getDrawingObjects: () => [],
+      images,
     });
 
     const renderer = gridView.grid.renderer;

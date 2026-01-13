@@ -8,6 +8,8 @@ import type {
 } from "@formula/grid";
 import type { CellRange as FillEngineRange } from "@formula/fill-engine";
 import type { DocumentController } from "../../document/documentController.js";
+import type { DrawingObject, ImageStore } from "../../drawings/types";
+import { DrawingOverlay, type GridGeometry, type Viewport as DrawingsViewport } from "../../drawings/overlay";
 import { showToast } from "../../extensions/ui.js";
 import { applyFillCommitToDocumentController } from "../../fill/applyFillCommit";
 import { CellEditorOverlay, type EditorCommit } from "../../editor/cellEditorOverlay.js";
@@ -55,6 +57,9 @@ export class SecondaryGridView {
   private readonly document: DocumentController;
   private readonly getSheetId: () => string;
   private readonly getComputedValue: (cell: { row: number; col: number }) => string | number | boolean | null;
+  private readonly getDrawingObjects: (sheetId: string) => DrawingObject[];
+  private readonly drawingsImages: ImageStore;
+  private readonly getSelectedDrawingId?: () => number | null;
   private readonly onRequestRefresh?: () => void;
   private readonly onEditStateChange?: (isEditing: boolean) => void;
   private readonly headerRows = 1;
@@ -78,6 +83,13 @@ export class SecondaryGridView {
 
   private readonly persistScroll?: (scroll: ScrollState) => void;
   private readonly persistZoom?: (zoom: number) => void;
+
+  private readonly drawingsCanvas: HTMLCanvasElement;
+  private readonly drawingsOverlay: DrawingOverlay;
+  private sheetViewFrozen: { rows: number; cols: number } = { rows: 0, cols: 0 };
+  private drawingsRenderInProgress = false;
+  private drawingsRenderQueued = false;
+  private drawingsRenderPromise: Promise<void> | null = null;
 
   constructor(options: {
     container: HTMLElement;
@@ -111,6 +123,18 @@ export class SecondaryGridView {
     persistZoom?: (zoom: number) => void;
     persistDebounceMs?: number;
     /**
+     * Drawing/picture objects for the currently visible sheet.
+     */
+    getDrawingObjects: (sheetId: string) => DrawingObject[];
+    /**
+     * Image store backing drawing objects.
+     */
+    images: ImageStore;
+    /**
+     * Optional hook to render selection handles on a selected drawing object.
+     */
+    getSelectedDrawingId?: () => number | null;
+    /**
      * Optional hook to refresh non-grid UI when the secondary pane mutates the document
      * (e.g. formula bar, charts, auditing overlays in the primary pane).
      */
@@ -127,6 +151,9 @@ export class SecondaryGridView {
     this.document = options.document;
     this.getSheetId = options.getSheetId;
     this.getComputedValue = options.getComputedValue;
+    this.getDrawingObjects = options.getDrawingObjects;
+    this.drawingsImages = options.images;
+    this.getSelectedDrawingId = options.getSelectedDrawingId;
     this.persistScroll = options.persistScroll;
     this.persistZoom = options.persistZoom;
     this.persistDebounceMs = options.persistDebounceMs ?? 150;
@@ -145,12 +172,18 @@ export class SecondaryGridView {
     contentCanvas.className = "grid-canvas grid-canvas--content";
     contentCanvas.setAttribute("aria-hidden", "true");
 
+    const drawingsCanvas = document.createElement("canvas");
+    drawingsCanvas.className = "grid-canvas grid-canvas--drawings";
+    drawingsCanvas.setAttribute("aria-hidden", "true");
+    drawingsCanvas.style.pointerEvents = "none";
+
     const selectionCanvas = document.createElement("canvas");
     selectionCanvas.className = "grid-canvas grid-canvas--selection";
     selectionCanvas.setAttribute("aria-hidden", "true");
 
     this.container.appendChild(gridCanvas);
     this.container.appendChild(contentCanvas);
+    this.container.appendChild(drawingsCanvas);
     this.container.appendChild(selectionCanvas);
 
     const vTrack = document.createElement("div");
@@ -263,6 +296,7 @@ export class SecondaryGridView {
           }
 
           this.repositionEditor();
+          void this.renderDrawings();
           externalCallbacks.onScroll?.(scroll, viewport);
         },
         onAxisSizeChange: (change) => {
@@ -295,23 +329,29 @@ export class SecondaryGridView {
     // CanvasGridRenderer caches decoded ImageBitmaps per imageId. When the underlying
     // workbook images change (e.g. applyState restore or future backend hydration),
     // invalidate cached bitmaps so the grid re-resolves.
+    //
+    // Additionally, re-render the drawings overlay when drawings/images change so pictures
+    // inserted into the sheet show up in the secondary pane without requiring a scroll.
     const unsubscribeImages = this.document.on("change", (payload: any) => {
       const source = typeof payload?.source === "string" ? payload.source : "";
       if (source === "applyState") {
         this.grid.renderer.clearImageCache?.();
-        return;
+      } else {
+        const deltas = Array.isArray(payload?.imageDeltas)
+          ? payload.imageDeltas
+          : Array.isArray(payload?.imagesDeltas)
+            ? payload.imagesDeltas
+            : [];
+        for (const delta of deltas) {
+          const imageId =
+            typeof delta?.imageId === "string" ? delta.imageId : typeof delta?.id === "string" ? delta.id : null;
+          if (!imageId) continue;
+          this.grid.renderer.invalidateImage?.(imageId);
+        }
       }
 
-      const deltas = Array.isArray(payload?.imageDeltas)
-        ? payload.imageDeltas
-        : Array.isArray(payload?.imagesDeltas)
-          ? payload.imagesDeltas
-          : [];
-      if (deltas.length === 0) return;
-      for (const delta of deltas) {
-        const imageId = typeof delta?.imageId === "string" ? delta.imageId : typeof delta?.id === "string" ? delta.id : null;
-        if (!imageId) continue;
-        this.grid.renderer.invalidateImage?.(imageId);
+      if (this.documentChangeAffectsDrawings(payload)) {
+        void this.renderDrawings();
       }
     });
     this.disposeFns.push(() => unsubscribeImages());
@@ -323,6 +363,31 @@ export class SecondaryGridView {
     // Match SpreadsheetApp header sizing so cell hit targets line up.
     this.grid.renderer.setColWidth(0, 48);
     this.grid.renderer.setRowHeight(0, 24);
+
+    this.drawingsCanvas = drawingsCanvas;
+    const geom: GridGeometry = {
+      cellOriginPx: (cell) => {
+        const headerWidth =
+          this.headerCols > 0 ? this.grid.renderer.scroll.cols.totalSize(this.headerCols) : 0;
+        const headerHeight =
+          this.headerRows > 0 ? this.grid.renderer.scroll.rows.totalSize(this.headerRows) : 0;
+        const gridRow = cell.row + this.headerRows;
+        const gridCol = cell.col + this.headerCols;
+        return {
+          x: this.grid.renderer.scroll.cols.positionOf(gridCol) - headerWidth,
+          y: this.grid.renderer.scroll.rows.positionOf(gridRow) - headerHeight,
+        };
+      },
+      cellSizePx: (cell) => {
+        const gridRow = cell.row + this.headerRows;
+        const gridCol = cell.col + this.headerCols;
+        return {
+          width: this.grid.renderer.getColWidth(gridCol),
+          height: this.grid.renderer.getRowHeight(gridRow),
+        };
+      },
+    };
+    this.drawingsOverlay = new DrawingOverlay(drawingsCanvas, this.drawingsImages, geom);
 
     // Initial sizing (ResizeObserver will keep it updated).
     this.resizeToContainer();
@@ -347,6 +412,7 @@ export class SecondaryGridView {
       this.container.dataset.scrollX = String(scroll.x);
       this.container.dataset.scrollY = String(scroll.y);
     }
+    void this.renderDrawings();
 
     // Re-apply view state when the document emits sheet view deltas (freeze panes, row/col sizes).
     const unsubscribeSheetView = this.document.on("change", (payload: any) => {
@@ -452,6 +518,8 @@ export class SecondaryGridView {
     const height = this.container.clientHeight;
     const dpr = window.devicePixelRatio || 1;
     this.grid.resize(width, height, dpr);
+    this.drawingsOverlay.resize(this.getDrawingsViewport({ width, height, dpr }));
+    void this.renderDrawings();
   }
 
   /**
@@ -482,6 +550,7 @@ export class SecondaryGridView {
 
     const frozenRows = normalizeFrozen(view?.frozenRows, maxRows);
     const frozenCols = normalizeFrozen(view?.frozenCols, maxCols);
+    this.sheetViewFrozen = { rows: frozenRows, cols: frozenCols };
     this.grid.renderer.setFrozen(this.headerRows + frozenRows, this.headerCols + frozenCols);
 
     const zoom = this.grid.renderer.getZoom();
@@ -530,6 +599,7 @@ export class SecondaryGridView {
     this.container.dataset.scrollX = String(scroll.x);
     this.container.dataset.scrollY = String(scroll.y);
     this.repositionEditor();
+    void this.renderDrawings();
   }
 
   private onAxisSizeChange(change: GridAxisSizeChange): void {
@@ -789,5 +859,91 @@ export class SecondaryGridView {
       this.persistZoom?.(this.pendingZoom);
       this.pendingZoom = null;
     }
+  }
+
+  private documentChangeAffectsDrawings(payload: any): boolean {
+    if (!payload || typeof payload !== "object") return false;
+
+    const source = typeof payload?.source === "string" ? payload.source : "";
+    // Applying a new document snapshot can replace the drawing layer entirely.
+    if (source === "applyState") return true;
+    // Some integrations may publish drawings/images updates with a dedicated source tag.
+    if (source === "drawings" || source === "images") return true;
+
+    const sheetId = this.getSheetId();
+    const matchesSheet = (delta: any): boolean => String(delta?.sheetId ?? "") === sheetId;
+    const touchesSheet = (deltas: any): boolean => Array.isArray(deltas) && deltas.some(matchesSheet);
+
+    if (
+      touchesSheet(payload?.drawingsDeltas) ||
+      touchesSheet(payload?.drawingDeltas) ||
+      touchesSheet(payload?.sheetDrawingsDeltas) ||
+      touchesSheet(payload?.sheetDrawingDeltas)
+    ) {
+      return true;
+    }
+
+    // Image updates may be workbook-wide; re-render so any referenced bitmaps refresh.
+    if (Array.isArray(payload?.imagesDeltas) || Array.isArray(payload?.imageDeltas)) return true;
+
+    if (payload?.drawingsChanged === true || payload?.imagesChanged === true) return true;
+
+    return false;
+  }
+
+  private getDrawingsViewport(override?: { width: number; height: number; dpr: number }): DrawingsViewport {
+    const scroll = this.grid.getScroll();
+    const width = override?.width ?? this.container.clientWidth;
+    const height = override?.height ?? this.container.clientHeight;
+    const dpr = override?.dpr ?? (window.devicePixelRatio || 1);
+    const zoom = this.grid.renderer.getZoom();
+    const viewport = this.grid.renderer.scroll.getViewportState();
+    const headerOffsetX =
+      this.headerCols > 0 ? this.grid.renderer.scroll.cols.totalSize(this.headerCols) : 0;
+    const headerOffsetY =
+      this.headerRows > 0 ? this.grid.renderer.scroll.rows.totalSize(this.headerRows) : 0;
+    return {
+      scrollX: scroll.x,
+      scrollY: scroll.y,
+      width,
+      height,
+      dpr,
+      zoom,
+      frozenRows: this.sheetViewFrozen.rows,
+      frozenCols: this.sheetViewFrozen.cols,
+      headerOffsetX,
+      headerOffsetY,
+      frozenWidthPx: viewport.frozenWidth,
+      frozenHeightPx: viewport.frozenHeight,
+    };
+  }
+
+  private async renderDrawings(): Promise<void> {
+    if (this.drawingsRenderInProgress) {
+      this.drawingsRenderQueued = true;
+      return this.drawingsRenderPromise ?? Promise.resolve();
+    }
+
+    this.drawingsRenderInProgress = true;
+    const run = (async () => {
+      try {
+        do {
+          this.drawingsRenderQueued = false;
+          const sheetId = this.getSheetId();
+          const objects = this.getDrawingObjects(sheetId);
+          const viewport = this.getDrawingsViewport();
+          const selectedId = this.getSelectedDrawingId?.() ?? null;
+          this.drawingsOverlay.setSelectedId(selectedId);
+          await this.drawingsOverlay.render(objects, viewport);
+        } while (this.drawingsRenderQueued);
+      } catch {
+        // Best-effort: drawing overlay should never break grid interactions.
+      } finally {
+        this.drawingsRenderInProgress = false;
+        this.drawingsRenderPromise = null;
+      }
+    })();
+    this.drawingsRenderPromise = run;
+    return run;
   }
 }

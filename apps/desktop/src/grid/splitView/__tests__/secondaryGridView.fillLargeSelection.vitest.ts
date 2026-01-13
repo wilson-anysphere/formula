@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SecondaryGridView } from "../secondaryGridView";
 import { DocumentController } from "../../../document/documentController.js";
+import type { ImageStore } from "../../../drawings/types";
 
 function createMockCanvasContext(): CanvasRenderingContext2D {
   const noop = () => {};
@@ -59,6 +60,8 @@ describe("SecondaryGridView fill large selections", () => {
     };
   });
 
+  const images: ImageStore = { get: () => undefined, set: () => {} };
+
   it("does not apply extremely large fill commits", async () => {
     const container = document.createElement("div");
     // Keep viewport 0-sized so the renderer doesn't do any expensive work in jsdom.
@@ -77,6 +80,8 @@ describe("SecondaryGridView fill large selections", () => {
       colCount: 201,
       showFormulas: () => false,
       getComputedValue: () => null,
+      getDrawingObjects: () => [],
+      images,
       onSelectionChange: selectionChange,
       onSelectionRangeChange: selectionChange,
     });
@@ -111,4 +116,3 @@ describe("SecondaryGridView fill large selections", () => {
     container.remove();
   });
 });
-

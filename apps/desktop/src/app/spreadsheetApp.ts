@@ -4870,6 +4870,36 @@ export class SpreadsheetApp {
     return this.sharedGridImageResolver;
   }
 
+  /**
+   * Returns drawing-layer objects (pictures, charts, shapes) for a given sheet.
+   *
+   * This is used by the split-view secondary pane so drawings render in both panes.
+   */
+  getDrawingObjects(sheetId: string): DrawingObject[] {
+    const id = String(sheetId ?? "");
+    if (!id) return [];
+    return this.listDrawingObjectsForSheet(id);
+  }
+
+  /**
+   * Returns the ImageStore used by the drawings overlay (picture bitmaps).
+   *
+   * This is used by the split-view secondary pane so it can render the same pictures
+   * as the primary grid.
+   */
+  getDrawingImages(): ImageStore {
+    return this.drawingImages;
+  }
+
+  /**
+   * Best-effort selected drawing id (used to render selection handles in the drawings overlay).
+   *
+   * Today this mirrors chart selection when available.
+   */
+  getSelectedDrawingId(): number | null {
+    return this.selectedChartId ? this.chartIdToDrawingId(this.selectedChartId) : null;
+  }
+
   getGridLimits(): GridLimits {
     return { ...this.limits };
   }
@@ -8756,7 +8786,7 @@ export class SpreadsheetApp {
     return false;
   }
 
-  private listDrawingObjectsForSheet(): DrawingObject[] {
+  private listDrawingObjectsForSheet(sheetId: string = this.sheetId): DrawingObject[] {
     const doc = this.document as any;
     const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
 
@@ -8765,12 +8795,12 @@ export class SpreadsheetApp {
     // tests (and older builds) monkeypatch it in after SpreadsheetApp construction. Include the
     // getter function identity in the cache key so we don't permanently cache an empty list
     // from the pre-monkeypatch state.
-    if (cached && cached.sheetId === this.sheetId && cached.source === drawingsGetter) return cached.objects;
+    if (cached && cached.sheetId === sheetId && cached.source === drawingsGetter) return cached.objects;
 
     let raw: unknown = null;
     if (drawingsGetter) {
       try {
-        raw = drawingsGetter.call(doc, this.sheetId);
+        raw = drawingsGetter.call(doc, sheetId);
       } catch {
         raw = null;
       }
@@ -8816,7 +8846,7 @@ export class SpreadsheetApp {
       return [];
     })();
 
-    this.drawingObjectsCache = { sheetId: this.sheetId, objects, source: drawingsGetter };
+    this.drawingObjectsCache = { sheetId, objects, source: drawingsGetter };
     return objects;
   }
 

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SecondaryGridView } from "../secondaryGridView";
 import { DocumentController } from "../../../document/documentController.js";
+import type { ImageStore } from "../../../drawings/types";
 
 function createMockCanvasContext(): CanvasRenderingContext2D {
   const noop = () => {};
@@ -59,6 +60,8 @@ describe("SecondaryGridView edit commits", () => {
     };
   });
 
+  const images: ImageStore = { get: () => undefined, set: () => {} };
+
   it("advances selection after an Enter commit", () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", { configurable: true, value: 400 });
@@ -75,6 +78,8 @@ describe("SecondaryGridView edit commits", () => {
       colCount: 11,
       showFormulas: () => false,
       getComputedValue: () => null,
+      getDrawingObjects: () => [],
+      images,
       onEditStateChange: editState,
     });
 
@@ -113,6 +118,8 @@ describe("SecondaryGridView edit commits", () => {
       colCount: 11,
       showFormulas: () => false,
       getComputedValue: () => null,
+      getDrawingObjects: () => [],
+      images,
       onEditStateChange: editState,
     });
 
