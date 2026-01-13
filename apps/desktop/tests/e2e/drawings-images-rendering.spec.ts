@@ -276,6 +276,7 @@ test.describe("drawing + image rendering regressions", () => {
     const fixture = loadInCellImageFixture();
 
     await gotoDesktop(page, "/?grid=shared");
+    await expect(page.locator("canvas.grid-canvas--chart")).toHaveCount(1);
     await expect(page.getByTestId("drawing-layer-canvas")).toHaveCount(1);
 
     await page.evaluate(async ({ fixture }) => {
