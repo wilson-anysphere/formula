@@ -10,7 +10,13 @@ import {
   type CellStructuralConflict,
   type FormulaConflict,
 } from "@formula/collab-conflicts";
-import { ensureWorkbookSchema, getWorkbookRoots } from "@formula/collab-workbook";
+import {
+  createMetadataManagerForSessionWithPermissions as createMetadataManagerForSessionWithPermissionsImpl,
+  createNamedRangeManagerForSessionWithPermissions as createNamedRangeManagerForSessionWithPermissionsImpl,
+  createSheetManagerForSessionWithPermissions as createSheetManagerForSessionWithPermissionsImpl,
+  ensureWorkbookSchema,
+  getWorkbookRoots,
+} from "@formula/collab-workbook";
 import {
   decryptCellPlaintext,
   encryptCellPlaintext,
@@ -2707,6 +2713,18 @@ export function createCollabSession(options: CollabSessionOptions = {}): CollabS
 
 // Backwards-compatible alias (Task 133 naming).
 export const createSession = createCollabSession;
+
+export function createSheetManagerForSessionWithPermissions(session: CollabSession) {
+  return createSheetManagerForSessionWithPermissionsImpl(session);
+}
+
+export function createMetadataManagerForSessionWithPermissions(session: CollabSession) {
+  return createMetadataManagerForSessionWithPermissionsImpl(session);
+}
+
+export function createNamedRangeManagerForSessionWithPermissions(session: CollabSession) {
+  return createNamedRangeManagerForSessionWithPermissionsImpl(session);
+}
 
 export type DocumentControllerBinder = { destroy: () => void };
 
