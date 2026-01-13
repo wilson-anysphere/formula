@@ -746,10 +746,12 @@ export class CanvasGridRenderer {
   }
 
   setScroll(scrollX: number, scrollY: number): void {
+    const before = this.scroll.getScroll();
     this.scroll.setScroll(scrollX, scrollY);
     const aligned = this.alignScrollToDevicePixels(this.scroll.getScroll());
     this.scroll.setScroll(aligned.x, aligned.y);
-    this.invalidateForScroll();
+    const after = this.scroll.getScroll();
+    if (before.x !== after.x || before.y !== after.y) this.invalidateForScroll();
   }
 
   scrollBy(deltaX: number, deltaY: number): void {
