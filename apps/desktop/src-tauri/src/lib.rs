@@ -18,6 +18,7 @@ pub mod ipc_origin;
 pub mod ipc_limits;
 pub mod macro_trust;
 pub mod macros;
+pub mod network_limits;
 pub mod open_file;
 pub mod open_file_ipc;
 pub mod oauth_redirect_ipc;

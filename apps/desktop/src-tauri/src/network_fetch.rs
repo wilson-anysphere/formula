@@ -1,12 +1,5 @@
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-
-/// Maximum number of bytes the backend will read from a `network_fetch` response body.
-///
-/// This is a defense-in-depth guard against compromised WebViews/extensions attempting to OOM the
-/// desktop backend by requesting very large responses.
-pub const MAX_NETWORK_FETCH_RESPONSE_BYTES: u64 = 5 * 1024 * 1024; // 5 MiB
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -69,42 +62,6 @@ fn apply_request_init(
     Ok(builder)
 }
 
-async fn read_response_body_limited(
-    response: reqwest::Response,
-    max_bytes: u64,
-) -> Result<Vec<u8>, String> {
-    let max_bytes_usize = usize::try_from(max_bytes)
-        .map_err(|_| "network_fetch response size limit exceeds platform limits".to_string())?;
-
-    if let Some(content_length) = response.content_length() {
-        if content_length > max_bytes {
-            return Err(format!(
-                "network_fetch response too large: content length {content_length} exceeds limit of {max_bytes} bytes"
-            ));
-        }
-    }
-
-    let mut body = Vec::new();
-    if let Some(content_length) = response.content_length() {
-        body.reserve(
-            usize::try_from(content_length).unwrap_or(max_bytes_usize).min(max_bytes_usize),
-        );
-    }
-
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| e.to_string())?;
-        if body.len().saturating_add(chunk.len()) > max_bytes_usize {
-            return Err(format!(
-                "network_fetch response too large: body exceeded limit of {max_bytes} bytes"
-            ));
-        }
-        body.extend_from_slice(&chunk);
-    }
-
-    Ok(body)
-}
-
 /// Core implementation of the `network_fetch` IPC command.
 ///
 /// This is intentionally kept independent of Tauri so it can be unit tested without the `desktop`
@@ -138,7 +95,7 @@ pub async fn network_fetch_impl(url: &str, init: &JsonValue) -> Result<NetworkFe
     let mut req = client.request(method, parsed_url);
     req = apply_request_init(req, init)?;
 
-    let response = req.send().await.map_err(|e| e.to_string())?;
+    let mut response = req.send().await.map_err(|e| e.to_string())?;
     let status = response.status();
     let status_text = status.canonical_reason().unwrap_or("").to_string();
     let final_url = response.url().to_string();
@@ -154,7 +111,12 @@ pub async fn network_fetch_impl(url: &str, init: &JsonValue) -> Result<NetworkFe
         })
         .collect::<Vec<_>>();
 
-    let bytes = read_response_body_limited(response, MAX_NETWORK_FETCH_RESPONSE_BYTES).await?;
+    let bytes = crate::network_limits::read_response_body_with_limit(
+        &mut response,
+        crate::network_limits::NETWORK_FETCH_MAX_BODY_BYTES,
+        "network_fetch",
+    )
+    .await?;
     let body_text = String::from_utf8_lossy(&bytes).to_string();
 
     Ok(NetworkFetchResult {
@@ -219,17 +181,21 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_large_response_without_content_length() {
-        let body = vec![b'a'; (MAX_NETWORK_FETCH_RESPONSE_BYTES as usize) + 1];
+        let body = vec![b'a'; crate::network_limits::NETWORK_FETCH_MAX_BODY_BYTES + 1];
         let url = spawn_server(body, false).await;
 
         let err = network_fetch_impl(&url, &JsonValue::Null).await.unwrap_err();
         assert!(
-            err.contains("response too large"),
+            err.contains("Response body too large"),
             "expected error to mention response too large; got: {err}"
         );
         assert!(
-            err.contains(&MAX_NETWORK_FETCH_RESPONSE_BYTES.to_string()),
+            err.contains(&crate::network_limits::NETWORK_FETCH_MAX_BODY_BYTES.to_string()),
             "expected error to include byte limit; got: {err}"
+        );
+        assert!(
+            err.contains(&(crate::network_limits::NETWORK_FETCH_MAX_BODY_BYTES + 1).to_string()),
+            "expected error to include observed size; got: {err}"
         );
     }
 
@@ -252,4 +218,3 @@ mod tests {
         );
     }
 }
-

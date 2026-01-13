@@ -5116,14 +5116,18 @@ pub async fn marketplace_search(
         .redirect(reqwest::redirect::Policy::limited(10))
         .build()
         .map_err(|e| e.to_string())?;
-    let response = client.get(url).send().await.map_err(|e| e.to_string())?;
+    let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;
     if !response.status().is_success() {
         return Err(format!("Marketplace search failed ({})", response.status()));
     }
-    response
-        .json::<JsonValue>()
-        .await
-        .map_err(|e| e.to_string())
+
+    let bytes = crate::network_limits::read_response_body_with_limit(
+        &mut response,
+        crate::network_limits::MARKETPLACE_JSON_MAX_BODY_BYTES,
+        "marketplace_search",
+    )
+    .await?;
+    serde_json::from_slice::<JsonValue>(&bytes).map_err(|e| e.to_string())
 }
 
 #[cfg(feature = "desktop")]
@@ -5157,7 +5161,7 @@ pub async fn marketplace_get_extension(
         .redirect(reqwest::redirect::Policy::limited(10))
         .build()
         .map_err(|e| e.to_string())?;
-    let response = client.get(url).send().await.map_err(|e| e.to_string())?;
+    let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;
     if response.status().as_u16() == 404 {
         return Ok(None);
     }
@@ -5167,10 +5171,13 @@ pub async fn marketplace_get_extension(
             response.status()
         ));
     }
-    let json = response
-        .json::<JsonValue>()
-        .await
-        .map_err(|e| e.to_string())?;
+    let bytes = crate::network_limits::read_response_body_with_limit(
+        &mut response,
+        crate::network_limits::MARKETPLACE_JSON_MAX_BODY_BYTES,
+        "marketplace_get_extension",
+    )
+    .await?;
+    let json = serde_json::from_slice::<JsonValue>(&bytes).map_err(|e| e.to_string())?;
     Ok(Some(json))
 }
 
@@ -5220,19 +5227,10 @@ fn marketplace_bounded_header_string(
 
 #[cfg(any(feature = "desktop", test))]
 async fn marketplace_download_payload_from_response(
-    response: reqwest::Response,
+    mut response: reqwest::Response,
 ) -> Result<MarketplaceDownloadPayload, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     use crate::resource_limits::MAX_MARKETPLACE_PACKAGE_BYTES;
-    use futures_util::StreamExt;
-
-    if let Some(len) = response.content_length() {
-        if len > MAX_MARKETPLACE_PACKAGE_BYTES as u64 {
-            return Err(format!(
-                "Marketplace package bytes (Content-Length={len}) exceeded MAX_MARKETPLACE_PACKAGE_BYTES ({MAX_MARKETPLACE_PACKAGE_BYTES} bytes)"
-            ));
-        }
-    }
 
     let (signature_base64, sha256, format_version, publisher, publisher_key_id, scan_status, files_sha256) =
         {
@@ -5260,20 +5258,12 @@ async fn marketplace_download_payload_from_response(
             )
         };
 
-    let mut bytes = Vec::new();
-    let mut seen = 0usize;
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| e.to_string())?;
-        let next = seen.saturating_add(chunk.len());
-        if next > MAX_MARKETPLACE_PACKAGE_BYTES {
-            return Err(format!(
-                "Marketplace package bytes exceeded MAX_MARKETPLACE_PACKAGE_BYTES ({MAX_MARKETPLACE_PACKAGE_BYTES} bytes)"
-            ));
-        }
-        seen = next;
-        bytes.extend_from_slice(&chunk);
-    }
+    let bytes = crate::network_limits::read_response_body_with_limit(
+        &mut response,
+        MAX_MARKETPLACE_PACKAGE_BYTES,
+        "marketplace_download_package",
+    )
+    .await?;
 
     let bytes_base64 = STANDARD.encode(&bytes);
 
@@ -5314,7 +5304,7 @@ pub async fn marketplace_download_package(
         .redirect(reqwest::redirect::Policy::limited(10))
         .build()
         .map_err(|e| e.to_string())?;
-    let response = client.get(url).send().await.map_err(|e| e.to_string())?;
+    let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;
     if response.status().as_u16() == 404 {
         return Ok(None);
     }
@@ -5383,7 +5373,15 @@ mod tests {
             .await
             .expect_err("expected package byte limit error");
         assert!(
-            err.contains("MAX_MARKETPLACE_PACKAGE_BYTES"),
+            err.contains("Response body too large for marketplace_download_package"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            err.contains(&MAX_MARKETPLACE_PACKAGE_BYTES.to_string()),
+            "unexpected error: {err}"
+        );
+        assert!(
+            err.contains(&(MAX_MARKETPLACE_PACKAGE_BYTES + 1).to_string()),
             "unexpected error: {err}"
         );
 
