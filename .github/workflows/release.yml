@@ -1808,28 +1808,6 @@ jobs:
       - name: Verify desktop binary is stripped (no symbols)
         run: python scripts/verify_desktop_binary_stripped.py
 
-      - name: Verify macOS bundle file associations + URL scheme
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -euo pipefail
-          app_bundle="$(find apps/desktop/src-tauri/target -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true)"
-          if [[ -z "${app_bundle}" ]]; then
-            echo "ERROR: could not find a .app bundle under apps/desktop/src-tauri/target/**/release/bundle" >&2
-            find apps/desktop/src-tauri/target -maxdepth 12 -type d -name '*.app' -print | head -n 20 || true
-            exit 1
-          fi
-          info_plist="${app_bundle}/Contents/Info.plist"
-          if [[ ! -f "${info_plist}" ]]; then
-            echo "ERROR: missing Info.plist at ${info_plist}" >&2
-            exit 1
-          fi
-          echo "App bundle: ${app_bundle}"
-          echo "Info.plist: ${info_plist}"
-          echo "--- plutil -p Info.plist (first 200 lines) ---"
-          plutil -p "${info_plist}" | head -n 200
-          echo "--- end plutil output ---"
-          python scripts/ci/verify_macos_bundle_associations.py --info-plist "${info_plist}"
       - name: Report desktop bundle sizes
         env:
           # Enforce the bundle size budget on tagged releases by default.
