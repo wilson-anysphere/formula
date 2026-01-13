@@ -301,6 +301,26 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
         for row in top_any_parts[:10]:
             lines.append(f"| {row['part']} | {row['count']} |")
         lines.append("")
+
+    top_critical_groups = summary.get("top_diff_part_groups_critical") or []
+    if top_critical_groups:
+        lines.append("## Top diff part groups (CRITICAL)")
+        lines.append("")
+        lines.append("| Group | Critical diffs |")
+        lines.append("|---|---:|")
+        for row in top_critical_groups[:10]:
+            lines.append(f"| {row['group']} | {row['count']} |")
+        lines.append("")
+
+    top_any_groups = summary.get("top_diff_part_groups_total") or []
+    if top_any_groups:
+        lines.append("## Top diff part groups (all severities)")
+        lines.append("")
+        lines.append("| Group | Total diffs |")
+        lines.append("|---|---:|")
+        for row in top_any_groups[:10]:
+            lines.append(f"| {row['group']} | {row['count']} |")
+        lines.append("")
     lines.append("## Per-workbook")
     lines.append("")
     lines.append("| Workbook | Open | Calculate | Render | Round-trip | Diff (C/W/I) | Failure category |")
@@ -472,6 +492,8 @@ def main() -> int:
     diff_totals: Counter[str] = Counter()
     diff_part_critical: Counter[str] = Counter()
     diff_part_total: Counter[str] = Counter()
+    diff_part_group_critical: Counter[str] = Counter()
+    diff_part_group_total: Counter[str] = Counter()
     passing_cellxfs: list[int] = []
     failing_cellxfs: list[int] = []
     failing_cellxfs_by_workbook: list[tuple[int, str]] = []
@@ -529,6 +551,9 @@ def main() -> int:
         diff_step = (r.get("steps") or {}).get("diff") or {}
         diff_details = diff_step.get("details") or {}
         parts_with_diffs = diff_details.get("parts_with_diffs")
+        part_groups = diff_details.get("part_groups") or {}
+        if not isinstance(part_groups, dict):
+            part_groups = {}
         if isinstance(parts_with_diffs, list):
             for row in parts_with_diffs:
                 if not isinstance(row, dict):
@@ -536,14 +561,23 @@ def main() -> int:
                 part = row.get("part")
                 if not isinstance(part, str) or not part:
                     continue
+                group = row.get("group")
+                if not isinstance(group, str) or not group:
+                    group = part_groups.get(part)
+                if not isinstance(group, str) or not group:
+                    group = None
                 critical = row.get("critical")
                 warning = row.get("warning")
                 info = row.get("info")
                 total = row.get("total")
                 if isinstance(critical, int):
                     diff_part_critical[part] += critical
+                    if group is not None:
+                        diff_part_group_critical[group] += critical
                 if isinstance(total, int):
                     diff_part_total[part] += total
+                    if group is not None:
+                        diff_part_group_total[group] += total
                 else:
                     # Back-compat: older schemas might not provide `total`.
                     part_sum = 0
@@ -552,6 +586,8 @@ def main() -> int:
                             part_sum += v
                     if part_sum:
                         diff_part_total[part] += part_sum
+                        if group is not None:
+                            diff_part_group_total[group] += part_sum
 
     top_diff_parts_critical = [
         {"part": part, "count": count}
@@ -563,6 +599,21 @@ def main() -> int:
     top_diff_parts_total = [
         {"part": part, "count": count}
         for part, count in sorted(diff_part_total.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+        if count > 0
+    ]
+
+    top_diff_part_groups_critical = [
+        {"group": group, "count": count}
+        for group, count in sorted(
+            diff_part_group_critical.items(), key=lambda kv: (-kv[1], kv[0])
+        )[:10]
+        if count > 0
+    ]
+    top_diff_part_groups_total = [
+        {"group": group, "count": count}
+        for group, count in sorted(
+            diff_part_group_total.items(), key=lambda kv: (-kv[1], kv[0])
+        )[:10]
         if count > 0
     ]
 
@@ -612,6 +663,8 @@ def main() -> int:
         "diff_totals": dict(diff_totals),
         "top_diff_parts_critical": top_diff_parts_critical,
         "top_diff_parts_total": top_diff_parts_total,
+        "top_diff_part_groups_critical": top_diff_part_groups_critical,
+        "top_diff_part_groups_total": top_diff_part_groups_total,
         "top_functions_in_failures": [
             {"function": fn, "count": cnt}
             for fn, cnt in failing_function_counts.most_common(50)
