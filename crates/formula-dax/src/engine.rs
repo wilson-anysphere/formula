@@ -16,6 +16,7 @@ use crate::model::{
 };
 use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::value::Value;
+use ordered_float::OrderedFloat;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
@@ -665,9 +666,7 @@ impl DaxEngine {
             }
             "SWITCH" => {
                 if args.len() < 3 {
-                    return Err(DaxError::Eval(
-                        "SWITCH expects at least 3 arguments".into(),
-                    ));
+                    return Err(DaxError::Eval("SWITCH expects at least 3 arguments".into()));
                 }
 
                 // DAX evaluates the expression once, then compares it against each value in
@@ -988,13 +987,12 @@ impl DaxEngine {
                         ));
                     }
 
-                    let search_idx =
-                        table_ref
-                            .column_idx(search_column)
-                            .ok_or_else(|| DaxError::UnknownColumn {
-                                table: search_table.clone(),
-                                column: search_column.clone(),
-                            })?;
+                    let search_idx = table_ref.column_idx(search_column).ok_or_else(|| {
+                        DaxError::UnknownColumn {
+                            table: search_table.clone(),
+                            column: search_column.clone(),
+                        }
+                    })?;
                     search_cols.push(search_idx);
 
                     let search_value =
@@ -1009,7 +1007,9 @@ impl DaxEngine {
                 for row in candidate_rows {
                     let mut matches = true;
                     for (col_idx, search_value) in search_cols.iter().zip(search_values.iter()) {
-                        let cell_value = table_ref.value_by_idx(row, *col_idx).unwrap_or(Value::Blank);
+                        let cell_value = table_ref
+                            .value_by_idx(row, *col_idx)
+                            .unwrap_or(Value::Blank);
                         if !compare_values(&BinaryOp::Equals, &cell_value, search_value)? {
                             matches = false;
                             break;
@@ -1035,8 +1035,9 @@ impl DaxEngine {
                         // DAX: allow duplicates only when the result values are unambiguous.
                         let mut non_blank: Option<Value> = None;
                         for &row in &matched_rows {
-                            let value =
-                                table_ref.value_by_idx(row, result_idx).unwrap_or(Value::Blank);
+                            let value = table_ref
+                                .value_by_idx(row, result_idx)
+                                .unwrap_or(Value::Blank);
                             if value.is_blank() {
                                 continue;
                             }
@@ -1073,20 +1074,119 @@ impl DaxEngine {
                     String::new()
                 };
 
-                // Ordering arguments are accepted for compatibility, but are not yet implemented.
                 let table_result = self.eval_table(model, table_expr, filter, row_ctx, env)?;
+
+                let descending = if args.len() >= 5 {
+                    let order_arg = &args[4];
+                    let order = match order_arg {
+                        // DAX passes ASC/DESC as bare identifiers, which we parse as `TableName`.
+                        Expr::TableName(name) => name.clone(),
+                        _ => {
+                            let v = self.eval_scalar(model, order_arg, filter, row_ctx, env)?;
+                            coerce_text(&v).into_owned()
+                        }
+                    };
+                    match order.to_ascii_uppercase().as_str() {
+                        "ASC" => false,
+                        "DESC" => true,
+                        other => {
+                            return Err(DaxError::Eval(format!(
+                                "CONCATENATEX order must be ASC or DESC, got {other}"
+                            )));
+                        }
+                    }
+                } else {
+                    false
+                };
 
                 let mut out = String::new();
                 let mut first = true;
-                for row in table_result.rows.iter().copied() {
-                    let inner_ctx = table_result.push_row_ctx(row_ctx, row);
-                    let value = self.eval_scalar(model, text_expr, filter, &inner_ctx, env)?;
-                    let text = coerce_text(&value);
-                    if !first {
-                        out.push_str(&delimiter);
+                // If an order-by expression is provided, precompute both the sort key and the
+                // formatted text for each row, then stable-sort before joining.
+                if args.len() >= 4 {
+                    let order_by_expr = &args[3];
+                    let mut keyed: Vec<(Value, String)> =
+                        Vec::with_capacity(table_result.rows.len());
+                    let mut saw_text = false;
+                    let mut saw_numeric = false;
+
+                    for row in table_result.rows.iter().copied() {
+                        let inner_ctx = table_result.push_row_ctx(row_ctx, row);
+                        let value = self.eval_scalar(model, text_expr, filter, &inner_ctx, env)?;
+                        let text = coerce_text(&value).into_owned();
+
+                        let key =
+                            self.eval_scalar(model, order_by_expr, filter, &inner_ctx, env)?;
+                        match &key {
+                            Value::Text(_) => saw_text = true,
+                            Value::Number(_) | Value::Boolean(_) => saw_numeric = true,
+                            Value::Blank => {}
+                        }
+                        keyed.push((key, text));
                     }
-                    out.push_str(&text);
-                    first = false;
+
+                    if saw_text && saw_numeric {
+                        return Err(DaxError::Type(
+                            "CONCATENATEX order_by_expr produced mixed text and numeric values"
+                                .into(),
+                        ));
+                    }
+
+                    if saw_text {
+                        let mut items: Vec<(String, String)> = keyed
+                            .into_iter()
+                            .map(|(key, text)| (coerce_text(&key).into_owned(), text))
+                            .collect();
+                        if descending {
+                            items.sort_by(|a, b| b.0.cmp(&a.0));
+                        } else {
+                            items.sort_by(|a, b| a.0.cmp(&b.0));
+                        }
+
+                        for (_key, text) in items {
+                            if !first {
+                                out.push_str(&delimiter);
+                            }
+                            out.push_str(&text);
+                            first = false;
+                        }
+                    } else {
+                        let mut items: Vec<(OrderedFloat<f64>, String)> =
+                            Vec::with_capacity(keyed.len());
+                        for (key, text) in keyed {
+                            let n = coerce_number(&key)?;
+                            if !n.is_finite() {
+                                return Err(DaxError::Eval(
+                                    "CONCATENATEX order_by_expr must return a finite number".into(),
+                                ));
+                            }
+                            items.push((OrderedFloat(n), text));
+                        }
+                        if descending {
+                            items.sort_by(|a, b| b.0.cmp(&a.0));
+                        } else {
+                            items.sort_by(|a, b| a.0.cmp(&b.0));
+                        }
+
+                        for (_key, text) in items {
+                            if !first {
+                                out.push_str(&delimiter);
+                            }
+                            out.push_str(&text);
+                            first = false;
+                        }
+                    }
+                } else {
+                    for row in table_result.rows.iter().copied() {
+                        let inner_ctx = table_result.push_row_ctx(row_ctx, row);
+                        let value = self.eval_scalar(model, text_expr, filter, &inner_ctx, env)?;
+                        let text = coerce_text(&value);
+                        if !first {
+                            out.push_str(&delimiter);
+                        }
+                        out.push_str(&text);
+                        first = false;
+                    }
                 }
                 Ok(Value::from(out))
             }
@@ -1106,9 +1206,7 @@ impl DaxEngine {
             }
             "EARLIER" => {
                 if args.is_empty() || args.len() > 2 {
-                    return Err(DaxError::Eval(
-                        "EARLIER expects 1 or 2 arguments".into(),
-                    ));
+                    return Err(DaxError::Eval("EARLIER expects 1 or 2 arguments".into()));
                 }
 
                 let Expr::ColumnRef { table, column } = &args[0] else {
@@ -1154,10 +1252,13 @@ impl DaxEngine {
                 if row >= table_ref.row_count() {
                     return Ok(Value::Blank);
                 }
-                let value = table_ref.value(row, column).ok_or_else(|| DaxError::UnknownColumn {
-                    table: table.clone(),
-                    column: column.clone(),
-                })?;
+                let value =
+                    table_ref
+                        .value(row, column)
+                        .ok_or_else(|| DaxError::UnknownColumn {
+                            table: table.clone(),
+                            column: column.clone(),
+                        })?;
                 Ok(value)
             }
             "EARLIEST" => {
@@ -1182,10 +1283,13 @@ impl DaxEngine {
                 if row >= table_ref.row_count() {
                     return Ok(Value::Blank);
                 }
-                let value = table_ref.value(row, column).ok_or_else(|| DaxError::UnknownColumn {
-                    table: table.clone(),
-                    column: column.clone(),
-                })?;
+                let value =
+                    table_ref
+                        .value(row, column)
+                        .ok_or_else(|| DaxError::UnknownColumn {
+                            table: table.clone(),
+                            column: column.clone(),
+                        })?;
                 Ok(value)
             }
             other => Err(DaxError::Eval(format!("unsupported function {other}"))),
@@ -1367,7 +1471,12 @@ impl DaxEngine {
         Ok(best.map(Value::from).unwrap_or(Value::Blank))
     }
 
-    fn eval_count(&self, model: &DataModel, expr: &Expr, filter: &FilterContext) -> DaxResult<Value> {
+    fn eval_count(
+        &self,
+        model: &DataModel,
+        expr: &Expr,
+        filter: &FilterContext,
+    ) -> DaxResult<Value> {
         let (table, column) = match expr {
             Expr::ColumnRef { table, column } => (table.as_str(), column.as_str()),
             _ => {
@@ -1393,11 +1502,7 @@ impl DaxEngine {
                 table_ref.stats_non_blank_count(idx),
                 column_is_dax_numeric(table_ref, idx),
             ) {
-                return Ok(Value::from(if is_numeric {
-                    non_blank as i64
-                } else {
-                    0
-                }));
+                return Ok(Value::from(if is_numeric { non_blank as i64 } else { 0 }));
             }
         }
 
@@ -1502,8 +1607,8 @@ impl DaxEngine {
             })?;
 
         if filter.is_empty() {
-            let include_virtual_blank =
-                blank_row_allowed(filter, table) && virtual_blank_row_exists(model, filter, table, None)?;
+            let include_virtual_blank = blank_row_allowed(filter, table)
+                && virtual_blank_row_exists(model, filter, table, None)?;
             if let Some(non_blank) = table_ref.stats_non_blank_count(idx) {
                 let mut blanks = table_ref.row_count().saturating_sub(non_blank);
                 if include_virtual_blank {
@@ -1533,8 +1638,8 @@ impl DaxEngine {
             return Err(DaxError::UnknownTable(table.to_string()));
         };
 
-        let include_virtual_blank =
-            blank_row_allowed(filter, table) && virtual_blank_row_exists(model, filter, table, Some(&sets))?;
+        let include_virtual_blank = blank_row_allowed(filter, table)
+            && virtual_blank_row_exists(model, filter, table, Some(&sets))?;
 
         let mut blanks = 0usize;
         for (row, allowed) in rows_set.iter().enumerate() {
@@ -1739,8 +1844,8 @@ impl DaxEngine {
             })?;
 
         if filter.is_empty() {
-            let include_virtual_blank =
-                blank_row_allowed(filter, table) && virtual_blank_row_exists(model, filter, table, None)?;
+            let include_virtual_blank = blank_row_allowed(filter, table)
+                && virtual_blank_row_exists(model, filter, table, None)?;
             if let Some(values) = table_ref.distinct_values_filtered(idx, None) {
                 let mut out: HashSet<Value> = values.into_iter().collect();
                 if include_virtual_blank {
@@ -1764,8 +1869,8 @@ impl DaxEngine {
             return Err(DaxError::UnknownTable(table.to_string()));
         };
 
-        let include_virtual_blank =
-            blank_row_allowed(filter, table) && virtual_blank_row_exists(model, filter, table, Some(&sets))?;
+        let include_virtual_blank = blank_row_allowed(filter, table)
+            && virtual_blank_row_exists(model, filter, table, Some(&sets))?;
 
         let rows: Vec<usize> = rows_set
             .iter()
@@ -1956,10 +2061,7 @@ impl DaxEngine {
             collect_column_refs(expr, &mut referenced_tables, &mut referenced_columns);
 
             let table = if referenced_tables.len() == 1 {
-                referenced_tables
-                    .into_iter()
-                    .next()
-                    .expect("len==1")
+                referenced_tables.into_iter().next().expect("len==1")
             } else {
                 let mut tables: Vec<String> = referenced_tables.into_iter().collect();
                 tables.sort();
@@ -2056,9 +2158,7 @@ impl DaxEngine {
                 }
                 Expr::Call { name, args } if name.eq_ignore_ascii_case("ALLNOBLANKROW") => {
                     let [inner] = args.as_slice() else {
-                        return Err(DaxError::Eval(
-                            "ALLNOBLANKROW expects 1 argument".into(),
-                        ));
+                        return Err(DaxError::Eval("ALLNOBLANKROW expects 1 argument".into()));
                     };
                     match inner {
                         Expr::TableName(table) => {
@@ -2092,8 +2192,8 @@ impl DaxEngine {
                         }
                         other => {
                             return Err(DaxError::Type(format!(
-                                "ALLNOBLANKROW expects a table name or column reference, got {other:?}"
-                            )))
+                            "ALLNOBLANKROW expects a table name or column reference, got {other:?}"
+                        )))
                         }
                     }
                 }
@@ -2616,9 +2716,7 @@ impl DaxEngine {
                 }
                 "ALLNOBLANKROW" => {
                     let [arg] = args.as_slice() else {
-                        return Err(DaxError::Eval(
-                            "ALLNOBLANKROW expects 1 argument".into(),
-                        ));
+                        return Err(DaxError::Eval("ALLNOBLANKROW expects 1 argument".into()));
                     };
                     match arg {
                         Expr::TableName(name) => {
@@ -3157,31 +3255,28 @@ impl DaxEngine {
                         }
                     }
 
-                    let is_relationship_active = |idx: usize,
-                                                 rel: &RelationshipInfo,
-                                                 overrides: &HashSet<(&str, &str)>| {
-                        let pair = (rel.rel.from_table.as_str(), rel.rel.to_table.as_str());
-                        let is_active = if overrides.contains(&pair) {
-                            summarize_filter.active_relationship_overrides.contains(&idx)
-                        } else {
-                            rel.rel.is_active
+                    let is_relationship_active =
+                        |idx: usize, rel: &RelationshipInfo, overrides: &HashSet<(&str, &str)>| {
+                            let pair = (rel.rel.from_table.as_str(), rel.rel.to_table.as_str());
+                            let is_active = if overrides.contains(&pair) {
+                                summarize_filter
+                                    .active_relationship_overrides
+                                    .contains(&idx)
+                            } else {
+                                rel.rel.is_active
+                            };
+                            if !is_active {
+                                return false;
+                            }
+                            !matches!(
+                                summarize_filter.cross_filter_overrides.get(&idx).copied(),
+                                Some(RelationshipOverride::Disabled)
+                            )
                         };
-                        if !is_active {
-                            return false;
-                        }
-                        !matches!(
-                            summarize_filter.cross_filter_overrides.get(&idx).copied(),
-                            Some(RelationshipOverride::Disabled)
-                        )
-                    };
 
                     // Determine the base table to scan for groups.
                     let base_table = if group_tables.len() == 1 {
-                        group_tables
-                            .iter()
-                            .next()
-                            .expect("len==1")
-                            .clone()
+                        group_tables.iter().next().expect("len==1").clone()
                     } else {
                         let mut tables_vec: Vec<&String> = group_tables.iter().collect();
                         tables_vec.sort();
@@ -3254,10 +3349,7 @@ impl DaxEngine {
 
                     enum GroupAccessor {
                         BaseColumn(usize),
-                        RelatedColumn {
-                            hops: Vec<Hop>,
-                            to_col_idx: usize,
-                        },
+                        RelatedColumn { hops: Vec<Hop>, to_col_idx: usize },
                     }
 
                     let mut accessors = Vec::with_capacity(group_cols.len());
@@ -3296,13 +3388,12 @@ impl DaxEngine {
                                 model.table(&rel_info.rel.from_table).ok_or_else(|| {
                                     DaxError::UnknownTable(rel_info.rel.from_table.clone())
                                 })?;
-                            let from_idx =
-                                from_table_ref.column_idx(&rel_info.rel.from_column).ok_or_else(
-                                    || DaxError::UnknownColumn {
-                                        table: rel_info.rel.from_table.clone(),
-                                        column: rel_info.rel.from_column.clone(),
-                                    },
-                                )?;
+                            let from_idx = from_table_ref
+                                .column_idx(&rel_info.rel.from_column)
+                                .ok_or_else(|| DaxError::UnknownColumn {
+                                    table: rel_info.rel.from_table.clone(),
+                                    column: rel_info.rel.from_column.clone(),
+                                })?;
 
                             hops.push(Hop {
                                 relationship_idx: rel_idx,
@@ -3320,21 +3411,13 @@ impl DaxEngine {
                             }
                         })?;
 
-                        accessors.push(GroupAccessor::RelatedColumn {
-                            hops,
-                            to_col_idx,
-                        });
+                        accessors.push(GroupAccessor::RelatedColumn { hops, to_col_idx });
                     }
 
                     let mut base_rows = resolve_table_rows(model, &summarize_filter, &base_table)?;
                     if group_tables.len() == 1
                         && blank_row_allowed(&summarize_filter, &base_table)
-                        && virtual_blank_row_exists(
-                            model,
-                            &summarize_filter,
-                            &base_table,
-                            None,
-                        )?
+                        && virtual_blank_row_exists(model, &summarize_filter, &base_table, None)?
                     {
                         base_rows.push(base_table_ref.row_count());
                     }
@@ -3346,12 +3429,11 @@ impl DaxEngine {
                         for accessor in &accessors {
                             match accessor {
                                 GroupAccessor::BaseColumn(idx) => key.push(
-                                    base_table_ref.value_by_idx(row, *idx).unwrap_or(Value::Blank),
+                                    base_table_ref
+                                        .value_by_idx(row, *idx)
+                                        .unwrap_or(Value::Blank),
                                 ),
-                                GroupAccessor::RelatedColumn {
-                                    hops,
-                                    to_col_idx,
-                                } => {
+                                GroupAccessor::RelatedColumn { hops, to_col_idx } => {
                                     let mut current_row = row;
                                     let mut current_table_ref = base_table_ref;
                                     let mut failed = false;
@@ -3385,8 +3467,9 @@ impl DaxEngine {
                                             }
                                         };
                                         current_row = to_row;
-                                        current_table_ref =
-                                            model.table(&rel_info.rel.to_table).ok_or_else(|| {
+                                        current_table_ref = model
+                                            .table(&rel_info.rel.to_table)
+                                            .ok_or_else(|| {
                                                 DaxError::UnknownTable(
                                                     rel_info.rel.to_table.clone(),
                                                 )
@@ -4254,10 +4337,12 @@ fn virtual_blank_row_exists(
             rel.rel.is_active
         };
 
-        if !is_active || matches!(
-            filter.cross_filter_overrides.get(&idx).copied(),
-            Some(RelationshipOverride::Disabled)
-        ) {
+        if !is_active
+            || matches!(
+                filter.cross_filter_overrides.get(&idx).copied(),
+                Some(RelationshipOverride::Disabled)
+            )
+        {
             continue;
         }
 

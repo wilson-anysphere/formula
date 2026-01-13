@@ -46,3 +46,19 @@ fn concatenatex_respects_filter_context() {
     assert_eq!(value, Value::from("East"));
 }
 
+#[test]
+fn concatenatex_orders_by_expression_desc() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "CONCATENATEX(Customers, Customers[Name], \",\", Customers[Name], DESC)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(value, Value::from("Carol,Bob,Alice"));
+}

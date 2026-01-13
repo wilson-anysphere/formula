@@ -227,8 +227,12 @@ impl Table {
                 // uniquely owned.
                 let table = Arc::make_mut(&mut backend.table);
                 let options = table.options();
-                let placeholder =
-                    formula_columnar::ColumnarTable::from_encoded(Vec::new(), Vec::new(), 0, options);
+                let placeholder = formula_columnar::ColumnarTable::from_encoded(
+                    Vec::new(),
+                    Vec::new(),
+                    0,
+                    options,
+                );
                 let existing = std::mem::replace(table, placeholder);
                 let updated = existing
                     .with_appended_column(schema, column_values)
@@ -659,7 +663,8 @@ impl DataModel {
                     .cloned()
                     .unwrap_or(Value::Blank);
                 // Keys on the "to" side must be unique for 1:* and 1:1 relationships.
-                if rel.cardinality != Cardinality::ManyToMany && rel_info.to_index.contains_key(&key)
+                if rel.cardinality != Cardinality::ManyToMany
+                    && rel_info.to_index.contains_key(&key)
                 {
                     self.tables
                         .get_mut(table)
@@ -1295,14 +1300,15 @@ impl DataModel {
                                 column: col,
                             }
                         }
-                        formula_columnar::ColumnAppendError::LengthMismatch { expected, actual } => {
-                            DaxError::ColumnLengthMismatch {
-                                table: table.clone(),
-                                column: name.clone(),
-                                expected,
-                                actual,
-                            }
-                        }
+                        formula_columnar::ColumnAppendError::LengthMismatch {
+                            expected,
+                            actual,
+                        } => DaxError::ColumnLengthMismatch {
+                            table: table.clone(),
+                            column: name.clone(),
+                            expected,
+                            actual,
+                        },
                         other => DaxError::Eval(format!(
                             "failed to append encoded calculated column {table}[{name}]: {other}"
                         )),
@@ -1325,9 +1331,7 @@ impl DataModel {
             }
             (TableStorage::InMemory(_), NewColumn::Columnar(_))
             | (TableStorage::Columnar(_), NewColumn::InMemory(_)) => {
-                return Err(DaxError::Eval(
-                    "calculated column backend mismatch".into(),
-                ));
+                return Err(DaxError::Eval("calculated column backend mismatch".into()));
             }
         }
 
@@ -1635,11 +1639,11 @@ impl DataModel {
         let mut out: Vec<usize> = Vec::with_capacity(calc_indices.len());
 
         let visit = |start: usize,
-                         state: &mut HashMap<usize, VisitState>,
-                         stack: &mut Vec<usize>,
-                         out: &mut Vec<usize>,
-                         deps_by_calc: &HashMap<usize, Vec<usize>>,
-                         this: &DataModel|
+                     state: &mut HashMap<usize, VisitState>,
+                     stack: &mut Vec<usize>,
+                     out: &mut Vec<usize>,
+                     deps_by_calc: &HashMap<usize, Vec<usize>>,
+                     this: &DataModel|
          -> DaxResult<()> {
             fn dfs(
                 node: usize,
@@ -1665,10 +1669,7 @@ impl DataModel {
                 if let Some(deps) = deps_by_calc.get(&node) {
                     for &dep in deps {
                         if matches!(state.get(&dep), Some(VisitState::Visiting)) {
-                            let start_pos = stack
-                                .iter()
-                                .position(|&n| n == dep)
-                                .unwrap_or(0);
+                            let start_pos = stack.iter().position(|&n| n == dep).unwrap_or(0);
                             let mut cycle_nodes: Vec<usize> =
                                 stack[start_pos..].iter().copied().collect();
                             cycle_nodes.push(dep);
