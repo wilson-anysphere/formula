@@ -249,6 +249,16 @@ Today, the `formula-io` crate:
 - Returns `Error::EncryptedWorkbook` from `open_workbook(...)` / `open_workbook_model(...)` for
   password-encrypted workbooks (OOXML OLE wrapper and legacy `.xls` `FILEPASS`).
 
+If you specifically need to open an **encrypted legacy `.xls`** workbook *today*, you can bypass
+`formula-io` and use the `.xls` importer directly (limited to BIFF8 RC4 CryptoAPI):
+
+```rust
+use formula_io::xls::import_xls_path_with_password;
+
+let imported = import_xls_path_with_password("book.xls", "password")?;
+let workbook_model = imported.workbook;
+```
+
 Example (detection + UX routing):
 
 ```rust
