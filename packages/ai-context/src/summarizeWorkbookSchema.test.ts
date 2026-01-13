@@ -30,6 +30,22 @@ describe("summarizeWorkbookSchema", () => {
     expect(summary1).toMatch(/^N1 \[NR\] r=\[SheetA!A1:B1\]$/m);
   });
 
+  it("escapes bracketed fields to keep summaries parseable", () => {
+    const workbook = {
+      id: "wb|1]",
+      sheets: [{ name: "A|B]", cells: [["Header"], [1]] }],
+      tables: [{ name: "T|1]", sheetName: "A|B]", rect: { r0: 0, c0: 0, r1: 1, c1: 0 } }],
+    };
+
+    const schema = extractWorkbookSchema(workbook, { maxAnalyzeRows: 5, maxAnalyzeCols: 5 });
+    const summary = summarizeWorkbookSchema(schema, { includeNamedRanges: false });
+
+    const lines = summary.split("\n");
+    expect(lines[0]).toBe("workbook=[wb\\|1\\]] sheets=1 tables=1 named=0");
+    expect(lines).toContain("s=[A\\|B\\]]");
+    expect(summary).toMatch(/^T1 \[T\\\|1\\\]\] r=\['A\\\|B\\\]'\!A1:A2\]/m);
+  });
+
   it("respects output limits", () => {
     const workbook = {
       id: "wb2",
@@ -55,4 +71,3 @@ describe("summarizeWorkbookSchema", () => {
     expect(summary).not.toMatch(/^N2 /m);
   });
 });
-
