@@ -228,14 +228,28 @@ Compute:
 H_block = Hash( H_final || LE32(block) )
 ```
 
-This `H_block` is not yet the symmetric key; it is the hash input to `CryptDeriveKey`.
+This `H_block` is the per-block hash input from which the actual symmetric key bytes are derived.
 
-### 5.2) Implementing CryptoAPI `CryptDeriveKey` (ipad/opad expansion)
+* For **AES**, `H_block` is fed into the CryptoAPI `CryptDeriveKey` expansion (see §5.2).
+* For **RC4**, the RC4 key is typically derived by truncating `H_block` (see §5.2).
+
+### 5.2) Deriving the symmetric key bytes (AES vs RC4)
+
+#### 5.2.1) RC4 (`CALG_RC4`): key = truncate(`H_block`)
+
+For Standard **RC4** encryption, the per-block RC4 key is derived by truncating the hash:
+
+```text
+rc4_key(block) = H_block[0 : keyLen]    // keyLen = KeySize/8
+```
+
+This matches the common Standard RC4 “re-key per 0x200-byte block” scheme (see §7.2.2).
+
+#### 5.2.2) AES (`CALG_AES_*`): CryptoAPI `CryptDeriveKey` (ipad/opad expansion)
 
 CryptoAPI’s `CryptDeriveKey` is **not PBKDF2**. For MD5/SHA1 it behaves like:
 
-* If the needed key length is **≤ digest length**: use the **prefix** of the hash bytes.
-* If the needed key length is **> digest length**: expand with an ipad/opad construction.
+* It expands the hash using an ipad/opad construction and then truncates to the required key length.
 
 Constants:
 
@@ -256,9 +270,6 @@ Pseudocode (MD5/SHA1 only; both use 64-byte blocks):
 function CryptDeriveKey(Hash, H_block, keyLen):
   digestLen = len(H_block)         // 16 or 20
 
-  if keyLen <= digestLen:
-    return H_block[0:keyLen]
-
   blockLen = 64                    // MD5/SHA1 block size in bytes
 
   // 1) Pad digest to 64 bytes with zeros
@@ -274,6 +285,8 @@ function CryptDeriveKey(Hash, H_block, keyLen):
 
   // 4) Concatenate and truncate
   derived = inner || outer         // 32 bytes for MD5, 40 bytes for SHA1
+  if keyLen > len(derived):
+    error("requested key length too long")
   return derived[0:keyLen]
 ```
 
@@ -317,7 +330,12 @@ Inputs from `EncryptionVerifier`:
 ```text
 H_final  = hash_password(password, Salt, spinCount=50000)         // §4
 H_block0 = Hash( H_final || LE32(0) )                             // §5.1
-key      = CryptDeriveKey(Hash, H_block0, keyLen=KeySize/8)       // §5.2
+keyLen   = KeySize / 8
+
+if AlgID == CALG_RC4:
+  key = H_block0[0:keyLen]                                        // §5.2.1
+else:
+  key = CryptDeriveKey(Hash, H_block0, keyLen=keyLen)             // §5.2.2
 ```
 
 ### 6.2) Decrypt verifier + verifier-hash as a *single* stream
@@ -427,8 +445,7 @@ segmentSize = 0x200   // 512
 For segment index `i = 0, 1, 2, ...`:
 
 1. Derive `H_block = Hash(H_final || LE32(i))`.
-2. `key_i = CryptDeriveKey(Hash, H_block, keyLen=KeySize/8)` (for SHA‑1 with 128-bit keys this is
-   typically just the first 16 bytes of `H_block`).
+2. `key_i = H_block[0 : KeySize/8]` (truncate to the configured key size).
 3. Initialize RC4 with `key_i` (fresh state for each segment) and decrypt exactly one segment of
    ciphertext.
 
@@ -474,7 +491,55 @@ iv0 (AES-CBC `EncryptedPackage` IV for segmentIndex=0) =
   719ea750a65a93d80e1e0ba33a2ba0e7
 ```
 
-### 8.1) RC4 per-block key example (128-bit)
+### 8.1) AES-128 key derivation sanity check (shows `CryptDeriveKey` is not truncation)
+
+This second vector is useful because it demonstrates a common bug:
+**for AES-128, you still must run the `CryptDeriveKey` ipad/opad step**, even though the desired key
+length (16 bytes) is smaller than the SHA‑1 digest length (20 bytes).
+
+Parameters:
+
+* Hash algorithm: SHA‑1
+* Cipher: AES‑128
+* KeySize: 128 bits → 16 bytes
+* spinCount: 50,000
+* `block = 0`
+
+Inputs:
+
+```text
+password = "Password1234_"
+passwordUtf16le =
+  50 00 61 00 73 00 73 00 77 00 6f 00 72 00 64 00 31 00 32 00 33 00 34 00 5f 00
+
+salt =
+  e8 82 66 49 0c 5b d1 ee bd 2b 43 94 e3 f8 30 ef
+```
+
+Derived values:
+
+```text
+H_final  = a00d5360ec463ee782df8c267525ae9ac66cd605
+H_block0 = e2f8cde457e5d449eb205057c88d201d14531ff3
+
+key (AES-128, 16 bytes; CryptDeriveKey result) =
+  40b13a71f90b966e375408f2d181a1aa
+
+iv0 (AES-CBC `EncryptedPackage` IV for segmentIndex=0) =
+  a1cdc25336964d314dd968da998d05b8
+```
+
+Sanity check:
+
+```text
+H_block0[0:16] =
+  e2f8cde457e5d449eb205057c88d201d
+```
+
+This is **not** the AES-128 key; if your code uses `H_block0[0:16]` directly, you will derive the
+wrong key.
+
+### 8.2) RC4 per-block key example (128-bit)
 
 If the file uses **RC4** (`AlgID = CALG_RC4`) with a 128-bit key (`KeySize = 128` bits → 16 bytes),
 then (for SHA‑1) the per-block RC4 key is simply the first 16 bytes of `H_block`:
@@ -490,7 +555,7 @@ rc4_key(block=1) = H_block1[0:16] =
   2ed4e8825cd48aa4a47994cda7415b4a
 ```
 
-### 8.2) Verifier check example (AES-ECB)
+### 8.3) Verifier check example (AES-ECB)
 
 The following values are a *synthetic* verifier example that is consistent with the derivation above
 (AES-256 + SHA-1). It is useful as an end-to-end unit test for the verifier logic.
