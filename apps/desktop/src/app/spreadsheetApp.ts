@@ -944,11 +944,32 @@ export class SpreadsheetApp {
             }
           },
         },
-      });
-      // Populate `modifiedBy` metadata for any direct `CollabSession.setCell*` writes
-      // (used by some conflict resolution + versioning flows) and ensure downstream
-      // conflict UX can attribute local edits correctly.
-      this.collabSession.setPermissions(sessionPermissions);
+       });
+       // Populate `modifiedBy` metadata for any direct `CollabSession.setCell*` writes
+       // (used by some conflict resolution + versioning flows) and ensure downstream
+       // conflict UX can attribute local edits correctly.
+      try {
+        this.collabSession.setPermissions(sessionPermissions);
+      } catch (err) {
+        // JWT payloads are intentionally decoded without signature verification (best-effort so
+        // collab links can bootstrap quickly). Treat any derived permissions as untrusted data and
+        // never crash the app if the token contains malformed `rangeRestrictions`.
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn("Failed to apply collab permissions from token; falling back to defaults.", message);
+
+        const fallbackPermissions = { ...sessionPermissions, rangeRestrictions: [] };
+        try {
+          // Fallback policy: keep the derived role/userId (if present) but drop all range
+          // restrictions when they fail validation. Server-side access control is still enforced
+          // by the sync server; this only prevents desktop startup from being DoS'd by a bad URL.
+          this.collabSession.setPermissions(fallbackPermissions);
+        } catch (fallbackErr) {
+          const fallbackMessage = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+          console.warn("Failed to apply fallback collab permissions; continuing with viewer access.", fallbackMessage);
+          // Last-resort safe default (should never happen).
+          this.collabSession.setPermissions({ role: "viewer", rangeRestrictions: [], userId: sessionPermissions.userId });
+        }
+      }
 
       this.sheetViewBinder = bindSheetViewToCollabSession({
         session: this.collabSession,

@@ -27,6 +27,20 @@ vi.mock("@formula/collab-session", () => ({
 
 import { SpreadsheetApp } from "../spreadsheetApp";
 
+function encodeBase64Url(value: string): string {
+  return Buffer.from(value, "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function makeJwt(payload: unknown): string {
+  const header = encodeBase64Url(JSON.stringify({ alg: "none", typ: "JWT" }));
+  const body = encodeBase64Url(JSON.stringify(payload));
+  return `${header}.${body}.sig`;
+}
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -300,6 +314,64 @@ describe("SpreadsheetApp collab persistence", () => {
     expect(options?.offline).toBeUndefined();
 
     app.destroy();
+    root.remove();
+  });
+
+  it("does not crash when JWT-derived rangeRestrictions are invalid (falls back)", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const token = makeJwt({
+      sub: "user-123",
+      role: "editor",
+      rangeRestrictions: ["not-an-object"],
+    });
+
+    const collabSession = createMockCollabSession();
+    collabSession.setPermissions = vi.fn((perms: any) => {
+      if (Array.isArray(perms?.rangeRestrictions) && perms.rangeRestrictions.some((r: unknown) => r == null || typeof r !== "object")) {
+        throw new Error("rangeRestrictions[0] invalid: restriction must be an object");
+      }
+    });
+
+    mocks.createCollabSession.mockImplementationOnce(() => collabSession);
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    let app: SpreadsheetApp | null = null;
+    expect(() => {
+      app = new SpreadsheetApp(root, status, {
+        collab: {
+          wsUrl: "ws://example.invalid",
+          docId: "doc-bad-restrictions",
+          token,
+          user: { id: "u1", name: "User 1", color: "#ff0000" },
+        },
+      });
+    }).not.toThrow();
+
+    expect(collabSession.setPermissions).toHaveBeenCalledTimes(2);
+    expect(collabSession.setPermissions.mock.calls[0]?.[0]).toMatchObject({
+      role: "editor",
+      userId: "user-123",
+      rangeRestrictions: ["not-an-object"],
+    });
+    expect(collabSession.setPermissions.mock.calls[1]?.[0]).toMatchObject({
+      role: "editor",
+      userId: "user-123",
+      rangeRestrictions: [],
+    });
+
+    // Never log raw token contents.
+    expect(warnSpy).toHaveBeenCalled();
+    const logged = warnSpy.mock.calls.flat().join(" ");
+    expect(logged).not.toContain(token);
+
+    app!.destroy();
     root.remove();
   });
 });
