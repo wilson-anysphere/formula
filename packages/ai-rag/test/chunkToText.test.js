@@ -39,6 +39,22 @@ test("chunkToText escapes '|' characters in cell text so row separators remain u
   assert.doesNotMatch(text, /North\|East/);
 });
 
+test("chunkToText formats Date values as ISO strings", () => {
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 1 },
+    cells: [
+      [{ v: "Date" }, { v: "Value" }],
+      [{ v: new Date("2024-01-02T03:04:05.000Z") }, { v: 1 }],
+    ],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /Date=2024-01-02T03:04:05\.000Z/);
+});
+
 test("chunkToText detects header rows below a title row and preserves the title as pre-header context", () => {
   const chunk = {
     kind: "dataRegion",

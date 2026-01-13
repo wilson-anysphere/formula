@@ -6,6 +6,13 @@ const MAX_FORMULA_SAMPLES = 12;
 
 function formatScalar(value) {
   if (value == null) return "";
+  if (value instanceof Date) {
+    const time = value.getTime();
+    if (!Number.isFinite(time)) return "";
+    // Use ISO format for stability and compactness (better embeddings than
+    // Date#toString locale/timezone output).
+    return value.toISOString();
+  }
   if (typeof value === "string") {
     const trimmed = value.replace(/\s+/g, " ").trim();
     // Our output format uses `|` as a column separator; replace literal pipes in
