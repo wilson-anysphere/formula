@@ -98,3 +98,34 @@ test("buildContext: structured DLP selectors outside the origin window do not af
   assert.doesNotMatch(out.promptContext, /\[REDACTED\]/);
 });
 
+test("buildContext: DLP REDACT also prevents attachments from leaking heuristic-sensitive strings (even with a no-op redactor)", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [["Email"], ["alice@example.com"]],
+    },
+    query: "anything",
+    attachments: [
+      {
+        type: "chart",
+        reference: "Chart1",
+        data: { note: "123-45-6789" },
+      },
+    ],
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: makePolicy(),
+      classificationRecords: [],
+    },
+  });
+
+  assert.match(out.promptContext, /## attachments/i);
+  assert.doesNotMatch(out.promptContext, /123-45-6789/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});

@@ -883,6 +883,13 @@ export class ContextManager {
     const shouldReturnRedactedStructured = Boolean(dlp) && dlpDecision?.decision === DLP_DECISION.REDACT;
     const includeRestrictedContentForStructured =
       dlp?.includeRestrictedContent ?? dlp?.include_restricted_content ?? false;
+    const attachmentsForPrompt = shouldReturnRedactedStructured
+      ? redactStructuredValue(params.attachments ?? [], this.redactor, {
+          signal,
+          includeRestrictedContent: includeRestrictedContentForStructured,
+          policyAllowsRestrictedContent,
+        })
+      : params.attachments;
     const schemaOut = shouldReturnRedactedStructured
       ? redactStructuredValue(schema, this.redactor, {
           signal,
@@ -956,8 +963,8 @@ export class ContextManager {
       {
         key: "attachments",
         priority: 2,
-        text: params.attachments?.length
-          ? this.redactor(`User-provided attachments:\n${stableJsonStringify(params.attachments)}`)
+        text: attachmentsForPrompt?.length
+          ? this.redactor(`User-provided attachments:\n${stableJsonStringify(attachmentsForPrompt)}`)
           : "",
       },
       {
