@@ -150,6 +150,7 @@ const MAX_SAFE_PACKED_ROW = Math.floor(Number.MAX_SAFE_INTEGER / PACK_COL_FACTOR
 const MAX_UINT32 = 2 ** 32 - 1;
 const HAS_BIGINT = typeof BigInt === "function";
 const BIGINT_SHIFT_32 = HAS_BIGINT ? BigInt(32) : null;
+const BIGINT_MASK_32 = HAS_BIGINT ? BigInt(MAX_UINT32) : null;
 
 /**
  * @param {number} row
@@ -201,8 +202,8 @@ function detectRegions(sheet, predicate, opts) {
   throwIfAborted(signal);
   const matrix = getSheetMatrix(sheet);
   if (matrix) {
-    /** @type {Map<CoordKey, { row: number, col: number }>} */
-    const coords = new Map();
+    /** @type {Set<CoordKey>} */
+    const coords = new Set();
     let truncated = false;
     let minRow = Number.POSITIVE_INFINITY;
     let minCol = Number.POSITIVE_INFINITY;
@@ -223,7 +224,7 @@ function detectRegions(sheet, predicate, opts) {
           const c = Number(cKey);
           if (!Number.isInteger(c) || c < 0) continue;
           if (!predicate(row[c])) continue;
-          coords.set(packCoordKey(r, c), { row: r, col: c });
+          coords.add(packCoordKey(r, c));
           minRow = Math.min(minRow, r);
           minCol = Math.min(minCol, c);
           maxRow = Math.max(maxRow, r);
@@ -249,64 +250,88 @@ function detectRegions(sheet, predicate, opts) {
     /** @type {{ rect: { r0: number, c0: number, r1: number, c1: number }, count: number }[]} */
     const components = [];
 
-    for (const start of coords.values()) {
+    for (const startKey of coords) {
       throwIfAborted(signal);
-      const startKey = packCoordKey(start.row, start.col);
       if (visited.has(startKey)) continue;
       visited.add(startKey);
-      const stack = [start];
-      let r0 = start.row;
-      let r1 = start.row;
-      let c0 = start.col;
-      let c1 = start.col;
+      const stack = [startKey];
+
+      let startRow = 0;
+      let startCol = 0;
+      if (typeof startKey === "number") {
+        startRow = Math.floor(startKey / PACK_COL_FACTOR);
+        startCol = startKey - startRow * PACK_COL_FACTOR;
+      } else if (typeof startKey === "bigint") {
+        const shift = /** @type {bigint} */ (BIGINT_SHIFT_32);
+        const mask = /** @type {bigint} */ (BIGINT_MASK_32);
+        startRow = Number(startKey >> shift);
+        startCol = Number(startKey & mask);
+      } else {
+        const idx = startKey.indexOf(",");
+        startRow = Number(startKey.slice(0, idx));
+        startCol = Number(startKey.slice(idx + 1));
+      }
+
+      let r0 = startRow;
+      let r1 = startRow;
+      let c0 = startCol;
+      let c1 = startCol;
       let count = 0;
 
       while (stack.length) {
         throwIfAborted(signal);
-        const cur = stack.pop();
-        if (!cur) continue;
+        const curKey = stack.pop();
+        if (curKey == null) continue;
         count += 1;
-        r0 = Math.min(r0, cur.row);
-        r1 = Math.max(r1, cur.row);
-        c0 = Math.min(c0, cur.col);
-        c1 = Math.max(c1, cur.col);
-
-        const r = cur.row;
-        const c = cur.col;
+        let r = 0;
+        let c = 0;
+        if (typeof curKey === "number") {
+          r = Math.floor(curKey / PACK_COL_FACTOR);
+          c = curKey - r * PACK_COL_FACTOR;
+        } else if (typeof curKey === "bigint") {
+          const shift = /** @type {bigint} */ (BIGINT_SHIFT_32);
+          const mask = /** @type {bigint} */ (BIGINT_MASK_32);
+          r = Number(curKey >> shift);
+          c = Number(curKey & mask);
+        } else {
+          const idx = curKey.indexOf(",");
+          r = Number(curKey.slice(0, idx));
+          c = Number(curKey.slice(idx + 1));
+        }
+        r0 = Math.min(r0, r);
+        r1 = Math.max(r1, r);
+        c0 = Math.min(c0, c);
+        c1 = Math.max(c1, c);
 
         if (r > 0) {
           const nk = packCoordKey(r - 1, c);
-          const entry = coords.get(nk);
-          if (entry && !visited.has(nk)) {
+          if (coords.has(nk) && !visited.has(nk)) {
             visited.add(nk);
-            stack.push(entry);
+            stack.push(nk);
           }
         }
 
         {
           const nk = packCoordKey(r + 1, c);
-          const entry = coords.get(nk);
-          if (entry && !visited.has(nk)) {
+          if (coords.has(nk) && !visited.has(nk)) {
             visited.add(nk);
-            stack.push(entry);
+            stack.push(nk);
           }
         }
 
         if (c > 0) {
           const nk = packCoordKey(r, c - 1);
-          const entry = coords.get(nk);
-          if (entry && !visited.has(nk)) {
+          if (coords.has(nk) && !visited.has(nk)) {
             visited.add(nk);
-            stack.push(entry);
+            stack.push(nk);
           }
         }
 
         {
           const nk = packCoordKey(r, c + 1);
-          const entry = coords.get(nk);
-          if (entry && !visited.has(nk)) {
+          if (coords.has(nk) && !visited.has(nk)) {
             visited.add(nk);
-            stack.push(entry);
+            stack.push(nk);
           }
         }
       }
@@ -366,28 +391,8 @@ function detectRegions(sheet, predicate, opts) {
       return acc;
     }
 
-    /**
-     * @param {string} key
-     */
-    function parseRowColKey(key) {
-      const raw = String(key);
-      const commaIdx = raw.indexOf(",");
-      const colonIdx = commaIdx >= 0 ? -1 : raw.indexOf(":");
-      const idx = commaIdx >= 0 ? commaIdx : colonIdx;
-      if (idx < 0) return null;
-      const delimiter = commaIdx >= 0 ? "," : ":";
-      // Reject keys that contain more than one delimiter (e.g. "1,2,3").
-      if (raw.indexOf(delimiter, idx + 1) !== -1) return null;
-
-      const row = parseNonNegativeInt(raw, 0, idx);
-      const col = parseNonNegativeInt(raw, idx + 1, raw.length);
-      if (row == null || col == null) return null;
-      if (!Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) return null;
-      return { row, col };
-    }
-
-    /** @type {Map<CoordKey, { row: number, col: number }>} */
-    const coords = new Map();
+    /** @type {Set<CoordKey>} */
+    const coords = new Set();
     let truncated = false;
     let minRow = Number.POSITIVE_INFINITY;
     let minCol = Number.POSITIVE_INFINITY;
@@ -396,15 +401,26 @@ function detectRegions(sheet, predicate, opts) {
 
     for (const [key, raw] of map.entries()) {
       throwIfAborted(signal);
-      const parsed = parseRowColKey(key);
-      if (!parsed) continue;
-      if (!predicate(raw)) continue;
-      coords.set(packCoordKey(parsed.row, parsed.col), parsed);
+      const rawKey = String(key);
+      const commaIdx = rawKey.indexOf(",");
+      const colonIdx = commaIdx >= 0 ? -1 : rawKey.indexOf(":");
+      const idx = commaIdx >= 0 ? commaIdx : colonIdx;
+      if (idx < 0) continue;
+      const delimiter = commaIdx >= 0 ? "," : ":";
+      // Reject keys that contain more than one delimiter (e.g. "1,2,3").
+      if (rawKey.indexOf(delimiter, idx + 1) !== -1) continue;
 
-      minRow = Math.min(minRow, parsed.row);
-      minCol = Math.min(minCol, parsed.col);
-      maxRow = Math.max(maxRow, parsed.row);
-      maxCol = Math.max(maxCol, parsed.col);
+      const row = parseNonNegativeInt(rawKey, 0, idx);
+      const col = parseNonNegativeInt(rawKey, idx + 1, rawKey.length);
+      if (row == null || col == null) continue;
+      if (!Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) continue;
+      if (!predicate(raw)) continue;
+      coords.add(packCoordKey(row, col));
+
+      minRow = Math.min(minRow, row);
+      minCol = Math.min(minCol, col);
+      maxRow = Math.max(maxRow, row);
+      maxCol = Math.max(maxCol, col);
 
       if (coords.size > cellLimit) {
         truncated = true;
@@ -420,64 +436,88 @@ function detectRegions(sheet, predicate, opts) {
     /** @type {{ rect: { r0: number, c0: number, r1: number, c1: number }, count: number }[]} */
     const components = [];
 
-    for (const start of coords.values()) {
+    for (const startKey of coords) {
       throwIfAborted(signal);
-      const startKey = packCoordKey(start.row, start.col);
       if (visited.has(startKey)) continue;
       visited.add(startKey);
-      const stack = [start];
-      let r0 = start.row;
-      let r1 = start.row;
-      let c0 = start.col;
-      let c1 = start.col;
+      const stack = [startKey];
+
+      let startRow = 0;
+      let startCol = 0;
+      if (typeof startKey === "number") {
+        startRow = Math.floor(startKey / PACK_COL_FACTOR);
+        startCol = startKey - startRow * PACK_COL_FACTOR;
+      } else if (typeof startKey === "bigint") {
+        const shift = /** @type {bigint} */ (BIGINT_SHIFT_32);
+        const mask = /** @type {bigint} */ (BIGINT_MASK_32);
+        startRow = Number(startKey >> shift);
+        startCol = Number(startKey & mask);
+      } else {
+        const idx = startKey.indexOf(",");
+        startRow = Number(startKey.slice(0, idx));
+        startCol = Number(startKey.slice(idx + 1));
+      }
+
+      let r0 = startRow;
+      let r1 = startRow;
+      let c0 = startCol;
+      let c1 = startCol;
       let count = 0;
 
       while (stack.length) {
         throwIfAborted(signal);
-        const cur = stack.pop();
-        if (!cur) continue;
+        const curKey = stack.pop();
+        if (curKey == null) continue;
         count += 1;
-        r0 = Math.min(r0, cur.row);
-        r1 = Math.max(r1, cur.row);
-        c0 = Math.min(c0, cur.col);
-        c1 = Math.max(c1, cur.col);
-
-        const r = cur.row;
-        const c = cur.col;
+        let r = 0;
+        let c = 0;
+        if (typeof curKey === "number") {
+          r = Math.floor(curKey / PACK_COL_FACTOR);
+          c = curKey - r * PACK_COL_FACTOR;
+        } else if (typeof curKey === "bigint") {
+          const shift = /** @type {bigint} */ (BIGINT_SHIFT_32);
+          const mask = /** @type {bigint} */ (BIGINT_MASK_32);
+          r = Number(curKey >> shift);
+          c = Number(curKey & mask);
+        } else {
+          const idx = curKey.indexOf(",");
+          r = Number(curKey.slice(0, idx));
+          c = Number(curKey.slice(idx + 1));
+        }
+        r0 = Math.min(r0, r);
+        r1 = Math.max(r1, r);
+        c0 = Math.min(c0, c);
+        c1 = Math.max(c1, c);
 
         if (r > 0) {
           const nk = packCoordKey(r - 1, c);
-          const entry = coords.get(nk);
-          if (entry && !visited.has(nk)) {
+          if (coords.has(nk) && !visited.has(nk)) {
             visited.add(nk);
-            stack.push(entry);
+            stack.push(nk);
           }
         }
 
         {
           const nk = packCoordKey(r + 1, c);
-          const entry = coords.get(nk);
-          if (entry && !visited.has(nk)) {
+          if (coords.has(nk) && !visited.has(nk)) {
             visited.add(nk);
-            stack.push(entry);
+            stack.push(nk);
           }
         }
 
         if (c > 0) {
           const nk = packCoordKey(r, c - 1);
-          const entry = coords.get(nk);
-          if (entry && !visited.has(nk)) {
+          if (coords.has(nk) && !visited.has(nk)) {
             visited.add(nk);
-            stack.push(entry);
+            stack.push(nk);
           }
         }
 
         {
           const nk = packCoordKey(r, c + 1);
-          const entry = coords.get(nk);
-          if (entry && !visited.has(nk)) {
+          if (coords.has(nk) && !visited.has(nk)) {
             visited.add(nk);
-            stack.push(entry);
+            stack.push(nk);
           }
         }
       }
