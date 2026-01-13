@@ -69,7 +69,10 @@ type AuditJsonSummary = {
 
 function compactAuditEntry(entry: AIAuditEntry, maxChars: number): AIAuditEntry {
   const toolCalls = Array.isArray(entry.tool_calls) ? entry.tool_calls : [];
-  const workbookId = entry.workbook_id ?? extractWorkbookIdFromInput(entry.input) ?? extractWorkbookIdFromSessionId(entry.session_id);
+  const workbookId =
+    normalizeNonEmptyString(entry.workbook_id) ??
+    extractWorkbookIdFromInput(entry.input) ??
+    extractWorkbookIdFromSessionId(entry.session_id);
 
   // Fast path: even if the initial JSON.stringify threw, it's still possible that
   // the entry fits when serialized. Try once defensively.
@@ -271,3 +274,6 @@ function extractWorkbookIdFromSessionId(sessionId: string): string | undefined {
   return workbookId && workbookId.trim() ? workbookId : undefined;
 }
 
+function normalizeNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}

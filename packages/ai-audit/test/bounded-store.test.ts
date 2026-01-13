@@ -4,6 +4,33 @@ import { BoundedAIAuditStore, MemoryAIAuditStore } from "../src/index.js";
 import type { AIAuditEntry } from "../src/types.js";
 
 describe("BoundedAIAuditStore", () => {
+  it("stores entries as-is when they are under the size cap", async () => {
+    const underlying = new MemoryAIAuditStore();
+    const maxEntryChars = 2_000;
+    const store = new BoundedAIAuditStore(underlying, { max_entry_chars: maxEntryChars });
+
+    const entry: AIAuditEntry = {
+      id: "entry-small",
+      timestamp_ms: Date.now(),
+      session_id: "session-small",
+      mode: "chat",
+      input: { prompt: "hi" },
+      model: "unit-test-model",
+      tool_calls: [{ name: "tool", parameters: { a: 1 }, result: { ok: true } }]
+    };
+
+    expect(JSON.stringify(entry).length).toBeLessThanOrEqual(maxEntryChars);
+
+    await store.logEntry(entry);
+
+    const stored = await underlying.listEntries({ session_id: "session-small" });
+    expect(stored.length).toBe(1);
+
+    expect(stored[0]!.input).toEqual(entry.input);
+    expect((stored[0]!.input as any)?.audit_truncated).toBeUndefined();
+    expect(stored[0]!.tool_calls[0]!.result).toEqual({ ok: true });
+  });
+
   it("compacts oversized entries to stay within the configured size limit", async () => {
     const underlying = new MemoryAIAuditStore();
     const maxEntryChars = 2_000;
@@ -46,4 +73,3 @@ describe("BoundedAIAuditStore", () => {
     expect(input?.audit_truncated).toBe(true);
   });
 });
-
