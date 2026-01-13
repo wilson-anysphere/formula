@@ -482,7 +482,16 @@ fn parse_axes(
 }
 
 fn is_plot_area_chart_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
-    node.is_element() && node.tag_name().name().ends_with("Chart")
+    if !node.is_element() {
+        return false;
+    }
+    // Prefer chart types we know how to model; if a Choice branch contains an
+    // unsupported chart type but the Fallback contains a supported one, we want to
+    // follow the Fallback so we can still parse something useful.
+    !matches!(
+        map_chart_kind(node.tag_name().name()),
+        ChartKind::Unknown { .. }
+    )
 }
 
 fn is_plot_area_axis_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
