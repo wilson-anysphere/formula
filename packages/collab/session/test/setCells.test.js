@@ -1,0 +1,116 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import * as Y from "yjs";
+
+import { createCollabSession } from "../src/index.ts";
+
+test("CollabSession setCells writes the same Yjs shape as individual setCell* calls", async () => {
+  const originalNow = Date.now;
+  Date.now = () => 1_700_000_000_000;
+  try {
+    const docA = new Y.Doc();
+    const docB = new Y.Doc();
+
+    const sessionA = createCollabSession({ doc: docA });
+    const sessionB = createCollabSession({ doc: docB });
+
+    await sessionA.setCellValue("Sheet1:0:0", 123);
+    await sessionA.setCellFormula("Sheet1:0:1", "=A1+1");
+    await sessionA.setCellValue("Sheet1:1:0", "x");
+    await sessionA.setCellFormula("Sheet1:1:1", null);
+    // Formula wins when both formula+value are provided.
+    await sessionA.setCellFormula("Sheet1:2:0", "=1");
+
+    await sessionB.setCells([
+      { cellKey: "Sheet1:0:0", value: 123 },
+      { cellKey: "Sheet1:0:1", formula: "=A1+1" },
+      { cellKey: "Sheet1:1:0", value: "x" },
+      { cellKey: "Sheet1:1:1", formula: null },
+      { cellKey: "Sheet1:2:0", value: "ignored", formula: "=1" },
+    ]);
+
+    assert.deepEqual(sessionB.cells.toJSON(), sessionA.cells.toJSON());
+
+    sessionA.destroy();
+    sessionB.destroy();
+    docA.destroy();
+    docB.destroy();
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("CollabSession setCells rejects entire batch when any cell is not editable (permissions) and leaves doc unchanged", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc });
+
+  session.setPermissions({
+    role: "editor",
+    userId: "u-editor",
+    rangeRestrictions: [
+      {
+        sheetName: "Sheet1",
+        startRow: 0,
+        startCol: 1,
+        endRow: 0,
+        endCol: 1,
+        readAllowlist: [],
+        // Only some other user can edit B1.
+        editAllowlist: ["u-other"],
+      },
+    ],
+  });
+
+  await assert.rejects(
+    session.setCells([
+      { cellKey: "Sheet1:0:0", value: "allowed" },
+      { cellKey: "Sheet1:0:1", value: "blocked" },
+    ]),
+    (err) => String(err?.message ?? err).includes("Sheet1:0:1"),
+  );
+
+  assert.deepEqual(session.cells.toJSON(), {});
+  assert.equal(session.cells.has("Sheet1:0:0"), false);
+  assert.equal(session.cells.has("Sheet1:0:1"), false);
+
+  session.destroy();
+  doc.destroy();
+});
+
+test("CollabSession setCells encrypts protected cells and never writes plaintext into `enc` cells", async () => {
+  const docId = "collab-session-setCells-encryption-test-doc";
+  const doc = new Y.Doc({ guid: docId });
+
+  const keyBytes = new Uint8Array(32).fill(7);
+  const keyForProtected = (cell) => {
+    if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) {
+      return { keyId: "k-range-1", keyBytes };
+    }
+    return null;
+  };
+
+  const session = createCollabSession({ doc, encryption: { keyForCell: keyForProtected } });
+
+  await session.setCells([
+    { cellKey: "Sheet1:0:0", value: "top-secret" },
+    { cellKey: "Sheet1:0:1", value: "plaintext" },
+  ]);
+
+  const encCell = session.cells.get("Sheet1:0:0");
+  assert.ok(encCell, "expected encrypted cell map to exist");
+  assert.equal(encCell.get("value"), undefined);
+  assert.equal(encCell.get("formula"), undefined);
+  assert.ok(encCell.get("enc"), "expected encrypted payload under `enc`");
+  assert.equal(JSON.stringify(encCell.toJSON()).includes("top-secret"), false);
+
+  const plainCell = session.cells.get("Sheet1:0:1");
+  assert.ok(plainCell, "expected plaintext cell map to exist");
+  assert.equal(plainCell.get("enc"), undefined);
+  assert.equal(plainCell.get("value"), "plaintext");
+  assert.equal(plainCell.get("formula"), null);
+
+  session.destroy();
+  doc.destroy();
+});
+

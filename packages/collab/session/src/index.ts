@@ -2335,6 +2335,221 @@ export class CollabSession {
     });
   }
 
+  async setCells(
+    updates: Array<{ cellKey: string; value?: unknown; formula?: string | null }>,
+    opts: { ignorePermissions?: boolean } = {}
+  ): Promise<void> {
+    if (!Array.isArray(updates) || updates.length === 0) return;
+
+    const planned: Array<{
+      cellKey: string;
+      parsed: CellAddress | null;
+      kind: "value" | "formula";
+      nextValue: unknown | null;
+      nextFormula: string;
+      shouldEncrypt: boolean;
+      encryptionCell: CellAddress | null;
+      encryptedPayload: unknown | null;
+    }> = [];
+
+    for (const update of updates) {
+      const cellKey = (update as any)?.cellKey;
+      if (typeof cellKey !== "string" || cellKey.length === 0) {
+        throw new Error(`Invalid cellKey: ${String(cellKey)}`);
+      }
+
+      // Formula wins when both are provided.
+      const kind: "value" | "formula" = update.formula !== undefined ? "formula" : "value";
+
+      const parsed = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
+      planned.push({
+        cellKey,
+        parsed,
+        kind,
+        nextValue: kind === "value" ? (update.value ?? null) : null,
+        nextFormula: kind === "formula" ? (update.formula ?? "").trim() : "",
+        shouldEncrypt: false,
+        encryptionCell: null,
+        encryptedPayload: null,
+      });
+    }
+
+    // Permission gate: reject the entire batch before encrypting/writing anything.
+    if (this.permissions && !opts.ignorePermissions) {
+      for (const update of planned) {
+        if (!update.parsed) throw new Error(`Invalid cellKey: ${update.cellKey}`);
+        if (!this.canEditCell(update.parsed)) {
+          throw new Error(`Cell not editable: ${update.cellKey}`);
+        }
+      }
+    }
+
+    /** @type {Array<Promise<void>>} */
+    const encryptions: Array<Promise<void>> = [];
+
+    for (const update of planned) {
+      const cellData = this.cells.get(update.cellKey);
+      const existingCell = getYMapCell(cellData);
+      const existingEnc =
+        existingCell?.get("enc") ?? (update.parsed ? this.getEncryptedPayloadForCell(update.parsed) : undefined);
+
+      const needsCellAddress = this.encryption != null || existingEnc !== undefined;
+      const encryptionCell = needsCellAddress ? update.parsed : null;
+      if (needsCellAddress && !encryptionCell) throw new Error(`Invalid cellKey: ${update.cellKey}`);
+
+      const key = encryptionCell && this.encryption ? this.encryption.keyForCell(encryptionCell) : null;
+      const shouldEncrypt =
+        existingEnc !== undefined ||
+        (encryptionCell
+          ? (typeof this.encryption?.shouldEncryptCell === "function" ? this.encryption.shouldEncryptCell(encryptionCell) : key != null)
+          : false);
+
+      update.shouldEncrypt = shouldEncrypt;
+      update.encryptionCell = encryptionCell;
+
+      if (!shouldEncrypt) continue;
+      if (!key) throw new Error(`Missing encryption key for cell ${update.cellKey}`);
+
+      const plaintext: CellPlaintext =
+        update.kind === "formula"
+          ? { value: null, formula: update.nextFormula || null }
+          : { value: update.nextValue ?? null, formula: null };
+
+      encryptions.push(
+        encryptCellPlaintext({
+          plaintext,
+          key,
+          context: {
+            docId: this.docIdForEncryption,
+            sheetId: encryptionCell!.sheetId,
+            row: encryptionCell!.row,
+            col: encryptionCell!.col,
+          },
+        }).then((payload) => {
+          update.encryptedPayload = payload;
+        })
+      );
+    }
+
+    if (encryptions.length > 0) {
+      await Promise.all(encryptions);
+    }
+
+    // Normalize foreign nested Y.Maps before mutating them (same semantics as setCellValue/setCellFormula).
+    for (const update of planned) {
+      if (update.kind === "value") {
+        // `setCellValue` skips this normalization when delegating to CellConflictMonitor.
+        if (!update.shouldEncrypt && this.cellValueConflictMonitor) continue;
+        this.ensureLocalCellMapForWrite(update.cellKey);
+        continue;
+      }
+
+      // `setCellFormula` skips this normalization when delegating to FormulaConflictMonitor.
+      if (!update.shouldEncrypt && this.formulaConflictMonitor) continue;
+      this.ensureLocalCellMapForWrite(update.cellKey);
+    }
+
+    const userId = this.permissions?.userId ?? null;
+    const formulaMonitor = this.formulaConflictMonitor;
+    const cellValueMonitor = this.cellValueConflictMonitor;
+
+    this.transactLocal(() => {
+      // Preflight: ensure we never write plaintext into encrypted cells. Validate
+      // every update *before* applying any, so failures leave the doc unchanged.
+      for (const update of planned) {
+        if (update.shouldEncrypt) continue;
+        if (!update.parsed) continue;
+        const encRaw =
+          getYMapCell(this.cells.get(update.cellKey))?.get("enc") ?? this.getEncryptedPayloadForCell(update.parsed);
+        if (encRaw !== undefined) {
+          throw new Error(`Refusing to write plaintext to encrypted cell ${update.cellKey}`);
+        }
+      }
+
+      for (const update of planned) {
+        if (update.shouldEncrypt) {
+          const modified = Date.now();
+          const enc = update.encryptedPayload;
+          if (!enc) throw new Error(`Missing encrypted payload for cell ${update.cellKey}`);
+
+          const cell = update.encryptionCell;
+          const keysToUpdate = cell
+            ? Array.from(
+                new Set([
+                  update.cellKey,
+                  makeCellKey(cell),
+                  `${cell.sheetId}:${cell.row},${cell.col}`,
+                  ...(cell.sheetId === this.defaultSheetId ? [`r${cell.row}c${cell.col}`] : []),
+                ])
+              )
+            : [update.cellKey];
+
+          for (const key of keysToUpdate) {
+            if (key !== update.cellKey && !this.cells.has(key)) continue;
+            let ycell = getYMapCell(this.cells.get(key));
+            if (!ycell) {
+              ycell = new Y.Map();
+              this.cells.set(key, ycell);
+            }
+            ycell.set("enc", enc);
+            ycell.delete("value");
+            ycell.delete("formula");
+            ycell.set("modified", modified);
+            if (userId) ycell.set("modifiedBy", userId);
+          }
+          continue;
+        }
+
+        if (update.kind === "formula") {
+          if (formulaMonitor) {
+            // FormulaConflictMonitor implements the correct null-marker semantics.
+            formulaMonitor.setLocalFormula(update.cellKey, update.nextFormula);
+            continue;
+          }
+
+          let cell = getYMapCell(this.cells.get(update.cellKey));
+          if (!cell) {
+            cell = new Y.Map();
+            this.cells.set(update.cellKey, cell);
+          }
+
+          cell.delete("enc");
+          if (update.nextFormula) cell.set("formula", update.nextFormula);
+          else cell.set("formula", null);
+          cell.set("value", null);
+          cell.set("modified", Date.now());
+          if (userId) cell.set("modifiedBy", userId);
+          continue;
+        }
+
+        // Value update.
+        if (cellValueMonitor) {
+          cellValueMonitor.setLocalValue(update.cellKey, update.nextValue ?? null);
+          continue;
+        }
+
+        if (formulaMonitor && this.formulaConflictsIncludeValueConflicts) {
+          formulaMonitor.setLocalValue(update.cellKey, update.nextValue ?? null);
+          continue;
+        }
+
+        let cell = getYMapCell(this.cells.get(update.cellKey));
+        if (!cell) {
+          cell = new Y.Map();
+          this.cells.set(update.cellKey, cell);
+        }
+
+        cell.delete("enc");
+        cell.set("value", update.nextValue ?? null);
+        // Preserve explicit formula clear markers (`formula=null`) so other clients
+        // can reason about delete-vs-overwrite causality via Yjs Item origin ids.
+        cell.set("formula", null);
+        cell.set("modified", Date.now());
+        if (userId) cell.set("modifiedBy", userId);
+      }
+    });
+  }
+
   async safeSetCellValue(cellKey: string, value: unknown): Promise<boolean> {
     const parsed = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
     if (!parsed) throw new Error(`Invalid cellKey: ${cellKey}`);
