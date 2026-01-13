@@ -273,15 +273,37 @@ impl ColumnarTableBackend {
         }
     }
 
-    fn dax_from_columnar(value: formula_columnar::Value) -> Value {
-        match value {
-            formula_columnar::Value::Null => Value::Blank,
-            formula_columnar::Value::Number(n) => Value::from(n),
-            formula_columnar::Value::Boolean(b) => Value::from(b),
-            formula_columnar::Value::String(s) => Value::from(s),
-            formula_columnar::Value::DateTime(v) => Value::from(v as f64),
-            formula_columnar::Value::Currency(v) => Value::from(v as f64),
-            formula_columnar::Value::Percentage(v) => Value::from(v as f64),
+    fn scale_factor(scale: u8) -> f64 {
+        10_f64.powi(scale as i32)
+    }
+
+    fn dax_from_columnar_typed(
+        value: formula_columnar::Value,
+        ty: formula_columnar::ColumnType,
+    ) -> Value {
+        use formula_columnar::{ColumnType, Value as ColValue};
+
+        match (ty, value) {
+            (_, ColValue::Null) => Value::Blank,
+            (_, ColValue::Number(n)) => Value::from(n),
+            (_, ColValue::Boolean(b)) => Value::from(b),
+            (_, ColValue::String(s)) => Value::from(s),
+
+            // MVP: treat DateTime as an integer-backed numeric type (matching previous behavior).
+            (ColumnType::DateTime, ColValue::DateTime(raw)) => Value::from(raw as f64),
+
+            (ColumnType::Currency { scale }, ColValue::Currency(raw)) => {
+                Value::from(raw as f64 / Self::scale_factor(scale))
+            }
+            (ColumnType::Percentage { scale }, ColValue::Percentage(raw)) => {
+                Value::from(raw as f64 / Self::scale_factor(scale))
+            }
+
+            // Defensive fallback: if a value's variant doesn't match the schema metadata,
+            // preserve the old "raw as f64" behavior rather than returning BLANK.
+            (_, ColValue::DateTime(raw) | ColValue::Currency(raw) | ColValue::Percentage(raw)) => {
+                Value::from(raw as f64)
+            }
         }
     }
 
@@ -291,6 +313,30 @@ impl ColumnarTableBackend {
             formula_columnar::Value::DateTime(v)
             | formula_columnar::Value::Currency(v)
             | formula_columnar::Value::Percentage(v) => Some(*v as f64),
+            _ => None,
+        }
+    }
+
+    fn numeric_from_columnar_typed(
+        value: &formula_columnar::Value,
+        ty: formula_columnar::ColumnType,
+    ) -> Option<f64> {
+        use formula_columnar::{ColumnType, Value as ColValue};
+
+        match (ty, value) {
+            (_, ColValue::Null) => None,
+            (_, ColValue::Number(n)) => Some(*n),
+            (ColumnType::DateTime, ColValue::DateTime(raw)) => Some(*raw as f64),
+            (ColumnType::Currency { scale }, ColValue::Currency(raw)) => {
+                Some(*raw as f64 / Self::scale_factor(scale))
+            }
+            (ColumnType::Percentage { scale }, ColValue::Percentage(raw)) => {
+                Some(*raw as f64 / Self::scale_factor(scale))
+            }
+            // Defensive fallback (see `dax_from_columnar_typed`).
+            (_, ColValue::DateTime(raw) | ColValue::Currency(raw) | ColValue::Percentage(raw)) => {
+                Some(*raw as f64)
+            }
             _ => None,
         }
     }
@@ -324,6 +370,9 @@ impl ColumnarTableBackend {
             Direct {
                 col: usize,
             },
+            /// A numeric aggregation (SUM/AVERAGE) over an int-backed logical type that needs
+            /// post-scaling (Currency/Percentage).
+            DirectScaled { col: usize, scale: u8 },
             DistinctCount {
                 distinct_non_blank_col: usize,
                 count_rows_col: usize,
@@ -378,8 +427,17 @@ impl ColumnarTableBackend {
                     let col_idx = spec.column_idx?;
                     let column_type = schema.get(col_idx)?.column_type;
                     if Self::is_dax_numeric_column(column_type) {
-                        Plan::Direct {
-                            col: ensure(AggOp::SumF64, Some(col_idx)),
+                        match column_type {
+                            formula_columnar::ColumnType::Currency { scale }
+                            | formula_columnar::ColumnType::Percentage { scale } => {
+                                Plan::DirectScaled {
+                                    col: ensure(AggOp::SumF64, Some(col_idx)),
+                                    scale,
+                                }
+                            }
+                            _ => Plan::Direct {
+                                col: ensure(AggOp::SumF64, Some(col_idx)),
+                            },
                         }
                     } else {
                         Plan::Constant(Value::Blank)
@@ -411,8 +469,17 @@ impl ColumnarTableBackend {
                     let col_idx = spec.column_idx?;
                     let column_type = schema.get(col_idx)?.column_type;
                     if Self::is_dax_numeric_column(column_type) {
-                        Plan::Direct {
-                            col: ensure(AggOp::AvgF64, Some(col_idx)),
+                        match column_type {
+                            formula_columnar::ColumnType::Currency { scale }
+                            | formula_columnar::ColumnType::Percentage { scale } => {
+                                Plan::DirectScaled {
+                                    col: ensure(AggOp::AvgF64, Some(col_idx)),
+                                    scale,
+                                }
+                            }
+                            _ => Plan::Direct {
+                                col: ensure(AggOp::AvgF64, Some(col_idx)),
+                            },
                         }
                     } else {
                         Plan::Constant(Value::Blank)
@@ -449,30 +516,45 @@ impl ColumnarTableBackend {
             Some(rows) => self.table.group_by_rows(group_by, &planned, rows).ok()?,
             None => self.table.group_by(group_by, &planned).ok()?,
         };
+        let grouped_schema = grouped.schema();
         let grouped_cols = grouped.to_values();
         let group_count = grouped.row_count();
 
         let mut out: Vec<Vec<Value>> = Vec::with_capacity(group_count);
         for row_idx in 0..group_count {
             let mut row: Vec<Value> = Vec::with_capacity(key_len + plans.len());
-            for col in 0..key_len {
+            for (col, &col_idx) in group_by.iter().enumerate().take(key_len) {
+                let ty = schema.get(col_idx)?.column_type;
                 let value = grouped_cols
                     .get(col)
                     .and_then(|c| c.get(row_idx))
                     .cloned()
                     .unwrap_or(formula_columnar::Value::Null);
-                row.push(Self::dax_from_columnar(value));
+                row.push(Self::dax_from_columnar_typed(value, ty));
             }
             for plan in &plans {
                 let value = match plan {
                     Plan::Direct { col } => {
+                        let col = *col;
+                        let ty = grouped_schema.get(col).map(|s| s.column_type)?;
+                        let v = grouped_cols
+                            .get(col)
+                            .and_then(|c| c.get(row_idx))
+                            .cloned()
+                            .unwrap_or(formula_columnar::Value::Null);
+                        Self::dax_from_columnar_typed(v, ty)
+                    }
+                    Plan::DirectScaled { col, scale } => {
                         let col = *col;
                         let v = grouped_cols
                             .get(col)
                             .and_then(|c| c.get(row_idx))
                             .cloned()
                             .unwrap_or(formula_columnar::Value::Null);
-                        Self::dax_from_columnar(v)
+                        match Self::numeric_from_columnar(&v) {
+                            Some(raw) => Value::from(raw / Self::scale_factor(*scale)),
+                            None => Value::Blank,
+                        }
                     }
                     Plan::DistinctCount {
                         distinct_non_blank_col,
@@ -520,6 +602,7 @@ impl ColumnarTableBackend {
         use std::collections::HashSet;
 
         let row_count = self.table.row_count();
+        let schema = self.table.schema();
 
         #[derive(Clone)]
         enum AggState {
@@ -549,7 +632,12 @@ impl ColumnarTableBackend {
                 })
             }
 
-            fn update(&mut self, spec: &AggregationSpec, value: Option<&formula_columnar::Value>) {
+            fn update(
+                &mut self,
+                spec: &AggregationSpec,
+                column_type: Option<formula_columnar::ColumnType>,
+                value: Option<&formula_columnar::Value>,
+            ) {
                 match (self, spec.kind) {
                     (AggState::CountRows { count }, AggregationKind::CountRows) => {
                         *count += 1;
@@ -562,44 +650,69 @@ impl ColumnarTableBackend {
                         }
                     }
                     (AggState::CountNumbers { count }, AggregationKind::CountNumbers) => {
+                        let Some(column_type) = column_type else {
+                            return;
+                        };
                         if value
-                            .and_then(ColumnarTableBackend::numeric_from_columnar)
+                            .and_then(|v| ColumnarTableBackend::numeric_from_columnar_typed(v, column_type))
                             .is_some()
                         {
                             *count += 1;
                         }
                     }
                     (AggState::Sum { sum, count }, AggregationKind::Sum) => {
-                        if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar)
+                        let Some(column_type) = column_type else {
+                            return;
+                        };
+                        if let Some(v) =
+                            value.and_then(|v| ColumnarTableBackend::numeric_from_columnar_typed(v, column_type))
                         {
                             *sum += v;
                             *count += 1;
                         }
                     }
                     (AggState::Avg { sum, count }, AggregationKind::Average) => {
-                        if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar)
+                        let Some(column_type) = column_type else {
+                            return;
+                        };
+                        if let Some(v) =
+                            value.and_then(|v| ColumnarTableBackend::numeric_from_columnar_typed(v, column_type))
                         {
                             *sum += v;
                             *count += 1;
                         }
                     }
                     (AggState::Min { best }, AggregationKind::Min) => {
-                        if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar)
+                        let Some(column_type) = column_type else {
+                            return;
+                        };
+                        if let Some(v) =
+                            value.and_then(|v| ColumnarTableBackend::numeric_from_columnar_typed(v, column_type))
                         {
                             *best = Some(best.map_or(v, |current| current.min(v)));
                         }
                     }
                     (AggState::Max { best }, AggregationKind::Max) => {
-                        if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar)
+                        let Some(column_type) = column_type else {
+                            return;
+                        };
+                        if let Some(v) =
+                            value.and_then(|v| ColumnarTableBackend::numeric_from_columnar_typed(v, column_type))
                         {
                             *best = Some(best.map_or(v, |current| current.max(v)));
                         }
                     }
                     (AggState::DistinctCount { set }, AggregationKind::DistinctCount) => {
+                        let Some(column_type) = column_type else {
+                            return;
+                        };
                         let Some(v) = value else {
                             return;
                         };
-                        set.insert(ColumnarTableBackend::dax_from_columnar(v.clone()));
+                        set.insert(ColumnarTableBackend::dax_from_columnar_typed(
+                            v.clone(),
+                            column_type,
+                        ));
                     }
                     _ => {}
                 }
@@ -632,6 +745,14 @@ impl ColumnarTableBackend {
         }
 
         let key_len = group_by.len();
+        let key_types: Vec<formula_columnar::ColumnType> = group_by
+            .iter()
+            .map(|&idx| schema.get(idx).map(|c| c.column_type))
+            .collect::<Option<Vec<_>>>()?;
+        let agg_types: Vec<Option<formula_columnar::ColumnType>> = aggs
+            .iter()
+            .map(|spec| spec.column_idx.and_then(|idx| schema.get(idx).map(|c| c.column_type)))
+            .collect();
         let mut key_buf: Vec<Value> = Vec::with_capacity(key_len);
 
         let mut states_template = Vec::with_capacity(aggs.len());
@@ -659,7 +780,7 @@ impl ColumnarTableBackend {
         const CHUNK_ROWS: usize = 65_536;
         let mut process_row = |row_offset: usize, range: &formula_columnar::ColumnarRange| {
             key_buf.clear();
-            for idx in group_by {
+            for (pos, idx) in group_by.iter().enumerate() {
                 let col = *idx - col_start;
                 let value = range
                     .columns
@@ -667,27 +788,27 @@ impl ColumnarTableBackend {
                     .and_then(|c| c.get(row_offset))
                     .cloned()
                     .unwrap_or(formula_columnar::Value::Null);
-                key_buf.push(Self::dax_from_columnar(value));
+                key_buf.push(Self::dax_from_columnar_typed(value, key_types[pos]));
             }
 
             if let Some(existing) = groups.get_mut(key_buf.as_slice()) {
-                for (state, spec) in existing.iter_mut().zip(aggs) {
+                for ((state, spec), col_type) in existing.iter_mut().zip(aggs).zip(&agg_types) {
                     let value = spec.column_idx.and_then(|idx| {
                         let col = idx - col_start;
                         range.columns.get(col).and_then(|c| c.get(row_offset))
                     });
-                    state.update(spec, value);
+                    state.update(spec, *col_type, value);
                 }
                 return;
             }
 
             let mut states = states_template.clone();
-            for (state, spec) in states.iter_mut().zip(aggs) {
+            for ((state, spec), col_type) in states.iter_mut().zip(aggs).zip(&agg_types) {
                 let value = spec.column_idx.and_then(|idx| {
                     let col = idx - col_start;
                     range.columns.get(col).and_then(|c| c.get(row_offset))
                 });
-                state.update(spec, value);
+                state.update(spec, *col_type, value);
             }
             groups.insert(key_buf.clone(), states);
         };
@@ -754,12 +875,22 @@ impl TableBackend for ColumnarTableBackend {
         if row >= self.table.row_count() || idx >= self.table.column_count() {
             return None;
         }
+        let ty = self.table.schema().get(idx)?.column_type;
         let value = self.table.get_cell(row, idx);
-        Some(Self::dax_from_columnar(value))
+        Some(Self::dax_from_columnar_typed(value, ty))
     }
 
     fn stats_sum(&self, idx: usize) -> Option<f64> {
-        self.table.scan().stats(idx)?.sum
+        let stats = self.table.scan().stats(idx)?;
+        let sum = stats.sum?;
+        let ty = self.table.schema().get(idx)?.column_type;
+        match ty {
+            formula_columnar::ColumnType::Currency { scale }
+            | formula_columnar::ColumnType::Percentage { scale } => {
+                Some(sum / Self::scale_factor(scale))
+            }
+            _ => Some(sum),
+        }
     }
 
     fn stats_non_blank_count(&self, idx: usize) -> Option<usize> {
@@ -773,12 +904,14 @@ impl TableBackend for ColumnarTableBackend {
 
     fn stats_min(&self, idx: usize) -> Option<Value> {
         let stats = self.table.scan().stats(idx)?;
-        Some(Self::dax_from_columnar(stats.min.clone()?))
+        let ty = self.table.schema().get(idx)?.column_type;
+        Some(Self::dax_from_columnar_typed(stats.min.clone()?, ty))
     }
 
     fn stats_max(&self, idx: usize) -> Option<Value> {
         let stats = self.table.scan().stats(idx)?;
-        Some(Self::dax_from_columnar(stats.max.clone()?))
+        let ty = self.table.schema().get(idx)?.column_type;
+        Some(Self::dax_from_columnar_typed(stats.max.clone()?, ty))
     }
 
     fn stats_distinct_count(&self, idx: usize) -> Option<u64> {
@@ -791,8 +924,14 @@ impl TableBackend for ColumnarTableBackend {
     }
 
     fn dictionary_values(&self, idx: usize) -> Option<Vec<Value>> {
+        let ty = self.table.schema().get(idx)?.column_type;
         let dict = self.table.dictionary(idx)?;
-        Some(dict.iter().cloned().map(Value::from).collect())
+        Some(
+            dict.iter()
+                .cloned()
+                .map(|s| Self::dax_from_columnar_typed(formula_columnar::Value::String(s), ty))
+                .collect(),
+        )
     }
 
     fn filter_eq(&self, idx: usize, value: &Value) -> Option<Vec<usize>> {
@@ -819,14 +958,44 @@ impl TableBackend for ColumnarTableBackend {
             Some(v as i64)
         }
 
+        fn scaled_i64_key(v: f64, scale: u8) -> Option<i64> {
+            // Match the fallback semantics for fixed-point logical types (Currency/Percentage):
+            // convert `raw: i64` to `f64` via `raw as f64 / 10^scale`, and compare as `f64`.
+            // For correctness we only use the i64 scan fast path when the computed raw value
+            // round-trips exactly back to the original `f64`.
+            const MAX_SAFE_INT: f64 = 9_007_199_254_740_992.0; // 2^53
+            if !v.is_finite() {
+                return None;
+            }
+            let factor = ColumnarTableBackend::scale_factor(scale);
+            let raw_f = v * factor;
+            if !raw_f.is_finite() {
+                return None;
+            }
+            let raw_round = raw_f.round();
+            if raw_round.abs() > MAX_SAFE_INT {
+                return None;
+            }
+            if raw_round < i64::MIN as f64 || raw_round > i64::MAX as f64 {
+                return None;
+            }
+            let raw = raw_round as i64;
+            ((raw as f64) / factor == v).then_some(raw)
+        }
+
         match value {
             Value::Text(s) => Some(self.table.scan().filter_eq_string(idx, s.as_ref())),
             Value::Number(n) => match column_type {
                 formula_columnar::ColumnType::Number => Some(self.table.scan().filter_eq_number(idx, n.0)),
-                formula_columnar::ColumnType::DateTime
-                | formula_columnar::ColumnType::Currency { .. }
-                | formula_columnar::ColumnType::Percentage { .. } => {
+                formula_columnar::ColumnType::DateTime => {
                     let Some(v) = safe_i64_key(n.0) else {
+                        return self.filter_in(idx, std::slice::from_ref(value));
+                    };
+                    Some(self.table.scan().filter_eq_i64(idx, v))
+                }
+                formula_columnar::ColumnType::Currency { scale }
+                | formula_columnar::ColumnType::Percentage { scale } => {
+                    let Some(v) = scaled_i64_key(n.0, scale) else {
                         return self.filter_in(idx, std::slice::from_ref(value));
                     };
                     Some(self.table.scan().filter_eq_i64(idx, v))
@@ -846,6 +1015,7 @@ impl TableBackend for ColumnarTableBackend {
         if idx >= self.table.column_count() {
             return None;
         }
+        let column_type = self.table.schema().get(idx)?.column_type;
 
         let rows = match rows {
             Some(rows)
@@ -872,7 +1042,7 @@ impl TableBackend for ColumnarTableBackend {
                 let mut out = Vec::with_capacity(result.row_count());
                 if let Some(col) = values.get(0) {
                     for v in col {
-                        out.push(Self::dax_from_columnar(v.clone()));
+                        out.push(Self::dax_from_columnar_typed(v.clone(), column_type));
                     }
                 }
                 return Some(out);
@@ -885,7 +1055,7 @@ impl TableBackend for ColumnarTableBackend {
                 let mut out = Vec::with_capacity(result.row_count());
                 if let Some(col) = values.get(0) {
                     for v in col {
-                        out.push(Self::dax_from_columnar(v.clone()));
+                        out.push(Self::dax_from_columnar_typed(v.clone(), column_type));
                     }
                 }
                 return Some(out);
@@ -912,7 +1082,7 @@ impl TableBackend for ColumnarTableBackend {
                     let end = (start + CHUNK_ROWS).min(row_count);
                     let range = self.table.get_range(start, end, idx, idx + 1);
                     for v in range.columns.get(0).into_iter().flatten() {
-                        push_value(Self::dax_from_columnar(v.clone()));
+                        push_value(Self::dax_from_columnar_typed(v.clone(), column_type));
                     }
                     start = end;
                 }
@@ -931,7 +1101,7 @@ impl TableBackend for ColumnarTableBackend {
                         }
                         let in_chunk = row - chunk_start;
                         if let Some(v) = range.columns.get(0).and_then(|c| c.get(in_chunk)) {
-                            push_value(Self::dax_from_columnar(v.clone()));
+                            push_value(Self::dax_from_columnar_typed(v.clone(), column_type));
                         }
                         pos += 1;
                     }
@@ -1000,9 +1170,7 @@ impl TableBackend for ColumnarTableBackend {
                 formula_columnar::ColumnType::Number => {
                     return Some(self.table.scan().filter_in_number(idx, &nums));
                 }
-                formula_columnar::ColumnType::DateTime
-                | formula_columnar::ColumnType::Currency { .. }
-                | formula_columnar::ColumnType::Percentage { .. } => {
+                formula_columnar::ColumnType::DateTime => {
                     const MAX_SAFE_INT: f64 = 9_007_199_254_740_992.0; // 2^53
                     let mut ints = Vec::with_capacity(nums.len());
                     for v in &nums {
@@ -1011,6 +1179,41 @@ impl TableBackend for ColumnarTableBackend {
                             break;
                         }
                         ints.push(*v as i64);
+                    }
+
+                    if !ints.is_empty() {
+                        return Some(self.table.scan().filter_in_i64(idx, &ints));
+                    }
+                }
+                formula_columnar::ColumnType::Currency { scale }
+                | formula_columnar::ColumnType::Percentage { scale } => {
+                    const MAX_SAFE_INT: f64 = 9_007_199_254_740_992.0; // 2^53
+                    let factor = Self::scale_factor(scale);
+                    let mut ints = Vec::with_capacity(nums.len());
+                    for v in &nums {
+                        if !v.is_finite() {
+                            ints.clear();
+                            break;
+                        }
+                        let raw_f = *v * factor;
+                        if !raw_f.is_finite() {
+                            ints.clear();
+                            break;
+                        }
+                        let raw_round = raw_f.round();
+                        if raw_round.abs() > MAX_SAFE_INT
+                            || raw_round < i64::MIN as f64
+                            || raw_round > i64::MAX as f64
+                        {
+                            ints.clear();
+                            break;
+                        }
+                        let raw = raw_round as i64;
+                        if (raw as f64) / factor != *v {
+                            ints.clear();
+                            break;
+                        }
+                        ints.push(raw);
                     }
 
                     if !ints.is_empty() {
@@ -1046,7 +1249,7 @@ impl TableBackend for ColumnarTableBackend {
             let range = self.table.get_range(start, end, idx, idx + 1);
             if let Some(col) = range.columns.get(0) {
                 for (offset, v) in col.iter().enumerate() {
-                    let dax_value = Self::dax_from_columnar(v.clone());
+                    let dax_value = Self::dax_from_columnar_typed(v.clone(), column_type);
                     if targets.contains(&dax_value) {
                         out.push(start + offset);
                     }
