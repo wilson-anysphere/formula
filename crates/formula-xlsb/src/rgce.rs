@@ -3421,10 +3421,23 @@ const PTG_ADD: u8 = 0x03;
 const PTG_SUB: u8 = 0x04;
 const PTG_MUL: u8 = 0x05;
 const PTG_DIV: u8 = 0x06;
+const PTG_POW: u8 = 0x07;
+const PTG_CONCAT: u8 = 0x08;
+const PTG_LT: u8 = 0x09;
+const PTG_LE: u8 = 0x0A;
+const PTG_EQ: u8 = 0x0B;
+const PTG_GT: u8 = 0x0C;
+const PTG_GE: u8 = 0x0D;
+const PTG_NE: u8 = 0x0E;
+const PTG_INTERSECT: u8 = 0x0F;
+const PTG_UNION: u8 = 0x10;
+const PTG_RANGE: u8 = 0x11;
 const PTG_UPLUS: u8 = 0x12;
 const PTG_UMINUS: u8 = 0x13;
 const PTG_MISSARG: u8 = 0x16;
+const PTG_STR: u8 = 0x17;
 const PTG_ERR: u8 = 0x1C;
+const PTG_BOOL: u8 = 0x1D;
 const PTG_INT: u8 = 0x1E;
 const PTG_NUM: u8 = 0x1F;
 const PTG_ARRAY: u8 = 0x20;
@@ -3462,6 +3475,8 @@ const COL_INDEX_MASK: u16 = 0x3FFF;
 enum Expr {
     Missing,
     Number(f64),
+    String(String),
+    Bool(bool),
     Error(u8),
     Ref(Ref),
     Name(NameRef),
@@ -3509,6 +3524,17 @@ enum BinaryOp {
     Sub,
     Mul,
     Div,
+    Pow,
+    Concat,
+    Lt,
+    Le,
+    Eq,
+    Gt,
+    Ge,
+    Ne,
+    Intersect,
+    Union,
+    Range,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3552,6 +3578,22 @@ fn emit_expr(
     match expr {
         Expr::Missing => rgce.push(PTG_MISSARG),
         Expr::Number(n) => emit_number(*n, rgce),
+        Expr::String(s) => {
+            rgce.push(PTG_STR);
+            let units: Vec<u16> = s.encode_utf16().collect();
+            let cch: u16 = units
+                .len()
+                .try_into()
+                .map_err(|_| EncodeError::Parse("string literal too long".to_string()))?;
+            rgce.extend_from_slice(&cch.to_le_bytes());
+            for unit in units {
+                rgce.extend_from_slice(&unit.to_le_bytes());
+            }
+        }
+        Expr::Bool(b) => {
+            rgce.push(PTG_BOOL);
+            rgce.push(u8::from(*b));
+        }
         Expr::Error(code) => {
             rgce.push(PTG_ERR);
             rgce.push(*code);
@@ -3601,6 +3643,17 @@ fn emit_expr(
                 BinaryOp::Sub => PTG_SUB,
                 BinaryOp::Mul => PTG_MUL,
                 BinaryOp::Div => PTG_DIV,
+                BinaryOp::Pow => PTG_POW,
+                BinaryOp::Concat => PTG_CONCAT,
+                BinaryOp::Lt => PTG_LT,
+                BinaryOp::Le => PTG_LE,
+                BinaryOp::Eq => PTG_EQ,
+                BinaryOp::Gt => PTG_GT,
+                BinaryOp::Ge => PTG_GE,
+                BinaryOp::Ne => PTG_NE,
+                BinaryOp::Intersect => PTG_INTERSECT,
+                BinaryOp::Union => PTG_UNION,
+                BinaryOp::Range => PTG_RANGE,
             });
         }
     }
@@ -3925,7 +3978,7 @@ impl<'a> FormulaParser<'a> {
 
     fn parse(&mut self) -> Result<Expr, String> {
         self.skip_ws();
-        let expr = self.parse_add_sub()?;
+        let expr = self.parse_expr(false)?;
         self.skip_ws();
         if self.pos < self.input.len() {
             return Err(format!("unexpected trailing input at byte {}", self.pos));
@@ -3933,8 +3986,68 @@ impl<'a> FormulaParser<'a> {
         Ok(expr)
     }
 
-    fn parse_add_sub(&mut self) -> Result<Expr, String> {
-        let mut expr = self.parse_mul_div()?;
+    fn parse_expr(&mut self, stop_at_comma: bool) -> Result<Expr, String> {
+        self.parse_comparison(stop_at_comma)
+    }
+
+    fn parse_comparison(&mut self, stop_at_comma: bool) -> Result<Expr, String> {
+        let mut expr = self.parse_concat(stop_at_comma)?;
+        loop {
+            self.skip_ws();
+            let rest = &self.input[self.pos..];
+            let op = if rest.starts_with("<=") {
+                self.pos += 2;
+                Some(BinaryOp::Le)
+            } else if rest.starts_with(">=") {
+                self.pos += 2;
+                Some(BinaryOp::Ge)
+            } else if rest.starts_with("<>") {
+                self.pos += 2;
+                Some(BinaryOp::Ne)
+            } else if rest.starts_with('<') {
+                self.pos += 1;
+                Some(BinaryOp::Lt)
+            } else if rest.starts_with('>') {
+                self.pos += 1;
+                Some(BinaryOp::Gt)
+            } else if rest.starts_with('=') {
+                self.pos += 1;
+                Some(BinaryOp::Eq)
+            } else {
+                None
+            };
+
+            let Some(op) = op else { break };
+            let rhs = self.parse_concat(stop_at_comma)?;
+            expr = Expr::Binary {
+                op,
+                left: Box::new(expr),
+                right: Box::new(rhs),
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_concat(&mut self, stop_at_comma: bool) -> Result<Expr, String> {
+        let mut expr = self.parse_add_sub(stop_at_comma)?;
+        loop {
+            self.skip_ws();
+            if self.peek_char() != Some('&') {
+                break;
+            }
+            self.next_char();
+            let rhs = self.parse_add_sub(stop_at_comma)?;
+            expr = Expr::Binary {
+                op: BinaryOp::Concat,
+                left: Box::new(expr),
+                right: Box::new(rhs),
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_add_sub(&mut self, stop_at_comma: bool) -> Result<Expr, String> {
+        let mut expr = self.parse_mul_div(stop_at_comma)?;
         loop {
             self.skip_ws();
             let op = match self.peek_char() {
@@ -3943,7 +4056,7 @@ impl<'a> FormulaParser<'a> {
                 _ => break,
             };
             self.next_char();
-            let rhs = self.parse_mul_div()?;
+            let rhs = self.parse_mul_div(stop_at_comma)?;
             expr = Expr::Binary {
                 op,
                 left: Box::new(expr),
@@ -3953,8 +4066,8 @@ impl<'a> FormulaParser<'a> {
         Ok(expr)
     }
 
-    fn parse_mul_div(&mut self) -> Result<Expr, String> {
-        let mut expr = self.parse_unary()?;
+    fn parse_mul_div(&mut self, stop_at_comma: bool) -> Result<Expr, String> {
+        let mut expr = self.parse_power(stop_at_comma)?;
         loop {
             self.skip_ws();
             let op = match self.peek_char() {
@@ -3963,7 +4076,7 @@ impl<'a> FormulaParser<'a> {
                 _ => break,
             };
             self.next_char();
-            let rhs = self.parse_unary()?;
+            let rhs = self.parse_power(stop_at_comma)?;
             expr = Expr::Binary {
                 op,
                 left: Box::new(expr),
@@ -3973,63 +4086,150 @@ impl<'a> FormulaParser<'a> {
         Ok(expr)
     }
 
-    fn parse_unary(&mut self) -> Result<Expr, String> {
+    fn parse_power(&mut self, stop_at_comma: bool) -> Result<Expr, String> {
+        let expr = self.parse_unary(stop_at_comma)?;
+        self.skip_ws();
+        if self.peek_char() != Some('^') {
+            return Ok(expr);
+        }
+        // Excel exponentiation is right-associative.
+        self.next_char();
+        let rhs = self.parse_power(stop_at_comma)?;
+        Ok(Expr::Binary {
+            op: BinaryOp::Pow,
+            left: Box::new(expr),
+            right: Box::new(rhs),
+        })
+    }
+
+    fn parse_unary(&mut self, stop_at_comma: bool) -> Result<Expr, String> {
         self.skip_ws();
         match self.peek_char() {
             Some('+') => {
                 self.next_char();
                 Ok(Expr::Unary {
                     op: UnaryOp::Plus,
-                    expr: Box::new(self.parse_unary()?),
+                    expr: Box::new(self.parse_unary(stop_at_comma)?),
                 })
             }
             Some('-') => {
                 self.next_char();
                 Ok(Expr::Unary {
                     op: UnaryOp::Minus,
-                    expr: Box::new(self.parse_unary()?),
+                    expr: Box::new(self.parse_unary(stop_at_comma)?),
                 })
             }
             Some('@') => {
                 self.next_char();
                 Ok(Expr::Unary {
                     op: UnaryOp::ImplicitIntersection,
-                    expr: Box::new(self.parse_unary()?),
+                    expr: Box::new(self.parse_unary(stop_at_comma)?),
                 })
             }
-            _ => self.parse_primary(),
+            _ => self.parse_ref_union(stop_at_comma),
         }
     }
 
-    fn parse_primary(&mut self) -> Result<Expr, String> {
+    fn parse_ref_union(&mut self, stop_at_comma: bool) -> Result<Expr, String> {
+        let mut expr = self.parse_ref_intersect(stop_at_comma)?;
+        if stop_at_comma {
+            return Ok(expr);
+        }
+        loop {
+            self.skip_ws();
+            if self.peek_char() != Some(',') {
+                break;
+            }
+            self.next_char();
+            let rhs = self.parse_ref_intersect(stop_at_comma)?;
+            expr = Expr::Binary {
+                op: BinaryOp::Union,
+                left: Box::new(expr),
+                right: Box::new(rhs),
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_ref_intersect(&mut self, stop_at_comma: bool) -> Result<Expr, String> {
+        let mut expr = self.parse_ref_range(stop_at_comma)?;
+        loop {
+            let had_ws = self.skip_ws();
+            if !had_ws {
+                break;
+            }
+            if !self.is_intersection_rhs_start() {
+                break;
+            }
+            let rhs = self.parse_ref_range(stop_at_comma)?;
+            expr = Expr::Binary {
+                op: BinaryOp::Intersect,
+                left: Box::new(expr),
+                right: Box::new(rhs),
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_ref_range(&mut self, stop_at_comma: bool) -> Result<Expr, String> {
+        let mut expr = self.parse_postfix(stop_at_comma)?;
+        loop {
+            let after_ws = self.peek_non_ws_pos();
+            if after_ws >= self.input.len() {
+                break;
+            }
+            if self.input[after_ws..].starts_with(':') {
+                // Commit any whitespace.
+                self.pos = after_ws;
+                self.next_char();
+                // Allow whitespace after ':'.
+                self.skip_ws();
+                let rhs = self.parse_postfix(stop_at_comma)?;
+                expr = Expr::Binary {
+                    op: BinaryOp::Range,
+                    left: Box::new(expr),
+                    right: Box::new(rhs),
+                };
+                continue;
+            }
+            break;
+        }
+        Ok(expr)
+    }
+
+    fn parse_postfix(&mut self, stop_at_comma: bool) -> Result<Expr, String> {
+        let mut expr = self.parse_primary(stop_at_comma)?;
+        while self.peek_char() == Some('#') {
+            self.next_char();
+            expr = Expr::SpillRange(Box::new(expr));
+        }
+        Ok(expr)
+    }
+
+    fn parse_primary(&mut self, stop_at_comma: bool) -> Result<Expr, String> {
         self.skip_ws();
-        let mut expr = match self.peek_char() {
+        let _ = stop_at_comma;
+        Ok(match self.peek_char() {
             Some('{') => self.parse_array_literal()?,
             Some('(') => {
                 self.next_char();
-                let expr = self.parse_add_sub()?;
+                // Parentheses allow union operators, even inside function argument lists.
+                let expr = self.parse_expr(false)?;
                 self.skip_ws();
                 if self.next_char() != Some(')') {
                     return Err("expected ')'".to_string());
                 }
                 expr
             }
+            Some('"') => Expr::String(self.parse_string_literal()?),
             Some('#') => Expr::Error(self.parse_error_literal()?),
             Some(ch) if ch.is_ascii_digit() || ch == '.' => self.parse_number()?,
+            Some('$') => self.parse_ident_or_ref()?,
             Some('[') => self.parse_ident_or_ref()?,
             Some('\'') => self.parse_ident_or_ref()?,
             Some(ch) if is_ident_start(ch) => self.parse_ident_or_ref()?,
             _ => return Err("unexpected token".to_string()),
-        };
-
-        self.skip_ws();
-        while self.peek_char() == Some('#') {
-            self.next_char();
-            expr = Expr::SpillRange(Box::new(expr));
-            self.skip_ws();
-        }
-
-        Ok(expr)
+        })
     }
 
     fn parse_array_literal(&mut self) -> Result<Expr, String> {
@@ -4179,8 +4379,13 @@ impl<'a> FormulaParser<'a> {
         let ident = self
             .parse_identifier()?
             .ok_or_else(|| "expected identifier".to_string())?;
-        self.skip_ws();
-        if self.peek_char() == Some('(') {
+
+        // Function calls allow optional whitespace between the identifier and `(` (e.g. `SUM (A1)`).
+        // But whitespace is also meaningful for the intersection operator, so only consume it if we
+        // actually see an opening paren.
+        let lparen_pos = self.peek_non_ws_pos();
+        if lparen_pos < self.input.len() && self.input[lparen_pos..].starts_with('(') {
+            self.pos = lparen_pos;
             self.next_char();
             let mut args = Vec::new();
             self.skip_ws();
@@ -4191,7 +4396,9 @@ impl<'a> FormulaParser<'a> {
                     if matches!(self.peek_char(), Some(',') | Some(')')) {
                         args.push(Expr::Missing);
                     } else {
-                        args.push(self.parse_add_sub()?);
+                        // Commas delimit arguments at the top level. Union expressions using `,`
+                        // must be parenthesized (e.g. `(A1,B1)`).
+                        args.push(self.parse_expr(true)?);
                     }
                     self.skip_ws();
                     match self.peek_char() {
@@ -4207,10 +4414,14 @@ impl<'a> FormulaParser<'a> {
             self.next_char();
             Ok(Expr::Func { name: ident, args })
         } else {
-            Ok(Expr::Name(NameRef {
-                sheet: None,
-                name: ident,
-            }))
+            match ident.to_ascii_uppercase().as_str() {
+                "TRUE" => Ok(Expr::Bool(true)),
+                "FALSE" => Ok(Expr::Bool(false)),
+                _ => Ok(Expr::Name(NameRef {
+                    sheet: None,
+                    name: ident,
+                })),
+            }
         }
     }
 
@@ -4274,17 +4485,31 @@ impl<'a> FormulaParser<'a> {
             self.pos = start;
             return Ok(None);
         };
-        self.skip_ws();
-        if self.peek_char() == Some(':') {
+        let after_a = self.pos;
+
+        // Area references like `A1:B2` allow optional whitespace around the `:` operator. But
+        // whitespace is also significant for the intersection operator, so only consume it if the
+        // next non-whitespace character is actually `:`.
+        let colon_pos = self.peek_non_ws_pos();
+        if colon_pos < self.input.len() && self.input[colon_pos..].starts_with(':') {
+            // Commit whitespace and consume ':'.
+            self.pos = colon_pos;
             self.next_char();
-            let b = self
-                .parse_cell_ref()?
-                .ok_or_else(|| "expected cell reference after ':'".to_string())?;
-            return Ok(Some(Ref {
-                sheet,
-                kind: RefKind::Area(a, b),
-            }));
+            // Allow whitespace after ':'.
+            self.skip_ws();
+
+            if let Some(b) = self.parse_cell_ref()? {
+                return Ok(Some(Ref {
+                    sheet,
+                    kind: RefKind::Area(a, b),
+                }));
+            }
+
+            // Not a simple area ref (`A1:B2`). Leave the `:` operator to be handled as a general
+            // range expression (`PtgRange`) by higher-precedence parsing.
+            self.pos = after_a;
         }
+
         Ok(Some(Ref {
             sheet,
             kind: RefKind::Cell(a),
@@ -4451,7 +4676,29 @@ impl<'a> FormulaParser<'a> {
         Ok(Some(self.input[start..self.pos].to_string()))
     }
 
-    fn skip_ws(&mut self) {
+    fn peek_non_ws_pos(&self) -> usize {
+        let mut i = self.pos;
+        while i < self.input.len() {
+            let ch = self.input[i..].chars().next().expect("i < len");
+            if ch.is_whitespace() {
+                i += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        i
+    }
+
+    fn is_intersection_rhs_start(&self) -> bool {
+        match self.peek_char() {
+            Some('$' | '[' | '\'' | '(') => true,
+            Some(ch) if is_ident_start(ch) => true,
+            _ => false,
+        }
+    }
+
+    fn skip_ws(&mut self) -> bool {
+        let start = self.pos;
         while let Some(ch) = self.peek_char() {
             if ch.is_whitespace() {
                 self.next_char();
@@ -4459,6 +4706,7 @@ impl<'a> FormulaParser<'a> {
                 break;
             }
         }
+        self.pos != start
     }
 
     fn consume_if(&mut self, expected: char) -> bool {
