@@ -4,6 +4,15 @@ import {
 } from "@formula/ai-completion";
 import { getLocale } from "../../i18n/index.js";
 
+// Translation tables from the Rust engine (canonical <-> localized function names).
+// Keep these in sync with `crates/formula-engine/src/locale/data/*.tsv`.
+//
+// We only need the localized->canonical direction so the completion engine can
+// look up signatures/range-arg metadata against the canonical function registry.
+import DE_DE_FUNCTION_TSV from "../../../../../crates/formula-engine/src/locale/data/de-DE.tsv?raw";
+import ES_ES_FUNCTION_TSV from "../../../../../crates/formula-engine/src/locale/data/es-ES.tsv?raw";
+import FR_FR_FUNCTION_TSV from "../../../../../crates/formula-engine/src/locale/data/fr-FR.tsv?raw";
+
 type RangeArgRegistry = {
   isRangeArg: (fnName: string, argIndex: number) => boolean;
 };
@@ -30,6 +39,47 @@ type FunctionCallFrame = {
 function toAsciiUpperCase(str: string): string {
   // Mirror Rust's `to_ascii_uppercase` to keep comparisons stable for non-ASCII identifiers.
   return str.replace(/[a-z]/g, (ch) => ch.toUpperCase());
+}
+
+type FunctionTranslationMap = Map<string, string>;
+
+function parseFunctionTranslationsTsv(tsv: string): FunctionTranslationMap {
+  const map: FunctionTranslationMap = new Map();
+  for (const rawLine of String(tsv ?? "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const [canonical, localized] = line.split("\t");
+    if (!canonical || !localized) continue;
+    const canonUpper = toAsciiUpperCase(canonical.trim());
+    const locUpper = toAsciiUpperCase(localized.trim());
+    // Only store translations that differ; identity entries can fall back to `to_ascii_uppercase`.
+    if (canonUpper && locUpper && canonUpper !== locUpper) {
+      map.set(locUpper, canonUpper);
+    }
+  }
+  return map;
+}
+
+const FUNCTION_TRANSLATIONS_BY_LOCALE: Record<string, FunctionTranslationMap> = {
+  "de-DE": parseFunctionTranslationsTsv(DE_DE_FUNCTION_TSV),
+  "fr-FR": parseFunctionTranslationsTsv(FR_FR_FUNCTION_TSV),
+  "es-ES": parseFunctionTranslationsTsv(ES_ES_FUNCTION_TSV),
+};
+
+function canonicalizeFunctionNameForLocale(name: string, localeId: string): string {
+  const raw = String(name ?? "");
+  if (!raw) return raw;
+
+  const localeMap = FUNCTION_TRANSLATIONS_BY_LOCALE[localeId];
+  if (!localeMap) return toAsciiUpperCase(raw);
+
+  // Mirror `formula_engine::locale::registry::FormulaLocale::canonical_function_name`.
+  const PREFIX = "_xlfn.";
+  const hasPrefix = raw.length >= PREFIX.length && raw.slice(0, PREFIX.length).toLowerCase() === PREFIX;
+  const base = hasPrefix ? raw.slice(PREFIX.length) : raw;
+  const upper = toAsciiUpperCase(base);
+  const mapped = localeMap.get(upper) ?? upper;
+  return hasPrefix ? `${PREFIX}${mapped}` : mapped;
 }
 
 function isAsciiLetter(ch: string): boolean {
@@ -254,11 +304,12 @@ function scanFunctionCallFrame(formulaPrefix: string, argSeparator: string): Fun
 function buildContextFromFunctionCall(params: {
   input: string;
   cursor: number;
-  fnName: string;
+  rawFnName: string;
+  canonicalFnName: string;
   argIndex: number;
   functionRegistry: RangeArgRegistry;
 }): PartialFormulaContext {
-  const { input, cursor, fnName, argIndex, functionRegistry } = params;
+  const { input, cursor, rawFnName, canonicalFnName, argIndex, functionRegistry } = params;
 
   const prefix = input.slice(0, cursor);
   const candidates = [",", ";"];
@@ -268,7 +319,7 @@ function buildContextFromFunctionCall(params: {
   for (const sep of candidates) {
     const scanned = scanFunctionCallFrame(prefix, sep);
     if (!scanned) continue;
-    if (scanned.name !== fnName) continue;
+    if (scanned.name !== rawFnName) continue;
     if (scanned.argIndex !== argIndex) continue;
     frame = scanned;
     break;
@@ -279,7 +330,7 @@ function buildContextFromFunctionCall(params: {
     for (const sep of candidates) {
       const scanned = scanFunctionCallFrame(prefix, sep);
       if (!scanned) continue;
-      if (scanned.name !== fnName) continue;
+      if (scanned.name !== rawFnName) continue;
       frame = scanned;
       break;
     }
@@ -309,10 +360,10 @@ function buildContextFromFunctionCall(params: {
   return {
     isFormula: true,
     inFunctionCall: true,
-    functionName: fnName,
+    functionName: canonicalFnName,
     argIndex,
     currentArg,
-    expectingRange: Boolean(functionRegistry?.isRangeArg?.(fnName, argIndex)),
+    expectingRange: Boolean(functionRegistry?.isRangeArg?.(canonicalFnName, argIndex)),
   };
 }
 
@@ -332,6 +383,7 @@ export function createLocaleAwarePartialFormulaParser(options: {
 }): (input: string, cursorPosition: number, functionRegistry: RangeArgRegistry) => Promise<PartialFormulaContext> {
   const getEngineClient = options.getEngineClient ?? (() => null);
   const timeoutMs = Number.isFinite(options.timeoutMs) ? Math.max(1, Math.trunc(options.timeoutMs as number)) : 15;
+  const unsupportedLocaleIds = new Set<string>();
 
   return async (
     input: string,
@@ -350,21 +402,29 @@ export function createLocaleAwarePartialFormulaParser(options: {
     }
 
     const localeId = getLocale();
+    if (unsupportedLocaleIds.has(localeId)) {
+      return parsePartialFormulaFallback(input, cursor, functionRegistry);
+    }
 
     try {
       const result = await engine.parseFormulaPartial(input, cursor, { localeId }, { timeoutMs });
       const ctx = result?.context?.function ?? null;
       if (ctx && typeof ctx.name === "string" && Number.isInteger(ctx.argIndex) && ctx.argIndex >= 0) {
+        const canonicalFnName = canonicalizeFunctionNameForLocale(ctx.name, localeId);
         return buildContextFromFunctionCall({
           input,
           cursor,
-          fnName: ctx.name,
+          rawFnName: ctx.name,
+          canonicalFnName,
           argIndex: ctx.argIndex,
           functionRegistry,
         });
       }
-    } catch {
-      // ignore; fall back below
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (typeof message === "string" && message.startsWith("unknown localeId:")) {
+        unsupportedLocaleIds.add(localeId);
+      }
     }
 
     return parsePartialFormulaFallback(input, cursor, functionRegistry);

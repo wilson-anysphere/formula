@@ -42,6 +42,31 @@ describe("createLocaleAwarePartialFormulaParser", () => {
     expect(result.currentArg?.start).toBe(input.length);
   });
 
+  it("canonicalizes localized function names for signature/range metadata (SUMME -> SUM)", async () => {
+    setLocale("de-DE");
+
+    const engine = {
+      parseFormulaPartial: async () => {
+        return { context: { function: { name: "SUMME", argIndex: 0 } } };
+      },
+    };
+
+    const parser = createLocaleAwarePartialFormulaParser({
+      getEngineClient: () => engine,
+      timeoutMs: 1000,
+    });
+    const fnRegistry = new FunctionRegistry();
+
+    const input = "=SUMME(A";
+    const result = await parser(input, input.length, fnRegistry);
+
+    expect(result.isFormula).toBe(true);
+    expect(result.inFunctionCall).toBe(true);
+    // Completion engine metadata is keyed by canonical (English) names.
+    expect(result.functionName).toBe("SUM");
+    expect(result.expectingRange).toBe(true);
+  });
+
   it("falls back to the JS parser when the engine throws", async () => {
     setLocale("en-US");
 
@@ -67,4 +92,3 @@ describe("createLocaleAwarePartialFormulaParser", () => {
     expect(result).toEqual(expected);
   });
 });
-
