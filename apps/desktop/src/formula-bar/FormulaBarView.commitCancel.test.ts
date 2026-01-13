@@ -167,6 +167,67 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("closes the function picker when canceling via Escape (while focused in textarea)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit: () => {}, onCancel });
+    const fx = queryFxButton(host);
+
+    view.setActiveCell({ address: "A1", input: "start", value: null });
+    fx.click();
+
+    const picker = host.querySelector<HTMLElement>('[data-testid="formula-function-picker"]');
+    expect(picker?.hidden).toBe(false);
+
+    // Bring focus back to the textarea so Escape hits the formula bar handler (not the picker handler).
+    view.textarea.focus();
+
+    const e = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    view.textarea.dispatchEvent(e);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(view.model.isEditing).toBe(false);
+    expect(picker?.hidden).toBe(true);
+
+    host.remove();
+  });
+
+  it("closes the function picker when committing via Enter (while focused in textarea)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    const fx = queryFxButton(host);
+
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    fx.click();
+
+    const picker = host.querySelector<HTMLElement>('[data-testid="formula-function-picker"]');
+    expect(picker?.hidden).toBe(false);
+
+    view.textarea.value = "=1";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    // Bring focus back to the textarea so Enter hits the formula bar handler (not the picker handler).
+    view.textarea.focus();
+
+    const e = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    view.textarea.dispatchEvent(e);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("=1", { reason: "enter", shift: false });
+    expect(view.model.isEditing).toBe(false);
+    expect(picker?.hidden).toBe(true);
+
+    host.remove();
+  });
+
   it("commits on Enter (without Alt), exits edit mode, and hides buttons again", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
