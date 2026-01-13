@@ -11,6 +11,7 @@
  *     PERF_CELL_UPDATES=100000 \
  *     PERF_BATCH_SIZE=1000 \
  *     PERF_COLS=100 \
+ *     NODE_OPTIONS=--expose-gc \
  *     FORMULA_NODE_TEST_CONCURRENCY=1 \
  *     pnpm test:node session-binder-perf
  *
@@ -28,6 +29,9 @@
  * Optional CI-style enforcement (disabled unless set):
  *   PERF_MAX_TOTAL_MS_YJS_TO_DC=15000   # fail if total runtime exceeds this (ms)
  *   PERF_MAX_TOTAL_MS_DC_TO_YJS=15000   # fail if total runtime exceeds this (ms)
+ *
+ * Optional structured output:
+ *   PERF_JSON=1  # emit JSON objects (one per scenario) for easy CI parsing
  */
 
 import test from "node:test";
@@ -285,6 +289,23 @@ perfTest(
       ].join("\n"),
     );
 
+    if (process.env.PERF_JSON === "1") {
+      console.log(
+        JSON.stringify({
+          suite: "session-binder-perf",
+          scenario: "yjs->dc",
+          updates: totalUpdates,
+          batchSize,
+          cols,
+          timingMs: { write: writeMs, apply: applyMs, total: totalMs },
+          mem: {
+            heapUsed: { start: startMem.heapUsed, peak: peakHeapUsed, postGc: postGcMem.heapUsed },
+            rss: { start: startMem.rss, peak: peakRss, postGc: postGcMem.rss },
+          },
+        }),
+      );
+    }
+
     const maxTotalMs = readPositiveInt(process.env.PERF_MAX_TOTAL_MS_YJS_TO_DC, 0);
     if (maxTotalMs > 0) {
       assert.ok(
@@ -379,6 +400,23 @@ perfTest(
         `[session-binder-perf] mem (best-effort): rss      start=${formatBytes(startMem.rss)} peak=${formatBytes(peakRss)} postGC=${formatBytes(postGcMem.rss)}`,
       ].join("\n"),
     );
+
+    if (process.env.PERF_JSON === "1") {
+      console.log(
+        JSON.stringify({
+          suite: "session-binder-perf",
+          scenario: "dc->yjs",
+          updates: totalUpdates,
+          batchSize,
+          cols,
+          timingMs: { emit: emitMs, binderWrite: writeMs, total: totalMs },
+          mem: {
+            heapUsed: { start: startMem.heapUsed, peak: peakHeapUsed, postGc: postGcMem.heapUsed },
+            rss: { start: startMem.rss, peak: peakRss, postGc: postGcMem.rss },
+          },
+        }),
+      );
+    }
 
     const maxTotalMs = readPositiveInt(process.env.PERF_MAX_TOTAL_MS_DC_TO_YJS, 0);
     if (maxTotalMs > 0) {

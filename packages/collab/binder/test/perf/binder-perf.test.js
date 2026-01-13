@@ -8,6 +8,7 @@
  *
  * How to run (recommended; uses the repo's TS-aware node:test harness):
  *   FORMULA_RUN_COLLAB_BINDER_PERF=1 \
+ *     NODE_OPTIONS=--expose-gc \
  *     FORMULA_NODE_TEST_CONCURRENCY=1 \
  *     pnpm test:node binder-perf
  *
@@ -26,6 +27,9 @@
  * Optional CI-style enforcement (disabled unless set):
  *   PERF_MAX_TOTAL_MS_YJS_TO_DC=15000   # fail if total runtime exceeds this (ms)
  *   PERF_MAX_TOTAL_MS_DC_TO_YJS=15000   # fail if total runtime exceeds this (ms)
+ *
+ * Optional structured output:
+ *   PERF_JSON=1  # emit JSON objects (one per scenario) for easy CI parsing
  */
 
 import test from "node:test";
@@ -104,6 +108,8 @@ class DocumentControllerPerfStub {
     this._cells = new Map();
 
     this.styleTable = new StyleTableStub();
+    // `bindYjsToDocumentController` patches this hook when edit guards are present.
+    this.canEditCell = null;
 
     /** @type {number} */
     this.appliedDeltaCount = 0;
@@ -284,6 +290,23 @@ perfTest(
       ].join("\n"),
     );
 
+    if (process.env.PERF_JSON === "1") {
+      console.log(
+        JSON.stringify({
+          suite: "binder-perf",
+          scenario: "yjs->dc",
+          updates: totalUpdates,
+          batchSize,
+          cols,
+          timingMs: { write: writeMs, apply: applyMs, total: totalMs },
+          mem: {
+            heapUsed: { start: startMem.heapUsed, peak: peakHeapUsed, postGc: postGcMem.heapUsed },
+            rss: { start: startMem.rss, peak: peakRss, postGc: postGcMem.rss },
+          },
+        }),
+      );
+    }
+
     const maxTotalMs = readPositiveInt(process.env.PERF_MAX_TOTAL_MS_YJS_TO_DC, 0);
     if (maxTotalMs > 0) {
       assert.ok(totalMs <= maxTotalMs, `[binder-perf] expected total <= ${maxTotalMs}ms, got ${totalMs.toFixed(1)}ms`);
@@ -380,6 +403,23 @@ perfTest(
         `[binder-perf] mem (best-effort): rss      start=${formatBytes(startMem.rss)} peak=${formatBytes(peakRss)} postGC=${formatBytes(postGcMem.rss)}`,
       ].join("\n"),
     );
+
+    if (process.env.PERF_JSON === "1") {
+      console.log(
+        JSON.stringify({
+          suite: "binder-perf",
+          scenario: "dc->yjs",
+          updates: totalUpdates,
+          batchSize,
+          cols,
+          timingMs: { emit: emitMs, binderWrite: writeMs, total: totalMs },
+          mem: {
+            heapUsed: { start: startMem.heapUsed, peak: peakHeapUsed, postGc: postGcMem.heapUsed },
+            rss: { start: startMem.rss, peak: peakRss, postGc: postGcMem.rss },
+          },
+        }),
+      );
+    }
 
     const maxTotalMs = readPositiveInt(process.env.PERF_MAX_TOTAL_MS_DC_TO_YJS, 0);
     if (maxTotalMs > 0) {
