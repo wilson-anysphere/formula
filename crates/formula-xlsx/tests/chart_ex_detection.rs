@@ -1,4 +1,4 @@
-use formula_model::charts::ChartKind;
+use formula_model::charts::{ChartKind, TextModel};
 use formula_xlsx::XlsxPackage;
 
 fn load_fixture(name: &str) -> Vec<u8> {
@@ -11,7 +11,7 @@ fn load_fixture(name: &str) -> Vec<u8> {
 
 #[test]
 fn detects_chart_ex_parts_and_parses_kind() {
-    for name in ["waterfall", "histogram"] {
+    for (name, expected_title) in [("waterfall", "Waterfall"), ("histogram", "Histogram")] {
         let bytes = load_fixture(name);
         let pkg = XlsxPackage::from_bytes(&bytes).expect("parse package");
 
@@ -59,6 +59,12 @@ fn detects_chart_ex_parts_and_parses_kind() {
             pkg.part(chart_ex.rels_path.as_deref().unwrap()),
             pkg2.part(chart_ex.rels_path.as_deref().unwrap()),
             "ChartEx rels should round-trip losslessly for {name}.xlsx"
+        );
+
+        assert_eq!(
+            model.title,
+            Some(TextModel::plain(expected_title)),
+            "expected {name}.xlsx ChartEx title to be parsed"
         );
     }
 }

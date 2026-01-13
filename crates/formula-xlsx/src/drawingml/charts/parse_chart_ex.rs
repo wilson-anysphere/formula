@@ -1,6 +1,6 @@
 use formula_model::charts::{
-    ChartDiagnostic, ChartDiagnosticLevel, ChartKind, ChartModel, PlotAreaModel, SeriesData,
-    SeriesModel, SeriesNumberData, SeriesTextData, TextModel,
+    ChartDiagnostic, ChartDiagnosticLevel, ChartKind, ChartModel, LegendModel, LegendPosition,
+    PlotAreaModel, SeriesData, SeriesModel, SeriesNumberData, SeriesTextData, TextModel,
 };
 use formula_model::RichText;
 use roxmltree::{Document, Node};
@@ -55,6 +55,11 @@ pub fn parse_chart_ex(
     let kind = detect_chart_kind(&doc, &mut diagnostics);
     let chart_name = format!("ChartEx:{kind}");
 
+    let chart_node = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "chart");
+    let title = chart_node.and_then(|chart| parse_title(chart, &mut diagnostics));
+    let legend = chart_node.and_then(|chart| parse_legend(chart, &mut diagnostics));
     let chart_data = parse_chart_data(&doc, &mut diagnostics);
 
     let series = find_chart_type_node(&doc)
@@ -71,11 +76,9 @@ pub fn parse_chart_ex(
         .unwrap_or_default();
 
     Ok(ChartModel {
-        chart_kind: ChartKind::Unknown {
-            name: chart_name.clone(),
-        },
-        title: None,
-        legend: None,
+        chart_kind: ChartKind::Unknown { name: chart_name.clone() },
+        title,
+        legend,
         plot_area: PlotAreaModel::Unknown { name: chart_name },
         axes: Vec::new(),
         series,
@@ -90,6 +93,76 @@ pub fn parse_chart_ex(
         external_data_rel_id: None,
         external_data_auto_update: None,
         diagnostics,
+    })
+}
+
+fn parse_title(chart_node: Node<'_, '_>, _diagnostics: &mut Vec<ChartDiagnostic>) -> Option<TextModel> {
+    // ChartEx sometimes stores a plain-text title directly as `<cx:title>My title</cx:title>`.
+    // It can also store a structured title as `<cx:title><cx:tx>...</cx:tx></cx:title>`.
+    let auto_deleted = chart_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "autoTitleDeleted")
+        .and_then(|n| n.attribute("val"))
+        .map(parse_ooxml_bool)
+        .unwrap_or(false);
+
+    let Some(title_node) = chart_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "title")
+    else {
+        return None;
+    };
+
+    let mut parsed = title_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "tx")
+        .and_then(parse_text_from_tx);
+
+    if parsed.is_none() {
+        parsed = title_node
+            .text()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(TextModel::plain);
+    }
+
+    if parsed.is_none() {
+        parsed = descendant_text(title_node, "v")
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(TextModel::plain);
+    }
+
+    if auto_deleted && parsed.is_none() {
+        None
+    } else {
+        parsed
+    }
+}
+
+fn parse_legend(chart_node: Node<'_, '_>, diagnostics: &mut Vec<ChartDiagnostic>) -> Option<LegendModel> {
+    let legend_node = chart_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "legend")?;
+
+    let position = legend_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "legendPos")
+        .and_then(|n| n.attribute("val"))
+        .map(|v| parse_legend_position(v, diagnostics))
+        .unwrap_or(LegendPosition::Unknown);
+
+    let overlay = legend_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "overlay")
+        .and_then(|n| n.attribute("val"))
+        .map(parse_ooxml_bool)
+        .unwrap_or(false);
+
+    Some(LegendModel {
+        position,
+        overlay,
+        text_style: None,
     })
 }
 
@@ -466,7 +539,19 @@ fn fill_series_data_formula(dst: &mut Option<SeriesData>, src: &Option<SeriesDat
 }
 
 fn parse_text_from_tx(tx_node: Node<'_, '_>) -> Option<TextModel> {
-    // Similar to classic charts: `tx/strRef/f` + `tx/strRef/strCache` or a direct `v`.
+    // Similar to classic charts: `tx/strRef/f` + `tx/strRef/strCache`, `tx/rich`, or a direct `v`.
+    if let Some(rich_node) = tx_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "rich")
+    {
+        let text = collect_rich_text(rich_node);
+        return Some(TextModel {
+            rich_text: RichText::new(text),
+            formula: None,
+            style: None,
+        });
+    }
+
     if let Some(str_ref) = tx_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "strRef")
@@ -770,10 +855,68 @@ fn descendant_text<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
         .and_then(|n| n.text())
 }
 
+fn collect_rich_text(rich_node: Node<'_, '_>) -> String {
+    rich_node
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "t")
+        .filter_map(|n| n.text())
+        .collect::<String>()
+}
+
+fn parse_legend_position(value: &str, diagnostics: &mut Vec<ChartDiagnostic>) -> LegendPosition {
+    match value {
+        "l" => LegendPosition::Left,
+        "r" => LegendPosition::Right,
+        "t" => LegendPosition::Top,
+        "b" => LegendPosition::Bottom,
+        "tr" => LegendPosition::TopRight,
+        other => {
+            diagnostics.push(ChartDiagnostic {
+                level: ChartDiagnosticLevel::Warning,
+                message: format!("unsupported legend position legendPos={other:?}"),
+            });
+            LegendPosition::Unknown
+        }
+    }
+}
+
+fn parse_ooxml_bool(value: &str) -> bool {
+    matches!(value, "1" | "true" | "True")
+}
+
 fn lowercase_first(s: &str) -> String {
     let mut chars = s.chars();
     let Some(first) = chars.next() else {
         return String::new();
     };
     first.to_lowercase().collect::<String>() + chars.as_str()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_legend_position_and_overlay() {
+        let xml = r#"<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex">
+  <cx:chart>
+    <cx:title><cx:tx><cx:v>My chart</cx:v></cx:tx></cx:title>
+    <cx:legend>
+      <cx:legendPos val="r"/>
+      <cx:overlay val="1"/>
+    </cx:legend>
+    <cx:plotArea>
+      <cx:histogramChart/>
+    </cx:plotArea>
+  </cx:chart>
+</cx:chartSpace>
+"#;
+
+        let model = parse_chart_ex(xml.as_bytes(), "unit-test").expect("parse");
+        assert_eq!(model.title, Some(TextModel::plain("My chart")));
+
+        let legend = model.legend.expect("legend should be parsed");
+        assert_eq!(legend.position, LegendPosition::Right);
+        assert!(legend.overlay);
+    }
 }
