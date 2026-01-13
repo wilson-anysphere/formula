@@ -44,10 +44,12 @@ pub fn handler<R: Runtime>(
     // If the webview ever navigates to remote/untrusted content, we must not allow that origin to
     // access `asset://` at all (even as a no-cors subresource).
     let window_url = current_window_url(&ctx);
-    let is_trusted_origin = window_url.as_ref().is_some_and(|url| {
-        desktop::ipc_origin::is_trusted_app_origin(url)
-            && window_origin_from_url(&ctx, url) == window_origin
-    });
+    let is_trusted_origin = desktop::asset_protocol_policy::is_asset_protocol_allowed(
+        &window_origin,
+        window_url.as_ref(),
+        use_https_scheme(&ctx),
+        desktop::tauri_origin::DesktopPlatform::current(),
+    );
     if !is_trusted_origin {
         let url_for_log = window_url
             .as_ref()
@@ -98,13 +100,6 @@ fn use_https_scheme<R: Runtime>(ctx: &UriSchemeContext<'_, R>) -> bool {
         .unwrap_or(false)
 }
 
-fn window_origin_from_url<R: Runtime>(ctx: &UriSchemeContext<'_, R>, url: &Url) -> String {
-    desktop::tauri_origin::webview_origin_from_url(
-        url,
-        use_https_scheme(ctx),
-        desktop::tauri_origin::DesktopPlatform::current(),
-    )
-}
 fn stable_window_origin<R: Runtime>(ctx: &UriSchemeContext<'_, R>) -> String {
     // Mirror Tauri upstream behavior: the window origin is computed once from the
     // *initial* webview URL and then used by the protocol handler.
