@@ -822,6 +822,15 @@ jobs:
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
+      - name: Smoke check packaged cross-origin isolation (COOP/COEP)
+        # COOP/COEP + Worker support can regress per-platform; run on all release targets by default.
+        #
+        # Optional: set `FORMULA_COI_CHECK_ALL_PLATFORMS=0` (or `false`) as a GitHub Actions variable to
+        # only run this step on Linux (useful if a hosted-runner regression makes the check flaky on
+        # macOS/Windows while keeping at least one COI signal before publishing).
+        if: needs.validate-version.outputs.upload == 'true' && (runner.os == 'Linux' || (vars.FORMULA_COI_CHECK_ALL_PLATFORMS != '0' && vars.FORMULA_COI_CHECK_ALL_PLATFORMS != 'false'))
+        run: pnpm -C apps/desktop check:coi
+
       - name: Cache pinned Tauri CLI binary (cargo-tauri)
         id: tauri-cli-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -1148,7 +1157,7 @@ jobs:
       - name: Smoke check packaged cross-origin isolation (COOP/COEP)
         # Run against the already-built Tauri artifacts from the previous step.
         # Skip Windows ARM64 cross-compile builds (the produced binary isn't runnable on x64 runners).
-        if: runner.os != 'Windows' || matrix.rust_target != 'aarch64-pc-windows-msvc'
+        if: needs.validate-version.outputs.upload != 'true' && (runner.os != 'Windows' || matrix.rust_target != 'aarch64-pc-windows-msvc') && (runner.os == 'Linux' || (vars.FORMULA_COI_CHECK_ALL_PLATFORMS != '0' && vars.FORMULA_COI_CHECK_ALL_PLATFORMS != 'false'))
         run: pnpm -C apps/desktop check:coi -- --no-build
 
       - name: Desktop dist asset report
