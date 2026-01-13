@@ -430,6 +430,48 @@ test("CollabSession↔DocumentController binder encryptFormat encrypts cell form
   docB.destroy();
 });
 
+test("CollabSession↔DocumentController binder encryptFormat does not fall back to plaintext `format` for legacy encrypted payloads", async () => {
+  const docId = "collab-session-documentController-encryption-test-doc-encryptFormat-no-plaintext-fallback";
+  const doc = new Y.Doc({ guid: docId });
+
+  const keyBytes = new Uint8Array(32).fill(7);
+  const keyForA1 = (cell) => {
+    if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) {
+      return { keyId: "k-range-1", keyBytes };
+    }
+    return null;
+  };
+
+  // Simulate an older client that encrypts only { value, formula } but leaves plaintext `format`.
+  const legacyWriter = createCollabSession({ doc, encryption: { keyForCell: keyForA1 } });
+  await legacyWriter.setCellValue("Sheet1:0:0", "top-secret");
+  doc.transact(() => {
+    const cell = legacyWriter.cells.get("Sheet1:0:0");
+    cell.set("format", { font: { bold: true } });
+  });
+  legacyWriter.destroy();
+
+  // New reader: has the key, but opts into encryptFormat (confidentiality-first).
+  const session = createCollabSession({ doc, encryption: { keyForCell: keyForA1, encryptFormat: true } });
+  const dc = new DocumentController();
+  const binder = await bindCollabSessionToDocumentController({ session, documentController: dc });
+
+  await waitForCondition(() => {
+    const cell = dc.getCell("Sheet1", "A1");
+    return cell.value === "top-secret" && cell.formula == null && cell.styleId === 0;
+  });
+
+  // Ensure the Yjs doc still contains plaintext formatting (legacy), proving the binder did not scrub it on read.
+  const ycell = session.cells.get("Sheet1:0:0");
+  assert.ok(ycell, "expected Yjs cell map to exist");
+  assert.ok(ycell.get("enc"), "expected encrypted payload under `enc`");
+  assert.deepEqual(ycell.get("format"), { font: { bold: true } });
+
+  binder.destroy();
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession↔DocumentController binder normalizes formula text (trimming + bare '=')", async () => {
   const doc = new Y.Doc();
   const session = createCollabSession({ doc });

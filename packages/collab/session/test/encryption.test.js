@@ -229,3 +229,34 @@ test("CollabSession E2E cell encryption: encryptFormat migrates legacy `style` k
   docA.destroy();
   docB.destroy();
 });
+
+test("CollabSession encryptFormat does not fall back to plaintext `format` for legacy encrypted payloads", async () => {
+  const docId = "collab-session-encryption-test-doc-encryptFormat-no-plaintext-fallback";
+  const doc = new Y.Doc({ guid: docId });
+
+  const keyBytes = new Uint8Array(32).fill(7);
+  const keyForA1 = (cell) => {
+    if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) {
+      return { keyId: "k-range-1", keyBytes };
+    }
+    return null;
+  };
+
+  // Simulate an older client that encrypts only { value, formula } but leaves plaintext `format`.
+  const legacyWriter = createCollabSession({ doc, encryption: { keyForCell: keyForA1 } });
+  await legacyWriter.setCellValue("Sheet1:0:0", "top-secret");
+  doc.transact(() => {
+    const cell = legacyWriter.cells.get("Sheet1:0:0");
+    cell.set("format", { font: { bold: true } });
+  });
+  legacyWriter.destroy();
+
+  const reader = createCollabSession({ doc, encryption: { keyForCell: keyForA1, encryptFormat: true } });
+  const cell = await reader.getCell("Sheet1:0:0");
+  assert.equal(cell?.value, "top-secret");
+  // Confidentiality-first: do not apply plaintext formatting when `enc` is present.
+  assert.deepEqual(cell?.format, null);
+
+  reader.destroy();
+  doc.destroy();
+});
