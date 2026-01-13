@@ -56,9 +56,13 @@ class CorpusMinimizeTests(unittest.TestCase):
 
     def test_minimize_workbook_reruns_when_truncated(self) -> None:
         calls: list[int] = []
+        names: list[str] = []
 
-        def fake_run_rust_triage(*_args, diff_limit: int, **_kwargs):  # type: ignore[no-untyped-def]
+        def fake_run_rust_triage(  # type: ignore[no-untyped-def]
+            *_args, workbook_name: str, diff_limit: int, **_kwargs
+        ):
             calls.append(diff_limit)
+            names.append(workbook_name)
             full = [
                 {
                     "severity": "CRITICAL",
@@ -109,6 +113,7 @@ class CorpusMinimizeTests(unittest.TestCase):
 
         # First run truncated (diff_limit=1) then rerun with diff_limit=total (=3).
         self.assertEqual(calls, [1, 3])
+        self.assertEqual(names, ["book.xlsx", "book.xlsx"])
         self.assertEqual(summary["critical_parts"], ["xl/_rels/workbook.xml.rels", "xl/workbook.xml"])
         self.assertEqual(summary["rels_critical_ids"], {"xl/_rels/workbook.xml.rels": ["rId9"]})
 
@@ -163,7 +168,8 @@ class CorpusMinimizeTests(unittest.TestCase):
         def fake_build_rust_helper() -> Path:  # type: ignore[no-untyped-def]
             return Path("noop")
 
-        def fake_run_rust_triage(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        def fake_run_rust_triage(*_args, workbook_name: str, **_kwargs):  # type: ignore[no-untyped-def]
+            self.assertEqual(workbook_name, "book.xlsx")
             return {
                 "steps": {
                     "diff": {
