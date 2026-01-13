@@ -2933,7 +2933,6 @@ export class CanvasGridRenderer {
       const sheetY = quadrant.scrollBaseY + (intersection.y - quadrant.originY);
       const sheetXEnd = sheetX + intersection.width;
       const sheetYEnd = sheetY + intersection.height;
-
       // Treat the intersection end coordinates as *exclusive* bounds. `indexAt(pos)` returns the
       // last index whose start position is `<= pos`, so calling it with an exact cell boundary
       // can otherwise "round up" and include a fully-clipped trailing row/col (wasted work, and
