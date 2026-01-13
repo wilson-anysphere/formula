@@ -45,11 +45,15 @@ function hasNonFormulaNonEmptyCell(cells) {
  * @typedef {number | bigint | string} CoordKey
  */
 
-const FAST_PACK_COL_BITS = 20;
-const FAST_PACK_MAX_ROW = 1 << (32 - FAST_PACK_COL_BITS); // 12 bits for row
-const FAST_PACK_MAX_COL = 1 << FAST_PACK_COL_BITS; // 20 bits for col
+// Pack row/col into a JS Number when the result stays within the 53-bit safe integer
+// range. This is equivalent to `(row << 20) | col` as an *integer* operation, but
+// avoids JS bitwise 32-bit truncation so it also works for large row indices.
+const PACK_COL_BITS = 20;
+const PACK_COL_FACTOR = 1 << PACK_COL_BITS; // 2^20
+const MAX_SAFE_PACKED_ROW = Math.floor(Number.MAX_SAFE_INTEGER / PACK_COL_FACTOR);
 const MAX_UINT32 = 2 ** 32 - 1;
 const HAS_BIGINT = typeof BigInt === "function";
+const BIGINT_SHIFT_32 = HAS_BIGINT ? BigInt(32) : null;
 
 /**
  * @param {number} row
@@ -57,15 +61,16 @@ const HAS_BIGINT = typeof BigInt === "function";
  * @returns {CoordKey}
  */
 function packCoordKey(row, col) {
-  // Fast path: pack into a 32-bit unsigned integer when both row/col fit.
-  // (Using bitwise operators keeps the key reversible and avoids collisions.)
-  if (row >= 0 && col >= 0 && row < FAST_PACK_MAX_ROW && col < FAST_PACK_MAX_COL) {
-    return ((row << FAST_PACK_COL_BITS) | col) >>> 0;
+  // Fast path: pack into a Number when it remains a safe integer. This covers
+  // Excel-scale sheets (rows up to ~1M) without allocating strings or BigInts.
+  if (row >= 0 && col >= 0 && col < PACK_COL_FACTOR && row <= MAX_SAFE_PACKED_ROW) {
+    return row * PACK_COL_FACTOR + col;
   }
 
   // General path: pack into a BigInt (row in high 32 bits, col in low 32 bits).
   if (HAS_BIGINT && row >= 0 && col >= 0 && col <= MAX_UINT32) {
-    return (BigInt(row) << 32n) | BigInt(col);
+    const shift = /** @type {bigint} */ (BIGINT_SHIFT_32);
+    return (BigInt(row) << shift) | BigInt(col);
   }
 
   // Last resort: preserve legacy behavior.
