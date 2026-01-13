@@ -1027,6 +1027,52 @@ test("Typing =BYROW(A suggests a range but does not auto-close parens (needs lam
   );
 });
 
+test("Typing =REDUCE(A suggests a range but does not auto-close parens (needs lambda)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=REDUCE(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=REDUCE(A1:A10"),
+    `Expected a REDUCE range suggestion without closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =SCAN(A suggests a range but does not auto-close parens (needs lambda)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=SCAN(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SCAN(A1:A10"),
+    `Expected a SCAN range suggestion without closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =PERCENTILE(A suggests a range but does not auto-close parens (needs k)", async () => {
   const engine = new TabCompletionEngine();
 

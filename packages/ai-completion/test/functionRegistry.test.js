@@ -122,12 +122,17 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("BYCOL", 0), "Expected BYCOL array to be a range");
   assert.ok(registry.isRangeArg("MAP", 0), "Expected MAP array to be a range");
   assert.equal(registry.isRangeArg("MAP", 1), false, "Expected MAP lambda not to be a range");
-  assert.equal(registry.isRangeArg("REDUCE", 0), false, "Expected REDUCE initial_value not to be a range");
-  assert.ok(registry.isRangeArg("REDUCE", 1), "Expected REDUCE array to be a range");
+
+  // REDUCE/SCAN support both 2-arg and 3-arg forms, so we treat the leading arg as range-like.
+  assert.ok(registry.isRangeArg("REDUCE", 0), "Expected REDUCE arg1 to be a range");
+  assert.ok(registry.isRangeArg("REDUCE", 1), "Expected REDUCE arg2 (array) to be a range");
   assert.equal(registry.isRangeArg("REDUCE", 2), false, "Expected REDUCE lambda not to be a range");
-  assert.equal(registry.isRangeArg("SCAN", 0), false, "Expected SCAN initial_value not to be a range");
-  assert.ok(registry.isRangeArg("SCAN", 1), "Expected SCAN array to be a range");
+
+  assert.ok(registry.isRangeArg("SCAN", 0), "Expected SCAN arg1 to be a range");
+  assert.ok(registry.isRangeArg("SCAN", 1), "Expected SCAN arg2 (array) to be a range");
   assert.equal(registry.isRangeArg("SCAN", 2), false, "Expected SCAN lambda not to be a range");
+
+  assert.ok(registry.isRangeArg("_xlfn.MAP", 0), "Expected _xlfn.MAP array to be a range");
 
   // Conditional logic with repeating (test/value) pairs
   const ifs = registry.getFunction("IFS");

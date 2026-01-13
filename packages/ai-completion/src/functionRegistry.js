@@ -1480,7 +1480,7 @@ const CURATED_FUNCTIONS = [
     name: "REDUCE",
     description: "Reduces an array to an accumulated value by applying a LAMBDA to each value.",
     args: [
-      { name: "initial_value", type: "value", optional: true },
+      { name: "initial_value", type: "range", optional: true },
       { name: "array", type: "range" },
       { name: "lambda", type: "value" },
     ],
@@ -1489,7 +1489,7 @@ const CURATED_FUNCTIONS = [
     name: "SCAN",
     description: "Scans an array by applying a LAMBDA to each value and returns intermediate results as an array.",
     args: [
-      { name: "initial_value", type: "value", optional: true },
+      { name: "initial_value", type: "range", optional: true },
       { name: "array", type: "range" },
       { name: "lambda", type: "value" },
     ],
