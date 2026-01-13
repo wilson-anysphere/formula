@@ -8,6 +8,7 @@ function createStubCanvasContext(): { ctx: CanvasRenderingContext2D; calls: Arra
   const ctx: any = {
     clearRect: (...args: unknown[]) => calls.push({ method: "clearRect", args }),
     drawImage: (...args: unknown[]) => calls.push({ method: "drawImage", args }),
+    // Used by shape txBody text layout.
     measureText: (text: string) => ({ width: String(text).length * 8 }),
     save: () => calls.push({ method: "save", args: [] }),
     restore: () => calls.push({ method: "restore", args: [] }),
@@ -24,8 +25,6 @@ function createStubCanvasContext(): { ctx: CanvasRenderingContext2D; calls: Arra
     closePath: (...args: unknown[]) => calls.push({ method: "closePath", args }),
     fill: (...args: unknown[]) => calls.push({ method: "fill", args }),
     stroke: (...args: unknown[]) => calls.push({ method: "stroke", args }),
-    // Used by shape txBody text layout.
-    measureText: (text: string) => ({ width: text.length * 8 }),
   };
 
   return { ctx: ctx as CanvasRenderingContext2D, calls };

@@ -24,8 +24,10 @@ describe("DrawingInteractionController hit-test perf", () => {
 
   it("does not re-sort on repeated pointermove when objects are unchanged", () => {
     const listeners = new Map<string, (e: any) => void>();
+    const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 800, height: 600, dpr: 1 };
     const canvas: any = {
       style: { cursor: "" },
+      getBoundingClientRect: () => ({ left: 0, top: 0 } as DOMRect),
       addEventListener: (type: string, cb: (e: any) => void) => listeners.set(type, cb),
       removeEventListener: (type: string) => listeners.delete(type),
       setPointerCapture: () => {},
@@ -36,8 +38,6 @@ describe("DrawingInteractionController hit-test perf", () => {
       cellOriginPx: () => ({ x: 0, y: 0 }),
       cellSizePx: () => ({ width: 10, height: 10 }),
     };
-
-    const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 800, height: 600, dpr: 1 };
 
     const objects: DrawingObject[] = [];
     for (let i = 0; i < 5_000; i += 1) {
@@ -59,15 +59,14 @@ describe("DrawingInteractionController hit-test perf", () => {
     const sortSpy = vi.spyOn(Array.prototype, "sort");
 
     // First pointer move builds the index (one sort).
-    pointerMove!({ offsetX: 25, offsetY: 25, pointerId: 1 });
+    pointerMove!({ clientX: 25, clientY: 25, pointerId: 1 });
     expect(sortSpy).toHaveBeenCalledTimes(1);
 
     // Subsequent moves should reuse the cached index (no more sorts).
     sortSpy.mockClear();
     for (let i = 0; i < 200; i += 1) {
-      pointerMove!({ offsetX: 25 + (i % 3), offsetY: 25 + (i % 3), pointerId: 1 });
+      pointerMove!({ clientX: 25 + (i % 3), clientY: 25 + (i % 3), pointerId: 1 });
     }
     expect(sortSpy).toHaveBeenCalledTimes(0);
   });
 });
-
