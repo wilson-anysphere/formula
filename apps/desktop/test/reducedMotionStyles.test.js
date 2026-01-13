@@ -15,6 +15,12 @@ function extractTransitionDeclarations(css) {
   return [...css.matchAll(/transition\s*:\s*([\s\S]*?);/g)].map((match) => match[1]?.trim() ?? "");
 }
 
+function stripCssComments(css) {
+  // CSS in this repo uses block comments only. Strip them so lint-style assertions
+  // don't trip over explanatory text like "16ms" in comments.
+  return css.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
 function collectCssFiles(dirPath) {
   /** @type {string[]} */
   const out = [];
@@ -51,7 +57,8 @@ test("Desktop CSS transitions use motion tokens (so reduced motion disables anim
   assert.ok(files.length > 0, "Expected to find CSS files under apps/desktop/src");
 
   for (const filePath of files) {
-    const css = fs.readFileSync(filePath, "utf8");
+    const rawCss = fs.readFileSync(filePath, "utf8");
+    const css = stripCssComments(rawCss);
     const relPath = path.relative(DESKTOP_ROOT, filePath);
     const isTokens = path.basename(filePath) === "tokens.css";
 
