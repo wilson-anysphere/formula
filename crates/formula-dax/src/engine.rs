@@ -1,5 +1,7 @@
 use crate::backend::TableBackend;
-use crate::model::{Cardinality, CrossFilterDirection, DataModel, RelationshipInfo};
+use crate::model::{
+    Cardinality, CrossFilterDirection, DataModel, RelationshipInfo, RelationshipPathDirection,
+};
 use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::value::Value;
 use std::borrow::Cow;
@@ -1315,8 +1317,8 @@ impl DaxEngine {
                 column: column.clone(),
             })?;
 
-        let include_virtual_blank = blank_row_allowed(filter, table)
-            && virtual_blank_row_exists(model, filter, table)?;
+        let include_virtual_blank =
+            blank_row_allowed(filter, table) && virtual_blank_row_exists(model, filter, table)?;
 
         if filter.is_empty() {
             if let Some(values) = table_ref.distinct_values_filtered(idx, None) {
@@ -1871,47 +1873,59 @@ impl DaxEngine {
             return Err(DaxError::Eval("RELATED requires row context".into()));
         };
 
-        let rel_info = model
-            .relationships()
-            .iter()
-            .find(|rel| {
-                rel.rel.is_active
-                    && rel.rel.from_table == current_table
-                    && rel.rel.to_table == *table
-            })
-            .ok_or_else(|| {
-                DaxError::Eval(format!(
-                    "no active relationship from {current_table} to {table} for RELATED"
-                ))
-            })?;
-
         let current_row = row_ctx
             .row_for(current_table)
             .ok_or_else(|| DaxError::Eval("missing row for current table".into()))?;
 
-        let from_table = model
-            .table(current_table)
-            .ok_or_else(|| DaxError::UnknownTable(current_table.to_string()))?;
-        let from_idx = from_table
-            .column_idx(&rel_info.rel.from_column)
-            .ok_or_else(|| DaxError::UnknownColumn {
-                table: current_table.to_string(),
-                column: rel_info.rel.from_column.clone(),
-            })?;
-        let key = from_table.value_by_idx(current_row, from_idx).unwrap_or(Value::Blank);
-        if key.is_blank() {
-            return Ok(Value::Blank);
-        }
-
-        let Some(to_row) = rel_info.to_index.get(&key).copied() else {
-            return Ok(Value::Blank);
+        let Some(path) = model.find_unique_active_relationship_path(
+            current_table,
+            table,
+            RelationshipPathDirection::ManyToOne,
+            |_, rel| rel.rel.is_active,
+        )?
+        else {
+            return Err(DaxError::Eval(format!(
+                "no active relationship from {current_table} to {table} for RELATED"
+            )));
         };
+
+        let mut row = current_row;
+        for rel_idx in path {
+            let rel_info = model
+                .relationships()
+                .get(rel_idx)
+                .expect("relationship index from path");
+
+            let from_table = model
+                .table(&rel_info.rel.from_table)
+                .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.from_table.clone()))?;
+            let from_idx = from_table
+                .column_idx(&rel_info.rel.from_column)
+                .ok_or_else(|| DaxError::UnknownColumn {
+                    table: rel_info.rel.from_table.clone(),
+                    column: rel_info.rel.from_column.clone(),
+                })?;
+
+            let key = from_table
+                .value_by_idx(row, from_idx)
+                .unwrap_or(Value::Blank);
+            if key.is_blank() {
+                return Ok(Value::Blank);
+            }
+
+            let Some(to_row) = rel_info.to_index.get(&key).copied() else {
+                return Ok(Value::Blank);
+            };
+
+            row = to_row;
+            // `rel_info.rel.to_table` becomes the "current" table for the next hop.
+        }
 
         let to_table = model
             .table(table)
             .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
         let value = to_table
-            .value(to_row, column)
+            .value(row, column)
             .ok_or_else(|| DaxError::UnknownColumn {
                 table: table.clone(),
                 column: column.clone(),
@@ -2157,11 +2171,15 @@ impl DaxEngine {
                             }
                         };
 
+                    struct RelatedHop {
+                        relationship_idx: usize,
+                        from_idx: usize,
+                    }
+
                     enum GroupAccessor {
                         BaseColumn(usize),
-                        RelatedColumn {
-                            relationship_idx: usize,
-                            from_idx: usize,
+                        RelatedPath {
+                            hops: Vec<RelatedHop>,
                             to_table: String,
                             to_col_idx: usize,
                         },
@@ -2175,32 +2193,42 @@ impl DaxEngine {
                             ));
                         };
                         if table != &base.table {
-                            let relationship_idx = model
-                                .relationships()
-                                .iter()
-                                .enumerate()
-                                .find_map(|(idx, rel)| {
-                                    (rel.rel.from_table == base.table
-                                        && rel.rel.to_table == *table
-                                        && is_relationship_active(idx, rel, &override_pairs))
-                                    .then_some(idx)
-                                })
-                                .ok_or_else(|| {
-                                    DaxError::Eval(format!(
-                                        "SUMMARIZE grouping column {table}[{column}] is not reachable from {}",
-                                        base.table
-                                    ))
-                                })?;
-                            let rel_info = model
-                                .relationships()
-                                .get(relationship_idx)
-                                .expect("found above");
-                            let from_idx = table_ref
-                                .column_idx(&rel_info.rel.from_column)
-                                .ok_or_else(|| DaxError::UnknownColumn {
-                                    table: base.table.clone(),
-                                    column: rel_info.rel.from_column.clone(),
-                                })?;
+                            let Some(path) = model.find_unique_active_relationship_path(
+                                &base.table,
+                                table,
+                                RelationshipPathDirection::ManyToOne,
+                                |idx, rel| is_relationship_active(idx, rel, &override_pairs),
+                            )?
+                            else {
+                                return Err(DaxError::Eval(format!(
+                                    "SUMMARIZE grouping column {table}[{column}] is not reachable from {}",
+                                    base.table
+                                )));
+                            };
+
+                            let mut hops = Vec::with_capacity(path.len());
+                            for rel_idx in path {
+                                let rel_info = model
+                                    .relationships()
+                                    .get(rel_idx)
+                                    .expect("relationship index from path");
+
+                                let from_table_ref =
+                                    model.table(&rel_info.rel.from_table).ok_or_else(|| {
+                                        DaxError::UnknownTable(rel_info.rel.from_table.clone())
+                                    })?;
+                                let from_idx = from_table_ref
+                                    .column_idx(&rel_info.rel.from_column)
+                                    .ok_or_else(|| DaxError::UnknownColumn {
+                                        table: rel_info.rel.from_table.clone(),
+                                        column: rel_info.rel.from_column.clone(),
+                                    })?;
+
+                                hops.push(RelatedHop {
+                                    relationship_idx: rel_idx,
+                                    from_idx,
+                                });
+                            }
 
                             let to_table_ref = model
                                 .table(table)
@@ -2212,9 +2240,8 @@ impl DaxEngine {
                                 }
                             })?;
 
-                            accessors.push(GroupAccessor::RelatedColumn {
-                                relationship_idx,
-                                from_idx,
+                            accessors.push(GroupAccessor::RelatedPath {
+                                hops,
                                 to_table: table.clone(),
                                 to_col_idx,
                             });
@@ -2238,35 +2265,53 @@ impl DaxEngine {
                                 GroupAccessor::BaseColumn(idx) => key.push(
                                     table_ref.value_by_idx(row, *idx).unwrap_or(Value::Blank),
                                 ),
-                                GroupAccessor::RelatedColumn {
-                                    relationship_idx,
-                                    from_idx,
+                                GroupAccessor::RelatedPath {
+                                    hops,
                                     to_table,
                                     to_col_idx,
                                 } => {
-                                    let fk = table_ref
-                                        .value_by_idx(row, *from_idx)
-                                        .unwrap_or(Value::Blank);
-                                    if fk.is_blank() {
+                                    let mut current_row = row;
+                                    let mut ok = true;
+                                    for hop in hops {
+                                        let rel_info = model
+                                            .relationships()
+                                            .get(hop.relationship_idx)
+                                            .expect("valid relationship index");
+                                        let from_table_ref = model
+                                            .table(&rel_info.rel.from_table)
+                                            .ok_or_else(|| {
+                                                DaxError::UnknownTable(
+                                                    rel_info.rel.from_table.clone(),
+                                                )
+                                            })?;
+
+                                        let fk = from_table_ref
+                                            .value_by_idx(current_row, hop.from_idx)
+                                            .unwrap_or(Value::Blank);
+                                        if fk.is_blank() {
+                                            ok = false;
+                                            break;
+                                        }
+
+                                        let Some(to_row) = rel_info.to_index.get(&fk).copied()
+                                        else {
+                                            ok = false;
+                                            break;
+                                        };
+                                        current_row = to_row;
+                                    }
+
+                                    if !ok {
                                         key.push(Value::Blank);
                                         continue;
                                     }
-
-                                    let rel_info = model
-                                        .relationships()
-                                        .get(*relationship_idx)
-                                        .expect("valid relationship index");
-                                    let Some(to_row) = rel_info.to_index.get(&fk).copied() else {
-                                        key.push(Value::Blank);
-                                        continue;
-                                    };
 
                                     let to_table_ref = model
                                         .table(to_table)
                                         .ok_or_else(|| DaxError::UnknownTable(to_table.clone()))?;
                                     key.push(
                                         to_table_ref
-                                            .value_by_idx(to_row, *to_col_idx)
+                                            .value_by_idx(current_row, *to_col_idx)
                                             .unwrap_or(Value::Blank),
                                     );
                                 }
@@ -2625,50 +2670,66 @@ impl DaxEngine {
                         return Err(DaxError::Eval("RELATEDTABLE requires row context".into()));
                     };
 
-                    let rel = model
-                        .relationships()
-                        .iter()
-                        .find(|rel| {
-                            rel.rel.is_active
-                                && rel.rel.from_table == *target_table
-                                && rel.rel.to_table == current_table
-                        })
-                        .ok_or_else(|| {
-                            DaxError::Eval(format!(
-                                "no active relationship between {current_table} and {target_table}"
-                            ))
-                        })?;
-
                     let current_row = row_ctx
                         .row_for(current_table)
                         .ok_or_else(|| DaxError::Eval("missing current row".into()))?;
 
-                    let to_table_ref = model
-                        .table(current_table)
-                        .ok_or_else(|| DaxError::UnknownTable(current_table.to_string()))?;
-                    let to_idx = to_table_ref.column_idx(&rel.rel.to_column).ok_or_else(|| {
-                        DaxError::UnknownColumn {
-                            table: current_table.to_string(),
-                            column: rel.rel.to_column.clone(),
-                        }
-                    })?;
-                    let key = to_table_ref
-                        .value_by_idx(current_row, to_idx)
-                        .unwrap_or(Value::Blank);
+                    // Fast path: direct relationship `target_table (many) -> current_table (one)`.
+                    if let Some(rel) = model.relationships().iter().find(|rel| {
+                        rel.rel.is_active
+                            && rel.rel.from_table == *target_table
+                            && rel.rel.to_table == current_table
+                    }) {
+                        let to_table_ref = model
+                            .table(current_table)
+                            .ok_or_else(|| DaxError::UnknownTable(current_table.to_string()))?;
+                        let to_idx =
+                            to_table_ref.column_idx(&rel.rel.to_column).ok_or_else(|| {
+                                DaxError::UnknownColumn {
+                                    table: current_table.to_string(),
+                                    column: rel.rel.to_column.clone(),
+                                }
+                            })?;
+                        let key = to_table_ref
+                            .value_by_idx(current_row, to_idx)
+                            .unwrap_or(Value::Blank);
 
-                    if key.is_blank() {
+                        if key.is_blank() {
+                            let sets = resolve_row_sets(model, filter)?;
+                            let allowed = sets
+                                .get(target_table)
+                                .ok_or_else(|| DaxError::UnknownTable(target_table.to_string()))?;
+
+                            let mut rows = Vec::new();
+                            for (fk, candidates) in &rel.from_index {
+                                if fk.is_blank() || !rel.to_index.contains_key(fk) {
+                                    for &row in candidates {
+                                        if allowed.get(row).copied().unwrap_or(false) {
+                                            rows.push(row);
+                                        }
+                                    }
+                                }
+                            }
+
+                            return Ok(TableResult {
+                                table: target_table.clone(),
+                                rows,
+                            });
+                        }
+
+                        // `RELATEDTABLE` is frequently used inside iterators. Use the relationship
+                        // index to fetch candidate fact rows, and only then apply the existing filter
+                        // context (including relationship propagation).
                         let sets = resolve_row_sets(model, filter)?;
                         let allowed = sets
                             .get(target_table)
                             .ok_or_else(|| DaxError::UnknownTable(target_table.to_string()))?;
 
                         let mut rows = Vec::new();
-                        for (fk, candidates) in &rel.from_index {
-                            if fk.is_blank() || !rel.to_index.contains_key(fk) {
-                                for &row in candidates {
-                                    if allowed.get(row).copied().unwrap_or(false) {
-                                        rows.push(row);
-                                    }
+                        if let Some(candidates) = rel.from_index.get(&key) {
+                            for &row in candidates {
+                                if allowed.get(row).copied().unwrap_or(false) {
+                                    rows.push(row);
                                 }
                             }
                         }
@@ -2679,20 +2740,77 @@ impl DaxEngine {
                         });
                     }
 
-                    // `RELATEDTABLE` is frequently used inside iterators. Use the relationship
-                    // index to fetch candidate fact rows, and only then apply the existing filter
-                    // context (including relationship propagation).
+                    // Multi-hop case: follow a unique active relationship chain in the reverse
+                    // direction (one-to-many at each hop).
+                    let Some(path) = model.find_unique_active_relationship_path(
+                        current_table,
+                        target_table,
+                        RelationshipPathDirection::OneToMany,
+                        |_, rel| rel.rel.is_active,
+                    )?
+                    else {
+                        return Err(DaxError::Eval(format!(
+                            "no active relationship between {current_table} and {target_table}"
+                        )));
+                    };
+
+                    let mut current_rows: Vec<usize> = vec![current_row];
+                    for rel_idx in path {
+                        let rel_info = model
+                            .relationships()
+                            .get(rel_idx)
+                            .expect("relationship index from path");
+
+                        let to_table_ref = model
+                            .table(&rel_info.rel.to_table)
+                            .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.to_table.clone()))?;
+                        let to_idx = to_table_ref
+                            .column_idx(&rel_info.rel.to_column)
+                            .ok_or_else(|| DaxError::UnknownColumn {
+                                table: rel_info.rel.to_table.clone(),
+                                column: rel_info.rel.to_column.clone(),
+                            })?;
+
+                        let mut next_rows: Vec<usize> = Vec::new();
+                        for &to_row in &current_rows {
+                            let key = to_table_ref
+                                .value_by_idx(to_row, to_idx)
+                                .unwrap_or(Value::Blank);
+
+                            if key.is_blank() {
+                                // Blank row semantics: include rows whose foreign key is BLANK or
+                                // does not match any row on the one-side.
+                                for (fk, candidates) in &rel_info.from_index {
+                                    if fk.is_blank() || !rel_info.to_index.contains_key(fk) {
+                                        next_rows.extend(candidates.iter().copied());
+                                    }
+                                }
+                                continue;
+                            }
+
+                            if let Some(candidates) = rel_info.from_index.get(&key) {
+                                next_rows.extend(candidates.iter().copied());
+                            }
+                        }
+
+                        if next_rows.is_empty() {
+                            current_rows.clear();
+                            break;
+                        }
+                        next_rows.sort_unstable();
+                        next_rows.dedup();
+                        current_rows = next_rows;
+                    }
+
                     let sets = resolve_row_sets(model, filter)?;
                     let allowed = sets
                         .get(target_table)
                         .ok_or_else(|| DaxError::UnknownTable(target_table.to_string()))?;
 
                     let mut rows = Vec::new();
-                    if let Some(candidates) = rel.from_index.get(&key) {
-                        for &row in candidates {
-                            if allowed.get(row).copied().unwrap_or(false) {
-                                rows.push(row);
-                            }
+                    for row in current_rows {
+                        if allowed.get(row).copied().unwrap_or(false) {
+                            rows.push(row);
                         }
                     }
 
@@ -3114,7 +3232,11 @@ fn blank_row_allowed(filter: &FilterContext, table: &str) -> bool {
     true
 }
 
-fn virtual_blank_row_exists(model: &DataModel, filter: &FilterContext, table: &str) -> DaxResult<bool> {
+fn virtual_blank_row_exists(
+    model: &DataModel,
+    filter: &FilterContext,
+    table: &str,
+) -> DaxResult<bool> {
     // Tabular models materialize an "unknown" (blank) row on the one-side of relationships when
     // there are fact-side rows whose foreign key is BLANK or has no match in the dimension. We
     // model that row virtually (at `row_count()`), so we need to know whether it exists for a

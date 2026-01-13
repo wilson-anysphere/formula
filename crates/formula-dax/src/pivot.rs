@@ -1,5 +1,6 @@
 use crate::backend::{AggregationKind, AggregationSpec, TableBackend};
 use crate::engine::{DaxError, DaxResult, FilterContext, RowContext};
+use crate::model::RelationshipPathDirection;
 use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::{DaxEngine, DataModel, Value};
 use std::borrow::Cow;
@@ -134,12 +135,18 @@ fn cmp_key(a: &[Value], b: &[Value]) -> Ordering {
     a.len().cmp(&b.len())
 }
 
+struct RelatedHop<'a> {
+    from_idx: usize,
+    to_index: &'a std::collections::HashMap<Value, usize>,
+    to_table: &'a crate::model::Table,
+}
+
 enum GroupKeyAccessor<'a> {
-    Base { idx: usize },
-    Related {
-        from_idx: usize,
-        to_index: &'a std::collections::HashMap<Value, usize>,
-        to_table: &'a crate::model::Table,
+    Base {
+        idx: usize,
+    },
+    RelatedPath {
+        hops: Vec<RelatedHop<'a>>,
         to_column_idx: usize,
     },
 }
@@ -148,7 +155,7 @@ fn build_group_key_accessors<'a>(
     model: &'a DataModel,
     base_table: &'a str,
     group_by: &'a [GroupByColumn],
-) -> DaxResult<( &'a crate::model::Table, Vec<GroupKeyAccessor<'a>>)> {
+) -> DaxResult<(&'a crate::model::Table, Vec<GroupKeyAccessor<'a>>)> {
     let base_table_ref = model
         .table(base_table)
         .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
@@ -156,50 +163,71 @@ fn build_group_key_accessors<'a>(
     let mut accessors = Vec::with_capacity(group_by.len());
     for col in group_by {
         if col.table == base_table {
-            let idx = base_table_ref
-                .column_idx(&col.column)
-                .ok_or_else(|| DaxError::UnknownColumn {
-                    table: base_table.to_string(),
-                    column: col.column.clone(),
-                })?;
+            let idx =
+                base_table_ref
+                    .column_idx(&col.column)
+                    .ok_or_else(|| DaxError::UnknownColumn {
+                        table: base_table.to_string(),
+                        column: col.column.clone(),
+                    })?;
             accessors.push(GroupKeyAccessor::Base { idx });
             continue;
         }
 
-        let rel_info = model
-            .relationships()
-            .iter()
-            .find(|rel| {
-                rel.rel.is_active && rel.rel.from_table == base_table && rel.rel.to_table == col.table
-            })
-            .ok_or_else(|| {
-                DaxError::Eval(format!(
-                    "no active relationship from {base_table} to {} for RELATED",
-                    col.table
-                ))
-            })?;
+        let Some(path) = model.find_unique_active_relationship_path(
+            base_table,
+            &col.table,
+            RelationshipPathDirection::ManyToOne,
+            |_, rel| rel.rel.is_active,
+        )?
+        else {
+            return Err(DaxError::Eval(format!(
+                "no active relationship from {base_table} to {} for RELATED",
+                col.table
+            )));
+        };
 
-        let from_idx = base_table_ref
-            .column_idx(&rel_info.rel.from_column)
-            .ok_or_else(|| DaxError::UnknownColumn {
-                table: base_table.to_string(),
-                column: rel_info.rel.from_column.clone(),
-            })?;
+        let mut hops = Vec::with_capacity(path.len());
+        for rel_idx in path {
+            let rel_info = model
+                .relationships()
+                .get(rel_idx)
+                .expect("relationship index from path");
+
+            let from_table_ref = model
+                .table(&rel_info.rel.from_table)
+                .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.from_table.clone()))?;
+            let from_idx = from_table_ref
+                .column_idx(&rel_info.rel.from_column)
+                .ok_or_else(|| DaxError::UnknownColumn {
+                    table: rel_info.rel.from_table.clone(),
+                    column: rel_info.rel.from_column.clone(),
+                })?;
+
+            let to_table_ref = model
+                .table(&rel_info.rel.to_table)
+                .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.to_table.clone()))?;
+
+            hops.push(RelatedHop {
+                from_idx,
+                to_index: &rel_info.to_index,
+                to_table: to_table_ref,
+            });
+        }
 
         let to_table_ref = model
             .table(&col.table)
             .ok_or_else(|| DaxError::UnknownTable(col.table.clone()))?;
-        let to_column_idx = to_table_ref
-            .column_idx(&col.column)
-            .ok_or_else(|| DaxError::UnknownColumn {
-                table: col.table.clone(),
-                column: col.column.clone(),
-            })?;
+        let to_column_idx =
+            to_table_ref
+                .column_idx(&col.column)
+                .ok_or_else(|| DaxError::UnknownColumn {
+                    table: col.table.clone(),
+                    column: col.column.clone(),
+                })?;
 
-        accessors.push(GroupKeyAccessor::Related {
-            from_idx,
-            to_index: &rel_info.to_index,
-            to_table: to_table_ref,
+        accessors.push(GroupKeyAccessor::RelatedPath {
+            hops,
             to_column_idx,
         });
     }
@@ -216,18 +244,35 @@ fn fill_group_key(
     out.clear();
     for accessor in accessors {
         let value = match accessor {
-            GroupKeyAccessor::Base { idx } => base_table.value_by_idx(row, *idx).unwrap_or(Value::Blank),
-            GroupKeyAccessor::Related {
-                from_idx,
-                to_index,
-                to_table,
+            GroupKeyAccessor::Base { idx } => {
+                base_table.value_by_idx(row, *idx).unwrap_or(Value::Blank)
+            }
+            GroupKeyAccessor::RelatedPath {
+                hops,
                 to_column_idx,
             } => {
-                let key = base_table.value_by_idx(row, *from_idx).unwrap_or(Value::Blank);
-                if key.is_blank() {
-                    Value::Blank
-                } else if let Some(&to_row) = to_index.get(&key) {
-                    to_table.value_by_idx(to_row, *to_column_idx).unwrap_or(Value::Blank)
+                let mut current_table = base_table;
+                let mut current_row = row;
+                let mut ok = true;
+                for hop in hops {
+                    let key = current_table
+                        .value_by_idx(current_row, hop.from_idx)
+                        .unwrap_or(Value::Blank);
+                    if key.is_blank() {
+                        ok = false;
+                        break;
+                    }
+                    let Some(&to_row) = hop.to_index.get(&key) else {
+                        ok = false;
+                        break;
+                    };
+                    current_table = hop.to_table;
+                    current_row = to_row;
+                }
+                if ok {
+                    current_table
+                        .value_by_idx(current_row, *to_column_idx)
+                        .unwrap_or(Value::Blank)
                 } else {
                     Value::Blank
                 }
@@ -732,10 +777,12 @@ fn plan_pivot_expr(
                 if table != base_table_name {
                     return Ok(None);
                 }
-                let idx = base_table.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
-                    table: table.clone(),
-                    column: column.clone(),
-                })?;
+                let idx = base_table
+                    .column_idx(column)
+                    .ok_or_else(|| DaxError::UnknownColumn {
+                        table: table.clone(),
+                        column: column.clone(),
+                    })?;
                 let kind = match name.to_ascii_uppercase().as_str() {
                     "SUM" => AggregationKind::Sum,
                     "AVERAGE" => AggregationKind::Average,
@@ -783,10 +830,12 @@ fn pivot_columnar_group_by(
 
     let mut group_idxs = Vec::with_capacity(group_by.len());
     for col in group_by {
-        let idx = table_ref.column_idx(&col.column).ok_or_else(|| DaxError::UnknownColumn {
-            table: base_table.to_string(),
-            column: col.column.clone(),
-        })?;
+        let idx = table_ref
+            .column_idx(&col.column)
+            .ok_or_else(|| DaxError::UnknownColumn {
+                table: base_table.to_string(),
+                column: col.column.clone(),
+            })?;
         group_idxs.push(idx);
     }
 
@@ -867,10 +916,12 @@ fn pivot_columnar_groups_with_measure_eval(
 
     let mut group_idxs = Vec::with_capacity(group_by.len());
     for col in group_by {
-        let idx = table_ref.column_idx(&col.column).ok_or_else(|| DaxError::UnknownColumn {
-            table: base_table.to_string(),
-            column: col.column.clone(),
-        })?;
+        let idx = table_ref
+            .column_idx(&col.column)
+            .ok_or_else(|| DaxError::UnknownColumn {
+                table: base_table.to_string(),
+                column: col.column.clone(),
+            })?;
         group_idxs.push(idx);
     }
 
@@ -902,8 +953,12 @@ fn pivot_columnar_groups_with_measure_eval(
         }
 
         for measure in measures {
-            let value =
-                engine.evaluate_expr(model, &measure.parsed, &group_filter, &RowContext::default())?;
+            let value = engine.evaluate_expr(
+                model,
+                &measure.parsed,
+                &group_filter,
+                &RowContext::default(),
+            )?;
             key.push(value);
         }
         rows_out.push(key);
@@ -1165,8 +1220,12 @@ fn pivot_row_scan(
 
         let mut row = key;
         for measure in measures {
-            let value =
-                engine.evaluate_expr(model, &measure.parsed, &group_filter, &RowContext::default())?;
+            let value = engine.evaluate_expr(
+                model,
+                &measure.parsed,
+                &group_filter,
+                &RowContext::default(),
+            )?;
             row.push(value);
         }
         rows_out.push(row);
@@ -1199,7 +1258,8 @@ pub fn pivot(
         return Ok(result);
     }
 
-    if let Some(result) = pivot_planned_row_group_by(model, base_table, group_by, measures, filter)? {
+    if let Some(result) = pivot_planned_row_group_by(model, base_table, group_by, measures, filter)?
+    {
         return Ok(result);
     }
 
@@ -1346,7 +1406,9 @@ pub fn pivot_crosstab_with_options(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions};
+    use formula_columnar::{
+        ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions,
+    };
     use std::sync::Arc;
     use std::time::Instant;
 

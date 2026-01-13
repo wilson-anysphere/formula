@@ -259,6 +259,16 @@ pub(crate) struct RelationshipInfo {
     pub(crate) from_index: HashMap<Value, Vec<usize>>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RelationshipPathDirection {
+    /// Follow relationships in their defined direction:
+    /// `from_table (many) -> to_table (one)`.
+    ManyToOne,
+    /// Follow relationships in reverse:
+    /// `to_table (one) -> from_table (many)`.
+    OneToMany,
+}
+
 impl DataModel {
     pub fn new() -> Self {
         Self {
@@ -737,6 +747,129 @@ impl DataModel {
 
     pub(crate) fn relationships(&self) -> &[RelationshipInfo] {
         &self.relationships
+    }
+
+    pub(crate) fn find_unique_active_relationship_path<F>(
+        &self,
+        from_table: &str,
+        to_table: &str,
+        direction: RelationshipPathDirection,
+        is_relationship_active: F,
+    ) -> DaxResult<Option<Vec<usize>>>
+    where
+        F: Fn(usize, &RelationshipInfo) -> bool,
+    {
+        // We intentionally do not treat `from_table == to_table` as a valid path here.
+        // Callers like `RELATED`/`RELATEDTABLE` are defined in terms of relationships, and
+        // previously errored when the target table was the current table.
+        if from_table == to_table {
+            return Ok(None);
+        }
+
+        fn dfs<'a, F>(
+            model: &'a DataModel,
+            start_table: &'a str,
+            current_table: &'a str,
+            target_table: &'a str,
+            direction: RelationshipPathDirection,
+            is_relationship_active: &F,
+            visited: &mut HashSet<&'a str>,
+            path: &mut Vec<usize>,
+            table_path: &mut Vec<&'a str>,
+            found_path: &mut Option<Vec<usize>>,
+            found_table_path: &mut Option<Vec<&'a str>>,
+        ) -> DaxResult<()>
+        where
+            F: Fn(usize, &RelationshipInfo) -> bool,
+        {
+            if current_table == target_table {
+                if found_path.is_some() {
+                    let first = found_table_path
+                        .as_ref()
+                        .map(|p| p.join(" -> "))
+                        .unwrap_or_else(|| "<unknown>".to_string());
+                    let second = table_path.join(" -> ");
+                    return Err(DaxError::Eval(format!(
+                        "ambiguous active relationship path between {start_table} and {target_table}: {first}; {second}"
+                    )));
+                }
+                *found_path = Some(path.clone());
+                *found_table_path = Some(table_path.clone());
+                return Ok(());
+            }
+
+            for (idx, rel) in model.relationships.iter().enumerate() {
+                if !(is_relationship_active(idx, rel)) {
+                    continue;
+                }
+
+                let next_table = match direction {
+                    RelationshipPathDirection::ManyToOne => {
+                        if rel.rel.from_table != current_table {
+                            continue;
+                        }
+                        rel.rel.to_table.as_str()
+                    }
+                    RelationshipPathDirection::OneToMany => {
+                        if rel.rel.to_table != current_table {
+                            continue;
+                        }
+                        rel.rel.from_table.as_str()
+                    }
+                };
+
+                if visited.contains(next_table) {
+                    continue;
+                }
+
+                visited.insert(next_table);
+                path.push(idx);
+                table_path.push(next_table);
+
+                dfs(
+                    model,
+                    start_table,
+                    next_table,
+                    target_table,
+                    direction,
+                    is_relationship_active,
+                    visited,
+                    path,
+                    table_path,
+                    found_path,
+                    found_table_path,
+                )?;
+
+                table_path.pop();
+                path.pop();
+                visited.remove(next_table);
+            }
+
+            Ok(())
+        }
+
+        let mut visited = HashSet::new();
+        visited.insert(from_table);
+        let mut path = Vec::new();
+        let mut table_path = vec![from_table];
+        let mut found_path = None;
+        let mut found_table_path = None;
+
+        dfs(
+            self,
+            from_table,
+            from_table,
+            to_table,
+            direction,
+            &is_relationship_active,
+            &mut visited,
+            &mut path,
+            &mut table_path,
+            &mut found_path,
+            &mut found_table_path,
+        )?;
+
+        Ok(found_path)
     }
 
     pub(crate) fn find_relationship_index(
