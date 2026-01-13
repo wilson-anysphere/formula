@@ -10,6 +10,16 @@ Most users should start with:
 - `python -m tools.corpus.dashboard` – generate a scorecard from triage reports (optionally `--append-trend .../trend.json`)
 - `python -m tools.corpus.minimize` – summarize which workbook parts are responsible for round-trip diffs (privacy-safe); can optionally emit a minimized workbook via `--out-xlsx`
 
+The dashboard emits both human- and machine-readable outputs:
+
+- `summary.md` (includes a **Timings** section with per-step `duration_ms` stats like p50/p90)
+- `summary.json` (includes the same data under `timings`)
+
+The dashboard also supports opt-in perf regression gates:
+
+- `--gate-load-p90-ms <ms>`
+- `--gate-round-trip-p90-ms <ms>`
+
 ## Private corpus note
 
 For private corpora following the recommended `originals/` + `sanitized/` layout, `tools.corpus.triage` defaults to
