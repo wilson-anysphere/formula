@@ -40,6 +40,7 @@ use formula_model::{
 use thiserror::Error;
 
 mod biff;
+mod ct;
 mod decrypt;
 pub mod diagnostics;
 mod formula_rewrite;

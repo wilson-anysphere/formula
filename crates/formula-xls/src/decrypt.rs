@@ -1,6 +1,8 @@
 use sha1::{Digest as _, Sha1};
 use thiserror::Error;
 
+use crate::ct::ct_eq;
+
 /// Errors returned while decrypting password-protected `.xls` BIFF8 workbooks.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum DecryptError {
@@ -763,7 +765,7 @@ fn verify_password(info: &CryptoApiEncryptionInfo, password: &str) -> Result<[u8
             verifier_hash.len()
         )));
     }
-    if verifier_hash[..verifier_hash_size] != expected[..verifier_hash_size] {
+    if !ct_eq(&verifier_hash[..verifier_hash_size], &expected[..verifier_hash_size]) {
         return Err(DecryptError::WrongPassword);
     }
 

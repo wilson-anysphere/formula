@@ -2392,6 +2392,7 @@ dependencies = [
  "md-5",
  "proptest",
  "sha1",
+ "subtle",
  "tempfile",
  "thiserror 2.0.17",
 ]

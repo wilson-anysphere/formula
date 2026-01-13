@@ -17,6 +17,8 @@
 use md5::{Digest as _, Md5};
 use thiserror::Error;
 
+use crate::ct::ct_eq;
+
 use super::{records, BiffVersion};
 
 pub(crate) mod cryptoapi;
@@ -522,7 +524,7 @@ fn verify_rc4_password(filepass: &FilePassRc4, password: &str) -> Result<[u8; 16
     let verifier_hash = &buf[16..32];
     let expected_hash: [u8; 16] = Md5::digest(verifier).into();
 
-    if verifier_hash != expected_hash {
+    if !ct_eq(verifier_hash, expected_hash.as_slice()) {
         return Err(DecryptError::WrongPassword);
     }
 

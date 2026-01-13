@@ -1,6 +1,8 @@
 use md5::Md5;
 use sha1::Digest as _;
 
+use crate::ct::ct_eq;
+
 /// Minimal RC4 stream cipher implementation (KSA + PRGA).
 ///
 /// BIFF8 legacy encryption uses RC4 with per-block keys derived from password material.
@@ -121,7 +123,7 @@ pub(crate) fn validate_biff8_rc4_password(
     let mut md5 = Md5::new();
     md5.update(&verifier);
     let expected = md5.finalize();
-    expected.as_slice() == verifier_hash
+    ct_eq(expected.as_slice(), &verifier_hash)
 }
 
 #[cfg(test)]

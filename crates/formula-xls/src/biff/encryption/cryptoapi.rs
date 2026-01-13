@@ -1,6 +1,8 @@
 use md5::Md5;
 use sha1::{Digest as _, Sha1};
 
+use crate::ct::ct_eq;
+
 use super::rc4::Rc4;
 
 // CryptoAPI ALG_ID values for hash functions.
@@ -119,7 +121,7 @@ pub(crate) fn validate_biff8_cryptoapi_password(
     let mut sha1 = Sha1::new();
     sha1.update(&verifier);
     let expected = sha1.finalize();
-    expected.as_slice() == verifier_hash
+    ct_eq(expected.as_slice(), &verifier_hash)
 }
 
 #[cfg(test)]
