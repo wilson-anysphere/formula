@@ -351,10 +351,9 @@ impl XlsxPackage {
                     None
                 };
 
-                // Excel commonly uses `CalcOrigin=5` for embedded in-cell images; when the
-                // rdRichValue tables are missing we cannot recover CalcOrigin, so use this as a
-                // best-effort default.
-                let mut calc_origin: u32 = 5;
+                // When the rdRichValue tables are missing we cannot recover `CalcOrigin`, so report
+                // it as `0` (unknown).
+                let mut calc_origin: u32 = 0;
                 let mut alt_text: Option<String> = None;
 
                 // Determine which relationship-slot index to use for this cell image.

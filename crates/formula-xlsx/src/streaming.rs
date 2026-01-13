@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Seek, Write};
 
 use formula_model::rich_text::RichText;
-use formula_model::{CellRef, CellValue, StyleTable};
+use formula_model::{CellRef, CellValue, ErrorValue, StyleTable};
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 use thiserror::Error;
@@ -3748,9 +3748,47 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     }
 
     let clear_cached_value = patch.clear_cached_value && patch_formula.is_some();
-    let _ = drop_vm_on_value_change;
-    // Preserve `vm` by default; callers can explicitly override/clear it via the patch.
-    let drop_vm = false;
+
+    // `vm="..."` points into `xl/metadata.xml` value metadata (rich values / images-in-cell).
+    //
+    // We generally preserve it for fidelity. The main exception is the embedded in-cell image
+    // placeholder representation, which uses `t="e"` + `<v>#VALUE!</v>`; when a patch changes the
+    // cached value away from that placeholder semantics, we must drop `vm` to avoid leaving a
+    // dangling rich-data pointer.
+    //
+    // Additionally, when patching incomplete workbook packages (see `drop_vm_on_value_change`),
+    // drop `vm` whenever the cached value semantics change unless the caller explicitly overrides
+    // `vm`.
+    let existing_is_rich_value_placeholder = if existing_t
+        .as_deref()
+        .is_some_and(|t| t.trim().eq_ignore_ascii_case("e"))
+    {
+        extract_cell_v_text(&inner_events)?
+            .as_deref()
+            .and_then(|v| v.trim().parse::<ErrorValue>().ok())
+            == Some(ErrorValue::Value)
+    } else {
+        false
+    };
+    let patch_is_rich_value_placeholder = matches!(&patch.value, CellValue::Error(ErrorValue::Value));
+
+    let value_eq = if drop_vm_on_value_change {
+        cell_value_semantics_eq(
+            existing_t.as_deref(),
+            &inner_events,
+            &patch.value,
+            patch.shared_string_idx,
+        )?
+    } else {
+        true
+    };
+
+    let drop_vm = if patch.vm.is_none() {
+        (existing_is_rich_value_placeholder && !patch_is_rich_value_placeholder)
+            || (drop_vm_on_value_change && !value_eq)
+    } else {
+        false
+    };
 
     let mut c = BytesStart::new(cell_tag.as_str());
     let mut has_r = false;

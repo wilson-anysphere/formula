@@ -128,6 +128,23 @@ impl PivotTableDefinition {
 
         Ok(def)
     }
+
+    /// Returns the output range of this pivot table (as declared by `<location ref="...">`).
+    ///
+    /// The returned range is in worksheet coordinates (0-indexed) and is parsed using
+    /// [`formula_model::Range::from_a1`]. If the pivot table definition does not specify a
+    /// location or the `ref` string is invalid, returns `None`.
+    pub fn location_range(&self) -> Option<formula_model::Range> {
+        let a1 = self.location_ref.as_deref()?;
+        formula_model::Range::from_a1(a1).ok()
+    }
+
+    /// Returns the top-left cell of the pivot table output range.
+    ///
+    /// This is equivalent to `self.location_range().map(|r| r.start)`.
+    pub fn location_top_left(&self) -> Option<formula_model::CellRef> {
+        self.location_range().map(|r| r.start)
+    }
 }
 
 impl XlsxPackage {
@@ -436,6 +453,7 @@ fn parse_bool(value: &str) -> Option<bool> {
 mod tests {
     use super::*;
 
+    use formula_model::{CellRef, Range};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -536,5 +554,33 @@ mod tests {
         assert_eq!(style.name.as_deref(), Some("PivotStyleLight16"));
         assert_eq!(style.show_row_headers, Some(true));
         assert_eq!(style.show_col_headers, Some(false));
+    }
+
+    #[test]
+    fn location_range_parses_valid_a1() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <location ref="B3:F20"/>
+</pivotTableDefinition>"#;
+
+        let parsed = PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml)
+            .expect("parse pivotTableDefinition");
+
+        assert_eq!(parsed.location_range(), Some(Range::from_a1("B3:F20").unwrap()));
+        assert_eq!(parsed.location_top_left(), Some(CellRef::new(2, 1)));
+    }
+
+    #[test]
+    fn location_range_invalid_ref_returns_none() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <location ref="not a range"/>
+</pivotTableDefinition>"#;
+
+        let parsed = PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml)
+            .expect("parse pivotTableDefinition");
+
+        assert_eq!(parsed.location_range(), None);
+        assert_eq!(parsed.location_top_left(), None);
     }
 }
