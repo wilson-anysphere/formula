@@ -1279,7 +1279,12 @@ fn find_pivot_layout(
     //    of the value area.
     //
     // Limitations:
-    // - Only supports pivot-engine Tabular layout (not Compact/"Row Labels").
+    // - Supports pivot-engine Tabular and Compact layouts.
+    //   - In Compact layout, the row-axis is represented by a single "Row Labels" column. For
+    //     pivots with multiple row fields, our pivot engine renders the combined key as
+    //     "Field1 / Field2 / …" in that column. GETPIVOTDATA can match against that combined
+    //     display string, but does not attempt to interpret Excel-style indentation or repeated
+    //     labels.
     // - Requires exactly one base value column (plus an optional "Grand Total - ..." column).
     // - Does not support column fields.
     const MAX_SCAN_ROWS: u32 = 10_000;
@@ -1340,18 +1345,6 @@ fn find_pivot_layout(
             }
             _ => break,
         }
-    }
-
-    // Disallow Compact layout pivots produced by our engine.
-    let first_header = ctx.get_cell_value(
-        sheet_id,
-        crate::eval::CellAddr {
-            row: header_row,
-            col: top_left_col,
-        },
-    );
-    if matches!(first_header, Value::Text(ref s) if s.eq_ignore_ascii_case("Row Labels")) {
-        return Err(ErrorKind::Ref);
     }
 
     // Determine where the value area begins by inspecting the first data row.

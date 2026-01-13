@@ -1217,6 +1217,86 @@ fn getpivotdata_returns_values_from_tabular_pivot_output() {
 }
 
 #[test]
+fn getpivotdata_returns_values_from_compact_pivot_output() {
+    use formula_engine::pivot::{
+        AggregationType, GrandTotals, Layout, PivotCache, PivotConfig, PivotEngine, PivotField,
+        PivotValue, SubtotalPosition, ValueField,
+    };
+
+    fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
+        values.to_vec()
+    }
+
+    fn to_cell_value(v: &PivotValue) -> Value {
+        match v {
+            PivotValue::Blank => Value::Blank,
+            PivotValue::Number(n) => Value::Number(*n),
+            PivotValue::Text(s) => Value::Text(s.clone()),
+            PivotValue::Bool(b) => Value::Bool(*b),
+            PivotValue::Date(d) => Value::Text(d.to_string()),
+        }
+    }
+
+    // Compute a compact-layout pivot using the engine.
+    let data: Vec<Vec<PivotValue>> = vec![
+        pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
+        pv_row(&["East".into(), "A".into(), 100.into()]),
+        pv_row(&["East".into(), "B".into(), 150.into()]),
+        pv_row(&["West".into(), "A".into(), 200.into()]),
+        pv_row(&["West".into(), "B".into(), 250.into()]),
+    ];
+    let cache = PivotCache::from_range(&data).unwrap();
+    let cfg = PivotConfig {
+        row_fields: vec![PivotField::new("Region")],
+        column_fields: vec![],
+        value_fields: vec![ValueField {
+            source_field: "Sales".to_string(),
+            name: "Sum of Sales".to_string(),
+            aggregation: AggregationType::Sum,
+            number_format: None,
+            show_as: None,
+            base_field: None,
+            base_item: None,
+        }],
+        filter_fields: vec![],
+        calculated_fields: vec![],
+        calculated_items: vec![],
+        layout: Layout::Compact,
+        subtotals: SubtotalPosition::None,
+        grand_totals: GrandTotals {
+            rows: true,
+            columns: false,
+        },
+    };
+    let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+    // Write the pivot output into a worksheet.
+    let mut sheet = TestSheet::new();
+    for (r, row) in result.data.iter().enumerate() {
+        for (c, value) in row.iter().enumerate() {
+            let addr = formula_engine::eval::CellAddr {
+                row: r as u32,
+                col: c as u32,
+            }
+            .to_a1();
+            sheet.set(&addr, to_cell_value(value));
+        }
+    }
+
+    // Row items live in a single "Row Labels" column under Compact layout.
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", B2, \"Row Labels\", \"East\")"),
+        Value::Number(250.0)
+    );
+
+    // When no field/item pairs are provided, return the grand total.
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A1)"),
+        Value::Number(700.0)
+    );
+}
+
+#[test]
 fn getpivotdata_supports_multiple_row_fields() {
     let mut sheet = TestSheet::new();
 
