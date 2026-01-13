@@ -84,6 +84,19 @@ pub enum DaxError {
         value: Value,
     },
 
+    #[error(
+        "relationship {relationship} join columns have incompatible types: {from_table}[{from_column}] ({from_type}) vs {to_table}[{to_column}] ({to_type})"
+    )]
+    RelationshipJoinColumnTypeMismatch {
+        relationship: String,
+        from_table: String,
+        from_column: String,
+        from_type: String,
+        to_table: String,
+        to_column: String,
+        to_type: String,
+    },
+
     #[error("type error: {0}")]
     Type(String),
 

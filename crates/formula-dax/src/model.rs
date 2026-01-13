@@ -776,6 +776,14 @@ impl DataModel {
                 column: to_col.clone(),
             })?;
 
+        Self::validate_relationship_join_column_types(
+            &relationship,
+            from_table,
+            from_idx,
+            to_table,
+            to_idx,
+        )?;
+
         let mut to_index = HashMap::<Value, RowSet>::new();
         for row in 0..to_table.row_count() {
             let value = to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
@@ -846,6 +854,116 @@ impl DataModel {
             to_index,
             from_index,
         });
+        Ok(())
+    }
+
+    fn validate_relationship_join_column_types(
+        relationship: &Relationship,
+        from_table: &Table,
+        from_idx: usize,
+        to_table: &Table,
+        to_idx: usize,
+    ) -> DaxResult<()> {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum JoinType {
+            Numeric,
+            Text,
+            Boolean,
+        }
+
+        struct JoinTypeInfo {
+            kind: JoinType,
+            display: String,
+        }
+
+        const SCAN_ROWS: usize = 1_000;
+
+        // Columnar tables have a declared type per column. Relationships with incompatible join
+        // column types almost always lead to "no matches" during filter propagation, which is
+        // extremely confusing to debug. Fail fast when the types are clearly incompatible.
+        //
+        // Compatibility rules:
+        // - `Number`, `DateTime`, `Currency`, and `Percentage` are treated as "numeric-like" and
+        //   considered compatible for relationship joins. The DAX engine coerces these logical
+        //   types to `Value::Number` internally (see `ColumnarTableBackend::dax_from_columnar`).
+        // - `String` and `Boolean` must match exactly with their respective kinds.
+        fn join_type_from_columnar(
+            column_type: formula_columnar::ColumnType,
+        ) -> JoinTypeInfo {
+            let kind = match column_type {
+                formula_columnar::ColumnType::Number
+                | formula_columnar::ColumnType::DateTime
+                | formula_columnar::ColumnType::Currency { .. }
+                | formula_columnar::ColumnType::Percentage { .. } => JoinType::Numeric,
+                formula_columnar::ColumnType::String => JoinType::Text,
+                formula_columnar::ColumnType::Boolean => JoinType::Boolean,
+            };
+
+            let display = match column_type {
+                formula_columnar::ColumnType::Number => "Number".to_string(),
+                formula_columnar::ColumnType::String => "String".to_string(),
+                formula_columnar::ColumnType::Boolean => "Boolean".to_string(),
+                formula_columnar::ColumnType::DateTime => "DateTime".to_string(),
+                formula_columnar::ColumnType::Currency { scale } => {
+                    format!("Currency(scale={scale})")
+                }
+                formula_columnar::ColumnType::Percentage { scale } => {
+                    format!("Percentage(scale={scale})")
+                }
+            };
+
+            JoinTypeInfo { kind, display }
+        }
+
+        fn join_type_from_in_memory_values(table: &Table, idx: usize) -> Option<JoinTypeInfo> {
+            let row_count = table.row_count();
+            let scan = row_count.min(SCAN_ROWS);
+            for row in 0..scan {
+                let value = table.value_by_idx(row, idx).unwrap_or(Value::Blank);
+                if value.is_blank() {
+                    continue;
+                }
+
+                let (kind, display) = match value {
+                    Value::Number(_) => (JoinType::Numeric, "Number".to_string()),
+                    Value::Text(_) => (JoinType::Text, "Text".to_string()),
+                    Value::Boolean(_) => (JoinType::Boolean, "Boolean".to_string()),
+                    Value::Blank => continue,
+                };
+                return Some(JoinTypeInfo { kind, display });
+            }
+            None
+        }
+
+        fn join_type_for_table_column(table: &Table, idx: usize) -> Option<JoinTypeInfo> {
+            if let Some(col_table) = table.columnar_table() {
+                let column_type = col_table.schema().get(idx)?.column_type;
+                return Some(join_type_from_columnar(column_type));
+            }
+            join_type_from_in_memory_values(table, idx)
+        }
+
+        let from_type = join_type_for_table_column(from_table, from_idx);
+        let to_type = join_type_for_table_column(to_table, to_idx);
+
+        // If we can't infer a type for one side (e.g. all BLANKs in the scan window), skip
+        // validation. This avoids false positives when loading sparse/empty in-memory tables.
+        let (Some(from_type), Some(to_type)) = (from_type, to_type) else {
+            return Ok(());
+        };
+
+        if from_type.kind != to_type.kind {
+            return Err(DaxError::RelationshipJoinColumnTypeMismatch {
+                relationship: relationship.name.clone(),
+                from_table: relationship.from_table.clone(),
+                from_column: relationship.from_column.clone(),
+                from_type: from_type.display,
+                to_table: relationship.to_table.clone(),
+                to_column: relationship.to_column.clone(),
+                to_type: to_type.display,
+            });
+        }
+
         Ok(())
     }
 
