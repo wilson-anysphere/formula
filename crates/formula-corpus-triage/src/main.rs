@@ -1332,6 +1332,7 @@ mod tests {
 
         let args = Args {
             input: PathBuf::new(),
+            format: WorkbookFormat::Xlsx,
             ignore_parts: Vec::new(),
             diff_limit: 10,
             recalc: false,
