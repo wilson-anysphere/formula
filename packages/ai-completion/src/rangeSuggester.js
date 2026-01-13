@@ -16,6 +16,8 @@ import { columnIndexToLetter, columnLetterToIndex, isEmptyCell, normalizeCellRef
  * The algorithm is intentionally simple and fast:
  * - If the user typed a column letter (e.g. "A"), suggest the contiguous block of
  *   non-empty cells above the current row in that column (A1:A10).
+ * - If no block exists above the active row (e.g. formula entered above a data block),
+ *   fall back to scanning downward for the first contiguous non-empty run.
  * - If adjacent columns contain a similarly-filled block over the same row span,
  *   also suggest a 2D rectangular range (A1:D10). Expansion stops at the first
  *   entirely-empty “gap” column and is bounded by `maxScanCols`.
