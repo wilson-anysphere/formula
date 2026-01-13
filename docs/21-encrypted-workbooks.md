@@ -12,12 +12,16 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
 **Current behavior (in this repo today):**
 
 - Encrypted workbooks are **detected** and rejected with a clear error:
-  - `formula-io` returns `formula_io::Error::EncryptedWorkbook`.
-  - The desktop app surfaces an “encrypted workbook not supported” message.
-- Password-based decryption is not yet wired into the high-level `formula-io` open APIs, so the
-  default open path cannot accept a password.
-  - Note: the legacy `.xls` importer (`formula-xls`) exposes
-    `import_xls_path_with_password(...)` for a subset of BIFF8 encryption (see below).
+  - **Encrypted OOXML** (OLE wrapper `EncryptionInfo` + `EncryptedPackage`):
+    - `formula-io` surfaces `Error::PasswordRequired` when no password is provided.
+    - `formula-io` surfaces `Error::InvalidPassword` when a password is provided (OOXML decryption
+      is not implemented yet; see [`open_workbook_with_password`](#formula-io-api)).
+    - `formula-io` surfaces `Error::UnsupportedOoxmlEncryption { version_major, version_minor }`
+      for unknown/unimplemented `EncryptionInfo` versions.
+  - **Encrypted legacy `.xls`** (BIFF `FILEPASS`):
+    - `formula-io` returns `Error::EncryptedWorkbook` (decryption not plumbed through `formula-io`).
+    - The legacy `.xls` importer (`formula-xls`) exposes `import_xls_path_with_password(...)` for a
+      subset of BIFF8 encryption (see below).
 
 **Intended behavior (when decryption + password plumbing is implemented):**
 
@@ -29,7 +33,7 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
 
 | File type | Encryption marker | Schemes (common) | Current behavior | Planned/target behavior |
 |---|---|---|---|---|
-| `.xlsx` / `.xlsm` / `.xlsb` (OOXML) | OLE/CFB streams `EncryptionInfo` + `EncryptedPackage` | Agile (4.4), Standard (3.2) | Detect + return `Error::EncryptedWorkbook` | Decrypt + open; surface `PasswordRequired` / `InvalidPassword` / `UnsupportedEncryptionScheme` |
+| `.xlsx` / `.xlsm` / `.xlsb` (OOXML) | OLE/CFB streams `EncryptionInfo` + `EncryptedPackage` | Agile (4.4), Standard (3.2) | Detect + surface `PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption` (no decryption yet) | Decrypt + open; surface `PasswordRequired` / `InvalidPassword` / `UnsupportedEncryptionScheme` |
 | `.xls` (BIFF) | BIFF `FILEPASS` record in workbook stream | XOR, RC4, CryptoAPI | `formula-io`: detect + `Error::EncryptedWorkbook` (no password plumbing yet). `formula-xls`: supports BIFF8 RC4 CryptoAPI when a password is provided. | Plumb password into `formula-io` and expand scheme coverage as needed (see [Legacy `.xls` encryption](#legacy-xls-encryption-biff-filepass)) |
 
 ---
@@ -246,8 +250,33 @@ Current behavior:
 Today, the `formula-io` crate:
 
 - **Detects** encrypted workbooks via `detect_workbook_encryption(...)`.
-- Returns `Error::EncryptedWorkbook` from `open_workbook(...)` / `open_workbook_model(...)` for
-  password-encrypted workbooks (OOXML OLE wrapper and legacy `.xls` `FILEPASS`).
+- For encrypted OOXML (OLE wrapper `EncryptionInfo` + `EncryptedPackage`), provides password-aware
+  open entrypoints:
+  - `open_workbook_with_password(path, password)`
+  - `open_workbook_model_with_password(path, password)`
+  These return `Error::PasswordRequired` when `password` is `None` and return `Error::InvalidPassword`
+  when `password` is `Some(...)` (until OOXML decryption is implemented).
+- For encrypted legacy `.xls` (BIFF `FILEPASS`), `formula-io` returns `Error::EncryptedWorkbook` (no
+  password plumbing yet).
+
+Example (password-aware open for encrypted OOXML):
+
+```rust
+use formula_io::{open_workbook_with_password, Error};
+
+let path = "book.xlsx";
+
+match open_workbook_with_password(path, None) {
+    Ok(workbook) => {
+        let _ = workbook;
+    }
+    Err(Error::PasswordRequired { .. }) => {
+        // Prompt the user for a password, then retry:
+        // open_workbook_with_password(path, Some(password))
+    }
+    Err(other) => return Err(other),
+}
+```
 
 If you specifically need to open an **encrypted legacy `.xls`** workbook *today*, you can bypass
 `formula-io` and use the `.xls` importer directly (limited to BIFF8 RC4 CryptoAPI):
@@ -272,8 +301,8 @@ match open_workbook(path) {
         // Opened normally.
         let _ = workbook;
     }
-    Err(Error::EncryptedWorkbook { .. }) => {
-        // Prompt the user for a password (or instruct them to remove encryption in Excel).
+    Err(Error::PasswordRequired { .. } | Error::EncryptedWorkbook { .. }) => {
+        // Prompt the user for a password (OOXML) or instruct them to remove encryption (legacy `.xls`).
         let info = detect_workbook_encryption(path)?
             .expect("encrypted workbook should be classified");
 
@@ -293,26 +322,9 @@ match open_workbook(path) {
 }
 ```
 
-The intended end-state is that these same `formula-io` entrypoints will accept a user-provided
-password (and optionally an “Agile HMAC verify” toggle) and return a normal workbook on success.
-That plumbing is not implemented yet.
-
-#### Planned API: `open_workbook_with_options` + `OpenOptions.password`
-
-Once password plumbing exists, callers should be able to pass an *open password* directly on the
-open call:
-
-```rust
-use formula_io::{open_workbook_with_options, OpenOptions};
-
-let workbook = open_workbook_with_options(
-    "book.xlsx",
-    OpenOptions {
-        password: Some("correct horse battery staple".into()),
-        ..Default::default()
-    },
-)?;
-```
+The intended end-state is that `open_workbook_with_password` / `open_workbook_model_with_password`
+will decrypt and return a normal workbook on success, without writing plaintext bytes to disk, and
+will optionally verify the Agile `dataIntegrity` HMAC.
 
 Notes:
 
@@ -320,8 +332,8 @@ Notes:
   to the relevant spec requirements (typically UTF-16LE for key derivation).
 - Callers should avoid logging passwords or embedding them in error messages.
 
-Until password support lands, callers can use `detect_workbook_encryption` to decide whether to
-prompt the user or show an “encryption not supported” message.
+Until OOXML decryption is implemented, callers can use `detect_workbook_encryption` to decide
+whether to prompt the user or show an “encryption not supported” message.
 
 #### Preflight detection (optional)
 
@@ -379,7 +391,8 @@ Encrypted workbook handling should distinguish at least these cases:
    - UI action: allow retry; do not treat as a “corrupt file” error.
 
 3. **Unsupported encryption scheme** (recognized encrypted container, but scheme not implemented)
-   - Surface as: `UnsupportedEncryptionScheme { scheme: … }`
+   - Surface as: `Error::UnsupportedOoxmlEncryption { version_major, version_minor }` (for OOXML),
+     and/or a future `UnsupportedEncryptionScheme { … }` once we plumb lower-level errors through.
    - UI action: explain limitation and suggest re-saving without encryption in Excel.
 
 4. **Corrupt encrypted wrapper** (missing streams, malformed `EncryptionInfo`, truncated payload)
@@ -388,9 +401,13 @@ Encrypted workbook handling should distinguish at least these cases:
 These distinctions matter for UX and telemetry: “needs password” is a normal user workflow, while
 “unsupported scheme” is an engineering coverage gap.
 
-Until password-based decryption is implemented end-to-end in `formula-io`, the high-level open APIs
-will generally surface a single “encrypted workbook not supported” error instead of distinguishing
-the cases above.
+Today, `formula-io` already distinguishes these cases for encrypted OOXML containers:
+
+- `Error::PasswordRequired`
+- `Error::InvalidPassword` (until decryption is implemented, any provided password yields this)
+- `Error::UnsupportedOoxmlEncryption { version_major, version_minor }`
+
+Legacy `.xls` encryption is still surfaced as the generic `Error::EncryptedWorkbook`.
 
 ### Mapping to existing Rust error types
 
