@@ -74,13 +74,15 @@ apt-get install -y \
 
 # For Tauri
 apt-get install -y \
+  file \
   libgtk-3-dev \
   libssl-dev \
   librsvg2-dev \
   patchelf \
   squashfs-tools \
   fakeroot \
-  rpm
+  rpm \
+  cpio
 
 # WebKitGTK dev package name differs across Ubuntu versions.
 apt-get install -y libwebkit2gtk-4.1-dev || apt-get install -y libwebkit2gtk-4.0-dev
