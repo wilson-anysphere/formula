@@ -54,6 +54,14 @@ describe.each(SOURCES)("$label permission-aware workbook managers", (source) => 
   it.each(["viewer", "commenter"] as const)("prevents %s from mutating workbook sheets", (role) => {
     const doc = new Y.Doc();
     const session = createCollabSession({ doc });
+    // Seed a nested Yjs type so we can ensure read-only callers can't mutate
+    // workbook sheet metadata indirectly (via nested maps/arrays).
+    const seededSheet1 = session.sheets.get(0) as any;
+    expect(seededSheet1).toBeTruthy();
+    doc.transact(() => {
+      seededSheet1.set("nested", new Y.Map());
+    });
+
     session.setPermissions({ role, userId: "u-readonly", rangeRestrictions: [] });
 
     const sheetMgr = source.createSheetManagerForSessionWithPermissions(session);
@@ -68,6 +76,10 @@ describe.each(SOURCES)("$label permission-aware workbook managers", (source) => 
     expect(sheet1).toBeTruthy();
     expect(() => (sheet1 as any).set("name", "Hacked")).toThrow(/read-?only/i);
 
+    const nested = (sheet1 as any).get("nested");
+    expect(nested).toBeTruthy();
+    expect(() => (nested as any).set("x", 1)).toThrow(/read-?only/i);
+
     // No mutation should have occurred.
     expect(sheetMgr.list().map((s) => s.id)).toEqual(beforeIds);
     expect(sheetMgr.list().find((s) => s.id === "Sheet1")?.name ?? null).toBe(beforeSheet1Name);
@@ -76,24 +88,41 @@ describe.each(SOURCES)("$label permission-aware workbook managers", (source) => 
 
   it.each(["viewer", "commenter"] as const)("prevents %s from mutating workbook metadata", (role) => {
     const doc = new Y.Doc();
+    // Seed a nested Yjs type in metadata (common for workbook-level UI state).
+    const nestedArr = new Y.Array<unknown>();
+    nestedArr.push([new Y.Map()]);
+    doc.transact(() => {
+      doc.getMap("metadata").set("nested", nestedArr);
+    });
     const session = createCollabSession({ doc });
     session.setPermissions({ role, userId: "u-readonly", rangeRestrictions: [] });
 
     const metadataMgr = source.createMetadataManagerForSessionWithPermissions(session);
     expect(() => metadataMgr.set("foo", "bar")).toThrow(/read-?only/i);
     expect(() => (metadataMgr.metadata as any).set("foo", "bar")).toThrow(/read-?only/i);
+    const nested = (metadataMgr.metadata as any).get("nested");
+    expect(nested).toBeTruthy();
+    expect(() => (nested as any).push([new Y.Map()])).toThrow(/read-?only/i);
     expect(metadataMgr.get("foo")).toBeUndefined();
     expect(session.metadata.get("foo")).toBeUndefined();
+    expect((doc.getMap("metadata").get("nested") as any)?.length ?? 0).toBe(1);
   });
 
   it.each(["viewer", "commenter"] as const)("prevents %s from mutating workbook named ranges", (role) => {
     const doc = new Y.Doc();
+    // Seed a nested Yjs type as a named range value to ensure nested types are guarded.
+    doc.transact(() => {
+      doc.getMap("namedRanges").set("Nested", new Y.Map());
+    });
     const session = createCollabSession({ doc });
     session.setPermissions({ role, userId: "u-readonly", rangeRestrictions: [] });
 
     const namedRangeMgr = source.createNamedRangeManagerForSessionWithPermissions(session);
     expect(() => namedRangeMgr.set("MyRange", "A1:B2")).toThrow(/read-?only/i);
     expect(() => (namedRangeMgr.namedRanges as any).set("MyRange", "A1:B2")).toThrow(/read-?only/i);
+    const nested = (namedRangeMgr.namedRanges as any).get("Nested");
+    expect(nested).toBeTruthy();
+    expect(() => (nested as any).set("x", 1)).toThrow(/read-?only/i);
     expect(namedRangeMgr.get("MyRange")).toBeUndefined();
     expect(session.namedRanges.get("MyRange")).toBeUndefined();
   });

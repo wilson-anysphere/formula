@@ -643,6 +643,14 @@ function createPermissionAwareYMapProxy<T>(params: {
   map: Y.Map<T>;
   session: PermissionAwareWorkbookSession;
   /**
+   * Optional wrapper for values returned by read APIs like `get()` / `values()` /
+   * `entries()`.
+   *
+   * This is used to return permission-guarded nested Yjs types (e.g. `metadata`
+   * values like `encryptedRanges` which are often stored as nested Y.Arrays/Y.Maps).
+   */
+  wrapValue?: (value: unknown) => unknown;
+  /**
    * Optional cache so we can preserve referential equality when returning nested
    * Y.Maps (e.g. sheet entries inside the `sheets` array).
    */
@@ -653,13 +661,13 @@ function createPermissionAwareYMapProxy<T>(params: {
    */
   proxySet?: WeakSet<object>;
 }): Y.Map<T> {
-  const { map, session, cache, proxySet } = params;
+  const { map, session, cache, proxySet, wrapValue } = params;
   if (proxySet?.has(map as any)) return map;
   const cached = cache?.get(map as any);
   if (cached) return cached;
 
   const proxy = new Proxy(map as any, {
-    get(target, prop) {
+    get(target, prop, receiver) {
       const value = Reflect.get(target, prop, target);
       if (typeof value !== "function") return value;
       if (prop === "constructor") return value;
@@ -670,6 +678,44 @@ function createPermissionAwareYMapProxy<T>(params: {
         return (...args: any[]) => {
           assertSessionCanMutateWorkbook(session);
           return Reflect.apply(value, target, args);
+        };
+      }
+
+      if (wrapValue && prop === "get") {
+        return (...args: any[]) => {
+          const out = Reflect.apply(value, target, args);
+          return wrapValue(out) as any;
+        };
+      }
+
+      if (wrapValue && prop === "forEach") {
+        return (cb: (...args: any[]) => void, thisArg?: any) => {
+          return Reflect.apply(value, target, [
+            (v: any, k: any) => cb.call(thisArg, wrapValue(v), k, receiver),
+            thisArg,
+          ]);
+        };
+      }
+
+      if (wrapValue && (prop === "values" || prop === "entries" || prop === Symbol.iterator)) {
+        return (...args: any[]) => {
+          const iter = Reflect.apply(value, target, args) as IterableIterator<any>;
+          const wrapEntry = (entry: any) => {
+            // values() yields the value, entries()/iterator yield [key, value]
+            if (prop === "values") return wrapValue(entry);
+            if (Array.isArray(entry) && entry.length >= 2) return [entry[0], wrapValue(entry[1])];
+            return entry;
+          };
+
+          return {
+            [Symbol.iterator]() {
+              return this;
+            },
+            next() {
+              const { value: v, done } = iter.next();
+              return done ? { value: v, done } : { value: wrapEntry(v), done };
+            },
+          } as IterableIterator<any>;
         };
       }
 
@@ -686,15 +732,28 @@ function createPermissionAwareYArrayProxy<T>(params: {
   array: Y.Array<T>;
   session: PermissionAwareWorkbookSession;
   /**
+   * Optional cache so we can preserve referential equality when returning nested
+   * Y.Arrays.
+   */
+  cache?: WeakMap<object, Y.Array<T>>;
+  /**
+   * Tracks the proxies created by this helper so we can avoid proxy-wrapping a
+   * proxy (which would otherwise break referential equality and add overhead).
+   */
+  proxySet?: WeakSet<object>;
+  /**
    * Optional wrapper for values returned by read APIs like `get()` / `toArray()`.
    * Useful for returning permission-guarded nested Y.Maps (e.g. sheet entries).
    */
   wrapValue?: (value: unknown) => unknown;
 }): Y.Array<T> {
-  const { array, session, wrapValue } = params;
+  const { array, session, wrapValue, cache, proxySet } = params;
+  if (proxySet?.has(array as any)) return array;
+  const cached = cache?.get(array as any);
+  if (cached) return cached;
 
-  return new Proxy(array as any, {
-    get(target, prop) {
+  const proxy = new Proxy(array as any, {
+    get(target, prop, receiver) {
       const value = Reflect.get(target, prop, target);
       if (typeof value !== "function") return value;
       if (prop === "constructor") return value;
@@ -722,9 +781,70 @@ function createPermissionAwareYArrayProxy<T>(params: {
         };
       }
 
+      if (wrapValue && prop === "forEach") {
+        return (cb: (...args: any[]) => void, thisArg?: any) => {
+          return Reflect.apply(value, target, [
+            (v: any, idx: number) => cb.call(thisArg, wrapValue(v), idx, receiver),
+            thisArg,
+          ]);
+        };
+      }
+
+      if (wrapValue && prop === Symbol.iterator) {
+        return (...args: any[]) => {
+          const iter = Reflect.apply(value, target, args) as IterableIterator<any>;
+          return {
+            [Symbol.iterator]() {
+              return this;
+            },
+            next() {
+              const { value: v, done } = iter.next();
+              return done ? { value: v, done } : { value: wrapValue(v), done };
+            },
+          } as IterableIterator<any>;
+        };
+      }
+
       return value.bind(target);
     },
   }) as Y.Array<T>;
+
+  cache?.set(array as any, proxy);
+  proxySet?.add(proxy as any);
+  return proxy;
+}
+
+function createPermissionAwareYTextProxy(params: {
+  text: Y.Text;
+  session: PermissionAwareWorkbookSession;
+  cache?: WeakMap<object, Y.Text>;
+  proxySet?: WeakSet<object>;
+}): Y.Text {
+  const { text, session, cache, proxySet } = params;
+  if (proxySet?.has(text as any)) return text;
+  const cached = cache?.get(text as any);
+  if (cached) return cached;
+
+  const proxy = new Proxy(text as any, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop, target);
+      if (typeof value !== "function") return value;
+      if (prop === "constructor") return value;
+
+      if (prop === "insert" || prop === "delete" || prop === "applyDelta" || prop === "format") {
+        return (...args: any[]) => {
+          assertSessionCanMutateWorkbook(session);
+          return Reflect.apply(value, target, args);
+        };
+      }
+
+      return value.bind(target);
+    },
+  }) as Y.Text;
+
+  cache?.set(text as any, proxy);
+  proxySet?.add(proxy as any);
+  return proxy;
 }
 
 export function createSheetManagerForSessionWithPermissions(session: PermissionAwareWorkbookSession): SheetManager {
@@ -732,16 +852,49 @@ export function createSheetManagerForSessionWithPermissions(session: PermissionA
 
   // Also guard the exposed Yjs roots so callers can't bypass the permission-aware
   // manager methods by mutating `mgr.sheets` directly.
-  const mapCache = new WeakMap<object, Y.Map<unknown>>();
+  const mapCache = new WeakMap<object, Y.Map<any>>();
   const mapProxies = new WeakSet<object>();
-  const wrapSheetEntry = (value: unknown) => {
-    if (mapProxies.has(value as any)) return value;
+  const arrayCache = new WeakMap<object, Y.Array<any>>();
+  const arrayProxies = new WeakSet<object>();
+  const textCache = new WeakMap<object, Y.Text>();
+  const textProxies = new WeakSet<object>();
+
+  const wrapYjsValue = (value: unknown): unknown => {
+    if (mapProxies.has(value as any) || arrayProxies.has(value as any) || textProxies.has(value as any)) return value;
     const map = getYMap(value);
-    if (!map) return value;
-    return createPermissionAwareYMapProxy({ map, session, cache: mapCache, proxySet: mapProxies });
+    if (map) {
+      return createPermissionAwareYMapProxy({
+        map,
+        session,
+        cache: mapCache,
+        proxySet: mapProxies,
+        wrapValue: wrapYjsValue,
+      });
+    }
+    const array = getYArray(value);
+    if (array) {
+      return createPermissionAwareYArrayProxy({
+        array,
+        session,
+        cache: arrayCache,
+        proxySet: arrayProxies,
+        wrapValue: wrapYjsValue,
+      });
+    }
+    const text = getYText(value);
+    if (text) {
+      return createPermissionAwareYTextProxy({ text, session, cache: textCache, proxySet: textProxies });
+    }
+    return value;
   };
 
-  (mgr as any).sheets = createPermissionAwareYArrayProxy({ array: mgr.sheets, session, wrapValue: wrapSheetEntry });
+  (mgr as any).sheets = createPermissionAwareYArrayProxy({
+    array: mgr.sheets,
+    session,
+    cache: arrayCache,
+    proxySet: arrayProxies,
+    wrapValue: wrapYjsValue,
+  });
   return mgr;
 }
 
@@ -749,12 +902,96 @@ export function createNamedRangeManagerForSessionWithPermissions(
   session: PermissionAwareWorkbookSession
 ): NamedRangeManager {
   const mgr = new NamedRangeManager({ doc: session.doc, transact: transactLocalWithWorkbookPermissions(session) });
-  (mgr as any).namedRanges = createPermissionAwareYMapProxy({ map: mgr.namedRanges as any, session });
+  const mapCache = new WeakMap<object, Y.Map<any>>();
+  const mapProxies = new WeakSet<object>();
+  const arrayCache = new WeakMap<object, Y.Array<any>>();
+  const arrayProxies = new WeakSet<object>();
+  const textCache = new WeakMap<object, Y.Text>();
+  const textProxies = new WeakSet<object>();
+
+  const wrapYjsValue = (value: unknown): unknown => {
+    if (mapProxies.has(value as any) || arrayProxies.has(value as any) || textProxies.has(value as any)) return value;
+    const map = getYMap(value);
+    if (map) {
+      return createPermissionAwareYMapProxy({
+        map,
+        session,
+        cache: mapCache,
+        proxySet: mapProxies,
+        wrapValue: wrapYjsValue,
+      });
+    }
+    const array = getYArray(value);
+    if (array) {
+      return createPermissionAwareYArrayProxy({
+        array,
+        session,
+        cache: arrayCache,
+        proxySet: arrayProxies,
+        wrapValue: wrapYjsValue,
+      });
+    }
+    const text = getYText(value);
+    if (text) {
+      return createPermissionAwareYTextProxy({ text, session, cache: textCache, proxySet: textProxies });
+    }
+    return value;
+  };
+
+  (mgr as any).namedRanges = createPermissionAwareYMapProxy({
+    map: mgr.namedRanges as any,
+    session,
+    cache: mapCache,
+    proxySet: mapProxies,
+    wrapValue: wrapYjsValue,
+  });
   return mgr;
 }
 
 export function createMetadataManagerForSessionWithPermissions(session: PermissionAwareWorkbookSession): MetadataManager {
   const mgr = new MetadataManager({ doc: session.doc, transact: transactLocalWithWorkbookPermissions(session) });
-  (mgr as any).metadata = createPermissionAwareYMapProxy({ map: mgr.metadata as any, session });
+  const mapCache = new WeakMap<object, Y.Map<any>>();
+  const mapProxies = new WeakSet<object>();
+  const arrayCache = new WeakMap<object, Y.Array<any>>();
+  const arrayProxies = new WeakSet<object>();
+  const textCache = new WeakMap<object, Y.Text>();
+  const textProxies = new WeakSet<object>();
+
+  const wrapYjsValue = (value: unknown): unknown => {
+    if (mapProxies.has(value as any) || arrayProxies.has(value as any) || textProxies.has(value as any)) return value;
+    const map = getYMap(value);
+    if (map) {
+      return createPermissionAwareYMapProxy({
+        map,
+        session,
+        cache: mapCache,
+        proxySet: mapProxies,
+        wrapValue: wrapYjsValue,
+      });
+    }
+    const array = getYArray(value);
+    if (array) {
+      return createPermissionAwareYArrayProxy({
+        array,
+        session,
+        cache: arrayCache,
+        proxySet: arrayProxies,
+        wrapValue: wrapYjsValue,
+      });
+    }
+    const text = getYText(value);
+    if (text) {
+      return createPermissionAwareYTextProxy({ text, session, cache: textCache, proxySet: textProxies });
+    }
+    return value;
+  };
+
+  (mgr as any).metadata = createPermissionAwareYMapProxy({
+    map: mgr.metadata as any,
+    session,
+    cache: mapCache,
+    proxySet: mapProxies,
+    wrapValue: wrapYjsValue,
+  });
   return mgr;
 }
