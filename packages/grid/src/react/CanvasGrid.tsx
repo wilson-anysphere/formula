@@ -1012,6 +1012,14 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const AUTO_FIT_MAX_COL_WIDTH = 500;
     const AUTO_FIT_MAX_ROW_HEIGHT = 500;
     const DOUBLE_CLICK_MS = 500;
+    const isMacPlatform = (() => {
+      try {
+        const platform = typeof navigator !== "undefined" ? navigator.platform : "";
+        return /Mac|iPhone|iPad|iPod/.test(platform);
+      } catch {
+        return false;
+      }
+    })();
 
     const nowMs = () =>
       typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
@@ -1450,6 +1458,80 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           touchPan = null;
           touchTapDisabled = true;
         }
+        return;
+      }
+
+      // Excel/Sheets behavior: right-clicking inside an existing selection keeps the
+      // selection intact; right-clicking outside moves the active cell to the clicked
+      // cell.
+      //
+      // Note: On macOS, Ctrl+click is commonly treated as a right click and fires the
+      // `contextmenu` event. Ensure we treat it as a context-click (not additive selection).
+      //
+      // We intentionally don't require `pointerType` to be present here: tests may dispatch
+      // a `MouseEvent("pointerdown")` without the PointerEvent fields.
+      const pointerType = (event as unknown as { pointerType?: string }).pointerType;
+      const isMousePointer = pointerType === undefined || pointerType === "" || pointerType === "mouse";
+      const isContextClick =
+        isMousePointer && (event.button === 2 || (isMacPlatform && event.button === 0 && event.ctrlKey && !event.metaKey));
+      if (isContextClick) {
+        const point = getViewportPoint(event);
+        const picked = renderer.pickCellAt(point.x, point.y);
+        if (!picked) return;
+
+        // Do not hijack header row/col context menus (if headers are configured).
+        const headerRows = headerRowsRef.current;
+        const headerCols = headerColsRef.current;
+        const isHeaderCell = (headerRows > 0 && picked.row < headerRows) || (headerCols > 0 && picked.col < headerCols);
+        if (isHeaderCell) return;
+
+        const prevSelection = renderer.getSelection();
+        const prevRange = renderer.getSelectionRange();
+
+        const ranges = renderer.getSelectionRanges();
+        const inSelection = ranges.some(
+          (range) =>
+            picked.row >= range.startRow &&
+            picked.row < range.endRow &&
+            picked.col >= range.startCol &&
+            picked.col < range.endCol
+        );
+
+        if (!inSelection) {
+          renderer.setSelection(picked);
+        }
+
+        const nextSelection = renderer.getSelection();
+        const nextRange = renderer.getSelectionRange();
+
+        const selectionChanged =
+          (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
+          (prevSelection?.col ?? null) !== (nextSelection?.col ?? null);
+        const rangeChanged =
+          (prevRange?.startRow ?? null) !== (nextRange?.startRow ?? null) ||
+          (prevRange?.endRow ?? null) !== (nextRange?.endRow ?? null) ||
+          (prevRange?.startCol ?? null) !== (nextRange?.startCol ?? null) ||
+          (prevRange?.endCol ?? null) !== (nextRange?.endCol ?? null);
+
+        if (selectionChanged || rangeChanged) {
+          announceSelection(nextSelection, nextRange);
+
+          if (selectionChanged) {
+            onSelectionChangeRef.current?.(nextSelection);
+          }
+
+          if (rangeChanged) {
+            onSelectionRangeChangeRef.current?.(nextRange);
+          }
+        }
+
+        // Best-effort: keep focus on the grid so keyboard navigation continues.
+        try {
+          containerRef.current?.focus({ preventScroll: true });
+        } catch {
+          containerRef.current?.focus();
+        }
+
         return;
       }
 
