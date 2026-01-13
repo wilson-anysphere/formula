@@ -67,6 +67,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            file \
+            binutils \
             libgtk-3-dev \
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
@@ -95,6 +97,9 @@ jobs:
           # "extract-and-run" mode (safe; does not affect the produced artifacts).
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build --bundles appimage,deb
+
+      - name: Smoke test produced AppImage (extract + ldd + arch)
+        run: bash scripts/ci/check-appimage.sh
 
       - name: Report desktop bundle sizes
         # If earlier steps fail (dependency install / build), still try to emit an
