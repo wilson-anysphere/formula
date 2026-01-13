@@ -476,6 +476,28 @@ const ALLOW_SORT: u32 = 1 << 10;
 const ALLOW_AUTO_FILTER: u32 = 1 << 11;
 const ALLOW_PIVOT_TABLES: u32 = 1 << 12;
 
+// Bits we understand (and are able to map into `formula_model::SheetProtection`) within the
+// enhanced protection allow-mask.
+//
+// Some BIFF writers appear to include additional bits in the same mask (or store the mask inside a
+// larger structure). We treat unknown bits as "don't care" and only act on these known flags.
+const KNOWN_ALLOW_MASK_BITS: u16 = (ALLOW_SELECT_LOCKED_CELLS
+    | ALLOW_SELECT_UNLOCKED_CELLS
+    | ALLOW_FORMAT_CELLS
+    | ALLOW_FORMAT_COLUMNS
+    | ALLOW_FORMAT_ROWS
+    | ALLOW_INSERT_COLUMNS
+    | ALLOW_INSERT_ROWS
+    | ALLOW_INSERT_HYPERLINKS
+    | ALLOW_DELETE_COLUMNS
+    | ALLOW_DELETE_ROWS
+    | ALLOW_SORT
+    | ALLOW_AUTO_FILTER
+    | ALLOW_PIVOT_TABLES
+    // Some writers use bits 14/15 for selection flags.
+    | (1u32 << 14)
+    | (1u32 << 15)) as u16;
+
 fn apply_sheet_protection_allow_mask(protection: &mut SheetProtection, mask: u32) {
     // Selection defaults to true in the model. Some BIFF writers omit the selection bits entirely
     // (relying on defaults), so be conservative: only override selection flags when we see any
@@ -612,17 +634,37 @@ fn parse_biff_feat_hdr_sheet_protection_allow_mask(
 }
 
 fn parse_allow_mask_best_effort(payload: &[u8]) -> Option<u32> {
-    // Excel's enhanced protection records have evolved over time. Some writers store the allow
-    // flags as a 16-bit value, while others may store it as a 32-bit bitfield. Parse both.
-    if payload.len() >= 4 {
-        let v = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-        return Some(v);
+    // Best-effort: some writers store the allow-mask as a u16 at the start of the structure, while
+    // others embed it deeper in the FEAT/FEATHEADR payload. Scan for a plausible u16 mask (one that
+    // only uses known bits) and prefer the candidate with the most bits set.
+    if payload.len() < 2 {
+        return None;
     }
-    if payload.len() >= 2 {
-        let v = u16::from_le_bytes([payload[0], payload[1]]) as u32;
-        return Some(v);
+
+    let mut best: Option<(u32, usize, u16)> = None;
+    for offset in 0..=payload.len() - 2 {
+        let mask = u16::from_le_bytes([payload[offset], payload[offset + 1]]);
+        if (mask & !KNOWN_ALLOW_MASK_BITS) != 0 {
+            continue;
+        }
+        let score = mask.count_ones();
+        match best {
+            None => best = Some((score, offset, mask)),
+            Some((best_score, best_offset, _)) => {
+                if score > best_score || (score == best_score && offset < best_offset) {
+                    best = Some((score, offset, mask));
+                }
+            }
+        }
     }
-    None
+
+    if let Some((_score, _offset, mask)) = best {
+        return Some(mask as u32);
+    }
+
+    // Fall back to the first u16 even if it contains unknown bits; this preserves the prior
+    // behavior for files we don't fully understand.
+    Some(u16::from_le_bytes([payload[0], payload[1]]) as u32)
 }
 /// Best-effort parse of worksheet view/UI state (frozen panes, zoom, selection, display flags).
 ///

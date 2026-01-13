@@ -158,6 +158,36 @@ fn imports_biff_sheet_protection_allow_flags_from_continued_feat_record() {
 }
 
 #[test]
+fn imports_biff_sheet_protection_allow_flags_from_mask_offset_feat_hdr() {
+    let bytes = xls_fixture_builder::build_sheet_protection_allow_flags_mask_offset_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheets
+        .first()
+        .expect("fixture should contain one sheet");
+    let p = &sheet.sheet_protection;
+
+    assert_eq!(p.enabled, true);
+    assert_eq!(p.password_hash, Some(0xCBEB));
+
+    // Allow flags imported even though the allow mask is not stored at offset 0 within the
+    // FEATHEADR header data payload.
+    assert_eq!(p.select_locked_cells, false);
+    assert_eq!(p.select_unlocked_cells, true);
+    assert_eq!(p.format_cells, true);
+    assert_eq!(p.sort, true);
+    assert_eq!(p.auto_filter, true);
+
+    assert!(
+        result.warnings.is_empty(),
+        "expected no warnings, got: {:?}",
+        result.warnings
+    );
+}
+
+#[test]
 fn warns_on_malformed_feat_protection_record_but_continues() {
     let bytes = xls_fixture_builder::build_sheet_protection_allow_flags_malformed_fixture_xls();
     let result = import_fixture(&bytes);

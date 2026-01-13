@@ -7,6 +7,7 @@ use super::{PivotField, PivotKeyPart, PivotSource, ValueField};
 const fn default_true() -> bool {
     true
 }
+
 /// Canonical reference to a field used by a pivot configuration.
 ///
 /// Pivot tables can be sourced from either:

@@ -1402,6 +1402,7 @@ fn build_page_setup_sanitized_sheet_name_sheet_stream(xf_cell: u16) -> Vec<u8> {
     push_record(&mut sheet, RECORD_SETUP, &setup);
 
     // Manual page breaks.
+    //
     // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.
     // Our fixture helpers accept the model’s “after which break occurs” form (0-based) and encode
     // it as `after + 1`. Breaks after row 1 and row 4, and after column 2 (i.e. between C and D).
@@ -3116,6 +3117,27 @@ pub fn build_sheet_protection_allow_flags_feat_continued_fixture_xls() -> Vec<u8
     let sheet_stream = build_sheet_protection_allow_flags_feat_continued_sheet_stream();
     let workbook_stream =
         build_single_sheet_workbook_stream("ProtectedAllowFlagsFeatCont", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture with worksheet protection enabled where the enhanced allow-mask is
+/// stored *after* some prefix bytes inside the `FEATHEADR` payload.
+///
+/// This exercises the importer's best-effort scanning for the allow-mask within FEAT/FEATHEADR
+/// payloads (some producers embed the mask inside a larger structure).
+pub fn build_sheet_protection_allow_flags_mask_offset_fixture_xls() -> Vec<u8> {
+    let sheet_stream = build_sheet_protection_allow_flags_mask_offset_sheet_stream();
+    let workbook_stream =
+        build_single_sheet_workbook_stream("ProtectedAllowFlagsMaskOffset", &sheet_stream, 1252);
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -9607,6 +9629,41 @@ fn build_sheet_protection_allow_flags_feat_continued_sheet_stream() -> Vec<u8> {
     sheet
 }
 
+fn build_sheet_protection_allow_flags_mask_offset_sheet_stream() -> Vec<u8> {
+    let allow_mask: u16 = 0x0EAE;
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Basic worksheet protection records.
+    push_record(&mut sheet, RECORD_PROTECT, &1u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_PASSWORD, &0xCBEBu16.to_le_bytes()); // "test" hash
+    push_record(&mut sheet, RECORD_OBJPROTECT, &0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_SCENPROTECT, &0u16.to_le_bytes());
+
+    // FEATHEADR header data with prefix bytes: [0xFF,0xFF] + allow_mask. The importer should scan
+    // past the prefix and recover the allow-mask.
+    push_record(
+        &mut sheet,
+        RECORD_FEATHEADR,
+        &feat_hdr_record_sheet_protection_allow_mask_prefixed(allow_mask),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
 fn build_tab_color_sheet_stream() -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
     push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
@@ -12724,6 +12781,24 @@ fn feat_hdr_record_sheet_protection_allow_mask(allow_mask: u16) -> Vec<u8> {
     out.extend_from_slice(&ISF_SHEET_PROTECTION.to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes()); // reserved
     out.extend_from_slice(&2u32.to_le_bytes()); // cbHdrData
+    out.extend_from_slice(&allow_mask.to_le_bytes());
+    out
+}
+
+fn feat_hdr_record_sheet_protection_allow_mask_prefixed(allow_mask: u16) -> Vec<u8> {
+    // Like `feat_hdr_record_sheet_protection_allow_mask`, but stores the allow mask after a 2-byte
+    // prefix in the header data so parsers must scan for it.
+    const ISF_SHEET_PROTECTION: u16 = 0x0002;
+
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&RECORD_FEATHEADR.to_le_bytes()); // rt
+    out.extend_from_slice(&0u16.to_le_bytes()); // grbitFrt
+    out.extend_from_slice(&0u32.to_le_bytes()); // reserved
+
+    out.extend_from_slice(&ISF_SHEET_PROTECTION.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    out.extend_from_slice(&4u32.to_le_bytes()); // cbHdrData
+    out.extend_from_slice(&[0xFF, 0xFF]); // prefix bytes
     out.extend_from_slice(&allow_mask.to_le_bytes());
     out
 }
