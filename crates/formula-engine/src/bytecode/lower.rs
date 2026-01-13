@@ -75,7 +75,7 @@ impl RectRef {
 
 fn validate_prefix(
     prefix: &RefPrefix,
-    current_sheet: usize,
+    _current_sheet: usize,
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
 ) -> Result<(), LowerError> {
     if prefix.workbook.is_some() {
@@ -84,12 +84,9 @@ fn validate_prefix(
     if let Some(sheet) = prefix.sheet.as_ref() {
         match sheet {
             crate::SheetRef::Sheet(name) => {
-                let Some(sheet_id) = resolve_sheet(name) else {
+                if resolve_sheet(name).is_none() {
                     return Err(LowerError::UnknownSheet);
                 };
-                if sheet_id != current_sheet {
-                    return Err(LowerError::CrossSheetReference);
-                }
             }
             crate::SheetRef::SheetRange { start, end } => {
                 // Sheet-span references are allowed in the bytecode backend (lowered as a
@@ -164,9 +161,19 @@ fn lower_cell_ref_expr(
 
     match prefix.sheet.as_ref() {
         None => Ok(BytecodeExpr::CellRef(cell)),
-        Some(crate::SheetRef::Sheet(_)) => {
-            // `lower_cell_ref` validated that the sheet matches the current sheet.
-            Ok(BytecodeExpr::CellRef(cell))
+        Some(crate::SheetRef::Sheet(name)) => {
+            let Some(sheet_id) = resolve_sheet(name) else {
+                return Err(LowerError::UnknownSheet);
+            };
+            if sheet_id == current_sheet {
+                Ok(BytecodeExpr::CellRef(cell))
+            } else {
+                let range = RangeRef::new(cell, cell);
+                let areas = vec![SheetRangeRef::new(sheet_id, range)];
+                Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
+                    areas.into(),
+                )))
+            }
         }
         Some(crate::SheetRef::SheetRange { start, end }) => {
             let sheets = expand_sheet_span(start, end, resolve_sheet)?;
@@ -292,6 +299,19 @@ fn lower_range_ref(
     );
 
     match merged_prefix.sheet.as_ref() {
+        Some(crate::SheetRef::Sheet(name)) => {
+            let Some(sheet_id) = resolve_sheet(name) else {
+                return Err(LowerError::UnknownSheet);
+            };
+            if sheet_id == current_sheet {
+                Ok(BytecodeExpr::RangeRef(range))
+            } else {
+                let areas = vec![SheetRangeRef::new(sheet_id, range)];
+                Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
+                    areas.into(),
+                )))
+            }
+        }
         Some(crate::SheetRef::SheetRange { start, end }) => {
             let sheets = expand_sheet_span(start, end, resolve_sheet)?;
             let areas: Vec<SheetRangeRef> = sheets
@@ -426,8 +446,16 @@ fn lower_canonical_reference_expr(
 ) -> Result<BytecodeExpr, LowerError> {
     match expr {
         crate::Expr::CellRef(r) => {
-            let r = lower_cell_ref(r, origin, current_sheet, resolve_sheet)?;
-            Ok(BytecodeExpr::RangeRef(RangeRef::new(r, r)))
+            // In reference contexts (spill/union/intersect), cell references must preserve
+            // reference semantics (as a single-cell range) while still respecting explicit sheet
+            // prefixes (`Sheet2!A1`).
+            match lower_cell_ref_expr(r, origin, current_sheet, resolve_sheet)? {
+                BytecodeExpr::CellRef(cell) => Ok(BytecodeExpr::RangeRef(RangeRef::new(cell, cell))),
+                BytecodeExpr::MultiRangeRef(r) => Ok(BytecodeExpr::MultiRangeRef(r)),
+                other => unreachable!(
+                    "lower_cell_ref_expr only lowers to CellRef/MultiRangeRef, got {other:?}"
+                ),
+            }
         }
         crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
             lower_range_ref(&b.left, &b.right, origin, current_sheet, resolve_sheet)
@@ -519,6 +547,19 @@ fn lower_canonical_expr_inner(
             let (prefix, rect) = lower_rect_ref(expr, origin, current_sheet, resolve_sheet)?;
             let range = RangeRef::new(rect.start, rect.end);
             match prefix.sheet.as_ref() {
+                Some(crate::SheetRef::Sheet(name)) => {
+                    let Some(sheet_id) = resolve_sheet(name) else {
+                        return Err(LowerError::UnknownSheet);
+                    };
+                    if sheet_id == current_sheet {
+                        Ok(BytecodeExpr::RangeRef(range))
+                    } else {
+                        let areas = vec![SheetRangeRef::new(sheet_id, range)];
+                        Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
+                            areas.into(),
+                        )))
+                    }
+                }
                 Some(crate::SheetRef::SheetRange { start, end }) => {
                     let sheets = expand_sheet_span(start, end, resolve_sheet)?;
                     let areas: Vec<SheetRangeRef> = sheets

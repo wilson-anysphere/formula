@@ -5683,7 +5683,6 @@ fn canonical_expr_contains_let_or_lambda(expr: &crate::Expr) -> bool {
 struct PrefixLowerErrorFlags {
     external_reference: bool,
     unknown_sheet: bool,
-    cross_sheet_reference: bool,
 }
 
 fn canonical_expr_depends_on_lowering_prefix_error(
@@ -5705,9 +5704,6 @@ fn canonical_expr_depends_on_lowering_prefix_error(
         if flags.unknown_sheet {
             return Some(bytecode::LowerError::UnknownSheet);
         }
-        if flags.cross_sheet_reference {
-            return Some(bytecode::LowerError::CrossSheetReference);
-        }
         return None;
     }
 
@@ -5724,8 +5720,6 @@ fn canonical_expr_depends_on_lowering_prefix_error(
         Some(bytecode::LowerError::ExternalReference)
     } else if flags.unknown_sheet {
         Some(bytecode::LowerError::UnknownSheet)
-    } else if flags.cross_sheet_reference {
-        Some(bytecode::LowerError::CrossSheetReference)
     } else {
         None
     }
@@ -5817,7 +5811,7 @@ fn canonical_expr_collect_sheet_prefix_errors(
 fn update_sheet_prefix_flags(
     workbook_prefix: &Option<String>,
     sheet: Option<&crate::SheetRef>,
-    current_sheet: SheetId,
+    _current_sheet: SheetId,
     workbook: &Workbook,
     flags: &mut PrefixLowerErrorFlags,
 ) {
@@ -5835,11 +5829,7 @@ fn update_sheet_prefix_flags(
             None => {
                 flags.unknown_sheet = true;
             }
-            Some(sheet_id) => {
-                if sheet_id != current_sheet {
-                    flags.cross_sheet_reference = true;
-                }
-            }
+            Some(_sheet_id) => {}
         },
         crate::SheetRef::SheetRange { start, end } => {
             if workbook.sheet_id(start).is_none() || workbook.sheet_id(end).is_none() {
@@ -11596,19 +11586,18 @@ mod tests {
     }
 
     #[test]
-    fn bytecode_compile_report_classifies_cross_sheet_references() {
+    fn bytecode_compile_report_allows_cross_sheet_references() {
         let mut engine = Engine::new();
         engine.set_cell_value("Sheet2", "A1", 1.0).unwrap();
         engine
-            .set_cell_formula("Sheet1", "A1", "=Sheet2!A1")
+            .set_cell_formula("Sheet1", "A1", "=Sheet2!A1+1")
             .unwrap();
 
         let report = engine.bytecode_compile_report(10);
-        assert_eq!(report.len(), 1);
-        assert_eq!(
-            report[0].reason,
-            BytecodeCompileReason::LowerError(bytecode::LowerError::CrossSheetReference)
-        );
+        assert_eq!(report.len(), 0, "expected formula to compile to bytecode");
+
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
     }
 
     #[test]

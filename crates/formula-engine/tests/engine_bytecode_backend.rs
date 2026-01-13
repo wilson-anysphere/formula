@@ -1494,12 +1494,13 @@ fn bytecode_backend_sheet_qualified_defined_name_formula_uses_target_sheet_conte
         .unwrap();
 
     // Evaluating `Sheet2!MyFormulaName` should use Sheet2 as the "current sheet" for `A1`.
-    // The bytecode backend cannot evaluate cross-sheet single-sheet references, so this should
-    // fall back to the AST backend rather than compiling an incorrect same-sheet program.
+    // The defined-name formula is inlined for bytecode compilation, and the engine normalizes
+    // unprefixed references (like `A1`) to the target sheet so the resulting bytecode program can
+    // evaluate correctly.
     engine
         .set_cell_formula("Sheet1", "B1", "=Sheet2!MyFormulaName")
         .unwrap();
-    assert_eq!(engine.bytecode_program_count(), 0);
+    assert_eq!(engine.bytecode_program_count(), 1);
 
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
@@ -4644,7 +4645,6 @@ fn bytecode_backend_matches_ast_for_implicit_intersection_over_sheet_span_when_o
 {
     let mut engine = Engine::new();
 
-    // Bytecode lowering currently supports 3D sheet spans, but not plain `Sheet2!A1` references.
     // Use a 3D span and custom sheet dimensions to create a case where only one sheet contributes
     // a non-#VALUE result under implicit intersection.
     engine.ensure_sheet("Sheet3");
@@ -7567,22 +7567,12 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 4);
-    assert_eq!(stats.compiled, 2);
-    assert_eq!(stats.fallback, 2);
-
-    assert_eq!(
-        stats
-            .fallback_reasons
-            .get(&BytecodeCompileReason::LowerError(
-                formula_engine::bytecode::LowerError::CrossSheetReference
-            ))
-            .copied()
-            .unwrap_or(0),
-        1
-    );
+    assert_eq!(stats.compiled, 3);
+    assert_eq!(stats.fallback, 1);
 
     // LowerError::Unsupported is mapped to `IneligibleExpr` so compile stats can distinguish
-    // structural lowering errors (e.g. cross-sheet refs) from missing bytecode implementation.
+    // structural lowering errors (e.g. unknown sheets/external refs) from missing bytecode
+    // implementation.
     let ineligible = stats
         .fallback_reasons
         .get(&BytecodeCompileReason::IneligibleExpr)
@@ -7594,7 +7584,7 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
     );
 
     let report = engine.bytecode_compile_report(usize::MAX);
-    assert_eq!(report.len(), 2);
+    assert_eq!(report.len(), 1);
 
     let a2 = parse_a1("A2").unwrap();
     let a3 = parse_a1("A3").unwrap();
@@ -7608,12 +7598,7 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
     };
 
     assert_eq!(reason_for(a2), None);
-    assert_eq!(
-        reason_for(a3),
-        Some(BytecodeCompileReason::LowerError(
-            formula_engine::bytecode::LowerError::CrossSheetReference
-        ))
-    );
+    assert_eq!(reason_for(a3), None);
     let a4_reason = reason_for(a4).expect("A4 should appear in fallback report");
     assert!(
         matches!(
@@ -7938,7 +7923,7 @@ fn bytecode_compile_diagnostics_reports_unknown_sheet_through_defined_name_formu
 }
 
 #[test]
-fn bytecode_compile_diagnostics_reports_cross_sheet_reference_through_defined_name_formula() {
+fn bytecode_compile_diagnostics_allows_cross_sheet_reference_through_defined_name_formula() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet2", "A1", 42.0).unwrap();
 
@@ -7954,18 +7939,11 @@ fn bytecode_compile_diagnostics_reports_cross_sheet_reference_through_defined_na
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 1);
-    assert_eq!(stats.compiled, 0);
-    assert_eq!(stats.fallback, 1);
-    assert_eq!(
-        stats
-            .fallback_reasons
-            .get(&BytecodeCompileReason::LowerError(
-                bytecode::LowerError::CrossSheetReference,
-            ))
-            .copied()
-            .unwrap_or(0),
-        1
-    );
+    assert_eq!(stats.compiled, 1);
+    assert_eq!(stats.fallback, 0);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(43.0));
 }
 
 #[test]
@@ -8263,8 +8241,8 @@ fn bytecode_backend_sheet_qualified_defined_name_static_ref_can_inline_without_l
     // When `Sheet2!RATE` resolves to a workbook defined name that is a static reference on the
     // *current* sheet, the reference can be inlined and compiled to bytecode even without LET.
     //
-    // This is a regression test ensuring prefix-error detection runs after static defined names
-    // are inlined, avoiding false cross-sheet rejections.
+    // This is a regression test ensuring static defined names are inlined before bytecode
+    // compilation, so sheet-qualified uses like `Sheet2!RATE` don't force an AST fallback.
     let mut engine = Engine::new();
     engine.ensure_sheet("Sheet2");
     engine.set_cell_value("Sheet1", "B1", 100.0).unwrap();

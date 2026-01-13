@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::table::TableIdentifier;
 use crate::{CellRef, Range, WorksheetId};
 
-use super::{CalculatedField, CalculatedItem, PivotField, PivotKeyPart, PivotTableId, ValueField};
+use super::{PivotConfig, PivotTableId};
 
 pub type PivotCacheId = Uuid;
 
@@ -44,96 +44,3 @@ pub enum PivotDestination {
     /// Anchor the pivot to a range (typically the existing pivot output range).
     Range { sheet_id: WorksheetId, range: Range },
 }
-
-/// Pivot layout style (Excel-like).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Layout {
-    Compact,
-    Outline,
-    Tabular,
-}
-
-impl Default for Layout {
-    fn default() -> Self {
-        Layout::Tabular
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum SubtotalPosition {
-    Top,
-    Bottom,
-    None,
-}
-
-impl Default for SubtotalPosition {
-    fn default() -> Self {
-        SubtotalPosition::None
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GrandTotals {
-    pub rows: bool,
-    pub columns: bool,
-}
-
-impl Default for GrandTotals {
-    fn default() -> Self {
-        Self {
-            rows: true,
-            columns: true,
-        }
-    }
-}
-
-/// Configuration for a pivot table filter field.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FilterField {
-    pub source_field: String,
-    /// Allowed values. `None` means allow all.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allowed: Option<Vec<PivotKeyPart>>,
-}
-
-/// Canonical pivot table configuration (field layout + display options).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PivotConfig {
-    pub row_fields: Vec<PivotField>,
-    pub column_fields: Vec<PivotField>,
-    pub value_fields: Vec<ValueField>,
-    #[serde(default)]
-    pub filter_fields: Vec<FilterField>,
-    #[serde(default)]
-    pub calculated_fields: Vec<CalculatedField>,
-    #[serde(default)]
-    pub calculated_items: Vec<CalculatedItem>,
-    #[serde(default)]
-    pub layout: Layout,
-    #[serde(default)]
-    pub subtotals: SubtotalPosition,
-    #[serde(default)]
-    pub grand_totals: GrandTotals,
-}
-
-impl Default for PivotConfig {
-    fn default() -> Self {
-        Self {
-            row_fields: Vec::new(),
-            column_fields: Vec::new(),
-            value_fields: Vec::new(),
-            filter_fields: Vec::new(),
-            calculated_fields: Vec::new(),
-            calculated_items: Vec::new(),
-            layout: Layout::default(),
-            subtotals: SubtotalPosition::default(),
-            grand_totals: GrandTotals::default(),
-        }
-    }
-}
-
