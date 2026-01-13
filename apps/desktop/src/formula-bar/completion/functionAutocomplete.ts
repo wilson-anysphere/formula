@@ -41,6 +41,8 @@ const FUNCTION_NAMES: string[] = (() => {
   return Array.from(names).sort((a, b) => a.localeCompare(b));
 })();
 
+const FUNCTION_NAMES_UPPER = new Set(FUNCTION_NAMES.map((name) => name.toUpperCase()));
+
 function isWhitespace(ch: string): boolean {
   return ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
 }
@@ -105,8 +107,11 @@ function findCompletionContext(input: string, cursorPosition: number): Completio
   // In argument positions (after `(` or `,`), very short alphabetic identifiers are
   // much more likely to be column/range refs (e.g. `SUM(A` / `SUM(AB`) than function
   // names. Be conservative here so we don't steal Tab from range completion.
-  if ((prevChar === "(" || prevChar === "," || prevChar === ";") && typedPrefix.length <= 2 && /^[A-Za-z]+$/.test(typedPrefix)) {
-    return null;
+  if (prevChar === "(" || prevChar === "," || prevChar === ";") {
+    if (/^[A-Za-z]+$/.test(typedPrefix)) {
+      if (typedPrefix.length === 1) return null;
+      if (typedPrefix.length === 2 && !FUNCTION_NAMES_UPPER.has(typedPrefix.toUpperCase())) return null;
+    }
   }
 
   // Support Excel `_xlfn.` function prefix in pasted formulas.
