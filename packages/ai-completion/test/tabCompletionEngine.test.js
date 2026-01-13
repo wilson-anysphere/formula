@@ -2175,6 +2175,25 @@ test("RANK.EQ order suggests 0 and 1", async () => {
   );
 });
 
+test("ROMAN form suggests 0, 1, 2, 3, 4", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=ROMAN(42, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const form of ["0", "1", "2", "3", "4"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=ROMAN(42, ${form}`),
+      `Expected ROMAN to suggest form=${form}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("WEEKDAY return_type suggests 1, 2, 3", async () => {
   const engine = new TabCompletionEngine();
 

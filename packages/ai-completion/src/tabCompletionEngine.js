@@ -1084,6 +1084,16 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "1", displayText: "1 (ascending)", confidence: 0.65 },
     ],
   },
+  ROMAN: {
+    // form
+    1: [
+      { replacement: "0", displayText: "0 (classic)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (more concise)", confidence: 0.65 },
+      { replacement: "2", displayText: "2 (more concise)", confidence: 0.64 },
+      { replacement: "3", displayText: "3 (more concise)", confidence: 0.63 },
+      { replacement: "4", displayText: "4 (simplified)", confidence: 0.62 },
+    ],
+  },
   WEEKDAY: {
     // return_type
     1: [
