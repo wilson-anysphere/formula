@@ -51,6 +51,15 @@ To regenerate after adding/removing Rust functions (requires a Rust toolchain):
 pnpm generate:function-catalog
 ```
 
+### AI tab-completion latency benchmark
+
+To guard against performance regressions in the JavaScript tab-completion engine (`TabCompletionEngine`),
+you can run a lightweight micro-benchmark locally:
+
+```bash
+pnpm bench:tab-completion
+```
+
 ### Rust/WASM engine (formula-wasm)
 
 The JS `@formula/engine` package loads the Rust engine via `wasm-bindgen` artifacts generated from `crates/formula-wasm`.
