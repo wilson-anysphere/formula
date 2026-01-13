@@ -277,6 +277,9 @@ export class EncryptedRangeManager {
   }
 
   add(range: EncryptedRangeAddInput): string {
+    // Normalize foreign nested Yjs types (ESM/CJS) before we start an undo-tracked
+    // transaction so collaborative undo only captures the user's change.
+    this.normalizeEncryptedRangesForUndoScope();
     const canonical = canonicalizeAddInput(range);
 
     let outId: string | null = null;
@@ -314,6 +317,7 @@ export class EncryptedRangeManager {
   remove(id: string): void {
     const normalizedId = normalizeId(id);
 
+    this.normalizeEncryptedRangesForUndoScope();
     this.transact(() => {
       const arr = getYArray(this.metadata.get(METADATA_KEY));
       if (!arr) return;
@@ -346,6 +350,7 @@ export class EncryptedRangeManager {
 
     const patchCreatedBy = patch.createdBy == null ? undefined : String(patch.createdBy).trim() || undefined;
 
+    this.normalizeEncryptedRangesForUndoScope();
     this.transact(() => {
       const arr = getYArray(this.metadata.get(METADATA_KEY));
       if (!arr) return;
@@ -385,6 +390,90 @@ export class EncryptedRangeManager {
     });
   }
 
+  /**
+   * Normalize `metadata.encryptedRanges` to the canonical schema (local `Y.Array`
+   * containing local `Y.Map` entries).
+   *
+   * This is needed when a doc was hydrated using a different `yjs` module
+   * instance (ESM vs CJS), which can leave nested types with foreign constructors.
+   * UndoManager relies on `instanceof` checks, so we normalize in an *untracked*
+   * transaction before applying user edits.
+   */
+  private normalizeEncryptedRangesForUndoScope(): void {
+    const existing = this.metadata.get(METADATA_KEY);
+    if (existing == null) return;
+
+    // Fast-path: already the canonical local schema.
+    const existingArr = getYArray(existing);
+    if (existingArr && existingArr instanceof Y.Array) {
+      const items = existingArr.toArray();
+      let allLocal = true;
+      for (const item of items) {
+        const map = getYMap(item);
+        if (!map || !(map instanceof Y.Map)) {
+          allLocal = false;
+          break;
+        }
+      }
+      if (allLocal) return;
+    }
+
+    const cloneEntryToLocal = (value: unknown, fallbackId?: string): Y.Map<unknown> | null => {
+      const map = getYMap(value);
+      const obj = !map && value && typeof value === "object" ? (value as any) : null;
+      if (!map && !obj) return null;
+
+      const out = new Y.Map<unknown>();
+      if (map) {
+        map.forEach((v: any, k: string) => {
+          out.set(String(k), v);
+        });
+      } else {
+        for (const [k, v] of Object.entries(obj)) {
+          out.set(k, v as any);
+        }
+      }
+
+      const id = coerceString(out.get("id"))?.trim() ?? "";
+      if (!id && fallbackId) out.set("id", String(fallbackId).trim());
+      return out;
+    };
+
+    // Normalize in an untracked transaction (origin is undefined) so collaborative
+    // undo only captures the user's explicit edits.
+    this.doc.transact(() => {
+      const current = this.metadata.get(METADATA_KEY);
+      if (current == null) return;
+
+      const next = new Y.Array<Y.Map<unknown>>();
+
+      const pushFrom = (value: unknown, fallbackId?: string) => {
+        const cloned = cloneEntryToLocal(value, fallbackId);
+        if (!cloned) return;
+        next.push([cloned]);
+      };
+
+      const arr = getYArray(current);
+      if (arr) {
+        for (const item of arr.toArray()) pushFrom(item);
+      } else {
+        const map = getYMap(current);
+        if (map) {
+          map.forEach((value, key) => {
+            pushFrom(value, String(key));
+          });
+        } else if (Array.isArray(current)) {
+          for (const item of current) pushFrom(item);
+        } else {
+          // Unknown schema; do not clobber.
+          return;
+        }
+      }
+
+      this.metadata.set(METADATA_KEY, next);
+    });
+  }
+
   private ensureEncryptedRangesArrayForWrite(): Y.Array<Y.Map<unknown>> {
     const existing = this.metadata.get(METADATA_KEY);
     const arr = getYArray(existing);
@@ -397,19 +486,25 @@ export class EncryptedRangeManager {
     // throw inside Yjs), migrate the array to local types.
     const next = new Y.Array<Y.Map<unknown>>();
 
-    const cloneEntry = (value: unknown) => {
-      const parsed = yRangeToEncryptedRange(value);
-      if (!parsed) return;
+    const cloneEntry = (value: unknown, fallbackId?: string) => {
+      const map = getYMap(value);
+      const obj = !map && value && typeof value === "object" ? (value as any) : null;
+      if (!map && !obj) return;
+
       const yRange = new Y.Map<unknown>();
-      yRange.set("id", parsed.id);
-      yRange.set("sheetId", parsed.sheetId);
-      yRange.set("startRow", parsed.startRow);
-      yRange.set("startCol", parsed.startCol);
-      yRange.set("endRow", parsed.endRow);
-      yRange.set("endCol", parsed.endCol);
-      yRange.set("keyId", parsed.keyId);
-      if (parsed.createdAt != null) yRange.set("createdAt", parsed.createdAt);
-      if (parsed.createdBy != null) yRange.set("createdBy", parsed.createdBy);
+      if (map) {
+        map.forEach((v: any, k: string) => {
+          yRange.set(String(k), v);
+        });
+      } else {
+        for (const [k, v] of Object.entries(obj)) {
+          yRange.set(k, v as any);
+        }
+      }
+
+      const id = coerceString(yRange.get("id"))?.trim() ?? "";
+      if (!id && fallbackId) yRange.set("id", String(fallbackId).trim());
+
       next.push([yRange]);
     };
 
@@ -418,7 +513,7 @@ export class EncryptedRangeManager {
     } else {
       const map = getYMap(existing);
       if (map) {
-        map.forEach((value) => cloneEntry(value));
+        map.forEach((value, key) => cloneEntry(value, String(key)));
       } else if (Array.isArray(existing)) {
         for (const item of existing) cloneEntry(item);
       }
@@ -476,4 +571,3 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
     },
   };
 }
-
