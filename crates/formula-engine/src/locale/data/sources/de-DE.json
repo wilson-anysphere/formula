@@ -2,6 +2,7 @@
   "source": "Microsoft Excel function translation tables (de-DE).",
   "translations": {
     "AVERAGE": "MITTELWERT",
+    "COUNTIF": "ZÄHLENWENN",
     "CUBEKPIMEMBER": "CUBEKPIMITGLIED",
     "CUBEMEMBER": "CUBEMITGLIED",
     "CUBEMEMBERPROPERTY": "CUBEMITGLIEDSEIGENSCHAFT",

@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -291,7 +293,17 @@ for (const locale of locales) {
   await mkdir(path.dirname(locale.outputPath), { recursive: true });
 
   if (check) {
-    const existing = await readFile(locale.outputPath, "utf8");
+    let existing = null;
+    try {
+      existing = await readFile(locale.outputPath, "utf8");
+    } catch (err) {
+      // Treat missing files as mismatches in `--check` mode, with a clear error message.
+      if (err && typeof err === "object" && "code" in err && err.code === "ENOENT") {
+        existing = null;
+      } else {
+        throw err;
+      }
+    }
     if (existing !== generated) {
       hadMismatch = true;
       console.error(
