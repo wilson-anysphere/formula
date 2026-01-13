@@ -729,7 +729,7 @@ jobs:
 
       - name: Verify macOS signed app entitlements (hardened runtime)
         # Only run when code signing is enabled (forks/dry-runs may not have signing secrets).
-        if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != ''
+        if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != ''
         run: |
           set -euo pipefail
           # Cargo workspaces typically emit bundle outputs under `<repo>/target/**`, but standalone
@@ -1341,7 +1341,7 @@ jobs:
           echo "$info" | grep -qw "arm64" || { echo "::error::macOS binary is missing arm64 slice"; exit 1; }
 
       - name: Validate macOS notarization + stapling (Gatekeeper)
-        if: ${{ runner.os == 'macOS' && ((secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '') || vars.FORMULA_REQUIRE_CODESIGN == '1') }}
+        if: ${{ runner.os == 'macOS' && ((secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '') || vars.FORMULA_REQUIRE_CODESIGN == '1') }}
         working-directory: apps/desktop/src-tauri
         shell: bash
         run: |
