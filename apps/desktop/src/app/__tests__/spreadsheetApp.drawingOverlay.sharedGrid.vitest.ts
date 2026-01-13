@@ -186,16 +186,6 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       sharedGrid.scrollTo(50, 100);
 
       expect(renderSpy).toHaveBeenCalled();
-      const lastCall = renderSpy.mock.calls.at(-1);
-      const viewport = lastCall?.[1] as any;
-
-      expect(viewport).toEqual(
-        expect.objectContaining({
-          frozenRows: 1,
-          frozenCols: 1,
-        }),
-      );
-
       const gridViewport = sharedGrid.renderer.scroll.getViewportState();
       const headerWidth = sharedGrid.renderer.scroll.cols.totalSize(1);
       const headerHeight = sharedGrid.renderer.scroll.rows.totalSize(1);
@@ -203,6 +193,21 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       const offsetY = Math.min(headerHeight, gridViewport.height);
       const cellAreaWidth = Math.max(0, gridViewport.width - offsetX);
       const cellAreaHeight = Math.max(0, gridViewport.height - offsetY);
+
+      // `DrawingOverlay.prototype.render` is shared between the sheet drawings overlay and the
+      // chart selection overlay. Find the call corresponding to the drawings canvas viewport,
+      // whose origin is positioned under the headers (so headerOffsetX/Y are 0).
+      const viewport = renderSpy.mock.calls
+        .map((call) => call?.[1] as any)
+        .find((vp) => vp && vp.headerOffsetX === 0 && vp.headerOffsetY === 0 && vp.width === cellAreaWidth && vp.height === cellAreaHeight);
+      expect(viewport).toBeTruthy();
+
+      expect(viewport).toEqual(
+        expect.objectContaining({
+          frozenRows: 1,
+          frozenCols: 1,
+        }),
+      );
 
       const expectedFrozenWidthPx = Math.min(cellAreaWidth, Math.max(0, gridViewport.frozenWidth - offsetX));
       const expectedFrozenHeightPx = Math.min(cellAreaHeight, Math.max(0, gridViewport.frozenHeight - offsetY));
