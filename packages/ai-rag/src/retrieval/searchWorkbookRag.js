@@ -85,6 +85,8 @@ export async function searchWorkbookRag(params) {
     );
   }
   for (let i = 0; i < qLen; i += 1) {
+    // Query vectors can be large (e.g. 1536 dims). Keep AbortSignal responsiveness while validating.
+    if ((i & 0xff) === 0) throwIfAborted(signal);
     const value = qVec[i];
     if (!Number.isFinite(value)) {
       throw new Error(
