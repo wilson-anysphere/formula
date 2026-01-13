@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 function collectStringPropertyValues(source, propertyName) {
   const values = [];
   // Match `propertyName: "value"` with permissive whitespace/newlines.
-  const re = new RegExp(`${propertyName}\\\\s*:\\\\s*\"([^\"]+)\"`, "g");
+  const re = new RegExp(`${propertyName}\\s*:\\s*\"([^\"]+)\"`, "g");
   let match;
   while ((match = re.exec(source))) {
     values.push(match[1]);
@@ -79,7 +79,7 @@ test("ribbon schema and File backstage expose stable, unique test ids", () => {
     "ribbon-perf-stats",
   ];
 
-  const missingRibbonTestIds = requiredRibbonTestIds.filter((id) => !ribbonSchema.includes(`testId: "${id}"`));
+  const missingRibbonTestIds = requiredRibbonTestIds.filter((id) => !ribbonTestIds.includes(id));
   assert.deepEqual(
     missingRibbonTestIds,
     [],
