@@ -39,41 +39,44 @@ export function suggestPatternValues(params) {
     return [];
   }
 
-  const cursor = clampCursor(params.currentInput ?? "", params.cursorPosition);
-  const prefix = (params.currentInput ?? "").slice(0, cursor);
-  if (prefix.length === 0) return [];
+  const input = params.currentInput ?? "";
+  const cursor = clampCursor(input, params.cursorPosition);
+  const prefix = input.slice(0, cursor);
   if (prefix.startsWith("=")) return [];
 
   const normalizedPrefix = prefix.toLowerCase();
+  const allowEmptyNumericPrefix = input.length === 0 && normalizedPrefix.length === 0;
 
   /** @type {Map<string, number>} */
   const scores = new Map();
 
-  // Scan up/down the current column for matching text values.
-  for (let offset = 1; offset <= maxScanRows; offset++) {
-    const weight = distanceWeight(offset);
-    const up = cellRef.row - offset;
-    const down = cellRef.row + offset;
-    if (up >= 0) {
-      const v = surroundingCells.getCellValue(up, cellRef.col);
+  if (normalizedPrefix.length > 0) {
+    // Scan up/down the current column for matching text values.
+    for (let offset = 1; offset <= maxScanRows; offset++) {
+      const weight = distanceWeight(offset);
+      const up = cellRef.row - offset;
+      const down = cellRef.row + offset;
+      if (up >= 0) {
+        const v = surroundingCells.getCellValue(up, cellRef.col);
+        maybeScoreTextMatch(v, normalizedPrefix, scores, weight);
+      }
+      const v = surroundingCells.getCellValue(down, cellRef.col);
       maybeScoreTextMatch(v, normalizedPrefix, scores, weight);
     }
-    const v = surroundingCells.getCellValue(down, cellRef.col);
-    maybeScoreTextMatch(v, normalizedPrefix, scores, weight);
-  }
 
-  // Scan left/right in the current row as well. Nearby patterns in the row are
-  // often as useful as the current column (e.g. categorical labels).
-  for (let offset = 1; offset <= maxScanCols; offset++) {
-    const weight = distanceWeight(offset);
-    const left = cellRef.col - offset;
-    const right = cellRef.col + offset;
-    if (left >= 0) {
-      const v = surroundingCells.getCellValue(cellRef.row, left);
+    // Scan left/right in the current row as well. Nearby patterns in the row are
+    // often as useful as the current column (e.g. categorical labels).
+    for (let offset = 1; offset <= maxScanCols; offset++) {
+      const weight = distanceWeight(offset);
+      const left = cellRef.col - offset;
+      const right = cellRef.col + offset;
+      if (left >= 0) {
+        const v = surroundingCells.getCellValue(cellRef.row, left);
+        maybeScoreTextMatch(v, normalizedPrefix, scores, weight);
+      }
+      const v = surroundingCells.getCellValue(cellRef.row, right);
       maybeScoreTextMatch(v, normalizedPrefix, scores, weight);
     }
-    const v = surroundingCells.getCellValue(cellRef.row, right);
-    maybeScoreTextMatch(v, normalizedPrefix, scores, weight);
   }
 
   // Basic numeric sequence completion: if the user is typing a number-like
@@ -84,6 +87,7 @@ export function suggestPatternValues(params) {
     cellRef,
     surroundingCells,
     maxScanRows,
+    allowEmptyPrefix: allowEmptyNumericPrefix,
   });
   if (numericCandidate !== null) {
     addScore(numericCandidate, scores, 2);
@@ -171,8 +175,14 @@ function formatNumberForCompletion(n) {
   return String(rounded);
 }
 
-function suggestNextNumberInColumn({ typedPrefix, cellRef, surroundingCells, maxScanRows }) {
-  if (!isNumericPrefix(typedPrefix)) return null;
+function suggestNextNumberInColumn({ typedPrefix, cellRef, surroundingCells, maxScanRows, allowEmptyPrefix = false }) {
+  const trimmedPrefix = typeof typedPrefix === "string" ? typedPrefix.trim() : "";
+  const hasPrefix = trimmedPrefix.length > 0;
+  if (hasPrefix) {
+    if (!isNumericPrefix(trimmedPrefix)) return null;
+  } else if (!allowEmptyPrefix) {
+    return null;
+  }
 
   /** @type {number[]} Nearest-first values above the current cell. */
   const previous = [];
@@ -212,8 +222,7 @@ function suggestNextNumberInColumn({ typedPrefix, cellRef, surroundingCells, max
   if (formatted === null) return null;
 
   // Only suggest if it matches what the user is already typing.
-  const trimmedPrefix = typedPrefix.trim();
-  if (!formatted.startsWith(trimmedPrefix)) return null;
+  if (trimmedPrefix && !formatted.startsWith(trimmedPrefix)) return null;
 
   return formatted;
 }

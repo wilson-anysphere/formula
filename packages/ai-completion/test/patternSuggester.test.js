@@ -96,3 +96,20 @@ test("suggestPatternValues suggests the next number in a simple column sequence"
 
   assert.equal(suggestions[0]?.text, "4");
 });
+
+test("suggestPatternValues suggests the next number for an empty input (pure insertion)", () => {
+  const ctx = createContext([
+    [0, 0, 1],
+    [1, 0, 2],
+    [2, 0, 3],
+  ]);
+
+  const suggestions = suggestPatternValues({
+    currentInput: "",
+    cursorPosition: 0,
+    cellRef: { row: 3, col: 0 },
+    surroundingCells: ctx,
+  });
+
+  assert.equal(suggestions[0]?.text, "4");
+});
