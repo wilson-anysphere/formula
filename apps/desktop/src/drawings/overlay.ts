@@ -203,9 +203,7 @@ export class DrawingOverlay {
 
     if (drawObjects) {
       for (const obj of ordered) {
-        if (seq !== this.renderSeq) return;
-        if (signal?.aborted) return;
-        if (seq !== this.renderSeq) return;
+        if (seq !== this.renderSeq || signal?.aborted) return;
         const rect = anchorToRectPx(obj.anchor, this.geom, zoom);
         const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
         const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
