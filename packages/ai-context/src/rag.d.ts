@@ -33,10 +33,18 @@ export interface RagChunk<TMetadata = RagChunkMetadata> {
 export interface ChunkSheetByRegionsOptions {
   maxChunkRows?: number;
   /**
+   * Alias for `splitByRowWindows`.
+   */
+  splitRegions?: boolean;
+  /**
    * Split tall regions into multiple row-window chunks to improve retrieval quality.
    * Defaults to `false` for backwards compatibility.
    */
   splitByRowWindows?: boolean;
+  /**
+   * Alias for `rowOverlap`.
+   */
+  chunkRowOverlap?: number;
   /** Row overlap between windows (only when splitting). Defaults to 3. */
   rowOverlap?: number;
   /** Maximum number of chunks per region (only when splitting). Defaults to 50. */

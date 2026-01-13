@@ -240,15 +240,32 @@ function clampRangeToMatrixBounds(bounds, range) {
 function valuesRangeToTsv(values, range, options) {
   const lines = [];
   const totalRows = range.endRow - range.startRow + 1;
-  const totalCols = range.endCol - range.startCol + 1;
   const limit = Math.min(totalRows, options.maxRows);
 
   for (let rOffset = 0; rOffset < limit; rOffset++) {
-    const row = values[range.startRow + rOffset] ?? [];
-    // Avoid allocating an intermediate row slice; build the line directly.
+    const row = values[range.startRow + rOffset];
+    if (!Array.isArray(row)) {
+      lines.push("");
+      continue;
+    }
+ 
+    // Preserve `slice2D(...)+matrixToTsv(...)` ragged-row semantics:
+    // only include columns that exist in the source row slice.
+    const rowLen = row.length;
+    if (rowLen <= range.startCol) {
+      lines.push("");
+      continue;
+    }
+ 
+    const sliceLen = Math.max(0, Math.min(rowLen, range.endCol + 1) - range.startCol);
+    if (sliceLen === 0) {
+      lines.push("");
+      continue;
+    }
+ 
     /** @type {string[]} */
-    const cells = new Array(totalCols);
-    for (let cOffset = 0; cOffset < totalCols; cOffset++) {
+    const cells = new Array(sliceLen);
+    for (let cOffset = 0; cOffset < sliceLen; cOffset++) {
       const v = row[range.startCol + cOffset];
       cells[cOffset] = isCellEmpty(v) ? "" : String(v);
     }
@@ -328,7 +345,15 @@ function splitRectByRowWindows(rect, options) {
  * @param {{ name: string, values: unknown[][], origin?: { row: number, col: number } }} sheet
  * @param {{
  *   maxChunkRows?: number,
+ *   /**
+ *    * Alias for `splitByRowWindows`.
+ *    *\/
+ *   splitRegions?: boolean,
  *   splitByRowWindows?: boolean,
+ *   /**
+ *    * Alias for `rowOverlap`.
+ *    *\/
+ *   chunkRowOverlap?: number,
  *   rowOverlap?: number,
  *   maxChunksPerRegion?: number,
  *   signal?: AbortSignal
@@ -346,7 +371,15 @@ export function chunkSheetByRegions(sheet, options = {}) {
  * @param {{ name: string, values: unknown[][], origin?: { row: number, col: number } }} sheet
  * @param {{
  *   maxChunkRows?: number,
+ *   /**
+ *    * Alias for `splitByRowWindows`.
+ *    *\/
+ *   splitRegions?: boolean,
  *   splitByRowWindows?: boolean,
+ *   /**
+ *    * Alias for `rowOverlap`.
+ *    *\/
+ *   chunkRowOverlap?: number,
  *   rowOverlap?: number,
  *   maxChunksPerRegion?: number,
  *   signal?: AbortSignal
@@ -358,8 +391,8 @@ export function chunkSheetByRegionsWithSchema(sheet, options = {}) {
   throwIfAborted(signal);
   const schema = extractSheetSchema(sheet, { signal });
   const maxChunkRows = options.maxChunkRows ?? 30;
-  const splitByRowWindows = options.splitByRowWindows ?? false;
-  const rowOverlap = options.rowOverlap ?? 3;
+  const splitByRowWindows = options.splitByRowWindows ?? options.splitRegions ?? false;
+  const rowOverlap = options.rowOverlap ?? options.chunkRowOverlap ?? 3;
   const maxChunksPerRegion = options.maxChunksPerRegion ?? 50;
   const origin = normalizeSheetOrigin(sheet);
   const matrixBounds = getMatrixBounds(sheet.values);
@@ -423,7 +456,7 @@ export function chunkSheetByRegionsWithSchema(sheet, options = {}) {
           : windowText;
 
       chunks.push({
-        id: `${baseId}${originSuffix}-w${window.index + 1}`,
+        id: splitByRowWindows ? `${baseId}${originSuffix}-rows-${window.startRow}` : `${baseId}${originSuffix}`,
         range: windowRangeA1,
         text,
         metadata: { type: "region", sheetName: sheet.name, regionRange: region.range },
@@ -457,7 +490,15 @@ export class RagIndex {
    * @param {{ name: string, values: unknown[][], origin?: { row: number, col: number } }} sheet
    * @param {{
    *   maxChunkRows?: number,
+   *   /**
+   *    * Alias for `splitByRowWindows`.
+   *    *\/
+   *   splitRegions?: boolean,
    *   splitByRowWindows?: boolean,
+   *   /**
+   *    * Alias for `rowOverlap`.
+   *    *\/
+   *   chunkRowOverlap?: number,
    *   rowOverlap?: number,
    *   maxChunksPerRegion?: number,
    *   signal?: AbortSignal
@@ -467,8 +508,8 @@ export class RagIndex {
   async indexSheet(sheet, options = {}) {
     const signal = options.signal;
     throwIfAborted(signal);
-    // `chunkSheetByRegions()` ids are deterministic (sheet name + region index, plus
-    // an optional window index when row-window splitting is enabled),
+    // `chunkSheetByRegions()` ids are deterministic (sheet name + region index, with an
+    // optional row-window start row suffix when splitting is enabled),
     // but the number of regions can change over time. Clear the previous region
     // chunks for this sheet so stale chunks don't linger in the store.
     if (typeof this.store.deleteByPrefix === "function") {
@@ -476,11 +517,13 @@ export class RagIndex {
     }
 
     throwIfAborted(signal);
+    const splitByRowWindows = options.splitByRowWindows ?? options.splitRegions;
+    const rowOverlap = options.rowOverlap ?? options.chunkRowOverlap;
     const { schema, chunks } = chunkSheetByRegionsWithSchema(sheet, {
       signal,
       maxChunkRows: options.maxChunkRows,
-      splitByRowWindows: options.splitByRowWindows,
-      rowOverlap: options.rowOverlap,
+      splitByRowWindows,
+      rowOverlap,
       maxChunksPerRegion: options.maxChunksPerRegion,
     });
     const items = [];
