@@ -348,3 +348,41 @@ test("ChunkedLocalStorageBinaryStorage can load legacy single-key LocalStorageBi
   expect(meta.chunks).toBeGreaterThan(0);
   expect(getTestLocalStorage().getItem(`${chunked.key}:0`)).toBeTypeOf("string");
 });
+
+test("ChunkedLocalStorageBinaryStorage can load legacy misaligned chunk boundaries (and migrates them)", async () => {
+  const namespace = "formula.test.rag";
+  const workbookId = "misaligned";
+  const key = `${namespace}:${workbookId}`;
+
+  const bytes = new Uint8Array(64);
+  for (let i = 0; i < bytes.length; i += 1) bytes[i] = (i * 31) % 256;
+  const encoded = Buffer.from(bytes).toString("base64");
+
+  // Simulate a previous buggy implementation that used a non-base64-aligned chunk size.
+  const oldChunkSize = 5; // not divisible by 4
+  const oldChunks = Math.ceil(encoded.length / oldChunkSize);
+  const ls = getTestLocalStorage();
+  ls.setItem(`${key}:meta`, JSON.stringify({ chunks: oldChunks }));
+  for (let i = 0; i < oldChunks; i += 1) {
+    const start = i * oldChunkSize;
+    ls.setItem(`${key}:${i}`, encoded.slice(start, start + oldChunkSize));
+  }
+
+  const storage = new ChunkedLocalStorageBinaryStorage({ namespace, workbookId, chunkSizeChars: 8 });
+  const loaded = await storage.load();
+  expect(Array.from(loaded ?? [])).toEqual(Array.from(bytes));
+
+  // Migration should rewrite chunks with a base64-aligned chunkSizeChars (8 -> aligned) and
+  // ensure each stored chunk is independently decodable (length % 4 === 0).
+  const metaRaw = ls.getItem(`${key}:meta`);
+  expect(metaRaw).toBeTypeOf("string");
+  const meta = JSON.parse(metaRaw ?? "{}");
+  expect(typeof meta.chunks).toBe("number");
+  expect(meta.chunks).toBeGreaterThan(0);
+
+  for (let i = 0; i < meta.chunks; i += 1) {
+    const part = ls.getItem(`${key}:${i}`);
+    expect(part).toBeTypeOf("string");
+    expect((part as string).length % 4).toBe(0);
+  }
+});

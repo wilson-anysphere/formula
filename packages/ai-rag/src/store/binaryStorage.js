@@ -217,7 +217,16 @@ export class ChunkedLocalStorageBinaryStorage {
       }
 
       try {
-        return fromBase64(parts.join(""));
+        const decoded = fromBase64(parts.join(""));
+        // Best-effort migration: re-save using the current chunk size so future
+        // loads can use chunk-by-chunk decoding (and so we normalize legacy
+        // misaligned chunk boundaries).
+        try {
+          await this.save(decoded);
+        } catch {
+          // ignore
+        }
+        return decoded;
       } catch {
         // Corrupted base64 payload; clear persisted chunks.
         try {
