@@ -17,6 +17,20 @@ test.describe("ribbon Find & Select", () => {
       }
     });
 
+    const waitForCommandRecent = async (commandId: string) => {
+      await page.waitForFunction((expectedId) => {
+        try {
+          const raw = localStorage.getItem("formula.commandRecents");
+          if (!raw) return false;
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) return false;
+          return parsed.some((entry) => entry && typeof entry === "object" && entry.commandId === expectedId);
+        } catch {
+          return false;
+        }
+      }, commandId);
+    };
+
     // Desktop currently defaults to the View tab (where debug controls live). Switch to Home
     // so we can access the Find & Select dropdown.
     await page.getByRole("tab", { name: "Home" }).click();
@@ -27,17 +41,7 @@ test.describe("ribbon Find & Select", () => {
     // --- Find ---
     await findSelect.click();
     await page.getByTestId("ribbon-root").getByTestId("ribbon-find").click();
-    await page.waitForFunction(() => {
-      try {
-        const raw = localStorage.getItem("formula.commandRecents");
-        if (!raw) return false;
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) return false;
-        return parsed.some((entry) => entry && typeof entry === "object" && entry.commandId === "edit.find");
-      } catch {
-        return false;
-      }
-    });
+    await waitForCommandRecent("edit.find");
     const findDialog = page.locator("dialog.find-replace-dialog[open]");
     await expect(findDialog).toBeVisible();
     await expect(findDialog.locator("input").first()).toBeFocused();
@@ -47,6 +51,7 @@ test.describe("ribbon Find & Select", () => {
     // --- Replace ---
     await findSelect.click();
     await page.getByTestId("ribbon-root").getByTestId("ribbon-replace").click();
+    await waitForCommandRecent("edit.replace");
     const replaceDialog = page.locator("dialog.find-replace-dialog[open]");
     await expect(replaceDialog).toBeVisible();
     await expect(replaceDialog.locator('input[placeholder="Replace with…"]')).toBeVisible();
@@ -57,6 +62,7 @@ test.describe("ribbon Find & Select", () => {
     // --- Go To ---
     await findSelect.click();
     await page.getByTestId("ribbon-root").getByTestId("ribbon-goto").click();
+    await waitForCommandRecent("navigation.goTo");
     const goToDialog = page.locator("dialog.goto-dialog[open]");
     await expect(goToDialog).toBeVisible();
     await expect(goToDialog.locator("input").first()).toBeFocused();
