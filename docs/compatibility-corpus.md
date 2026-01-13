@@ -194,8 +194,15 @@ This produces a privacy-safe summary:
 - `critical_parts`: list of OPC part names with at least one `CRITICAL` diff
 - `part_counts`: per-part diff counts (C/W/I/total)
 - `rels_critical_ids`: for `.rels` parts, the relationship Ids (`rId...`) involved in critical diffs
+- `critical_part_hashes`: sha256 + size of each critical part (helps correlate failures without leaking content)
 
 The tool always writes a JSON summary file (default: `tools/corpus/out/minimize/<sha16>.json`).
+
+To include the usually-ignored noisy metadata parts (`docProps/*`) in the diff analysis, pass:
+
+```bash
+python -m tools.corpus.minimize --input /path/to/workbook.xlsx --no-default-diff-ignore
+```
 
 To also attempt to write a smaller workbook that still reproduces the critical diffs:
 
