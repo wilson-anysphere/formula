@@ -2020,7 +2020,9 @@ fn plan_shared_strings<R: Read + Seek>(
 
         let idx = reuse_idx.unwrap_or_else(|| match &patch.value {
             CellValue::String(s) => shared_strings.get_or_insert_plain(s),
-            CellValue::Entity(entity) => shared_strings.get_or_insert_plain(entity.display_value.as_str()),
+            CellValue::Entity(entity) => {
+                shared_strings.get_or_insert_plain(entity.display_value.as_str())
+            }
             CellValue::Record(record) => {
                 let display = record.to_string();
                 shared_strings.get_or_insert_plain(display.as_str())
@@ -2054,16 +2056,13 @@ fn resolve_shared_strings_part_name<R: Read + Seek>(
 
     if let Some(bytes) = workbook_rels {
         let rels = parse_relationships(&bytes)?;
-        if let Some(rel) = rels
-            .iter()
-            .find(|rel| {
-                rel.type_uri == REL_TYPE_SHARED_STRINGS
-                    && !rel
-                        .target_mode
-                        .as_deref()
-                        .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
-            })
-        {
+        if let Some(rel) = rels.iter().find(|rel| {
+            rel.type_uri == REL_TYPE_SHARED_STRINGS
+                && !rel
+                    .target_mode
+                    .as_deref()
+                    .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        }) {
             return Ok(Some(resolve_target("xl/workbook.xml", &rel.target)));
         }
     }
@@ -3413,13 +3412,7 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 insert_pending_before_cell(&mut writer, state, col_0, cell_prefix)?;
 
                 if let Some(patch) = take_patch_for_col(state, col_0) {
-                    write_patched_cell(
-                        &mut writer,
-                        Some(e),
-                        &cell_ref,
-                        &patch,
-                        cell_prefix,
-                    )?;
+                    write_patched_cell(&mut writer, Some(e), &cell_ref, &patch, cell_prefix)?;
                 } else {
                     writer.write_event(Event::Empty(e.to_owned()))?;
                 }
@@ -3769,7 +3762,8 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     } else {
         false
     };
-    let patch_is_rich_value_placeholder = matches!(&patch.value, CellValue::Error(ErrorValue::Value));
+    let patch_is_rich_value_placeholder =
+        matches!(&patch.value, CellValue::Error(ErrorValue::Value));
     let value_eq = if drop_vm_on_value_change {
         cell_value_semantics_eq(
             existing_t.as_deref(),
@@ -3783,7 +3777,7 @@ fn patch_existing_cell<R: BufRead, W: Write>(
 
     let drop_vm = if patch.vm.is_none() {
         (existing_is_rich_value_placeholder && !patch_is_rich_value_placeholder)
-            || (drop_vm_on_value_change && !value_eq)
+            || (drop_vm_on_value_change && (clear_cached_value || !value_eq))
     } else {
         false
     };
@@ -4352,7 +4346,9 @@ fn cell_value_semantics_eq(
     match patch_value {
         CellValue::Empty => {
             if existing_t == Some("inlineStr") {
-                return Ok(extract_cell_inline_string_text(inner_events)?.unwrap_or_default().is_empty());
+                return Ok(extract_cell_inline_string_text(inner_events)?
+                    .unwrap_or_default()
+                    .is_empty());
             }
             Ok(v_text.unwrap_or_default().is_empty())
         }
@@ -4387,7 +4383,9 @@ fn cell_value_semantics_eq(
         }
         CellValue::String(s) => {
             match existing_t {
-                Some("inlineStr") => Ok(extract_cell_inline_string_text(inner_events)?.unwrap_or_default() == *s),
+                Some("inlineStr") => {
+                    Ok(extract_cell_inline_string_text(inner_events)?.unwrap_or_default() == *s)
+                }
                 Some("s") => {
                     let Some(idx_text) = v_text else {
                         return Ok(false);
@@ -4406,7 +4404,9 @@ fn cell_value_semantics_eq(
             // when available.
             let s = rich.text.as_str();
             match existing_t {
-                Some("inlineStr") => Ok(extract_cell_inline_string_text(inner_events)?.unwrap_or_default() == s),
+                Some("inlineStr") => {
+                    Ok(extract_cell_inline_string_text(inner_events)?.unwrap_or_default() == s)
+                }
                 Some("s") => {
                     let Some(idx_text) = v_text else {
                         return Ok(false);
@@ -4769,8 +4769,7 @@ mod tests {
             .unwrap();
         zip.write_all(workbook_rels.as_bytes()).unwrap();
 
-        zip.start_file("xl/worksheets/sheet1.xml", options)
-            .unwrap();
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
         zip.write_all(worksheet_xml.as_bytes()).unwrap();
 
         zip.start_file("xl/styles.xml", options).unwrap();
@@ -4841,8 +4840,7 @@ mod tests {
             .unwrap();
         zip.write_all(workbook_rels.as_bytes()).unwrap();
 
-        zip.start_file("xl/worksheets/sheet1.xml", options)
-            .unwrap();
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
         zip.write_all(worksheet_xml.as_bytes()).unwrap();
 
         zip.start_file("xl/sharedStrings.xml", options).unwrap();

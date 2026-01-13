@@ -3,15 +3,16 @@ use roxmltree::Document;
 
 use crate::workbook::ChartExtractionError;
 
+mod anchor;
 pub mod charts;
 mod preserve;
 pub mod style;
 
 pub use preserve::{
-    PreservedChartSheet, PreservedDrawingParts, PreservedSheetControls, PreservedSheetDrawingHF,
-    PreservedSheetDrawings, PreservedSheetOleObjects, PreservedSheetPicture,
-    SheetDrawingRelationship, SheetRelationshipStub, SheetRelationshipStubWithType,
-    preserve_drawing_parts_from_reader,
+    preserve_drawing_parts_from_reader, PreservedChartSheet, PreservedDrawingParts,
+    PreservedSheetControls, PreservedSheetDrawingHF, PreservedSheetDrawings,
+    PreservedSheetOleObjects, PreservedSheetPicture, SheetDrawingRelationship,
+    SheetRelationshipStub, SheetRelationshipStubWithType,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,9 +40,10 @@ pub fn extract_chart_refs(
             continue;
         }
 
-        let Some(anchor_model) = parse_anchor(&anchor) else {
+        let Some(anchor_model) = anchor::parse_anchor(&anchor) else {
             continue;
         };
+        let anchor_model = anchor::anchor_to_chart_anchor(anchor_model);
 
         for chart in anchor
             .descendants()
@@ -66,95 +68,4 @@ pub fn extract_chart_refs(
     }
 
     Ok(out)
-}
-
-fn parse_anchor(anchor: &roxmltree::Node<'_, '_>) -> Option<ChartAnchor> {
-    match anchor.tag_name().name() {
-        "absoluteAnchor" => {
-            let pos = anchor
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "pos")?;
-            let ext = anchor
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "ext")?;
-
-            Some(ChartAnchor::Absolute {
-                x_emu: pos.attribute("x")?.trim().parse().ok()?,
-                y_emu: pos.attribute("y")?.trim().parse().ok()?,
-                cx_emu: ext.attribute("cx")?.trim().parse().ok()?,
-                cy_emu: ext.attribute("cy")?.trim().parse().ok()?,
-            })
-        }
-        "oneCellAnchor" => {
-            let from = anchor
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "from")?;
-            let ext = anchor
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "ext")?;
-
-            Some(ChartAnchor::OneCell {
-                from_col: descendant_text(from, "col")
-                    .and_then(|t| t.trim().parse().ok())?,
-                from_row: descendant_text(from, "row")
-                    .and_then(|t| t.trim().parse().ok())?,
-                from_col_off_emu: descendant_text(from, "colOff")
-                    .unwrap_or("0")
-                    .trim()
-                    .parse()
-                    .ok()?,
-                from_row_off_emu: descendant_text(from, "rowOff")
-                    .unwrap_or("0")
-                    .trim()
-                    .parse()
-                    .ok()?,
-                cx_emu: ext.attribute("cx")?.trim().parse().ok()?,
-                cy_emu: ext.attribute("cy")?.trim().parse().ok()?,
-            })
-        }
-        "twoCellAnchor" => {
-            let from = anchor
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "from")?;
-            let to = anchor
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "to")?;
-
-            Some(ChartAnchor::TwoCell {
-                from_col: descendant_text(from, "col")
-                    .and_then(|t| t.trim().parse().ok())?,
-                from_row: descendant_text(from, "row")
-                    .and_then(|t| t.trim().parse().ok())?,
-                from_col_off_emu: descendant_text(from, "colOff")
-                    .unwrap_or("0")
-                    .trim()
-                    .parse()
-                    .ok()?,
-                from_row_off_emu: descendant_text(from, "rowOff")
-                    .unwrap_or("0")
-                    .trim()
-                    .parse()
-                    .ok()?,
-                to_col: descendant_text(to, "col").and_then(|t| t.trim().parse().ok())?,
-                to_row: descendant_text(to, "row").and_then(|t| t.trim().parse().ok())?,
-                to_col_off_emu: descendant_text(to, "colOff")
-                    .unwrap_or("0")
-                    .trim()
-                    .parse()
-                    .ok()?,
-                to_row_off_emu: descendant_text(to, "rowOff")
-                    .unwrap_or("0")
-                    .trim()
-                    .parse()
-                    .ok()?,
-            })
-        }
-        _ => None,
-    }
-}
-
-fn descendant_text<'a>(node: roxmltree::Node<'a, 'a>, tag: &str) -> Option<&'a str> {
-    node.children()
-        .find(|n| n.is_element() && n.tag_name().name() == tag)
-        .and_then(|n| n.text())
 }

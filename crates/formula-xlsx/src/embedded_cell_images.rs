@@ -126,7 +126,9 @@ impl XlsxPackage {
                     crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map(
                         metadata_bytes,
                     )
-                    .map_err(|e| XlsxError::Invalid(format!("failed to parse {metadata_part}: {e}")))?;
+                    .map_err(|e| {
+                        XlsxError::Invalid(format!("failed to parse {metadata_part}: {e}"))
+                    })?;
                 vm_to_rich_value = parsed;
             }
         }
@@ -289,7 +291,8 @@ impl XlsxPackage {
                     };
 
                     let mut slot_candidates: Vec<u32> = Vec::new();
-                    if let Some(local_image) = local_image_by_rich_value_index.get(&rich_value_index)
+                    if let Some(local_image) =
+                        local_image_by_rich_value_index.get(&rich_value_index)
                     {
                         slot_candidates.push(local_image.local_image_identifier);
                     } else if let Some(Some(rel_idx)) =
@@ -649,8 +652,14 @@ fn parse_rich_value_rel_image_targets(
 
 fn strip_uri_suffixes(target: &str) -> &str {
     let target = target.trim();
-    let target = target.split_once('#').map(|(base, _)| base).unwrap_or(target);
-    target.split_once('?').map(|(base, _)| base).unwrap_or(target)
+    let target = target
+        .split_once('#')
+        .map(|(base, _)| base)
+        .unwrap_or(target);
+    target
+        .split_once('?')
+        .map(|(base, _)| base)
+        .unwrap_or(target)
 }
 
 fn parse_sheet_vm_image_cells(sheet_xml: &[u8]) -> Result<Vec<(CellRef, u32)>, XlsxError> {
@@ -676,7 +685,8 @@ fn resolve_local_image_identifier_to_image_part(
     image_targets_by_rel_id: &HashMap<String, String>,
     local_image_identifier: u32,
 ) -> Option<String> {
-    let rel_id = crate::rich_data::rel_slot_get(rich_value_rel_ids, local_image_identifier as usize)?;
+    let rel_id =
+        crate::rich_data::rel_slot_get(rich_value_rel_ids, local_image_identifier as usize)?;
     image_targets_by_rel_id.get(rel_id).cloned()
 }
 

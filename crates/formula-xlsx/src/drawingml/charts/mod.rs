@@ -1,6 +1,5 @@
 use formula_model::charts::ChartModel;
-use formula_model::drawings::{Anchor, AnchorPoint, CellOffset, EmuSize};
-use formula_model::CellRef;
+use formula_model::drawings::Anchor;
 use roxmltree::Document;
 
 use crate::workbook::ChartExtractionError;
@@ -94,7 +93,7 @@ pub fn extract_chart_object_refs(
             continue;
         }
 
-        let Some(anchor_model) = parse_anchor(&anchor) else {
+        let Some(anchor_model) = super::anchor::parse_anchor(&anchor) else {
             continue;
         };
 
@@ -185,87 +184,6 @@ mod tests {
         assert!(frame_xml.ends_with("</xdr:graphicFrame>"));
     }
 }
-
-fn parse_anchor(anchor: &roxmltree::Node<'_, '_>) -> Option<Anchor> {
-    match anchor.tag_name().name() {
-        "absoluteAnchor" => {
-            let pos = anchor
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "pos")?;
-            let ext = anchor
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "ext")?;
-
-            Some(Anchor::Absolute {
-                pos: CellOffset::new(
-                    pos.attribute("x")?.trim().parse().ok()?,
-                    pos.attribute("y")?.trim().parse().ok()?,
-                ),
-                ext: EmuSize::new(
-                    ext.attribute("cx")?.trim().parse().ok()?,
-                    ext.attribute("cy")?.trim().parse().ok()?,
-                ),
-            })
-        }
-        "oneCellAnchor" => {
-            let from = anchor
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "from")?;
-            let ext = anchor
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "ext")?;
-
-            Some(Anchor::OneCell {
-                from: parse_anchor_point(&from)?,
-                ext: EmuSize::new(
-                    ext.attribute("cx")?.trim().parse().ok()?,
-                    ext.attribute("cy")?.trim().parse().ok()?,
-                ),
-            })
-        }
-        "twoCellAnchor" => {
-            let from = anchor
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "from")?;
-            let to = anchor
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "to")?;
-
-            Some(Anchor::TwoCell {
-                from: parse_anchor_point(&from)?,
-                to: parse_anchor_point(&to)?,
-            })
-        }
-        _ => None,
-    }
-}
-
-fn parse_anchor_point(node: &roxmltree::Node<'_, '_>) -> Option<AnchorPoint> {
-    let col: u32 = descendant_text(*node, "col")?.trim().parse().ok()?;
-    let row: u32 = descendant_text(*node, "row")?.trim().parse().ok()?;
-    let col_off: i64 = descendant_text(*node, "colOff")
-        .unwrap_or("0")
-        .trim()
-        .parse()
-        .ok()?;
-    let row_off: i64 = descendant_text(*node, "rowOff")
-        .unwrap_or("0")
-        .trim()
-        .parse()
-        .ok()?;
-
-    Some(AnchorPoint::new(
-        CellRef::new(row, col),
-        CellOffset::new(col_off, row_off),
-    ))
-}
-
-fn descendant_text<'a>(node: roxmltree::Node<'a, 'a>, tag: &str) -> Option<&'a str> {
-    node.children()
-        .find(|n| n.is_element() && n.tag_name().name() == tag)
-        .and_then(|n| n.text())
-}
-
 fn slice_node_xml(node: &roxmltree::Node<'_, '_>, doc: &str) -> Option<String> {
     let range = node.range();
     doc.get(range).map(|s| s.to_string())
