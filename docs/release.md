@@ -6,8 +6,8 @@ macOS/Windows/Linux and uploads them to a **draft** GitHub Release.
 
 Platform/architecture expectations for a release:
 
-- **macOS:** built as a **universal** binary (Intel + Apple Silicon).
-- **Windows:** assets for **x64** and **ARM64**.
+- **macOS:** **universal** build (Intel + Apple Silicon): `.dmg` (installer) + `.app.tar.gz` (updater payload).
+- **Windows:** **x64** + **ARM64**: installers in both formats (`.msi` + `.exe`) for each architecture.
 - **Linux:** `.AppImage` + `.deb` + `.rpm`.
 
 The workflow also uploads updater metadata (`latest.json` + `latest.json.sig`) used by the Tauri
