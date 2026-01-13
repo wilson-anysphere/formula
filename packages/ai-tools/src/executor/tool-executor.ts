@@ -704,10 +704,10 @@ export class ToolExecutor {
       );
     }
 
+    const includeFormulaValues = Boolean(this.options.include_formula_values && (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW));
     let redactedCellCount = 0;
     const sourceValues: CellScalar[][] = sourceCells.map((row, r) =>
       row.map((cell, c) => {
-        if (cell.formula) return null;
         if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
           const rowIndex = source.startRow + r;
           const colIndex = source.startCol + c;
@@ -716,6 +716,7 @@ export class ToolExecutor {
             return null;
           }
         }
+        if (cell.formula && !includeFormulaValues) return null;
         return cell.value ?? null;
       })
     );
@@ -953,6 +954,7 @@ export class ToolExecutor {
       );
     }
     const cells = this.spreadsheet.readRange(range);
+    const includeFormulaValues = Boolean(this.options.include_formula_values && (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW));
     const entries: Array<{ cell: string; value: number }> = [];
     let redactedCellCount = 0;
     for (let r = 0; r < cells.length; r++) {
@@ -969,7 +971,7 @@ export class ToolExecutor {
           }
         }
         const cell = cells[r]![c]!;
-        const numeric = toNumber(cell);
+        const numeric = toNumber(cell, { includeFormulaValues });
         if (numeric === null) continue;
         entries.push({
           cell: this.formatCellForUser({ sheet: range.sheet, row: range.startRow + r, col: range.startCol + c }),
@@ -1749,14 +1751,15 @@ export class ToolExecutor {
       return;
     }
 
+    const includeFormulaValues = Boolean(this.options.include_formula_values && (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW));
     const sourceValues: CellScalar[][] = sourceCells.map((row, r) =>
       row.map((cell, c) => {
-        if (cell.formula) return null;
         if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
           const rowIndex = pivot.source.startRow + r;
           const colIndex = pivot.source.startCol + c;
           if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) return null;
         }
+        if (cell.formula && !includeFormulaValues) return null;
         return cell.value ?? null;
       })
     );
