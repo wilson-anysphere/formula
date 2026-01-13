@@ -271,7 +271,7 @@ Secrets used by `tauri-apps/tauri-action`:
 
 - `APPLE_CERTIFICATE` – base64-encoded `.p12` Developer ID certificate
 - `APPLE_CERTIFICATE_PASSWORD`
-- `APPLE_SIGNING_IDENTITY` – optional but recommended; e.g. `Developer ID Application: Your Company (TEAMID)`
+- `APPLE_SIGNING_IDENTITY` – required for macOS signing in this repo (CI disables signing if missing to avoid ambiguous identity selection); e.g. `Developer ID Application: Your Company (TEAMID)`
 - `APPLE_ID` – Apple ID email
 - `APPLE_PASSWORD` – app-specific password
 - `APPLE_TEAM_ID`
