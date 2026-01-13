@@ -8,6 +8,32 @@ import { DLP_ACTION } from "../../security/dlp/src/actions.js";
 import { CLASSIFICATION_SCOPE } from "../../security/dlp/src/selectors.js";
 
 describe("ToolExecutor include_formula_values", () => {
+  it("defaults to treating formula cells as null even when a computed value is present", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { formula: "=1+1", value: 2 });
+    workbook.setCell(parseA1Cell("Sheet1!B1"), { value: 4 });
+
+    const executor = new ToolExecutor(workbook);
+
+    const read = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:B1" },
+    });
+    expect(read.ok).toBe(true);
+    expect(read.tool).toBe("read_range");
+    if (!read.ok || read.tool !== "read_range") throw new Error("Unexpected tool result");
+    expect(read.data?.values).toEqual([[null, 4]]);
+
+    const stats = await executor.execute({
+      name: "compute_statistics",
+      parameters: { range: "Sheet1!A1:B1", measures: ["mean", "sum", "count"] },
+    });
+    expect(stats.ok).toBe(true);
+    expect(stats.tool).toBe("compute_statistics");
+    if (!stats.ok || stats.tool !== "compute_statistics") throw new Error("Unexpected tool result");
+    expect(stats.data?.statistics).toEqual({ mean: 4, sum: 4, count: 1 });
+  });
+
   it("read_range surfaces computed values for formula cells when enabled", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { formula: "=1+1", value: 2 });
