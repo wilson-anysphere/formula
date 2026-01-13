@@ -29,6 +29,40 @@ function columnIndexToLetter(index) {
   return out;
 }
 
+test("Typing = suggests starter functions like SUM(", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM("),
+    `Expected a SUM starter suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =<space> suggests starter functions (pure insertion)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "= ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "= SUM("),
+    `Expected a SUM starter suggestion preserving the space, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =VLO suggests VLOOKUP(", async () => {
   const engine = new TabCompletionEngine();
 

@@ -139,6 +139,13 @@ export class TabCompletionEngine {
   async getRuleBasedSuggestions(context, parsed) {
     if (!parsed.isFormula) return [];
 
+    // 0) Default "starter" functions when the user just typed "=" and hasn't
+    // begun entering a function name yet.
+    if (!parsed.inFunctionCall && !parsed.functionNamePrefix) {
+      const topLevel = this.suggestTopLevelFunctions(context);
+      if (topLevel.length > 0) return topLevel;
+    }
+
     // 1) Function name completion
     if (!parsed.inFunctionCall && parsed.functionNamePrefix) {
       const [fnSuggestions, identifierSuggestions] = await Promise.all([
@@ -587,6 +594,47 @@ export class TabCompletionEngine {
     }
 
     return [];
+  }
+
+  /**
+   * When the user has only typed "=" (optionally followed by whitespace), we
+   * provide a small curated set of common Excel functions so tab completion is
+   * immediately useful without any additional typing.
+   *
+   * These suggestions must be representable as "pure insertions" at the caret
+   * (the formula bar ghost text model), so we only trigger when the input has
+   * no non-whitespace characters after the leading "=".
+   *
+   * @param {CompletionContext} context
+   * @returns {Suggestion[]}
+   */
+  suggestTopLevelFunctions(context) {
+    const input = context.currentInput ?? "";
+    if (typeof input !== "string") return [];
+
+    // Only trigger when the formula body is empty (e.g. "=", "= ", "\n=\t").
+    if (input.trim() !== "=") return [];
+
+    const cursor = clampCursor(input, context.cursorPosition);
+
+    // Curated list + stable ordering. Use slightly decreasing confidence so our
+    // list order is preserved even after global sorting.
+    const starters = ["SUM(", "AVERAGE(", "IF(", "XLOOKUP(", "VLOOKUP("];
+
+    /** @type {Suggestion[]} */
+    const suggestions = [];
+    for (let i = 0; i < starters.length; i += 1) {
+      const displayText = starters[i];
+      const text = replaceSpan(input, cursor, cursor, displayText);
+      suggestions.push({
+        text,
+        displayText,
+        type: "formula",
+        confidence: 0.9 - i * 0.01,
+      });
+    }
+
+    return suggestions.slice(0, this.maxSuggestions);
   }
 }
 
