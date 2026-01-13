@@ -41,6 +41,13 @@ export class JsonVectorStore extends InMemoryVectorStore {
     this._autoSave = opts.autoSave ?? true;
     this._loaded = false;
     this._dirty = false;
+    // Serialize `storage.save()` calls to prevent lost updates when multiple
+    // mutations trigger overlapping async persists.
+    /** @type {Promise<void>} */
+    this._persistQueue = Promise.resolve();
+    // Monotonic counter so we only clear `_dirty` when the persisted snapshot
+    // corresponds to the latest mutation at the time the persist started.
+    this._mutationVersion = 0;
   }
 
   /**
@@ -90,6 +97,7 @@ export class JsonVectorStore extends InMemoryVectorStore {
   }
 
   async _persist() {
+    const version = this._mutationVersion;
     const records = await super.list();
     const payload = JSON.stringify({
       version: JSON_VECTOR_STORE_VERSION,
@@ -102,21 +110,33 @@ export class JsonVectorStore extends InMemoryVectorStore {
     });
     const data = new TextEncoder().encode(payload);
     await this._storage.save(data);
-    this._dirty = false;
+    if (this._mutationVersion === version) {
+      this._dirty = false;
+    }
+  }
+
+  async _enqueuePersist() {
+    const task = () => this._persist();
+    // Ensure the queue keeps flowing even if a previous persist failed.
+    const next = this._persistQueue.then(task, task);
+    this._persistQueue = next;
+    return next;
   }
 
   async upsert(records) {
     await this.load();
     await super.upsert(records);
     this._dirty = true;
-    if (this._autoSave) await this._persist();
+    this._mutationVersion += 1;
+    if (this._autoSave) await this._enqueuePersist();
   }
 
   async delete(ids) {
     await this.load();
     await super.delete(ids);
     this._dirty = true;
-    if (this._autoSave) await this._persist();
+    this._mutationVersion += 1;
+    if (this._autoSave) await this._enqueuePersist();
   }
 
   async get(id) {
@@ -141,8 +161,14 @@ export class JsonVectorStore extends InMemoryVectorStore {
   }
 
   async close() {
-    if (!this._loaded && !this._dirty) return;
+    if (!this._loaded && !this._dirty) {
+      // If nothing was ever loaded/mutated we can return early. Still ensure any
+      // queued persists are drained (this is a no-op in the common case).
+      await this._persistQueue;
+      return;
+    }
     await this.load();
-    if (this._dirty) await this._persist();
+    if (this._dirty) await this._enqueuePersist();
+    await this._persistQueue;
   }
 }

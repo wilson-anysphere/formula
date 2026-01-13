@@ -151,6 +151,10 @@ export class SqliteVectorStore {
     this._dimension = opts.dimension;
     this._autoSave = opts.autoSave;
     this._dirty = false;
+    // Serialize `storage.save()` calls to prevent out-of-order async persists from
+    // overwriting newer snapshots.
+    /** @type {Promise<void>} */
+    this._persistQueue = Promise.resolve();
 
     this._ensureSchema();
     this._registerFunctions();
@@ -482,6 +486,14 @@ export class SqliteVectorStore {
     }
   }
 
+  async _enqueuePersist() {
+    const task = () => this._persist();
+    // Ensure the queue keeps flowing even if a previous persist failed.
+    const next = this._persistQueue.then(task, task);
+    this._persistQueue = next;
+    return next;
+  }
+
   /**
    * @param {{ id: string, vector: ArrayLike<number>, metadata: any }[]} records
    */
@@ -560,7 +572,7 @@ export class SqliteVectorStore {
       stmt.free();
     }
 
-    if (this._autoSave) await this._persist();
+    if (this._autoSave) await this._enqueuePersist();
   }
 
   /**
@@ -580,7 +592,7 @@ export class SqliteVectorStore {
     } finally {
       stmt.free();
     }
-    if (this._autoSave) await this._persist();
+    if (this._autoSave) await this._enqueuePersist();
   }
 
   /**
@@ -606,7 +618,7 @@ export class SqliteVectorStore {
     // (sql.js definitely drops them after `export()`; VACUUM may or may not.)
     this._registerFunctions();
     this._dirty = true;
-    if (this._autoSave) await this._persist();
+    if (this._autoSave) await this._enqueuePersist();
   }
 
   /**
@@ -910,7 +922,8 @@ export class SqliteVectorStore {
   }
 
   async close() {
-    if (this._dirty) await this._persist();
+    await this._enqueuePersist();
+    await this._persistQueue;
     this._db.close();
   }
 }
