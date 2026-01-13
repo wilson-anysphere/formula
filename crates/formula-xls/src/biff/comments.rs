@@ -22,7 +22,7 @@
 //! Note: anchoring to merged regions (top-left cell) is handled by the importer
 //! when inserting notes into the [`formula_model`] worksheet model.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use formula_model::{CellRef, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 
@@ -50,6 +50,17 @@ const TXO_TEXT_LEN_OFFSET: usize = 6;
 const TXO_RUNS_LEN_OFFSET: usize = 12;
 const TXO_TEXT_LEN_OFFSETS: [usize; 4] = [TXO_TEXT_LEN_OFFSET, 4, 8, 10];
 const TXO_MAX_TEXT_CHARS: usize = 32 * 1024;
+
+/// Maximum number of legacy NOTE/OBJ/TXO note groups to parse per worksheet.
+///
+/// This bounds memory usage for malicious `.xls` files that contain extremely large numbers of
+/// comments.
+const MAX_NOTES_PER_SHEET: usize = 20_000;
+/// Maximum number of TXO text payloads to store per worksheet while resolving NOTE records.
+///
+/// In well-formed files this should be <= the number of NOTE records, but we cap it separately to
+/// avoid unbounded memory usage when the stream contains many standalone/dangling OBJ/TXO records.
+const MAX_TXO_TEXTS_PER_SHEET: usize = 20_000;
 
 const MAX_WARNINGS_PER_SHEET: usize = 20;
 
@@ -194,9 +205,12 @@ pub(crate) fn parse_biff_sheet_notes(
         records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
 
     let mut notes: Vec<ParsedNote> = Vec::new();
+    let mut note_obj_ids: HashSet<u16> = HashSet::new();
     let mut texts_by_obj_id: HashMap<u16, String> = HashMap::new();
     let mut current_obj_id: Option<u16> = None;
     let mut warnings: Vec<String> = Vec::new();
+    let mut notes_truncated = false;
+    let mut texts_truncated = false;
 
     for record in iter {
         let record = match record {
@@ -215,6 +229,21 @@ pub(crate) fn parse_biff_sheet_notes(
 
         match record.record_id {
             RECORD_NOTE => {
+                if notes.len() >= MAX_NOTES_PER_SHEET {
+                    if !notes_truncated {
+                        notes_truncated = true;
+                        push_warning(
+                            &mut warnings,
+                            format!(
+                                "too many NOTE records in worksheet; capped at {MAX_NOTES_PER_SHEET}"
+                            ),
+                        );
+                    }
+                    // Stop collecting NOTE records to avoid unbounded allocations, but keep scanning
+                    // so we can still recover TXO payloads for notes already parsed.
+                    continue;
+                }
+
                 if let Some(note) = parse_note_record(
                     record.data.as_ref(),
                     record.offset,
@@ -222,6 +251,8 @@ pub(crate) fn parse_biff_sheet_notes(
                     codepage,
                     &mut warnings,
                 ) {
+                    note_obj_ids.insert(note.primary_obj_id);
+                    note_obj_ids.insert(note.secondary_obj_id);
                     notes.push(note);
                 }
             }
@@ -241,6 +272,27 @@ pub(crate) fn parse_biff_sheet_notes(
                     );
                     continue;
                 };
+
+                // If NOTE parsing was truncated, only retain TXO payloads for objects referenced by
+                // the notes we kept.
+                if notes_truncated && !note_obj_ids.contains(&obj_id) {
+                    continue;
+                }
+
+                if texts_by_obj_id.len() >= MAX_TXO_TEXTS_PER_SHEET
+                    && !texts_by_obj_id.contains_key(&obj_id)
+                {
+                    if !texts_truncated {
+                        texts_truncated = true;
+                        push_warning(
+                            &mut warnings,
+                            format!(
+                                "too many TXO text payloads in worksheet; capped at {MAX_TXO_TEXTS_PER_SHEET}"
+                            ),
+                        );
+                    }
+                    continue;
+                }
 
                 if let Some(text) = parse_txo_text(&record, biff, codepage, &mut warnings) {
                     texts_by_obj_id.insert(obj_id, text);
@@ -2796,5 +2848,69 @@ mod tests {
         assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].author, "Alice");
+    }
+
+    #[test]
+    fn caps_notes_per_sheet() {
+        fn append_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
+            out.extend_from_slice(&id.to_le_bytes());
+            out.extend_from_slice(&(data.len() as u16).to_le_bytes());
+            out.extend_from_slice(data);
+        }
+
+        let total_notes = MAX_NOTES_PER_SHEET + 10;
+        // Approximate capacity: ~73 bytes per (NOTE+OBJ+TXO+CONTINUE) group.
+        let mut stream = Vec::with_capacity(4 + 16 + total_notes * 80 + 4);
+
+        append_record(&mut stream, records::RECORD_BOF_BIFF8, &[0u8; 16]);
+
+        for i in 0..total_notes {
+            let row = i as u16;
+            let obj_id = (i as u16).wrapping_add(1);
+
+            // NOTE record payload (11 bytes for a 1-byte author).
+            let mut note_payload = [0u8; 11];
+            note_payload[0..2].copy_from_slice(&row.to_le_bytes());
+            note_payload[2..4].copy_from_slice(&0u16.to_le_bytes()); // col
+            // Write `obj_id` into both adjacent fields for robustness across parser variations.
+            note_payload[4..6].copy_from_slice(&obj_id.to_le_bytes());
+            note_payload[6..8].copy_from_slice(&obj_id.to_le_bytes());
+            // BIFF8 ShortXLUnicodeString author: "A" (compressed).
+            note_payload[8] = 1; // length
+            note_payload[9] = 0; // flags (compressed)
+            note_payload[10] = b'A';
+            append_record(&mut stream, RECORD_NOTE, &note_payload);
+
+            // OBJ record payload containing ftCmo with idObj.
+            let mut obj_payload = [0u8; 26];
+            obj_payload[0..2].copy_from_slice(&OBJ_SUBRECORD_FT_CMO.to_le_bytes());
+            obj_payload[2..4].copy_from_slice(&0x0012u16.to_le_bytes()); // ftCmo size
+            obj_payload[4..6].copy_from_slice(&0u16.to_le_bytes()); // ot
+            obj_payload[6..8].copy_from_slice(&obj_id.to_le_bytes()); // idObj
+            // Remaining bytes are zero (ftCmo tail + optional ftEnd).
+            append_record(&mut stream, RECORD_OBJ, &obj_payload);
+
+            // TXO record header with `cchText` at offset 6.
+            let mut txo_payload = [0u8; 18];
+            txo_payload[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2]
+                .copy_from_slice(&1u16.to_le_bytes());
+            append_record(&mut stream, RECORD_TXO, &txo_payload);
+
+            // CONTINUE payload containing a single compressed character.
+            let continue_payload = [0u8, b'x'];
+            append_record(&mut stream, records::RECORD_CONTINUE, &continue_payload);
+        }
+
+        append_record(&mut stream, records::RECORD_EOF, &[]);
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), MAX_NOTES_PER_SHEET);
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("capped") && w.contains("NOTE")),
+            "expected truncation warning; warnings={warnings:?}"
+        );
     }
 }
