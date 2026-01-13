@@ -76,6 +76,17 @@ while IFS= read -r match; do
   if [[ "$ref" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     toolchain_ref="$ref"
   else
+    if ! [[ "$ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
+      echo "Rust toolchain action must be pinned to a Rust version tag (X.Y.Z) or a full commit SHA:"
+      echo "  rust-toolchain.toml channel = ${channel}"
+      echo "  ${file}:${line} uses dtolnay/rust-toolchain@${ref}"
+      echo "  Fix: use dtolnay/rust-toolchain@${channel}, or pin to a commit SHA with a trailing toolchain comment:"
+      echo "    uses: dtolnay/rust-toolchain@<sha> # ${channel}"
+      echo
+      fail=1
+      continue
+    fi
+
     # Commit SHA pins: require an explicit semver toolchain comment so we can validate the intent
     # without reaching out to GitHub during CI.
     #
