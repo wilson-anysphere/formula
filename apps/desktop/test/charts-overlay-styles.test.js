@@ -7,36 +7,34 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(__dirname, "..");
 
-test("shared-grid chart pane hosts use CSS classes (no static inline styles)", async () => {
+test("SpreadsheetApp overlay canvases use CSS classes (no static inline styles)", async () => {
   const spreadsheetAppPath = path.join(desktopRoot, "src/app/spreadsheetApp.ts");
   const text = await readFile(spreadsheetAppPath, "utf8");
 
-  const start = text.indexOf("private initSharedChartPanes(): void {");
-  assert.ok(start !== -1, "expected SpreadsheetApp.initSharedChartPanes() to exist");
+  const start = text.indexOf('this.gridCanvas = document.createElement("canvas");');
+  assert.ok(start !== -1, "expected SpreadsheetApp to create overlay canvases via document.createElement");
 
-  const end = text.indexOf("private syncSharedChartPanes", start);
-  assert.ok(end !== -1, "expected SpreadsheetApp.syncSharedChartPanes() after initSharedChartPanes()");
+  const end = text.indexOf("this.root.appendChild(this.outlineLayer);", start);
+  assert.ok(end !== -1, "expected SpreadsheetApp to append the outlineLayer after creating overlay canvases");
 
   const block = text.slice(start, end);
 
-  // Ensure pane hosts are class-based.
-  assert.match(block, /chart-pane-top-left/);
-  assert.match(block, /chart-pane--top-left/);
-  assert.match(block, /chart-pane-top-right/);
-  assert.match(block, /chart-pane--top-right/);
-  assert.match(block, /chart-pane-bottom-left/);
-  assert.match(block, /chart-pane--bottom-left/);
-  assert.match(block, /chart-pane-bottom-right/);
-  assert.match(block, /chart-pane--bottom-right/);
+  // Ensure overlay layers are class-based.
+  assert.match(block, /gridCanvas\.className\s*=\s*"grid-canvas grid-canvas--base"/);
+  assert.match(block, /drawingCanvas\.className\s*=\s*"drawing-layer drawing-layer--overlay"/);
+  assert.match(block, /chartCanvas\.className\s*=\s*"grid-canvas grid-canvas--chart"/);
+  assert.match(block, /selectionCanvas\.className\s*=\s*"grid-canvas grid-canvas--selection"/);
 
-  // Ensure stable presentation styles are not set inline anymore.
-  assert.ok(!block.includes("pane.style.position"), "expected pane host position to be driven by CSS");
-  assert.ok(!block.includes("pane.style.pointerEvents"), "expected pane host pointer-events to be driven by CSS");
-  assert.ok(!block.includes("pane.style.overflow"), "expected pane host overflow to be driven by CSS");
-  assert.ok(!block.includes("pane.style.left"), "expected pane host default geometry to be driven by CSS");
-  assert.ok(!block.includes("pane.style.top"), "expected pane host default geometry to be driven by CSS");
-  assert.ok(!block.includes("pane.style.width"), "expected pane host default geometry to be driven by CSS");
-  assert.ok(!block.includes("pane.style.height"), "expected pane host default geometry to be driven by CSS");
+  // Shared-grid overlay stacking is expressed via CSS classes (see charts-overlay.css).
+  assert.match(block, /drawingCanvas\.classList\.add\("drawing-layer--shared"\)/);
+  assert.match(block, /chartCanvas\.classList\.add\("grid-canvas--shared-chart"\)/);
+  assert.match(block, /selectionCanvas\.classList\.add\("grid-canvas--shared-selection"\)/);
+  assert.match(block, /outlineLayer\.classList\.add\("outline-layer--shared"\)/);
+
+  // Ensure stable presentation styles are not set inline at mount time.
+  assert.ok(!block.includes(".style.position"), "expected overlay positioning to be driven by CSS");
+  assert.ok(!block.includes(".style.pointerEvents"), "expected overlay pointer-events to be driven by CSS");
+  assert.ok(!block.includes(".style.overflow"), "expected overlay overflow clipping to be driven by CSS");
 });
 
 test("chart overlay hosts are styled via charts-overlay.css", async () => {
@@ -47,50 +45,52 @@ test("chart overlay hosts are styled via charts-overlay.css", async () => {
   const cssPath = path.join(desktopRoot, "src/styles/charts-overlay.css");
   const css = await readFile(cssPath, "utf8");
 
-  assert.match(css, /\.chart-pane\s*\{/);
+  // Charts are rendered on a dedicated canvas layer.
+  assert.match(css, /\.grid-canvas--chart\s*\{/);
+  assert.match(css, /pointer-events:\s*none\s*;/);
+
+  // Drawings (shapes/images) are rendered to a canvas clipped under headers.
+  assert.match(css, /\.drawing-layer\s*\{/);
   assert.match(css, /position:\s*absolute\s*;/);
   assert.match(css, /pointer-events:\s*none\s*;/);
   assert.match(css, /overflow:\s*hidden\s*;/);
 
-  // Ensure the chart overlay remains clipped under headers.
-  assert.match(css, /\.chart-layer\s*\{/);
-  assert.match(css, /overflow:\s*hidden\s*;/);
-
-  // Ensure chart host divs can be created without inline presentation styles.
-  assert.match(css, /\.chart-object\s*\{/);
+  // Shared-grid overlay stacking uses CSS variables + modifier classes.
+  assert.match(css, /\.grid-root\s*\{/);
+  assert.match(css, /--grid-z-chart-overlay/);
+  assert.match(css, /\.drawing-layer--shared\s*\{/);
+  assert.match(css, /\.grid-canvas--shared-chart\s*\{/);
+  assert.match(css, /\.grid-canvas--shared-selection\s*\{/);
+  assert.match(css, /\.outline-layer--shared\s*\{/);
 });
 
-test("shared-grid pane geometry stays dynamic (inline left/top/width/height/display)", async () => {
+test("chart + drawing overlay geometry stays dynamic (inline offsets/sizing)", async () => {
   const spreadsheetAppPath = path.join(desktopRoot, "src/app/spreadsheetApp.ts");
   const text = await readFile(spreadsheetAppPath, "utf8");
 
-  const start = text.indexOf("private syncSharedChartPanes(viewport: GridViewportState): void {");
-  assert.ok(start !== -1, "expected SpreadsheetApp.syncSharedChartPanes() to exist");
+  // Drawings overlay is offset under headers.
+  assert.match(text, /drawingCanvas\.style\.left\s*=/);
+  assert.match(text, /drawingCanvas\.style\.top\s*=/);
 
-  const end = text.indexOf("private chartAnchorToViewportRect", start);
-  assert.ok(end !== -1, "expected chartAnchorToViewportRect() after syncSharedChartPanes()");
-
-  const block = text.slice(start, end);
-
-  assert.match(block, /pane\.style\.left\s*=/);
-  assert.match(block, /pane\.style\.top\s*=/);
-  assert.match(block, /pane\.style\.width\s*=/);
-  assert.match(block, /pane\.style\.height\s*=/);
-  assert.match(block, /pane\.style\.display\s*=/);
+  // Chart canvas is resized dynamically for DPR.
+  assert.match(text, /chartCanvas\.style\.width\s*=/);
+  assert.match(text, /chartCanvas\.style\.height\s*=/);
 });
 
 test("shared-grid overlay stacking uses CSS classes (no zIndex inline styles)", async () => {
   const spreadsheetAppPath = path.join(desktopRoot, "src/app/spreadsheetApp.ts");
   const text = await readFile(spreadsheetAppPath, "utf8");
 
-  assert.match(text, /chartLayer\.classList\.add\("chart-layer--shared"\)/);
+  assert.match(text, /drawingCanvas\.classList\.add\("drawing-layer--shared"\)/);
+  assert.match(text, /chartCanvas\.classList\.add\("grid-canvas--shared-chart"\)/);
   assert.match(text, /selectionCanvas\.classList\.add\("grid-canvas--shared-selection"\)/);
   assert.match(text, /outlineLayer\.classList\.add\("outline-layer--shared"\)/);
 
-  // Sanity: we should not rely on these specific inline z-indices anymore.
-  assert.ok(!text.includes('chartLayer.style.zIndex = "2"'));
-  assert.ok(!text.includes('selectionCanvas.style.zIndex = "3"'));
-  assert.ok(!text.includes('outlineLayer.style.zIndex = "4"'));
+  // Sanity: overlay stacking should be driven by CSS, not inline zIndex assignments.
+  assert.ok(!text.includes("drawingCanvas.style.zIndex"), "expected no inline zIndex for drawingCanvas");
+  assert.ok(!text.includes("chartCanvas.style.zIndex"), "expected no inline zIndex for chartCanvas");
+  assert.ok(!text.includes("selectionCanvas.style.zIndex"), "expected no inline zIndex for selectionCanvas");
+  assert.ok(!text.includes("outlineLayer.style.zIndex"), "expected no inline zIndex for outlineLayer");
 });
 
 test("SpreadsheetApp assigns semantic layer classes to grid canvases + chart overlay", async () => {
@@ -105,7 +105,8 @@ test("SpreadsheetApp assigns semantic layer classes to grid canvases + chart ove
   assert.match(text, /selectionCanvas\.className\s*=\s*"grid-canvas grid-canvas--selection"/);
   assert.match(text, /presenceCanvas\.className\s*=\s*"grid-canvas grid-canvas--presence"/);
 
-  assert.match(text, /chartLayer\.className\s*=\s*"chart-layer chart-layer--overlay"/);
+  assert.match(text, /drawingCanvas\.className\s*=\s*"drawing-layer drawing-layer--overlay"/);
+  assert.match(text, /chartCanvas\.className\s*=\s*"grid-canvas grid-canvas--chart"/);
 });
 
 test("SecondaryGridView assigns semantic layer classes to shared-grid canvases", async () => {

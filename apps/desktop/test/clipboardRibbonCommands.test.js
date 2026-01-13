@@ -11,7 +11,7 @@ function escapeRegExp(value) {
 }
 
 test("Ribbon schema includes canonical clipboard command ids for Home → Clipboard", () => {
-  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
+  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "schema", "homeTab.ts");
   const schema = fs.readFileSync(schemaPath, "utf8");
 
   const ids = [
@@ -29,7 +29,7 @@ test("Ribbon schema includes canonical clipboard command ids for Home → Clipbo
   ];
 
   for (const id of ids) {
-    assert.match(schema, new RegExp(`\\bid:\\s*["']${escapeRegExp(id)}["']`), `Expected ribbonSchema.ts to include ${id}`);
+    assert.match(schema, new RegExp(`\\bid:\\s*["']${escapeRegExp(id)}["']`), `Expected homeTab.ts to include ${id}`);
   }
 
   // Ensure the two primary controls are dropdowns.

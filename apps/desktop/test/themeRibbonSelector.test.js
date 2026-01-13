@@ -11,7 +11,7 @@ function escapeRegExp(value) {
 }
 
 test("Ribbon schema includes the Theme selector dropdown (View → Appearance)", () => {
-  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
+  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "schema", "viewTab.ts");
   const schema = fs.readFileSync(schemaPath, "utf8");
 
   // Dropdown trigger.
@@ -36,14 +36,35 @@ test("Ribbon schema includes the Theme selector dropdown (View → Appearance)",
   }
 });
 
-test("Desktop theme switching commands are wired via registerBuiltinCommands", () => {
+test("Desktop theme switching commands are wired via registerDesktopCommands/registerBuiltinCommands", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = fs.readFileSync(mainPath, "utf8");
 
   // Theme switching is wired through the shared CommandRegistry so ribbon, command palette, and
   // keybindings share the same implementation.
-  assert.match(main, /\bregisterBuiltinCommands\s*\(\s*\{[\s\S]*?\bthemeController\b/);
-  assert.match(main, /\brefreshRibbonUiState\s*:\s*scheduleRibbonSelectionFormatStateUpdate\b/);
+  assert.match(
+    main,
+    /\bregisterDesktopCommands\s*\(\s*\{\s*[\s\S]*?\bthemeController\b/,
+    "Expected desktop startup to pass ThemeController into registerDesktopCommands",
+  );
+  assert.match(
+    main,
+    /\bregisterDesktopCommands\s*\(\s*\{\s*[\s\S]*?\brefreshRibbonUiState\s*:\s*scheduleRibbonSelectionFormatStateUpdate\b/,
+    "Expected desktop startup to wire refreshRibbonUiState to scheduleRibbonSelectionFormatStateUpdate",
+  );
+
+  const desktopCommandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
+  const desktopCommands = fs.readFileSync(desktopCommandsPath, "utf8");
+  assert.match(
+    desktopCommands,
+    /\bregisterBuiltinCommands\s*\(\s*\{\s*[\s\S]*?\bthemeController\b/,
+    "Expected registerDesktopCommands.ts to pass themeController into registerBuiltinCommands",
+  );
+  assert.match(
+    desktopCommands,
+    /\bregisterBuiltinCommands\s*\(\s*\{\s*[\s\S]*?\brefreshRibbonUiState\b/,
+    "Expected registerDesktopCommands.ts to pass refreshRibbonUiState into registerBuiltinCommands",
+  );
 
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
   const commands = fs.readFileSync(commandsPath, "utf8");
@@ -59,13 +80,15 @@ test("Desktop theme switching commands are wired via registerBuiltinCommands", (
     const pattern = new RegExp(
       `commandRegistry\\.registerBuiltinCommand\\([\\s\\S]*?["']${escapeRegExp(
         commandId,
-      )}["'][\\s\\S]*?themeController\\.setThemePreference\\(["']${escapeRegExp(preference)}["']\\)`,
+      )}["'][\\s\\S]*?themeController\\.setThemePreference\\(["']${escapeRegExp(
+        preference,
+      )}["']\\)[\\s\\S]*?\\brefresh\\(\\)`,
       "m",
     );
     assert.match(
       commands,
       pattern,
-      `Expected registerBuiltinCommands.ts to handle ${commandId} by calling themeController.setThemePreference("${preference}")`,
+      `Expected registerBuiltinCommands.ts to handle ${commandId} by calling themeController.setThemePreference("${preference}") and refreshing ribbon UI state`,
     );
   }
 });

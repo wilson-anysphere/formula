@@ -11,8 +11,9 @@ function escapeRegExp(value) {
 }
 
 test("Ribbon schema includes View/Developer macro command ids", () => {
-  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
-  const schema = fs.readFileSync(schemaPath, "utf8");
+  const viewTabPath = path.join(__dirname, "..", "src", "ribbon", "schema", "viewTab.ts");
+  const developerTabPath = path.join(__dirname, "..", "src", "ribbon", "schema", "developerTab.ts");
+  const schema = `${fs.readFileSync(viewTabPath, "utf8")}\n${fs.readFileSync(developerTabPath, "utf8")}`;
 
   const commandIds = [
     // View → Macros.
@@ -93,4 +94,3 @@ test("Desktop main.ts wires macro ribbon commands to Macros/Script Editor/VBA pa
   assert.match(main, /\bactiveMacroRecorder\?\.\s*start\(\);/, "Expected record macro commands to call activeMacroRecorder.start()");
   assert.match(main, /\bactiveMacroRecorder\?\.\s*stop\(\);/, "Expected stop recording commands to call activeMacroRecorder.stop()");
 });
-

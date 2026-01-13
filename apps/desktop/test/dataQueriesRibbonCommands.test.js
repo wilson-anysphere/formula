@@ -11,7 +11,7 @@ function escapeRegExp(value) {
 }
 
 test("Ribbon schema includes Data → Queries & Connections controls", () => {
-  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
+  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "schema", "dataTab.ts");
   const schema = fs.readFileSync(schemaPath, "utf8");
 
   // Toggle button.

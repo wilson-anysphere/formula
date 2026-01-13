@@ -10,6 +10,15 @@ function readDesktopSource(...segments) {
   return fs.readFileSync(path.join(__dirname, "..", "src", ...segments), "utf8");
 }
 
+function readRibbonSchemaSource() {
+  const schemaDir = path.join(__dirname, "..", "src", "ribbon", "schema");
+  const schemaFiles = fs
+    .readdirSync(schemaDir)
+    .filter((entry) => entry.endsWith(".ts"))
+    .sort((a, b) => a.localeCompare(b));
+  return schemaFiles.map((file) => fs.readFileSync(path.join(schemaDir, file), "utf8")).join("\n");
+}
+
 function collectSchemaButtonsWithSize(source, sizeValue) {
   const buttons = new Map();
   const re = new RegExp(`\\bsize\\s*:\\s*["']${sizeValue}["']`, "g");
@@ -177,7 +186,7 @@ function skipWhitespace(source, index) {
 }
 
 test('ribbon schema assigns an iconId for every button with size: "icon"', () => {
-  const schemaSource = readDesktopSource("ribbon", "ribbonSchema.ts");
+  const schemaSource = readRibbonSchemaSource();
 
   const iconButtons = collectSchemaButtonsWithSize(schemaSource, "icon");
   assert.ok(
@@ -195,7 +204,7 @@ test('ribbon schema assigns an iconId for every button with size: "icon"', () =>
 });
 
 test('ribbon schema assigns an iconId for every button with size: "large"', () => {
-  const schemaSource = readDesktopSource("ribbon", "ribbonSchema.ts");
+  const schemaSource = readRibbonSchemaSource();
 
   const largeButtons = collectSchemaButtonsWithSize(schemaSource, "large");
   assert.ok(

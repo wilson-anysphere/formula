@@ -28,10 +28,15 @@ test("desktop main.ts avoids static inline style assignments", () => {
     );
   }
 
+  // Hidden color inputs are defined in the builtin command registration module so they can be
+  // invoked from ribbon/command palette/keybindings through the same path.
+  const builtinCommandsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
+  const builtinCommands = fs.readFileSync(builtinCommandsPath, "utf8");
+
   const hiddenColorInputSection = extractSection(
-    source,
-    "function createHiddenColorInput()",
-    "const fontColorPicker",
+    builtinCommands,
+    "const createHiddenColorInput",
+    "let fontColorPicker",
   );
   assert.equal(
     /\.style\./.test(hiddenColorInputSection),

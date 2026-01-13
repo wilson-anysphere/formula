@@ -11,13 +11,13 @@ function escapeRegExp(value) {
 }
 
 test("Ribbon schema uses canonical Review → Comments command ids", () => {
-  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
+  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "schema", "reviewTab.ts");
   const schema = fs.readFileSync(schemaPath, "utf8");
 
   // Review → Comments group should be wired to the stable builtin command ids.
   const commandIds = ["comments.addComment", "comments.togglePanel"];
   for (const id of commandIds) {
-    assert.match(schema, new RegExp(`\\bid:\\s*["']${escapeRegExp(id)}["']`), `Expected ribbonSchema.ts to include ${id}`);
+    assert.match(schema, new RegExp(`\\bid:\\s*["']${escapeRegExp(id)}["']`), `Expected reviewTab.ts to include ${id}`);
   }
 
   // Preserve key metadata so the UI stays stable.

@@ -384,7 +384,6 @@ function parseStroke(spPr: XmlElementLike): ShapeStroke | undefined {
 
   const solid = childElements(ln).find((c) => localName(c) === "solidFill");
   const color = (solid ? parseSrgbColor(solid) : null) ?? DEFAULT_STROKE_COLOR;
-
   const dash = findFirstDescendantByLocalName(ln, "prstDash");
   const dashPreset = dash ? getAttribute(dash, "val")?.trim() : null;
   if (dashPreset) return { color, widthEmu, dashPreset };

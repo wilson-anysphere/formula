@@ -17,13 +17,13 @@ function countMatches(source, pattern) {
 }
 
 test("Ribbon schema aligns Home → Editing AutoSum/Fill ids with CommandRegistry ids", () => {
-  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
+  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "schema", "homeTab.ts");
   const schema = fs.readFileSync(schemaPath, "utf8");
 
   // Canonical command ids.
   const requiredIds = ["edit.autoSum", "edit.fillDown", "edit.fillRight"];
   for (const id of requiredIds) {
-    assert.match(schema, new RegExp(`\\bid:\\s*["']${escapeRegExp(id)}["']`), `Expected ribbonSchema.ts to include ${id}`);
+    assert.match(schema, new RegExp(`\\bid:\\s*["']${escapeRegExp(id)}["']`), `Expected homeTab.ts to include ${id}`);
   }
 
   // AutoSum should be used for both the dropdown button id and the default "Sum" menu item.
@@ -67,4 +67,3 @@ test("Desktop main.ts handles canonical Editing ribbon commands directly (no leg
     );
   }
 });
-

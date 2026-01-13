@@ -27,6 +27,8 @@ test("tokens.css defines required design tokens", () => {
     "text-secondary",
     "border",
     "accent",
+    "accent-hover",
+    "accent-active",
     "accent-light",
     "error",
     "warning",

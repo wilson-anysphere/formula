@@ -27,15 +27,21 @@ function findDuplicates(values) {
 }
 
 test("ribbon schema and File backstage expose stable, unique test ids", () => {
-  const ribbonSchemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
-  const ribbonSchema = fs.readFileSync(ribbonSchemaPath, "utf8");
+  const ribbonSchemaDir = path.join(__dirname, "..", "src", "ribbon", "schema");
+  const ribbonSchemaFiles = fs
+    .readdirSync(ribbonSchemaDir)
+    .filter((entry) => entry.endsWith(".ts"))
+    .sort((a, b) => a.localeCompare(b));
+  const ribbonSchema = ribbonSchemaFiles
+    .map((file) => fs.readFileSync(path.join(ribbonSchemaDir, file), "utf8"))
+    .join("\n");
 
   const ribbonTestIds = collectStringPropertyValues(ribbonSchema, "testId");
   const ribbonDuplicates = findDuplicates(ribbonTestIds);
   assert.deepEqual(
     ribbonDuplicates,
     [],
-    `apps/desktop/src/ribbon/ribbonSchema.ts contains duplicate testId values (breaks Playwright strict-mode):\n${ribbonDuplicates
+    `apps/desktop/src/ribbon/schema/*.ts contains duplicate testId values (breaks Playwright strict-mode):\n${ribbonDuplicates
       .map(({ value, count }) => `- ${value} (${count}x)`)
       .join("\n")}`,
   );
@@ -77,7 +83,7 @@ test("ribbon schema and File backstage expose stable, unique test ids", () => {
   assert.deepEqual(
     missingRibbonTestIds,
     [],
-    `apps/desktop/src/ribbon/ribbonSchema.ts is missing required test ids:\n${missingRibbonTestIds.map((id) => `- ${id}`).join("\n")}`,
+    `apps/desktop/src/ribbon/schema/*.ts is missing required test ids:\n${missingRibbonTestIds.map((id) => `- ${id}`).join("\n")}`,
   );
 
   const fileBackstagePath = path.join(__dirname, "..", "src", "ribbon", "FileBackstage.tsx");

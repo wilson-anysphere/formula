@@ -11,7 +11,7 @@ function escapeRegExp(value) {
 }
 
 test("Ribbon schema includes View → Zoom command ids", () => {
-  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
+  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "schema", "viewTab.ts");
   const schema = fs.readFileSync(schemaPath, "utf8");
 
   const ids = [

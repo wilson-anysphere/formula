@@ -114,9 +114,12 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     // intentionally include hex colors.
     if (rel === "charts/scene/color.ts") return false;
     if (rel === "charts/scene/demo.ts") return false;
+    // Ribbon command router maps ribbon ids to cell-formatting color presets (data-driven),
+    // which intentionally include ARGB hex strings.
+    if (rel === "ribbon/ribbonCommandRouter.ts") return false;
     if (rel.includes("/demo/")) return false;
     if (rel.includes("/__tests__/")) return false;
-    if (/\.(test|spec)\.[jt]sx?$/.test(rel)) return false;
+    if (/\.(test|spec|vitest)\.[jt]sx?$/.test(rel)) return false;
     return (
       rel.endsWith(".css") ||
       rel.endsWith(".js") ||
