@@ -62,6 +62,8 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Fail if merge conflict markers are present
         run: bash scripts/ci/check-merge-conflict-markers.sh
+      - name: Guard: Rust toolchain pins match rust-toolchain.toml
+        run: bash scripts/ci/check-rust-toolchain-pins.sh
 
   validate-version:
     name: Validate desktop version matches tag

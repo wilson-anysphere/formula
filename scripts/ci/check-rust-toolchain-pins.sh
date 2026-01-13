@@ -60,14 +60,47 @@ while IFS= read -r match; do
     continue
   fi
 
-  # dtolnay/rust-toolchain tags sometimes include a leading "v". We only use numeric toolchain tags.
-  ref="${ref#v}"
+  # dtolnay/rust-toolchain can be pinned either to:
+  # - a toolchain version tag (e.g. `@1.92.0`), or
+  # - an immutable commit SHA (supply-chain hardening), often with a trailing `# 1.92.0` comment.
+  #
+  # Normalize both forms into the underlying Rust toolchain version we expect.
+  toolchain_ref=""
+  if [[ "$ref" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    toolchain_ref="$ref"
+  else
+    # Commit SHA pins: require an explicit semver toolchain comment so we can validate the intent
+    # without reaching out to GitHub during CI.
+    #
+    # Example:
+    #   uses: dtolnay/rust-toolchain@<sha> # 1.92.0
+    comment="${match#*#}"
+    if [ "$comment" != "$match" ]; then
+      comment="${comment#"${comment%%[![:space:]]*}"}" # ltrim
+      comment="${comment%%[[:space:]]*}"
+      comment="${comment#v}"
+      if [[ "$comment" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        toolchain_ref="$comment"
+      fi
+    fi
+  fi
 
-  if [ "$ref" != "$channel" ]; then
+  if [ -z "$toolchain_ref" ]; then
+    echo "Rust toolchain pin could not be interpreted as a semver version:"
+    echo "  rust-toolchain.toml channel = ${channel}"
+    echo "  ${file}:${line} uses dtolnay/rust-toolchain@${ref}"
+    echo "  Fix: pin to @${channel}, or add a trailing comment with the toolchain version:"
+    echo "    uses: dtolnay/rust-toolchain@<sha> # ${channel}"
+    echo
+    fail=1
+    continue
+  fi
+
+  if [ "$toolchain_ref" != "$channel" ]; then
     echo "Rust toolchain pin mismatch:"
     echo "  rust-toolchain.toml channel = ${channel}"
     echo "  ${file}:${line} uses dtolnay/rust-toolchain@${ref}"
-    echo "  Fix: update the workflow to dtolnay/rust-toolchain@${channel} (or update rust-toolchain.toml)."
+    echo "  Fix: update the workflow to match ${channel} (or update rust-toolchain.toml)."
     echo
     fail=1
   fi
