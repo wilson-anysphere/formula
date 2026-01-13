@@ -377,13 +377,15 @@ install WebView2 automatically if it is missing by using Tauri's WebView2 instal
   (Evergreen **bootstrapper**; we also set `silent: true`; requires an internet connection to download/install the runtime).
 - Alternative: `bundle.windows.webviewInstallMode.type = "embedBootstrapper"` bundles the bootstrapper into the installer
   (slightly larger installer; still requires internet to install the runtime; can be more reliable on older Windows versions).
-- CI verification: the release workflow runs `scripts/ci/check-windows-webview2-installer.py`, which inspects the produced
-  Windows installer(s) and asserts they contain a reference to `MicrosoftEdgeWebview2Setup.exe` (or an offline runtime
-  installer), failing the release build if this regresses.
+- CI verification:
+  - Fast preflight (config-only): `node scripts/ci/check-webview2-install-mode.mjs`
+  - Built-artifact inspection: `python scripts/ci/check-windows-webview2-installer.py` (asserts the produced installers
+    contain a WebView2 bootstrapper/runtime reference), failing the release build if this regresses.
 
 To verify locally after a Windows build, run:
 
 ```bash
+node scripts/ci/check-webview2-install-mode.mjs
 python scripts/ci/check-windows-webview2-installer.py
 ```
 
