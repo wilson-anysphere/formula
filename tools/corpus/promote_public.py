@@ -200,7 +200,8 @@ def main() -> int:
     parser.add_argument(
         "--name",
         help=(
-            "Optional fixture name (without extension). Defaults to the input filename. "
+            "Optional fixture name (without extension). "
+            "If omitted, a safe hash-based name is used unless promoting an existing fixture under --public-dir. "
             "Examples: 'my-case' or 'my-case.xlsx'."
         ),
     )
@@ -267,20 +268,14 @@ def main() -> int:
         print(f"Failed to read input workbook: {e}")
         return 1
 
-    try:
-        default_ext = Path(wb_in.display_name).suffix.lower()
-        if default_ext not in {".xlsx", ".xlsm", ".xlsb"}:
-            default_ext = ".xlsx"
-        display_name = _coerce_display_name(args.name or wb_in.display_name, default_ext=default_ext)
-    except ValueError as e:
-        print(str(e))
-        return 1
-
-    # Note: `WorkbookInput` must not contain local paths; use `display_name`.
+    # Note: `WorkbookInput` must not contain local paths; use a safe `display_name`.
     workbook_bytes = wb_in.data
+    input_ext = Path(wb_in.display_name).suffix.lower()
+    if input_ext not in {".xlsx", ".xlsm", ".xlsb"}:
+        input_ext = ".xlsx"
 
     if args.sanitize:
-        if display_name.casefold().endswith(".xlsb"):
+        if input_ext == ".xlsb":
             print(
                 "XLSB sanitization is not supported by --sanitize yet. "
                 "Provide an already-sanitized XLSB and pass --confirm-sanitized, "
@@ -302,7 +297,7 @@ def main() -> int:
             print(f"Sanitization failed: {e}")
             return 1
 
-    if display_name.casefold().endswith(".xlsb") and not args.confirm_sanitized:
+    if input_ext == ".xlsb" and not args.confirm_sanitized:
         print(
             "XLSB leak scanning is not supported. "
             "Provide an already-sanitized XLSB and pass --confirm-sanitized."
@@ -325,6 +320,33 @@ def main() -> int:
             return 1
 
     public_dir: Path = args.public_dir
+    # Choose a stable, non-sensitive display name. File names can leak customer/org info, so
+    # default to a hash-based name unless we're promoting an existing fixture already under
+    # the public corpus directory (where the filename is assumed to be safe).
+    try:
+        if args.name:
+            display_name = _coerce_display_name(args.name, default_ext=input_ext)
+        else:
+            try:
+                input_resolved = args.input.resolve()
+                public_resolved = public_dir.resolve()
+                in_public_dir = input_resolved.is_relative_to(public_resolved)
+            except Exception:
+                in_public_dir = False
+
+            if in_public_dir:
+                display_name = _coerce_display_name(wb_in.display_name, default_ext=input_ext)
+            else:
+                display_name = f"workbook-{sha256_hex(workbook_bytes)[:16]}{input_ext}"
+    except ValueError as e:
+        print(str(e))
+        return 1
+
+    out_ext = Path(display_name).suffix.lower()
+    if out_ext != input_ext:
+        print(f"--name extension must match input extension ({input_ext}); got {out_ext}.")
+        return 1
+
     fixture_path = public_dir / f"{display_name}.b64"
     expectations_path = public_dir / "expectations.json"
 

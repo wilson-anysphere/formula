@@ -372,6 +372,9 @@ triage and refresh the expectations entry.
 For `.xlsb` inputs, `--sanitize` and leak scanning are not supported; provide an already-sanitized workbook and pass
 `--confirm-sanitized`.
 
+Filename safety: if you omit `--name` when promoting from outside `tools/corpus/public/`, the command uses a
+hash-based name (`workbook-<sha256[:16]>.xlsx`) instead of the local filename to avoid leaking customer/org names.
+
 ### Generate a unified compatibility scorecard (corpus + Excel-oracle)
 
 The corpus dashboard captures **read + round-trip** behavior, while the Excel-oracle harness captures

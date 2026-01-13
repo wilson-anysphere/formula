@@ -37,6 +37,56 @@ def _make_minimal_xlsx() -> bytes:
 
 
 class PromotePublicCLITests(unittest.TestCase):
+    def test_main_defaults_to_hash_name_outside_public_dir(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="promote-public-cli-test-") as td:
+            tmp = Path(td)
+            public_dir = tmp / "public"
+            triage_out = tmp / "triage"
+            input_path = tmp / "input.xlsx"
+            input_bytes = _make_minimal_xlsx()
+            input_path.write_bytes(input_bytes)
+
+            expected_name = f"workbook-{sha256_hex(input_bytes)[:16]}.xlsx"
+
+            original_run_public_triage = promote_mod._run_public_triage
+            try:
+                promote_mod._run_public_triage = (  # type: ignore[assignment]
+                    lambda wb, *, diff_limit=25, recalc=False, render_smoke=False: {
+                        "sha256": sha256_hex(wb.data),
+                        "result": {
+                            "open_ok": True,
+                            "round_trip_ok": True,
+                            "diff_critical_count": 0,
+                        },
+                    }
+                )
+
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    with mock.patch.object(
+                        sys,
+                        "argv",
+                        [
+                            "promote_public.py",
+                            "--input",
+                            str(input_path),
+                            "--public-dir",
+                            str(public_dir),
+                            "--triage-out",
+                            str(triage_out),
+                        ],
+                    ):
+                        rc = promote_mod.main()
+                self.assertEqual(rc, 0)
+
+                fixture_path = public_dir / f"{expected_name}.b64"
+                self.assertTrue(fixture_path.exists())
+
+                expectations = json.loads((public_dir / "expectations.json").read_text(encoding="utf-8"))
+                self.assertIn(expected_name, expectations)
+            finally:
+                promote_mod._run_public_triage = original_run_public_triage  # type: ignore[assignment]
+
     def test_main_skips_triage_for_existing_public_fixture(self) -> None:
         with tempfile.TemporaryDirectory(prefix="promote-public-cli-test-") as td:
             tmp = Path(td)
