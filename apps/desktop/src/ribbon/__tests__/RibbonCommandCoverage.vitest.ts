@@ -104,6 +104,26 @@ function collectRibbonCommandIds(): string[] {
 describe("Ribbon ↔ CommandRegistry coverage", () => {
   it("registers canonical ribbon command ids in CommandRegistry", () => {
     const ribbonIds = collectRibbonCommandIds();
+    const ribbonIdSet = new Set(ribbonIds);
+
+    // Guard against the exemption list silently growing/staying stale:
+    // - If an exempt id no longer exists in the ribbon schema, remove it.
+    // - If an exempt id now has a real command registered, remove it from the exemption list.
+    const staleExemptions = [...INTENTIONALLY_UNIMPLEMENTED_RIBBON_COMMAND_IDS].filter((id) => !ribbonIdSet.has(id)).sort();
+    expect(
+      staleExemptions,
+      `Exemptions contain ids that are no longer present in the ribbon schema:\n${staleExemptions.map((id) => `- ${id}`).join("\n")}`,
+    ).toEqual([]);
+    const nonCanonicalExemptions = [...INTENTIONALLY_UNIMPLEMENTED_RIBBON_COMMAND_IDS]
+      .filter((id) => !CANONICAL_RIBBON_COMMAND_RE.test(id))
+      .sort();
+    expect(
+      nonCanonicalExemptions,
+      `Exemptions must only include canonical command ids (matching ${String(CANONICAL_RIBBON_COMMAND_RE)}):\n${nonCanonicalExemptions
+        .map((id) => `- ${id}`)
+        .join("\n")}`,
+    ).toEqual([]);
+
     const idsToCheck = ribbonIds
       .filter((id) => CANONICAL_RIBBON_COMMAND_RE.test(id))
       .filter((id) => !INTENTIONALLY_UNIMPLEMENTED_RIBBON_COMMAND_IDS.has(id))
@@ -191,6 +211,17 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       fontColorPicker: {} as any,
       fillColorPicker: {} as any,
     });
+
+    const implementedExemptions = [...INTENTIONALLY_UNIMPLEMENTED_RIBBON_COMMAND_IDS]
+      .filter((id) => commandRegistry.getCommand(id) != null)
+      .sort();
+    expect(
+      implementedExemptions,
+      [
+        "Exemptions contain ids that are now registered commands (please remove them from the exemption list):",
+        ...implementedExemptions.map((id) => `- ${id}`),
+      ].join("\n"),
+    ).toEqual([]);
     const missing = idsToCheck.filter((id) => commandRegistry.getCommand(id) == null);
 
     expect(
