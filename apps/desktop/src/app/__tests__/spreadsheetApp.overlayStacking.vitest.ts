@@ -230,3 +230,4 @@ describe("SpreadsheetApp overlay stacking", () => {
     }
   });
 });
+
