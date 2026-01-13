@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  convertDocumentSheetDrawingsToUiDrawingObjects,
   convertModelDrawingObjectToUiDrawingObject,
   convertModelImageStoreToUiImageStore,
   convertModelWorkbookDrawingsToUiDrawingLayer,
 } from "../modelAdapters";
+import { pxToEmu } from "../overlay";
 
 describe("drawings/modelAdapters", () => {
   it("converts a TwoCell Image drawing object", () => {
@@ -234,6 +236,70 @@ describe("drawings/modelAdapters", () => {
     expect(ui.drawingsBySheetName.Sheet1).toHaveLength(1);
     expect(ui.drawingsBySheetName.Sheet1?.[0]?.kind).toEqual({ type: "image", imageId: "image1.png" });
     expect(ui.drawingsBySheetName.Sheet2).toEqual([]);
+  });
+
+  it("converts DocumentController cell-anchored drawings (pixel size) to overlay anchors", () => {
+    const drawings = [
+      {
+        id: "7",
+        zOrder: 1,
+        anchor: { type: "cell", sheetId: "Sheet1", row: 0, col: 0 },
+        kind: { type: "image", imageId: "img1" },
+        size: { width: 120, height: 80 },
+      },
+    ];
+
+    const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+    expect(ui).toHaveLength(1);
+    expect(ui[0]).toMatchObject({
+      id: 7,
+      kind: { type: "image", imageId: "img1" },
+      anchor: {
+        type: "oneCell",
+        from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+        size: { cx: pxToEmu(120), cy: pxToEmu(80) },
+      },
+      zOrder: 1,
+      size: { cx: pxToEmu(120), cy: pxToEmu(80) },
+    });
+  });
+
+  it("defaults missing DocumentController drawing sizes to 100x100px", () => {
+    const drawings = [
+      {
+        id: "d1",
+        zOrder: 0,
+        anchor: { type: "cell", row: 3, col: 2 },
+        kind: { type: "image", imageId: "img1" },
+      },
+    ];
+
+    const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+    expect(ui).toHaveLength(1);
+    expect(ui[0]?.anchor).toMatchObject({
+      type: "oneCell",
+      from: { cell: { row: 3, col: 2 }, offset: { xEmu: 0, yEmu: 0 } },
+      size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+    });
+  });
+
+  it("accepts cell anchor pixel offsets in DocumentController drawings", () => {
+    const drawings = [
+      {
+        id: "1",
+        zOrder: 0,
+        anchor: { type: "cell", row: 0, col: 0, x: 12, y: 34 },
+        kind: { type: "image", imageId: "img1" },
+        size: { width: 10, height: 10 },
+      },
+    ];
+
+    const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+    expect(ui).toHaveLength(1);
+    expect(ui[0]?.anchor).toMatchObject({
+      type: "oneCell",
+      from: { cell: { row: 0, col: 0 }, offset: { xEmu: pxToEmu(12), yEmu: pxToEmu(34) } },
+    });
   });
 
   it("accepts workbook snapshots with sheets encoded as an object map", () => {
