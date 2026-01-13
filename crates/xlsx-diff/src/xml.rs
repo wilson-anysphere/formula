@@ -165,25 +165,57 @@ fn normalize_child_order(parent: &QName, children: &mut Vec<XmlNode>, part_name:
     // Worksheet cell storage order is not semantically meaningful. Normalize the most
     // common containers so diffs focus on actual content changes rather than writer
     // iteration order.
-    if part_name.starts_with("xl/worksheets/")
+    let is_worksheet_part = part_name.starts_with("xl/worksheets/sheet") && part_name.ends_with(".xml");
+
+    if is_worksheet_part
         && parent.ns.as_deref() == Some(SPREADSHEETML_NS)
         && parent.local == "sheetData"
     {
         children.sort_by_key(sheetdata_child_sort_key);
     }
 
-    if part_name.starts_with("xl/worksheets/")
+    if is_worksheet_part
         && parent.ns.as_deref() == Some(SPREADSHEETML_NS)
         && parent.local == "cols"
     {
         children.sort_by_key(cols_child_sort_key);
     }
 
-    if part_name.starts_with("xl/worksheets/")
+    if is_worksheet_part
         && parent.ns.as_deref() == Some(SPREADSHEETML_NS)
         && parent.local == "row"
     {
         children.sort_by_key(row_child_sort_key);
+    }
+
+    // Worksheet containers whose child ordering is effectively a set/map. Excel and other
+    // writers frequently rewrite these in different orders.
+    if is_worksheet_part
+        && parent.ns.as_deref() == Some(SPREADSHEETML_NS)
+        && parent.local == "mergeCells"
+    {
+        children.sort_by_key(merge_cells_child_sort_key);
+    }
+
+    if is_worksheet_part
+        && parent.ns.as_deref() == Some(SPREADSHEETML_NS)
+        && parent.local == "hyperlinks"
+    {
+        children.sort_by_key(hyperlinks_child_sort_key);
+    }
+
+    if is_worksheet_part
+        && parent.ns.as_deref() == Some(SPREADSHEETML_NS)
+        && parent.local == "dataValidations"
+    {
+        children.sort_by_key(data_validations_child_sort_key);
+    }
+
+    if is_worksheet_part
+        && parent.ns.as_deref() == Some(SPREADSHEETML_NS)
+        && parent.local == "conditionalFormatting"
+    {
+        children.sort_by_key(conditional_formatting_child_sort_key);
     }
 
     if part_name == "xl/workbook.xml"
@@ -272,6 +304,59 @@ fn cols_child_sort_key(node: &XmlNode) -> (u8, u32, u32, String) {
         }
         XmlNode::Element(el) => (1, u32::MAX, u32::MAX, el.name.local.clone()),
         XmlNode::Text(_) => (2, u32::MAX, u32::MAX, String::new()),
+    }
+}
+
+fn merge_cells_child_sort_key(node: &XmlNode) -> (u8, String, String) {
+    match node {
+        XmlNode::Element(el) if el.name.local == "mergeCell" => (
+            0,
+            attr_value(el, "ref").unwrap_or_default().to_string(),
+            String::new(),
+        ),
+        XmlNode::Element(el) => (1, el.name.local.clone(), String::new()),
+        XmlNode::Text(_) => (2, String::new(), String::new()),
+    }
+}
+
+fn hyperlinks_child_sort_key(node: &XmlNode) -> (u8, String, String) {
+    match node {
+        XmlNode::Element(el) if el.name.local == "hyperlink" => {
+            let key = attr_value(el, "ref")
+                .or_else(|| attr_value(el, "id"))
+                .unwrap_or_default()
+                .to_string();
+            (0, key, String::new())
+        }
+        XmlNode::Element(el) => (1, el.name.local.clone(), String::new()),
+        XmlNode::Text(_) => (2, String::new(), String::new()),
+    }
+}
+
+fn data_validations_child_sort_key(node: &XmlNode) -> (u8, String, String, String) {
+    match node {
+        XmlNode::Element(el) if el.name.local == "dataValidation" => (
+            0,
+            attr_value(el, "sqref").unwrap_or_default().to_string(),
+            attr_value(el, "type").unwrap_or_default().to_string(),
+            String::new(),
+        ),
+        XmlNode::Element(el) => (1, el.name.local.clone(), String::new(), String::new()),
+        XmlNode::Text(_) => (2, String::new(), String::new(), String::new()),
+    }
+}
+
+fn conditional_formatting_child_sort_key(node: &XmlNode) -> (u8, u32, String, String) {
+    match node {
+        XmlNode::Element(el) if el.name.local == "cfRule" => {
+            let priority = attr_value(el, "priority")
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(u32::MAX);
+            let ty = attr_value(el, "type").unwrap_or_default().to_string();
+            (0, priority, ty, String::new())
+        }
+        XmlNode::Element(el) => (1, u32::MAX, String::new(), el.name.local.clone()),
+        XmlNode::Text(_) => (2, u32::MAX, String::new(), String::new()),
     }
 }
 
