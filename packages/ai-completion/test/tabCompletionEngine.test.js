@@ -114,6 +114,24 @@ test("Typing =<space> suggests starter functions (pure insertion)", async () => 
   );
 });
 
+test("Typing = suggests an extended starter list when maxSuggestions is increased", async () => {
+  const engine = new TabCompletionEngine({ maxSuggestions: 7 });
+
+  const currentInput = "=";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.deepEqual(
+    suggestions.map((s) => s.text),
+    ["=SUM(", "=AVERAGE(", "=IF(", "=XLOOKUP(", "=VLOOKUP(", "=INDEX(", "=MATCH("],
+    `Expected extended starter ordering, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Backend completion client is not called for empty formulas (just '=')", async () => {
   let calls = 0;
   const completionClient = {
