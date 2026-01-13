@@ -9,10 +9,44 @@ use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::Arc;
 
 /// Aggregation operator supported by the columnar query engine.
+///
+/// ## Null semantics
+///
+/// Unless noted otherwise, aggregations ignore nulls (blanks).
+///
+/// - [`AggOp::Count`], [`AggOp::CountNumbers`], and [`AggOp::DistinctCount`] always return a
+///   numeric value (never null). When the input has no qualifying values for a group they return
+///   `0.0`.
+/// - [`AggOp::SumF64`] and [`AggOp::AvgF64`] return `Value::Null` when a group has no numeric
+///   values.
+/// - [`AggOp::Var`], [`AggOp::VarP`], [`AggOp::StdDev`], and [`AggOp::StdDevP`] return
+///   `Value::Null` when a group has no numeric values; the sample variants (`Var`, `StdDev`)
+///   additionally return `Value::Null` when the group has fewer than 2 numeric values.
+/// - [`AggOp::Min`] / [`AggOp::Max`] return `Value::Null` when a group has no non-null values.
+///
+/// ## DistinctCount details
+///
+/// [`AggOp::DistinctCount`] counts distinct **non-null** values. For `ColumnType::Number` it
+/// canonicalizes `-0.0` to `0.0` and all NaN bit patterns to a single canonical NaN (mirroring
+/// [`canonical_f64_bits`]) before deduplication.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AggOp {
     Count,
+    /// Average of numeric values (ignoring nulls).
+    AvgF64,
     SumF64,
+    /// Count distinct non-null values.
+    DistinctCount,
+    /// Count non-null numeric values (Excel/Pivot `COUNT` semantics).
+    CountNumbers,
+    /// Sample variance (n-1 denominator), ignoring nulls; null when the group has <2 values.
+    Var,
+    /// Population variance (n denominator), ignoring nulls; null when the group has 0 values.
+    VarP,
+    /// Sample standard deviation (sqrt(var)), ignoring nulls; null when the group has <2 values.
+    StdDev,
+    /// Population standard deviation (sqrt(varp)), ignoring nulls; null when the group has 0 values.
+    StdDevP,
     Min,
     Max,
 }
@@ -49,6 +83,62 @@ impl AggSpec {
     pub fn sum_f64(column: usize) -> Self {
         Self {
             op: AggOp::SumF64,
+            column: Some(column),
+            name: None,
+        }
+    }
+
+    pub fn avg_f64(column: usize) -> Self {
+        Self {
+            op: AggOp::AvgF64,
+            column: Some(column),
+            name: None,
+        }
+    }
+
+    pub fn distinct_count(column: usize) -> Self {
+        Self {
+            op: AggOp::DistinctCount,
+            column: Some(column),
+            name: None,
+        }
+    }
+
+    pub fn count_numbers(column: usize) -> Self {
+        Self {
+            op: AggOp::CountNumbers,
+            column: Some(column),
+            name: None,
+        }
+    }
+
+    pub fn var(column: usize) -> Self {
+        Self {
+            op: AggOp::Var,
+            column: Some(column),
+            name: None,
+        }
+    }
+
+    pub fn var_p(column: usize) -> Self {
+        Self {
+            op: AggOp::VarP,
+            column: Some(column),
+            name: None,
+        }
+    }
+
+    pub fn std_dev(column: usize) -> Self {
+        Self {
+            op: AggOp::StdDev,
+            column: Some(column),
+            name: None,
+        }
+    }
+
+    pub fn std_dev_p(column: usize) -> Self {
+        Self {
+            op: AggOp::StdDevP,
             column: Some(column),
             name: None,
         }
@@ -203,6 +293,35 @@ fn scalar_to_key(kind: KeyKind, scalar: Scalar) -> KeyValue {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct DistinctGroupKey {
+    group: u64,
+    value: u64,
+}
+
+fn distinct_value_bits(kind: KeyKind, scalar: Scalar) -> Option<u64> {
+    match (kind, scalar) {
+        (_, Scalar::Null) => None,
+        (KeyKind::Int, Scalar::I64(v)) => Some(v as u64),
+        (KeyKind::Float, Scalar::F64(v)) => Some(canonical_f64_bits(v)),
+        (KeyKind::Bool, Scalar::Bool(v)) => Some(if v { 1 } else { 0 }),
+        (KeyKind::Dict, Scalar::U32(v)) => Some(v as u64),
+        _ => None,
+    }
+}
+
+fn update_welford(counts: &mut [u64], means: &mut [f64], m2: &mut [f64], group: usize, x: f64) {
+    let n0 = counts[group];
+    let n1 = n0 + 1;
+    counts[group] = n1;
+    let mean0 = means[group];
+    let delta = x - mean0;
+    let mean1 = mean0 + delta / n1 as f64;
+    means[group] = mean1;
+    let delta2 = x - mean1;
+    m2[group] += delta * delta2;
+}
+
 fn value_from_i64(column_type: ColumnType, value: i64) -> Value {
     match column_type {
         ColumnType::DateTime => Value::DateTime(value),
@@ -221,7 +340,14 @@ fn default_output_name(table: &ColumnarTable, spec: &AggSpec) -> String {
     match (spec.op, col_name) {
         (AggOp::Count, None) => "count".to_owned(),
         (AggOp::Count, Some(name)) => format!("count_{name}"),
+        (AggOp::CountNumbers, Some(name)) => format!("count_numbers_{name}"),
         (AggOp::SumF64, Some(name)) => format!("sum_{name}"),
+        (AggOp::AvgF64, Some(name)) => format!("avg_{name}"),
+        (AggOp::DistinctCount, Some(name)) => format!("distinct_count_{name}"),
+        (AggOp::Var, Some(name)) => format!("var_{name}"),
+        (AggOp::VarP, Some(name)) => format!("var_p_{name}"),
+        (AggOp::StdDev, Some(name)) => format!("std_dev_{name}"),
+        (AggOp::StdDevP, Some(name)) => format!("std_dev_p_{name}"),
         (AggOp::Min, Some(name)) => format!("min_{name}"),
         (AggOp::Max, Some(name)) => format!("max_{name}"),
         _ => "agg".to_owned(),
@@ -856,9 +982,45 @@ impl KeyColumnBuilder {
 enum AggState {
     CountRows { counts: Vec<u64> },
     CountNonNull { counts: Vec<u64>, col: usize },
+    CountNumbers { counts: Vec<u64>, col: usize },
     SumF64 {
         sums: Vec<f64>,
         non_null: Vec<u64>,
+        col: usize,
+    },
+    AvgF64 {
+        sums: Vec<f64>,
+        counts: Vec<u64>,
+        col: usize,
+    },
+    DistinctCount {
+        counts: Vec<u64>,
+        seen: FastHashMap<DistinctGroupKey, ()>,
+        col: usize,
+        kind: KeyKind,
+    },
+    Var {
+        counts: Vec<u64>,
+        means: Vec<f64>,
+        m2: Vec<f64>,
+        col: usize,
+    },
+    VarP {
+        counts: Vec<u64>,
+        means: Vec<f64>,
+        m2: Vec<f64>,
+        col: usize,
+    },
+    StdDev {
+        counts: Vec<u64>,
+        means: Vec<f64>,
+        m2: Vec<f64>,
+        col: usize,
+    },
+    StdDevP {
+        counts: Vec<u64>,
+        means: Vec<f64>,
+        m2: Vec<f64>,
         col: usize,
     },
     MinI64 {
@@ -898,7 +1060,14 @@ impl AggState {
         match self {
             Self::CountRows { .. } => None,
             Self::CountNonNull { col, .. } => Some(*col),
+            Self::CountNumbers { col, .. } => Some(*col),
             Self::SumF64 { col, .. } => Some(*col),
+            Self::AvgF64 { col, .. } => Some(*col),
+            Self::DistinctCount { col, .. } => Some(*col),
+            Self::Var { col, .. }
+            | Self::VarP { col, .. }
+            | Self::StdDev { col, .. }
+            | Self::StdDevP { col, .. } => Some(*col),
             Self::MinI64 { col, .. } => Some(*col),
             Self::MaxI64 { col, .. } => Some(*col),
             Self::MinF64 { col, .. } => Some(*col),
@@ -912,9 +1081,43 @@ impl AggState {
         match self {
             Self::CountRows { counts } => counts.push(0),
             Self::CountNonNull { counts, .. } => counts.push(0),
+            Self::CountNumbers { counts, .. } => counts.push(0),
             Self::SumF64 { sums, non_null, .. } => {
                 sums.push(0.0);
                 non_null.push(0);
+            }
+            Self::AvgF64 { sums, counts, .. } => {
+                sums.push(0.0);
+                counts.push(0);
+            }
+            Self::DistinctCount { counts, .. } => counts.push(0),
+            Self::Var {
+                counts,
+                means,
+                m2,
+                ..
+            }
+            | Self::VarP {
+                counts,
+                means,
+                m2,
+                ..
+            }
+            | Self::StdDev {
+                counts,
+                means,
+                m2,
+                ..
+            }
+            | Self::StdDevP {
+                counts,
+                means,
+                m2,
+                ..
+            } => {
+                counts.push(0);
+                means.push(0.0);
+                m2.push(0.0);
             }
             Self::MinI64 { values, validity, .. } | Self::MaxI64 { values, validity, .. } => {
                 values.push(0);
@@ -945,6 +1148,12 @@ impl AggState {
                     counts[group] += 1;
                 }
             }
+            Self::CountNumbers { counts, .. } => match scalar {
+                Scalar::F64(_) | Scalar::I64(_) => {
+                    counts[group] += 1;
+                }
+                Scalar::Null | Scalar::Bool(_) | Scalar::U32(_) => {}
+            },
             Self::SumF64 { sums, non_null, .. } => match scalar {
                 Scalar::F64(v) => {
                     sums[group] += v;
@@ -960,6 +1169,69 @@ impl AggState {
                 }
                 Scalar::Null | Scalar::U32(_) => {}
             },
+            Self::AvgF64 { sums, counts, .. } => match scalar {
+                Scalar::F64(v) => {
+                    sums[group] += v;
+                    counts[group] += 1;
+                }
+                Scalar::I64(v) => {
+                    sums[group] += v as f64;
+                    counts[group] += 1;
+                }
+                // Averages are only planned for numeric columns, but keep defensive behavior.
+                Scalar::Null | Scalar::Bool(_) | Scalar::U32(_) => {}
+            },
+            Self::DistinctCount {
+                counts,
+                seen,
+                kind,
+                ..
+            } => {
+                let kind = *kind;
+                let Some(value_bits) = distinct_value_bits(kind, scalar) else {
+                    return;
+                };
+                let key = DistinctGroupKey {
+                    group: group as u64,
+                    value: value_bits,
+                };
+                if seen.insert(key, ()).is_none() {
+                    counts[group] += 1;
+                }
+            }
+            Self::Var {
+                counts,
+                means,
+                m2,
+                ..
+            }
+            | Self::VarP {
+                counts,
+                means,
+                m2,
+                ..
+            }
+            | Self::StdDev {
+                counts,
+                means,
+                m2,
+                ..
+            }
+            | Self::StdDevP {
+                counts,
+                means,
+                m2,
+                ..
+            } => {
+                let x = match scalar {
+                    Scalar::F64(v) => Some(v),
+                    Scalar::I64(v) => Some(v as f64),
+                    _ => None,
+                };
+                if let Some(x) = x {
+                    update_welford(counts, means, m2, group, x);
+                }
+            }
             Self::MinI64 { values, validity, .. } => match scalar {
                 Scalar::I64(v) => {
                     if !validity.get(group) {
@@ -1032,7 +1304,10 @@ impl AggState {
 
     fn finish(self) -> ResultColumn {
         match self {
-            Self::CountRows { counts } | Self::CountNonNull { counts, .. } => {
+            Self::CountRows { counts }
+            | Self::CountNonNull { counts, .. }
+            | Self::CountNumbers { counts, .. }
+            | Self::DistinctCount { counts, .. } => {
                 let mut validity = BitVec::new();
                 let values: Vec<f64> = counts
                     .into_iter()
@@ -1050,6 +1325,86 @@ impl AggState {
                 }
                 ResultColumn::Float {
                     values: sums,
+                    validity,
+                }
+            }
+            Self::AvgF64 { mut sums, counts, .. } => {
+                let mut validity = BitVec::with_capacity_bits(sums.len());
+                for (i, &cnt) in counts.iter().enumerate() {
+                    if cnt == 0 {
+                        sums[i] = 0.0;
+                        validity.push(false);
+                    } else {
+                        sums[i] /= cnt as f64;
+                        validity.push(true);
+                    }
+                }
+                ResultColumn::Float {
+                    values: sums,
+                    validity,
+                }
+            }
+            Self::Var { counts, mut m2, .. } => {
+                let mut validity = BitVec::with_capacity_bits(m2.len());
+                for (i, &cnt) in counts.iter().enumerate() {
+                    if cnt > 1 {
+                        m2[i] /= (cnt - 1) as f64;
+                        validity.push(true);
+                    } else {
+                        m2[i] = 0.0;
+                        validity.push(false);
+                    }
+                }
+                ResultColumn::Float {
+                    values: m2,
+                    validity,
+                }
+            }
+            Self::VarP { counts, mut m2, .. } => {
+                let mut validity = BitVec::with_capacity_bits(m2.len());
+                for (i, &cnt) in counts.iter().enumerate() {
+                    if cnt > 0 {
+                        m2[i] /= cnt as f64;
+                        validity.push(true);
+                    } else {
+                        m2[i] = 0.0;
+                        validity.push(false);
+                    }
+                }
+                ResultColumn::Float {
+                    values: m2,
+                    validity,
+                }
+            }
+            Self::StdDev { counts, mut m2, .. } => {
+                let mut validity = BitVec::with_capacity_bits(m2.len());
+                for (i, &cnt) in counts.iter().enumerate() {
+                    if cnt > 1 {
+                        m2[i] = (m2[i] / (cnt - 1) as f64).sqrt();
+                        validity.push(true);
+                    } else {
+                        m2[i] = 0.0;
+                        validity.push(false);
+                    }
+                }
+                ResultColumn::Float {
+                    values: m2,
+                    validity,
+                }
+            }
+            Self::StdDevP { counts, mut m2, .. } => {
+                let mut validity = BitVec::with_capacity_bits(m2.len());
+                for (i, &cnt) in counts.iter().enumerate() {
+                    if cnt > 0 {
+                        m2[i] = (m2[i] / cnt as f64).sqrt();
+                        validity.push(true);
+                    } else {
+                        m2[i] = 0.0;
+                        validity.push(false);
+                    }
+                }
+                ResultColumn::Float {
+                    values: m2,
                     validity,
                 }
             }
@@ -1160,6 +1515,35 @@ impl GroupByEngine {
                         }
                     }
                 }
+                AggOp::CountNumbers => {
+                    let col = spec.column.ok_or(QueryError::UnsupportedColumnType {
+                        col: 0,
+                        column_type: ColumnType::String,
+                        operation: "COUNTNUMBERS without column",
+                    })?;
+                    let ty = table.schema()[col].column_type;
+                    match ty {
+                        ColumnType::Number
+                        | ColumnType::DateTime
+                        | ColumnType::Currency { .. }
+                        | ColumnType::Percentage { .. } => {}
+                        ColumnType::String | ColumnType::Boolean => {
+                            return Err(QueryError::UnsupportedColumnType {
+                                col,
+                                column_type: ty,
+                                operation: "COUNTNUMBERS",
+                            });
+                        }
+                    }
+                    schema.push(ColumnSchema {
+                        name,
+                        column_type: ColumnType::Number,
+                    });
+                    agg_states.push(AggState::CountNumbers {
+                        counts: Vec::new(),
+                        col,
+                    });
+                }
                 AggOp::SumF64 => {
                     let col = spec.column.ok_or(QueryError::UnsupportedColumnType {
                         col: 0,
@@ -1189,6 +1573,120 @@ impl GroupByEngine {
                         sums: Vec::new(),
                         non_null: Vec::new(),
                         col,
+                    });
+                }
+                AggOp::AvgF64 => {
+                    let col = spec.column.ok_or(QueryError::UnsupportedColumnType {
+                        col: 0,
+                        column_type: ColumnType::String,
+                        operation: "AVG without column",
+                    })?;
+                    let ty = table.schema()[col].column_type;
+                    match ty {
+                        ColumnType::Number
+                        | ColumnType::DateTime
+                        | ColumnType::Currency { .. }
+                        | ColumnType::Percentage { .. } => {}
+                        ColumnType::String | ColumnType::Boolean => {
+                            return Err(QueryError::UnsupportedColumnType {
+                                col,
+                                column_type: ty,
+                                operation: "AVG",
+                            });
+                        }
+                    }
+                    schema.push(ColumnSchema {
+                        name,
+                        column_type: ColumnType::Number,
+                    });
+                    agg_states.push(AggState::AvgF64 {
+                        sums: Vec::new(),
+                        counts: Vec::new(),
+                        col,
+                    });
+                }
+                AggOp::DistinctCount => {
+                    let col = spec.column.ok_or(QueryError::UnsupportedColumnType {
+                        col: 0,
+                        column_type: ColumnType::String,
+                        operation: "DISTINCTCOUNT without column",
+                    })?;
+                    let ty = table.schema()[col].column_type;
+                    let kind = key_kind_for_column_type(ty).ok_or(QueryError::UnsupportedColumnType {
+                        col,
+                        column_type: ty,
+                        operation: "DISTINCTCOUNT",
+                    })?;
+                    let seen_capacity = table
+                        .scan()
+                        .stats(col)
+                        .map(|s| s.distinct_count as usize)
+                        .unwrap_or(0)
+                        .min(table.row_count());
+                    schema.push(ColumnSchema {
+                        name,
+                        column_type: ColumnType::Number,
+                    });
+                    agg_states.push(AggState::DistinctCount {
+                        counts: Vec::new(),
+                        seen: FastHashMap::with_capacity_and_hasher(
+                            seen_capacity,
+                            FastBuildHasher::default(),
+                        ),
+                        col,
+                        kind,
+                    });
+                }
+                AggOp::Var | AggOp::VarP | AggOp::StdDev | AggOp::StdDevP => {
+                    let col = spec.column.ok_or(QueryError::UnsupportedColumnType {
+                        col: 0,
+                        column_type: ColumnType::String,
+                        operation: "VAR/STDDEV without column",
+                    })?;
+                    let ty = table.schema()[col].column_type;
+                    match ty {
+                        ColumnType::Number
+                        | ColumnType::DateTime
+                        | ColumnType::Currency { .. }
+                        | ColumnType::Percentage { .. } => {}
+                        ColumnType::String | ColumnType::Boolean => {
+                            return Err(QueryError::UnsupportedColumnType {
+                                col,
+                                column_type: ty,
+                                operation: "VAR/STDDEV",
+                            });
+                        }
+                    }
+                    schema.push(ColumnSchema {
+                        name,
+                        column_type: ColumnType::Number,
+                    });
+                    agg_states.push(match spec.op {
+                        AggOp::Var => AggState::Var {
+                            counts: Vec::new(),
+                            means: Vec::new(),
+                            m2: Vec::new(),
+                            col,
+                        },
+                        AggOp::VarP => AggState::VarP {
+                            counts: Vec::new(),
+                            means: Vec::new(),
+                            m2: Vec::new(),
+                            col,
+                        },
+                        AggOp::StdDev => AggState::StdDev {
+                            counts: Vec::new(),
+                            means: Vec::new(),
+                            m2: Vec::new(),
+                            col,
+                        },
+                        AggOp::StdDevP => AggState::StdDevP {
+                            counts: Vec::new(),
+                            means: Vec::new(),
+                            m2: Vec::new(),
+                            col,
+                        },
+                        _ => unreachable!("only VAR/STDDEV ops handled here"),
                     });
                 }
                 AggOp::Min | AggOp::Max => {

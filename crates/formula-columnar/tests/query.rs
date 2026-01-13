@@ -256,6 +256,350 @@ fn group_by_rows_matches_group_by_on_selected_rows() {
 }
 
 #[test]
+fn group_by_avg_f64_ignores_nulls_and_nulls_when_no_values() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "v".to_owned(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let rows = vec![
+        vec![Value::String(Arc::<str>::from("A")), Value::Number(1.0)],
+        vec![Value::String(Arc::<str>::from("A")), Value::Null],
+        vec![Value::String(Arc::<str>::from("A")), Value::Number(3.0)],
+        vec![Value::String(Arc::<str>::from("B")), Value::Null],
+        vec![Value::String(Arc::<str>::from("B")), Value::Null],
+        vec![Value::Null, Value::Number(2.0)],
+    ];
+    let table = build_table(schema, rows);
+
+    let result = table
+        .group_by(&[0], &[AggSpec::avg_f64(1).with_name("avg")])
+        .unwrap();
+    assert_eq!(result.row_count(), 3);
+
+    let cols = result.to_values();
+    let mut lookup = std::collections::HashMap::<String, Value>::new();
+    for r in 0..result.row_count() {
+        let key_str = match &cols[0][r] {
+            Value::Null => "<null>".to_owned(),
+            Value::String(s) => s.as_ref().to_owned(),
+            other => format!("{other:?}"),
+        };
+        lookup.insert(key_str, cols[1][r].clone());
+    }
+
+    assert_eq!(lookup.get("A"), Some(&Value::Number(2.0)));
+    assert_eq!(lookup.get("B"), Some(&Value::Null));
+    assert_eq!(lookup.get("<null>"), Some(&Value::Number(2.0)));
+}
+
+#[test]
+fn group_by_distinct_count_ignores_nulls_and_outputs_zero() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "v".to_owned(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let rows = vec![
+        vec![Value::String(Arc::<str>::from("A")), Value::Number(1.0)],
+        vec![Value::String(Arc::<str>::from("A")), Value::Number(1.0)],
+        vec![Value::String(Arc::<str>::from("A")), Value::Null],
+        vec![Value::String(Arc::<str>::from("A")), Value::Number(2.0)],
+        vec![Value::String(Arc::<str>::from("B")), Value::Null],
+        vec![Value::String(Arc::<str>::from("B")), Value::Null],
+        vec![Value::String(Arc::<str>::from("B")), Value::Number(3.0)],
+        vec![Value::String(Arc::<str>::from("C")), Value::Null],
+    ];
+    let table = build_table(schema, rows);
+
+    let result = table
+        .group_by(&[0], &[AggSpec::distinct_count(1)])
+        .unwrap();
+    assert_eq!(result.row_count(), 3);
+
+    let cols = result.to_values();
+    let mut lookup = std::collections::HashMap::<String, Value>::new();
+    for r in 0..result.row_count() {
+        let key_str = match &cols[0][r] {
+            Value::Null => "<null>".to_owned(),
+            Value::String(s) => s.as_ref().to_owned(),
+            other => format!("{other:?}"),
+        };
+        lookup.insert(key_str, cols[1][r].clone());
+    }
+
+    assert_eq!(lookup.get("A"), Some(&Value::Number(2.0)));
+    assert_eq!(lookup.get("B"), Some(&Value::Number(1.0)));
+    assert_eq!(lookup.get("C"), Some(&Value::Number(0.0)));
+}
+
+#[test]
+fn group_by_distinct_count_strings_uses_dictionary_indices() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "s".to_owned(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let rows = vec![
+        vec![
+            Value::String(Arc::<str>::from("G1")),
+            Value::String(Arc::<str>::from("apple")),
+        ],
+        vec![
+            Value::String(Arc::<str>::from("G1")),
+            Value::String(Arc::<str>::from("banana")),
+        ],
+        vec![
+            Value::String(Arc::<str>::from("G1")),
+            Value::String(Arc::<str>::from("apple")),
+        ],
+        vec![Value::String(Arc::<str>::from("G1")), Value::Null],
+        vec![
+            Value::String(Arc::<str>::from("G2")),
+            Value::String(Arc::<str>::from("banana")),
+        ],
+        vec![
+            Value::String(Arc::<str>::from("G2")),
+            Value::String(Arc::<str>::from("banana")),
+        ],
+        vec![Value::String(Arc::<str>::from("G2")), Value::Null],
+        vec![Value::String(Arc::<str>::from("G3")), Value::Null],
+    ];
+    let table = build_table(schema, rows);
+
+    let result = table
+        .group_by(&[0], &[AggSpec::distinct_count(1)])
+        .unwrap();
+    assert_eq!(result.row_count(), 3);
+
+    let cols = result.to_values();
+    let mut lookup = std::collections::HashMap::<String, Value>::new();
+    for r in 0..result.row_count() {
+        let key_str = match &cols[0][r] {
+            Value::Null => "<null>".to_owned(),
+            Value::String(s) => s.as_ref().to_owned(),
+            other => format!("{other:?}"),
+        };
+        lookup.insert(key_str, cols[1][r].clone());
+    }
+
+    assert_eq!(lookup.get("G1"), Some(&Value::Number(2.0)));
+    assert_eq!(lookup.get("G2"), Some(&Value::Number(1.0)));
+    assert_eq!(lookup.get("G3"), Some(&Value::Number(0.0)));
+}
+
+#[test]
+fn group_by_distinct_count_number_canonicalizes_negative_zero_and_nans() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "v".to_owned(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let rows = vec![
+        vec![Value::String(Arc::<str>::from("A")), Value::Number(0.0)],
+        vec![Value::String(Arc::<str>::from("A")), Value::Number(-0.0)],
+        vec![
+            Value::String(Arc::<str>::from("A")),
+            Value::Number(f64::from_bits(0x7ff8000000000001)),
+        ],
+        vec![
+            Value::String(Arc::<str>::from("A")),
+            Value::Number(f64::from_bits(0x7ff8000000000002)),
+        ],
+        vec![Value::String(Arc::<str>::from("A")), Value::Null],
+    ];
+    let table = build_table(schema, rows);
+
+    let result = table
+        .group_by(&[0], &[AggSpec::distinct_count(1)])
+        .unwrap();
+    assert_eq!(result.row_count(), 1);
+    let cols = result.to_values();
+    assert_eq!(cols[1][0], Value::Number(2.0));
+}
+
+#[test]
+fn group_by_multiple_keys_and_multiple_new_aggs_smoke() {
+    let schema = vec![
+        ColumnSchema {
+            name: "region".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "active".to_owned(),
+            column_type: ColumnType::Boolean,
+        },
+        ColumnSchema {
+            name: "amount".to_owned(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "user".to_owned(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let rows = vec![
+        vec![
+            Value::String(Arc::<str>::from("East")),
+            Value::Boolean(true),
+            Value::Number(10.0),
+            Value::String(Arc::<str>::from("u1")),
+        ],
+        vec![
+            Value::String(Arc::<str>::from("East")),
+            Value::Boolean(true),
+            Value::Number(20.0),
+            Value::String(Arc::<str>::from("u2")),
+        ],
+        vec![
+            Value::String(Arc::<str>::from("East")),
+            Value::Boolean(true),
+            Value::Null,
+            Value::String(Arc::<str>::from("u2")),
+        ],
+        vec![
+            Value::String(Arc::<str>::from("East")),
+            Value::Boolean(false),
+            Value::Number(5.0),
+            Value::String(Arc::<str>::from("u1")),
+        ],
+        vec![
+            Value::String(Arc::<str>::from("West")),
+            Value::Boolean(true),
+            Value::Null,
+            Value::Null,
+        ],
+        vec![
+            Value::String(Arc::<str>::from("West")),
+            Value::Boolean(true),
+            Value::Number(7.0),
+            Value::String(Arc::<str>::from("u3")),
+        ],
+        vec![
+            Value::String(Arc::<str>::from("West")),
+            Value::Boolean(true),
+            Value::Number(9.0),
+            Value::String(Arc::<str>::from("u3")),
+        ],
+        vec![
+            Value::Null,
+            Value::Boolean(true),
+            Value::Number(1.0),
+            Value::String(Arc::<str>::from("u4")),
+        ],
+    ];
+    let table = build_table(schema, rows);
+
+    let result = table
+        .group_by(
+            &[0, 1],
+            &[
+                AggSpec::count_rows().with_name("cnt"),
+                AggSpec::avg_f64(2).with_name("avg"),
+                AggSpec::count_numbers(2).with_name("cnt_numbers"),
+                AggSpec::distinct_count(3).with_name("dc_users"),
+                AggSpec::var_p(2).with_name("varp"),
+                AggSpec::std_dev_p(2).with_name("stddevp"),
+            ],
+        )
+        .unwrap();
+
+    assert_eq!(result.row_count(), 4);
+    let cols = result.to_values();
+
+    let mut lookup = std::collections::HashMap::<String, Vec<Value>>::new();
+    for r in 0..result.row_count() {
+        let region = match &cols[0][r] {
+            Value::Null => "<null>".to_owned(),
+            Value::String(s) => s.as_ref().to_owned(),
+            other => format!("{other:?}"),
+        };
+        let active = match &cols[1][r] {
+            Value::Boolean(b) => b.to_string(),
+            Value::Null => "<null>".to_owned(),
+            other => format!("{other:?}"),
+        };
+        let key = format!("{region}|{active}");
+        lookup.insert(
+            key,
+            vec![
+                cols[2][r].clone(), // cnt
+                cols[3][r].clone(), // avg
+                cols[4][r].clone(), // cnt_numbers
+                cols[5][r].clone(), // dc_users
+                cols[6][r].clone(), // varp
+                cols[7][r].clone(), // stddevp
+            ],
+        );
+    }
+
+    assert_eq!(
+        lookup.get("East|true"),
+        Some(&vec![
+            Value::Number(3.0),
+            Value::Number(15.0),
+            Value::Number(2.0),
+            Value::Number(2.0),
+            Value::Number(25.0),
+            Value::Number(5.0),
+        ])
+    );
+    assert_eq!(
+        lookup.get("East|false"),
+        Some(&vec![
+            Value::Number(1.0),
+            Value::Number(5.0),
+            Value::Number(1.0),
+            Value::Number(1.0),
+            Value::Number(0.0),
+            Value::Number(0.0),
+        ])
+    );
+    assert_eq!(
+        lookup.get("West|true"),
+        Some(&vec![
+            Value::Number(3.0),
+            Value::Number(8.0),
+            Value::Number(2.0),
+            Value::Number(1.0),
+            Value::Number(1.0),
+            Value::Number(1.0),
+        ])
+    );
+    assert_eq!(
+        lookup.get("<null>|true"),
+        Some(&vec![
+            Value::Number(1.0),
+            Value::Number(1.0),
+            Value::Number(1.0),
+            Value::Number(1.0),
+            Value::Number(0.0),
+            Value::Number(0.0),
+        ])
+    );
+}
+
+#[test]
 fn hash_join_handles_duplicate_keys() {
     let schema = vec![ColumnSchema {
         name: "k".to_owned(),
