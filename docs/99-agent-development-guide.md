@@ -681,8 +681,8 @@ mockups/README.md                # Full design system
 
 **Sizes:**
 ```css
---radius: 6px;      /* Panels, buttons */
---radius-sm: 4px;   /* Tags, small elements */
+--radius: 4px;      /* Panels, buttons */
+--radius-sm: 3px;   /* Tags, small elements */
 
 /* Grid: 22px rows, 90px columns, 40px row headers */
 ```
