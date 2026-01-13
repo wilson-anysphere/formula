@@ -3,6 +3,8 @@ import type { LLMClient, LLMMessage } from "../../../../packages/llm/src/index.j
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
 import { AIAuditRecorder } from "../../../../packages/ai-audit/src/recorder.js";
 
+import { classifyText } from "../../../../packages/ai-context/src/dlp.js";
+
 import { DLP_ACTION } from "../../../../packages/security/dlp/src/actions.js";
 import {
   CLASSIFICATION_LEVEL,
@@ -323,7 +325,8 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       args: params.args,
       provenance: alignedProvenance,
       defaultSheetId,
-      maxCellChars: literalMaxChars,
+      maxCellChars: this.maxCellChars,
+      maxLiteralChars: literalMaxChars,
       classificationRecords: dlp.classificationRecords,
       classificationIndex,
       sheetNameResolver: this.sheetNameResolver,
@@ -977,7 +980,17 @@ function computeSelectionClassification(params: {
   defaultSheetId: string;
   args: CellValue[];
   provenance: AiFunctionArgumentProvenance[];
+  /**
+   * Maximum number of characters to scan/serialize for referenced cell values.
+   *
+   * Note that prompts typed directly into formulas may use a larger cap (`maxLiteralChars`).
+   */
   maxCellChars: number;
+  /**
+   * Maximum number of characters to scan for literal formula arguments (e.g. the prompt string
+   * typed directly into `AI("…")`).
+   */
+  maxLiteralChars: number;
   classificationRecords: Array<{ selector: any; classification: any }>;
   classificationIndex: DlpCellIndex | null;
   sheetNameResolver: SheetNameResolver | null;
@@ -991,11 +1004,39 @@ function computeSelectionClassification(params: {
     const prov = params.provenance[i];
     const hasRefs = Boolean((prov?.cells?.length ?? 0) > 0 || (prov?.ranges?.length ?? 0) > 0);
     if (hasRefs) continue;
-    selectionClassification = maxClassification(selectionClassification, heuristicClassifyValue(params.args[i], params.maxCellChars));
+    selectionClassification = maxClassification(selectionClassification, heuristicClassifyValue(params.args[i], params.maxLiteralChars));
     if (selectionClassification.level === CLASSIFICATION_LEVEL.RESTRICTED) break;
   }
 
-  // 2) Store-backed provenance classification (enterprise DLP).
+  // 2) Heuristic classification for referenced values (defense-in-depth).
+  //
+  // If the enterprise classification store is empty/incomplete, we still want to avoid sending
+  // obviously-sensitive patterns (emails, API keys, SSNs, credit cards, etc) to cloud models.
+  //
+  // NOTE: We only scan the already-materialized scalar values / sampled range entries passed
+  // into `evaluateAiFunction` (ranges are already bounded by `evaluateFormula`'s sampling).
+  if (selectionClassification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
+    for (let i = 0; i < params.args.length; i += 1) {
+      const prov = params.provenance[i];
+      const hasRefs = Boolean((prov?.cells?.length ?? 0) > 0 || (prov?.ranges?.length ?? 0) > 0);
+      if (!hasRefs) continue;
+
+      const arg = params.args[i];
+      if (Array.isArray(arg)) {
+        for (const entry of arg as Array<SpreadsheetValue | ProvenanceCellValue>) {
+          const scalar = entry && isProvenanceCellValue(entry) ? entry.value : (entry as SpreadsheetValue);
+          selectionClassification = maxClassification(selectionClassification, heuristicClassifyValue(scalar as any, params.maxCellChars));
+          if (selectionClassification.level === CLASSIFICATION_LEVEL.RESTRICTED) break;
+        }
+      } else {
+        selectionClassification = maxClassification(selectionClassification, heuristicClassifyValue(arg, params.maxCellChars));
+      }
+
+      if (selectionClassification.level === CLASSIFICATION_LEVEL.RESTRICTED) break;
+    }
+  }
+
+  // 3) Store-backed provenance classification (enterprise DLP).
   for (const cellRef of references.cells) {
     const parsed = parseProvenanceRef(cellRef, params.defaultSheetId, params.sheetNameResolver);
     if (!parsed || !parsed.isCell) continue;
@@ -1033,14 +1074,22 @@ function computeSelectionClassification(params: {
 function heuristicClassifyValue(value: CellValue, maxChars: number): any {
   if (Array.isArray(value)) return { ...DEFAULT_CLASSIFICATION };
   const scalar = isProvenanceCellValue(value) ? value.value : (value as SpreadsheetValue);
-  const text = formatScalar(scalar, { maxChars }).toLowerCase();
+  const text = formatScalar(scalar, { maxChars });
   if (!text) return { ...DEFAULT_CLASSIFICATION };
 
+  // Conservative heuristic DLP scanner (defense-in-depth) from `@formula/ai-context`.
+  const heuristic = classifyText(String(text));
+  if (heuristic?.level === "sensitive") {
+    const labels = (heuristic.findings || []).map((f: unknown) => `heuristic:${String(f)}`);
+    return { level: CLASSIFICATION_LEVEL.RESTRICTED, labels };
+  }
+
+  const lowered = text.toLowerCase();
   const labels = ["heuristic"];
-  if (text.includes("password") || text.includes("ssn")) return { level: CLASSIFICATION_LEVEL.RESTRICTED, labels };
-  if (text.includes("top secret") || text.includes("secret")) return { level: CLASSIFICATION_LEVEL.RESTRICTED, labels };
-  if (text.includes("confidential")) return { level: CLASSIFICATION_LEVEL.CONFIDENTIAL, labels };
-  if (text.includes("internal")) return { level: CLASSIFICATION_LEVEL.INTERNAL, labels };
+  if (lowered.includes("password") || lowered.includes("ssn")) return { level: CLASSIFICATION_LEVEL.RESTRICTED, labels };
+  if (lowered.includes("top secret") || lowered.includes("secret")) return { level: CLASSIFICATION_LEVEL.RESTRICTED, labels };
+  if (lowered.includes("confidential")) return { level: CLASSIFICATION_LEVEL.CONFIDENTIAL, labels };
+  if (lowered.includes("internal")) return { level: CLASSIFICATION_LEVEL.INTERNAL, labels };
   return { ...DEFAULT_CLASSIFICATION };
 }
 
@@ -1257,6 +1306,10 @@ function compactScalarForPrompt(params: {
       classificationIndex: params.classificationIndex,
       sheetNameResolver: params.sheetNameResolver,
     });
+
+    // Defense-in-depth: if the structured classification store is empty/incomplete,
+    // still avoid sending obvious sensitive patterns from referenced cells.
+    classification = maxClassification(classification, heuristicClassifyValue(params.value as any, params.maxCellChars));
   } else {
     classification = heuristicClassifyValue(params.value as any, params.maxLiteralChars);
   }
@@ -1441,38 +1494,39 @@ function compactArrayForPrompt(params: {
         return DLP_REDACTION_PLACEHOLDER;
       }
 
+      let classification = { ...DEFAULT_CLASSIFICATION };
+
       if (cellRef) {
-        const classification = classificationForCellRef(cellRef);
-        const allowed = params.maxAllowedRank !== null && classificationRank(classification.level) <= params.maxAllowedRank;
-        if (!allowed) {
-          if (!redactedSeen.has(index)) {
-            redactedSeen.add(index);
-            redactedCount += 1;
-          }
-          return DLP_REDACTION_PLACEHOLDER;
-        }
-      } else
-      // If we can map indices -> cells, enforce per-cell redaction.
-      if (range && cols && rangeSheetId) {
+        classification = maxClassification(classification, classificationForCellRef(cellRef));
+      } else if (range && cols && rangeSheetId) {
+        // If we can map indices -> cells, enforce per-cell redaction.
         const rowOffset = Math.floor(index / cols);
         const colOffset = index % cols;
         const row = range.start.row + rowOffset;
         const col = range.start.col + colOffset;
 
-        const classification = params.classificationIndex
-          ? effectiveCellClassificationFromIndex(params.classificationIndex, { documentId: params.documentId, sheetId: rangeSheetId, row, col })
-          : effectiveCellClassification(
-              { documentId: params.documentId, sheetId: rangeSheetId, row, col } as any,
-              params.classificationRecords,
-            );
-        const allowed = params.maxAllowedRank !== null && classificationRank(classification.level) <= params.maxAllowedRank;
-        if (!allowed) {
-          if (!redactedSeen.has(index)) {
-            redactedSeen.add(index);
-            redactedCount += 1;
-          }
-          return DLP_REDACTION_PLACEHOLDER;
+        classification = maxClassification(
+          classification,
+          params.classificationIndex
+            ? effectiveCellClassificationFromIndex(params.classificationIndex, { documentId: params.documentId, sheetId: rangeSheetId, row, col })
+            : effectiveCellClassification(
+                { documentId: params.documentId, sheetId: rangeSheetId, row, col } as any,
+                params.classificationRecords,
+              ),
+        );
+      }
+
+      // Defense-in-depth: even when structured classifications are missing, redact
+      // obvious sensitive patterns found in the actual values we're about to serialize.
+      classification = maxClassification(classification, heuristicClassifyValue(raw as any, params.maxCellChars));
+
+      const allowed = params.maxAllowedRank !== null && classificationRank(classification.level) <= params.maxAllowedRank;
+      if (!allowed) {
+        if (!redactedSeen.has(index)) {
+          redactedSeen.add(index);
+          redactedCount += 1;
         }
+        return DLP_REDACTION_PLACEHOLDER;
       }
     }
 
