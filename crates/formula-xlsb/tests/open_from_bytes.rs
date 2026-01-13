@@ -36,3 +36,16 @@ fn opens_fixture_from_bytes() {
         "expected cell A1 in parsed sheet"
     );
 }
+
+#[test]
+fn opens_fixture_from_vec_without_copy() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
+    let bytes = std::fs::read(path).expect("read fixture bytes");
+
+    // `open_from_vec` consumes the Vec, avoiding an extra copy for callers that already have an
+    // owned buffer (e.g. decrypted EncryptedPackage bytes).
+    let wb = XlsbWorkbook::open_from_vec(bytes).expect("open xlsb from vec");
+    assert_eq!(wb.sheet_metas().len(), 1);
+    let sheet = wb.read_sheet(0).expect("read sheet");
+    assert!(sheet.cells.iter().any(|c| c.row == 0 && c.col == 0));
+}

@@ -175,6 +175,22 @@ impl XlsbWorkbook {
         Self::open_from_owned_bytes(bytes, options)
     }
 
+    /// Open an XLSB workbook from an owned in-memory ZIP buffer.
+    ///
+    /// This avoids copying when the caller already has a `Vec<u8>` (e.g. decrypted `EncryptedPackage`
+    /// bytes).
+    pub fn open_from_vec(bytes: Vec<u8>) -> Result<Self, ParseError> {
+        Self::open_from_vec_with_options(bytes, OpenOptions::default())
+    }
+
+    /// Open an XLSB workbook from an owned in-memory ZIP buffer, controlling preservation options.
+    pub fn open_from_vec_with_options(
+        bytes: Vec<u8>,
+        options: OpenOptions,
+    ) -> Result<Self, ParseError> {
+        Self::open_from_owned_bytes(bytes, options)
+    }
+
     /// Open an XLSB workbook from in-memory ZIP bytes.
     pub fn open_from_bytes(bytes: &[u8]) -> Result<Self, ParseError> {
         Self::open_from_bytes_with_options(bytes, OpenOptions::default())
