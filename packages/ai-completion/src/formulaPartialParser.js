@@ -267,7 +267,7 @@ function findTokenAtCursor(inputPrefix, cursorPosition) {
 
   // Must be preceded by '=' or an operator/whitespace.
   const before = start - 1 >= 0 ? inputPrefix[start - 1] : "";
-  if (before && !/[=\s(,+\-*/^]/.test(before)) return null;
+  if (before && !/[=\s(,;+\-*/^]/.test(before)) return null;
 
   if (!text) return null;
   if (/^\d+$/.test(text)) return null;
