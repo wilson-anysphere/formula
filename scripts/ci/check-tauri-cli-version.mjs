@@ -20,6 +20,22 @@ function parseMajorMinor(version) {
   return `${match[1]}.${match[2]}`;
 }
 
+function parsePinnedCliVersion(version) {
+  const normalized = String(version ?? "").trim();
+  // For determinism, TAURI_CLI_VERSION must be a fully pinned patch version.
+  //
+  // `cargo install tauri-cli --version 2.9` would float to the latest 2.9.x and
+  // would therefore not be reproducible when new patch releases land.
+  const cleaned = normalized.replace(/^v/, "");
+  const match = cleaned.match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+  if (!match) {
+    throw new Error(
+      `Expected TAURI_CLI_VERSION to be pinned to an exact patch version like "2.9.5" (got "${version}")`,
+    );
+  }
+  return { majorMinor: `${match[1]}.${match[2]}` };
+}
+
 function extractTauriVersionFromCargoToml(tomlText) {
   // Common forms:
   //   tauri = "2.9"
@@ -82,6 +98,14 @@ if (!pinnedCliVersion) {
 }
 
 const cliMajorMinor = parseMajorMinor(pinnedCliVersion);
+try {
+  // Fail fast if someone accidentally loosens the pin (e.g. "2.9") and
+  // reintroduces toolchain drift.
+  parsePinnedCliVersion(pinnedCliVersion);
+} catch (err) {
+  console.error(String(err instanceof Error ? err.message : err));
+  process.exit(1);
+}
 
 if (cliMajorMinor !== tauriMajorMinor) {
   console.error("Pinned Tauri CLI version does not match the repo's Tauri major/minor version.");
@@ -97,4 +121,3 @@ if (cliMajorMinor !== tauriMajorMinor) {
 console.log(
   `Pinned Tauri CLI version check passed: tauri=${tauriVersion} (major/minor ${tauriMajorMinor}) matches TAURI_CLI_VERSION=${pinnedCliVersion}.`,
 );
-
