@@ -68,8 +68,6 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.font.strikethrough",
   "home.font.fontName",
   "home.font.fontSize",
-  "home.font.increaseFont",
-  "home.font.decreaseFont",
   "home.font.fontColor",
   "home.font.fillColor",
   "home.font.borders",
@@ -194,18 +192,6 @@ function isExemptViaPattern(commandId: string): boolean {
     if (suffix === "custom") return true;
     const percent = Number(suffix);
     return Number.isFinite(percent) && Number.isInteger(percent) && percent > 0;
-  }
-
-  // Font size menu items: "home.font.fontSize.<pt>"
-  if (commandId.startsWith("home.font.fontSize.")) {
-    const size = Number(commandId.slice("home.font.fontSize.".length));
-    return Number.isFinite(size) && Number.isInteger(size) && size > 0;
-  }
-
-  // Font name presets: "home.font.fontName.<preset>"
-  if (commandId.startsWith("home.font.fontName.")) {
-    const preset = commandId.slice("home.font.fontName.".length);
-    return preset === "calibri" || preset === "arial" || preset === "times" || preset === "courier";
   }
 
   // Fill color presets.
