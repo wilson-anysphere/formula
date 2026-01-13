@@ -98,20 +98,31 @@ function main() {
   }
 
   const repoRoot = process.cwd();
-  const candidates = [
-    path.join(repoRoot, "apps", "desktop", "src-tauri", "target"),
-    path.join(repoRoot, "target"),
-  ].filter(isDir);
+  /** @type {string[]} */
+  const candidates = [];
 
-  if (candidates.length === 0) {
+  const cargoTargetDir = process.env.CARGO_TARGET_DIR?.trim() ?? "";
+  if (cargoTargetDir) {
+    candidates.push(path.isAbsolute(cargoTargetDir) ? cargoTargetDir : path.join(repoRoot, cargoTargetDir));
+  }
+
+  candidates.push(
+    path.join(repoRoot, "apps", "desktop", "src-tauri", "target"),
+    path.join(repoRoot, "apps", "desktop", "target"),
+    path.join(repoRoot, "target"),
+  );
+
+  const candidateDirs = candidates.filter(isDir);
+
+  if (candidateDirs.length === 0) {
     fatal(
-      `No candidate target directories found (expected apps/desktop/src-tauri/target or target). Repo root: ${repoRoot}`,
+      `No candidate Cargo target directories found. Looked in: CARGO_TARGET_DIR=${cargoTargetDir || "(unset)"} apps/desktop/src-tauri/target apps/desktop/target target. Repo root: ${repoRoot}`,
     );
   }
 
   /** @type {string[]} */
   const found = [];
-  for (const dir of candidates) {
+  for (const dir of candidateDirs) {
     const bundleDirs = findBundleDirs(dir);
     for (const bundleDir of bundleDirs) {
       walkSync(bundleDir, (p) => path.basename(p) === "latest.json", found);
@@ -121,7 +132,7 @@ function main() {
   const best = pickBestManifest(found);
   if (!best) {
     fatal(
-      `No latest.json found under: ${candidates.map((c) => c.split(path.sep).join("/")).join(", ")}`,
+      `No latest.json found under: ${candidateDirs.map((c) => c.split(path.sep).join("/")).join(", ")}`,
     );
   }
 

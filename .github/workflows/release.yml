@@ -36,7 +36,9 @@ concurrency:
   # For `workflow_dispatch`, `github.ref` is the branch the workflow is run from, but the release
   # tag may come from inputs. Key concurrency off the *effective* release tag when provided so
   # dispatch runs for a given tag can't overlap with the corresponding tag push run.
-  group: desktop-release-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.tag != '' && (startsWith(github.event.inputs.tag, 'v') && github.event.inputs.tag || format('v{0}', github.event.inputs.tag)) || github.event.inputs.version != '' && (startsWith(github.event.inputs.version, 'v') && github.event.inputs.version || format('v{0}', github.event.inputs.version)) || github.ref_name) || github.ref_name }}
+  # NOTE: `github.event.inputs.*` may be empty/undefined for optional inputs, so guard `startsWith`
+  # with truthy checks to avoid evaluation errors.
+  group: desktop-release-${{ github.event_name == 'workflow_dispatch' && ((github.event.inputs.tag && (startsWith(github.event.inputs.tag, 'v') && github.event.inputs.tag || format('v{0}', github.event.inputs.tag))) || (github.event.inputs.version && (startsWith(github.event.inputs.version, 'v') && github.event.inputs.version || format('v{0}', github.event.inputs.version))) || github.ref_name) || github.ref_name }}
   # Queue (don't cancel) subsequent runs so each tag's release assets are written
   # atomically by a single workflow run.
   cancel-in-progress: false
