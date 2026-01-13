@@ -36,7 +36,6 @@ pub(crate) use globals::{
 pub(crate) use defined_names::parse_biff_defined_names;
 pub(crate) use sheet::{
     parse_biff_sheet_cell_xf_indices_filtered, parse_biff_sheet_hyperlinks,
-    parse_biff_sheet_manual_page_breaks,
     parse_biff_sheet_merged_cells, parse_biff_sheet_print_settings, parse_biff_sheet_protection,
     parse_biff_sheet_row_col_properties,
     parse_biff_sheet_view_state, SheetRowColProperties,

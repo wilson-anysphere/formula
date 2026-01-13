@@ -285,7 +285,7 @@ pub(crate) struct BiffSheetProtection {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct BiffSheetPrintSettings {
-    pub(crate) page_setup: Option<PageSetup>,
+    pub(crate) page_setup: PageSetup,
     pub(crate) manual_page_breaks: ManualPageBreaks,
     pub(crate) warnings: Vec<String>,
 }
@@ -829,7 +829,6 @@ pub(crate) fn parse_biff_sheet_print_settings(
     let mut out = BiffSheetPrintSettings::default();
 
     let mut page_setup = PageSetup::default();
-    let mut saw_any_record = false;
 
     // We need to consult WSBOOL.fFitToPage to decide whether SETUP.iScale or SETUP.iFit* apply.
     // Keep the raw SETUP fields around and compute scaling at the end so record order doesn't
@@ -871,7 +870,6 @@ pub(crate) fn parse_biff_sheet_print_settings(
             ),
             // Page setup/margins/scaling.
             RECORD_SETUP => {
-                saw_any_record = true;
                 // SETUP [MS-XLS 2.4.296]
                 //
                 // Payload (BIFF8):
@@ -960,7 +958,6 @@ pub(crate) fn parse_biff_sheet_print_settings(
                 }
             }
             RECORD_LEFTMARGIN | RECORD_RIGHTMARGIN | RECORD_TOPMARGIN | RECORD_BOTTOMMARGIN => {
-                saw_any_record = true;
                 let record_name = match record.record_id {
                     RECORD_LEFTMARGIN => "LEFTMARGIN",
                     RECORD_RIGHTMARGIN => "RIGHTMARGIN",
@@ -1012,7 +1009,6 @@ pub(crate) fn parse_biff_sheet_print_settings(
                     );
                     continue;
                 }
-                saw_any_record = true;
                 let grbit = u16::from_le_bytes([data[0], data[1]]);
                 wsbool_fit_to_page = Some((grbit & 0x0100) != 0);
             }
@@ -1039,12 +1035,7 @@ pub(crate) fn parse_biff_sheet_print_settings(
         page_setup.scaling = Scaling::Percent(if scale == 0 { 100 } else { scale });
     }
 
-    // Only surface a page setup when it results in a non-default `PageSetup`. Worksheets almost
-    // always contain a `WSBOOL` record (for outline flags), but that does not necessarily imply
-    // any explicit print/page setup metadata.
-    if saw_any_record && page_setup != PageSetup::default() {
-        out.page_setup = Some(page_setup);
-    }
+    out.page_setup = page_setup;
 
     Ok(out)
 }
@@ -3458,7 +3449,7 @@ mod tests {
         .concat();
 
         let parsed = parse_biff_sheet_print_settings(&stream, 0).expect("parse");
-        let setup = parsed.page_setup.expect("expected page_setup");
+        let setup = &parsed.page_setup;
         assert_eq!(setup.paper_size.code, 9);
         assert_eq!(setup.orientation, Orientation::Landscape);
         assert_eq!(setup.scaling, Scaling::FitTo { width: 2, height: 3 });
@@ -3490,7 +3481,7 @@ mod tests {
         .concat();
 
         let parsed = parse_biff_sheet_print_settings(&stream, 0).expect("parse");
-        let setup = parsed.page_setup.expect("expected page_setup");
+        let setup = &parsed.page_setup;
         assert_eq!(setup.scaling, Scaling::Percent(80));
     }
 
@@ -3509,7 +3500,7 @@ mod tests {
         .concat();
 
         let parsed = parse_biff_sheet_print_settings(&stream, 0).expect("parse");
-        let setup = parsed.page_setup.expect("expected page_setup");
+        let setup = &parsed.page_setup;
         assert_eq!(setup.paper_size, PageSetup::default().paper_size);
         assert_eq!(setup.orientation, Orientation::Portrait);
         assert_eq!(setup.scaling, Scaling::Percent(100));
@@ -3528,7 +3519,7 @@ mod tests {
         .concat();
 
         let parsed = parse_biff_sheet_print_settings(&stream, 0).expect("parse");
-        let setup = parsed.page_setup.expect("expected page_setup");
+        let setup = &parsed.page_setup;
         assert_eq!(setup.margins.left, 1.0);
         assert!(
             parsed
