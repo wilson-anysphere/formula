@@ -1288,14 +1288,19 @@ export class DesktopSharedGrid {
     const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
     const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
 
-    const inHeaderRow = viewport.frozenRows > 0 && viewportY >= 0 && viewportY <= frozenHeightClamped;
-    const inRowHeaderCol = viewport.frozenCols > 0 && viewportX >= 0 && viewportX <= frozenWidthClamped;
-
     const absScrollX = viewport.frozenWidth + viewport.scrollX;
     const absScrollY = viewport.frozenHeight + viewport.scrollY;
 
     const colAxis = renderer.scroll.cols;
     const rowAxis = renderer.scroll.rows;
+
+    const headerRowsFrozen = Math.min(this.headerRows, viewport.frozenRows);
+    const headerColsFrozen = Math.min(this.headerCols, viewport.frozenCols);
+    const headerHeight = rowAxis.totalSize(headerRowsFrozen);
+    const headerWidth = colAxis.totalSize(headerColsFrozen);
+
+    const inHeaderRow = headerRowsFrozen > 0 && viewportY >= 0 && viewportY <= Math.min(headerHeight, viewport.height);
+    const inRowHeaderCol = headerColsFrozen > 0 && viewportX >= 0 && viewportX <= Math.min(headerWidth, viewport.width);
 
     const RESIZE_HIT_RADIUS_PX = 4;
 

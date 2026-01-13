@@ -1094,14 +1094,23 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
       const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
 
-      const inHeaderRow = viewport.frozenRows > 0 && viewportY >= 0 && viewportY <= frozenHeightClamped;
-      const inRowHeaderCol = viewport.frozenCols > 0 && viewportX >= 0 && viewportX <= frozenWidthClamped;
-
       const absScrollX = viewport.frozenWidth + viewport.scrollX;
       const absScrollY = viewport.frozenHeight + viewport.scrollY;
 
       const colAxis = renderer.scroll.cols;
       const rowAxis = renderer.scroll.rows;
+
+      const effectiveHeaderRows = headersControlled ? headerRowsRef.current : viewport.frozenRows > 0 ? 1 : 0;
+      const effectiveHeaderCols = headersControlled ? headerColsRef.current : viewport.frozenCols > 0 ? 1 : 0;
+
+      const headerRowsFrozen = Math.min(effectiveHeaderRows, viewport.frozenRows);
+      const headerColsFrozen = Math.min(effectiveHeaderCols, viewport.frozenCols);
+
+      const headerHeight = rowAxis.totalSize(headerRowsFrozen);
+      const headerWidth = colAxis.totalSize(headerColsFrozen);
+
+      const inHeaderRow = headerRowsFrozen > 0 && viewportY >= 0 && viewportY <= Math.min(headerHeight, viewport.height);
+      const inRowHeaderCol = headerColsFrozen > 0 && viewportX >= 0 && viewportX <= Math.min(headerWidth, viewport.width);
 
       let best: (ResizeHit & { distance: number }) | null = null;
 
