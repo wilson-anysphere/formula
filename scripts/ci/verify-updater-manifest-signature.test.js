@@ -180,3 +180,40 @@ test("supports minisign key/signature structures (\"Ed\" + keyId + bytes)", () =
   assert.equal(proc.status, 0, proc.stderr);
   assert.match(proc.stdout, /signature OK/);
 });
+
+test("supports minisign signature *files* (comment + payload lines)", () => {
+  const tmp = makeTempDir();
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const rawPubkey = rawEd25519PublicKey(publicKey);
+
+  // minisign key id is metadata; for testing we can use any 8 bytes as long as they match.
+  const keyId = Buffer.from([8, 7, 6, 5, 4, 3, 2, 1]);
+  const keyIdHex = Buffer.from(keyId).reverse().toString("hex").toUpperCase();
+
+  const pubPayload = Buffer.concat([Buffer.from([0x45, 0x64]), keyId, rawPubkey]); // "Ed" + keyId + pubkey
+  const pubPayloadLine = pubPayload.toString("base64").replace(/=+$/, "");
+  const minisignPubkeyFile = `untrusted comment: minisign public key: ${keyIdHex}\n${pubPayloadLine}\n`;
+  const tauriPubkey = Buffer.from(minisignPubkeyFile, "utf8").toString("base64");
+
+  const latestJsonPath = path.join(tmp, "latest.json");
+  const latestSigPath = path.join(tmp, "latest.json.sig");
+  const configPath = path.join(tmp, "tauri.conf.json");
+
+  const latestJsonBytes = Buffer.from(JSON.stringify({ version: "0.1.0", platforms: {} }), "utf8");
+  const signature = sign(null, latestJsonBytes, privateKey);
+  const minisignSigPayload = Buffer.concat([Buffer.from([0x45, 0x64]), keyId, Buffer.from(signature)]);
+  const sigPayloadLine = minisignSigPayload.toString("base64").replace(/=+$/, "");
+
+  const minisignSigFile = `untrusted comment: minisign signature: ${keyIdHex}\n${sigPayloadLine}\ntrusted comment: timestamp: 0\nAAAA\n`;
+
+  writeFileSync(latestJsonPath, latestJsonBytes);
+  writeFileSync(latestSigPath, minisignSigFile, "utf8");
+  writeFileSync(
+    configPath,
+    JSON.stringify({ plugins: { updater: { pubkey: tauriPubkey } } }, null, 2),
+  );
+
+  const proc = run({ configPath, latestJsonPath, latestSigPath });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /signature OK/);
+});
