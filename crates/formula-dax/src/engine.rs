@@ -1585,6 +1585,7 @@ impl DaxEngine {
             expr: &Expr,
             eval_filter: &FilterContext,
             row_ctx: &RowContext,
+            keep_filters: bool,
             clear_columns: &mut HashSet<(String, String)>,
             row_filters: &mut Vec<(String, HashSet<usize>)>,
         ) -> DaxResult<()> {
@@ -1615,8 +1616,10 @@ impl DaxEngine {
             // removed.
             let mut base_filter = eval_filter.clone();
             for key in &referenced_columns {
-                base_filter.column_filters.remove(key);
-                clear_columns.insert(key.clone());
+                if !keep_filters {
+                    base_filter.column_filters.remove(key);
+                    clear_columns.insert(key.clone());
+                }
             }
 
             let candidate_rows = resolve_table_rows(model, &base_filter, &table)?;
@@ -1702,6 +1705,7 @@ impl DaxEngine {
                     arg,
                     &eval_filter,
                     row_ctx,
+                    keep_filters,
                     &mut clear_columns,
                     &mut row_filters,
                 )?,
@@ -1712,6 +1716,7 @@ impl DaxEngine {
                         arg,
                         &eval_filter,
                         row_ctx,
+                        keep_filters,
                         &mut clear_columns,
                         &mut row_filters,
                     )?

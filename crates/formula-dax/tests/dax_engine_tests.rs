@@ -237,6 +237,38 @@ fn calculate_keepfilters_on_different_column_applies_both_filters() {
 }
 
 #[test]
+fn calculate_keepfilters_preserves_existing_filters_for_boolean_expressions() {
+    let mut model = build_model();
+    model
+        .add_measure(
+            "Override Medium",
+            "CALCULATE(SUM(Orders[Amount]), Orders[Amount] > 7 && Orders[Amount] < 20)",
+        )
+        .unwrap();
+    model
+        .add_measure(
+            "Keep Medium",
+            "CALCULATE(SUM(Orders[Amount]), KEEPFILTERS(Orders[Amount] > 7 && Orders[Amount] < 20))",
+        )
+        .unwrap();
+
+    let amount_20 =
+        FilterContext::empty().with_column_equals("Orders", "Amount", Value::from(20.0));
+
+    // Default CALCULATE filter arguments replace existing filters on referenced columns.
+    assert_eq!(
+        model.evaluate_measure("Override Medium", &amount_20).unwrap(),
+        18.0.into()
+    );
+
+    // KEEPFILTERS forces intersection with the existing filter context.
+    assert_eq!(
+        model.evaluate_measure("Keep Medium", &amount_20).unwrap(),
+        Value::Blank
+    );
+}
+
+#[test]
 fn calculate_treatas_can_simulate_relationships() {
     let model = build_model_without_relationship();
     let filter = FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
