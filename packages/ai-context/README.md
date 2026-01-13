@@ -17,6 +17,13 @@ This package focuses on:
 
 ---
 
+## Where this is used (in this repo)
+
+- Desktop chat orchestration: [`apps/desktop/src/ai/chat/orchestrator.ts`](../../apps/desktop/src/ai/chat/orchestrator.ts)
+- Desktop workbook context wrapper: [`apps/desktop/src/ai/context/WorkbookContextBuilder.ts`](../../apps/desktop/src/ai/context/WorkbookContextBuilder.ts)
+
+---
+
 ## Exports (high level)
 
 ```js
