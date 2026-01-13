@@ -740,6 +740,8 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
     let mut timeline_to_drawings: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 
     for rels_name in drawing_rels {
+        // Real-world workbooks can contain malformed relationship XML. Pivot slicer discovery is
+        // best-effort, so treat any missing/malformed `.rels` part as empty.
         let Some(rels_bytes) = package.part(&rels_name) else {
             continue;
         };
@@ -1613,8 +1615,14 @@ fn resolve_relationship_targets(
 ) -> Result<Vec<String>, XlsxError> {
     let mut targets = BTreeSet::new();
     for rid in relationship_ids {
-        if let Some(target) = resolve_relationship_target(package, base_part, &rid)? {
-            targets.insert(target);
+        // These relationships are optional (they connect caches to pivot tables). Be tolerant of
+        // malformed `.rels` payloads and continue when we can't resolve a target.
+        match resolve_relationship_target(package, base_part, &rid) {
+            Ok(Some(target)) => {
+                targets.insert(target);
+            }
+            Ok(None) => {}
+            Err(_) => {}
         }
     }
     Ok(targets.into_iter().collect())
