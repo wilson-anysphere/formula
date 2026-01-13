@@ -3646,44 +3646,77 @@ export class SpreadsheetApp {
     const maxDocRows = Math.max(0, rowCount - headerRows);
     const maxDocCols = Math.max(0, colCount - headerCols);
 
-    const nextCols = new Map<number, number>();
+    // Shared-grid hide/unhide semantics: only `OutlineEntry.hidden.user` is treated as hidden.
+    // (Outline- and filter-hidden rows/cols are intentionally ignored so existing shared-grid
+    // outline compatibility tests remain valid.)
+    const HIDDEN_AXIS_SIZE_BASE = 2; // CSS px at zoom=1
+    const outline = this.getOutlineForSheet(this.sheetId);
+
+    const docColOverridesBase = new Map<number, number>();
     for (const [key, value] of Object.entries(view?.colWidths ?? {})) {
       const col = Number(key);
       if (!Number.isInteger(col) || col < 0) continue;
       if (col >= maxDocCols) continue;
       const size = Number(value);
       if (!Number.isFinite(size) || size <= 0) continue;
-      nextCols.set(col, size);
+      docColOverridesBase.set(col, size);
+    }
+    for (const [summaryIndex, entry] of outline.cols.entries) {
+      if (!entry.hidden.user) continue;
+      const docCol = Number(summaryIndex) - 1; // outline indices are 1-based
+      if (!Number.isInteger(docCol) || docCol < 0) continue;
+      if (docCol >= maxDocCols) continue;
+      // Hidden overrides must take precedence over persisted widths.
+      docColOverridesBase.set(docCol, HIDDEN_AXIS_SIZE_BASE);
     }
 
-    const nextRows = new Map<number, number>();
+    const docRowOverridesBase = new Map<number, number>();
     for (const [key, value] of Object.entries(view?.rowHeights ?? {})) {
       const row = Number(key);
       if (!Number.isInteger(row) || row < 0) continue;
       if (row >= maxDocRows) continue;
       const size = Number(value);
       if (!Number.isFinite(size) || size <= 0) continue;
-      nextRows.set(row, size);
+      docRowOverridesBase.set(row, size);
+    }
+    for (const [summaryIndex, entry] of outline.rows.entries) {
+      if (!entry.hidden.user) continue;
+      const docRow = Number(summaryIndex) - 1; // outline indices are 1-based
+      if (!Number.isInteger(docRow) || docRow < 0) continue;
+      if (docRow >= maxDocRows) continue;
+      docRowOverridesBase.set(docRow, HIDDEN_AXIS_SIZE_BASE);
     }
 
     // Batch apply to avoid N-per-index invalidation + worst-case O(n^2) `VariableSizeAxis` updates.
+    // Ensure indices are applied in ascending order (CanvasGridRenderer expects this for predictable
+    // axis updates).
     const colSizes = new Map<number, number>();
     for (let i = 0; i < headerCols; i += 1) {
       colSizes.set(i, this.sharedGrid.renderer.getColWidth(i));
     }
-    for (const [col, base] of nextCols) {
-      colSizes.set(col + headerCols, base * zoom);
+    const docCols = [...docColOverridesBase.keys()].sort((a, b) => a - b);
+    for (const docCol of docCols) {
+      const base = docColOverridesBase.get(docCol);
+      if (base == null) continue;
+      colSizes.set(docCol + headerCols, base * zoom);
     }
 
     const rowSizes = new Map<number, number>();
     for (let i = 0; i < headerRows; i += 1) {
       rowSizes.set(i, this.sharedGrid.renderer.getRowHeight(i));
     }
-    for (const [row, base] of nextRows) {
-      rowSizes.set(row + headerRows, base * zoom);
+    const docRows = [...docRowOverridesBase.keys()].sort((a, b) => a - b);
+    for (const docRow of docRows) {
+      const base = docRowOverridesBase.get(docRow);
+      if (base == null) continue;
+      rowSizes.set(docRow + headerRows, base * zoom);
     }
 
     this.sharedGrid.renderer.applyAxisSizeOverrides({ rows: rowSizes, cols: colSizes }, { resetUnspecified: true });
+    // Axis size changes can affect the scrollable content size (max scroll, scrollbar thumb size)
+    // without changing the current scroll offsets. Force the DesktopSharedGrid scrollbars to
+    // re-measure so the thumb reflects the updated total size.
+    this.sharedGrid.scrollBy(0, 0);
   }
 
   freezePanes(): void {
@@ -4194,17 +4227,8 @@ export class SpreadsheetApp {
 
   /**
    * Hide or unhide rows (0-based indices).
-   *
-   * Note: This is only supported in the legacy renderer. Shared-grid mode intentionally does not
-   * currently implement outline-based hidden rows/cols.
    */
   setRowsHidden(rows: number[] | null | undefined, hidden: boolean): void {
-    if (this.gridMode !== "legacy") {
-      showToast("Hide/Unhide is not supported in shared grid mode yet.", "info");
-      // Preserve keyboard workflows even when the action is unsupported.
-      this.focus();
-      return;
-    }
     if (!Array.isArray(rows) || rows.length === 0) return;
 
     const outline = this.getOutlineForSheet(this.sheetId);
@@ -4226,16 +4250,8 @@ export class SpreadsheetApp {
 
   /**
    * Hide or unhide columns (0-based indices).
-   *
-   * Note: This is only supported in the legacy renderer. Shared-grid mode intentionally does not
-   * currently implement outline-based hidden rows/cols.
    */
   setColsHidden(cols: number[] | null | undefined, hidden: boolean): void {
-    if (this.gridMode !== "legacy") {
-      showToast("Hide/Unhide is not supported in shared grid mode yet.", "info");
-      this.focus();
-      return;
-    }
     if (!Array.isArray(cols) || cols.length === 0) return;
 
     const outline = this.getOutlineForSheet(this.sheetId);
@@ -7874,15 +7890,17 @@ export class SpreadsheetApp {
   }
 
   private isRowHidden(row: number): boolean {
-    if (this.gridMode !== "legacy") return false;
+    if (!Number.isInteger(row) || row < 0 || row >= this.limits.maxRows) return false;
     const entry = this.getOutlineForSheet(this.sheetId).rows.entry(row + 1);
-    return isHidden(entry.hidden);
+    if (this.gridMode === "legacy") return isHidden(entry.hidden);
+    return entry.hidden.user;
   }
 
   private isColHidden(col: number): boolean {
-    if (this.gridMode !== "legacy") return false;
+    if (!Number.isInteger(col) || col < 0 || col >= this.limits.maxCols) return false;
     const entry = this.getOutlineForSheet(this.sheetId).cols.entry(col + 1);
-    return isHidden(entry.hidden);
+    if (this.gridMode === "legacy") return isHidden(entry.hidden);
+    return entry.hidden.user;
   }
 
   private rebuildAxisVisibilityCache(): void {
@@ -8517,7 +8535,8 @@ export class SpreadsheetApp {
 
   private renderOutlineControls(): void {
     // Outline controls rely on the legacy renderer's row/col visibility caches.
-    // Shared-grid mode does not support hidden rows/cols yet, so keep the controls disabled.
+    // Shared-grid mode intentionally does not implement outline-group collapsing yet (only user-hidden
+    // rows/cols are supported), so keep the outline toggle controls disabled.
     if (this.sharedGrid) {
       for (const button of this.outlineButtons.values()) button.remove();
       this.outlineButtons.clear();
@@ -8625,6 +8644,7 @@ export class SpreadsheetApp {
       this.rebuildAxisVisibilityCache();
     }
     this.ensureActiveCellVisible();
+    if (this.sharedGrid) this.syncSharedGridAxisSizesFromDocument();
     this.scrollCellIntoView(this.selection.active);
     if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: false });
     this.refresh();
@@ -8678,19 +8698,30 @@ export class SpreadsheetApp {
   }
 
   private ensureActiveCellVisible(): void {
-    if (this.sharedGrid) {
-      // Shared-grid mode does not support hidden rows/cols yet, so the active cell never needs
-      // to be remapped to a "visible" index. Avoid referencing legacy visibility caches.
-      return;
-    }
     const range = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0] ?? null;
     let { row, col } = this.selection.active;
     let canPreserveSelection = range != null;
 
     if (this.isRowHidden(row)) {
-      const withinRange = range
-        ? this.closestVisibleIndexInRange(this.rowIndexByVisual, row, range.startRow, range.endRow)
-        : null;
+      const withinRange = (() => {
+        if (!range) return null;
+        if (!this.sharedGrid) {
+          return this.closestVisibleIndexInRange(this.rowIndexByVisual, row, range.startRow, range.endRow);
+        }
+
+        // Shared-grid mode intentionally does not build row/col visibility caches (they would be
+        // O(maxRows/maxCols) for Excel-scale sheets). Instead, scan within the active selection
+        // range to find a visible row, preferring forward (Excel-like).
+        const start = Math.max(0, Math.min(range.startRow, range.endRow));
+        const end = Math.min(this.limits.maxRows - 1, Math.max(range.startRow, range.endRow));
+        for (let r = Math.max(start, row); r <= end; r += 1) {
+          if (!this.isRowHidden(r)) return r;
+        }
+        for (let r = Math.min(end, row - 1); r >= start; r -= 1) {
+          if (!this.isRowHidden(r)) return r;
+        }
+        return null;
+      })();
       if (withinRange != null) {
         row = withinRange;
       } else {
@@ -8699,9 +8730,22 @@ export class SpreadsheetApp {
       }
     }
     if (this.isColHidden(col)) {
-      const withinRange = range
-        ? this.closestVisibleIndexInRange(this.colIndexByVisual, col, range.startCol, range.endCol)
-        : null;
+      const withinRange = (() => {
+        if (!range) return null;
+        if (!this.sharedGrid) {
+          return this.closestVisibleIndexInRange(this.colIndexByVisual, col, range.startCol, range.endCol);
+        }
+
+        const start = Math.max(0, Math.min(range.startCol, range.endCol));
+        const end = Math.min(this.limits.maxCols - 1, Math.max(range.startCol, range.endCol));
+        for (let c = Math.max(start, col); c <= end; c += 1) {
+          if (!this.isColHidden(c)) return c;
+        }
+        for (let c = Math.min(end, col - 1); c >= start; c -= 1) {
+          if (!this.isColHidden(c)) return c;
+        }
+        return null;
+      })();
       if (withinRange != null) {
         col = withinRange;
       } else {
@@ -12298,18 +12342,17 @@ export class SpreadsheetApp {
   }
 
   private usedRangeProvider() {
-    const shared = Boolean(this.sharedGrid);
     return {
       getUsedRange: () => this.computeUsedRange(),
       isCellEmpty: (cell: CellCoord) => {
         const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
         return state?.value == null && state?.formula == null;
       },
-      // Shared-grid mode currently supports manual row/col hide/unhide but does not yet render
-      // outline-collapsed (group) hidden state. Match Excel-like navigation by skipping user-hidden
-      // indices while ignoring outline-hidden ones.
-      isRowHidden: (row: number) => (shared ? this.outline.rows.entry(row + 1).hidden.user : this.isRowHidden(row)),
-      isColHidden: (col: number) => (shared ? this.outline.cols.entry(col + 1).hidden.user : this.isColHidden(col)),
+      // Shared-grid mode supports manual row/col hide/unhide but does not yet render outline-collapsed
+      // (group) hidden state. Match Excel-like navigation by skipping user-hidden indices while
+      // ignoring outline/filter-hidden ones.
+      isRowHidden: (row: number) => this.isRowHidden(row),
+      isColHidden: (col: number) => this.isColHidden(col),
     };
   }
 

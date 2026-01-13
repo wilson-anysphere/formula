@@ -5497,14 +5497,20 @@ if (
           label: "Hide",
           enabled: allowEditCommands,
           onSelect: () => {
-            // Hide/Unhide is currently legacy-grid only. Avoid enumerating potentially huge
-            // shared-grid selections (e.g. select-all on Excel-scale sheets) just to show the
-            // "not supported" toast.
-            if (app.getGridMode() !== "legacy") {
-              app.hideRows([]);
+            // `selectedRowIndices()` enumerates every row in every selection range into a Set.
+            // Keep this bounded so Excel-scale select-all (1M rows) can't cause huge allocations.
+            const selection = app.getSelectionRanges();
+            let rowUpperBound = 0;
+            for (const range of selection) {
+              const r = normalizeSelectionRange(range);
+              rowUpperBound += Math.max(0, r.endRow - r.startRow + 1);
+              if (rowUpperBound > MAX_AXIS_RESIZE_INDICES) break;
+            }
+            if (rowUpperBound > MAX_AXIS_RESIZE_INDICES) {
+              showToast("Selection too large to hide rows. Select fewer rows and try again.", "warning");
               return;
             }
-            app.hideRows(selectedRowIndices());
+            app.hideRows(selectedRowIndices(selection));
           },
         },
         {
@@ -5512,11 +5518,18 @@ if (
           label: "Unhide",
           enabled: allowEditCommands,
           onSelect: () => {
-            if (app.getGridMode() !== "legacy") {
-              app.unhideRows([]);
+            const selection = app.getSelectionRanges();
+            let rowUpperBound = 0;
+            for (const range of selection) {
+              const r = normalizeSelectionRange(range);
+              rowUpperBound += Math.max(0, r.endRow - r.startRow + 1);
+              if (rowUpperBound > MAX_AXIS_RESIZE_INDICES) break;
+            }
+            if (rowUpperBound > MAX_AXIS_RESIZE_INDICES) {
+              showToast("Selection too large to unhide rows. Select fewer rows and try again.", "warning");
               return;
             }
-            app.unhideRows(selectedRowIndices());
+            app.unhideRows(selectedRowIndices(selection));
           },
         },
       ];
@@ -5528,11 +5541,20 @@ if (
           label: "Hide",
           enabled: allowEditCommands,
           onSelect: () => {
-            if (app.getGridMode() !== "legacy") {
-              app.hideCols([]);
+            // `selectedColIndices()` enumerates every column in every selection range into a Set.
+            // Keep this bounded so Excel-scale select-all (16k cols) can't cause huge allocations.
+            const selection = app.getSelectionRanges();
+            let colUpperBound = 0;
+            for (const range of selection) {
+              const r = normalizeSelectionRange(range);
+              colUpperBound += Math.max(0, r.endCol - r.startCol + 1);
+              if (colUpperBound > MAX_AXIS_RESIZE_INDICES) break;
+            }
+            if (colUpperBound > MAX_AXIS_RESIZE_INDICES) {
+              showToast("Selection too large to hide columns. Select fewer columns and try again.", "warning");
               return;
             }
-            app.hideCols(selectedColIndices());
+            app.hideCols(selectedColIndices(selection));
           },
         },
         {
@@ -5540,11 +5562,18 @@ if (
           label: "Unhide",
           enabled: allowEditCommands,
           onSelect: () => {
-            if (app.getGridMode() !== "legacy") {
-              app.unhideCols([]);
+            const selection = app.getSelectionRanges();
+            let colUpperBound = 0;
+            for (const range of selection) {
+              const r = normalizeSelectionRange(range);
+              colUpperBound += Math.max(0, r.endCol - r.startCol + 1);
+              if (colUpperBound > MAX_AXIS_RESIZE_INDICES) break;
+            }
+            if (colUpperBound > MAX_AXIS_RESIZE_INDICES) {
+              showToast("Selection too large to unhide columns. Select fewer columns and try again.", "warning");
               return;
             }
-            app.unhideCols(selectedColIndices());
+            app.unhideCols(selectedColIndices(selection));
           },
         },
       ];
