@@ -787,9 +787,14 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $target = "${{ matrix.rust_target }}"
-          $releaseDir = "apps/desktop/src-tauri/target/$target/release"
-          if (-not (Test-Path $releaseDir)) {
-            throw "windows-arm64: Expected Rust release directory not found: $releaseDir"
+          $releaseCandidates = @(
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release"),
+            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release")
+          )
+          $releaseDir = $releaseCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $releaseDir) {
+            $candidatesJoined = $releaseCandidates -join "`n"
+            throw "windows-arm64: Expected Rust release directory not found. Looked in:`n$candidatesJoined"
           }
           $exe = Get-ChildItem -Path $releaseDir -Recurse -File -Filter "formula-desktop.exe" | Select-Object -First 1
           if (-not $exe) {
@@ -900,7 +905,15 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($target)) {
             throw "windows-sigcheck: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
           }
-          $bundleDir = "apps/desktop/src-tauri/target/$target/release/bundle"
+          $bundleCandidates = @(
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle")
+          )
+          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $bundleDir) {
+            $candidatesJoined = $bundleCandidates -join "`n"
+            throw "windows-sigcheck: ERROR expected Tauri bundle dir not found. Looked in:`n$candidatesJoined"
+          }
           python scripts/ci/check-windows-installer-signatures.py --bundle-dir "$bundleDir"
 
       - name: Verify Linux release artifacts (AppImage + deb + rpm + signatures)
