@@ -271,6 +271,44 @@ test("JsonVectorStore.close waits for an in-flight persist", async () => {
   assert.equal(closeResolved, true);
 });
 
+test("JsonVectorStore surfaces persist errors and the queue recovers for later writes", async () => {
+  class FailOnceStorage {
+    constructor() {
+      /** @type {Uint8Array | null} */
+      this._data = null;
+      this._failsLeft = 1;
+    }
+    async load() {
+      return this._data ? new Uint8Array(this._data) : null;
+    }
+    async save(data) {
+      if (this._failsLeft > 0) {
+        this._failsLeft -= 1;
+        throw new Error("save failed");
+      }
+      this._data = new Uint8Array(data);
+    }
+    get data() {
+      return this._data ? new Uint8Array(this._data) : null;
+    }
+  }
+
+  const storage = new FailOnceStorage();
+  const store = new JsonVectorStore({ storage, dimension: 2, autoSave: true });
+
+  await assert.rejects(store.upsert([{ id: "a", vector: [1, 0], metadata: {} }]), /save failed/);
+
+  // Subsequent writes should still persist successfully (queue must not be stuck).
+  await store.upsert([{ id: "b", vector: [0, 1], metadata: {} }]);
+  await store.close();
+
+  const persisted = storage.data;
+  assert.ok(persisted);
+  const parsed = JSON.parse(new TextDecoder().decode(persisted));
+  const ids = parsed.records.map((r) => r.id).sort();
+  assert.deepEqual(ids, ["a", "b"]);
+});
+
 let sqlJsAvailable = true;
 try {
   // Keep this as a computed dynamic import (no literal bare specifier) so
@@ -360,6 +398,44 @@ test(
     storage.release(1);
     await Promise.all([upsertPromise, closePromise]);
     assert.equal(closeResolved, true);
+  }
+);
+
+test(
+  "SqliteVectorStore surfaces persist errors and the queue recovers for later writes",
+  { skip: !sqlJsAvailable },
+  async () => {
+    class FailOnceStorage {
+      constructor() {
+        /** @type {Uint8Array | null} */
+        this._data = null;
+        this._failsLeft = 1;
+      }
+      async load() {
+        return this._data ? new Uint8Array(this._data) : null;
+      }
+      async save(data) {
+        if (this._failsLeft > 0) {
+          this._failsLeft -= 1;
+          throw new Error("save failed");
+        }
+        this._data = new Uint8Array(data);
+      }
+    }
+
+    const storage = new FailOnceStorage();
+    const SqliteVectorStore = await getSqliteVectorStore();
+    const store = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: true });
+
+    await assert.rejects(store.upsert([{ id: "a", vector: [1, 0], metadata: {} }]), /save failed/);
+    await store.upsert([{ id: "b", vector: [0, 1], metadata: {} }]);
+
+    const reloaded = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: false });
+    assert.ok(await reloaded.get("a"));
+    assert.ok(await reloaded.get("b"));
+
+    await store.close();
+    await reloaded.close();
   }
 );
 
