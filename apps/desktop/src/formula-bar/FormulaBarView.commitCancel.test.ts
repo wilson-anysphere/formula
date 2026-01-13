@@ -19,6 +19,39 @@ function queryActions(host: HTMLElement): {
 }
 
 describe("FormulaBarView commit/cancel UX", () => {
+  it("ignores commit/cancel actions while not editing", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel });
+    const { cancel, commit } = queryActions(host);
+
+    expect(view.model.isEditing).toBe(false);
+    expect(cancel.hidden).toBe(true);
+    expect(commit.hidden).toBe(true);
+
+    // Even if events are dispatched (e.g. programmatically), the view should guard
+    // against committing/canceling while not editing.
+    cancel.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    commit.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    const enter = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    view.textarea.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(false);
+
+    const escape = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    view.textarea.dispatchEvent(escape);
+    expect(escape.defaultPrevented).toBe(false);
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(false);
+
+    host.remove();
+  });
+
   it("hides commit/cancel buttons when not editing and shows them on focus", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
