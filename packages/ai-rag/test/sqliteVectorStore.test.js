@@ -82,6 +82,44 @@ test(
   }
 );
 
+test(
+  "SqliteVectorStore throws typed error on dimension mismatch when reset is disabled (file storage)",
+  { skip: !sqlJsAvailable },
+  async () => {
+    const tmpRoot = path.join(__dirname, ".tmp");
+    await mkdir(tmpRoot, { recursive: true });
+    const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-dim-mismatch-throw-"));
+    const filePath = path.join(tmpDir, "vectors.sqlite");
+
+    try {
+      const store1 = await createSqliteFileVectorStore({
+        filePath,
+        dimension: 3,
+        autoSave: true,
+      });
+      await store1.upsert([{ id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb" } }]);
+      await store1.close();
+
+      await assert.rejects(
+        createSqliteFileVectorStore({
+          filePath,
+          dimension: 4,
+          autoSave: false,
+          resetOnDimensionMismatch: false,
+        }),
+        (err) => {
+          assert.equal(err?.name, "SqliteVectorStoreDimensionMismatchError");
+          assert.equal(err?.dbDimension, 3);
+          assert.equal(err?.requestedDimension, 4);
+          return true;
+        }
+      );
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  }
+);
+
 test("SqliteVectorStore.vacuum() VACUUMs and persists a smaller DB (even with autoSave:false)", { skip: !sqlJsAvailable }, async () => {
   const tmpRoot = path.join(__dirname, ".tmp");
   await mkdir(tmpRoot, { recursive: true });

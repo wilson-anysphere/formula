@@ -221,9 +221,18 @@ maybeTest("SqliteVectorStore throws on dimension mismatch when resetOnDimensionM
   await store1.upsert([{ id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb" } }]);
   await store1.close();
 
-  await expect(
-    SqliteVectorStore.create({ storage, dimension: 4, autoSave: false, resetOnDimensionMismatch: false })
-  ).rejects.toThrow(/dimension mismatch/i);
+  let err: any = null;
+  try {
+    await SqliteVectorStore.create({ storage, dimension: 4, autoSave: false, resetOnDimensionMismatch: false });
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeTruthy();
+  expect(err).toMatchObject({
+    name: "SqliteVectorStoreDimensionMismatchError",
+    dbDimension: 3,
+    requestedDimension: 4,
+  });
 });
 
 maybeTest("SqliteVectorStore.compact() VACUUMs and persists a smaller DB (even with autoSave:false)", async () => {
