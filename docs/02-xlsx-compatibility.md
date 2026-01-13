@@ -11,11 +11,152 @@ Perfect XLSX compatibility is the foundation of user trust. Users must be confid
 - [20-images-in-cells.md](./20-images-in-cells.md) — Excel “Images in Cell” (`IMAGE()` / “Place in Cell”) packaging + schema notes
 - [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) — RichData (`richValue*` / `rdrichvalue*`) tables used by images-in-cells
 - [xlsx-embedded-images-in-cells.md](./xlsx-embedded-images-in-cells.md) — confirmed “Place in Cell” chain (the `rdRichValue*` schema; the fixture used there is encoded as `t="e"`/`#VALUE!`, but other real Excel files use other cached-value encodings)
+- [xlsx-comments.md](./xlsx-comments.md) — legacy notes + threaded comments + persons parts (relationships, parsing, preservation)
 - [21-encrypted-workbooks.md](./21-encrypted-workbooks.md) — password-protected / encrypted Excel workbooks (OOXML `EncryptedPackage`, legacy `.xls` `FILEPASS`)
 - [21-offcrypto.md](./21-offcrypto.md) — MS-OFFCRYPTO details for encrypted OOXML workbooks (`EncryptionInfo` + `EncryptedPackage`)
 - [21-xlsx-pivots.md](./21-xlsx-pivots.md) — pivot tables/caches/slicers/timelines compatibility notes + roadmap
 
 ---
+
+## Compatibility checklist (L1 Read / L4 Round-trip)
+
+This repo’s File I/O workstream uses the following shorthand (see [`instructions/file-io.md`](../instructions/file-io.md)):
+
+- **L1 (Read)**: the workbook opens and all data is visible/usable.
+- **L4 (Round-trip)**: we can save and reopen in Excel without unintended diffs or fidelity loss.
+
+| Feature | L1 impact | L4 impact | Preservation / patching summary |
+|---|---:|---:|---|
+| Data validations (`<dataValidations>`) | Low (UI affordance) | High | Treat as an opaque worksheet subtree unless explicitly editing validations; preserve ordering/placement when patching nearby sections (e.g. `<mergeCells>`). |
+| Row/column default styles (`row/@s`, `col/@style`) | Medium (formatting/render) | High | Preserve attributes and any rows/cols that exist solely to carry defaults; only rewrite when explicitly changing row/col defaults. |
+| Rich text (`sharedStrings` runs + `inlineStr`) | High (display fidelity) | High | Parse rich runs for display; preserve raw `<si>` records and unchanged inline `<is>` subtrees to avoid reserializing formatting. |
+| Sheet view state (`<sheetViews>` beyond zoom/freeze) | Medium (UI state) | Medium | Patch only the fields we own (zoom/freeze/etc); preserve unknown attributes/elements and additional view state (selection, gridlines/headings). |
+| Comments (legacy notes + threaded) | Medium (collab/review) | High | Parse comment text/authors into the model; preserve all comment-related OPC parts byte-for-byte unless explicitly rewriting comment XML. |
+| Outline metadata (`outlinePr`, row/col `outlineLevel`/`collapsed`/`hidden`) | Medium (grouping UX) | High | Parse into model `Outline`; when writing, update only outline-related attrs and keep all other row/col metadata intact. |
+| OPC robustness (path normalization) | High (open more files) | High | Normalize relationship targets for lookup (case/backslash/percent decoding); preserve original `.rels` bytes unless we must repair/append relationships. |
+
+---
+
+## Feature preservation rules
+
+This section documents the **current preservation contract** for specific XLSX features: what we parse into the workbook model vs what we keep around for lossless round-trip.
+
+### Data validations (`<dataValidations>`)
+
+Excel stores dropdown lists, custom validation formulas, and input/error prompts under `<dataValidations>` in each worksheet XML.
+
+#### Preservation strategy
+
+- **Parsed into model:** best-effort *identification only* (ranges + presence) when needed for UI; full rule semantics are treated as a separate subsystem.
+- **Preserved byte-for-byte:** the original `<dataValidations>` subtree is preserved whenever we are not explicitly editing validations.
+
+#### Patch/write rules
+
+- We treat `<dataValidations>` as **schema-ordered** relative to other worksheet sections. When inserting/replacing nearby blocks (e.g. `<mergeCells>`), we insert in the correct position **before** `<dataValidations>` to avoid Excel warnings.
+- When we do not touch validations, we do not normalize/rewrite the block (attribute order, unknown extension nodes, etc.).
+
+### Row/column default styles (`row/@s`, `col/@style`)
+
+SpreadsheetML supports row/column-level default formatting:
+
+- `row/@s` (+ `row/@customFormat`) applies a default `xf` style index to all cells in a row that do not specify `c/@s`.
+- `col/@style` applies a default `xf` style index to all cells in a column range (`<col min="…" max="…">`).
+
+#### Preservation strategy
+
+- **Parsed into model:** row/col default style indices are captured as per-row/per-col metadata (so we can keep them even if the row/col has no cells).
+- **Preserved byte-for-byte:** if we are not editing row/col defaults, we preserve the original `row/@s` / `col/@style` attributes (and any companion attributes like `customFormat`) unchanged.
+
+#### Patch/write rules
+
+- Do **not** delete “empty” rows/cols that exist only to carry default styles.
+- When emitting new rows/cols that carry defaults, write both the style index and its enabling flag (`customFormat="1"` for rows; Excel varies for cols).
+- Never renumber `xf` indices; only map stable `style_id` ↔ `xf` index through `styles.xml`.
+
+### Rich text (shared strings `<r>` runs + `inlineStr`)
+
+Excel can encode rich text in two places:
+
+1. **`xl/sharedStrings.xml`**: `<si>` entries can contain a simple `<t>` or multiple `<r>` runs with formatting (`<rPr>`).
+2. **Inline strings (`t="inlineStr"`)**: `<c t="inlineStr"><is>…</is></c>` can also contain `<r>` runs.
+
+#### Preservation strategy
+
+- **Parsed into model:** visible text plus run-level style for shared strings; inline strings are parsed at least to their visible text.
+- **Preserved byte-for-byte:**
+  - Existing shared-string `<si>` XML is preserved so we don’t reserialize rich runs we didn’t generate.
+  - Inline `<is>` payloads are preserved when the cell is unchanged (so rich runs survive no-op saves).
+
+#### Patch/write rules
+
+- Prefer updating shared strings via an *append-only* editor (do not rewrite existing `<si>` records).
+- Only re-emit an inline string’s `<is>` subtree when the cell value actually changes.
+
+### Sheet view state (`<sheetViews>` beyond zoom/freeze)
+
+`<sheetViews>` contains user interface state such as:
+
+- selection (`<selection activeCell="…" sqref="…"/>`)
+- gridlines/headings visibility (`showGridLines`, `showRowColHeaders`, etc.)
+- split panes (freeze and non-freeze splits)
+- zoom, view mode, and other sheet window flags
+
+#### Preservation strategy
+
+- **Parsed into model:** the subset we need to recreate Excel-like UX (zoom, panes/freeze, selection, basic show/hide flags).
+- **Preserved byte-for-byte:** any attributes/elements we do not model, including extension lists (`<extLst>`) and unknown view flags.
+
+#### Patch/write rules
+
+- Patch **in place** (attribute-level) rather than regenerating the entire `<sheetViews>` block.
+- When we only need to change zoom/freeze, preserve selections and unknown flags.
+
+### Comments (legacy notes + threaded comments)
+
+#### Preservation strategy
+
+- **Parsed into model:** comment anchors + visible text + authors (both legacy notes and threaded comments).
+- **Preserved byte-for-byte:** comment-adjacent OPC parts (VML shapes, commentsExt, persons, and related `.rels`) unless the caller explicitly rewrites comment XML.
+
+See [`docs/xlsx-comments.md`](./xlsx-comments.md) for the full part layout, relationship types, and preservation rules.
+
+### Outline metadata (`outlinePr`, row/col `outlineLevel`/`collapsed`/`hidden`)
+
+Outline/grouping state is split across:
+
+- `<sheetPr><outlinePr …/></sheetPr>`
+- row attributes: `row/@outlineLevel`, `row/@collapsed`, `row/@hidden`
+- column attributes: `col/@outlineLevel`, `col/@collapsed`, `col/@hidden`
+
+#### Preservation strategy
+
+- **Parsed into model:** outline preferences (`outlinePr`) and row/col outline entries (level/collapsed/hidden) are parsed into `formula_model::Outline`.
+- **Preserved byte-for-byte:** non-outline row/col attributes are not interpreted by the outline subsystem and should be preserved.
+
+#### Patch/write rules
+
+- When writing outline changes, update **only**:
+  - `outlinePr` attributes
+  - row/col outline attributes (`outlineLevel`, `collapsed`, `hidden`)
+- Recompute derived hidden state (outline-hidden vs user-hidden) before writing.
+- Keep schema order: if inserting a new `<cols>` section for outline columns, place it before `<sheetData>`.
+
+### OPC robustness (relationship targets + part lookup)
+
+Real-world XLSX producers sometimes emit relationship targets that diverge from canonical OPC part names.
+
+#### Preservation strategy
+
+- **Parsed into model:** none (this is lookup/IO plumbing).
+- **Preserved byte-for-byte:** `.rels` parts and `[Content_Types].xml` are preserved unless we must explicitly repair/append entries.
+
+#### Patch/write rules
+
+- Relationship target normalization is *lookup-only*:
+  - tolerate Windows path separators (`\`)
+  - ignore URI fragments/queries (`#…`, `?…`) when mapping to ZIP entry names
+  - fall back to case-insensitive and percent-decoded lookups when a target does not resolve as-is
+- Never rewrite a relationship `Target` string just to “normalize” it; preserve original strings unless the relationship itself is being created/repaired.
 
 ## XLSX File Format Structure
 
@@ -40,6 +181,12 @@ workbook.xlsx (ZIP archive)
 │   ├── workbook.xml             # Workbook structure, sheet refs
 │   ├── styles.xml               # All cell formatting
 │   ├── sharedStrings.xml        # Deduplicated text strings
+│   ├── comments1.xml            # (optional) legacy cell notes ("comments" in OOXML terminology)
+│   ├── threadedComments/        # (optional) modern threaded comments
+│   │   └── threadedComments1.xml
+│   ├── persons/                 # (optional) people directory for threaded comments
+│   │   └── persons1.xml
+│   ├── commentsExt1.xml         # (optional) comment extension metadata (may be unreferenced)
 │   ├── cellimages.xml           # (optional) workbook-level cell image store (name/casing varies; may also appear as xl/cellImages.xml; observed in real Excel fixtures: fixtures/xlsx/rich-data/images-in-cell.xlsx; fixtures/xlsx/images-in-cells/image-in-cell.xlsx)
 │   ├── calcChain.xml            # Calculation order hints
 │   ├── metadata.xml             # Cell/value metadata (Excel "Rich Data")
@@ -56,7 +203,8 @@ workbook.xlsx (ZIP archive)
 │   │   ├── sheet1.xml           # Cell data, formulas
 │   │   └── sheet2.xml
 │   ├── drawings/
-│   │   └── drawing1.xml         # Charts, shapes, images
+│   │   ├── drawing1.xml         # Charts, shapes, images
+│   │   └── vmlDrawing1.vml      # (optional) VML shapes for legacy notes/comments
 │   ├── media/
 │   │   └── image1.png           # Embedded image blobs (used by drawings and in-cell images)
 │   ├── charts/
