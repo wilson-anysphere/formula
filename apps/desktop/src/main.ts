@@ -49,6 +49,7 @@ import { computeRibbonDisabledByIdFromCommandRegistry } from "./ribbon/ribbonCom
 import { getRibbonUiStateSnapshot, setRibbonUiState } from "./ribbon/ribbonUiState.js";
 import { deriveRibbonAriaKeyShortcutsById, deriveRibbonShortcutById } from "./ribbon/ribbonShortcuts.js";
 import { MAX_AXIS_RESIZE_INDICES, promptAndApplyAxisSizing, selectedColIndices, selectedRowIndices } from "./ribbon/axisSizing.js";
+import { handleRibbonCommand as handleRibbonFormattingCommand } from "./ribbon/commandHandlers.js";
 import { RIBBON_DISABLED_BY_ID_WHILE_EDITING } from "./ribbon/ribbonEditingDisabledById.js";
 
 import type { CellRange as GridCellRange } from "@formula/grid";
@@ -175,7 +176,6 @@ import { tryInsertCollabSheet } from "./sheets/collabSheetMutations";
 import { startSheetStoreDocumentSync } from "./sheets/sheetStoreDocumentSync";
 import { createAddSheetCommand, createDeleteActiveSheetCommand } from "./sheets/sheetCommands";
 import {
-  applyAllBorders,
   NUMBER_FORMATS,
   toggleBold,
   toggleItalic,
@@ -8058,6 +8058,16 @@ const onRibbonCommandError = (_commandId: string, err: unknown): void => {
   showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
 };
 
+const ribbonCommandHandlersCtx = {
+  app,
+  applyFormattingToSelection,
+  showToast,
+  executeCommand: (commandId: string, ...args: any[]) => {
+    void commandRegistry.executeCommand(commandId, ...args).catch((err) => onRibbonCommandError(commandId, err));
+  },
+  sortSelection: (options: { order: "ascending" | "descending" }) => sortSelection(app, options),
+};
+
 const ribbonActions = createRibbonActionsFromCommands({
   commandRegistry,
   onCommandError: onRibbonCommandError,
@@ -8279,6 +8289,10 @@ function handleRibbonCommand(commandId: string): void {
       }
     }
 
+    if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
+      return;
+    }
+
     switch (commandId) {
       case "file.new.new":
       case "file.new.blankWorkbook": {
@@ -8407,20 +8421,6 @@ function handleRibbonCommand(commandId: string): void {
       case "insert.illustrations.onlinePictures":
         void handleInsertPicturesRibbonCommand(commandId, app);
         return;
-      case "home.font.borders":
-        // This command is a dropdown with menu items; the top-level command is not expected
-        // to fire when the menu is present. Keep this as a fallback.
-        applyFormattingToSelection("Borders", (_doc, sheetId, ranges) => applyAllBorders(doc, sheetId, ranges));
-        return;
-      case "home.font.fontColor":
-        executeBuiltinCommand("format.fontColor");
-        return;
-      case "home.font.fillColor":
-        executeBuiltinCommand("format.fillColor");
-        return;
-      case "home.font.fontSize":
-        executeBuiltinCommand("format.fontSize.set");
-        return;
 
       case "home.alignment.mergeCenter":
         // Dropdown container id; some ribbon interactions can surface this in `onCommand`.
@@ -8534,12 +8534,6 @@ function handleRibbonCommand(commandId: string): void {
           getActiveCellNumberFormat: activeCellNumberFormat,
           applyFormattingToSelection,
         });
-        return;
-      case "format.openFormatCells":
-      case "home.number.formatCells": // legacy ribbon schema id
-      case "home.number.moreFormats.formatCells": // legacy ribbon schema id
-      case "home.cells.format.formatCells": // legacy ribbon schema id
-        executeBuiltinCommand("format.openFormatCells");
         return;
       case "home.cells.insert.insertCells":
       case "home.cells.delete.deleteCells":
@@ -8670,16 +8664,6 @@ function handleRibbonCommand(commandId: string): void {
           getCellValue: (sheetId, cell) => app.getCellComputedValueForSheet(sheetId, cell),
           focusGrid: () => app.focus(),
         });
-        return;
-      case "home.editing.sortFilter.sortAtoZ":
-      case "data.sortFilter.sortAtoZ":
-      case "data.sortFilter.sort.sortAtoZ":
-        sortSelection(app, { order: "ascending" });
-        return;
-      case "home.editing.sortFilter.sortZtoA":
-      case "data.sortFilter.sortZtoA":
-      case "data.sortFilter.sort.sortZtoA":
-        sortSelection(app, { order: "descending" });
         return;
       case "view.freezePanes":
       case "view.freezeTopRow":
