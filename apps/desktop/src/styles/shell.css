@@ -277,6 +277,8 @@ dialog.print-preview-dialog::backdrop {
   font-size: 12px;
   align-items: stretch;
   min-width: 0;
+  /* Never allow status bar contents to introduce page-level horizontal scrolling. */
+  overflow-x: hidden;
 }
 
 .statusbar:focus-within {
