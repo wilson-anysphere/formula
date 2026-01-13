@@ -13,9 +13,19 @@ export interface RagSheet {
   origin?: { row: number; col: number };
 }
 
-export interface RagChunk<TMetadata = any> {
+export type RagChunkMetadata =
+  | { type: "region"; sheetName: string; regionRange: string }
+  | { type: "range"; sheetName: string };
+
+export interface RagChunk<TMetadata = RagChunkMetadata> {
   id: string;
+  /**
+   * Sheet-qualified A1 range string (e.g. `"Sheet1!A1:B3"`).
+   */
   range: string;
+  /**
+   * Prompt-friendly text representation (TSV-ish preview) of the chunk.
+   */
   text: string;
   metadata: TMetadata;
 }
@@ -57,65 +67,63 @@ export interface VectorStore<TItem = VectorStoreItem> {
     topK: number,
     options?: { signal?: AbortSignal },
   ): Promise<Array<VectorStoreSearchResult<TItem>>>;
+  /**
+   * Optional method for per-sheet re-indexing when the number of chunks can shrink.
+   */
   deleteByPrefix?: (prefix: string, options?: { signal?: AbortSignal }) => Promise<void>;
   readonly size?: number;
 }
 
 export class HashEmbedder implements Embedder {
   dimension: number;
-
   constructor(options?: { dimension?: number });
-
   /**
    * Deterministic, offline hash-based embeddings.
    */
   embed(text: string, options?: { signal?: AbortSignal }): Promise<number[]>;
 }
 
-export class InMemoryVectorStore<TMetadata = any>
-  implements VectorStore<VectorStoreItem<TMetadata>>
-{
+export class InMemoryVectorStore<TMetadata = any> implements VectorStore<VectorStoreItem<TMetadata>> {
   items: Map<string, VectorStoreItem<TMetadata>>;
-
   constructor();
-
   add(items: Array<VectorStoreItem<TMetadata>>, options?: { signal?: AbortSignal }): Promise<void>;
-
   search(
     queryEmbedding: number[],
     topK: number,
     options?: { signal?: AbortSignal },
   ): Promise<Array<VectorStoreSearchResult<VectorStoreItem<TMetadata>>>>;
-
   deleteByPrefix(prefix: string, options?: { signal?: AbortSignal }): Promise<void>;
-
   get size(): number;
 }
 
+/**
+ * Chunk a sheet by detected regions for a simple RAG pipeline.
+ */
 export function chunkSheetByRegions(
   sheet: RagSheet,
   options?: ChunkSheetByRegionsOptions,
 ): Array<RagChunk<{ type: "region"; sheetName: string; regionRange: string }>>;
 
+/**
+ * Like `chunkSheetByRegions`, but also returns the extracted schema so callers can
+ * reuse it without a second pass.
+ */
 export function chunkSheetByRegionsWithSchema(
   sheet: RagSheet,
   options?: ChunkSheetByRegionsOptions,
-): {
-  schema: SheetSchema;
-  chunks: Array<RagChunk<{ type: "region"; sheetName: string; regionRange: string }>>;
-};
+): { schema: SheetSchema; chunks: Array<RagChunk<{ type: "region"; sheetName: string; regionRange: string }>> };
 
 export class RagIndex {
   embedder: Embedder;
   store: VectorStore;
-
   constructor(options?: { embedder?: Embedder; store?: VectorStore });
-
+  /**
+   * Index a sheet, replacing any previous region chunks for the same sheet.
+   */
   indexSheet(
     sheet: RagSheet,
     options?: ChunkSheetByRegionsOptions,
   ): Promise<{ schema: SheetSchema; chunkCount: number }>;
-
   search(
     query: string,
     topK?: number,
@@ -123,8 +131,12 @@ export class RagIndex {
   ): Promise<Array<{ range: string; score: number; preview: string }>>;
 }
 
+/**
+ * Convenience for building a single chunk from a numeric range in a sheet.
+ */
 export function rangeToChunk(
   sheet: RagSheet,
   range: { startRow: number; startCol: number; endRow: number; endCol: number },
   options?: { maxRows?: number },
 ): RagChunk<{ type: "range"; sheetName: string }>;
+
