@@ -14,6 +14,8 @@ use crate::storage::collab_encryption_keys::{
     CollabEncryptionKeyEntry, CollabEncryptionKeyListEntry, CollabEncryptionKeyStore,
 };
 #[cfg(feature = "desktop")]
+use crate::storage::collab_tokens::{CollabTokenEntry, CollabTokenStore};
+#[cfg(feature = "desktop")]
 use crate::storage::power_query_cache_key::{PowerQueryCacheKey, PowerQueryCacheKeyStore};
 #[cfg(feature = "desktop")]
 use crate::storage::power_query_credentials::{
@@ -1226,6 +1228,80 @@ pub async fn power_query_cache_key_get_or_create(
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCacheKeyStore::open_default();
         store.get_or_create().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Collaboration: load a persisted sync token by key.
+///
+/// Tokens are stored encrypted-at-rest using an OS-keychain-backed keyring.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn collab_token_get(
+    window: tauri::WebviewWindow,
+    token_key: String,
+) -> Result<Option<CollabTokenEntry>, String> {
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "collaboration tokens",
+        ipc_origin::Verb::Are,
+    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "collaboration tokens", ipc_origin::Verb::Are)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = CollabTokenStore::open_default().map_err(|e| e.to_string())?;
+        store.get(&token_key).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Collaboration: persist a sync token entry for a key.
+///
+/// IMPORTANT: token strings must never be logged.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn collab_token_set(
+    window: tauri::WebviewWindow,
+    token_key: String,
+    entry: CollabTokenEntry,
+) -> Result<(), String> {
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "collaboration tokens",
+        ipc_origin::Verb::Are,
+    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "collaboration tokens", ipc_origin::Verb::Are)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = CollabTokenStore::open_default().map_err(|e| e.to_string())?;
+        store.set(&token_key, entry).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Collaboration: delete any persisted sync token entry for a key.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn collab_token_delete(
+    window: tauri::WebviewWindow,
+    token_key: String,
+) -> Result<(), String> {
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "collaboration tokens",
+        ipc_origin::Verb::Are,
+    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "collaboration tokens", ipc_origin::Verb::Are)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = CollabTokenStore::open_default().map_err(|e| e.to_string())?;
+        store.delete(&token_key).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?

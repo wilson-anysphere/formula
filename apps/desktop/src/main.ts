@@ -113,7 +113,7 @@ import { assertExtensionRangeWithinLimits } from "./extensions/rangeSizeGuard.js
 import { createOpenFormatCells } from "./formatting/openFormatCellsCommand.js";
 import { parseCollabShareLink, serializeCollabShareLink } from "./sharing/collabLink.js";
 import { saveCollabConnectionForWorkbook, loadCollabConnectionForWorkbook } from "./sharing/collabConnectionStore.js";
-import { loadCollabToken, storeCollabToken } from "./sharing/collabTokenStore.js";
+import { loadCollabToken, preloadCollabTokenFromKeychain, storeCollabToken } from "./sharing/collabTokenStore.js";
 import { getWorkbookMutationPermission, READ_ONLY_SHEET_MUTATION_MESSAGE } from "./collab/permissionGuards";
 import { DesktopExtensionHostManager } from "./extensions/extensionHostManager.js";
 import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
@@ -1128,6 +1128,18 @@ openMarketplacePanelButtonEl.addEventListener("click", (e) => {
 const docIdParam = new URL(window.location.href).searchParams.get("docId");
 const docId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam : null;
 const workbookId = docId ?? "local-workbook";
+
+// Best-effort: hydrate any persisted collaboration token from the desktop secure store
+// into session-scoped storage before SpreadsheetApp resolves its auto-reconnect options.
+try {
+  const stored = loadCollabConnectionForWorkbook({ workbookKey: workbookId });
+  if (stored) {
+    await preloadCollabTokenFromKeychain({ wsUrl: stored.wsUrl, docId: stored.docId });
+  }
+} catch {
+  // ignore (storage disabled / Tauri invoke unavailable / etc)
+}
+
 const legacyGridLimits = (() => {
   if (resolveDesktopGridMode() !== "legacy") return undefined;
   // `getWorkbookLoadLimits` also resolves snapshot chunking controls; strip it down to

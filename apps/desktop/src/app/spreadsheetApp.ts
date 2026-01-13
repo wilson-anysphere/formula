@@ -525,8 +525,9 @@ function resolveCollabOptionsFromStoredConnection(workbookId: string | undefined
   const stored = loadCollabConnectionForWorkbook({ workbookKey });
   if (!stored) return null;
 
-  // Tokens are never persisted across app restarts unless we have OS keychain integration.
-  // Only auto-reconnect when the token is still present for this session.
+  // Tokens are persisted across app restarts on desktop via an OS-keychain-backed
+  // encrypted store (see `collabTokenStore`), and cached into session-scoped
+  // storage during startup.
   const token = loadCollabToken({ wsUrl: stored.wsUrl, docId: stored.docId });
   if (!token) return null;
 
