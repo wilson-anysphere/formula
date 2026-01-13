@@ -9,6 +9,11 @@
   z-index: var(--grid-z-chart-overlay, 2);
 }
 
+.chart-selection-canvas {
+  /* Selection handles for charts are painted on a separate overlay canvas. */
+  pointer-events: none;
+}
+
 /* Canvas-based drawings overlay (shapes, images, etc). */
 .drawing-layer {
   position: absolute;
