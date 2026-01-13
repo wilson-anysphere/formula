@@ -2,6 +2,7 @@ import type { ChatStreamEvent, LLMClient, LLMMessage } from "../../../../../pack
 
 import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js";
 import type { AIAuditEntry, AuditListFilters } from "../../../../../packages/ai-audit/src/types.js";
+import { AIAuditRecorder } from "../../../../../packages/ai-audit/src/recorder.js";
 
 import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
 import type { TokenEstimator } from "../../../../../packages/ai-context/src/tokenBudget.js";
@@ -439,7 +440,50 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
       // Hard stop: DLP says we cannot send any workbook content to a cloud model.
       // IMPORTANT: do not call the LLM in this case.
       if (error instanceof DlpViolationError) {
-        throw new AiChatOrchestratorError(error.message, { sessionId, cause: error });
+        // Write an audit entry even though we never reach the tool/LLM loop.
+        // IMPORTANT: keep this payload sanitized (no workbook context / sampled cell values).
+        let offeredTools: string[] | undefined;
+        try {
+          const toolPolicy =
+            options.toolExecutorOptions?.toolPolicy ??
+            getDesktopToolPolicy({ mode: "chat", prompt: text, hasAttachments: attachments.length > 0 });
+          const toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
+            ...(options.toolExecutorOptions ?? {}),
+            toolPolicy,
+            default_sheet: activeSheetId,
+            sheet_name_resolver: options.toolExecutorOptions?.sheet_name_resolver ?? options.sheetNameResolver ?? null,
+            require_approval_for_mutations: true,
+            dlp,
+          });
+          offeredTools = toolExecutor.tools.map((t) => t.name);
+        } catch {
+          // ignore
+        }
+
+        const recorder = new AIAuditRecorder({
+          store: auditStore,
+          session_id: sessionId,
+          workbook_id: options.workbookId,
+          mode: "chat",
+          model: options.model,
+          input: {
+            blocked: true,
+            text: truncateTextForAudit(text, MAX_AUDIT_TEXT_CHARS),
+            attachments: sanitizeAttachmentsForAudit(attachments),
+            workbookId: options.workbookId,
+            sheetId: activeSheetId,
+            ...(offeredTools ? { offered_tools: offeredTools } : {}),
+            dlp: { decision: (error as any)?.decision ?? null },
+          },
+        });
+
+        try {
+          await recorder.finalize();
+        } catch {
+          // Best-effort: do not mask the DLP error if the audit store fails.
+        }
+
+        throw new AiChatOrchestratorError(error.message, { sessionId, auditEntryId: recorder.entry.id, cause: error });
       }
       throw error;
     }
@@ -749,4 +793,24 @@ function extractRetrievedRanges(retrieved: any[], sheetNameResolver?: SheetNameR
     }
   }
   return out;
+}
+
+const MAX_AUDIT_TEXT_CHARS = 8_000;
+
+function truncateTextForAudit(text: string, maxChars: number): string {
+  const s = String(text ?? "");
+  if (!Number.isFinite(maxChars) || maxChars <= 0) return "";
+  if (s.length <= maxChars) return s;
+  const marker = "[TRUNCATED]…";
+  if (maxChars <= marker.length) return marker.slice(0, Math.max(0, maxChars));
+  return `${s.slice(0, Math.max(0, maxChars - marker.length))}${marker}`;
+}
+
+function sanitizeAttachmentsForAudit(attachments: AiChatAttachment[]): Array<{ type: string; reference: string }> {
+  // Attachments may include sampled/rich payloads. For audit entries generated in the DLP-blocked
+  // path we only persist the attachment *references* (no data blobs).
+  return (attachments ?? []).map((a) => ({
+    type: String((a as any)?.type ?? ""),
+    reference: truncateTextForAudit(String((a as any)?.reference ?? ""), 1_000),
+  }));
 }

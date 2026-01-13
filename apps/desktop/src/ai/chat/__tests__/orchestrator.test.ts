@@ -754,6 +754,12 @@ describe("ai chat orchestrator", () => {
       expect(stats.error?.name).toBe("DlpViolationError");
       expect(stats.error?.message).toMatch(/Sending data to cloud AI is restricted/i);
 
+      const entries = await auditStore.listEntries({ session_id: "session_dlp_block" });
+      expect(entries.length).toBe(1);
+      expect(entries[0]?.mode).toBe("chat");
+      expect((entries[0]?.input as any)?.blocked).toBe(true);
+      expect(JSON.stringify(entries[0]?.input)).not.toContain("TOP SECRET");
+
       const events = getAiDlpAuditLogger().list();
       expect(events.some((e: any) => e.details?.type === "ai.workbook_context")).toBe(true);
     } finally {
