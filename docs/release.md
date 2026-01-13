@@ -219,6 +219,12 @@ Note: we intentionally do **not** enable `com.apple.security.cs.disable-library-
 
 #### Local verification checklist (signed app)
 
+Note: `apps/desktop/src-tauri/tauri.conf.json` does **not** hardcode a signing identity, so a plain
+local `tauri build` will typically produce **unsigned** artifacts. To run this checklist locally,
+you must build a **signed** app (e.g. use the CI-produced artifacts, or temporarily set
+`bundle.macOS.signingIdentity` to your explicit `Developer ID Application: … (TEAMID)` identity and
+then revert the change—do not commit it).
+
 1. Build the production bundles:
 
    ```bash
