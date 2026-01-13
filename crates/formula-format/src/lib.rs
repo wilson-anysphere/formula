@@ -39,8 +39,8 @@ pub use crate::parse::{locale_for_lcid, FormatCode, ParseError};
 pub const BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX: &str = "__builtin_numFmtId:";
 
 pub use locale::{
-    format_number, get_locale, number_locale_from_locale, NumberLocale, DE_DE, EN_GB, EN_US, ES_ES,
-    FR_FR, IT_IT,
+    format_number, get_locale, number_locale_from_locale, NumberLocale, DE_CH, DE_DE, EN_GB, EN_US,
+    ES_ES, FR_CH, FR_FR, IT_CH, IT_IT,
 };
 
 fn resolve_builtin_placeholder(code: &str) -> Option<&'static str> {

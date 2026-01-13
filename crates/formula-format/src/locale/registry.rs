@@ -52,6 +52,27 @@ pub static IT_IT: NumberLocale = NumberLocale {
     thousands_separator: Some('.'),
 };
 
+/// Swiss German / Swiss-style number separators (`'` grouping, `.` decimal).
+pub static DE_CH: NumberLocale = NumberLocale {
+    id: "de-CH",
+    decimal_separator: '.',
+    thousands_separator: Some('\''),
+};
+
+/// Swiss French / Swiss-style number separators (`'` grouping, `.` decimal).
+pub static FR_CH: NumberLocale = NumberLocale {
+    id: "fr-CH",
+    decimal_separator: '.',
+    thousands_separator: Some('\''),
+};
+
+/// Swiss Italian / Swiss-style number separators (`'` grouping, `.` decimal).
+pub static IT_CH: NumberLocale = NumberLocale {
+    id: "it-CH",
+    decimal_separator: '.',
+    thousands_separator: Some('\''),
+};
+
 fn normalize_locale_id(id: &str) -> Option<&'static str> {
     let trimmed = id.trim();
     if trimmed.is_empty() {
@@ -76,9 +97,12 @@ fn normalize_locale_id(id: &str) -> Option<&'static str> {
         "en-us" | "en" => Some("en-US"),
         "en-gb" | "en-uk" => Some("en-GB"),
         "de-de" | "de" => Some("de-DE"),
+        "de-ch" => Some("de-CH"),
         "fr-fr" | "fr" => Some("fr-FR"),
+        "fr-ch" => Some("fr-CH"),
         "es-es" | "es" => Some("es-ES"),
         "it-it" | "it" => Some("it-IT"),
+        "it-ch" => Some("it-CH"),
         _ => None,
     }
 }
@@ -88,9 +112,12 @@ pub fn get_locale(id: &str) -> Option<&'static NumberLocale> {
         "en-US" => Some(&EN_US),
         "en-GB" => Some(&EN_GB),
         "de-DE" => Some(&DE_DE),
+        "de-CH" => Some(&DE_CH),
         "fr-FR" => Some(&FR_FR),
+        "fr-CH" => Some(&FR_CH),
         "es-ES" => Some(&ES_ES),
         "it-IT" => Some(&IT_IT),
+        "it-CH" => Some(&IT_CH),
         _ => None,
     }
 }
@@ -217,9 +244,12 @@ mod tests {
         assert_eq!(normalize_locale_id("en-GB"), Some("en-GB"));
         assert_eq!(normalize_locale_id("en_uk"), Some("en-GB"));
         assert_eq!(normalize_locale_id("de"), Some("de-DE"));
+        assert_eq!(normalize_locale_id("de_ch"), Some("de-CH"));
         assert_eq!(normalize_locale_id("fr_fr"), Some("fr-FR"));
+        assert_eq!(normalize_locale_id("fr_CH"), Some("fr-CH"));
         assert_eq!(normalize_locale_id("es-ES"), Some("es-ES"));
         assert_eq!(normalize_locale_id("it_it"), Some("it-IT"));
+        assert_eq!(normalize_locale_id("it-CH"), Some("it-CH"));
         assert_eq!(normalize_locale_id(""), None);
     }
 
