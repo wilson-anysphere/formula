@@ -55,6 +55,11 @@ jobs:
     needs: validate-version
     strategy:
       fail-fast: false
+      # NOTE: tauri-action updates shared GitHub Release assets (notably `latest.json`)
+      # for the updater. If multiple matrix jobs run in parallel they can race and
+      # overwrite each other, leading to missing platform entries. Serializing the
+      # matrix prevents these release asset / manifest update races.
+      max-parallel: 1
       matrix:
         # Pinned runner images keep release workflows deterministic and avoid breakages
         # when GitHub updates the default `*-latest` hosted runner images.
