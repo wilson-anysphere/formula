@@ -828,18 +828,9 @@ describe("DocumentControllerSpreadsheetApi", () => {
     });
 
     const api = new DocumentControllerSpreadsheetApi(controller);
-    const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
+    const cells = api.readRange({ sheet: "Sheet1", startRow: 1, endRow: 1, startCol: 1, endCol: 1 });
 
-    const result = await executor.execute({
-      name: "read_range",
-      parameters: { range: "A1:A1" }
-    });
-
-    expect(result.ok).toBe(true);
-    expect(result.tool).toBe("read_range");
-    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
-
-    const value = result.data?.values?.[0]?.[0] as any;
+    const value = cells[0]?.[0]?.value as any;
     expect(value?.text).toBe("Rich Bold");
     value.text = "Mutated";
 

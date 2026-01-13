@@ -47,6 +47,7 @@ export function resetAiDlpAuditLoggerForTests(): void {
 }
 
 type AiCloudDlpCacheEntry = {
+  storageToken: unknown;
   rawOrgPolicy: string | null;
   rawDocPolicy: string | null;
   rawClassifications: string | null;
@@ -60,8 +61,8 @@ type AiCloudDlpCacheEntry = {
 
 const aiCloudDlpCache = new Map<string, AiCloudDlpCacheEntry>();
 
-function safeStorage(storage: StorageLike): StorageLike {
-  return {
+function safeStorage(storage: StorageLike): StorageLike & { __raw?: StorageLike } {
+  const wrapper: StorageLike & { __raw?: StorageLike } = {
     getItem(key) {
       try {
         return storage.getItem(key);
@@ -84,6 +85,10 @@ function safeStorage(storage: StorageLike): StorageLike {
       }
     }
   };
+  // Expose the underlying storage object so memoization can invalidate caches when
+  // environments swap out `localStorage` implementations (e.g. unit tests).
+  wrapper.__raw = storage;
+  return wrapper;
 }
 
 function getLocalStorageOrNull(): StorageLike | null {
@@ -153,12 +158,18 @@ function loadEffectivePolicy(params: { documentId: string; orgId?: string; stora
 
 function memoizedDlpData(params: { storage: StorageLike; documentId: string; orgId: string }): AiCloudDlpCacheEntry {
   const cacheKey = `${params.orgId}\u0000${params.documentId}`;
+  const storageToken = (params.storage as any)?.__raw ?? params.storage;
 
   const rawOrgPolicy = params.storage.getItem(`dlp:orgPolicy:${params.orgId}`);
   const rawDocPolicy = params.storage.getItem(`dlp:docPolicy:${params.documentId}`);
   const rawClassifications = params.storage.getItem(`dlp:classifications:${params.documentId}`);
 
-  const cached = aiCloudDlpCache.get(cacheKey);
+  // Only reuse cached values when the backing storage instance is the same.
+  // (Tests frequently replace `window.localStorage` with an in-memory mock.)
+  const cached = (() => {
+    const entry = aiCloudDlpCache.get(cacheKey);
+    return entry && entry.storageToken === storageToken ? entry : null;
+  })();
   if (
     cached &&
     cached.rawOrgPolicy === rawOrgPolicy &&
@@ -192,6 +203,7 @@ function memoizedDlpData(params: { storage: StorageLike; documentId: string; org
   const hasDlpConfig = Boolean(storedOrgPolicy || storedDocumentPolicy || classificationRecords.length > 0);
 
   const next: AiCloudDlpCacheEntry = {
+    storageToken,
     rawOrgPolicy,
     rawDocPolicy,
     rawClassifications,

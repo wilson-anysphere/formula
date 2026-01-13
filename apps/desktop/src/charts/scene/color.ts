@@ -103,7 +103,13 @@ export function parseColor(input: string): RGBA | null {
     ctx.fillStyle = value;
     const parsed = ctx.fillStyle;
     if (parsed !== sentinel) {
-      return parseColor(parsed);
+      // Some environments (notably unit tests with a stubbed canvas context) do not normalize
+      // `fillStyle` assignments. In that case `parsed === value`, and recursing would loop
+      // indefinitely (e.g. "black" -> "black" -> ...).
+      //
+      // If the platform normalized the value (e.g. "black" -> "rgb(0, 0, 0)"), recurse once
+      // so we can parse via the fast-path regexes above.
+      if (parsed !== value) return parseColor(parsed);
     }
   }
 

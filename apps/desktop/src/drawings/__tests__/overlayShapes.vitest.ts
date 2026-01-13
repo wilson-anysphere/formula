@@ -8,6 +8,7 @@ function createStubCanvasContext(): { ctx: CanvasRenderingContext2D; calls: Arra
   const ctx: any = {
     clearRect: (...args: unknown[]) => calls.push({ method: "clearRect", args }),
     drawImage: (...args: unknown[]) => calls.push({ method: "drawImage", args }),
+    measureText: (text: string) => ({ width: String(text).length * 8 }),
     save: () => calls.push({ method: "save", args: [] }),
     restore: () => calls.push({ method: "restore", args: [] }),
     beginPath: () => calls.push({ method: "beginPath", args: [] }),
