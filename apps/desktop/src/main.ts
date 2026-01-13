@@ -129,6 +129,7 @@ import { installKeyboardContextKeys, KeyboardContextKeyIds } from "./keyboard/in
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette, installCommandPaletteRecentsTracking } from "./command-palette/index.js";
 import { registerDesktopCommands } from "./commands/registerDesktopCommands.js";
+import { registerFormatFontDropdownCommands } from "./commands/registerFormatFontDropdownCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
 import { registerPageLayoutCommands } from "./commands/registerPageLayoutCommands.js";
 import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
@@ -7341,6 +7342,18 @@ registerPageLayoutCommands({
   },
 });
 
+// Home → Font dropdown actions are registered as canonical `format.*` commands so
+// ribbon actions and the command palette share a single command surface.
+registerFormatFontDropdownCommands({
+  commandRegistry,
+  category: t("commandCategory.format"),
+  applyFormattingToSelection,
+  openColorPicker,
+  getDocument: () => app.getDocument(),
+  fontColorPicker,
+  fillColorPicker,
+});
+
 function getTauriInvokeForPrint(): TauriInvoke | null {
   const invoke =
     queuedInvoke ?? ((globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined) ?? null;
@@ -8219,222 +8232,9 @@ function handleRibbonCommand(commandId: string): void {
       return;
     }
 
-    const fillColorPrefix = "home.font.fillColor.";
-    if (commandId.startsWith(fillColorPrefix)) {
-      const preset = commandId.slice(fillColorPrefix.length);
-      if (preset === "moreColors") {
-        executeBuiltinCommand("format.fillColor");
-        return;
-      }
-      const argb = (() => {
-        switch (preset) {
-          case "lightGray":
-            return ["#", "FF", "D9D9D9"].join("");
-          case "yellow":
-            return ["#", "FF", "FFFF00"].join("");
-          case "blue":
-            return ["#", "FF", "0000FF"].join("");
-          case "green":
-            return ["#", "FF", "00FF00"].join("");
-          case "red":
-            return ["#", "FF", "FF0000"].join("");
-          default:
-            return null;
-        }
-      })();
-
-      if (preset === "none" || preset === "noFill") {
-        executeBuiltinCommand("format.fillColor", null);
-        return;
-      }
-
-      if (argb) {
-        executeBuiltinCommand("format.fillColor", argb);
-      }
-      return;
-    }
-
-    const fontColorPrefix = "home.font.fontColor.";
-    if (commandId.startsWith(fontColorPrefix)) {
-      const preset = commandId.slice(fontColorPrefix.length);
-      if (preset === "moreColors") {
-        executeBuiltinCommand("format.fontColor");
-        return;
-      }
-      const argb = (() => {
-        switch (preset) {
-          case "black":
-            return ["#", "FF", "000000"].join("");
-          case "blue":
-            return ["#", "FF", "0000FF"].join("");
-          case "green":
-            return ["#", "FF", "00FF00"].join("");
-          case "red":
-            return ["#", "FF", "FF0000"].join("");
-          default:
-            return null;
-        }
-      })();
-
-      if (preset === "automatic") {
-        executeBuiltinCommand("format.fontColor", null);
-        return;
-      }
-
-      if (argb) {
-        executeBuiltinCommand("format.fontColor", argb);
-      }
-      return;
-    }
-
-    const clearPrefix = "home.font.clearFormatting.";
-    if (commandId.startsWith(clearPrefix)) {
-      const kind = commandId.slice(clearPrefix.length);
-      if (kind === "clearFormats") {
-        applyFormattingToSelection("Clear formats", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, null, { label: "Clear formats" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      }
-      if (kind === "clearContents") {
-        applyFormattingToSelection("Clear contents", (doc, sheetId, ranges) => {
-          for (const range of ranges) {
-            doc.clearRange(sheetId, range, { label: "Clear contents" });
-          }
-        });
-        return;
-      }
-      if (kind === "clearAll") {
-        applyFormattingToSelection(
-          "Clear all",
-          (doc, sheetId, ranges) => {
-            let applied = true;
-            for (const range of ranges) {
-              doc.clearRange(sheetId, range, { label: "Clear all" });
-              const ok = doc.setRangeFormat(sheetId, range, null, { label: "Clear all" });
-              if (ok === false) applied = false;
-            }
-            return applied;
-          },
-          { forceBatch: true },
-        );
-        return;
-      }
-      return;
-    }
-
-    const bordersPrefix = "home.font.borders.";
-    if (commandId.startsWith(bordersPrefix)) {
-      const kind = commandId.slice(bordersPrefix.length);
-      const defaultBorderColor = ["#", "FF", "000000"].join("");
-      if (kind === "none") {
-        applyFormattingToSelection("Borders", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { border: null }, { label: "Borders" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      }
-
-      if (kind === "all") {
-        applyFormattingToSelection("Borders", (_doc, sheetId, ranges) => applyAllBorders(doc, sheetId, ranges));
-        return;
-      }
-
-      if (kind === "outside" || kind === "thickBox") {
-        const edgeStyle = kind === "thickBox" ? "thick" : "thin";
-        const edge = { style: edgeStyle, color: defaultBorderColor };
-        applyFormattingToSelection(
-          "Borders",
-          (doc, sheetId, ranges) => {
-            let applied = true;
-            const applyBorder = (targetRange: CellRange, patch: Record<string, any> | null) => {
-              const ok = doc.setRangeFormat(sheetId, targetRange, patch, { label: "Borders" });
-              if (ok === false) applied = false;
-            };
-            for (const range of ranges) {
-              const startRow = range.start.row;
-              const endRow = range.end.row;
-              const startCol = range.start.col;
-              const endCol = range.end.col;
-
-              // Top edge.
-              applyBorder({ start: { row: startRow, col: startCol }, end: { row: startRow, col: endCol } }, { border: { top: edge } });
-
-              // Bottom edge.
-              applyBorder({ start: { row: endRow, col: startCol }, end: { row: endRow, col: endCol } }, { border: { bottom: edge } });
-
-              // Left edge.
-              applyBorder({ start: { row: startRow, col: startCol }, end: { row: endRow, col: startCol } }, { border: { left: edge } });
-
-              // Right edge.
-              applyBorder({ start: { row: startRow, col: endCol }, end: { row: endRow, col: endCol } }, { border: { right: edge } });
-            }
-            return applied;
-          },
-          { forceBatch: true },
-        );
-        return;
-      }
-
-      const edge = { style: "thin", color: defaultBorderColor };
-      const borderPatch = (() => {
-        switch (kind) {
-          case "bottom":
-            return { border: { bottom: edge } };
-          case "top":
-            return { border: { top: edge } };
-          case "left":
-            return { border: { left: edge } };
-          case "right":
-            return { border: { right: edge } };
-          default:
-            return null;
-        }
-      })();
-
-      if (borderPatch) {
-        applyFormattingToSelection(
-          "Borders",
-          (doc, sheetId, ranges) => {
-            let applied = true;
-            for (const range of ranges) {
-              const startRow = range.start.row;
-              const endRow = range.end.row;
-              const startCol = range.start.col;
-              const endCol = range.end.col;
-
-              const targetRange = (() => {
-                switch (kind) {
-                  case "bottom":
-                    return { start: { row: endRow, col: startCol }, end: { row: endRow, col: endCol } };
-                  case "top":
-                    return { start: { row: startRow, col: startCol }, end: { row: startRow, col: endCol } };
-                  case "left":
-                    return { start: { row: startRow, col: startCol }, end: { row: endRow, col: startCol } };
-                  case "right":
-                    return { start: { row: startRow, col: endCol }, end: { row: endRow, col: endCol } };
-                  default:
-                    return range;
-                }
-              })();
-
-              const ok = doc.setRangeFormat(sheetId, targetRange, borderPatch, { label: "Borders" });
-              if (ok === false) applied = false;
-            }
-            return applied;
-          },
-          { forceBatch: true },
-        );
-      }
+    const command = commandRegistry.getCommand(commandId);
+    if (command) {
+      executeCommand(commandId);
       return;
     }
 
