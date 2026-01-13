@@ -1,5 +1,23 @@
+/**
+ * Desktop idle RSS benchmark (Linux-only).
+ *
+ * Reproducibility + safety:
+ * - The desktop process is spawned with user-data directories redirected under
+ *   `target/perf-home` so the benchmark cannot read/write the real user profile.
+ * - This keeps caches deterministic on CI runners (and avoids polluting developer machines).
+ *
+ * Environment isolation:
+ * - All platforms: `HOME` + `USERPROFILE` => `target/perf-home`
+ * - Linux: `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME` => `target/perf-home/xdg-*`
+ * - Windows: `APPDATA`, `LOCALAPPDATA`, `TEMP`, `TMP` => `target/perf-home/*`
+ * - macOS/Linux: `TMPDIR` => `target/perf-home/tmp`
+ *
+ * Reset behavior:
+ * - Set `FORMULA_DESKTOP_BENCH_RESET_HOME=1` to delete `target/perf-home` before *each* iteration.
+ */
+
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { readFile, readlink, readdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -22,10 +40,10 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')
 // Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
 const perfHome = resolve(repoRoot, 'target', 'perf-home');
 const perfTmp = resolve(perfHome, 'tmp');
-const perfXdgConfig = resolve(perfHome, '.config');
-const perfXdgCache = resolve(perfHome, '.cache');
-const perfXdgState = resolve(perfHome, '.local', 'state');
-const perfXdgData = resolve(perfHome, '.local', 'share');
+const perfXdgConfig = resolve(perfHome, 'xdg-config');
+const perfXdgCache = resolve(perfHome, 'xdg-cache');
+const perfXdgState = resolve(perfHome, 'xdg-state');
+const perfXdgData = resolve(perfHome, 'xdg-data');
 const perfAppData = resolve(perfHome, 'AppData', 'Roaming');
 const perfLocalAppData = resolve(perfHome, 'AppData', 'Local');
 
@@ -34,7 +52,6 @@ const perfLocalAppData = resolve(perfHome, 'AppData', 'Local');
 //   background check/download on startup, which can add nondeterministic CPU/memory/network
 //   activity and skew idle-memory benchmarks.
 // - `FORMULA_STARTUP_METRICS=1` enables the Rust-side one-line startup metrics log we parse.
-
 export function parseProcChildrenPids(content: string): number[] {
   const trimmed = content.trim();
   if (!trimmed) return [];
@@ -310,6 +327,11 @@ async function runOnce(binPath: string, timeoutMs: number): Promise<number> {
   const xvfbPath = resolve(repoRoot, 'scripts/xvfb-run-safe.sh');
   const command = useXvfb ? 'bash' : binPath;
   const args = useXvfb ? [xvfbPath, binPath] : [];
+
+  // Optionally, force a clean state between iterations to avoid cache pollution.
+  if (process.env.FORMULA_DESKTOP_BENCH_RESET_HOME === '1') {
+    rmSync(perfHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
 
   mkdirSync(perfHome, { recursive: true });
   mkdirSync(perfTmp, { recursive: true });
