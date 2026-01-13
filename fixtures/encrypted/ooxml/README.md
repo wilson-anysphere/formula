@@ -1,21 +1,32 @@
-# Encrypted OOXML spreadsheet fixtures
+# Encrypted OOXML XLSX fixtures
 
-This directory is the home for Excel OOXML spreadsheets that require a password to open (for
-example `.xlsx`, `.xlsm`, `.xlsb`).
+This directory contains **password-protected OOXML workbooks** (`.xlsx`) stored as **OLE/CFB**
+(Compound File Binary) containers with `EncryptionInfo` + `EncryptedPackage` streams
+(see MS-OFFCRYPTO / ECMA-376).
 
-Even though they use spreadsheet extensions like `.xlsx` / `.xlsm` / `.xlsb`, encrypted OOXML
-workbooks are **not ZIP/OPC packages**. Excel stores them as OLE/CFB (Compound File Binary)
-containers with `EncryptionInfo` + `EncryptedPackage` streams (see MS-OFFCRYPTO).
+These fixtures intentionally live **outside** `fixtures/xlsx/` so they are not picked up by the
+ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
 
-These fixtures live outside `fixtures/xlsx/` so they are not picked up by
-`xlsx-diff::collect_fixture_paths` (which drives the ZIP-based round-trip test corpus).
+## Passwords
+
+- `agile.xlsx` / `standard.xlsx`: `password`
+- `agile-empty-password.xlsx`: empty string (`""`)
 
 ## Fixtures
 
-- `agile.xlsx` – encrypted OOXML (Agile encryption; MS-OFFCRYPTO `EncryptionInfo` version 4.4)
-- `standard.xlsx` – encrypted OOXML (Standard encryption; MS-OFFCRYPTO `EncryptionInfo` version 3.2)
-- `plaintext.xlsx` – small ZIP/OPC `.xlsx` package used as the ground-truth plaintext for decryption fixtures
-- `agile-empty-password.xlsx` – Agile encrypted OOXML whose open password is the empty string (`""`); decrypts exactly to `plaintext.xlsx`
+- `plaintext.xlsx` – unencrypted ZIP-based workbook (starts with `PK`).
+  - Copied from `fixtures/xlsx/basic/basic.xlsx`.
+- `agile.xlsx` – Agile encrypted OOXML.
+  - `EncryptionInfo` header version **Major 4 / Minor 4**
+  - Decrypts to `plaintext.xlsx` with password `password`
+- `standard.xlsx` – Standard encrypted OOXML.
+  - `EncryptionInfo` header version **Major 3 / Minor 2**
+  - Decrypts to `plaintext.xlsx` with password `password`
+- `agile-empty-password.xlsx` – Agile encrypted OOXML with an **empty** open password.
+  - `EncryptionInfo` header version **Major 4 / Minor 4**
+  - Decrypts to `plaintext.xlsx` with password `""`
+
+## Inspecting encryption headers
 
 You can inspect an encrypted OOXML container (and confirm Agile vs Standard) with:
 
@@ -25,44 +36,21 @@ bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fix
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-empty-password.xlsx
 ```
 
-These are used by:
+## Provenance
 
-- `crates/formula-io/tests/encrypted_ooxml.rs` (ensures `open_workbook` / `open_workbook_model`
-  surface a password/encryption error when no password is supplied)
-- `crates/formula-io/tests/encrypted_ooxml_fixtures.rs` (format sniffing/detection; optional)
-- `crates/formula-xlsx/tests/encrypted_ooxml_empty_password.rs` (test-only decrypt harness that
-  validates the Agile KDF handles an empty-string password and distinguishes `None` from `Some("")`)
+These fixtures are **synthetic** and **safe-to-ship**. They contain no proprietary or user data.
 
-Most encrypted OOXML fixtures are currently only used to exercise the “password required” error
-path, so the actual passwords are not needed by those tests (Formula does not decrypt encrypted
-workbooks yet).
+## Generation notes
 
-## Regenerating fixtures (without Excel)
+The committed fixture binaries were generated using Python and
+[`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool) **5.4.2**.
 
-Use the Apache POI-based generator:
+Implementation detail: `msoffcrypto-tool` includes a minimal OLE writer that does not correctly
+handle an `EncryptedPackage` stream **≤ 4096 bytes**. Since `plaintext.xlsx` is tiny, the ciphertext
+is padded so that the `EncryptedPackage` stream is **4104 bytes** (8-byte length prefix + 4096 bytes
+ciphertext). The embedded unencrypted size prefix still points at the original plaintext length, so
+decrypting produces identical bytes.
 
-- Source: `tools/encrypted-ooxml-fixtures/GenerateEncryptedXlsx.java`
-- Wrapper script (downloads pinned jars + verifies SHA256): `tools/encrypted-ooxml-fixtures/generate.sh`
+Alternative regeneration tooling also exists under `tools/encrypted-ooxml-fixtures/` (Apache POI
+5.2.5), but was not used to generate the committed fixture bytes above.
 
-Apache POI version: **5.2.5** (see `tools/encrypted-ooxml-fixtures/generate.sh` for the full pinned jar set).
-
-Example (from repo root):
-
-```bash
-# Pick any plaintext `.xlsx` as the payload.
-PLAINTEXT=fixtures/xlsx/basic/basic.xlsx
-
-tools/encrypted-ooxml-fixtures/generate.sh agile password "$PLAINTEXT" fixtures/encrypted/ooxml/agile.xlsx
-tools/encrypted-ooxml-fixtures/generate.sh standard password "$PLAINTEXT" fixtures/encrypted/ooxml/standard.xlsx
-```
-
-Note: the generated encrypted files are not expected to be byte-for-byte stable across runs
-(encryption uses random salts/IVs). They should still be structurally valid encrypted OOXML containers.
-
-## Passwords
-
-If you add additional encrypted workbook fixtures intended for decryption tests, document the expected
-password in the adjacent README (or encode it in the filename) so tests can open them deterministically.
-
-See `docs/21-encrypted-workbooks.md` for details on OOXML encryption containers (`EncryptionInfo` /
-`EncryptedPackage`).
