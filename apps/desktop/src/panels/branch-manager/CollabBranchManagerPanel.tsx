@@ -6,7 +6,7 @@ import { t } from "../../i18n/index.js";
 
 import { BranchManagerPanel, type Actor as BranchActor } from "./BranchManagerPanel.js";
 import { MergeBranchPanel } from "./MergeBranchPanel.js";
-import { useReservedRootGuardError } from "../collabReservedRootGuard.js";
+import { clearReservedRootGuardError, useReservedRootGuardError } from "../collabReservedRootGuard.js";
 
 // Import branching helpers from the browser-safe entrypoint so bundlers don't
 // accidentally pull Node-only stores (e.g. SQLite) into the WebView bundle.
@@ -27,12 +27,6 @@ export function CollabBranchManagerPanel({
 }) {
   const reservedRootGuardError = useReservedRootGuardError((session as any)?.provider ?? null);
   const mutationsDisabled = Boolean(reservedRootGuardError);
-
-  const banner = reservedRootGuardError ? (
-    <div className="collab-panel__message collab-panel__message--error" data-testid="reserved-root-guard-error">
-      {reservedRootGuardError}
-    </div>
-  ) : null;
 
   const localPresenceId = session.presence?.localPresence?.id;
   const sessionPermissions = (session as any)?.permissions as { role?: unknown; userId?: unknown } | null | undefined;
@@ -107,6 +101,23 @@ export function CollabBranchManagerPanel({
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [mergeSource, setMergeSource] = useState<string | null>(null);
+
+  const banner = reservedRootGuardError ? (
+    <div className="collab-panel__message collab-panel__message--error" data-testid="reserved-root-guard-error">
+      <div>{reservedRootGuardError}</div>
+      <button
+        type="button"
+        onClick={() => {
+          clearReservedRootGuardError((session as any)?.provider ?? null);
+          setError(null);
+          setReady(false);
+          setMergeSource(null);
+        }}
+      >
+        Retry
+      </button>
+    </div>
+  ) : null;
 
   useEffect(() => {
     // If the sync server has disconnected due to reserved root mutations, branch

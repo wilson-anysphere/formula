@@ -13,7 +13,7 @@ export const RESERVED_ROOT_GUARD_UI_MESSAGE =
 // Preserve the detected error per provider instance so panels can show the banner
 // even if they are opened after the close event occurred (or are re-opened).
 const providerReservedRootGuardError = new WeakMap<object, string>();
-const providerReservedRootGuardMonitors = new WeakMap<object, { subscribers: Set<(message: string) => void> }>();
+const providerReservedRootGuardMonitors = new WeakMap<object, { subscribers: Set<(message: string | null) => void> }>();
 
 function coerceReason(reason: unknown): string {
   if (typeof reason === "string") return reason;
@@ -243,7 +243,7 @@ export function useReservedRootGuardError(provider: any | null): string | null {
       });
     }
 
-    const subscriber = (message: string) => setError(message);
+    const subscriber = (message: string | null) => setError(message);
     monitor.subscribers.add(subscriber);
     return () => {
       monitor?.subscribers.delete(subscriber);
@@ -251,4 +251,19 @@ export function useReservedRootGuardError(provider: any | null): string | null {
   }, [provider]);
 
   return error;
+}
+
+export function clearReservedRootGuardError(provider: any | null): void {
+  if (!provider || (typeof provider !== "object" && typeof provider !== "function")) return;
+  const key = provider as object;
+  providerReservedRootGuardError.delete(key);
+  const monitor = providerReservedRootGuardMonitors.get(key);
+  if (!monitor) return;
+  for (const cb of Array.from(monitor.subscribers)) {
+    try {
+      cb(null);
+    } catch {
+      // ignore
+    }
+  }
 }

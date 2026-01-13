@@ -6,7 +6,7 @@ import { buildVersionHistoryItems } from "./VersionHistoryPanel.js";
 import { VersionHistoryCompareSection } from "./VersionHistoryCompare.js";
 import { t, tWithVars } from "../../i18n/index.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
-import { useReservedRootGuardError } from "../collabReservedRootGuard.js";
+import { clearReservedRootGuardError, useReservedRootGuardError } from "../collabReservedRootGuard.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 
 function formatVersionTimestamp(timestampMs: number): string {
@@ -26,12 +26,6 @@ export function CollabVersionHistoryPanel({
 }) {
   const reservedRootGuardError = useReservedRootGuardError((session as any)?.provider ?? null);
   const mutationsDisabled = Boolean(reservedRootGuardError);
-
-  const banner = reservedRootGuardError ? (
-    <div className="collab-panel__message collab-panel__message--error" data-testid="reserved-root-guard-error">
-      {reservedRootGuardError}
-    </div>
-  ) : null;
   // `@formula/collab-versioning` depends on the core versioning subsystem, which can pull in
   // Node-only modules (e.g. `node:events`). Avoid importing it at desktop shell startup so
   // split-view/grid e2e can boot without requiring those polyfills; load it lazily when the
@@ -43,6 +37,24 @@ export function CollabVersionHistoryPanel({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const banner = reservedRootGuardError ? (
+    <div className="collab-panel__message collab-panel__message--error" data-testid="reserved-root-guard-error">
+      <div>{reservedRootGuardError}</div>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => {
+          clearReservedRootGuardError((session as any)?.provider ?? null);
+          setError(null);
+          setLoadError(null);
+          setCollabVersioning(null);
+        }}
+      >
+        Retry
+      </button>
+    </div>
+  ) : null;
 
   const [checkpointName, setCheckpointName] = useState("");
   const [checkpointAnnotations, setCheckpointAnnotations] = useState("");
