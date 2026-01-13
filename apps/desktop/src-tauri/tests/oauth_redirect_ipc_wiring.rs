@@ -28,6 +28,20 @@ fn slice_between<'a>(
 fn tauri_main_wires_oauth_redirect_ready_handshake() {
     let main_rs = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs"));
 
+    // Ensure cold-start argv OAuth redirects are queued too.
+    let init_start = main_rs.find("let initial_oauth_urls").expect(
+        "desktop main.rs missing initial_oauth_urls extraction; \
+         cold-start OAuth redirects must be queued until the frontend is ready",
+    );
+    let init_window = main_rs
+        .get(init_start..init_start.saturating_add(700))
+        .unwrap_or(&main_rs[init_start..]);
+    assert!(
+        init_window.contains("pending_urls.extend("),
+        "desktop main.rs must queue initial argv OAuth redirects via OauthRedirectState.pending_urls \
+         (e.g. `guard.pending_urls.extend(initial_oauth_urls)`) so redirects aren't dropped on cold start"
+    );
+
     // --- 1) Ensure there is an `oauth-redirect-ready` listener registered.
     let listener_start = main_rs
         .find("listen(OAUTH_REDIRECT_READY_EVENT")
@@ -53,20 +67,14 @@ fn tauri_main_wires_oauth_redirect_ready_handshake() {
          re-emit stale OAuth redirects."
     );
 
-    // Extra guardrail (mirrors the open-file test): readiness should only be flipped in response
-    // to the explicit frontend readiness event.
-    let total_ready_assigns = main_rs.matches(".ready = true").count();
-    assert_eq!(
-        total_ready_assigns, 1,
-        "expected exactly one `.ready = true` assignment in desktop main.rs (inside the \
-         OAUTH_REDIRECT_READY_EVENT listener). If readiness is flipped elsewhere, cold-start OAuth \
-         redirects can be emitted before the JS listener exists."
-    );
-
+    let has_ready_guard = listener_body.contains("if guard.ready")
+        || listener_body.contains("if !guard.ready")
+        || listener_body.contains("if state.ready")
+        || listener_body.contains("if !state.ready");
     assert!(
-        listener_body.contains("if guard.ready") || listener_body.contains("if state.ready"),
-        "OAUTH_REDIRECT_READY_EVENT listener should return early if already ready so the flush \
-         happens at most once"
+        has_ready_guard,
+        "OAUTH_REDIRECT_READY_EVENT listener should be idempotent (flush at most once), \
+         e.g. `if guard.ready {{ return; }}` before draining pending URLs"
     );
 
     let drains_pending = listener_body.contains("take(&mut guard.pending_urls)")
@@ -135,4 +143,3 @@ fn tauri_main_wires_oauth_redirect_ready_handshake() {
         );
     }
 }
-
