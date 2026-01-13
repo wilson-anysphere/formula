@@ -135,8 +135,18 @@ export class DesktopOAuthBroker implements OAuthBroker {
         const parsedRedirect = new URL(redirectUri);
         const port = Number.parseInt(parsedRedirect.port, 10);
         const isLoopbackHost =
-          parsedRedirect.hostname === "127.0.0.1" || parsedRedirect.hostname === "localhost" || parsedRedirect.hostname === "::1";
-        const isLoopback = parsedRedirect.protocol === "http:" && isLoopbackHost && parsedRedirect.port !== "" && Number.isInteger(port) && port > 0;
+          parsedRedirect.hostname === "127.0.0.1" ||
+          parsedRedirect.hostname === "localhost" ||
+          // URL.hostname serializes IPv6 hosts with brackets per the URL standard.
+          // Accept both bracketed and unbracketed forms to be safe across runtimes.
+          parsedRedirect.hostname === "[::1]" ||
+          parsedRedirect.hostname === "::1";
+        const isLoopback =
+          parsedRedirect.protocol === "http:" &&
+          isLoopbackHost &&
+          parsedRedirect.port !== "" &&
+          Number.isInteger(port) &&
+          port > 0;
 
         if (isLoopback) {
           const invoke = (globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined;

@@ -6,6 +6,10 @@ describe("DesktopOAuthBroker.openAuthUrl", () => {
   const originalTauri = (globalThis as any).__TAURI__;
   const originalWindow = (globalThis as any).window;
 
+  function buildAuthUrl(redirectUri: string): string {
+    return `https://example.com/oauth/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
+  }
+
   afterEach(() => {
     (globalThis as any).__TAURI__ = originalTauri;
     (globalThis as any).window = originalWindow;
@@ -25,6 +29,63 @@ describe("DesktopOAuthBroker.openAuthUrl", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(invoke).toHaveBeenCalledWith("open_external_url", { url: "https://example.com/auth" });
     expect(windowOpen).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["http://127.0.0.1:1234/callback"],
+    ["http://localhost:1234/callback"],
+    ["http://[::1]:1234/callback"],
+  ])("starts a loopback listener for %s redirect URIs when running under Tauri", async (redirectUri) => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+    // Guard against accidental webview navigation fallback.
+    const windowOpen = vi.fn();
+    (globalThis as any).window = { open: windowOpen };
+
+    const broker = new DesktopOAuthBroker();
+    const authUrl = buildAuthUrl(redirectUri);
+    await broker.openAuthUrl(authUrl);
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke.mock.calls[0]).toEqual(["oauth_loopback_listen", { redirect_uri: redirectUri }]);
+    expect(invoke.mock.calls[1]).toEqual(["open_external_url", { url: authUrl }]);
+    expect(windowOpen).not.toHaveBeenCalled();
+  });
+
+  it("does not start a loopback listener for https redirect URIs", async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const broker = new DesktopOAuthBroker();
+    const authUrl = buildAuthUrl("https://127.0.0.1:1234/callback");
+    await broker.openAuthUrl(authUrl);
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("open_external_url", { url: authUrl });
+  });
+
+  it("does not start a loopback listener for http loopback redirect URIs without an explicit port", async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const broker = new DesktopOAuthBroker();
+    const authUrl = buildAuthUrl("http://127.0.0.1/callback");
+    await broker.openAuthUrl(authUrl);
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("open_external_url", { url: authUrl });
+  });
+
+  it("does not start a loopback listener for non-loopback http redirect URIs", async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const broker = new DesktopOAuthBroker();
+    const authUrl = buildAuthUrl("http://example.com:1234/callback");
+    await broker.openAuthUrl(authUrl);
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("open_external_url", { url: authUrl });
   });
 
   it("rejects non-http(s) auth URLs", async () => {
