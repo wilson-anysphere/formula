@@ -68,7 +68,7 @@ test("Reduced motion overrides set motion tokens to 0ms", () => {
 
   assert.match(
     css,
-    /:root\[data-reduced-motion="true"\][\s\S]*--motion-duration:\s*0ms;[\s\S]*--motion-duration-fast:\s*0ms;[\s\S]*--motion-ease:\s*linear;/,
+    /:root\[data-reduced-motion\s*=\s*(?:"true"|'true'|true)\][\s\S]*--motion-duration:\s*0ms;[\s\S]*--motion-duration-fast:\s*0ms;[\s\S]*--motion-ease:\s*linear;/,
     "Expected tokens.css to set --motion-duration/--motion-duration-fast to 0ms when data-reduced-motion=\"true\"",
   );
 
@@ -126,6 +126,7 @@ test("Any smooth scrolling CSS is gated behind reduced motion overrides", () => 
   const files = collectCssFiles(srcRoot);
 
   const offenders = [];
+  const reducedMotionAttrRe = /data-reduced-motion\s*=\s*(?:"true"|'true'|true)/;
   for (const filePath of files) {
     const rawCss = fs.readFileSync(filePath, "utf8");
     const css = stripCssComments(rawCss);
@@ -135,7 +136,7 @@ test("Any smooth scrolling CSS is gated behind reduced motion overrides", () => 
     const hasReducedMotionOverride =
       /prefers-reduced-motion\s*:\s*reduce/.test(css) &&
       /scroll-behavior\s*:\s*auto\b/.test(css) &&
-      /data-reduced-motion\s*=\s*\"true\"/.test(css);
+      reducedMotionAttrRe.test(css);
 
     if (!hasReducedMotionOverride) {
       offenders.push(path.relative(DESKTOP_ROOT, filePath));
@@ -183,7 +184,7 @@ test("Sheet tabs disable smooth scrolling under reduced motion", () => {
 
   assert.match(
     uiCss,
-    /(?:html|:root)\[data-reduced-motion="true"\]\s+#sheet-tabs\.sheet-bar\s+\.sheet-tabs\s*\{[\s\S]*scroll-behavior:\s*auto;/,
+    /(?:html|:root)\[data-reduced-motion\s*=\s*(?:"true"|'true'|true)\]\s+#sheet-tabs\.sheet-bar\s+\.sheet-tabs\s*\{[\s\S]*scroll-behavior:\s*auto;/,
     "Expected ui.css to disable smooth scrolling for sheet tabs when data-reduced-motion=\"true\"",
   );
 
