@@ -8,6 +8,9 @@ The password-aware helpers (`open_workbook_with_password` / `open_workbook_model
 surface `Error::InvalidPassword`. (End-to-end decryption is still being wired; see
 [`docs/21-encrypted-workbooks.md`](./21-encrypted-workbooks.md) for current behavior and entrypoints.)
 
+For unknown `EncryptionInfo` versions, `formula-io` may surface
+`Error::UnsupportedOoxmlEncryption { version_major, version_minor }`.
+
 If/when we add **Standard Encryption (CryptoAPI AES)** decryption support, the most common
 interoperability bugs are in the `EncryptedPackage` stream framing (the `u64` size prefix), **0x1000
 segmenting**, **IV derivation**, and **padding/truncation**. This note is meant as a compact

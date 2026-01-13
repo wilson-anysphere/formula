@@ -61,19 +61,26 @@ println!("EncryptionInfo version: {major}.{minor}");
 
 ## Supported encryption schemes
 
-MS-OFFCRYPTO defines multiple encryption “containers” for OOXML packages:
+MS-OFFCRYPTO defines multiple encryption “containers” for OOXML packages. For Excel-encrypted
+spreadsheets you will most commonly see:
 
-- **Standard** encryption (binary headers; CryptoAPI) — `EncryptionInfo` version **3.2**
+- **Standard** encryption (binary headers; CryptoAPI) — `EncryptionInfo` version **3.2** (or sometimes
+  `4.2` in the wild)
 - **Agile** encryption (XML descriptor) — `EncryptionInfo` version **4.4**
 
 Current state in this repo (important nuance):
 
-- Low-level decryption primitives exist:
-  - Standard/CryptoAPI parsing + password key derivation: `crates/formula-offcrypto`
-  - Agile (4.4) parsing + decryption + `dataIntegrity` HMAC verification: `crates/formula-xlsx::offcrypto`
+- Low-level decryption primitives exist in multiple crates:
+  - Standard/CryptoAPI parsing + password key derivation + `EncryptedPackage` helpers:
+    `crates/formula-offcrypto`
+  - Higher-level decrypt helpers (OLE wrapper → decrypted ZIP bytes): `crates/formula-office-crypto`
+  - Agile (4.4) parsing/decryption helpers (including `dataIntegrity`): `crates/formula-xlsx::offcrypto`
 - The high-level `formula-io` open path does **not** yet decrypt OOXML workbooks end-to-end; it
   primarily provides **detection + error classification** so callers can prompt for a password and
   route errors correctly.
+
+When triaging user reports, the most important thing is to capture the `EncryptionInfo` version
+(`3.2`/`4.2` vs `4.4`) because it determines which scheme you’re dealing with.
 
 ## Public API usage
 
@@ -140,8 +147,8 @@ When handling user reports, these error variants map cleanly to “what happened
 | Error | Meaning | Typical remediation |
 |------|---------|---------------------|
 | `PasswordRequired` | The file is encrypted/password-protected, but no password was provided. | Retry with `open_workbook_with_password(.., Some(password))` / `open_workbook_model_with_password(.., Some(password))`, or ask the user to remove encryption in Excel. |
-| `InvalidPassword` | Password was provided but the workbook could not be decrypted/verified. | Ask the user to re-enter the password; confirm it opens in Excel with the same password. If Formula still cannot open it, ask the user to remove encryption and re-save. |
-| `UnsupportedOoxmlEncryption` | We identified an encrypted OOXML container, but the `EncryptionInfo` version is not recognized/implemented (i.e. not Standard `3.2` / Agile `4.4`). | Ask the user to remove encryption (open in Excel → remove password → re-save), or provide an unencrypted copy. |
+| `InvalidPassword` | Password was provided but the workbook could not be opened/decrypted. (This can mean “wrong password”; until decryption is wired end-to-end, it can also mean “not implemented yet”.) | Ask the user to re-enter the password; confirm it opens in Excel with the same password. If Formula still cannot open it, capture `EncryptionInfo` version + the exact error, then ask the user to remove encryption and re-save. |
+| `UnsupportedOoxmlEncryption` | We identified an encrypted OOXML container, but the `EncryptionInfo` version is not recognized/implemented (i.e. not Standard `3.2`/`4.2` or Agile `4.4`). | Ask the user to remove encryption (open in Excel → remove password → re-save), or provide an unencrypted copy. |
 | `EncryptedWorkbook` | Legacy `.xls` BIFF encryption was detected (BIFF `FILEPASS`). | Ask the user to remove encryption in Excel, or convert the workbook to an unencrypted format. |
 
 If you need to distinguish **Agile vs Standard** for triage, include the `EncryptionInfo` version
@@ -163,3 +170,15 @@ Attribution / provenance:
 - The fixtures are generated via an Apache POI-based generator (pinned jars + SHA256 verification)
   under `tools/encrypted-ooxml-fixtures/`.
 - See `fixtures/encrypted/ooxml/README.md` for the regeneration recipe and tool versions.
+
+### Useful debugging tool
+
+For quick triage, `formula-io` includes a small helper binary that prints a one-line summary of an
+encrypted OOXML file’s `EncryptionInfo` header:
+
+```bash
+bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- path/to/encrypted.xlsx
+```
+
+This prints a string like `Agile (4.4) flags=0x...` or `Standard (3.2) flags=0x...`, which is often
+enough to route a bug report to the right implementation path.
