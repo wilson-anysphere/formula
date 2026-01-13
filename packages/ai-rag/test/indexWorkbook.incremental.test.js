@@ -426,3 +426,29 @@ test("indexWorkbook can be aborted from onProgress before persistence (no partia
   assert.equal(sawUpsertStart, true);
   assert.deepEqual(await store.list({ workbookId: workbook.id, includeVector: false }), []);
 });
+
+test("indexWorkbook rejects when a batched embedder call returns the wrong vector count (no partial writes)", async () => {
+  const workbook = makeWorkbookTwoTables();
+  const store = new InMemoryVectorStore({ dimension: 128 });
+
+  let embedCalls = 0;
+  const embedder = {
+    async embedTexts(texts) {
+      embedCalls += 1;
+      if (embedCalls === 1) {
+        // First batch is for a single text but returns two vectors.
+        return [new Float32Array(128), new Float32Array(128)];
+      }
+      // Second batch returns none; overall count would have "matched" without per-batch validation.
+      return [];
+    },
+  };
+
+  await assert.rejects(
+    indexWorkbook({ workbook, vectorStore: store, embedder, embedBatchSize: 1 }),
+    /returned 2 vector\(s\); expected 1/
+  );
+
+  assert.equal(embedCalls, 1);
+  assert.deepEqual(await store.list({ workbookId: workbook.id, includeVector: false }), []);
+});

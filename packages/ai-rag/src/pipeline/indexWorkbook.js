@@ -164,6 +164,16 @@ export async function indexWorkbook(params) {
           embedder.embedTexts(batchTexts, { signal }),
           signal
         );
+        if (!Array.isArray(batchVectors)) {
+          throw new Error(
+            `embedder.embedTexts returned a non-array result; expected an array of length ${batchTexts.length}`
+          );
+        }
+        if (batchVectors.length !== batchTexts.length) {
+          throw new Error(
+            `embedder.embedTexts returned ${batchVectors.length} vector(s); expected ${batchTexts.length}`
+          );
+        }
         vectors.push(...batchVectors);
         onProgress?.({
           phase: "embed",
