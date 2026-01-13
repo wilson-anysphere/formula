@@ -717,7 +717,7 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
             extra = f"{float(rate):.1%}"
         if skipped > 0:
             extra = f"{extra}, {skipped} skipped"
-        lines.append(f"- {label}: **{ok} / {attempted}** ({extra})")
+        lines.append(f"- {label}: **{ok} / {attempted} attempted** ({extra})")
 
     lines.append(
         f"- Round-trip: **{counts['round_trip_ok']} / {counts['total']}** ({rates['round_trip']:.1%})"

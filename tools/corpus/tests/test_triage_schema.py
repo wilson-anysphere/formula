@@ -80,8 +80,8 @@ class TriageSchemaTests(unittest.TestCase):
         self.assertIn("0/1/0", md)
         self.assertIn("Round-trip fail-on", md)
         # Calculate/render should not be reported as "0.0%" when triage skipped those steps.
-        self.assertIn("Calculate: **0 / 0** (SKIP", md)
-        self.assertIn("Render: **0 / 0** (SKIP", md)
+        self.assertIn("Calculate: **0 / 0 attempted** (SKIP", md)
+        self.assertIn("Render: **0 / 0 attempted** (SKIP", md)
 
     def test_triage_passes_round_trip_fail_on_to_rust_and_surfaces_in_dashboard(self) -> None:
         import subprocess
