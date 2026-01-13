@@ -90,6 +90,11 @@ jobs:
         run: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build --bundles appimage,deb
 
       - name: Report desktop bundle sizes
+        # If earlier steps fail (dependency install / build), still try to emit an
+        # empty report + JSON artifact to aid debugging. When the build succeeds,
+        # this step enforces the size gate (if enabled) normally.
+        if: always()
+        continue-on-error: ${{ failure() }}
         env:
           # Optional: set these as GitHub Actions "Variables" to enable gating.
           # - FORMULA_ENFORCE_BUNDLE_SIZE=1 to fail when any artifact exceeds the limit
@@ -104,3 +109,4 @@ jobs:
         with:
           name: desktop-bundle-size-report
           path: desktop-bundle-size-report.json
+          if-no-files-found: warn
