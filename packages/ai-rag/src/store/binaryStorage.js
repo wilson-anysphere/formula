@@ -82,7 +82,7 @@ function getLocalStorageOrNull() {
 /**
  * @param {Uint8Array} data
  */
-function toBase64(data) {
+export function toBase64(data) {
   // Prefer Node's Buffer when available.
   if (typeof Buffer !== "undefined") {
     return Buffer.from(data).toString("base64");
@@ -98,7 +98,7 @@ function toBase64(data) {
 /**
  * @param {string} encoded
  */
-function fromBase64(encoded) {
+export function fromBase64(encoded) {
   if (typeof Buffer !== "undefined") {
     return new Uint8Array(Buffer.from(encoded, "base64"));
   }

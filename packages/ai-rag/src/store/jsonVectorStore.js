@@ -1,5 +1,7 @@
-import { InMemoryBinaryStorage } from "./binaryStorage.js";
+import { fromBase64, InMemoryBinaryStorage, toBase64 } from "./binaryStorage.js";
 import { InMemoryVectorStore } from "./inMemoryVectorStore.js";
+
+const JSON_VECTOR_STORE_VERSION = 2;
 
 function createAbortError(message = "Aborted") {
   const err = new Error(message);
@@ -9,6 +11,25 @@ function createAbortError(message = "Aborted") {
 
 function throwIfAborted(signal) {
   if (signal?.aborted) throw createAbortError();
+}
+
+/**
+ * @param {Float32Array} vector
+ */
+function float32VectorToBase64(vector) {
+  const bytes = new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength);
+  return toBase64(bytes);
+}
+
+/**
+ * @param {string} encoded
+ */
+function base64ToFloat32Vector(encoded) {
+  const bytes = fromBase64(encoded);
+  if (bytes.byteLength % 4 !== 0) {
+    throw new Error(`Invalid vector_b64 payload: expected byteLength multiple of 4, got ${bytes.byteLength}`);
+  }
+  return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
 }
 
 /**
@@ -49,29 +70,42 @@ export class JsonVectorStore extends InMemoryVectorStore {
       return;
     }
 
+    const version = parsed?.version;
     if (
       !parsed ||
       typeof parsed !== "object" ||
-      parsed.version !== 1 ||
+      (version !== 1 && version !== 2) ||
       parsed.dimension !== this.dimension ||
       !Array.isArray(parsed.records)
     ) {
       return;
     }
 
-    await super.upsert(
-      parsed.records.map((r) => ({ id: r.id, vector: r.vector, metadata: r.metadata }))
-    );
+    let records;
+    try {
+      records =
+        version === 1
+          ? parsed.records.map((r) => ({ id: r.id, vector: r.vector, metadata: r.metadata }))
+          : parsed.records.map((r) => ({
+              id: r.id,
+              vector: base64ToFloat32Vector(r.vector_b64),
+              metadata: r.metadata,
+            }));
+    } catch {
+      return;
+    }
+
+    await super.upsert(records);
   }
 
   async _persist() {
     const records = await super.list();
     const payload = JSON.stringify({
-      version: 1,
+      version: JSON_VECTOR_STORE_VERSION,
       dimension: this.dimension,
       records: records.map((r) => ({
         id: r.id,
-        vector: Array.from(r.vector),
+        vector_b64: float32VectorToBase64(r.vector),
         metadata: r.metadata,
       })),
     });
