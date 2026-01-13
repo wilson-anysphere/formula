@@ -61,7 +61,11 @@ describe("registerDesktopCommands", () => {
     await commandRegistry.executeCommand("workbench.setAutoSaveEnabled", true);
     expect(handlers.setAutoSaveEnabled).toHaveBeenCalledWith(true);
 
-    await commandRegistry.executeCommand("format.toggleBold");
+    // Ensure we didn't accidentally override registerBuiltinCommands' richer formatting command
+    // registrations (which include keywords and accept pressed-state args for ribbon toggles).
+    expect(commandRegistry.getCommand("format.toggleBold")?.keywords).toEqual(expect.arrayContaining(["bold"]));
+
+    await commandRegistry.executeCommand("format.toggleStrikethrough", true);
     expect(applyFormattingToSelection).toHaveBeenCalled();
   });
 });

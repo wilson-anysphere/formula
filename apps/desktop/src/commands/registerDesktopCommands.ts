@@ -8,11 +8,7 @@ import type { ThemeController } from "../theme/themeController.js";
 
 import {
   NUMBER_FORMATS,
-  toggleBold,
-  toggleItalic,
   toggleStrikethrough,
-  toggleUnderline,
-  toggleWrap,
   type CellRange,
 } from "../formatting/toolbar.js";
 
@@ -73,6 +69,28 @@ export function registerDesktopCommands(params: {
     openCommandPalette = null,
   } = params;
 
+  const commandCategoryFormat = t("commandCategory.format");
+
+  commandRegistry.registerBuiltinCommand(
+    "format.toggleStrikethrough",
+    t("command.format.toggleStrikethrough"),
+    (next?: boolean) =>
+      applyFormattingToSelection(
+        t("command.format.toggleStrikethrough"),
+        (doc, sheetId, ranges) => toggleStrikethrough(doc, sheetId, ranges, { next }),
+        { forceBatch: true },
+      ),
+    { category: commandCategoryFormat },
+  );
+
+  registerNumberFormatCommands({
+    commandRegistry,
+    applyFormattingToSelection,
+    getActiveCellNumberFormat,
+    t,
+    category: commandCategoryFormat,
+  });
+
   if (layoutController) {
     registerBuiltinCommands({
       commandRegistry,
@@ -89,78 +107,10 @@ export function registerDesktopCommands(params: {
 
   registerWorkbenchFileCommands({ commandRegistry, handlers: workbenchFileHandlers });
 
-  const commandCategoryFormat = t("commandCategory.format");
-
-  commandRegistry.registerBuiltinCommand(
-    "format.toggleBold",
-    t("command.format.toggleBold"),
-    () =>
-      applyFormattingToSelection(
-        t("command.format.toggleBold"),
-        (doc, sheetId, ranges) => toggleBold(doc, sheetId, ranges),
-        { forceBatch: true },
-      ),
-    { category: commandCategoryFormat },
-  );
-
-  commandRegistry.registerBuiltinCommand(
-    "format.toggleItalic",
-    t("command.format.toggleItalic"),
-    () =>
-      applyFormattingToSelection(
-        t("command.format.toggleItalic"),
-        (doc, sheetId, ranges) => toggleItalic(doc, sheetId, ranges),
-        { forceBatch: true },
-      ),
-    { category: commandCategoryFormat },
-  );
-
-  commandRegistry.registerBuiltinCommand(
-    "format.toggleUnderline",
-    t("command.format.toggleUnderline"),
-    () =>
-      applyFormattingToSelection(
-        t("command.format.toggleUnderline"),
-        (doc, sheetId, ranges) => toggleUnderline(doc, sheetId, ranges),
-        { forceBatch: true },
-      ),
-    { category: commandCategoryFormat },
-  );
-
-  commandRegistry.registerBuiltinCommand(
-    "format.toggleStrikethrough",
-    t("command.format.toggleStrikethrough"),
-    (next?: boolean) =>
-      applyFormattingToSelection(
-        t("command.format.toggleStrikethrough"),
-        (doc, sheetId, ranges) => toggleStrikethrough(doc, sheetId, ranges, { next }),
-        { forceBatch: true },
-      ),
-    { category: commandCategoryFormat },
-  );
-
-  commandRegistry.registerBuiltinCommand(
-    "format.toggleWrapText",
-    t("command.format.toggleWrapText"),
-    (next?: boolean) =>
-      applyFormattingToSelection(
-        t("command.format.toggleWrapText"),
-        (doc, sheetId, ranges) => toggleWrap(doc, sheetId, ranges, typeof next === "boolean" ? { next } : undefined),
-        { forceBatch: true },
-      ),
-    { category: commandCategoryFormat },
-  );
-
-  registerNumberFormatCommands({
-    commandRegistry,
-    applyFormattingToSelection,
-    getActiveCellNumberFormat,
-    t,
-    category: commandCategoryFormat,
-  });
-
   commandRegistry.registerBuiltinCommand("format.openFormatCells", t("command.format.openFormatCells"), () => openFormatCells(), {
     category: commandCategoryFormat,
+    icon: null,
+    keywords: ["format cells", "number format", "font"],
   });
 
   // Quick-pick variant for applying common number formats without opening the full dialog.
