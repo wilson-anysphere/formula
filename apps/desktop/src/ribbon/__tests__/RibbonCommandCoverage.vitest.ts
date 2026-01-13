@@ -3,9 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CommandRegistry } from "../../extensions/commandRegistry.js";
 import { createDefaultLayout, openPanel, closePanel } from "../../layout/layoutState.js";
 import { panelRegistry } from "../../panels/panelRegistry.js";
-import { registerBuiltinCommands } from "../../commands/registerBuiltinCommands.js";
-import { registerNumberFormatCommands } from "../../commands/registerNumberFormatCommands.js";
-import { registerWorkbenchFileCommands } from "../../commands/registerWorkbenchFileCommands.js";
+import { registerDesktopCommands } from "../../commands/registerDesktopCommands.js";
 
 import { defaultRibbonSchema } from "../ribbonSchema";
 
@@ -114,57 +112,30 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       },
     } as any;
 
-    // Register the same built-in commands that the desktop shell wires up.
-    registerBuiltinCommands({
+    registerDesktopCommands({
       commandRegistry,
       app: {} as any,
       layoutController,
       themeController: { setThemePreference: () => {} } as any,
       refreshRibbonUiState: () => {},
-    });
-    registerWorkbenchFileCommands({
-      commandRegistry,
-      handlers: {
+      applyFormattingToSelection: () => {},
+      getActiveCellNumberFormat: () => null,
+      openFormatCells: () => {},
+      showQuickPick: async () => null,
+      findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
+      workbenchFileHandlers: {
         newWorkbook: () => {},
         openWorkbook: () => {},
         saveWorkbook: () => {},
         saveWorkbookAs: () => {},
+        setAutoSaveEnabled: () => {},
         print: () => {},
         printPreview: () => {},
         closeWorkbook: () => {},
         quit: () => {},
       },
+      openCommandPalette: () => {},
     });
-
-    // Number format commands are registered in the desktop shell via `registerNumberFormatCommands(...)`
-    // (today invoked from `apps/desktop/src/main.ts`). Register them here so ribbon ids like
-    // `format.numberFormat.accounting.*` stay covered without needing a long stub list.
-    registerNumberFormatCommands({
-      commandRegistry,
-      applyFormattingToSelection: () => {},
-      getActiveCellNumberFormat: () => null,
-      t: (key) => key,
-      category: null,
-    });
-
-    // Some canonical commands are still registered inline in `apps/desktop/src/main.ts`
-    // (because they depend on UI dialogs / selection helpers). Mirror those ids here so
-    // this test remains a Ribbon↔CommandRegistry drift guard even before command
-    // registration is fully centralized.
-    for (const id of [
-      "edit.find",
-      "edit.replace",
-      "format.toggleBold",
-      "format.toggleItalic",
-      "format.toggleUnderline",
-      "format.toggleStrikethrough",
-      "format.toggleWrapText",
-      "format.openFormatCells",
-    ]) {
-      if (commandRegistry.getCommand(id)) continue;
-      commandRegistry.registerBuiltinCommand(id, id, () => {});
-    }
-
     const missing = idsToCheck.filter((id) => commandRegistry.getCommand(id) == null);
 
     expect(missing, `Missing CommandRegistry registrations for:\n${missing.map((id) => `- ${id}`).join("\n")}`).toEqual([]);
