@@ -45,6 +45,59 @@ extract_node_major() {
   printf '%s' "$value"
 }
 
+extract_first_numeric_major() {
+  local raw="$1"
+  # Trim whitespace.
+  raw="${raw#"${raw%%[![:space:]]*}"}"
+  raw="${raw%"${raw##*[![:space:]]}"}"
+  # Strip surrounding quotes if present.
+  if [[ "$raw" == \"*\" ]]; then
+    raw="${raw#\"}"
+    raw="${raw%\"}"
+  elif [[ "$raw" == \'*\' ]]; then
+    raw="${raw#\'}"
+    raw="${raw%\'}"
+  fi
+  # Strip a leading "v" (Node version strings sometimes use v22.0.0).
+  raw="${raw#v}"
+  raw="${raw#V}"
+  # Capture leading digits as the major.
+  if [[ "$raw" =~ ^([0-9]+) ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  printf '%s' ""
+}
+
+extract_nvmrc_node_major() {
+  local file="$1"
+  if [ ! -f "$file" ]; then
+    return 0
+  fi
+  local line=""
+  # `.nvmrc` is typically a single line; ignore blank lines and comments.
+  line="$(grep -E '^[[:space:]]*[^#[:space:]]' "$file" | head -n 1 || true)"
+  extract_first_numeric_major "$line"
+}
+
+extract_mise_node_major() {
+  local file="$1"
+  if [ ! -f "$file" ]; then
+    return 0
+  fi
+  local line=""
+  line="$(grep -E '^[[:space:]]*node[[:space:]]*=' "$file" | head -n 1 || true)"
+  if [ -z "$line" ]; then
+    printf '%s' ""
+    return 0
+  fi
+  # Remove key + '='.
+  local value="${line#*=}"
+  # Strip trailing comments.
+  value="${value%%#*}"
+  extract_first_numeric_major "$value"
+}
+
 require_env_pin_usage() {
   local file="$1"
   local fail=0
@@ -180,5 +233,26 @@ require_env_pin_usage "$ci_workflow"
 require_env_pin_usage "$release_workflow"
 require_env_pin_usage "$bundle_size_workflow"
 require_env_pin_usage "$windows_arm64_smoke_workflow"
+
+# Optional local tooling pins (keep local release builds aligned with CI).
+nvmrc_major="$(extract_nvmrc_node_major ".nvmrc")"
+if [ -n "$nvmrc_major" ] && [ "$nvmrc_major" != "$ci_node_major" ]; then
+  echo "Node major pin mismatch between workflows and .nvmrc:" >&2
+  echo "  workflows: NODE_VERSION=${ci_node_major}" >&2
+  echo "  .nvmrc:     ${nvmrc_major}" >&2
+  echo "" >&2
+  echo "Fix: update .nvmrc or the workflows so they agree." >&2
+  exit 1
+fi
+
+mise_node_major="$(extract_mise_node_major "mise.toml")"
+if [ -n "$mise_node_major" ] && [ "$mise_node_major" != "$ci_node_major" ]; then
+  echo "Node major pin mismatch between workflows and mise.toml:" >&2
+  echo "  workflows: NODE_VERSION=${ci_node_major}" >&2
+  echo "  mise.toml:  node=${mise_node_major}" >&2
+  echo "" >&2
+  echo "Fix: update mise.toml or the workflows so they agree." >&2
+  exit 1
+fi
 
 echo "Node version pins match (NODE_VERSION=${ci_node_major})."
