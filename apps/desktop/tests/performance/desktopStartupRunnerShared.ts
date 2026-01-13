@@ -167,9 +167,22 @@ type RunOnceOptions = {
   /**
    * Root directory for all app/user-data state for this run (HOME, XDG dirs, temp dirs, etc).
    *
-   * If omitted, defaults to `target/perf-home`.
+   * If omitted, defaults to `target/perf-home` (or `FORMULA_PERF_HOME` if set).
    */
   profileDir?: string;
+  /**
+   * Optional hook invoked after startup metrics are captured but before the process is terminated.
+   *
+   * This is used by benchmarks that need to take a final measurement (e.g. RSS) while the app is
+   * still alive. The hook is best-effort: any error is ignored and shutdown proceeds.
+   */
+  afterCapture?: (child: ChildProcess, metrics: StartupMetrics) => void | Promise<void>;
+  /**
+   * Maximum time to wait for `afterCapture` before proceeding with shutdown.
+   *
+   * This prevents the benchmark harness from hanging indefinitely if the hook blocks.
+   */
+  afterCaptureTimeoutMs?: number;
 };
 
 function mergeEnvParts(parts: Array<NodeJS.ProcessEnv | undefined>): NodeJS.ProcessEnv {
@@ -197,16 +210,21 @@ function closeReadline(rl: Interface | null): void {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
 export async function runOnce({
   binPath,
   timeoutMs,
   argv,
   envOverrides,
   profileDir: profileDirRaw,
+  afterCapture,
+  afterCaptureTimeoutMs,
 }: RunOnceOptions): Promise<StartupMetrics> {
   const profileDir = profileDirRaw ? resolve(repoRoot, profileDirRaw) : perfHome;
   const dirs = resolveProfileDirs(profileDir);
-
   // Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
   // Optionally, force a clean state between iterations to avoid cache pollution.
   if (process.env.FORMULA_DESKTOP_BENCH_RESET_HOME === '1') {
@@ -296,6 +314,7 @@ export async function runOnce({
     };
 
     const beginShutdown = (reason: 'captured' | 'timeout') => {
+      if (settled) return;
       if (exitDeadline) return;
 
       const initialMode: TerminateProcessTreeMode =
@@ -347,7 +366,25 @@ export async function runOnce({
         clearTimeout(startupTimeout);
         startupTimeout = null;
       }
-      beginShutdown('captured');
+
+      const hook = afterCapture;
+      if (!hook) {
+        beginShutdown('captured');
+        return;
+      }
+
+      const hookTimeoutMs = afterCaptureTimeoutMs ?? 5000;
+      void (async () => {
+        try {
+          await Promise.race([
+            Promise.resolve(hook(child, parsed)),
+            sleep(Math.max(0, hookTimeoutMs)),
+          ]);
+        } catch {
+          // Best-effort hook: ignore errors and proceed to shutdown.
+        }
+        beginShutdown('captured');
+      })();
     };
 
     if (child.stdout) {

@@ -23,8 +23,27 @@
  * - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=full` (default): launch the normal app (requires bundled frontend assets).
  * - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell`: launch `--startup-bench` (measures shell/webview startup without
  *   requiring `apps/desktop/dist`).
+ *
+ * Optional idle RSS metric:
+ * - Metric: `desktop.memory.<mode>.rss_mb.p95` (and `desktop.memory.rss_mb.p95` alias for cold mode)
+ * - Target: `FORMULA_DESKTOP_RSS_TARGET_MB` (default: 100)
+ * - Delay after capturing `[startup] ... tti_ms=...` before sampling:
+ *   `FORMULA_DESKTOP_RSS_IDLE_DELAY_MS` (default: 1000)
+ *
+ * Platform support for RSS:
+ * - Linux (CI primary): reads `/proc/<pid>/status` (VmRSS) for the desktop PID (resolving through
+ *   any Xvfb wrapper processes).
+ * - macOS: best-effort via `ps`.
+ * - Windows: best-effort via PowerShell (`Get-Process ... WorkingSet64`).
+ * - Other platforms: skipped.
+ *
+ * RSS measurement is best-effort; if we can't sample RSS, we skip the memory metric rather than
+ * failing the timing benchmarks.
  */
-import { existsSync } from 'node:fs';
+
+import { spawnSync } from 'node:child_process';
+import { existsSync, realpathSync } from 'node:fs';
+import { readFile, readlink, readdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -51,7 +70,12 @@ type StartupBenchKind = 'full' | 'shell';
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
-function buildResult(name: string, values: number[], targetMs: number): BenchmarkResult {
+function buildResult(
+  name: string,
+  values: number[],
+  target: number,
+  unit: BenchmarkResult['unit'],
+): BenchmarkResult {
   const sorted = [...values].sort((a, b) => a - b);
   const avg = mean(sorted);
   const med = median(sorted);
@@ -63,14 +87,14 @@ function buildResult(name: string, values: number[], targetMs: number): Benchmar
     name,
     iterations: values.length,
     warmup: 0,
-    unit: 'ms',
+    unit,
     mean: avg,
     median: med,
     p95,
     p99,
     stdDev: sd,
-    targetMs,
-    passed: p95 <= targetMs,
+    targetMs: target,
+    passed: p95 <= target,
   };
 }
 
@@ -98,6 +122,182 @@ function parseBenchKind(): StartupBenchKind {
     );
   }
   return kindRaw;
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+function parseProcChildrenPids(content: string): number[] {
+  const trimmed = content.trim();
+  if (!trimmed) return [];
+  return trimmed
+    .split(/\s+/g)
+    .map((x) => Number(x))
+    .filter((n) => Number.isInteger(n) && n > 0);
+}
+
+function parseProcStatusVmRssKb(content: string): number | null {
+  const match = content.match(/^VmRSS:\s+(\d+)\s+kB\s*$/m);
+  if (!match) return null;
+  const kb = Number(match[1]);
+  if (!Number.isFinite(kb)) return null;
+  return kb;
+}
+
+async function readUtf8(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, 'utf8');
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ESRCH' || code === 'EACCES') return null;
+    throw err;
+  }
+}
+
+async function readProcExeLinux(pid: number): Promise<string | null> {
+  try {
+    const target = await readlink(`/proc/${pid}/exe`);
+    // If the binary was replaced/cleaned up mid-run, Linux appends " (deleted)".
+    return target.replace(/ \(deleted\)$/, '');
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ESRCH' || code === 'EACCES') return null;
+    throw err;
+  }
+}
+
+async function getChildPidsLinux(pid: number): Promise<number[]> {
+  // `/proc/<pid>/task/<tid>/children` is per-thread (not per-process). Union children across
+  // all tasks so we don't miss descendants spawned by worker threads.
+  let tids: string[];
+  try {
+    tids = await readdir(`/proc/${pid}/task`);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ESRCH' || code === 'EACCES') return [];
+    throw err;
+  }
+
+  const out = new Set<number>();
+  for (const tid of tids) {
+    const content = await readUtf8(`/proc/${pid}/task/${tid}/children`);
+    if (!content) continue;
+    for (const child of parseProcChildrenPids(content)) {
+      out.add(child);
+    }
+  }
+
+  return [...out];
+}
+
+async function collectProcessTreePidsLinux(rootPid: number): Promise<number[]> {
+  const seen = new Set<number>();
+  const stack: number[] = [rootPid];
+  while (stack.length > 0) {
+    const pid = stack.pop()!;
+    if (seen.has(pid)) continue;
+    seen.add(pid);
+    const children = await getChildPidsLinux(pid);
+    for (const child of children) {
+      if (!seen.has(child)) stack.push(child);
+    }
+  }
+  return [...seen];
+}
+
+async function findPidForExecutableLinux(
+  rootPid: number,
+  binPath: string,
+  timeoutMs: number,
+): Promise<number | null> {
+  const binResolved = resolve(binPath);
+  let binReal = binResolved;
+  try {
+    binReal = realpathSync(binResolved);
+  } catch {
+    // Best-effort; realpath can fail in some sandbox setups.
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const pids = await collectProcessTreePidsLinux(rootPid);
+    for (const pid of pids) {
+      const exe = await readProcExeLinux(pid);
+      if (!exe) continue;
+      if (exe === binReal || exe === binResolved) return pid;
+    }
+    await sleep(50);
+  }
+  return null;
+}
+
+async function getProcessRssMbLinux(pid: number): Promise<number | null> {
+  const status = await readUtf8(`/proc/${pid}/status`);
+  if (!status) return null;
+  const kb = parseProcStatusVmRssKb(status);
+  if (kb == null) return null;
+  return kb / 1024;
+}
+
+function getRssMbViaPs(pid: number): number | null {
+  try {
+    const proc = spawnSync('ps', ['-o', 'rss=', '-p', String(pid)], { encoding: 'utf8' });
+    if (proc.status !== 0) return null;
+    const kb = Number(proc.stdout.trim());
+    if (!Number.isFinite(kb)) return null;
+    return kb / 1024;
+  } catch {
+    return null;
+  }
+}
+
+function getRssMbViaPowerShell(pid: number): number | null {
+  try {
+    const proc = spawnSync(
+      'powershell.exe',
+      ['-NoProfile', '-Command', `(Get-Process -Id ${pid}).WorkingSet64`],
+      { encoding: 'utf8' },
+    );
+    if (proc.status !== 0) return null;
+    const bytes = Number(proc.stdout.trim());
+    if (!Number.isFinite(bytes)) return null;
+    return bytes / (1024 * 1024);
+  } catch {
+    return null;
+  }
+}
+
+async function captureDesktopRssMb(
+  childPid: number,
+  binPath: string,
+  idleDelayMs: number,
+  timeoutMs: number,
+): Promise<number | null> {
+  try {
+    await sleep(idleDelayMs);
+
+    if (process.platform === 'linux') {
+      // When running under Xvfb, `childPid` is the wrapper process group leader. Resolve the real
+      // desktop PID by executable path.
+      const desktopPid = await findPidForExecutableLinux(childPid, binPath, Math.min(2000, timeoutMs));
+      if (!desktopPid) return null;
+      return await getProcessRssMbLinux(desktopPid);
+    }
+
+    if (process.platform === 'darwin') {
+      return getRssMbViaPs(childPid);
+    }
+
+    if (process.platform === 'win32') {
+      return getRssMbViaPowerShell(childPid);
+    }
+  } catch {
+    // Best-effort: RSS measurement failures should not fail the benchmark run.
+    return null;
+  }
+
+  return null;
 }
 
 export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> {
@@ -130,6 +330,12 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   const envOverrides: NodeJS.ProcessEnv = { FORMULA_DISABLE_STARTUP_UPDATE_CHECK: '1' };
   const argv = benchKind === 'shell' ? ['--startup-bench'] : [];
 
+  const rssIdleDelayMs = Math.max(
+    0,
+    Number(process.env.FORMULA_DESKTOP_RSS_IDLE_DELAY_MS ?? '1000') || 1000,
+  );
+  const rssTargetMb = Number(process.env.FORMULA_DESKTOP_RSS_TARGET_MB ?? '100') || 100;
+
   const perfHome =
     process.env.FORMULA_PERF_HOME && process.env.FORMULA_PERF_HOME.trim() !== ''
       ? resolve(repoRoot, process.env.FORMULA_PERF_HOME)
@@ -153,6 +359,26 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   };
 
   const metrics: StartupMetrics[] = [];
+  const rssSamples: number[] = [];
+
+  const runOnceWithRss = async (profileDir: string): Promise<StartupMetrics> => {
+    let rssMb: number | null = null;
+    const result = await runOnce({
+      binPath,
+      timeoutMs,
+      argv,
+      envOverrides,
+      profileDir,
+      afterCapture: async (child) => {
+        if (!child.pid) return;
+        rssMb = await captureDesktopRssMb(child.pid, binPath, rssIdleDelayMs, timeoutMs);
+      },
+      afterCaptureTimeoutMs: rssIdleDelayMs + 4000,
+    });
+    if (rssMb != null && Number.isFinite(rssMb)) rssSamples.push(rssMb);
+    return result;
+  };
+
   try {
     if (startupMode === 'warm') {
       const profileDir = resolve(profileRoot, 'profile');
@@ -165,8 +391,10 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
       setResetHome(undefined);
       for (let i = 0; i < runs; i += 1) {
         // eslint-disable-next-line no-console
-        console.log(`[desktop-${benchKind}-startup] run ${i + 1}/${runs} (warm, profile=${profileDir})...`);
-        metrics.push(await runOnce({ binPath, timeoutMs, argv, envOverrides, profileDir }));
+        console.log(
+          `[desktop-${benchKind}-startup] run ${i + 1}/${runs} (warm, profile=${profileDir})...`,
+        );
+        metrics.push(await runOnceWithRss(profileDir));
       }
     } else {
       // Reset before *every* run to avoid mixing cold + warm starts.
@@ -174,8 +402,10 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
       for (let i = 0; i < runs; i += 1) {
         const profileDir = resolve(profileRoot, `run-${String(i + 1).padStart(2, '0')}`);
         // eslint-disable-next-line no-console
-        console.log(`[desktop-${benchKind}-startup] run ${i + 1}/${runs} (cold, profile=${profileDir})...`);
-        metrics.push(await runOnce({ binPath, timeoutMs, argv, envOverrides, profileDir }));
+        console.log(
+          `[desktop-${benchKind}-startup] run ${i + 1}/${runs} (cold, profile=${profileDir})...`,
+        );
+        metrics.push(await runOnceWithRss(profileDir));
       }
     }
   } finally {
@@ -267,6 +497,7 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   const firstRenderTarget = startupMode === 'warm' ? fullWarmFirstRenderTarget : fullColdFirstRenderTarget;
 
   const metricPrefix = benchKind === 'shell' ? 'desktop.shell_startup' : 'desktop.startup';
+  const memoryPrefix = benchKind === 'shell' ? 'desktop.shell_memory' : 'desktop.memory';
 
   if (benchKind === 'full' && firstRender.length !== metrics.length) {
     throw new Error(
@@ -275,26 +506,43 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   }
 
   const results: BenchmarkResult[] = [
-    buildResult(`${metricPrefix}.${startupMode}.window_visible_ms.p95`, windowVisible, windowTarget),
+    buildResult(`${metricPrefix}.${startupMode}.window_visible_ms.p95`, windowVisible, windowTarget, 'ms'),
   ];
   if (benchKind === 'full') {
     results.push(
-      buildResult(`${metricPrefix}.${startupMode}.first_render_ms.p95`, firstRender, firstRenderTarget),
+      buildResult(`${metricPrefix}.${startupMode}.first_render_ms.p95`, firstRender, firstRenderTarget, 'ms'),
     );
   }
-  results.push(buildResult(`${metricPrefix}.${startupMode}.tti_ms.p95`, tti, ttiTarget));
+  results.push(buildResult(`${metricPrefix}.${startupMode}.tti_ms.p95`, tti, ttiTarget, 'ms'));
+
+  const minRssValidFraction = 0.8;
+  const minRssValidRuns = Math.ceil(runs * minRssValidFraction);
+  if (rssSamples.length >= minRssValidRuns) {
+    results.push(buildResult(`${memoryPrefix}.${startupMode}.rss_mb.p95`, rssSamples, rssTargetMb, 'mb'));
+  } else if (rssSamples.length > 0) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[desktop-${benchKind}-startup] rss_mb only available for ${rssSamples.length}/${runs} runs (<${Math.round(
+        minRssValidFraction * 100,
+      )}%); skipping memory metric`,
+    );
+  }
 
   // Convenience aliases:
   // - For cold-start runs, also expose a stable top-level metric name (no `.cold` suffix).
   // - For full startup, keep backwards-compatible legacy aliases.
   if (startupMode === 'cold') {
     if (benchKind === 'shell') {
-      results.push(buildResult('desktop.shell_startup.window_visible_ms.p95', windowVisible, windowTarget));
-      results.push(buildResult('desktop.shell_startup.tti_ms.p95', tti, ttiTarget));
+      results.push(buildResult('desktop.shell_startup.window_visible_ms.p95', windowVisible, windowTarget, 'ms'));
+      results.push(buildResult('desktop.shell_startup.tti_ms.p95', tti, ttiTarget, 'ms'));
     } else {
-      results.push(buildResult('desktop.startup.window_visible_ms.p95', windowVisible, windowTarget));
-      results.push(buildResult('desktop.startup.first_render_ms.p95', firstRender, firstRenderTarget));
-      results.push(buildResult('desktop.startup.tti_ms.p95', tti, ttiTarget));
+      results.push(buildResult('desktop.startup.window_visible_ms.p95', windowVisible, windowTarget, 'ms'));
+      results.push(buildResult('desktop.startup.first_render_ms.p95', firstRender, firstRenderTarget, 'ms'));
+      results.push(buildResult('desktop.startup.tti_ms.p95', tti, ttiTarget, 'ms'));
+    }
+
+    if (rssSamples.length >= minRssValidRuns) {
+      results.push(buildResult(`${memoryPrefix}.rss_mb.p95`, rssSamples, rssTargetMb, 'mb'));
     }
   }
 
@@ -338,9 +586,10 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
         benchKind === 'shell'
           ? 'desktop.shell_startup.webview_loaded_ms.p95'
           : 'desktop.startup.webview_loaded_ms.p95';
-      results.push(buildResult(name, webviewLoaded, webviewLoadedTarget));
+      results.push(buildResult(name, webviewLoaded, webviewLoadedTarget, 'ms'));
     }
   }
 
   return results;
 }
+
