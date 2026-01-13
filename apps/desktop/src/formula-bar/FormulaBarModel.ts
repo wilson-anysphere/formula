@@ -616,7 +616,20 @@ function highlightFromEngineTokens(formula: string, tokens: EngineFormulaToken[]
     if (end < start) continue;
 
     if (start > pos) {
-      spans.push({ kind: "unknown", start: pos, end: start, text: formula.slice(pos, start) });
+      // The engine lexer intentionally omits some characters (e.g. leading `=` in formula inputs).
+      // Highlight any uncovered gaps using the local tokenizer as a best-effort fallback.
+      const gapText = formula.slice(pos, start);
+      for (const gapSpan of highlightFormula(gapText)) {
+        const gapStart = pos + gapSpan.start;
+        const gapEnd = pos + gapSpan.end;
+        if (gapEnd <= gapStart) continue;
+        spans.push({
+          kind: gapSpan.kind,
+          start: gapStart,
+          end: gapEnd,
+          text: formula.slice(gapStart, gapEnd),
+        });
+      }
     }
 
     if (end > start) {
@@ -631,7 +644,18 @@ function highlightFromEngineTokens(formula: string, tokens: EngineFormulaToken[]
   }
 
   if (pos < formula.length) {
-    spans.push({ kind: "unknown", start: pos, end: formula.length, text: formula.slice(pos) });
+    const gapText = formula.slice(pos);
+    for (const gapSpan of highlightFormula(gapText)) {
+      const gapStart = pos + gapSpan.start;
+      const gapEnd = pos + gapSpan.end;
+      if (gapEnd <= gapStart) continue;
+      spans.push({
+        kind: gapSpan.kind,
+        start: gapStart,
+        end: gapEnd,
+        text: formula.slice(gapStart, gapEnd),
+      });
+    }
   }
 
   return spans;

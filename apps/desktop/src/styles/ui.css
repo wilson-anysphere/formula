@@ -409,6 +409,10 @@
   color: var(--error);
 }
 
+.formula-bar-hint-error {
+  margin-bottom: 4px;
+}
+
 .formula-bar-hint-panel {
   display: flex;
   flex-direction: column;

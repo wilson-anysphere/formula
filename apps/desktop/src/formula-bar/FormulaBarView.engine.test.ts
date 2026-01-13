@@ -34,7 +34,6 @@ describe("FormulaBarView WASM editor tooling integration", () => {
     const draft = "=1+";
 
     const tokens: FormulaToken[] = [
-      { kind: "Eq", span: { start: 0, end: 1 } },
       { kind: "Number", span: { start: 1, end: 2 }, value: "1" },
       { kind: "Plus", span: { start: 2, end: 3 } },
       { kind: "Eof", span: { start: 3, end: 3 } },
@@ -67,9 +66,14 @@ describe("FormulaBarView WASM editor tooling integration", () => {
     await flushTooling();
 
     const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const eqSpan = Array.from(highlight?.querySelectorAll<HTMLElement>('span[data-kind="operator"]') ?? []).find(
+      (el) => el.textContent === "=",
+    );
+    expect(eqSpan).toBeTruthy();
     const errorEl = highlight?.querySelector<HTMLElement>(".formula-bar-token--error");
     expect(errorEl).toBeTruthy();
     expect(errorEl?.textContent).toBe("+");
+    expect(host.querySelector<HTMLElement>('[data-testid="formula-hint"]')?.textContent).toContain("Unexpected token");
 
     host.remove();
   });
@@ -84,7 +88,6 @@ describe("FormulaBarView WASM editor tooling integration", () => {
     const sepIndex = draft.indexOf(";");
 
     const tokens: FormulaToken[] = [
-      { kind: "Eq", span: { start: 0, end: 1 } },
       { kind: "Ident", span: { start: 1, end: 4 }, value: "SUM" },
       { kind: "LParen", span: { start: 4, end: 5 } },
       { kind: "Number", span: { start: 5, end: 6 }, value: "1" },

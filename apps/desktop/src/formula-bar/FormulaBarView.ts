@@ -929,6 +929,11 @@ export class FormulaBarView {
     // uses stable highlights and we want to avoid late async updates after commit/cancel.
     if (!this.model.isEditing) return;
 
+    // Only ask the engine to lex/parse when the draft is actually a formula.
+    // This avoids surfacing parse errors while editing plain text values.
+    const draft = this.model.draft;
+    if (!draft.trim().startsWith("=")) return;
+
     const engine = this.#tooling?.getWasmEngine?.() ?? null;
     if (!engine) return;
 
@@ -939,7 +944,6 @@ export class FormulaBarView {
     const referenceStyle = this.#tooling?.referenceStyle ?? "A1";
 
     const cursor = this.model.cursorStart;
-    const draft = this.model.draft;
     const requestId = ++this.#toolingRequestId;
 
     this.#toolingPending = { requestId, draft, cursor, localeId: localeId || "en-US", referenceStyle };
@@ -973,6 +977,7 @@ export class FormulaBarView {
   }): Promise<void> {
     const engine = this.#tooling?.getWasmEngine?.() ?? null;
     if (!engine) return;
+    if (!pending.draft.trim().startsWith("=")) return;
 
     try {
       const options: FormulaParseOptions = { localeId: pending.localeId, referenceStyle: pending.referenceStyle };
@@ -985,6 +990,7 @@ export class FormulaBarView {
       if (pending.requestId !== this.#toolingRequestId) return;
       if (!this.model.isEditing) return;
       if (this.model.draft !== pending.draft) return;
+      if (!this.model.draft.trim().startsWith("=")) return;
 
       this.model.applyEngineToolingResult({ formula: pending.draft, localeId: pending.localeId, lexResult, parseResult });
       this.#requestRender({ preserveTextareaValue: true });
@@ -1566,7 +1572,7 @@ export class FormulaBarView {
 
     const syntaxError = this.model.syntaxError();
     this.#hintEl.classList.toggle("formula-bar-hint--syntax-error", Boolean(syntaxError));
-    const hint = syntaxError ? null : this.model.functionHint();
+    const hint = this.model.functionHint();
     this.#hintEl.replaceChildren();
     if (syntaxError) {
       this.#clearArgumentPreviewState();
@@ -1574,7 +1580,9 @@ export class FormulaBarView {
       message.className = "formula-bar-hint-error";
       message.textContent = syntaxError.message;
       this.#hintEl.appendChild(message);
-    } else if (!hint) {
+    }
+
+    if (!hint) {
       this.#clearArgumentPreviewState();
     } else {
       const panel = document.createElement("div");
@@ -1614,32 +1622,39 @@ export class FormulaBarView {
         body.appendChild(summaryEl);
       }
 
-      const provider = this.#argumentPreviewProvider;
-      const activeArg = getActiveArgumentSpan(this.model.draft, this.model.cursorStart);
-      const wantsArgPreview = Boolean(
-        activeArg && typeof provider === "function" && typeof activeArg.argText === "string" && activeArg.argText.trim() !== ""
-      );
-
-      if (wantsArgPreview && activeArg) {
-        const key = `${activeArg.fnName}|${activeArg.argIndex}|${activeArg.span.start}:${activeArg.span.end}|${activeArg.argText}`;
-        if (this.#argumentPreviewKey !== key) {
-          this.#argumentPreviewKey = key;
-          this.#argumentPreviewValue = null;
-          this.#argumentPreviewPending = true;
-          this.#scheduleArgumentPreviewEvaluation(activeArg, key);
-        }
-
-        const previewEl = document.createElement("div");
-        previewEl.className = "formula-bar-hint-arg-preview";
-        previewEl.dataset.testid = "formula-hint-arg-preview";
-        previewEl.dataset.argStart = String(activeArg.span.start);
-        previewEl.dataset.argEnd = String(activeArg.span.end);
-
-        const rhs = this.#argumentPreviewPending ? "…" : formatArgumentPreviewValue(this.#argumentPreviewValue);
-        previewEl.textContent = `↳ ${activeArg.argText}  →  ${rhs}`;
-        body.appendChild(previewEl);
-      } else {
+      if (syntaxError) {
         this.#clearArgumentPreviewState();
+      } else {
+        const provider = this.#argumentPreviewProvider;
+        const activeArg = getActiveArgumentSpan(this.model.draft, this.model.cursorStart);
+        const wantsArgPreview = Boolean(
+          activeArg &&
+            typeof provider === "function" &&
+            typeof activeArg.argText === "string" &&
+            activeArg.argText.trim() !== ""
+        );
+
+        if (wantsArgPreview && activeArg) {
+          const key = `${activeArg.fnName}|${activeArg.argIndex}|${activeArg.span.start}:${activeArg.span.end}|${activeArg.argText}`;
+          if (this.#argumentPreviewKey !== key) {
+            this.#argumentPreviewKey = key;
+            this.#argumentPreviewValue = null;
+            this.#argumentPreviewPending = true;
+            this.#scheduleArgumentPreviewEvaluation(activeArg, key);
+          }
+
+          const previewEl = document.createElement("div");
+          previewEl.className = "formula-bar-hint-arg-preview";
+          previewEl.dataset.testid = "formula-hint-arg-preview";
+          previewEl.dataset.argStart = String(activeArg.span.start);
+          previewEl.dataset.argEnd = String(activeArg.span.end);
+
+          const rhs = this.#argumentPreviewPending ? "…" : formatArgumentPreviewValue(this.#argumentPreviewValue);
+          previewEl.textContent = `↳ ${activeArg.argText}  →  ${rhs}`;
+          body.appendChild(previewEl);
+        } else {
+          this.#clearArgumentPreviewState();
+        }
       }
 
       panel.appendChild(title);
