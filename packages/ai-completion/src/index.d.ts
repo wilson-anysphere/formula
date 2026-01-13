@@ -31,6 +31,7 @@ export interface TabCompletionRequest {
   input: string;
   cursorPosition: number;
   cellA1: string;
+  signal?: AbortSignal;
 }
 
 export interface TabCompletionClient {
@@ -38,7 +39,12 @@ export interface TabCompletionClient {
 }
 
 export class CursorTabCompletionClient implements TabCompletionClient {
-  constructor(options?: { baseUrl?: string; fetchImpl?: typeof fetch; timeoutMs?: number });
+  constructor(options?: {
+    baseUrl?: string;
+    fetchImpl?: typeof fetch;
+    timeoutMs?: number;
+    getAuthHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
+  });
   completeTabCompletion(req: TabCompletionRequest): Promise<string>;
 }
 

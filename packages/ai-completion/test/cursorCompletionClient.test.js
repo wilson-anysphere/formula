@@ -28,7 +28,10 @@ test("CursorCompletionClient sends a structured request body", async () => {
 
   assert.equal(seen?.url, "http://example.test/api/ai/tab-completion");
   assert.equal(seen?.init?.method, "POST");
-  assert.equal(seen?.init?.headers?.["content-type"], "application/json");
+  assert.equal(
+    seen?.init?.headers?.["Content-Type"] ?? seen?.init?.headers?.["content-type"],
+    "application/json",
+  );
   assert.equal(seen?.init?.credentials, "include");
   assert.equal(typeof seen?.init?.signal?.aborted, "boolean");
 
