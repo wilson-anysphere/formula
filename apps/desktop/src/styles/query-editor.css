@@ -399,9 +399,15 @@
   margin-bottom: 4px;
 }
 
+.query-editor-add-step__menu-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .query-editor-add-step__menu-item {
   width: 100%;
-  margin-top: 4px;
+  margin-top: 0;
   text-align: start;
   padding: 6px 8px;
   border: 1px solid transparent;
