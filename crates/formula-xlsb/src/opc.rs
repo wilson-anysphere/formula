@@ -21,6 +21,7 @@ use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -88,7 +89,7 @@ impl<T: Read + Seek> ReadSeek for T {}
 #[derive(Clone)]
 enum WorkbookSource {
     Path(PathBuf),
-    Bytes(Vec<u8>),
+    Bytes(Arc<[u8]>),
 }
 
 impl fmt::Debug for WorkbookSource {
@@ -156,6 +157,11 @@ impl XlsbWorkbook {
         Ok(Self::from_parsed(WorkbookSource::Path(path), parsed))
     }
 
+    /// Open an XLSB workbook from in-memory ZIP bytes, without copying.
+    pub fn from_bytes(bytes: Arc<[u8]>, options: OpenOptions) -> Result<Self, ParseError> {
+        Self::open_from_owned_bytes(bytes, options)
+    }
+
     /// Open an XLSB workbook from an in-memory reader.
     ///
     /// This is primarily intended for decrypted Office-encrypted XLSB files, where the decrypted
@@ -172,6 +178,7 @@ impl XlsbWorkbook {
         reader.seek(SeekFrom::Start(0))?;
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes)?;
+        let bytes: Arc<[u8]> = bytes.into();
         Self::open_from_owned_bytes(bytes, options)
     }
 
@@ -201,11 +208,11 @@ impl XlsbWorkbook {
         bytes: &[u8],
         options: OpenOptions,
     ) -> Result<Self, ParseError> {
-        Self::open_from_owned_bytes(bytes.to_vec(), options)
+        Self::open_from_owned_bytes(Arc::from(bytes), options)
     }
 
-    fn open_from_owned_bytes(bytes: Vec<u8>, options: OpenOptions) -> Result<Self, ParseError> {
-        let mut zip = ZipArchive::new(Cursor::new(bytes.as_slice()))?;
+    fn open_from_owned_bytes(bytes: Arc<[u8]>, options: OpenOptions) -> Result<Self, ParseError> {
+        let mut zip = ZipArchive::new(Cursor::new(bytes.clone()))?;
         let parsed = parse_xlsb_from_zip(&mut zip, options)?;
         Ok(Self::from_parsed(WorkbookSource::Bytes(bytes), parsed))
     }
@@ -230,15 +237,15 @@ impl XlsbWorkbook {
         }
     }
 
-    fn open_zip(&self) -> Result<ZipArchive<Box<dyn ReadSeek + '_>>, ParseError> {
+    fn open_zip(&self) -> Result<ZipArchive<Box<dyn ReadSeek>>, ParseError> {
         match &self.source {
             WorkbookSource::Path(path) => {
                 let file = File::open(path)?;
-                let reader: Box<dyn ReadSeek + '_> = Box::new(file);
+                let reader: Box<dyn ReadSeek> = Box::new(file);
                 Ok(ZipArchive::new(reader)?)
             }
             WorkbookSource::Bytes(bytes) => {
-                let reader: Box<dyn ReadSeek + '_> = Box::new(Cursor::new(bytes.as_slice()));
+                let reader: Box<dyn ReadSeek> = Box::new(Cursor::new(bytes.clone()));
                 Ok(ZipArchive::new(reader)?)
             }
         }
@@ -1040,7 +1047,7 @@ impl XlsbWorkbook {
         edits_by_sheet: &BTreeMap<usize, Vec<CellEdit>>,
     ) -> Result<(), ParseError> {
         let mut overrides: HashMap<String, Vec<u8>> = HashMap::new();
-        let mut zip: Option<ZipArchive<Box<dyn ReadSeek + '_>>> = None;
+        let mut zip: Option<ZipArchive<Box<dyn ReadSeek>>> = None;
 
         for (&sheet_index, edits) in edits_by_sheet {
             if edits.is_empty() {

@@ -1,5 +1,7 @@
-use formula_xlsb::XlsbWorkbook;
+use formula_xlsb::{CellValue, OpenOptions, XlsbWorkbook};
+use pretty_assertions::assert_eq;
 use std::io::Cursor;
+use std::sync::Arc;
 
 #[test]
 fn opens_fixture_from_reader_bytes() {
@@ -26,14 +28,24 @@ fn opens_fixture_from_bytes() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
     let bytes = std::fs::read(path).expect("read fixture bytes");
 
-    let wb = XlsbWorkbook::open_from_bytes(&bytes).expect("open xlsb from bytes");
+    let wb = XlsbWorkbook::from_bytes(Arc::from(bytes), OpenOptions::default())
+        .expect("open xlsb from bytes");
     assert_eq!(wb.sheet_metas().len(), 1);
     assert!(wb.preserved_parts().contains_key("[Content_Types].xml"));
 
     let sheet = wb.read_sheet(0).expect("read sheet");
-    assert!(
-        sheet.cells.iter().any(|c| c.row == 0 && c.col == 0),
-        "expected cell A1 in parsed sheet"
+    let mut cells = sheet
+        .cells
+        .iter()
+        .map(|c| ((c.row, c.col), c))
+        .collect::<std::collections::HashMap<_, _>>();
+    assert_eq!(
+        cells.remove(&(0, 0)).unwrap().value,
+        CellValue::Text("Hello".to_string())
+    );
+    assert_eq!(
+        cells.remove(&(0, 1)).unwrap().value,
+        CellValue::Number(42.5)
     );
 }
 
