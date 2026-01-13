@@ -197,6 +197,20 @@ describe("runAgentTask (agent mode orchestrator)", () => {
 
       const events = getAiDlpAuditLogger().list();
       expect(events.some((e: any) => e.details?.type === "ai.workbook_context")).toBe(true);
+
+      // Even though the run was blocked before the first model call, we should still
+      // finalize an agent-mode audit entry for the failed run.
+      const auditEntries = await auditStore.listEntries({ session_id: result.session_id });
+      expect(auditEntries).toHaveLength(1);
+      const entry = auditEntries[0]!;
+      expect(entry.mode).toBe("agent");
+      expect(entry.tool_calls).toHaveLength(0);
+      expect(entry.user_feedback).toBe("rejected");
+      expect(entry.input).toMatchObject({ goal: "Read the secret cell" });
+      // Audit input should only include metadata about the run, not workbook context payloads.
+      expect(entry.input).not.toHaveProperty("workbook_context");
+      expect(entry.input).not.toHaveProperty("workbookContext");
+      expect(JSON.stringify(entry.input)).not.toContain("TOP SECRET");
     } finally {
       if (original === undefined) {
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
