@@ -1067,6 +1067,9 @@ export class FormulaBarView {
     // If the formula bar isn't mounted, avoid stealing focus (and avoid creating global pickers).
     if (!this.root.isConnected) return;
 
+    // Avoid overlapping UI affordances (typing autocomplete vs. explicit fx picker).
+    this.#functionAutocomplete.close();
+
     // Excel-style: clicking fx focuses the formula input and commonly starts a formula.
     if (this.model.isEditing) this.focus();
     else this.focus({ cursor: "end" });
