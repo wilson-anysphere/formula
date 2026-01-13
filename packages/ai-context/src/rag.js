@@ -235,14 +235,16 @@ function clampRangeToMatrixBounds(bounds, range) {
  *
  * @param {unknown[][]} values
  * @param {{ startRow: number, startCol: number, endRow: number, endCol: number }} range
- * @param {{ maxRows: number }} options
+ * @param {{ maxRows: number, signal?: AbortSignal }} options
  */
 function valuesRangeToTsv(values, range, options) {
+  const signal = options.signal;
   const lines = [];
   const totalRows = range.endRow - range.startRow + 1;
   const limit = Math.min(totalRows, options.maxRows);
 
   for (let rOffset = 0; rOffset < limit; rOffset++) {
+    throwIfAborted(signal);
     const row = values[range.startRow + rOffset];
     if (!Array.isArray(row)) {
       lines.push("");
@@ -266,6 +268,7 @@ function valuesRangeToTsv(values, range, options) {
     /** @type {string[]} */
     const cells = new Array(sliceLen);
     for (let cOffset = 0; cOffset < sliceLen; cOffset++) {
+      throwIfAborted(signal);
       const v = row[range.startCol + cOffset];
       cells[cOffset] = isCellEmpty(v) ? "" : String(v);
     }
@@ -416,7 +419,7 @@ export function chunkSheetByRegionsWithSchema(sheet, options = {}) {
         endCol: regionRectAbs.endCol - origin.col,
       };
       const headerRange = clampRangeToMatrixBounds(matrixBounds, headerRangeRaw);
-      headerLine = headerRange ? valuesRangeToTsv(sheet.values, headerRange, { maxRows: 1 }) : "";
+      headerLine = headerRange ? valuesRangeToTsv(sheet.values, headerRange, { maxRows: 1, signal }) : "";
     }
     const windows = splitByRowWindows
       ? splitRectByRowWindows(
@@ -447,7 +450,7 @@ export function chunkSheetByRegionsWithSchema(sheet, options = {}) {
       };
 
       const localRange = clampRangeToMatrixBounds(matrixBounds, localRangeRaw);
-      const windowText = localRange ? valuesRangeToTsv(sheet.values, localRange, { maxRows: maxChunkRows }) : "";
+      const windowText = localRange ? valuesRangeToTsv(sheet.values, localRange, { maxRows: maxChunkRows, signal }) : "";
       const text =
         headerLine && window.startRow > regionRectAbs.startRow
           ? windowText
