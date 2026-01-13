@@ -215,7 +215,7 @@ class DocumentControllerPerfStub {
 
 perfTest(
   "perf: session binder applies many Yjs cell updates (Yjs -> binder -> DocumentController)",
-  { timeout: PERF_TIMEOUT_MS },
+  { timeout: PERF_TIMEOUT_MS, concurrency: 1 },
   async () => {
     const totalUpdates = Number.parseInt(process.env.PERF_CELL_UPDATES ?? "50000", 10);
     const batchSize = Number.parseInt(process.env.PERF_BATCH_SIZE ?? "1000", 10);
@@ -333,7 +333,7 @@ perfTest(
 
 perfTest(
   "perf: session binder writes many DocumentController deltas (DocumentController -> binder -> Yjs)",
-  { timeout: PERF_TIMEOUT_MS },
+  { timeout: PERF_TIMEOUT_MS, concurrency: 1 },
   async () => {
     const totalUpdates = Number.parseInt(process.env.PERF_CELL_UPDATES ?? "50000", 10);
     const batchSize = Number.parseInt(process.env.PERF_BATCH_SIZE ?? "1000", 10);

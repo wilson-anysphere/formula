@@ -202,7 +202,7 @@ class DocumentControllerPerfStub {
 
 perfTest(
   "perf: binder applies many cell updates without pathological scaling",
-  { timeout: PERF_TIMEOUT_MS },
+  { timeout: PERF_TIMEOUT_MS, concurrency: 1 },
   async () => {
     const totalUpdates = Number.parseInt(process.env.PERF_CELL_UPDATES ?? "50000", 10);
     const batchSize = Number.parseInt(process.env.PERF_BATCH_SIZE ?? "1000", 10);
@@ -328,7 +328,7 @@ perfTest(
 
 perfTest(
   "perf: binder writes many DocumentController deltas to Yjs without pathological scaling",
-  { timeout: PERF_TIMEOUT_MS },
+  { timeout: PERF_TIMEOUT_MS, concurrency: 1 },
   async () => {
     const totalUpdates = Number.parseInt(process.env.PERF_CELL_UPDATES ?? "50000", 10);
     const batchSize = Number.parseInt(process.env.PERF_BATCH_SIZE ?? "1000", 10);
