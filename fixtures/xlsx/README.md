@@ -64,6 +64,7 @@ tests (see `rich-data/README.md` and check `docProps/app.xml` for provenance).
   - `comments.xlsx` - legacy comments parts.
   - `grouped-rows.xlsx` - outline/grouped rows metadata.
   - `image.xlsx` - embedded image (`xl/media/image1.png`) + drawing relationship.
+  - `rotated-image.xlsx` - **synthetic** rotated image (`xdr:pic` with `<a:xfrm rot="...">`; used for manual verification of transform support).
   - `shape-textbox.xlsx` - **synthetic** DrawingML shape with `<xdr:txBody>` text (used by UI shape text rendering).
   - `rotated-shape.xlsx` - **synthetic** DrawingML shape with `a:xfrm rot="..."` (used for manual verification of rotation/flip support).
   - `image-in-cell.xlsx` - **real Excel** “Place in Cell” image values using `xl/metadata.xml` + `xl/richData/*` (no `xl/cellimages.xml`; see `basic/image-in-cell.md`).
