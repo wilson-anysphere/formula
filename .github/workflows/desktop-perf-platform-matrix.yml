@@ -22,8 +22,8 @@ env:
   FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH: "0"
 
 jobs:
-  desktop-startup-perf:
-    name: Desktop startup perf (${{ matrix.os }})
+  desktop-perf:
+    name: Desktop perf (${{ matrix.os }})
     # Avoid spending compute on scheduled runs in forks.
     if: github.event_name != 'schedule' || github.repository == 'wilson-anysphere/formula'
     runs-on: ${{ matrix.os }}
