@@ -20,6 +20,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # Keep dry-run desktop bundles on the same Node.js major as CI/release workflows
+  # to avoid subtle differences in generated assets.
+  NODE_VERSION: 22
+
 jobs:
   conflict-marker-guard:
     name: "Guard: no merge conflict markers"
@@ -51,7 +56,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
 
       # Optional: only runs when a tag-like ref is explicitly requested.
       # This keeps dry runs usable from branches while still allowing "build this tag" validation.
