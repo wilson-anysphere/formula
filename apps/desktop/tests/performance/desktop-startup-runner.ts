@@ -24,7 +24,7 @@ type Summary = {
   firstRender: { p50: number | null; p95: number | null };
   tti: { p50: number; p95: number; targetMs: number };
   enforce: boolean;
-  webviewLoaded?: { p50: number; p95: number };
+  webviewLoaded?: { p50: number; p95: number; targetMs: number };
 };
 
 function parseBenchKindFromEnv(): StartupBenchKind | null {
@@ -40,6 +40,7 @@ function parseArgs(argv: string[]): {
   timeoutMs: number;
   binPath: string | null;
   windowTargetMs: number;
+  webviewLoadedTargetMs: number;
   ttiTargetMs: number;
   allowInCi: boolean;
   enforce: boolean;
@@ -51,6 +52,7 @@ function parseArgs(argv: string[]): {
   const envTimeoutMs = Number(process.env.FORMULA_DESKTOP_STARTUP_TIMEOUT_MS ?? "") || 15_000;
   const envBin = process.env.FORMULA_DESKTOP_BIN ?? null;
   const envWindowTargetMs = Number(process.env.FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS ?? "") || 500;
+  const envWebviewLoadedTargetMs = Number(process.env.FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS ?? "") || 800;
   const envTtiTargetMs = Number(process.env.FORMULA_DESKTOP_TTI_TARGET_MS ?? "") || 1000;
   const envEnforce = process.env.FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH === "1";
 
@@ -62,6 +64,7 @@ function parseArgs(argv: string[]): {
     timeoutMs: Math.max(1, envTimeoutMs),
     binPath: envBin as string | null,
     windowTargetMs: Math.max(1, envWindowTargetMs),
+    webviewLoadedTargetMs: Math.max(1, envWebviewLoadedTargetMs),
     ttiTargetMs: Math.max(1, envTtiTargetMs),
     allowInCi: false,
     enforce: envEnforce,
@@ -77,6 +80,8 @@ function parseArgs(argv: string[]): {
     else if ((arg === "--bin" || arg === "--bin-path") && args[0]) out.binPath = args.shift()!;
     else if ((arg === "--window-target-ms" || arg === "--window-visible-target-ms") && args[0])
       out.windowTargetMs = Math.max(1, Number(args.shift()) || out.windowTargetMs);
+    else if ((arg === "--webview-loaded-target-ms" || arg === "--webview-target-ms") && args[0])
+      out.webviewLoadedTargetMs = Math.max(1, Number(args.shift()) || out.webviewLoadedTargetMs);
     else if (arg === "--tti-target-ms" && args[0])
       out.ttiTargetMs = Math.max(1, Number(args.shift()) || out.ttiTargetMs);
     else if ((arg === "--json" || arg === "--json-path") && args[0]) out.jsonPath = args.shift()!;
@@ -96,6 +101,8 @@ function formatMaybeMs(ms: number | null): string {
 
 function printSummary(summary: Summary, benchKind: StartupBenchKind): void {
   const windowStatus = summary.windowVisible.p95 <= summary.windowVisible.targetMs ? "PASS" : "FAIL";
+  const webviewLoadedStatus =
+    summary.webviewLoaded && summary.webviewLoaded.p95 <= summary.webviewLoaded.targetMs ? "PASS" : "FAIL";
   const ttiStatus = summary.tti.p95 <= summary.tti.targetMs ? "PASS" : "FAIL";
   // eslint-disable-next-line no-console
   console.log(
@@ -105,7 +112,7 @@ function printSummary(summary: Summary, benchKind: StartupBenchKind): void {
       `windowVisible(${windowStatus} p50=${summary.windowVisible.p50}ms,p95=${summary.windowVisible.p95}ms,target=${summary.windowVisible.targetMs}ms)`,
       `firstRender(p50=${formatMaybeMs(summary.firstRender.p50)},p95=${formatMaybeMs(summary.firstRender.p95)})`,
       summary.webviewLoaded
-        ? `webviewLoaded(p50=${summary.webviewLoaded.p50}ms,p95=${summary.webviewLoaded.p95}ms)`
+        ? `webviewLoaded(${webviewLoadedStatus} p50=${summary.webviewLoaded.p50}ms,p95=${summary.webviewLoaded.p95}ms,target=${summary.webviewLoaded.targetMs}ms)`
         : "webviewLoaded(n/a)",
       `tti(${ttiStatus} p50=${summary.tti.p50}ms,p95=${summary.tti.p95}ms,target=${summary.tti.targetMs}ms)`,
       summary.enforce ? "enforced=1" : "enforced=0",
@@ -114,8 +121,18 @@ function printSummary(summary: Summary, benchKind: StartupBenchKind): void {
 }
 
 async function main(): Promise<void> {
-  const { runs, timeoutMs, binPath: argBin, windowTargetMs, ttiTargetMs, allowInCi, enforce, jsonPath, benchKind } =
-    parseArgs(process.argv.slice(2));
+  const {
+    runs,
+    timeoutMs,
+    binPath: argBin,
+    windowTargetMs,
+    webviewLoadedTargetMs,
+    ttiTargetMs,
+    allowInCi,
+    enforce,
+    jsonPath,
+    benchKind,
+  } = parseArgs(process.argv.slice(2));
 
   if (process.env.CI && !allowInCi && process.env.FORMULA_RUN_DESKTOP_STARTUP_BENCH !== "1") {
     // eslint-disable-next-line no-console
@@ -141,6 +158,7 @@ async function main(): Promise<void> {
       `- runs: ${runs} (override via --runs or FORMULA_DESKTOP_STARTUP_RUNS)\n` +
       `- timeout: ${timeoutMs}ms (override via --timeout-ms or FORMULA_DESKTOP_STARTUP_TIMEOUT_MS)\n` +
       `- window target: ${windowTargetMs}ms (override via --window-target-ms or FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS)\n` +
+      `- webviewLoaded target: ${webviewLoadedTargetMs}ms (override via --webview-loaded-target-ms or FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS)\n` +
       `- tti target: ${ttiTargetMs}ms (override via --tti-target-ms or FORMULA_DESKTOP_TTI_TARGET_MS)\n` +
       `- home: target/perf-home (repo-local; override with FORMULA_PERF_HOME; set FORMULA_DESKTOP_BENCH_RESET_HOME=1 to reset between iterations)\n` +
       (enforce
@@ -200,6 +218,7 @@ async function main(): Promise<void> {
           webviewLoaded: {
             p50: percentile(webviewLoadedValues, 0.5),
             p95: percentile(webviewLoadedValues, 0.95),
+            targetMs: webviewLoadedTargetMs,
           },
         }
       : {}),
@@ -235,7 +254,10 @@ async function main(): Promise<void> {
   }
 
   if (enforce) {
-    const failed = summary.windowVisible.p95 > summary.windowVisible.targetMs || summary.tti.p95 > summary.tti.targetMs;
+    const failed =
+      summary.windowVisible.p95 > summary.windowVisible.targetMs ||
+      summary.tti.p95 > summary.tti.targetMs ||
+      (summary.webviewLoaded !== undefined && summary.webviewLoaded.p95 > summary.webviewLoaded.targetMs);
     if (failed) process.exitCode = 1;
   }
 }
