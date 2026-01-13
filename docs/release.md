@@ -2,7 +2,7 @@
 
 This repository ships the desktop app via GitHub Releases and Tauri's built-in updater.
 Tagged pushes (`vX.Y.Z`) trigger a GitHub Actions workflow that builds installers/bundles for
-macOS/Windows/Linux and uploads them to a **draft** GitHub Release.
+macOS (Apple Silicon + Intel), Windows, and Linux and uploads them to a **draft** GitHub Release.
 
 Platform/architecture expectations for a release:
 
