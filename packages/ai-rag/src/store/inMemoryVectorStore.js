@@ -218,5 +218,17 @@ export class InMemoryVectorStore {
     return heap.map(({ id, score, metadata }) => ({ id, score, metadata }));
   }
 
+  /**
+   * Interface parity with persistent stores. In-memory stores don't need to batch,
+   * but exposing this lets callers opportunistically group mutations.
+   *
+   * @template T
+   * @param {() => Promise<T> | T} fn
+   * @returns {Promise<T>}
+   */
+  async batch(fn) {
+    return await fn();
+  }
+
   async close() {}
 }

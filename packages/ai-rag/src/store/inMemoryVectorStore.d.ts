@@ -14,6 +14,8 @@ export class InMemoryVectorStore {
   constructor(opts: { dimension: number });
   readonly dimension: number;
 
+  batch<T>(fn: () => Promise<T> | T): Promise<T>;
+
   upsert(records: VectorRecord[]): Promise<void>;
   delete(ids: string[]): Promise<void>;
   deleteWorkbook(workbookId: string): Promise<number>;

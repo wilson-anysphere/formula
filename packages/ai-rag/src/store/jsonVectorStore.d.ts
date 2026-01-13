@@ -4,6 +4,8 @@ export class JsonVectorStore extends InMemoryVectorStore {
   constructor(opts: { storage?: any; dimension: number; autoSave?: boolean });
   load(): Promise<void>;
 
+  batch<T>(fn: () => Promise<T> | T): Promise<T>;
+
   upsert(records: VectorRecord[]): Promise<void>;
   delete(ids: string[]): Promise<void>;
   deleteWorkbook(workbookId: string): Promise<number>;

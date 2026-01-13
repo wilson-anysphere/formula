@@ -216,44 +216,69 @@ export async function indexWorkbook(params) {
     }
   }
 
-  if (toUpsert.length) {
-    if (vectors.length !== toUpsert.length) {
-      throw new Error(
-        `Embedding count mismatch: got ${vectors.length} vector(s) for ${toUpsert.length} text(s)`
-      );
-    }
-    // Avoid aborting while awaiting persistence. Upserts are stateful; if we were to
-    // reject early here, callers could start a new indexing run while the underlying
-    // store is still writing.
-    throwIfAborted(signal);
-    onProgress?.({ phase: "upsert", processed: 0, total: toUpsert.length });
-    // Allow callers to cancel from within onProgress before starting persistence.
-    throwIfAborted(signal);
-    await vectorStore.upsert(
-      toUpsert.map((r, i) => ({
-        id: r.id,
-        vector: vectors[i],
-        metadata: r.metadata,
-      }))
-    );
-    onProgress?.({ phase: "upsert", processed: toUpsert.length, total: toUpsert.length });
-  }
-  throwIfAborted(signal);
-
   // Delete stale records for this workbook.
   const staleIds = existingForWorkbook
     .map((r) => r.id)
     .filter((id) => !currentIds.has(id));
-  if (staleIds.length) {
-    // Avoid aborting while awaiting persistence. Deletes are stateful; if we were to
+
+  const upsertRecords = toUpsert.map((r, i) => ({
+    id: r.id,
+    vector: vectors[i],
+    metadata: r.metadata,
+  }));
+
+  const hasMutations = upsertRecords.length > 0 || staleIds.length > 0;
+  if (hasMutations && typeof vectorStore.batch === "function") {
+    // Avoid aborting while awaiting persistence. Batches are stateful; if we were to
     // reject early here, callers could start a new indexing run while the underlying
     // store is still writing.
     throwIfAborted(signal);
-    onProgress?.({ phase: "delete", processed: 0, total: staleIds.length });
-    // Allow callers to cancel from within onProgress before starting persistence.
+    await vectorStore.batch(async () => {
+      if (signal?.aborted) return;
+      if (upsertRecords.length) {
+        onProgress?.({ phase: "upsert", processed: 0, total: upsertRecords.length });
+        // Allow callers to cancel from within onProgress before starting persistence.
+        if (signal?.aborted) return;
+        await vectorStore.upsert(upsertRecords);
+        onProgress?.({ phase: "upsert", processed: upsertRecords.length, total: upsertRecords.length });
+      }
+      // Preserve the existing behavior: if an abort happens during the upsert, skip
+      // deletions, but do not throw inside the batch (throwing would skip the final
+      // persistence snapshot).
+      if (signal?.aborted) return;
+      if (staleIds.length) {
+        onProgress?.({ phase: "delete", processed: 0, total: staleIds.length });
+        // Allow callers to cancel from within onProgress before starting persistence.
+        if (signal?.aborted) return;
+        await vectorStore.delete(staleIds);
+        onProgress?.({ phase: "delete", processed: staleIds.length, total: staleIds.length });
+      }
+    });
+  } else {
+    if (upsertRecords.length) {
+      // Avoid aborting while awaiting persistence. Upserts are stateful; if we were to
+      // reject early here, callers could start a new indexing run while the underlying
+      // store is still writing.
+      throwIfAborted(signal);
+      onProgress?.({ phase: "upsert", processed: 0, total: upsertRecords.length });
+      // Allow callers to cancel from within onProgress before starting persistence.
+      throwIfAborted(signal);
+      await vectorStore.upsert(upsertRecords);
+      onProgress?.({ phase: "upsert", processed: upsertRecords.length, total: upsertRecords.length });
+    }
     throwIfAborted(signal);
-    await vectorStore.delete(staleIds);
-    onProgress?.({ phase: "delete", processed: staleIds.length, total: staleIds.length });
+
+    if (staleIds.length) {
+      // Avoid aborting while awaiting persistence. Deletes are stateful; if we were to
+      // reject early here, callers could start a new indexing run while the underlying
+      // store is still writing.
+      throwIfAborted(signal);
+      onProgress?.({ phase: "delete", processed: 0, total: staleIds.length });
+      // Allow callers to cancel from within onProgress before starting persistence.
+      throwIfAborted(signal);
+      await vectorStore.delete(staleIds);
+      onProgress?.({ phase: "delete", processed: staleIds.length, total: staleIds.length });
+    }
   }
   throwIfAborted(signal);
 

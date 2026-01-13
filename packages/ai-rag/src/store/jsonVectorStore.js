@@ -48,6 +48,7 @@ export class JsonVectorStore extends InMemoryVectorStore {
     // Monotonic counter so we only clear `_dirty` when the persisted snapshot
     // corresponds to the latest mutation at the time the persist started.
     this._mutationVersion = 0;
+    this._batchDepth = 0;
   }
 
   /**
@@ -185,5 +186,36 @@ export class JsonVectorStore extends InMemoryVectorStore {
     await this.load();
     if (this._dirty) await this._enqueuePersist();
     await this._persistQueue;
+  }
+
+  /**
+   * Batch multiple mutations into a single persistence snapshot.
+   *
+   * When autoSave is enabled, `upsert()`/`delete()` normally persist after each call.
+   * `batch()` temporarily suppresses those intermediate saves, then persists once at
+   * the end if anything changed.
+   *
+   * @template T
+   * @param {() => Promise<T> | T} fn
+   * @returns {Promise<T>}
+   */
+  async batch(fn) {
+    const isOutermost = this._batchDepth === 0;
+    const prevAutoSave = isOutermost ? this._autoSave : null;
+    if (isOutermost) this._autoSave = false;
+    this._batchDepth += 1;
+    /** @type {any} */
+    let result;
+    try {
+      result = await fn();
+    } finally {
+      this._batchDepth -= 1;
+      if (isOutermost) this._autoSave = prevAutoSave;
+    }
+
+    // Only persist for successful (non-throwing) batches, and only when autoSave was
+    // enabled at the start of the batch.
+    if (isOutermost && prevAutoSave && this._dirty) await this._enqueuePersist();
+    return result;
   }
 }

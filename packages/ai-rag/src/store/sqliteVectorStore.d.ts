@@ -8,6 +8,8 @@ export class SqliteVectorStore {
 
   readonly dimension: number;
 
+  batch<T>(fn: () => Promise<T> | T): Promise<T>;
+
   upsert(records: Array<{ id: string; vector: ArrayLike<number>; metadata: any }>): Promise<void>;
   delete(ids: string[]): Promise<void>;
   deleteWorkbook(workbookId: string): Promise<number>;

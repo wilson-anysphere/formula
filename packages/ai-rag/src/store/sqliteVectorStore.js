@@ -155,6 +155,7 @@ export class SqliteVectorStore {
     // overwriting newer snapshots.
     /** @type {Promise<void>} */
     this._persistQueue = Promise.resolve();
+    this._batchDepth = 0;
 
     this._ensureSchema();
     this._registerFunctions();
@@ -503,6 +504,37 @@ export class SqliteVectorStore {
     const next = this._persistQueue.then(task, task);
     this._persistQueue = next;
     return next;
+  }
+
+  /**
+   * Batch multiple mutations into a single persistence snapshot.
+   *
+   * When autoSave is enabled, `upsert()`/`delete()` normally persist after each call.
+   * `batch()` temporarily suppresses those intermediate saves, then persists once at
+   * the end if anything changed.
+   *
+   * @template T
+   * @param {() => Promise<T> | T} fn
+   * @returns {Promise<T>}
+   */
+  async batch(fn) {
+    const isOutermost = this._batchDepth === 0;
+    const prevAutoSave = isOutermost ? this._autoSave : null;
+    if (isOutermost) this._autoSave = false;
+    this._batchDepth += 1;
+    /** @type {any} */
+    let result;
+    try {
+      result = await fn();
+    } finally {
+      this._batchDepth -= 1;
+      if (isOutermost) this._autoSave = prevAutoSave;
+    }
+
+    // Only persist for successful (non-throwing) batches, and only when autoSave was
+    // enabled at the start of the batch.
+    if (isOutermost && prevAutoSave && this._dirty) await this._enqueuePersist();
+    return result;
   }
 
   /**
