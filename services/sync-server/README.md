@@ -520,14 +520,15 @@ Notable metrics (prefix `sync_server_`):
 - `sync_server_ws_messages_too_large_total`
 - `sync_server_ws_message_handler_errors_total{stage=...}`
 - `sync_server_ws_reserved_root_mutations_total`
-- `sync_server_ws_reserved_root_inspection_fail_closed_total{reason=...}`
-- `sync_server_ws_awareness_spoof_attempts_total` / `sync_server_ws_awareness_client_id_collisions_total`
-- `sync_server_ws_closes_total{code=...}`
-- `sync_server_introspection_over_capacity_total`
-- `sync_server_introspection_requests_total{result=ok|inactive|error}`
-- `sync_server_introspection_request_duration_ms{path=...,result=...}`
-- `sync_server_retention_docs_purged_total{sweep=...}`
-- `sync_server_retention_sweep_errors_total{sweep=...}`
+  - `sync_server_ws_reserved_root_inspection_fail_closed_total{reason=...}`
+  - `sync_server_ws_awareness_spoof_attempts_total` / `sync_server_ws_awareness_client_id_collisions_total`
+  - `sync_server_ws_closes_total{code=...}`
+  - `sync_server_shutdown_draining_current`
+  - `sync_server_introspection_over_capacity_total`
+  - `sync_server_introspection_requests_total{result=ok|inactive|error}`
+  - `sync_server_introspection_request_duration_ms{path=...,result=...}`
+  - `sync_server_retention_docs_purged_total{sweep=...}`
+  - `sync_server_retention_sweep_errors_total{sweep=...}`
 - `sync_server_persistence_info{backend=...,encryption=...}`
 - `sync_server_process_resident_memory_bytes` / `sync_server_process_heap_used_bytes` / `sync_server_event_loop_delay_ms`
 
