@@ -66,17 +66,20 @@ const RECORD_FILTERMODE: u16 = 0x009B;
 // Excel 2007+ may store newer filter semantics in BIFF8 via future records.
 const RECORD_AUTOFILTER12: u16 = 0x087E;
 const RECORD_WSBOOL: u16 = 0x0081;
+const RECORD_HORIZONTALPAGEBREAKS: u16 = 0x001B;
+const RECORD_VERTICALPAGEBREAKS: u16 = 0x001A;
 const RECORD_ROW: u16 = 0x0208;
 const RECORD_COLINFO: u16 = 0x007D;
 const RECORD_OBJPROTECT: u16 = 0x0063;
 const RECORD_SCENPROTECT: u16 = 0x00DD;
-const RECORD_VERTICALPAGEBREAKS: u16 = 0x001A;
-const RECORD_HORIZONTALPAGEBREAKS: u16 = 0x001B;
 
 const ROW_OPTION_HIDDEN: u16 = 0x0020;
 const ROW_OPTION_COLLAPSED: u16 = 0x1000;
 const COLINFO_OPTION_HIDDEN: u16 = 0x0001;
 const COLINFO_OPTION_COLLAPSED: u16 = 0x1000;
+
+// WSBOOL options.
+const WSBOOL_OPTION_FIT_TO_PAGE: u16 = 0x0100;
 
 const BOF_VERSION_BIFF8: u16 = 0x0600;
 const BOF_DT_WORKBOOK_GLOBALS: u16 = 0x0005;
@@ -607,6 +610,108 @@ pub fn build_sheet_print_settings_fixture_xls() -> Vec<u8> {
             .expect("write Workbook stream");
     }
     ole.into_inner().into_inner()
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PageSetupScalingMode {
+    Percent,
+    FitTo,
+}
+
+/// Build a BIFF8 `.xls` fixture containing worksheet page setup + margins + manual page breaks,
+/// using percent scaling (`WSBOOL.fFitToPage=0`, `SETUP.iScale=85`).
+pub fn build_page_setup_percent_scaling_fixture_xls() -> Vec<u8> {
+    // `build_single_sheet_workbook_stream` always emits a single cell XF at index 16 (after 16
+    // style XFs).
+    let sheet_stream = build_page_setup_fixture_sheet_stream(16, PageSetupScalingMode::Percent);
+    let workbook_stream = build_single_sheet_workbook_stream("Sheet1", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing worksheet page setup + margins + manual page breaks,
+/// using fit-to scaling (`WSBOOL.fFitToPage=1`, `SETUP.iFitWidth=2`, `SETUP.iFitHeight=3`).
+pub fn build_page_setup_fit_to_scaling_fixture_xls() -> Vec<u8> {
+    // `build_single_sheet_workbook_stream` always emits a single cell XF at index 16 (after 16
+    // style XFs).
+    let sheet_stream = build_page_setup_fixture_sheet_stream(16, PageSetupScalingMode::FitTo);
+    let workbook_stream = build_single_sheet_workbook_stream("Sheet1", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+fn build_page_setup_fixture_sheet_stream(xf_cell: u16, mode: PageSetupScalingMode) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 10) cols [0, 5) (large enough to cover our page breaks).
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&10u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&5u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    // WINDOW2 is required by some consumers; keep defaults.
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // WSBOOL controls scaling mode (`fFitToPage`).
+    let mut wsbool: u16 = 0x0C01;
+    match mode {
+        PageSetupScalingMode::Percent => wsbool &= !WSBOOL_OPTION_FIT_TO_PAGE,
+        PageSetupScalingMode::FitTo => wsbool |= WSBOOL_OPTION_FIT_TO_PAGE,
+    }
+    push_record(&mut sheet, RECORD_WSBOOL, &wsbool.to_le_bytes());
+
+    // Page setup: Landscape + A4 + scaling + non-default header/footer margins.
+    match mode {
+        PageSetupScalingMode::Percent => push_record(
+            &mut sheet,
+            RECORD_SETUP,
+            &setup_record(9, 85, 0, 0, true, 0.9, 1.0),
+        ),
+        PageSetupScalingMode::FitTo => push_record(
+            &mut sheet,
+            RECORD_SETUP,
+            &setup_record(9, 100, 2, 3, true, 0.9, 1.0),
+        ),
+    }
+
+    // Margins.
+    push_record(&mut sheet, RECORD_LEFTMARGIN, &0.5f64.to_le_bytes());
+    push_record(&mut sheet, RECORD_RIGHTMARGIN, &0.6f64.to_le_bytes());
+    push_record(&mut sheet, RECORD_TOPMARGIN, &0.7f64.to_le_bytes());
+    push_record(&mut sheet, RECORD_BOTTOMMARGIN, &0.8f64.to_le_bytes());
+
+    // Manual page breaks.
+    // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.
+    // The importer converts these to the model’s “after which break occurs” form by subtracting 1.
+    push_record(&mut sheet, RECORD_HPAGEBREAKS, &hpagebreaks_record(&[5]));
+    push_record(&mut sheet, RECORD_VPAGEBREAKS, &vpagebreaks_record(&[3]));
+
+    // Provide at least one cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 0.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
 }
 
 fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
