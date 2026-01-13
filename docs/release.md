@@ -8,7 +8,7 @@ Platform/architecture expectations for a release:
 
 - **macOS:** **universal** build (Intel + Apple Silicon): `.dmg` (installer) + `.app.tar.gz` (updater payload).
 - **Windows:** **x64** + **ARM64**: installers in both formats (`.msi` + `.exe`) for each architecture.
-- **Linux:** `.AppImage` + `.deb` + `.rpm`.
+- **Linux:** **x86_64** + **ARM64**: `.AppImage` + `.deb` + `.rpm` for each architecture.
 
 The workflow also uploads updater metadata (`latest.json` + `latest.json.sig`) used by the Tauri
 updater.
@@ -623,7 +623,8 @@ alongside the installers. The file is structured roughly like:
     "darwin-universal": { "url": "…", "signature": "…" },
     "windows-x86_64": { "url": "…", "signature": "…" },
     "windows-aarch64": { "url": "…", "signature": "…" },
-    "linux-x86_64": { "url": "…", "signature": "…" }
+    "linux-x86_64": { "url": "…", "signature": "…" },
+    "linux-aarch64": { "url": "…", "signature": "…" }
   }
 }
 ```
@@ -632,9 +633,10 @@ Expected `{{target}}` / `latest.json.platforms` keys for this repo’s **tagged 
 enforced; see `docs/desktop-updater-target-mapping.md`):
 
 - **macOS (universal):** `darwin-universal` → updater payload (typically an `.app.tar.gz`).
-- **Windows x64:** `windows-x86_64` → updater installer (currently the **`.msi`**).
-- **Windows ARM64:** `windows-aarch64` → updater installer (currently the **`.msi`**).
+- **Windows x64:** `windows-x86_64` → updater installer (`.msi` or `.exe`).
+- **Windows ARM64:** `windows-aarch64` → updater installer (`.msi` or `.exe`).
 - **Linux x86_64:** `linux-x86_64` → updater payload (typically the `.AppImage`).
+- **Linux ARM64:** `linux-aarch64` → updater payload (typically the `.AppImage`).
 
 Local note: when inspecting manifests from local builds or older tooling you may see alternate key
 spellings (for example Rust target triples like `x86_64-pc-windows-msvc` / `aarch64-pc-windows-msvc`
@@ -654,7 +656,8 @@ For reference, this is how the release workflow’s Tauri build targets map to u
 | macOS universal | `--target universal-apple-darwin` | `aarch64-apple-darwin` + `x86_64-apple-darwin` | `darwin-universal` |
 | Windows x64 | `--target x86_64-pc-windows-msvc --bundles msi,nsis` | `x86_64-pc-windows-msvc` | `windows-x86_64` |
 | Windows ARM64 | `--target aarch64-pc-windows-msvc --bundles msi,nsis` | `aarch64-pc-windows-msvc` | `windows-aarch64` |
-| Linux x64 | `--bundles appimage,deb,rpm` | `x86_64-unknown-linux-gnu` | `linux-x86_64` |
+| Linux x86_64 | `--bundles appimage,deb,rpm` | `x86_64-unknown-linux-gnu` | `linux-x86_64` |
+| Linux ARM64 | `--bundles appimage,deb,rpm` | `aarch64-unknown-linux-gnu` | `linux-aarch64` |
 
 Local-note: some toolchains may emit alias key spellings in `latest.json` (for example Rust target
 triples like `x86_64-pc-windows-msvc` / `aarch64-pc-windows-msvc`, or `windows-arm64`). Tagged
@@ -850,7 +853,7 @@ are attached:
    - macOS (**universal**): `.dmg` (installer) + `.app.tar.gz` (updater payload)
    - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `x64` / `x86_64`)
    - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `arm64` / `aarch64`)
-   - Linux: `.AppImage` + `.deb` + `.rpm`
+   - Linux (**x86_64 + ARM64**): `.AppImage` + `.deb` + `.rpm` for each architecture
 
    This repo requires Tauri updater signing for tagged releases, so expect `.sig` signature files to
    be uploaded alongside the produced artifacts:
@@ -877,6 +880,7 @@ are attached:
    - `windows-x86_64`
    - `windows-aarch64`
    - `linux-x86_64`
+   - `linux-aarch64`
 
    Note: the tagged-release CI validator is intentionally **strict** about these key names. If you
    see different spellings (for example Rust target triples like `x86_64-pc-windows-msvc` or
@@ -953,6 +957,7 @@ are attached:
 
    ```bash
    # Dependency metadata (ensure the runtime deps are present)
+   # (Pick the package files matching the architecture you're validating: amd64/x86_64 vs arm64/aarch64.)
    deb="$(ls *.deb | head -n 1)"
    rpm="$(ls *.rpm | head -n 1)"
 

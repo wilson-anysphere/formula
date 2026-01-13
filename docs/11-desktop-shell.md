@@ -356,7 +356,7 @@ The repo’s custom `asset:` handler adds `Cross-Origin-Resource-Policy: cross-o
 ### `bundle.*` (packaging)
 
 Release CI (`.github/workflows/release.yml`) produces platform installers/bundles for **macOS/Windows/Linux**
-(including multi-arch artifacts like macOS universal and Windows x64+arm64). For the expected artifact
+(including multi-arch artifacts like macOS universal, Windows x64+arm64, and Linux x86_64+arm64). For the expected artifact
 list and verification commands, see `docs/release.md` (“Verifying a release”).
 
 Notable keys:
@@ -385,7 +385,7 @@ Tagged builds are expected to produce:
 
 - **macOS:** universal `.dmg` (plus updater payload `.app.tar.gz`)
 - **Windows:** installers for **x64** and **ARM64** (`.msi` + `.exe`)
-- **Linux:** `.AppImage` + `.deb` + `.rpm`
+- **Linux:** `.AppImage` + `.deb` + `.rpm` for **x86_64** and **ARM64**
 
 Auto-update is driven by the Tauri updater manifest (`latest.json`) uploaded to the release.
 For the exact `latest.json.platforms` key names (multi-arch), see `docs/desktop-updater-target-mapping.md`.
