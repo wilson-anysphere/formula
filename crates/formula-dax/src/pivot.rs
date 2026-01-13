@@ -1082,12 +1082,27 @@ fn pivot_columnar_star_schema_group_by(
             continue;
         }
 
-        let Some(rel_info) = model.relationships().iter().find(|rel| {
-            rel.rel.is_active && rel.rel.from_table == base_table && rel.rel.to_table == col.table
-        }) else {
-            // Multi-hop or unrelated group-by columns aren't supported by this fast path.
+        let Some(path) = model.find_unique_active_relationship_path(
+            base_table,
+            &col.table,
+            RelationshipPathDirection::ManyToOne,
+            |_, rel| rel.rel.is_active,
+        )?
+        else {
+            // `pivot()` should ultimately error for unsupported RELATED columns (the planned
+            // row-group-by path will do so). Keep this fast path conservative.
             return Ok(None);
         };
+
+        if path.len() != 1 {
+            // Multi-hop traversal isn't supported by this fast path (yet).
+            return Ok(None);
+        }
+
+        let rel_info = model
+            .relationships()
+            .get(path[0])
+            .expect("relationship index from path");
 
         let from_idx = table_ref
             .column_idx(&rel_info.rel.from_column)
