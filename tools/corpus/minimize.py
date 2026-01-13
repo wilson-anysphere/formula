@@ -158,6 +158,14 @@ def _format_counts(counts: dict[str, int]) -> str:
     return f'{counts.get("critical", 0)}/{counts.get("warning", 0)}/{counts.get("info", 0)} (total {counts.get("total", 0)})'
 
 
+def _guess_workbook_extension(name: str) -> str:
+    lower = (name or "").lower()
+    for ext in (".xlsb", ".xlsm", ".xlsx"):
+        if lower.endswith(ext):
+            return ext
+    return ".xlsx"
+
+
 def minimize_workbook(
     workbook: WorkbookInput,
     *,
@@ -593,9 +601,16 @@ def main() -> int:
 
     out_xlsx = args.out_xlsx
     if out_xlsx is not None:
-        # Allow passing a directory for convenience.
+        # Allow passing a directory for convenience, and preserve the original workbook extension.
+        ext = _guess_workbook_extension(workbook.display_name)
+        raw_out_xlsx = str(args.out_xlsx)
         if out_xlsx.exists() and out_xlsx.is_dir():
-            out_xlsx = out_xlsx / f"{workbook_id}.min.xlsx"
+            out_xlsx = out_xlsx / f"{workbook_id}.min{ext}"
+        elif raw_out_xlsx.endswith(("/", "\\")):
+            out_dir = Path(raw_out_xlsx)
+            out_xlsx = out_dir / f"{workbook_id}.min{ext}"
+        elif out_xlsx.suffix == "":
+            out_xlsx = out_xlsx.with_suffix(ext)
         try:
             min_summary, removed_parts, min_bytes = minimize_workbook_package(
                 workbook,
