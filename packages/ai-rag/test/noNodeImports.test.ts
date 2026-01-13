@@ -12,6 +12,7 @@ const browserSafeEntrypoints = [
   new URL("../src/utils/hash.js", import.meta.url),
   new URL("../src/retrieval/searchWorkbookRag.js", import.meta.url),
   new URL("../src/retrieval/ranking.js", import.meta.url),
+  new URL("../src/retrieval/rankResults.js", import.meta.url),
   new URL("../../../apps/desktop/src/ai/rag/index.js", import.meta.url),
 ];
 
