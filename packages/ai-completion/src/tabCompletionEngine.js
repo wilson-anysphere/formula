@@ -864,6 +864,34 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "TRUE", displayText: "TRUE (only values occurring once)", confidence: 0.61 },
     ],
   },
+  SUBTOTAL: {
+    // function_num (1-11 / 101-111)
+    0: [
+      { replacement: "9", displayText: "9 (SUM)", confidence: 0.7 },
+      { replacement: "109", displayText: "109 (SUM, ignore hidden)", confidence: 0.68 },
+      { replacement: "3", displayText: "3 (COUNTA)", confidence: 0.66 },
+      { replacement: "103", displayText: "103 (COUNTA, ignore hidden)", confidence: 0.65 },
+      { replacement: "1", displayText: "1 (AVERAGE)", confidence: 0.64 },
+    ],
+  },
+  AGGREGATE: {
+    // function_num
+    0: [
+      { replacement: "9", displayText: "9 (SUM)", confidence: 0.7 },
+      { replacement: "1", displayText: "1 (AVERAGE)", confidence: 0.67 },
+      { replacement: "3", displayText: "3 (COUNTA)", confidence: 0.66 },
+      { replacement: "4", displayText: "4 (MAX)", confidence: 0.65 },
+      { replacement: "5", displayText: "5 (MIN)", confidence: 0.64 },
+    ],
+    // options
+    1: [
+      { replacement: "0", displayText: "0 (ignore nested SUBTOTAL/AGGREGATE)", confidence: 0.68 },
+      { replacement: "4", displayText: "4 (ignore nothing)", confidence: 0.66 },
+      { replacement: "6", displayText: "6 (ignore errors)", confidence: 0.64 },
+      { replacement: "7", displayText: "7 (ignore hidden + errors)", confidence: 0.63 },
+      { replacement: "3", displayText: "3 (ignore nested + hidden + errors)", confidence: 0.62 },
+    ],
+  },
   VLOOKUP: {
     // range_lookup (TRUE = approx match, FALSE = exact)
     3: [

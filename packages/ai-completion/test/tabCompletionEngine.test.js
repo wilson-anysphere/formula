@@ -1581,6 +1581,73 @@ test("UNIQUE exactly_once suggests TRUE/FALSE", async () => {
   );
 });
 
+test("SUBTOTAL function_num suggests 9 and 109", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SUBTOTAL(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUBTOTAL(9"),
+    `Expected SUBTOTAL to suggest function_num=9, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUBTOTAL(109"),
+    `Expected SUBTOTAL to suggest function_num=109, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("AGGREGATE function_num suggests 9", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=AGGREGATE(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=AGGREGATE(9"),
+    `Expected AGGREGATE to suggest function_num=9, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("AGGREGATE options suggests common values (0, 4, 6, 7)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=AGGREGATE(9, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=AGGREGATE(9, 0"),
+    `Expected AGGREGATE to suggest options=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=AGGREGATE(9, 4"),
+    `Expected AGGREGATE to suggest options=4, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=AGGREGATE(9, 6"),
+    `Expected AGGREGATE to suggest options=6, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=AGGREGATE(9, 7"),
+    `Expected AGGREGATE to suggest options=7, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("TabCompletionEngine caches suggestions by context key", async () => {
   let callCount = 0;
   const completionClient = {
