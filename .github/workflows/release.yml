@@ -586,8 +586,23 @@ jobs:
           }
 
           # Wrap in @() so `.Count` behaves consistently even when 0 or 1 files match.
-          $msis = @(Get-ChildItem -Path $bundleDir -Recurse -File -Include *.msi -ErrorAction SilentlyContinue)
-          $exes = @(Get-ChildItem -Path $bundleDir -Recurse -File -Include *.exe -ErrorAction SilentlyContinue)
+          #
+          # Tauri Windows bundle outputs live under:
+          # - bundle/msi/*.msi
+          # - bundle/nsis/*.exe (and sometimes bundle/nsis-web/*.exe)
+          #
+          # We intentionally scope to these directories so random `.exe` files (e.g. helpers)
+          # do not satisfy the "Windows installer" requirement.
+          $msis = @(
+            Get-ChildItem -Path (Join-Path $bundleDir "msi") -Recurse -File -Filter "*.msi" -ErrorAction SilentlyContinue
+          )
+          $exes = @()
+          $exes += @(
+            Get-ChildItem -Path (Join-Path $bundleDir "nsis") -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue
+          )
+          $exes += @(
+            Get-ChildItem -Path (Join-Path $bundleDir "nsis-web") -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue
+          )
 
           if ($msis.Count -eq 0 -and $exes.Count -eq 0) {
             throw "windows-bundle: ERROR no .msi or .exe installers found under: $bundleDir"

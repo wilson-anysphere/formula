@@ -367,6 +367,11 @@ Expected `{{target}}` values for this repo’s release matrix:
 - **Linux:** `linux-x86_64` (some toolchains use `x86_64-unknown-linux-gnu`; points at the updater
   payload, typically the `.AppImage`).
 
+Note: `apps/desktop/src-tauri/tauri.conf.json` sets `bundle.targets: "all"`, which enables all
+supported bundlers for the current platform (including **MSI/WiX** + **NSIS** on Windows). CI still
+passes `--bundles msi,nsis` and installs WiX + NSIS explicitly so Windows releases always include
+both installer formats.
+
 For reference, this is how the release workflow’s Tauri build targets map to updater targets:
 
 | Workflow build | Tauri build args | Rust target triple | `latest.json` platform key(s) |
