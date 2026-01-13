@@ -78,6 +78,13 @@ pub fn parse_chart_ex(
             series.push(parse_series(series_node, &chart_data, &mut diagnostics));
         }
     }
+    if series.is_empty() {
+        // Some real-world ChartEx parts omit the `<cx:*Chart>` wrapper and
+        // instead place `<cx:series>` nodes directly under `<cx:plotArea>`.
+        for series_node in doc.descendants().filter(is_series_node_in_plot_area) {
+            series.push(parse_series(series_node, &chart_data, &mut diagnostics));
+        }
+    }
 
     Ok(ChartModel {
         chart_kind: ChartKind::Unknown {
@@ -266,6 +273,17 @@ fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {
 
 fn is_series_node(node: &Node<'_, '_>) -> bool {
     node.is_element() && (node.tag_name().name() == "ser" || node.tag_name().name() == "series")
+}
+
+fn has_ancestor_named(node: Node<'_, '_>, name: &str) -> bool {
+    node.ancestors()
+        .any(|a| a.is_element() && a.tag_name().name() == name)
+}
+
+fn is_series_node_in_plot_area(node: &Node<'_, '_>) -> bool {
+    is_series_node(node)
+        && has_ancestor_named(*node, "plotArea")
+        && !has_ancestor_named(*node, "chartData")
 }
 
 fn find_chart_type_nodes<'a>(doc: &'a Document<'a>) -> Vec<Node<'a, 'a>> {

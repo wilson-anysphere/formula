@@ -1,4 +1,4 @@
-use formula_model::charts::SeriesData;
+use formula_model::charts::{ChartKind, SeriesData};
 use formula_xlsx::drawingml::charts::parse_chart_ex;
 
 #[test]
@@ -286,5 +286,42 @@ fn chart_ex_collects_series_from_multiple_chart_type_nodes() {
             .as_ref()
             .and_then(|d| d.formula.as_deref()),
         Some("Sheet1!$B$2:$B$4")
+    );
+}
+
+#[test]
+fn chart_ex_parses_series_without_explicit_chart_type_node() {
+    let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex">
+  <cx:chartData>
+    <cx:data id="0">
+      <cx:numDim type="val">
+        <cx:f>Sheet1!$A$2:$A$4</cx:f>
+      </cx:numDim>
+    </cx:data>
+  </cx:chartData>
+
+  <cx:chart>
+    <cx:plotArea>
+      <cx:series layoutId="treemap" dataId="0" />
+    </cx:plotArea>
+  </cx:chart>
+</cx:chartSpace>
+"#;
+
+    let model = parse_chart_ex(xml, "chartEx1.xml").expect("parse chartEx");
+
+    match &model.chart_kind {
+        ChartKind::Unknown { name } => assert_eq!(name, "ChartEx:treemap"),
+        other => panic!("expected ChartKind::Unknown, got {other:?}"),
+    }
+
+    assert_eq!(model.series.len(), 1);
+    assert_eq!(
+        model.series[0]
+            .values
+            .as_ref()
+            .and_then(|d| d.formula.as_deref()),
+        Some("Sheet1!$A$2:$A$4")
     );
 }
