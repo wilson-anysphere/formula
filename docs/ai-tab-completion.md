@@ -66,15 +66,18 @@ The engine consumes a `CompletionContext` (see `packages/ai-completion/src/tabCo
    - Only active for non-formula input (`!parsed.isFormula`).
    - Uses `suggestPatternValues()` to scan nearby cells for repeated strings that match the typed prefix.
 
-   **C. Cursor backend completion (optional)**
-   - Implemented by `getCursorBackendSuggestions()`.
-   - Only runs when:
-     - a `completionClient` is configured, and
-     - we are editing a formula (`parsed.isFormula`), and
-     - the user is not currently typing a function name prefix (`!parsed.functionNamePrefix`).
-   - Calls:
-     - `completionClient.completeTabCompletion({ input, cursorPosition, cellA1 })`
-   - The request is wrapped in a **hard timeout** (`completionTimeoutMs`, default 100ms; clamped to ≤200ms) so the UI stays responsive even if the backend is slow/unavailable.
+    **C. Cursor backend completion (optional)**
+    - Implemented by `getCursorBackendSuggestions()`.
+    - Only runs when:
+      - a `completionClient` is configured, and
+      - we are editing a formula (`parsed.isFormula`), and
+      - the user is not currently typing a function name prefix (`!parsed.functionNamePrefix`).
+    - Calls:
+      - `completionClient.completeTabCompletion({ input, cursorPosition, cellA1 })`
+    - The request is wrapped in a **hard timeout** (`completionTimeoutMs`, default 100ms; clamped to ≤200ms) so the UI stays responsive even if the backend is slow/unavailable.
+    - The built-in Cursor backend client (`CursorTabCompletionClient`) supports:
+      - `getAuthHeaders?: () => Record<string,string> | Promise<Record<string,string>>` for environments where cookie-based auth isn't available.
+      - `signal?: AbortSignal` on `completeTabCompletion()` for caller-driven cancellation (e.g. abort in-flight requests when the user keeps typing).
 
 4. **Rank + dedupe**
    - Suggestions are merged, then `rankAndDedupe()`:
@@ -298,4 +301,3 @@ Run:
 
 Notes for test authors:
 - keep tests network-safe and deterministic by stubbing/injecting a `completionClient` when needed (the engine works fine with `completionClient: null`).
-
