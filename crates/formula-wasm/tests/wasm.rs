@@ -50,6 +50,12 @@ fn assert_json_number(value: &JsonValue, expected: f64) {
     assert_eq!(actual, expected);
 }
 
+fn to_js_value<T: serde::Serialize>(value: &T) -> JsValue {
+    value
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .expect("failed to serialize JS value")
+}
+
 #[derive(Debug, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct PartialParseResult {
@@ -327,7 +333,7 @@ fn rewrite_formulas_for_copy_delta_shifts_a1_references() {
         "deltaRow": 1,
         "deltaCol": 1,
     })];
-    let requests_js = serde_wasm_bindgen::to_value(&requests).unwrap();
+    let requests_js = to_js_value(&requests);
     let out_js = rewrite_formulas_for_copy_delta(requests_js).unwrap();
     let out: Vec<String> = serde_wasm_bindgen::from_value(out_js).unwrap();
     assert_eq!(out, vec!["=B3".to_string()]);
@@ -347,7 +353,7 @@ fn rewrite_formulas_for_copy_delta_shifts_row_and_column_ranges() {
             "deltaCol": 0,
         }),
     ];
-    let requests_js = serde_wasm_bindgen::to_value(&requests).unwrap();
+    let requests_js = to_js_value(&requests);
     let out_js = rewrite_formulas_for_copy_delta(requests_js).unwrap();
     let out: Vec<String> = serde_wasm_bindgen::from_value(out_js).unwrap();
     assert_eq!(out, vec!["=SUM(B:B)".to_string(), "=SUM(2:2)".to_string()]);
@@ -360,7 +366,7 @@ fn rewrite_formulas_for_copy_delta_drops_spill_postfix_when_reference_becomes_re
         "deltaRow": 0,
         "deltaCol": -1,
     })];
-    let requests_js = serde_wasm_bindgen::to_value(&requests).unwrap();
+    let requests_js = to_js_value(&requests);
     let out_js = rewrite_formulas_for_copy_delta(requests_js).unwrap();
     let out: Vec<String> = serde_wasm_bindgen::from_value(out_js).unwrap();
     assert_eq!(out, vec!["=#REF!".to_string()]);
@@ -1571,7 +1577,7 @@ fn rich_values_support_field_access_formulas() {
 
     wb.set_cell_rich(
         "A1".to_string(),
-        serde_wasm_bindgen::to_value(&entity).unwrap(),
+        to_js_value(&entity),
         Some(DEFAULT_SHEET.to_string()),
     )
     .unwrap();
@@ -1613,7 +1619,7 @@ fn rich_values_support_image_inputs() {
 
     wb.set_cell_rich(
         "A1".to_string(),
-        serde_wasm_bindgen::to_value(&image).unwrap(),
+        to_js_value(&image),
         Some(DEFAULT_SHEET.to_string()),
     )
     .unwrap();
@@ -1647,7 +1653,7 @@ fn rich_values_accept_scalar_cell_value_inputs() {
     let number = json!({ "type": "number", "value": 42.0 });
     wb.set_cell_rich(
         "A1".to_string(),
-        serde_wasm_bindgen::to_value(&number).unwrap(),
+        to_js_value(&number),
         Some(DEFAULT_SHEET.to_string()),
     )
     .unwrap();
@@ -1676,7 +1682,7 @@ fn rich_values_accept_error_cell_value_inputs() {
     let error = json!({ "type": "error", "value": "#FIELD!" });
     wb.set_cell_rich(
         "A1".to_string(),
-        serde_wasm_bindgen::to_value(&error).unwrap(),
+        to_js_value(&error),
         Some(DEFAULT_SHEET.to_string()),
     )
     .unwrap();
@@ -1707,7 +1713,7 @@ fn rich_values_typed_string_preserves_error_like_text() {
     let text = json!({ "type": "string", "value": "#FIELD!" });
     wb.set_cell_rich(
         "A1".to_string(),
-        serde_wasm_bindgen::to_value(&text).unwrap(),
+        to_js_value(&text),
         Some(DEFAULT_SHEET.to_string()),
     )
     .unwrap();
@@ -1741,7 +1747,7 @@ fn set_cell_rich_null_clears_previous_value() {
 
     wb.set_cell_rich(
         "A1".to_string(),
-        serde_wasm_bindgen::to_value(&entity).unwrap(),
+        to_js_value(&entity),
         Some(DEFAULT_SHEET.to_string()),
     )
     .unwrap();
@@ -1787,7 +1793,7 @@ fn rich_values_support_bracketed_field_access_formulas() {
 
     wb.set_cell_rich(
         "A1".to_string(),
-        serde_wasm_bindgen::to_value(&entity).unwrap(),
+        to_js_value(&entity),
         Some(DEFAULT_SHEET.to_string()),
     )
     .unwrap();
@@ -1832,7 +1838,7 @@ fn rich_values_support_nested_field_access_formulas() {
 
     wb.set_cell_rich(
         "A1".to_string(),
-        serde_wasm_bindgen::to_value(&entity).unwrap(),
+        to_js_value(&entity),
         Some(DEFAULT_SHEET.to_string()),
     )
     .unwrap();
@@ -1864,7 +1870,7 @@ fn rich_values_missing_field_access_returns_field_error() {
 
     wb.set_cell_rich(
         "A1".to_string(),
-        serde_wasm_bindgen::to_value(&entity).unwrap(),
+        to_js_value(&entity),
         Some(DEFAULT_SHEET.to_string()),
     )
     .unwrap();
@@ -1907,7 +1913,7 @@ fn rich_values_roundtrip_through_wasm_exports() {
 
     wb.set_cell_rich(
         "A1".to_string(),
-        serde_wasm_bindgen::to_value(&entity).unwrap(),
+        to_js_value(&entity),
         Some(DEFAULT_SHEET.to_string()),
     )
     .unwrap();
@@ -1919,7 +1925,7 @@ fn rich_values_roundtrip_through_wasm_exports() {
     // `serde_wasm_bindgen` may canonicalize JS numbers that are whole integers (e.g. `42.0`) into
     // integer JSON numbers (`42`). Normalize the expected payload through the same JS round-trip so
     // this assertion reflects the actual wasm boundary behavior.
-    let expected_entity_js = serde_wasm_bindgen::to_value(&entity).unwrap();
+    let expected_entity_js = to_js_value(&entity);
     let expected_entity: JsonValue = serde_wasm_bindgen::from_value(expected_entity_js).unwrap();
     assert_eq!(
         got,
@@ -1983,7 +1989,7 @@ fn rich_values_reject_invalid_payloads() {
     let err = wb
         .set_cell_rich(
             "A1".to_string(),
-            serde_wasm_bindgen::to_value(&invalid).unwrap(),
+            to_js_value(&invalid),
             Some(DEFAULT_SHEET.to_string()),
         )
         .unwrap_err();
@@ -1992,4 +1998,45 @@ fn rich_values_reject_invalid_payloads() {
         .as_string()
         .unwrap_or_else(|| "missing error message".to_string());
     assert!(message.contains("invalid rich value"), "{message}");
+}
+
+#[wasm_bindgen_test]
+fn goal_seek_solves_quadratic_and_updates_workbook_state() {
+    let mut wb = WasmWorkbook::new();
+    wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
+        .unwrap();
+    wb.set_cell("B1".to_string(), JsValue::from_str("=A1*A1"), None)
+        .unwrap();
+
+    let req = Object::new();
+    Reflect::set(&req, &JsValue::from_str("targetCell"), &JsValue::from_str("B1")).unwrap();
+    Reflect::set(&req, &JsValue::from_str("targetValue"), &JsValue::from_f64(25.0)).unwrap();
+    Reflect::set(&req, &JsValue::from_str("changingCell"), &JsValue::from_str("A1")).unwrap();
+    Reflect::set(&req, &JsValue::from_str("tolerance"), &JsValue::from_f64(1e-9)).unwrap();
+
+    let result_js = wb.goal_seek(req.into()).unwrap();
+    let result: JsonValue = serde_wasm_bindgen::from_value(result_js).unwrap();
+    assert_eq!(result["success"].as_bool(), Some(true), "{result:?}");
+    let solution = result["solution"]
+        .as_f64()
+        .unwrap_or_else(|| panic!("expected numeric solution, got {result:?}"));
+    assert!(
+        (solution - 5.0).abs() < 1e-6,
+        "expected solution ≈ 5, got {solution}"
+    );
+
+    // After recalc, the workbook should reflect the solved value and the target formula result.
+    wb.recalculate(None).unwrap();
+
+    let a1_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let a1: CellData = serde_wasm_bindgen::from_value(a1_js).unwrap();
+    let a1_value = a1.value.as_f64().unwrap();
+    assert!((a1_value - 5.0).abs() < 1e-6, "A1 = {a1_value}");
+    let a1_input = a1.input.as_f64().unwrap();
+    assert!((a1_input - 5.0).abs() < 1e-6, "A1 input = {a1_input}");
+
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    let b1_value = b1.value.as_f64().unwrap();
+    assert!((b1_value - 25.0).abs() < 1e-6, "B1 = {b1_value}");
 }

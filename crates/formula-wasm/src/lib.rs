@@ -3,13 +3,15 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use formula_engine::{
     CellAddr, Coord, EditError as EngineEditError, EditOp as EngineEditOp,
     EditResult as EngineEditResult, Engine, ErrorKind, NameDefinition, NameScope, ParseOptions,
-    Span as EngineSpan, Token, TokenKind, Value as EngineValue,
+    RecalcMode, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
 };
 use formula_engine::editing::rewrite::rewrite_formula_for_copy_delta;
 use formula_engine::locale::{
     canonicalize_formula_with_style, get_locale, localize_formula_with_style, FormulaLocale,
     ValueLocaleConfig, DE_DE, EN_US, ES_ES, FR_FR,
 };
+use formula_engine::what_if::EngineWhatIfModel;
+use formula_engine::what_if::goal_seek::{GoalSeek, GoalSeekParams};
 use formula_model::{
     display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range, EXCEL_MAX_COLS,
     EXCEL_MAX_ROWS,
@@ -130,6 +132,30 @@ fn parse_options_from_js(options: Option<JsValue>) -> Result<ParseOptions, JsVal
         "options must be { localeId?: string, referenceStyle?: \"A1\" | \"R1C1\" } or a ParseOptions object",
     ))
 }
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum GoalSeekRecalcModeDto {
+    SingleThreaded,
+    MultiThreaded,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GoalSeekRequestDto {
+    target_cell: String,
+    target_value: f64,
+    changing_cell: String,
+    #[serde(default)]
+    sheet: Option<String>,
+    #[serde(default)]
+    tolerance: Option<f64>,
+    #[serde(default)]
+    max_iterations: Option<usize>,
+    #[serde(default)]
+    recalc_mode: Option<GoalSeekRecalcModeDto>,
+}
+
 fn edit_error_to_string(err: EngineEditError) -> String {
     match err {
         EngineEditError::SheetNotFound(sheet) => format!("sheet not found: {sheet}"),
@@ -2796,6 +2822,103 @@ impl WasmWorkbook {
         }
 
         Ok(())
+    }
+
+    #[wasm_bindgen(js_name = "goalSeek")]
+    pub fn goal_seek(&mut self, request: JsValue) -> Result<JsValue, JsValue> {
+        if request.is_null() || request.is_undefined() {
+            return Err(js_err("goalSeek request must be an object"));
+        }
+        let request: GoalSeekRequestDto = serde_wasm_bindgen::from_value(request)
+            .map_err(|err| js_err(format!("invalid goalSeek request: {err}")))?;
+
+        let sheet_name = request.sheet.as_deref().unwrap_or(DEFAULT_SHEET);
+        let sheet = self.inner.require_sheet(sheet_name)?.to_string();
+
+        let target_cell_raw = request.target_cell.trim();
+        if target_cell_raw.is_empty() {
+            return Err(js_err("targetCell must be a non-empty string"));
+        }
+        if target_cell_raw.contains('!') {
+            return Err(js_err("targetCell must be an A1 address without a sheet prefix"));
+        }
+        let target_cell = CellRef::from_a1(target_cell_raw)
+            .map_err(|_| js_err(format!("invalid targetCell address: {target_cell_raw}")))?
+            .to_a1();
+
+        let changing_cell_raw = request.changing_cell.trim();
+        if changing_cell_raw.is_empty() {
+            return Err(js_err("changingCell must be a non-empty string"));
+        }
+        if changing_cell_raw.contains('!') {
+            return Err(js_err("changingCell must be an A1 address without a sheet prefix"));
+        }
+        let changing_cell_ref = CellRef::from_a1(changing_cell_raw)
+            .map_err(|_| js_err(format!("invalid changingCell address: {changing_cell_raw}")))?;
+        let changing_cell = changing_cell_ref.to_a1();
+
+        if !request.target_value.is_finite() {
+            return Err(js_err("targetValue must be a finite number"));
+        }
+
+        let mut params =
+            GoalSeekParams::new(target_cell.as_str(), request.target_value, changing_cell.as_str());
+        if let Some(tolerance) = request.tolerance {
+            if !tolerance.is_finite() {
+                return Err(js_err("tolerance must be a finite number"));
+            }
+            if !(tolerance > 0.0) {
+                return Err(js_err("tolerance must be > 0"));
+            }
+            params.tolerance = tolerance;
+        }
+        if let Some(max_iterations) = request.max_iterations {
+            if max_iterations == 0 {
+                return Err(js_err("maxIterations must be > 0"));
+            }
+            params.max_iterations = max_iterations;
+        }
+
+        let recalc_mode = request.recalc_mode.map(|mode| match mode {
+            GoalSeekRecalcModeDto::SingleThreaded => RecalcMode::SingleThreaded,
+            GoalSeekRecalcModeDto::MultiThreaded => RecalcMode::MultiThreaded,
+        });
+
+        let result = {
+            let mut model = EngineWhatIfModel::new(&mut self.inner.engine, sheet.clone());
+            if let Some(mode) = recalc_mode {
+                model = model.with_recalc_mode(mode);
+            }
+            GoalSeek::solve(&mut model, params).map_err(|err| js_err(err.to_string()))?
+        };
+
+        let solution_json = serde_json::Number::from_f64(result.solution)
+            .map(JsonValue::Number)
+            .ok_or_else(|| js_err("goalSeek produced a non-finite solution"))?;
+
+        // Ensure the JS-facing workbook input state matches the what-if engine updates.
+        if let Some(rich_cells) = self.inner.sheets_rich.get_mut(&sheet) {
+            rich_cells.remove(&changing_cell);
+        }
+        if let Some(sheet_cells) = self.inner.sheets.get_mut(&sheet) {
+            sheet_cells.insert(changing_cell.clone(), solution_json);
+        }
+
+        let key = FormulaCellKey::new(sheet.clone(), changing_cell_ref);
+        self.inner.pending_spill_clears.remove(&key);
+        self.inner.pending_formula_baselines.remove(&key);
+
+        let out = Object::new();
+        object_set(&out, "success", &JsValue::from_bool(result.success()))?;
+        object_set(&out, "solution", &JsValue::from_f64(result.solution))?;
+        object_set(
+            &out,
+            "iterations",
+            &JsValue::from_f64(result.iterations as f64),
+        )?;
+        object_set(&out, "finalError", &JsValue::from_f64(result.final_error))?;
+        object_set(&out, "finalOutput", &JsValue::from_f64(result.final_output))?;
+        Ok(out.into())
     }
 
     #[wasm_bindgen(js_name = "recalculate")]
