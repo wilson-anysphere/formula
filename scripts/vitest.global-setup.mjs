@@ -1,4 +1,7 @@
 import { ensureFormulaWasmNodeBuild } from "./build-formula-wasm-node.mjs";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 export default async function globalSetup() {
   if (process.env.FORMULA_SKIP_WASM_BUILD === "1" || process.env.FORMULA_SKIP_WASM_BUILD === "true") {
@@ -31,30 +34,46 @@ function shouldSkipWasmBuildForCurrentRun() {
     return false;
   }
 
-  // Only treat args as explicit test paths when they're concrete filesystem-like paths
-  // (not glob patterns / regex filters).
-  const looksLikeConcretePath = (arg) =>
-    (arg.includes("/") || arg.includes("\\")) &&
-    !arg.includes("*") &&
-    !arg.includes("?") &&
-    !arg.includes("{") &&
-    !arg.includes("}") &&
-    !arg.includes("[") &&
-    !arg.includes("]") &&
-    !arg.includes("(") &&
-    !arg.includes(")") &&
-    !arg.includes("|");
+  const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+  const engineDir = ensureTrailingSep(path.resolve(repoRoot, "packages", "engine"));
+  const formulaWasmDir = ensureTrailingSep(path.resolve(repoRoot, "crates", "formula-wasm"));
 
-  if (!filtered.every(looksLikeConcretePath)) {
-    // Ambiguous selection (globs / patterns); default to building so wasm-backed
-    // tests don't fail with missing artifacts.
-    return false;
+  // Only skip the build when the user provided *concrete* filesystem paths (not
+  // globs / regex patterns), and none of those paths touch wasm-backed suites.
+  const isAmbiguousSelector = (arg) =>
+    arg.includes("*") ||
+    arg.includes("?") ||
+    arg.includes("{") ||
+    arg.includes("}") ||
+    arg.includes("[") ||
+    arg.includes("]") ||
+    arg.includes("(") ||
+    arg.includes(")") ||
+    arg.includes("|");
+
+  const resolved = [];
+  for (const arg of filtered) {
+    if (isAmbiguousSelector(arg)) {
+      // Globs/patterns may include wasm-backed tests; keep the conservative default.
+      return false;
+    }
+
+    const abs = path.isAbsolute(arg) ? arg : path.resolve(process.cwd(), arg);
+    if (!existsSync(abs)) {
+      // If this doesn't exist, treat it as a non-path selector; keep the conservative default.
+      return false;
+    }
+    resolved.push(abs);
   }
 
-  const needsWasmBuild = filtered.some((arg) => {
-    const normalized = arg.replaceAll("\\", "/");
-    return normalized.includes("/packages/engine/") || normalized.includes("/crates/formula-wasm/");
+  const needsWasmBuild = resolved.some((abs) => {
+    const normalized = ensureTrailingSep(path.resolve(abs));
+    return normalized.startsWith(engineDir) || normalized.startsWith(formulaWasmDir);
   });
 
   return !needsWasmBuild;
+}
+
+function ensureTrailingSep(p) {
+  return p.endsWith(path.sep) ? p : `${p}${path.sep}`;
 }
