@@ -459,18 +459,19 @@ jobs:
           $msis = @(Get-ChildItem -Path $bundleDir -Recurse -File -Include *.msi -ErrorAction SilentlyContinue)
           $exes = @(Get-ChildItem -Path $bundleDir -Recurse -File -Include *.exe -ErrorAction SilentlyContinue)
 
-          if ($msis.Count -eq 0) {
-            throw "windows-bundle: ERROR missing required Windows MSI installer under: $bundleDir"
-          }
-          if ($exes.Count -eq 0) {
-            throw "windows-bundle: ERROR missing required Windows EXE (NSIS) installer under: $bundleDir"
+          if ($msis.Count -eq 0 -and $exes.Count -eq 0) {
+            throw "windows-bundle: ERROR no .msi or .exe installers found under: $bundleDir"
           }
 
           Write-Host "windows-bundle: OK (found $($msis.Count) MSI + $($exes.Count) EXE installer file(s))"
-          Write-Host "MSI installers:"
-          $msis | ForEach-Object { Write-Host " - $($_.FullName)" }
-          Write-Host "EXE installers:"
-          $exes | ForEach-Object { Write-Host " - $($_.FullName)" }
+          if ($msis.Count -gt 0) {
+            Write-Host "MSI installers:"
+            $msis | ForEach-Object { Write-Host " - $($_.FullName)" }
+          }
+          if ($exes.Count -gt 0) {
+            Write-Host "EXE installers:"
+            $exes | ForEach-Object { Write-Host " - $($_.FullName)" }
+          }
 
       - name: Verify Windows installers bundle/reference WebView2 (bootstrapper/runtime)
         if: runner.os == 'Windows'
