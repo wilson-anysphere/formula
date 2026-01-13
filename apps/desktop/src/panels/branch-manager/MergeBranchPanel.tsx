@@ -270,7 +270,7 @@ function CellConflictColumn({
         <div className="branch-merge__cell-section">
           <div className="branch-merge__cell-section-title">Encrypted</div>
           <div className="branch-merge__cell-section-body">
-            {cellHasEnc(cell) ? encryptedCellText(cell?.enc) : "∅"}
+            {cellHasEnc(cell) ? <span className="branch-merge__encrypted">{encryptedCellText(cell?.enc)}</span> : "∅"}
           </div>
         </div>
       ) : null}
@@ -279,7 +279,11 @@ function CellConflictColumn({
         <div className="branch-merge__cell-section">
           <div className="branch-merge__cell-section-title">Formula</div>
           <div className="branch-merge__cell-section-body">
-            <FormulaDiffView before={formulaOld} after={formulaNew} />
+            {cellHasEnc(cell) ? (
+              <span className="branch-merge__encrypted">{encryptedCellText(cell?.enc)}</span>
+            ) : (
+              <FormulaDiffView before={formulaOld} after={formulaNew} />
+            )}
           </div>
         </div>
       ) : null}
@@ -287,7 +291,15 @@ function CellConflictColumn({
       {showValue ? (
         <div className="branch-merge__cell-section">
           <div className="branch-merge__cell-section-title">Value</div>
-          <div className="branch-merge__cell-section-body">{cellHasValue(cell) ? valueSummary(cell?.value) : "∅"}</div>
+          <div className="branch-merge__cell-section-body">
+            {cellHasEnc(cell) ? (
+              <span className="branch-merge__encrypted">{encryptedCellText(cell?.enc)}</span>
+            ) : cellHasValue(cell) ? (
+              valueSummary(cell?.value)
+            ) : (
+              "∅"
+            )}
+          </div>
         </div>
       ) : null}
 
@@ -404,7 +416,23 @@ function manualCellFromDraft(
         : draft.encSource === "ours"
           ? conflict.ours
           : conflict.theirs;
-    return normalizeManualCell(chosen ? { ...chosen } : null);
+    const cell = chosen ? { ...chosen } : null;
+    if (!cell) return null;
+
+    const formatText = draft.formatText.trim();
+    if (!formatText) {
+      delete cell.format;
+    } else {
+      try {
+        const parsed = JSON.parse(formatText);
+        if (parsed !== null && parsed !== undefined) cell.format = parsed as Record<string, unknown>;
+        else delete cell.format;
+      } catch {
+        // Validation is handled separately; ignore parse errors here.
+      }
+    }
+
+    return normalizeManualCell(cell);
   }
 
   /** @type {Cell} */
@@ -513,11 +541,7 @@ export function MergeBranchPanel({
 
               const formatText = next.formatText.trim();
               let formatError: string | null = null;
-              const encLocked =
-                next.encSource !== "custom" &&
-                (cellHasEnc(conflict.base) || cellHasEnc(conflict.ours) || cellHasEnc(conflict.theirs));
-
-              if (!next.deleteCell && !encLocked && formatText.length > 0) {
+              if (!next.deleteCell && formatText.length > 0) {
                 try {
                   JSON.parse(formatText);
                 } catch (e) {
@@ -715,8 +739,9 @@ export function MergeBranchPanel({
                   (() => {
                     const draft = cellDraft ?? initialDraftForCellConflict(c, c.ours ? { ...c.ours } : null, "ours");
                     const hasEnc = cellHasEnc(c.base) || cellHasEnc(c.ours) || cellHasEnc(c.theirs);
-                    const encLocked = hasEnc && draft.encSource !== "custom";
-                    const disabled = mutationsDisabled || draft.deleteCell || encLocked;
+                    const contentLocked = hasEnc && draft.encSource !== "custom";
+                    const contentDisabled = mutationsDisabled || draft.deleteCell || contentLocked;
+                    const formatDisabled = mutationsDisabled || draft.deleteCell;
 
                     return (
                       <div className="branch-merge__manual-cell-editor">
@@ -752,7 +777,7 @@ export function MergeBranchPanel({
                           <div className="branch-merge__manual-cell-label">Formula</div>
                           <input
                             value={draft.formulaText}
-                            disabled={disabled}
+                            disabled={contentDisabled}
                             placeholder="=SUM(A1:A10)"
                             onChange={(e) => updateManualDraft({ ...draft, formulaText: e.target.value }, c)}
                           />
@@ -762,7 +787,7 @@ export function MergeBranchPanel({
                           <div className="branch-merge__manual-cell-label">Value</div>
                           <input
                             value={draft.valueText}
-                            disabled={disabled || draft.formulaText.trim().length > 0}
+                            disabled={contentDisabled || draft.formulaText.trim().length > 0}
                             placeholder="123"
                             onChange={(e) => updateManualDraft({ ...draft, valueText: e.target.value }, c)}
                           />
@@ -772,7 +797,7 @@ export function MergeBranchPanel({
                           <div className="branch-merge__manual-cell-label">Format (JSON)</div>
                           <textarea
                             value={draft.formatText}
-                            disabled={disabled}
+                            disabled={formatDisabled}
                             onChange={(e) => updateManualDraft({ ...draft, formatText: e.target.value }, c)}
                           />
                         </div>
