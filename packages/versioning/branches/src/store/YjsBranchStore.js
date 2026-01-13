@@ -431,8 +431,6 @@ export class YjsBranchStore {
     this.#branches.forEach((value) => {
       const branchMap = getYMap(value);
       if (!branchMap) return;
-      const branchDocId = branchMap.get("docId");
-      if (typeof branchDocId === "string" && branchDocId.length > 0 && branchDocId !== docId) return;
       const head = branchMap.get("headCommitId");
       if (typeof head === "string" && head.length > 0) referenced.add(head);
     });
@@ -442,8 +440,6 @@ export class YjsBranchStore {
     this.#commits.forEach((value) => {
       const commitMap = getYMap(value);
       if (!commitMap) return;
-      const commitDocId = commitMap.get("docId");
-      if (typeof commitDocId === "string" && commitDocId.length > 0 && commitDocId !== docId) return;
       const parent = commitMap.get("parentCommitId");
       if (typeof parent === "string" && parent.length > 0) referenced.add(parent);
       const mergeParent = commitMap.get("mergeParentCommitId");
@@ -482,14 +478,6 @@ export class YjsBranchStore {
       this.#branches.forEach((value) => {
         const branchMap = getYMap(value);
         if (!branchMap) return;
-        const branchDocId = branchMap.get("docId");
-        if (
-          typeof branchDocId === "string" &&
-          branchDocId.length > 0 &&
-          branchDocId !== docId
-        ) {
-          return;
-        }
         const head = branchMap.get("headCommitId");
         if (typeof head === "string" && head.length > 0) stillReferenced.add(head);
       });
@@ -497,14 +485,6 @@ export class YjsBranchStore {
       this.#commits.forEach((value) => {
         const commitMap = getYMap(value);
         if (!commitMap) return;
-        const commitDocId = commitMap.get("docId");
-        if (
-          typeof commitDocId === "string" &&
-          commitDocId.length > 0 &&
-          commitDocId !== docId
-        ) {
-          return;
-        }
         const parent = commitMap.get("parentCommitId");
         if (typeof parent === "string" && parent.length > 0) stillReferenced.add(parent);
         const mergeParent = commitMap.get("mergeParentCommitId");
