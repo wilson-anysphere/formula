@@ -890,7 +890,12 @@ impl DataModel {
             parsed: parsed.clone(),
         };
 
-        let values = {
+        enum NewColumn {
+            InMemory(Vec<Value>),
+            Columnar(formula_columnar::EncodedColumn),
+        }
+
+        let new_column = {
             let Some(table_ref) = self.tables.get(&table) else {
                 return Err(DaxError::UnknownTable(table.clone()));
             };
@@ -902,27 +907,217 @@ impl DataModel {
             //
             // Note: columnar-backed tables require a single physical column type; expressions that
             // produce mixed value types across rows will currently return a type error.
+            match &table_ref.storage {
+                TableStorage::InMemory(_) => {
+                    let mut results = Vec::with_capacity(table_ref.row_count());
+                    for row in 0..table_ref.row_count() {
+                        let mut row_ctx = RowContext::default();
+                        row_ctx.push(table_ref.name(), row);
+                        let value = crate::engine::DaxEngine::new().evaluate_expr(
+                            self,
+                            &parsed,
+                            &FilterContext::default(),
+                            &row_ctx,
+                        )?;
+                        results.push(value);
+                    }
+                    NewColumn::InMemory(results)
+                }
+                TableStorage::Columnar(backend) => {
+                    use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder};
 
-            let mut results = Vec::with_capacity(table_ref.row_count());
-            for row in 0..table_ref.row_count() {
-                let mut row_ctx = RowContext::default();
-                row_ctx.push(table_ref.name(), row);
-                let value = crate::engine::DaxEngine::new().evaluate_expr(
-                    self,
-                    &parsed,
-                    &FilterContext::default(),
-                    &row_ctx,
-                )?;
-                results.push(value);
+                    if table_ref.column_idx(&name).is_some() {
+                        return Err(DaxError::DuplicateColumn {
+                            table: table.clone(),
+                            column: name.clone(),
+                        });
+                    }
+
+                    let options = backend.table.options();
+                    let row_count = table_ref.row_count();
+                    let engine = crate::engine::DaxEngine::new();
+
+                    let mut leading_nulls: usize = 0;
+                    let mut inferred_type: Option<ColumnType> = None;
+                    let mut builder: Option<ColumnarTableBuilder> = None;
+
+                    for row in 0..row_count {
+                        let mut row_ctx = RowContext::default();
+                        row_ctx.push(table_ref.name(), row);
+                        let value = engine.evaluate_expr(
+                            self,
+                            &parsed,
+                            &FilterContext::default(),
+                            &row_ctx,
+                        )?;
+
+                        match (inferred_type, &value) {
+                            (None, Value::Blank) => {
+                                leading_nulls += 1;
+                                continue;
+                            }
+                            (None, Value::Number(_))
+                            | (None, Value::Text(_))
+                            | (None, Value::Boolean(_)) => {
+                                let ty = match &value {
+                                    Value::Number(_) => ColumnType::Number,
+                                    Value::Text(_) => ColumnType::String,
+                                    Value::Boolean(_) => ColumnType::Boolean,
+                                    Value::Blank => unreachable!("handled above"),
+                                };
+
+                                let schema = vec![ColumnSchema {
+                                    name: name.clone(),
+                                    column_type: ty,
+                                }];
+                                let mut b = ColumnarTableBuilder::new(schema, options);
+                                for _ in 0..leading_nulls {
+                                    b.append_row(&[formula_columnar::Value::Null]);
+                                }
+
+                                let encoded = match &value {
+                                    Value::Number(n) => formula_columnar::Value::Number(n.0),
+                                    Value::Text(s) => formula_columnar::Value::String(s.clone()),
+                                    Value::Boolean(bv) => formula_columnar::Value::Boolean(*bv),
+                                    Value::Blank => formula_columnar::Value::Null,
+                                };
+                                b.append_row(&[encoded]);
+
+                                inferred_type = Some(ty);
+                                builder = Some(b);
+                            }
+                            (Some(_), Value::Blank) => {
+                                if let Some(b) = builder.as_mut() {
+                                    b.append_row(&[formula_columnar::Value::Null]);
+                                }
+                            }
+                            (Some(ty), v) => {
+                                let matches = match (ty, v) {
+                                    (ColumnType::Number, Value::Number(_)) => true,
+                                    (ColumnType::String, Value::Text(_)) => true,
+                                    (ColumnType::Boolean, Value::Boolean(_)) => true,
+                                    _ => false,
+                                };
+                                if !matches {
+                                    let expected = match ty {
+                                        ColumnType::Number => "Number",
+                                        ColumnType::String => "Text",
+                                        ColumnType::Boolean => "Boolean",
+                                        ColumnType::DateTime => "DateTime",
+                                        ColumnType::Currency { .. } => "Currency",
+                                        ColumnType::Percentage { .. } => "Percentage",
+                                    };
+                                    let actual = match v {
+                                        Value::Blank => "Blank",
+                                        Value::Number(_) => "Number",
+                                        Value::Text(_) => "Text",
+                                        Value::Boolean(_) => "Boolean",
+                                    };
+                                    return Err(DaxError::Type(format!(
+                                        "calculated column {table}[{name}] produced {actual} after inferring {expected}"
+                                    )));
+                                }
+
+                                let encoded = match v {
+                                    Value::Number(n) => formula_columnar::Value::Number(n.0),
+                                    Value::Text(s) => formula_columnar::Value::String(s.clone()),
+                                    Value::Boolean(bv) => formula_columnar::Value::Boolean(*bv),
+                                    Value::Blank => formula_columnar::Value::Null,
+                                };
+                                if let Some(b) = builder.as_mut() {
+                                    b.append_row(&[encoded]);
+                                }
+                            }
+                        }
+                    }
+
+                    // If the column is entirely blank, choose a deterministic default type (Number)
+                    // and encode the entire column as nulls.
+                    let b = match builder {
+                        Some(b) => b,
+                        None => {
+                            let schema = vec![ColumnSchema {
+                                name: name.clone(),
+                                column_type: ColumnType::Number,
+                            }];
+                            let mut b = ColumnarTableBuilder::new(schema, options);
+                            for _ in 0..row_count {
+                                b.append_row(&[formula_columnar::Value::Null]);
+                            }
+                            b
+                        }
+                    };
+
+                    let mut encoded_cols = b.finalize().into_encoded_columns();
+                    let encoded = encoded_cols.pop().ok_or_else(|| {
+                        DaxError::Eval("expected one encoded column from builder".into())
+                    })?;
+                    if !encoded_cols.is_empty() {
+                        return Err(DaxError::Eval(
+                            "expected one encoded column from builder".into(),
+                        ));
+                    }
+
+                    NewColumn::Columnar(encoded)
+                }
             }
-            results
         };
 
         let table_mut = self
             .tables
             .get_mut(&table)
             .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-        table_mut.add_column(name, values)?;
+
+        match (&mut table_mut.storage, new_column) {
+            (TableStorage::InMemory(_), NewColumn::InMemory(values)) => {
+                table_mut.add_column(name.clone(), values)?;
+            }
+            (TableStorage::Columnar(backend), NewColumn::Columnar(encoded)) => {
+                let base = backend.table.as_ref().clone();
+                let appended = base
+                    .with_appended_encoded_column(encoded)
+                    .map_err(|e| match e {
+                        formula_columnar::ColumnAppendError::DuplicateColumn { name: col } => {
+                            DaxError::DuplicateColumn {
+                                table: table.clone(),
+                                column: col,
+                            }
+                        }
+                        formula_columnar::ColumnAppendError::LengthMismatch { expected, actual } => {
+                            DaxError::ColumnLengthMismatch {
+                                table: table.clone(),
+                                column: name.clone(),
+                                expected,
+                                actual,
+                            }
+                        }
+                        other => DaxError::Eval(format!(
+                            "failed to append encoded calculated column {table}[{name}]: {other}"
+                        )),
+                    })?;
+
+                backend.table = Arc::new(appended);
+
+                backend.columns = backend
+                    .table
+                    .schema()
+                    .iter()
+                    .map(|c| c.name.clone())
+                    .collect();
+                backend.column_index = backend
+                    .columns
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, c)| (c.clone(), idx))
+                    .collect();
+            }
+            (TableStorage::InMemory(_), NewColumn::Columnar(_))
+            | (TableStorage::Columnar(_), NewColumn::InMemory(_)) => {
+                return Err(DaxError::Eval(
+                    "calculated column backend mismatch".into(),
+                ));
+            }
+        }
 
         self.calculated_columns.push(calc);
         // Recompute the evaluation order for calculated columns in this table so `insert_row`
