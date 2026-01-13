@@ -633,6 +633,17 @@ Notes:
 
 This means that when budgets shrink, **samples drop first**, then attachments, then schema JSON, etc.
 
+For workbook context (`buildWorkbookContext*()`), the default section priorities are:
+
+1. `dlp` (if present) — priority 5
+2. `retrieved` — priority 4
+3. `workbook_schema` — priority 3.5
+4. `workbook_summary` — priority 3
+5. `attachments` — priority 2
+
+`workbook_schema` is a compact, schema-first summary (tables + inferred headers/types + named ranges) intended to
+improve chat quality even when retrieval is sparse.
+
 ### Example: pack your own sections into a prompt budget
 
 If you’re not using `ContextManager`, you can still use the token-budgeting primitives directly:
