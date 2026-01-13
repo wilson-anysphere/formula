@@ -223,6 +223,7 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("format.numberFormat.currency", otherIndex)).toBe("Ctrl+Shift+$");
     expect(getPrimaryCommandKeybindingDisplay("format.numberFormat.percent", otherIndex)).toBe("Ctrl+Shift+%");
     expect(getPrimaryCommandKeybindingDisplay("format.numberFormat.date", otherIndex)).toBe("Ctrl+Shift+#");
+    expect(getPrimaryCommandKeybindingDisplay("format.openFormatCells", otherIndex)).toBe("Ctrl+1");
 
     const macIndex = buildCommandKeybindingDisplayIndex({ platform: "mac", contributed: [], builtin: builtinKeybindings });
     expect(getPrimaryCommandKeybindingDisplay("workbench.newWorkbook", macIndex)).toBe("⌘N");
@@ -272,5 +273,6 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("format.numberFormat.currency", macIndex)).toBe("⇧⌘$");
     expect(getPrimaryCommandKeybindingDisplay("format.numberFormat.percent", macIndex)).toBe("⇧⌘%");
     expect(getPrimaryCommandKeybindingDisplay("format.numberFormat.date", macIndex)).toBe("⇧⌘#");
+    expect(getPrimaryCommandKeybindingDisplay("format.openFormatCells", macIndex)).toBe("⌘1");
   });
 });

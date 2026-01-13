@@ -31,8 +31,15 @@ const KEYBINDING_COMMAND_BY_RIBBON_ID: Record<string, string> = {
   "format.numberFormat.accounting": "format.numberFormat.currency",
   "format.numberFormat.shortDate": "format.numberFormat.date",
   "format.numberFormat.longDate": "format.numberFormat.date",
+
+  // Format Cells dialog entrypoints (Ctrl/Cmd+1).
+  // Note: `format.openFormatCells` is used directly in the ribbon schema, so it
+  // is picked up by the identity mapping. Keep these mappings for related
+  // menu items (and legacy ids) so shortcut hints stay accurate.
   "home.number.formatCells": "format.openFormatCells",
   "home.number.moreFormats.formatCells": "format.openFormatCells",
+  "home.alignment.orientation.formatCellAlignment": "format.openFormatCells",
+  "home.number.moreFormats.custom": "format.openFormatCells",
 
   // --- Comments ---------------------------------------------------------------
   "comments.addComment": "comments.addComment",
