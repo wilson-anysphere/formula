@@ -2,6 +2,7 @@ import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
 import { PresenceManager } from "@formula/collab-presence";
 import { createUndoService, type UndoService } from "@formula/collab-undo";
+import { migrateCommentsArrayToMap } from "@formula/collab-comments";
 import {
   getMapRoot,
   getYArray,
@@ -482,6 +483,21 @@ export interface CollabSessionOptions {
      * and removed from the shared Yjs cell map. Defaults to false for backwards compatibility.
      */
     encryptFormat?: boolean;
+  };
+
+  /**
+   * Comments configuration.
+   */
+  comments?: {
+    /**
+     * When enabled, CollabSession will attempt to migrate legacy Array-backed
+     * comments roots (`Y.Array<Y.Map>`) into the canonical Map-backed schema
+     * (`Y.Map<string, Y.Map>`).
+     *
+     * Migration runs best-effort after initial document hydration (local
+     * persistence load and/or provider initial sync).
+     */
+    migrateLegacyArrayToMap?: boolean;
   };
 }
 
@@ -1102,6 +1118,84 @@ export class CollabSession {
         // treat it as an unhealthy persistence state.
       }
     );
+
+    this.scheduleCommentsMigration(options.comments);
+  }
+
+  private scheduleCommentsMigration(opts: CollabSessionOptions["comments"] | undefined): void {
+    if (!opts?.migrateLegacyArrayToMap) return;
+
+    const tryMigrate = () => {
+      if (this.isDestroyed) return;
+
+      let didMigrate = false;
+      try {
+        didMigrate = migrateCommentsArrayToMap(this.doc, { origin: "comments-migrate" });
+      } catch {
+        // Best-effort: never block session usage on comment schema migration.
+        return;
+      }
+
+      if (!didMigrate) return;
+
+      // Migration replaces the `comments` root type, which can leave any
+      // existing UndoManager scopes pointing at the old root. Ensure all known
+      // UndoManagers track the new canonical root so comment edits remain
+      // undoable.
+      try {
+        const root = this.doc.share.get("comments");
+        if (!root || !isYAbstractType(root)) return;
+
+        const undoManagers = Array.from(this.localOrigins).filter((value) => {
+          if (value instanceof Y.UndoManager) return true;
+          if (!value || typeof value !== "object") return false;
+          const maybe = value as any;
+          return (
+            typeof maybe.addToScope === "function" &&
+            typeof maybe.undo === "function" &&
+            typeof maybe.redo === "function" &&
+            typeof maybe.stopCapturing === "function"
+          );
+        });
+
+        for (const undoManager of undoManagers) {
+          try {
+            (undoManager as any).addToScope(root);
+          } catch {
+            // ignore
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    // Run after local persistence hydration (if enabled).
+    if (this.hasLocalPersistence) {
+      void this.localPersistenceLoaded
+        .catch(() => {
+          // Ignore load failures; we still might be able to migrate based on
+          // remote/provider hydration.
+        })
+        .finally(() => {
+          queueMicrotask(tryMigrate);
+        });
+    }
+
+    const provider = this.provider;
+    if (provider && typeof provider.on === "function") {
+      const handler = (isSynced: boolean) => {
+        if (!isSynced) return;
+        if (typeof provider.off === "function") provider.off("sync", handler);
+        queueMicrotask(tryMigrate);
+      };
+      provider.on("sync", handler);
+      if (provider.synced) handler(true);
+    } else if (!this.hasLocalPersistence) {
+      // No persistence + no sync provider: the caller-provided doc is already in
+      // memory, so migrate in a microtask.
+      queueMicrotask(tryMigrate);
+    }
   }
 
   private startLocalPersistence(): void {

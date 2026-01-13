@@ -270,6 +270,9 @@ importers:
 
   packages/collab/session:
     dependencies:
+      '@formula/collab-comments':
+        specifier: workspace:*
+        version: link:../comments
       '@formula/collab-conflicts':
         specifier: workspace:*
         version: link:../conflicts

@@ -65,6 +65,9 @@ test("CollabSession undo captures comment edits when comments root is created la
   sessionA.setPermissions({ role: "editor", userId: "u-a", rangeRestrictions: [] });
   sessionB.setPermissions({ role: "editor", userId: "u-b", rangeRestrictions: [] });
 
+  sessionA.setPermissions({ role: "editor", rangeRestrictions: [], userId: "u-a" });
+  sessionB.setPermissions({ role: "editor", rangeRestrictions: [], userId: "u-b" });
+
   assert.ok(docA.share.get("comments") instanceof Y.Map);
   assert.ok(docB.share.get("comments") instanceof Y.Map);
 
@@ -169,6 +172,9 @@ test("CollabSession undo does not clobber legacy Array-backed comments root (in-
   sessionA.setPermissions({ role: "editor", userId: "u-a", rangeRestrictions: [] });
   sessionB.setPermissions({ role: "editor", userId: "u-b", rangeRestrictions: [] });
 
+  sessionA.setPermissions({ role: "editor", rangeRestrictions: [], userId: "u_legacy" });
+  sessionB.setPermissions({ role: "editor", rangeRestrictions: [], userId: "u_legacy_remote" });
+
   assert.ok(docA.share.get("comments") instanceof Y.Array);
   assert.ok(docB.share.get("comments") instanceof Y.Array);
 
@@ -196,6 +202,53 @@ test("CollabSession undo does not clobber legacy Array-backed comments root (in-
   disconnect();
   docA.destroy();
   docB.destroy();
+});
+
+test("CollabSession can optionally migrate legacy Array-backed comments root to canonical Map schema", async () => {
+  const doc = new Y.Doc();
+
+  const legacyRoot = doc.getArray("comments");
+  legacyRoot.push([
+    createYComment({
+      id: "c_legacy",
+      cellRef: "Sheet1:0:0",
+      kind: "threaded",
+      content: "legacy",
+      author: { id: "u_legacy", name: "Legacy User" },
+      now: 1,
+    }),
+  ]);
+
+  assert.ok(doc.share.get("comments") instanceof Y.Array);
+
+  const session = createCollabSession({
+    doc,
+    undo: {},
+    comments: { migrateLegacyArrayToMap: true },
+  });
+
+  session.setPermissions({ role: "editor", rangeRestrictions: [], userId: "u_legacy" });
+
+  // Migration is scheduled after hydration in a microtask.
+  await new Promise((resolve) => queueMicrotask(resolve));
+
+  assert.ok(doc.share.get("comments") instanceof Y.Map);
+
+  const comments = createCommentManagerForSession(session);
+  const getContent = () => comments.listAll().find((c) => c.id === "c_legacy")?.content ?? null;
+
+  assert.equal(getContent(), "legacy");
+
+  comments.setCommentContent({ commentId: "c_legacy", content: "legacy (edited)", now: 2 });
+  assert.equal(getContent(), "legacy (edited)");
+
+  // Migration replaces the comments root; ensure it remains undoable.
+  assert.equal(session.undo?.canUndo(), true);
+  session.undo?.undo();
+  assert.equal(getContent(), "legacy");
+
+  session.destroy();
+  doc.destroy();
 });
 
 test("CollabSession undo captures comment edits when comments root was created by a different Yjs instance (CJS applyUpdate)", () => {

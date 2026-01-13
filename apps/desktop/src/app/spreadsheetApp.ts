@@ -1016,6 +1016,11 @@ export class SpreadsheetApp {
           token: collab.token,
           disableBc: collab.disableBc,
         },
+        comments: {
+          // Canonicalize older Array-backed comment roots into the deterministic
+          // Map-backed schema after hydration.
+          migrateLegacyArrayToMap: true,
+        },
         presence: {
           user: collab.user,
           activeSheet: this.sheetId,
