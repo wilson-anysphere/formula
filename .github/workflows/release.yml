@@ -591,7 +591,8 @@ jobs:
           sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64
 
       - name: Install JS dependencies
-        run: pnpm install --frozen-lockfile
+        # Prefer cached pnpm store entries to reduce network flakiness on reruns.
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Cache wasm-pack binary
         id: wasm-pack-cache
