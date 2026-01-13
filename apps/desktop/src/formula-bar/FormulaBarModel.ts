@@ -241,7 +241,12 @@ export class FormulaBarModel {
 
   syntaxError(): FormulaParseError | null {
     if (this.#engineToolingFormula !== this.#draft) return null;
-    return this.#engineSyntaxError;
+    const err = this.#engineSyntaxError;
+    if (!err) return null;
+    // The partial parser sometimes reports "expected token" errors with a zero-length span at
+    // the cursor (incomplete input). Only surface errors that correspond to a highlightable span.
+    if (!err.span || err.span.end <= err.span.start) return null;
+    return err;
   }
 
   /**
@@ -262,7 +267,10 @@ export class FormulaBarModel {
     this.#engineToolingLocaleId = args.localeId || "en-US";
     this.#engineFunctionContext = args.parseResult.context.function;
 
-    const error = args.parseResult.error ?? args.lexResult.error;
+    // Prefer lexer errors (unexpected characters, unterminated strings) over parse errors.
+    // The parser may also report an error in these cases, but the lexer message/span tends
+    // to be more precise for editor feedback.
+    const error = args.lexResult.error ?? args.parseResult.error;
     this.#engineSyntaxError = error;
 
     const referenceTokens = tokenizeFormula(args.formula).filter((t) => t.type === "reference");

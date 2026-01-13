@@ -878,12 +878,18 @@ export class FormulaBarView {
   #scheduleEngineTooling(): void {
     // Only run editor-tooling calls while editing; the formula bar view mode already
     // uses stable highlights and we want to avoid late async updates after commit/cancel.
-    if (!this.model.isEditing) return;
+    if (!this.model.isEditing) {
+      this.#cancelPendingTooling();
+      return;
+    }
 
     // Only ask the engine to lex/parse when the draft is actually a formula.
     // This avoids surfacing parse errors while editing plain text values.
     const draft = this.model.draft;
-    if (!draft.trim().startsWith("=")) return;
+    if (!draft.trim().startsWith("=")) {
+      this.#cancelPendingTooling();
+      return;
+    }
 
     const engine = this.#tooling?.getWasmEngine?.() ?? null;
     if (!engine) return;
@@ -926,6 +932,10 @@ export class FormulaBarView {
     localeId: string;
     referenceStyle: NonNullable<FormulaParseOptions["referenceStyle"]>;
   }): Promise<void> {
+    // It's possible for a scheduled tooling flush to run after commit/cancel; bail early
+    // before invoking any async engine work.
+    if (!this.model.isEditing) return;
+    if (this.model.draft !== pending.draft) return;
     const engine = this.#tooling?.getWasmEngine?.() ?? null;
     if (!engine) return;
     if (!pending.draft.trim().startsWith("=")) return;
@@ -949,6 +959,25 @@ export class FormulaBarView {
       // Best-effort: if the engine worker is unavailable/uninitialized, keep the local
       // tokenizer/highlighter without surfacing errors to the user.
     }
+  }
+
+  #cancelPendingTooling(): void {
+    if (this.#toolingScheduled) {
+      const { id, kind } = this.#toolingScheduled;
+      if (kind === "raf") {
+        try {
+          cancelAnimationFrame(id);
+        } catch {
+          // ignore
+        }
+      } else {
+        clearTimeout(id);
+      }
+    }
+    this.#toolingScheduled = null;
+    this.#toolingPending = null;
+    // Bump request id so any in-flight engine responses are considered stale.
+    this.#toolingRequestId += 1;
   }
 
   #onKeyDown(e: KeyboardEvent): void {
@@ -1049,6 +1078,7 @@ export class FormulaBarView {
     this.#closeFunctionPicker({ restoreFocus: false });
     this.textarea.blur();
     this.model.cancel();
+    this.#cancelPendingTooling();
     this.#hoverOverride = null;
     this.#hoverOverrideText = null;
     this.#selectedReferenceIndex = null;
@@ -1063,6 +1093,7 @@ export class FormulaBarView {
     this.#closeFunctionPicker({ restoreFocus: false });
     this.textarea.blur();
     const committed = this.model.commit();
+    this.#cancelPendingTooling();
     this.#hoverOverride = null;
     this.#hoverOverrideText = null;
     this.#selectedReferenceIndex = null;
