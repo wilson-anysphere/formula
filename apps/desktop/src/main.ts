@@ -2098,8 +2098,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       // AutoSave is only supported in the desktop/Tauri runtime.
       "file.save.autoSave": autoSaveEnabled && isTauriInvokeAvailable(),
       "view.toggleShowFormulas": app.getShowFormulas(),
-      "view.show.performanceStats": perfStatsEnabled,
-      "view.window.split": ribbonLayoutController ? ribbonLayoutController.layout.splitView.direction !== "none" : false,
+      "view.togglePerformanceStats": perfStatsEnabled,
+      "view.toggleSplitView": ribbonLayoutController ? ribbonLayoutController.layout.splitView.direction !== "none" : false,
       "view.togglePanel.aiChat": isPanelOpen(PanelIds.AI_CHAT),
       "view.togglePanel.aiAudit": isPanelOpen(PanelIds.AI_AUDIT),
       "view.togglePanel.versionHistory": isPanelOpen(PanelIds.VERSION_HISTORY),
@@ -2111,7 +2111,6 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "view.togglePanel.marketplace": isPanelOpen(PanelIds.MARKETPLACE),
       "view.togglePanel.extensions": isPanelOpen(PanelIds.EXTENSIONS),
       "data.queriesConnections.queriesConnections": isPanelOpen(PanelIds.DATA_QUERIES),
-      "review.comments.showComments": app.isCommentsPanelVisible(),
       "comments.togglePanel": app.isCommentsPanelVisible(),
       "home.clipboard.formatPainter": Boolean(formatPainterState),
     };
@@ -2233,7 +2232,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "pageLayout.export.exportPdf": true,
           }),
       // View/zoom controls depend on the current runtime (e.g. shared-grid mode).
-      "view.show.performanceStats": !perfStatsSupported,
+      "view.togglePerformanceStats": !perfStatsSupported,
       "view.zoom.zoom": zoomDisabled,
       "view.zoom.zoom100": zoomDisabled,
       "view.zoom.zoomToSelection": zoomDisabled,
@@ -8435,23 +8434,11 @@ mountRibbon(ribbonReactRoot, {
         app.focus();
         return;
       }
-      case "view.show.performanceStats":
-        app.setGridPerfStatsEnabled(pressed);
-        app.focus();
-        return;
-      case "view.window.split": {
-        if (!ribbonLayoutController) {
-          showToast("Split view is not available.");
-          return;
-        }
-
-        const currentDirection = ribbonLayoutController.layout.splitView.direction;
-        if (!pressed) {
-          ribbonLayoutController.setSplitDirection("none");
-        } else if (currentDirection === "none") {
-          ribbonLayoutController.setSplitDirection("vertical", 0.5);
-        }
-
+      case "view.togglePerformanceStats":
+      case "view.toggleSplitView": {
+        void commandRegistry.executeCommand(commandId, pressed).catch((err) => {
+          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+        });
         app.focus();
         return;
       }
@@ -8498,8 +8485,8 @@ mountRibbon(ribbonReactRoot, {
       commandId === "home.font.strikethrough" ||
       commandId === "format.toggleWrapText" ||
       commandId === "view.toggleShowFormulas" ||
-      commandId === "view.show.performanceStats" ||
-      commandId === "view.window.split" ||
+      commandId === "view.togglePerformanceStats" ||
+      commandId === "view.toggleSplitView" ||
       commandId === "file.save.autoSave" ||
       commandId === "data.queriesConnections.queriesConnections"
     ) {

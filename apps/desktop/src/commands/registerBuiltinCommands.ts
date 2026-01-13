@@ -205,6 +205,48 @@ export function registerBuiltinCommands(params: {
   );
 
   commandRegistry.registerBuiltinCommand(
+    "view.togglePerformanceStats",
+    t("command.view.togglePerformanceStats"),
+    (next?: boolean) => {
+      const perfStats = app.getGridPerfStats() as any;
+      const current = Boolean(perfStats?.enabled);
+      const enabled = typeof next === "boolean" ? next : !current;
+      app.setGridPerfStatsEnabled(enabled);
+    },
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.togglePerformanceStats"),
+      keywords: ["performance", "perf", "stats", "overlay", "fps"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.toggleSplitView",
+    t("command.view.toggleSplitView"),
+    (next?: boolean) => {
+      const currentDirection = layoutController.layout.splitView.direction;
+      const shouldEnable = typeof next === "boolean" ? next : currentDirection === "none";
+
+      if (!shouldEnable) {
+        layoutController.setSplitDirection("none");
+      } else if (currentDirection === "none") {
+        // Match ribbon toggle behavior: default to a 50/50 vertical split the first
+        // time split view is enabled.
+        layoutController.setSplitDirection("vertical", 0.5);
+      }
+
+      app.focus();
+    },
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.toggleSplitView"),
+      keywords: ["split", "split view", "pane", "panes"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
     "audit.togglePrecedents",
     t("command.audit.togglePrecedents"),
     () => {

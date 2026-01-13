@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { CommandRegistry } from "../extensions/commandRegistry.js";
-import { createDefaultLayout, getPanelPlacement, openPanel, closePanel } from "../layout/layoutState.js";
+import { createDefaultLayout, getPanelPlacement, openPanel, closePanel, setSplitDirection as setSplitDirectionState } from "../layout/layoutState.js";
 import { PanelIds, panelRegistry } from "../panels/panelRegistry.js";
 
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
@@ -275,6 +275,86 @@ describe("registerBuiltinCommands: sheet navigation", () => {
     expect(focusAfterSheetNavigation).toHaveBeenCalledTimes(2);
 
     expect(activated).toEqual(["Sheet1", "Sheet1"]);
+  });
+});
+
+describe("registerBuiltinCommands: view toggles", () => {
+  it("view.togglePerformanceStats toggles current state when next is omitted", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    let enabled = false;
+    const setGridPerfStatsEnabled = vi.fn((value: boolean) => {
+      enabled = value;
+    });
+
+    const app = {
+      getGridPerfStats: () => ({ enabled }),
+      setGridPerfStatsEnabled,
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController });
+
+    await commandRegistry.executeCommand("view.togglePerformanceStats");
+    expect(setGridPerfStatsEnabled).toHaveBeenLastCalledWith(true);
+
+    await commandRegistry.executeCommand("view.togglePerformanceStats");
+    expect(setGridPerfStatsEnabled).toHaveBeenLastCalledWith(false);
+  });
+
+  it("view.toggleSplitView matches ribbon semantics (default vertical 0.5, toggles off to none)", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+      setSplitDirection: vi.fn(),
+    } as any;
+    layoutController.setSplitDirection.mockImplementation((direction: "none" | "vertical" | "horizontal", ratio?: number) => {
+      layoutController.layout = setSplitDirectionState(layoutController.layout, direction, ratio);
+    });
+
+    const app = {
+      focus: vi.fn(),
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController });
+
+    // Toggle on when currently none -> default to vertical 0.5.
+    expect(layoutController.layout.splitView.direction).toBe("none");
+    await commandRegistry.executeCommand("view.toggleSplitView");
+    expect(layoutController.setSplitDirection).toHaveBeenLastCalledWith("vertical", 0.5);
+    expect(layoutController.layout.splitView.direction).toBe("vertical");
+    expect(app.focus).toHaveBeenCalledTimes(1);
+
+    // Toggle off -> set to none.
+    await commandRegistry.executeCommand("view.toggleSplitView");
+    expect(layoutController.setSplitDirection).toHaveBeenLastCalledWith("none");
+    expect(layoutController.layout.splitView.direction).toBe("none");
+    expect(app.focus).toHaveBeenCalledTimes(2);
+
+    // Turning on when already split should not change direction.
+    layoutController.layout = setSplitDirectionState(layoutController.layout, "horizontal", 0.6);
+    (layoutController.setSplitDirection as any).mockClear();
+    (app.focus as any).mockClear();
+
+    await commandRegistry.executeCommand("view.toggleSplitView", true);
+    expect(layoutController.setSplitDirection).not.toHaveBeenCalled();
+    expect(app.focus).toHaveBeenCalledTimes(1);
   });
 });
 

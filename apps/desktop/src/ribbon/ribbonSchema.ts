@@ -2157,7 +2157,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               testId: "ribbon-show-formulas",
             },
             {
-              id: "view.show.performanceStats",
+              id: "view.togglePerformanceStats",
               label: "Performance Stats",
               ariaLabel: "Performance stats",
               iconId: "chart",
@@ -2256,7 +2256,7 @@ export const defaultRibbonSchema: RibbonSchema = {
                 { id: "view.unfreezePanes", label: "Unfreeze Panes", ariaLabel: "Unfreeze Panes", iconId: "close" },
               ],
             },
-            { id: "view.window.split", label: "Split", ariaLabel: "Split", iconId: "divide", kind: "toggle" },
+            { id: "view.toggleSplitView", label: "Split", ariaLabel: "Split", iconId: "divide", kind: "toggle" },
             { id: "view.window.hide", label: "Hide", ariaLabel: "Hide", iconId: "eyeOff" },
             { id: "view.window.unhide", label: "Unhide", ariaLabel: "Unhide", iconId: "eye" },
             { id: "view.window.viewSideBySide", label: "View Side by Side", ariaLabel: "View Side by Side", iconId: "sideBySide", kind: "toggle" },
