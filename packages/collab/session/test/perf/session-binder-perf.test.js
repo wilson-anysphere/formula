@@ -31,6 +31,10 @@
  * Optional CI-style enforcement (disabled unless set):
  *   PERF_MAX_TOTAL_MS_YJS_TO_DC=15000   # fail if total runtime exceeds this (ms)
  *   PERF_MAX_TOTAL_MS_DC_TO_YJS=15000   # fail if total runtime exceeds this (ms)
+ *   PERF_MAX_PEAK_HEAP_BYTES_YJS_TO_DC=500000000 # fail if heapUsed peak exceeds this (bytes)
+ *   PERF_MAX_PEAK_RSS_BYTES_YJS_TO_DC=1500000000 # fail if rss peak exceeds this (bytes)
+ *   PERF_MAX_PEAK_HEAP_BYTES_DC_TO_YJS=500000000 # fail if heapUsed peak exceeds this (bytes)
+ *   PERF_MAX_PEAK_RSS_BYTES_DC_TO_YJS=1500000000 # fail if rss peak exceeds this (bytes)
  *
  * Optional structured output:
  *   PERF_JSON=1  # emit JSON objects (one per scenario) for easy CI parsing
@@ -363,6 +367,21 @@ perfTestYjsToDc(
           `[session-binder-perf] expected total <= ${maxTotalMs}ms, got ${totalMs.toFixed(1)}ms`,
         );
       }
+
+      const maxPeakHeap = readPositiveInt(process.env.PERF_MAX_PEAK_HEAP_BYTES_YJS_TO_DC, 0);
+      if (maxPeakHeap > 0) {
+        assert.ok(
+          peakHeapUsed <= maxPeakHeap,
+          `[session-binder-perf] expected peak heapUsed <= ${maxPeakHeap} bytes, got ${peakHeapUsed}`,
+        );
+      }
+      const maxPeakRss = readPositiveInt(process.env.PERF_MAX_PEAK_RSS_BYTES_YJS_TO_DC, 0);
+      if (maxPeakRss > 0) {
+        assert.ok(
+          peakRss <= maxPeakRss,
+          `[session-binder-perf] expected peak rss <= ${maxPeakRss} bytes, got ${peakRss}`,
+        );
+      }
     } finally {
       try {
         binder.destroy();
@@ -494,6 +513,21 @@ perfTestDcToYjs(
         assert.ok(
           totalMs <= maxTotalMs,
           `[session-binder-perf] expected total <= ${maxTotalMs}ms, got ${totalMs.toFixed(1)}ms`,
+        );
+      }
+
+      const maxPeakHeap = readPositiveInt(process.env.PERF_MAX_PEAK_HEAP_BYTES_DC_TO_YJS, 0);
+      if (maxPeakHeap > 0) {
+        assert.ok(
+          peakHeapUsed <= maxPeakHeap,
+          `[session-binder-perf] expected peak heapUsed <= ${maxPeakHeap} bytes, got ${peakHeapUsed}`,
+        );
+      }
+      const maxPeakRss = readPositiveInt(process.env.PERF_MAX_PEAK_RSS_BYTES_DC_TO_YJS, 0);
+      if (maxPeakRss > 0) {
+        assert.ok(
+          peakRss <= maxPeakRss,
+          `[session-binder-perf] expected peak rss <= ${maxPeakRss} bytes, got ${peakRss}`,
         );
       }
     } finally {
