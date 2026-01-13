@@ -15,6 +15,18 @@ function createColumnAContext(rowsWithValues) {
   };
 }
 
+function createGridContext(cells) {
+  const values = new Map();
+  for (const [rowIndex, colIndex, value] of cells) {
+    values.set(`${rowIndex},${colIndex}`, value);
+  }
+  return {
+    getCellValue(row, col) {
+      return values.get(`${row},${col}`);
+    },
+  };
+}
+
 test("suggestRanges returns contiguous range above current cell for a column prefix", () => {
   const ctx = createColumnAContext([
     [0, 10],
@@ -79,4 +91,45 @@ test("suggestRanges preserves absolute column/row prefixes in A1 output", () => 
   });
 
   assert.equal(absBoth[0].range, "$A$1:$A$3");
+});
+
+test("suggestRanges suggests a 2D table range when adjacent columns form a rectangular block", () => {
+  /** @type {Array<[number, number, any]>} */
+  const cells = [];
+  // Header row (row 1 in A1 notation).
+  for (let c = 0; c < 4; c++) cells.push([0, c, `H${c + 1}`]);
+  // Data rows 2..10.
+  for (let r = 1; r < 10; r++) {
+    for (let c = 0; c < 4; c++) {
+      cells.push([r, c, r * 100 + c]);
+    }
+  }
+
+  const suggestions = suggestRanges({
+    currentArgText: "A",
+    cellRef: { row: 10, col: 0 }, // row 11, below the table
+    surroundingCells: createGridContext(cells),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.range === "A1:D10"),
+    `Expected suggestions to contain A1:D10, got: ${suggestions.map((s) => s.range).join(", ")}`
+  );
+});
+
+test("suggestRanges does not suggest a 2D table range when only one column is populated", () => {
+  /** @type {Array<[number, number, any]>} */
+  const cells = [];
+  for (let r = 0; r < 10; r++) cells.push([r, 0, r === 0 ? "Header" : r]);
+
+  const suggestions = suggestRanges({
+    currentArgText: "A",
+    cellRef: { row: 10, col: 0 }, // row 11, below the data
+    surroundingCells: createGridContext(cells),
+  });
+
+  assert.ok(
+    !suggestions.some((s) => /A\d+:[B-Z]/.test(s.range)),
+    `Expected no multi-column A1 range suggestions, got: ${suggestions.map((s) => s.range).join(", ")}`
+  );
 });

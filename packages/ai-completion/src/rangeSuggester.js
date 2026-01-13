@@ -1,4 +1,4 @@
-import { columnLetterToIndex, isEmptyCell, normalizeCellRef } from "./a1.js";
+import { columnIndexToLetter, columnLetterToIndex, isEmptyCell, normalizeCellRef } from "./a1.js";
 
 /**
  * @typedef {{range: string, confidence: number, reason: string}} RangeSuggestion
@@ -23,7 +23,8 @@ import { columnLetterToIndex, isEmptyCell, normalizeCellRef } from "./a1.js";
  *   cellRef: {row:number,col:number} | string,
  *   surroundingCells: CellContext,
  *   sheetName?: string,
- *   maxScanRows?: number
+ *   maxScanRows?: number,
+ *   maxScanCols?: number
  * }} params
  * @returns {RangeSuggestion[]}
  */
@@ -32,6 +33,7 @@ export function suggestRanges(params) {
   const cellRef = normalizeCellRef(params.cellRef);
   const sheetName = params.sheetName;
   const maxScanRows = params.maxScanRows ?? 500;
+  const maxScanCols = params.maxScanCols ?? 50;
 
   if (!surroundingCells || typeof surroundingCells.getCellValue !== "function") {
     return [];
@@ -61,6 +63,9 @@ export function suggestRanges(params) {
     ? findContiguousBlockDown(surroundingCells, colIndex, explicitRow - 1, maxScanRows, sheetName)
     : findContiguousBlockAbove(surroundingCells, colIndex, cellRef.row - 1, maxScanRows, sheetName);
 
+  /** @type {RangeSuggestion | null} */
+  let tableSuggestion = null;
+
   if (contiguous) {
     const { startRow, endRow, numericRatio } = contiguous;
     const startA1 = `${colPrefix}${colToken}${rowPrefix}${startRow + 1}`;
@@ -78,6 +83,29 @@ export function suggestRanges(params) {
       confidence: clamp01(base + lengthBoost + numericBoost),
       reason: explicitRow ? "contiguous_down_from_start" : "contiguous_above_current_cell",
     });
+
+    // Also suggest a 2D rectangular range when the column looks like part of a table.
+    const tableStartRow = contiguous.rawStartRow ?? startRow;
+    const tableEndRow = contiguous.rawEndRow ?? endRow;
+    const table = findContiguousTableToRight(
+      surroundingCells,
+      colIndex,
+      tableStartRow,
+      tableEndRow,
+      maxScanCols,
+      sheetName
+    );
+    if (table) {
+      const { endCol, confidence } = table;
+      const endLetters = applyColumnCase(columnIndexToLetter(endCol), colToken);
+      const startCell = `${colPrefix}${colToken}${rowPrefix}${tableStartRow + 1}`;
+      const endCell = `${colPrefix}${endLetters}${rowPrefix}${tableEndRow + 1}`;
+      tableSuggestion = {
+        range: `${startCell}:${endCell}`,
+        confidence,
+        reason: explicitRow ? "contiguous_table_down_from_start" : "contiguous_table_above_current_cell",
+      };
+    }
   }
 
   suggestions.push({
@@ -86,8 +114,14 @@ export function suggestRanges(params) {
     reason: "entire_column",
   });
 
+  // Keep "entire column" as the second suggestion for compatibility with existing
+  // tests/callers, then append the optional 2D table range.
+  if (tableSuggestion) suggestions.push(tableSuggestion);
+
   return suggestions;
 }
+
+const EXCEL_MAX_COL_INDEX = 16383; // XFD (1-based 16384)
 
 function safeColumnLetterToIndex(letters) {
   try {
@@ -123,8 +157,17 @@ function findContiguousBlockAbove(ctx, col, fromRow, maxScanRows, sheetName) {
   }
   startRow++;
 
+  const rawStartRow = startRow;
+  const rawEndRow = endRow;
+
   const trimmed = trimNonNumericEdgesIfMostlyNumeric(ctx, col, startRow, endRow, sheetName);
-  return { startRow: trimmed.startRow, endRow: trimmed.endRow, numericRatio: trimmed.numericRatio };
+  return {
+    startRow: trimmed.startRow,
+    endRow: trimmed.endRow,
+    numericRatio: trimmed.numericRatio,
+    rawStartRow,
+    rawEndRow,
+  };
 }
 
 /**
@@ -147,7 +190,7 @@ function findContiguousBlockDown(ctx, col, startRow, maxScanRows, sheetName) {
   }
 
   const metrics = computeNumericStats(ctx, col, startRow, endRow, sheetName);
-  return { startRow, endRow, numericRatio: metrics.numericRatio };
+  return { startRow, endRow, numericRatio: metrics.numericRatio, rawStartRow: startRow, rawEndRow: endRow };
 }
 
 function trimNonNumericEdgesIfMostlyNumeric(ctx, col, startRow, endRow, sheetName) {
@@ -202,4 +245,87 @@ function isNumericValue(value) {
 
 function clamp01(v) {
   return Math.max(0, Math.min(1, v));
+}
+
+function applyColumnCase(letters, typedColToken) {
+  if (!typedColToken) return letters;
+  if (typedColToken.toUpperCase() === typedColToken) return letters.toUpperCase();
+  if (typedColToken.toLowerCase() === typedColToken) return letters.toLowerCase();
+  return letters;
+}
+
+/**
+ * @param {CellContext} ctx
+ * @param {number} startCol 0-based
+ * @param {number} startRow 0-based
+ * @param {number} endRow 0-based
+ * @param {number} maxScanCols
+ * @returns {{endCol:number, confidence:number} | null}
+ */
+function findContiguousTableToRight(ctx, startCol, startRow, endRow, maxScanCols, sheetName) {
+  if (maxScanCols <= 1) return null;
+  if (endRow < startRow) return null;
+
+  const rowCount = endRow - startRow + 1;
+  if (rowCount <= 1) return null;
+
+  const maxCol = Math.min(EXCEL_MAX_COL_INDEX, startCol + Math.max(1, maxScanCols) - 1);
+
+  let endCol = startCol;
+
+  // Confidence helpers.
+  let headerNonEmptyCols = 0;
+  let numericRatioSum = 0;
+
+  // Include the base column in the stats.
+  if (!isEmptyCell(ctx.getCellValue(startRow, startCol, sheetName))) headerNonEmptyCols++;
+  numericRatioSum += computeTableColumnNumericRatio(ctx, startCol, startRow, endRow, sheetName);
+
+  for (let col = startCol + 1; col <= maxCol; col++) {
+    let nonEmpty = 0;
+    for (let r = startRow; r <= endRow; r++) {
+      const v = ctx.getCellValue(r, col, sheetName);
+      if (!isEmptyCell(v)) nonEmpty++;
+    }
+
+    // Stop expanding when we hit an entirely empty column (gap).
+    if (nonEmpty === 0) break;
+
+    // Heuristic: require the column to be "table-shaped" (mostly filled) to avoid
+    // pulling in stray values far to the right.
+    const coverage = nonEmpty / rowCount;
+    if (coverage < 0.6) break;
+
+    endCol = col;
+
+    if (!isEmptyCell(ctx.getCellValue(startRow, col, sheetName))) headerNonEmptyCols++;
+    numericRatioSum += computeTableColumnNumericRatio(ctx, col, startRow, endRow, sheetName);
+  }
+
+  if (endCol === startCol) return null;
+
+  const colCount = endCol - startCol + 1;
+  const headerRatio = headerNonEmptyCols / colCount;
+  const avgNumericRatio = numericRatioSum / colCount;
+
+  // Confidence heuristic:
+  // - Wide blocks are likely "tables" for lookup/filter functions.
+  // - Header coverage is a good table signal.
+  // - Numeric-heavy columns are common in analytic tables.
+  const base = 0.45;
+  const widthBoost = Math.min(0.25, (colCount - 1) * 0.05);
+  const headerBoost = 0.1 * headerRatio;
+  const lengthBoost = Math.min(0.1, rowCount / 200);
+  const numericBoost = 0.1 * avgNumericRatio;
+  const confidence = clamp01(base + widthBoost + headerBoost + lengthBoost + numericBoost);
+
+  return { endCol, confidence };
+}
+
+function computeTableColumnNumericRatio(ctx, col, startRow, endRow, sheetName) {
+  // Treat the top row as a potential header and exclude it from numeric stats so
+  // numeric columns with a text header don't get penalized.
+  if (endRow <= startRow) return 0;
+  const stats = computeNumericStats(ctx, col, startRow + 1, endRow, sheetName);
+  return stats.numericRatio;
 }
