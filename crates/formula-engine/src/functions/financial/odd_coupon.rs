@@ -272,8 +272,9 @@ fn coupon_period_e(
     // Reuse the shared COUP* helper (`coupon_schedule::coupon_period_e`) to keep `E` conventions
     // aligned with Excel's regular bond functions.
     //
-    // In particular, for basis=4 (European 30E/360) Excel models `E` as `360/frequency` (like
-    // `COUPDAYS`), even though `DAYS360(PCD, NCD, TRUE)` can differ for some EOM schedules.
+    // In particular, for basis=4 (European 30E/360), Excel models `E` as a fixed `360/frequency`
+    // (consistent with `COUPDAYS`), even though `DAYS360(PCD, NCD, TRUE)` can differ for some
+    // end-of-month schedules.
     super::coupon_schedule::coupon_period_e(pcd, ncd, frequency, basis, system)
 }
 

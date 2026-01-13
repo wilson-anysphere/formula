@@ -1361,20 +1361,164 @@ fn getpivotdata_errors() {
 }
 
 #[test]
-fn getpivotdata_rejects_column_fields_mvp() {
+fn getpivotdata_supports_column_fields() {
     let mut sheet = TestSheet::new();
 
-    // Simulated pivot-engine output with a column field (headers are "A - ..." / "B - ...").
+    // Simulated pivot-engine output with a column field (headers are "A - ..." / "B - ...")
+    // plus a row grand total column.
     sheet.set("A1", "Region");
     sheet.set("B1", "A - Sum of Sales");
     sheet.set("C1", "B - Sum of Sales");
+    sheet.set("D1", "Grand Total - Sum of Sales");
+
     sheet.set("A2", "East");
     sheet.set("B2", 100.0);
     sheet.set("C2", 150.0);
+    sheet.set("D2", 250.0);
 
-    // The MVP only supports pivots with no column fields.
+    sheet.set("A3", "West");
+    sheet.set("B3", 200.0);
+    sheet.set("C3", 250.0);
+    sheet.set("D3", 450.0);
+
+    sheet.set("A4", "Grand Total");
+    sheet.set("B4", 300.0);
+    sheet.set("C4", 400.0);
+    sheet.set("D4", 700.0);
+
+    // `data_field` can refer directly to a rendered header.
     assert_eq!(
         sheet.eval("=GETPIVOTDATA(\"A - Sum of Sales\", A2, \"Region\", \"East\")"),
-        Value::Error(ErrorKind::Ref)
+        Value::Number(100.0)
+    );
+
+    // Or a base value field name with a column item criterion.
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A2, \"Region\", \"East\", \"Product\", \"A\")"),
+        Value::Number(100.0)
+    );
+
+    // If no column item is specified, return the row grand total for that value field.
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A2, \"Region\", \"East\")"),
+        Value::Number(250.0)
+    );
+
+    // Column totals can be queried by omitting row criteria.
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A2, \"Product\", \"A\")"),
+        Value::Number(300.0)
+    );
+
+    // When no criteria are provided, return the overall grand total.
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A2)"),
+        Value::Number(700.0)
+    );
+}
+
+#[test]
+fn getpivotdata_supports_multiple_value_fields() {
+    let mut sheet = TestSheet::new();
+
+    // Simulated pivot-engine output with 2 value fields.
+    sheet.set("A1", "Region");
+    sheet.set("B1", "Sum of Sales");
+    sheet.set("C1", "Count of Sales");
+
+    sheet.set("A2", "East");
+    sheet.set("B2", 250.0);
+    sheet.set("C2", 2.0);
+
+    sheet.set("A3", "West");
+    sheet.set("B3", 450.0);
+    sheet.set("C3", 2.0);
+
+    sheet.set("A4", "Grand Total");
+    sheet.set("B4", 700.0);
+    sheet.set("C4", 4.0);
+
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A1, \"Region\", \"East\")"),
+        Value::Number(250.0)
+    );
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Count of Sales\", A1, \"Region\", \"East\")"),
+        Value::Number(2.0)
+    );
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Count of Sales\", A1)"),
+        Value::Number(4.0)
+    );
+}
+
+#[test]
+fn getpivotdata_supports_column_fields_and_multiple_value_fields() {
+    let mut sheet = TestSheet::new();
+
+    // Simulated pivot-engine output with:
+    // - row field: Region
+    // - column field: Product (A/B)
+    // - value fields: Sum of Sales, Count of Sales
+    sheet.set("A1", "Region");
+    sheet.set("B1", "A - Sum of Sales");
+    sheet.set("C1", "A - Count of Sales");
+    sheet.set("D1", "B - Sum of Sales");
+    sheet.set("E1", "B - Count of Sales");
+    sheet.set("F1", "Grand Total - Sum of Sales");
+    sheet.set("G1", "Grand Total - Count of Sales");
+
+    sheet.set("A2", "East");
+    sheet.set("B2", 100.0);
+    sheet.set("C2", 1.0);
+    sheet.set("D2", 150.0);
+    sheet.set("E2", 1.0);
+    sheet.set("F2", 250.0);
+    sheet.set("G2", 2.0);
+
+    sheet.set("A3", "West");
+    sheet.set("B3", 200.0);
+    sheet.set("C3", 1.0);
+    sheet.set("D3", 250.0);
+    sheet.set("E3", 1.0);
+    sheet.set("F3", 450.0);
+    sheet.set("G3", 2.0);
+
+    sheet.set("A4", "Grand Total");
+    sheet.set("B4", 300.0);
+    sheet.set("C4", 2.0);
+    sheet.set("D4", 400.0);
+    sheet.set("E4", 2.0);
+    sheet.set("F4", 700.0);
+    sheet.set("G4", 4.0);
+
+    // Select a specific column item + specific value field.
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A2, \"Region\", \"East\", \"Product\", \"A\")"),
+        Value::Number(100.0)
+    );
+    assert_eq!(
+        sheet.eval(
+            "=GETPIVOTDATA(\"Count of Sales\", A2, \"Region\", \"East\", \"Product\", \"B\")"
+        ),
+        Value::Number(1.0)
+    );
+
+    // Select a row total for a specific value field.
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Count of Sales\", A2, \"Region\", \"East\")"),
+        Value::Number(2.0)
+    );
+
+    // Select a column total (no row criteria).
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A2, \"Product\", \"A\")"),
+        Value::Number(300.0)
+    );
+
+    // Select an overall grand total for a specific value field.
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Count of Sales\", A2)"),
+        Value::Number(4.0)
     );
 }

@@ -71,13 +71,13 @@
 //!
 //! For reference, this engine matches `coupon_schedule::coupon_period_e`:
 //!
-//! - basis `0` / `2` / `4`: `E = 360 / frequency` (constant)
-//!   - Note: for `basis=4`, day counts are still European 30E/360 (`DAYS360(..., TRUE)`), but Excel
-//!     models the period length `E` (as used in `COUPDAYS` and these odd-coupon functions) as a
-//!     fixed `360/frequency`. This can therefore differ from `DAYS360(PCD, NCD, TRUE)` for some
-//!     end-of-month schedules involving February.
-//! - basis `3`: `E = 365 / frequency` (constant)
-//! - basis `1`: `E = ncd - pcd` (actual days between regular coupon dates)
+//! - basis `0` / `2` / `4`: `E = 360 / frequency` (fixed)
+//!   - For basis `4` (European 30E/360), day counts like `A`/`DSC` still use `DAYS360(..., TRUE)`,
+//!     but the modeled coupon period length `E` remains fixed at `360/frequency` (consistent with
+//!     `COUPDAYS`). This can differ from `DAYS360(PCD, NCD, TRUE)` for some end-of-month schedules
+//!     involving February.
+//! - basis `3`: `E = 365 / frequency` (fixed)
+//! - basis `1`: `E = ncd - pcd` (actual days between regular coupon dates; variable)
 //!
 //! **Coupon amount**
 //!

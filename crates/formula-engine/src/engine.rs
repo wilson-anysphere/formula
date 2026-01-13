@@ -7750,6 +7750,10 @@ fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
             bytecode::Value::Error(bytecode::ErrorKind::Value)
         }
         Value::Array(arr) => {
+            // The engine generally stores spilled array results in a dedicated spill table rather
+            // than as `Value::Array` in the grid. However, callers can still populate cells with
+            // `Value::Array` directly (e.g. via the external value provider or tests). Bytecode
+            // evaluation should be able to consume these values as proper arrays.
             let total = match arr.rows.checked_mul(arr.cols) {
                 Some(v) => v,
                 None => return bytecode::Value::Error(bytecode::ErrorKind::Spill),

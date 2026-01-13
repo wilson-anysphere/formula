@@ -4215,7 +4215,7 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
             assert_close(e4, e_fixed, 0.0);
             assert!(
                 (days360_eu - e_fixed).abs() > 0.0,
-                "expected DAYS360_EU(PCD,NCD) != 360/frequency for this scenario"
+                "expected DAYS360(PCD, NCD, TRUE) != 360/frequency for this scenario"
             );
         }
         // Guard: ensure US vs EU DAYS360 behavior actually diverges in this scenario.
@@ -4299,8 +4299,8 @@ fn oddlprice_matches_excel_model_for_30_360_bases() {
     let redemption = 100.0;
     let frequency = 2;
 
-    // Guard: ensure this scenario actually exercises a basis=4 schedule where
-    // `DAYS360(PCD, NCD, TRUE) != 360/frequency`.
+    // Guard: ensure this scenario exercises a schedule where European DAYS360 between coupon
+    // dates differs from the fixed `E = 360/frequency`.
     //
     // last_interest is EOM Feb 28, so the EOM-pinned prior coupon date is Aug 31.
     // Under European DAYS360, this period is 178 days (not 180), but the odd-coupon bond functions
@@ -4316,7 +4316,7 @@ fn oddlprice_matches_excel_model_for_30_360_bases() {
     assert_close(e4, e_fixed, 0.0);
     assert!(
         (days360_eu - e_fixed).abs() > 0.0,
-        "expected DAYS360_EU(PCD,NCD) != 360/frequency for this scenario"
+        "expected DAYS360(PCD, NCD, TRUE) != 360/frequency for this scenario"
     );
 
     for basis in [0, 4] {

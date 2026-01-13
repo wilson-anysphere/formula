@@ -1187,11 +1187,33 @@ inventory::submit! {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PivotValueColKind {
+    Regular,
+    GrandTotal,
+}
+
+#[derive(Debug, Clone)]
+struct PivotValueCol {
+    col: u32,
+    /// Column key item strings for column-field pivots (e.g. `["A"]` or `["A", "2024"]`).
+    ///
+    /// Note: the current pivot output flattens column keys into header text and does not include
+    /// the source field names. We therefore treat column criteria as matching by item string.
+    column_items: Vec<String>,
+    kind: PivotValueColKind,
+}
+
 struct PivotLayout {
     header_row: u32,
     top_left_col: u32,
     row_fields: HashMap<String, u32>,
-    data_col: u32,
+    value_cols: Vec<PivotValueCol>,
+    /// Map of uppercased rendered header -> index into `value_cols`.
+    value_col_by_header: HashMap<String, usize>,
+    /// Map of uppercased value field name -> indices into `value_cols`.
+    value_cols_by_value_name: HashMap<String, Vec<usize>>,
+    has_column_fields: bool,
 }
 
 fn getpivotdata_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
@@ -1222,7 +1244,8 @@ fn getpivotdata_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let mut criteria = Vec::new();
+    let mut row_criteria = Vec::new();
+    let mut col_criteria = Vec::new();
     for pair_idx in (2..args.len()).step_by(2) {
         let field_value = eval_scalar_arg(ctx, &args[pair_idx]);
         if let Value::Error(e) = field_value {
@@ -1239,22 +1262,37 @@ fn getpivotdata_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         if field.is_empty() {
             return Value::Error(ErrorKind::Value);
         }
-        let col = match layout.row_fields.get(&field.to_ascii_uppercase()) {
-            Some(c) => *c,
-            None => return Value::Error(ErrorKind::Ref),
-        };
-        criteria.push((col, item_value));
+
+        if let Some(col) = layout.row_fields.get(&field.to_ascii_uppercase()) {
+            row_criteria.push((*col, item_value));
+            continue;
+        }
+
+        // Column-field pivots do not render the column field name(s) in the output grid; only
+        // the column item values appear as prefixes in the value headers (e.g. `"A - Sum of Sales"`).
+        //
+        // For scan-based GETPIVOTDATA, treat any non-row-field criteria as a column-item constraint,
+        // but only if we detected column fields in the pivot output.
+        if !layout.has_column_fields {
+            return Value::Error(ErrorKind::Ref);
+        }
+        col_criteria.push(item_value);
     }
 
-    if criteria.is_empty() {
-        return getpivotdata_grand_total(ctx, &pivot_ref.sheet_id, &layout);
+    let value_col = match select_pivot_value_col(ctx, &layout, &data_field, &col_criteria) {
+        Ok(c) => c,
+        Err(e) => return Value::Error(e),
+    };
+
+    if row_criteria.is_empty() {
+        return getpivotdata_grand_total(ctx, &pivot_ref.sheet_id, &layout, value_col);
     }
 
-    match getpivotdata_find_row(ctx, &pivot_ref.sheet_id, &layout, &criteria) {
+    match getpivotdata_find_row(ctx, &pivot_ref.sheet_id, &layout, &row_criteria, value_col) {
         Ok(row) => {
             let addr = crate::eval::CellAddr {
                 row,
-                col: layout.data_col,
+                col: value_col,
             };
             ctx.get_cell_value(&pivot_ref.sheet_id, addr)
         }
@@ -1267,34 +1305,49 @@ fn find_pivot_layout(
     pivot_ref: &Reference,
     data_field: &str,
 ) -> Result<PivotLayout, ErrorKind> {
-    // Heuristics (MVP, pivot-engine-compatible):
+    // Heuristics (scan-based, pivot-engine-compatible):
     //
-    // 1) Starting from the provided pivot_table cell, scan upward for a header cell that
-    //    matches `data_field` (case-insensitive). This is assumed to be the value-field
-    //    caption written by our pivot engine.
-    // 2) From that header cell, scan left across the same row while cells are non-empty
-    //    text to locate the pivot table's top-left corner.
-    // 3) The row-field columns are the leading columns where the first data row contains
-    //    text (row labels). The first non-text cell below the header indicates the start
-    //    of the value area.
+    // 1) Starting from the provided pivot_table cell, scan upward for a header row containing
+    //    a value header that matches `data_field`. Matching is case-insensitive and accepts:
+    //      - exact header match (e.g. `"Sum of Sales"` or `"A - Sum of Sales"`)
+    //      - column-field headers that end with `" - <data_field>"` (e.g. `"A - Sum of Sales"`)
+    //      - grand total headers `"Grand Total - <data_field>"`.
+    // 2) From that header cell, scan left across the same row while cells are non-empty text
+    //    to locate the pivot table's top-left corner.
+    // 3) The row-field columns are the leading columns where the first data row contains text
+    //    (row labels). The first non-text cell below the header indicates the start of the
+    //    value area.
+    // 4) Scan right across the header row to detect the full value area width and build a
+    //    mapping from rendered value headers to value columns.
     //
-    // Limitations:
-    // - Supports pivot-engine Tabular and Compact layouts.
+    // MVP safeguards / limitations:
+    // - Scan-based heuristic: returns #REF! when the referenced range does not resemble an
+    //   engine-produced pivot output.
+    // - Supports pivot-engine Tabular layout and a limited form of Compact layout:
     //   - In Compact layout, the row-axis is represented by a single "Row Labels" column. For
-    //     pivots with multiple row fields, our pivot engine renders the combined key as
+    //     pivots with multiple row fields, the pivot engine renders the combined key as
     //     "Field1 / Field2 / …" in that column. GETPIVOTDATA can match against that combined
     //     display string, but does not attempt to interpret Excel-style indentation or repeated
     //     labels.
-    // - Requires exactly one base value column (plus an optional "Grand Total - ..." column).
-    // - Does not support column fields.
+    // - Supports column fields and multiple value fields by mapping rendered value headers such as:
+    //   - `<value name>`
+    //   - `<col item> - <value name>`
+    //   - `Grand Total - <value name>`
+    //   Note: the current pivot output flattens column keys into header text and does not include
+    //   the source field names; column criteria are therefore matched by item string.
+    // - Scan limits cap work for pathological ranges.
     const MAX_SCAN_ROWS: u32 = 10_000;
     const MAX_SCAN_COLS: u32 = 64;
 
     let sheet_id = &pivot_ref.sheet_id;
     let anchor = pivot_ref.start;
 
+    let data_field_lc = data_field.to_ascii_lowercase();
+    let data_field_suffix_lc = format!(" - {data_field_lc}");
+    let data_field_gt_lc = format!("grand total - {data_field_lc}");
+
     let mut header_row: Option<u32> = None;
-    let mut data_col: Option<u32> = None;
+    let mut header_match_col: Option<u32> = None;
 
     let max_up = anchor.row.min(MAX_SCAN_ROWS);
     let col_start = anchor.col.saturating_sub(MAX_SCAN_COLS);
@@ -1304,22 +1357,37 @@ fn find_pivot_layout(
         let row = anchor.row - delta;
         for col in col_start..=col_end {
             let v = ctx.get_cell_value(sheet_id, crate::eval::CellAddr { row, col });
-            if value_text_eq(&v, data_field) {
-                let below = ctx.get_cell_value(
-                    sheet_id,
-                    crate::eval::CellAddr {
-                        row: row.saturating_add(1),
-                        col,
-                    },
-                );
-                // Pivot-engine value cells are numbers/blanks; if we see a text value directly
-                // below, this is unlikely to be the pivot header row.
-                if !matches!(below, Value::Text(_)) {
-                    header_row = Some(row);
-                    data_col = Some(col);
-                    break;
-                }
+            let Value::Text(t) = v else {
+                continue;
+            };
+            if t.is_empty() {
+                continue;
             }
+
+            let t_lc = t.to_ascii_lowercase();
+            let matches = t_lc == data_field_lc
+                || t_lc == data_field_gt_lc
+                || t_lc.ends_with(&data_field_suffix_lc);
+            if !matches {
+                continue;
+            }
+
+            let below = ctx.get_cell_value(
+                sheet_id,
+                crate::eval::CellAddr {
+                    row: row.saturating_add(1),
+                    col,
+                },
+            );
+            // Pivot-engine value cells are numbers/blanks; if we see a text value directly below,
+            // this is unlikely to be the pivot header row.
+            if matches!(below, Value::Text(_)) {
+                continue;
+            }
+
+            header_row = Some(row);
+            header_match_col = Some(col);
+            break;
         }
         if header_row.is_some() {
             break;
@@ -1327,10 +1395,10 @@ fn find_pivot_layout(
     }
 
     let header_row = header_row.ok_or(ErrorKind::Ref)?;
-    let data_col = data_col.ok_or(ErrorKind::Ref)?;
+    let header_match_col = header_match_col.ok_or(ErrorKind::Ref)?;
 
     // Find top-left header cell by scanning left across the header row.
-    let mut top_left_col = data_col;
+    let mut top_left_col = header_match_col;
     while top_left_col > 0 {
         let left = ctx.get_cell_value(
             sheet_id,
@@ -1350,7 +1418,7 @@ fn find_pivot_layout(
     // Determine where the value area begins by inspecting the first data row.
     let first_data_row = header_row.saturating_add(1);
     let mut first_value_col: Option<u32> = None;
-    for col in top_left_col..=data_col {
+    for col in top_left_col..=top_left_col.saturating_add(MAX_SCAN_COLS) {
         let below = ctx.get_cell_value(
             sheet_id,
             crate::eval::CellAddr {
@@ -1365,60 +1433,7 @@ fn find_pivot_layout(
     }
     let first_value_col = first_value_col.ok_or(ErrorKind::Ref)?;
     if first_value_col == top_left_col {
-        // Pivot with no row fields isn't supported in the MVP.
-        return Err(ErrorKind::Ref);
-    }
-
-    // Ensure the requested data_field refers to the base value column.
-    if data_col != first_value_col {
-        return Err(ErrorKind::Ref);
-    }
-
-    // Collect value headers (base + optional grand total).
-    let mut value_headers: Vec<String> = Vec::new();
-    for col in first_value_col..=first_value_col.saturating_add(MAX_SCAN_COLS) {
-        let v = ctx.get_cell_value(
-            sheet_id,
-            crate::eval::CellAddr {
-                row: header_row,
-                col,
-            },
-        );
-        match v {
-            Value::Text(s) if !s.is_empty() => value_headers.push(s),
-            _ => break,
-        }
-    }
-    if value_headers.is_empty() {
-        return Err(ErrorKind::Ref);
-    }
-
-    let base_headers: Vec<&str> = value_headers
-        .iter()
-        .filter_map(|h| {
-            (!h.to_ascii_lowercase().starts_with("grand total - ")).then_some(h.as_str())
-        })
-        .collect();
-
-    if base_headers.len() != 1 {
-        // Multiple value fields and/or column fields are not supported in the MVP.
-        return Err(ErrorKind::Ref);
-    }
-
-    let base_header = base_headers[0];
-    if !base_header.eq_ignore_ascii_case(data_field) {
-        return Err(ErrorKind::Ref);
-    }
-
-    // Allow at most a single pivot-engine grand-total column.
-    let expected_gt = format!("Grand Total - {base_header}");
-    for h in &value_headers {
-        if h.eq_ignore_ascii_case(base_header) {
-            continue;
-        }
-        if h.eq_ignore_ascii_case(&expected_gt) {
-            continue;
-        }
+        // Pivot with no row fields isn't supported in the scan-based MVP.
         return Err(ErrorKind::Ref);
     }
 
@@ -1436,21 +1451,183 @@ fn find_pivot_layout(
             Value::Text(s) if !s.is_empty() => s,
             _ => return Err(ErrorKind::Ref),
         };
-        row_fields.insert(name.to_ascii_uppercase(), col);
+        // Duplicate field names would make criteria ambiguous.
+        if row_fields.insert(name.to_ascii_uppercase(), col).is_some() {
+            return Err(ErrorKind::Ref);
+        }
+    }
+
+    // Ensure the header we matched is inside the detected value area.
+    if header_match_col < first_value_col {
+        return Err(ErrorKind::Ref);
+    }
+
+    // Collect value headers (including column-field and grand-total headers).
+    let mut value_cols: Vec<PivotValueCol> = Vec::new();
+    let mut value_col_by_header: HashMap<String, usize> = HashMap::new();
+    let mut value_cols_by_value_name: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut has_column_fields = false;
+
+    for col in first_value_col..=first_value_col.saturating_add(MAX_SCAN_COLS) {
+        let v = ctx.get_cell_value(
+            sheet_id,
+            crate::eval::CellAddr {
+                row: header_row,
+                col,
+            },
+        );
+        let header = match v {
+            Value::Text(s) if !s.is_empty() => s,
+            _ => break,
+        };
+
+        let parsed = parse_pivot_value_header(&header);
+        has_column_fields |= !parsed.column_items.is_empty();
+
+        let idx = value_cols.len();
+        value_cols.push(PivotValueCol {
+            col,
+            column_items: parsed.column_items,
+            kind: parsed.kind,
+        });
+
+        let header_key = header.to_ascii_uppercase();
+        if value_col_by_header.insert(header_key, idx).is_some() {
+            // Duplicate rendered header -> ambiguous, not a supported pivot shape.
+            return Err(ErrorKind::Ref);
+        }
+
+        value_cols_by_value_name
+            .entry(parsed.value_name.to_ascii_uppercase())
+            .or_default()
+            .push(idx);
+    }
+
+    if value_cols.is_empty() {
+        return Err(ErrorKind::Ref);
     }
 
     Ok(PivotLayout {
         header_row,
         top_left_col,
         row_fields,
-        data_col,
+        value_cols,
+        value_col_by_header,
+        value_cols_by_value_name,
+        has_column_fields,
     })
+}
+
+struct ParsedPivotValueHeader {
+    kind: PivotValueColKind,
+    value_name: String,
+    column_items: Vec<String>,
+}
+
+fn parse_pivot_value_header(header: &str) -> ParsedPivotValueHeader {
+    // Pivot engine emits grand total columns as `"Grand Total - <value name>"`.
+    const GT_PREFIX: &str = "Grand Total - ";
+    if header.len() >= GT_PREFIX.len() && header[..GT_PREFIX.len()].eq_ignore_ascii_case(GT_PREFIX) {
+        return ParsedPivotValueHeader {
+            kind: PivotValueColKind::GrandTotal,
+            value_name: header[GT_PREFIX.len()..].to_string(),
+            column_items: Vec::new(),
+        };
+    }
+
+    // Regular value columns may include a flattened column key prefix:
+    // - no column fields: `<value name>`
+    // - with column fields: `<col item> - <value name>` or `<a> / <b> - <value name>`
+    if let Some((prefix, value_name)) = header.split_once(" - ") {
+        let column_items = prefix
+            .split(" / ")
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+        return ParsedPivotValueHeader {
+            kind: PivotValueColKind::Regular,
+            value_name: value_name.to_string(),
+            column_items,
+        };
+    }
+
+    ParsedPivotValueHeader {
+        kind: PivotValueColKind::Regular,
+        value_name: header.to_string(),
+        column_items: Vec::new(),
+    }
+}
+
+fn select_pivot_value_col(
+    ctx: &dyn FunctionContext,
+    layout: &PivotLayout,
+    data_field: &str,
+    col_criteria: &[Value],
+) -> Result<u32, ErrorKind> {
+    // If the caller provided an exact rendered header (e.g. `"A - Sum of Sales"`),
+    // honor it directly.
+    let data_field_key = data_field.to_ascii_uppercase();
+    let mut candidates: Vec<usize> = if let Some(idx) = layout.value_col_by_header.get(&data_field_key)
+    {
+        vec![*idx]
+    } else {
+        layout
+            .value_cols_by_value_name
+            .get(&data_field_key)
+            .cloned()
+            .unwrap_or_default()
+    };
+
+    if candidates.is_empty() {
+        return Err(ErrorKind::Ref);
+    }
+
+    if !col_criteria.is_empty() {
+        let mut col_items = Vec::with_capacity(col_criteria.len());
+        for v in col_criteria {
+            col_items.push(v.coerce_to_string_with_ctx(ctx)?);
+        }
+
+        candidates.retain(|idx| {
+            let col = &layout.value_cols[*idx];
+            col_items.iter().all(|needle| {
+                col.column_items
+                    .iter()
+                    .any(|item| item.eq_ignore_ascii_case(needle))
+            })
+        });
+
+        return match candidates.len() {
+            0 => Err(ErrorKind::NA),
+            1 => Ok(layout.value_cols[candidates[0]].col),
+            _ => Err(ErrorKind::Ref),
+        };
+    }
+
+    if candidates.len() == 1 {
+        return Ok(layout.value_cols[candidates[0]].col);
+    }
+
+    // When column fields exist and no column criteria are provided, prefer the row grand total
+    // column (`"Grand Total - <value name>"`) if present; otherwise the selection is ambiguous.
+    let mut gt: Option<u32> = None;
+    for idx in &candidates {
+        let col = &layout.value_cols[*idx];
+        if col.kind == PivotValueColKind::GrandTotal {
+            if gt.is_some() {
+                return Err(ErrorKind::Ref);
+            }
+            gt = Some(col.col);
+        }
+    }
+    gt.ok_or(ErrorKind::Ref)
 }
 
 fn getpivotdata_grand_total(
     ctx: &dyn FunctionContext,
     sheet_id: &SheetId,
     layout: &PivotLayout,
+    value_col: u32,
 ) -> Value {
     const MAX_SCAN_ROWS: u32 = 10_000;
 
@@ -1471,7 +1648,7 @@ fn getpivotdata_grand_total(
                 sheet_id,
                 crate::eval::CellAddr {
                     row,
-                    col: layout.data_col,
+                    col: value_col,
                 },
             );
         }
@@ -1488,7 +1665,7 @@ fn getpivotdata_grand_total(
             sheet_id,
             crate::eval::CellAddr {
                 row,
-                col: layout.data_col,
+                col: value_col,
             },
         );
         if matches!(first, Value::Blank) && matches!(value, Value::Blank) {
@@ -1504,6 +1681,7 @@ fn getpivotdata_find_row(
     sheet_id: &SheetId,
     layout: &PivotLayout,
     criteria: &[(u32, Value)],
+    value_col: u32,
 ) -> Result<u32, ErrorKind> {
     const MAX_SCAN_ROWS: u32 = 10_000;
 
@@ -1524,7 +1702,7 @@ fn getpivotdata_find_row(
             sheet_id,
             crate::eval::CellAddr {
                 row,
-                col: layout.data_col,
+                col: value_col,
             },
         );
         if matches!(first, Value::Blank) && matches!(value, Value::Blank) {
@@ -1550,13 +1728,6 @@ fn getpivotdata_find_row(
     }
 
     found.ok_or(ErrorKind::NA)
-}
-
-fn value_text_eq(v: &Value, s: &str) -> bool {
-    match v {
-        Value::Text(t) => t.eq_ignore_ascii_case(s),
-        _ => false,
-    }
 }
 
 fn pivot_item_matches(ctx: &dyn FunctionContext, cell: &Value, item: &Value) -> Result<bool, ErrorKind> {
