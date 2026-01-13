@@ -256,6 +256,13 @@ def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(overhead, dict):
         overhead = {}
 
+    part_change_ratio = summary.get("part_change_ratio") or {}
+    if not isinstance(part_change_ratio, dict):
+        part_change_ratio = {}
+    part_change_ratio_critical = summary.get("part_change_ratio_critical") or {}
+    if not isinstance(part_change_ratio_critical, dict):
+        part_change_ratio_critical = {}
+
     timings = summary.get("timings") or {}
     if not isinstance(timings, dict):
         timings = {}
@@ -299,6 +306,9 @@ def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
         "size_overhead_p50": overhead.get("p50"),
         "size_overhead_p90": overhead.get("p90"),
         "size_overhead_samples": int(overhead.get("count") or 0),
+        # Fraction of package parts that changed (any severity / critical-only).
+        "part_change_ratio_p90": part_change_ratio.get("p90"),
+        "part_change_ratio_critical_p90": part_change_ratio_critical.get("p90"),
     }
 
     def _top_list(
@@ -1054,6 +1064,8 @@ def main() -> int:
         help="Optional CI gate: fail if round_trip p90 exceeds this threshold (ms).",
     )
     args = parser.parse_args()
+    if args.trend_max_entries < 0:
+        parser.error("--trend-max-entries must be >= 0")
 
     triage_dir = args.triage_dir
     out_dir = args.out_dir or triage_dir
