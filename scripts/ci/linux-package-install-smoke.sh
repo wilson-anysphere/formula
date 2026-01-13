@@ -117,14 +117,18 @@ find_pkg_dirs() {
 
   local -A seen=()
   local -a dirs=()
-  local f d
+  local f d d_abs
   for f in "${files[@]}"; do
     d="$(dirname "${f}")"
-    if [[ -n "${seen[${d}]:-}" ]]; then
+    # Normalize to an absolute path so we don't accidentally run the same smoke
+    # test twice (e.g. when `CARGO_TARGET_DIR=target` yields both absolute and
+    # relative matches).
+    d_abs="$(cd "${d}" && pwd -P)"
+    if [[ -n "${seen[${d_abs}]:-}" ]]; then
       continue
     fi
-    seen["${d}"]=1
-    dirs+=("${d}")
+    seen["${d_abs}"]=1
+    dirs+=("${d_abs}")
   done
 
   out_dirs=("${dirs[@]}")
