@@ -10880,16 +10880,17 @@ export class SpreadsheetApp {
         }
       }
 
-      const key = `${targetSheet}:${addr.toUpperCase()}`;
+      const normalizedAddr = addr.replaceAll("$", "").trim().toUpperCase();
+      const key = `${targetSheet}:${normalizedAddr}`;
       if (memo.has(key)) return memo.get(key) as SpreadsheetValue;
       if (stack.has(key)) return "#REF!";
 
       stack.add(key);
-      const state = this.document.getCell(targetSheet, addr) as { value: unknown; formula: string | null };
+      const state = this.document.getCell(targetSheet, normalizedAddr) as { value: unknown; formula: string | null };
       let value: SpreadsheetValue;
       if (state?.formula) {
         value = evaluateFormula(state.formula, getCellValue, {
-          cellAddress: `${targetSheet}!${addr.toUpperCase()}`,
+          cellAddress: `${targetSheet}!${normalizedAddr}`,
           resolveNameToReference,
           maxRangeCells: MAX_CELL_READS,
         });
