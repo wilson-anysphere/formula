@@ -30,6 +30,7 @@ This package focuses on:
 - [`ContextManager` options](#contextmanager-constructor-options)
 - Examples
   - [Extract schema + summarize](#example-extract-sheet-schema--summarize)
+  - [Extract workbook schema](#example-extract-workbook-schema-tables--named-ranges)
   - [Single-sheet context](#example-build-single-sheet-context-with-contextmanagerbuildcontext)
   - [Workbook context](#example-build-workbook-context-with-contextmanagerbuildworkbookcontextfromspreadsheetapi)
   - [Trim conversation history](#example-trim-conversation-history-with-trimmessagestobudget)
