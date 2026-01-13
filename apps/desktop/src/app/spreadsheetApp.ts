@@ -6109,6 +6109,13 @@ export class SpreadsheetApp {
       }
     }
 
+    // Unqualified A1 references (e.g. `A1:B2`) are relative to the sheet containing the formula.
+    // When the formula bar is editing a cell on another sheet (Excel-style range selection mode),
+    // avoid previewing/highlighting them on the *currently active* sheet.
+    if (this.formulaEditCell?.sheetId) {
+      return { explicit: true, sheetId: this.formulaEditCell.sheetId };
+    }
+
     return { explicit: false, sheetId: null };
   }
 
@@ -13104,10 +13111,17 @@ export class SpreadsheetApp {
   ): Array<{ start: CellCoord; end: CellCoord; color: string; active: boolean }> {
     if (!highlights || highlights.length === 0) return [];
 
+    const formulaSheetId = this.formulaEditCell?.sheetId ?? sheetId;
+
     return highlights
       .filter((h) => {
         const sheet = h.range.sheet;
-        if (!sheet) return true;
+        if (!sheet) {
+          // Unqualified references (no sheet qualifier) are relative to the sheet containing the formula.
+          // When the user is viewing another sheet while still editing the formula, don't render
+          // misleading highlights on the active sheet.
+          return formulaSheetId.toLowerCase() === sheetId.toLowerCase();
+        }
         const resolved = this.getSheetIdByName(sheet);
         if (!resolved) return false;
         return resolved.toLowerCase() === sheetId.toLowerCase();

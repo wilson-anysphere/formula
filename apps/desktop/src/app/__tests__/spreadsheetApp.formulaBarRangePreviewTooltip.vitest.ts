@@ -178,6 +178,43 @@ describe("SpreadsheetApp formula-bar range preview tooltip", () => {
     formulaBar.remove();
   });
 
+  it("skips unqualified previews when editing a cell on another sheet", () => {
+    const root = createRoot();
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    // Ensure both sheets exist and have different values so a wrong-sheet preview would be obvious.
+    const doc = app.getDocument();
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, 111);
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, 222);
+
+    // Begin editing on Sheet1, then switch to Sheet2 without inserting a sheet-qualified reference.
+    const textarea = formulaBar.querySelector('[data-testid="formula-input"]') as HTMLTextAreaElement | null;
+    expect(textarea).not.toBeNull();
+    textarea!.dispatchEvent(new Event("focus"));
+    app.activateSheet("Sheet2");
+
+    textarea!.value = "=A1";
+    textarea!.setSelectionRange(textarea!.value.length, textarea!.value.length);
+    textarea!.dispatchEvent(new Event("input"));
+
+    const tooltip = formulaBar.querySelector<HTMLElement>('[data-testid="formula-range-preview-tooltip"]');
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.hidden).toBe(true);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
   it("renders a preview grid for named ranges when hovering an identifier in view mode", () => {
     const root = createRoot();
     const formulaBar = document.createElement("div");
