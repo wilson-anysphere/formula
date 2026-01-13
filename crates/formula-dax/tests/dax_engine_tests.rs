@@ -1234,6 +1234,68 @@ fn bidirectional_relationship_propagates_filters_to_dimension() {
 }
 
 #[test]
+fn crossfilter_can_override_relationship_direction_inside_calculate() {
+    let model = build_model();
+    let filter = FilterContext::empty().with_column_equals("Orders", "Amount", 20.0.into());
+
+    let engine = DaxEngine::new();
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(Customers)",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(Customers), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], BOTH))",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn crossfilter_none_can_disable_relationship_inside_calculate() {
+    let model = build_model();
+    let filter = FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "SUM(Orders[Amount])",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        38.0.into()
+    );
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(SUM(Orders[Amount]), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], NONE))",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        43.0.into()
+    );
+}
+
+#[test]
 fn relationship_does_not_filter_facts_when_dimension_is_unfiltered() {
     // When referential integrity is not enforced, tabular models include fact rows whose
     // foreign key has no match in the dimension. Those rows should only be removed when the

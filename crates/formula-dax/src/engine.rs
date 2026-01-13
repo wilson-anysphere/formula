@@ -77,11 +77,18 @@ pub enum DaxError {
     Eval(String),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RelationshipOverride {
+    Active(CrossFilterDirection),
+    Disabled,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct FilterContext {
     column_filters: HashMap<(String, String), HashSet<Value>>,
     row_filters: HashMap<String, HashSet<usize>>,
     active_relationship_overrides: HashSet<usize>,
+    cross_filter_overrides: HashMap<usize, RelationshipOverride>,
     suppress_implicit_measure_context_transition: bool,
 }
 
@@ -1235,6 +1242,9 @@ impl DaxEngine {
                 if name.eq_ignore_ascii_case("USERELATIONSHIP") {
                     self.apply_userelationship(model, filter, args)?;
                     self.apply_userelationship(model, &mut eval_filter, args)?;
+                } else if name.eq_ignore_ascii_case("CROSSFILTER") {
+                    self.apply_crossfilter(model, filter, args)?;
+                    self.apply_crossfilter(model, &mut eval_filter, args)?;
                 }
             }
         }
@@ -1263,6 +1273,7 @@ impl DaxEngine {
 
             match arg {
                 Expr::Call { name, .. } if name.eq_ignore_ascii_case("USERELATIONSHIP") => {}
+                Expr::Call { name, .. } if name.eq_ignore_ascii_case("CROSSFILTER") => {}
                 Expr::Call { name, args }
                     if name.eq_ignore_ascii_case("ALL")
                         || name.eq_ignore_ascii_case("REMOVEFILTERS") =>
@@ -1492,6 +1503,67 @@ impl DaxEngine {
         };
 
         filter.activate_relationship(rel_idx);
+        Ok(())
+    }
+
+    fn apply_crossfilter(
+        &self,
+        model: &DataModel,
+        filter: &mut FilterContext,
+        args: &[Expr],
+    ) -> DaxResult<()> {
+        let [left, right, direction] = args else {
+            return Err(DaxError::Eval("CROSSFILTER expects 3 arguments".into()));
+        };
+        let Expr::ColumnRef {
+            table: left_table,
+            column: left_column,
+        } = left
+        else {
+            return Err(DaxError::Type(
+                "CROSSFILTER expects column references".into(),
+            ));
+        };
+        let Expr::ColumnRef {
+            table: right_table,
+            column: right_column,
+        } = right
+        else {
+            return Err(DaxError::Type(
+                "CROSSFILTER expects column references".into(),
+            ));
+        };
+
+        // The third argument is a bare identifier in DAX, and our parser represents bare
+        // identifiers as `Expr::TableName`.
+        let override_dir = match direction {
+            Expr::TableName(name) => match name.to_ascii_uppercase().as_str() {
+                "BOTH" => RelationshipOverride::Active(CrossFilterDirection::Both),
+                // DAX uses `ONEWAY` but we'll accept the more explicit `SINGLE` as well.
+                "ONEWAY" | "SINGLE" => RelationshipOverride::Active(CrossFilterDirection::Single),
+                "NONE" => RelationshipOverride::Disabled,
+                other => {
+                    return Err(DaxError::Eval(format!(
+                        "unsupported CROSSFILTER direction {other}"
+                    )))
+                }
+            },
+            other => {
+                return Err(DaxError::Type(format!(
+                    "CROSSFILTER expects a direction identifier, got {other:?}"
+                )))
+            }
+        };
+
+        let Some(rel_idx) =
+            model.find_relationship_index(left_table, left_column, right_table, right_column)
+        else {
+            return Err(DaxError::Eval(format!(
+                "no relationship found between {left_table}[{left_column}] and {right_table}[{right_column}]"
+            )));
+        };
+
+        filter.cross_filter_overrides.insert(rel_idx, override_dir);
         Ok(())
     }
 
@@ -2161,11 +2233,22 @@ fn resolve_row_sets(
             } else {
                 relationship.rel.is_active
             };
-            if !is_active {
+
+            // CROSSFILTER can disable a relationship for the duration of the evaluation.
+            let override_state = filter.cross_filter_overrides.get(&idx).copied();
+
+            if !is_active || matches!(override_state, Some(RelationshipOverride::Disabled)) {
                 continue;
             }
+
+            let cross_filter_direction = match override_state {
+                Some(RelationshipOverride::Active(dir)) => dir,
+                None => relationship.rel.cross_filter_direction,
+                Some(RelationshipOverride::Disabled) => unreachable!("checked above"),
+            };
+
             changed |= propagate_filter(&mut sets, relationship, Direction::ToMany, filter)?;
-            if relationship.rel.cross_filter_direction == CrossFilterDirection::Both {
+            if cross_filter_direction == CrossFilterDirection::Both {
                 changed |= propagate_filter(&mut sets, relationship, Direction::ToOne, filter)?;
             }
         }
@@ -2415,7 +2498,11 @@ fn virtual_blank_row_exists(model: &DataModel, filter: &FilterContext, table: &s
         } else {
             rel.rel.is_active
         };
-        if !is_active {
+
+        if !is_active || matches!(
+            filter.cross_filter_overrides.get(&idx).copied(),
+            Some(RelationshipOverride::Disabled)
+        ) {
             continue;
         }
 
