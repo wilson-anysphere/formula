@@ -10,6 +10,24 @@ import { normalizeDocumentState } from "../../../../../packages/versioning/branc
 const structuredCloneFn =
   typeof globalThis.structuredClone === "function" ? globalThis.structuredClone : null;
 
+/**
+ * @param {Uint8Array} bytes
+ * @returns {string}
+ */
+function encodeBase64(bytes) {
+  // eslint-disable-next-line no-undef
+  if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
+  if (typeof btoa === "function") {
+    const chunkSize = 0x8000;
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  }
+  throw new Error("Base64 encoding is not supported in this environment");
+}
+
 // Collab masking (permissions/encryption) renders unreadable cells as a constant
 // placeholder. Branching should treat these as "unknown" rather than persisting
 // the placeholder as real content.
@@ -401,12 +419,62 @@ export function documentControllerToBranchState(doc) {
     metaById[sheetId] = metaOut;
   }
 
+  /** @type {Record<string, any>} */
+  const metadata = {};
+
+  // --- Workbook images + sheet drawings ---
+  //
+  // BranchService doesn't have first-class workbook media types yet, but it provides a
+  // generic `metadata` map that is versioned + merged. Store the DocumentController
+  // image store and per-sheet drawings there so branching doesn't drop embedded media.
+  //
+  // Shape intentionally mirrors DocumentController's snapshot schema so we can rehydrate
+  // via `DocumentController.applyState` without additional transforms.
+  const imagesMap = doc?.images;
+  if (imagesMap instanceof Map) {
+    const images = Array.from(imagesMap.entries())
+      .map(([id, entry]) => {
+        const imageId = typeof id === "string" ? id : String(id);
+        const bytes = entry?.bytes instanceof Uint8Array ? entry.bytes : null;
+        if (!bytes) return null;
+        /** @type {any} */
+        const out = { id: imageId, bytesBase64: encodeBase64(bytes) };
+        if ("mimeType" in (entry ?? {})) out.mimeType = entry.mimeType ?? null;
+        return out;
+      })
+      .filter(Boolean)
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    if (images.length > 0) metadata.images = images;
+  }
+
+  const drawingsBySheet = {};
+  const canReadDrawings = typeof doc.getSheetDrawings === "function" || doc?.drawingsBySheet instanceof Map;
+  if (canReadDrawings) {
+    for (const sheetId of sheetIds) {
+      let drawings = [];
+      if (typeof doc.getSheetDrawings === "function") {
+        try {
+          drawings = doc.getSheetDrawings(sheetId) ?? [];
+        } catch {
+          drawings = [];
+        }
+      } else {
+        const raw = doc.drawingsBySheet?.get?.(sheetId);
+        drawings = Array.isArray(raw) ? cloneJsonish(raw) : [];
+      }
+      if (Array.isArray(drawings) && drawings.length > 0) {
+        drawingsBySheet[sheetId] = cloneJsonish(drawings);
+      }
+    }
+    if (Object.keys(drawingsBySheet).length > 0) metadata.drawingsBySheet = drawingsBySheet;
+  }
+
   /** @type {DocumentState} */
   const state = {
     schemaVersion: 1,
     sheets: { order: sheetIds, metaById },
     cells,
-    metadata: {},
+    metadata,
     namedRanges: {},
     comments: {},
   };
@@ -518,7 +586,27 @@ export function applyBranchStateToDocumentController(doc, state) {
   // Match DocumentController's snapshot shape: include an explicit `sheetOrder`
   // array so ordering survives even if consumers manipulate/sort the `sheets`
   // list.
+  /** @type {any} */
   const snapshot = { schemaVersion: 1, sheetOrder: sheetIds, sheets };
+
+  // Restore workbook images + drawings (stored inside BranchService metadata).
+  // These are optional; omit when empty so older controllers/snapshots remain compact.
+  const rawImages = normalized.metadata?.images;
+  if (Array.isArray(rawImages) && rawImages.length > 0) {
+    snapshot.images = cloneJsonish(rawImages);
+  }
+
+  const rawDrawingsBySheet = normalized.metadata?.drawingsBySheet;
+  if (rawDrawingsBySheet && typeof rawDrawingsBySheet === "object" && !Array.isArray(rawDrawingsBySheet)) {
+    /** @type {Record<string, any[]>} */
+    const out = {};
+    for (const [sheetId, drawings] of Object.entries(rawDrawingsBySheet)) {
+      if (!sheetIds.includes(sheetId)) continue;
+      if (!Array.isArray(drawings) || drawings.length === 0) continue;
+      out[sheetId] = cloneJsonish(drawings);
+    }
+    if (Object.keys(out).length > 0) snapshot.drawingsBySheet = out;
+  }
 
   const encoded =
     typeof TextEncoder !== "undefined"
