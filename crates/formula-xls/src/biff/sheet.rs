@@ -1387,7 +1387,12 @@ fn parse_hyperlink_string(input: &[u8], codepage: u16) -> Result<(String, usize)
                 if input.len() >= 4 + byte_len {
                     let bytes = &input[4..4 + byte_len];
                     let s = decode_utf16le(bytes)?;
-                    return Ok((trim_trailing_nuls(s), 4 + byte_len));
+                    // Hyperlink-related strings in BIFF are frequently NUL terminated, but we've
+                    // observed files in the wild that include embedded NULs + trailing garbage
+                    // within the declared length. Truncate at the first NUL for best-effort
+                    // compatibility (mirrors how file moniker paths are handled).
+                    let s = trim_at_first_nul(trim_trailing_nuls(s));
+                    return Ok((s, 4 + byte_len));
                 }
             }
         }
@@ -1395,7 +1400,7 @@ fn parse_hyperlink_string(input: &[u8], codepage: u16) -> Result<(String, usize)
 
     // Fallback: BIFF8 XLUnicodeString (u16 length + flags).
     let (s, consumed) = strings::parse_biff8_unicode_string(input, codepage)?;
-    Ok((s, consumed))
+    Ok((trim_at_first_nul(trim_trailing_nuls(s)), consumed))
 }
 
 fn decode_utf16le(bytes: &[u8]) -> Result<String, String> {

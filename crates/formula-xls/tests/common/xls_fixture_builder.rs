@@ -6612,6 +6612,109 @@ pub fn build_continued_hyperlink_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing hyperlink edge cases:
+///
+/// - A malformed hyperlink record (declared string length larger than available bytes) that should
+///   yield an import warning and be skipped.
+/// - A valid hyperlink split across `HLINK` + multiple `CONTINUE` records, with UTF-16 string data
+///   split at fragment boundaries (including an odd-byte boundary within a UTF-16 code unit).
+/// - Embedded NUL characters inside the display/tooltip/location strings; the importer should
+///   truncate at the first NUL for best-effort compatibility.
+pub fn build_hyperlink_edge_cases_fixture_xls() -> Vec<u8> {
+    // Malformed hyperlink anchored at B1.
+    let malformed = hlink_external_url_malformed_tooltip_len(
+        0,
+        0,
+        1,
+        1,
+        "https://example.com",
+        "Bad",
+        "Bad tooltip",
+        1000,
+    );
+
+    // Valid continued internal hyperlink anchored at A1, pointing to B2.
+    let display = "Display\u{0}After";
+    let location = "EdgeCases!B2\u{0}Ignored";
+    let tooltip = "Tooltip\u{0}Ignored";
+    let continued = hlink_internal_location(0, 0, 0, 0, location, display, tooltip);
+
+    // Compute split points that fall inside the `location` string's UTF-16 payload:
+    // - First split: 1 byte into the UTF-16 character data (between bytes of the first code unit).
+    // - Second split: on a UTF-16 code unit boundary.
+    let display_field_len = hyperlink_string_field_len(display);
+    let location_field_start = 32usize + display_field_len;
+    let location_utf16_start = location_field_start + 4;
+    let split1 = location_utf16_start + 1;
+    let split2 = location_utf16_start + 10;
+
+    // -- Globals -----------------------------------------------------------------
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: 16 style XFs + one cell XF for the A1 cell value.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "EdgeCases");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // A1: NUMBER record so calamine reports at least one used cell.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    // Malformed HLINK record at B1.
+    push_record(&mut sheet, RECORD_HLINK, &malformed);
+
+    // Continued HLINK record at A1.
+    push_hlink_record_continued(&mut sheet, &continued, &[split1, split2]);
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream.write_all(&globals).expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 fn build_merged_hyperlink_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -6779,6 +6882,58 @@ fn hlink_external_url(
     }
 
     write_hyperlink_string(&mut out, tooltip);
+
+    out
+}
+
+fn hlink_external_url_malformed_tooltip_len(
+    rw_first: u16,
+    rw_last: u16,
+    col_first: u16,
+    col_last: u16,
+    url: &str,
+    display: &str,
+    tooltip: &str,
+    tooltip_cch: u32,
+) -> Vec<u8> {
+    // Same as `hlink_external_url`, but writes an intentionally malformed tooltip HyperlinkString
+    // length prefix so the importer sees a declared length larger than the available bytes.
+    const STREAM_VERSION: u32 = 2;
+    const LINK_OPTS_HAS_MONIKER: u32 = 0x0000_0001;
+    const LINK_OPTS_HAS_DISPLAY: u32 = 0x0000_0010;
+    const LINK_OPTS_HAS_TOOLTIP: u32 = 0x0000_0020;
+
+    // URL moniker CLSID: 79EAC9E0-BAF9-11CE-8C82-00AA004BA90B (COM GUID little-endian fields).
+    const CLSID_URL_MONIKER: [u8; 16] = [
+        0xE0, 0xC9, 0xEA, 0x79, 0xF9, 0xBA, 0xCE, 0x11, 0x8C, 0x82, 0x00, 0xAA, 0x00, 0x4B, 0xA9, 0x0B,
+    ];
+
+    let link_opts = LINK_OPTS_HAS_MONIKER | LINK_OPTS_HAS_DISPLAY | LINK_OPTS_HAS_TOOLTIP;
+
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&rw_first.to_le_bytes());
+    out.extend_from_slice(&rw_last.to_le_bytes());
+    out.extend_from_slice(&col_first.to_le_bytes());
+    out.extend_from_slice(&col_last.to_le_bytes());
+
+    out.extend_from_slice(&[0u8; 16]); // hyperlink GUID (unused)
+    out.extend_from_slice(&STREAM_VERSION.to_le_bytes());
+    out.extend_from_slice(&link_opts.to_le_bytes());
+
+    write_hyperlink_string(&mut out, display);
+
+    // URL moniker: CLSID + length (bytes) + UTF-16LE URL (NUL terminated).
+    out.extend_from_slice(&CLSID_URL_MONIKER);
+    let mut url_utf16: Vec<u16> = url.encode_utf16().collect();
+    url_utf16.push(0); // NUL terminator
+    let url_bytes_len: u32 = (url_utf16.len() * 2) as u32;
+    out.extend_from_slice(&url_bytes_len.to_le_bytes());
+    for code_unit in url_utf16 {
+        out.extend_from_slice(&code_unit.to_le_bytes());
+    }
+
+    // Tooltip with malformed declared length.
+    write_hyperlink_string_with_declared_cch(&mut out, tooltip, tooltip_cch);
 
     out
 }
@@ -6971,6 +7126,57 @@ fn write_hyperlink_string(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(&(u16s.len() as u32).to_le_bytes());
     for code_unit in u16s {
         out.extend_from_slice(&code_unit.to_le_bytes());
+    }
+}
+
+fn write_hyperlink_string_with_declared_cch(out: &mut Vec<u8>, s: &str, declared_cch: u32) {
+    // HyperlinkString: u32 cch + UTF-16LE (including trailing NUL).
+    // Some corrupted files in the wild have inconsistent `cch` values; tests use this helper to
+    // build such payloads.
+    let mut u16s: Vec<u16> = s.encode_utf16().collect();
+    u16s.push(0);
+    out.extend_from_slice(&declared_cch.to_le_bytes());
+    for code_unit in u16s {
+        out.extend_from_slice(&code_unit.to_le_bytes());
+    }
+}
+
+fn hyperlink_string_field_len(s: &str) -> usize {
+    // Length in bytes written by `write_hyperlink_string`.
+    let u16_len = s.encode_utf16().count() + 1; // trailing NUL
+    4 + u16_len * 2
+}
+
+fn push_hlink_record_continued(out: &mut Vec<u8>, payload: &[u8], split_points: &[usize]) {
+    // Emit an HLINK record split across one or more CONTINUE records. `split_points` are absolute
+    // byte offsets into the logical record payload.
+    if split_points.is_empty() {
+        push_record(out, RECORD_HLINK, payload);
+        return;
+    }
+
+    let mut start = 0usize;
+    let mut first = true;
+    for &split in split_points {
+        let split = split.min(payload.len());
+        if split <= start {
+            continue;
+        }
+        let frag = &payload[start..split];
+        if first {
+            push_record(out, RECORD_HLINK, frag);
+            first = false;
+        } else {
+            push_record(out, RECORD_CONTINUE, frag);
+        }
+        start = split;
+    }
+
+    let tail = &payload[start..];
+    if first {
+        push_record(out, RECORD_HLINK, tail);
+    } else {
+        push_record(out, RECORD_CONTINUE, tail);
     }
 }
 
