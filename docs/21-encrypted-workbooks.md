@@ -14,8 +14,10 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
 - Encrypted workbooks are **detected** and rejected with a clear error:
   - `formula-io` returns `formula_io::Error::EncryptedWorkbook`.
   - The desktop app surfaces an “encrypted workbook not supported” message.
-- Password-based decryption is not yet wired into the public open APIs, so callers cannot supply a
-  password to open an encrypted workbook.
+- Password-based decryption is not yet wired into the high-level `formula-io` open APIs, so the
+  default open path cannot accept a password.
+  - Note: the legacy `.xls` importer (`formula-xls`) exposes
+    `import_xls_path_with_password(...)` for a subset of BIFF8 encryption (see below).
 
 **Intended behavior (when decryption + password plumbing is implemented):**
 
@@ -28,7 +30,7 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
 | File type | Encryption marker | Schemes (common) | Current behavior | Planned/target behavior |
 |---|---|---|---|---|
 | `.xlsx` / `.xlsm` / `.xlsb` (OOXML) | OLE/CFB streams `EncryptionInfo` + `EncryptedPackage` | Agile (4.4), Standard (3.2) | Detect + return `Error::EncryptedWorkbook` | Decrypt + open; surface `PasswordRequired` / `InvalidPassword` / `UnsupportedEncryptionScheme` |
-| `.xls` (BIFF) | BIFF `FILEPASS` record in workbook stream | XOR, RC4, CryptoAPI | Detect + return `Error::EncryptedWorkbook` | Decrypt + open (scope TBD; see [Legacy `.xls` encryption](#legacy-xls-encryption-biff-filepass)) |
+| `.xls` (BIFF) | BIFF `FILEPASS` record in workbook stream | XOR, RC4, CryptoAPI | `formula-io`: detect + `Error::EncryptedWorkbook` (no password plumbing yet). `formula-xls`: supports BIFF8 RC4 CryptoAPI when a password is provided. | Plumb password into `formula-io` and expand scheme coverage as needed (see [Legacy `.xls` encryption](#legacy-xls-encryption-biff-filepass)) |
 
 ---
 
@@ -105,8 +107,11 @@ Implementation notes:
 
 - `crates/formula-io/src/bin/ooxml-encryption-info.rs` prints a one-line scheme/version summary
   based on the `(majorVersion, minorVersion)` header (e.g. `3.2` → Standard, `4.4` → Agile).
-- `crates/formula-offcrypto` is a low-level helper for decrypting a Standard `EncryptedPackage`
-  **given a derived key**; it does not parse `EncryptionInfo` by itself.
+- `crates/formula-offcrypto` parses `EncryptionInfo` (Standard/CryptoAPI 3.2 and Agile 4.4
+  password-key-encryptor subset) and implements Standard password→key derivation + verifier checks.
+- `crates/formula-io/src/offcrypto/encrypted_package.rs` decrypts the Standard/CryptoAPI
+  `EncryptedPackage` stream once you have the file key and verifier salt (AES-CBC in 0x1000-byte
+  segments).
 
 ### Supported OOXML encryption schemes
 
@@ -137,9 +142,12 @@ archive containing `xl/workbook.bin` for `.xlsb`).
 
 The encryption *mode* differs by scheme:
 
-- **Standard (3.2):** AES-ECB over the ciphertext payload (16-byte blocks).
-- **Agile (4.4):** encrypted in **4096-byte plaintext segments** with a per-segment IV derived from
-  `keyData/@saltValue` and the segment index (see MS-OFFCRYPTO Agile encryption).
+- **Standard (3.2 / CryptoAPI):** AES-CBC ciphertext split into **0x1000-byte (4096) segments**.
+  Each segment `i` uses `IV = SHA1(verifierSalt || LE32(i))[0..16]` and is decrypted independently;
+  the concatenated plaintext is truncated to `original_package_size`.
+- **Agile (4.4):** encrypted in **0x1000-byte (4096) plaintext segments** with a per-segment IV
+  derived from `keyData/@saltValue` and the segment index, and cipher/chaining parameters specified
+  by the XML descriptor.
 
 ### High-level decrypt/open algorithm (OOXML)
 
@@ -184,8 +192,10 @@ Useful entrypoints when working on encrypted workbook support:
     - `detect_workbook_encryption`
     - `WorkbookEncryptionKind`
     - `Error::EncryptedWorkbook` (legacy “not supported” umbrella error)
-- **Standard (CryptoAPI) `EncryptedPackage` AES-ECB decrypt helper (given a derived key):**
-  - `crates/formula-offcrypto/src/lib.rs`
+- **Standard (CryptoAPI) helpers:**
+  - `crates/formula-offcrypto` — parse Standard `EncryptionInfo`, derive/verify password key
+  - `crates/formula-io/src/offcrypto/encrypted_package.rs` — decrypt Standard `EncryptedPackage`
+    once you have the AES key + verifier salt
 - **Agile encryption primitives (password hash / key+IV derivation):**
   - `crates/formula-xlsx/src/offcrypto/crypto.rs`
 
@@ -219,8 +229,13 @@ Formula’s decryption support is intentionally scoped:
 - We aim to support the widely encountered BIFF8 variants needed for “real-world compatibility”.
 - Rare/obsolete variants should produce a clear “unsupported encryption scheme” error.
 
-Current behavior: Formula detects `FILEPASS` during `.xls` import and returns an
-“encrypted workbook not supported” error rather than attempting decryption.
+Current behavior:
+
+- `formula_xls::import_xls_path(...)` (no password) returns `ImportError::EncryptedWorkbook` when
+  `FILEPASS` is present.
+- `formula_xls::import_xls_path_with_password(...)` supports **BIFF8 RC4 CryptoAPI**
+  (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`). Other `FILEPASS` variants are currently
+  treated as unsupported.
 
 ---
 
