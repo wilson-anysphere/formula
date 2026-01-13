@@ -15,6 +15,8 @@ lives elsewhere:
 
 Note: `formula-xlsx` also contains a best-effort OpenXML → engine bridge (for in-app computation),
 but that is a convenience layer, not the canonical schema boundary (see ADR-0005).
+The bridge lives at `crates/formula-xlsx/src/pivots/engine_bridge.rs` and is a migration target
+(OpenXML → `formula-model` schema, then model → compute), not a long-term architecture decision.
 
 The goal is team clarity: pivots are a large subsystem with many interdependent OPC parts, and
 regressions are easy to introduce when changing ZIP/relationship handling.
