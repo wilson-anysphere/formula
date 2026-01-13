@@ -632,7 +632,20 @@ impl XlsxPackage {
         let mut with_slash = String::with_capacity(name.len() + 1);
         with_slash.push('/');
         with_slash.push_str(name);
-        self.parts.get(with_slash.as_str()).map(|v| v.as_slice())
+        if let Some(bytes) = self.parts.get(with_slash.as_str()) {
+            return Some(bytes.as_slice());
+        }
+
+        // Fall back to a linear scan for non-canonical producer output:
+        // - Windows-style `\` separators (treated as `/`)
+        // - ASCII case differences (e.g. `XL/Workbook.xml`)
+        //
+        // Note: We intentionally do *not* canonicalize the stored part names; this map is used for
+        // higher-fidelity round-tripping where preserving unknown part names is valuable.
+        self.parts
+            .iter()
+            .find(|(key, _)| crate::zip_util::zip_part_names_equivalent(key.as_str(), name))
+            .map(|(_, bytes)| bytes.as_slice())
     }
 
     pub fn parts(&self) -> impl Iterator<Item = (&str, &[u8])> {

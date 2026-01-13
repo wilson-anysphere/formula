@@ -582,16 +582,13 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         parts.insert(name, buf);
     }
 
-    let workbook_kind = parts
-        .get("[Content_Types].xml")
-        .and_then(|bytes| detect_workbook_kind_from_content_types(bytes))
+    let workbook_kind = part_bytes_tolerant(&parts, "[Content_Types].xml")
+        .and_then(detect_workbook_kind_from_content_types)
         .unwrap_or(WorkbookKind::Workbook);
 
-    let workbook_xml = parts
-        .get(WORKBOOK_PART)
-        .ok_or(ReadError::MissingPart(WORKBOOK_PART))?;
-    let workbook_rels = parts
-        .get(WORKBOOK_RELS_PART)
+    let workbook_xml =
+        part_bytes_tolerant(&parts, WORKBOOK_PART).ok_or(ReadError::MissingPart(WORKBOOK_PART))?;
+    let workbook_rels = part_bytes_tolerant(&parts, WORKBOOK_RELS_PART)
         .ok_or(ReadError::MissingPart(WORKBOOK_RELS_PART))?;
 
     let rels_info = parse_relationships(workbook_rels)?;
@@ -625,7 +622,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     // without conditional formatting.
     let mut conditional_formatting_dxfs: Option<Vec<formula_model::CfStyleOverride>> = None;
     let styles_part = StylesPart::parse_or_default(
-        parts.get(&styles_part_name).map(|b| b.as_slice()),
+        part_bytes_tolerant(&parts, &styles_part_name),
         &mut workbook.styles,
     )?;
 
@@ -634,7 +631,8 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         .as_deref()
         .map(|target| resolve_target(WORKBOOK_PART, target))
         .unwrap_or_else(|| "xl/sharedStrings.xml".to_string());
-    let shared_strings = if let Some(bytes) = parts.get(&shared_strings_part_name) {
+    let shared_strings = if let Some(bytes) = part_bytes_tolerant(&parts, &shared_strings_part_name)
+    {
         parse_shared_strings(bytes)?
     } else {
         Vec::new()
@@ -645,8 +643,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         .as_deref()
         .map(|target| resolve_target(WORKBOOK_PART, target))
         .unwrap_or_else(|| "xl/metadata.xml".to_string());
-    let mut metadata_part = parts
-        .get(&metadata_part_name)
+    let mut metadata_part = part_bytes_tolerant(&parts, &metadata_part_name)
         .and_then(|bytes| MetadataPart::parse(bytes).ok());
     if let Some(metadata_part) = metadata_part.as_mut() {
         metadata_part.vm_index_base = infer_vm_index_base_for_workbook(&parts, &sheets);
@@ -674,14 +671,14 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         let ws_id = workbook.add_sheet(sheet.name.clone())?;
         worksheet_ids_by_index.push(ws_id);
 
-        let sheet_xml = parts.get(&sheet.path).ok_or(ReadError::MissingPart(
+        let sheet_xml = part_bytes_tolerant(&parts, &sheet.path).ok_or(ReadError::MissingPart(
             "worksheet part referenced from workbook.xml.rels",
         ))?;
         let sheet_xml_str = std::str::from_utf8(sheet_xml)?;
 
         // Worksheet relationships are needed to resolve table parts, hyperlinks, and drawings.
         let rels_part = rels_for_part(&sheet.path);
-        let rels_xml_bytes = parts.get(&rels_part).map(|bytes| bytes.as_slice());
+        let rels_xml_bytes = part_bytes_tolerant(&parts, &rels_part);
         let rels_xml = rels_xml_bytes.map(std::str::from_utf8).transpose()?;
 
         {
@@ -709,7 +706,6 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
                     .get_or_insert_with(|| styles_part.conditional_formatting_dxfs());
                 ws.conditional_formatting_dxfs = dxfs.clone();
             }
-
             // Merged cells (must be parsed before cell content so we don't treat interior
             // cells as value-bearing).
             let merges = crate::merge_cells::read_merge_cells_from_worksheet_xml(sheet_xml_str)
@@ -750,9 +746,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             })?;
 
             attach_tables_from_part_getter(ws, &sheet.path, sheet_xml, rels_xml_bytes, |target| {
-                parts
-                    .get(target)
-                    .map(|bytes| Cow::Borrowed(bytes.as_slice()))
+                part_bytes_tolerant(&parts, target).map(Cow::Borrowed)
             });
 
             parse_worksheet_into_model(
@@ -857,7 +851,7 @@ fn load_rich_value_images_from_parts(parts: &BTreeMap<String, Vec<u8>>, workbook
     };
 
     for target in targets.into_iter().flatten() {
-        let Some(bytes) = parts.get(&target) else {
+        let Some(bytes) = part_bytes_tolerant(parts, &target) else {
             continue;
         };
 
@@ -876,7 +870,7 @@ fn load_rich_value_images_from_parts(parts: &BTreeMap<String, Vec<u8>>, workbook
         workbook.images.insert(
             image_id,
             ImageData {
-                bytes: bytes.clone(),
+                bytes: bytes.to_vec(),
                 content_type: Some(content_type),
             },
         );
@@ -1544,7 +1538,7 @@ fn infer_vm_index_base_for_workbook(
     sheets: &[ParsedSheet],
 ) -> VmIndexBase {
     for sheet in sheets {
-        let Some(bytes) = parts.get(&sheet.path) else {
+        let Some(bytes) = part_bytes_tolerant(parts, &sheet.path) else {
             continue;
         };
         if worksheet_contains_vm_zero(bytes) {

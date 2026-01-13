@@ -4,7 +4,35 @@ use zip::read::ZipFile;
 use zip::result::ZipError;
 use zip::ZipArchive;
 
-/// Open a ZIP entry by name, tolerating a leading `/` mismatch.
+pub(crate) fn zip_part_names_equivalent(a: &str, b: &str) -> bool {
+    fn strip_leading_separators(mut bytes: &[u8]) -> &[u8] {
+        while matches!(bytes.first(), Some(b'/' | b'\\')) {
+            bytes = &bytes[1..];
+        }
+        bytes
+    }
+
+    let a = strip_leading_separators(a.as_bytes());
+    let b = strip_leading_separators(b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+
+    for (&a, &b) in a.iter().zip(b.iter()) {
+        let a = if a == b'\\' { b'/' } else { a.to_ascii_lowercase() };
+        let b = if b == b'\\' { b'/' } else { b.to_ascii_lowercase() };
+        if a != b {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Open a ZIP entry by name, tolerating common producer mistakes:
+/// - leading `/` mismatch
+/// - Windows-style `\` path separators
+/// - ASCII case differences
 ///
 /// Valid XLSX/XLSM files should *not* include a leading `/` in the underlying ZIP entry names,
 /// but some producers do. Since SpreadsheetML relationship targets and other part-name handling in
@@ -28,20 +56,26 @@ pub(crate) fn open_zip_part<'a, R: Read + Seek>(
         with_slash
     };
 
-    let mut candidate = None::<String>;
+    let mut candidate = None::<(String, u8)>;
     for entry in archive.file_names() {
         if entry == name {
-            candidate = Some(name.to_string());
+            candidate = Some((entry.to_string(), 3));
             break;
         }
         if entry == alt.as_str() {
-            candidate = Some(alt.clone());
+            candidate = Some((entry.to_string(), 2));
+            continue;
+        }
+
+        if zip_part_names_equivalent(entry, name) {
+            if candidate.as_ref().map_or(true, |(_, score)| *score < 1) {
+                candidate = Some((entry.to_string(), 1));
+            }
         }
     }
 
     match candidate {
-        Some(name) => archive.by_name(&name),
+        Some((name, _)) => archive.by_name(&name),
         None => Err(ZipError::FileNotFound),
     }
 }
-

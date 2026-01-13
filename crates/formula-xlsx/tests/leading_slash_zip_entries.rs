@@ -180,6 +180,57 @@ fn build_minimal_xlsx_with_leading_slash_drawing_part() -> Vec<u8> {
     zip.finish().unwrap().into_inner()
 }
 
+fn build_minimal_xlsx_with_noncanonical_entries() -> Vec<u8> {
+    let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+    Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+    let worksheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+</worksheet>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options =
+        FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    fn add_file(
+        zip: &mut ZipWriter<Cursor<Vec<u8>>>,
+        options: FileOptions<()>,
+        name: &str,
+        bytes: &[u8],
+    ) {
+        zip.start_file(name, options).unwrap();
+        zip.write_all(bytes).unwrap();
+    }
+
+    // Non-canonical entry names:
+    // - Different case (`XL/Workbook.xml`)
+    // - Windows-style path separators (`xl\worksheets\sheet1.xml`)
+    add_file(&mut zip, options, "XL/Workbook.xml", workbook_xml);
+    add_file(&mut zip, options, "xl/_rels/workbook.xml.rels", workbook_rels);
+    add_file(
+        &mut zip,
+        options,
+        r#"xl\worksheets\sheet1.xml"#,
+        worksheet_xml,
+    );
+
+    zip.finish().unwrap().into_inner()
+}
+
 #[test]
 fn worksheet_parts_from_reader_tolerates_leading_slash_entries() {
     let bytes = build_minimal_xlsx_with_leading_slash_entries();
@@ -280,5 +331,33 @@ fn preserve_drawing_parts_from_reader_tolerates_leading_slash_entries() {
     assert!(
         preserved.parts.contains_key("xl/drawings/drawing1.xml"),
         "expected preserved drawing parts to include xl/drawings/drawing1.xml"
+    );
+}
+
+#[test]
+fn read_workbook_model_from_bytes_tolerates_noncanonical_zip_entries() {
+    let bytes = build_minimal_xlsx_with_noncanonical_entries();
+    let workbook = read_workbook_model_from_bytes(&bytes).expect("read workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "Sheet1");
+}
+
+#[test]
+fn load_from_bytes_tolerates_noncanonical_zip_entries() {
+    let bytes = build_minimal_xlsx_with_noncanonical_entries();
+    let doc = load_from_bytes(&bytes).expect("load xlsx document");
+    assert_eq!(doc.workbook.sheets.len(), 1);
+    assert_eq!(doc.workbook.sheets[0].name, "Sheet1");
+}
+
+#[test]
+fn xlsx_package_part_lookup_tolerates_noncanonical_zip_entries() {
+    let bytes = build_minimal_xlsx_with_noncanonical_entries();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read package");
+    let workbook_xml = std::str::from_utf8(pkg.part("xl/workbook.xml").expect("workbook.xml part"))
+        .expect("workbook.xml utf-8");
+    assert!(
+        workbook_xml.contains("<sheet name=\"Sheet1\""),
+        "expected workbook.xml to contain sheet, got:\n{workbook_xml}"
     );
 }
