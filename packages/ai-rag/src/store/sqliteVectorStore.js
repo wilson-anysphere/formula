@@ -1187,8 +1187,8 @@ export class SqliteVectorStore {
     const workbookId = opts?.workbookId;
     throwIfAborted(signal);
     const sql = workbookId
-      ? "SELECT id, content_hash, metadata_hash FROM vectors WHERE workbook_id = ?"
-      : "SELECT id, content_hash, metadata_hash FROM vectors";
+      ? "SELECT id, content_hash, metadata_hash, length(vector) AS vector_bytes FROM vectors WHERE workbook_id = ?"
+      : "SELECT id, content_hash, metadata_hash, length(vector) AS vector_bytes FROM vectors";
     const stmt = this._db.prepare(sql);
     try {
       if (workbookId) stmt.bind([workbookId]);
@@ -1198,7 +1198,27 @@ export class SqliteVectorStore {
         throwIfAborted(signal);
         if (!stmt.step()) break;
         const row = stmt.get();
-        out.push({ id: row[0], contentHash: row[1] ?? null, metadataHash: row[2] ?? null });
+        const id = row[0];
+        const bytes = Number(row[3]);
+        if (!Number.isFinite(bytes)) {
+          throw new Error(
+            `SqliteVectorStore.listContentHashes() failed to read vector blob byte length for id=${JSON.stringify(id)}: got ${String(
+              row[3]
+            )}`
+          );
+        }
+        if (bytes % 4 !== 0) {
+          throw new Error(
+            `SqliteVectorStore.listContentHashes() invalid vector blob length for id=${JSON.stringify(id)}: ${bytes}`
+          );
+        }
+        const expectedBytes = this._dimension * 4;
+        if (bytes !== expectedBytes) {
+          throw new Error(
+            `SqliteVectorStore.listContentHashes() vector blob byte length mismatch for id=${JSON.stringify(id)}: expected ${expectedBytes}, got ${bytes}`
+          );
+        }
+        out.push({ id, contentHash: row[1] ?? null, metadataHash: row[2] ?? null });
       }
       throwIfAborted(signal);
       return out;

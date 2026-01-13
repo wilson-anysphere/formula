@@ -564,7 +564,28 @@ test(
       await assert.rejects(store.get("bad-bytes"), /failed to decode stored vector blob: Invalid vector blob length/);
       await assert.rejects(store.list(), /failed to decode stored vector blob for id=.*Invalid vector blob length/);
       await assert.rejects(store.list({ includeVector: false }), /invalid vector blob length/i);
+      await assert.rejects(store.listContentHashes(), /invalid vector blob length/i);
       await assert.rejects(store.query([1, 0, 0], 1), /dot\\(\\) failed to decode arg0 vector blob: Invalid vector blob length/);
+    } finally {
+      await store.close();
+    }
+  }
+);
+
+test(
+  "SqliteVectorStore.listContentHashes throws when stored vector blob has wrong length",
+  { skip: !sqlJsAvailable },
+  async () => {
+    const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
+    try {
+      const badBlob = new Uint8Array(new Float32Array([1, 0]).buffer);
+      const stmt = store._db.prepare(
+        "INSERT INTO vectors (id, workbook_id, vector, metadata_json) VALUES (?, ?, ?, ?);"
+      );
+      stmt.run(["bad", null, badBlob, "{}"]);
+      stmt.free();
+
+      await assert.rejects(store.listContentHashes(), /expected 12/);
     } finally {
       await store.close();
     }
