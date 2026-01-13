@@ -19,10 +19,11 @@ const CREDIT_CARD_CANDIDATE_RE = /\b(?:\d[ -]*?){13,16}\b/g;
 // Phone numbers are noisy; keep the patterns conservative and validate digit count.
 // - International: require '+' prefix (E.164-like)
 // - US: require separators / parentheses, optionally prefixed with +1
-// NOTE: We intentionally require the '+' to be preceded by a non-word boundary
-// (or start-of-string) to avoid matching common spreadsheet formulas like `=A1+12345678901`.
-// (Those are arithmetic operations, not phone numbers.)
-const PHONE_INTL_CANDIDATE_RE = /(^|[^\w])(\+\d[\d\s().-]{7,}\d)/g;
+// NOTE: Phone patterns are particularly prone to false positives in spreadsheets (e.g.
+// formulas that contain `+123...`). Keep this conservative:
+// - Require a plausible delimiter (whitespace/opening punctuation/assignment) before '+'.
+// - Avoid matching arithmetic operators like `)` or `*` that often appear in formulas.
+const PHONE_INTL_CANDIDATE_RE = /(^|[\s"'({\[<:=,])(\+\d[\d\s().-]{7,}\d)/g;
 const PHONE_US_CANDIDATE_RE = /(?:\+1[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]\d{3}[\s.-]\d{4}(?:\s*(?:ext|x|#)\s*\d{1,5})?/g;
 
 // Conservative token detectors. Keep patterns specific to reduce false positives.
