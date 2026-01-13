@@ -390,7 +390,7 @@ fn verify_password(info: &CryptoApiEncryptionInfo, password: &str) -> Result<[u8
 }
 
 fn parse_filepass_record_payload(payload: &[u8]) -> Result<CryptoApiEncryptionInfo, DecryptError> {
-    if payload.len() < 8 {
+    if payload.len() < 2 {
         return Err(DecryptError::InvalidFormat(format!(
             "FILEPASS payload truncated (len={})",
             payload.len()
@@ -400,13 +400,31 @@ fn parse_filepass_record_payload(payload: &[u8]) -> Result<CryptoApiEncryptionIn
     let encryption_type = read_u16_le(payload, 0).ok_or_else(|| {
         DecryptError::InvalidFormat("FILEPASS missing wEncryptionType".to_string())
     })?;
+
+    if encryption_type != ENCRYPTION_TYPE_RC4 {
+        return Err(DecryptError::UnsupportedEncryption);
+    }
+
+    if payload.len() < 4 {
+        return Err(DecryptError::InvalidFormat(format!(
+            "FILEPASS payload truncated: missing wEncryptionSubType (len={})",
+            payload.len()
+        )));
+    }
+
     let encryption_subtype = read_u16_le(payload, 2).ok_or_else(|| {
         DecryptError::InvalidFormat("FILEPASS missing wEncryptionSubType".to_string())
     })?;
 
-    if encryption_type != ENCRYPTION_TYPE_RC4 || encryption_subtype != ENCRYPTION_SUBTYPE_CRYPTOAPI
-    {
+    if encryption_subtype != ENCRYPTION_SUBTYPE_CRYPTOAPI {
         return Err(DecryptError::UnsupportedEncryption);
+    }
+
+    if payload.len() < 8 {
+        return Err(DecryptError::InvalidFormat(format!(
+            "FILEPASS payload truncated: missing dwEncryptionInfoLen (len={})",
+            payload.len()
+        )));
     }
 
     let enc_info_len = read_u32_le(payload, 4).ok_or_else(|| {
@@ -497,6 +515,14 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
 
     let mut offset = filepass_data_end;
     while offset < out.len() {
+        let remaining = out.len().saturating_sub(offset);
+        if remaining < 4 {
+            // Some writers may include trailing padding bytes after the final EOF record. Those
+            // bytes are not part of any record payload and should be ignored rather than treated
+            // as a truncated record header.
+            break;
+        }
+
         if offset + 4 > out.len() {
             return Err(DecryptError::InvalidFormat(
                 "truncated BIFF record header".to_string(),
@@ -521,4 +547,3 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
 
     Ok(out)
 }
-
