@@ -157,6 +157,9 @@ test("YjsBranchStore.ensureDocument can recover when root commit is mid snapshot
     maxChunksPerTransaction: 1,
   });
 
+  const stateBeforeRepair = await repairStore.getDocumentStateAtCommit(rootId);
+  assert.equal(stateBeforeRepair.schemaVersion, 1);
+
   await repairStore.ensureDocument(docId, actor, { sheets: {} });
 
   const repaired = commits.get(rootId);

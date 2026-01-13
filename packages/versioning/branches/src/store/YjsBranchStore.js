@@ -543,6 +543,10 @@ export class YjsBranchStore {
     const snapshotEncoding = commitMap.get("snapshotEncoding");
     if (snapshotEncoding === "gzip-chunks" || commitMap.get("snapshotChunks") !== undefined) {
       if (!this.#isCommitComplete(commitMap)) {
+        // Snapshot payloads are an optimization; if the patch is stored inline we
+        // can still reconstruct the commit state by replaying patches even while
+        // an interrupted snapshot chunk write is being repaired.
+        if (commitMap.get("patch") !== undefined) return null;
         throw new Error(`Commit not fully written yet: ${commitId}`);
       }
       const chunksArr = getYArray(commitMap.get("snapshotChunks"));
