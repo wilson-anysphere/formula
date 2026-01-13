@@ -73,7 +73,8 @@ node scripts/ci/check-tauri-cli-version.mjs
 # Ensures the tag version matches apps/desktop/src-tauri/tauri.conf.json "version".
 node scripts/check-desktop-version.mjs vX.Y.Z
 
-# Ensures plugins.updater.pubkey/endpoints are not placeholders when the updater is active.
+# Ensures plugins.updater.pubkey/endpoints are not placeholders and the pubkey is a valid minisign key
+# when the updater is active.
 node scripts/check-updater-config.mjs
 
 # Ensures Windows installers will install WebView2 if it is missing.
