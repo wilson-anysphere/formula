@@ -1300,16 +1300,6 @@ export class FormulaBarView {
 
     if (!this.model.isEditing) return;
 
-    if (this.textarea.value.trim() === "") {
-      this.textarea.value = "=";
-      this.textarea.setSelectionRange(1, 1);
-      this.model.updateDraft(this.textarea.value, 1, 1);
-      this.#selectedReferenceIndex = null;
-      this.#render({ preserveTextareaValue: true });
-      this.#emitOverlays();
-      this.#scheduleEngineTooling();
-    }
-
     this.#openFunctionPicker();
   }
 
@@ -1463,13 +1453,16 @@ export class FormulaBarView {
     if (!this.model.isEditing) return;
 
     const prevText = this.textarea.value;
+    const isEmpty = prevText.trim() === "";
     const start = Math.max(0, Math.min(selection.start, prevText.length));
     const end = Math.max(0, Math.min(selection.end, prevText.length));
 
     const insert = `${name}(`;
-    const nextText = prevText.slice(0, start) + insert + prevText.slice(end);
+    // If the user was editing an empty cell, selecting a function should insert the
+    // leading "=" (Excel behavior) so the result is a valid formula.
+    const nextText = isEmpty ? `=${insert}` : prevText.slice(0, start) + insert + prevText.slice(end);
     // Place the caret inside the parentheses so users can immediately type arguments.
-    const cursor = start + insert.length;
+    const cursor = isEmpty ? nextText.length : start + insert.length;
 
     this.textarea.value = nextText;
     try {
