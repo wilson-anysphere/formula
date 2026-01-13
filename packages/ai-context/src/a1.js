@@ -1,5 +1,14 @@
-const A1_CELL_RE = /^([A-Z]+)(\d+)$/;
-const A1_RANGE_RE = /^(?<start>[A-Z]+\d+)(?::(?<end>[A-Z]+\d+))?$/;
+export const EXCEL_MAX_ROWS = 1_048_576;
+export const EXCEL_MAX_COLS = 16_384;
+const EXCEL_MAX_ROW_INDEX = EXCEL_MAX_ROWS - 1;
+const EXCEL_MAX_COL_INDEX = EXCEL_MAX_COLS - 1;
+
+// Excel-style A1 cell refs (case-insensitive) with optional `$` absolute markers.
+// Examples: A1, $A$1, $A1, A$1.
+const A1_CELL_RE = /^\$?([A-Za-z]+)\$?(\d+)$/;
+const A1_CELL_RANGE_RE = /^(?<start>\$?[A-Za-z]+\$?\d+)(?:\s*:\s*(?<end>\$?[A-Za-z]+\$?\d+))?$/;
+const A1_COL_RANGE_RE = /^(?<start>\$?[A-Za-z]+)\s*:\s*(?<end>\$?[A-Za-z]+)$/;
+const A1_ROW_RANGE_RE = /^(?<start>\$?\d+)\s*:\s*(?<end>\$?\d+)$/;
 
 function isAsciiLetter(ch) {
   return ch >= "A" && ch <= "Z" ? true : ch >= "a" && ch <= "z";
@@ -148,10 +157,11 @@ export function columnIndexToA1(columnIndex) {
  * @param {string} letters
  */
 export function a1ToColumnIndex(letters) {
-  if (!letters || !/^[A-Z]+$/.test(letters)) {
+  if (!letters || !/^[A-Za-z]+$/.test(letters)) {
     throw new Error(`Invalid column letters: ${letters}`);
   }
 
+  letters = letters.toUpperCase();
   let value = 0;
   for (const char of letters) {
     value = value * 26 + (char.charCodeAt(0) - 64);
@@ -173,25 +183,76 @@ export function cellRefToA1(cell) {
  * @param {string} a1Cell
  */
 export function a1ToCellRef(a1Cell) {
-  const match = A1_CELL_RE.exec(a1Cell);
+  const match = A1_CELL_RE.exec(String(a1Cell).trim());
   if (!match) throw new Error(`Invalid A1 cell reference: ${a1Cell}`);
 
   const [, colLetters, rowDigits] = match;
-  const row = Number(rowDigits) - 1;
   const col = a1ToColumnIndex(colLetters);
+  const rowNumber = Number(rowDigits);
+  const row = rowNumber - 1;
 
-  if (!Number.isInteger(row) || row < 0) throw new Error(`Invalid row in A1 ref: ${a1Cell}`);
+  if (!Number.isInteger(rowNumber) || rowNumber < 1 || rowNumber > EXCEL_MAX_ROWS) {
+    throw new Error(`Invalid row in A1 ref: ${a1Cell}`);
+  }
+  if (!Number.isInteger(col) || col < 0 || col >= EXCEL_MAX_COLS) {
+    throw new Error(`Invalid column in A1 ref: ${a1Cell}`);
+  }
   return { row, col };
+}
+
+/**
+ * @param {string} colRef
+ */
+function a1ToColumnRangeIndex(colRef) {
+  const letters = String(colRef).trim().replace(/^\$/, "");
+  const col = a1ToColumnIndex(letters);
+  if (!Number.isInteger(col) || col < 0 || col >= EXCEL_MAX_COLS) {
+    throw new Error(`Invalid column in A1 ref: ${colRef}`);
+  }
+  return col;
+}
+
+/**
+ * @param {string} rowRef
+ */
+function a1ToRowRangeIndex(rowRef) {
+  const digits = String(rowRef).trim().replace(/^\$/, "");
+  const rowNumber = Number(digits);
+  if (!Number.isInteger(rowNumber) || rowNumber < 1 || rowNumber > EXCEL_MAX_ROWS) {
+    throw new Error(`Invalid row in A1 ref: ${rowRef}`);
+  }
+  return rowNumber - 1;
 }
 
 /**
  * @param {{ startRow: number, startCol: number, endRow: number, endCol: number, sheetName?: string }} range
  */
 export function rangeToA1(range) {
-  const start = cellRefToA1({ row: range.startRow, col: range.startCol });
-  const end = cellRefToA1({ row: range.endRow, col: range.endCol });
+  const normalized = normalizeRange(range);
+  const prefix = normalized.sheetName ? `${formatSheetName(normalized.sheetName)}!` : "";
+
+  // Whole-column ranges (e.g. A:C) cover all rows but only a subset of columns.
+  if (normalized.startRow === 0 && normalized.endRow === EXCEL_MAX_ROW_INDEX) {
+    const startCol = columnIndexToA1(normalized.startCol);
+    const endCol = columnIndexToA1(normalized.endCol);
+    return `${prefix}${startCol}:${endCol}`;
+  }
+
+  // Whole-row ranges (e.g. 1:10) cover all columns but only a subset of rows.
+  if (normalized.startCol === 0 && normalized.endCol === EXCEL_MAX_COL_INDEX) {
+    if (!Number.isInteger(normalized.startRow) || normalized.startRow < 0) {
+      throw new Error(`Invalid row in range: ${JSON.stringify(range)}`);
+    }
+    if (!Number.isInteger(normalized.endRow) || normalized.endRow < 0) {
+      throw new Error(`Invalid row in range: ${JSON.stringify(range)}`);
+    }
+    return `${prefix}${normalized.startRow + 1}:${normalized.endRow + 1}`;
+  }
+
+  const start = cellRefToA1({ row: normalized.startRow, col: normalized.startCol });
+  const end = cellRefToA1({ row: normalized.endRow, col: normalized.endCol });
   const suffix = start === end ? start : `${start}:${end}`;
-  return range.sheetName ? `${formatSheetName(range.sheetName)}!${suffix}` : suffix;
+  return `${prefix}${suffix}`;
 }
 
 /**
@@ -200,6 +261,7 @@ export function rangeToA1(range) {
  */
 export function parseA1Range(a1Range) {
   const input = String(a1Range).trim();
+  if (!input) throw new Error(`Invalid A1 range: ${a1Range}`);
   const bangIndex = input.lastIndexOf("!");
   const rawSheet = bangIndex === -1 ? "" : input.slice(0, bangIndex);
   const sheetName = bangIndex === -1 ? undefined : unescapeSheetName(rawSheet);
@@ -207,20 +269,48 @@ export function parseA1Range(a1Range) {
     throw new Error(`Invalid A1 range: missing sheet name in "${a1Range}"`);
   }
   const rest = bangIndex === -1 ? input : input.slice(bangIndex + 1).trim();
+  if (!rest) throw new Error(`Invalid A1 range: missing range in "${a1Range}"`);
 
-  const match = A1_RANGE_RE.exec(rest);
-  if (!match || !match.groups) throw new Error(`Invalid A1 range: ${a1Range}`);
+  const cellMatch = A1_CELL_RANGE_RE.exec(rest);
+  if (cellMatch?.groups) {
+    const start = a1ToCellRef(cellMatch.groups.start);
+    const end = cellMatch.groups.end ? a1ToCellRef(cellMatch.groups.end) : start;
+    return normalizeRange({
+      sheetName,
+      startRow: start.row,
+      startCol: start.col,
+      endRow: end.row,
+      endCol: end.col,
+    });
+  }
 
-  const start = a1ToCellRef(match.groups.start);
-  const end = match.groups.end ? a1ToCellRef(match.groups.end) : start;
+  const colMatch = A1_COL_RANGE_RE.exec(rest);
+  if (colMatch?.groups) {
+    const startCol = a1ToColumnRangeIndex(colMatch.groups.start);
+    const endCol = a1ToColumnRangeIndex(colMatch.groups.end);
+    return normalizeRange({
+      sheetName,
+      startRow: 0,
+      startCol,
+      endRow: EXCEL_MAX_ROW_INDEX,
+      endCol,
+    });
+  }
 
-  return normalizeRange({
-    sheetName,
-    startRow: start.row,
-    startCol: start.col,
-    endRow: end.row,
-    endCol: end.col,
-  });
+  const rowMatch = A1_ROW_RANGE_RE.exec(rest);
+  if (rowMatch?.groups) {
+    const startRow = a1ToRowRangeIndex(rowMatch.groups.start);
+    const endRow = a1ToRowRangeIndex(rowMatch.groups.end);
+    return normalizeRange({
+      sheetName,
+      startRow,
+      startCol: 0,
+      endRow,
+      endCol: EXCEL_MAX_COL_INDEX,
+    });
+  }
+
+  throw new Error(`Invalid A1 range: ${a1Range}`);
 }
 
 /**
