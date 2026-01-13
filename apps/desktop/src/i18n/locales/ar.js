@@ -52,6 +52,7 @@ export const ar = {
   "versionHistory.checkpoint": "نقطة حفظ",
   "versionHistory.autoSave": "حفظ تلقائي",
   "versionHistory.restore": "تمت الاستعادة",
+  "panels.versionHistory.title": "سجل الإصدارات",
   "versionHistory.panel.loading": "جارٍ تحميل سجل الإصدارات…",
   "versionHistory.panel.unavailableWithMessage": "سجل الإصدارات غير متاح: {message}",
   "versionHistory.panel.noSession": "سيظهر سجل الإصدارات هنا.",
