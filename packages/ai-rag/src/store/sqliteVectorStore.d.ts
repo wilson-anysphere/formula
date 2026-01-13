@@ -33,7 +33,14 @@ export class SqliteVectorStore {
   delete(ids: string[]): Promise<void>;
   deleteWorkbook(workbookId: string): Promise<number>;
   clear(): Promise<void>;
+  /**
+   * Run SQLite `VACUUM` to reclaim space after large deletions and persist the
+   * compacted database snapshot.
+   */
   compact(): Promise<void>;
+  /**
+   * Alias for {@link compact}.
+   */
   vacuum(): Promise<void>;
   get(id: string): Promise<{ id: string; vector: Float32Array; metadata: any } | null>;
   list(opts?: {
