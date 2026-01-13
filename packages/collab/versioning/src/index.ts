@@ -55,7 +55,21 @@ export type DefaultYjsVersionStoreOptions = {
    * "stream"`.
    */
   maxChunksPerTransaction?: number | null;
+  /**
+   * Optional snapshot compression.
+   *
+   * Note: `"gzip"` is only supported in environments with either Node's `zlib`
+   * or the web `CompressionStream` API. When unsupported, `YjsVersionStore` will
+   * throw when saving/loading versions. Defaults to `"none"`.
+   */
   compression?: "none" | "gzip";
+  /**
+   * How the snapshot bytes are encoded inside the Y.Doc.
+   *
+   * Note: when `writeMode: "stream"`, snapshots are always stored as `"chunks"`
+   * regardless of this option (so streaming mode can append bytes across many
+   * transactions).
+   */
   snapshotEncoding?: "chunks" | "base64";
 };
 
