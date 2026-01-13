@@ -61,6 +61,8 @@ const RECORD_FORMULA: u16 = 0x0006;
 /// SHRFMLA [MS-XLS 2.4.277] stores a shared formula (rgce) for a range.
 const RECORD_SHRFMLA: u16 = 0x04BC;
 const RECORD_LABELSST: u16 = 0x00FD;
+/// ARRAY [MS-XLS 2.4.19] stores an array (CSE) formula (rgce) for a range.
+const RECORD_ARRAY: u16 = 0x0221;
 const RECORD_HLINK: u16 = 0x01B8;
 const RECORD_AUTOFILTERINFO: u16 = 0x009D;
 const RECORD_SORT: u16 = 0x0090;
@@ -358,6 +360,25 @@ pub fn build_shared_formula_ptgfuncvar_fixture_xls() -> Vec<u8> {
 /// - `SharedArea3D!B2`: `Sheet1!A2:A3`
 pub fn build_shared_formula_area3d_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_shared_formula_area3d_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a minimal BIFF8 `.xls` fixture containing an array (CSE) formula.
+///
+/// The fixture contains a single sheet named `Array` with an array formula over `B1:B2` whose
+/// formula is `A1:A2`. Both cells in the array range have `FORMULA` records whose `rgce` is
+/// `PtgExp` referencing the base cell (`B1`), and the `ARRAY` record stores the shared `rgce`
+/// token stream.
+pub fn build_array_formula_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_array_formula_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -5648,6 +5669,14 @@ fn build_shared_formula_area3d_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_array_formula_workbook_stream() -> Vec<u8> {
+    // Use the generic single-sheet workbook builder: it creates a minimal BIFF8 globals stream
+    // including a default cell XF at index 16.
+    let xf_cell = 16u16;
+    let sheet_stream = build_array_formula_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("Array", &sheet_stream, 1252)
+}
+
 fn build_merged_formatted_blank_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -8073,6 +8102,59 @@ fn build_simple_number_sheet_stream(xf_cell: u16, v: f64) -> Vec<u8> {
 
     // A1: NUMBER record.
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, v));
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_array_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) (A..B, rows 1..2).
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // A1: NUMBER record (ensures calamine surfaces a non-empty range).
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    // Array formula group: B1:B2, formula `A1:A2`.
+    let base_row = 0u16;
+    let base_col = 1u16; // B
+
+    // Formula tokens for `A1:A2`: PtgArea with relative flags so the rendered formula is `A1:A2`
+    // (no `$`).
+    let col_with_flags: u16 = 0xC000; // col=0 (A) + rowRel + colRel
+    let array_rgce = ptg_area(0, 1, col_with_flags, col_with_flags);
+
+    // B1 FORMULA: PtgExp -> base cell (B1).
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(base_row, base_col, xf_cell, 0.0, &ptg_exp(base_row, base_col)),
+    );
+
+    // ARRAY record stores the formula token stream for the whole group.
+    push_record(
+        &mut sheet,
+        RECORD_ARRAY,
+        &array_record_refu(base_row, 1, base_col as u8, base_col as u8, &array_rgce),
+    );
+
+    // B2 FORMULA: PtgExp -> base cell (B1).
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, base_col, xf_cell, 0.0, &ptg_exp(base_row, base_col)),
+    );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
@@ -10735,6 +10817,31 @@ fn ptg_area(rw_first: u16, rw_last: u16, col_first: u16, col_last: u16) -> Vec<u
     out
 }
 
+fn array_record_refu(
+    rw_first: u16,
+    rw_last: u16,
+    col_first: u8,
+    col_last: u8,
+    rgce: &[u8],
+) -> Vec<u8> {
+    // ARRAY record payload (best-effort BIFF8 encoding):
+    //   [ref: RefU (6 bytes)]
+    //   [flags/reserved: u16] (commonly present; importer is permissive about its presence)
+    //   [cce: u16]
+    //   [rgce: cce bytes]
+    //
+    // RefU: [rwFirst:u16][rwLast:u16][colFirst:u8][colLast:u8]
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&rw_first.to_le_bytes());
+    out.extend_from_slice(&rw_last.to_le_bytes());
+    out.push(col_first);
+    out.push(col_last);
+    out.extend_from_slice(&0u16.to_le_bytes()); // flags/reserved
+    out.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+    out.extend_from_slice(rgce);
+    out
+}
+
 fn sort_record_payload(
     rw_first: u16,
     rw_last: u16,
@@ -10781,6 +10888,7 @@ fn sort_record_payload(
 
     out
 }
+
 fn window2() -> [u8; 18] {
     // WINDOW2 record payload (BIFF8). Most fields can be zero for our fixtures.
     let mut out = [0u8; 18];

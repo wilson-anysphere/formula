@@ -1643,12 +1643,15 @@ fn import_xls_path_with_biff_reader(
             }
         }
 
-        // BIFF8 shared-formula fallback: recover follower-cell formulas whose `FORMULA.rgce` is
-        // `PtgExp` but the expected `SHRFMLA/ARRAY` definition record is missing/corrupt.
+        // BIFF8 `PtgExp` formulas (shared formulas + array/CSE formulas).
         //
-        // Calamine can only resolve `PtgExp` via SHRFMLA/ARRAY; some non-standard producers omit
-        // those records but still store a usable full `FORMULA.rgce` in the base cell. Recover
-        // those formulas by materializing from the base cell's rgce across the row/col delta.
+        // Calamine does not resolve `PtgExp` references. Recover formulas by scanning the raw
+        // worksheet substream for `SHRFMLA` (shared formula) and `ARRAY` (array formula)
+        // definition records.
+        //
+        // Some non-standard producers omit those definition records but still store a full
+        // `FORMULA.rgce` token stream in the base cell; as a fallback, recover follower-cell
+        // formulas by materializing from the base cell's rgce across the row/col delta.
         if let (
             Some(workbook_stream),
             Some(codepage),
@@ -1683,12 +1686,8 @@ fn import_xls_path_with_biff_reader(
                         defined_names,
                     };
 
-                    match biff::formulas::recover_ptgexp_formulas_from_base_cell(
-                        workbook_stream,
-                        sheet_info.offset,
-                        &ctx,
-                    ) {
-                        Ok(mut recovered) => {
+                    let mut apply_recovered_formulas =
+                        |mut recovered: biff::formulas::PtgExpFallbackResult| {
                             for warning in recovered.warnings.drain(..) {
                                 push_import_warning(
                                     &mut warnings,
@@ -1699,7 +1698,7 @@ fn import_xls_path_with_biff_reader(
                             for (cell_ref, formula_text) in recovered.formulas {
                                 let anchor = sheet.merged_regions.resolve_cell(cell_ref);
                                 // Best-effort fallback only: do not override formulas that were
-                                // already resolved by calamine (normal SHRFMLA/ARRAY handling).
+                                // already resolved by calamine or earlier recovery passes.
                                 //
                                 // Calamine can return the `#UNKNOWN!` error sentinel for `PtgExp`
                                 // formulas it cannot resolve; treat that as "unresolved" so we can
@@ -1710,7 +1709,18 @@ fn import_xls_path_with_biff_reader(
                                 {
                                     continue;
                                 }
-                                if let Some(normalized) = normalize_formula_text(&formula_text) {
+
+                                // Strip NUL bytes so formula text is parseable/stable (matches the
+                                // calamine formula cleanup path).
+                                let formula_text_clean;
+                                let formula_text = if formula_text.contains('\0') {
+                                    formula_text_clean = formula_text.replace('\0', "");
+                                    formula_text_clean.as_str()
+                                } else {
+                                    formula_text.as_str()
+                                };
+
+                                if let Some(normalized) = normalize_formula_text(formula_text) {
                                     sheet.set_formula(anchor, Some(normalized));
                                     if let Some(resolved) = style_id_for_cell_xf(
                                         xf_style_ids.as_deref(),
@@ -1721,7 +1731,29 @@ fn import_xls_path_with_biff_reader(
                                     }
                                 }
                             }
-                        }
+                        };
+
+                    match biff::formulas::recover_ptgexp_formulas_from_shrfmla_and_array(
+                        workbook_stream,
+                        sheet_info.offset,
+                        &ctx,
+                    ) {
+                        Ok(recovered) => apply_recovered_formulas(recovered),
+                        Err(err) => push_import_warning(
+                            &mut warnings,
+                            format!(
+                                "failed to recover shared/array formulas for sheet `{sheet_name}`: {err}"
+                            ),
+                            &mut warnings_suppressed,
+                        ),
+                    }
+
+                    match biff::formulas::recover_ptgexp_formulas_from_base_cell(
+                        workbook_stream,
+                        sheet_info.offset,
+                        &ctx,
+                    ) {
+                        Ok(recovered) => apply_recovered_formulas(recovered),
                         Err(err) => push_import_warning(
                             &mut warnings,
                             format!(

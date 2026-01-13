@@ -22,9 +22,9 @@
 //! column index. When we detect these patterns, we re-decode formulas directly from the BIFF
 //! worksheet stream and override calamine’s string output.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use formula_model::CellRef;
+use formula_model::{CellRef, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 
 use super::{records, rgce, worksheet_formulas};
 use super::worksheet_formulas::FormulaMembershipHint;
@@ -48,6 +48,111 @@ pub(crate) struct PtgExpFallbackResult {
 #[derive(Debug, Default)]
 pub(crate) struct SheetFormulaOverrides {
     pub(crate) formulas: HashMap<CellRef, String>,
+}
+
+/// Recover shared/array formulas referenced via `PtgExp` by resolving their corresponding
+/// `SHRFMLA`/`ARRAY` definition records.
+///
+/// This is best-effort: malformed records are skipped with warnings.
+pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
+    workbook_stream: &[u8],
+    sheet_offset: usize,
+    ctx: &rgce::RgceDecodeContext<'_>,
+) -> Result<PtgExpFallbackResult, String> {
+    let parsed = worksheet_formulas::parse_biff8_worksheet_formulas(workbook_stream, sheet_offset)?;
+
+    let mut warnings: Vec<String> = parsed.warnings.into_iter().map(|w| w.message).collect();
+
+    // Track all FORMULA cells so array formulas can be applied to every cell in the group range.
+    let formula_cells: Vec<CellRef> = parsed.formula_cells.keys().copied().collect();
+
+    // Track FORMULA cells whose `rgce` is `PtgExp`, so we can resolve them after scanning.
+    let mut ptgexp_cells: Vec<(CellRef, CellRef)> = Vec::new();
+    for (&cell_ref, cell) in &parsed.formula_cells {
+        let Some((base_row, base_col)) = parse_ptg_exp(&cell.rgce) else {
+            continue;
+        };
+        if base_row >= EXCEL_MAX_ROWS || base_col >= EXCEL_MAX_COLS {
+            warnings.push(format!(
+                "skipping out-of-bounds PtgExp reference in {} -> ({base_row},{base_col})",
+                cell_ref.to_a1()
+            ));
+            continue;
+        }
+        ptgexp_cells.push((cell_ref, CellRef::new(base_row, base_col)));
+    }
+
+    let mut recovered: HashMap<CellRef, String> = HashMap::new();
+    let mut decoded_arrays: HashMap<CellRef, String> = HashMap::new();
+    let mut applied_arrays: HashSet<CellRef> = HashSet::new();
+
+    for (cell, base) in ptgexp_cells {
+        // Shared formulas are decoded relative to the *current* cell.
+        if let Some(def) = parsed
+            .shrfmla
+            .get(&base)
+            .filter(|def| range_contains(def.range, cell))
+        {
+            let base_coord = rgce::CellCoord::new(cell.row, cell.col);
+            let decoded = rgce::decode_biff8_rgce_with_base(&def.rgce, ctx, Some(base_coord));
+            for w in decoded.warnings {
+                warnings.push(format!(
+                    "failed to fully decode shared formula at {} (base {}): {w}",
+                    cell.to_a1(),
+                    base.to_a1()
+                ));
+            }
+            if !decoded.text.trim().is_empty() {
+                recovered.insert(cell, decoded.text);
+            }
+            continue;
+        }
+
+        // Array formulas are decoded relative to the *array base* cell, and the same formula text
+        // is displayed for every cell in the group.
+        if let Some(def) = parsed
+            .array
+            .get(&base)
+            .filter(|def| range_contains(def.range, cell))
+        {
+            let text = if let Some(existing) = decoded_arrays.get(&base) {
+                existing.clone()
+            } else {
+                let base_coord = rgce::CellCoord::new(base.row, base.col);
+                let decoded = rgce::decode_biff8_rgce_with_base(&def.rgce, ctx, Some(base_coord));
+                for w in decoded.warnings {
+                    warnings.push(format!("failed to fully decode array formula base {}: {w}", base.to_a1()));
+                }
+                let text = decoded.text;
+                decoded_arrays.insert(base, text.clone());
+                text
+            };
+
+            if text.trim().is_empty() {
+                continue;
+            }
+
+            if applied_arrays.insert(base) {
+                for &target in &formula_cells {
+                    if range_contains(def.range, target) {
+                        recovered.insert(target, text.clone());
+                    }
+                }
+            }
+            continue;
+        }
+
+        warnings.push(format!(
+            "unresolved PtgExp reference in {} -> {}",
+            cell.to_a1(),
+            base.to_a1()
+        ));
+    }
+
+    Ok(PtgExpFallbackResult {
+        formulas: recovered,
+        warnings,
+    })
 }
 
 /// Best-effort recovery of `PtgExp`-only formulas by materializing from the referenced base cell's

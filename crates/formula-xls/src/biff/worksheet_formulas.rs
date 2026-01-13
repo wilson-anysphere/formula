@@ -172,16 +172,18 @@ pub(crate) fn parse_biff8_array_record(
     let fragments: Vec<&[u8]> = record.fragments().collect();
     let cursor = FragmentCursor::new(&fragments, 0, 0);
 
-    // ARRAY layouts vary slightly (RefU vs Ref8). Try both.
-    {
+    // ARRAY layouts vary slightly:
+    // - RefU (6) vs Ref8 (8) for the array range header.
+    // - Some producers include 2 or 4 bytes of reserved/flags before `cce`.
+    for reserved_len in [2usize, 4] {
         let mut c = cursor.clone();
-        if let Ok(rgce) = parse_array_with_refu(&mut c) {
+        if let Ok(rgce) = parse_array_with_refu(&mut c, reserved_len) {
             return Ok(ParsedArrayRecord { rgce });
         }
     }
-    {
-        let mut c = cursor;
-        if let Ok(rgce) = parse_array_with_ref8(&mut c) {
+    for reserved_len in [2usize, 4] {
+        let mut c = cursor.clone();
+        if let Ok(rgce) = parse_array_with_ref8(&mut c, reserved_len) {
             return Ok(ParsedArrayRecord { rgce });
         }
     }
@@ -643,20 +645,24 @@ fn parse_shrfmla_with_ref8(cursor: &mut FragmentCursor<'_>) -> Result<Vec<u8>, S
     cursor.read_biff8_rgce(cce)
 }
 
-fn parse_array_with_refu(cursor: &mut FragmentCursor<'_>) -> Result<Vec<u8>, String> {
+fn parse_array_with_refu(
+    cursor: &mut FragmentCursor<'_>,
+    reserved_len: usize,
+) -> Result<Vec<u8>, String> {
     // ref (rwFirst:u16, rwLast:u16, colFirst:u8, colLast:u8)
     cursor.skip_bytes(2 + 2 + 1 + 1)?;
-    // reserved
-    cursor.skip_bytes(2)?;
+    cursor.skip_bytes(reserved_len)?;
     let cce = cursor.read_u16_le()? as usize;
     cursor.read_biff8_rgce(cce)
 }
 
-fn parse_array_with_ref8(cursor: &mut FragmentCursor<'_>) -> Result<Vec<u8>, String> {
+fn parse_array_with_ref8(
+    cursor: &mut FragmentCursor<'_>,
+    reserved_len: usize,
+) -> Result<Vec<u8>, String> {
     // ref (rwFirst:u16, rwLast:u16, colFirst:u16, colLast:u16)
     cursor.skip_bytes(8)?;
-    // reserved
-    cursor.skip_bytes(2)?;
+    cursor.skip_bytes(reserved_len)?;
     let cce = cursor.read_u16_le()? as usize;
     cursor.read_biff8_rgce(cce)
 }
