@@ -29,31 +29,98 @@ function errBlock(heading, details) {
  */
 function decodeBase64(value) {
   const normalized = value.trim().replace(/\s+/g, "");
-  if (normalized.length === 0 || normalized.length % 4 !== 0) return null;
-  if (!/^[A-Za-z0-9+/]+=*$/.test(normalized)) return null;
-  try {
-    return Buffer.from(normalized, "base64");
-  } catch {
-    return null;
-  }
+  if (normalized.length === 0) return null;
+
+  // Support both standard base64 and base64url (GitHub secrets may contain either).
+  let base64 = normalized.replace(/-/g, "+").replace(/_/g, "/");
+
+  // Reject anything that isn't plausibly base64. (Node's base64 decoder is permissive, so validate
+  // the alphabet and padding ourselves.)
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) return null;
+
+  // Allow unpadded base64 by adding the required '=' chars.
+  const mod = base64.length % 4;
+  if (mod === 1) return null;
+  if (mod !== 0) base64 += "=".repeat(4 - mod);
+
+  return Buffer.from(base64, "base64");
 }
 
 /**
  * TAURI_KEY_PASSWORD is only required when the private key is encrypted.
  *
- * We cannot fully validate the key format without invoking the Tauri CLI, so we use a conservative
- * heuristic:
- * - If TAURI_KEY_PASSWORD is empty AND the private key decodes to a small (32/64-byte) raw key, we
- *   assume the key is unencrypted and accept an empty password.
- * - Otherwise, require TAURI_KEY_PASSWORD so tagged releases fail early instead of inside
- *   tauri-apps/tauri-action.
+ * We can't perfectly validate every possible Tauri key encoding without invoking the Tauri CLI,
+ * but we can reliably detect the common cases:
+ *
+ * - Raw Ed25519 private keys (32/64 bytes, base64-encoded) are unencrypted.
+ * - PKCS#8 DER (base64-encoded) indicates encryption based on the top-level ASN.1 structure.
+ * - PEM keys can be detected via their BEGIN header.
  *
  * @param {string} privateKey
  */
-function isClearlyUnencryptedPrivateKey(privateKey) {
-  const decoded = decodeBase64(privateKey);
-  if (!decoded) return false;
-  return decoded.length === 32 || decoded.length === 64;
+function isEncryptedPrivateKey(privateKey) {
+  const trimmed = privateKey.trim();
+
+  // PEM (multiline) keys: the header tells us whether it's encrypted.
+  if (trimmed.includes("-----BEGIN ENCRYPTED PRIVATE KEY-----")) return true;
+  if (trimmed.includes("-----BEGIN PRIVATE KEY-----")) return false;
+
+  const decoded = decodeBase64(trimmed);
+  if (!decoded) return undefined;
+
+  // Raw Ed25519 secret key (32 bytes) or secret+public (64 bytes).
+  if (decoded.length === 32 || decoded.length === 64) return false;
+
+  // Detect PKCS#8 encryption based on the outer ASN.1 sequence:
+  // - PrivateKeyInfo ::= SEQUENCE { INTEGER version, ... } (unencrypted)
+  // - EncryptedPrivateKeyInfo ::= SEQUENCE { SEQUENCE algId, OCTET STRING data } (encrypted)
+  try {
+    /**
+     * @param {Buffer} buf
+     * @param {number} offset
+     */
+    function readLength(buf, offset) {
+      if (offset >= buf.length) throw new Error("DER length out of bounds");
+      const first = buf[offset];
+      if ((first & 0x80) === 0) return { length: first, bytes: 1 };
+      const count = first & 0x7f;
+      if (count === 0 || count > 6) throw new Error("Unsupported DER length encoding");
+      if (offset + 1 + count > buf.length) throw new Error("DER length out of bounds");
+      let length = 0;
+      for (let i = 0; i < count; i++) length = (length << 8) | buf[offset + 1 + i];
+      return { length, bytes: 1 + count };
+    }
+
+    /**
+     * @param {Buffer} buf
+     * @param {number} offset
+     */
+    function readTlv(buf, offset) {
+      if (offset >= buf.length) throw new Error("DER tag out of bounds");
+      const tag = buf[offset];
+      const { length, bytes } = readLength(buf, offset + 1);
+      const valueStart = offset + 1 + bytes;
+      const valueEnd = valueStart + length;
+      if (valueEnd > buf.length) throw new Error("DER value out of bounds");
+      return { tag, valueStart, valueEnd, next: valueEnd };
+    }
+
+    const outer = readTlv(decoded, 0);
+    if (outer.tag !== 0x30) return undefined;
+
+    const first = readTlv(decoded, outer.valueStart);
+    if (first.valueEnd > outer.valueEnd) return undefined;
+
+    const second = readTlv(decoded, first.next);
+    if (second.valueEnd > outer.valueEnd) return undefined;
+
+    if (first.tag === 0x02) return false; // INTEGER version => unencrypted PKCS#8.
+    if (first.tag === 0x30 && second.tag === 0x04) return true; // algId + OCTET STRING => encrypted.
+  } catch {
+    // Fall through to unknown.
+  }
+
+  return undefined;
 }
 
 function main() {
@@ -89,7 +156,14 @@ function main() {
 
   const passwordTrimmed = password.trim();
   const passwordMissing = passwordTrimmed.length === 0;
-  if (passwordMissing && privateKey.trim().length > 0 && !isClearlyUnencryptedPrivateKey(privateKey)) {
+
+  const encrypted = privateKey.trim().length > 0 ? isEncryptedPrivateKey(privateKey) : undefined;
+  if (passwordMissing && encrypted === true) missing.push("TAURI_KEY_PASSWORD");
+
+  // If we can't determine whether the key is encrypted, we err on the side of catching
+  // misconfiguration early by requiring a password. This avoids failures later inside
+  // `tauri-apps/tauri-action` when an encrypted key is provided without a passphrase.
+  if (passwordMissing && encrypted === undefined && privateKey.trim().length > 0) {
     missing.push("TAURI_KEY_PASSWORD");
   }
 
