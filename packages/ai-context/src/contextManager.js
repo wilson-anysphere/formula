@@ -371,8 +371,14 @@ export class ContextManager {
     const safeCellCap = normalizeNonNegativeInt(params.limits?.maxContextCells, this.maxContextCells);
     const maxChunkRows = normalizeNonNegativeInt(params.limits?.maxChunkRows, this.maxChunkRows);
     const rawValues = Array.isArray(rawSheet?.values) ? rawSheet.values : [];
-    const rowCount = Math.min(rawValues.length, safeRowCap);
-    const safeColCap = rowCount > 0 ? Math.max(1, Math.floor(safeCellCap / rowCount)) : 0;
+    // Respect both the row cap and the total cell cap.
+    // If `maxContextRows` is larger than `maxContextCells`, we need to clamp the row count
+    // further so we can still include at least one column per row without exceeding the
+    // total cell budget.
+    let rowCount = Math.min(rawValues.length, safeRowCap);
+    if (safeCellCap === 0) rowCount = 0;
+    else if (rowCount > safeCellCap) rowCount = safeCellCap;
+    const safeColCap = rowCount > 0 ? Math.floor(safeCellCap / rowCount) : 0;
     const valuesForContext = rawValues.slice(0, rowCount).map((row) => {
       if (!Array.isArray(row) || safeColCap === 0) return [];
       return row.length <= safeColCap ? row.slice() : row.slice(0, safeColCap);

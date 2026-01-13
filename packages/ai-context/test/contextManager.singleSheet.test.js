@@ -141,6 +141,18 @@ test("buildContext: maxContextCells option truncates columns", async () => {
   assert.equal(out.retrieved[0].range, "Sheet1!A1:B10");
 });
 
+test("buildContext: maxContextCells also caps rows when maxContextRows is larger", async () => {
+  // 50 rows x 2 cols => 100 cells. Cap to 10 total => 10 rows x 1 col.
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, maxContextRows: 100, maxContextCells: 10 });
+  const values = Array.from({ length: 50 }, (_v, r) => [`r${r}c1`, `r${r}c2`]);
+  const sheet = makeSheet(values);
+
+  const out = await cm.buildContext({ sheet, query: "anything", sampleRows: 1000 });
+  assert.equal(out.sampledRows.length, 10);
+  assert.ok(out.sampledRows.every((row) => row.length === 1));
+  assert.equal(out.retrieved[0].range, "Sheet1!A1:A10");
+});
+
 test("buildContext: maxChunkRows affects sheet-level retrieved chunk previews", async () => {
   const cm = new ContextManager({ tokenBudgetTokens: 1_000 });
   const sheet = makeSheet([["a"], ["b"], ["c"], ["d"], ["e"]]);
