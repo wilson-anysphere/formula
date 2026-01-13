@@ -1,4 +1,5 @@
 use formula_engine::eval::parse_a1;
+use formula_engine::value::Array;
 use formula_engine::{Engine, ErrorKind, Value};
 
 #[test]
@@ -127,6 +128,38 @@ fn bytecode_backend_spills_comparison_results() {
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Bool(true));
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Bool(false));
     assert_eq!(engine.get_cell_value("Sheet1", "B3"), Value::Bool(false));
+}
+
+#[test]
+fn bytecode_backend_spills_array_value_loaded_from_cell() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Array(Array::new(
+                1,
+                2,
+                vec![Value::Number(1.0), Value::Number(2.0)],
+            )),
+        )
+        .unwrap();
+
+    engine.set_cell_formula("Sheet1", "C1", "=A1").unwrap();
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected simple cell reference to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "C1").expect("spill range");
+    assert_eq!(start, parse_a1("C1").unwrap());
+    assert_eq!(end, parse_a1("D1").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(2.0));
 }
 
 #[test]
