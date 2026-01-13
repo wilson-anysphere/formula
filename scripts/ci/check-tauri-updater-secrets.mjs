@@ -46,6 +46,84 @@ function decodeBase64(value) {
   return Buffer.from(base64, "base64");
 }
 
+const MINISIGN_PUBLIC_KEY_BYTES = 42; // "Ed" + keyId(8) + pubkey(32)
+// Unencrypted minisign secret keys are small; encrypted keys include scrypt params + nonce + MAC.
+// Use a generous upper bound for "clearly unencrypted" to avoid falsely requiring a password.
+const MINISIGN_UNENCRYPTED_SECRET_KEY_MAX_BYTES = 96;
+
+/**
+ * @param {string} text
+ */
+function parseMinisignKeyFileBody(text) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  const payloadLine = lines.find((line) => !line.toLowerCase().startsWith("untrusted comment:"));
+  if (!payloadLine) return null;
+  const binary = decodeBase64(payloadLine);
+  if (!binary) return null;
+  if (binary.length < 2 || binary[0] !== 0x45 || binary[1] !== 0x64) return null; // "Ed"
+  return { payloadLine, binary };
+}
+
+/**
+ * Try to interpret TAURI_PRIVATE_KEY as a minisign key.
+ *
+ * Tauri's updater uses minisign signatures. `cargo tauri signer generate` outputs base64 strings
+ * that decode to a minisign key file (ASCII) whose payload line base64-decodes to a binary key
+ * starting with the magic bytes "Ed".
+ *
+ * @param {string} privateKey
+ * @returns {{ kind: 'secret' | 'public', encrypted?: boolean } | null}
+ */
+function analyzeMinisignPrivateKey(privateKey) {
+  const trimmed = privateKey.trim();
+
+  const tryParseKeyFile = (content) => {
+    const lowered = content.toLowerCase();
+    const hasSecretHeader = lowered.includes("minisign secret key");
+    const hasPublicHeader = lowered.includes("minisign public key");
+    if (!hasSecretHeader && !hasPublicHeader) return null;
+
+    const parsed = parseMinisignKeyFileBody(content);
+    if (!parsed) return null;
+
+    if (hasPublicHeader || parsed.binary.length === MINISIGN_PUBLIC_KEY_BYTES) {
+      return { kind: "public" };
+    }
+
+    const encrypted = parsed.binary.length > MINISIGN_UNENCRYPTED_SECRET_KEY_MAX_BYTES;
+    return { kind: "secret", encrypted };
+  };
+
+  // Raw minisign key file (multiline secret).
+  {
+    const parsed = tryParseKeyFile(trimmed);
+    if (parsed) return parsed;
+  }
+
+  const decoded = decodeBase64(trimmed);
+  if (!decoded) return null;
+
+  // base64-encoded minisign key file
+  {
+    const decodedText = decoded.toString("utf8");
+    const parsed = tryParseKeyFile(decodedText);
+    if (parsed) return parsed;
+  }
+
+  // base64-encoded minisign binary key (payload line itself).
+  if (decoded.length >= 2 && decoded[0] === 0x45 && decoded[1] === 0x64) {
+    if (decoded.length === MINISIGN_PUBLIC_KEY_BYTES) return { kind: "public" };
+    const encrypted = decoded.length > MINISIGN_UNENCRYPTED_SECRET_KEY_MAX_BYTES;
+    return { kind: "secret", encrypted };
+  }
+
+  return null;
+}
+
 /**
  * TAURI_KEY_PASSWORD is only required when the private key is encrypted.
  *
@@ -60,6 +138,9 @@ function decodeBase64(value) {
  */
 function isEncryptedPrivateKey(privateKey) {
   const trimmed = privateKey.trim();
+
+  const minisign = analyzeMinisignPrivateKey(trimmed);
+  if (minisign?.kind === "secret") return minisign.encrypted === true;
 
   // PEM (multiline) keys: the header tells us whether it's encrypted.
   if (trimmed.includes("-----BEGIN ENCRYPTED PRIVATE KEY-----")) return true;
@@ -131,7 +212,10 @@ function isEncryptedPrivateKey(privateKey) {
 /**
  * Basic format validation for the updater private key.
  *
- * The tauri-action signer supports:
+ * The tauri-action signer supports minisign keys produced by `cargo tauri signer generate`
+ * (the common case for Tauri updater signing), and may also support other encodings depending on
+ * the Tauri toolchain:
+ * - minisign secret key (base64 string that decodes to a minisign key file)
  * - PEM (`-----BEGIN (ENCRYPTED )?PRIVATE KEY-----`)
  * - base64-encoded raw Ed25519 keys (32/64 bytes)
  * - base64-encoded PKCS#8 DER (ASN.1 SEQUENCE, starts with 0x30)
@@ -143,6 +227,22 @@ function validatePrivateKeyFormat(privateKey) {
   const trimmed = privateKey.trim();
   if (trimmed.length === 0) return;
 
+  const minisign = analyzeMinisignPrivateKey(trimmed);
+  if (minisign) {
+    if (minisign.kind === "public") {
+      errBlock(`Invalid TAURI_PRIVATE_KEY`, [
+        `TAURI_PRIVATE_KEY looks like a minisign *public* key, not a private key.`,
+        `Did you accidentally paste apps/desktop/src-tauri/tauri.conf.json → plugins.updater.pubkey ?`,
+        `Set TAURI_PRIVATE_KEY to the private key printed by:`,
+        `  (cd apps/desktop/src-tauri && cargo tauri signer generate)`,
+        `Then store it as the GitHub Actions secret TAURI_PRIVATE_KEY.`,
+      ]);
+      err(`\nUpdater signing secrets preflight failed. Fix TAURI_PRIVATE_KEY before tagging a release.\n`);
+      throw new Error("invalid TAURI_PRIVATE_KEY");
+    }
+    return;
+  }
+
   if (
     trimmed.includes("-----BEGIN PRIVATE KEY-----") ||
     trimmed.includes("-----BEGIN ENCRYPTED PRIVATE KEY-----")
@@ -153,7 +253,8 @@ function validatePrivateKeyFormat(privateKey) {
   const decoded = decodeBase64(trimmed);
   if (!decoded) {
     errBlock(`Invalid TAURI_PRIVATE_KEY`, [
-      `TAURI_PRIVATE_KEY is set but does not look like a PEM key or a base64-encoded key.`,
+      `TAURI_PRIVATE_KEY is set but does not look like a valid Tauri updater private key.`,
+      `Expected the value printed by \`cargo tauri signer generate\` (minisign secret key; base64 string).`,
       `Make sure you paste the private key printed by:`,
       `  (cd apps/desktop/src-tauri && cargo tauri signer generate)`,
       `Then store it as the GitHub Actions secret TAURI_PRIVATE_KEY (Settings → Secrets and variables → Actions).`,
@@ -169,12 +270,26 @@ function validatePrivateKeyFormat(privateKey) {
   // raw key material
   if (decoded.length === 32 || decoded.length === 64) return;
 
+  // minisign binary key (Ed25519 + key id prefix)
+  if (decoded.length >= 2 && decoded[0] === 0x45 && decoded[1] === 0x64) {
+    if (decoded.length === MINISIGN_PUBLIC_KEY_BYTES) {
+      errBlock(`Invalid TAURI_PRIVATE_KEY`, [
+        `TAURI_PRIVATE_KEY looks like a minisign *public* key (42 bytes), not a private key.`,
+        `Set TAURI_PRIVATE_KEY to the private key printed by:`,
+        `  (cd apps/desktop/src-tauri && cargo tauri signer generate)`,
+      ]);
+      err(`\nUpdater signing secrets preflight failed. Fix TAURI_PRIVATE_KEY before tagging a release.\n`);
+      throw new Error("invalid TAURI_PRIVATE_KEY");
+    }
+    return;
+  }
+
   // PKCS#8 DER should begin with an ASN.1 SEQUENCE (0x30).
   if (decoded.length > 0 && decoded[0] === 0x30) return;
 
   errBlock(`Invalid TAURI_PRIVATE_KEY`, [
     `TAURI_PRIVATE_KEY is set but does not look like a supported Tauri signing key format.`,
-    `Expected a PEM key, base64-encoded raw Ed25519 key, or base64-encoded PKCS#8 DER.`,
+    `Expected a minisign secret key (from \`cargo tauri signer generate\`), PEM key, base64-encoded raw Ed25519 key, or base64-encoded PKCS#8 DER.`,
     `Regenerate keys with:`,
     `  (cd apps/desktop/src-tauri && cargo tauri signer generate)`,
     `Then update the GitHub Actions secret TAURI_PRIVATE_KEY.`,

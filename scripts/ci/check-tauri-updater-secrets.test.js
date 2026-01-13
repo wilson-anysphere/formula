@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -35,6 +36,51 @@ test("fails when TAURI_PRIVATE_KEY is set but not a supported format", () => {
   const proc = run({ TAURI_PRIVATE_KEY: "definitely-not-a-key", TAURI_KEY_PASSWORD: "pass" });
   assert.notEqual(proc.status, 0);
   assert.match(proc.stderr, /Invalid TAURI_PRIVATE_KEY/);
+});
+
+function fakeMinisignSecretKey({ encrypted }) {
+  // minisign keys are binary payloads prefixed with "Ed" + 8-byte key id.
+  const header = Buffer.from([0x45, 0x64]); // "Ed"
+  const keyId = Buffer.alloc(8, 0x11);
+  const secretPayload = Buffer.alloc(encrypted ? 140 : 64, 0x22);
+  const binary = Buffer.concat([header, keyId, secretPayload]);
+  const payloadLine = binary.toString("base64").replace(/=+$/, "");
+  const keyFile = `untrusted comment: minisign secret key: 0000000000000000\n${payloadLine}\n`;
+
+  // `cargo tauri signer generate` prints base64 strings that decode to minisign key files.
+  return Buffer.from(keyFile, "utf8").toString("base64");
+}
+
+test("passes with an unencrypted minisign secret key and empty password", () => {
+  const key = fakeMinisignSecretKey({ encrypted: false });
+  const proc = run({ TAURI_PRIVATE_KEY: key, TAURI_KEY_PASSWORD: "" });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /preflight passed/i);
+});
+
+test("requires TAURI_KEY_PASSWORD for encrypted minisign secret keys", () => {
+  const key = fakeMinisignSecretKey({ encrypted: true });
+  {
+    const proc = run({ TAURI_PRIVATE_KEY: key, TAURI_KEY_PASSWORD: "" });
+    assert.notEqual(proc.status, 0);
+    assert.match(proc.stderr, /\bTAURI_KEY_PASSWORD\b/);
+  }
+  {
+    const proc = run({ TAURI_PRIVATE_KEY: key, TAURI_KEY_PASSWORD: "pass" });
+    assert.equal(proc.status, 0, proc.stderr);
+    assert.match(proc.stdout, /preflight passed/i);
+  }
+});
+
+test("fails when TAURI_PRIVATE_KEY is a minisign public key (copied from tauri.conf.json)", () => {
+  const configPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
+  const config = JSON.parse(readFileSync(configPath, "utf8"));
+  const pubkey = config?.plugins?.updater?.pubkey;
+  assert.equal(typeof pubkey, "string");
+
+  const proc = run({ TAURI_PRIVATE_KEY: pubkey, TAURI_KEY_PASSWORD: "pass" });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /minisign \*public\* key/i);
 });
 
 test("passes with an unencrypted raw Ed25519 key and empty password", () => {
