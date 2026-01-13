@@ -33,7 +33,9 @@ test.describe("formula bar - fx function picker", () => {
       await expect(formulaInput).toHaveValue("");
 
       // 2) Click fx to open the function picker.
-      await page.getByTestId("formula-fx-button").click();
+      const fxButton = page.getByTestId("formula-fx-button");
+      await fxButton.click();
+      await expect(fxButton).toHaveAttribute("aria-expanded", "true");
 
       // 3) Search/select a known function.
       const pickerInput = page.getByTestId("formula-function-picker-input");
@@ -46,6 +48,7 @@ test.describe("formula bar - fx function picker", () => {
 
       // Picker should close.
       await expect(page.getByTestId("formula-function-picker")).toBeHidden();
+      await expect(fxButton).toHaveAttribute("aria-expanded", "false");
 
       // 4) Assert formula bar text becomes `=SUM()` with cursor inside parentheses.
       await expect(formulaInput).toHaveValue("=SUM()");
