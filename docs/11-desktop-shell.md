@@ -78,12 +78,18 @@ The frontend installs listeners in `apps/desktop/src/tauri/startupMetrics.ts` an
   `[startup] ...` timings.
 
   Tuning knobs:
+  - `FORMULA_DESKTOP_STARTUP_MODE=cold|warm` (default: `cold`)
   - `FORMULA_DESKTOP_STARTUP_RUNS` (default: 20)
   - `FORMULA_DESKTOP_STARTUP_TIMEOUT_MS` (default: 15000)
   - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell|full` (what to measure)
-  - `FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS` (default: 500)
-  - `FORMULA_DESKTOP_FIRST_RENDER_TARGET_MS` (default: 500)
-  - `FORMULA_DESKTOP_TTI_TARGET_MS` (default: 1000)
+  - Cold-start targets (defaults shown; legacy unscoped vars are still accepted as fallbacks):
+    - `FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS` (default: 500)
+    - `FORMULA_DESKTOP_COLD_FIRST_RENDER_TARGET_MS` (default: 500)
+    - `FORMULA_DESKTOP_COLD_TTI_TARGET_MS` (default: 1000)
+  - Warm-start targets (optional; default to the cold targets if unset):
+    - `FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS`
+    - `FORMULA_DESKTOP_WARM_FIRST_RENDER_TARGET_MS`
+    - `FORMULA_DESKTOP_WARM_TTI_TARGET_MS`
   - `FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=1` to fail the command when p95 exceeds the targets (useful for CI gating)
   - `FORMULA_RUN_DESKTOP_STARTUP_BENCH=1` to allow running in CI (the runner skips in CI by default)
   - `FORMULA_DESKTOP_BIN=/path/to/formula-desktop` to benchmark a custom binary

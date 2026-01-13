@@ -147,10 +147,17 @@ These scripts are designed to be safe to run locally:
 
 Startup benchmark (runner defaults shown):
 
+- `FORMULA_DESKTOP_STARTUP_MODE=cold|warm` (default: `cold`)
 - `FORMULA_DESKTOP_STARTUP_RUNS=20`
 - `FORMULA_DESKTOP_STARTUP_TIMEOUT_MS=15000`
-- `FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS=500`
-- `FORMULA_DESKTOP_TTI_TARGET_MS=1000`
+- Cold-start targets (defaults shown; legacy unscoped vars are still accepted as fallbacks):
+  - `FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS=500`
+  - `FORMULA_DESKTOP_COLD_FIRST_RENDER_TARGET_MS=500`
+  - `FORMULA_DESKTOP_COLD_TTI_TARGET_MS=1000`
+- Warm-start targets (optional; default to the cold targets if unset):
+  - `FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS`
+  - `FORMULA_DESKTOP_WARM_FIRST_RENDER_TARGET_MS`
+  - `FORMULA_DESKTOP_WARM_TTI_TARGET_MS`
 - `FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=1` to fail when p95 exceeds targets
 - `FORMULA_RUN_DESKTOP_STARTUP_BENCH=1` to allow running the runner in CI (it skips by default)
 

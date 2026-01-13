@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   defaultDesktopBinPath,
@@ -15,6 +16,7 @@ import {
 // - `FORMULA_STARTUP_METRICS=1` enables the Rust-side one-line startup metrics log we parse.
 
 type StartupBenchKind = "shell" | "full";
+type StartupMode = "cold" | "warm";
 
 type Summary = {
   runs: number;
@@ -26,6 +28,9 @@ type Summary = {
   enforce: boolean;
   webviewLoaded?: { p50: number; p95: number; targetMs: number };
 };
+
+// Ensure paths are rooted at repo root even when invoked from elsewhere.
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 function parseBenchKindFromEnv(): StartupBenchKind | null {
   const raw = (process.env.FORMULA_DESKTOP_STARTUP_BENCH_KIND ?? "").trim().toLowerCase();
@@ -39,6 +44,7 @@ function parseArgs(argv: string[]): {
   runs: number;
   timeoutMs: number;
   binPath: string | null;
+  mode: StartupMode;
   windowTargetMs: number;
   webviewLoadedTargetMs: number;
   ttiTargetMs: number;
@@ -48,24 +54,52 @@ function parseArgs(argv: string[]): {
   benchKind: StartupBenchKind;
 } {
   const args = [...argv];
+
+  const modeRaw = (process.env.FORMULA_DESKTOP_STARTUP_MODE ?? "cold").trim().toLowerCase();
+  if (modeRaw !== "cold" && modeRaw !== "warm") {
+    throw new Error(
+      `Invalid FORMULA_DESKTOP_STARTUP_MODE=${JSON.stringify(modeRaw)} (expected "cold" or "warm")`,
+    );
+  }
+  let mode: StartupMode = modeRaw;
+
   const envRuns = Number(process.env.FORMULA_DESKTOP_STARTUP_RUNS ?? "") || 20;
   const envTimeoutMs = Number(process.env.FORMULA_DESKTOP_STARTUP_TIMEOUT_MS ?? "") || 15_000;
   const envBin = process.env.FORMULA_DESKTOP_BIN ?? null;
-  const envWindowTargetMs = Number(process.env.FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS ?? "") || 500;
+
+  const coldWindowTargetMs =
+    Number(
+      process.env.FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS ??
+        process.env.FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS ??
+        "",
+    ) || 500;
+  const coldTtiTargetMs =
+    Number(
+      process.env.FORMULA_DESKTOP_COLD_TTI_TARGET_MS ??
+        process.env.FORMULA_DESKTOP_TTI_TARGET_MS ??
+        "",
+    ) || 1000;
+  const warmWindowTargetMs =
+    Number(process.env.FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS ?? "") || coldWindowTargetMs;
+  const warmTtiTargetMs = Number(process.env.FORMULA_DESKTOP_WARM_TTI_TARGET_MS ?? "") || coldTtiTargetMs;
+
   const envWebviewLoadedTargetMs = Number(process.env.FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS ?? "") || 800;
-  const envTtiTargetMs = Number(process.env.FORMULA_DESKTOP_TTI_TARGET_MS ?? "") || 1000;
   const envEnforce = process.env.FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH === "1";
 
   const envKind = parseBenchKindFromEnv();
   const defaultKind: StartupBenchKind = envKind ?? (process.env.CI ? "shell" : "full");
 
+  let windowTargetMsOverride: number | null = null;
+  let ttiTargetMsOverride: number | null = null;
+
   const out = {
     runs: Math.max(1, envRuns),
     timeoutMs: Math.max(1, envTimeoutMs),
     binPath: envBin as string | null,
-    windowTargetMs: Math.max(1, envWindowTargetMs),
+    mode,
+    windowTargetMs: 0,
     webviewLoadedTargetMs: Math.max(1, envWebviewLoadedTargetMs),
-    ttiTargetMs: Math.max(1, envTtiTargetMs),
+    ttiTargetMs: 0,
     allowInCi: false,
     enforce: envEnforce,
     jsonPath: null as string | null,
@@ -75,21 +109,35 @@ function parseArgs(argv: string[]): {
   while (args.length > 0) {
     const arg = args.shift();
     if (!arg) break;
-    if (arg === "--runs" && args[0]) out.runs = Math.max(1, Number(args.shift()) || out.runs);
+
+    if (arg === "--mode" && args[0]) {
+      const raw = String(args.shift()).trim().toLowerCase();
+      if (raw !== "cold" && raw !== "warm") {
+        throw new Error(`Invalid --mode ${JSON.stringify(raw)} (expected "cold" or "warm")`);
+      }
+      mode = raw;
+      out.mode = mode;
+    } else if (arg === "--runs" && args[0]) out.runs = Math.max(1, Number(args.shift()) || out.runs);
     else if (arg === "--timeout-ms" && args[0]) out.timeoutMs = Math.max(1, Number(args.shift()) || out.timeoutMs);
     else if ((arg === "--bin" || arg === "--bin-path") && args[0]) out.binPath = args.shift()!;
     else if ((arg === "--window-target-ms" || arg === "--window-visible-target-ms") && args[0])
-      out.windowTargetMs = Math.max(1, Number(args.shift()) || out.windowTargetMs);
+      windowTargetMsOverride = Math.max(1, Number(args.shift()) || 0);
     else if ((arg === "--webview-loaded-target-ms" || arg === "--webview-target-ms") && args[0])
       out.webviewLoadedTargetMs = Math.max(1, Number(args.shift()) || out.webviewLoadedTargetMs);
     else if (arg === "--tti-target-ms" && args[0])
-      out.ttiTargetMs = Math.max(1, Number(args.shift()) || out.ttiTargetMs);
+      ttiTargetMsOverride = Math.max(1, Number(args.shift()) || 0);
     else if ((arg === "--json" || arg === "--json-path") && args[0]) out.jsonPath = args.shift()!;
     else if (arg === "--allow-ci") out.allowInCi = true;
     else if (arg === "--enforce") out.enforce = true;
     else if (arg === "--startup-bench" || arg === "--shell") out.benchKind = "shell";
     else if (arg === "--full") out.benchKind = "full";
   }
+
+  out.windowTargetMs =
+    windowTargetMsOverride ??
+    (mode === "warm" ? Math.max(1, warmWindowTargetMs) : Math.max(1, coldWindowTargetMs));
+  out.ttiTargetMs =
+    ttiTargetMsOverride ?? (mode === "warm" ? Math.max(1, warmTtiTargetMs) : Math.max(1, coldTtiTargetMs));
 
   return out;
 }
@@ -125,6 +173,7 @@ async function main(): Promise<void> {
     runs,
     timeoutMs,
     binPath: argBin,
+    mode,
     windowTargetMs,
     webviewLoadedTargetMs,
     ttiTargetMs,
@@ -155,29 +204,67 @@ async function main(): Promise<void> {
   console.log(
     "[desktop-startup] measuring desktop startup timings (window-visible + first-render + TTI).\n" +
       `- kind: ${benchKind} (set FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell|full or pass --startup-bench/--full)\n` +
+      `- mode: ${mode} (set FORMULA_DESKTOP_STARTUP_MODE=cold|warm or pass --mode)\n` +
       `- runs: ${runs} (override via --runs or FORMULA_DESKTOP_STARTUP_RUNS)\n` +
       `- timeout: ${timeoutMs}ms (override via --timeout-ms or FORMULA_DESKTOP_STARTUP_TIMEOUT_MS)\n` +
-      `- window target: ${windowTargetMs}ms (override via --window-target-ms or FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS)\n` +
+      `- window target: ${windowTargetMs}ms (override via --window-target-ms)\n` +
       `- webviewLoaded target: ${webviewLoadedTargetMs}ms (override via --webview-loaded-target-ms or FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS)\n` +
-      `- tti target: ${ttiTargetMs}ms (override via --tti-target-ms or FORMULA_DESKTOP_TTI_TARGET_MS)\n` +
-      `- home: target/perf-home (repo-local; override with FORMULA_PERF_HOME; set FORMULA_DESKTOP_BENCH_RESET_HOME=1 to reset between iterations)\n` +
+      `- tti target: ${ttiTargetMs}ms (override via --tti-target-ms)\n` +
+      `- home: target/perf-home (repo-local; override with FORMULA_PERF_HOME)\n` +
       (enforce
         ? "- enforcement: enabled (set FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=0 to disable)\n"
         : "- enforcement: disabled (set FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=1 or pass --enforce to fail on regression)\n"),
   );
 
   const results: StartupMetrics[] = [];
-  for (let i = 0; i < runs; i += 1) {
-    // eslint-disable-next-line no-console
-    console.log(`[desktop-${benchKind}-startup] run ${i + 1}/${runs}...`);
-    results.push(
-      await runOnce({
-        binPath,
-        timeoutMs,
-        argv,
-        envOverrides: { FORMULA_DISABLE_STARTUP_UPDATE_CHECK: "1" },
-      }),
-    );
+  const envOverrides: NodeJS.ProcessEnv = { FORMULA_DISABLE_STARTUP_UPDATE_CHECK: "1" };
+
+  const perfHome =
+    process.env.FORMULA_PERF_HOME && process.env.FORMULA_PERF_HOME.trim() !== ""
+      ? resolve(repoRoot, process.env.FORMULA_PERF_HOME)
+      : resolve(repoRoot, "target", "perf-home");
+  const profileRoot = resolve(perfHome, `desktop-startup-${benchKind}-${mode}-${Date.now()}-${process.pid}`);
+
+  // `desktopStartupUtil.runOnce()` supports resetting the selected profile dir via
+  // `FORMULA_DESKTOP_BENCH_RESET_HOME=1`. Manage it here so cold/warm semantics remain clear.
+  const prevResetHome = process.env.FORMULA_DESKTOP_BENCH_RESET_HOME;
+  const setResetHome = (value: string | undefined) => {
+    if (value === undefined) {
+      delete process.env.FORMULA_DESKTOP_BENCH_RESET_HOME;
+    } else {
+      process.env.FORMULA_DESKTOP_BENCH_RESET_HOME = value;
+    }
+  };
+
+  try {
+    if (mode === "warm") {
+      const profileDir = resolve(profileRoot, "profile");
+      setResetHome("1");
+      // eslint-disable-next-line no-console
+      console.log(`[desktop-${benchKind}-startup] warmup run 1/1 (warm, profile=${profileDir})...`);
+      await runOnce({ binPath, timeoutMs, argv, envOverrides, profileDir });
+
+      setResetHome(undefined);
+      for (let i = 0; i < runs; i += 1) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[desktop-${benchKind}-startup] run ${i + 1}/${runs} (warm, profile=${profileDir})...`,
+        );
+        results.push(await runOnce({ binPath, timeoutMs, argv, envOverrides, profileDir }));
+      }
+    } else {
+      setResetHome("1");
+      for (let i = 0; i < runs; i += 1) {
+        const profileDir = resolve(profileRoot, `run-${String(i + 1).padStart(2, "0")}`);
+        // eslint-disable-next-line no-console
+        console.log(
+          `[desktop-${benchKind}-startup] run ${i + 1}/${runs} (cold, profile=${profileDir})...`,
+        );
+        results.push(await runOnce({ binPath, timeoutMs, argv, envOverrides, profileDir }));
+      }
+    }
+  } finally {
+    setResetHome(prevResetHome);
   }
 
   const windowVisible = results.map((r) => r.windowVisibleMs).sort((a, b) => a - b);
@@ -242,6 +329,8 @@ async function main(): Promise<void> {
           generatedAt: new Date().toISOString(),
           platform: process.platform,
           binPath,
+          mode,
+          benchKind,
           runs: results.length,
           samples: results,
           summary,
@@ -263,3 +352,4 @@ async function main(): Promise<void> {
 }
 
 await main();
+
