@@ -95,15 +95,31 @@ def upsert_expectations_entry(
     """
 
     current = expectations.get(workbook_name)
-    if current == entry:
+    if current is None:
+        out = dict(expectations)
+        out[workbook_name] = entry
+        return out, True
+
+    if not isinstance(current, dict):
+        raise ValueError(
+            f"Expected expectations[{workbook_name!r}] to be a JSON object, got {type(current).__name__}."
+        )
+
+    # Treat existing entries as up-to-date if they already contain our required keys with
+    # matching values, even if they include additional fields for stricter CI gating.
+    if all(current.get(k) == v for (k, v) in entry.items()):
         return expectations, False
-    if current is not None and not force:
+
+    if not force:
         raise FileExistsError(
             f"Refusing to overwrite existing expectations entry for {workbook_name}. "
             "Re-run with --force to overwrite."
         )
+
+    merged = dict(current)
+    merged.update(entry)
     out = dict(expectations)
-    out[workbook_name] = entry
+    out[workbook_name] = merged
     return out, True
 
 

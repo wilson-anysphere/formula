@@ -78,6 +78,24 @@ class PromotePublicExpectationsTests(unittest.TestCase):
         self.assertFalse(changed)
         self.assertEqual(updated, expectations)
 
+    def test_upsert_expectations_entry_is_idempotent_with_extra_existing_keys(self) -> None:
+        expectations = {
+            "book.xlsx": {
+                "open_ok": True,
+                "round_trip_ok": True,
+                "diff_critical_count": 0,
+                "diff_warning_count": 123,
+            }
+        }
+        updated, changed = upsert_expectations_entry(
+            expectations=expectations,
+            workbook_name="book.xlsx",
+            entry={"open_ok": True, "round_trip_ok": True, "diff_critical_count": 0},
+            force=False,
+        )
+        self.assertFalse(changed)
+        self.assertEqual(updated, expectations)
+
     def test_upsert_expectations_entry_refuses_overwrite_without_force(self) -> None:
         expectations = {"book.xlsx": {"open_ok": True, "round_trip_ok": True, "diff_critical_count": 0}}
         with self.assertRaises(FileExistsError):
@@ -111,6 +129,18 @@ class PromotePublicExpectationsTests(unittest.TestCase):
             )
             self.assertFalse(changed)
 
+            # If expectations contains extra keys, we should still treat it as up-to-date
+            # as long as the required keys match.
+            data = json.loads(expectations_path.read_text(encoding="utf-8"))
+            data["book.xlsx"]["diff_warning_count"] = 123
+            expectations_path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            before = expectations_path.read_text(encoding="utf-8")
+            changed = update_public_expectations_file(
+                expectations_path, workbook_name="book.xlsx", report=report, force=False
+            )
+            self.assertFalse(changed)
+            self.assertEqual(expectations_path.read_text(encoding="utf-8"), before)
+
             # Different expectations without --force should fail.
             report2 = {"result": {"open_ok": True, "round_trip_ok": False, "diff_critical_count": 9}}
             with self.assertRaises(FileExistsError):
@@ -126,7 +156,14 @@ class PromotePublicExpectationsTests(unittest.TestCase):
             data = json.loads(expectations_path.read_text(encoding="utf-8"))
             self.assertEqual(
                 data,
-                {"book.xlsx": {"open_ok": True, "round_trip_ok": False, "diff_critical_count": 9}},
+                {
+                    "book.xlsx": {
+                        "open_ok": True,
+                        "round_trip_ok": False,
+                        "diff_critical_count": 9,
+                        "diff_warning_count": 123,
+                    }
+                },
             )
 
 
