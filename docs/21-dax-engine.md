@@ -42,6 +42,11 @@ Key APIs (see `crates/formula-dax/src/model.rs`):
 The evaluation entry point is typically `DaxEngine::evaluate(...)` (for ad-hoc expressions) or
 `DataModel::evaluate_measure(...)` (for named measures).
 
+`DaxEngine` also exposes a helper that is useful when an API takes a [`FilterContext`] but you want to
+reuse DAX `CALCULATE`-style filter syntax:
+
+- `DaxEngine::apply_calculate_filters(model, filter, &[filter_arg_strs...]) -> FilterContext`
+
 ### `Table` and `TableBackend`
 
 `Table` is a thin wrapper around a `TableBackend` implementation (see `crates/formula-dax/src/backend.rs`).
@@ -286,6 +291,12 @@ Filter propagation happens in `resolve_row_sets(...)`:
 
 It is primarily created by iterators (`SUMX`, `FILTER`, …) by pushing a row before evaluating an expression.
 
+`RowContext` can contain **multiple entries for the same table** when iterators nest (e.g. nested `FILTER`
+or `SUMX` over the same table). The engine supports this via:
+
+- `EARLIER(Table[Column], [level])` to reference an outer row context for the same table
+- `EARLIEST(Table[Column])` to reference the outermost row context for the table
+
 ### Context transition
 
 Context transition is implemented by `apply_context_transition(...)`:
@@ -483,6 +494,7 @@ If a function is not listed here, it is currently unsupported and will evaluate 
 ### Scalar functions
 
 - `TRUE()`, `FALSE()`, `BLANK()`
+- `ISBLANK(x)`
 - `IF(condition, then, [else])`
 - `SWITCH(expr, value1, result1, ..., [else])`
 - `DIVIDE(numerator, denominator, [alternateResult])`
@@ -511,6 +523,8 @@ If a function is not listed here, it is currently unsupported and will evaluate 
   (current MVP restriction: all search columns must be in the same table as the result column)
 - `CALCULATE(expr, filter1, filter2, ...)`
 - `RELATED(Table[Column])` (requires row context)
+- `EARLIER(Table[Column], [level])` (requires nested row context)
+- `EARLIEST(Table[Column])` (requires row context)
 
 ### Table functions
 
@@ -521,7 +535,11 @@ If a function is not listed here, it is currently unsupported and will evaluate 
 - `ALLEXCEPT(Table, Table[Col1], Table[Col2], ...)`
 - `CALCULATETABLE(tableExpr, filter1, filter2, ...)`
 - `SUMMARIZE(tableExpr, Table[GroupCol1], Table[GroupCol2], ...)`  
-  (limited: currently only grouping columns are supported; it returns a row set of the base table)
+  (limited: currently only grouping columns are supported; group columns may be on the base table or on
+  related tables reachable via a unique active relationship path; it returns a row set of the base table)
+- `SUMMARIZECOLUMNS(Table[GroupCol1], Table[GroupCol2], ...)`  
+  (limited: currently only grouping columns are supported; the engine picks a base table that can reach
+  all grouped tables via active relationships; it returns a row set of that base table)
 - `RELATEDTABLE(Table)` (requires row context)
 
 ### Filter modifiers inside `CALCULATE`
