@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 
 use formula_offcrypto::decrypt_standard_ooxml_from_bytes;
+use formula_offcrypto::OffcryptoError;
 
 fn fixture(path: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join(path)
@@ -36,3 +37,22 @@ fn wrong_password_returns_error() {
     let _msg = err.to_string();
 }
 
+#[test]
+fn rejects_agile_fixture() {
+    // `example_password.xlsx` is an Agile-encrypted OOXML package (EncryptionInfo v4.4).
+    let encrypted =
+        std::fs::read(fixture("inputs/example_password.xlsx")).expect("read encrypted fixture");
+
+    let err = decrypt_standard_ooxml_from_bytes(encrypted, "any-password")
+        .expect_err("expected Agile encryption to be rejected");
+    assert!(
+        matches!(
+            err,
+            OffcryptoError::UnsupportedEncryption {
+                version_major: 4,
+                version_minor: 4
+            }
+        ),
+        "expected UnsupportedEncryption(4.4), got {err:?}"
+    );
+}

@@ -53,6 +53,17 @@ pub struct EncryptionVersionInfo {
     pub flags: u32,
 }
 
+impl EncryptionVersionInfo {
+    /// Parse the MS-OFFCRYPTO `EncryptionVersionInfo` header from an `EncryptionInfo` stream.
+    pub fn parse(encryption_info_stream: &[u8]) -> Result<Self, OffcryptoError> {
+        let mut r = Reader::new(encryption_info_stream);
+        let major = r.read_u16_le("EncryptionVersionInfo.major")?;
+        let minor = r.read_u16_le("EncryptionVersionInfo.minor")?;
+        let flags = r.read_u32_le("EncryptionVersionInfo.flags")?;
+        Ok(Self { major, minor, flags })
+    }
+}
+
 /// Parsed Standard (CryptoAPI) `EncryptionHeader`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StandardEncryptionHeader {
@@ -1761,14 +1772,12 @@ pub fn decrypt_standard_ooxml_from_bytes(
 ) -> Result<Vec<u8>, OffcryptoError> {
     // 1) Validate that the file's EncryptionInfo version indicates Standard encryption (3.2).
     let encryption_info = read_ole_stream(&raw_ole, "EncryptionInfo")?;
-    match parse_encryption_info(&encryption_info)? {
-        EncryptionInfo::Standard { .. } => {}
-        EncryptionInfo::Agile { version, .. } | EncryptionInfo::Unsupported { version } => {
-            return Err(OffcryptoError::UnsupportedEncryption {
-                version_major: version.major,
-                version_minor: version.minor,
-            });
-        }
+    let version = EncryptionVersionInfo::parse(&encryption_info)?;
+    if (version.major, version.minor) != (3, 2) {
+        return Err(OffcryptoError::UnsupportedEncryption {
+            version_major: version.major,
+            version_minor: version.minor,
+        });
     }
 
     // 2) Decrypt using upstream implementation.
