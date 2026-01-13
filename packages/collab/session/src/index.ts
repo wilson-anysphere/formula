@@ -2027,7 +2027,7 @@ export class CollabSession {
         (typeof rawFormula === "string" ? rawFormula.trim() === "" : String(rawFormula).trim() === "");
       if (!formulaEmpty) continue;
 
-      const isMarkerOnly = keySet.has("formula") && rawFormula === null && valueEmpty;
+      const isMarkerOnly = keySet.has("formula") && formulaEmpty && valueEmpty;
       if (isMarkerOnly && !pruneMarkerOnly) continue;
 
       // Only prune entries that contain no other known meaningful keys.

@@ -114,3 +114,84 @@ test("CollabSession.compactCells is idempotent", () => {
   }
 });
 
+test("CollabSession.compactCells preserves marker-only cells by default when conflict monitors are enabled", () => {
+  const session = createCollabSession({
+    doc: new Y.Doc(),
+    formulaConflicts: { localUserId: "u", onConflict: () => {} },
+  });
+  try {
+    session.doc.transact(() => {
+      const markerOnly = new Y.Map();
+      markerOnly.set("value", null);
+      markerOnly.set("formula", null);
+      session.cells.set("Sheet1:4:0", markerOnly);
+    });
+
+    const kept = session.compactCells();
+    assert.deepEqual(kept, { scanned: 1, deleted: 0 });
+    assert.equal(session.cells.has("Sheet1:4:0"), true);
+
+    let sawOrigin = null;
+    session.doc.on("update", (_update, origin) => {
+      sawOrigin = origin;
+    });
+
+    const pruned = session.compactCells({ pruneMarkerOnly: true });
+    assert.deepEqual(pruned, { scanned: 1, deleted: 1 });
+    assert.equal(session.cells.has("Sheet1:4:0"), false);
+    assert.equal(sawOrigin, "cells-compact");
+  } finally {
+    session.destroy();
+    session.doc.destroy();
+  }
+});
+
+test("CollabSession.compactCells dryRun does not mutate", () => {
+  const session = createCollabSession({ doc: new Y.Doc() });
+  try {
+    session.doc.transact(() => {
+      const empty = new Y.Map();
+      empty.set("value", null);
+      empty.set("formula", null);
+      session.cells.set("Sheet1:5:0", empty);
+    });
+
+    const preview = session.compactCells({ dryRun: true });
+    assert.deepEqual(preview, { scanned: 1, deleted: 1 });
+    assert.equal(session.cells.has("Sheet1:5:0"), true);
+
+    const applied = session.compactCells();
+    assert.deepEqual(applied, { scanned: 1, deleted: 1 });
+    assert.equal(session.cells.has("Sheet1:5:0"), false);
+  } finally {
+    session.destroy();
+    session.doc.destroy();
+  }
+});
+
+test("CollabSession.compactCells maxCellsScanned limits work", () => {
+  const session = createCollabSession({ doc: new Y.Doc() });
+  try {
+    session.doc.transact(() => {
+      for (let i = 0; i < 2; i += 1) {
+        const empty = new Y.Map();
+        empty.set("value", null);
+        empty.set("formula", null);
+        session.cells.set(`Sheet1:6:${i}`, empty);
+      }
+    });
+
+    assert.equal(session.cells.size, 2);
+    const first = session.compactCells({ maxCellsScanned: 1 });
+    assert.equal(first.scanned, 1);
+    assert.equal(first.deleted, 1);
+    assert.equal(session.cells.size, 1);
+
+    const second = session.compactCells();
+    assert.equal(second.deleted, 1);
+    assert.equal(session.cells.size, 0);
+  } finally {
+    session.destroy();
+    session.doc.destroy();
+  }
+});
