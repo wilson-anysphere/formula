@@ -391,6 +391,28 @@ test("buildContext: maxChunkRows constructor option affects retrieved chunk prev
   assert.match(preview, /… \(3 more rows\)$/);
 });
 
+test("buildContext: splitRegions indexes multiple row windows for tall sheets", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000 });
+  const values = [];
+  for (let r = 0; r < 100; r++) values.push([r === 99 ? "specialtoken" : "filler"]);
+  const sheet = makeSheet(values);
+
+  const out = await cm.buildContext({
+    sheet,
+    query: "specialtoken",
+    limits: {
+      maxChunkRows: 10,
+      splitRegions: true,
+      chunkRowOverlap: 0,
+      maxChunksPerRegion: 20,
+    },
+  });
+
+  assert.ok(cm.ragIndex.store.size > 1);
+  assert.equal(out.retrieved[0].range, "Sheet1!A91:A100");
+  assert.match(out.retrieved[0].preview, /\bspecialtoken\b/);
+});
+
 test("buildContext: negative maxContextRows/maxContextCells fall back to defaults", async () => {
   const cm = new ContextManager({ tokenBudgetTokens: 1_000, maxContextRows: -1, maxContextCells: -1 });
   const sheet = makeSheet([["r1"], ["r2"], ["r3"], ["r4"], ["r5"]]);

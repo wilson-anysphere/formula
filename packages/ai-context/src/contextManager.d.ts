@@ -209,7 +209,25 @@ export class ContextManager {
     sampleRows?: number;
     samplingStrategy?: "random" | "stratified" | "head" | "tail" | "systematic";
     stratifyByColumn?: number;
-    limits?: { maxContextRows?: number; maxContextCells?: number; maxChunkRows?: number };
+    limits?: {
+      maxContextRows?: number;
+      maxContextCells?: number;
+      maxChunkRows?: number;
+      /**
+       * Split tall sheet regions into multiple row windows for better retrieval quality.
+       *
+       * Defaults to `false` for backwards compatibility.
+       */
+      splitRegions?: boolean;
+      /**
+       * Row overlap between region windows (only when splitting).
+       */
+      chunkRowOverlap?: number;
+      /**
+       * Maximum number of chunks per region (only when splitting).
+       */
+      maxChunksPerRegion?: number;
+    };
     signal?: AbortSignal;
     dlp?: DlpOptions;
   }): Promise<BuildContextResult>;

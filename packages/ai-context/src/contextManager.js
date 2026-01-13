@@ -161,7 +161,14 @@ function stableHashValue(value, options = {}) {
  * Deterministic signature of inputs that affect RAG chunking/indexing.
  *
  * @param {{ name?: string, origin?: any, values?: unknown[][] }} sheet
- * @param {{ maxChunkRows?: number, signal?: AbortSignal }} [options]
+ * @param {{
+ *   maxChunkRows?: number,
+ *   splitRegions?: boolean,
+ *   chunkRowOverlap?: number,
+ *   maxChunksPerRegion?: number,
+ *   valuesHash?: string,
+ *   signal?: AbortSignal
+ * }} [options]
  */
 function computeSheetIndexSignature(sheet, options = {}) {
   const signal = options.signal;
@@ -169,12 +176,22 @@ function computeSheetIndexSignature(sheet, options = {}) {
   const origin = normalizeSheetOrigin(sheet?.origin);
   const maxChunkRows = options.maxChunkRows ?? DEFAULT_RAG_MAX_CHUNK_ROWS;
   const valuesHash = options.valuesHash ?? stableHashValue(sheet?.values ?? [], { signal });
+  const splitRegions = options.splitRegions === true;
+  const chunkRowOverlap = splitRegions ? options.chunkRowOverlap : undefined;
+  const maxChunksPerRegion = splitRegions ? options.maxChunksPerRegion : undefined;
 
   let hash = FNV_OFFSET_64;
   hash = fnv1a64Update(hash, `sig:v${SHEET_INDEX_SIGNATURE_VERSION}\n`);
   hash = fnv1a64Update(hash, `name:${sheet?.name ?? ""}\n`);
   hash = fnv1a64Update(hash, `origin:${origin.row},${origin.col}\n`);
   hash = fnv1a64Update(hash, `maxChunkRows:${String(maxChunkRows)}\n`);
+  hash = fnv1a64Update(hash, `splitRegions:${splitRegions ? "1" : "0"}\n`);
+  if (splitRegions) {
+    const overlapKey = chunkRowOverlap === undefined || chunkRowOverlap === null ? "" : String(chunkRowOverlap);
+    const maxChunksKey = maxChunksPerRegion === undefined || maxChunksPerRegion === null ? "" : String(maxChunksPerRegion);
+    hash = fnv1a64Update(hash, `chunkRowOverlap:${overlapKey}\n`);
+    hash = fnv1a64Update(hash, `maxChunksPerRegion:${maxChunksKey}\n`);
+  }
   hash = fnv1a64Update(hash, "values:");
   hash = fnv1a64Update(hash, valuesHash);
   return hash.toString(16).padStart(16, "0");
@@ -218,6 +235,17 @@ function normalizeNonNegativeInt(value, fallback) {
   if (value === undefined || value === null) return fallback;
   const n = Number(value);
   if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.floor(n);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {number | undefined}
+ */
+function normalizeOptionalNonNegativeInt(value) {
+  if (value === undefined || value === null) return undefined;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return undefined;
   return Math.floor(n);
 }
 
@@ -398,12 +426,21 @@ export class ContextManager {
    * Returns the extracted schema (reused from chunking/indexing when possible).
    *
    * @param {{ name: string, values: unknown[][], origin?: any }} sheet
-   * @param {{ signal?: AbortSignal, maxChunkRows?: number }} [options]
+   * @param {{
+   *   signal?: AbortSignal,
+   *   maxChunkRows?: number,
+   *   splitRegions?: boolean,
+   *   chunkRowOverlap?: number,
+   *   maxChunksPerRegion?: number,
+   * }} [options]
    * @returns {Promise<{ schema: any }>}
    */
   async _ensureSheetIndexed(sheet, options = {}) {
     const signal = options.signal;
     const maxChunkRows = options.maxChunkRows;
+    const splitRegions = options.splitRegions;
+    const chunkRowOverlap = options.chunkRowOverlap;
+    const maxChunksPerRegion = options.maxChunksPerRegion;
     throwIfAborted(signal);
     const sheetName = typeof sheet?.name === "string" ? sheet.name : String(sheet?.name ?? "");
 
@@ -411,14 +448,27 @@ export class ContextManager {
       throwIfAborted(signal);
 
       if (!this.cacheSheetIndex) {
-        const indexStats = await this.ragIndex.indexSheet(sheet, { signal, maxChunkRows });
+        const indexStats = await this.ragIndex.indexSheet(sheet, {
+          signal,
+          maxChunkRows,
+          splitRegions,
+          chunkRowOverlap,
+          maxChunksPerRegion,
+        });
         const schema = indexStats?.schema ?? extractSheetSchema(sheet, { signal });
         return { schema };
       }
 
       const valuesHash = stableHashValue(sheet?.values ?? [], { signal });
       const cacheKey = sheetIndexCacheKey(sheet);
-      const signature = computeSheetIndexSignature(sheet, { signal, maxChunkRows, valuesHash });
+      const signature = computeSheetIndexSignature(sheet, {
+        signal,
+        maxChunkRows,
+        splitRegions,
+        chunkRowOverlap,
+        maxChunksPerRegion,
+        valuesHash,
+      });
       const schemaSignature = computeSheetSchemaSignature(sheet, { signal, valuesHash });
 
       const cached = this._sheetIndexCache.get(cacheKey);
@@ -446,7 +496,13 @@ export class ContextManager {
         return { schema };
       }
 
-      const indexStats = await this.ragIndex.indexSheet(sheet, { signal, maxChunkRows });
+      const indexStats = await this.ragIndex.indexSheet(sheet, {
+        signal,
+        maxChunkRows,
+        splitRegions,
+        chunkRowOverlap,
+        maxChunksPerRegion,
+      });
       const schema = indexStats?.schema ?? extractSheetSchema(sheet, { signal });
 
       // Update caches after successful indexing.
@@ -486,15 +542,31 @@ export class ContextManager {
    *   sheet: { name: string, values: unknown[][], namedRanges?: any[] },
    *   query: string,
    *   attachments?: Attachment[],
-   *   sampleRows?: number,
-   *   samplingStrategy?: "random" | "stratified" | "head" | "tail" | "systematic",
-   *   stratifyByColumn?: number,
-   *   limits?: { maxContextRows?: number, maxContextCells?: number, maxChunkRows?: number },
-   *   signal?: AbortSignal,
-   *   dlp?: {
-   *     documentId: string,
-   *     sheetId?: string,
-   *     policy: any,
+    *   sampleRows?: number,
+    *   samplingStrategy?: "random" | "stratified" | "head" | "tail" | "systematic",
+    *   stratifyByColumn?: number,
+    *   limits?: {
+    *     maxContextRows?: number,
+    *     maxContextCells?: number,
+    *     maxChunkRows?: number,
+    *     /**
+    *      * Split tall regions into multiple row windows to improve retrieval quality.
+    *      *\/
+    *     splitRegions?: boolean,
+    *     /**
+    *      * Row overlap between region windows (only when splitRegions is enabled).
+    *      *\/
+    *     chunkRowOverlap?: number,
+    *     /**
+    *      * Maximum number of windows per region (only when splitRegions is enabled).
+    *      *\/
+    *     maxChunksPerRegion?: number,
+    *   },
+    *   signal?: AbortSignal,
+    *   dlp?: {
+    *     documentId: string,
+    *     sheetId?: string,
+    *     policy: any,
    *     classificationRecords?: Array<{ selector: any, classification: any }>,
    *     classificationStore?: { list(documentId: string): Array<{ selector: any, classification: any }> },
    *     includeRestrictedContent?: boolean,
@@ -514,6 +586,9 @@ export class ContextManager {
     // extraction / RAG chunking can't OOM the worker.
     const safeCellCap = normalizeNonNegativeInt(params.limits?.maxContextCells, this.maxContextCells);
     const maxChunkRows = normalizeNonNegativeInt(params.limits?.maxChunkRows, this.maxChunkRows);
+    const splitRegions = params.limits?.splitRegions === true;
+    const chunkRowOverlap = normalizeOptionalNonNegativeInt(params.limits?.chunkRowOverlap);
+    const maxChunksPerRegion = normalizeOptionalNonNegativeInt(params.limits?.maxChunksPerRegion);
     const rawValues = Array.isArray(rawSheet?.values) ? rawSheet.values : [];
     // Respect both the row cap and the total cell cap.
     // If `maxContextRows` is larger than `maxContextCells`, we need to clamp the row count
@@ -696,7 +771,13 @@ export class ContextManager {
     //
     // `RagIndex.indexSheet()` extracts the schema as part of chunking; `_ensureSheetIndexed()`
     // reuses that work (or cached results) so we don't run schema extraction twice.
-    const { schema } = await this._ensureSheetIndexed(sheetForContext, { signal, maxChunkRows });
+    const { schema } = await this._ensureSheetIndexed(sheetForContext, {
+      signal,
+      maxChunkRows,
+      splitRegions,
+      chunkRowOverlap,
+      maxChunksPerRegion,
+    });
     throwIfAborted(signal);
     let queryForRag = params.query;
     if (dlp) {
