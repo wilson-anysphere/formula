@@ -61,3 +61,30 @@ fn opens_fixture_from_vec_without_copy() {
     let sheet = wb.read_sheet(0).expect("read sheet");
     assert!(sheet.cells.iter().any(|c| c.row == 0 && c.col == 0));
 }
+
+#[test]
+fn in_memory_save_as_to_writer_is_lossless_at_opc_part_level() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
+    let bytes = std::fs::read(path).expect("read fixture bytes");
+
+    let wb = XlsbWorkbook::open_from_vec(bytes.clone()).expect("open xlsb from vec");
+
+    let mut out = Cursor::new(Vec::new());
+    wb.save_as_to_writer(&mut out)
+        .expect("save_as_to_writer should succeed");
+    let out_bytes = out.into_inner();
+
+    let expected = xlsx_diff::WorkbookArchive::from_bytes(&bytes).expect("read expected archive");
+    let actual = xlsx_diff::WorkbookArchive::from_bytes(&out_bytes).expect("read actual archive");
+    let report = xlsx_diff::diff_archives(&expected, &actual);
+    assert!(
+        report.is_empty(),
+        "expected no OPC part diffs, got:\n{}",
+        report
+            .differences
+            .iter()
+            .map(|d| d.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
