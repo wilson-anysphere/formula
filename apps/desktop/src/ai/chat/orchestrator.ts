@@ -138,6 +138,16 @@ export interface AiChatOrchestratorOptions {
   llmClient: LLMClient;
   model: string;
   /**
+   * When enabled (default), if the user's query is classified as needing tools
+   * (e.g. it references cells/ranges) but the model answers without any tool
+   * calls, we retry once with a stricter system instruction that forces tool
+   * usage ("do not guess").
+   *
+   * This plugs a common failure mode where models respond confidently about
+   * workbook data without reading it.
+   */
+  strictToolVerification?: boolean;
+  /**
    * Optional resolver that maps user-facing sheet names (display names) to stable
    * DocumentController sheet ids.
    *
@@ -248,6 +258,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
   const reserveForOutputTokens =
     options.reserveForOutputTokens ?? getDefaultReserveForOutputTokens("chat", contextWindowTokens);
   const keepLastMessages = options.keepLastMessages ?? 40;
+  const strictToolVerification = options.strictToolVerification ?? true;
 
   const spreadsheet = new DocumentControllerSpreadsheetApi(options.documentController, {
     createChart: options.createChart,
@@ -594,6 +605,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
         on_tool_result: params.onToolResult as any,
         on_stream_event: params.onStreamEvent as any,
         signal: params.signal,
+        strict_tool_verification: strictToolVerification,
         verify_claims: true,
         verification_tool_executor: toolExecutor as any,
         audit: {

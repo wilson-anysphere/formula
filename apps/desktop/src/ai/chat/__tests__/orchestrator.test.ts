@@ -1230,6 +1230,7 @@ describe("ai chat orchestrator", () => {
       getActiveSheetId: () => "Sheet1",
       contextManager,
       sessionId: "session_tool_policy_default",
+      strictToolVerification: false,
       onApprovalRequired: async () => true
     });
 
@@ -1238,6 +1239,85 @@ describe("ai chat orchestrator", () => {
     expect(requests).toHaveLength(1);
     const toolNames = (requests[0]?.tools ?? []).map((t: any) => t.name).sort();
     expect(toolNames).toEqual(["compute_statistics", "detect_anomalies", "filter_range", "read_range"]);
+  });
+
+  it("retries once with strict tool verification when the model answers a data question without tools", async () => {
+    const controller = new DocumentController();
+    seed2x2(controller);
+
+    let callCount = 0;
+    const llmClient = {
+      chat: vi.fn(async (_request: any) => {
+        callCount += 1;
+
+        // First run: model answers directly (no toolCalls) even though the prompt
+        // clearly references spreadsheet data.
+        if (callCount === 1) {
+          return {
+            message: { role: "assistant", content: "The sum is 4." },
+            usage: { promptTokens: 1, completionTokens: 1 }
+          };
+        }
+
+        // Strict retry: model issues a tool call.
+        if (callCount === 2) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{ id: "call_1", name: "read_range", arguments: { range: "Sheet1!A1:A2" } }]
+            },
+            usage: { promptTokens: 1, completionTokens: 1 }
+          };
+        }
+
+        // After tool execution: model provides final answer.
+        return {
+          message: { role: "assistant", content: "The sum is 4." },
+          usage: { promptTokens: 1, completionTokens: 1 }
+        };
+      }),
+    };
+
+    const auditStore = new LocalStorageAIAuditStore({ key: "test_audit_strict_tool_verification" });
+    const embedder = new HashEmbedder({ dimension: 32 });
+    const vectorStore = new InMemoryVectorStore({ dimension: 32 });
+    const contextManager = new ContextManager({
+      tokenBudgetTokens: 800,
+      workbookRag: { vectorStore, embedder, topK: 3 }
+    });
+
+    const orchestrator = createAiChatOrchestrator({
+      documentController: controller,
+      workbookId: "wb_strict_tool_verification",
+      llmClient: llmClient as any,
+      model: "mock-model",
+      getActiveSheetId: () => "Sheet1",
+      auditStore,
+      sessionId: "session_strict_tool_verification",
+      contextManager,
+      strictToolVerification: true,
+    });
+
+    const onToolCall = vi.fn();
+    const onToolResult = vi.fn();
+
+    const result = await orchestrator.sendMessage({
+      text: "What is the sum of A1:A2?",
+      history: [],
+      onToolCall,
+      onToolResult,
+    });
+
+    // Should have retried (1st call answered without tools; retry performs tool loop).
+    expect(llmClient.chat).toHaveBeenCalledTimes(3);
+    expect(result.toolResults.length).toBe(1);
+    expect(result.toolResults[0]).toMatchObject({ tool: "read_range", ok: true });
+
+    expect(onToolCall).toHaveBeenCalledTimes(1);
+    expect(onToolCall.mock.calls[0]?.[0]).toMatchObject({ name: "read_range" });
+    expect(onToolResult).toHaveBeenCalledTimes(1);
+    expect(onToolResult.mock.calls[0]?.[0]).toMatchObject({ name: "read_range" });
   });
 
   it("upgrades chat tool policy to include mutation tools when prompt implies edits (still approval-gated)", async () => {
@@ -1267,6 +1347,7 @@ describe("ai chat orchestrator", () => {
       getActiveSheetId: () => "Sheet1",
       contextManager,
       sessionId: "session_tool_policy_upgrade",
+      strictToolVerification: false,
       onApprovalRequired: async () => true
     });
 
@@ -1323,6 +1404,7 @@ describe("ai chat orchestrator", () => {
       auditStore,
       sessionId: "session_attachment_compaction",
       ragService: ragService as any,
+      strictToolVerification: false,
     });
 
     const giant = "x".repeat(50_000);
