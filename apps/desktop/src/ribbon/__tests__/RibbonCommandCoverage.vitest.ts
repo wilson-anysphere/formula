@@ -5,6 +5,7 @@ import { createDefaultLayout, openPanel, closePanel } from "../../layout/layoutS
 import { panelRegistry } from "../../panels/panelRegistry.js";
 import { registerDesktopCommands } from "../../commands/registerDesktopCommands.js";
 import { registerFormatPainterCommand } from "../../commands/formatPainterCommand.js";
+import { RIBBON_MACRO_COMMAND_IDS, registerRibbonMacroCommands } from "../../commands/registerRibbonMacroCommands.js";
 
 import { defaultRibbonSchema } from "../ribbonSchema";
 
@@ -55,15 +56,6 @@ const INTENTIONALLY_UNIMPLEMENTED_RIBBON_COMMAND_IDS = new Set<string>([
   "view.window.switchWindows",
   "view.window.switchWindows.window1",
   "view.window.switchWindows.window2",
-
-  // View → Macros (implemented via ribbon-only handlers today; not exposed as CommandRegistry commands yet)
-  "view.macros.viewMacros",
-  "view.macros.viewMacros.run",
-  "view.macros.viewMacros.edit",
-  "view.macros.viewMacros.delete",
-  "view.macros.recordMacro",
-  "view.macros.recordMacro.stop",
-  "view.macros.useRelativeReferences",
 ]);
 
 const REQUIRED_PAGE_LAYOUT_COMMAND_IDS = [
@@ -84,6 +76,8 @@ const REQUIRED_PAGE_LAYOUT_COMMAND_IDS = [
   "pageLayout.pageSetup.printArea.addTo",
   "pageLayout.export.exportPdf",
 ];
+
+const REQUIRED_DEVELOPER_CODE_COMMAND_IDS = RIBBON_MACRO_COMMAND_IDS.filter((id) => id.startsWith("developer.code."));
 
 function collectRibbonCommandIds(): string[] {
   const ids = new Set<string>();
@@ -130,6 +124,10 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       // but these specific Page Setup/Print Area/PDF Export controls should be real commands so they can
       // be invoked from the command palette/extensions and covered by generic command-disable logic.
       .concat(REQUIRED_PAGE_LAYOUT_COMMAND_IDS.filter((id) => ribbonIds.includes(id)))
+      // Developer tab is mostly placeholder UI, but the macro-related Code group should be wired
+      // through CommandRegistry so it can appear in the command palette and avoid ribbon-only
+      // dispatch logic.
+      .concat(REQUIRED_DEVELOPER_CODE_COMMAND_IDS.filter((id) => ribbonIds.includes(id)))
       .sort((a, b) => a.localeCompare(b));
 
     const commandRegistry = new CommandRegistry();
@@ -196,6 +194,21 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       isArmed: () => false,
       arm: () => {},
       disarm: () => {},
+    });
+
+    // View/Developer macro commands are registered separately from `registerDesktopCommands`
+    // because they require panel focus wiring + macro-recorder integration in the desktop shell.
+    registerRibbonMacroCommands({
+      commandRegistry,
+      handlers: {
+        openPanel: () => {},
+        focusScriptEditorPanel: () => {},
+        focusVbaMigratePanel: () => {},
+        setPendingMacrosPanelFocus: () => {},
+        startMacroRecorder: () => {},
+        stopMacroRecorder: () => {},
+        isTauri: () => false,
+      },
     });
 
     const implementedExemptions = [...INTENTIONALLY_UNIMPLEMENTED_RIBBON_COMMAND_IDS]
