@@ -1680,10 +1680,10 @@ export class DesktopSharedGrid {
 
         if (drag.kind === "col") {
           const delta = event.clientX - drag.startClient;
-          renderer.setColWidth(drag.index, Math.max(MIN_COL_WIDTH, drag.startSize + delta));
+          renderer.setColWidth(drag.index, Math.max(MIN_COL_WIDTH * renderer.getZoom(), drag.startSize + delta));
         } else {
           const delta = event.clientY - drag.startClient;
-          renderer.setRowHeight(drag.index, Math.max(MIN_ROW_HEIGHT, drag.startSize + delta));
+          renderer.setRowHeight(drag.index, Math.max(MIN_ROW_HEIGHT * renderer.getZoom(), drag.startSize + delta));
         }
 
         this.syncScrollbars();
