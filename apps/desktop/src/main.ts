@@ -2158,6 +2158,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "view.togglePanel.dataQueries": isPanelOpen(PanelIds.DATA_QUERIES),
       "view.togglePanel.macros": isPanelOpen(PanelIds.MACROS),
       "view.togglePanel.scriptEditor": isPanelOpen(PanelIds.SCRIPT_EDITOR),
+      "view.togglePanel.vbaMigrate": isPanelOpen(PanelIds.VBA_MIGRATE),
       "view.togglePanel.python": isPanelOpen(PanelIds.PYTHON),
       "view.togglePanel.marketplace": isPanelOpen(PanelIds.MARKETPLACE),
       "view.togglePanel.extensions": isPanelOpen(PanelIds.EXTENSIONS),
