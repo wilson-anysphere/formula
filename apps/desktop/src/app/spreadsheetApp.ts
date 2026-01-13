@@ -5517,13 +5517,26 @@ export class SpreadsheetApp {
 
     const rawText = typeof refText === "string" ? refText.trim() : "";
     const { sheetName } = splitSheetQualifier(rawText);
-    if (sheetName) {
-      const resolved = this.resolveSheetIdByName(sheetName);
-      // For sheet-qualified refs, only preview when the referenced sheet is currently active.
-      if (!resolved || resolved.toLowerCase() !== this.sheetId.toLowerCase()) {
-        this.hideFormulaRangePreviewTooltip();
-        return;
+    const resolvedSheetForPreview = (() => {
+      if (sheetName) {
+        return this.resolveSheetIdByName(sheetName);
       }
+
+      // Named ranges can point at a specific sheet (even though the identifier itself is unqualified).
+      // When possible, resolve the name so we can avoid previewing the wrong sheet.
+      if (rawText) {
+        const entry: any = this.searchWorkbook.getName(rawText);
+        const nameSheet = typeof entry?.sheetName === "string" ? entry.sheetName.trim() : "";
+        if (nameSheet) return this.resolveSheetIdByName(nameSheet);
+      }
+      return null;
+    })();
+
+    if (resolvedSheetForPreview && resolvedSheetForPreview.toLowerCase() !== this.sheetId.toLowerCase()) {
+      // For sheet-qualified refs (and named ranges that target another sheet), only preview when the
+      // referenced sheet is currently active (don't auto-switch).
+      this.hideFormulaRangePreviewTooltip();
+      return;
     }
 
     const startRow = Math.min(range.start.row, range.end.row);
@@ -5540,14 +5553,30 @@ export class SpreadsheetApp {
     const totalCells = rowCount * colCount;
     const tooLarge = totalCells > MAX_FORMULA_RANGE_PREVIEW_CELLS;
 
-    const label =
-      rawText ||
-      rangeToA1({
-        startRow,
-        endRow,
-        startCol,
-        endCol,
-      });
+    const label = (() => {
+      if (rawText && !sheetName) {
+        const entry: any = this.searchWorkbook.getName(rawText);
+        const r = entry?.range;
+        if (
+          r &&
+          typeof r.startRow === "number" &&
+          typeof r.startCol === "number" &&
+          typeof r.endRow === "number" &&
+          typeof r.endCol === "number"
+        ) {
+          return `${rawText} (${rangeToA1(r)})`;
+        }
+      }
+      return (
+        rawText ||
+        rangeToA1({
+          startRow,
+          endRow,
+          startCol,
+          endCol,
+        })
+      );
+    })();
 
     const key = `${this.sheetId}:${startRow},${startCol}:${endRow},${endCol}:${label}:${tooLarge ? "L" : "S"}`;
     if (this.formulaRangePreviewTooltipVisible && this.formulaRangePreviewTooltipLastKey === key) {

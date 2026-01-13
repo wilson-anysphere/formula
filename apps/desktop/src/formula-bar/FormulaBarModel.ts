@@ -449,8 +449,14 @@ export class FormulaBarModel {
   }
 
   #updateHoverFromCursor(): void {
-    const text = this.#draft;
-    if (!text) {
+    if (!this.#isEditing || !this.#draft.trim().startsWith("=")) {
+      this.#hoveredReference = null;
+      this.#hoveredReferenceText = null;
+      return;
+    }
+
+    const activeIndex = this.#activeReferenceIndex;
+    if (activeIndex == null) {
       this.#hoveredReference = null;
       this.#hoveredReferenceText = null;
       return;
@@ -458,51 +464,22 @@ export class FormulaBarModel {
 
     // Reuse the already-computed reference metadata to avoid re-tokenizing the full
     // formula string on every cursor move.
-    const refs = this.#coloredReferences;
-    if (refs.length === 0) {
+    const active = this.#coloredReferences[activeIndex] ?? null;
+    if (!active) {
       this.#hoveredReference = null;
       this.#hoveredReferenceText = null;
       return;
     }
 
-    const findReferenceAt = (probe: number): ColoredFormulaReference | null => {
-      if (!Number.isFinite(probe)) return null;
-      if (probe < 0 || probe >= text.length) return null;
-      return refs.find((ref) => ref.start <= probe && probe < ref.end) ?? null;
+    this.#hoveredReferenceText = active.text;
+    this.#hoveredReference = {
+      start: { row: active.range.startRow, col: active.range.startCol },
+      end: { row: active.range.endRow, col: active.range.endCol },
     };
 
-    // In edit mode, support both:
-    // - a collapsed caret inside a reference token
-    // - a selection that overlaps a reference token (Excel-style clicking selects the full token)
-    const selStart = Math.min(this.#cursorStart, this.#cursorEnd);
-    const selEnd = Math.max(this.#cursorStart, this.#cursorEnd);
-
-    const probes: number[] = [];
-    if (selStart === selEnd) {
-      const cursor = selStart;
-      // Probe the character immediately before the cursor so the end-of-token position counts as "inside".
-      if (cursor > 0) probes.push(cursor - 1);
-      // Also probe at the cursor so the start-of-token position counts as "inside".
-      probes.push(cursor);
-    } else {
-      // For non-collapsed selections, probe within the selected region.
-      probes.push(selEnd > 0 ? selEnd - 1 : selStart);
-      probes.push(selStart);
-    }
-
-    for (const probe of probes) {
-      const ref = findReferenceAt(probe);
-      if (!ref) continue;
-      this.#hoveredReferenceText = ref.text;
-      this.#hoveredReference = {
-        start: { row: ref.range.startRow, col: ref.range.startCol },
-        end: { row: ref.range.endRow, col: ref.range.endCol },
-      };
-      return;
-    }
-
-    this.#hoveredReference = null;
-    this.#hoveredReferenceText = null;
+    // NOTE: `active.text` can be a sheet-qualified A1 reference, a named range, or
+    // (when configured) a structured reference. Consumers that need sheet gating
+    // should use `hoveredReferenceText()` (and resolve names/sheet qualifiers there).
   }
 
   #updateReferenceHighlights(): void {
