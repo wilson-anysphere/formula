@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,6 +59,20 @@ const crossOriginIsolationHeaders = {
   "Cross-Origin-Embedder-Policy": "require-corp",
 };
 
+function envFlagEnabled(name: string): boolean {
+  const raw = process.env[name];
+  if (typeof raw !== "string") return false;
+  switch (raw.trim().toLowerCase()) {
+    case "1":
+    case "true":
+    case "yes":
+    case "on":
+      return true;
+    default:
+      return false;
+  }
+}
+
 function resolveJsToTs() {
   return {
     name: "formula:resolve-js-to-ts",
@@ -91,6 +105,32 @@ function resolveJsToTs() {
   };
 }
 
+function stripPyodideFromDist() {
+  let outDir: string | null = null;
+  let rootDir: string | null = null;
+
+  return {
+    name: "formula:strip-pyodide-from-dist",
+    apply: "build" as const,
+    configResolved(config: any) {
+      outDir = config.build?.outDir ?? null;
+      rootDir = config.root ?? null;
+    },
+    closeBundle() {
+      if (!outDir || !rootDir) return;
+      if (envFlagEnabled("FORMULA_BUNDLE_PYODIDE_ASSETS")) return;
+      try {
+        // Keep production desktop bundles small by ensuring we do not ship the full
+        // Pyodide distribution in `dist/`. Packaged builds download + cache Pyodide
+        // assets on-demand instead.
+        rmSync(resolve(rootDir, outDir, "pyodide"), { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+    },
+  };
+}
+
 export default defineConfig({
   root: ".",
   cacheDir,
@@ -100,6 +140,7 @@ export default defineConfig({
   envPrefix: ["VITE_", "DESKTOP_LOAD_"],
   plugins: [
     resolveJsToTs(),
+    stripPyodideFromDist(),
     ...(typeof visualizer === "function"
       ? [
           visualizer({

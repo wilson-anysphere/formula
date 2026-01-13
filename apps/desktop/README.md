@@ -282,10 +282,18 @@ Packaged desktop builds download Pyodide assets **on-demand** into an app-data
 cache and serve them to the WebView via the `pyodide://` protocol (COOP/COEP
 friendly). This keeps installers small while preserving Python functionality.
 
-If you need to bundle Pyodide into `dist/` (for offline development/CI), set
-`FORMULA_BUNDLE_PYODIDE_ASSETS=1` when running `pnpm -C apps/desktop dev` or
-`pnpm -C apps/desktop build` (this runs `scripts/ensure-pyodide-assets.mjs` and
-copies the assets into `dist/`).
+In **Vite dev** (`pnpm -C apps/desktop dev`), we download the required Pyodide files into
+`apps/desktop/public/pyodide/` via `scripts/ensure-pyodide-assets.mjs` so the dev server can
+serve them from the same origin at `/pyodide/v0.25.1/full/`.
+
+In **packaged/production desktop builds**, Pyodide assets are **not embedded** in `dist/` by
+default to keep installer size down. The first time the user runs a Pyodide-backed feature, the
+desktop backend downloads + verifies the pinned Pyodide distribution into the app cache directory
+and serves it via the `pyodide://` protocol.
+
+If you need to bundle Pyodide into `dist/` (for offline development/CI/preview), set
+`FORMULA_BUNDLE_PYODIDE_ASSETS=1` when running `pnpm -C apps/desktop build` (this runs
+`scripts/ensure-pyodide-assets.mjs` and copies the assets into `dist/`).
 
 ## Content Security Policy (Tauri)
 

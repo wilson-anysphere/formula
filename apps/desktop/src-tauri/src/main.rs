@@ -1550,42 +1550,43 @@ fn main() {
                 resolved_path.to_string()
             };
 
-            match _ctx.app_handle().asset_resolver().get(key.clone()) {
-                Some(asset) => {
-                    let mut builder = Response::builder()
-                        .status(StatusCode::OK)
-                        .header(tauri::http::header::CONTENT_TYPE, asset.mime_type);
+            // Prefer embedded frontend assets (the Vite `dist/` output).
+            if let Some(asset) = _ctx.app_handle().asset_resolver().get(key.clone()) {
+                let mut builder = Response::builder()
+                    .status(StatusCode::OK)
+                    .header(tauri::http::header::CONTENT_TYPE, asset.mime_type);
 
-                    if let Some(csp) = asset.csp_header {
-                        builder = builder.header("Content-Security-Policy", csp);
-                    }
-
-                    let mut response = builder.body(asset.bytes).unwrap_or_else(|_| {
-                        Response::builder()
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .header(tauri::http::header::CONTENT_TYPE, "text/plain")
-                            .body(b"failed to build tauri asset response".to_vec())
-                            .expect("build error response")
-                    });
-
-                    apply_cross_origin_isolation_headers(&mut response);
-                    response
+                if let Some(csp) = asset.csp_header {
+                    builder = builder.header("Content-Security-Policy", csp);
                 }
-                None => {
-                    if startup_bench || should_log_startup_metrics() {
-                        eprintln!(
-                            "[formula][startup-bench] missing tauri asset for path {:?} (normalized {:?})",
-                            raw_path,
-                            key
-                        );
-                    }
+
+                let mut response = builder.body(asset.bytes).unwrap_or_else(|_| {
                     Response::builder()
-                        .status(StatusCode::NOT_FOUND)
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
                         .header(tauri::http::header::CONTENT_TYPE, "text/plain")
-                        .body(b"asset not found".to_vec())
-                        .expect("build not-found response")
-                }
+                        .body(b"failed to build tauri asset response".to_vec())
+                        .expect("build error response")
+                });
+
+                apply_cross_origin_isolation_headers(&mut response);
+                return response;
             }
+
+            if startup_bench || should_log_startup_metrics() {
+                eprintln!(
+                    "[formula][startup-bench] missing tauri asset for path {:?} (normalized {:?})",
+                    raw_path,
+                    key
+                );
+            }
+
+            let mut response = Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .header(tauri::http::header::CONTENT_TYPE, "text/plain")
+                .body(b"asset not found".to_vec())
+                .expect("build not-found response");
+            apply_cross_origin_isolation_headers(&mut response);
+            response
         })
         // Core platform plugins used by the app (dialog, shell).
         .plugin(tauri_plugin_dialog::init())
