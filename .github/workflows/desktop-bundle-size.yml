@@ -62,7 +62,6 @@ jobs:
             librsvg2-dev \
             libssl-dev \
             patchelf \
-            rpm \
             squashfs-tools
 
           # Some AppImage tooling requires FUSE2 at runtime. Ubuntu 24.04 renamed the
@@ -84,7 +83,7 @@ jobs:
           # In CI we may not have FUSE2 available, so force AppImages to run in
           # "extract-and-run" mode (safe; does not affect the produced artifacts).
           APPIMAGE_EXTRACT_AND_RUN: "1"
-        run: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build
+        run: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build --bundles appimage,deb
 
       - name: Report desktop bundle sizes
         env:
