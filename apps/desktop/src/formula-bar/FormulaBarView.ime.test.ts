@@ -171,4 +171,34 @@ describe("FormulaBarView IME composition safety", () => {
 
     host.remove();
   });
+
+  it("does not toggle absolute references with F4 during composition", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "=A1";
+    // Caret between A and 1.
+    view.textarea.setSelectionRange(2, 2);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new Event("compositionstart"));
+    const f4DuringComposition = new KeyboardEvent("keydown", { key: "F4", cancelable: true });
+    view.textarea.dispatchEvent(f4DuringComposition);
+
+    expect(view.textarea.value).toBe("=A1");
+    expect(f4DuringComposition.defaultPrevented).toBe(false);
+
+    view.textarea.dispatchEvent(new Event("compositionend"));
+    const f4AfterComposition = new KeyboardEvent("keydown", { key: "F4", cancelable: true });
+    view.textarea.dispatchEvent(f4AfterComposition);
+
+    expect(f4AfterComposition.defaultPrevented).toBe(true);
+    expect(view.textarea.value).toBe("=$A$1");
+
+    host.remove();
+  });
 });
