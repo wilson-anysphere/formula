@@ -72,6 +72,9 @@ afterEach(() => {
 describe("theme toggle commands", () => {
   it("executing view.theme.dark updates data-theme and persists storage", async () => {
     const storage = createMemoryStorage();
+    // Seed an explicit preference so the test doesn't depend on whatever the
+    // app's "new user" theme default is.
+    saveAppearanceSettings({ themePreference: "light" }, storage);
     const controller = new ThemeController({ document, storage });
     controller.start();
 
@@ -81,9 +84,7 @@ describe("theme toggle commands", () => {
     expect(commandRegistry.getCommand("view.theme.dark")).toBeDefined();
 
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-    // Default theme preference can change over time; only assert we are not
-    // already persisted to the target preference we're testing.
-    expect(getThemePreference(storage)).not.toBe("dark");
+    expect(getThemePreference(storage)).toBe("light");
 
     await commandRegistry.executeCommand("view.theme.dark");
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
