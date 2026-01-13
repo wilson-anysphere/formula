@@ -29,6 +29,16 @@ pub enum OffCryptoError {
     #[error("invalid OOXML Agile encryption parameter: {param}")]
     InvalidAgileParameter { param: &'static str },
 
+    // --- OLE/CFB container helpers --------------------------------------------------------------
+    #[error("missing required OLE stream `{stream}`")]
+    MissingRequiredStream { stream: String },
+
+    #[error("io error while reading encrypted OLE streams: {source}")]
+    Io {
+        #[source]
+        source: std::io::Error,
+    },
+
     // --- EncryptionInfo XML parsing ------------------------------------------------------------
     #[error("EncryptionInfo XML is not valid UTF-8: {source}")]
     EncryptionInfoXmlNotUtf8 {

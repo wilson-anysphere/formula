@@ -58,23 +58,80 @@ mod encryption_info;
 mod error;
 mod rc4;
 
+#[allow(unused_imports)]
 pub use agile::{
     decrypt_agile_encrypted_package_stream, decrypt_agile_encrypted_package_stream_with_key,
     decrypt_agile_keys, parse_agile_encryption_info_stream, AgileDataIntegrity, AgileDecryptedKeys,
     AgileEncryptionInfo, AgileKeyData, AgilePasswordKeyEncryptor,
 };
+
+#[allow(unused_imports)]
 pub use aes_cbc::{
     decrypt_aes_cbc_no_padding, decrypt_aes_cbc_no_padding_in_place, AesCbcDecryptError,
     AES_BLOCK_SIZE,
 };
+
 pub use agile_decrypt::decrypt_agile_encrypted_package;
+
+#[allow(unused_imports)]
 pub use crypto::{
-    derive_iv, derive_key, hash_password, CryptoError, HashAlgorithm, HMAC_KEY_BLOCK,
-    HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
-    derive_segment_iv, segment_block_key,
+    derive_iv, derive_key, derive_segment_iv, hash_password, segment_block_key, CryptoError,
+    HashAlgorithm, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK,
+    VERIFIER_HASH_VALUE_BLOCK,
 };
+
+#[allow(unused_imports)]
 pub use encryption_info::{
-    parse_agile_encryption_info_xml, AgileEncryptionInfo, EncryptionInfoWarning, PasswordKeyEncryptor,
-    KEY_ENCRYPTOR_URI_CERTIFICATE, KEY_ENCRYPTOR_URI_PASSWORD,
+    parse_agile_encryption_info_xml, AgileEncryptionInfo as AgileEncryptionInfoXml,
+    EncryptionInfoWarning, PasswordKeyEncryptor, KEY_ENCRYPTOR_URI_CERTIFICATE,
+    KEY_ENCRYPTOR_URI_PASSWORD,
 };
+
 pub use error::{OffCryptoError, Result};
+
+use std::io::{Read, Seek};
+
+/// Decrypt an Agile-encrypted OOXML package directly from an OLE CFB container.
+///
+/// This is a convenience wrapper around [`decrypt_agile_encrypted_package`] that handles stream
+/// extraction from a `cfb::CompoundFile`.
+///
+/// Stream names are matched at the root level and support both common forms:
+/// - `EncryptionInfo` / `EncryptedPackage`
+/// - `/EncryptionInfo` / `/EncryptedPackage`
+pub fn decrypt_agile_ooxml_from_cfb<R: Read + Seek>(
+    cfb: &mut cfb::CompoundFile<R>,
+    password: &str,
+) -> Result<Vec<u8>> {
+    let encryption_info = read_cfb_stream_bytes(cfb, "EncryptionInfo")?;
+    let encrypted_package = read_cfb_stream_bytes(cfb, "EncryptedPackage")?;
+    decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, password)
+}
+
+fn read_cfb_stream_bytes<R: Read + Seek>(
+    cfb: &mut cfb::CompoundFile<R>,
+    name: &'static str,
+) -> Result<Vec<u8>> {
+    let mut stream = match cfb.open_stream(name) {
+        Ok(s) => s,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            let with_slash = format!("/{name}");
+            match cfb.open_stream(&with_slash) {
+                Ok(s) => s,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    return Err(OffCryptoError::MissingRequiredStream {
+                        stream: name.to_string(),
+                    });
+                }
+                Err(err) => return Err(OffCryptoError::Io { source: err }),
+            }
+        }
+        Err(err) => return Err(OffCryptoError::Io { source: err }),
+    };
+
+    let mut buf = Vec::new();
+    stream
+        .read_to_end(&mut buf)
+        .map_err(|source| OffCryptoError::Io { source })?;
+    Ok(buf)
+}
