@@ -498,6 +498,31 @@ fn canonicalize_and_localize_error_literals() {
     );
 }
 
+#[test]
+fn canonicalize_normalizes_canonical_error_variants() {
+    assert_eq!(
+        locale::canonicalize_formula("=#n/a!", &locale::EN_US).unwrap(),
+        "=#N/A"
+    );
+    assert_eq!(
+        locale::canonicalize_formula("=#value!", &locale::EN_US).unwrap(),
+        "=#VALUE!"
+    );
+}
+
+#[test]
+fn localize_normalizes_canonical_error_variants_before_translation() {
+    // Some legacy/stored formulas may contain `#N/A!` instead of canonical `#N/A`.
+    // Ensure we normalize before attempting locale error literal lookup.
+    let expected = locale::DE_DE
+        .localized_error_literal("#N/A")
+        .unwrap_or("#N/A");
+    assert_eq!(
+        locale::localize_formula("=#N/A!", &locale::DE_DE).unwrap(),
+        format!("={expected}")
+    );
+}
+
 // NOTE: Localized spellings in these tests are based on Microsoft Excel's function/error
 // translations for the de-DE / fr-FR / es-ES locales. Keep these in sync with
 // `src/locale/data/*.tsv` and `src/locale/registry.rs`.
@@ -1038,7 +1063,7 @@ fn engine_accepts_localized_r1c1_formulas_with_field_access() {
         engine.get_cell_formula("Sheet1", "B1"),
         Some("=SUM(A1.Price,1.5)")
     );
- }
+}
 
 #[test]
 fn engine_accepts_localized_spilling_formulas() {

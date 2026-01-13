@@ -1,6 +1,6 @@
 use crate::eval::FormulaParseError;
 use crate::parser::{lex, Token, TokenKind};
-use crate::{LocaleConfig, ParseOptions, ReferenceStyle};
+use crate::{ErrorKind, LocaleConfig, ParseOptions, ReferenceStyle};
 
 use super::FormulaLocale;
 
@@ -166,15 +166,29 @@ fn translate_formula_with_style(
             TokenKind::Error(raw) => {
                 match dir {
                     Direction::ToCanonical => {
-                        if let Some(canon) = locale.canonical_error_literal(raw) {
-                            out.push_str(canon);
+                        // 1) Apply locale-specific mapping (localized -> canonical) if present.
+                        // 2) Normalize canonical spelling/casing for known errors (e.g. `#N/A!` -> `#N/A`).
+                        // 3) Otherwise preserve the original token text.
+                        let mapped = locale
+                            .canonical_error_literal(raw)
+                            .unwrap_or_else(|| raw.as_str());
+                        if let Some(kind) = ErrorKind::from_code(mapped) {
+                            out.push_str(kind.as_code());
                         } else {
                             out.push_str(token_slice(expr_src, tok)?);
                         }
                     }
                     Direction::ToLocalized => {
-                        if let Some(loc) = locale.localized_error_literal(raw) {
+                        // Some legacy/corrupt canonical formulas may contain non-canonical spellings
+                        // like `#N/A!` or mixed casing. Normalize first so locale lookup works.
+                        let kind = ErrorKind::from_code(raw);
+                        let lookup_key = kind.map(|k| k.as_code()).unwrap_or_else(|| raw.as_str());
+
+                        if let Some(loc) = locale.localized_error_literal(lookup_key) {
                             out.push_str(loc);
+                        } else if let Some(kind) = kind {
+                            // No localized mapping available; still normalize the canonical spelling.
+                            out.push_str(kind.as_code());
                         } else {
                             out.push_str(token_slice(expr_src, tok)?);
                         }
