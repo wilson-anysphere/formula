@@ -1048,7 +1048,6 @@ export class SpreadsheetApp {
         undoService,
         defaultSheetId: this.sheetId,
         userId: sessionPermissions.userId,
-        userId: sessionPermissions.userId,
         onEditRejected: (rejected) => {
           showCollabEditRejectedToast(rejected);
         },
