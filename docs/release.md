@@ -443,6 +443,22 @@ CI smoke test:
   and asserts that the expected Windows bundles land under
   `apps/desktop/src-tauri/target/aarch64-pc-windows-msvc/release/bundle/**`.
 
+## Windows installer bundler prerequisites (WiX + NSIS)
+
+Formula ships **both** Windows installer formats for **x64** and **ARM64**:
+
+- **MSI** (WiX Toolset; Tauri uses `candle.exe` + `light.exe`)
+- **EXE** (NSIS; Tauri uses `makensis.exe`)
+
+In CI, `.github/workflows/release.yml` installs these tools automatically via Chocolatey so tagged
+releases always include both `.msi` and `.exe` assets for each architecture.
+
+For local Windows builds, ensure WiX + NSIS are installed and on `PATH` (example using Chocolatey):
+
+```powershell
+choco install wixtoolset nsis --yes --no-progress
+```
+
 ## Windows: WebView2 runtime installation (required)
 
 Formula relies on the **Microsoft Edge WebView2 Evergreen Runtime** on Windows. The Windows installers are configured to
