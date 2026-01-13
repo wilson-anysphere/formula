@@ -1,0 +1,38 @@
+// Fixtures in `tests/fixtures/` are copied from the MIT-licensed `nolze/msoffcrypto-tool` repo:
+// https://github.com/nolze/msoffcrypto-tool
+//
+// The upstream project is MIT licensed; see their repository for the full license text.
+
+use std::path::PathBuf;
+
+use formula_offcrypto::decrypt_standard_ooxml_from_bytes;
+
+fn fixture(path: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join(path)
+}
+
+#[test]
+fn decrypts_standard_fixture_docx() {
+    let encrypted = std::fs::read(fixture("inputs/ecma376standard_password.docx"))
+        .expect("read encrypted fixture");
+    let expected = std::fs::read(fixture("outputs/ecma376standard_password_plain.docx"))
+        .expect("read expected decrypted fixture");
+
+    let decrypted =
+        decrypt_standard_ooxml_from_bytes(encrypted, "Password1234_").expect("decrypt fixture");
+    assert!(decrypted.starts_with(b"PK"));
+    assert_eq!(decrypted, expected);
+}
+
+#[test]
+fn wrong_password_returns_error() {
+    let encrypted = std::fs::read(fixture("inputs/ecma376standard_password.docx"))
+        .expect("read encrypted fixture");
+
+    let err = decrypt_standard_ooxml_from_bytes(encrypted, "not-the-password")
+        .expect_err("expected wrong password to error");
+
+    // The exact error surface comes from `office-crypto`; we only assert that we didn't panic.
+    let _msg = err.to_string();
+}
+
