@@ -235,99 +235,113 @@ perfTest(
     const dc = new DocumentControllerPerfStub();
     const binder = await bindCollabSessionToDocumentController({ session, documentController: dc, userId: "perf-user" });
 
-    const cells = ydoc.getMap("cells");
-    const origin = { type: "perf-origin" };
+    try {
+      const cells = ydoc.getMap("cells");
+      const origin = { type: "perf-origin" };
 
-    if (RUN_PERF && typeof global.gc !== "function") {
-      console.warn(
-        "[session-binder-perf] global.gc() unavailable; run with NODE_OPTIONS=--expose-gc for more stable memory readings",
-      );
-    }
+      if (RUN_PERF && typeof global.gc !== "function") {
+        console.warn(
+          "[session-binder-perf] global.gc() unavailable; run with NODE_OPTIONS=--expose-gc for more stable memory readings",
+        );
+      }
 
-    if (typeof global.gc === "function") global.gc();
-    const startMem = process.memoryUsage();
-    let peakHeapUsed = startMem.heapUsed;
-    let peakRss = startMem.rss;
+      if (typeof global.gc === "function") global.gc();
+      const startMem = process.memoryUsage();
+      let peakHeapUsed = startMem.heapUsed;
+      let peakRss = startMem.rss;
 
-    const t0 = performance.now();
-    for (let i = 0; i < totalUpdates; i += batchSize) {
-      const end = Math.min(totalUpdates, i + batchSize);
-      ydoc.transact(() => {
-        for (let j = i; j < end; j += 1) {
-          const row = Math.floor(j / cols);
-          const col = j % cols;
-          const key = `Sheet1:${row}:${col}`;
-          let cell = cells.get(key);
-          if (!(cell instanceof Y.Map)) {
-            cell = new Y.Map();
-            cells.set(key, cell);
+      const t0 = performance.now();
+      for (let i = 0; i < totalUpdates; i += batchSize) {
+        const end = Math.min(totalUpdates, i + batchSize);
+        ydoc.transact(() => {
+          for (let j = i; j < end; j += 1) {
+            const row = Math.floor(j / cols);
+            const col = j % cols;
+            const key = `Sheet1:${row}:${col}`;
+            let cell = cells.get(key);
+            if (!(cell instanceof Y.Map)) {
+              cell = new Y.Map();
+              cells.set(key, cell);
+            }
+            cell.set("value", j);
+            cell.set("formula", null);
           }
-          cell.set("value", j);
-          cell.set("formula", null);
-        }
-      }, origin);
+        }, origin);
 
-      const mem = process.memoryUsage();
-      peakHeapUsed = Math.max(peakHeapUsed, mem.heapUsed);
-      peakRss = Math.max(peakRss, mem.rss);
-    }
-    const tWriteDone = performance.now();
+        const mem = process.memoryUsage();
+        peakHeapUsed = Math.max(peakHeapUsed, mem.heapUsed);
+        peakRss = Math.max(peakRss, mem.rss);
+      }
+      const tWriteDone = performance.now();
 
-    await dc.whenApplied(totalUpdates);
-    const tApplyDone = performance.now();
+      await dc.whenApplied(totalUpdates);
+      const tApplyDone = performance.now();
 
-    const endMem = process.memoryUsage();
-    peakHeapUsed = Math.max(peakHeapUsed, endMem.heapUsed);
-    peakRss = Math.max(peakRss, endMem.rss);
+      const endMem = process.memoryUsage();
+      peakHeapUsed = Math.max(peakHeapUsed, endMem.heapUsed);
+      peakRss = Math.max(peakRss, endMem.rss);
 
-    if (typeof global.gc === "function") global.gc();
-    const postGcMem = process.memoryUsage();
+      if (typeof global.gc === "function") global.gc();
+      const postGcMem = process.memoryUsage();
 
-    assert.equal(dc.appliedDeltaCount, totalUpdates);
+      assert.equal(dc.appliedDeltaCount, totalUpdates);
 
-    const writeMs = tWriteDone - t0;
-    const applyMs = tApplyDone - tWriteDone;
-    const totalMs = tApplyDone - t0;
+      const writeMs = tWriteDone - t0;
+      const applyMs = tApplyDone - tWriteDone;
+      const totalMs = tApplyDone - t0;
 
-    console.log(
-      [
-        "",
-        `[session-binder-perf] updates=${totalUpdates.toLocaleString()} batchSize=${batchSize.toLocaleString()} cols=${cols.toLocaleString()}`,
-        `[session-binder-perf] time: write=${writeMs.toFixed(1)}ms apply=${applyMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`,
-        `[session-binder-perf] mem (best-effort): heapUsed start=${formatBytes(startMem.heapUsed)} peak=${formatBytes(peakHeapUsed)} postGC=${formatBytes(postGcMem.heapUsed)}`,
-        `[session-binder-perf] mem (best-effort): rss      start=${formatBytes(startMem.rss)} peak=${formatBytes(peakRss)} postGC=${formatBytes(postGcMem.rss)}`,
-      ].join("\n"),
-    );
-
-    if (process.env.PERF_JSON === "1") {
       console.log(
-        JSON.stringify({
-          suite: "session-binder-perf",
-          scenario: "yjs->dc",
-          runtime: runtimeInfo(),
-          updates: totalUpdates,
-          batchSize,
-          cols,
-          timingMs: { write: writeMs, apply: applyMs, total: totalMs },
-          mem: {
-            heapUsed: { start: startMem.heapUsed, peak: peakHeapUsed, postGc: postGcMem.heapUsed },
-            rss: { start: startMem.rss, peak: peakRss, postGc: postGcMem.rss },
-          },
-        }),
+        [
+          "",
+          `[session-binder-perf] updates=${totalUpdates.toLocaleString()} batchSize=${batchSize.toLocaleString()} cols=${cols.toLocaleString()}`,
+          `[session-binder-perf] time: write=${writeMs.toFixed(1)}ms apply=${applyMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`,
+          `[session-binder-perf] mem (best-effort): heapUsed start=${formatBytes(startMem.heapUsed)} peak=${formatBytes(peakHeapUsed)} postGC=${formatBytes(postGcMem.heapUsed)}`,
+          `[session-binder-perf] mem (best-effort): rss      start=${formatBytes(startMem.rss)} peak=${formatBytes(peakRss)} postGC=${formatBytes(postGcMem.rss)}`,
+        ].join("\n"),
       );
-    }
 
-    const maxTotalMs = readPositiveInt(process.env.PERF_MAX_TOTAL_MS_YJS_TO_DC, 0);
-    if (maxTotalMs > 0) {
-      assert.ok(
-        totalMs <= maxTotalMs,
-        `[session-binder-perf] expected total <= ${maxTotalMs}ms, got ${totalMs.toFixed(1)}ms`,
-      );
-    }
+      if (process.env.PERF_JSON === "1") {
+        console.log(
+          JSON.stringify({
+            suite: "session-binder-perf",
+            scenario: "yjs->dc",
+            runtime: runtimeInfo(),
+            updates: totalUpdates,
+            batchSize,
+            cols,
+            timingMs: { write: writeMs, apply: applyMs, total: totalMs },
+            mem: {
+              heapUsed: { start: startMem.heapUsed, peak: peakHeapUsed, postGc: postGcMem.heapUsed },
+              rss: { start: startMem.rss, peak: peakRss, postGc: postGcMem.rss },
+            },
+          }),
+        );
+      }
 
-    binder.destroy();
-    session.destroy();
-    ydoc.destroy();
+      const maxTotalMs = readPositiveInt(process.env.PERF_MAX_TOTAL_MS_YJS_TO_DC, 0);
+      if (maxTotalMs > 0) {
+        assert.ok(
+          totalMs <= maxTotalMs,
+          `[session-binder-perf] expected total <= ${maxTotalMs}ms, got ${totalMs.toFixed(1)}ms`,
+        );
+      }
+    } finally {
+      try {
+        binder.destroy();
+      } catch {
+        // ignore
+      }
+      try {
+        session.destroy();
+      } catch {
+        // ignore
+      }
+      try {
+        ydoc.destroy();
+      } catch {
+        // ignore
+      }
+    }
   },
 );
 
@@ -353,99 +367,113 @@ perfTest(
     const dc = new DocumentControllerPerfStub();
     const binder = await bindCollabSessionToDocumentController({ session, documentController: dc, userId: "perf-user" });
 
-    const cells = ydoc.getMap("cells");
+    try {
+      const cells = ydoc.getMap("cells");
 
-    if (RUN_PERF && typeof global.gc !== "function") {
-      console.warn(
-        "[session-binder-perf] global.gc() unavailable; run with NODE_OPTIONS=--expose-gc for more stable memory readings",
-      );
-    }
-
-    if (typeof global.gc === "function") global.gc();
-    const startMem = process.memoryUsage();
-    let peakHeapUsed = startMem.heapUsed;
-    let peakRss = startMem.rss;
-
-    const t0 = performance.now();
-    for (let i = 0; i < totalUpdates; i += batchSize) {
-      const end = Math.min(totalUpdates, i + batchSize);
-
-      /** @type {any[]} */
-      const deltas = [];
-      for (let j = i; j < end; j += 1) {
-        const row = Math.floor(j / cols);
-        const col = j % cols;
-        deltas.push({
-          sheetId: "Sheet1",
-          row,
-          col,
-          before: { value: null, formula: null, styleId: 0 },
-          after: { value: j, formula: null, styleId: 0 },
-        });
+      if (RUN_PERF && typeof global.gc !== "function") {
+        console.warn(
+          "[session-binder-perf] global.gc() unavailable; run with NODE_OPTIONS=--expose-gc for more stable memory readings",
+        );
       }
 
-      dc._emit("change", { deltas });
+      if (typeof global.gc === "function") global.gc();
+      const startMem = process.memoryUsage();
+      let peakHeapUsed = startMem.heapUsed;
+      let peakRss = startMem.rss;
 
-      const mem = process.memoryUsage();
-      peakHeapUsed = Math.max(peakHeapUsed, mem.heapUsed);
-      peakRss = Math.max(peakRss, mem.rss);
-    }
-    const tEmitDone = performance.now();
+      const t0 = performance.now();
+      for (let i = 0; i < totalUpdates; i += batchSize) {
+        const end = Math.min(totalUpdates, i + batchSize);
 
-    await waitForCondition(() => cells.size === totalUpdates);
-    const tWriteDone = performance.now();
+        /** @type {any[]} */
+        const deltas = [];
+        for (let j = i; j < end; j += 1) {
+          const row = Math.floor(j / cols);
+          const col = j % cols;
+          deltas.push({
+            sheetId: "Sheet1",
+            row,
+            col,
+            before: { value: null, formula: null, styleId: 0 },
+            after: { value: j, formula: null, styleId: 0 },
+          });
+        }
 
-    const endMem = process.memoryUsage();
-    peakHeapUsed = Math.max(peakHeapUsed, endMem.heapUsed);
-    peakRss = Math.max(peakRss, endMem.rss);
+        dc._emit("change", { deltas });
 
-    if (typeof global.gc === "function") global.gc();
-    const postGcMem = process.memoryUsage();
+        const mem = process.memoryUsage();
+        peakHeapUsed = Math.max(peakHeapUsed, mem.heapUsed);
+        peakRss = Math.max(peakRss, mem.rss);
+      }
+      const tEmitDone = performance.now();
 
-    assert.equal(cells.size, totalUpdates);
+      await waitForCondition(() => cells.size === totalUpdates);
+      const tWriteDone = performance.now();
 
-    const emitMs = tEmitDone - t0;
-    const writeMs = tWriteDone - tEmitDone;
-    const totalMs = tWriteDone - t0;
+      const endMem = process.memoryUsage();
+      peakHeapUsed = Math.max(peakHeapUsed, endMem.heapUsed);
+      peakRss = Math.max(peakRss, endMem.rss);
 
-    console.log(
-      [
-        "",
-        `[session-binder-perf] (doc->yjs) updates=${totalUpdates.toLocaleString()} batchSize=${batchSize.toLocaleString()} cols=${cols.toLocaleString()}`,
-        `[session-binder-perf] time: emit=${emitMs.toFixed(1)}ms binderWrite=${writeMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`,
-        `[session-binder-perf] mem (best-effort): heapUsed start=${formatBytes(startMem.heapUsed)} peak=${formatBytes(peakHeapUsed)} postGC=${formatBytes(postGcMem.heapUsed)}`,
-        `[session-binder-perf] mem (best-effort): rss      start=${formatBytes(startMem.rss)} peak=${formatBytes(peakRss)} postGC=${formatBytes(postGcMem.rss)}`,
-      ].join("\n"),
-    );
+      if (typeof global.gc === "function") global.gc();
+      const postGcMem = process.memoryUsage();
 
-    if (process.env.PERF_JSON === "1") {
+      assert.equal(cells.size, totalUpdates);
+
+      const emitMs = tEmitDone - t0;
+      const writeMs = tWriteDone - tEmitDone;
+      const totalMs = tWriteDone - t0;
+
       console.log(
-        JSON.stringify({
-          suite: "session-binder-perf",
-          scenario: "dc->yjs",
-          runtime: runtimeInfo(),
-          updates: totalUpdates,
-          batchSize,
-          cols,
-          timingMs: { emit: emitMs, binderWrite: writeMs, total: totalMs },
-          mem: {
-            heapUsed: { start: startMem.heapUsed, peak: peakHeapUsed, postGc: postGcMem.heapUsed },
-            rss: { start: startMem.rss, peak: peakRss, postGc: postGcMem.rss },
-          },
-        }),
+        [
+          "",
+          `[session-binder-perf] (doc->yjs) updates=${totalUpdates.toLocaleString()} batchSize=${batchSize.toLocaleString()} cols=${cols.toLocaleString()}`,
+          `[session-binder-perf] time: emit=${emitMs.toFixed(1)}ms binderWrite=${writeMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`,
+          `[session-binder-perf] mem (best-effort): heapUsed start=${formatBytes(startMem.heapUsed)} peak=${formatBytes(peakHeapUsed)} postGC=${formatBytes(postGcMem.heapUsed)}`,
+          `[session-binder-perf] mem (best-effort): rss      start=${formatBytes(startMem.rss)} peak=${formatBytes(peakRss)} postGC=${formatBytes(postGcMem.rss)}`,
+        ].join("\n"),
       );
-    }
 
-    const maxTotalMs = readPositiveInt(process.env.PERF_MAX_TOTAL_MS_DC_TO_YJS, 0);
-    if (maxTotalMs > 0) {
-      assert.ok(
-        totalMs <= maxTotalMs,
-        `[session-binder-perf] expected total <= ${maxTotalMs}ms, got ${totalMs.toFixed(1)}ms`,
-      );
-    }
+      if (process.env.PERF_JSON === "1") {
+        console.log(
+          JSON.stringify({
+            suite: "session-binder-perf",
+            scenario: "dc->yjs",
+            runtime: runtimeInfo(),
+            updates: totalUpdates,
+            batchSize,
+            cols,
+            timingMs: { emit: emitMs, binderWrite: writeMs, total: totalMs },
+            mem: {
+              heapUsed: { start: startMem.heapUsed, peak: peakHeapUsed, postGc: postGcMem.heapUsed },
+              rss: { start: startMem.rss, peak: peakRss, postGc: postGcMem.rss },
+            },
+          }),
+        );
+      }
 
-    binder.destroy();
-    session.destroy();
-    ydoc.destroy();
+      const maxTotalMs = readPositiveInt(process.env.PERF_MAX_TOTAL_MS_DC_TO_YJS, 0);
+      if (maxTotalMs > 0) {
+        assert.ok(
+          totalMs <= maxTotalMs,
+          `[session-binder-perf] expected total <= ${maxTotalMs}ms, got ${totalMs.toFixed(1)}ms`,
+        );
+      }
+    } finally {
+      try {
+        binder.destroy();
+      } catch {
+        // ignore
+      }
+      try {
+        session.destroy();
+      } catch {
+        // ignore
+      }
+      try {
+        ydoc.destroy();
+      } catch {
+        // ignore
+      }
+    }
   },
 );
