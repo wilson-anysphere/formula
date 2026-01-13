@@ -14,6 +14,7 @@ use std::path::Path;
 pub(crate) mod autofilter;
 pub(crate) mod globals;
 mod comments;
+pub(crate) mod encryption;
 pub(crate) mod defined_names;
 pub(crate) mod externsheet;
 pub(crate) mod rgce;
