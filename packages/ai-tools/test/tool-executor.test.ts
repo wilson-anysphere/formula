@@ -489,6 +489,28 @@ describe("ToolExecutor", () => {
     expect(() => JSON.stringify(result)).not.toThrow();
   });
 
+  it("read_range summarizes ArrayBuffer views (typed arrays) to avoid huge JSON payloads", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    const bytes = new Uint8Array([1, 2, 3]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: bytes as any });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A1" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.values).toEqual([
+      [JSON.stringify({ __type: "Uint8Array", length: 3, byteLength: 3, sample: [1, 2, 3] })],
+    ]);
+    expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
   it("read_range truncates huge string cell payloads (per-cell) and stays JSON-serializable", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);

@@ -28,6 +28,7 @@ function normalizeFormulaTextOpt(value: unknown): string | null {
 
 const DEFAULT_READ_RANGE_MAX_CELL_CHARS = 10_000;
 const UNSERIALIZABLE_CELL_VALUE_PLACEHOLDER = "[Unserializable cell value]";
+const DEFAULT_RICH_VALUE_SAMPLE_ITEMS = 32;
 
 function truncateCellString(value: string, maxChars: number): string {
   const limit = Number.isFinite(maxChars) ? Math.max(0, Math.floor(maxChars)) : DEFAULT_READ_RANGE_MAX_CELL_CHARS;
@@ -37,9 +38,44 @@ function truncateCellString(value: string, maxChars: number): string {
   return `${value.slice(0, limit)}…[truncated ${truncated} chars]`;
 }
 
+function summarizeArrayBufferView(view: ArrayBufferView): Record<string, unknown> {
+  const ctorName = (view as any)?.constructor?.name;
+  const type = typeof ctorName === "string" && ctorName.trim().length > 0 ? ctorName.trim() : "ArrayBufferView";
+  const byteLength = typeof (view as any).byteLength === "number" ? (view as any).byteLength : undefined;
+  const length = typeof (view as any).length === "number" ? (view as any).length : undefined;
+  const canSample = typeof (view as any).subarray === "function" && typeof (view as any).length === "number";
+  const sample = canSample
+    ? Array.from((view as any).subarray(0, DEFAULT_RICH_VALUE_SAMPLE_ITEMS) as ArrayLike<number>)
+    : undefined;
+
+  return {
+    __type: type,
+    ...(length !== undefined ? { length } : {}),
+    ...(byteLength !== undefined ? { byteLength } : {}),
+    ...(sample ? { sample } : {})
+  };
+}
+
+function richValueJsonReplacer(_key: string, value: unknown): unknown {
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "function" || typeof value === "symbol") return String(value);
+
+  if (typeof ArrayBuffer !== "undefined") {
+    if (value instanceof ArrayBuffer) {
+      return { __type: "ArrayBuffer", byteLength: value.byteLength };
+    }
+    if (typeof ArrayBuffer.isView === "function" && value && typeof value === "object" && ArrayBuffer.isView(value)) {
+      return summarizeArrayBufferView(value as ArrayBufferView);
+    }
+  }
+
+  return value;
+}
+
 function stringifyCellValue(value: unknown): string {
+  if (typeof value === "bigint") return value.toString();
   try {
-    const json = JSON.stringify(value);
+    const json = JSON.stringify(value, richValueJsonReplacer);
     if (typeof json === "string") return json;
   } catch {
     // ignore
