@@ -9,6 +9,7 @@ export type SheetViewState = {
   frozenCols: number;
   colWidths?: Record<string, number>;
   rowHeights?: Record<string, number>;
+  drawings?: any[];
 };
 
 export type SheetViewDelta = {
@@ -19,7 +20,7 @@ export type SheetViewDelta = {
 
 export type SheetViewBinder = { destroy: () => void };
 
-const VIEW_KEYS = new Set(["view", "frozenRows", "frozenCols", "colWidths", "rowHeights"]);
+const VIEW_KEYS = new Set(["view", "frozenRows", "frozenCols", "colWidths", "rowHeights", "drawings"]);
 
 function isRecord(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -97,6 +98,83 @@ function readAxisOverrides(raw: unknown): Record<string, number> | undefined {
   return undefined;
 }
 
+function cloneJsonValue<T>(value: T): T {
+  if (value == null) return value;
+
+  const structuredCloneImpl = (globalThis as any)?.structuredClone;
+  if (typeof structuredCloneImpl === "function") {
+    try {
+      return structuredCloneImpl(value);
+    } catch {
+      // Fall through to JSON-based cloning.
+    }
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    // Best-effort fallback: shallow clone common container types.
+    if (Array.isArray(value)) return value.slice() as any;
+    if (isRecord(value)) return { ...(value as any) };
+    return value;
+  }
+}
+
+function normalizeDrawings(raw: unknown): any[] | undefined {
+  if (raw == null) return undefined;
+
+  let json = raw as any;
+  if (json && typeof json === "object" && typeof json.toJSON === "function") {
+    try {
+      json = json.toJSON();
+    } catch {
+      // Ignore JSON conversion errors and fall back to the raw value.
+    }
+  }
+
+  if (!Array.isArray(json) || json.length === 0) return undefined;
+
+  const cloned = cloneJsonValue(json);
+  return Array.isArray(cloned) && cloned.length > 0 ? cloned : undefined;
+}
+
+function deepEquals(a: any, b: any): boolean {
+  if (a === b) return true;
+  if (a == null || b == null) return a === b;
+  if (typeof a !== typeof b) return false;
+
+  if (typeof a !== "object") return false;
+
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (!deepEquals(a[i], b[i])) return false;
+    }
+    return true;
+  }
+
+  if (isRecord(a)) {
+    if (!isRecord(b)) return false;
+    const aKeys = Object.keys(a);
+    const bKeys = Object.keys(b);
+    if (aKeys.length !== bKeys.length) return false;
+    aKeys.sort();
+    bKeys.sort();
+    for (let i = 0; i < aKeys.length; i += 1) {
+      const key = aKeys[i]!;
+      if (key !== bKeys[i]) return false;
+      if (!deepEquals(a[key], b[key])) return false;
+    }
+    return true;
+  }
+
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
 function sheetViewEquals(a: SheetViewState, b: SheetViewState): boolean {
   if (a === b) return true;
 
@@ -121,7 +199,11 @@ function sheetViewEquals(a: SheetViewState, b: SheetViewState): boolean {
     a.frozenRows === b.frozenRows &&
     a.frozenCols === b.frozenCols &&
     axisEquals(a.colWidths, b.colWidths) &&
-    axisEquals(a.rowHeights, b.rowHeights)
+    axisEquals(a.rowHeights, b.rowHeights) &&
+    deepEquals(
+      Array.isArray(a.drawings) && a.drawings.length > 0 ? a.drawings : null,
+      Array.isArray(b.drawings) && b.drawings.length > 0 ? b.drawings : null,
+    )
   );
 }
 
@@ -142,9 +224,15 @@ function readSheetViewFromSheetMap(sheet: any): SheetViewState {
   const rowHeights =
     viewRaw !== undefined ? readAxisOverrides(readYMapOrObject(viewRaw, "rowHeights")) : readAxisOverrides(sheet?.get?.("rowHeights"));
 
+  let drawingsRaw: unknown = undefined;
+  if (viewRaw !== undefined) drawingsRaw = readYMapOrObject(viewRaw, "drawings");
+  if (drawingsRaw === undefined) drawingsRaw = sheet?.get?.("drawings") ?? sheet?.drawings;
+  const drawings = normalizeDrawings(drawingsRaw);
+
   const out: SheetViewState = { frozenRows, frozenCols };
   if (colWidths) out.colWidths = colWidths;
   if (rowHeights) out.rowHeights = rowHeights;
+  if (drawings) out.drawings = drawings;
   return out;
 }
 
@@ -218,25 +306,62 @@ export function bindSheetViewToCollabSession(options: {
   };
 
   const applyYjsToDocumentController = (sheetIds: Iterable<string>): void => {
-    const deltas: SheetViewDelta[] = [];
+    const viewDeltas: SheetViewDelta[] = [];
+    /** @type {Array<{ sheetId: string, before: any[], after: any[] }>} */
+    const drawingDeltas: Array<{ sheetId: string; before: any[]; after: any[] }> = [];
 
     for (const sheetId of sheetIds) {
       const sheet = findSheetMap(sheetId);
       if (!sheet) continue;
 
       const after = readSheetViewFromSheetMap(sheet);
-      const before = documentController.getSheetView(sheetId) as SheetViewState;
-      if (sheetViewEquals(before, after)) continue;
 
-      deltas.push({ sheetId, before, after });
+      // Sheet view (frozen panes + axis overrides) lives in `DocumentController.getSheetView`.
+      const beforeRaw = documentController.getSheetView(sheetId) as SheetViewState;
+      const beforeView: SheetViewState = {
+        frozenRows: beforeRaw.frozenRows,
+        frozenCols: beforeRaw.frozenCols,
+        ...(beforeRaw.colWidths ? { colWidths: beforeRaw.colWidths } : {}),
+        ...(beforeRaw.rowHeights ? { rowHeights: beforeRaw.rowHeights } : {}),
+      };
+      const afterView: SheetViewState = {
+        frozenRows: after.frozenRows,
+        frozenCols: after.frozenCols,
+        ...(after.colWidths ? { colWidths: after.colWidths } : {}),
+        ...(after.rowHeights ? { rowHeights: after.rowHeights } : {}),
+      };
+
+      if (!sheetViewEquals(beforeView, afterView)) {
+        viewDeltas.push({ sheetId, before: beforeView, after: afterView });
+      }
+
+      // Drawings are stored separately in the DocumentController (Task 218) as `drawingDeltas`.
+      const getSheetDrawings = (documentController as any).getSheetDrawings;
+      if (typeof getSheetDrawings === "function") {
+        const beforeDrawingsRaw = getSheetDrawings.call(documentController, sheetId);
+        const afterDrawingsRaw = after.drawings ?? [];
+
+        const beforeDrawings = Array.isArray(beforeDrawingsRaw) ? beforeDrawingsRaw : [];
+        const afterDrawings = Array.isArray(afterDrawingsRaw) ? afterDrawingsRaw : [];
+
+        const beforeComparable = beforeDrawings.length > 0 ? beforeDrawings : null;
+        const afterComparable = afterDrawings.length > 0 ? afterDrawings : null;
+        if (!deepEquals(beforeComparable, afterComparable)) {
+          drawingDeltas.push({ sheetId, before: beforeDrawings, after: afterDrawings });
+        }
+      }
     }
 
-    if (deltas.length === 0) return;
+    if (viewDeltas.length === 0 && drawingDeltas.length === 0) return;
 
     applyingRemote = true;
     try {
-      if (typeof (documentController as any).applyExternalSheetViewDeltas === "function") {
-        (documentController as any).applyExternalSheetViewDeltas(deltas, { source: "collab" });
+      if (viewDeltas.length > 0 && typeof (documentController as any).applyExternalSheetViewDeltas === "function") {
+        (documentController as any).applyExternalSheetViewDeltas(viewDeltas, { source: "collab" });
+      }
+
+      if (drawingDeltas.length > 0 && typeof (documentController as any).applyExternalDrawingDeltas === "function") {
+        (documentController as any).applyExternalDrawingDeltas(drawingDeltas, { source: "collab" });
       }
     } finally {
       applyingRemote = false;
@@ -262,7 +387,11 @@ export function bindSheetViewToCollabSession(options: {
     if (session.isReadOnly()) return;
 
     const sheetViewDeltas: SheetViewDelta[] = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
-    if (sheetViewDeltas.length === 0) return;
+    const drawingDeltas: Array<{ sheetId: string; before: any[]; after: any[] }> = Array.isArray(payload?.drawingDeltas)
+      ? payload.drawingDeltas
+      : [];
+
+    if (sheetViewDeltas.length === 0 && drawingDeltas.length === 0) return;
 
     session.doc?.transact?.(
       () => {
@@ -291,6 +420,45 @@ export function bindSheetViewToCollabSession(options: {
 
           applyAxisDelta(colWidthsMap, before?.colWidths, after.colWidths);
           applyAxisDelta(rowHeightsMap, before?.rowHeights, after.rowHeights);
+
+          const drawingsBefore = Array.isArray(before?.drawings) && before.drawings.length > 0 ? before.drawings : null;
+          const drawingsAfter = Array.isArray(after.drawings) && after.drawings.length > 0 ? after.drawings : null;
+
+          if (!deepEquals(drawingsBefore, drawingsAfter)) {
+            if (drawingsAfter) {
+              const cloned = cloneJsonValue(drawingsAfter);
+              viewMap.set("drawings", cloned);
+              // Back-compat: mirror to the sheet root so older clients can still observe updates.
+              sheet.set("drawings", cloned);
+            } else {
+              viewMap.delete("drawings");
+              sheet.delete("drawings");
+            }
+          }
+        }
+
+        for (const delta of drawingDeltas) {
+          const sheetId = typeof delta?.sheetId === "string" ? delta.sheetId : null;
+          if (!sheetId) continue;
+
+          const sheet = findSheetMap(sheetId);
+          if (!sheet) continue;
+
+          const beforeDrawings = Array.isArray(delta?.before) && delta.before.length > 0 ? delta.before : null;
+          const afterDrawings = Array.isArray(delta?.after) && delta.after.length > 0 ? delta.after : null;
+
+          if (deepEquals(beforeDrawings, afterDrawings)) continue;
+
+          const viewMap = ensureNestedYMap(sheet, "view");
+          if (afterDrawings) {
+            const cloned = cloneJsonValue(afterDrawings);
+            viewMap.set("drawings", cloned);
+            // Back-compat: mirror to the sheet root so older clients can still observe updates.
+            sheet.set("drawings", cloned);
+          } else {
+            viewMap.delete("drawings");
+            sheet.delete("drawings");
+          }
         }
       },
       binderOrigin,

@@ -4616,6 +4616,34 @@ export class DocumentController {
   }
 
   /**
+   * Apply a set of drawing deltas that originated externally (e.g. collaboration sync).
+   *
+   * Like {@link applyExternalSheetViewDeltas}, these updates:
+   * - bypass undo/redo history (not user-editable)
+   * - emit `change` + `update` events so UI layers can react
+   * - mark the document dirty by default
+   *
+   * @param {DrawingDelta[]} deltas
+   * @param {{ source?: string, markDirty?: boolean }} [options]
+   */
+  applyExternalDrawingDeltas(deltas, options = {}) {
+    if (!deltas || deltas.length === 0) return;
+
+    // External updates should never merge with user edits.
+    this.lastMergeKey = null;
+    this.lastMergeTime = 0;
+
+    const source = typeof options.source === "string" ? options.source : undefined;
+    this.#applyEdits([], [], [], [], deltas, [], [], null, { recalc: false, emitChange: true, source });
+
+    // Mark dirty even though we didn't advance the undo cursor.
+    if (options.markDirty !== false) {
+      this.savedCursor = null;
+    }
+    this.#emitDirty();
+  }
+
+  /**
    * Apply a set of layered formatting deltas that originated externally (e.g. collaboration sync).
    *
    * Like {@link applyExternalDeltas}, these updates:
