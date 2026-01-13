@@ -34,7 +34,6 @@ import {
   terminateProcessTree,
   stdDev,
 } from './desktopStartupUtil.ts';
-} from './desktopStartupUtil.ts';
 
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
@@ -469,7 +468,7 @@ export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
   const settleMs = Math.max(0, Number(process.env.FORMULA_DESKTOP_MEMORY_SETTLE_MS ?? '5000') || 5000);
   const timeoutMs = Math.max(
     1,
-    Number(process.env.FORMULA_DESKTOP_MEMORY_TIMEOUT_MS ?? '30000') || 30000,
+    Number(process.env.FORMULA_DESKTOP_MEMORY_TIMEOUT_MS ?? '20000') || 20000,
   );
 
   const targetMb = Number(process.env.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB ?? '100') || 100;
