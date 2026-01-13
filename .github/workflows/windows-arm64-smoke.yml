@@ -2,6 +2,10 @@ name: Windows ARM64 (Tauri) smoke
 
 on:
   workflow_dispatch:
+  schedule:
+    # Weekly (Monday 05:23 UTC) so we detect runner image/toolchain regressions
+    # even when no desktop-related PRs are landing.
+    - cron: "23 5 * * 1"
   push:
     branches: [main]
     paths:
@@ -23,6 +27,8 @@ on:
 jobs:
   windows-arm64:
     name: Build + bundle (aarch64-pc-windows-msvc)
+    # Avoid spending compute on scheduled runs in forks.
+    if: github.event_name != 'schedule' || github.repository == 'wilson-anysphere/formula'
     runs-on: windows-latest
 
     env:
