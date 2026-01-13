@@ -2,17 +2,73 @@ use formula_dax::{
     Cardinality, CrossFilterDirection, DataModel, DaxEngine, DaxError, FilterContext, Relationship,
     RowContext, Table, Value,
 };
-
 use pretty_assertions::assert_eq;
+
+#[test]
+fn can_add_one_to_one_relationship_with_unique_keys() {
+    let mut model = DataModel::new();
+
+    let mut people = Table::new("People", vec!["PersonId", "Name"]);
+    people.push_row(vec![1.into(), "Alice".into()]).unwrap();
+    people.push_row(vec![2.into(), "Bob".into()]).unwrap();
+    model.add_table(people).unwrap();
+
+    let mut passports = Table::new("Passports", vec!["PersonId", "PassportNo"]);
+    passports.push_row(vec![1.into(), "P1".into()]).unwrap();
+    passports.push_row(vec![2.into(), "P2".into()]).unwrap();
+    model.add_table(passports).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Passports_People".into(),
+            from_table: "Passports".into(),
+            from_column: "PersonId".into(),
+            to_table: "People".into(),
+            to_column: "PersonId".into(),
+            cardinality: Cardinality::OneToOne,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+}
+
+#[test]
+fn one_to_one_relationship_rejects_non_unique_to_side_keys() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Id"]);
+    dim.push_row(vec![1.into()]).unwrap();
+    dim.push_row(vec![1.into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id"]);
+    fact.push_row(vec![1.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    let err = model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Id".into(),
+            to_table: "Dim".into(),
+            to_column: "Id".into(),
+            cardinality: Cardinality::OneToOne,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap_err();
+
+    assert!(matches!(err, DaxError::NonUniqueKey { .. }));
+}
 
 #[test]
 fn one_to_one_relationship_supports_related() {
     let mut model = DataModel::new();
 
     let mut people = Table::new("People", vec!["PersonId", "Name"]);
-    people
-        .push_row(vec![1.into(), "Alice".into()])
-        .unwrap();
+    people.push_row(vec![1.into(), "Alice".into()]).unwrap();
     people.push_row(vec![2.into(), "Bob".into()]).unwrap();
     model.add_table(people).unwrap();
 
@@ -82,6 +138,56 @@ fn one_to_one_relationship_rejects_duplicate_from_keys() {
         }
         other => panic!("expected NonUniqueKey, got {other:?}"),
     }
+}
+
+#[test]
+fn one_to_one_filter_propagation_works() {
+    let mut model = DataModel::new();
+
+    let mut people = Table::new("People", vec!["PersonId", "Name", "Region"]);
+    people
+        .push_row(vec![1.into(), "Alice".into(), "East".into()])
+        .unwrap();
+    people
+        .push_row(vec![2.into(), "Bob".into(), "West".into()])
+        .unwrap();
+    people
+        .push_row(vec![3.into(), "Carol".into(), "East".into()])
+        .unwrap();
+    model.add_table(people).unwrap();
+
+    let mut passports = Table::new("Passports", vec!["PersonId", "PassportNo"]);
+    passports.push_row(vec![1.into(), "P1".into()]).unwrap();
+    passports.push_row(vec![2.into(), "P2".into()]).unwrap();
+    model.add_table(passports).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Passports_People".into(),
+            from_table: "Passports".into(),
+            from_column: "PersonId".into(),
+            to_table: "People".into(),
+            to_column: "PersonId".into(),
+            cardinality: Cardinality::OneToOne,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_measure("Passport Count", "COUNTROWS(Passports)")
+        .unwrap();
+
+    let all = model
+        .evaluate_measure("Passport Count", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(all, Value::from(2i64));
+
+    let east_filter =
+        FilterContext::empty().with_column_equals("People", "Region", "East".into());
+    let east = model.evaluate_measure("Passport Count", &east_filter).unwrap();
+    assert_eq!(east, Value::from(1i64));
 }
 
 #[test]
@@ -165,5 +271,45 @@ fn one_to_one_insert_row_rejects_duplicate_from_keys() {
     assert!(matches!(err, DaxError::NonUniqueKey { .. }));
 
     assert_eq!(model.table("From").unwrap().row_count(), 2);
+}
+
+#[test]
+fn one_to_one_related_returns_expected_values() {
+    let mut model = DataModel::new();
+
+    let mut people = Table::new("People", vec!["PersonId", "Name"]);
+    people.push_row(vec![1.into(), "Alice".into()]).unwrap();
+    people.push_row(vec![2.into(), "Bob".into()]).unwrap();
+    model.add_table(people).unwrap();
+
+    let mut passports = Table::new("Passports", vec!["PersonId", "PassportNo"]);
+    passports.push_row(vec![1.into(), "P1".into()]).unwrap();
+    passports.push_row(vec![2.into(), "P2".into()]).unwrap();
+    model.add_table(passports).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Passports_People".into(),
+            from_table: "Passports".into(),
+            from_column: "PersonId".into(),
+            to_table: "People".into(),
+            to_column: "PersonId".into(),
+            cardinality: Cardinality::OneToOne,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_calculated_column("Passports", "PersonName", "RELATED(People[Name])")
+        .unwrap();
+
+    let passports = model.table("Passports").unwrap();
+    let names: Vec<Value> = (0..passports.row_count())
+        .map(|row| passports.value(row, "PersonName").unwrap())
+        .collect();
+
+    assert_eq!(names, vec![Value::from("Alice"), Value::from("Bob")]);
 }
 

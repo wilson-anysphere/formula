@@ -1214,7 +1214,7 @@ enum StarSchemaGroupKeyAccessor<'a> {
     Base { key_pos: usize },
     Related {
         fk_key_pos: usize,
-        to_index: &'a std::collections::HashMap<Value, RowSet>,
+        to_index: &'a HashMap<Value, RowSet>,
         to_table: &'a crate::model::Table,
         to_column_idx: usize,
     },
