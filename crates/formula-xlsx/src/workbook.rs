@@ -173,11 +173,14 @@ impl XlsxPackage {
                     }
                 };
 
-                let chart_rels_path = if chart_part_path.is_empty() {
-                    None
+                let (chart_rels_path, chart_rels_bytes) = if chart_part_path.is_empty() {
+                    (None, None)
                 } else {
                     let rels = rels_for_part(&chart_part_path);
-                    self.part(&rels).map(|_| rels)
+                    match self.part(&rels) {
+                        Some(bytes) => (Some(rels), Some(bytes.to_vec())),
+                        None => (None, None),
+                    }
                 };
 
                 let mut chart_ex_part = None;
@@ -185,41 +188,40 @@ impl XlsxPackage {
                 let mut colors_part = None;
                 let mut user_shapes_part = None;
 
-                if let Some(chart_rels_path) = chart_rels_path.as_deref() {
-                    if let Some(chart_rels_xml) = self.part(chart_rels_path) {
-                        let rels = parse_relationships(chart_rels_xml, chart_rels_path)?;
-                        for rel in rels {
-                            let target_path = resolve_target(&chart_part_path, &rel.target);
-                            let rel_type = rel.type_.to_ascii_lowercase();
-                            let rel_target = rel.target.to_ascii_lowercase();
+                if let (Some(chart_rels_path), Some(chart_rels_bytes)) =
+                    (chart_rels_path.as_deref(), chart_rels_bytes.as_deref())
+                {
+                    let rels = parse_relationships(chart_rels_bytes, chart_rels_path)?;
+                    for rel in rels {
+                        let target_path = resolve_target(&chart_part_path, &rel.target);
+                        let rel_type = rel.type_.to_ascii_lowercase();
+                        let rel_target = rel.target.to_ascii_lowercase();
 
-                            if chart_ex_part.is_none()
-                                && (rel_type.contains("chartex") || rel_target.contains("chartex"))
-                            {
-                                chart_ex_part = Some(target_path);
-                                continue;
-                            }
+                        if chart_ex_part.is_none()
+                            && (rel_type.contains("chartex") || rel_target.contains("chartex"))
+                        {
+                            chart_ex_part = Some(target_path);
+                            continue;
+                        }
 
-                            if style_part.is_none()
-                                && is_chart_style_relationship(&rel_type, &rel_target)
-                            {
-                                style_part = Some(target_path);
-                                continue;
-                            }
+                        if style_part.is_none() && is_chart_style_relationship(&rel_type, &rel_target)
+                        {
+                            style_part = Some(target_path);
+                            continue;
+                        }
 
-                            if colors_part.is_none()
-                                && is_chart_colors_relationship(&rel_type, &rel_target)
-                            {
-                                colors_part = Some(target_path);
-                                continue;
-                            }
+                        if colors_part.is_none()
+                            && is_chart_colors_relationship(&rel_type, &rel_target)
+                        {
+                            colors_part = Some(target_path);
+                            continue;
+                        }
 
-                            if user_shapes_part.is_none()
-                                && is_chart_user_shapes_relationship(&rel_type, &rel_target)
-                            {
-                                user_shapes_part = Some(target_path);
-                                continue;
-                            }
+                        if user_shapes_part.is_none()
+                            && is_chart_user_shapes_relationship(&rel_type, &rel_target)
+                        {
+                            user_shapes_part = Some(target_path);
+                            continue;
                         }
                     }
                 }
@@ -227,15 +229,18 @@ impl XlsxPackage {
                 let chart = OpcPart {
                     path: chart_part_path.clone(),
                     rels_path: chart_rels_path.clone(),
+                    rels_bytes: chart_rels_bytes,
                     bytes: chart_bytes,
                 };
 
                 let chart_ex = chart_ex_part.and_then(|path| match self.part(&path) {
                     Some(bytes) => {
                         let rels_path = rels_for_part(&path);
+                        let rels_bytes = self.part(&rels_path).map(|bytes| bytes.to_vec());
                         Some(OpcPart {
                             path,
-                            rels_path: self.part(&rels_path).map(|_| rels_path),
+                            rels_path: rels_bytes.as_ref().map(|_| rels_path),
+                            rels_bytes,
                             bytes: bytes.to_vec(),
                         })
                     }
@@ -254,6 +259,7 @@ impl XlsxPackage {
                     Some(bytes) => Some(OpcPart {
                         path,
                         rels_path: None,
+                        rels_bytes: None,
                         bytes: bytes.to_vec(),
                     }),
                     None => {
@@ -271,6 +277,7 @@ impl XlsxPackage {
                     Some(bytes) => Some(OpcPart {
                         path,
                         rels_path: None,
+                        rels_bytes: None,
                         bytes: bytes.to_vec(),
                     }),
                     None => {
@@ -287,9 +294,11 @@ impl XlsxPackage {
                 let user_shapes = user_shapes_part.and_then(|path| match self.part(&path) {
                     Some(bytes) => {
                         let rels_path = rels_for_part(&path);
+                        let rels_bytes = self.part(&rels_path).map(|bytes| bytes.to_vec());
                         Some(OpcPart {
                             path,
-                            rels_path: self.part(&rels_path).map(|_| rels_path),
+                            rels_path: rels_bytes.as_ref().map(|_| rels_path),
+                            rels_bytes,
                             bytes: bytes.to_vec(),
                         })
                     }

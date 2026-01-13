@@ -120,6 +120,16 @@ fn detects_and_preserves_chart_ex_part_from_chart_relationships() {
     assert_eq!(chart_objects.len(), 1);
 
     let chart_object = &chart_objects[0];
+    let chart_part = &chart_object.parts.chart;
+    let chart_rels_path = chart_part
+        .rels_path
+        .as_deref()
+        .expect("chart rels should be present");
+    assert_eq!(
+        chart_part.rels_bytes.as_deref(),
+        package.part(chart_rels_path),
+        "chart rels bytes should be stored on the OpcPart"
+    );
     let chart_ex = chart_object
         .parts
         .chart_ex
@@ -130,5 +140,14 @@ fn detects_and_preserves_chart_ex_part_from_chart_relationships() {
     assert_eq!(
         chart_ex.rels_path.as_deref(),
         Some("xl/charts/_rels/chartEx1.xml.rels")
+    );
+    let chart_ex_rels_path = chart_ex
+        .rels_path
+        .as_deref()
+        .expect("chartEx rels path should be present");
+    assert_eq!(
+        chart_ex.rels_bytes.as_deref(),
+        package.part(chart_ex_rels_path),
+        "chartEx rels bytes should be stored on the OpcPart"
     );
 }

@@ -21,6 +21,7 @@ const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/rela
 pub struct OpcPart {
     pub path: String,
     pub rels_path: Option<String>,
+    pub rels_bytes: Option<Vec<u8>>,
     pub bytes: Vec<u8>,
 }
 
