@@ -310,8 +310,7 @@ alongside the installers. The file is structured roughly like:
   "notes": "...",
   "pub_date": "2026-01-01T00:00:00Z",
   "platforms": {
-    "darwin-aarch64": { "url": "…", "signature": "…" },
-    "darwin-x86_64": { "url": "…", "signature": "…" },
+    "darwin-universal": { "url": "…", "signature": "…" },
     "windows-x86_64": { "url": "…", "signature": "…" },
     "windows-aarch64": { "url": "…", "signature": "…" },
     "linux-x86_64": { "url": "…", "signature": "…" }
@@ -321,8 +320,8 @@ alongside the installers. The file is structured roughly like:
 
 Expected `{{target}}` values for this repo’s release matrix:
 
-- **macOS (universal):** `darwin-aarch64` and `darwin-x86_64` (both should be present; they may point
-  at the same universal updater payload, typically an `.app.tar.gz`).
+- **macOS (universal):** `darwin-universal` (some toolchains use `universal-apple-darwin`) pointing
+  at the updater payload, typically an `.app.tar.gz`.
 - **Windows:** `windows-x86_64` and `windows-aarch64` (one entry per architecture; points at the
   Windows installer used by the updater. The release workflow builds **both** `.msi` (WiX) and
   `.exe` (NSIS) installers, but `latest.json` will typically reference just one per architecture.)
@@ -332,10 +331,10 @@ For reference, this is how the release workflow’s Tauri build targets map to u
 
 | Workflow build | Tauri build args | Rust target triple | `latest.json` platform key(s) |
 | --- | --- | --- | --- |
-| macOS universal | `--target universal-apple-darwin` | `aarch64-apple-darwin` + `x86_64-apple-darwin` | `darwin-aarch64`, `darwin-x86_64` |
-| Windows x64 | `--target x86_64-pc-windows-msvc --bundles msi,nsis` | `x86_64-pc-windows-msvc` | `windows-x86_64` |
-| Windows ARM64 | `--target aarch64-pc-windows-msvc --bundles msi,nsis` | `aarch64-pc-windows-msvc` | `windows-aarch64` |
-| Linux x64 | `--bundles appimage,deb,rpm` | `x86_64-unknown-linux-gnu` | `linux-x86_64` |
+| macOS universal | `--target universal-apple-darwin` | `universal-apple-darwin` | `darwin-universal` (or `universal-apple-darwin`) |
+| Windows x64 | `--target x86_64-pc-windows-msvc --bundles msi,nsis` | `x86_64-pc-windows-msvc` | `windows-x86_64` (or `x86_64-pc-windows-msvc`) |
+| Windows ARM64 | `--target aarch64-pc-windows-msvc --bundles msi,nsis` | `aarch64-pc-windows-msvc` | `windows-aarch64` / `windows-arm64` (or `aarch64-pc-windows-msvc`) |
+| Linux x64 | `--bundles appimage,deb,rpm` | `x86_64-unknown-linux-gnu` | `linux-x86_64` (or `x86_64-unknown-linux-gnu`) |
 
 Note: `.deb` and `.rpm` are shipped for manual install/downgrade, but are not typically used by the
 Tauri updater on Linux. If a target entry is missing from `latest.json`, auto-update for that
@@ -494,10 +493,10 @@ are attached:
    and check the build job for the relevant platform/target (and whether the Tauri bundler step
    failed before uploading assets).
 2. Download `latest.json` and confirm `platforms` includes entries for:
-   - `darwin-aarch64` and `darwin-x86_64` (macOS universal updater payload)
-   - `windows-x86_64` (Windows x64)
-   - `windows-aarch64` (Windows ARM64)
-   - `linux-x86_64` (Linux)
+   - `darwin-universal` (macOS universal updater payload; sometimes `universal-apple-darwin`)
+   - `windows-x86_64` (Windows x64; sometimes `x86_64-pc-windows-msvc`)
+   - `windows-aarch64` / `windows-arm64` (Windows ARM64; sometimes `aarch64-pc-windows-msvc`)
+   - `linux-x86_64` (Linux; sometimes `x86_64-unknown-linux-gnu`)
 
    Quick check (after downloading `latest.json` to your current directory):
 
