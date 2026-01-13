@@ -211,8 +211,29 @@
 }
 
 .ribbon__tab.ribbon__tab--file:hover {
-  background: var(--accent);
-  filter: brightness(1.05);
+  background: var(--accent-hover);
+}
+
+.ribbon__tab.ribbon__tab--file:active {
+  background: var(--accent-active);
+}
+
+:root[data-theme="high-contrast"] .ribbon__tab.ribbon__tab--file {
+  filter: none;
+}
+
+:root[data-theme="high-contrast"] .ribbon__tab.ribbon__tab--file:hover:not(:focus-visible) {
+  box-shadow: inset 0 0 0 1px var(--text-on-accent);
+}
+
+@media (forced-colors: active), (prefers-contrast: more) {
+  .ribbon__tab.ribbon__tab--file {
+    filter: none;
+  }
+
+  .ribbon__tab.ribbon__tab--file:hover:not(:focus-visible) {
+    box-shadow: inset 0 0 0 1px var(--text-on-accent);
+  }
 }
 
 .ribbon__content {

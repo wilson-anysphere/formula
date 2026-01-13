@@ -46,6 +46,9 @@
 
   /* Brand / interactive */
   --accent: #0066cc;
+  /* Hover/active states for solid accent surfaces (primary buttons, File tab, etc). */
+  --accent-hover: #006bd6;
+  --accent-active: #005cb8;
   --accent-light: #e6f0ff;
   --accent-bg: var(--accent-light);
   --accent-border: var(--accent);
@@ -195,6 +198,8 @@
   --border-strong: #5a5a5a;
 
   --accent: #4da6ff;
+  --accent-hover: #51aeff;
+  --accent-active: #499ef2;
   --accent-light: #1a3a5c;
 
   --error: #f44336;
@@ -243,6 +248,8 @@
   --border-strong: CanvasText;
 
   --accent: Highlight;
+  --accent-hover: Highlight;
+  --accent-active: Highlight;
   --accent-light: Highlight;
   --accent-bg: Highlight;
   --accent-border: Highlight;
@@ -333,6 +340,8 @@
     --border-strong: CanvasText;
 
     --accent: Highlight;
+    --accent-hover: Highlight;
+    --accent-active: Highlight;
     --accent-light: Highlight;
     --accent-bg: Highlight;
     --accent-border: Highlight;

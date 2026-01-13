@@ -174,8 +174,7 @@
   transition:
     background-color var(--motion-duration-fast) var(--motion-ease),
     border-color var(--motion-duration-fast) var(--motion-ease),
-    color var(--motion-duration-fast) var(--motion-ease),
-    filter var(--motion-duration-fast) var(--motion-ease);
+    color var(--motion-duration-fast) var(--motion-ease);
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button:hover:not(:disabled) {
@@ -199,5 +198,41 @@
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button--primary:hover:not(:disabled) {
-  filter: brightness(1.1);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.formula-titlebar.formula-titlebar--component .formula-titlebar__action-button--primary:active:not(:disabled) {
+  background: var(--accent-active);
+  border-color: var(--accent-active);
+}
+
+:root[data-theme="high-contrast"] .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button--primary {
+  filter: none;
+}
+
+:root[data-theme="high-contrast"]
+  .formula-titlebar.formula-titlebar--component
+  .formula-titlebar__action-button--primary:hover:not(:disabled) {
+  border-color: var(--text-on-accent);
+}
+
+:root[data-theme="high-contrast"]
+  .formula-titlebar.formula-titlebar--component
+  .formula-titlebar__action-button--primary:active:not(:disabled) {
+  border-color: var(--text-on-accent);
+}
+
+@media (forced-colors: active), (prefers-contrast: more) {
+  .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button--primary {
+    filter: none;
+  }
+
+  .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button--primary:hover:not(:disabled) {
+    border-color: var(--text-on-accent);
+  }
+
+  .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button--primary:active:not(:disabled) {
+    border-color: var(--text-on-accent);
+  }
 }
