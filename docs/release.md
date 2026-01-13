@@ -177,6 +177,8 @@ node scripts/check-macos-entitlements.mjs
 
 If these entitlements are missing, a notarized build can still pass notarization but launch with a **blank window** or a crashing WebView process.
 
+Note: we intentionally do **not** enable `com.apple.security.cs.disable-library-validation` since the app does not load third-party / unsigned dylibs at runtime.
+
 #### Local verification checklist (signed app)
 
 1. Build the production bundles:
@@ -230,7 +232,6 @@ If a signed/notarized build launches with a blank window or crashes immediately,
 3. macOS logs/crash reports:
    - Use **Console.app** → Crash Reports / log stream.
    - Look for `WebKit`, `JavaScriptCore`, or `EXC_BAD_ACCESS` crashes in a `WebContent` process.
-
 ### Windows (Authenticode)
 
 Secrets:

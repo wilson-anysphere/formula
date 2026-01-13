@@ -12,12 +12,19 @@
 
     <!--
       WKWebView / JavaScriptCore JIT + WebAssembly under the hardened runtime.
-      Without these, signed/notarized builds can launch with a blank WebView or crash
-      when the JS engine tries to allocate JIT executable memory.
+      Formula's frontend executes WebAssembly (Pyodide, formula engine worker) and uses
+      CSP-enabled `unsafe-eval` / `wasm-unsafe-eval`. Without these, signed/notarized builds can
+      launch with a blank WebView or crash when the JS engine tries to allocate JIT memory.
     -->
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
+
+    <!--
+      Intentionally *not* enabling `com.apple.security.cs.disable-library-validation`:
+      Formula does not load third-party / unsigned dylibs at runtime. If we ever introduce
+      dlopen-based plugins or unsigned external frameworks, revisit this.
+    -->
   </dict>
 </plist>
