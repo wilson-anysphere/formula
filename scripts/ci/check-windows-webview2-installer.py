@@ -227,7 +227,10 @@ def _7z_list(archive: Path) -> str | None:
 
     # -sccUTF-8 forces UTF-8 console encoding (important on Windows).
     cmd = [seven_zip, "l", "-sccUTF-8", "-ba", "-bd", str(archive)]
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300)
+    try:
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300)
+    except subprocess.TimeoutExpired:
+        return None
     if proc.returncode != 0:
         return None
     return proc.stdout.decode("utf-8", errors="replace")
@@ -244,7 +247,12 @@ def _7z_extract_and_find_marker(archive: Path, markers: list[str]) -> str | None
 
     with tempfile.TemporaryDirectory(prefix="webview2-check-") as tmpdir:
         cmd = [seven_zip, "x", "-y", "-sccUTF-8", f"-o{tmpdir}", str(archive)]
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300)
+        try:
+            proc = subprocess.run(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300
+            )
+        except subprocess.TimeoutExpired:
+            return None
         if proc.returncode != 0:
             return None
 
