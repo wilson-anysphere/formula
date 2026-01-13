@@ -122,7 +122,6 @@ export function buildHitTestIndex(
   const bucketSizePx = Math.max(1, Math.floor(opts?.bucketSizePx ?? 256));
   const maxBucketsPerObject = Math.max(1, Math.floor(opts?.maxBucketsPerObject ?? 256));
   const zoom = Number.isFinite(opts?.zoom) && (opts!.zoom as number) > 0 ? (opts!.zoom as number) : 1;
-
   // Walk from top to bottom (highest zOrder first).
   //
   // Perf: avoid allocating/sorting when callers already keep objects zOrder-sorted

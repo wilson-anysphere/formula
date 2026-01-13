@@ -6,6 +6,8 @@ import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js"
 import { parseA1Range } from "../charts/a1.js";
 import { emuToPx } from "../charts/overlay.js";
 import { chartAnchorToDrawingAnchor } from "../charts/chartAnchorToDrawingAnchor";
+import { ChartCanvasStoreAdapter } from "../charts/chartCanvasStoreAdapter";
+import { chartIdToDrawingId as chartStoreIdToDrawingId, chartRecordToDrawingObject, drawingAnchorToChartAnchor } from "../charts/chartDrawingAdapter";
 import { ChartStore, type ChartRecord } from "../charts/chartStore";
 import { ChartRendererAdapter, type ChartStore as ChartRendererStore } from "../charts/chartRendererAdapter";
 import type { ChartModel } from "../charts/renderChart";
@@ -792,6 +794,41 @@ function resolveCollabPersistenceEnabled(params: URLSearchParams): boolean {
   return true;
 }
 
+function resolveUseCanvasCharts(search: string = typeof window !== "undefined" ? window.location.search : ""): boolean {
+  try {
+    const params = new URLSearchParams(search);
+    const raw = params.get("canvasCharts") ?? params.get("useCanvasCharts") ?? params.get("canvas_charts");
+    if (raw != null) {
+      const normalized = raw.trim().toLowerCase();
+      if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") return true;
+      if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") return false;
+    }
+  } catch {
+    // Ignore invalid URLSearchParams input.
+  }
+
+  // Vite exposes env vars via `import.meta.env`, but tests may also set Node-style env.
+  const metaEnv = (import.meta as any)?.env as Record<string, unknown> | undefined;
+  const viteValue = metaEnv?.VITE_CANVAS_CHARTS ?? metaEnv?.VITE_USE_CANVAS_CHARTS;
+  if (typeof viteValue === "string" && viteValue.trim() !== "") {
+    const normalized = viteValue.trim().toLowerCase();
+    if (normalized === "1" || normalized === "true") return true;
+    if (normalized === "0" || normalized === "false") return false;
+  }
+  if (typeof viteValue === "boolean") return viteValue;
+
+  const nodeEnv = (globalThis as any)?.process?.env as Record<string, unknown> | undefined;
+  const nodeValue = nodeEnv?.CANVAS_CHARTS ?? nodeEnv?.USE_CANVAS_CHARTS;
+  if (typeof nodeValue === "string" && nodeValue.trim() !== "") {
+    const normalized = nodeValue.trim().toLowerCase();
+    if (normalized === "1" || normalized === "true") return true;
+    if (normalized === "0" || normalized === "false") return false;
+  }
+  if (typeof nodeValue === "boolean") return nodeValue;
+
+  return false;
+}
+
 function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
   if (typeof window === "undefined") return null;
   try {
@@ -893,6 +930,7 @@ export class SpreadsheetApp {
   private uiReady = false;
   private readonly sheetNameResolver: SheetNameResolver | null;
   private readonly gridMode: DesktopGridMode;
+  private readonly useCanvasCharts: boolean;
   /**
    * When enabled, comments are keyed by a sheet-qualified cell ref (`${sheetId}!A1`).
    *
@@ -1204,10 +1242,13 @@ export class SpreadsheetApp {
       ranges: Array<{ sheetId: string; startRow: number; endRow: number; startCol: number; endCol: number }>;
     }
   >();
+  private readonly chartCanvasStoreAdapter: ChartCanvasStoreAdapter;
+  private chartRecordLookupCache: { list: readonly ChartRecord[]; map: Map<string, ChartRecord> } | null = null;
   private readonly chartOverlayImages: ImageStore = { get: () => undefined, set: () => {} };
   private chartOverlayGeom: DrawingGridGeometry | null = null;
   private chartSelectionOverlay: DrawingOverlay | null = null;
   private chartSelectionCanvas: HTMLCanvasElement | null = null;
+  private chartDrawingInteraction: DrawingInteractionController | null = null;
   private chartDragState:
     | {
         pointerId: number;
@@ -1296,6 +1337,7 @@ export class SpreadsheetApp {
     this.sheetNameResolver = opts.sheetNameResolver ?? null;
     this.searchWorkbook = new DocumentWorkbookAdapter({ document: this.document, sheetNameResolver: this.sheetNameResolver ?? undefined });
     this.gridMode = resolveDesktopGridMode();
+    this.useCanvasCharts = resolveUseCanvasCharts();
     this.limits =
       opts.limits ??
       (this.gridMode === "shared"
@@ -1807,28 +1849,40 @@ export class SpreadsheetApp {
 
     // Avoid allocating a fresh `{row,col}` object for every chart cell lookup.
     const chartCoordScratch = { row: 0, col: 0 };
+    const getChartCellValue = (sheetId: string, row: number, col: number): unknown => {
+      chartCoordScratch.row = row;
+      chartCoordScratch.col = col;
+      const state = this.document.getCell(sheetId, chartCoordScratch) as {
+        value: unknown;
+        formula: string | null;
+      };
+      if (state?.formula != null) {
+        // Charts should use computed values for formulas (show-formulas is a display-only toggle).
+        return this.getCellComputedValueForSheetInternal(sheetId, chartCoordScratch);
+      }
+      const value = state?.value ?? null;
+      return isRichTextValue(value) ? value.text : value;
+    };
     this.chartStore = new ChartStore({
       defaultSheet: this.sheetId,
       sheetNameResolver: this.sheetNameResolver,
-      getCellValue: (sheetId, row, col) => {
-        chartCoordScratch.row = row;
-        chartCoordScratch.col = col;
-        const state = this.document.getCell(sheetId, chartCoordScratch) as {
-          value: unknown;
-          formula: string | null;
-        };
-        if (state?.formula != null) {
-          // Charts should use computed values for formulas (show-formulas is a display-only toggle).
-          return this.getCellComputedValueForSheetInternal(sheetId, chartCoordScratch);
-        }
-        const value = state?.value ?? null;
-        return isRichTextValue(value) ? value.text : value;
-      },
+      getCellValue: getChartCellValue,
       // Creating/removing charts should not force a full data re-scan for *every* existing chart.
       // `renderCharts(false)` updates chart positioning and ensures newly-created charts have a
       // cached ChartModel. Data refreshes happen only for charts marked dirty by cell/computed
       // changes (see `dirtyChartIds`).
-      onChange: () => this.renderCharts(false)
+      onChange: () => {
+        if (this.useCanvasCharts) this.renderDrawings();
+        else this.renderCharts(false);
+      }
+    });
+
+    this.chartCanvasStoreAdapter = new ChartCanvasStoreAdapter({
+      getChart: (chartId) => this.getChartRecordById(chartId),
+      getCellValue: getChartCellValue,
+      resolveSheetId: (token) => this.resolveSheetIdByName(token),
+      getSeriesColors: () => this.chartTheme.seriesColors,
+      maxDataCells: MAX_CHART_DATA_CELLS,
     });
 
     const chartRendererStore: ChartRendererStore = {
@@ -2047,7 +2101,9 @@ export class SpreadsheetApp {
             this.clearSharedHoverCellCache();
             this.hideCommentTooltip();
             this.renderDrawings(effectiveViewport);
-            this.renderCharts(false);
+            if (!this.useCanvasCharts) {
+              this.renderCharts(false);
+            }
             this.renderAuditing();
             this.renderSelection();
             if (this.scrollX !== prevX || this.scrollY !== prevY) {
@@ -2264,7 +2320,30 @@ export class SpreadsheetApp {
       this.drawingCanvas,
       this.drawingImages,
       this.drawingGeom,
-      new ChartRendererAdapter(this.formulaChartModelStore),
+      new ChartRendererAdapter({
+        getChartModel: (chartId) => {
+          // In canvas-charts mode, ChartStore charts are rendered as drawing objects
+          // using their ChartStore ids. Imported workbook charts use their own ids
+          // (e.g. `${sheetId}:${drawingObjectId}`) and continue to read from
+          // `formulaChartModelStore`.
+          if (this.getChartRecordById(chartId)) return this.chartCanvasStoreAdapter.getChartModel(chartId);
+          return this.formulaChartModelStore.getChartModel(chartId);
+        },
+        getChartData: (chartId) => {
+          if (this.getChartRecordById(chartId)) return undefined;
+          return this.formulaChartModelStore.getChartData(chartId);
+        },
+        getChartTheme: (chartId) => {
+          if (this.getChartRecordById(chartId)) return this.chartCanvasStoreAdapter.getChartTheme(chartId);
+          return this.formulaChartModelStore.getChartTheme(chartId);
+        },
+        getChartRevision: (chartId) => {
+          // Return NaN for chart ids we don't own so ChartRendererAdapter falls back
+          // to model/theme identity checks rather than freezing cached surfaces.
+          if (this.getChartRecordById(chartId)) return this.chartCanvasStoreAdapter.getChartRevision(chartId);
+          return Number.NaN;
+        },
+      }),
     );
     this.drawingOverlay.setSelectedId(null);
 
@@ -2372,15 +2451,90 @@ export class SpreadsheetApp {
       });
     }
 
-    // Chart interactions use hit testing against chart bounds rather than enabling pointer
-    // events on the chart DOM itself (charts remain `pointer-events: none` so grid scrolling
-    // and selection behave consistently). Use a capture listener so we can intercept
-    // chart pointerdowns before grid selection handlers run.
-    this.root.addEventListener("pointerdown", (e) => this.onChartPointerDownCapture(e), {
-      capture: true,
-      passive: false,
-      signal: this.domAbort.signal,
-    });
+    if (this.useCanvasCharts) {
+      const geom = this.chartOverlayGeom;
+      if (geom) {
+        const anchorsEqual = (a: DrawingObject["anchor"], b: DrawingObject["anchor"]): boolean => {
+          if (a.type !== b.type) return false;
+          if (a.type === "absolute") {
+            return a.pos.xEmu === (b as any).pos.xEmu && a.pos.yEmu === (b as any).pos.yEmu && a.size.cx === (b as any).size.cx && a.size.cy === (b as any).size.cy;
+          }
+          if (a.type === "oneCell") {
+            const bb = b as any;
+            return (
+              a.from.cell.row === bb.from.cell.row &&
+              a.from.cell.col === bb.from.cell.col &&
+              a.from.offset.xEmu === bb.from.offset.xEmu &&
+              a.from.offset.yEmu === bb.from.offset.yEmu &&
+              a.size.cx === bb.size.cx &&
+              a.size.cy === bb.size.cy
+            );
+          }
+          // twoCell
+          const bb = b as any;
+          return (
+            a.from.cell.row === bb.from.cell.row &&
+            a.from.cell.col === bb.from.cell.col &&
+            a.from.offset.xEmu === bb.from.offset.xEmu &&
+            a.from.offset.yEmu === bb.from.offset.yEmu &&
+            a.to.cell.row === bb.to.cell.row &&
+            a.to.cell.col === bb.to.cell.col &&
+            a.to.offset.xEmu === bb.to.offset.xEmu &&
+            a.to.offset.yEmu === bb.to.offset.yEmu
+          );
+        };
+
+        this.chartDrawingInteraction = new DrawingInteractionController(
+          this.root,
+          geom,
+          {
+            getViewport: () => this.getDrawingInteractionViewport(),
+            getObjects: () => this.listCanvasChartDrawingObjectsForSheet(this.sheetId, 0),
+            setObjects: (next) => {
+              const current = this.listCanvasChartDrawingObjectsForSheet(this.sheetId, 0);
+              const prevById = new Map<number, DrawingObject>();
+              for (const obj of current) prevById.set(obj.id, obj);
+
+              for (const obj of next) {
+                const prev = prevById.get(obj.id);
+                if (!prev) continue;
+                if (anchorsEqual(prev.anchor, obj.anchor)) continue;
+                const chartId = obj.kind.type === "chart" ? obj.kind.chartId : undefined;
+                if (typeof chartId !== "string" || chartId.trim() === "") continue;
+                this.chartStore.updateChartAnchor(chartId, drawingAnchorToChartAnchor(obj.anchor));
+              }
+            },
+            onSelectionChange: (selectedId) => {
+              const selected =
+                selectedId != null ? this.listCanvasChartDrawingObjectsForSheet(this.sheetId, 0).find((o) => o.id === selectedId) : null;
+              const nextChartId =
+                selected?.kind.type === "chart" && typeof selected.kind.chartId === "string" ? selected.kind.chartId : null;
+
+              // Drawings and charts are mutually exclusive selections. Selecting a chart
+              // should clear any drawing selection so selection handles don't double-render.
+              if (nextChartId != null && this.selectedDrawingId != null) {
+                this.selectedDrawingId = null;
+                this.drawingInteractionController?.setSelectedId(null);
+              }
+
+              this.selectedChartId = nextChartId;
+              this.renderDrawings();
+            },
+          },
+          { capture: true },
+        );
+      }
+    } else {
+      // Chart interactions use hit testing against chart bounds rather than enabling pointer
+      // events on the chart DOM itself (charts remain `pointer-events: none` so grid scrolling
+      // and selection behave consistently). Use a capture listener so we can intercept
+      // chart pointerdowns before grid selection handlers run.
+      this.root.addEventListener("pointerdown", (e) => this.onChartPointerDownCapture(e), {
+        capture: true,
+        passive: false,
+        signal: this.domAbort.signal,
+      });
+    }
 
     // Drawings interactions also require capture-based hit testing because in shared-grid mode
     // pointer events are handled by the full-size `selectionCanvas` (which includes headers)
@@ -3349,6 +3503,8 @@ export class SpreadsheetApp {
     this.chartDragAbort?.abort();
     this.chartDragAbort = null;
     this.chartDragState = null;
+    this.chartDrawingInteraction?.dispose();
+    this.chartDrawingInteraction = null;
     this.setCollabUndoService(null);
     this.reservedRootGuardToastUnsubscribe?.();
     this.reservedRootGuardToastUnsubscribe = null;
@@ -3460,10 +3616,16 @@ export class SpreadsheetApp {
       this.renderScheduled = false;
       if (this.disposed) return;
       const renderMode = this.pendingRenderMode;
+      const renderContent = renderMode === "full";
       this.pendingRenderMode = "full";
       this.renderGrid();
+      if (this.useCanvasCharts && renderContent) {
+        this.invalidateCanvasChartsForActiveSheet();
+      }
       this.renderDrawings();
-      this.renderCharts(false);
+      if (!this.useCanvasCharts) {
+        this.renderCharts(false);
+      }
       this.renderReferencePreview();
       this.renderAuditing();
       this.renderPresence();
@@ -4917,6 +5079,12 @@ export class SpreadsheetApp {
     return this.chartStore.listCharts();
   }
 
+  getChartViewportRect(chartId: string): { left: number; top: number; width: number; height: number } | null {
+    const chart = this.getChartRecordById(chartId);
+    if (!chart) return null;
+    return this.chartAnchorToViewportRect(chart.anchor);
+  }
+
   getSelectedChartId(): string | null {
     return this.selectedChartId;
   }
@@ -5314,6 +5482,20 @@ export class SpreadsheetApp {
       this.document.cancelBatch();
       throw err;
     }
+  }
+
+  private getChartRecordById(chartId: string): ChartRecord | undefined {
+    const id = String(chartId ?? "");
+    if (!id) return undefined;
+    const list = this.chartStore.listCharts();
+    const cached = this.chartRecordLookupCache;
+    if (!cached || cached.list !== list) {
+      const map = new Map<string, ChartRecord>();
+      for (const chart of list) map.set(chart.id, chart);
+      this.chartRecordLookupCache = { list, map };
+      return map.get(id);
+    }
+    return cached.map.get(id);
   }
 
   private enqueueWasmSync(task: (engine: EngineClient) => Promise<void>): Promise<void> {
@@ -9057,7 +9239,9 @@ export class SpreadsheetApp {
       this.scrollY = scroll.y;
 
       this.renderDrawings(viewport);
-      this.renderCharts(false);
+      if (!this.useCanvasCharts) {
+        this.renderCharts(false);
+      }
       this.renderAuditing();
       this.renderSelection();
       this.updateStatus();
@@ -9101,7 +9285,9 @@ export class SpreadsheetApp {
 
     this.renderDrawings();
     this.renderGrid();
-    this.renderCharts(false);
+    if (!this.useCanvasCharts) {
+      this.renderCharts(false);
+    }
     this.renderReferencePreview();
     this.renderAuditing();
     this.renderPresence();
@@ -10245,6 +10431,24 @@ export class SpreadsheetApp {
     this.chartDragAbort = null;
   }
   private renderCharts(renderContent: boolean): void {
+    if (this.useCanvasCharts) {
+      if (renderContent) {
+        // Full chart refresh (e.g. sheet switch): invalidate every chart so the adapter rebuilds
+        // cached models on the next draw.
+        this.invalidateCanvasChartsForActiveSheet();
+        this.dirtyChartIds.clear();
+      } else if (this.dirtyChartIds.size > 0) {
+        // Targeted refresh: invalidate only charts whose underlying data ranges were touched.
+        for (const id of this.dirtyChartIds) {
+          this.chartCanvasStoreAdapter.invalidate(id);
+        }
+        this.dirtyChartIds.clear();
+      }
+      // Charts render as drawing objects on the drawings overlay canvas.
+      this.renderDrawings();
+      return;
+    }
+
     const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
     const keep = new Set<string>();
 
@@ -10886,6 +11090,20 @@ export class SpreadsheetApp {
     this.drawingObjectsCache = { sheetId: this.sheetId, objects, source: drawingsGetter };
   }
 
+  private listCanvasChartDrawingObjectsForSheet(sheetId: string, zBase: number): DrawingObject[] {
+    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === sheetId);
+    if (charts.length === 0) return [];
+    return charts.map((chart, idx) => chartRecordToDrawingObject(chart, zBase + idx));
+  }
+
+  private invalidateCanvasChartsForActiveSheet(): void {
+    const charts = this.chartStore.listCharts();
+    for (const chart of charts) {
+      if (chart.sheetId !== this.sheetId) continue;
+      this.chartCanvasStoreAdapter.invalidate(chart.id);
+    }
+  }
+
   private renderDrawings(sharedViewport?: GridViewportState): void {
     // In shared-grid mode the renderer can emit an initial viewport notification while
     // SpreadsheetApp is still constructing (e.g. unit tests that stub
@@ -10894,12 +11112,34 @@ export class SpreadsheetApp {
     const overlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
     if (!overlay) return;
     const viewport = this.getDrawingRenderViewport(sharedViewport);
-    const objects = this.listDrawingObjectsForSheet();
-    this.drawingObjects = objects;
-    if (this.selectedDrawingId != null && !objects.some((o) => o.id === this.selectedDrawingId)) {
+    const baseObjects = this.listDrawingObjectsForSheet();
+    this.drawingObjects = baseObjects;
+    if (this.selectedDrawingId != null && !baseObjects.some((o) => o.id === this.selectedDrawingId)) {
       this.selectedDrawingId = null;
     }
-    overlay.setSelectedId(this.selectedDrawingId);
+
+    const objects: DrawingObject[] = (() => {
+      if (!this.useCanvasCharts) return baseObjects;
+      const maxZ = baseObjects.reduce((acc, obj) => Math.max(acc, obj.zOrder), -1);
+      const charts = this.listCanvasChartDrawingObjectsForSheet(this.sheetId, maxZ + 1);
+      return charts.length > 0 ? [...baseObjects, ...charts] : baseObjects;
+    })();
+
+    if (this.useCanvasCharts && this.selectedDrawingId == null && this.selectedChartId != null) {
+      const selectedChartDrawingId = chartStoreIdToDrawingId(this.selectedChartId);
+      if (!objects.some((o) => o.id === selectedChartDrawingId)) {
+        this.selectedChartId = null;
+      }
+    }
+
+    const selectedOverlayId =
+      this.selectedDrawingId != null
+        ? this.selectedDrawingId
+        : this.useCanvasCharts && this.selectedChartId != null
+          ? chartStoreIdToDrawingId(this.selectedChartId)
+          : null;
+
+    overlay.setSelectedId(selectedOverlayId);
     void overlay.render(objects, viewport).catch((err) => {
       console.warn("Drawing overlay render failed", err);
     });
