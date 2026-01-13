@@ -208,6 +208,7 @@ export class FormulaBarView {
   #readOnly = false;
   #isComposing = false;
   #isFunctionPickerComposing = false;
+  #isNameBoxComposing = false;
 
   #scheduledRender:
     | { id: number; kind: "raf" }
@@ -649,6 +650,13 @@ export class FormulaBarView {
     });
 
     address.addEventListener("keydown", (e) => {
+      if (
+        (this.#isNameBoxComposing || e.isComposing) &&
+        (e.key === "Enter" || e.key === "Escape" || e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "F4")
+      ) {
+        return;
+      }
+
       const wantsMenuKey =
         (e.key === "ArrowDown" && e.altKey && !e.ctrlKey && !e.metaKey) ||
         (e.key === "F4" && !e.altKey && !e.ctrlKey && !e.metaKey);
@@ -786,6 +794,16 @@ export class FormulaBarView {
         address.value = this.#nameBoxValue;
         address.blur();
       }
+    });
+
+    address.addEventListener("compositionstart", () => {
+      this.#isNameBoxComposing = true;
+    });
+    address.addEventListener("compositionend", () => {
+      this.#isNameBoxComposing = false;
+    });
+    address.addEventListener("blur", () => {
+      this.#isNameBoxComposing = false;
     });
 
     address.addEventListener("input", () => {

@@ -201,4 +201,33 @@ describe("FormulaBarView IME composition safety", () => {
 
     host.remove();
   });
+
+  it("does not run name box Enter navigation during composition", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onGoTo = vi.fn(() => true);
+    const view = new FormulaBarView(host, { onCommit: () => {}, onGoTo });
+
+    const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]')!;
+    address.focus();
+    address.value = "B2";
+
+    address.dispatchEvent(new Event("compositionstart"));
+    const enterDuringComposition = new KeyboardEvent("keydown", { key: "Enter", cancelable: true, bubbles: true });
+    address.dispatchEvent(enterDuringComposition);
+
+    expect(enterDuringComposition.defaultPrevented).toBe(false);
+    expect(onGoTo).not.toHaveBeenCalled();
+
+    address.dispatchEvent(new Event("compositionend"));
+    const enterAfterComposition = new KeyboardEvent("keydown", { key: "Enter", cancelable: true, bubbles: true });
+    address.dispatchEvent(enterAfterComposition);
+
+    expect(enterAfterComposition.defaultPrevented).toBe(true);
+    expect(onGoTo).toHaveBeenCalledTimes(1);
+    expect(onGoTo).toHaveBeenCalledWith("B2");
+
+    host.remove();
+  });
 });
