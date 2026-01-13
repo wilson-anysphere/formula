@@ -55,6 +55,47 @@ def _median(values: list[int]) -> float | None:
 
 
 def _load_reports(reports_dir: Path) -> list[dict[str, Any]]:
+    """Load triage reports from `reports_dir`.
+
+    If `index.json` is present in the parent directory, prefer its ordered report list so the
+    per-workbook table is stable and matches the original triage input ordering (rather than being
+    an artifact of report filename sorting).
+    """
+
+    triage_dir = reports_dir.parent
+    index_path = triage_dir / "index.json"
+
+    if index_path.exists():
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 (tooling)
+            index = None
+        if isinstance(index, dict):
+            entries = index.get("reports")
+            if isinstance(entries, list):
+                ordered: list[dict[str, Any]] = []
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    filename = entry.get("file")
+                    if not isinstance(filename, str) or not filename:
+                        # Back-compat: older indices only recorded the report id, and the report
+                        # file was named `<id>.json`.
+                        report_id = entry.get("id")
+                        if isinstance(report_id, str) and report_id:
+                            filename = f"{report_id}.json"
+                    if not isinstance(filename, str) or not filename:
+                        continue
+                    path = reports_dir / filename
+                    if not path.exists():
+                        continue
+                    try:
+                        ordered.append(json.loads(path.read_text(encoding="utf-8")))
+                    except Exception:  # noqa: BLE001 (tooling)
+                        continue
+                if ordered:
+                    return ordered
+
     reports: list[dict[str, Any]] = []
     for path in sorted(reports_dir.glob("*.json")):
         reports.append(json.loads(path.read_text(encoding="utf-8")))
