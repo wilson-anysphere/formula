@@ -573,4 +573,158 @@ mod tests {
         assert_eq!(parsed.xf, xf);
         assert_eq!(parsed.rgce, rgce_expected);
     }
+
+    #[test]
+    fn parses_formula_rgce_with_ptgexp_before_continued_ptgstr_token() {
+        // Regression test: ensure we consume fixed-size payloads for common tokens (PtgExp/PtgTbl)
+        // so the rgce stream stays aligned and we can still detect/skip PtgStr continuation flags.
+        let literal = "ABCDE";
+        let ptgexp_row = 0x1234u16;
+        let ptgexp_col = 0x5678u16;
+
+        let rgce_expected: Vec<u8> = [
+            vec![0x01], // PtgExp
+            ptgexp_row.to_le_bytes().to_vec(),
+            ptgexp_col.to_le_bytes().to_vec(),
+            vec![0x17, literal.len() as u8, 0u8], // PtgStr + cch + flags (compressed)
+            literal.as_bytes().to_vec(),
+        ]
+        .concat();
+
+        // Split after the first two characters ("AB") inside the string payload.
+        let first_rgce = &rgce_expected[..(5 + 3 + 2)]; // PtgExp (5) + PtgStr header (3) + "AB" (2)
+        let remaining_chars = &literal.as_bytes()[2..]; // "CDE"
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (compressed)
+        continue_payload.extend_from_slice(remaining_chars);
+
+        let row = 1u16;
+        let col = 2u16;
+        let xf = 3u16;
+        let cached_result = 0f64;
+        let cce = rgce_expected.len() as u16;
+
+        let mut formula_payload_part1 = Vec::new();
+        formula_payload_part1.extend_from_slice(&row.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&col.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&xf.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&cached_result.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        formula_payload_part1.extend_from_slice(&0u32.to_le_bytes()); // chn
+        formula_payload_part1.extend_from_slice(&cce.to_le_bytes());
+        formula_payload_part1.extend_from_slice(first_rgce);
+
+        let stream = [
+            record(RECORD_FORMULA, &formula_payload_part1),
+            record(records::RECORD_CONTINUE, &continue_payload),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_FORMULA;
+        let mut iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter.next().expect("record").expect("logical record");
+        assert_eq!(record.record_id, RECORD_FORMULA);
+        assert!(record.is_continued());
+
+        let parsed = parse_biff8_formula_record(&record).expect("parse formula");
+        assert_eq!(parsed.rgce, rgce_expected);
+    }
+
+    #[test]
+    fn parses_shrfmla_rgce_with_continued_ptgstr_token() {
+        // Synthetic SHRFMLA record split across CONTINUE within a PtgStr payload.
+        let literal = "ABCDE";
+        let rgce_expected: Vec<u8> = [
+            vec![0x17, literal.len() as u8, 0u8], // PtgStr + cch + flags (compressed)
+            literal.as_bytes().to_vec(),
+        ]
+        .concat();
+
+        let first_rgce = &rgce_expected[..(3 + 2)]; // ptg + cch + flags + "AB"
+        let remaining_chars = &literal.as_bytes()[2..]; // "CDE"
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (compressed)
+        continue_payload.extend_from_slice(remaining_chars);
+
+        // SHRFMLA record (best-effort): ref (RefU, 6 bytes) + cUse (2) + cce (2) + rgce.
+        let rw_first = 0u16;
+        let rw_last = 0u16;
+        let col_first = 0u8;
+        let col_last = 0u8;
+        let c_use = 0u16;
+        let cce = rgce_expected.len() as u16;
+
+        let mut payload_part1 = Vec::new();
+        payload_part1.extend_from_slice(&rw_first.to_le_bytes());
+        payload_part1.extend_from_slice(&rw_last.to_le_bytes());
+        payload_part1.push(col_first);
+        payload_part1.push(col_last);
+        payload_part1.extend_from_slice(&c_use.to_le_bytes());
+        payload_part1.extend_from_slice(&cce.to_le_bytes());
+        payload_part1.extend_from_slice(first_rgce);
+
+        let stream = [
+            record(RECORD_SHRFMLA, &payload_part1),
+            record(records::RECORD_CONTINUE, &continue_payload),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_SHRFMLA;
+        let mut iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter.next().expect("record").expect("logical record");
+        assert_eq!(record.record_id, RECORD_SHRFMLA);
+        assert!(record.is_continued());
+
+        let parsed = parse_biff8_shrfmla_record(&record).expect("parse SHRFMLA");
+        assert_eq!(parsed.rgce, rgce_expected);
+    }
+
+    #[test]
+    fn parses_array_rgce_with_continued_ptgstr_token() {
+        // Synthetic ARRAY record split across CONTINUE within a PtgStr payload.
+        let literal = "ABCDE";
+        let rgce_expected: Vec<u8> = [
+            vec![0x17, literal.len() as u8, 0u8], // PtgStr + cch + flags (compressed)
+            literal.as_bytes().to_vec(),
+        ]
+        .concat();
+
+        let first_rgce = &rgce_expected[..(3 + 2)]; // ptg + cch + flags + "AB"
+        let remaining_chars = &literal.as_bytes()[2..]; // "CDE"
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (compressed)
+        continue_payload.extend_from_slice(remaining_chars);
+
+        // ARRAY record (best-effort): ref (RefU, 6 bytes) + reserved/grbit (2) + cce (2) + rgce.
+        let rw_first = 0u16;
+        let rw_last = 0u16;
+        let col_first = 0u8;
+        let col_last = 0u8;
+        let grbit = 0u16;
+        let cce = rgce_expected.len() as u16;
+
+        let mut payload_part1 = Vec::new();
+        payload_part1.extend_from_slice(&rw_first.to_le_bytes());
+        payload_part1.extend_from_slice(&rw_last.to_le_bytes());
+        payload_part1.push(col_first);
+        payload_part1.push(col_last);
+        payload_part1.extend_from_slice(&grbit.to_le_bytes());
+        payload_part1.extend_from_slice(&cce.to_le_bytes());
+        payload_part1.extend_from_slice(first_rgce);
+
+        let stream = [
+            record(RECORD_ARRAY, &payload_part1),
+            record(records::RECORD_CONTINUE, &continue_payload),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_ARRAY;
+        let mut iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter.next().expect("record").expect("logical record");
+        assert_eq!(record.record_id, RECORD_ARRAY);
+        assert!(record.is_continued());
+
+        let parsed = parse_biff8_array_record(&record).expect("parse ARRAY");
+        assert_eq!(parsed.rgce, rgce_expected);
+    }
 }
