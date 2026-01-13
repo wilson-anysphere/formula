@@ -9,9 +9,10 @@ import {
   parseStartupLine,
   percentile,
   shouldUseXvfb,
+  terminateProcessTree,
   type StartupMetrics,
-} from "./desktopStartupRunnerShared.ts";
-import { terminateProcessTree, type TerminateProcessTreeMode } from "./processTree.ts";
+  type TerminateProcessTreeMode,
+} from "./desktopStartupUtil.ts";
 
 type Summary = {
   runs: number;
@@ -74,10 +75,8 @@ function parseArgs(argv: string[]): {
     const arg = args.shift();
     if (!arg) break;
     if (arg === "--runs" && args[0]) out.runs = Math.max(1, Number(args.shift()) || out.runs);
-    else if (arg === "--timeout-ms" && args[0])
-      out.timeoutMs = Math.max(1, Number(args.shift()) || out.timeoutMs);
-    else if (arg === "--settle-ms" && args[0])
-      out.settleMs = Math.max(0, Number(args.shift()) || out.settleMs);
+    else if (arg === "--timeout-ms" && args[0]) out.timeoutMs = Math.max(1, Number(args.shift()) || out.timeoutMs);
+    else if (arg === "--settle-ms" && args[0]) out.settleMs = Math.max(0, Number(args.shift()) || out.settleMs);
     else if ((arg === "--bin" || arg === "--bin-path") && args[0]) out.binPath = args.shift()!;
     else if (arg === "--target-mb" && args[0]) {
       const raw = Number(args.shift());
@@ -97,7 +96,6 @@ function closeReadline(rl: Interface | null): void {
     // ignore
   }
 }
-
 function parsePsTable(output: string): { pid: number; ppid: number; rssKb: number }[] {
   const rows: { pid: number; ppid: number; rssKb: number }[] = [];
   for (const line of output.split("\n")) {
@@ -246,6 +244,7 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
       cwd: repoRoot,
       stdio: ["ignore", "pipe", "pipe"],
       env,
+      // On POSIX, start the app in its own process group so we can terminate the whole tree.
       detached: process.platform !== "win32",
       windowsHide: true,
     });

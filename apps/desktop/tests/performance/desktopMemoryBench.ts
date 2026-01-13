@@ -8,9 +8,13 @@ import { fileURLToPath } from 'node:url';
 import { type BenchmarkResult } from './benchmark.ts';
 import {
   defaultDesktopBinPath,
+  mean,
+  median,
+  percentile,
   parseStartupLine as parseStartupMetricsLine,
   shouldUseXvfb,
-} from './desktopStartupRunnerShared.ts';
+  stdDev,
+} from './desktopStartupUtil.ts';
 
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
@@ -372,25 +376,6 @@ async function runOnce(binPath: string, timeoutMs: number): Promise<number> {
       });
     }
   }
-}
-
-function mean(values: number[]): number {
-  return values.reduce((a, b) => a + b, 0) / values.length;
-}
-
-function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return 0;
-  const idx = Math.floor(sorted.length * p);
-  return sorted[Math.min(idx, sorted.length - 1)]!;
-}
-
-function median(sorted: number[]): number {
-  return sorted[Math.floor(sorted.length / 2)]!;
-}
-
-function stdDev(values: number[], avg: number): number {
-  const variance = values.reduce((sum, x) => sum + Math.pow(x - avg, 2), 0) / values.length;
-  return Math.sqrt(variance);
 }
 
 function buildResult(name: string, values: number[], targetMb: number): BenchmarkResult {
