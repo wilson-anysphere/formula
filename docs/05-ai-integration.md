@@ -335,6 +335,7 @@ Implementation notes (actual):
 **Code entrypoints:**
 - Core context builder (schema + sampling + RAG hooks) + DLP redaction/blocking: [`packages/ai-context/src/contextManager.js`](../packages/ai-context/src/contextManager.js)
 - Package usage + examples (token budgeting + DLP notes): [`packages/ai-context/README.md`](../packages/ai-context/README.md)
+- Query-aware table/region scoring + selection primitives (reusable; not yet wired into `ContextManager` policy): [`packages/ai-context/src/queryAware.js`](../packages/ai-context/src/queryAware.js)
 - Desktop wrapper that builds per-message workbook context + budgets tokens: [`apps/desktop/src/ai/context/WorkbookContextBuilder.ts`](../apps/desktop/src/ai/context/WorkbookContextBuilder.ts)
 - Desktop RAG service (persistent local index; deterministic hash embeddings): [`apps/desktop/src/ai/rag/ragService.ts`](../apps/desktop/src/ai/rag/ragService.ts)
 
