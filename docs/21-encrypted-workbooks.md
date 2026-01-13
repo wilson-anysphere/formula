@@ -23,6 +23,13 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
 - Distinguish “password required” vs “invalid password” vs “unsupported encryption scheme”
   (see [Error semantics](#error-semantics)).
 
+### Support matrix (current vs planned)
+
+| File type | Encryption marker | Schemes (common) | Current behavior | Planned/target behavior |
+|---|---|---|---|---|
+| `.xlsx` / `.xlsm` / `.xlsb` (OOXML) | OLE/CFB streams `EncryptionInfo` + `EncryptedPackage` | Agile (4.4), Standard (3.2) | Detect + return `Error::EncryptedWorkbook` | Decrypt + open; surface `PasswordRequired` / `InvalidPassword` / `UnsupportedEncryptionScheme` |
+| `.xls` (BIFF) | BIFF `FILEPASS` record in workbook stream | XOR, RC4, CryptoAPI | Detect + return `Error::EncryptedWorkbook` | Decrypt + open (scope TBD; see [Legacy `.xls` encryption](#legacy-xls-encryption-biff-filepass)) |
+
 ---
 
 ## Terminology: protection vs encryption (do not confuse these)
