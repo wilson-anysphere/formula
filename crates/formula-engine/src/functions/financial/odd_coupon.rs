@@ -408,13 +408,28 @@ fn oddf_equation(
     }
 
     // Regular coupon period length `E` (days).
-    let n = i32::try_from(coupon_dates.len()).map_err(|_| ExcelError::Num)?;
-    let offset_prev = n
-        .checked_mul(months_per_period)
-        .ok_or(ExcelError::Num)?
-        .checked_neg()
-        .ok_or(ExcelError::Num)?;
-    let prev_coupon = coupon_date_with_eom(maturity, offset_prev, eom, system)?;
+    //
+    // Excel models `E` as the length of the *regular* coupon period containing settlement,
+    // i.e. the interval between the previous coupon date (PCD) and next coupon date (NCD).
+    // For ODDF* functions, `NCD` is always `first_coupon` (since `settlement <= first_coupon`).
+    //
+    // `PCD` derivation is surprisingly basis-dependent for month-stepping schedules that involve
+    // clamping (e.g. `Aug 30 -> Feb 29 -> Aug 29`):
+    // - For basis=4 (European 30E/360), Excel steps backwards from `first_coupon` to determine
+    //   `PCD` for the DAYS360_EU day-count used in `E`.
+    // - For bases 1/2/3 (actual-day bases), Excel's behavior matches the maturity-anchored coupon
+    //   schedule used for the cashflow dates.
+    let prev_coupon = if basis == 4 {
+        coupon_date_with_eom(first_coupon, -months_per_period, eom, system)?
+    } else {
+        let n = i32::try_from(coupon_dates.len()).map_err(|_| ExcelError::Num)?;
+        let offset_prev = n
+            .checked_mul(months_per_period)
+            .ok_or(ExcelError::Num)?
+            .checked_neg()
+            .ok_or(ExcelError::Num)?;
+        coupon_date_with_eom(maturity, offset_prev, eom, system)?
+    };
     let e = coupon_period_e(prev_coupon, first_coupon, basis, freq, system)?;
 
     // Regular coupon payment per period.
