@@ -801,6 +801,7 @@ fn ignore_path_with_invalid_part_glob_does_not_match_all_parts() {
             path_substring: "dyDescent".to_string(),
             kind: None,
         }],
+        strict_calc_chain: false,
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);

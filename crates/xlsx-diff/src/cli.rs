@@ -97,6 +97,14 @@ pub fn run() -> Result<()> {
     run_with_args(args)
 }
 
+/// Parse CLI arguments.
+///
+/// This exists so wrapper binaries (e.g. the deprecated `xlsb-diff`) can parse
+/// the shared CLI args without taking a direct dependency on `clap`.
+pub fn parse_args() -> Args {
+    Args::parse()
+}
+
 pub fn run_with_args(args: Args) -> Result<()> {
     let threshold = parse_severity(&args.fail_on)?;
 

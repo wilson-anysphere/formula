@@ -8716,7 +8716,6 @@ name = "xlsb-diff"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap",
  "xlsx-diff",
 ]
 
