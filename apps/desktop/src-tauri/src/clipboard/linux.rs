@@ -22,6 +22,18 @@ fn normalize_target_name(target: &str) -> String {
     target.trim().to_ascii_lowercase()
 }
 
+fn latin1_encode_if_possible(text: &str) -> Option<Vec<u8>> {
+    let mut bytes = Vec::with_capacity(text.len());
+    for ch in text.chars() {
+        let codepoint = ch as u32;
+        if codepoint > 0xFF {
+            return None;
+        }
+        bytes.push(codepoint as u8);
+    }
+    Some(bytes)
+}
+
 /// Choose the "best" clipboard target from a list of advertised targets.
 ///
 /// Linux clipboard targets are free-form atoms and different apps may advertise the same content
@@ -76,6 +88,7 @@ mod gtk_backend {
     use super::{
         bytes_to_utf8, choose_best_target, decoded_pixbuf_len, ClipboardContent, ClipboardError,
         ClipboardWritePayload, MAX_DECODED_IMAGE_BYTES,
+        latin1_encode_if_possible,
     };
     use crate::clipboard_fallback;
 
@@ -347,28 +360,47 @@ mod gtk_backend {
             ensure_gtk()?;
 
             let set_clipboard_data = |clipboard: &gtk::Clipboard| {
-                const INFO_TEXT: u32 = 1;
+                const INFO_TEXT_UTF8: u32 = 1;
                 const INFO_HTML: u32 = 2;
                 const INFO_RTF: u32 = 3;
                 const INFO_PNG: u32 = 4;
+                const INFO_TEXT_STRING: u32 = 5;
 
                 // Do not restrict targets based on app identity; we want both intra-app copy/paste and
                 // interoperability with other apps (LibreOffice, browser, image editors, etc.).
                 let flags = gtk::TargetFlags::empty();
                 let mut targets: Vec<gtk::TargetEntry> = Vec::new();
+                let text_string_bytes = text
+                    .as_deref()
+                    .and_then(|t| latin1_encode_if_possible(t))
+                    .map(Arc::new);
 
                 if text.is_some() {
                     // Provide common plaintext targets so other apps can pick their preferred flavor.
                     // (GTK's own `set_text` would also do this, but we need to set multiple targets at once.)
-                    targets.push(gtk::TargetEntry::new("text/plain", flags, INFO_TEXT));
+                    targets.push(gtk::TargetEntry::new("text/plain", flags, INFO_TEXT_UTF8));
                     targets.push(gtk::TargetEntry::new(
                         "text/plain;charset=utf-8",
                         flags,
-                        INFO_TEXT,
+                        INFO_TEXT_UTF8,
                     ));
-                    targets.push(gtk::TargetEntry::new("UTF8_STRING", flags, INFO_TEXT));
-                    targets.push(gtk::TargetEntry::new("STRING", flags, INFO_TEXT));
-                    targets.push(gtk::TargetEntry::new("TEXT", flags, INFO_TEXT));
+                    targets.push(gtk::TargetEntry::new("UTF8_STRING", flags, INFO_TEXT_UTF8));
+
+                    // X11 `STRING` is always ISO-8859-1 (Latin-1). Only advertise it when we can
+                    // actually supply Latin-1 bytes; otherwise legacy consumers that request
+                    // `STRING` would see mojibake.
+                    if text_string_bytes.is_some() {
+                        targets.push(gtk::TargetEntry::new(
+                            "STRING",
+                            flags,
+                            INFO_TEXT_STRING,
+                        ));
+                    }
+
+                    // `TEXT` is a legacy X11 target whose encoding depends on the current locale.
+                    // On modern Linux desktops this is almost always UTF-8, so we treat it as
+                    // equivalent to `UTF8_STRING` and provide UTF-8 bytes.
+                    targets.push(gtk::TargetEntry::new("TEXT", flags, INFO_TEXT_UTF8));
                 }
 
                 if html.is_some() {
@@ -393,19 +425,26 @@ mod gtk_backend {
                 // Note: the closure captures owned copies of the strings/bytes so the clipboard stays
                 // valid after this function returns.
                 let text = text.clone();
+                let text_string_bytes = text_string_bytes.clone();
                 let html = html.clone();
                 let rtf = rtf.clone();
                 let png_bytes = png_bytes.clone();
                 let success =
                     clipboard.set_with_data(&targets, move |_clipboard, selection_data, info| {
                         match info {
-                            INFO_TEXT => {
+                            INFO_TEXT_UTF8 => {
                                 if let Some(ref text) = text {
                                     selection_data.set(
                                         &selection_data.target(),
                                         8,
                                         text.as_bytes(),
                                     );
+                                }
+                            }
+                            INFO_TEXT_STRING => {
+                                if let Some(ref bytes) = text_string_bytes {
+                                    selection_data
+                                        .set(&selection_data.target(), 8, bytes.as_slice());
                                 }
                             }
                             INFO_HTML => {
@@ -593,6 +632,29 @@ mod tests {
         let targets = vec!["text/plain", "UTF8_STRING"];
         let best = choose_best_target(&targets, &["text/html"]);
         assert_eq!(best, None);
+    }
+
+    #[test]
+    fn latin1_encode_if_possible_encodes_ascii() {
+        assert_eq!(
+            super::latin1_encode_if_possible("hello"),
+            Some(b"hello".to_vec())
+        );
+    }
+
+    #[test]
+    fn latin1_encode_if_possible_encodes_latin1_codepoints() {
+        // "café" where "é" is U+00E9 (0xE9).
+        assert_eq!(
+            super::latin1_encode_if_possible("café"),
+            Some(vec![b'c', b'a', b'f', 0xE9])
+        );
+    }
+
+    #[test]
+    fn latin1_encode_if_possible_returns_none_for_non_latin1() {
+        // Euro sign is U+20AC which is not representable in ISO-8859-1.
+        assert_eq!(super::latin1_encode_if_possible("€"), None);
     }
 
     #[test]
