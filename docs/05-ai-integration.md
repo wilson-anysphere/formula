@@ -338,6 +338,9 @@ Implementation notes (actual):
 - Desktop wrapper that builds per-message workbook context + budgets tokens: [`apps/desktop/src/ai/context/WorkbookContextBuilder.ts`](../apps/desktop/src/ai/context/WorkbookContextBuilder.ts)
 - Desktop RAG service (persistent local index; deterministic hash embeddings): [`apps/desktop/src/ai/rag/ragService.ts`](../apps/desktop/src/ai/rag/ragService.ts)
 
+Note: The code blocks in the subsections below are **illustrative**. The source-of-truth implementation is in the files
+linked above; prefer those over the pseudocode when making product/architecture decisions.
+
 ### Prompt context shape (actual)
 
 Context is ultimately fed to the model as a **bounded** markdown-ish string composed of multiple `## <section>` blocks
