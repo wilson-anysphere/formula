@@ -8703,6 +8703,22 @@ function handleRibbonCommand(commandId: string): void {
         // `edit.autoSum` restores focus, but ensure the grid is focused even if the command is a no-op.
         app.focus();
         return;
+      case "home.editing.autoSum.average":
+        app.autoSumAverage();
+        app.focus();
+        return;
+      case "home.editing.autoSum.countNumbers":
+        app.autoSumCountNumbers();
+        app.focus();
+        return;
+      case "home.editing.autoSum.max":
+        app.autoSumMax();
+        app.focus();
+        return;
+      case "home.editing.autoSum.min":
+        app.autoSumMin();
+        app.focus();
+        return;
       case "edit.fillDown":
         executeBuiltinCommand(commandId);
         app.focus();

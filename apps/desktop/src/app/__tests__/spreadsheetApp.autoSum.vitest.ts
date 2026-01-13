@@ -119,6 +119,10 @@ describe("SpreadsheetApp AutoSum (Alt+=)", () => {
     const sheetId = app.getCurrentSheetId();
     const doc = app.getDocument();
 
+    // SpreadsheetApp seeds some demo/navigation data for non-collab sessions. Clear it so
+    // AutoSum tests start from an empty grid.
+    doc.clearRange(sheetId, "A1:E5");
+
     doc.setCellValue(sheetId, "A1", 1);
     doc.setCellValue(sheetId, "A2", 2);
     doc.setCellValue(sheetId, "A3", 3);
@@ -137,5 +141,217 @@ describe("SpreadsheetApp AutoSum (Alt+=)", () => {
     app.destroy();
     root.remove();
   });
-});
 
+  const variants: Array<{
+    name: string;
+    run: (app: SpreadsheetApp) => void;
+    fn: "AVERAGE" | "COUNT" | "MAX" | "MIN";
+  }> = [
+    { name: "Average", run: (app) => app.autoSumAverage(), fn: "AVERAGE" },
+    { name: "Count Numbers", run: (app) => app.autoSumCountNumbers(), fn: "COUNT" },
+    { name: "Max", run: (app) => app.autoSumMax(), fn: "MAX" },
+    { name: "Min", run: (app) => app.autoSumMin(), fn: "MIN" },
+  ];
+
+  it.each(variants)(
+    "inserts a $fn formula below a selected vertical range and moves the active cell ($name)",
+    ({ run, fn }) => {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+
+      doc.clearRange(sheetId, "A1:E5");
+
+      doc.setCellValue(sheetId, "A1", 1);
+      doc.setCellValue(sheetId, "A2", 2);
+      doc.setCellValue(sheetId, "A3", 3);
+
+      app.selectRange({ range: { startRow: 0, endRow: 2, startCol: 0, endCol: 0 } }, { scrollIntoView: false, focus: true });
+
+      run(app);
+
+      expect(status.activeCell.textContent).toBe("A4");
+      expect(doc.getCell(sheetId, "A4").formula).toBe(`=${fn}(A1:A3)`);
+
+      app.destroy();
+      root.remove();
+    },
+  );
+
+  it.each(variants)(
+    "uses the last selected cell when it's empty for a vertical range ($name)",
+    ({ run, fn }) => {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+
+      doc.clearRange(sheetId, "A1:E5");
+
+      doc.setCellValue(sheetId, "A1", 1);
+      doc.setCellValue(sheetId, "A2", 2);
+      doc.setCellValue(sheetId, "A3", 3);
+      // A4 intentionally empty.
+      expect(doc.getCell(sheetId, "A4")).toMatchObject({ value: null, formula: null });
+
+      // Select A1:A4 where the last cell (A4) is empty. Excel-style AutoSum should use A4 and sum A1:A3.
+      app.selectRange({ range: { startRow: 0, endRow: 3, startCol: 0, endCol: 0 } }, { scrollIntoView: false, focus: true });
+
+      run(app);
+
+      expect(status.activeCell.textContent).toBe("A4");
+      expect(doc.getCell(sheetId, "A4").formula).toBe(`=${fn}(A1:A3)`);
+      expect(doc.getCell(sheetId, "A5").formula).toBeNull();
+
+      app.destroy();
+      root.remove();
+    },
+  );
+
+  it.each(variants)(
+    "inserts a $fn formula to the right of a selected horizontal range when the last cell is non-empty ($name)",
+    ({ run, fn }) => {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+
+      doc.clearRange(sheetId, "A1:E5");
+
+      doc.setCellValue(sheetId, "A1", 1);
+      doc.setCellValue(sheetId, "B1", 2);
+      doc.setCellValue(sheetId, "C1", 3);
+
+      // Select A1:C1 (Excel-style AutoSum should insert into D1).
+      app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: 2 } }, { scrollIntoView: false, focus: true });
+
+      run(app);
+
+      expect(status.activeCell.textContent).toBe("D1");
+      expect(doc.getCell(sheetId, "D1").formula).toBe(`=${fn}(A1:C1)`);
+
+      app.destroy();
+      root.remove();
+    },
+  );
+
+  it.each(variants)(
+    "uses the last selected cell when it's empty for a horizontal range ($name)",
+    ({ run, fn }) => {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+
+      doc.clearRange(sheetId, "A1:E5");
+
+      doc.setCellValue(sheetId, "A1", 1);
+      doc.setCellValue(sheetId, "B1", 2);
+      doc.setCellValue(sheetId, "C1", 3);
+      // D1 intentionally empty.
+
+      // Select A1:D1 where the last cell (D1) is empty. Excel-style AutoSum should use D1 and sum A1:C1.
+      app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: 3 } }, { scrollIntoView: false, focus: true });
+
+      run(app);
+
+      expect(status.activeCell.textContent).toBe("D1");
+      expect(doc.getCell(sheetId, "D1").formula).toBe(`=${fn}(A1:C1)`);
+      expect(doc.getCell(sheetId, "E1").formula).toBeNull();
+
+      app.destroy();
+      root.remove();
+    },
+  );
+
+  it.each(variants)(
+    "uses the contiguous numeric block above the active cell when selection is not a 1D range ($name)",
+    ({ run, fn }) => {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+
+      doc.clearRange(sheetId, "A1:E5");
+
+      doc.setCellValue(sheetId, "A1", 1);
+      doc.setCellValue(sheetId, "A2", 2);
+      doc.setCellValue(sheetId, "A3", 3);
+
+      // Active cell A4 with a single-cell selection (not a 1D multi-cell range).
+      app.selectRange({ range: { startRow: 3, endRow: 3, startCol: 0, endCol: 0 } }, { scrollIntoView: false, focus: true });
+
+      run(app);
+
+      expect(status.activeCell.textContent).toBe("A4");
+      expect(doc.getCell(sheetId, "A4").formula).toBe(`=${fn}(A1:A3)`);
+
+      app.destroy();
+      root.remove();
+    },
+  );
+
+  it.each(variants)(
+    "uses the contiguous numeric block to the left of the active cell when there is no numeric block above ($name)",
+    ({ run, fn }) => {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+
+      doc.clearRange(sheetId, "A1:E5");
+
+      doc.setCellValue(sheetId, "A1", 1);
+      doc.setCellValue(sheetId, "B1", 2);
+      doc.setCellValue(sheetId, "C1", 3);
+
+      // Active cell D1: no numeric cells above, but a numeric block to the left (A1:C1).
+      app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 3, endCol: 3 } }, { scrollIntoView: false, focus: true });
+
+      run(app);
+
+      expect(status.activeCell.textContent).toBe("D1");
+      expect(doc.getCell(sheetId, "D1").formula).toBe(`=${fn}(A1:C1)`);
+
+      app.destroy();
+      root.remove();
+    },
+  );
+});

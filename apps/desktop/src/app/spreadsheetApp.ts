@@ -5428,6 +5428,62 @@ export class SpreadsheetApp {
     this.focus();
   }
 
+  autoSumAverage(): void {
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
+    if (this.isEditing()) return;
+    this.autoSumSelection("AVERAGE");
+    this.refresh();
+    this.focus();
+  }
+
+  autoSumCountNumbers(): void {
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
+    if (this.isEditing()) return;
+    this.autoSumSelection("COUNT");
+    this.refresh();
+    this.focus();
+  }
+
+  autoSumMax(): void {
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
+    if (this.isEditing()) return;
+    this.autoSumSelection("MAX");
+    this.refresh();
+    this.focus();
+  }
+
+  autoSumMin(): void {
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
+    if (this.isEditing()) return;
+    this.autoSumSelection("MIN");
+    this.refresh();
+    this.focus();
+  }
+
   autoSum(): void {
     if (this.isReadOnly()) {
       const cell = this.selection.active;
@@ -5437,7 +5493,7 @@ export class SpreadsheetApp {
       return;
     }
     if (this.isEditing()) return;
-    this.autoSumSelection();
+    this.autoSumSelection("SUM");
     this.refresh();
     this.focus();
   }
@@ -11802,7 +11858,7 @@ export class SpreadsheetApp {
     return true;
   }
 
-  private autoSumSelection(): void {
+  private autoSumSelection(fn: "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN"): void {
     const sheetId = this.sheetId;
     const coordScratch = { row: 0, col: 0 };
 
@@ -11826,7 +11882,7 @@ export class SpreadsheetApp {
       return state.value == null && state.formula == null;
     };
 
-    const chooseTargetFromSelection = (): { target: CellCoord; sumRange: Range } | null => {
+    const chooseTargetFromSelection = (): { target: CellCoord; formulaRange: Range } | null => {
       if (this.selection.ranges.length !== 1) return null;
       const range = normalizeRange(this.selection.ranges[0]!);
       const isSingleRow = range.startRow === range.endRow;
@@ -11838,37 +11894,37 @@ export class SpreadsheetApp {
       if (isSingleCol && range.endRow > range.startRow) {
         const bottom = { row: range.endRow, col: range.startCol };
         if (isEmptyCell(bottom.row, bottom.col)) {
-          const sumRange: Range = {
+          const formulaRange: Range = {
             startRow: range.startRow,
             endRow: range.endRow - 1,
             startCol: range.startCol,
             endCol: range.endCol,
           };
-          if (sumRange.endRow < sumRange.startRow) return null;
-          return { target: bottom, sumRange };
+          if (formulaRange.endRow < formulaRange.startRow) return null;
+          return { target: bottom, formulaRange };
         }
 
         const nextRow = range.endRow + 1;
         if (nextRow >= this.limits.maxRows) return null;
-        return { target: { row: nextRow, col: range.startCol }, sumRange: range };
+        return { target: { row: nextRow, col: range.startCol }, formulaRange: range };
       }
 
       if (isSingleRow && range.endCol > range.startCol) {
         const right = { row: range.startRow, col: range.endCol };
         if (isEmptyCell(right.row, right.col)) {
-          const sumRange: Range = {
+          const formulaRange: Range = {
             startRow: range.startRow,
             endRow: range.endRow,
             startCol: range.startCol,
             endCol: range.endCol - 1,
           };
-          if (sumRange.endCol < sumRange.startCol) return null;
-          return { target: right, sumRange };
+          if (formulaRange.endCol < formulaRange.startCol) return null;
+          return { target: right, formulaRange };
         }
 
         const nextCol = range.endCol + 1;
         if (nextCol >= this.limits.maxCols) return null;
-        return { target: { row: range.startRow, col: nextCol }, sumRange: range };
+        return { target: { row: range.startRow, col: nextCol }, formulaRange: range };
       }
 
       return null;
@@ -11882,7 +11938,7 @@ export class SpreadsheetApp {
       if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: true });
       else this.scrollCellIntoView(selected.target);
 
-      const formula = `=SUM(${rangeToA1(selected.sumRange)})`;
+      const formula = `=${fn}(${rangeToA1(selected.formulaRange)})`;
       this.applyEdit(sheetId, selected.target, formula, { label: "AutoSum" });
       return;
     }
@@ -11901,7 +11957,7 @@ export class SpreadsheetApp {
       return coerceNumber(state.value) != null;
     };
 
-    const sumRange = (() => {
+    const formulaRange = (() => {
       // Prefer a contiguous numeric block above the active cell in the same column.
       if (active.row > 0 && isNumericishCell(active.row - 1, active.col)) {
         let startRow = active.row - 1;
@@ -11919,9 +11975,9 @@ export class SpreadsheetApp {
       return null;
     })();
 
-    if (!sumRange) return;
+    if (!formulaRange) return;
 
-    const formula = `=SUM(${rangeToA1(sumRange)})`;
+    const formula = `=${fn}(${rangeToA1(formulaRange)})`;
     this.applyEdit(this.sheetId, active, formula, { label: t("command.edit.autoSum") });
   }
 
