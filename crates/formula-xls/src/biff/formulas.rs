@@ -65,6 +65,7 @@ pub(crate) struct PtgExpFallbackResult {
 #[derive(Debug, Default)]
 pub(crate) struct SheetFormulaOverrides {
     pub(crate) formulas: HashMap<CellRef, String>,
+    pub(crate) warnings: Vec<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -467,8 +468,8 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
 
     // Collect all cell formula rgce bytes first so PtgExp followers can reference bases that
     // appear later in the stream.
-    let mut rgce_by_cell: HashMap<(u32, u32), Vec<u8>> = HashMap::new();
-    let mut shrfmla_by_cell: HashMap<(u32, u32), Vec<u8>> = HashMap::new();
+    let mut rgce_by_cell: HashMap<(u32, u32), (Vec<u8>, Vec<u8>)> = HashMap::new();
+    let mut shrfmla_by_cell: HashMap<(u32, u32), (Vec<u8>, Vec<u8>)> = HashMap::new();
     let mut ptgexp_cells: Vec<(u32, u32, u32, u32, worksheet_formulas::FormulaGrbit)> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
 
@@ -549,12 +550,12 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
                 let col = parsed.col as u32;
                 let grbit = parsed.grbit;
                 let rgce = parsed.rgce;
-
-                rgce_by_cell.insert((row, col), rgce.clone());
+                let rgcb = parsed.rgcb;
 
                 if let Some((base_row, base_col)) = parse_ptg_exp(&rgce) {
                     ptgexp_cells.push((row, col, base_row, base_col, grbit));
                 }
+                rgce_by_cell.insert((row, col), (rgce, rgcb));
             }
             worksheet_formulas::RECORD_SHRFMLA => {
                 let Some((row, col)) = parse_shrfmla_anchor(record.data.as_ref()) else {
@@ -582,7 +583,7 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
                         continue;
                     }
                 };
-                shrfmla_by_cell.insert((row, col), parsed.rgce);
+                shrfmla_by_cell.insert((row, col), (parsed.rgce, parsed.rgcb));
             }
             _ => {}
         }
@@ -593,7 +594,7 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
     for (row, col, base_row, base_col, grbit) in ptgexp_cells {
         let cell_ref = CellRef::new(row, col);
         let base_cell_ref = CellRef::new(base_row, base_col);
-        let Some(base_rgce) = rgce_by_cell.get(&(base_row, base_col)) else {
+        let Some((base_rgce, base_rgcb)) = rgce_by_cell.get(&(base_row, base_col)) else {
             push_warning_bounded(
                 &mut warnings,
                 format!(
@@ -607,10 +608,12 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
         };
 
         let mut base_rgce_bytes: &[u8] = base_rgce;
+        let mut base_rgcb_bytes: &[u8] = base_rgcb;
         if base_rgce_bytes.first().copied() == Some(0x01) {
             // Base cell stores PtgExp; attempt to resolve via SHRFMLA before giving up.
-            if let Some(shared_rgce) = shrfmla_by_cell.get(&(base_row, base_col)) {
+            if let Some((shared_rgce, shared_rgcb)) = shrfmla_by_cell.get(&(base_row, base_col)) {
                 base_rgce_bytes = shared_rgce;
+                base_rgcb_bytes = shared_rgcb;
             } else {
                 // If a SHRFMLA/ARRAY definition exists for this base cell + range, then the base-cell
                 // fallback is not applicable and we should not emit a misleading warning about a
@@ -672,7 +675,12 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
         };
 
         let base_coord = rgce::CellCoord::new(row, col);
-        let decoded = rgce::decode_biff8_rgce_with_base(&materialized, ctx, Some(base_coord));
+        let decoded = rgce::decode_biff8_rgce_with_base_and_rgcb(
+            &materialized,
+            base_rgcb_bytes,
+            ctx,
+            Some(base_coord),
+        );
         if !decoded.warnings.is_empty() {
             for w in decoded.warnings {
                 push_warning_bounded(
@@ -749,8 +757,24 @@ pub(crate) fn parse_biff8_sheet_formula_overrides(
                 continue;
             };
 
-            if let Some(text) = decode_formula_text_best_effort(&materialized, cell_ref, ctx) {
-                out.formulas.insert(cell_ref, text);
+            let decoded = decode_formula_text_best_effort(
+                &materialized,
+                &shrfmla.rgcb,
+                cell_ref,
+                ctx,
+            );
+            if decoded.warnings.is_empty()
+                && !decoded.text.is_empty()
+                && decoded.text != "#UNKNOWN!"
+            {
+                out.formulas.insert(cell_ref, decoded.text);
+            } else {
+                // Surface array-constant decode failures for better diagnostics.
+                for w in decoded.warnings {
+                    if w.contains("PtgArray") {
+                        out.warnings.push(format!("cell {}: {w}", cell_ref.to_a1()));
+                    }
+                }
             }
             continue;
         }
@@ -758,12 +782,21 @@ pub(crate) fn parse_biff8_sheet_formula_overrides(
         // Non-shared formulas: only override when we detect a 3D area token that uses relative
         // flags (these are easy to mis-decode if the high bits of the column fields are treated as
         // part of the column index).
-        if !rgce_contains_area3d_relative_flags(&cell.rgce) {
+        let has_area3d_relative = rgce_contains_area3d_relative_flags(&cell.rgce);
+        let has_ptgarray = rgce_contains_ptgarray(&cell.rgce);
+        if !has_area3d_relative && !has_ptgarray {
             continue;
         }
 
-        if let Some(text) = decode_formula_text_best_effort(&cell.rgce, cell_ref, ctx) {
-            out.formulas.insert(cell_ref, text);
+        let decoded = decode_formula_text_best_effort(&cell.rgce, &cell.rgcb, cell_ref, ctx);
+        if decoded.warnings.is_empty() && !decoded.text.is_empty() && decoded.text != "#UNKNOWN!" {
+            out.formulas.insert(cell_ref, decoded.text);
+        } else if has_ptgarray {
+            for w in decoded.warnings {
+                if w.contains("PtgArray") {
+                    out.warnings.push(format!("cell {}: {w}", cell_ref.to_a1()));
+                }
+            }
         }
     }
 
@@ -772,25 +805,107 @@ pub(crate) fn parse_biff8_sheet_formula_overrides(
 
 fn decode_formula_text_best_effort(
     rgce_bytes: &[u8],
+    rgcb: &[u8],
     cell_ref: CellRef,
     ctx: &rgce::RgceDecodeContext<'_>,
-) -> Option<String> {
+) -> rgce::DecodeRgceResult {
     let base = rgce::CellCoord::new(cell_ref.row, cell_ref.col);
-    let decoded = rgce::decode_biff8_rgce_with_base(rgce_bytes, ctx, Some(base));
-
-    // Be conservative: only override formulas when decoding succeeded without warnings.
-    if !decoded.warnings.is_empty() {
-        return None;
-    }
-    if decoded.text.is_empty() || decoded.text == "#UNKNOWN!" {
-        return None;
-    }
-    Some(decoded.text)
+    rgce::decode_biff8_rgce_with_base_and_rgcb(rgce_bytes, rgcb, ctx, Some(base))
 }
 
 fn range_contains(range: (CellRef, CellRef), cell: CellRef) -> bool {
     let (start, end) = range;
     cell.row >= start.row && cell.row <= end.row && cell.col >= start.col && cell.col <= end.col
+}
+
+fn rgce_contains_ptgarray(rgce_bytes: &[u8]) -> bool {
+    // Best-effort scan: stay aligned for common fixed-width ptgs and bail on unknown tokens.
+    let mut i = 0usize;
+    while i < rgce_bytes.len() {
+        let ptg = rgce_bytes[i];
+        i += 1;
+
+        match ptg {
+            // PtgArray (array constant): [unused: 7 bytes] + values stored in trailing rgcb.
+            0x20 | 0x40 | 0x60 => return true,
+
+            // PtgExp / PtgTbl: [rw:u16][col:u16]
+            0x01 | 0x02 => i = i.saturating_add(4),
+
+            // Fixed-width/no-payload operators + PtgParen.
+            0x03..=0x16 | 0x2F => {}
+
+            // PtgAttr: [grbit:u8][wAttr:u16] (+ optional jump table for tAttrChoose)
+            0x19 => {
+                if i + 3 > rgce_bytes.len() {
+                    return false;
+                }
+                let grbit = rgce_bytes[i];
+                let w_attr = u16::from_le_bytes([rgce_bytes[i + 1], rgce_bytes[i + 2]]) as usize;
+                i += 3;
+
+                const T_ATTR_CHOOSE: u8 = 0x04;
+                if grbit & T_ATTR_CHOOSE != 0 {
+                    let needed = w_attr.saturating_mul(2);
+                    i = i.saturating_add(needed);
+                }
+            }
+
+            // PtgStr: [cch:u8][flags:u8][chars...]
+            0x17 => {
+                if i + 2 > rgce_bytes.len() {
+                    return false;
+                }
+                let cch = rgce_bytes[i] as usize;
+                let flags = rgce_bytes[i + 1];
+                i += 2;
+                let bytes = if flags & 0x01 != 0 { cch.saturating_mul(2) } else { cch };
+                i = i.saturating_add(bytes);
+            }
+
+            // PtgErr / PtgBool
+            0x1C | 0x1D => i = i.saturating_add(1),
+            // PtgInt
+            0x1E => i = i.saturating_add(2),
+            // PtgNum
+            0x1F => i = i.saturating_add(8),
+
+            // PtgFunc
+            0x21 | 0x41 | 0x61 => i = i.saturating_add(2),
+            // PtgFuncVar
+            0x22 | 0x42 | 0x62 => i = i.saturating_add(3),
+            // PtgName
+            0x23 | 0x43 | 0x63 => i = i.saturating_add(6),
+
+            // PtgRef
+            0x24 | 0x44 | 0x64 => i = i.saturating_add(4),
+            // PtgArea
+            0x25 | 0x45 | 0x65 => i = i.saturating_add(8),
+
+            // PtgMem* tokens: [cce:u16][rgce:cce bytes]
+            0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
+            | 0x2E | 0x4E | 0x6E => {
+                if i + 2 > rgce_bytes.len() {
+                    return false;
+                }
+                let cce = u16::from_le_bytes([rgce_bytes[i], rgce_bytes[i + 1]]) as usize;
+                i = i.saturating_add(2 + cce);
+            }
+
+            // 3D references: PtgRef3d / PtgArea3d.
+            0x3A | 0x5A | 0x7A => i = i.saturating_add(6),
+            0x3B | 0x5B | 0x7B => i = i.saturating_add(10),
+
+            // Unknown/unsupported token; bail so we don't mis-scan.
+            _ => return false,
+        }
+
+        if i > rgce_bytes.len() {
+            return false;
+        }
+    }
+
+    false
 }
 
 fn rgce_contains_area3d_relative_flags(rgce_bytes: &[u8]) -> bool {

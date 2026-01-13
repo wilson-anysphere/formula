@@ -298,8 +298,8 @@ pub(crate) fn decode_biff8_rgce_with_base(
     decode_biff8_rgce_with_base_and_rgcb_opt(rgce, None, ctx, base)
 }
 
-/// Decode a BIFF8 `rgce` token stream using a trailing `rgcb` payload stream to decode array
-/// constants (`PtgArray`).
+/// Decode a BIFF8 `rgce` token stream using the trailing `rgcb` data blocks referenced by certain
+/// ptgs (notably `PtgArray`).
 ///
 /// The returned text does **not** include a leading `=`.
 pub(crate) fn decode_biff8_rgce_with_base_and_rgcb(
@@ -816,7 +816,12 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                 input = &input[7..];
 
                 if let Some(rgcb) = rgcb {
-                    match decode_array_constant(rgcb, &mut rgcb_pos, &mut warnings, &mut warnings_suppressed) {
+                    match decode_array_constant(
+                        rgcb,
+                        &mut rgcb_pos,
+                        &mut warnings,
+                        &mut warnings_suppressed,
+                    ) {
                         Some(arr) => stack.push(ExprFragment::new(arr)),
                         None => {
                             push_warning(
@@ -828,9 +833,8 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                         }
                     }
                 } else {
-                    // We only have access to the `rgce` token stream (as stored in some NAME
-                    // records), not the trailing `rgcb` data blocks, so we cannot reconstruct the
-                    // array literal. Render a parseable placeholder and continue decoding.
+                    // Defined-name (`NAME`) formulas do not have access to the trailing `rgcb`
+                    // data blocks.
                     push_warning(
                         &mut warnings,
                         "PtgArray constant is not supported; rendering #UNKNOWN!",
@@ -3823,6 +3827,72 @@ mod tests {
         assert!(
             decoded.warnings.iter().any(|w| w.contains("PtgArray")),
             "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_array_using_rgcb_to_array_literal() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // 1 + {1,2;3,4}
+        let rgce = [
+            0x1E, 0x01, 0x00, // PtgInt 1
+            0x20, // PtgArray
+            0, 0, 0, 0, 0, 0, 0, // 7-byte opaque header
+            0x03, // PtgAdd
+        ];
+
+        // BIFF8 array constant: [cols_minus1: u16][rows_minus1: u16] + values row-major.
+        let mut rgcb = Vec::<u8>::new();
+        rgcb.extend_from_slice(&1u16.to_le_bytes()); // 2 cols
+        rgcb.extend_from_slice(&1u16.to_le_bytes()); // 2 rows
+        for n in [1.0f64, 2.0, 3.0, 4.0] {
+            rgcb.push(0x01); // number
+            rgcb.extend_from_slice(&n.to_le_bytes());
+        }
+
+        let decoded = decode_biff8_rgce_with_base_and_rgcb(&rgce, &rgcb, &ctx, None);
+        assert_eq!(decoded.text, "1+{1,2;3,4}");
+        assert!(
+            decoded.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_array_string_element_escapes_quotes() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        let rgce = [
+            0x20, // PtgArray
+            0, 0, 0, 0, 0, 0, 0, // 7-byte opaque header
+        ];
+
+        // {"a""b"}
+        let mut rgcb = Vec::<u8>::new();
+        rgcb.extend_from_slice(&0u16.to_le_bytes()); // 1 col
+        rgcb.extend_from_slice(&0u16.to_le_bytes()); // 1 row
+        rgcb.push(0x02); // string
+        rgcb.extend_from_slice(&3u16.to_le_bytes()); // cch
+        for ch in ['a', '"', 'b'] {
+            rgcb.extend_from_slice(&(ch as u16).to_le_bytes());
+        }
+
+        let decoded = decode_biff8_rgce_with_base_and_rgcb(&rgce, &rgcb, &ctx, None);
+        assert_eq!(decoded.text, "{\"a\"\"b\"}");
+        assert!(
+            decoded.warnings.is_empty(),
+            "expected no warnings, got {:?}",
             decoded.warnings
         );
         assert_parseable(&decoded.text);

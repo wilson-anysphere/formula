@@ -2015,6 +2015,15 @@ fn import_xls_with_biff_reader(
                                     let anchor = sheet.merged_regions.resolve_cell(cell_ref);
                                     sheet.set_formula(anchor, Some(formula));
                                 }
+                                for warning in parsed.warnings {
+                                    push_import_warning(
+                                        &mut warnings,
+                                        format!(
+                                            "failed to fully decode `.xls` formula(s) for sheet `{sheet_name}`: {warning}"
+                                        ),
+                                        &mut warnings_suppressed,
+                                    );
+                                }
                             }
                             Err(err) => push_import_warning(
                                 &mut warnings,

@@ -104,16 +104,20 @@ pub(crate) struct ParsedFormulaRecord {
     pub(crate) xf: u16,
     pub(crate) grbit: FormulaGrbit,
     pub(crate) rgce: Vec<u8>,
+    /// Trailing data blocks (`rgcb`) referenced by certain ptgs (notably `PtgArray`).
+    pub(crate) rgcb: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ParsedSharedFormulaRecord {
     pub(crate) rgce: Vec<u8>,
+    pub(crate) rgcb: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ParsedArrayRecord {
     pub(crate) rgce: Vec<u8>,
+    pub(crate) rgcb: Vec<u8>,
 }
 
 pub(crate) fn parse_biff8_formula_record(
@@ -134,6 +138,7 @@ pub(crate) fn parse_biff8_formula_record(
 
     let cce = cursor.read_u16_le()? as usize;
     let rgce = cursor.read_biff8_rgce(cce)?;
+    let rgcb = cursor.read_remaining_bytes()?;
 
     Ok(ParsedFormulaRecord {
         row,
@@ -141,6 +146,7 @@ pub(crate) fn parse_biff8_formula_record(
         xf,
         grbit,
         rgce,
+        rgcb,
     })
 }
 
@@ -158,30 +164,30 @@ pub(crate) fn parse_biff8_shrfmla_record(
     //
     // Layout A: RefU (6) + cUse (2) + cce (2).
     let mut c = cursor.clone();
-    if let Ok(rgce) = parse_shrfmla_with_refu(&mut c) {
+    if let Ok((rgce, rgcb)) = parse_shrfmla_with_refu(&mut c) {
         if !rgce.is_empty() {
-            return Ok(ParsedSharedFormulaRecord { rgce });
+            return Ok(ParsedSharedFormulaRecord { rgce, rgcb });
         }
     }
     // Layout B: Ref8 (8) + cUse (2) + cce (2).
     let mut c = cursor.clone();
-    if let Ok(rgce) = parse_shrfmla_with_ref8(&mut c) {
+    if let Ok((rgce, rgcb)) = parse_shrfmla_with_ref8(&mut c) {
         if !rgce.is_empty() {
-            return Ok(ParsedSharedFormulaRecord { rgce });
+            return Ok(ParsedSharedFormulaRecord { rgce, rgcb });
         }
     }
     // Layout C: RefU (6) + cce (2) (cUse omitted).
     let mut c = cursor.clone();
-    if let Ok(rgce) = parse_shrfmla_with_refu_no_cuse(&mut c) {
+    if let Ok((rgce, rgcb)) = parse_shrfmla_with_refu_no_cuse(&mut c) {
         if !rgce.is_empty() {
-            return Ok(ParsedSharedFormulaRecord { rgce });
+            return Ok(ParsedSharedFormulaRecord { rgce, rgcb });
         }
     }
     // Layout D: Ref8 (8) + cce (2) (cUse omitted).
     let mut c = cursor;
-    if let Ok(rgce) = parse_shrfmla_with_ref8_no_cuse(&mut c) {
+    if let Ok((rgce, rgcb)) = parse_shrfmla_with_ref8_no_cuse(&mut c) {
         if !rgce.is_empty() {
-            return Ok(ParsedSharedFormulaRecord { rgce });
+            return Ok(ParsedSharedFormulaRecord { rgce, rgcb });
         }
     }
 
@@ -200,45 +206,8 @@ pub(crate) fn parse_biff8_shrfmla_record(
 pub(crate) fn parse_biff8_shrfmla_record_with_rgcb(
     record: &records::LogicalBiffRecord<'_>,
 ) -> Result<(Vec<u8>, Vec<u8>), String> {
-    let fragments: Vec<&[u8]> = record.fragments().collect();
-    let cursor = FragmentCursor::new(&fragments, 0, 0);
-
-    // SHRFMLA layouts vary slightly between producers (RefU vs Ref8 for the shared range). Try a
-    // small set of plausible BIFF8 layouts.
-    // Layout A: RefU (6) + cUse (2) + cce (2).
-    let mut c = cursor.clone();
-    if let Ok(rgce) = parse_shrfmla_with_refu(&mut c) {
-        if !rgce.is_empty() {
-            let rgcb = c.read_remaining_bytes()?;
-            return Ok((rgce, rgcb));
-        }
-    }
-    // Layout B: Ref8 (8) + cUse (2) + cce (2).
-    let mut c = cursor.clone();
-    if let Ok(rgce) = parse_shrfmla_with_ref8(&mut c) {
-        if !rgce.is_empty() {
-            let rgcb = c.read_remaining_bytes()?;
-            return Ok((rgce, rgcb));
-        }
-    }
-    // Layout C: RefU (6) + cce (2) (cUse omitted).
-    let mut c = cursor.clone();
-    if let Ok(rgce) = parse_shrfmla_with_refu_no_cuse(&mut c) {
-        if !rgce.is_empty() {
-            let rgcb = c.read_remaining_bytes()?;
-            return Ok((rgce, rgcb));
-        }
-    }
-    // Layout D: Ref8 (8) + cce (2) (cUse omitted).
-    let mut c = cursor;
-    if let Ok(rgce) = parse_shrfmla_with_ref8_no_cuse(&mut c) {
-        if !rgce.is_empty() {
-            let rgcb = c.read_remaining_bytes()?;
-            return Ok((rgce, rgcb));
-        }
-    }
-
-    Err("unrecognized SHRFMLA record layout".to_string())
+    let parsed = parse_biff8_shrfmla_record(record)?;
+    Ok((parsed.rgce, parsed.rgcb))
 }
 
 pub(crate) fn parse_biff8_array_record(
@@ -252,14 +221,14 @@ pub(crate) fn parse_biff8_array_record(
     // - Some producers include 2 or 4 bytes of reserved/flags before `cce`.
     for reserved_len in [2usize, 4] {
         let mut c = cursor.clone();
-        if let Ok(rgce) = parse_array_with_refu(&mut c, reserved_len) {
-            return Ok(ParsedArrayRecord { rgce });
+        if let Ok((rgce, rgcb)) = parse_array_with_refu(&mut c, reserved_len) {
+            return Ok(ParsedArrayRecord { rgce, rgcb });
         }
     }
     for reserved_len in [2usize, 4] {
         let mut c = cursor.clone();
-        if let Ok(rgce) = parse_array_with_ref8(&mut c, reserved_len) {
-            return Ok(ParsedArrayRecord { rgce });
+        if let Ok((rgce, rgcb)) = parse_array_with_ref8(&mut c, reserved_len) {
+            return Ok(ParsedArrayRecord { rgce, rgcb });
         }
     }
 
@@ -274,6 +243,8 @@ pub(crate) struct Biff8FormulaCell {
     pub(crate) grbit: FormulaGrbit,
     /// Raw formula token stream (`rgce`).
     pub(crate) rgce: Vec<u8>,
+    /// Trailing data blocks (`rgcb`) referenced by certain ptgs (notably `PtgArray`).
+    pub(crate) rgcb: Vec<u8>,
 }
 
 /// Minimal parsed representation of a BIFF8 SHRFMLA record.
@@ -281,6 +252,7 @@ pub(crate) struct Biff8FormulaCell {
 pub(crate) struct Biff8ShrFmlaRecord {
     pub(crate) range: (CellRef, CellRef),
     pub(crate) rgce: Vec<u8>,
+    pub(crate) rgcb: Vec<u8>,
 }
 
 /// Minimal parsed representation of a BIFF8 ARRAY record.
@@ -288,6 +260,7 @@ pub(crate) struct Biff8ShrFmlaRecord {
 pub(crate) struct Biff8ArrayRecord {
     pub(crate) range: (CellRef, CellRef),
     pub(crate) rgce: Vec<u8>,
+    pub(crate) rgcb: Vec<u8>,
 }
 
 /// Minimal parsed representation of a BIFF8 TABLE record.
@@ -437,6 +410,7 @@ pub(crate) fn parse_biff8_worksheet_formulas(
                             cell,
                             grbit: parsed_formula.grbit,
                             rgce: parsed_formula.rgce,
+                            rgcb: parsed_formula.rgcb,
                         },
                     );
                 }
@@ -468,6 +442,7 @@ pub(crate) fn parse_biff8_worksheet_formulas(
                             Biff8ShrFmlaRecord {
                                 range,
                                 rgce: parsed.rgce,
+                                rgcb: parsed.rgcb,
                             },
                         );
                     }
@@ -500,6 +475,7 @@ pub(crate) fn parse_biff8_worksheet_formulas(
                             Biff8ArrayRecord {
                                 range,
                                 rgce: parsed.rgce,
+                                rgcb: parsed.rgcb,
                             },
                         );
                     }
@@ -729,56 +705,79 @@ pub(crate) fn resolve_ptgexp_or_ptgtbl_best_effort(
     }
 }
 
-fn parse_shrfmla_with_refu(cursor: &mut FragmentCursor<'_>) -> Result<Vec<u8>, String> {
+fn parse_shrfmla_with_refu(
+    cursor: &mut FragmentCursor<'_>,
+) -> Result<(Vec<u8>, Vec<u8>), String> {
     // ref (rwFirst:u16, rwLast:u16, colFirst:u8, colLast:u8)
     cursor.skip_bytes(2 + 2 + 1 + 1)?;
     // cUse
     cursor.skip_bytes(2)?;
     let cce = cursor.read_u16_le()? as usize;
-    cursor.read_biff8_rgce(cce)
+    let rgce = cursor.read_biff8_rgce(cce)?;
+    let rgcb = cursor.read_remaining_bytes()?;
+    Ok((rgce, rgcb))
 }
 
-fn parse_shrfmla_with_refu_no_cuse(cursor: &mut FragmentCursor<'_>) -> Result<Vec<u8>, String> {
+fn parse_shrfmla_with_refu_no_cuse(
+    cursor: &mut FragmentCursor<'_>,
+) -> Result<(Vec<u8>, Vec<u8>), String> {
     // ref (rwFirst:u16, rwLast:u16, colFirst:u8, colLast:u8)
     cursor.skip_bytes(2 + 2 + 1 + 1)?;
     // cce
     let cce = cursor.read_u16_le()? as usize;
-    cursor.read_biff8_rgce(cce)
+    let rgce = cursor.read_biff8_rgce(cce)?;
+    let rgcb = cursor.read_remaining_bytes()?;
+    Ok((rgce, rgcb))
 }
 
-fn parse_shrfmla_with_ref8(cursor: &mut FragmentCursor<'_>) -> Result<Vec<u8>, String> {
+fn parse_shrfmla_with_ref8(
+    cursor: &mut FragmentCursor<'_>,
+) -> Result<(Vec<u8>, Vec<u8>), String> {
     // ref (rwFirst:u16, rwLast:u16, colFirst:u16, colLast:u16)
     cursor.skip_bytes(8)?;
     // cUse
     cursor.skip_bytes(2)?;
     let cce = cursor.read_u16_le()? as usize;
-    cursor.read_biff8_rgce(cce)
+    let rgce = cursor.read_biff8_rgce(cce)?;
+    let rgcb = cursor.read_remaining_bytes()?;
+    Ok((rgce, rgcb))
 }
 
-fn parse_shrfmla_with_ref8_no_cuse(cursor: &mut FragmentCursor<'_>) -> Result<Vec<u8>, String> {
+fn parse_shrfmla_with_ref8_no_cuse(
+    cursor: &mut FragmentCursor<'_>,
+) -> Result<(Vec<u8>, Vec<u8>), String> {
     // ref (rwFirst:u16, rwLast:u16, colFirst:u16, colLast:u16)
     cursor.skip_bytes(8)?;
     let cce = cursor.read_u16_le()? as usize;
-    cursor.read_biff8_rgce(cce)
+    let rgce = cursor.read_biff8_rgce(cce)?;
+    let rgcb = cursor.read_remaining_bytes()?;
+    Ok((rgce, rgcb))
 }
 
-fn parse_array_with_refu(cursor: &mut FragmentCursor<'_>, reserved_len: usize) -> Result<Vec<u8>, String> {
+fn parse_array_with_refu(
+    cursor: &mut FragmentCursor<'_>,
+    reserved_len: usize,
+) -> Result<(Vec<u8>, Vec<u8>), String> {
     // ref (rwFirst:u16, rwLast:u16, colFirst:u8, colLast:u8)
     cursor.skip_bytes(2 + 2 + 1 + 1)?;
     cursor.skip_bytes(reserved_len)?;
     let cce = cursor.read_u16_le()? as usize;
-    cursor.read_biff8_rgce(cce)
+    let rgce = cursor.read_biff8_rgce(cce)?;
+    let rgcb = cursor.read_remaining_bytes()?;
+    Ok((rgce, rgcb))
 }
 
 fn parse_array_with_ref8(
     cursor: &mut FragmentCursor<'_>,
     reserved_len: usize,
-) -> Result<Vec<u8>, String> {
+) -> Result<(Vec<u8>, Vec<u8>), String> {
     // ref (rwFirst:u16, rwLast:u16, colFirst:u16, colLast:u16)
     cursor.skip_bytes(8)?;
     cursor.skip_bytes(reserved_len)?;
     let cce = cursor.read_u16_le()? as usize;
-    cursor.read_biff8_rgce(cce)
+    let rgce = cursor.read_biff8_rgce(cce)?;
+    let rgcb = cursor.read_remaining_bytes()?;
+    Ok((rgce, rgcb))
 }
 
 #[derive(Debug, Clone)]
@@ -1394,6 +1393,7 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                             Biff8ShrFmlaRecord {
                                 range,
                                 rgce: parsed.rgce,
+                                rgcb: parsed.rgcb,
                             },
                         );
                     }
@@ -1420,6 +1420,7 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                             Biff8ArrayRecord {
                                 range,
                                 rgce: parsed.rgce,
+                                rgcb: parsed.rgcb,
                             },
                         );
                     }
@@ -1530,8 +1531,9 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                     .get(&base_cell)
                     .filter(|d| range_contains_cell(d.range, exp.cell))
                 {
-                    rgce::decode_biff8_rgce_with_base(
+                    rgce::decode_biff8_rgce_with_base_and_rgcb(
                         &def.rgce,
+                        &def.rgcb,
                         ctx,
                         Some(rgce::CellCoord::new(exp.cell.row, exp.cell.col)),
                     )
@@ -1539,8 +1541,9 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                     .get(&base_cell)
                     .filter(|d| range_contains_cell(d.range, exp.cell))
                 {
-                    rgce::decode_biff8_rgce_with_base(
+                    rgce::decode_biff8_rgce_with_base_and_rgcb(
                         &def.rgce,
+                        &def.rgcb,
                         ctx,
                         Some(rgce::CellCoord::new(def.range.0.row, def.range.0.col)),
                     )
@@ -1578,8 +1581,9 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                     .get(&base_cell)
                     .filter(|d| range_contains_cell(d.range, exp.cell))
                 {
-                    rgce::decode_biff8_rgce_with_base(
+                    rgce::decode_biff8_rgce_with_base_and_rgcb(
                         &def.rgce,
+                        &def.rgcb,
                         ctx,
                         Some(rgce::CellCoord::new(exp.cell.row, exp.cell.col)),
                     )
@@ -1587,8 +1591,9 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                     .get(&base_cell)
                     .filter(|d| range_contains_cell(d.range, exp.cell))
                 {
-                    rgce::decode_biff8_rgce_with_base(
+                    rgce::decode_biff8_rgce_with_base_and_rgcb(
                         &def.rgce,
+                        &def.rgcb,
                         ctx,
                         Some(rgce::CellCoord::new(def.range.0.row, def.range.0.col)),
                     )
@@ -1742,6 +1747,7 @@ mod tests {
         assert_eq!(parsed.xf, xf);
         assert_eq!(parsed.grbit, FormulaGrbit(0));
         assert_eq!(parsed.rgce, rgce_expected);
+        assert!(parsed.rgcb.is_empty());
     }
 
     #[test]
@@ -1799,6 +1805,7 @@ mod tests {
         let parsed = parse_biff8_formula_record(&record).expect("parse formula");
         assert_eq!(parsed.grbit, FormulaGrbit(0));
         assert_eq!(parsed.rgce, rgce_expected);
+        assert!(parsed.rgcb.is_empty());
     }
 
     #[test]
@@ -1854,6 +1861,7 @@ mod tests {
 
         let parsed = parse_biff8_formula_record(&record).expect("parse formula");
         assert_eq!(parsed.rgce, rgce_expected);
+        assert!(parsed.rgcb.is_empty());
     }
 
     #[test]
@@ -2162,6 +2170,7 @@ mod tests {
 
         let parsed = parse_biff8_shrfmla_record(&record).expect("parse SHRFMLA");
         assert_eq!(parsed.rgce, rgce_expected);
+        assert!(parsed.rgcb.is_empty());
     }
 
     #[test]
@@ -2211,6 +2220,7 @@ mod tests {
 
         let parsed = parse_biff8_array_record(&record).expect("parse ARRAY");
         assert_eq!(parsed.rgce, rgce_expected);
+        assert!(parsed.rgcb.is_empty());
     }
 
     #[test]
@@ -2305,6 +2315,7 @@ mod tests {
         let shrfmla = parsed.shrfmla.get(&anchor).expect("missing SHRFMLA");
         assert_eq!(shrfmla.range, (anchor, anchor));
         assert_eq!(shrfmla.rgce, rgce);
+        assert!(shrfmla.rgcb.is_empty());
     }
 
     #[test]
@@ -2351,6 +2362,7 @@ mod tests {
         let array = parsed.array.get(&anchor).expect("missing ARRAY");
         assert_eq!(array.range, (anchor, anchor));
         assert_eq!(array.rgce, rgce);
+        assert!(array.rgcb.is_empty());
     }
 
     fn formula_payload(row: u16, col: u16, grbit: u16, rgce: &[u8]) -> Vec<u8> {

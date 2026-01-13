@@ -810,6 +810,25 @@ pub fn build_shared_formula_ptgexp_u32_row_u16_col_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a worksheet formula that uses an array constant
+/// (`PtgArray` + trailing `rgcb`).
+///
+/// This exercises the importer's ability to decode BIFF8 array constants into parseable Excel
+/// syntax like `{1,2;3,4}` instead of degrading to `#UNKNOWN!`.
+pub fn build_formula_array_constant_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_formula_array_constant_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture with a merged region (`A1:B1`) where only the
 /// non-anchor cell (`B1`) has a formatted `BLANK` record.
 ///
@@ -7710,6 +7729,51 @@ fn build_shared_formula_ptgarray_sheet_stream(xf_cell: u16) -> Vec<u8> {
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_formula_array_constant_workbook_stream() -> Vec<u8> {
+    // Use the generic single-sheet workbook builder: it creates a minimal BIFF8 globals stream
+    // including a default cell XF at index 16.
+    let xf_cell = 16u16;
+    let sheet_stream = build_formula_array_constant_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("ArrayConst", &sheet_stream, 1252)
+}
+
+fn build_formula_array_constant_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) => A1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Formula: SUM({1,2;3,4})
+    let rgce = [
+        0x20u8, // PtgArray
+        0, 0, 0, 0, 0, 0, 0, // 7-byte header
+        0x22, // PtgFuncVar
+        0x01, // argc=1
+        0x04, 0x00, // iftab=4 (SUM)
+    ];
+
+    let rgcb = rgcb_array_constant_numbers_2x2(&[1.0, 2.0, 3.0, 4.0]);
+
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_rgcb(0, 0, xf_cell, 10.0, &rgce, &rgcb),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
 }
 
@@ -16083,6 +16147,19 @@ fn formula_cell_with_raw_value(
     out.extend_from_slice(&0u32.to_le_bytes()); // chn
     out.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
     out.extend_from_slice(rgce);
+    out
+}
+
+fn formula_cell_with_rgcb(
+    row: u16,
+    col: u16,
+    xf: u16,
+    cached_result: f64,
+    rgce: &[u8],
+    rgcb: &[u8],
+) -> Vec<u8> {
+    let mut out = formula_cell(row, col, xf, cached_result, rgce);
+    out.extend_from_slice(rgcb);
     out
 }
 

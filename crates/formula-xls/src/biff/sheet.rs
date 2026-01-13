@@ -818,7 +818,6 @@ pub(crate) fn parse_biff_sheet_manual_page_breaks(
 
     Ok(out)
 }
-
 fn parse_horizontal_page_breaks_record(
     data: &[u8],
     record_offset: usize,
@@ -1998,6 +1997,7 @@ pub(crate) fn parse_biff8_sheet_formulas(
 
     for cell in parsed.formula_cells.values() {
         let mut resolved_rgce: Option<Vec<u8>> = None;
+        let mut resolved_rgcb: Option<Vec<u8>> = None;
         // Most BIFF8 `rgce` tokens are self-contained (row/col fields are absolute with separate
         // relative/absolute flags). Some tokens (notably `PtgRefN`/`PtgAreaN`) require a "base cell"
         // coordinate to interpret relative offsets. In those cases, the base cell is:
@@ -2026,6 +2026,9 @@ pub(crate) fn parse_biff8_sheet_formulas(
                     if let Some(def) = parsed.shrfmla.get(&base) {
                         resolved_rgce =
                             super::formulas::materialize_biff8_rgce_from_base(&def.rgce, base, cell.cell);
+                        if resolved_rgce.is_some() {
+                            resolved_rgcb = Some(def.rgcb.clone());
+                        }
                     }
                 }
                 worksheet_formulas::PtgReferenceResolution::Array { base } => {
@@ -2034,6 +2037,7 @@ pub(crate) fn parse_biff8_sheet_formulas(
                         // per-cell (unlike SHRFMLA shared formulas). Excel displays the same array
                         // formula text for every cell in the array range, anchored at `base`.
                         resolved_rgce = Some(def.rgce.clone());
+                        resolved_rgcb = Some(def.rgcb.clone());
                         decode_base = rgce::CellCoord::new(base.row, base.col);
                     }
                 }
@@ -2042,11 +2046,8 @@ pub(crate) fn parse_biff8_sheet_formulas(
         }
 
         let rgce_bytes = resolved_rgce.as_deref().unwrap_or(&cell.rgce);
-        let decoded = rgce::decode_biff8_rgce_with_base(
-            rgce_bytes,
-            ctx,
-            Some(decode_base),
-        );
+        let rgcb_bytes = resolved_rgcb.as_deref().unwrap_or(&cell.rgcb);
+        let decoded = rgce::decode_biff8_rgce_with_base_and_rgcb(rgce_bytes, rgcb_bytes, ctx, Some(decode_base));
         for warning in decoded.warnings {
             push_warning_bounded(
                 &mut out.warnings,
