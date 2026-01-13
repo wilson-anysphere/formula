@@ -55,6 +55,7 @@ describe("ai-context TS entrypoint", () => {
         'void cm.buildContext({ sheet: { name: "Sheet1", values: [[1]] }, query: "hi" });',
         'void cm.buildContext({ sheet: { name: "Sheet1", values: [[1]] }, query: "hi", samplingStrategy: "systematic" });',
         'void cm.buildContext({ sheet: { name: "Sheet1", values: [[1]] }, query: "hi", samplingStrategy: "tail" });',
+        'void cm.buildContext({ sheet: { name: "Sheet1", values: [[1]], tables: [{ name: "T", range: "Sheet1!A1:A1" }] }, query: "hi" });',
         "",
         "// --- Sampling helpers (should be exported + typed) ---",
         "headSampleRows([1, 2, 3], 2)[0] satisfies number;",
