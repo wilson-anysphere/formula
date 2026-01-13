@@ -218,7 +218,13 @@ impl LocaleConfig {
                 continue;
             }
 
-            if Some(ch) == self.thousands_separator && Some(ch) != decimal {
+            // Some locales (notably fr-FR) commonly use NBSP (U+00A0) for thousands grouping, but
+            // narrow NBSP (U+202F) also appears in spreadsheets. When configured for either,
+            // accept both.
+            let is_thousands_sep = Some(ch) == self.thousands_separator
+                || (self.thousands_separator == Some('\u{00A0}') && ch == '\u{202F}')
+                || (self.thousands_separator == Some('\u{202F}') && ch == '\u{00A0}');
+            if is_thousands_sep && Some(ch) != decimal {
                 // Strip locale grouping separators.
                 continue;
             }

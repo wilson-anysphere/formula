@@ -119,6 +119,14 @@ fn canonicalize_supports_nbsp_thousands_separator_in_fr_fr() {
 }
 
 #[test]
+fn canonicalize_supports_narrow_nbsp_thousands_separator_in_fr_fr() {
+    // Some French locales/spreadsheets use narrow NBSP (U+202F) for thousands grouping.
+    let fr = "=SOMME(1\u{202F}234,56;0,5)";
+    let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
+    assert_eq!(canon, "=SUM(1234.56,0.5)");
+}
+
+#[test]
 fn fr_fr_does_not_treat_ascii_spaces_as_thousands_separators() {
     // ASCII spaces are still significant for Excel (whitespace / intersection operator) and must
     // not be silently stripped out of numeric literals.
