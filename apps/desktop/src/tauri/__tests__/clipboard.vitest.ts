@@ -96,13 +96,13 @@ describe("tauri/clipboard base64 normalization", () => {
   it("writeClipboard normalizes legacy pngBase64 before invoking clipboard_write", async () => {
     const invoke = vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
       if (cmd !== "clipboard_write") throw new Error(`Unexpected invoke: ${cmd}`);
-      expect(args).toEqual({ payload: { pngBase64: base64 } });
+      expect(args).toEqual({ payload: { text: "", pngBase64: base64 } });
       return null;
     });
 
     (globalThis as any).__TAURI__ = { core: { invoke } };
 
-    await writeClipboard({ pngBase64: `data:image/png;base64, \n ${base64} \n` });
+    await writeClipboard({ text: "", pngBase64: `data:image/png;base64, \n ${base64} \n` });
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
@@ -122,13 +122,13 @@ describe("tauri/clipboard base64 normalization", () => {
   it("writeClipboard treats DATA: URL prefix case-insensitively", async () => {
     const invoke = vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
       if (cmd !== "clipboard_write") throw new Error(`Unexpected invoke: ${cmd}`);
-      expect(args).toEqual({ payload: { pngBase64: base64 } });
+      expect(args).toEqual({ payload: { text: "", pngBase64: base64 } });
       return null;
     });
 
     (globalThis as any).__TAURI__ = { core: { invoke } };
 
-    await writeClipboard({ pngBase64: ` \n DATA:image/png;base64,${base64} \n` });
+    await writeClipboard({ text: "", pngBase64: ` \n DATA:image/png;base64,${base64} \n` });
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
