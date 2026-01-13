@@ -197,9 +197,18 @@ def _render_markdown(
     lines.append(f"- Binary path: `{bin_path}`")
     if bin_size_bytes is not None:
         lines.append(f"- Binary size: **{_human_bytes(bin_size_bytes)}** ({bin_size_bytes} bytes)")
-    if limit_mb is not None:
+    if limit_mb is None:
+        lines.append(f"- Size limit: _(not set)_ (set `{ENV_SIZE_LIMIT_MB}=...` to enable)")
+        lines.append(
+            f"- Enforcement: **{'enabled' if enforce else 'disabled'}** "
+            f"(set `{ENV_ENFORCE_SIZE_LIMIT}=1` to fail when over the limit)"
+        )
+    else:
         lines.append(f"- Size limit: **{limit_mb} MB**")
-        lines.append(f"- Enforcement: **{'enabled' if enforce else 'disabled'}**")
+        lines.append(
+            f"- Enforcement: **{'enabled' if enforce else 'disabled'}** "
+            f"(set `{ENV_ENFORCE_SIZE_LIMIT}=1` to fail when over the limit)"
+        )
     lines.append("")
 
     if tool_note:

@@ -161,6 +161,12 @@ jobs:
         # Informational only (for now). The report script writes markdown to both stdout and the
         # job summary (`GITHUB_STEP_SUMMARY`) so it shows up directly in the PR UI.
         continue-on-error: true
+        env:
+          # Optional: set these as GitHub Actions "Variables" to enable gating later.
+          # - FORMULA_ENFORCE_DESKTOP_BINARY_SIZE=1 to fail when the binary exceeds the limit
+          # - FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB=XX to set the budget
+          FORMULA_ENFORCE_DESKTOP_BINARY_SIZE: ${{ vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE }}
+          FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB }}
         run: python3 scripts/desktop_binary_size_report.py --no-build
 
       - name: Run benchmark suite
