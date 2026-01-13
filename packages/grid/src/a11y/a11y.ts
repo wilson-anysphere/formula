@@ -91,4 +91,5 @@ export function describeCell(
   return `Active cell ${address}, value ${valueDescription}. Selection ${selectionDescription}.`;
 }
 
-export { SR_ONLY_STYLE, applySrOnlyStyle } from "./srOnlyStyle";
+// Include `.ts` so this module remains executable under Node's built-in "strip types" TS support.
+export { SR_ONLY_STYLE, applySrOnlyStyle } from "./srOnlyStyle.ts";
