@@ -54,14 +54,25 @@ To regenerate model JSON files:
 
 ```bash
 # From repo root.
-cargo run -p formula-xlsx --bin dump_chart_models -- fixtures/charts/xlsx/bar.xlsx
+cargo run -p formula-xlsx --bin dump_chart_models -- fixtures/charts/xlsx/bar.xlsx --emit-both-models
 ```
 
 By default the tool writes files under `fixtures/charts/models/<workbook-stem>/`.
 See `--help` for options.
 
-The JSON payload includes the chart index, sheet name, anchor, and the parsed
-`ChartModel` (see `formula_model::charts::ChartModel`).
+The JSON payload includes the chart index, sheet name, anchor, and one or more
+parsed `ChartModel`s (see `formula_model::charts::ChartModel`):
+
+- `modelChartSpace`: the classic `c:chartSpace` model parsed from `chart*.xml`.
+- `modelChartEx`: optional best-effort `cx:*` (ChartEx) model parsed from
+  `chartEx*.xml` when present.
+
+If you only want a single model, `dump_chart_models` supports:
+
+- `--use-chart-object-model` (emits `extract_chart_objects()`'s chosen model,
+  preferring ChartEx when present).
+- Omitting `--emit-both-models` (legacy schema with a single `model` field,
+  parsed from `chart*.xml`).
 
 After regenerating, run:
 
