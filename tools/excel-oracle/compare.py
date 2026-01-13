@@ -309,6 +309,20 @@ def main() -> int:
             f"Got: {expected_source.get('kind')!r}"
         )
 
+    # The repo may use a "synthetic CI baseline" pinned dataset (source.kind="excel" but with
+    # source.syntheticSource metadata). Surface this explicitly in the report summary so CI tooling
+    # and developers can tell at a glance whether mismatches are against real Excel or a baseline.
+    expected_dataset_kind = "excel"
+    expected_dataset_patch_entry_count = 0
+    expected_dataset_has_patches = False
+    if isinstance(expected_source, dict):
+        if isinstance(expected_source.get("syntheticSource"), dict):
+            expected_dataset_kind = "synthetic"
+        patches = expected_source.get("patches")
+        if isinstance(patches, list):
+            expected_dataset_patch_entry_count = len(patches)
+            expected_dataset_has_patches = expected_dataset_patch_entry_count > 0
+
     cases_sha = _sha256_file(cases_path)
     expected_case_set = expected.get("caseSet")
     actual_case_set = actual.get("caseSet")
@@ -626,6 +640,10 @@ def main() -> int:
             "casesPath": str(cases_path),
             "expectedPath": str(expected_path),
             "actualPath": str(actual_path),
+            # Expected dataset provenance.
+            "expectedDatasetKind": expected_dataset_kind,
+            "expectedDatasetHasPatches": expected_dataset_has_patches,
+            "expectedDatasetPatchEntryCount": expected_dataset_patch_entry_count,
         },
         "expectedSource": expected.get("source"),
         "actualSource": actual_source,

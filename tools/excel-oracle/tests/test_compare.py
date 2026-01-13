@@ -43,7 +43,18 @@ class ComparePartialDatasetsTests(unittest.TestCase):
             expected_payload = {
                 "schemaVersion": 1,
                 "generatedAt": "unit-test",
-                "source": {"kind": "excel", "note": "synthetic test fixture"},
+                "source": {
+                    "kind": "excel",
+                    "note": "synthetic test fixture",
+                    "syntheticSource": {
+                        "kind": "formula-engine",
+                        "version": "unit-test",
+                        "os": "linux",
+                        "arch": "x86_64",
+                        "caseSet": "unit-test",
+                    },
+                    "patches": [{"version": "16.0", "build": "unit-test", "operatingSystem": "windows"}],
+                },
                 "caseSet": {"path": str(cases_path), "count": 1},
                 "results": [{"caseId": "case-a", "result": {"t": "n", "v": 2}}],
             }
@@ -104,6 +115,9 @@ class ComparePartialDatasetsTests(unittest.TestCase):
             self.assertEqual(report["summary"]["casesPath"], str(cases_path))
             self.assertEqual(report["summary"]["expectedPath"], str(expected_path))
             self.assertEqual(report["summary"]["actualPath"], str(actual_path))
+            self.assertEqual(report["summary"]["expectedDatasetKind"], "synthetic")
+            self.assertEqual(report["summary"]["expectedDatasetHasPatches"], True)
+            self.assertEqual(report["summary"]["expectedDatasetPatchEntryCount"], 1)
             mismatches = report.get("mismatches", [])
             self.assertIsInstance(mismatches, list)
             self.assertEqual(len(mismatches), 1)

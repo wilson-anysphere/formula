@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import hashlib
 import importlib.util
 import os
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest import mock
@@ -229,6 +230,7 @@ class CompatGateDryRunTests(unittest.TestCase):
     def test_dry_run_does_not_invoke_subprocesses(self) -> None:
         compat_gate = self._load_compat_gate()
         stdout = StringIO()
+        stderr = StringIO()
 
         repo_root = Path(__file__).resolve().parents[3]
         old_cwd = Path.cwd()
@@ -243,7 +245,11 @@ class CompatGateDryRunTests(unittest.TestCase):
                 "1",
                 "--dry-run",
             ]
-            with mock.patch.object(compat_gate.subprocess, "run") as run_mock, redirect_stdout(stdout):
+            with (
+                mock.patch.object(compat_gate.subprocess, "run") as run_mock,
+                redirect_stdout(stdout),
+                redirect_stderr(stderr),
+            ):
                 rc = compat_gate.main()
             run_mock.assert_not_called()
             self.assertEqual(rc, 0)
@@ -255,6 +261,138 @@ class CompatGateDryRunTests(unittest.TestCase):
         self.assertIn("engine_cmd:", out)
         self.assertIn("compare_cmd:", out)
         self.assertIn("cases selected:", out)
+
+
+class CompatGateSyntheticExpectedDatasetTests(unittest.TestCase):
+    def _load_compat_gate(self):
+        compat_gate_py = Path(__file__).resolve().parents[1] / "compat_gate.py"
+        self.assertTrue(compat_gate_py.is_file(), f"compat_gate.py not found at {compat_gate_py}")
+
+        spec = importlib.util.spec_from_file_location("excel_oracle_compat_gate_synth", compat_gate_py)
+        assert spec is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+
+    def test_dry_run_prints_synthetic_dataset_warning(self) -> None:
+        compat_gate = self._load_compat_gate()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            cases_path = tmp_path / "cases.json"
+            expected_path = tmp_path / "expected.json"
+
+            cases_path.write_text('{"schemaVersion":1,"cases":[]}\n', encoding="utf-8", newline="\n")
+            expected_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {
+                    "kind": "excel",
+                    "version": "unknown",
+                    "build": "unknown",
+                    "operatingSystem": "unknown",
+                    "syntheticSource": {
+                        "kind": "formula-engine",
+                        "version": "unit-test",
+                        "os": "linux",
+                        "arch": "x86_64",
+                        "caseSet": "unit-test",
+                    },
+                },
+                "caseSet": {"path": str(cases_path), "count": 0},
+                "results": [],
+            }
+            expected_path.write_text(
+                json.dumps(expected_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            old_argv = sys.argv[:]
+            stdout = StringIO()
+            stderr = StringIO()
+            try:
+                sys.argv = [
+                    "compat_gate.py",
+                    "--cases",
+                    str(cases_path),
+                    "--expected",
+                    str(expected_path),
+                    "--actual",
+                    str(tmp_path / "actual.json"),
+                    "--report",
+                    str(tmp_path / "report.json"),
+                    "--dry-run",
+                ]
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    rc = compat_gate.main()
+            finally:
+                sys.argv = old_argv
+
+            self.assertEqual(rc, 0)
+            combined = stdout.getvalue() + "\n" + stderr.getvalue()
+            self.assertIn("Expected Excel oracle dataset is SYNTHETIC", combined)
+            self.assertIn("kind:    formula-engine", combined)
+            self.assertIn("version: unit-test", combined)
+            self.assertIn("os:      linux", combined)
+            self.assertIn("arch:    x86_64", combined)
+            self.assertIn("caseSet: unit-test", combined)
+
+    def test_require_real_excel_fails_for_synthetic_dataset(self) -> None:
+        compat_gate = self._load_compat_gate()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            cases_path = tmp_path / "cases.json"
+            expected_path = tmp_path / "expected.json"
+
+            cases_path.write_text('{"schemaVersion":1,"cases":[]}\n', encoding="utf-8", newline="\n")
+            expected_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {
+                    "kind": "excel",
+                    "syntheticSource": {
+                        "kind": "formula-engine",
+                        "version": "unit-test",
+                        "os": "linux",
+                        "arch": "x86_64",
+                        "caseSet": "unit-test",
+                    },
+                },
+                "caseSet": {"path": str(cases_path), "count": 0},
+                "results": [],
+            }
+            expected_path.write_text(
+                json.dumps(expected_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            old_argv = sys.argv[:]
+            stdout = StringIO()
+            stderr = StringIO()
+            try:
+                sys.argv = [
+                    "compat_gate.py",
+                    "--cases",
+                    str(cases_path),
+                    "--expected",
+                    str(expected_path),
+                    "--dry-run",
+                    "--require-real-excel",
+                ]
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    rc = compat_gate.main()
+            finally:
+                sys.argv = old_argv
+
+            self.assertNotEqual(rc, 0)
+            combined = stdout.getvalue() + "\n" + stderr.getvalue()
+            self.assertIn("Expected Excel oracle dataset is SYNTHETIC", combined)
+            self.assertIn("--require-real-excel was set", combined)
 
 
 if __name__ == "__main__":
