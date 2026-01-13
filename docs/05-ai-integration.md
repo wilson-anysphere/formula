@@ -103,6 +103,7 @@ Suggestions:
   - rule-based suggestions (functions, ranges, argument hints) **for formulas**
   - pattern suggestions (nearby repeated values) **for non-formula input** (`type: "value"`)
   - optional Cursor backend completion via `CursorTabCompletionClient` **for formulas** (strict timeout for UI responsiveness)
+    - `CursorTabCompletionClient` can optionally use `getAuthHeaders()` for Cursor-managed auth headers when cookie auth is unavailable, and supports `signal?: AbortSignal` for cancellation.
 - Desktop attaches formula previews by evaluating the suggested formula locally (see `createPreviewEvaluator` in
   [`apps/desktop/src/ai/completion/formulaBarTabCompletion.ts`](../apps/desktop/src/ai/completion/formulaBarTabCompletion.ts), which uses
   [`apps/desktop/src/spreadsheet/evaluateFormula.ts`](../apps/desktop/src/spreadsheet/evaluateFormula.ts)).
