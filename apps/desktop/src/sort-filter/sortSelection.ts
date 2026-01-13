@@ -3,8 +3,12 @@ import type { DocumentController } from "../document/documentController.js";
 import { showToast } from "../extensions/ui.js";
 import { normalizeSelectionRange } from "../formatting/selectionSizeGuard.js";
 import type { CellCoord, Range } from "../selection/types";
-import type { SortOrder } from "./types";
+import type { SpreadsheetValue } from "../spreadsheet/evaluateFormula";
 
+import type { SortKey, SortOrder, SortSpec } from "./types";
+
+// Sorting re-materializes the full selection into JS arrays (values + style ids).
+// Keep this bounded so users can't accidentally trigger million-cell allocations.
 export const DEFAULT_SORT_CELL_LIMIT = 50_000;
 
 type CellSnapshot = { value: unknown; formula: string | null; styleId: number };
@@ -101,15 +105,15 @@ export function sortRangeRowsInDocument(
   const rows: CellSnapshot[][] = [];
   const keys: unknown[] = [];
 
-  for (let row = startRow; row <= endRow; row++) {
+  for (let row = startRow; row <= endRow; row += 1) {
     const rowCells: CellSnapshot[] = [];
-    for (let col = startCol; col <= endCol; col++) {
-      const cell = doc.getCell(sheetId, { row, col });
+    for (let col = startCol; col <= endCol; col += 1) {
+      const cell = doc.getCell(sheetId, { row, col }) as { value: unknown; formula: string | null; styleId: number };
       rowCells.push({ value: cell.value, formula: cell.formula ?? null, styleId: cell.styleId ?? 0 });
     }
     rows.push(rowCells);
     const keyCell = rowCells[keyCol - startCol];
-    keys.push(effectiveCellValue(keyCell));
+    keys.push(effectiveCellValue(keyCell!));
   }
 
   const order = options.order;
@@ -179,3 +183,102 @@ export function sortSelection(app: SpreadsheetApp, options: { order: SortOrder }
 
   app.focus();
 }
+
+export type GetSortValue = (cell: { row: number; col: number }) => SpreadsheetValue;
+
+function clampKeys(keys: SortKey[], width: number): SortKey[] {
+  const out: SortKey[] = [];
+  for (const key of keys) {
+    if (!key || typeof key.column !== "number" || typeof key.order !== "string") continue;
+    const col = Math.trunc(key.column);
+    if (col < 0 || col >= width) continue;
+    out.push({ column: col, order: key.order });
+  }
+  return out;
+}
+
+/**
+ * Apply a multi-key sort spec to the current selection.
+ *
+ * - `spec.keys[].column` are 0-based indices relative to `selection.startCol`.
+ * - When `spec.hasHeader` is true, the first row of the selection is kept fixed.
+ */
+export function applySortSpecToSelection(params: {
+  doc: DocumentController;
+  sheetId: string;
+  selection: Range;
+  spec: SortSpec;
+  getCellValue: GetSortValue;
+  maxCells?: number;
+  label?: string;
+}): boolean {
+  const { startRow, endRow, startCol, endCol } = normalizeSelectionRange(params.selection);
+  if (startRow < 0 || startCol < 0) return false;
+
+  const rowCount = endRow - startRow + 1;
+  const colCount = endCol - startCol + 1;
+  if (rowCount <= 0 || colCount <= 0) return false;
+
+  const cellCount = rowCount * colCount;
+  const maxCells = params.maxCells ?? DEFAULT_SORT_CELL_LIMIT;
+  if (cellCount > maxCells) return false;
+
+  const keys = clampKeys(params.spec.keys, colCount);
+  if (keys.length === 0) return false;
+
+  const dataStartRow = params.spec.hasHeader ? startRow + 1 : startRow;
+  // Nothing to sort.
+  if (dataStartRow > endRow) return true;
+  const dataHeight = endRow - dataStartRow + 1;
+  if (dataHeight <= 1) return true;
+
+  type RowRecord = {
+    originalIndex: number;
+    keyValues: SpreadsheetValue[];
+    cells: CellSnapshot[];
+  };
+
+  const rows: RowRecord[] = [];
+  for (let i = 0; i < dataHeight; i += 1) {
+    const row = dataStartRow + i;
+
+    const keyValues = keys.map((k) => params.getCellValue({ row, col: startCol + k.column }));
+
+    const cells: CellSnapshot[] = [];
+    for (let c = 0; c < colCount; c += 1) {
+      const state = params.doc.getCell(params.sheetId, { row, col: startCol + c }) as {
+        value: unknown;
+        formula: string | null;
+        styleId: number;
+      };
+      cells.push({ value: state.value, formula: state.formula ?? null, styleId: state.styleId ?? 0 });
+    }
+
+    rows.push({ originalIndex: i, keyValues, cells });
+  }
+
+  rows.sort((a, b) => {
+    for (let i = 0; i < keys.length; i += 1) {
+      const key = keys[i]!;
+      const cmp = compareEffectiveValues(a.keyValues[i], b.keyValues[i], key.order);
+      if (cmp !== 0) return cmp;
+    }
+    // Stable tie-breaker.
+    return a.originalIndex - b.originalIndex;
+  });
+
+  const sortedValues: CellSnapshot[][] = rows.map((r) => r.cells);
+
+  const label = params.label ?? "Sort";
+  params.doc.beginBatch({ label });
+  try {
+    params.doc.setRangeValues(params.sheetId, { row: dataStartRow, col: startCol }, sortedValues);
+    params.doc.endBatch();
+  } catch (err) {
+    params.doc.cancelBatch();
+    throw err;
+  }
+
+  return true;
+}
+

@@ -123,6 +123,7 @@ import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
 import { handleInsertPicturesRibbonCommand } from "./main.insertPicturesRibbonCommand.js";
 import { assertExtensionRangeWithinLimits } from "./extensions/rangeSizeGuard.js";
 import { createOpenFormatCells } from "./formatting/openFormatCellsCommand.js";
+import { handleCustomSortCommand } from "./sort-filter/openCustomSortDialog.js";
 import { parseCollabShareLink, serializeCollabShareLink } from "./sharing/collabLink.js";
 import { saveCollabConnectionForWorkbook, loadCollabConnectionForWorkbook } from "./sharing/collabConnectionStore.js";
 import { loadCollabToken, preloadCollabTokenFromKeychain, storeCollabToken } from "./sharing/collabTokenStore.js";
@@ -8737,6 +8738,17 @@ function handleRibbonCommand(commandId: string): void {
         return;
       case "navigation.goTo":
         executeBuiltinCommand("navigation.goTo");
+        return;
+      case "home.editing.sortFilter.customSort":
+      case "data.sortFilter.sort.customSort":
+        handleCustomSortCommand(commandId, {
+          isEditing: isSpreadsheetEditing,
+          getDocument: () => app.getDocument(),
+          getSheetId: () => app.getCurrentSheetId(),
+          getSelectionRanges: () => app.getSelectionRanges(),
+          getCellValue: (sheetId, cell) => app.getCellComputedValueForSheet(sheetId, cell),
+          focusGrid: () => app.focus(),
+        });
         return;
       case "home.editing.sortFilter.sortAtoZ":
       case "data.sortFilter.sortAtoZ":

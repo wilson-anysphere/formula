@@ -17,13 +17,14 @@ export function SortDialog(props: SortDialogProps) {
   const [hasHeader, setHasHeader] = useState<boolean>(props.initial.hasHeader);
 
   return (
-    <div className="formula-sort-dialog">
+    <div className="formula-sort-dialog" data-testid="sort-dialog">
       <div className="formula-sort-dialog__title">Sort</div>
 
       <label className="formula-sort-dialog__header-toggle">
         <input
           className="formula-sort-filter__checkbox"
           type="checkbox"
+          data-testid="sort-dialog-has-header"
           checked={hasHeader}
           onChange={(e) => setHasHeader(e.target.checked)}
         />{" "}
@@ -35,6 +36,7 @@ export function SortDialog(props: SortDialogProps) {
           <div key={i} className="formula-sort-dialog__level">
             <select
               className="formula-sort-filter__select formula-sort-dialog__select"
+              data-testid={`sort-dialog-column-${i}`}
               value={key.column}
               onChange={(e) => {
                 const col = Number(e.target.value);
@@ -49,12 +51,14 @@ export function SortDialog(props: SortDialogProps) {
             </select>
             <button
               className="formula-sort-filter__button"
+              data-testid={`sort-dialog-order-${i}`}
               onClick={() => setKeys((prev) => prev.map((k, idx) => (idx === i ? { ...k, order: nextOrder(k.order) } : k)))}
             >
               {key.order === "ascending" ? "A→Z" : "Z→A"}
             </button>
             <button
               className="formula-sort-filter__button"
+              data-testid={`sort-dialog-remove-${i}`}
               onClick={() => setKeys((prev) => prev.filter((_, idx) => idx !== i))}
             >
               Remove
@@ -64,6 +68,7 @@ export function SortDialog(props: SortDialogProps) {
 
         <button
           className="formula-sort-filter__button formula-sort-dialog__add-level"
+          data-testid="sort-dialog-add-level"
           onClick={() =>
             setKeys((prev) => [
               ...prev,
@@ -79,11 +84,12 @@ export function SortDialog(props: SortDialogProps) {
       </div>
 
       <div className="formula-sort-filter__controls formula-sort-dialog__controls">
-        <button className="formula-sort-filter__button" onClick={props.onCancel}>
+        <button className="formula-sort-filter__button" data-testid="sort-dialog-cancel" onClick={props.onCancel}>
           Cancel
         </button>
         <button
           className="formula-sort-filter__button formula-sort-filter__button--primary"
+          data-testid="sort-dialog-ok"
           onClick={() => props.onApply({ keys, hasHeader })}
           disabled={keys.length === 0}
         >
@@ -93,3 +99,4 @@ export function SortDialog(props: SortDialogProps) {
     </div>
   );
 }
+

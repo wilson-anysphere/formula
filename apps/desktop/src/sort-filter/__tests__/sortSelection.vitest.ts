@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { DocumentController } from "../../document/documentController.js";
-import { sortRangeRowsInDocument } from "../sortSelection.js";
+import { applySortSpecToSelection, sortRangeRowsInDocument } from "../sortSelection.js";
 
 describe("sortRangeRowsInDocument", () => {
   it("sorts rows in a selection and moves style/formula state with the row", () => {
@@ -85,6 +85,61 @@ describe("sortRangeRowsInDocument", () => {
 
     expect(result).toMatchObject({ applied: false, reason: "tooLarge" });
     expect(doc.getStackDepths()).toEqual({ undo: 0, redo: 0 });
+  });
+});
+
+describe("applySortSpecToSelection", () => {
+  it("supports multi-key stable sorts and preserves the header row", () => {
+    const doc = new DocumentController();
+
+    doc.setRangeValues("Sheet1", "A1:C5", [
+      ["Letter", "Number", "Id"],
+      ["A", 1, "first"],
+      ["A", 1, "second"],
+      ["A", 0, "third"],
+      ["B", 1, "fourth"],
+    ]);
+
+    const ok = applySortSpecToSelection({
+      doc,
+      sheetId: "Sheet1",
+      selection: { startRow: 0, startCol: 0, endRow: 4, endCol: 2 },
+      spec: {
+        hasHeader: true,
+        keys: [
+          { column: 0, order: "ascending" },
+          { column: 1, order: "ascending" },
+        ],
+      },
+      getCellValue: (cell) => {
+        const state = doc.getCell("Sheet1", cell) as { value: any };
+        return (state?.value ?? null) as any;
+      },
+    });
+
+    expect(ok).toBe(true);
+
+    const readRow = (row: number): any[] => {
+      const out: any[] = [];
+      for (let col = 0; col < 3; col += 1) {
+        const state = doc.getCell("Sheet1", { row, col }) as { value: any };
+        out.push(state?.value ?? null);
+      }
+      return out;
+    };
+
+    // Header row preserved.
+    expect(readRow(0)).toEqual(["Letter", "Number", "Id"]);
+
+    // Sorted rows:
+    //   A,0,third
+    //   A,1,first   (stable among equal keys)
+    //   A,1,second
+    //   B,1,fourth
+    expect(readRow(1)).toEqual(["A", 0, "third"]);
+    expect(readRow(2)).toEqual(["A", 1, "first"]);
+    expect(readRow(3)).toEqual(["A", 1, "second"]);
+    expect(readRow(4)).toEqual(["B", 1, "fourth"]);
   });
 });
 
