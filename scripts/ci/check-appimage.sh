@@ -54,23 +54,75 @@ expected_readelf_machine_substring() {
 }
 
 find_appimages() {
-  # Prefer searching the known Cargo/Tauri target directories rather than
-  # traversing the whole repo.
+  # Prefer searching known Cargo/Tauri target directories rather than traversing the whole repo.
   local roots=()
-  for root in "apps/desktop/src-tauri/target" "target"; do
-    if [ -d "$root" ]; then
-      roots+=("$root")
+
+  # Respect `CARGO_TARGET_DIR` if set (common in CI caching setups). Cargo interprets relative paths
+  # relative to the build working directory (repo root in CI).
+  if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+    local cargo_target_dir="${CARGO_TARGET_DIR}"
+    if [[ "${cargo_target_dir}" != /* ]]; then
+      cargo_target_dir="${repo_root}/${cargo_target_dir}"
+    fi
+    if [[ -d "${cargo_target_dir}" ]]; then
+      roots+=("${cargo_target_dir}")
+    fi
+  fi
+
+  for root in "apps/desktop/src-tauri/target" "apps/desktop/target" "target"; do
+    if [[ -d "${root}" ]]; then
+      roots+=("${root}")
     fi
   done
 
-  if [ "${#roots[@]}" -eq 0 ]; then
-    die "no target directories found (expected apps/desktop/src-tauri/target and/or target)"
+  if [[ "${#roots[@]}" -eq 0 ]]; then
+    die "no target directories found (expected CARGO_TARGET_DIR, apps/desktop/src-tauri/target, apps/desktop/target, and/or target)"
   fi
 
-  # Covers:
-  # - target/release/bundle/appimage/*.AppImage
-  # - target/<triple>/release/bundle/appimage/*.AppImage
-  # - apps/desktop/src-tauri/target/**/release/bundle/appimage/*.AppImage
+  # Canonicalize and de-dupe roots (avoid duplicate scanning when CARGO_TARGET_DIR overlaps defaults).
+  local -A seen=()
+  local -a uniq_roots=()
+  local r abs
+  for r in "${roots[@]}"; do
+    abs="${r}"
+    if [[ "${abs}" != /* ]]; then
+      abs="${repo_root}/${abs}"
+    fi
+    if [[ ! -d "${abs}" ]]; then
+      continue
+    fi
+    abs="$(cd "${abs}" && pwd -P)"
+    if [[ -n "${seen[${abs}]:-}" ]]; then
+      continue
+    fi
+    seen["${abs}"]=1
+    uniq_roots+=("${abs}")
+  done
+  roots=("${uniq_roots[@]}")
+
+  # Use predictable bundle globs (fast) and fall back to `find` if the layout is unexpected.
+  local nullglob_was_set=0
+  if shopt -q nullglob; then
+    nullglob_was_set=1
+  fi
+  shopt -s nullglob
+
+  local -a matches=()
+  for r in "${roots[@]}"; do
+    matches+=("${r}/release/bundle/appimage/"*.AppImage)
+    matches+=("${r}/"*/release/bundle/appimage/*.AppImage)
+  done
+
+  if [[ "${nullglob_was_set}" -eq 0 ]]; then
+    shopt -u nullglob
+  fi
+
+  if [[ "${#matches[@]}" -gt 0 ]]; then
+    printf '%s\n' "${matches[@]}" | sort -u
+    return 0
+  fi
+
+  # Fallback: traverse roots to locate AppImage bundles.
   find "${roots[@]}" \
     -type f \
     -name '*.AppImage' \

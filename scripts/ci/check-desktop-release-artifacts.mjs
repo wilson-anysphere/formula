@@ -178,11 +178,22 @@ function candidateTargetDirs() {
   /** @type {string[]} */
   const candidates = [];
 
+  // Respect `CARGO_TARGET_DIR` if set, since some CI/caching setups override it.
+  // Cargo interprets relative paths relative to the working directory used for the build.
+  const cargoTargetDirEnv = process.env.CARGO_TARGET_DIR;
+  if (cargoTargetDirEnv && cargoTargetDirEnv.trim() !== "") {
+    const resolved = path.isAbsolute(cargoTargetDirEnv)
+      ? cargoTargetDirEnv
+      : path.join(repoRoot, cargoTargetDirEnv);
+    if (isDir(resolved)) candidates.push(resolved);
+  }
+
   // Common locations:
   // - workspace builds: <repo>/target
   // - standalone Tauri app builds: apps/desktop/src-tauri/target
   for (const p of [
     path.join(repoRoot, "apps", "desktop", "src-tauri", "target"),
+    path.join(repoRoot, "apps", "desktop", "target"),
     path.join(repoRoot, "target"),
   ]) {
     if (isDir(p)) candidates.push(p);
