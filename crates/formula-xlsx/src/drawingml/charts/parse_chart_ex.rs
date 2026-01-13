@@ -7,6 +7,7 @@ use roxmltree::{Document, Node};
 use std::collections::{BTreeSet, HashMap};
 
 use super::cache::{parse_num_cache, parse_str_cache};
+use super::REL_NS;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChartExParseError {
@@ -48,6 +49,24 @@ pub fn parse_chart_ex(
     let root = doc.root_element();
     let root_name = root.tag_name().name();
     let root_ns = root.tag_name().namespace().unwrap_or("");
+
+    let external_data_node = root
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "externalData");
+    let external_data_rel_id = external_data_node
+        .and_then(|n| {
+            n.attribute((REL_NS, "id"))
+                .or_else(|| n.attribute("r:id"))
+                .or_else(|| n.attribute("id"))
+        })
+        .map(str::to_string);
+    let external_data_auto_update = external_data_node
+        .and_then(|n| {
+            n.children()
+                .find(|c| c.is_element() && c.tag_name().name() == "autoUpdate")
+        })
+        .and_then(|n| n.attribute("val"))
+        .map(parse_ooxml_bool);
 
     let mut diagnostics = vec![ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
@@ -104,8 +123,8 @@ pub fn parse_chart_ex(
         colors_part: None,
         chart_area_style: None,
         plot_area_style: None,
-        external_data_rel_id: None,
-        external_data_auto_update: None,
+        external_data_rel_id,
+        external_data_auto_update,
         diagnostics,
     })
 }
