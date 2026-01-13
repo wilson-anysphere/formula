@@ -207,6 +207,73 @@ pub fn format_value(value: Value<'_>, format_code: Option<&str>, options: &Forma
     }
 }
 
+fn render_general_value(value: Value<'_>, options: &FormatOptions) -> RenderResult {
+    match value {
+        Value::Blank => RenderResult {
+            text: String::new(),
+            alignment: AlignmentHint::Left,
+            color: None,
+            layout_hint: None,
+        },
+        Value::Text(s) => RenderResult {
+            text: s.to_string(),
+            alignment: AlignmentHint::Left,
+            color: None,
+            layout_hint: None,
+        },
+        Value::Bool(b) => RenderResult {
+            text: if b { "TRUE" } else { "FALSE" }.to_string(),
+            alignment: AlignmentHint::Center,
+            color: None,
+            layout_hint: None,
+        },
+        Value::Error(err) => RenderResult {
+            text: err.to_string(),
+            alignment: AlignmentHint::Center,
+            color: None,
+            layout_hint: None,
+        },
+        Value::Number(n) => {
+            if !n.is_finite() {
+                // Excel does not have NaN/Infinity numeric values; treat them as #NUM!.
+                return RenderResult {
+                    text: "#NUM!".to_string(),
+                    alignment: AlignmentHint::Center,
+                    color: None,
+                    layout_hint: None,
+                };
+            }
+
+            // General numeric rendering is on the hot path, so avoid the full format
+            // parser for the common None/""/"General" cases.
+            let rendered = crate::number::format_number(n, "General", false, options);
+            RenderResult {
+                text: rendered.text,
+                alignment: AlignmentHint::Right,
+                color: None,
+                layout_hint: None,
+            }
+        }
+    }
+}
+
+fn format_code_is_general_without_tokens(format_code: Option<&str>) -> bool {
+    let Some(code) = format_code else {
+        return true;
+    };
+
+    let trimmed = code.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+
+    // Only treat "General" (case-insensitive) as the fast path when the format code is *exactly*
+    // General. Anything tokenized (e.g. locale tags like `[$-409]General`, conditions, section
+    // separators, built-in placeholders like `__builtin_numFmtId:*`, etc.) must go through the
+    // parser to preserve Excel semantics.
+    trimmed.eq_ignore_ascii_case("general")
+}
+
 fn resolve_builtin_placeholder_format_code(
     code: &str,
     locale: Locale,
@@ -255,6 +322,10 @@ fn resolve_builtin_placeholder_format_code(
 ///
 /// [`format_value`] remains available for callers that only need the rendered string.
 pub fn render_value(value: Value<'_>, format_code: Option<&str>, options: &FormatOptions) -> RenderResult {
+    if format_code_is_general_without_tokens(format_code) {
+        return render_general_value(value, options);
+    }
+
     let code_str = format_code.unwrap_or("General");
     let code_str = if code_str.trim().is_empty() {
         "General"
