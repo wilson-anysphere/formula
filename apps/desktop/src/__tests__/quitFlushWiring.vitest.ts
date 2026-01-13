@@ -6,6 +6,12 @@ import { fileURLToPath } from "node:url";
 
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+function findIndex(content: string, re: RegExp, fromIndex: number = 0): number {
+  const slice = content.slice(fromIndex);
+  const match = slice.match(re);
+  return match ? fromIndex + (match.index ?? 0) : -1;
+}
+
 describe("desktop quit wiring", () => {
   it("flushes collab local persistence before hard-exit", async () => {
     const absMainPath = path.join(SRC_ROOT, "main.ts");
@@ -15,14 +21,14 @@ describe("desktop quit wiring", () => {
     expect(content).toContain("flushCollabLocalPersistenceBestEffort");
 
     // Ensure the `registerAppQuitHandlers` quit/restart paths flush before quitting.
-    const quitAppIdx = content.indexOf("quitApp: async () => {");
-    const restartAppIdx = content.indexOf("restartApp: async () => {", quitAppIdx);
+    const quitAppIdx = findIndex(content, /\bquitApp\s*:\s*async\s*\(\s*\)\s*=>\s*\{/, 0);
+    const restartAppIdx = findIndex(content, /\brestartApp\s*:\s*async\s*\(\s*\)\s*=>\s*\{/, Math.max(0, quitAppIdx));
     expect(quitAppIdx).toBeGreaterThanOrEqual(0);
     expect(restartAppIdx).toBeGreaterThan(quitAppIdx);
 
     const quitAppBody = content.slice(quitAppIdx, restartAppIdx);
     const quitAppFlushIdx = quitAppBody.indexOf("flushCollabLocalPersistenceBestEffort");
-    const quitAppQuitIdx = quitAppBody.indexOf('invoke("quit_app")');
+    const quitAppQuitIdx = findIndex(quitAppBody, /\binvoke\s*\(\s*["']quit_app["']/, 0);
     expect(quitAppFlushIdx).toBeGreaterThanOrEqual(0);
     expect(quitAppQuitIdx).toBeGreaterThan(quitAppFlushIdx);
 
@@ -32,21 +38,20 @@ describe("desktop quit wiring", () => {
 
     const restartAppBody = content.slice(restartAppIdx, restartEndIdx);
     const restartFlushIdx = restartAppBody.indexOf("flushCollabLocalPersistenceBestEffort");
-    const restartInvokeIdx = restartAppBody.indexOf('invoke("restart_app")');
+    const restartInvokeIdx = findIndex(restartAppBody, /\binvoke\s*\(\s*["']restart_app["']/, 0);
     expect(restartFlushIdx).toBeGreaterThanOrEqual(0);
     expect(restartInvokeIdx).toBeGreaterThan(restartFlushIdx);
 
     // Ensure the ribbon/native close flow (`handleCloseRequest({ quit: true })`) flushes too.
-    const handleCloseStart = content.indexOf("async function handleCloseRequest");
-    const handleCloseEnd = content.indexOf("handleCloseRequestForRibbon = handleCloseRequest;", handleCloseStart);
+    const handleCloseStart = findIndex(content, /\basync function handleCloseRequest\s*\(/, 0);
+    const handleCloseEnd = content.indexOf("handleCloseRequestForRibbon = handleCloseRequest;", Math.max(0, handleCloseStart));
     expect(handleCloseStart).toBeGreaterThanOrEqual(0);
     expect(handleCloseEnd).toBeGreaterThan(handleCloseStart);
 
     const handleCloseBody = content.slice(handleCloseStart, handleCloseEnd);
     const handleFlushIdx = handleCloseBody.indexOf("flushCollabLocalPersistenceBestEffort");
-    const handleQuitIdx = handleCloseBody.indexOf('invoke("quit_app")');
+    const handleQuitIdx = findIndex(handleCloseBody, /\binvoke\s*\(\s*["']quit_app["']/, 0);
     expect(handleFlushIdx).toBeGreaterThanOrEqual(0);
     expect(handleQuitIdx).toBeGreaterThan(handleFlushIdx);
   });
 });
-
