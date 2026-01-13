@@ -427,12 +427,13 @@ export class CanvasGridRenderer {
   private textLayoutEngine?: TextLayoutEngine;
 
   private readonly imageResolver: CanvasGridImageResolver | null;
+  private readonly imageErrorRetryMs = 250;
   private readonly imageBitmapCache = new Map<
     string,
     | { state: "pending"; promise: Promise<void>; bitmap: null }
     | { state: "ready"; promise: null; bitmap: CanvasImageSource }
     | { state: "missing"; promise: null; bitmap: null }
-    | { state: "error"; promise: null; bitmap: null; error: unknown }
+    | { state: "error"; promise: null; bitmap: null; error: unknown; expiresAtMs: number }
   >();
   private imagePlaceholderPattern: { pattern: CanvasPattern; zoomKey: number } | null = null;
   private destroyed = false;
@@ -795,7 +796,15 @@ export class CanvasGridRenderer {
 
     const existing = this.imageBitmapCache.get(imageId);
     if (existing?.state === "ready") return existing.bitmap;
-    if (existing) return null;
+    if (existing?.state === "error") {
+      if (existing.expiresAtMs <= Date.now()) {
+        this.imageBitmapCache.delete(imageId);
+      } else {
+        return null;
+      }
+    } else if (existing) {
+      return null;
+    }
 
     this.requestImageBitmap(imageId);
     return null;
@@ -842,7 +851,13 @@ export class CanvasGridRenderer {
       } catch (error) {
         if (this.destroyed) return;
         if (this.imageBitmapCache.get(imageId) !== placeholder) return;
-        this.imageBitmapCache.set(imageId, { state: "error", promise: null, bitmap: null, error });
+        this.imageBitmapCache.set(imageId, {
+          state: "error",
+          promise: null,
+          bitmap: null,
+          error,
+          expiresAtMs: Date.now() + this.imageErrorRetryMs,
+        });
       } finally {
         // Repaint visible placeholders once the image finishes resolving.
         this.markContentDirtyForImageUpdate();
