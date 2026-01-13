@@ -176,14 +176,21 @@ plaintext_i = AES-CBC-Decrypt(key=package_key, iv=iv, ciphertext=segment_i)
 Each segment is independently AES-CBC encrypted; segment ciphertext is padded to the AES block size.
 
 #### Agile integrity (HMAC)
-Agile includes a `dataIntegrity` block that authenticates the plaintext package:
+Agile includes a `dataIntegrity` block that authenticates the package bytes:
 
-* `encryptedHmacKey` is decrypted using a key derived from `package_key` and `HMAC_KEY_BLOCK`
-* `encryptedHmacValue` is decrypted using a key derived from `package_key` and `HMAC_VALUE_BLOCK`
-* `HMAC-SHA512(hmacKey, plaintextPackageBytes)` must match `hmacValue` (constant-time compare)
+* `encryptedHmacKey` is AES-CBC-decrypted using **`package_key` as the AES key**, and an IV derived
+  from `keyData.saltValue` and `HMAC_KEY_BLOCK` (truncate/pad to `blockSize`).
+* `encryptedHmacValue` is AES-CBC-decrypted using **`package_key` as the AES key**, and an IV derived
+  from `keyData.saltValue` and `HMAC_VALUE_BLOCK` (truncate/pad to `blockSize`).
+* Compute `HMAC-(keyData.hashAlgorithm)(hmacKey, EncryptedPackageStreamBytes)` and compare it to the
+  decrypted `hmacValue` (constant-time compare).
+  - Note: in our implementations, the HMAC input is the **entire `EncryptedPackage` stream bytes**
+    (8-byte length prefix + ciphertext), not the decrypted ZIP bytes.
 
 Implementation status:
 
+- `crates/formula-xlsx::offcrypto` validates `dataIntegrity` and returns `IntegrityMismatch` on
+  failure.
 - `crates/formula-offcrypto` parses `encryptedHmacKey`/`encryptedHmacValue` for completeness but does
   not currently validate them.
 - `crates/formula-office-crypto` also parses these fields but does not currently validate them.
@@ -192,13 +199,24 @@ Implementation status:
 
 ### Standard (CryptoAPI): password KDF + verifier (ECMA-376)
 
-Standard encryption key derivation is **not PBKDF2**. It is CryptoAPI/ECMA-376’s SHA-1 based
-construction with a fixed iteration count of **50,000**.
+Standard encryption key derivation is **not PBKDF2**. It is CryptoAPI/ECMA-376’s iterative hash loop
+(`spinCount = 50,000`) plus CryptoAPI `CryptDeriveKey`-style key material expansion.
+
+Hash algorithm nuance:
+
+- The password hashing loop uses the hash identified by `EncryptionHeader.algIdHash`
+  (`CALG_SHA1`, `CALG_SHA_256`, …).
+- Excel’s Standard/CryptoAPI AES commonly uses **SHA-1**; some non-Excel tooling can emit other
+  hashes.
 
 In this repo, the reference implementation is `crates/formula-offcrypto/src/lib.rs`:
 `standard_derive_key` + `standard_verify_key`.
 
-High-level shape:
+`crates/formula-office-crypto` also implements a compatible Standard key deriver
+(`StandardKeyDeriver`) but supports additional `AlgIDHash` values (SHA-256/384/512) for
+compatibility.
+
+High-level shape (Excel-default SHA-1):
 
 ```text
 pw = UTF16LE(password)                      // no BOM, no NUL
@@ -215,8 +233,8 @@ Verifier nuances (very common bug source):
 
 - `EncryptionVerifier.encryptedVerifier` and `EncryptionVerifier.encryptedVerifierHash` are
   encrypted with **AES-ECB** (no IV) using the derived key.
-- The verifier hash is SHA-1 (20 bytes) and the encrypted blob is padded to an AES block boundary
-  (typically **32 bytes** on disk).
+- The verifier hash is `EncryptionHeader.algIdHash` (commonly SHA-1, 20 bytes) and the encrypted
+  blob is padded to an AES block boundary (for SHA-1, typically **32 bytes** on disk).
 
 ### Standard (CryptoAPI): `EncryptedPackage` decryption (AES-CBC, 0x1000 segments)
 
@@ -236,6 +254,13 @@ Where:
 
 See `docs/offcrypto-standard-encryptedpackage.md` for edge cases (notably the “extra full padding
 block” case where the final ciphertext segment can be `0x1010` bytes).
+
+Implementation nuance:
+
+- `crates/formula-io/src/offcrypto/encrypted_package.rs` implements the CBC + per-segment-IV scheme
+  above (given a derived key and salt).
+- `crates/formula-office-crypto` attempts a small set of Standard/CryptoAPI AES variants observed in
+  the wild (including the scheme above) to maximize compatibility.
 
 ## Interop notes / fixture generation
 

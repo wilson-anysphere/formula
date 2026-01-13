@@ -1,7 +1,8 @@
 # MS-OFFCRYPTO Standard (CryptoAPI) encryption: key derivation + verifier validation
 
 This document is a *from-scratch* implementation guide for decrypting **MS Office “Standard” encryption**
-(`EncryptionInfo` version **3.2**) used by password-protected OOXML files (e.g. `.xlsx`, `.docx`, `.pptx`)
+(`EncryptionInfo` `versionMinor == 2`, commonly **3.2**) used by password-protected OOXML files (e.g.
+`.xlsx`, `.docx`, `.pptx`)
 stored inside an OLE Compound File.
 
 It focuses on:
@@ -14,9 +15,12 @@ It focuses on:
 
 The intent is that an engineer can implement this without reading any external references.
 
+For repo-specific implementation notes (which parameter subsets we accept, crate entrypoints, writer
+defaults), see `docs/office-encryption.md`.
+
 ---
 
-## 1) Detecting “Standard” encryption (version 3.2)
+## 1) Detecting “Standard” encryption (`versionMinor == 2`)
 
 An encrypted OOXML file is an **OLE Compound File** (CFB) containing (at minimum) these streams:
 
@@ -34,18 +38,18 @@ To detect **Standard (CryptoAPI)** encryption:
 4. Standard encryption is identified by:
 
 ```text
-major = 3
 minor = 2
+major ∈ {2, 3, 4}   // observed in the wild
 ```
 
 The `flags` field is part of the `EncryptionInfo` header (and must be consumed to keep offsets correct),
 but it is not needed for the scheme dispatch.
 
-If the version is not `3.2`, the file is *not* Standard encryption (it may be Agile, Extensible, etc.).
+If `versionMinor != 2`, the file is *not* Standard encryption (it may be Agile `4.4`, Extensible, etc.).
 
 ---
 
-## 2) `EncryptionInfo` binary layout (version 3.2)
+## 2) `EncryptionInfo` binary layout (`versionMinor == 2`)
 
 All integer fields in this section are **little-endian**.
 
@@ -63,7 +67,7 @@ EncryptionInfoStream =
 
 | Offset | Size | Type   | Name  | Meaning |
 |-------:|-----:|--------|-------|---------|
-| 0x00   | 2    | u16le  | Major | 3 for Standard |
+| 0x00   | 2    | u16le  | Major | Commonly 3; `2` and `4` also occur with `Minor == 2` |
 | 0x02   | 2    | u16le  | Minor | 2 for Standard |
 | 0x04   | 4    | u32le  | Flags | Header flags (not required for decryption; consume for correct parsing) |
 
@@ -143,6 +147,9 @@ The `EncryptionHeader` `AlgID` and `AlgIDHash` are CryptoAPI `ALG_ID` values.
 |------|------|--------------|--------------|
 | MD5 | `CALG_MD5` | `0x00008003` | 16 |
 | SHA-1 | `CALG_SHA1` | `0x00008004` | 20 |
+| SHA-256 | `CALG_SHA_256` | `0x0000800C` | 32 |
+| SHA-384 | `CALG_SHA_384` | `0x0000800D` | 48 |
+| SHA-512 | `CALG_SHA_512` | `0x0000800E` | 64 |
 
 ---
 

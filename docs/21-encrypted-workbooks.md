@@ -43,7 +43,7 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
 
 | File type | Encryption marker | Schemes (common) | Current behavior | Planned/target behavior |
 |---|---|---|---|---|
-| `.xlsx` / `.xlsm` / `.xlsb` (OOXML) | OLE/CFB streams `EncryptionInfo` + `EncryptedPackage` | Agile (4.4), Standard (3.2) | `PasswordRequired` (and `UnsupportedOoxmlEncryption` for unknown versions; `open_workbook_with_password` surfaces `InvalidPassword`) | Decrypt + open; surface `PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption` (or a more specific “unsupported scheme” error) |
+| `.xlsx` / `.xlsm` / `.xlsb` (OOXML) | OLE/CFB streams `EncryptionInfo` + `EncryptedPackage` | Agile (4.4), Standard (minor=2; commonly 3.2) | `PasswordRequired` (and `UnsupportedOoxmlEncryption` for unknown versions; `open_workbook_with_password` surfaces `InvalidPassword`) | Decrypt + open; surface `PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption` (or a more specific “unsupported scheme” error) |
 | `.xls` (BIFF) | BIFF `FILEPASS` record in workbook stream | XOR, RC4, CryptoAPI | `formula-io`: detect + `Error::EncryptedWorkbook` (no password plumbing yet). `formula-xls`: supports BIFF8 RC4 CryptoAPI when a password is provided. | Plumb password into `formula-io` and expand scheme coverage as needed (see [Legacy `.xls` encryption](#legacy-xls-encryption-biff-filepass)) |
 
 ---
@@ -114,7 +114,7 @@ In practice:
 
 | Scheme | `major.minor` | Notes |
 |--------|---------------|------|
-| **Standard** | `3.2` (versionMinor = `2`) | CryptoAPI-style header/verifier structures (binary). |
+| **Standard** | `*.2` (`versionMinor == 2`, `versionMajor ∈ {2,3,4}` in the wild; commonly `3.2`) | CryptoAPI-style header/verifier structures (binary). |
 | **Agile** | `4.4` | XML-based encryption descriptor. |
 
 Implementation notes:
@@ -127,7 +127,7 @@ Implementation notes:
   bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- path/to/encrypted.xlsx
   ```
 - `crates/formula-offcrypto` parses `EncryptionInfo` for both:
-  - Standard (3.2) header + verifier structures, and
+  - Standard (CryptoAPI; `versionMinor == 2`) header + verifier structures, and
   - Agile (4.4) XML (password key-encryptor subset),
   and implements Standard password→key derivation + verifier checks.
 - `crates/formula-io/src/offcrypto/encrypted_package.rs` decrypts the Standard/CryptoAPI
@@ -144,7 +144,7 @@ Excel-produced encrypted workbooks primarily use:
 Formula’s encrypted-workbook support targets these two schemes:
 
 - **Agile** (`EncryptionInfo` version 4.4; XML-based descriptor inside `EncryptionInfo`)
-- **Standard** (`EncryptionInfo` version 3.2; CryptoAPI-style header/verifier)
+- **Standard** (`EncryptionInfo` `versionMinor == 2`; CryptoAPI-style header/verifier)
 
 Everything else should fail with a specific “unsupported encryption scheme” error (see
 [Error semantics](#error-semantics)).
@@ -162,7 +162,7 @@ archive containing `xl/workbook.bin` for `.xlsb`).
 
 The encryption *mode* differs by scheme:
 
-- **Standard (3.2 / CryptoAPI):** AES-CBC over **0x1000 (4096)-byte plaintext segments** with a
+- **Standard (CryptoAPI; `versionMinor == 2`):** AES-CBC over **0x1000 (4096)-byte plaintext segments** with a
   per-segment IV. Segment `i` uses `IV = SHA1(verifierSalt || LE32(i))[0..16]` and is decrypted
   independently; the concatenated plaintext is truncated to `original_package_size` (see
   `docs/offcrypto-standard-encryptedpackage.md`).
@@ -179,7 +179,7 @@ At a high level, opening a password-encrypted OOXML workbook is:
    - Confirm `EncryptionInfo` + `EncryptedPackage` streams exist.
 2. **Read and classify `EncryptionInfo`**
    - Parse the `(major, minor)` version header.
-   - **Standard (3.2 / minor=2):** parse the binary CryptoAPI header + verifier structures.
+   - **Standard (minor=2; major ∈ {2,3,4}):** parse the binary CryptoAPI header + verifier structures.
    - **Agile (4.4):** parse the XML `<encryption>` descriptor (key derivation params, ciphers,
      integrity metadata, …).
 3. **Derive keys from the password**

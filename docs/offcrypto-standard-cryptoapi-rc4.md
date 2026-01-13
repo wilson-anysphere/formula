@@ -27,7 +27,8 @@ Password-encrypted OOXML workbooks are **not ZIP files on disk**, even if the ex
 
 Instead, they are an **OLE Compound File Binary** (CFB) container with two relevant streams:
 
-- `EncryptionInfo` — parameters and verifier (Standard header structures for version 3.2)
+- `EncryptionInfo` — parameters and verifier (Standard header structures for `versionMinor == 2`;
+  commonly `3.2`)
 - `EncryptedPackage` — the encrypted bytes of the real OPC/ZIP package
 
 ### `EncryptedPackage` stream layout
@@ -178,4 +179,3 @@ Common values for Standard RC4-encrypted OOXML:
 
 See Microsoft’s WinCrypt reference for the full `CALG_*` table:
 https://learn.microsoft.com/en-us/windows/win32/seccrypto/cryptographic-algorithm-identifiers
-
