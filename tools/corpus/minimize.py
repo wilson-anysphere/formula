@@ -739,6 +739,15 @@ def main() -> int:
         help="Env var containing Fernet key used to decrypt *.enc workbook inputs.",
     )
     parser.add_argument(
+        "--privacy-mode",
+        choices=[triage_mod._PRIVACY_PUBLIC, triage_mod._PRIVACY_PRIVATE],  # noqa: SLF001
+        default=triage_mod._PRIVACY_PUBLIC,  # noqa: SLF001
+        help=(
+            "Control redaction of minimize outputs. `public` preserves filenames/URLs; "
+            "`private` anonymizes display_name and hashes non-standard URLs."
+        ),
+    )
+    parser.add_argument(
         "--diff-ignore",
         action="append",
         default=[],
@@ -790,6 +799,29 @@ def main() -> int:
         diff_ignore=diff_ignore,
         diff_limit=max(0, int(args.diff_limit)),
     )
+
+    if args.privacy_mode == triage_mod._PRIVACY_PRIVATE:  # noqa: SLF001
+        # Match triage privacy-mode behavior to avoid leaking local filenames or corporate domains
+        # when summary JSON is uploaded as an artifact.
+        summary["display_name"] = triage_mod._anonymized_display_name(  # noqa: SLF001
+            sha256=summary.get("sha256") or sha256_hex(workbook.data),
+            original_name=workbook.display_name,
+        )
+        summary["run_url"] = triage_mod._redact_run_url(  # noqa: SLF001
+            summary.get("run_url"), privacy_mode=args.privacy_mode
+        )
+        # Do not leak local output paths; keep only the basename.
+        minimized = summary.get("minimized")
+        if isinstance(minimized, dict):
+            p = minimized.get("path")
+            if isinstance(p, str) and p:
+                minimized["path"] = Path(p).name
+            err = minimized.get("error")
+            if isinstance(err, str) and err:
+                minimized["error"] = f"sha256={triage_mod._sha256_text(err)}"  # noqa: SLF001
+        err = summary.get("critical_part_hashes_error")
+        if isinstance(err, str) and err:
+            summary["critical_part_hashes_error"] = f"sha256={triage_mod._sha256_text(err)}"  # noqa: SLF001
 
     workbook_id = summary["sha256"][:16]
     out_path = args.out or (Path("tools/corpus/out/minimize") / f"{workbook_id}.json")
