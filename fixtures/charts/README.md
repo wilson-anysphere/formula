@@ -67,9 +67,14 @@ cargo run -p formula-xlsx --bin dump_chart_models -- fixtures/charts/xlsx/bar.xl
 By default the tool writes files under `fixtures/charts/models/<workbook-stem>/`.
 See `--help` for options.
 
-The JSON payload includes the chart index, sheet name, anchor, and one or more
-parsed `ChartModel`s (see `formula_model::charts::ChartModel`):
+The JSON payload includes the chart index, sheet name, anchor, drawing object
+metadata, and one or more parsed `ChartModel`s (see
+`formula_model::charts::ChartModel`):
 
+- `drawingRelId`: the `r:id` used in the drawing part to reference the chart
+  part (`xl/charts/chartN.xml`).
+- `drawingObjectId` / `drawingObjectName`: the DrawingML `<xdr:cNvPr>` id/name
+  for the embedded chart object (when present).
 - `modelChartSpace`: the classic `c:chartSpace` model parsed from `chart*.xml`.
 - `modelChartEx`: optional best-effort `cx:*` (ChartEx) model parsed from
   `chartEx*.xml` when present.

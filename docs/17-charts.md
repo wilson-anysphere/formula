@@ -156,7 +156,9 @@ with concrete `cx:*Chart` elements and cached series points).
    cargo run -p formula-xlsx --bin dump_chart_models -- fixtures/charts/xlsx/<stem>.xlsx --emit-both-models
    ```
 
-   This writes `fixtures/charts/models/<stem>/chart<N>.json` (one JSON per extracted chart).
+   This writes `fixtures/charts/models/<stem>/chart<N>.json` (one JSON per extracted chart),
+   including the drawing relationship/object metadata (`drawingRelId`, `drawingObjectId`,
+   `drawingObjectName`) plus the parsed chart models (`modelChartSpace`, optional `modelChartEx`).
 5. Commit the XLSX, the model JSON(s), and the golden PNG.
 
 ### What the tests enforce

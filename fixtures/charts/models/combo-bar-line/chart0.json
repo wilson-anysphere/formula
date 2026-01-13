@@ -25,6 +25,9 @@
       }
     }
   },
+  "drawingRelId": "rId1",
+  "drawingObjectId": 2,
+  "drawingObjectName": "Chart 1",
   "parts": {
     "drawingPart": "xl/drawings/drawing1.xml",
     "chartPart": "xl/charts/chart1.xml",
@@ -120,6 +123,8 @@
     ],
     "series": [
       {
+        "idx": 0,
+        "order": 0,
         "name": null,
         "categories": {
           "formula": "Sheet1!$A$2:$A$5",
@@ -147,6 +152,8 @@
         "plotIndex": 0
       },
       {
+        "idx": 1,
+        "order": 1,
         "name": null,
         "categories": {
           "formula": "Sheet1!$A$2:$A$5",

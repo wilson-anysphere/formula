@@ -94,6 +94,8 @@
     ],
     "series": [
       {
+        "idx": 0,
+        "order": 0,
         "name": {
           "richText": {
             "text": "",
