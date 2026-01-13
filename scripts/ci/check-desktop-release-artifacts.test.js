@@ -1,0 +1,97 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const scriptPath = path.join(repoRoot, "scripts", "ci", "check-desktop-release-artifacts.mjs");
+
+/**
+ * @param {string} p
+ */
+function touch(p) {
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, "x");
+}
+
+/**
+ * @param {Record<string, string | undefined>} env
+ * @param {string[]} args
+ */
+function run(env, args) {
+  const proc = spawnSync(process.execPath, [scriptPath, ...args], {
+    encoding: "utf8",
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      ...env,
+    },
+  });
+  if (proc.error) throw proc.error;
+  return proc;
+}
+
+test("fork mode: macOS unsigned build passes without updater signatures", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "formula-release-artifacts-"));
+  const bundleDir = path.join(tmp, "target", "release", "bundle");
+
+  touch(path.join(bundleDir, "dmg", "Formula.dmg"));
+
+  const proc = run(
+    {
+      RUNNER_OS: "macOS",
+      FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES: "false",
+      FORMULA_HAS_TAURI_UPDATER_KEY: "false",
+    },
+    ["--bundle-dir", bundleDir],
+  );
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /passed/i);
+});
+
+test("signed mode: macOS requires latest.json + installer/archive signatures", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "formula-release-artifacts-"));
+  const bundleDir = path.join(tmp, "target", "release", "bundle");
+
+  touch(path.join(bundleDir, "latest.json"));
+  touch(path.join(bundleDir, "latest.json.sig"));
+  touch(path.join(bundleDir, "dmg", "Formula.dmg"));
+  touch(path.join(bundleDir, "dmg", "Formula.dmg.sig"));
+  touch(path.join(bundleDir, "macos", "Formula.app.tar.gz"));
+  touch(path.join(bundleDir, "macos", "Formula.app.tar.gz.sig"));
+
+  const proc = run(
+    {
+      RUNNER_OS: "macOS",
+      FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES: "true",
+      FORMULA_HAS_TAURI_UPDATER_KEY: "true",
+    },
+    ["--bundle-dir", bundleDir],
+  );
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("fork mode: Windows requires installer artifacts but not updater signatures", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "formula-release-artifacts-"));
+  const bundleDir = path.join(tmp, "target", "release", "bundle");
+
+  // Must match the script's stricter path filters:
+  touch(path.join(bundleDir, "msi", "Formula_x64.msi"));
+  touch(path.join(bundleDir, "nsis", "Formula_x64.exe"));
+  // A WebView2 bootstrapper should not count as the shipped installer.
+  touch(path.join(bundleDir, "nsis", "MicrosoftEdgeWebView2Setup.exe"));
+
+  const proc = run(
+    {
+      RUNNER_OS: "Windows",
+      FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES: "false",
+      FORMULA_HAS_TAURI_UPDATER_KEY: "false",
+    },
+    ["--bundle-dir", bundleDir],
+  );
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
