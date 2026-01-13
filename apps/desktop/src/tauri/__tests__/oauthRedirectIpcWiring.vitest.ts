@@ -34,7 +34,7 @@ describe("oauthRedirectIpc wiring", () => {
       const varName = escapeForRegExp(assignment[1]!);
       const hasThen =
         new RegExp(
-          String.raw`\b${varName}\b\s*\.\s*then\s*\(\s*(?:async\s*)?(?:\(\s*\)\s*=>|function\s*\(\s*\))[\s\S]{0,750}?\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']`,
+          String.raw`\b${varName}\b\s*\.\s*then\s*\(\s*(?:async\s*)?(?:\(\s*[^)]*\)\s*=>|\w+\s*=>|function\s*\(\s*[^)]*\))[\s\S]{0,750}?\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']`,
           "m",
         ).test(code);
       const hasAwait =
@@ -46,7 +46,7 @@ describe("oauthRedirectIpc wiring", () => {
     } else {
       // Fallback for inlined promise chaining / top-level await.
       const hasThen =
-        /\blisten\s*\(\s*["']oauth-redirect["'][\s\S]{0,750}?\)\s*\.?\s*then\s*\(\s*(?:async\s*)?(?:\(\s*\)\s*=>|function\s*\(\s*\))[\s\S]{0,750}?\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']/.test(
+        /\blisten\s*\(\s*["']oauth-redirect["'][\s\S]{0,750}?\)\s*\.?\s*then\s*\(\s*(?:async\s*)?(?:\(\s*[^)]*\)\s*=>|\w+\s*=>|function\s*\(\s*[^)]*\))[\s\S]{0,750}?\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']/.test(
           code,
         );
       const hasAwait =
