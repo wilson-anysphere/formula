@@ -18,7 +18,9 @@ pub enum DecodeRgceError {
     #[error("stack underflow decoding ptg=0x{ptg:02X} at rgce offset {offset}")]
     StackUnderflow { offset: usize, ptg: u8 },
     /// A ptg referenced a function id we don't know how to display.
-    #[error("unknown function id=0x{func_id:04X} decoding ptg=0x{ptg:02X} at rgce offset {offset}")]
+    #[error(
+        "unknown function id=0x{func_id:04X} decoding ptg=0x{ptg:02X} at rgce offset {offset}"
+    )]
     UnknownFunctionId {
         offset: usize,
         ptg: u8,
@@ -219,10 +221,11 @@ fn decode_array_constant(
                     for chunk in raw.chunks_exact(2) {
                         units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
                     }
-                    let s = String::from_utf16(&units).map_err(|_| DecodeRgceError::InvalidUtf16 {
-                        offset: ptg_offset,
-                        ptg,
-                    })?;
+                    let s =
+                        String::from_utf16(&units).map_err(|_| DecodeRgceError::InvalidUtf16 {
+                            offset: ptg_offset,
+                            ptg,
+                        })?;
                     let escaped = s.replace('"', "\"\"");
                     col_texts.push(format!("\"{escaped}\""));
                 }
@@ -349,11 +352,10 @@ fn decode_rgce_impl(
                         ptg,
                     });
                 };
-                let prec = binary_precedence(ptg)
-                    .ok_or(DecodeRgceError::UnsupportedToken {
-                        offset: ptg_offset,
-                        ptg,
-                    })?;
+                let prec = binary_precedence(ptg).ok_or(DecodeRgceError::UnsupportedToken {
+                    offset: ptg_offset,
+                    ptg,
+                })?;
 
                 let right = stack.pop().ok_or(DecodeRgceError::StackUnderflow {
                     offset: ptg_offset,
@@ -886,11 +888,12 @@ fn decode_rgce_impl(
                     continue;
                 }
 
-                let name = function_id_to_name(func_id).ok_or(DecodeRgceError::UnknownFunctionId {
-                    offset: ptg_offset,
-                    ptg,
-                    func_id,
-                })?;
+                let name =
+                    function_id_to_name(func_id).ok_or(DecodeRgceError::UnknownFunctionId {
+                        offset: ptg_offset,
+                        ptg,
+                        func_id,
+                    })?;
 
                 let mut args = Vec::with_capacity(argc);
                 for _ in 0..argc {
@@ -960,7 +963,8 @@ fn decode_rgce_impl(
                     });
                 }
                 let row1 = u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) + 1;
-                let row2 = u32::from_le_bytes([rgce[i + 4], rgce[i + 5], rgce[i + 6], rgce[i + 7]]) + 1;
+                let row2 =
+                    u32::from_le_bytes([rgce[i + 4], rgce[i + 5], rgce[i + 6], rgce[i + 7]]) + 1;
                 let col1 = u16::from_le_bytes([rgce[i + 8], rgce[i + 9] & 0x3F]) as u32;
                 let col2 = u16::from_le_bytes([rgce[i + 10], rgce[i + 11] & 0x3F]) as u32;
                 let flags1 = rgce[i + 9];
@@ -1209,8 +1213,10 @@ fn decode_rgce_impl(
                     });
                 }
                 let ixti = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
-                let row_first0 = u32::from_le_bytes([rgce[i + 2], rgce[i + 3], rgce[i + 4], rgce[i + 5]]);
-                let row_last0 = u32::from_le_bytes([rgce[i + 6], rgce[i + 7], rgce[i + 8], rgce[i + 9]]);
+                let row_first0 =
+                    u32::from_le_bytes([rgce[i + 2], rgce[i + 3], rgce[i + 4], rgce[i + 5]]);
+                let row_last0 =
+                    u32::from_le_bytes([rgce[i + 6], rgce[i + 7], rgce[i + 8], rgce[i + 9]]);
                 let col_first = u16::from_le_bytes([rgce[i + 10], rgce[i + 11]]);
                 let col_last = u16::from_le_bytes([rgce[i + 12], rgce[i + 13]]);
                 i += 14;
@@ -1219,8 +1225,8 @@ fn decode_rgce_impl(
                 let a = format_cell_ref_from_field(row_first0, col_first);
                 let b = format_cell_ref_from_field(row_last0, col_last);
 
-                let is_single_cell = row_first0 == row_last0
-                    && (col_first & 0x3FFF) == (col_last & 0x3FFF);
+                let is_single_cell =
+                    row_first0 == row_last0 && (col_first & 0x3FFF) == (col_last & 0x3FFF);
                 let is_value_class = (ptg & 0x60) == 0x40;
 
                 let mut text = String::new();

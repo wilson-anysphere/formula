@@ -58,30 +58,21 @@ fn decodes_ptgareaerr_and_consumes_payload() {
 fn decodes_ptgrefn_with_base() {
     // Base cell is C3 (row0=2, col0=2). Offsets (-2, -2) point at A1.
     let rgce = ptg_refn(-2, -2);
-    assert_eq!(
-        decode_rgce_with_base(&rgce, 2, 2).expect("decode"),
-        "A1"
-    );
+    assert_eq!(decode_rgce_with_base(&rgce, 2, 2).expect("decode"), "A1");
 }
 
 #[test]
 fn decodes_ptgarean_with_base() {
     // Base cell is C3 (row0=2, col0=2). Offsets (-1..=1, -1..=1) -> B2:D4.
     let rgce = ptg_arean(-1, 1, -1, 1);
-    assert_eq!(
-        decode_rgce_with_base(&rgce, 2, 2).expect("decode"),
-        "B2:D4"
-    );
+    assert_eq!(decode_rgce_with_base(&rgce, 2, 2).expect("decode"), "B2:D4");
 }
 
 #[test]
 fn ptgrefn_out_of_bounds_emits_ref() {
     // Base cell A1 + row_off=-1 is out-of-bounds.
     let rgce = ptg_refn(-1, 0);
-    assert_eq!(
-        decode_rgce_with_base(&rgce, 0, 0).expect("decode"),
-        "#REF!"
-    );
+    assert_eq!(decode_rgce_with_base(&rgce, 0, 0).expect("decode"), "#REF!");
 }
 
 #[test]

@@ -1,8 +1,8 @@
+use formula_xlsb::workbook_context::WorkbookContext;
 use formula_xlsb::{biff12_varint, parse_sheet_bin, parse_sheet_bin_with_context, CellValue};
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 use std::io::Cursor;
-use formula_xlsb::workbook_context::WorkbookContext;
 
 fn push_record(out: &mut Vec<u8>, id: u32, data: &[u8]) {
     biff12_varint::write_record_id(out, id).expect("write record id");
@@ -289,7 +289,10 @@ fn materializes_shared_formulas_with_ptgexp_candidate_fallback_to_biff8_layout()
         b2.formula.as_ref().and_then(|f| f.text.as_deref()),
         Some("A2+1")
     );
-    assert_eq!(b2.formula.as_ref().unwrap().rgce.first().copied(), Some(0x24)); // PtgRef
+    assert_eq!(
+        b2.formula.as_ref().unwrap().rgce.first().copied(),
+        Some(0x24)
+    ); // PtgRef
 }
 
 #[test]
@@ -512,7 +515,10 @@ fn materializes_shared_formulas_with_ptgexp_trailing_bytes() {
         b2.formula.as_ref().and_then(|f| f.text.as_deref()),
         Some("A2+1")
     );
-    assert_eq!(b2.formula.as_ref().unwrap().rgce.first().copied(), Some(0x24)); // PtgRef
+    assert_eq!(
+        b2.formula.as_ref().unwrap().rgce.first().copied(),
+        Some(0x24)
+    ); // PtgRef
 }
 
 #[test]
@@ -866,23 +872,161 @@ fn materializes_shared_formulas_with_ptgmem_subexpression_refs() {
     assert_eq!(b2_rgce.get(mem_offset).copied(), Some(0x2E)); // PtgMemAreaN
 
     // PtgMem* layout: [ptg][cce: u16][nested rgce...]
-    let cce = u16::from_le_bytes([
-        b2_rgce[mem_offset + 1],
-        b2_rgce[mem_offset + 2],
-    ]) as usize;
+    let cce = u16::from_le_bytes([b2_rgce[mem_offset + 1], b2_rgce[mem_offset + 2]]) as usize;
     assert_eq!(cce, 7);
 
     // The nested rgce should have been materialized too: `A2` (row 1, col 0).
     let nested_offset = mem_offset + 1 + 2;
     assert_eq!(b2_rgce.get(nested_offset).copied(), Some(0x24)); // PtgRef
-    let nested_row =
-        u32::from_le_bytes(b2_rgce[nested_offset + 1..nested_offset + 5].try_into().unwrap());
-    let nested_col =
-        u16::from_le_bytes(b2_rgce[nested_offset + 5..nested_offset + 7].try_into().unwrap());
+    let nested_row = u32::from_le_bytes(
+        b2_rgce[nested_offset + 1..nested_offset + 5]
+            .try_into()
+            .unwrap(),
+    );
+    let nested_col = u16::from_le_bytes(
+        b2_rgce[nested_offset + 5..nested_offset + 7]
+            .try_into()
+            .unwrap(),
+    );
     assert_eq!(nested_row, 1);
     assert_eq!(nested_col, 0xC000); // col=0, row+col relative.
 
     // Ensure the output rgce stayed aligned after the mem subexpression.
+    assert_eq!(
+        b2_rgce.get(nested_offset + cce).copied(),
+        Some(0x1E) // PtgInt
+    );
+}
+
+#[test]
+fn materializes_shared_formulas_with_ptgmemfunc_subexpression_refs() {
+    // Same as `materializes_shared_formulas_with_ptgmem_subexpression_refs`, but use PtgMemFunc
+    // (0x29) instead of PtgMemAreaN (0x2E). This covers another common PtgMem* variant.
+    const WORKSHEET_BEGIN: u32 = 0x0081;
+    const WORKSHEET_END: u32 = 0x0082;
+    const SHEETDATA_BEGIN: u32 = 0x0091;
+    const SHEETDATA_END: u32 = 0x0092;
+    const DIMENSION: u32 = 0x0094;
+
+    const ROW: u32 = 0x0000;
+    const FMLA_NUM: u32 = 0x0009;
+    const SHR_FMLA: u32 = 0x0010;
+
+    let mut sheet = Vec::new();
+    push_record(&mut sheet, WORKSHEET_BEGIN, &[]);
+
+    // BrtWsDim: cover B1:B2.
+    let mut dim = Vec::new();
+    dim.extend_from_slice(&0u32.to_le_bytes());
+    dim.extend_from_slice(&1u32.to_le_bytes());
+    dim.extend_from_slice(&1u32.to_le_bytes());
+    dim.extend_from_slice(&1u32.to_le_bytes());
+    push_record(&mut sheet, DIMENSION, &dim);
+
+    push_record(&mut sheet, SHEETDATA_BEGIN, &[]);
+
+    // Row 0
+    push_record(&mut sheet, ROW, &0u32.to_le_bytes());
+
+    // Shared formula over B1:B2:
+    //   B1: A1+1
+    //   B2: A2+1
+    let mut shr_fmla = Vec::new();
+    shr_fmla.extend_from_slice(&0u32.to_le_bytes());
+    shr_fmla.extend_from_slice(&1u32.to_le_bytes());
+    shr_fmla.extend_from_slice(&1u32.to_le_bytes());
+    shr_fmla.extend_from_slice(&1u32.to_le_bytes());
+
+    let base_rgce: Vec<u8> = {
+        let mem_rgce: Vec<u8> = {
+            let mut v = Vec::new();
+            v.push(0x2C); // PtgRefN
+            v.extend_from_slice(&0i32.to_le_bytes());
+            v.extend_from_slice(&(-1i16).to_le_bytes());
+            v
+        };
+
+        let mut v = Vec::new();
+        v.push(0x2C); // PtgRefN (main operand)
+        v.extend_from_slice(&0i32.to_le_bytes());
+        v.extend_from_slice(&(-1i16).to_le_bytes());
+        v.push(0x29); // PtgMemFunc
+        v.extend_from_slice(&(mem_rgce.len() as u16).to_le_bytes()); // cce
+        v.extend_from_slice(&mem_rgce);
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+    shr_fmla.extend_from_slice(&(base_rgce.len() as u32).to_le_bytes());
+    shr_fmla.extend_from_slice(&base_rgce);
+    push_record(&mut sheet, SHR_FMLA, &shr_fmla);
+
+    // B1 full formula (PtgRef A1 + 1 +)
+    let full_rgce: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x24); // PtgRef
+        v.extend_from_slice(&0u32.to_le_bytes()); // row=0
+        v.extend_from_slice(&0xC000u16.to_le_bytes()); // col=0, row+col relative
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+    let mut b1 = Vec::new();
+    b1.extend_from_slice(&1u32.to_le_bytes()); // col B
+    b1.extend_from_slice(&0u32.to_le_bytes()); // style
+    b1.extend_from_slice(&0.0f64.to_le_bytes()); // cached value
+    b1.extend_from_slice(&0u16.to_le_bytes()); // flags
+    b1.extend_from_slice(&(full_rgce.len() as u32).to_le_bytes());
+    b1.extend_from_slice(&full_rgce);
+    push_record(&mut sheet, FMLA_NUM, &b1);
+
+    // Row 1
+    push_record(&mut sheet, ROW, &1u32.to_le_bytes());
+
+    // B2 uses PtgExp to reference base cell B1 (row=0, col=1)
+    let ptgexp: [u8; 5] = [0x01, 0x00, 0x00, 0x01, 0x00];
+    let mut b2 = Vec::new();
+    b2.extend_from_slice(&1u32.to_le_bytes()); // col B
+    b2.extend_from_slice(&0u32.to_le_bytes()); // style
+    b2.extend_from_slice(&0.0f64.to_le_bytes()); // cached value
+    b2.extend_from_slice(&0u16.to_le_bytes()); // flags
+    b2.extend_from_slice(&(ptgexp.len() as u32).to_le_bytes());
+    b2.extend_from_slice(&ptgexp);
+    push_record(&mut sheet, FMLA_NUM, &b2);
+
+    push_record(&mut sheet, SHEETDATA_END, &[]);
+    push_record(&mut sheet, WORKSHEET_END, &[]);
+
+    let parsed = parse_sheet_bin(&mut Cursor::new(sheet), &[]).expect("parse synthetic sheet");
+    let mut cells: HashMap<(u32, u32), _> =
+        parsed.cells.iter().map(|c| ((c.row, c.col), c)).collect();
+
+    let b2 = cells.remove(&(1, 1)).expect("B2 present");
+    assert_eq!(
+        b2.formula.as_ref().and_then(|f| f.text.as_deref()),
+        Some("A2+1")
+    );
+
+    let b2_rgce = &b2.formula.as_ref().unwrap().rgce;
+    assert_eq!(b2_rgce.first().copied(), Some(0x24)); // PtgRef
+
+    // PtgMemFunc should appear after the first PtgRef token (6-byte payload).
+    let mem_offset = 7usize;
+    assert_eq!(b2_rgce.get(mem_offset).copied(), Some(0x29)); // PtgMemFunc
+
+    let cce = u16::from_le_bytes([b2_rgce[mem_offset + 1], b2_rgce[mem_offset + 2]]) as usize;
+    assert_eq!(cce, 7);
+
+    let nested_offset = mem_offset + 1 + 2;
+    assert_eq!(b2_rgce.get(nested_offset).copied(), Some(0x24)); // nested PtgRef
+    let nested_row = u32::from_le_bytes(
+        b2_rgce[nested_offset + 1..nested_offset + 5]
+            .try_into()
+            .unwrap(),
+    );
+    assert_eq!(nested_row, 1);
     assert_eq!(
         b2_rgce.get(nested_offset + cce).copied(),
         Some(0x1E) // PtgInt
@@ -996,7 +1140,9 @@ fn materializes_shared_formulas_out_of_bounds_refs_as_ref_error() {
     let mut cells: HashMap<(u32, u32), _> =
         parsed.cells.iter().map(|c| ((c.row, c.col), c)).collect();
 
-    let b2 = cells.remove(&(MAX_ROW, base_col)).expect("B1048576 present");
+    let b2 = cells
+        .remove(&(MAX_ROW, base_col))
+        .expect("B1048576 present");
     assert_eq!(
         b2.formula.as_ref().and_then(|f| f.text.as_deref()),
         Some("#REF!+1")
