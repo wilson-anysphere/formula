@@ -777,9 +777,24 @@ export function MergeBranchPanel({
                             <select
                               value={draft.encSource}
                               disabled={mutationsDisabled || draft.deleteCell}
-                              onChange={(e) =>
-                                updateManualDraft({ ...draft, deleteCell: false, encSource: e.target.value as any }, c)
-                              }
+                              onChange={(e) => {
+                                const encSource = e.target.value as ManualCellDraft["encSource"];
+                                let next: ManualCellDraft = { ...draft, deleteCell: false, encSource };
+
+                                if (encSource !== "custom") {
+                                  const chosen =
+                                    encSource === "base" ? c.base : encSource === "ours" ? c.ours : c.theirs;
+                                  next = {
+                                    ...next,
+                                    // Encrypted payloads cannot be edited, so clear the content fields.
+                                    formulaText: "",
+                                    valueText: "",
+                                    formatText: chosen?.format ? JSON.stringify(chosen.format, null, 2) : "",
+                                  };
+                                }
+
+                                updateManualDraft(next, c);
+                              }}
                             >
                               <option value="custom">Custom (unencrypted)</option>
                               {cellHasEnc(c.base) ? <option value="base">Use base</option> : null}
