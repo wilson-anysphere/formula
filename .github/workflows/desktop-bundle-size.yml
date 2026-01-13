@@ -16,6 +16,7 @@ on:
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
+      - "rust-toolchain.toml"
       - ".github/workflows/desktop-bundle-size.yml"
       - ".github/workflows/release.yml"
   pull_request:
@@ -31,6 +32,7 @@ on:
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
+      - "rust-toolchain.toml"
       - ".github/workflows/desktop-bundle-size.yml"
       - ".github/workflows/release.yml"
 
