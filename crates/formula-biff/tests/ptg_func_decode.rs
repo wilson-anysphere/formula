@@ -87,6 +87,30 @@ fn decodes_ptgfunc_fixed_arity_functions() {
         decode_rgce(&get_workbook).expect("decode GET.WORKBOOK"),
         "GET.WORKBOOK(1)"
     );
+
+    let mut get_workspace = Vec::new();
+    get_workspace.extend_from_slice(&ptg_int(1));
+    get_workspace.extend_from_slice(&ptg_func(186)); // GET.WORKSPACE
+    assert_eq!(
+        decode_rgce(&get_workspace).expect("decode GET.WORKSPACE"),
+        "GET.WORKSPACE(1)"
+    );
+
+    let mut get_window = Vec::new();
+    get_window.extend_from_slice(&ptg_int(1));
+    get_window.extend_from_slice(&ptg_func(187)); // GET.WINDOW
+    assert_eq!(
+        decode_rgce(&get_window).expect("decode GET.WINDOW"),
+        "GET.WINDOW(1)"
+    );
+
+    let mut get_document = Vec::new();
+    get_document.extend_from_slice(&ptg_int(1));
+    get_document.extend_from_slice(&ptg_func(188)); // GET.DOCUMENT
+    assert_eq!(
+        decode_rgce(&get_document).expect("decode GET.DOCUMENT"),
+        "GET.DOCUMENT(1)"
+    );
 }
 
 #[cfg(feature = "encode")]
@@ -105,6 +129,9 @@ fn encode_roundtrips_for_new_ptgfunc_functions() {
         "EVALUATE(1)",
         "GET.CELL(1,2)",
         "GET.WORKBOOK(1)",
+        "GET.WORKSPACE(1)",
+        "GET.WINDOW(1)",
+        "GET.DOCUMENT(1)",
         "SERIES(1,2,3,4)",
     ] {
         let rgce = encode_rgce(formula).expect("encode");
