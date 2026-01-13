@@ -578,6 +578,38 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("clears AI suggestion state when canceling", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel });
+    view.setActiveCell({ address: "A1", input: "orig", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "=1+";
+    view.textarea.setSelectionRange(3, 3);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.setAiSuggestion("=1+2");
+    expect(view.model.aiSuggestion()).toBe("=1+2");
+    expect(view.model.aiGhostText()).toBe("2");
+
+    const e = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    view.textarea.dispatchEvent(e);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(view.model.isEditing).toBe(false);
+    expect(view.model.draft).toBe("orig");
+    expect(view.model.aiSuggestion()).toBeNull();
+    expect(view.model.aiGhostText()).toBe("");
+
+    host.remove();
+  });
+
   it("does not commit twice if Enter is pressed multiple times", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
