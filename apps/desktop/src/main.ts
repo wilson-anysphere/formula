@@ -7326,11 +7326,24 @@ registerDesktopCommands({
       });
     },
     closeWorkbook: () => {
-      if (!handleCloseRequestForRibbon) {
+      if (handleCloseRequestForRibbon) {
+        void handleCloseRequestForRibbon({ quit: false }).catch((err) => {
+          console.error("Failed to close window:", err);
+          showToast(`Failed to close window: ${String(err)}`, "error");
+        });
+        return;
+      }
+
+      // When running under Tauri, the close-request handler is normally installed by the desktop
+      // host integration. If it isn't available (e.g. permission/config mismatch), fall back to
+      // the window API so Close Window still works.
+      const winApi = (globalThis as any).__TAURI__?.window;
+      if (!winApi) {
         showDesktopOnlyToast("Closing windows is available in the desktop app.");
         return;
       }
-      void handleCloseRequestForRibbon({ quit: false }).catch((err) => {
+
+      void hideTauriWindow().catch((err) => {
         console.error("Failed to close window:", err);
         showToast(`Failed to close window: ${String(err)}`, "error");
       });
