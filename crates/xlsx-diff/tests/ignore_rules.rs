@@ -2,7 +2,9 @@ use std::collections::BTreeSet;
 use std::io::{Cursor, Write};
 use std::process::Command;
 
-use xlsx_diff::{diff_archives_with_options, DiffOptions, Severity, WorkbookArchive};
+use xlsx_diff::{
+    diff_archives_with_options, DiffOptions, IgnorePathRule, Severity, WorkbookArchive,
+};
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
@@ -92,12 +94,16 @@ fn calcchain_related_rels_and_content_types_downgrade_to_warning() {
     let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
 
     let report = xlsx_diff::diff_archives(&expected, &actual);
-    assert_eq!(report.count(Severity::Critical), 0, "{:#?}", report.differences);
+    assert_eq!(
+        report.count(Severity::Critical),
+        0,
+        "{:#?}",
+        report.differences
+    );
     assert!(
-        report
-            .differences
-            .iter()
-            .any(|d| d.kind == "missing_part" && d.part == "xl/calcChain.xml" && d.severity == Severity::Warning),
+        report.differences.iter().any(|d| d.kind == "missing_part"
+            && d.part == "xl/calcChain.xml"
+            && d.severity == Severity::Warning),
         "expected calcChain missing_part to be a warning, got {:#?}",
         report.differences
     );
@@ -160,14 +166,16 @@ fn calcchain_bin_related_rels_and_content_types_downgrade_to_warning() {
     let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
 
     let report = xlsx_diff::diff_archives(&expected, &actual);
-    assert_eq!(report.count(Severity::Critical), 0, "{:#?}", report.differences);
+    assert_eq!(
+        report.count(Severity::Critical),
+        0,
+        "{:#?}",
+        report.differences
+    );
     assert!(
-        report
-            .differences
-            .iter()
-            .any(|d| d.kind == "missing_part"
-                && d.part == "xl/calcChain.bin"
-                && d.severity == Severity::Warning),
+        report.differences.iter().any(|d| d.kind == "missing_part"
+            && d.part == "xl/calcChain.bin"
+            && d.severity == Severity::Warning),
         "expected calcChain.bin missing_part to be a warning, got {:#?}",
         report.differences
     );
@@ -238,32 +246,23 @@ fn missing_and_extra_part_severity_is_part_aware() {
 
     let report = xlsx_diff::diff_archives(&expected, &actual);
     assert!(
-        report
-            .differences
-            .iter()
-            .any(|d| d.kind == "missing_part"
-                && d.part == "[Content_Types].xml"
-                && d.severity == Severity::Critical),
+        report.differences.iter().any(|d| d.kind == "missing_part"
+            && d.part == "[Content_Types].xml"
+            && d.severity == Severity::Critical),
         "expected missing [Content_Types].xml to be CRITICAL, got {:#?}",
         report.differences
     );
     assert!(
-        report
-            .differences
-            .iter()
-            .any(|d| d.kind == "missing_part"
-                && d.part.ends_with(".rels")
-                && d.severity == Severity::Critical),
+        report.differences.iter().any(|d| d.kind == "missing_part"
+            && d.part.ends_with(".rels")
+            && d.severity == Severity::Critical),
         "expected missing *.rels to be CRITICAL, got {:#?}",
         report.differences
     );
     assert!(
-        report
-            .differences
-            .iter()
-            .any(|d| d.kind == "missing_part"
-                && d.part == "docProps/app.xml"
-                && d.severity == Severity::Info),
+        report.differences.iter().any(|d| d.kind == "missing_part"
+            && d.part == "docProps/app.xml"
+            && d.severity == Severity::Info),
         "expected missing docProps/* to be INFO, got {:#?}",
         report.differences
     );
@@ -280,30 +279,23 @@ fn missing_and_extra_part_severity_is_part_aware() {
 
     let report = xlsx_diff::diff_archives(&expected, &actual);
     assert!(
-        report
-            .differences
-            .iter()
-            .any(|d| d.kind == "extra_part"
-                && d.part == "[Content_Types].xml"
-                && d.severity == Severity::Critical),
+        report.differences.iter().any(|d| d.kind == "extra_part"
+            && d.part == "[Content_Types].xml"
+            && d.severity == Severity::Critical),
         "expected extra [Content_Types].xml to be CRITICAL, got {:#?}",
         report.differences
     );
     assert!(
-        report
-            .differences
-            .iter()
-            .any(|d| d.kind == "extra_part" && d.part.ends_with(".rels") && d.severity == Severity::Critical),
+        report.differences.iter().any(|d| d.kind == "extra_part"
+            && d.part.ends_with(".rels")
+            && d.severity == Severity::Critical),
         "expected extra *.rels to be CRITICAL, got {:#?}",
         report.differences
     );
     assert!(
-        report
-            .differences
-            .iter()
-            .any(|d| d.kind == "extra_part"
-                && d.part == "docProps/app.xml"
-                && d.severity == Severity::Info),
+        report.differences.iter().any(|d| d.kind == "extra_part"
+            && d.part == "docProps/app.xml"
+            && d.severity == Severity::Info),
         "expected extra docProps/* to be INFO, got {:#?}",
         report.differences
     );
@@ -319,10 +311,15 @@ fn ignore_glob_suppresses_calcchain_diffs() {
     let options = DiffOptions {
         ignore_parts: Default::default(),
         ignore_globs: vec!["xl/calcChain.*".to_string()],
+        ignore_paths: Vec::new(),
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);
-    assert!(report.is_empty(), "expected no diffs, got {:#?}", report.differences);
+    assert!(
+        report.is_empty(),
+        "expected no diffs, got {:#?}",
+        report.differences
+    );
 }
 
 #[test]
@@ -338,10 +335,15 @@ fn ignore_rules_normalize_leading_slashes_and_backslashes() {
     let options = DiffOptions {
         ignore_parts,
         ignore_globs: vec![r"\xl\calcChain.*".to_string()],
+        ignore_paths: Vec::new(),
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);
-    assert!(report.is_empty(), "expected no diffs, got {:#?}", report.differences);
+    assert!(
+        report.is_empty(),
+        "expected no diffs, got {:#?}",
+        report.differences
+    );
 }
 
 #[test]
@@ -352,7 +354,11 @@ fn zip_entry_names_are_normalized_for_diffing() {
     let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
 
     let report = xlsx_diff::diff_archives(&expected, &actual);
-    assert!(report.is_empty(), "expected no diffs, got {:#?}", report.differences);
+    assert!(
+        report.is_empty(),
+        "expected no diffs, got {:#?}",
+        report.differences
+    );
 }
 
 #[test]
@@ -414,10 +420,15 @@ fn ignore_glob_suppresses_calcchain_related_plumbing_diffs() {
     let options = DiffOptions {
         ignore_parts: Default::default(),
         ignore_globs: vec!["xl/calcChain.*".to_string()],
+        ignore_paths: Vec::new(),
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);
-    assert!(report.is_empty(), "expected no diffs, got {:#?}", report.differences);
+    assert!(
+        report.is_empty(),
+        "expected no diffs, got {:#?}",
+        report.differences
+    );
 }
 
 #[test]
@@ -466,10 +477,15 @@ fn ignore_glob_suppresses_docprops_plumbing_diffs() {
     let options = DiffOptions {
         ignore_parts: Default::default(),
         ignore_globs: vec!["docProps/*".to_string()],
+        ignore_paths: Vec::new(),
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);
-    assert!(report.is_empty(), "expected no diffs, got {:#?}", report.differences);
+    assert!(
+        report.is_empty(),
+        "expected no diffs, got {:#?}",
+        report.differences
+    );
 }
 
 #[test]
@@ -515,6 +531,7 @@ fn ignore_rules_do_not_hide_relationship_target_changes_to_non_ignored_parts() {
     let options = DiffOptions {
         ignore_parts: Default::default(),
         ignore_globs: vec!["docProps/*".to_string()],
+        ignore_paths: Vec::new(),
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);
@@ -554,10 +571,128 @@ fn ignore_glob_suppresses_rels_targets_with_parent_dir_segments() {
     let options = DiffOptions {
         ignore_parts: Default::default(),
         ignore_globs: vec!["xl/media/*".to_string()],
+        ignore_paths: Vec::new(),
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);
-    assert!(report.is_empty(), "expected no diffs, got {:#?}", report.differences);
+    assert!(
+        report.is_empty(),
+        "expected no diffs, got {:#?}",
+        report.differences
+    );
+}
+
+#[test]
+fn ignore_path_suppresses_specific_xml_attribute_diffs() {
+    let expected_zip = zip_bytes(&[(
+        "xl/worksheets/sheet1.xml",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>
+</worksheet>"#,
+    )]);
+    let actual_zip = zip_bytes(&[(
+        "xl/worksheets/sheet1.xml",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.30"/>
+</worksheet>"#,
+    )]);
+
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    // Sanity: without the ignore-path rule, we should see an attribute diff.
+    let base_report = xlsx_diff::diff_archives(&expected, &actual);
+    assert!(
+        base_report
+            .differences
+            .iter()
+            .any(|d| d.part == "xl/worksheets/sheet1.xml"
+                && d.kind == "attribute_changed"
+                && d.path.contains("dyDescent")),
+        "expected a dyDescent attribute diff, got {:#?}",
+        base_report.differences
+    );
+
+    let options = DiffOptions {
+        ignore_parts: Default::default(),
+        ignore_globs: Vec::new(),
+        ignore_paths: vec![IgnorePathRule {
+            part: None,
+            path_substring: "dyDescent".to_string(),
+            kind: None,
+        }],
+    };
+
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert!(
+        report.is_empty(),
+        "expected no diffs, got {:#?}",
+        report.differences
+    );
+}
+
+#[test]
+fn cli_ignore_path_flag_suppresses_specific_xml_attribute_diffs() {
+    let expected_zip = zip_bytes(&[(
+        "xl/worksheets/sheet1.xml",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>
+</worksheet>"#,
+    )]);
+    let actual_zip = zip_bytes(&[(
+        "xl/worksheets/sheet1.xml",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.30"/>
+</worksheet>"#,
+    )]);
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let original_path = tempdir.path().join("original.xlsx");
+    let modified_path = tempdir.path().join("modified.xlsx");
+    std::fs::write(&original_path, expected_zip).unwrap();
+    std::fs::write(&modified_path, actual_zip).unwrap();
+
+    // Without ignores, the CLI should report a critical diff and exit non-zero.
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&original_path)
+        .arg(&modified_path)
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit, got {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&original_path)
+        .arg(&modified_path)
+        .arg("--ignore-path")
+        .arg("dyDescent")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "expected exit 0, got {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("No differences."),
+        "expected output to say 'No differences.', got:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
 }
 
 #[test]

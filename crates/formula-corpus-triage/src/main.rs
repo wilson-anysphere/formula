@@ -402,6 +402,7 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
         &xlsx_diff::DiffOptions {
             ignore_parts: ignore,
             ignore_globs: Vec::new(),
+            ignore_paths: Vec::new(),
         },
     );
 
@@ -924,7 +925,11 @@ mod tests {
 
         for (addr, value, expected_code) in [
             ("A1", CellValue::Error(ErrorValue::Field), "#FIELD!"),
-            ("A2", CellValue::Error(ErrorValue::GettingData), "#GETTING_DATA"),
+            (
+                "A2",
+                CellValue::Error(ErrorValue::GettingData),
+                "#GETTING_DATA",
+            ),
         ] {
             set_engine_value(&mut engine, "Sheet1", addr, &value).unwrap();
 

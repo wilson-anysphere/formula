@@ -29,6 +29,19 @@ struct Args {
     #[arg(long = "ignore-glob")]
     ignore_globs: Vec<String>,
 
+    /// Substring patterns to ignore within XML diff paths (repeatable).
+    ///
+    /// This is useful for suppressing known-noisy attributes (e.g. `dyDescent`,
+    /// `xr:uid`) without ignoring the entire part.
+    #[arg(long = "ignore-path")]
+    ignore_paths: Vec<String>,
+
+    /// Like `--ignore-path`, but scoped to parts matched by a glob.
+    ///
+    /// Format: `<part_glob>:<path_substring>`. Repeatable.
+    #[arg(long = "ignore-path-in")]
+    ignore_paths_in: Vec<String>,
+
     /// Output format.
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     format: OutputFormat,
@@ -86,10 +99,18 @@ fn main() -> Result<()> {
             .map(|s| normalize_ignore_pattern(s))
             .filter(|s| !s.is_empty())
             .collect(),
+        ignore_paths: build_ignore_path_rules(&args)?,
     };
 
     for pattern in &options.ignore_globs {
         Glob::new(pattern)?;
+    }
+    for rule in &options.ignore_paths {
+        if let Some(part) = &rule.part {
+            if part.contains('*') || part.contains('?') {
+                Glob::new(part)?;
+            }
+        }
     }
 
     let mut report =
@@ -137,6 +158,25 @@ fn main() -> Result<()> {
                     "(none)".to_string()
                 } else {
                     globs.join(", ")
+                }
+            );
+            let mut ignore_paths: Vec<String> = options
+                .ignore_paths
+                .iter()
+                .map(|r| match (&r.part, r.kind.as_deref()) {
+                    (Some(part), Some(kind)) => format!("{part}:{kind}:{}", r.path_substring),
+                    (Some(part), None) => format!("{part}:{}", r.path_substring),
+                    (None, Some(kind)) => format!("{kind}:{}", r.path_substring),
+                    (None, None) => r.path_substring.clone(),
+                })
+                .collect();
+            ignore_paths.sort();
+            println!(
+                "  ignore-path: {}",
+                if ignore_paths.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    ignore_paths.join(", ")
                 }
             );
             println!();
@@ -240,4 +280,44 @@ fn severity_label(severity: xlsx_diff::Severity) -> &'static str {
         xlsx_diff::Severity::Warning => "warning",
         xlsx_diff::Severity::Info => "info",
     }
+}
+
+fn build_ignore_path_rules(args: &Args) -> Result<Vec<xlsx_diff::IgnorePathRule>> {
+    let mut rules = Vec::new();
+
+    for pattern in &args.ignore_paths {
+        let trimmed = pattern.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        rules.push(xlsx_diff::IgnorePathRule {
+            part: None,
+            path_substring: trimmed.replace('\\', "/"),
+            kind: None,
+        });
+    }
+
+    for scoped in &args.ignore_paths_in {
+        let trimmed = scoped.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Some((part, pattern)) = trimmed.split_once(':') else {
+            anyhow::bail!(
+                "invalid --ignore-path-in '{trimmed}' (expected format: <part_glob>:<path_substring>)"
+            );
+        };
+        let part = normalize_ignore_pattern(part);
+        let pattern = pattern.trim();
+        if part.is_empty() || pattern.is_empty() {
+            continue;
+        }
+        rules.push(xlsx_diff::IgnorePathRule {
+            part: Some(part),
+            path_substring: pattern.replace('\\', "/"),
+            kind: None,
+        });
+    }
+
+    Ok(rules)
 }

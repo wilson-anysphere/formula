@@ -192,6 +192,35 @@ pub struct DiffOptions {
     /// library intentionally ignores invalid glob patterns; the `xlsx_diff`
     /// CLI validates globs up-front and will return an error instead.
     pub ignore_globs: Vec<String>,
+    /// Fine-grained XML diff ignore rules.
+    ///
+    /// This allows callers to suppress known-noisy diffs (for example volatile
+    /// attributes like `xr:uid` or `x14ac:dyDescent`) without ignoring an entire
+    /// OPC part.
+    ///
+    /// Rules are evaluated against the `(part, XmlDiff.path, XmlDiff.kind)`
+    /// tuple. When `ignore_paths` is empty, existing behavior is unchanged.
+    pub ignore_paths: Vec<IgnorePathRule>,
+}
+
+/// Fine-grained ignore rule for XML diffs (`XmlDiff`).
+///
+/// A rule matches (and thus suppresses) an XML diff when:
+/// - `part` matches the normalized OPC part name (if provided), and
+/// - `path_substring` is contained in the XML diff path, and
+/// - `kind` matches the XML diff kind (if provided).
+///
+/// Part matching supports either exact matches or basic glob matching. If the
+/// provided part pattern contains `*` or `?`, it is interpreted as a glob;
+/// otherwise it is matched exactly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IgnorePathRule {
+    /// Optional part selector (exact or glob).
+    pub part: Option<String>,
+    /// Substring to match against `XmlDiff.path`.
+    pub path_substring: String,
+    /// Optional `XmlDiff.kind` match (exact).
+    pub kind: Option<String>,
 }
 
 pub fn diff_workbooks(expected: &Path, actual: &Path) -> Result<DiffReport> {
@@ -222,6 +251,7 @@ pub fn diff_archives_with_options(
     let mut report = DiffReport::default();
 
     let ignore = IgnoreMatcher::new(options);
+    let ignore_paths = IgnorePathMatcher::new(options);
 
     let expected_parts: BTreeSet<&str> = expected
         .part_names()
@@ -315,6 +345,9 @@ pub fn diff_archives_with_options(
                         );
                     }
                     for diff in diffs {
+                        if ignore_paths.matches(part, &diff.path, &diff.kind) {
+                            continue;
+                        }
                         if should_ignore_xml_diff(part, &diff.path, &ignored_rel_ids, &ignore) {
                             continue;
                         }
@@ -597,6 +630,91 @@ impl IgnoreMatcher {
         }
 
         false
+    }
+}
+
+struct IgnorePathMatcher {
+    rules: Vec<IgnorePathRuleMatcher>,
+}
+
+#[derive(Debug, Clone)]
+struct IgnorePathRuleMatcher {
+    part: Option<IgnorePathPartMatcher>,
+    path_substring: String,
+    kind: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+enum IgnorePathPartMatcher {
+    Exact(String),
+    Glob(globset::GlobMatcher),
+}
+
+impl IgnorePathMatcher {
+    fn new(options: &DiffOptions) -> Self {
+        let mut rules = Vec::new();
+        for rule in &options.ignore_paths {
+            let path_substring = rule.path_substring.trim();
+            if path_substring.is_empty() {
+                continue;
+            }
+
+            let kind = rule
+                .kind
+                .as_ref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+
+            let part = rule.part.as_ref().and_then(|pattern| {
+                let normalized = pattern.trim().replace('\\', "/");
+                let normalized = normalized.trim_start_matches('/');
+                if normalized.is_empty() {
+                    return None;
+                }
+
+                // Treat patterns without glob metacharacters as exact matches. This allows exact
+                // part names like `[Content_Types].xml` without requiring escaping glob syntax.
+                if !normalized.contains('*') && !normalized.contains('?') {
+                    return Some(IgnorePathPartMatcher::Exact(normalize_opc_part_name(
+                        normalized,
+                    )));
+                }
+
+                Glob::new(normalized)
+                    .ok()
+                    .map(|g| IgnorePathPartMatcher::Glob(g.compile_matcher()))
+            });
+
+            rules.push(IgnorePathRuleMatcher {
+                part,
+                path_substring: path_substring.to_string(),
+                kind,
+            });
+        }
+
+        Self { rules }
+    }
+
+    fn matches(&self, part: &str, path: &str, kind: &str) -> bool {
+        self.rules.iter().any(|rule| {
+            if let Some(rule_kind) = &rule.kind {
+                if rule_kind != kind {
+                    return false;
+                }
+            }
+
+            if let Some(matcher) = &rule.part {
+                let ok = match matcher {
+                    IgnorePathPartMatcher::Exact(exact) => exact == part,
+                    IgnorePathPartMatcher::Glob(glob) => glob.is_match(part),
+                };
+                if !ok {
+                    return false;
+                }
+            }
+
+            path.contains(&rule.path_substring)
+        })
     }
 }
 
