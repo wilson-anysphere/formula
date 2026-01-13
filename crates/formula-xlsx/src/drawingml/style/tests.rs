@@ -1,5 +1,5 @@
-use formula_model::charts::LineDash;
 use formula_model::charts::FillStyle;
+use formula_model::charts::LineDash;
 use formula_model::Color;
 use roxmltree::Document;
 
@@ -75,6 +75,27 @@ fn solid_fill_tint_transform_on_srgb() {
     let doc = Document::parse(xml).unwrap();
     let fill = parse_solid_fill(doc.root_element()).unwrap();
     assert_eq!(fill.color, Color::Argb(0xFF808080));
+}
+
+#[test]
+fn solid_fill_scrgb_clr_converts_to_srgb() {
+    let xml = r#"<a:solidFill xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:scrgbClr r="100000" g="0" b="0"/>
+    </a:solidFill>"#;
+    let doc = Document::parse(xml).unwrap();
+    let fill = parse_solid_fill(doc.root_element()).unwrap();
+    assert_eq!(fill.color, Color::Argb(0xFFFF0000));
+}
+
+#[test]
+fn solid_fill_skips_extlst_and_finds_color() {
+    let xml = r#"<a:solidFill xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:extLst><a:ext uri="{00000000-0000-0000-0000-000000000000}"/></a:extLst>
+        <a:srgbClr val="00FF00"/>
+    </a:solidFill>"#;
+    let doc = Document::parse(xml).unwrap();
+    let fill = parse_solid_fill(doc.root_element()).unwrap();
+    assert_eq!(fill.color, Color::Argb(0xFF00FF00));
 }
 
 #[test]
