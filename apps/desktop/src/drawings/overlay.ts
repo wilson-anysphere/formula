@@ -1186,7 +1186,6 @@ function renderShapeText(
   } else if (vertical === "bottom") {
     y = inner.y + (inner.height - totalHeight);
   }
-  y = Math.max(inner.y, y);
 
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
@@ -1200,7 +1199,6 @@ function renderShapeText(
     } else if (alignment === "right") {
       x = inner.x + (inner.width - line.width);
     }
-    x = Math.max(inner.x, x);
 
     for (const seg of line.segments) {
       if (!seg.text) continue;

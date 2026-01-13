@@ -188,15 +188,15 @@ describe("DrawingOverlay shapes", () => {
     `;
 
     const overlay = new DrawingOverlay(canvas, images, geom);
-    // Ensure the text box has enough space (after the 4px padding on each side) for the
-    // label to be centered without being clamped to the padding bounds.
-    await overlay.render([createShapeObject(xml, { widthPx: 100, heightPx: 40 })], viewport);
+    await overlay.render([createShapeObject(xml)], viewport);
 
     const call = calls.find((c) => c.method === "fillText" && c.args[0] === "Centered");
     expect(call).toBeTruthy();
-    // `renderShapeText` uses a 4px padding inset and positions the text at the top-left
-    // baseline with center/middle alignment within that padded region.
-    expect(Number(call!.args[1])).toBeCloseTo(23, 5);
-    expect(Number(call!.args[2])).toBeCloseTo(17.4, 5);
+
+    // Text is rendered with a left baseline and centered as a block inside the shape bounds.
+    // When the text is larger than the shape, the origin can be outside the shape and is
+    // clipped by the overlay.
+    expect(Number(call!.args[1])).toBe(-17);
+    expect(Number(call!.args[2])).toBeCloseTo(2.4, 3);
   });
 });
