@@ -157,5 +157,49 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
-});
 
+  it("passes frozen pane counts from the document even if derived frozen counts are stale", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render");
+
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      const doc = app.getDocument();
+      doc.setFrozen(app.getCurrentSheetId(), 1, 1, { label: "Freeze" });
+
+      // Simulate stale cached counts (charts historically had a bug here).
+      (app as any).frozenRows = 0;
+      (app as any).frozenCols = 0;
+      (app as any).scrollX = 50;
+      (app as any).scrollY = 100;
+
+      renderSpy.mockClear();
+      app.refresh("scroll");
+
+      expect(renderSpy).toHaveBeenCalled();
+      const lastCall = renderSpy.mock.calls.at(-1);
+      const viewport = lastCall?.[1] as any;
+
+      expect(viewport).toEqual(
+        expect.objectContaining({
+          frozenRows: 1,
+          frozenCols: 1,
+        }),
+      );
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+});

@@ -6908,8 +6908,9 @@ export class SpreadsheetApp {
       width = Math.max(0, this.width - offsetX);
       height = Math.max(0, this.height - offsetY);
 
-      frozenRows = this.frozenRows;
-      frozenCols = this.frozenCols;
+      // Mirror chart overlay behaviour: prefer the sheet view state over any derived/cached
+      // frozen counts so pinned drawings stay correct even if internal state is stale.
+      ({ frozenRows, frozenCols } = this.getFrozen());
       frozenWidthPx = this.frozenWidth;
       frozenHeightPx = this.frozenHeight;
     }
