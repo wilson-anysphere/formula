@@ -127,6 +127,38 @@ describe("AddStepMenu", () => {
     expect(host?.textContent).toContain("Preview schema required");
   });
 
+  it("closes the operation menu on outside click and Escape", async () => {
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+
+    await act(async () => {
+      root?.render(<AddStepMenu onAddStep={() => {}} aiContext={{ query: baseQuery(), preview }} />);
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "+ Add step").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(host!.querySelector(".query-editor-add-step__menu-popover")).toBeTruthy();
+
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+
+    expect(host!.querySelector(".query-editor-add-step__menu-popover")).toBeNull();
+
+    await act(async () => {
+      findButtonByText(host!, "+ Add step").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(host!.querySelector(".query-editor-add-step__menu-popover")).toBeTruthy();
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+
+    expect(host!.querySelector(".query-editor-add-step__menu-popover")).toBeNull();
+  });
+
   it("handles empty AI intent and renders returned suggestions with readable labels", async () => {
     const preview = new DataTable([{ name: "Region", type: "string" }], []);
     const query = baseQuery();
@@ -178,6 +210,57 @@ describe("AddStepMenu", () => {
     const suggestionButtons = host!.querySelectorAll("button.query-editor-add-step__suggestion");
     expect(suggestionButtons.length).toBe(1);
     expect(suggestionButtons[0]?.textContent).toBe("Filter Rows (Region)");
+  });
+
+  it("clears existing AI suggestions when the intent changes or after applying one", async () => {
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const query = baseQuery();
+    const aiContext = { query, preview };
+
+    const onAiSuggest = vi.fn(async () => [
+      { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "isNotNull" } },
+    ]);
+    const onAddStep = vi.fn();
+
+    await act(async () => {
+      root?.render(<AddStepMenu onAddStep={onAddStep} onAiSuggest={onAiSuggest} aiContext={aiContext} />);
+    });
+
+    const input = host!.querySelector("input.query-editor-add-step__ai-input") as HTMLInputElement;
+    const suggestButton = host!.querySelector("button.query-editor-add-step__ai-button") as HTMLButtonElement;
+
+    await act(async () => {
+      input.value = "filter";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      suggestButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flushMicrotasks(10);
+    });
+
+    expect(host!.querySelectorAll("button.query-editor-add-step__suggestion").length).toBe(1);
+
+    await act(async () => {
+      input.value = "filter again";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(host!.querySelectorAll("button.query-editor-add-step__suggestion").length).toBe(0);
+
+    await act(async () => {
+      suggestButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flushMicrotasks(10);
+    });
+
+    const suggestionButton = host!.querySelector("button.query-editor-add-step__suggestion") as HTMLButtonElement;
+    expect(suggestionButton).toBeTruthy();
+
+    await act(async () => {
+      suggestionButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(onAddStep).toHaveBeenCalledTimes(1);
+    expect(host!.querySelectorAll("button.query-editor-add-step__suggestion").length).toBe(0);
   });
 
   it("shows an error message when AI suggestion fails", async () => {
