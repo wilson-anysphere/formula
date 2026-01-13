@@ -665,6 +665,10 @@ fn parse_horizontal_page_breaks_record(
     manual_page_breaks: &mut ManualPageBreaks,
     warnings: &mut Vec<String>,
 ) {
+    // [MS-XLS] 2.4.122 HORIZONTALPAGEBREAKS caps `cbrk` at 1026.
+    const SPEC_MAX: usize = 1026;
+    const ENTRY_LEN: usize = 6;
+
     // HorizontalPageBreaks payload:
     // - cbrk (u16)
     // - HorzBrk[cbrk] (6 bytes each): row (u16), colStart (u16), colEnd (u16)
@@ -678,28 +682,25 @@ fn parse_horizontal_page_breaks_record(
 
     let cbrk = u16::from_le_bytes([data[0], data[1]]) as usize;
 
-    let mut parsed = 0usize;
-    let mut pos = 2usize;
-    for _ in 0..cbrk {
-        let Some(chunk) = data.get(pos..pos + 6) else {
-            break;
-        };
-        pos = pos.saturating_add(6);
-        parsed = parsed.saturating_add(1);
+    let max_entries_by_len = data.len().saturating_sub(2) / ENTRY_LEN;
+    let iter_entries = cbrk.min(max_entries_by_len).min(SPEC_MAX);
 
-        let row = u16::from_le_bytes([chunk[0], chunk[1]]);
-        manual_page_breaks
-            .row_breaks_after
-            .insert(row.saturating_sub(1) as u32);
-    }
-
-    if parsed < cbrk {
+    if cbrk > iter_entries {
         push_warning_bounded(
             warnings,
             format!(
-                "truncated HorizontalPageBreaks record at offset {record_offset}: expected {cbrk} breaks, got {parsed}"
+                "HorizontalPageBreaks record at offset {record_offset}: cbrk={cbrk} exceeds available entries (payload_len={}, max_entries_by_len={max_entries_by_len}, spec_max={SPEC_MAX}); parsing {iter_entries} entries",
+                data.len()
             ),
         );
+    }
+
+    for i in 0..iter_entries {
+        let base = 2usize.saturating_add(i.saturating_mul(ENTRY_LEN));
+        let row = u16::from_le_bytes([data[base], data[base + 1]]);
+        manual_page_breaks
+            .row_breaks_after
+            .insert(row.saturating_sub(1) as u32);
     }
 }
 
@@ -709,6 +710,10 @@ fn parse_vertical_page_breaks_record(
     manual_page_breaks: &mut ManualPageBreaks,
     warnings: &mut Vec<String>,
 ) {
+    // [MS-XLS] 2.4.350 VERTICALPAGEBREAKS caps `cbrk` at 255.
+    const SPEC_MAX: usize = 255;
+    const ENTRY_LEN: usize = 6;
+
     // VerticalPageBreaks payload:
     // - cbrk (u16)
     // - VertBrk[cbrk] (6 bytes each): col (u16), rowStart (u16), rowEnd (u16)
@@ -722,28 +727,25 @@ fn parse_vertical_page_breaks_record(
 
     let cbrk = u16::from_le_bytes([data[0], data[1]]) as usize;
 
-    let mut parsed = 0usize;
-    let mut pos = 2usize;
-    for _ in 0..cbrk {
-        let Some(chunk) = data.get(pos..pos + 6) else {
-            break;
-        };
-        pos = pos.saturating_add(6);
-        parsed = parsed.saturating_add(1);
+    let max_entries_by_len = data.len().saturating_sub(2) / ENTRY_LEN;
+    let iter_entries = cbrk.min(max_entries_by_len).min(SPEC_MAX);
 
-        let col = u16::from_le_bytes([chunk[0], chunk[1]]);
-        manual_page_breaks
-            .col_breaks_after
-            .insert(col.saturating_sub(1) as u32);
-    }
-
-    if parsed < cbrk {
+    if cbrk > iter_entries {
         push_warning_bounded(
             warnings,
             format!(
-                "truncated VerticalPageBreaks record at offset {record_offset}: expected {cbrk} breaks, got {parsed}"
+                "VerticalPageBreaks record at offset {record_offset}: cbrk={cbrk} exceeds available entries (payload_len={}, max_entries_by_len={max_entries_by_len}, spec_max={SPEC_MAX}); parsing {iter_entries} entries",
+                data.len()
             ),
         );
+    }
+
+    for i in 0..iter_entries {
+        let base = 2usize.saturating_add(i.saturating_mul(ENTRY_LEN));
+        let col = u16::from_le_bytes([data[base], data[base + 1]]);
+        manual_page_breaks
+            .col_breaks_after
+            .insert(col.saturating_sub(1) as u32);
     }
 }
 /// Best-effort parse of worksheet print/page setup settings (margins, scaling, paper size, etc).

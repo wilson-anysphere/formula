@@ -649,14 +649,6 @@ fn import_xls_path_with_biff_reader(
     // Track worksheet ids so BIFF `itab` scopes can be mapped to the output model.
     let mut sheet_ids_by_calamine_idx: Vec<formula_model::WorksheetId> =
         Vec::with_capacity(sheets.len());
-    // Best-effort worksheet page setup / print settings parsed from BIFF records. We defer applying
-    // these to the workbook until after the sheet loop so we avoid borrow conflicts with the
-    // in-progress `Worksheet` mutable reference.
-    let mut pending_sheet_print_settings: Vec<(
-        formula_model::WorksheetId,
-        formula_model::PageSetup,
-        formula_model::ManualPageBreaks,
-    )> = Vec::new();
 
     for (sheet_idx, sheet_meta) in sheets.iter().enumerate() {
         let source_sheet_name = sheet_meta.name.clone();
@@ -849,35 +841,6 @@ fn import_xls_path_with_biff_reader(
                             "failed to import `.xls` sheet protection for BIFF sheet index {} (`{}`): {err}",
                             biff_idx, sheet_name
                         ))),
-                    }
-
-                    // Best-effort worksheet page setup (paper size, margins, scaling).
-                    //
-                    // Only implemented for BIFF8 currently; BIFF5 SETUP layout differs.
-                    if biff_version == Some(biff::BiffVersion::Biff8) {
-                        match biff::parse_biff_sheet_print_settings(
-                            workbook_stream,
-                            sheet_info.offset,
-                        ) {
-                            Ok(mut settings) => {
-                                warnings.extend(settings.warnings.drain(..).map(ImportWarning::new));
-                                let manual_page_breaks = settings.manual_page_breaks;
-                                let page_setup = settings.page_setup.unwrap_or_default();
- 
-                                // Avoid storing a default `PageSetup` unless there is something
-                                // non-default worth preserving (page setup fields or manual page breaks).
-                                if page_setup != formula_model::PageSetup::default()
-                                    || !manual_page_breaks.is_empty()
-                                {
-                                    pending_sheet_print_settings
-                                        .push((sheet_id, page_setup, manual_page_breaks));
-                                }
-                            }
-                            Err(err) => warnings.push(ImportWarning::new(format!(
-                                "failed to import `.xls` print settings for BIFF sheet index {} (`{}`): {err}",
-                                biff_idx, sheet_name
-                            ))),
-                        }
                     }
                 }
             }
@@ -1481,14 +1444,6 @@ fn import_xls_path_with_biff_reader(
                     "skipped {out_of_range_xf_count} cells in sheet `{sheet_name}` with out-of-range XF indices"
                 )));
             }
-        }
-    }
-
-    // Apply any deferred BIFF print/page setup settings.
-    for (sheet_id, page_setup, manual_page_breaks) in pending_sheet_print_settings.drain(..) {
-        out.set_sheet_page_setup(sheet_id, page_setup);
-        if !manual_page_breaks.is_empty() {
-            out.set_manual_page_breaks(sheet_id, manual_page_breaks);
         }
     }
 

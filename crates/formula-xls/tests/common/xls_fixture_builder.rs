@@ -612,6 +612,61 @@ pub fn build_manual_page_breaks_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a malformed `HORIZONTALPAGEBREAKS` record with an
+/// unreasonable break count (`cbrk=0xFFFF`) but only a single entry worth of payload bytes.
+///
+/// This is used to regression-test that the importer caps loop counts based on record length and
+/// spec limits, preventing pathological CPU loops on corrupt files.
+pub fn build_page_break_cbrk_cap_fixture_xls() -> Vec<u8> {
+    // `build_single_sheet_workbook_stream` always emits a single cell XF at index 16 (after 16
+    // style XFs).
+    let sheet_stream = build_page_break_cbrk_cap_sheet_stream(16);
+    let workbook_stream = build_single_sheet_workbook_stream("PageBreaks", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+fn build_page_break_cbrk_cap_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) => A1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1 (A)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Malformed `HORIZONTALPAGEBREAKS` payload:
+    // [cbrk:u16][(rw:u16, colStart:u16, colEnd:u16) * cbrk]
+    // Here, `cbrk` claims 65535 entries, but we only provide one.
+    let mut breaks = Vec::<u8>::new();
+    breaks.extend_from_slice(&0xFFFFu16.to_le_bytes());
+    breaks.extend_from_slice(&1u16.to_le_bytes()); // rw=1 => break after row 0
+    breaks.extend_from_slice(&0u16.to_le_bytes()); // colStart
+    breaks.extend_from_slice(&255u16.to_le_bytes()); // colEnd
+    push_record(&mut sheet, RECORD_HORIZONTALPAGEBREAKS, &breaks);
+
+    // Provide at least one cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
 /// Build a BIFF8 `.xls` fixture that stores worksheet print settings (page setup, margins and
 /// manual page breaks) in the worksheet substream.
 pub fn build_sheet_print_settings_fixture_xls() -> Vec<u8> {
