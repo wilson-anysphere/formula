@@ -69,4 +69,14 @@ describe("CommandRegistry-backed ribbon disabling", () => {
 
     act(() => root.unmount());
   });
+
+  it("keeps implemented ribbon-only Fill Up/Left commands enabled even though they are not registered", () => {
+    const commandRegistry = new CommandRegistry();
+    const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
+
+    // These are currently handled directly by the desktop `onCommand` switch (not via CommandRegistry),
+    // so they must be exempt from the registry-backed disabling allowlist.
+    expect(baselineDisabledById["home.editing.fill.up"]).toBeUndefined();
+    expect(baselineDisabledById["home.editing.fill.left"]).toBeUndefined();
+  });
 });

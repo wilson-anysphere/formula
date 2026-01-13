@@ -110,6 +110,8 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.editing.autoSum.sum",
   "home.editing.fill.down",
   "home.editing.fill.right",
+  "home.editing.fill.up",
+  "home.editing.fill.left",
 
   // --- Comments ---------------------------------------------------------------
   "review.comments.newComment",
