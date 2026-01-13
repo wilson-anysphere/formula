@@ -34,6 +34,7 @@ import {
   terminateProcessTree,
   stdDev,
 } from './desktopStartupUtil.ts';
+} from './desktopStartupUtil.ts';
 
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
