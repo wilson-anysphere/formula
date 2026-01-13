@@ -1,0 +1,9 @@
+[package]
+name = "formula-offcrypto"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aes = "0.8"
+thiserror = "1"
+

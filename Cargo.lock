@@ -2167,6 +2167,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "formula-offcrypto"
+version = "0.1.0"
+dependencies = [
+ "aes",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "formula-storage"
 version = "0.1.0"
 dependencies = [
