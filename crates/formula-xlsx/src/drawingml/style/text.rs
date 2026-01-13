@@ -85,10 +85,18 @@ fn apply_rpr_fallback(style: &mut TextRunStyle, rpr: Node<'_, '_>) {
 fn parse_font_family(rpr: Node<'_, '_>) -> Option<String> {
     // DrawingML uses `typeface` on `<a:latin>` for both concrete font names and theme placeholders
     // like `+mn-lt` / `+mj-lt`. Preserve the raw string so callers can later resolve theme fonts.
-    rpr.children()
-        .find(|n| n.is_element() && n.tag_name().name() == "latin")
-        .and_then(|n| n.attribute("typeface"))
-        .map(|s| s.to_string())
+    for tag in ["latin", "ea", "cs"] {
+        let family = rpr
+            .children()
+            .find(|n| n.is_element() && n.tag_name().name() == tag)
+            .and_then(|n| n.attribute("typeface"))
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        if let Some(family) = family {
+            return Some(family.to_string());
+        }
+    }
+    None
 }
 
 fn parse_color(rpr: Node<'_, '_>) -> Option<formula_model::charts::ColorRef> {

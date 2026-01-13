@@ -166,3 +166,35 @@ fn txpr_falls_back_to_end_para_rpr_when_no_runs() {
     assert_eq!(style.strike, Some(true));
     assert_eq!(style.font_family.as_deref(), Some("Calibri"));
 }
+
+#[test]
+fn txpr_parses_baseline_shift() {
+    let xml = r#"<c:txPr xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:p>
+            <a:pPr>
+                <a:defRPr baseline="30000"/>
+            </a:pPr>
+        </a:p>
+    </c:txPr>"#;
+    let doc = Document::parse(xml).unwrap();
+    let style = parse_txpr(doc.root_element()).unwrap();
+    assert_eq!(style.baseline, Some(30000));
+}
+
+#[test]
+fn txpr_falls_back_to_ea_font_when_latin_missing() {
+    let xml = r#"<c:txPr xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:p>
+            <a:pPr>
+                <a:defRPr>
+                    <a:ea typeface="MS Gothic"/>
+                </a:defRPr>
+            </a:pPr>
+        </a:p>
+    </c:txPr>"#;
+    let doc = Document::parse(xml).unwrap();
+    let style = parse_txpr(doc.root_element()).unwrap();
+    assert_eq!(style.font_family.as_deref(), Some("MS Gothic"));
+}
