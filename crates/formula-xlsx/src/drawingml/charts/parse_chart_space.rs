@@ -1,9 +1,9 @@
 use formula_model::charts::{
     AxisKind, AxisModel, AxisPosition, AxisScalingModel, BarChartModel, ChartDiagnostic,
-    ChartDiagnosticLevel, ChartKind, ChartModel, ComboChartEntry, ComboPlotAreaModel, DataLabelsModel,
-    LegendModel, LegendPosition, LineChartModel, NumberFormatModel, PieChartModel, PlotAreaModel,
-    ScatterChartModel, SeriesData, SeriesIndexRange, SeriesModel, SeriesNumberData, SeriesPointStyle,
-    SeriesTextData, TextModel,
+    ChartDiagnosticLevel, ChartKind, ChartModel, ComboChartEntry, ComboPlotAreaModel,
+    DataLabelsModel, LegendModel, LegendPosition, LineChartModel, NumberFormatModel, PieChartModel,
+    PlotAreaModel, ScatterChartModel, SeriesData, SeriesIndexRange, SeriesModel, SeriesNumberData,
+    SeriesPointStyle, SeriesTextData, TextModel,
 };
 use formula_model::RichText;
 use roxmltree::{Document, Node};
@@ -76,7 +76,7 @@ pub fn parse_chart_space(
     {
         warn(
             &mut diagnostics,
-            "mc:AlternateContent encountered; content choice is not yet modeled",
+            "mc:AlternateContent encountered; Choice/Fallback selection is not yet modeled",
         );
     }
     if doc
@@ -134,7 +134,9 @@ pub fn parse_chart_space(
 
     let plot_area_style = plot_area_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "spPr")
+        .filter(|n| n.is_element())
+        .flat_map(flatten_alternate_content)
+        .find(|n| n.tag_name().name() == "spPr")
         .and_then(parse_sppr);
 
     let (chart_kind, plot_area, series) = parse_plot_area_chart(plot_area_node, &mut diagnostics);
@@ -168,10 +170,22 @@ fn parse_plot_area_chart(
     let chart_elems: Vec<_> = plot_area_node
         .children()
         .filter(|n| n.is_element())
+        .flat_map(flatten_alternate_content)
         .filter(|n| n.tag_name().name().ends_with("Chart"))
         .collect();
 
-    let Some(primary_chart) = chart_elems.first().copied() else {
+    let primary_chart = chart_elems
+        .iter()
+        .copied()
+        .find(|n| {
+            !matches!(
+                map_chart_kind(n.tag_name().name()),
+                ChartKind::Unknown { .. }
+            )
+        })
+        .or_else(|| chart_elems.first().copied());
+
+    let Some(primary_chart) = primary_chart else {
         warn(
             diagnostics,
             "plotArea is missing a supported *Chart element",
@@ -402,12 +416,19 @@ fn parse_axes(
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> Vec<AxisModel> {
     let mut axes = Vec::new();
+    let mut seen_ids = std::collections::HashSet::<u32>::new();
 
-    for axis in plot_area_node.children().filter(|n| n.is_element()) {
+    for axis in plot_area_node
+        .children()
+        .filter(|n| n.is_element())
+        .flat_map(flatten_alternate_content)
+    {
         let tag = axis.tag_name().name();
         if tag == "catAx" || tag == "valAx" || tag == "dateAx" || tag == "serAx" {
             if let Some(axis_model) = parse_axis(axis, diagnostics) {
-                axes.push(axis_model);
+                if seen_ids.insert(axis_model.id) {
+                    axes.push(axis_model);
+                }
             }
             continue;
         }
@@ -422,6 +443,62 @@ fn parse_axes(
     }
 
     axes
+}
+
+/// Flattens `mc:AlternateContent` wrappers for the chartSpace parser.
+///
+/// Excel often uses markup-compatibility wrappers to conditionally include newer
+/// OOXML content. For chart parsing, we treat these wrappers as transparent:
+/// - non-`AlternateContent` nodes are yielded as-is
+/// - `AlternateContent` yields the element children of the first non-empty `Choice`
+///   branch, falling back to `Fallback` if no `Choice` yields elements.
+///
+/// The caller is responsible for any further filtering (e.g., `*Chart`, `*Ax`).
+fn flatten_alternate_content<'a, 'input>(node: Node<'a, 'input>) -> Vec<Node<'a, 'input>> {
+    if node.tag_name().name() != "AlternateContent" {
+        return vec![node];
+    }
+
+    // Prefer `<mc:Choice>` content (in document order), but fall back to
+    // `<mc:Fallback>` if no choice yields any element children. This matches the
+    // general OOXML expectation that `Choice` contains the "preferred" content,
+    // while `Fallback` exists for older consumers. Importantly, we avoid emitting
+    // both branches to prevent duplicate chart/axis nodes from being interpreted
+    // as a combo chart.
+    for choice in node
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "Choice")
+    {
+        let children: Vec<_> = choice
+            .children()
+            .filter(|n| n.is_element())
+            .flat_map(flatten_alternate_content)
+            .collect();
+        if !children.is_empty() {
+            return children;
+        }
+    }
+
+    for fallback in node
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "Fallback")
+    {
+        let children: Vec<_> = fallback
+            .children()
+            .filter(|n| n.is_element())
+            .flat_map(flatten_alternate_content)
+            .collect();
+        if !children.is_empty() {
+            return children;
+        }
+    }
+
+    // Unknown structure: treat AlternateContent as transparent and just emit its
+    // direct element children.
+    node.children()
+        .filter(|n| n.is_element())
+        .flat_map(flatten_alternate_content)
+        .collect()
 }
 
 fn parse_axis(
