@@ -50,6 +50,23 @@ describe("ToolExecutor include_formula_values", () => {
     expect(result.data?.values).toEqual([[2]]);
   });
 
+  it("read_range returns formulas and computed values together when include_formulas=true and include_formula_values is enabled", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { formula: "=1+1", value: 2 });
+
+    const executor = new ToolExecutor(workbook, { include_formula_values: true });
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A1", include_formulas: true },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+    expect(result.data?.values).toEqual([[2]]);
+    expect(result.data?.formulas).toEqual([["=1+1"]]);
+  });
+
   it("read_range surfaces computed values for formula cells under DLP ALLOW decisions when enabled", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { formula: "=1+1", value: 2 });
@@ -76,13 +93,14 @@ describe("ToolExecutor include_formula_values", () => {
 
     const result = await executor.execute({
       name: "read_range",
-      parameters: { range: "Sheet1!A1:A1" },
+      parameters: { range: "Sheet1!A1:A1", include_formulas: true },
     });
 
     expect(result.ok).toBe(true);
     expect(result.tool).toBe("read_range");
     if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
     expect(result.data?.values).toEqual([[2]]);
+    expect(result.data?.formulas).toEqual([["=1+1"]]);
 
     expect(audit_logger.log).toHaveBeenCalledTimes(1);
     const event = audit_logger.log.mock.calls[0]?.[0];
@@ -511,13 +529,14 @@ describe("ToolExecutor include_formula_values", () => {
 
     const read = await executor.execute({
       name: "read_range",
-      parameters: { range: "Sheet1!A1:C1" },
+      parameters: { range: "Sheet1!A1:C1", include_formulas: true },
     });
 
     expect(read.ok).toBe(true);
     expect(read.tool).toBe("read_range");
     if (!read.ok || read.tool !== "read_range") throw new Error("Unexpected tool result");
     expect(read.data?.values).toEqual([[null, "[REDACTED]", 4]]);
+    expect(read.data?.formulas).toEqual([["=1+1", "[REDACTED]", null]]);
 
     const stats = await executor.execute({
       name: "compute_statistics",
