@@ -202,4 +202,46 @@ describe("extractWorkbookSchema", () => {
     expect(schema.tables[0].headers).toEqual(["Name", "Value"]);
     expect(schema.tables[0].inferredColumnTypes).toEqual(["string", "number"]);
   });
+
+  it("infers formula columns when cells contain formulas", () => {
+    const workbook = {
+      id: "wb-formula",
+      sheets: [
+        {
+          name: "Sheet1",
+          cells: [
+            ["Item", "Price", "Tax", "Total"],
+            ["A", 10, 0.1, "=B2*(1+C2)"],
+            ["B", 20, 0.2, "=B3*(1+C3)"],
+          ],
+        },
+      ],
+      tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 2, c1: 3 } }],
+    };
+
+    const schema = extractWorkbookSchema(workbook);
+    expect(schema.tables[0].headers).toEqual(["Item", "Price", "Tax", "Total"]);
+    expect(schema.tables[0].inferredColumnTypes).toEqual(["string", "number", "number", "formula"]);
+  });
+
+  it("infers ISO-like date strings as dates", () => {
+    const workbook = {
+      id: "wb-date",
+      sheets: [
+        {
+          name: "Sheet1",
+          cells: [
+            ["Date", "Amount"],
+            ["2025-01-01", 10],
+            ["2025-01-02", 20],
+          ],
+        },
+      ],
+      tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 2, c1: 1 } }],
+    };
+
+    const schema = extractWorkbookSchema(workbook);
+    expect(schema.tables[0].headers).toEqual(["Date", "Amount"]);
+    expect(schema.tables[0].inferredColumnTypes).toEqual(["date", "number"]);
+  });
 });
