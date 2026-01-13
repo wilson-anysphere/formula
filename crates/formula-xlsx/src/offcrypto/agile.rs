@@ -117,10 +117,11 @@ fn validate_aes_cbc_params(
             cipher: cipher_algorithm.to_string(),
         });
     }
-    if !(cipher_chaining.trim().eq_ignore_ascii_case("ChainingModeCBC")
-        || cipher_chaining.trim().eq_ignore_ascii_case("CBC"))
+    if !cipher_chaining
+        .trim()
+        .eq_ignore_ascii_case("ChainingModeCBC")
     {
-        return Err(OffCryptoError::UnsupportedChainingMode {
+        return Err(OffCryptoError::UnsupportedCipherChaining {
             chaining: cipher_chaining.to_string(),
         });
     }
@@ -563,6 +564,82 @@ mod tests {
     use aes::{Aes128, Aes192, Aes256};
     use cbc::cipher::block_padding::NoPadding;
     use cbc::cipher::{BlockEncryptMut, KeyIvInit};
+
+    fn wrap_xml_in_encryption_info_stream(xml: &str) -> Vec<u8> {
+        let mut encryption_info_stream = Vec::new();
+        encryption_info_stream.extend_from_slice(&4u16.to_le_bytes()); // major
+        encryption_info_stream.extend_from_slice(&4u16.to_le_bytes()); // minor
+        encryption_info_stream.extend_from_slice(&0u32.to_le_bytes()); // flags
+        encryption_info_stream.extend_from_slice(xml.as_bytes());
+        encryption_info_stream
+    }
+
+    #[test]
+    fn rejects_cfb_cipher_chaining_in_key_data() {
+        let xml = format!(
+            r#"
+            <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                        xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+              <keyData saltValue="AA==" hashAlgorithm="SHA1" hashSize="20"
+                       cipherAlgorithm="AES" cipherChaining="ChainingModeCFB"
+                       keyBits="128" blockSize="16" />
+              <keyEncryptors>
+                <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
+                  <p:encryptedKey saltValue="AA==" spinCount="1" hashAlgorithm="SHA1" hashSize="20"
+                                  cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                                  keyBits="128" blockSize="16"
+                                  encryptedVerifierHashInput="AA=="
+                                  encryptedVerifierHashValue="AA=="
+                                  encryptedKeyValue="AA=="/>
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>
+        "#
+        );
+
+        let stream = wrap_xml_in_encryption_info_stream(&xml);
+        let err = parse_agile_encryption_info_stream(&stream).expect_err("expected error");
+        assert!(
+            matches!(err, OffCryptoError::UnsupportedCipherChaining { ref chaining } if chaining == "ChainingModeCFB"),
+            "unexpected error: {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("only") && msg.contains("ChainingModeCBC"),
+            "expected message to mention only CBC is supported, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn rejects_cfb_cipher_chaining_in_encrypted_key() {
+        let xml = format!(
+            r#"
+            <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                        xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+              <keyData saltValue="AA==" hashAlgorithm="SHA1" hashSize="20"
+                       cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                       keyBits="128" blockSize="16" />
+              <keyEncryptors>
+                <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
+                  <p:encryptedKey saltValue="AA==" spinCount="1" hashAlgorithm="SHA1" hashSize="20"
+                                  cipherAlgorithm="AES" cipherChaining="ChainingModeCFB"
+                                  keyBits="128" blockSize="16"
+                                  encryptedVerifierHashInput="AA=="
+                                  encryptedVerifierHashValue="AA=="
+                                  encryptedKeyValue="AA=="/>
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>
+        "#
+        );
+
+        let stream = wrap_xml_in_encryption_info_stream(&xml);
+        let err = parse_agile_encryption_info_stream(&stream).expect_err("expected error");
+        assert!(
+            matches!(err, OffCryptoError::UnsupportedCipherChaining { ref chaining } if chaining == "ChainingModeCFB"),
+            "unexpected error: {err:?}"
+        );
+    }
 
     fn zero_pad(mut bytes: Vec<u8>) -> Vec<u8> {
         if bytes.is_empty() {

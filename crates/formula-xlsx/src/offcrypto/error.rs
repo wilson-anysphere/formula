@@ -23,6 +23,11 @@ pub enum OffCryptoError {
     #[error("unsupported OOXML encryption chaining mode `{chaining}`")]
     UnsupportedChainingMode { chaining: String },
 
+    #[error(
+        "unsupported OOXML encryption cipher chaining mode `{chaining}`; only `ChainingModeCBC` is supported"
+    )]
+    UnsupportedCipherChaining { chaining: String },
+
     #[error("unsupported OOXML encryption hash algorithm `{hash}`")]
     UnsupportedHashAlgorithm { hash: String },
 
