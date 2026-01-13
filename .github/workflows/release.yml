@@ -314,6 +314,34 @@ jobs:
             exit 1
           fi
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
+
+      - name: Check Cargo.lock is up-to-date (no implicit lockfile updates)
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="apps/desktop/src-tauri/Cargo.toml"
+
+          # Validate the lockfile for each desktop release target. This fails if
+          # Cargo would modify Cargo.lock during the build.
+          for target in \
+            x86_64-unknown-linux-gnu \
+            aarch64-unknown-linux-gnu \
+            x86_64-pc-windows-msvc \
+            aarch64-pc-windows-msvc \
+            x86_64-apple-darwin \
+            aarch64-apple-darwin; do
+            echo "Checking Cargo.lock for target: $target"
+            cargo metadata \
+              --locked \
+              --format-version=1 \
+              --manifest-path "$manifest" \
+              --features desktop \
+              --filter-platform "$target" \
+              >/dev/null
+          done
+
   build:
     name: Build (${{ matrix.label }})
     needs: preflight
