@@ -1703,6 +1703,7 @@ impl DaxEngine {
             row_ctx: &RowContext,
             env: &mut VarEnv,
             keep_filters: bool,
+            env: &mut VarEnv,
             clear_columns: &mut HashSet<(String, String)>,
             row_filters: &mut Vec<(String, HashSet<usize>)>,
         ) -> DaxResult<()> {
@@ -1824,10 +1825,15 @@ impl DaxEngine {
                     row_ctx,
                     env,
                     keep_filters,
+                    env,
                     &mut clear_columns,
                     &mut row_filters,
                 )?,
-                Expr::Call { name, .. } if name.eq_ignore_ascii_case("NOT") => {
+                Expr::Call { name, .. }
+                    if name.eq_ignore_ascii_case("NOT")
+                        || name.eq_ignore_ascii_case("AND")
+                        || name.eq_ignore_ascii_case("OR") =>
+                {
                     apply_boolean_filter_expr(
                         self,
                         model,
@@ -1836,6 +1842,7 @@ impl DaxEngine {
                         row_ctx,
                         env,
                         keep_filters,
+                        env,
                         &mut clear_columns,
                         &mut row_filters,
                     )?

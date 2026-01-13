@@ -854,6 +854,36 @@ fn calculate_supports_not_boolean_filters() {
 }
 
 #[test]
+fn calculate_supports_and_or_function_boolean_filters() {
+    let mut model = build_model();
+    model
+        .add_measure(
+            "Medium (AND fn)",
+            "CALCULATE(SUM(Orders[Amount]), AND(Orders[Amount] > 7, Orders[Amount] < 20))",
+        )
+        .unwrap();
+    model
+        .add_measure(
+            "Selected (OR fn)",
+            "CALCULATE(SUM(Orders[Amount]), OR(Orders[Amount] = 10, Orders[Amount] = 20))",
+        )
+        .unwrap();
+
+    assert_eq!(
+        model
+            .evaluate_measure("Medium (AND fn)", &FilterContext::empty())
+            .unwrap(),
+        18.0.into()
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("Selected (OR fn)", &FilterContext::empty())
+            .unwrap(),
+        30.0.into()
+    );
+}
+
+#[test]
 fn calculate_boolean_filter_expressions_must_reference_one_table() {
     let model = build_model();
     let err = DaxEngine::new()
