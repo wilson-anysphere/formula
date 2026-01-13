@@ -80,7 +80,13 @@ Key options:
 - `tokenEstimator`: used for *all* token budgeting inside `ContextManager`. If you’re also using `trimMessagesToBudget`, pass the **same estimator** there too so budgets line up.
 - `redactor(text)`: last-mile redaction for prompt-facing strings. This is **not** a replacement for structured DLP.
 - `workbookRag`: enables workbook retrieval (`buildWorkbookContext*`). Requires:
-  - `vectorStore` implementing `query(...)` / `upsert(...)` (e.g. `InMemoryVectorStore`, `SqliteVectorStore`)
+  - `vectorStore` implementing the `packages/ai-rag` store interface used by indexing + retrieval:
+    - `list(...)` (to load existing chunk hashes)
+    - `upsert(...)` (to persist new/updated embeddings)
+    - `delete(...)` (to remove stale chunks)
+    - `query(...)` (to retrieve top-K chunks for a query)
+    - (optionally) `close()`
+    - e.g. `InMemoryVectorStore`, `SqliteVectorStore`
   - `embedder` implementing `embedTexts([...])` (e.g. `HashEmbedder`)
   - Optional tuning:
     - `topK`: default number of retrieved chunks per query (can be overridden per call).
