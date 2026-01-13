@@ -61,6 +61,10 @@ while IFS= read -r match; do
   line="${rest%%:*}"
   ref="${match#*dtolnay/rust-toolchain@}"
   ref="${ref%%[[:space:]]*}"
+  # Normalize common YAML quoting + CRLF.
+  ref="${ref%$'\r'}"
+  ref="${ref%\"}"
+  ref="${ref%\'}"
   ref="${ref#v}"
 
   if [ -z "$ref" ]; then
