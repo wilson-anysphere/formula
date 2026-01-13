@@ -2101,6 +2101,12 @@ export class CollabSession {
     const existingCell = getYMapCell(cellData);
     const parsedMaybe = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
 
+    // Fail closed: when permissions are configured, we must not allow callers to
+    // bypass permission checks by providing an unparseable key.
+    if (this.permissions && !ignorePermissions && !parsedMaybe) {
+      throw new Error(`Invalid cellKey: ${cellKey}`);
+    }
+
     if (this.permissions && !ignorePermissions && parsedMaybe && !this.canEditCell(parsedMaybe)) {
       throw new Error(`Permission denied: cannot edit cell ${makeCellKey(parsedMaybe)}`);
     }
@@ -2297,6 +2303,12 @@ export class CollabSession {
     const cellData = this.cells.get(cellKey);
     const existingCell = getYMapCell(cellData);
     const parsedMaybe = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
+
+    // Fail closed: when permissions are configured, we must not allow callers to
+    // bypass permission checks by providing an unparseable key.
+    if (this.permissions && !ignorePermissions && !parsedMaybe) {
+      throw new Error(`Invalid cellKey: ${cellKey}`);
+    }
 
     if (this.permissions && !ignorePermissions && parsedMaybe && !this.canEditCell(parsedMaybe)) {
       throw new Error(`Permission denied: cannot edit cell ${makeCellKey(parsedMaybe)}`);

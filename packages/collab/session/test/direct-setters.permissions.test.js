@@ -24,6 +24,25 @@ test("CollabSession direct setters enforce viewer role (no Yjs mutation)", async
   doc.destroy();
 });
 
+test("CollabSession direct setters reject unparseable cell keys when permissions are configured (viewer)", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc, schema: { autoInit: false } });
+  session.setPermissions({ role: "viewer", userId: "u-viewer", rangeRestrictions: [] });
+
+  const before = Y.encodeStateAsUpdate(doc);
+
+  await assert.rejects(session.setCellValue("bad-key", "hacked"), /Invalid cellKey/);
+  await assert.rejects(session.setCellFormula("bad-key", "=HACK()"), /Invalid cellKey/);
+
+  assert.equal(session.cells.has("bad-key"), false);
+
+  const after = Y.encodeStateAsUpdate(doc);
+  assert.equal(Buffer.from(before).equals(Buffer.from(after)), true);
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession direct setters enforce rangeRestrictions for editors (no Yjs mutation)", async () => {
   const doc = new Y.Doc();
   const session = createCollabSession({ doc, schema: { autoInit: false } });
@@ -59,6 +78,41 @@ test("CollabSession direct setters enforce rangeRestrictions for editors (no Yjs
   doc.destroy();
 });
 
+test("CollabSession direct setters reject unparseable cell keys when rangeRestrictions are configured (editor)", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc, schema: { autoInit: false } });
+
+  session.setPermissions({
+    role: "editor",
+    userId: "u-editor",
+    rangeRestrictions: [
+      {
+        sheetName: "Sheet1",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+        // Anyone can read, but only u-other can edit.
+        readAllowlist: [],
+        editAllowlist: ["u-other"],
+      },
+    ],
+  });
+
+  const before = Y.encodeStateAsUpdate(doc);
+
+  await assert.rejects(session.setCellValue("bad-key", "hacked"), /Invalid cellKey/);
+  await assert.rejects(session.setCellFormula("bad-key", "=HACK()"), /Invalid cellKey/);
+
+  assert.equal(session.cells.has("bad-key"), false);
+
+  const after = Y.encodeStateAsUpdate(doc);
+  assert.equal(Buffer.from(before).equals(Buffer.from(after)), true);
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession direct setter escape hatch can bypass permissions when requested", async () => {
   const doc = new Y.Doc();
   const session = createCollabSession({ doc, schema: { autoInit: false } });
@@ -69,6 +123,18 @@ test("CollabSession direct setter escape hatch can bypass permissions when reque
 
   await session.setCellFormula("Sheet1:0:1", "=1", { ignorePermissions: true });
   assert.equal((await session.getCell("Sheet1:0:1"))?.formula, "=1");
+
+  session.destroy();
+  doc.destroy();
+});
+
+test("CollabSession direct setter escape hatch allows writing to unparseable cell keys", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc, schema: { autoInit: false } });
+  session.setPermissions({ role: "viewer", userId: "u-viewer", rangeRestrictions: [] });
+
+  await session.setCellValue("bad-key", "allowed", { ignorePermissions: true });
+  assert.equal((await session.getCell("bad-key"))?.value, "allowed");
 
   session.destroy();
   doc.destroy();
@@ -110,4 +176,3 @@ test("CollabSession permission getters expose role/capabilities and return defen
   session.destroy();
   doc.destroy();
 });
-
