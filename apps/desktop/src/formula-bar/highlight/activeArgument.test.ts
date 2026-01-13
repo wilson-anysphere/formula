@@ -1,0 +1,80 @@
+import { describe, expect, it } from "vitest";
+
+import { getActiveArgumentSpan } from "./activeArgument.js";
+
+describe("getActiveArgumentSpan", () => {
+  it("returns null when the cursor is not inside a function call", () => {
+    expect(getActiveArgumentSpan("=A1+1", 2)).toBeNull();
+    expect(getActiveArgumentSpan("SUM(A1)", 2)).toBeNull();
+  });
+
+  it("returns the innermost function + arg span (nested calls)", () => {
+    const formula = '=IF(SUM(A1:A2) > 3, "yes", "no")';
+    const insideSum = formula.indexOf("A1") + 1;
+    expect(getActiveArgumentSpan(formula, insideSum)).toEqual({
+      fnName: "SUM",
+      argIndex: 0,
+      argText: "A1:A2",
+      span: { start: formula.indexOf("A1:A2"), end: formula.indexOf("A1:A2") + "A1:A2".length },
+    });
+
+    const insideIfSecondArg = formula.indexOf('"yes"') + 1;
+    expect(getActiveArgumentSpan(formula, insideIfSecondArg)).toEqual({
+      fnName: "IF",
+      argIndex: 1,
+      argText: '"yes"',
+      span: { start: formula.indexOf('"yes"'), end: formula.indexOf('"yes"') + '"yes"'.length },
+    });
+  });
+
+  it("ignores commas inside string literals", () => {
+    const formula = '=CONCAT("a,b", "c")';
+    const insideFirstString = formula.indexOf("a,b") + 1;
+    expect(getActiveArgumentSpan(formula, insideFirstString)).toMatchObject({
+      fnName: "CONCAT",
+      argIndex: 0,
+      argText: '"a,b"',
+    });
+  });
+
+  it("ignores commas inside nested parentheses (union operator)", () => {
+    const formula = "=SUM((A1,B1), C1)";
+    const insideC1 = formula.indexOf("C1") + 1;
+    expect(getActiveArgumentSpan(formula, insideC1)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 1,
+      argText: "C1",
+    });
+  });
+
+  it("ignores commas inside square brackets (structured / external refs)", () => {
+    const formula = "=SUM(Table1[[#All],[Col1],[Col2]], 1)";
+    const insideSecondArg = formula.lastIndexOf("1") + 1;
+    expect(getActiveArgumentSpan(formula, insideSecondArg)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 1,
+      argText: "1",
+    });
+  });
+
+  it("ignores commas inside curly braces (array literals)", () => {
+    const formula = "=SUM({1,2,3}, 4)";
+    const insideSecondArg = formula.indexOf("4") + 1;
+    expect(getActiveArgumentSpan(formula, insideSecondArg)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 1,
+      argText: "4",
+    });
+  });
+
+  it("returns an empty argText span when the argument is currently empty", () => {
+    const formula = "=SUM(A1, )";
+    const cursorInEmptyArg = formula.indexOf(")") - 1;
+    expect(getActiveArgumentSpan(formula, cursorInEmptyArg)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 1,
+      argText: "",
+    });
+  });
+});
+

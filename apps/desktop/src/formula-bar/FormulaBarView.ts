@@ -13,6 +13,7 @@ import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu.js";
 import { searchFunctionResults } from "../command-palette/commandPaletteSearch.js";
 import FUNCTION_CATALOG from "../../../../shared/functionCatalog.mjs";
 import { getFunctionSignature, type FunctionSignature } from "./highlight/functionSignatures.js";
+import { getActiveArgumentSpan } from "./highlight/activeArgument.js";
 import { FormulaBarFunctionAutocompleteController } from "./completion/functionAutocomplete.js";
 import { computeFormulaIndentation } from "./computeFormulaIndentation.js";
 
@@ -166,6 +167,13 @@ export class FormulaBarView {
     | null = null;
   #pendingRender: { preserveTextareaValue: boolean } | null = null;
   #lastHighlightHtml: string | null = null;
+
+  #argumentPreviewProvider: ((expr: string) => unknown | Promise<unknown>) | null = null;
+  #argumentPreviewKey: string | null = null;
+  #argumentPreviewValue: unknown | null = null;
+  #argumentPreviewPending = false;
+  #argumentPreviewTimer: ReturnType<typeof setTimeout> | null = null;
+  #argumentPreviewRequestId = 0;
 
   #functionAutocomplete: FormulaBarFunctionAutocompleteController;
   #nameBoxDropdownEl: HTMLButtonElement;
@@ -623,6 +631,12 @@ export class FormulaBarView {
     const rect = this.#nameBoxDropdownEl.getBoundingClientRect();
     this.#nameBoxDropdownEl.setAttribute("aria-expanded", "true");
     menu.open({ x: rect.left, y: rect.bottom, items });
+  }
+
+  setArgumentPreviewProvider(provider: ((expr: string) => unknown | Promise<unknown>) | null): void {
+    this.#argumentPreviewProvider = provider;
+    this.#clearArgumentPreviewState();
+    this.#render({ preserveTextareaValue: true });
   }
 
   setAiSuggestion(suggestion: string | FormulaBarAiSuggestion | null): void {
@@ -1430,11 +1444,14 @@ export class FormulaBarView {
     const hint = syntaxError ? null : this.model.functionHint();
     this.#hintEl.replaceChildren();
     if (syntaxError) {
+      this.#clearArgumentPreviewState();
       const message = document.createElement("div");
       message.className = "formula-bar-hint-error";
       message.textContent = syntaxError.message;
       this.#hintEl.appendChild(message);
-    } else if (hint) {
+    } else if (!hint) {
+      this.#clearArgumentPreviewState();
+    } else {
       const panel = document.createElement("div");
       panel.className = "formula-bar-hint-panel";
 
@@ -1472,6 +1489,34 @@ export class FormulaBarView {
         body.appendChild(summaryEl);
       }
 
+      const provider = this.#argumentPreviewProvider;
+      const activeArg = getActiveArgumentSpan(this.model.draft, this.model.cursorStart);
+      const wantsArgPreview = Boolean(
+        activeArg && typeof provider === "function" && typeof activeArg.argText === "string" && activeArg.argText.trim() !== ""
+      );
+
+      if (wantsArgPreview && activeArg) {
+        const key = `${activeArg.fnName}|${activeArg.argIndex}|${activeArg.span.start}:${activeArg.span.end}|${activeArg.argText}`;
+        if (this.#argumentPreviewKey !== key) {
+          this.#argumentPreviewKey = key;
+          this.#argumentPreviewValue = null;
+          this.#argumentPreviewPending = true;
+          this.#scheduleArgumentPreviewEvaluation(activeArg, key);
+        }
+
+        const previewEl = document.createElement("div");
+        previewEl.className = "formula-bar-hint-arg-preview";
+        previewEl.dataset.testid = "formula-hint-arg-preview";
+        previewEl.dataset.argStart = String(activeArg.span.start);
+        previewEl.dataset.argEnd = String(activeArg.span.end);
+
+        const rhs = this.#argumentPreviewPending ? "…" : formatArgumentPreviewValue(this.#argumentPreviewValue);
+        previewEl.textContent = `↳ ${activeArg.argText}  →  ${rhs}`;
+        body.appendChild(previewEl);
+      } else {
+        this.#clearArgumentPreviewState();
+      }
+
       panel.appendChild(title);
       panel.appendChild(body);
       this.#hintEl.appendChild(panel);
@@ -1506,6 +1551,62 @@ export class FormulaBarView {
 
     this.#syncScroll();
     this.#adjustHeight();
+  }
+
+  #clearArgumentPreviewState(): void {
+    this.#argumentPreviewKey = null;
+    this.#argumentPreviewValue = null;
+    this.#argumentPreviewPending = false;
+    this.#argumentPreviewRequestId += 1;
+    if (this.#argumentPreviewTimer != null) {
+      clearTimeout(this.#argumentPreviewTimer);
+      this.#argumentPreviewTimer = null;
+    }
+  }
+
+  #scheduleArgumentPreviewEvaluation(activeArg: ReturnType<typeof getActiveArgumentSpan>, key: string): void {
+    if (!activeArg) return;
+    const provider = this.#argumentPreviewProvider;
+    if (typeof provider !== "function") return;
+
+    // Cancel any pending timer before scheduling a new evaluation. This keeps typing responsive
+    // and avoids doing work for stale cursor positions.
+    if (this.#argumentPreviewTimer != null) {
+      clearTimeout(this.#argumentPreviewTimer);
+      this.#argumentPreviewTimer = null;
+    }
+
+    const requestId = ++this.#argumentPreviewRequestId;
+    const expr = activeArg.argText;
+
+    this.#argumentPreviewTimer = setTimeout(() => {
+      this.#argumentPreviewTimer = null;
+
+      // Allow the preview provider to be async, but bound the time we wait for it.
+      const timeoutMs = 100;
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      const timeoutPromise = new Promise<unknown>((resolve) => {
+        timeoutId = setTimeout(() => resolve("(preview unavailable)"), timeoutMs);
+      });
+
+      Promise.race([Promise.resolve().then(() => provider(expr)), timeoutPromise])
+        .then((value) => {
+          if (timeoutId != null) clearTimeout(timeoutId);
+          if (requestId !== this.#argumentPreviewRequestId) return;
+          if (this.#argumentPreviewKey !== key) return;
+          this.#argumentPreviewPending = false;
+          this.#argumentPreviewValue = value === undefined ? "(preview unavailable)" : value;
+          this.#requestRender({ preserveTextareaValue: true });
+        })
+        .catch(() => {
+          if (timeoutId != null) clearTimeout(timeoutId);
+          if (requestId !== this.#argumentPreviewRequestId) return;
+          if (this.#argumentPreviewKey !== key) return;
+          this.#argumentPreviewPending = false;
+          this.#argumentPreviewValue = "(preview unavailable)";
+          this.#requestRender({ preserveTextareaValue: true });
+        });
+    }, 0);
   }
 
   #setErrorPanelOpen(open: boolean, opts: { restoreFocus: boolean } = { restoreFocus: true }): void {
@@ -1728,6 +1829,14 @@ function formatPreview(value: unknown): string {
   if (value == null) return "";
   if (typeof value === "string") return ` ${value}`;
   return ` ${String(value)}`;
+}
+
+function formatArgumentPreviewValue(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  return String(value);
 }
 
 function computeReferenceHighlights(text: string): FormulaReferenceHighlight[] {

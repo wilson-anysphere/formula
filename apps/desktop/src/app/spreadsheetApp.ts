@@ -2031,6 +2031,7 @@ export class SpreadsheetApp {
           sheet,
         };
       });
+      this.formulaBar.setArgumentPreviewProvider((expr) => this.evaluateFormulaBarArgumentPreview(expr));
       this.formulaRangePreviewTooltip = this.createFormulaRangePreviewTooltip();
       opts.formulaBar.appendChild(this.formulaRangePreviewTooltip);
 
@@ -2041,14 +2042,14 @@ export class SpreadsheetApp {
         sheetNameResolver: this.sheetNameResolver ?? undefined,
         limits: this.limits,
         schemaProvider: {
-           getNamedRanges: () => {
-             const formatSheetPrefix = (id: string): string => {
+          getNamedRanges: () => {
+            const formatSheetPrefix = (id: string): string => {
               const token = formatSheetNameForA1(id);
               return token ? `${token}!` : "";
-             };
- 
-             const out: Array<{ name: string; range?: string }> = [];
-             for (const entry of this.searchWorkbook.names.values()) {
+            };
+
+            const out: Array<{ name: string; range?: string }> = [];
+            for (const entry of this.searchWorkbook.names.values()) {
               const e: any = entry as any;
               const name = typeof e?.name === "string" ? (e.name as string) : "";
               if (!name) continue;
@@ -2058,9 +2059,9 @@ export class SpreadsheetApp {
               out.push({ name, range: rangeText });
             }
             return out;
-           },
-           getTables: () =>
-             Array.from(this.searchWorkbook.tables.values())
+          },
+          getTables: () =>
+            Array.from(this.searchWorkbook.tables.values())
               .map((table: any) => ({
                 name: typeof table?.name === "string" ? table.name : "",
                 sheetName: typeof table?.sheetName === "string" ? table.sheetName : undefined,
@@ -2071,10 +2072,10 @@ export class SpreadsheetApp {
                 columns: Array.isArray(table?.columns) ? table.columns.map((c: unknown) => String(c)) : [],
               }))
               .filter((t: { name: string; columns: string[] }) => t.name.length > 0 && t.columns.length > 0),
-           getCacheKey: () => `schema:${Number((this.searchWorkbook as any).schemaVersion) || 0}`,
-         },
-       });
-     }
+          getCacheKey: () => `schema:${Number((this.searchWorkbook as any).schemaVersion) || 0}`,
+        },
+      });
+    }
 
     if (this.gridMode === "legacy") {
       // Precompute row/col visibility + mappings before any initial render work.
@@ -10390,6 +10391,118 @@ export class SpreadsheetApp {
     const knownSheets = this.document.getSheetIds();
     const lower = trimmed.toLowerCase();
     return knownSheets.find((id) => id.toLowerCase() === lower) ?? null;
+  }
+
+  private evaluateFormulaBarArgumentPreview(expr: string): SpreadsheetValue | string {
+    const raw = typeof expr === "string" ? expr : String(expr ?? "");
+    const trimmedExpr = raw.trim();
+    if (!trimmedExpr) return "(preview unavailable)";
+
+    const editTarget = this.formulaEditCell ?? { sheetId: this.sheetId, cell: { ...this.selection.active } };
+    const sheetId = editTarget.sheetId;
+    const cellAddress = cellToA1(editTarget.cell);
+
+    // Hard cap on the number of cell reads we allow for preview. This keeps the formula bar
+    // responsive even when the argument expression references a large range.
+    const MAX_CELL_READS = 5_000;
+
+    // Resolve named ranges (and allow undefined names to fall back to `#NAME?`).
+    const resolveNameToReference = (name: string): string | null => {
+      const key = String(name ?? "").trim().toUpperCase();
+      if (!key) return null;
+
+      for (const entry of this.searchWorkbook.names.values()) {
+        const e: any = entry as any;
+        const n = typeof e?.name === "string" ? e.name.trim().toUpperCase() : "";
+        if (!n || n !== key) continue;
+        const sheetName = typeof e?.sheetName === "string" ? (e.sheetName as string) : "";
+        const range = e?.range;
+        if (!range) continue;
+        const a1 = rangeToA1(range);
+        if (!a1) continue;
+        const token = sheetName ? formatSheetNameForA1(sheetName) : "";
+        const prefix = token ? `${token}!` : "";
+        return `${prefix}${a1}`;
+      }
+
+      return null;
+    };
+
+    let reads = 0;
+    const memo = new Map<string, SpreadsheetValue>();
+    const stack = new Set<string>();
+
+    const resolveSheetId = (token: string): string | null => {
+      const resolved = this.resolveSheetIdByName(token);
+      if (resolved) return resolved;
+
+      // `DocumentController` materializes sheets lazily; if the user refers to the current sheet
+      // before it has been created, allow it through.
+      const unquoted = (() => {
+        const t = token.trim();
+        const quoted = /^'((?:[^']|'')+)'$/.exec(t);
+        if (quoted) return quoted[1]!.replace(/''/g, "'").trim();
+        return t;
+      })();
+      if (unquoted && unquoted.toLowerCase() === sheetId.toLowerCase()) return sheetId;
+      return null;
+    };
+
+    const getCellValue = (ref: string): SpreadsheetValue => {
+      reads += 1;
+      if (reads > MAX_CELL_READS) throw new Error("preview too large");
+
+      const normalized = String(ref ?? "").replaceAll("$", "").trim();
+      let targetSheet = sheetId;
+      let addr = normalized;
+      const bang = normalized.lastIndexOf("!");
+      if (bang >= 0) {
+        const sheetToken = normalized.slice(0, bang);
+        const cellToken = normalized.slice(bang + 1);
+        if (sheetToken && cellToken) {
+          const resolved = resolveSheetId(sheetToken);
+          if (!resolved) return "#REF!";
+          targetSheet = resolved;
+          addr = cellToken.trim();
+        }
+      }
+
+      const key = `${targetSheet}:${addr.toUpperCase()}`;
+      if (memo.has(key)) return memo.get(key) as SpreadsheetValue;
+      if (stack.has(key)) return "#REF!";
+
+      stack.add(key);
+      const state = this.document.getCell(targetSheet, addr) as { value: unknown; formula: string | null };
+      let value: SpreadsheetValue;
+      if (state?.formula) {
+        value = evaluateFormula(state.formula, getCellValue, {
+          cellAddress: `${targetSheet}!${addr.toUpperCase()}`,
+          resolveNameToReference,
+          maxRangeCells: MAX_CELL_READS,
+        });
+      } else {
+        const rawValue = state?.value ?? null;
+        value =
+          rawValue == null || typeof rawValue === "number" || typeof rawValue === "string" || typeof rawValue === "boolean"
+            ? (rawValue as SpreadsheetValue)
+            : isRichTextValue(rawValue)
+              ? (rawValue.text as SpreadsheetValue)
+              : null;
+      }
+      stack.delete(key);
+      memo.set(key, value);
+      return value;
+    };
+
+    try {
+      return evaluateFormula(`=${trimmedExpr}`, getCellValue, {
+        cellAddress: `${sheetId}!${cellAddress}`,
+        resolveNameToReference,
+        maxRangeCells: MAX_CELL_READS,
+      });
+    } catch {
+      return "(preview unavailable)";
+    }
   }
 
   private resolveSheetDisplayNameById(sheetId: string): string {
