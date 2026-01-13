@@ -2,6 +2,7 @@ import { RagIndex } from "./rag.js";
 import { DEFAULT_TOKEN_ESTIMATOR, packSectionsToTokenBudget, stableJsonStringify } from "./tokenBudget.js";
 import { headSampleRows, randomSampleRows, stratifiedSampleRows, systematicSampleRows } from "./sampling.js";
 import { classifyText, redactText } from "./dlp.js";
+import { isCellEmpty, parseA1Range, rangeToA1 } from "./a1.js";
 import { awaitWithAbort, throwIfAborted } from "./abort.js";
 import { inferColumnType, isLikelyHeaderRow } from "./schema.js";
 
@@ -624,6 +625,11 @@ export class ContextManager {
       }
     }
 
+    const attachmentData = buildRangeAttachmentSectionText(
+      { sheet: sheetForContext, attachments: params.attachments },
+      { maxRows: 30, maxAttachments: 3 },
+    );
+
     const shouldReturnRedactedStructured = Boolean(dlp) && dlpDecision?.decision === DLP_DECISION.REDACT;
     const schemaOut = shouldReturnRedactedStructured ? redactStructuredValue(schema, this.redactor, { signal }) : schema;
     const sampledOut = shouldReturnRedactedStructured
@@ -646,6 +652,16 @@ export class ContextManager {
              },
            ]
          : []),
+      ...(attachmentData
+        ? [
+            {
+              key: "attachment_data",
+              // Slightly below DLP policy notes, but above retrieved/schema/samples.
+              priority: 4.5,
+              text: this.redactor(attachmentData),
+            },
+          ]
+        : []),
       {
         key: "schema",
         priority: 3,
@@ -1483,6 +1499,135 @@ function redactStructuredValue(value, redactor, options = {}) {
     out[key] = redactStructuredValue(v, redactor, { signal });
   }
   return out;
+}
+
+function normalizeSheetNameForComparison(name) {
+  const raw = typeof name === "string" ? name.trim() : "";
+  if (!raw) return "";
+  if (raw.startsWith("'") && raw.endsWith("'") && raw.length >= 2) {
+    return raw.slice(1, -1).replace(/''/g, "'");
+  }
+  return raw;
+}
+
+function getSheetOrigin(sheet) {
+  if (!sheet || typeof sheet !== "object") return { row: 0, col: 0 };
+  const origin = sheet.origin;
+  if (!origin || typeof origin !== "object") return { row: 0, col: 0 };
+  const row = Number.isInteger(origin.row) && origin.row >= 0 ? origin.row : 0;
+  const col = Number.isInteger(origin.col) && origin.col >= 0 ? origin.col : 0;
+  return { row, col };
+}
+
+/**
+ * @param {{ sheet: { name: string, values: unknown[][], origin?: { row: number, col: number } }, attachments?: Attachment[] }} params
+ * @param {{ maxRows?: number, maxAttachments?: number }} [options]
+ */
+function buildRangeAttachmentSectionText(params, options = {}) {
+  const attachments = Array.isArray(params.attachments) ? params.attachments : [];
+  if (attachments.length === 0) return "";
+  const sheet = params.sheet;
+  const sheetName = sheet?.name ?? "";
+  const normalizedSheetName = normalizeSheetNameForComparison(sheetName);
+  const maxRows = options.maxRows ?? 30;
+  const maxAttachments = options.maxAttachments ?? 3;
+
+  const values = Array.isArray(sheet?.values) ? sheet.values : [];
+  const matrixRowCount = values.length;
+  let matrixColCount = 0;
+  for (const row of values) {
+    if (!Array.isArray(row)) continue;
+    if (row.length > matrixColCount) matrixColCount = row.length;
+  }
+
+  const origin = getSheetOrigin(sheet);
+  const availableRange =
+    matrixRowCount > 0 && matrixColCount > 0
+      ? rangeToA1({
+          sheetName,
+          startRow: origin.row,
+          startCol: origin.col,
+          endRow: origin.row + matrixRowCount - 1,
+          endCol: origin.col + matrixColCount - 1,
+        })
+      : "";
+
+  const entries = [];
+  let included = 0;
+
+  for (const attachment of attachments) {
+    if (included >= maxAttachments) break;
+    if (!attachment || attachment.type !== "range" || typeof attachment.reference !== "string") continue;
+
+    let parsed;
+    try {
+      parsed = parseA1Range(attachment.reference);
+    } catch {
+      continue;
+    }
+
+    const attachmentSheetName = normalizeSheetNameForComparison(parsed.sheetName);
+    if (attachmentSheetName && attachmentSheetName !== normalizedSheetName) continue;
+
+    const canonicalRange = rangeToA1({ ...parsed, sheetName });
+
+    if (matrixRowCount === 0 || matrixColCount === 0) {
+      entries.push(`${canonicalRange}: (no sheet values available to preview)`);
+      included += 1;
+      continue;
+    }
+
+    const local = {
+      startRow: parsed.startRow - origin.row,
+      startCol: parsed.startCol - origin.col,
+      endRow: parsed.endRow - origin.row,
+      endCol: parsed.endCol - origin.col,
+    };
+
+    const intersects =
+      !(local.endRow < 0 || local.endCol < 0 || local.startRow >= matrixRowCount || local.startCol >= matrixColCount);
+
+    if (!intersects) {
+      const windowSuffix = availableRange ? ` (${availableRange})` : "";
+      entries.push(`${canonicalRange}: (range is outside the available sheet window${windowSuffix})`);
+      included += 1;
+      continue;
+    }
+
+    const clamped = {
+      startRow: Math.max(0, local.startRow),
+      startCol: Math.max(0, local.startCol),
+      endRow: Math.min(matrixRowCount - 1, local.endRow),
+      endCol: Math.min(matrixColCount - 1, local.endCol),
+    };
+
+    const matrix = [];
+    for (let r = clamped.startRow; r <= clamped.endRow; r++) {
+      const row = values[r] ?? [];
+      matrix.push(row.slice(clamped.startCol, clamped.endCol + 1));
+    }
+
+    entries.push(`${canonicalRange}:\n${matrixToTsv(matrix, { maxRows })}`);
+    included += 1;
+  }
+
+  if (entries.length === 0) return "";
+  return `Attached range data:\n${entries.join("\n\n")}`;
+}
+
+/**
+ * @param {unknown[][]} matrix
+ * @param {{ maxRows: number }} options
+ */
+function matrixToTsv(matrix, options) {
+  const lines = [];
+  const limit = Math.min(matrix.length, options.maxRows);
+  for (let r = 0; r < limit; r++) {
+    const row = matrix[r];
+    lines.push((row ?? []).map((v) => (isCellEmpty(v) ? "" : String(v))).join("\t"));
+  }
+  if (matrix.length > limit) lines.push(`… (${matrix.length - limit} more rows)`);
+  return lines.join("\n");
 }
 
 function cellInNormalizedRange(cell, range) {

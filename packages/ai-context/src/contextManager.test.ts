@@ -27,8 +27,10 @@ describe("ContextManager promptContext", () => {
     // The compact format should not include pretty-print indentation.
     expect(out1.promptContext).not.toContain('\n  "');
 
+    const attachmentData = extractPromptSection(out1.promptContext, "attachment_data");
     const pretty = buildPrettyPromptContext({
       schema: out1.schema,
+      attachmentData,
       attachments,
       sampledRows: out1.sampledRows,
       retrieved: out1.retrieved,
@@ -61,11 +63,17 @@ describe("ContextManager samplingStrategy", () => {
 
 function buildPrettyPromptContext(params: {
   schema: unknown;
+  attachmentData: string;
   attachments: unknown[];
   sampledRows: unknown[][];
   retrieved: unknown[];
 }): string {
   const sections = [
+    {
+      key: "attachment_data",
+      priority: 4.5,
+      text: params.attachmentData ? params.attachmentData : "",
+    },
     {
       key: "schema",
       priority: 3,
@@ -92,4 +100,13 @@ function buildPrettyPromptContext(params: {
 
   sections.sort((a, b) => b.priority - a.priority);
   return sections.map((s) => `## ${s.key}\n${s.text}`).join("\n\n");
+}
+
+function extractPromptSection(promptContext: string, key: string): string {
+  const marker = `## ${key}\n`;
+  const start = promptContext.indexOf(marker);
+  if (start === -1) return "";
+  const rest = promptContext.slice(start + marker.length);
+  const next = rest.indexOf("\n\n## ");
+  return next === -1 ? rest : rest.slice(0, next);
 }
