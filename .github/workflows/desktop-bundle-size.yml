@@ -1,9 +1,38 @@
 name: Desktop bundle size
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
+    paths:
+      - "apps/desktop/**"
+      - "crates/**"
+      - "packages/**"
+      - "extensions/**"
+      - ".cargo/**"
+      - "scripts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/desktop-bundle-size.yml"
+      - ".github/workflows/release.yml"
   pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "crates/**"
+      - "packages/**"
+      - "extensions/**"
+      - ".cargo/**"
+      - "scripts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/desktop-bundle-size.yml"
+      - ".github/workflows/release.yml"
 
 concurrency:
   group: desktop-bundle-size-${{ github.event.pull_request.number || github.ref }}
