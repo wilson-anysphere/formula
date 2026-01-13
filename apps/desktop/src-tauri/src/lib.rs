@@ -25,6 +25,7 @@ pub mod persistence;
 #[cfg(any(feature = "desktop", test))]
 mod power_query_validation;
 pub mod python;
+pub mod network_fetch;
 pub mod resource_limits;
 pub(crate) mod sheet_name;
 pub mod sql;

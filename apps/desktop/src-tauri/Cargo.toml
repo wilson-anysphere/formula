@@ -84,7 +84,7 @@ png = "0.17"
 rand_core = "0.6"
 sha2 = "0.10"
 hex = "0.4"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "postgres", "chrono"] }
 tauri = { version = "2.9", optional = true, features = ["tray-icon"] }
 tauri-plugin-deep-link = { version = "2.4", optional = true }
