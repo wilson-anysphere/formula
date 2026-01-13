@@ -79,7 +79,7 @@ jobs:
       - name: Run excel-oracle python unit tests
         run: python -m unittest discover -s tools/excel-oracle/tests
       - name: Run excel-oracle corpus coverage guards
-        run: cargo test -p formula-engine --test excel_oracle_coverage --test function_catalog_sync --locked
+        run: cargo test -p formula-engine --test excel_oracle_coverage --test function_catalog_sync --test locale_function_tsv_completeness --locked
       - name: Run compatibility gate (engine vs pinned Excel dataset)
         run: python tools/excel-oracle/compat_gate.py
       - name: Publish compatibility summary
