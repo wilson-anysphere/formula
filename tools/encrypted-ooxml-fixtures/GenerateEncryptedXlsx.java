@@ -1,0 +1,105 @@
+import java.io.OutputStream;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+import org.apache.poi.poifs.crypt.EncryptionInfo;
+import org.apache.poi.poifs.crypt.EncryptionMode;
+import org.apache.poi.poifs.crypt.Encryptor;
+import org.apache.poi.poifs.filesystem.POIFSFileSystem;
+
+/**
+ * Generate an encrypted OOXML workbook (`.xlsx`) by wrapping a plaintext OOXML package
+ * in an OLE2/CFB container ("EncryptedPackage" + "EncryptionInfo" streams).
+ *
+ * <p>Usage:
+ *
+ * <pre>
+ *   java -cp ... GenerateEncryptedXlsx agile    password in.xlsx out.xlsx
+ *   java -cp ... GenerateEncryptedXlsx standard password in.xlsx out.xlsx
+ * </pre>
+ *
+ * <p>Notes:
+ * <ul>
+ *   <li>The output `.xlsx` is <b>not</b> a ZIP file; it is an OLE2/CFB container as used by Excel for
+ *       encrypted OOXML.
+ *   <li>Apache POI uses random salts/IVs for encryption, so output bytes are not expected to be
+ *       bit-for-bit stable across runs. The resulting files should still be valid encrypted
+ *       workbooks.</li>
+ * </ul>
+ */
+public final class GenerateEncryptedXlsx {
+  private static void usageAndExit() {
+    System.err.println(
+        "Usage: GenerateEncryptedXlsx <mode> <password> <in_plaintext_xlsx> <out_encrypted_xlsx>\n"
+            + "  mode: agile | standard\n"
+            + "\n"
+            + "Example:\n"
+            + "  GenerateEncryptedXlsx agile password fixtures/xlsx/basic/basic.xlsx fixtures/encrypted/ooxml/agile.xlsx\n");
+    System.exit(2);
+  }
+
+  private static EncryptionMode parseMode(String s) {
+    if (s == null) {
+      throw new IllegalArgumentException("mode is required");
+    }
+    switch (s.toLowerCase()) {
+      case "agile":
+        return EncryptionMode.agile;
+      case "standard":
+        return EncryptionMode.standard;
+      default:
+        throw new IllegalArgumentException("unknown mode: " + s + " (expected: agile|standard)");
+    }
+  }
+
+  public static void main(String[] args) throws Exception {
+    if (args.length != 4) {
+      usageAndExit();
+      return;
+    }
+
+    final EncryptionMode mode;
+    try {
+      mode = parseMode(args[0]);
+    } catch (IllegalArgumentException e) {
+      System.err.println(e.getMessage());
+      usageAndExit();
+      return;
+    }
+
+    final String password = args[1];
+    final Path inPath = Paths.get(args[2]);
+    final Path outPath = Paths.get(args[3]);
+
+    if (!Files.isRegularFile(inPath)) {
+      throw new IllegalArgumentException("input file does not exist or is not a regular file: " + inPath);
+    }
+
+    final Path parent = outPath.toAbsolutePath().getParent();
+    if (parent != null) {
+      Files.createDirectories(parent);
+    }
+
+    try (POIFSFileSystem fs = new POIFSFileSystem()) {
+      EncryptionInfo info = new EncryptionInfo(mode);
+      Encryptor enc = info.getEncryptor();
+      enc.confirmPassword(password);
+
+      // Encrypt the raw OOXML ZIP bytes directly (avoid parsing/repacking and avoid mutating the input).
+      try (InputStream plaintext = Files.newInputStream(inPath);
+          OutputStream encryptedStream = enc.getDataStream(fs)) {
+        byte[] buf = new byte[16 * 1024];
+        int read;
+        while ((read = plaintext.read(buf)) != -1) {
+          encryptedStream.write(buf, 0, read);
+        }
+      }
+
+      try (OutputStream out = Files.newOutputStream(outPath)) {
+        fs.writeFilesystem(out);
+      }
+    }
+  }
+}
