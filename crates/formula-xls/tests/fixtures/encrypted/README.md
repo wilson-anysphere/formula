@@ -20,21 +20,27 @@ Why a dedicated directory?
 
 ## Fixture inventory
 
-All fixtures are intentionally tiny (a minimal CFB container with a `Workbook` stream that contains
-`BOF` + `FILEPASS` + `EOF`).
+All fixtures are intentionally tiny.
 
-`formula-xls` currently does **not** implement decryption; the importer detects `FILEPASS` and
-surfaces a clear `EncryptedWorkbook` error. These fixtures are therefore **detection fixtures**
-(they are not intended to be opened/decrypted in Excel).
+- The XOR + “RC4 standard” fixtures are **detection fixtures** (minimal CFB + `Workbook` stream
+  containing just enough BIFF to surface a `FILEPASS` record).
+- The RC4 CryptoAPI fixture is a **real encrypted workbook** (still small) used to validate the
+  decryption path.
+
+`formula-xls` treats `FILEPASS` as a signal that the workbook is encrypted/password-protected.
+
+- `import_xls_path` does **not** support encrypted workbooks and returns `ImportError::EncryptedWorkbook`.
+- `import_xls_path_with_password` supports a subset of BIFF8 encryption: **RC4 CryptoAPI**
+  (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`).
 
 Note: In BIFF8, both RC4 variants use `wEncryptionType=0x0001`; the `subType` field distinguishes
 “RC4 standard” (`subType=0x0001`) from “RC4 CryptoAPI” (`subType=0x0002`).
 
 | File | Encryption scheme | BIFF version | Created with | Test password |
 |---|---|---:|---|---|
-| `biff8_xor_pw_open.xls` | XOR (legacy obfuscation) | BIFF8 | `cargo test -p formula-xls --test regenerate_encrypted_xls_fixtures -- --ignored` (this repo; writes a minimal CFB/BIFF stream via `cfb` `0.10`) | `password` |
+| `biff8_xor_pw_open.xls` | XOR (legacy obfuscation) | BIFF8 | `cargo test -p formula-xls --test regenerate_encrypted_xls_fixtures -- --ignored` (this repo; writes a tiny CFB/BIFF stream via `cfb` `0.10`) | `password` |
 | `biff8_rc4_standard_pw_open.xls` | RC4 “standard” | BIFF8 | same as above | `password` |
-| `biff8_rc4_cryptoapi_pw_open.xls` | RC4 (CryptoAPI) | BIFF8 | same as above | `password` |
+| `biff8_rc4_cryptoapi_pw_open.xls` | RC4 (CryptoAPI) | BIFF8 | same as above; additionally used by `tests/import_encrypted_rc4_cryptoapi.rs` to validate `import_xls_path_with_password` | `correct horse battery staple` |
 
 ## Regenerating fixtures
 

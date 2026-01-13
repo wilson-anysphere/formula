@@ -1,6 +1,6 @@
-use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
+use std::{io::Read, ops::Range as ByteRange};
 
 fn read_workbook_stream(path: &Path) -> Vec<u8> {
     let bytes = std::fs::read(path).expect("read xls fixture");
@@ -24,6 +24,41 @@ fn read_record(stream: &[u8], offset: usize) -> Option<(u16, &[u8], usize)> {
     let data_end = data_start.checked_add(len)?;
     let data = stream.get(data_start..data_end)?;
     Some((record_id, data, data_end))
+}
+
+fn workbook_globals_filepass_payload_range(workbook_stream: &[u8]) -> Option<ByteRange<usize>> {
+    // Scan the workbook globals substream for FILEPASS. Stop at EOF or a subsequent BOF.
+    const RECORD_BOF_BIFF8: u16 = 0x0809;
+    const RECORD_EOF: u16 = 0x000A;
+    const RECORD_FILEPASS: u16 = 0x002F;
+
+    let (record_id, bof_payload, mut offset) = read_record(workbook_stream, 0)?;
+    if record_id != RECORD_BOF_BIFF8 {
+        return None;
+    }
+    if bof_payload.len() < 4 || bof_payload[0..2] != [0x00, 0x06] || bof_payload[2..4] != [0x05, 0x00]
+    {
+        return None;
+    }
+
+    while let Some((record_id, data, next)) = read_record(workbook_stream, offset) {
+        if record_id == RECORD_EOF {
+            break;
+        }
+        // A subsequent BOF indicates the next substream (worksheet, etc); FILEPASS must be in
+        // workbook globals.
+        if record_id == RECORD_BOF_BIFF8 {
+            break;
+        }
+        if record_id == RECORD_FILEPASS {
+            // Return the payload range within the workbook stream buffer.
+            let data_start = offset + 4;
+            let data_end = data_start + data.len();
+            return Some(data_start..data_end);
+        }
+        offset = next;
+    }
+    None
 }
 
 #[test]
@@ -66,36 +101,15 @@ fn errors_on_encrypted_xls_fixtures() {
 
         // Assert the underlying fixture stream matches its documented encryption scheme.
         let workbook_stream = read_workbook_stream(&path);
-        let (record_id, bof_payload, next) =
-            read_record(&workbook_stream, 0).expect("read BOF record");
-        assert_eq!(
-            record_id, 0x0809,
-            "expected first record to be BIFF8 BOF in {path:?}"
-        );
-        assert!(
-            bof_payload.len() >= 4
-                && bof_payload[0..2] == [0x00, 0x06]
-                && bof_payload[2..4] == [0x05, 0x00],
-            "expected BOF payload to indicate BIFF8 workbook globals in {path:?}"
-        );
-
-        let (record_id, filepass_payload, next) =
-            read_record(&workbook_stream, next).expect("read FILEPASS record");
-        assert_eq!(
-            record_id, 0x002F,
-            "expected second record to be FILEPASS in {path:?}"
-        );
+        let Some(filepass_range) = workbook_globals_filepass_payload_range(&workbook_stream) else {
+            panic!("expected to find FILEPASS in workbook globals substream for {path:?}");
+        };
+        let filepass_payload = &workbook_stream[filepass_range];
         assert!(
             filepass_payload.starts_with(expected_filepass_prefix),
             "unexpected FILEPASS payload prefix for {path:?}; expected {:02X?}, got {:02X?}",
             expected_filepass_prefix,
             &filepass_payload[..filepass_payload.len().min(expected_filepass_prefix.len())]
-        );
-
-        let (record_id, _, _) = read_record(&workbook_stream, next).expect("read EOF record");
-        assert_eq!(
-            record_id, 0x000A,
-            "expected third record to be EOF in {path:?}"
         );
     }
 }

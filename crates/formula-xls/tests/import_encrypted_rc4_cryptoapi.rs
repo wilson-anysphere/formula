@@ -9,7 +9,8 @@ fn fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
-        .join("encrypted_rc4_cryptoapi_biff8.xls")
+        .join("encrypted")
+        .join("biff8_rc4_cryptoapi_pw_open.xls")
 }
 
 fn read_workbook_stream_from_xls_bytes(data: &[u8]) -> Vec<u8> {
