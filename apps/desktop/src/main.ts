@@ -2091,8 +2091,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "home.alignment.alignRight": formatState.align === "right",
       // AutoSave is only supported in the desktop/Tauri runtime.
       "file.save.autoSave": autoSaveEnabled && isTauriInvokeAvailable(),
-      "view.show.showFormulas": app.getShowFormulas(),
-      "formulas.formulaAuditing.showFormulas": app.getShowFormulas(),
+      "view.toggleShowFormulas": app.getShowFormulas(),
       "view.show.performanceStats": perfStatsEnabled,
       "view.window.split": ribbonLayoutController ? ribbonLayoutController.layout.splitView.direction !== "none" : false,
       "data.queriesConnections.queriesConnections":
@@ -8332,14 +8331,17 @@ mountRibbon(ribbonReactRoot, {
         app.focus();
         return;
       }
-      case "view.show.showFormulas":
-        app.setShowFormulas(pressed);
+      case "view.toggleShowFormulas": {
+        // Route all ribbon "Show Formulas" toggles through the canonical command so
+        // ribbon, command palette, and keybindings share the same logic/guards.
+        if (app.getShowFormulas() !== pressed) {
+          void commandRegistry.executeCommand("view.toggleShowFormulas").catch((err) => {
+            showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+          });
+        }
         app.focus();
         return;
-      case "formulas.formulaAuditing.showFormulas":
-        app.setShowFormulas(pressed);
-        app.focus();
-        return;
+      }
       case "view.show.performanceStats":
         app.setGridPerfStatsEnabled(pressed);
         app.focus();
@@ -8400,8 +8402,7 @@ mountRibbon(ribbonReactRoot, {
     if (
       commandId === "home.font.strikethrough" ||
       commandId === "home.alignment.wrapText" ||
-      commandId === "view.show.showFormulas" ||
-      commandId === "formulas.formulaAuditing.showFormulas" ||
+      commandId === "view.toggleShowFormulas" ||
       commandId === "view.show.performanceStats" ||
       commandId === "view.window.split" ||
       commandId === "file.save.autoSave" ||

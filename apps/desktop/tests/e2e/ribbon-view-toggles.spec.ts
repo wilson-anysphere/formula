@@ -90,7 +90,9 @@ test.describe("ribbon view toggles", () => {
     const formulasTab = page.getByRole("tab", { name: "Formulas", exact: true });
     await expect(formulasTab).toBeVisible();
     await formulasTab.click();
-    const formulasShowFormulasToggle = page.locator('[data-command-id="formulas.formulaAuditing.showFormulas"]');
+    const formulasShowFormulasToggle = page
+      .getByRole("tabpanel", { name: "Formulas", exact: true })
+      .getByRole("button", { name: "Show Formulas", exact: true });
     await expect(formulasShowFormulasToggle).toHaveAttribute("aria-pressed", "true");
 
     // Toggle via the Formulas tab control: should hide formulas and sync back to the View tab toggle.

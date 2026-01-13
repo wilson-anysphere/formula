@@ -1610,7 +1610,7 @@ export const defaultRibbonSchema: RibbonSchema = {
             { id: "formulas.formulaAuditing.tracePrecedents", label: "Trace Precedents", ariaLabel: "Trace Precedents", iconId: "arrowLeft", size: "small" },
             { id: "formulas.formulaAuditing.traceDependents", label: "Trace Dependents", ariaLabel: "Trace Dependents", iconId: "arrowRight", size: "small" },
             { id: "formulas.formulaAuditing.removeArrows", label: "Remove Arrows", ariaLabel: "Remove Arrows", iconId: "close", kind: "dropdown", size: "small" },
-            { id: "formulas.formulaAuditing.showFormulas", label: "Show Formulas", ariaLabel: "Show Formulas", iconId: "function", kind: "toggle", size: "small" },
+            { id: "view.toggleShowFormulas", label: "Show Formulas", ariaLabel: "Show Formulas", iconId: "function", kind: "toggle", size: "small" },
             { id: "formulas.formulaAuditing.errorChecking", label: "Error Checking", ariaLabel: "Error Checking", iconId: "warning", kind: "dropdown", size: "small" },
             { id: "formulas.formulaAuditing.evaluateFormula", label: "Evaluate Formula", ariaLabel: "Evaluate Formula", iconId: "autoSum", kind: "dropdown", size: "small" },
             { id: "formulas.formulaAuditing.watchWindow", label: "Watch Window", ariaLabel: "Watch Window", iconId: "eye", kind: "dropdown", size: "small" },
@@ -2135,7 +2135,7 @@ export const defaultRibbonSchema: RibbonSchema = {
             { id: "view.show.formulaBar", label: "Formula Bar", ariaLabel: "Formula Bar", iconId: "function", kind: "toggle", defaultPressed: true },
             { id: "view.show.headings", label: "Headings", ariaLabel: "Headings", iconId: "headings", kind: "toggle", defaultPressed: true },
             {
-              id: "view.show.showFormulas",
+              id: "view.toggleShowFormulas",
               label: "Show Formulas",
               ariaLabel: "Show formulas (Ctrl/Cmd+`)",
               iconId: "function",

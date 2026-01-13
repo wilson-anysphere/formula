@@ -18,7 +18,8 @@ test("Ribbon schema includes Formulas → Formula Auditing command ids", () => {
     "formulas.formulaAuditing.tracePrecedents",
     "formulas.formulaAuditing.traceDependents",
     "formulas.formulaAuditing.removeArrows",
-    "formulas.formulaAuditing.showFormulas",
+    // "Show Formulas" is intentionally unified with the canonical view command.
+    "view.toggleShowFormulas",
   ];
 
   for (const commandId of commandIds) {
@@ -72,24 +73,34 @@ test("Desktop main.ts wires Formulas → Formula Auditing commands to Spreadshee
   assert.match(
     main,
     new RegExp(
-      `case\\s+["']formulas\\.formulaAuditing\\.showFormulas["']:\\s*\\n` +
-        `\\s*app\\.setShowFormulas\\(pressed\\);\\s*\\n` +
-        `\\s*app\\.focus\\(\\);`,
+      `case\\s+["']view\\.toggleShowFormulas["']:\\s*(?:\\{\\s*)?` +
+        // Ensure the ribbon toggle routes through the canonical command handler.
+        `[\\s\\S]*?commandRegistry\\.executeCommand\\(["']view\\.toggleShowFormulas["']\\)`,
       "m",
     ),
-    "Expected main.ts to handle formulas.formulaAuditing.showFormulas via app.setShowFormulas(pressed)",
+    "Expected main.ts to handle view.toggleShowFormulas via commandRegistry.executeCommand(view.toggleShowFormulas)",
   );
 
   assert.match(
     main,
-    /"formulas\.formulaAuditing\.showFormulas":\s*app\.getShowFormulas\(\)/,
-    "Expected ribbon pressed state to include formulas.formulaAuditing.showFormulas",
+    /"view\.toggleShowFormulas":\s*app\.getShowFormulas\(\)/,
+    "Expected ribbon pressed state to include view.toggleShowFormulas",
   );
 
   assert.match(
     main,
-    /commandId\s*===\s*["']formulas\.formulaAuditing\.showFormulas["']/,
-    "Expected onCommand to ignore formulas.formulaAuditing.showFormulas (toggle semantics handled in onToggle)",
+    /commandId\s*===\s*["']view\.toggleShowFormulas["']/,
+    "Expected onCommand to ignore view.toggleShowFormulas (toggle semantics handled in onToggle)",
+  );
+
+  assert.doesNotMatch(
+    main,
+    /formulas\.formulaAuditing\.showFormulas/,
+    "Expected legacy formulas.formulaAuditing.showFormulas id to be removed from main.ts",
+  );
+  assert.doesNotMatch(
+    main,
+    /view\.show\.showFormulas/,
+    "Expected legacy view.show.showFormulas id to be removed from main.ts",
   );
 });
-
