@@ -70,6 +70,39 @@ describe("duplicateDrawingObject", () => {
     // Ensure original is unchanged (immutability).
     expect(obj.preserved?.["xlsx.pic_xml"]).toContain(`id="1"`);
   });
+
+  it("patches rawXml/raw_xml payloads for shapes and charts", () => {
+    const shape: DrawingObject = {
+      id: 2,
+      kind: {
+        type: "shape",
+        rawXml: `<xdr:sp><xdr:nvSpPr><xdr:cNvPr id="2" name="Shape 2"/></xdr:nvSpPr></xdr:sp>`,
+        raw_xml: `<xdr:sp><xdr:nvSpPr><xdr:cNvPr id="2" name="Shape 2"/></xdr:nvSpPr></xdr:sp>`,
+      },
+      anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 0, cy: 0 } },
+      zOrder: 0,
+    };
+
+    const dupShape = duplicateDrawingObject(shape, 8);
+    expect((dupShape.kind as any).rawXml).toContain(`id="8"`);
+    expect((dupShape.kind as any).rawXml).toContain(`name="Shape 8"`);
+    expect((dupShape.kind as any).raw_xml).toContain(`id="8"`);
+
+    const chart: DrawingObject = {
+      id: 3,
+      kind: {
+        type: "chart",
+        chartId: "rId1",
+        rawXml: `<xdr:graphicFrame><xdr:nvGraphicFramePr><xdr:cNvPr id="3" name="Chart 3"/></xdr:nvGraphicFramePr></xdr:graphicFrame>`,
+      },
+      anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 0, cy: 0 } },
+      zOrder: 0,
+    };
+
+    const dupChart = duplicateDrawingObject(chart, 9);
+    expect((dupChart.kind as any).rawXml).toContain(`id="9"`);
+    expect((dupChart.kind as any).rawXml).toContain(`name="Chart 9"`);
+  });
 });
 
 describe("DrawingInteractionController commit-time patching", () => {
