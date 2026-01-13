@@ -13,7 +13,7 @@ describe("ai-context TS entrypoint", () => {
     writeFileSync(
       tmpFile,
       [
-        'import { ContextManager, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, RagIndex, classifyText, chunkSheetByRegions, chunkSheetByRegionsWithSchema, extractSheetSchema, extractWorkbookSchema, parseA1Range, summarizeSheetSchema, trimMessagesToBudget } from "../src/index.js";',
+        'import { ContextManager, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, RagIndex, classifyText, chunkSheetByRegions, chunkSheetByRegionsWithSchema, extractSheetSchema, extractWorkbookSchema, parseA1Range, summarizeRegion, summarizeSheetSchema, trimMessagesToBudget } from "../src/index.js";',
         "",
         "EXCEL_MAX_ROWS satisfies number;",
         "EXCEL_MAX_COLS satisfies number;",
@@ -30,6 +30,8 @@ describe("ai-context TS entrypoint", () => {
         "",
         "const summary = summarizeSheetSchema(schema);",
         "summary satisfies string;",
+        "const regionSummary = summarizeRegion(schema.tables[0]!);",
+        "regionSummary satisfies string;",
         "",
         'const chunks = chunkSheetByRegions({ name: "Sheet1", values: [[1]] });',
         'chunks[0]?.metadata.type satisfies "region";',
@@ -102,6 +104,9 @@ describe("ai-context TS entrypoint", () => {
         "",
         "// @ts-expect-error - summarizeSheetSchema expects a SheetSchema.",
         "summarizeSheetSchema({});",
+        "",
+        "// @ts-expect-error - summarizeRegion expects a TableSchema or DataRegionSchema.",
+        "summarizeRegion({});",
         "",
         "// @ts-expect-error - buildContext requires a query string.",
         'cm.buildContext({ sheet: { name: "Sheet1", values: [[1]] } });',
