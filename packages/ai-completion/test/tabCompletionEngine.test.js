@@ -3051,6 +3051,34 @@ test("Quoted sheet-name prefixes are suggested as 'Sheet Name'! inside range arg
   );
 });
 
+test("Quoted sheet-name prefix completions escape apostrophes (Bob's Sheet → 'Bob''s Sheet'!)", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Bob's Sheet"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM('Bo";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM('Bob''s Sheet'!"),
+    `Expected a quoted sheet-prefix suggestion with escaped apostrophe, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.equal(
+    suggestions.filter((s) => s.text.endsWith("!)")).length,
+    0,
+    `Expected escaped quoted sheet-prefix suggestions to not auto-close parens, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Sheet prefixes are not suggested when the user hasn't started quotes for a sheet that needs them (=SUM(My Sheet)", async () => {
   const engine = new TabCompletionEngine({
     schemaProvider: {
@@ -3782,6 +3810,35 @@ test("Completion client request falls back to A1 when cellRef is invalid", async
   assert.equal(seenReq?.cellA1, "A1");
   assert.equal(typeof seenReq?.signal?.aborted, "boolean");
   assert.ok(Array.isArray(suggestions));
+});
+
+test("buildCacheKey never throws when cache-key providers throw", () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getCacheKey: () => {
+        throw new Error("boom");
+      },
+    },
+  });
+
+  const key = engine.buildCacheKey({
+    // @ts-ignore - intentionally invalid
+    currentInput: 123,
+    cursorPosition: -5,
+    // @ts-ignore - intentionally invalid
+    cellRef: "not-a1",
+    surroundingCells: {
+      getCellValue() {
+        return null;
+      },
+      getCacheKey() {
+        throw new Error("boom");
+      },
+    },
+  });
+
+  assert.equal(typeof key, "string");
+  assert.ok(key.length > 0);
 });
 
 test("parsePartialFormula errors do not crash getSuggestions (falls back to pattern suggestions)", async () => {
