@@ -19,13 +19,21 @@ function isNodeRuntime() {
   return Boolean(proc?.versions?.node);
 }
 
+async function importNodeZlib() {
+  // Important: keep the specifier non-literal so browser bundlers (esbuild, Rollup, etc)
+  // don't try to resolve `node:zlib` when producing a browser bundle. This code path
+  // is only executed in Node runtimes (guarded by `isNodeRuntime()`).
+  const specifier = "node:zlib";
+  return import(/* @vite-ignore */ specifier);
+}
+
 /**
  * @param {Uint8Array} bytes
  * @returns {Promise<Uint8Array>}
  */
 async function gzipBytes(bytes) {
   if (isNodeRuntime()) {
-    const zlib = await import(/* @vite-ignore */ "node:zlib");
+    const zlib = await importNodeZlib();
     return new Uint8Array(zlib.gzipSync(bytes));
   }
 
@@ -47,7 +55,7 @@ async function gzipBytes(bytes) {
  */
 async function gunzipBytes(bytes) {
   if (isNodeRuntime()) {
-    const zlib = await import(/* @vite-ignore */ "node:zlib");
+    const zlib = await importNodeZlib();
     return new Uint8Array(zlib.gunzipSync(bytes));
   }
 
