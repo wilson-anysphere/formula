@@ -141,6 +141,14 @@ pub struct CfStyleOverride {
     pub italic: Option<bool>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DataBarDirection {
+    LeftToRight,
+    RightToLeft,
+    /// Excel's default: follow sheet / locale direction.
+    Context,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DataBarRule {
     pub min: Cfvo,
@@ -150,6 +158,9 @@ pub struct DataBarRule {
     pub min_length: Option<u8>,
     pub max_length: Option<u8>,
     pub gradient: Option<bool>,
+    pub negative_fill_color: Option<Color>,
+    pub axis_color: Option<Color>,
+    pub direction: Option<DataBarDirection>,
 }
 
 impl DataBarRule {
@@ -1747,6 +1758,9 @@ mod tests {
                 min_length: Some(10),
                 max_length: Some(90),
                 gradient: Some(false),
+                negative_fill_color: None,
+                axis_color: None,
+                direction: None,
             }),
             dependencies: vec![],
         };
@@ -1832,6 +1846,9 @@ mod tests {
                 min_length: None,
                 max_length: None,
                 gradient: None,
+                negative_fill_color: None,
+                axis_color: None,
+                direction: None,
             }),
             dependencies: vec![],
         };
@@ -2107,5 +2124,62 @@ mod tests {
             })),
             None
         );
+    }
+
+    #[test]
+    fn databar_rule_serde_round_trip_preserves_x14_fields() {
+        let rule = DataBarRule {
+            min: Cfvo {
+                type_: CfvoType::AutoMin,
+                value: None,
+            },
+            max: Cfvo {
+                type_: CfvoType::AutoMax,
+                value: None,
+            },
+            color: Some(Color::new_argb(0xFF638EC6)),
+            min_length: Some(0),
+            max_length: Some(100),
+            gradient: Some(false),
+            negative_fill_color: Some(Color::new_argb(0xFFFF0000)),
+            axis_color: Some(Color::new_argb(0xFF000000)),
+            direction: Some(DataBarDirection::LeftToRight),
+        };
+
+        let json = serde_json::to_string(&rule).expect("serialize");
+        let round_tripped: DataBarRule = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(round_tripped, rule);
+    }
+
+    #[test]
+    fn databar_rule_serde_backwards_compatible_when_x14_fields_absent() {
+        let rule = DataBarRule {
+            min: Cfvo {
+                type_: CfvoType::AutoMin,
+                value: None,
+            },
+            max: Cfvo {
+                type_: CfvoType::AutoMax,
+                value: None,
+            },
+            color: None,
+            min_length: None,
+            max_length: None,
+            gradient: None,
+            negative_fill_color: Some(Color::new_argb(0xFFFF0000)),
+            axis_color: Some(Color::new_argb(0xFF000000)),
+            direction: Some(DataBarDirection::RightToLeft),
+        };
+
+        let mut value = serde_json::to_value(&rule).expect("serialize to value");
+        let obj = value.as_object_mut().expect("object");
+        obj.remove("negative_fill_color");
+        obj.remove("axis_color");
+        obj.remove("direction");
+
+        let deserialized: DataBarRule = serde_json::from_value(value).expect("deserialize without x14 fields");
+        assert_eq!(deserialized.negative_fill_color, None);
+        assert_eq!(deserialized.axis_color, None);
+        assert_eq!(deserialized.direction, None);
     }
 }

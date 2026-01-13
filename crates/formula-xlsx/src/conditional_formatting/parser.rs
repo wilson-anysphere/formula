@@ -1,7 +1,7 @@
 use formula_model::{
     extract_a1_references, parse_argb_hex_color, parse_sqref, CellIsOperator, CfRule, CfRuleKind,
-    CfRuleSchema, Cfvo, CfvoType, ColorScaleRule, DataBarRule, IconSet, IconSetRule, TopBottomKind,
-    TopBottomRule, UniqueDuplicateRule,
+    CfRuleSchema, Cfvo, CfvoType, ColorScaleRule, DataBarDirection, DataBarRule, IconSet, IconSetRule,
+    TopBottomKind, TopBottomRule, UniqueDuplicateRule,
 };
 use roxmltree::Document;
 use std::collections::HashMap;
@@ -243,6 +243,9 @@ fn parse_data_bar(rule_node: roxmltree::Node<'_, '_>, main_ns: &str) -> Option<C
         min_length: None,
         max_length: None,
         gradient: None,
+        negative_fill_color: None,
+        axis_color: None,
+        direction: None,
     }))
 }
 
@@ -266,6 +269,28 @@ fn parse_x14_data_bar(rule_node: roxmltree::Node<'_, '_>, x14_ns: &str) -> Optio
     let gradient = data_bar
         .attribute("gradient")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+    let direction = data_bar.attribute("direction").and_then(|v| match v {
+        "leftToRight" => Some(DataBarDirection::LeftToRight),
+        "rightToLeft" => Some(DataBarDirection::RightToLeft),
+        "context" => Some(DataBarDirection::Context),
+        _ => None,
+    });
+    let negative_fill_color = data_bar
+        .children()
+        .find(|n| {
+            n.is_element()
+                && n.tag_name().name() == "negativeFillColor"
+                && n.tag_name().namespace() == Some(x14_ns)
+        })
+        .and_then(|n| n.attribute("rgb"))
+        .and_then(parse_argb_hex_color);
+    let axis_color = data_bar
+        .children()
+        .find(|n| {
+            n.is_element() && n.tag_name().name() == "axisColor" && n.tag_name().namespace() == Some(x14_ns)
+        })
+        .and_then(|n| n.attribute("rgb"))
+        .and_then(parse_argb_hex_color);
 
     // x14 extended schema typically omits the positive fill color; it remains in the base cfRule.
     Some(CfRuleKind::DataBar(DataBarRule {
@@ -275,6 +300,9 @@ fn parse_x14_data_bar(rule_node: roxmltree::Node<'_, '_>, x14_ns: &str) -> Optio
         min_length,
         max_length,
         gradient,
+        negative_fill_color,
+        axis_color,
+        direction,
     }))
 }
 
@@ -380,6 +408,9 @@ fn merge_x14_into_base(base: &mut CfRule, ext: &CfRule) {
             base_db.min_length = ext_db.min_length.or(base_db.min_length);
             base_db.max_length = ext_db.max_length.or(base_db.max_length);
             base_db.gradient = ext_db.gradient.or(base_db.gradient);
+            base_db.negative_fill_color = ext_db.negative_fill_color.or(base_db.negative_fill_color);
+            base_db.axis_color = ext_db.axis_color.or(base_db.axis_color);
+            base_db.direction = ext_db.direction.or(base_db.direction);
         }
         _ => {}
     }
