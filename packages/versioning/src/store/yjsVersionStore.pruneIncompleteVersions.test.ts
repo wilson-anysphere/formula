@@ -302,4 +302,43 @@ describe("YjsVersionStore: pruneIncompleteVersions()", () => {
     expect(doc.getMap("versions").get("missingChunks")).toBeUndefined();
     expect((doc.getMap("versionsMeta").get("order") as any)?.toArray?.()).toEqual([]);
   });
+
+  it("listVersions() opportunistically prunes stale incomplete records using the default policy", async () => {
+    const doc = new Y.Doc();
+    const store = new YjsVersionStore({
+      doc,
+      writeMode: "stream",
+      chunkSize: 1024,
+      maxChunksPerTransaction: 2,
+    });
+
+    doc.transact(() => {
+      const versions = doc.getMap("versions");
+      const meta = doc.getMap("versionsMeta");
+      const order = new Y.Array<string>();
+      meta.set("order", order);
+
+      const record = new Y.Map<any>();
+      record.set("schemaVersion", 1);
+      record.set("id", "staleIncomplete");
+      record.set("kind", "snapshot");
+      // Extremely old timestamps; should be pruned by default (10 minute) threshold.
+      record.set("timestampMs", 1);
+      record.set("createdAtMs", 1);
+      record.set("compression", "none");
+      record.set("snapshotEncoding", "chunks");
+      record.set("snapshotChunkCountExpected", 2);
+      record.set("snapshotComplete", false);
+      const chunks = new Y.Array<Uint8Array>();
+      chunks.push([new Uint8Array([1])]);
+      record.set("snapshotChunks", chunks);
+
+      versions.set("staleIncomplete", record);
+      order.push(["staleIncomplete"]);
+    }, "test");
+
+    expect(await store.listVersions()).toEqual([]);
+    expect(doc.getMap("versions").get("staleIncomplete")).toBeUndefined();
+    expect((doc.getMap("versionsMeta").get("order") as any)?.toArray?.()).toEqual([]);
+  });
 });

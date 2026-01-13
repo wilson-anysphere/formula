@@ -694,6 +694,10 @@ export class YjsVersionStore {
    * writer crashes, these incomplete records remain in the Y.Doc but are hidden
    * from callers (`getVersion()` returns null, `listVersions()` drops them).
    *
+   * Some older/corrupted docs may also contain version records that are unreadable
+   * even when `snapshotComplete` is unset/incorrect (e.g. chunk payloads that are
+   * missing expected chunks).
+   *
    * Because callers don't see them, retention policies may never delete them.
    * This method deletes *stale* incomplete records so they don't accumulate
    * indefinitely.
