@@ -22,7 +22,7 @@ describe("Ribbon schema iconId coverage", () => {
     const iconButtons = collectButtonsBySize("icon");
 
     // Guard against a broken traversal so the test can't pass vacuously.
-    expect(iconButtons.map((button) => button.id)).toContain("home.font.bold");
+    expect(iconButtons.map((button) => button.id)).toContain("format.toggleBold");
 
     const missing = iconButtons.filter((button) => !button.iconId).map((button) => button.id);
     expect(missing).toEqual([]);

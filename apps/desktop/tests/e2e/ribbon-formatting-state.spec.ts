@@ -39,7 +39,7 @@ test.describe("ribbon formatting state", () => {
     await homeTab.click();
     await expect(homeTab).toHaveAttribute("aria-selected", "true");
 
-    const bold = ribbon.locator('button[data-command-id="home.font.bold"]');
+    const bold = ribbon.locator('button[data-command-id="format.toggleBold"]');
     await expect(bold).toBeVisible();
     await expect(bold).toHaveAttribute("aria-pressed", "false");
 

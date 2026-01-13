@@ -193,7 +193,7 @@ test.describe("sheet navigation shortcuts", () => {
     await homeTab.click();
     await expect(homeTab).toHaveAttribute("aria-selected", "true");
 
-    const bold = ribbon.locator('button[data-command-id="home.font.bold"]');
+    const bold = ribbon.locator('button[data-command-id="format.toggleBold"]');
     await expect(bold).toBeVisible();
     await bold.focus();
     await expect(bold).toBeFocused();

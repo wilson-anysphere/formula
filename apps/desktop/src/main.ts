@@ -2081,9 +2081,9 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const perfStatsEnabled = Boolean(perfStats?.enabled);
 
     const pressedById = {
-      "home.font.bold": formatState.bold,
-      "home.font.italic": formatState.italic,
-      "home.font.underline": formatState.underline,
+      "format.toggleBold": formatState.bold,
+      "format.toggleItalic": formatState.italic,
+      "format.toggleUnderline": formatState.underline,
       "home.font.strikethrough": formatState.strikethrough,
       "home.alignment.wrapText": formatState.wrapText,
       "home.alignment.alignLeft": formatState.align === "left",
@@ -2171,23 +2171,23 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       ...(isEditing
         ? {
             // Formatting commands are disabled while editing (Excel-style behavior).
-            "home.font.bold": true,
-            "home.font.italic": true,
-            "home.font.underline": true,
+            "format.toggleBold": true,
+            "format.toggleItalic": true,
+            "format.toggleUnderline": true,
             "home.font.strikethrough": true,
             "home.font.fontName": true,
             "home.font.fontSize": true,
             "home.font.increaseFont": true,
             "home.font.decreaseFont": true,
-             "home.font.fontColor": true,
-             "home.font.fillColor": true,
-             "home.font.borders": true,
-             "home.font.clearFormatting": true,
-             "home.clipboard.formatPainter": true,
-             "home.alignment.wrapText": true,
-             "home.alignment.topAlign": true,
-             "home.alignment.middleAlign": true,
-             "home.alignment.bottomAlign": true,
+            "home.font.fontColor": true,
+            "home.font.fillColor": true,
+            "home.font.borders": true,
+            "home.font.clearFormatting": true,
+            "home.clipboard.formatPainter": true,
+            "home.alignment.wrapText": true,
+            "home.alignment.topAlign": true,
+            "home.alignment.middleAlign": true,
+            "home.alignment.bottomAlign": true,
             "home.alignment.alignLeft": true,
             "home.alignment.center": true,
             "home.alignment.alignRight": true,
@@ -2201,10 +2201,10 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.number.date": true,
             "home.number.comma": true,
             "home.number.increaseDecimal": true,
-             "home.number.decreaseDecimal": true,
-             "home.number.formatCells": true,
-           }
-         : null),
+            "home.number.decreaseDecimal": true,
+            "home.number.formatCells": true,
+          }
+        : null),
       ...(printExportAvailable
         ? null
         : {
@@ -8358,17 +8358,6 @@ mountRibbon(ribbonReactRoot, {
         app.focus();
         return;
       }
-      case "home.font.bold":
-        applyFormattingToSelection("Bold", (doc, sheetId, ranges) => toggleBold(doc, sheetId, ranges, { next: pressed }));
-        return;
-      case "home.font.italic":
-        applyFormattingToSelection("Italic", (doc, sheetId, ranges) => toggleItalic(doc, sheetId, ranges, { next: pressed }));
-        return;
-      case "home.font.underline":
-        applyFormattingToSelection("Underline", (doc, sheetId, ranges) =>
-          toggleUnderline(doc, sheetId, ranges, { next: pressed }),
-        );
-        return;
       case "home.font.strikethrough":
         applyFormattingToSelection("Strikethrough", (doc, sheetId, ranges) => {
           let applied = true;
@@ -8394,13 +8383,19 @@ mountRibbon(ribbonReactRoot, {
       });
     };
 
+    if (
+      commandId === "format.toggleBold" ||
+      commandId === "format.toggleItalic" ||
+      commandId === "format.toggleUnderline"
+    ) {
+      executeBuiltinCommand(commandId);
+      return;
+    }
+
     // Toggle buttons trigger both `onToggle` and `onCommand`. We handle most toggle
     // semantics in `onToggle` (since it provides the `pressed` state). Avoid
     // falling through to the default "unimplemented" toast here.
     if (
-      commandId === "home.font.bold" ||
-      commandId === "home.font.italic" ||
-      commandId === "home.font.underline" ||
       commandId === "home.font.strikethrough" ||
       commandId === "home.alignment.wrapText" ||
       commandId === "view.show.showFormulas" ||

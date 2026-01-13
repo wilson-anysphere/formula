@@ -32,13 +32,13 @@ function renderRibbon() {
 describe("Ribbon UI state overrides", () => {
   it("updates toggle aria-pressed when pressed overrides change", () => {
     const { container, root } = renderRibbon();
-    const bold = container.querySelector<HTMLButtonElement>('[data-command-id="home.font.bold"]');
+    const bold = container.querySelector<HTMLButtonElement>('[data-command-id="format.toggleBold"]');
     expect(bold).toBeInstanceOf(HTMLButtonElement);
     expect(bold?.getAttribute("aria-pressed")).toBe("false");
 
     act(() => {
       setRibbonUiState({
-        pressedById: { "home.font.bold": true },
+        pressedById: { "format.toggleBold": true },
         labelById: Object.create(null),
         disabledById: Object.create(null),
       });
@@ -68,4 +68,3 @@ describe("Ribbon UI state overrides", () => {
     act(() => root.unmount());
   });
 });
-

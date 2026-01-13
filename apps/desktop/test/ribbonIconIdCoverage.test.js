@@ -181,7 +181,7 @@ test('ribbon schema assigns an iconId for every button with size: "icon"', () =>
 
   const iconButtons = collectSchemaButtonsWithSize(schemaSource, "icon");
   assert.ok(
-    iconButtons.some((button) => button.id === "home.font.bold"),
+    iconButtons.some((button) => button.id === "format.toggleBold"),
     "Sanity-check: expected an icon-sized button id",
   );
 

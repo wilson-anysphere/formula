@@ -33,7 +33,7 @@ describe("Ribbon icon rendering", () => {
   it("renders SVG icons for schema buttons with iconId (and no icon otherwise)", () => {
     const { container, root } = renderRibbon();
 
-    const bold = container.querySelector<HTMLButtonElement>('[data-command-id="home.font.bold"]');
+    const bold = container.querySelector<HTMLButtonElement>('[data-command-id="format.toggleBold"]');
     expect(bold).toBeInstanceOf(HTMLButtonElement);
     expect(bold?.querySelector(".ribbon-button__icon svg")).toBeInstanceOf(SVGSVGElement);
 

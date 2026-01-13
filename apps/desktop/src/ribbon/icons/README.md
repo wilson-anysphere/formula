@@ -30,7 +30,7 @@ import { RibbonIcon } from "./RibbonIcon";
 
 ```ts
 {
-  id: "home.font.bold",
+  id: "format.toggleBold",
   label: "Bold",
   size: "icon",
   iconId: "bold",
