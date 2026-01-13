@@ -6,7 +6,8 @@
 //! See `docs/offcrypto-standard-cryptoapi-rc4.md` for the full writeup, including why the RC4
 //! re-key interval is 0x200 bytes (and not the BIFF8 0x400-byte interval).
 
-use sha1::{Digest as _, Sha1};
+use md5::{Digest as _, Md5};
+use sha1::Sha1;
 
 fn hex_decode(mut s: &str) -> Vec<u8> {
     // Keep parsing permissive for readability in expected-value literals.
@@ -70,6 +71,33 @@ fn standard_rc4_spun_password_hash(password: &str, salt: &[u8], spin_count: u32)
 /// `rc4_key = SHA1(H || LE32(block_index))[0..key_len]`
 fn standard_rc4_derive_block_key(h: [u8; 20], block_index: u32, key_len: usize) -> Vec<u8> {
     let mut hasher = Sha1::new();
+    hasher.update(h);
+    hasher.update(block_index.to_le_bytes());
+    let digest = hasher.finalize();
+    digest[..key_len].to_vec()
+}
+
+/// Standard CryptoAPI "spun password hash" helper for MD5.
+fn standard_rc4_spun_password_hash_md5(password: &str, salt: &[u8], spin_count: u32) -> [u8; 16] {
+    let pw = password_utf16le_bytes(password);
+    let mut h = Md5::new();
+    h.update(salt);
+    h.update(&pw);
+    let mut cur: [u8; 16] = h.finalize().into();
+
+    for i in 0..spin_count {
+        let mut h = Md5::new();
+        h.update(i.to_le_bytes());
+        h.update(cur);
+        cur = h.finalize().into();
+    }
+
+    cur
+}
+
+/// Standard CryptoAPI per-block key derivation helper for MD5.
+fn standard_rc4_derive_block_key_md5(h: [u8; 16], block_index: u32, key_len: usize) -> Vec<u8> {
+    let mut hasher = Md5::new();
     hasher.update(h);
     hasher.update(block_index.to_le_bytes());
     let digest = hasher.finalize();
@@ -147,4 +175,28 @@ fn standard_cryptoapi_rc4_derivation_vector() {
         hex_decode("e7c9974140e69857dbdec656c7ccb4f9283d723236")
     );
     assert_eq!(rc4_apply(&key0, &ciphertext), plaintext);
+}
+
+#[test]
+fn standard_cryptoapi_rc4_derivation_md5_vector() {
+    let password = "password";
+    let salt: Vec<u8> = (0u8..=0x0F).collect();
+    let spin_count = 50_000u32;
+    let key_len = 16usize;
+
+    let h = standard_rc4_spun_password_hash_md5(password, &salt, spin_count);
+
+    let key0 = standard_rc4_derive_block_key_md5(h, 0, key_len);
+    let key1 = standard_rc4_derive_block_key_md5(h, 1, key_len);
+    let key2 = standard_rc4_derive_block_key_md5(h, 2, key_len);
+    let key3 = standard_rc4_derive_block_key_md5(h, 3, key_len);
+
+    assert_eq!(key0, hex_decode("69badcae244868e209d4e053ccd2a3bc"));
+    assert_eq!(key1, hex_decode("6f4d502ab37700ffdab5704160455b47"));
+    assert_eq!(key2, hex_decode("ac69022e396c7750872133f37e2c7afc"));
+    assert_eq!(key3, hex_decode("1b056e7118ab8d35e9d67adee8b11104"));
+
+    // Truncation for 40-bit RC4 keys.
+    let key0_40 = standard_rc4_derive_block_key_md5(h, 0, 5);
+    assert_eq!(key0_40, hex_decode("69badcae24"));
 }

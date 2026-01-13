@@ -2202,6 +2202,7 @@ dependencies = [
  "formula-xls",
  "formula-xlsb",
  "formula-xlsx",
+ "md-5",
  "roxmltree",
  "sha1",
  "tempfile",
