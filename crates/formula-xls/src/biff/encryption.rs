@@ -207,6 +207,14 @@ fn decrypt_after_filepass(
 mod tests {
     use super::*;
 
+    fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(4 + payload.len());
+        out.extend_from_slice(&record_id.to_le_bytes());
+        out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
     #[test]
     fn parses_biff5_xor_filepass() {
         let payload = [0x34, 0x12, 0x78, 0x56];
@@ -312,5 +320,53 @@ mod tests {
         let err = parse_filepass_record(BiffVersion::Biff8, &payload).expect_err("expected err");
         assert!(matches!(err, DecryptError::InvalidFilePass(_)));
     }
-}
 
+    #[test]
+    fn decrypt_workbook_stream_requires_password_when_filepass_present() {
+        // Minimal BIFF8 stream: BOF + FILEPASS + EOF.
+        let bof_payload = [0x00, 0x06, 0x05, 0x00]; // BIFF8, workbook globals
+        let filepass_payload = [
+            0x00, 0x00, // wEncryptionType (XOR)
+            0x34, 0x12, // key
+            0x78, 0x56, // verifier
+        ];
+        let mut stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_payload),
+            record(records::RECORD_FILEPASS, &filepass_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let err = decrypt_workbook_stream(&mut stream, "").expect_err("expected error");
+        assert_eq!(err, DecryptError::PasswordRequired);
+    }
+
+    #[test]
+    fn decrypt_workbook_stream_returns_no_filepass_when_missing() {
+        let bof_payload = [0x00, 0x06, 0x05, 0x00];
+        let mut stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let err = decrypt_workbook_stream(&mut stream, "pw").expect_err("expected error");
+        assert_eq!(err, DecryptError::NoFilePass);
+    }
+
+    #[test]
+    fn decrypt_workbook_stream_ignores_filepass_after_next_bof() {
+        let bof_payload = [0x00, 0x06, 0x05, 0x00];
+        let mut stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_payload),
+            // Next BOF indicates the start of another substream; FILEPASS must not be scanned there.
+            record(records::RECORD_BOF_BIFF8, &bof_payload),
+            record(records::RECORD_FILEPASS, &[]),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let err = decrypt_workbook_stream(&mut stream, "pw").expect_err("expected error");
+        assert_eq!(err, DecryptError::NoFilePass);
+    }
+}
