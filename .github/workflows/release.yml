@@ -917,6 +917,70 @@ jobs:
           tauriScript: cargo tauri
           args: --target universal-apple-darwin
 
+      # Debug symbols are not end-user installer assets, but they are needed for post-release crash
+      # symbolication. Package them separately so they can be downloaded from the workflow run
+      # without bloating installer bundles.
+      - name: Package macOS debug symbols (dSYM)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p debug-symbols
+
+          roots=()
+          if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+            cargo_target_dir="${CARGO_TARGET_DIR}"
+            if [[ "${cargo_target_dir}" != /* ]]; then
+              cargo_target_dir="${PWD}/${cargo_target_dir}"
+            fi
+            if [[ -d "${cargo_target_dir}" ]]; then
+              roots+=("${cargo_target_dir}")
+            fi
+          fi
+          for root in "apps/desktop/src-tauri/target" "apps/desktop/target" "target"; do
+            if [[ -d "${root}" ]]; then
+              roots+=("${root}")
+            fi
+          done
+          if ((${#roots[@]} == 0)); then
+            echo "debug-symbols: ERROR no Cargo target directories found (CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-<unset>})" >&2
+            exit 1
+          fi
+
+          shopt -s nullglob
+          dsym_dirs=()
+          for root in "${roots[@]}"; do
+            dsym_dirs+=("${root}"/release/bundle/macos/*.dSYM)
+            dsym_dirs+=("${root}"/*/release/bundle/macos/*.dSYM)
+          done
+          shopt -u nullglob
+
+          if ((${#dsym_dirs[@]} == 0)); then
+            echo "debug-symbols: ERROR no .dSYM bundles found under **/release/bundle/macos/**" >&2
+            exit 1
+          fi
+          mapfile -t dsym_dirs < <(printf '%s\n' "${dsym_dirs[@]}" | sort -u)
+
+          for dsym in "${dsym_dirs[@]}"; do
+            base="$(basename "$dsym")"
+            out="debug-symbols/${base}.zip"
+            echo "debug-symbols: zipping $dsym -> $out"
+            rm -f "$out"
+            # Use `ditto` to preserve bundle structure/metadata for dSYM directories.
+            ditto -c -k --sequesterRsrc --keepParent "$dsym" "$out"
+          done
+
+          ls -lah debug-symbols
+
+      - name: Upload debug symbol archives (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: debug-symbols-${{ needs.validate-version.outputs.artifact_label }}-${{ matrix.cache_target }}
+          path: debug-symbols/*.zip
+          if-no-files-found: error
+
       - name: Desktop dist asset report
         if: runner.os == 'macOS'
         run: node scripts/desktop_dist_asset_report.mjs
@@ -1040,6 +1104,46 @@ jobs:
           # action install a floating `@tauri-apps/cli@v2` toolchain.
           tauriScript: cargo tauri
           args: ${{ matrix.tauri_args }}
+
+      - name: Package Windows debug symbols (PDB)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $target = "${{ matrix.rust_target }}"
+          if ([string]::IsNullOrWhiteSpace($target)) {
+            throw "debug-symbols: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
+          }
+
+          $candidatePdbs = @(
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/formula-desktop.pdb"),
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/$target/release/formula-desktop.pdb"),
+            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/formula-desktop.pdb")
+          )
+
+          $pdbPath = $candidatePdbs | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $pdbPath) {
+            $joined = $candidatePdbs -join "`n"
+            throw "debug-symbols: ERROR formula-desktop.pdb not found. Looked in:`n$joined"
+          }
+
+          New-Item -ItemType Directory -Force -Path "debug-symbols" | Out-Null
+          Copy-Item -Force $pdbPath "debug-symbols/formula-desktop.pdb"
+
+          $zipPath = "debug-symbols/formula-desktop.pdb.zip"
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+          Compress-Archive -Path "debug-symbols/formula-desktop.pdb" -DestinationPath $zipPath
+
+          Get-ChildItem -Path "debug-symbols" | Format-Table Name,Length
+
+      - name: Upload debug symbol archives (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: debug-symbols-${{ needs.validate-version.outputs.artifact_label }}-${{ matrix.cache_target }}
+          path: debug-symbols/*.zip
+          if-no-files-found: error
 
       - name: Smoke check packaged cross-origin isolation (COOP/COEP)
         # Run against the already-built Tauri artifacts from the previous step.
