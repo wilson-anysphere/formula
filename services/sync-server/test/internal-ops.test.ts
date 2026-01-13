@@ -418,15 +418,26 @@ test("purge handles dot-segment doc ids without URL normalization", async (t) =>
 
   await waitForCondition(async () => !(await fileExists(persistedPath)), 10_000);
 
-  const tombstonesRaw = await readFile(path.join(dataDir, "tombstones.json"), "utf8");
+  const tombstonesLogRaw = await readFile(path.join(dataDir, "tombstones.log"), "utf8");
   if (process.platform !== "win32") {
-    const st = await stat(path.join(dataDir, "tombstones.json"));
+    const st = await stat(path.join(dataDir, "tombstones.log"));
     assert.equal(st.mode & 0o777, 0o600);
   }
-  const tombstones = JSON.parse(tombstonesRaw) as any;
-  assert.equal(tombstones.schemaVersion, 1);
-  assert.ok(typeof tombstones.tombstones === "object" && tombstones.tombstones !== null);
-  assert.ok(Object.prototype.hasOwnProperty.call(tombstones.tombstones, docKey));
+  const records = tombstonesLogRaw
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as any);
+  assert.ok(
+    records.some(
+      (r) =>
+        r &&
+        typeof r === "object" &&
+        r.op === "set" &&
+        r.docKey === docKey &&
+        typeof r.deletedAtMs === "number"
+    )
+  );
 
   const wsStatus = await rawWebSocketUpgradeStatus({
     host: "127.0.0.1",
