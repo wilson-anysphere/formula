@@ -25,6 +25,15 @@ const RECORD_SUPBOOK: u16 = 0x01AE;
 /// See [MS-XLS] 2.4.106 (EXTERNNAME).
 const RECORD_EXTERNNAME: u16 = 0x0023;
 
+/// Maximum number of warnings retained while scanning for `SUPBOOK` / `EXTERNNAME` metadata.
+///
+/// Corrupt workbook streams can contain huge numbers of malformed records; capping warning growth
+/// prevents unbounded memory usage while still surfacing that something went wrong.
+const MAX_SUPBOOK_WARNINGS: usize = 200;
+
+const SUPBOOK_WARNINGS_SUPPRESSED_MSG: &str =
+    "too many SUPBOOK/EXTERNNAME warnings; further warnings suppressed";
+
 // BIFF8 string option flags used by XLUnicodeString.
 // See [MS-XLS] 2.5.268.
 const STR_FLAG_HIGH_BYTE: u8 = 0x01;
@@ -69,6 +78,30 @@ pub(crate) struct SupBookTable {
     pub(crate) warnings: Vec<String>,
 }
 
+fn push_warning(out: &mut SupBookTable, msg: String) {
+    if out.warnings.len() < MAX_SUPBOOK_WARNINGS {
+        out.warnings.push(msg);
+        return;
+    }
+
+    // Cap reached: keep the list bounded and emit a single suppression marker.
+    if out.warnings.len() > MAX_SUPBOOK_WARNINGS {
+        out.warnings.truncate(MAX_SUPBOOK_WARNINGS);
+    }
+    if out
+        .warnings
+        .last()
+        .is_some_and(|w| w == SUPBOOK_WARNINGS_SUPPRESSED_MSG)
+    {
+        return;
+    }
+
+    // Keep `warnings.len() == MAX_SUPBOOK_WARNINGS` by overwriting the last entry.
+    if let Some(last) = out.warnings.last_mut() {
+        *last = SUPBOOK_WARNINGS_SUPPRESSED_MSG.to_string();
+    }
+}
+
 pub(crate) fn parse_biff8_supbook_table(workbook_stream: &[u8], codepage: u16) -> SupBookTable {
     let mut out = SupBookTable::default();
 
@@ -81,9 +114,12 @@ pub(crate) fn parse_biff8_supbook_table(workbook_stream: &[u8], codepage: u16) -
         let record = match record {
             Ok(record) => record,
             Err(err) => {
-                out.warnings.push(format!(
+                push_warning(
+                    &mut out,
+                    format!(
                     "malformed BIFF record while scanning for SUPBOOK/EXTERNNAME: {err}"
-                ));
+                    ),
+                );
                 break;
             }
         };
@@ -97,25 +133,33 @@ pub(crate) fn parse_biff8_supbook_table(workbook_stream: &[u8], codepage: u16) -
         match record.record_id {
             RECORD_SUPBOOK => {
                 let (info, warnings) = parse_supbook_record(&record, codepage);
-                out.warnings.extend(warnings);
+                for warning in warnings {
+                    push_warning(&mut out, warning);
+                }
                 out.supbooks.push(info);
                 current_supbook = Some(out.supbooks.len().saturating_sub(1));
             }
             RECORD_EXTERNNAME => {
                 let Some(idx) = current_supbook else {
-                    out.warnings.push(format!(
-                        "EXTERNNAME record at offset {} without preceding SUPBOOK",
-                        record.offset
-                    ));
+                    push_warning(
+                        &mut out,
+                        format!(
+                            "EXTERNNAME record at offset {} without preceding SUPBOOK",
+                            record.offset
+                        ),
+                    );
                     continue;
                 };
 
                 match parse_externname_record(&record, codepage) {
                     Ok(name) => out.supbooks[idx].extern_names.push(name),
-                    Err(err) => out.warnings.push(format!(
-                        "failed to parse EXTERNNAME record at offset {}: {err}",
-                        record.offset
-                    )),
+                    Err(err) => push_warning(
+                        &mut out,
+                        format!(
+                            "failed to parse EXTERNNAME record at offset {}: {err}",
+                            record.offset
+                        ),
+                    ),
                 }
             }
             records::RECORD_EOF => break,
@@ -835,5 +879,27 @@ mod tests {
         assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
         assert_eq!(parsed.supbooks.len(), 1);
         assert_eq!(parsed.supbooks[0].extern_names, vec!["ABCDEFG".to_string()]);
+    }
+
+    #[test]
+    fn caps_warning_growth_for_externname_records_without_supbook() {
+        // Corrupt streams can contain a long run of EXTERNNAME records before any SUPBOOK.
+        // We should cap warning growth to avoid unbounded allocations.
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            (0..(MAX_SUPBOOK_WARNINGS + 50))
+                .flat_map(|_| record(RECORD_EXTERNNAME, &[]))
+                .collect::<Vec<u8>>(),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_supbook_table(&stream, 1252);
+        assert_eq!(parsed.warnings.len(), MAX_SUPBOOK_WARNINGS);
+        assert!(
+            parsed.warnings.iter().any(|w| w == SUPBOOK_WARNINGS_SUPPRESSED_MSG),
+            "warnings={:?}",
+            parsed.warnings
+        );
     }
 }
