@@ -84,6 +84,7 @@ export interface WorkbookRagSheet {
    * avoid materializing a dense matrix for very large sheets.
    */
   getCell?: (row: number, col: number) => unknown;
+  [key: string]: unknown;
 }
 
 export interface WorkbookRagWorkbook {
