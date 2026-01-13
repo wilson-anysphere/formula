@@ -1,5 +1,5 @@
 import { formatA1, parseA1 } from "../../document/coords.js";
-import { normalizeDocumentState } from "../../../../../packages/versioning/branches/src/state.js";
+import { normalizeDocumentState } from "../../../../../packages/versioning/branches/src/browser.js";
 
 /**
  * @typedef {import("../../document/documentController.js").DocumentController} DocumentController

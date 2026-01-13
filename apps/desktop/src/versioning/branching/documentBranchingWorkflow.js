@@ -2,7 +2,7 @@ import {
   applyBranchStateToDocumentController,
   documentControllerToBranchState,
 } from "./branchStateAdapter.js";
-import { normalizeDocumentState } from "../../../../../packages/versioning/branches/src/state.js";
+import { normalizeDocumentState } from "../../../../../packages/versioning/branches/src/browser.js";
 import { parseA1 } from "../../document/coords.js";
 
 /**
