@@ -12,7 +12,7 @@ import {
   normalizeClassification,
 } from "../../../../packages/security/dlp/src/classification.js";
 import { DLP_DECISION, evaluatePolicy } from "../../../../packages/security/dlp/src/policyEngine.js";
-import { effectiveCellClassification, effectiveRangeClassification, normalizeRange } from "../../../../packages/security/dlp/src/selectors.js";
+import { effectiveCellClassification, effectiveRangeClassification, normalizeRange, selectorKey } from "../../../../packages/security/dlp/src/selectors.js";
 
 import { parseA1Range, rangeToA1, type RangeAddress } from "./a1.js";
 import {
@@ -48,6 +48,8 @@ const MAX_RANGE_SAMPLE_VALUES = 30;
 const MAX_USER_MESSAGE_CHARS = 16_000;
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 4;
 const MAX_OUTPUT_CHARS = 10_000;
+
+const DLP_INDEX_CACHE_MAX_ENTRIES = 5;
 
 // Cache persistence intentionally uses a short debounce to avoid repeatedly serializing
 // the entire cache map when many AI cells resolve in a burst.
@@ -207,6 +209,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
   private readonly cache = new Map<string, CacheEntry>();
   private readonly inFlightByKey = new Map<string, Promise<void>>();
   private readonly pendingAudits = new Set<Promise<void>>();
+  private readonly dlpIndexCache = new Map<string, DlpCellIndex>();
 
   private cachePersistTimer: ReturnType<typeof setTimeout> | null = null;
   private cachePersistPromise: Promise<void> | null = null;
@@ -283,11 +286,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     const hasAnyRefs = alignedProvenance.some((prov) => (prov?.cells?.length ?? 0) > 0 || (prov?.ranges?.length ?? 0) > 0);
     let classificationIndex: DlpCellIndex | null =
       hasCellRefs && dlp.classificationRecords.length > 0
-        ? buildDlpCellIndex({
-            documentId: this.workbookId,
-            sheetIds: referencedSheetIds,
-            records: dlp.classificationRecords,
-          })
+        ? this.getMemoizedDlpCellIndex({ sheetIds: referencedSheetIds, records: dlp.classificationRecords })
         : null;
 
     // AI prompts are authored directly in formulas, so we can safely inspect a bit more text
@@ -314,11 +313,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     const maxAllowedRank = decision.maxAllowed === null ? null : classificationRank(decision.maxAllowed);
 
     if (!classificationIndex && decision.decision !== DLP_DECISION.ALLOW && hasAnyRefs && dlp.classificationRecords.length > 0) {
-      classificationIndex = buildDlpCellIndex({
-        documentId: this.workbookId,
-        sheetIds: referencedSheetIds,
-        records: dlp.classificationRecords,
-      });
+      classificationIndex = this.getMemoizedDlpCellIndex({ sheetIds: referencedSheetIds, records: dlp.classificationRecords });
     }
 
     const { prompt, inputs, inputsHash, inputsCompaction, redactedCount } = preparePromptAndInputs({
@@ -443,6 +438,39 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     const pending = this.cachePersistPromise;
     this.flushCachePersistenceNow();
     if (pending) await pending;
+  }
+
+  private getMemoizedDlpCellIndex(params: {
+    sheetIds: Set<string>;
+    records: Array<{ selector: any; classification: any }>;
+  }): DlpCellIndex {
+    // NOTE: We key by workbookId + referenced sheet ids + a hash of the classification record set.
+    // This allows reusing the expensive per-cell classification index across multiple AI() evaluations
+    // in the same workbook/session without leaking across workbooks or missing updates.
+    const sheetIdsKey = stableJsonStringify(Array.from(params.sheetIds).sort());
+    const recordsHash = hashClassificationRecords(params.records);
+    const cacheKey = `${this.workbookId}\u0000${sheetIdsKey}\u0000${recordsHash}`;
+
+    const existing = this.dlpIndexCache.get(cacheKey);
+    if (existing) {
+      // Refresh LRU position.
+      this.dlpIndexCache.delete(cacheKey);
+      this.dlpIndexCache.set(cacheKey, existing);
+      return existing;
+    }
+
+    const built = __dlpIndexBuilder.buildDlpCellIndex({
+      documentId: this.workbookId,
+      sheetIds: params.sheetIds,
+      records: params.records,
+    });
+    this.dlpIndexCache.set(cacheKey, built);
+    while (this.dlpIndexCache.size > DLP_INDEX_CACHE_MAX_ENTRIES) {
+      const oldestKey = this.dlpIndexCache.keys().next().value as string | undefined;
+      if (oldestKey === undefined) break;
+      this.dlpIndexCache.delete(oldestKey);
+    }
+    return built;
   }
 
   private startRequest(params: {
@@ -1473,6 +1501,15 @@ function collectReferencedSheetIds(params: {
   return sheetIds;
 }
 
+/**
+ * Test seam: allows spying on DLP index construction without relying on ESM export rewriting.
+ *
+ * `AiCellFunctionEngine` always calls this indirection when building indices.
+ */
+export const __dlpIndexBuilder = {
+  buildDlpCellIndex,
+};
+
 function buildDlpCellIndex(params: {
   documentId: string;
   sheetIds: Set<string>;
@@ -1838,13 +1875,48 @@ function stableJsonStringify(value: unknown): string {
   }
 }
 
+function fnv1a32Update(hash: number, text: string): number {
+  let h = hash >>> 0;
+  const s = String(text);
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
 function hashText(text: string): string {
   // FNV-1a 32-bit for deterministic, dependency-free hashing.
+  const hash = fnv1a32Update(0x811c9dc5, text);
+  return hash.toString(16).padStart(8, "0");
+}
+
+function hashClassificationRecords(records: Array<{ selector: any; classification: any }>): string {
+  // We intentionally hash only the fields that impact enforcement/indexing. This keeps the hash
+  // stable across innocuous record shape changes while still invalidating on selector/classification
+  // updates.
   let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i += 1) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
+  hash = fnv1a32Update(hash, String(records?.length ?? 0));
+
+  for (const record of records || []) {
+    if (!record || !record.selector || typeof record.selector !== "object") continue;
+
+    let selectorStable = "";
+    try {
+      selectorStable = selectorKey(record.selector);
+    } catch {
+      selectorStable = stableJsonStringify(record.selector);
+    }
+
+    const classification = normalizeClassification(record.classification);
+    const classificationStable = `${classification.level}:${(classification.labels ?? []).join(",")}`;
+
+    hash = fnv1a32Update(hash, selectorStable);
+    hash = fnv1a32Update(hash, "\u0000");
+    hash = fnv1a32Update(hash, classificationStable);
+    hash = fnv1a32Update(hash, "\u0000");
   }
+
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
