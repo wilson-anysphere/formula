@@ -48,6 +48,87 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(mgr.list().map((r) => r.id)).toEqual([id2]);
   });
 
+  it("manager update validates and applies patches", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const mgr = new EncryptedRangeManager({ doc });
+    const id = mgr.add({
+      sheetId: "s1",
+      startRow: 0,
+      startCol: 0,
+      endRow: 0,
+      endCol: 0,
+      keyId: "k1",
+    });
+
+    mgr.update(id, { endRow: 1, endCol: 2, keyId: "k2" });
+    expect(mgr.list().find((r) => r.id === id)).toEqual({
+      id,
+      sheetId: "s1",
+      startRow: 0,
+      startCol: 0,
+      endRow: 1,
+      endCol: 2,
+      keyId: "k2",
+    });
+
+    // Invalid patch should throw and not modify the range.
+    expect(() => mgr.update(id, { startRow: 10 })).toThrow(/startRow/);
+    expect(mgr.list().find((r) => r.id === id)?.startRow).toBe(0);
+  });
+
+  it("manager validates inputs", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const mgr = new EncryptedRangeManager({ doc });
+
+    expect(() =>
+      mgr.add({
+        sheetId: "",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+        keyId: "k1",
+      })
+    ).toThrow(/sheetId/);
+
+    expect(() =>
+      mgr.add({
+        sheetId: "s1",
+        startRow: -1 as any,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+        keyId: "k1",
+      })
+    ).toThrow(/startRow/);
+
+    expect(() =>
+      mgr.add({
+        sheetId: "s1",
+        startRow: 2,
+        startCol: 0,
+        endRow: 1,
+        endCol: 0,
+        keyId: "k1",
+      })
+    ).toThrow(/startRow.*endRow/);
+
+    expect(() =>
+      mgr.add({
+        sheetId: "s1",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+        keyId: "",
+      })
+    ).toThrow(/keyId/);
+  });
+
   it("createEncryptionPolicyFromDoc shouldEncryptCell / keyIdForCell reflect metadata", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });
