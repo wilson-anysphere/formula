@@ -29,8 +29,11 @@ describe("dlp heuristic", () => {
   it("detects common API keys/tokens with conservative patterns", () => {
     const awsAccessKeyId = "AKIAIOSFODNN7EXAMPLE";
     const ghToken = "ghp_123456789012345678901234567890123456";
+    const ghFineGrained = `github_pat_${"A".repeat(82)}`;
+    const googleApiKey = `AIza${"A".repeat(35)}`;
+    const stripeSecretKey = `sk_live_${"a".repeat(24)}`;
     const slackToken = "xoxb-123456789012-123456789012-abcdefghijklmnopqrstuvwxyzABCDEF";
-    const text = `Keys: ${awsAccessKeyId} ${ghToken} ${slackToken}`;
+    const text = `Keys: ${awsAccessKeyId} ${ghToken} ${ghFineGrained} ${googleApiKey} ${stripeSecretKey} ${slackToken}`;
 
     expect(classifyText(text).findings).toContain("api_key");
   });

@@ -16,7 +16,7 @@ const PHONE_US_CANDIDATE_RE = /(?:\+1[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]\d{3}[\s.
 
 // Conservative token detectors. Keep patterns specific to reduce false positives.
 const API_KEY_RE =
-  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{36}\b|\bxox[baprs]-\d{10,13}-\d{10,13}-[A-Za-z0-9]{24,64}\b/g;
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{36}\b|\bgithub_pat_[A-Za-z0-9_]{82}\b|\bAIza[0-9A-Za-z_-]{35}\b|\b(?:sk|rk)_(?:test|live)_[0-9a-zA-Z]{24}\b|\bxox[baprs]-\d{10,13}-\d{10,13}-[A-Za-z0-9]{24,64}\b/g;
 
 // Candidate detector only. Validate IBAN checksum (mod 97) before classifying/redacting.
 //
