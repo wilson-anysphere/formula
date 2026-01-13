@@ -181,6 +181,8 @@ CI guardrail (run on macOS release builds):
 node scripts/check-macos-entitlements.mjs
 ```
 
+Release workflow note: when macOS signing secrets are configured, CI also runs `codesign -d --entitlements :-` on the built `.app` to ensure these entitlements are actually embedded in the signed bundle (protects against config drift where the plist exists but isn’t used during signing).
+
 If these entitlements are missing, a notarized build can still pass notarization but launch with a **blank window** or a crashing WebView process.
 
 Note: we intentionally do **not** enable `com.apple.security.cs.disable-library-validation` since the app does not load third-party / unsigned dylibs at runtime.
