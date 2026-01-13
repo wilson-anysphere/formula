@@ -653,6 +653,37 @@ test("indexWorkbook treats non-finite embedBatchSize as Infinity (single embed c
   assert.equal(embedCalls, 1);
 });
 
+test("indexWorkbook reports progress across phases", async () => {
+  const workbook = makeWorkbookTwoTables();
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const store = new InMemoryVectorStore({ dimension: 128 });
+  await indexWorkbook({ workbook, vectorStore: store, embedder });
+
+  // Change T1 so it must re-embed/upsert, and remove T2 to force a delete.
+  const workbook2 = JSON.parse(JSON.stringify(workbook));
+  workbook2.sheets[0].cells[1][0] = { v: 999 };
+  workbook2.tables = workbook2.tables.filter((t) => t.name !== "T2");
+  workbook2.sheets[0].cells[0][3] = null;
+  workbook2.sheets[0].cells[0][4] = null;
+  workbook2.sheets[0].cells[1][3] = null;
+  workbook2.sheets[0].cells[1][4] = null;
+
+  /** @type {Array<{ phase: string, processed: number, total?: number }>} */
+  const events = [];
+  await indexWorkbook({
+    workbook: workbook2,
+    vectorStore: store,
+    embedder,
+    embedBatchSize: 1,
+    onProgress: (info) => events.push(info),
+  });
+
+  const phases = new Set(events.map((e) => e.phase));
+  for (const phase of ["chunk", "hash", "embed", "upsert", "delete"]) {
+    assert.ok(phases.has(phase), `Expected onProgress to include phase=${phase}`);
+  }
+});
+
 test("indexWorkbook rejects when embedder returns the wrong number of vectors (no partial writes)", async () => {
   const workbook = makeWorkbookTwoTables();
   const store = new InMemoryVectorStore({ dimension: 128 });
