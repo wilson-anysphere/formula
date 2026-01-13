@@ -49,9 +49,14 @@ export function pickLocalImageFiles(options: PickLocalImageFilesOptions = {}): P
     document.body.appendChild(input);
 
     let settled = false;
+    let focusTimer: number | null = null;
     const cleanup = () => {
       input.remove();
       window.removeEventListener("focus", onWindowFocus, true);
+      if (focusTimer != null) {
+        clearTimeout(focusTimer);
+        focusTimer = null;
+      }
     };
 
     const finish = (files: File[]) => {
@@ -75,11 +80,18 @@ export function pickLocalImageFiles(options: PickLocalImageFilesOptions = {}): P
     // Opening the file picker typically blurs the window; when the picker is dismissed
     // the window regains focus. If no `change` event fired, treat it as cancel.
     const onWindowFocus = () => {
-      // Defer a tick to allow the `change` event to win the race when a file is selected.
-      setTimeout(() => {
+      // Browsers usually blur the window while the native file picker is open and then
+      // re-focus when it's dismissed. If the user cancelled, no `change` event fires.
+      //
+      // In automation (Playwright) the focus transition can happen before the harness
+      // calls `fileChooser.setFiles(...)`. Use a small delay so a real selection's
+      // `change` event can win the race.
+      if (focusTimer != null) clearTimeout(focusTimer);
+      focusTimer = window.setTimeout(() => {
+        focusTimer = null;
         if (settled) return;
         finish(input.files ? Array.from(input.files) : []);
-      }, 0);
+      }, 250);
     };
 
     input.addEventListener("change", onChange, { once: true });

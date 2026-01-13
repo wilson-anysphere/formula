@@ -516,7 +516,6 @@ impl Workbook {
         self.sheet_order.insert(new_index, id);
         true
     }
-
     /// Returns the sheet ids referenced by an Excel-style 3D sheet span (`Sheet1:Sheet3`).
     ///
     /// This respects the current workbook tab order. Reversed spans are allowed (e.g.

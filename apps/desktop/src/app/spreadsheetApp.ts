@@ -5445,6 +5445,20 @@ export class SpreadsheetApp {
   }
 
   /**
+   * Track external async work as part of `SpreadsheetApp.whenIdle()`.
+   *
+   * The desktop shell owns some async flows (notably workbook open/save) that do not live inside
+   * the SpreadsheetApp class, but should still be treated as "busy" for Playwright and other
+   * callers awaiting `whenIdle()`.
+   */
+  trackIdleTask(task: unknown): void {
+    if (this.disposed) return;
+    if (!isThenable(task)) return;
+    // Normalize rejections so `whenIdle()` does not throw due to a background task failing.
+    this.idle.track(Promise.resolve(task).catch(() => {}));
+  }
+
+  /**
    * Force a pass of picture/image garbage collection.
    *
    * This is primarily exposed for tests and diagnostic tooling. Normal operation uses
@@ -7072,6 +7086,7 @@ export class SpreadsheetApp {
 
     let nextOrder = ordered;
     if (direction === "forward") {
+      // Excel-style semantics: move the drawing forward one step in the render stack.
       if (index >= ordered.length - 1) return;
       nextOrder = ordered.slice();
       const tmp = nextOrder[index]!;
@@ -10082,8 +10097,9 @@ export class SpreadsheetApp {
       const normalizeTag = (tag: string): string => tag.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
       const normalizeEmu = (n: unknown): number => {
         const num = typeof n === "number" ? n : typeof n === "bigint" ? Number(n) : Number(n);
-        return Number.isFinite(num) ? Math.round(num) : 0;
+        return Number.isFinite(num) ? num : 0;
       };
+      const normalizeEmuInt = (n: unknown): number => Math.round(normalizeEmu(n));
       const uiType = typeof (uiAnchor as any).type === "string" ? normalizeTag((uiAnchor as any).type) : "";
 
       const patchCellRef = (cell: any, next: { row: number; col: number }): void => {
@@ -10096,9 +10112,16 @@ export class SpreadsheetApp {
         if (!offset || typeof offset !== "object") return;
         const xEmu = normalizeEmu(next.xEmu);
         const yEmu = normalizeEmu(next.yEmu);
+        const xEmuInt = normalizeEmuInt(xEmu);
+        const yEmuInt = normalizeEmuInt(yEmu);
         // Support both formula-model (`x_emu`) and UI (`xEmu`) key conventions.
-        if ("x_emu" in offset) (offset as any).x_emu = xEmu;
-        if ("y_emu" in offset) (offset as any).y_emu = yEmu;
+        //
+        // Important: formula-model drawing anchors serialize EMU values as integers (i64). Preserve
+        // that compatibility by rounding only the snake_case keys. The UI representation uses
+        // floating-point EMUs so zoom-scaled moves (e.g. 1 screen px at 2x zoom -> 0.5px in sheet
+        // space) round-trip without accumulating integer drift.
+        if ("x_emu" in offset) (offset as any).x_emu = xEmuInt;
+        if ("y_emu" in offset) (offset as any).y_emu = yEmuInt;
         if ("xEmu" in offset) (offset as any).xEmu = xEmu;
         if ("yEmu" in offset) (offset as any).yEmu = yEmu;
       };
@@ -10111,12 +10134,14 @@ export class SpreadsheetApp {
         patchCellOffset(offset, next.offset);
       };
 
-      const patchEmuSize = (size: any, next: { cx: number; cy: number }): void => {
+      const patchEmuSize = (size: any, next: { cx: number; cy: number }, roundEmu: boolean): void => {
         if (!size || typeof size !== "object") return;
         const cx = normalizeEmu(next.cx);
         const cy = normalizeEmu(next.cy);
-        if ("cx" in size) (size as any).cx = cx;
-        if ("cy" in size) (size as any).cy = cy;
+        const outCx = roundEmu ? normalizeEmuInt(cx) : cx;
+        const outCy = roundEmu ? normalizeEmuInt(cy) : cy;
+        if ("cx" in size) (size as any).cx = outCx;
+        if ("cy" in size) (size as any).cy = outCy;
       };
 
       // Preserve the raw enum representation when the anchor is stored as a formula-model/Rust enum
@@ -10132,8 +10157,8 @@ export class SpreadsheetApp {
             if (normalized === "onecell" && uiType === "onecell") {
               patchAnchorPoint((value as any).from, uiAnchor.from);
               // Formula-model uses `ext` for size; accept `size` too for compatibility.
-              patchEmuSize((value as any).ext, uiAnchor.size);
-              patchEmuSize((value as any).size, uiAnchor.size);
+              patchEmuSize((value as any).ext, uiAnchor.size, true);
+              patchEmuSize((value as any).size, uiAnchor.size, true);
               return rawAnchor;
             }
             if (normalized === "twocell" && uiType === "twocell") {
@@ -10143,8 +10168,8 @@ export class SpreadsheetApp {
             }
             if (normalized === "absolute" && uiType === "absolute") {
               patchCellOffset((value as any).pos, uiAnchor.pos);
-              patchEmuSize((value as any).ext, uiAnchor.size);
-              patchEmuSize((value as any).size, uiAnchor.size);
+              patchEmuSize((value as any).ext, uiAnchor.size, true);
+              patchEmuSize((value as any).size, uiAnchor.size, true);
               return rawAnchor;
             }
           }
@@ -10167,8 +10192,8 @@ export class SpreadsheetApp {
           if (payload && typeof payload === "object") {
             if (normalized === "onecell" && uiType === "onecell") {
               patchAnchorPoint((payload as any).from, uiAnchor.from);
-              patchEmuSize((payload as any).ext, uiAnchor.size);
-              patchEmuSize((payload as any).size, uiAnchor.size);
+              patchEmuSize((payload as any).ext, uiAnchor.size, true);
+              patchEmuSize((payload as any).size, uiAnchor.size, false);
               return rawAnchor;
             }
             if (normalized === "twocell" && uiType === "twocell") {
@@ -10178,8 +10203,8 @@ export class SpreadsheetApp {
             }
             if (normalized === "absolute" && uiType === "absolute") {
               patchCellOffset((payload as any).pos, uiAnchor.pos);
-              patchEmuSize((payload as any).ext, uiAnchor.size);
-              patchEmuSize((payload as any).size, uiAnchor.size);
+              patchEmuSize((payload as any).ext, uiAnchor.size, true);
+              patchEmuSize((payload as any).size, uiAnchor.size, false);
               return rawAnchor;
             }
           }

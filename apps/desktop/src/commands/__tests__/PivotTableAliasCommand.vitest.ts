@@ -3,8 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { CommandRegistry } from "../../extensions/commandRegistry.js";
 import { createDefaultLayout, openPanel as openDockPanel } from "../../layout/layoutState.js";
-import { PanelIds } from "../../panels/panelRegistry.js";
-import { panelRegistry } from "../../panels/panelRegistry.js";
+import { panelRegistry, PanelIds } from "../../panels/panelRegistry.js";
 import { registerBuiltinCommands } from "../registerBuiltinCommands.js";
 
 describe("PivotTable ribbon alias commands", () => {

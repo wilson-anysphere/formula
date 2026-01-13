@@ -696,6 +696,10 @@ type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
 let tauriBackend: TauriWorkbookBackend | null = null;
 let activeWorkbook: WorkbookInfo | null = null;
 let pendingBackendSync: Promise<void> = Promise.resolve();
+// File commands can be triggered from many entry points (ribbon, titlebar, native menu events).
+// Some of those paths intentionally fire-and-forget command promises. Keep file operations
+// serialized so "Save" cannot run while an "Open" is still loading and wiring up workbook sync.
+let pendingFileCommand: Promise<void> = Promise.resolve();
 let queuedInvoke: TauriInvoke | null = null;
 let workbookSync: ReturnType<typeof startWorkbookSync> | null = null;
 let rerenderLayout: (() => void) | null = null;
@@ -8600,48 +8604,56 @@ registerDesktopCommands({
         showDesktopOnlyToast("Creating new workbooks is available in the desktop app.");
         return;
       }
-      try {
-        await handleNewWorkbook();
-      } catch (err) {
-        console.error("Failed to create workbook:", err);
-        showToast(`Failed to create workbook: ${String(err)}`, "error");
-      }
+      return queueFileCommand(async () => {
+        try {
+          await handleNewWorkbook();
+        } catch (err) {
+          console.error("Failed to create workbook:", err);
+          showToast(`Failed to create workbook: ${String(err)}`, "error");
+        }
+      });
     },
     openWorkbook: async () => {
       if (!tauriBackend) {
         showDesktopOnlyToast("Opening workbooks is available in the desktop app.");
         return;
       }
-      try {
-        await promptOpenWorkbook();
-      } catch (err) {
-        console.error("Failed to open workbook:", err);
-        showToast(`Failed to open workbook: ${String(err)}`, "error");
-      }
+      return queueFileCommand(async () => {
+        try {
+          await promptOpenWorkbook();
+        } catch (err) {
+          console.error("Failed to open workbook:", err);
+          showToast(`Failed to open workbook: ${String(err)}`, "error");
+        }
+      });
     },
     saveWorkbook: async () => {
       if (!tauriBackend) {
         showDesktopOnlyToast("Saving workbooks is available in the desktop app.");
         return;
       }
-      try {
-        await handleSave();
-      } catch (err) {
-        console.error("Failed to save workbook:", err);
-        showToast(`Failed to save workbook: ${String(err)}`, "error");
-      }
+      return queueFileCommand(async () => {
+        try {
+          await handleSave();
+        } catch (err) {
+          console.error("Failed to save workbook:", err);
+          showToast(`Failed to save workbook: ${String(err)}`, "error");
+        }
+      });
     },
     saveWorkbookAs: async () => {
       if (!tauriBackend) {
         showDesktopOnlyToast("Save As is available in the desktop app.");
         return;
       }
-      try {
-        await handleSaveAs();
-      } catch (err) {
-        console.error("Failed to save workbook:", err);
-        showToast(`Failed to save workbook: ${String(err)}`, "error");
-      }
+      return queueFileCommand(async () => {
+        try {
+          await handleSaveAs();
+        } catch (err) {
+          console.error("Failed to save workbook:", err);
+          showToast(`Failed to save workbook: ${String(err)}`, "error");
+        }
+      });
     },
     setAutoSaveEnabled: (enabled?: boolean) => {
       const nextEnabled = typeof enabled === "boolean" ? enabled : !autoSaveEnabled;
@@ -10052,6 +10064,25 @@ async function confirmDiscardDirtyState(actionLabel: string): Promise<boolean> {
   commitAllPendingEditsForCommand();
   if (!isDirtyForUnsavedChangesPrompts()) return true;
   return nativeDialogs.confirm(`You have unsaved changes. Discard them and ${actionLabel}?`);
+}
+
+function queueFileCommand<T>(op: () => Promise<T>): Promise<T> {
+  const result = pendingFileCommand.then(op, op);
+  // Include shell-owned file operations (open/save/close) in the app's idle tracker so
+  // Playwright helpers that await `app.whenIdle()` don't race work that runs outside
+  // SpreadsheetApp internals.
+  try {
+    app.trackIdleTask(result);
+  } catch {
+    // ignore (defensive: non-standard harnesses may not expose the idle tracker hook)
+  }
+  pendingFileCommand = result.then(
+    () => undefined,
+    (err) => {
+      console.error("Failed to run file command:", err);
+    },
+  );
+  return result;
 }
 
 function queueBackendOp<T>(op: () => Promise<T>): Promise<T> {

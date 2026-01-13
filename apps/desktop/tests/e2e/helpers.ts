@@ -34,12 +34,16 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   const requestFailures: string[] = [];
-  let networkChangedResolve: (() => void) | null = null;
+  let signalNetworkChanged: (() => void) | null = null;
 
   const onConsole = (msg: any): void => {
     try {
       if (msg?.type?.() !== "error") return;
-      consoleErrors.push(msg.text());
+      const text = msg.text();
+      consoleErrors.push(text);
+      if (text.includes("net::ERR_NETWORK_CHANGED")) {
+        signalNetworkChanged?.();
+      }
     } catch {
       // ignore listener failures
     }
@@ -60,9 +64,8 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
       const failure = typeof req?.failure === "function" ? req.failure() : null;
       const suffix = failure?.errorText ? ` (${failure.errorText})` : "";
       requestFailures.push(`${method} ${url}${suffix}`.trim());
-      if (failure?.errorText?.includes?.("net::ERR_NETWORK_CHANGED")) {
-        networkChangedResolve?.();
-        networkChangedResolve = null;
+      if (typeof failure?.errorText === "string" && failure.errorText.includes("net::ERR_NETWORK_CHANGED")) {
+        signalNetworkChanged?.();
       }
     } catch {
       // ignore listener failures
@@ -115,33 +118,47 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
     return parts.length > 0 ? `\n\n${parts.join("\n\n")}` : "";
   };
 
-  // Vite may trigger a one-time full reload after dependency optimization. If that
-  // happens mid-wait, retry once after the navigation completes.
   const maxAttempts = 3;
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const networkChangedPromise = new Promise<void>((resolve) => {
-      networkChangedResolve = resolve;
-    });
 
+  // Vite may trigger a full reload after dependency optimization (or when it discovers a new
+  // dynamic import). When that happens mid-navigation, Chromium surfaces `net::ERR_NETWORK_CHANGED`
+  // for module requests and the app never boots. Retry a few times so desktop e2e is resilient on
+  // first-run optimize behavior.
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const requestStart = requestFailures.length;
+    let networkChanged = false;
+    let resolveNetworkChanged: (() => void) | null = null;
+    const networkChangedPromise = new Promise<void>((resolve) => {
+      resolveNetworkChanged = resolve;
+    });
+    signalNetworkChanged = () => {
+      if (networkChanged) return;
+      networkChanged = true;
+      resolveNetworkChanged?.();
+    };
     try {
       // Desktop e2e relies on waiting for `__formulaApp` (and `whenIdle`) rather than the
       // window `load` event. Under heavy load, waiting for `load` can occasionally hang
       // (e.g. if a long-lived request prevents the event from firing).
       await page.goto(path, { waitUntil: "domcontentloaded" });
-      const appReadyTimeout = typeof appReadyTimeoutMs === "number" && appReadyTimeoutMs > 0 ? appReadyTimeoutMs : 60_000;
-      const raceResult = await Promise.race([
-        page
-          .waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: appReadyTimeout })
-          .then(() => ({ tag: "ready" as const }))
-          .catch((err) => ({ tag: "error" as const, err })),
-        networkChangedPromise.then(() => ({ tag: "networkChanged" as const })),
+      const appReadyTimeout =
+        typeof appReadyTimeoutMs === "number" && appReadyTimeoutMs > 0 ? appReadyTimeoutMs : 60_000;
+      const appReadyPromise = page.waitForFunction(() => Boolean(window.__formulaApp), undefined, {
+        timeout: appReadyTimeout,
+      });
+
+      // Vite can surface transient `net::ERR_NETWORK_CHANGED` errors during dependency
+      // optimization. If the page recovers quickly (e.g. via an automatic reload), allow the boot
+      // to complete; otherwise treat the network change as a signal to retry navigation.
+      await Promise.race([
+        appReadyPromise,
+        networkChangedPromise.then(async () => {
+          await Promise.race([appReadyPromise, page.waitForTimeout(Math.min(10_000, appReadyTimeout))]);
+          const ready = await page.evaluate(() => Boolean(window.__formulaApp)).catch(() => false);
+          if (ready) return;
+          throw new Error("net::ERR_NETWORK_CHANGED");
+        }),
       ]);
-      if (raceResult.tag === "networkChanged") {
-        throw new Error("net::ERR_NETWORK_CHANGED");
-      }
-      if (raceResult.tag === "error") {
-        throw raceResult.err;
-      }
       // `__formulaApp` is assigned early in `main.ts` so tests can still introspect failures,
       // but that means we need to explicitly wait for the app to settle before interacting.
       await page.evaluate(async ({ waitForIdle, idleTimeoutMs }) => {
@@ -196,19 +213,16 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const sawNetworkChanged = requestFailures.some((failure) => failure.includes("net::ERR_NETWORK_CHANGED"));
+      const attemptFailures = requestFailures.slice(requestStart);
+      const sawNetworkChanged =
+        networkChanged || attemptFailures.some((entry) => entry.includes("net::ERR_NETWORK_CHANGED"));
       if (
         attempt < maxAttempts - 1 &&
         (message.includes("Execution context was destroyed") ||
           message.includes("net::ERR_ABORTED") ||
           message.includes("net::ERR_NETWORK_CHANGED") ||
-          requestFailures.some((f) => f.includes("net::ERR_NETWORK_CHANGED")) ||
           message.includes("interrupted by another navigation") ||
           message.includes("frame was detached") ||
-          // Occasionally the Vite dev server will restart under us (or the browser will observe a
-          // transient network reset). In that case, the app never finishes bootstrapping and we
-          // time out waiting for `__formulaApp`. If we saw `net::ERR_NETWORK_CHANGED` while
-          // fetching modules, retry once.
           sawNetworkChanged)
       ) {
         // Clear captured diagnostics for the retry so a successful second attempt doesn't inherit
