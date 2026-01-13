@@ -167,7 +167,9 @@ export function suggestRanges(params) {
     );
     if (table) {
       const { endCol, confidence } = table;
-      const endLetters = applyColumnCase(columnIndexToLetter(endCol), parsed.startColToken);
+      // Use the end-token casing when expanding the right edge so mixed-case inputs
+      // like "AB1:a" keep their casing consistent with the 1D range suggestion.
+      const endLetters = applyColumnCase(columnIndexToLetter(endCol), parsed.endColToken);
       const startCell = `${parsed.startColPrefix}${parsed.startColToken}${parsed.rowPrefix}${tableStartRow + 1}`;
       const endCell = `${parsed.endColPrefix}${endLetters}${parsed.rowPrefix}${tableEndRow + 1}`;
       const tableReason = toTableReason(contiguousReason);

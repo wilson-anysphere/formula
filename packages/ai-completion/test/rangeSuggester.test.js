@@ -356,6 +356,33 @@ test("suggestRanges preserves end-column $ prefix in 2D table suggestions (A:$A 
   );
 });
 
+test("suggestRanges preserves end-column token casing for 2D table suggestions (AB1:a -> AB1:ad10)", () => {
+  /** @type {Array<[number, number, any]>} */
+  const cells = [];
+  // Start at column AB (0-based 27) so the table expands into AC/AD.
+  const startCol = 27; // AB
+  // Header row across AB:AD.
+  for (let c = 0; c < 3; c++) cells.push([0, startCol + c, `H${c + 1}`]);
+  // Data rows 2..10.
+  for (let r = 1; r < 10; r++) {
+    for (let c = 0; c < 3; c++) {
+      cells.push([r, startCol + c, r * 100 + c]);
+    }
+  }
+
+  const suggestions = suggestRanges({
+    // User started typing AB1:AB10, but only entered a lowercase prefix for the end column.
+    currentArgText: "AB1:a",
+    cellRef: { row: 10, col: startCol }, // row 11, below the table
+    surroundingCells: createGridContext(cells),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.range === "AB1:ad10"),
+    `Expected suggestions to contain AB1:ad10, got: ${suggestions.map((s) => s.range).join(", ")}`
+  );
+});
+
 test("suggestRanges suggests a 2D table range across the Z->AA column boundary (Y1:AB10)", () => {
   /** @type {Array<[number, number, any]>} */
   const cells = [];
