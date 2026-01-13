@@ -13,7 +13,9 @@ test.describe("formula bar - fx function picker", () => {
       const app = (window as any).__formulaApp;
       if (!app) throw new Error("Missing window.__formulaApp");
       const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
       // E1 is outside the seeded used range (ends at D5).
+      doc.setCellValue(sheetId, "E1", null);
       app.activateCell({ sheetId, row: 0, col: 4 }, { focus: false, scrollIntoView: false });
     });
     await expect(page.getByTestId("active-cell")).toHaveText("E1");
