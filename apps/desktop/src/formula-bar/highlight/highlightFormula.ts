@@ -11,13 +11,3 @@ export function highlightFormula(input: string): HighlightSpan[] {
     end: token.end,
   }));
 }
-
-function escapeHtml(text: string): string {
-  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-
-export function highlightFormulaToHtml(input: string): string {
-  return highlightFormula(input)
-    .map((span) => `<span data-kind="${span.kind}">${escapeHtml(span.text)}</span>`)
-    .join("");
-}
