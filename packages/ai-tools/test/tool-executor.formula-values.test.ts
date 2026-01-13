@@ -169,6 +169,52 @@ describe("ToolExecutor include_formula_values", () => {
     expect(result.data?.count).toBe(1);
   });
 
+  it("filter_range compares formula cells using computed values under DLP ALLOW decisions when enabled", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Value" });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { formula: "=1+1", value: 2 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      include_formula_values: true,
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true,
+            },
+          },
+        },
+        audit_logger,
+      },
+    });
+
+    const result = await executor.execute({
+      name: "filter_range",
+      parameters: {
+        range: "Sheet1!A1:A2",
+        has_header: true,
+        criteria: [{ column: "A", operator: "greater", value: 1 }],
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("filter_range");
+    if (!result.ok || result.tool !== "filter_range") throw new Error("Unexpected tool result");
+    expect(result.data?.matching_rows).toEqual([2]);
+    expect(result.data?.count).toBe(1);
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event.decision?.decision).toBe("allow");
+    expect(event.redactedCellCount).toBe(0);
+  });
+
   it("does not fall back to comparing formula text when include_formula_values is enabled but a formula cell has no computed value", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Value" });
@@ -214,6 +260,50 @@ describe("ToolExecutor include_formula_values", () => {
     expect(workbook.getCell(parseA1Cell("Sheet1!A2")).value).toBe(2);
     expect(workbook.getCell(parseA1Cell("Sheet1!A3")).formula).toBe("=10");
     expect(workbook.getCell(parseA1Cell("Sheet1!A3")).value).toBe(10);
+  });
+
+  it("sort_range compares formula cells using computed values under DLP ALLOW decisions when enabled", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Value" });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { formula: "=10", value: 10 });
+    workbook.setCell(parseA1Cell("Sheet1!A3"), { formula: "=2", value: 2 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      include_formula_values: true,
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true,
+            },
+          },
+        },
+        audit_logger,
+      },
+    });
+
+    const result = await executor.execute({
+      name: "sort_range",
+      parameters: { range: "Sheet1!A1:A3", has_header: true, sort_by: [{ column: "A", order: "asc" }] },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("sort_range");
+    if (!result.ok || result.tool !== "sort_range") throw new Error("Unexpected tool result");
+
+    expect(workbook.getCell(parseA1Cell("Sheet1!A2")).formula).toBe("=2");
+    expect(workbook.getCell(parseA1Cell("Sheet1!A3")).formula).toBe("=10");
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event.decision?.decision).toBe("allow");
+    expect(event.redactedCellCount).toBe(0);
   });
 
   it("detect_anomalies can include numeric values from formula cells when enabled", async () => {
