@@ -496,19 +496,22 @@ are attached:
    - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, usually includes `arm64` in the filename)
    - Linux: `.AppImage` + `.deb` + `.rpm`
 
-   If the release was built with updater signing secrets (`TAURI_PRIVATE_KEY`, `TAURI_KEY_PASSWORD`),
-   expect a corresponding `.sig` signature file uploaded alongside the updater-consumed artifacts:
-   - macOS: `.app.tar.gz.sig`
-   - Windows: installer `.sig` (`.msi.sig` and `.exe.sig`)
-   - Linux: `.AppImage.sig`
+   This repo requires Tauri updater signing for tagged releases, so expect `.sig` signature files to
+   be uploaded alongside the produced artifacts:
+   - macOS: `.dmg.sig` and `.app.tar.gz.sig`
+   - Windows (each architecture): `.msi.sig` and `.exe.sig`
+   - Linux: `.AppImage.sig`, `.deb.sig`, `.rpm.sig`
+
+   (These `.sig` files are Tauri/Ed25519 updater signatures, **not** OS/package-manager signatures.)
 
    Note: the release workflow enforces that each Windows target produces **both** a `.msi` and a
    `.exe` installer under `apps/desktop/src-tauri/target/<triple>/release/bundle/**`. If the MSI
    bundler regresses (e.g. missing WiX toolset support for ARM64), the workflow fails so we don’t
    ship a Windows release that violates the distribution requirement.
 
-   Note: this repo also uploads `.sig` files for the Linux `.deb` and `.rpm` bundles (used for
-   manual install/downgrade), even though the Tauri updater typically uses the `.AppImage` on Linux.
+   Note: even though the Tauri updater typically uses the `.AppImage` on Linux, we still ship
+   distro-native packages (`.deb`/`.rpm`) for manual install/downgrade and their corresponding `.sig`
+   files.
 
    If an expected platform/arch is missing entirely, start with the GitHub Actions run for that tag
    and check the build job for the relevant platform/target (and whether the Tauri bundler step
