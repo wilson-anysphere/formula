@@ -58,7 +58,7 @@ find_pkg_dirs() {
   # target directories.
   local -a search_roots=()
   local root
-  for root in "apps/desktop/src-tauri/target" "target"; do
+  for root in "apps/desktop/src-tauri/target" "apps/desktop/target" "target"; do
     if [[ -d "$root" ]]; then
       search_roots+=("$root")
     fi
@@ -70,9 +70,28 @@ find_pkg_dirs() {
   fi
 
   local -a files
-  mapfile -t files < <(
-    find "${search_roots[@]}" -type f -path "*/release/bundle/${pkg_type}/*${ext}" -print | sort
-  )
+  # Use globs instead of `find` to avoid traversing the entire Cargo target directory,
+  # which can contain many build artifacts. The bundle output layout is predictable:
+  #   <target>/release/bundle/<type>/*.deb|*.rpm
+  #   <target>/<triple>/release/bundle/<type>/*.deb|*.rpm
+  local nullglob_was_set=0
+  if shopt -q nullglob; then
+    nullglob_was_set=1
+  fi
+  shopt -s nullglob
+  files=()
+  for root in "${search_roots[@]}"; do
+    files+=("$root"/release/bundle/"${pkg_type}"/*"${ext}")
+    files+=("$root"/*/release/bundle/"${pkg_type}"/*"${ext}")
+  done
+  if [[ "${nullglob_was_set}" -eq 0 ]]; then
+    shopt -u nullglob
+  fi
+
+  # Sort and de-dupe for deterministic logs.
+  if [[ ${#files[@]} -gt 0 ]]; then
+    mapfile -t files < <(printf '%s\n' "${files[@]}" | sort -u)
+  fi
 
   if [[ ${#files[@]} -eq 0 ]]; then
     echo "linux-package-install-smoke: no ${ext} artifacts found under target/**/release/bundle/${pkg_type}" >&2
