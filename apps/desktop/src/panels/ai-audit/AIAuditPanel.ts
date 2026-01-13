@@ -341,15 +341,17 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
     const session_id = sessionInput.value.trim() || undefined;
     const workbookId = workbookInput.value.trim() || undefined;
     const pageSize = parsePageSize();
+    const queryLimit = pageSize + 1;
     const nowMs = Date.now();
     const after_timestamp_ms = computeAfterTimestampMs(nowMs);
 
     try {
       if (op === "refresh") {
-        const entries = await store.listEntries({ session_id, workbook_id: workbookId, after_timestamp_ms, limit: pageSize });
-        currentEntries = entries;
-        hasMore = entries.length >= pageSize;
-        replaceEntries(entries);
+        const entries = await store.listEntries({ session_id, workbook_id: workbookId, after_timestamp_ms, limit: queryLimit });
+        const page = entries.slice(0, pageSize);
+        currentEntries = page;
+        hasMore = entries.length > pageSize;
+        replaceEntries(page);
         updateMeta();
       } else {
         const last = currentEntries[currentEntries.length - 1];
@@ -362,13 +364,14 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
           session_id,
           workbook_id: workbookId,
           after_timestamp_ms,
-          limit: pageSize,
+          limit: queryLimit,
           cursor: { before_timestamp_ms: last.timestamp_ms, before_id: last.id },
         });
+        const page = older.slice(0, pageSize);
         const existingIds = new Set(currentEntries.map((e) => e.id));
-        const deduped = older.filter((e) => !existingIds.has(e.id));
+        const deduped = page.filter((e) => !existingIds.has(e.id));
         currentEntries = currentEntries.concat(deduped);
-        hasMore = older.length >= pageSize && deduped.length > 0;
+        hasMore = older.length > pageSize && deduped.length > 0;
         appendEntries(deduped);
         updateMeta();
       }
