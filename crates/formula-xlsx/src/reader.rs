@@ -35,5 +35,8 @@ fn read_error_to_xlsx_error(err: crate::read::ReadError) -> XlsxError {
         crate::read::ReadError::InvalidRangeRef(range) => {
             XlsxError::Invalid(format!("invalid range reference: {range}"))
         }
+        crate::read::ReadError::InvalidPassword => XlsxError::InvalidPassword,
+        crate::read::ReadError::UnsupportedEncryption(msg) => XlsxError::UnsupportedEncryption(msg),
+        crate::read::ReadError::InvalidEncryptedWorkbook(msg) => XlsxError::InvalidEncryptedWorkbook(msg),
     }
 }

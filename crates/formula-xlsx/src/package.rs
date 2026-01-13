@@ -298,6 +298,12 @@ pub enum XlsxError {
     InvalidSheetId,
     #[error("hyperlink error: {0}")]
     Hyperlink(String),
+    #[error("invalid password for encrypted workbook")]
+    InvalidPassword,
+    #[error("unsupported encryption: {0}")]
+    UnsupportedEncryption(String),
+    #[error("invalid encrypted workbook: {0}")]
+    InvalidEncryptedWorkbook(String),
     #[error(transparent)]
     StreamingPatch(#[from] Box<crate::streaming::StreamingPatchError>),
 }
@@ -305,6 +311,21 @@ pub enum XlsxError {
 impl From<crate::streaming::StreamingPatchError> for XlsxError {
     fn from(err: crate::streaming::StreamingPatchError) -> Self {
         Self::StreamingPatch(Box::new(err))
+    }
+}
+
+impl From<crate::encrypted::EncryptedOoxmlError> for XlsxError {
+    fn from(err: crate::encrypted::EncryptedOoxmlError) -> Self {
+        match err {
+            crate::encrypted::EncryptedOoxmlError::InvalidPassword => Self::InvalidPassword,
+            crate::encrypted::EncryptedOoxmlError::UnsupportedEncryption(msg) => {
+                Self::UnsupportedEncryption(msg)
+            }
+            crate::encrypted::EncryptedOoxmlError::InvalidEncryptedWorkbook(msg) => {
+                Self::InvalidEncryptedWorkbook(msg)
+            }
+            crate::encrypted::EncryptedOoxmlError::Io(err) => Self::Io(err),
+        }
     }
 }
 
@@ -618,6 +639,13 @@ impl XlsxPackage {
         }
 
         Ok(Self { parts })
+    }
+
+    /// Load an [`XlsxPackage`] from bytes, transparently decrypting Office `EncryptedPackage`
+    /// OLE wrappers when the input bytes are password-protected.
+    pub fn from_bytes_with_password(bytes: &[u8], password: &str) -> Result<Self, XlsxError> {
+        let bytes = crate::encrypted::maybe_decrypt_office_encrypted_package(bytes, password)?;
+        Self::from_bytes(bytes.as_ref())
     }
 
     pub fn part(&self, name: &str) -> Option<&[u8]> {

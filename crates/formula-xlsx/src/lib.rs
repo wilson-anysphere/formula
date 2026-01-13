@@ -29,6 +29,7 @@ pub mod conditional_formatting;
 mod content_types;
 pub mod drawingml;
 pub mod drawings;
+mod encrypted;
 pub mod embedded_cell_images;
 pub mod embedded_images;
 mod formula_text;
@@ -113,7 +114,11 @@ pub use pivots::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use read::load_from_path;
-pub use read::{load_from_bytes, read_workbook_model_from_bytes, read_workbook_model_from_reader};
+pub use read::ReadError;
+pub use read::{
+    load_from_bytes, load_from_bytes_with_password, read_workbook_model_from_bytes,
+    read_workbook_model_from_bytes_with_password, read_workbook_model_from_reader,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use reader::{read_workbook, read_workbook_from_reader};
 pub use recalc_policy::RecalcPolicy;

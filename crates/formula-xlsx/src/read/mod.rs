@@ -86,6 +86,12 @@ pub enum ReadError {
     InvalidCellRef(String),
     #[error("invalid range reference: {0}")]
     InvalidRangeRef(String),
+    #[error("invalid password for encrypted workbook")]
+    InvalidPassword,
+    #[error("unsupported encryption: {0}")]
+    UnsupportedEncryption(String),
+    #[error("invalid encrypted workbook: {0}")]
+    InvalidEncryptedWorkbook(String),
 }
 
 impl From<crate::calc_settings::CalcSettingsError> for ReadError {
@@ -96,6 +102,21 @@ impl From<crate::calc_settings::CalcSettingsError> for ReadError {
             crate::calc_settings::CalcSettingsError::Xml(err) => Self::Xml(err),
             crate::calc_settings::CalcSettingsError::XmlAttr(err) => Self::XmlAttr(err),
             crate::calc_settings::CalcSettingsError::Utf8(err) => Self::Utf8(err),
+        }
+    }
+}
+
+impl From<crate::encrypted::EncryptedOoxmlError> for ReadError {
+    fn from(err: crate::encrypted::EncryptedOoxmlError) -> Self {
+        match err {
+            crate::encrypted::EncryptedOoxmlError::InvalidPassword => Self::InvalidPassword,
+            crate::encrypted::EncryptedOoxmlError::UnsupportedEncryption(msg) => {
+                Self::UnsupportedEncryption(msg)
+            }
+            crate::encrypted::EncryptedOoxmlError::InvalidEncryptedWorkbook(msg) => {
+                Self::InvalidEncryptedWorkbook(msg)
+            }
+            crate::encrypted::EncryptedOoxmlError::Io(err) => Self::Io(err),
         }
     }
 }
@@ -116,6 +137,16 @@ pub fn load_from_path(path: impl AsRef<Path>) -> Result<XlsxDocument, ReadError>
 /// styles, shared strings, and referenced worksheets).
 pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadError> {
     read_workbook_model_from_reader(Cursor::new(bytes))
+}
+
+/// Read an XLSX workbook model from in-memory bytes, transparently decrypting Office
+/// `EncryptedPackage` OLE wrappers when the input bytes are password-protected.
+pub fn read_workbook_model_from_bytes_with_password(
+    bytes: &[u8],
+    password: &str,
+) -> Result<Workbook, ReadError> {
+    let bytes = crate::encrypted::maybe_decrypt_office_encrypted_package(bytes, password)?;
+    read_workbook_model_from_bytes(bytes.as_ref())
 }
 
 /// Read an XLSX workbook model directly from a seekable reader without inflating
@@ -1124,6 +1155,15 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     })
 }
 
+/// Load an [`XlsxDocument`] from in-memory bytes, transparently decrypting Office
+/// `EncryptedPackage` OLE wrappers when the input bytes are password-protected.
+pub fn load_from_bytes_with_password(
+    bytes: &[u8],
+    password: &str,
+) -> Result<XlsxDocument, ReadError> {
+    let bytes = crate::encrypted::maybe_decrypt_office_encrypted_package(bytes, password)?;
+    load_from_bytes(bytes.as_ref())
+}
 fn discover_worksheet_comment_part_names(
     worksheet_part: &str,
     worksheet_rels: Option<&[u8]>,
