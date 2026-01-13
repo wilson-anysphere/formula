@@ -33,21 +33,44 @@ impl FunctionTranslations {
         self.maps.get_or_init(|| {
             let mut canon_to_loc = HashMap::new();
             let mut loc_to_canon = HashMap::new();
+            // Track the exact line that introduced each key so we can produce actionable
+            // diagnostics if the TSV contains duplicate entries.
+            let mut canon_line: HashMap<&'static str, (usize, &'static str)> = HashMap::new();
+            let mut loc_line: HashMap<&'static str, (usize, &'static str)> = HashMap::new();
 
-            for line in self.data_tsv.lines() {
-                let line = line.trim();
+            for (idx, raw_line) in self.data_tsv.lines().enumerate() {
+                let line_no = idx + 1;
+                let line = raw_line.trim();
                 if line.is_empty() || line.starts_with('#') {
                     continue;
                 }
 
                 let (canon, loc) = line.split_once('\t').unwrap_or_else(|| {
-                    panic!("invalid function translation line (expected TSV): {line:?}")
+                    panic!(
+                        "invalid function translation line (expected TSV) at line {line_no}: {line:?}"
+                    )
                 });
                 let canon = canon.trim();
                 let loc = loc.trim();
                 if canon.is_empty() || loc.is_empty() {
-                    panic!("invalid function translation line (empty entry): {line:?}");
+                    panic!(
+                        "invalid function translation line (empty entry) at line {line_no}: {line:?}"
+                    );
                 }
+
+                if let Some((prev_no, prev_line)) = canon_line.get(canon) {
+                    panic!(
+                        "duplicate canonical function translation key {canon:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
+                    );
+                }
+                if let Some((prev_no, prev_line)) = loc_line.get(loc) {
+                    panic!(
+                        "duplicate localized function translation key {loc:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
+                    );
+                }
+
+                canon_line.insert(canon, (line_no, line));
+                loc_line.insert(loc, (line_no, line));
 
                 canon_to_loc.insert(canon, loc);
                 loc_to_canon.insert(loc, canon);
@@ -284,5 +307,66 @@ pub fn get_locale(id: &str) -> Option<&'static FormulaLocale> {
         "fr-FR" => Some(&FR_FR),
         "es-ES" => Some(&ES_ES),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::any::Any;
+    use std::panic::AssertUnwindSafe;
+
+    fn panic_message(err: &(dyn Any + Send)) -> String {
+        if let Some(msg) = err.downcast_ref::<&str>() {
+            (*msg).to_string()
+        } else if let Some(msg) = err.downcast_ref::<String>() {
+            msg.clone()
+        } else {
+            "<non-string panic>".to_string()
+        }
+    }
+
+    #[test]
+    fn duplicate_canonical_key_panics_with_diagnostics() {
+        let translations = FunctionTranslations::new(
+            "\
+SUM\tSOMME
+SUM\tSUMA
+",
+        );
+        let err = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            translations.maps();
+        }))
+        .expect_err("expected duplicate canonical key to panic");
+
+        let msg = panic_message(&*err);
+        assert!(msg.contains("duplicate canonical function translation key"));
+        assert!(msg.contains("\"SUM\""));
+        assert!(msg.contains("line 1"));
+        assert!(msg.contains("line 2"));
+        assert!(msg.contains("SUM\\tSOMME"));
+        assert!(msg.contains("SUM\\tSUMA"));
+    }
+
+    #[test]
+    fn duplicate_localized_key_panics_with_diagnostics() {
+        let translations = FunctionTranslations::new(
+            "\
+SUM\tSOMME
+AVERAGE\tSOMME
+",
+        );
+        let err = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            translations.maps();
+        }))
+        .expect_err("expected duplicate localized key to panic");
+
+        let msg = panic_message(&*err);
+        assert!(msg.contains("duplicate localized function translation key"));
+        assert!(msg.contains("\"SOMME\""));
+        assert!(msg.contains("line 1"));
+        assert!(msg.contains("line 2"));
+        assert!(msg.contains("SUM\\tSOMME"));
+        assert!(msg.contains("AVERAGE\\tSOMME"));
     }
 }
