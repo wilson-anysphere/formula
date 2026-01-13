@@ -101,7 +101,7 @@ pub enum OffCryptoError {
     },
 
     #[error(
-        "EncryptionInfo XML invalid base64 value for attribute `{attr}` on element `{element}`: {source}"
+         "EncryptionInfo XML invalid base64 value for attribute `{attr}` on element `{element}`: {source}"
     )]
     Base64Decode {
         element: String,
@@ -109,6 +109,11 @@ pub enum OffCryptoError {
         #[source]
         source: base64::DecodeError,
     },
+
+    #[error(
+        "EncryptionInfo XML spinCount {spin_count} exceeds maximum allowed {max} (refusing to run expensive password KDF)"
+    )]
+    SpinCountTooLarge { spin_count: u32, max: u32 },
 
     // --- Cryptographic verification ------------------------------------------------------------
     #[error("wrong password for encrypted workbook (verifier mismatch)")]

@@ -64,14 +64,19 @@ pub use aes_cbc::{
     decrypt_aes_cbc_no_padding, decrypt_aes_cbc_no_padding_in_place, AesCbcDecryptError,
     AES_BLOCK_SIZE,
 };
+
 pub use agile::{
     decrypt_agile_encrypted_package_stream as decrypt_agile_encrypted_package_bytes,
     decrypt_agile_encrypted_package_stream_with_key, decrypt_agile_keys,
     parse_agile_encryption_info_stream, parse_agile_encryption_info_stream_with_options,
-    AgileDataIntegrity, AgileDecryptedKeys, AgileEncryptionInfo, AgileKeyData, AgilePasswordKeyEncryptor,
-    AgileEncryptionInfoWarning,
+    parse_agile_encrypted_key, AgileDataIntegrity, AgileDecryptedKeys, AgileEncryptedKey,
+    AgileEncryptionInfo, AgileEncryptionInfoWarning, AgileKeyData, AgilePasswordKeyEncryptor,
+    DecryptOptions, DEFAULT_MAX_SPIN_COUNT,
 };
-pub use agile_decrypt::{decrypt_agile_encrypted_package, decrypt_agile_encrypted_package_stream};
+pub use agile_decrypt::{
+    decrypt_agile_encrypted_package, decrypt_agile_encrypted_package_stream,
+    decrypt_agile_encrypted_package_with_options,
+};
 pub use crypto::{
     derive_iv, derive_key, derive_segment_iv, hash_password, segment_block_key, CryptoError,
     HashAlgorithm, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK,

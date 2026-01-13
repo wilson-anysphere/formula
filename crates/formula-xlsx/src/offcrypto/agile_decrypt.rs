@@ -7,6 +7,7 @@ use hmac::{Hmac, Mac};
 use super::aes_cbc::{
     decrypt_aes_cbc_no_padding, decrypt_aes_cbc_no_padding_in_place, AES_BLOCK_SIZE,
 };
+use super::agile::DecryptOptions;
 use super::crypto::{
     derive_iv, derive_key, hash_password, segment_block_key, HashAlgorithm, HMAC_KEY_BLOCK,
     HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
@@ -266,7 +267,22 @@ pub fn decrypt_agile_encrypted_package(
     encrypted_package: &[u8],
     password: &str,
 ) -> Result<Vec<u8>> {
-    let info = parse_agile_encryption_info(encryption_info)?;
+    decrypt_agile_encrypted_package_with_options(
+        encryption_info,
+        encrypted_package,
+        password,
+        &DecryptOptions::default(),
+    )
+}
+
+/// Like [`decrypt_agile_encrypted_package`] but with configurable [`DecryptOptions`].
+pub fn decrypt_agile_encrypted_package_with_options(
+    encryption_info: &[u8],
+    encrypted_package: &[u8],
+    password: &str,
+    opts: &DecryptOptions,
+) -> Result<Vec<u8>> {
+    let info = parse_agile_encryption_info(encryption_info, opts)?;
 
     // Validate AES-CBC ciphertext buffers up-front to avoid confusing crypto backend errors and to
     // ensure we can report which field was malformed.
@@ -723,8 +739,11 @@ fn parse_encrypted_package_stream(encrypted_package: &[u8]) -> Result<(usize, &[
     Ok((declared_len, &encrypted_package[8..]))
 }
 
-fn parse_agile_encryption_info(encryption_info: &[u8]) -> Result<AgileEncryptionInfo> {
-    let opts = ParseOptions::default();
+fn parse_agile_encryption_info(
+    encryption_info: &[u8],
+    decrypt_opts: &DecryptOptions,
+) -> Result<AgileEncryptionInfo> {
+    let parse_opts = ParseOptions::default();
     if encryption_info.len() < 8 {
         return Err(OffCryptoError::MissingRequiredElement {
             element: "EncryptionInfoHeader".to_string(),
@@ -737,7 +756,7 @@ fn parse_agile_encryption_info(encryption_info: &[u8]) -> Result<AgileEncryption
         return Err(OffCryptoError::UnsupportedEncryptionVersion { major, minor });
     }
 
-    let xml_bytes = extract_encryption_info_xml(encryption_info, &opts)?;
+    let xml_bytes = extract_encryption_info_xml(encryption_info, &parse_opts)?;
     let xml = decode_encryption_info_xml_text(xml_bytes)?;
     let doc = roxmltree::Document::parse(xml.as_ref())?;
 
@@ -825,9 +844,9 @@ fn parse_agile_encryption_info(encryption_info: &[u8]) -> Result<AgileEncryption
             element: "encryptedKey".to_string(),
         })?;
 
-    let key_data = parse_key_data(key_data_node, &opts)?;
-    let data_integrity = parse_data_integrity(data_integrity_node, &opts)?;
-    let password_key = parse_password_key_encryptor(encrypted_key_node, &opts)?;
+    let key_data = parse_key_data(key_data_node, &parse_opts)?;
+    let data_integrity = parse_data_integrity(data_integrity_node, &parse_opts)?;
+    let password_key = parse_password_key_encryptor(encrypted_key_node, &parse_opts, decrypt_opts)?;
 
     Ok(AgileEncryptionInfo {
         key_data,
@@ -857,20 +876,29 @@ fn parse_data_integrity(node: roxmltree::Node<'_, '_>, opts: &ParseOptions) -> R
 
 fn parse_password_key_encryptor(
     node: roxmltree::Node<'_, '_>,
-    opts: &ParseOptions,
+    parse_opts: &ParseOptions,
+    decrypt_opts: &DecryptOptions,
 ) -> Result<PasswordKeyEncryptor> {
     validate_cipher_settings(node)?;
 
+    let spin_count = parse_u32_attr(node, "spinCount")?;
+    if spin_count > decrypt_opts.max_spin_count {
+        return Err(OffCryptoError::SpinCountTooLarge {
+            spin_count,
+            max: decrypt_opts.max_spin_count,
+        });
+    }
+
     Ok(PasswordKeyEncryptor {
-        salt_value: parse_base64_attr(node, "saltValue", opts)?,
+        salt_value: parse_base64_attr(node, "saltValue", parse_opts)?,
         hash_algorithm: parse_hash_algorithm(node, "hashAlgorithm")?,
-        spin_count: parse_u32_attr(node, "spinCount")?,
+        spin_count,
         block_size: parse_usize_attr(node, "blockSize")?,
         key_bits: parse_usize_attr(node, "keyBits")?,
         hash_size: parse_usize_attr(node, "hashSize")?,
-        encrypted_verifier_hash_input: parse_base64_attr(node, "encryptedVerifierHashInput", opts)?,
-        encrypted_verifier_hash_value: parse_base64_attr(node, "encryptedVerifierHashValue", opts)?,
-        encrypted_key_value: parse_base64_attr(node, "encryptedKeyValue", opts)?,
+        encrypted_verifier_hash_input: parse_base64_attr(node, "encryptedVerifierHashInput", parse_opts)?,
+        encrypted_verifier_hash_value: parse_base64_attr(node, "encryptedVerifierHashValue", parse_opts)?,
+        encrypted_key_value: parse_base64_attr(node, "encryptedKeyValue", parse_opts)?,
     })
 }
 
@@ -1153,7 +1181,8 @@ mod key_encryptor_tests {
         );
 
         let stream = build_encryption_info_stream(&xml);
-        let info = parse_agile_encryption_info(&stream).expect("parse should succeed");
+        let info =
+            parse_agile_encryption_info(&stream, &DecryptOptions::default()).expect("parse should succeed");
         assert_eq!(info.password_key.spin_count, 1);
     }
 
@@ -1174,7 +1203,8 @@ mod key_encryptor_tests {
         );
 
         let stream = build_encryption_info_stream(&xml);
-        let err = parse_agile_encryption_info(&stream).expect_err("expected error");
+        let err = parse_agile_encryption_info(&stream, &DecryptOptions::default())
+            .expect_err("expected error");
         match err {
             OffCryptoError::UnsupportedKeyEncryptor { available_uris, .. } => {
                 assert!(

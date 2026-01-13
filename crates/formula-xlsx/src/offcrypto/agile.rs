@@ -26,6 +26,86 @@ pub enum AgileEncryptionInfoWarning {
     MultiplePasswordKeyEncryptors { count: usize },
 }
 
+/// Default maximum `spinCount` accepted from Agile encryption descriptors.
+///
+/// Excel commonly uses `spinCount=100000`. This default provides headroom while preventing
+/// malicious documents from requesting billions of hash iterations (CPU DoS).
+pub const DEFAULT_MAX_SPIN_COUNT: u32 = 10_000_000;
+
+/// Options controlling Agile decryption behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecryptOptions {
+    /// Maximum accepted `spinCount` for the Agile password KDF.
+    pub max_spin_count: u32,
+}
+
+impl Default for DecryptOptions {
+    fn default() -> Self {
+        Self {
+            max_spin_count: DEFAULT_MAX_SPIN_COUNT,
+        }
+    }
+}
+
+/// Parsed fields from an Agile password `p:encryptedKey` element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgileEncryptedKey {
+    pub spin_count: u32,
+}
+
+/// Parse the Agile password `p:encryptedKey` element from an `EncryptionInfo` XML document.
+///
+/// This helper is useful for preflight checks and enforces [`DecryptOptions::max_spin_count`] to
+/// avoid CPU DoS via enormous `spinCount` values.
+pub fn parse_agile_encrypted_key(xml: &[u8], opts: &DecryptOptions) -> Result<AgileEncryptedKey> {
+    let xml = std::str::from_utf8(xml)?;
+    let doc = roxmltree::Document::parse(xml)?;
+
+    // There may be multiple `<encryptedKey>` elements (e.g. certificate-based key encryptors).
+    // Prefer the one that contains `spinCount`, which is specific to the password key encryptor.
+    let mut encrypted_keys = doc
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "encryptedKey");
+
+    let first = encrypted_keys
+        .next()
+        .ok_or_else(|| OffCryptoError::MissingRequiredElement {
+            element: "p:encryptedKey".to_string(),
+        })?;
+
+    let node = if first.attribute("spinCount").is_some() {
+        first
+    } else {
+        encrypted_keys
+            .find(|n| n.attribute("spinCount").is_some())
+            .unwrap_or(first)
+    };
+
+    let spin_str = node.attribute("spinCount").ok_or_else(|| {
+        OffCryptoError::MissingRequiredAttribute {
+            element: "p:encryptedKey".to_string(),
+            attr: "spinCount".to_string(),
+        }
+    })?;
+
+    let spin_count = spin_str.trim().parse::<u32>().map_err(|e| {
+        OffCryptoError::InvalidAttribute {
+            element: "p:encryptedKey".to_string(),
+            attr: "spinCount".to_string(),
+            reason: format!("expected unsigned 32-bit integer: {e}"),
+        }
+    })?;
+
+    if spin_count > opts.max_spin_count {
+        return Err(OffCryptoError::SpinCountTooLarge {
+            spin_count,
+            max: opts.max_spin_count,
+        });
+    }
+
+    Ok(AgileEncryptedKey { spin_count })
+}
+
 /// Parsed `<keyData>` parameters from an Agile Encryption descriptor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgileKeyData {
@@ -322,9 +402,17 @@ pub fn parse_agile_encryption_info_stream_with_options(
         key_encryptor_block_size,
     )?;
 
+    let spin_count = parse_u32_attr("encryptedKey", encrypted_key_node, "spinCount")?;
+    if spin_count > DEFAULT_MAX_SPIN_COUNT {
+        return Err(OffCryptoError::SpinCountTooLarge {
+            spin_count,
+            max: DEFAULT_MAX_SPIN_COUNT,
+        });
+    }
+
     let password_key_encryptor = AgilePasswordKeyEncryptor {
         salt_value: decode_b64_attr("encryptedKey", encrypted_key_node, "saltValue", opts)?,
-        spin_count: parse_u32_attr("encryptedKey", encrypted_key_node, "spinCount")?,
+        spin_count,
         hash_algorithm: parse_hash_algorithm_attr("encryptedKey", encrypted_key_node, "hashAlgorithm")?,
         cipher_algorithm: key_encryptor_cipher_algorithm,
         cipher_chaining: key_encryptor_cipher_chaining,
@@ -1320,5 +1408,41 @@ mod tests {
             ),
             "unexpected error: {err:?}"
         );
+    }
+
+    #[test]
+    fn rejects_spin_count_above_default_max() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+            xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+  <keyEncryptors>
+    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+      <p:encryptedKey spinCount="4294967295"/>
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>
+"#;
+
+        let err = parse_agile_encrypted_key(xml, &DecryptOptions::default()).unwrap_err();
+        assert!(matches!(
+            err,
+            OffCryptoError::SpinCountTooLarge {
+                spin_count: u32::MAX,
+                max: DEFAULT_MAX_SPIN_COUNT
+            }
+        ));
+    }
+
+    #[test]
+    fn allows_overriding_max_spin_count() {
+        let xml = br#"<encryption xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+  <p:encryptedKey spinCount="4294967295"/>
+ </encryption>"#;
+
+        let opts = DecryptOptions {
+            max_spin_count: u32::MAX,
+        };
+        let parsed = parse_agile_encrypted_key(xml, &opts).expect("should accept with override");
+        assert_eq!(parsed.spin_count, u32::MAX);
     }
 }
