@@ -92,6 +92,16 @@ test("LocalStorageBinaryStorage clears invalid base64 payloads on load (browser 
   });
 });
 
+test("LocalStorageBinaryStorage clears invalid base64 payloads on load (Buffer path)", async () => {
+  await withTempGlobalProp("localStorage", new MemoryLocalStorage(), async () => {
+    const storage = new LocalStorageBinaryStorage({ namespace: "formula.test.rag", workbookId: "bad-b64-buffer" });
+    globalThis.localStorage.setItem(storage.key, "%%%not-base64%%%");
+    const loaded = await storage.load();
+    assert.equal(loaded, null);
+    assert.equal(globalThis.localStorage.getItem(storage.key), null, "expected invalid base64 key to be cleared");
+  });
+});
+
 test("ChunkedLocalStorageBinaryStorage clears invalid legacy base64 payloads on load (browser path)", async () => {
   await withBrowserBase64(async () => {
     await withTempGlobalProp("localStorage", new MemoryLocalStorage(), async () => {

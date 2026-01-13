@@ -702,11 +702,39 @@ export function toBase64(data) {
  * @param {string} encoded
  */
 export function fromBase64(encoded) {
+  const input = String(encoded ?? "");
+  if (input.length === 0) return new Uint8Array();
+
+  // `Buffer.from(str, "base64")` is permissive and will happily decode garbage
+  // (e.g. "%%%not-base64%%%") into arbitrary bytes without throwing. In browser
+  // environments `atob()` is much stricter and throws for invalid input. We
+  // validate the payload up-front so callers can reliably detect corruption and
+  // clear persisted state regardless of whether a global Buffer implementation
+  // exists (some bundlers/polyfills inject Buffer into browser runtimes).
+  if (input.length % 4 !== 0) {
+    throw new Error("Invalid base64 payload");
+  }
+  // Fast reject invalid characters.
+  if (/[^A-Za-z0-9+/=]/.test(input)) {
+    throw new Error("Invalid base64 payload");
+  }
+  const padIndex = input.indexOf("=");
+  if (padIndex !== -1) {
+    // Padding is only allowed at the very end and must be 1 or 2 '=' chars.
+    const padLen = input.length - padIndex;
+    if (padLen !== 1 && padLen !== 2) {
+      throw new Error("Invalid base64 payload");
+    }
+    for (let i = padIndex; i < input.length; i += 1) {
+      if (input[i] !== "=") throw new Error("Invalid base64 payload");
+    }
+  }
+
   if (typeof Buffer !== "undefined") {
-    return new Uint8Array(Buffer.from(encoded, "base64"));
+    return new Uint8Array(Buffer.from(input, "base64"));
   }
   // eslint-disable-next-line no-undef
-  const binary = atob(encoded);
+  const binary = atob(input);
   const bytes = new Uint8Array(binary.length);
   // Fill in chunks to keep the hot loop simple for large payloads.
   const chunkSize = 0x8000;
