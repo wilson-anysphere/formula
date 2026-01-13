@@ -1,7 +1,8 @@
 //! MS-OFFCRYPTO parsing and crypto utilities.
 //!
 //! This crate currently supports:
-//! - Parsing the *Standard* (CryptoAPI) `EncryptionInfo` stream header (version 3.2)
+//! - Parsing the *Standard* (CryptoAPI) `EncryptionInfo` stream header (`versionMinor == 2`;
+//!   commonly 3.2, but `versionMajor ∈ {2,3,4}` is observed in the wild)
 //! - Parsing the *Agile* `EncryptionInfo` stream (version 4.4) (password key-encryptor subset)
 //! - Parsing the `EncryptedPackage` stream header
 //! - ECMA-376 Standard password→key derivation + verifier checks
@@ -166,7 +167,7 @@ pub struct AgileEncryptionInfo {
 /// Parsed `EncryptionInfo`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EncryptionInfo {
-    /// Standard (CryptoAPI) encryption (MS-OFFCRYPTO version 3.2).
+    /// Standard (CryptoAPI) encryption (MS-OFFCRYPTO `versionMinor == 2`; commonly 3.2).
     Standard {
         version: EncryptionVersionInfo,
         header: StandardEncryptionHeader,
@@ -362,7 +363,13 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
         return Ok(EncryptionInfo::Agile { version, info });
     }
 
-    if (major, minor) != (3, 2) {
+    // MS-OFFCRYPTO / ECMA-376 identifies "Standard" encryption via `versionMinor == 2`, but
+    // real-world files vary `versionMajor` across 2/3/4 (see nolze/msoffcrypto-tool).
+    //
+    // Treat everything else (including "Extensible" encryption, versionMinor == 3) as unsupported
+    // for now so callers can surface an actionable error.
+    let is_standard = minor == 2 && matches!(major, 2 | 3 | 4);
+    if !is_standard {
         return Ok(EncryptionInfo::Unsupported { version });
     }
 

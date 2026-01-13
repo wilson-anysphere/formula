@@ -29,9 +29,13 @@ pub(crate) fn parse_encryption_info_header(
     let flags = read_u32_le(bytes, 4)?;
     let header_size = read_u32_le(bytes, 8)?;
 
+    // MS-OFFCRYPTO / ECMA-376 identifies "Standard" encryption via `versionMinor == 2`, but
+    // real-world files vary `versionMajor` across Office generations (2/3/4).
+    //
+    // "Extensible" encryption uses `versionMinor == 3` with `versionMajor` 3 or 4.
     let kind = match (version_major, version_minor) {
         (4, 4) => EncryptionInfoKind::Agile,
-        (3, 2) | (4, 2) => EncryptionInfoKind::Standard,
+        (major, 2) if (2..=4).contains(&major) => EncryptionInfoKind::Standard,
         _ => {
             return Err(OfficeCryptoError::UnsupportedEncryption(format!(
                 "unsupported EncryptionInfo version {version_major}.{version_minor} (flags={flags:#x})"
@@ -91,4 +95,3 @@ pub(crate) fn decode_utf16le_nul_terminated(bytes: &[u8]) -> Result<String, Offi
         OfficeCryptoError::InvalidFormat("invalid UTF-16LE in EncryptionInfo".to_string())
     })
 }
-

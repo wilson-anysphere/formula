@@ -83,9 +83,13 @@ fn main() {
     let minor = u16::from_le_bytes([info_hdr[2], info_hdr[3]]);
     let flags = u32::from_le_bytes([info_hdr[4], info_hdr[5], info_hdr[6], info_hdr[7]]);
 
+    // MS-OFFCRYPTO identifies "Standard" encryption via `versionMinor == 2`, but real-world files
+    // vary the major version across Office generations (2/3/4). Keep this diagnostic tool aligned
+    // with `formula-offcrypto` so it correctly labels Standard-encrypted files.
     let kind = match (major, minor) {
         (4, 4) => "Agile",
-        (3, 2) => "Standard",
+        (major, 2) if (2..=4).contains(&major) => "Standard",
+        (major, 3) if (3..=4).contains(&major) => "Extensible",
         _ => "Unknown",
     };
 

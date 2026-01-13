@@ -17,7 +17,9 @@ fn utf16le_bytes(s: &str, terminated: bool) -> Vec<u8> {
     out
 }
 
-fn build_standard_encryption_info(
+fn build_standard_encryption_info_with_version(
+    version_major: u16,
+    version_minor: u16,
     csp_name: &[u8],
     alg_id: u32,
     alg_id_hash: u32,
@@ -28,9 +30,9 @@ fn build_standard_encryption_info(
 ) -> Vec<u8> {
     let mut bytes = Vec::new();
 
-    // EncryptionVersionInfo (major=3, minor=2)
-    bytes.extend_from_slice(&3u16.to_le_bytes());
-    bytes.extend_from_slice(&2u16.to_le_bytes());
+    // EncryptionVersionInfo
+    bytes.extend_from_slice(&version_major.to_le_bytes());
+    bytes.extend_from_slice(&version_minor.to_le_bytes());
     bytes.extend_from_slice(&0xAABBCCDDu32.to_le_bytes());
 
     // EncryptionHeader (8 DWORDs + cspName)
@@ -57,18 +59,32 @@ fn build_standard_encryption_info(
     bytes
 }
 
+fn build_standard_encryption_info(
+    csp_name: &[u8],
+    alg_id: u32,
+    alg_id_hash: u32,
+    key_size_bits: u32,
+    salt_size: u32,
+    verifier_hash_size: u32,
+    encrypted_verifier_hash_len: usize,
+) -> Vec<u8> {
+    build_standard_encryption_info_with_version(
+        3,
+        2,
+        csp_name,
+        alg_id,
+        alg_id_hash,
+        key_size_bits,
+        salt_size,
+        verifier_hash_size,
+        encrypted_verifier_hash_len,
+    )
+}
+
 #[test]
 fn parse_synthetic_standard_encryption_info() {
     let csp_name = utf16le_bytes("Test CSP", true);
-    let bytes = build_standard_encryption_info(
-        &csp_name,
-        CALG_AES_128,
-        CALG_SHA1,
-        128,
-        16,
-        20,
-        32,
-    );
+    let bytes = build_standard_encryption_info(&csp_name, CALG_AES_128, CALG_SHA1, 128, 16, 20, 32);
 
     let info = parse_encryption_info(&bytes).expect("parse");
     let EncryptionInfo::Standard {
@@ -108,6 +124,46 @@ fn parse_synthetic_standard_encryption_info() {
             encrypted_verifier_hash: vec![0xBB; 32],
         }
     );
+}
+
+#[test]
+fn parse_synthetic_standard_encryption_info_accepts_major_2_minor_2() {
+    let bytes = build_standard_encryption_info_with_version(
+        2,
+        2,
+        &utf16le_bytes("Test CSP", true),
+        CALG_AES_128,
+        CALG_SHA1,
+        128,
+        16,
+        20,
+        32,
+    );
+    let info = parse_encryption_info(&bytes).expect("parse");
+    let EncryptionInfo::Standard { version, .. } = info else {
+        panic!("expected standard");
+    };
+    assert_eq!((version.major, version.minor), (2, 2));
+}
+
+#[test]
+fn parse_synthetic_standard_encryption_info_accepts_major_4_minor_2() {
+    let bytes = build_standard_encryption_info_with_version(
+        4,
+        2,
+        &utf16le_bytes("Test CSP", true),
+        CALG_AES_128,
+        CALG_SHA1,
+        128,
+        16,
+        20,
+        32,
+    );
+    let info = parse_encryption_info(&bytes).expect("parse");
+    let EncryptionInfo::Standard { version, .. } = info else {
+        panic!("expected standard");
+    };
+    assert_eq!((version.major, version.minor), (4, 2));
 }
 
 #[test]
@@ -164,30 +220,16 @@ fn truncation_missing_verifier_fields() {
 
 #[test]
 fn csp_name_accepts_terminated_and_non_terminated_utf16le() {
-    let bytes_term = build_standard_encryption_info(
-        &utf16le_bytes("CSP", true),
-        CALG_AES_128,
-        CALG_SHA1,
-        128,
-        16,
-        20,
-        32,
-    );
+    let bytes_term =
+        build_standard_encryption_info(&utf16le_bytes("CSP", true), CALG_AES_128, CALG_SHA1, 128, 16, 20, 32);
     let info = parse_encryption_info(&bytes_term).expect("terminated parse");
     let EncryptionInfo::Standard { header, .. } = info else {
         panic!("expected standard");
     };
     assert_eq!(header.csp_name, "CSP");
 
-    let bytes_no_term = build_standard_encryption_info(
-        &utf16le_bytes("CSP", false),
-        CALG_AES_128,
-        CALG_SHA1,
-        128,
-        16,
-        20,
-        32,
-    );
+    let bytes_no_term =
+        build_standard_encryption_info(&utf16le_bytes("CSP", false), CALG_AES_128, CALG_SHA1, 128, 16, 20, 32);
     let info = parse_encryption_info(&bytes_no_term).expect("non-terminated parse");
     let EncryptionInfo::Standard { header, .. } = info else {
         panic!("expected standard");

@@ -181,6 +181,23 @@ mod tests {
     }
 
     #[test]
+    fn parses_standard_encryption_info_accepts_version_2_2() {
+        // Standard encryption is identified by `versionMinor == 2` and `versionMajor ∈ {2,3,4}` in
+        // the wild; ensure we don't over-gate on the common `3.2`/`4.2` pairs.
+        let mut info_bytes = standard::tests::standard_encryption_info_fixture();
+        info_bytes[..2].copy_from_slice(&2u16.to_le_bytes()); // versionMajor
+        info_bytes[2..4].copy_from_slice(&2u16.to_le_bytes()); // versionMinor
+
+        let header = util::parse_encryption_info_header(&info_bytes).expect("parse header");
+        assert_eq!(header.kind, util::EncryptionInfoKind::Standard);
+
+        let parsed =
+            standard::parse_standard_encryption_info(&info_bytes, &header).expect("parse standard");
+        assert_eq!(parsed.version_major, 2);
+        assert_eq!(parsed.version_minor, 2);
+    }
+
+    #[test]
     fn parses_agile_encryption_info_minimal() {
         let info_bytes = agile::tests::agile_encryption_info_fixture();
         let header = util::parse_encryption_info_header(&info_bytes).expect("parse header");
