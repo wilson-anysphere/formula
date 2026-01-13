@@ -1269,6 +1269,79 @@ fn columnar_tables_support_measures_and_filter_propagation() {
 }
 
 #[test]
+fn persisted_columnar_table_can_register_calculated_column_definition_without_recomputing() {
+    let mut model = DataModel::new();
+
+    // Simulate a persisted model: calculated column values are already present in the stored
+    // columnar table, and we only need to register the DAX expression metadata.
+    let orders_schema = vec![
+        ColumnSchema {
+            name: "OrderId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Double Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut orders = ColumnarTableBuilder::new(orders_schema, options);
+
+    let amounts = [10.0, 20.0, 5.0, 8.0];
+    for (idx, amount) in amounts.iter().copied().enumerate() {
+        orders.append_row(&[
+            formula_columnar::Value::Number((100 + idx) as f64),
+            formula_columnar::Value::Number(amount),
+            formula_columnar::Value::Number(amount * 2.0),
+        ]);
+    }
+    model
+        .add_table(Table::from_columnar("Orders", orders.finalize()))
+        .unwrap();
+
+    // Negative: registering a definition for a column that doesn't exist should fail.
+    let err = model
+        .add_calculated_column_definition("Orders", "Missing Column", "Orders[Amount] * 2")
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DaxError::UnknownColumn { table, column }
+            if table == "Orders" && column == "Missing Column"
+    ));
+
+    model
+        .add_calculated_column_definition("Orders", "Double Amount", "Orders[Amount] * 2")
+        .unwrap();
+
+    assert!(model.calculated_columns().iter().any(|c| {
+        c.table == "Orders" && c.name == "Double Amount" && c.expression == "Orders[Amount] * 2"
+    }));
+
+    // Ensure values remain readable from the table and match the persisted values.
+    let orders = model.table("Orders").unwrap();
+    let values: Vec<Value> = (0..orders.row_count())
+        .map(|row| orders.value(row, "Double Amount").unwrap())
+        .collect();
+    assert_eq!(values, vec![20.0.into(), 40.0.into(), 10.0.into(), 16.0.into()]);
+
+    // Negative: registering the same calculated column definition twice should fail.
+    let err = model
+        .add_calculated_column_definition("Orders", "Double Amount", "Orders[Amount] * 2")
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DaxError::DuplicateColumn { table, column } if table == "Orders" && column == "Double Amount"
+    ));
+}
+
+#[test]
 fn measure_in_row_context_performs_implicit_context_transition() {
     let mut model = build_model();
     model
