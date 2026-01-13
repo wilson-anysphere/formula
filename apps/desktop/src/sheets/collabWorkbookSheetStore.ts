@@ -245,12 +245,16 @@ function cloneCollabSheetMap(entry: unknown): Y.Map<unknown> {
 }
 
 export class CollabWorkbookSheetStore extends WorkbookSheetStore {
+  private readonly canEditWorkbook: () => boolean;
+
   constructor(
     private readonly session: CollabSessionLike,
     initialSheets: ConstructorParameters<typeof WorkbookSheetStore>[0],
     private readonly keyRef: CollabSheetsKeyRef,
+    opts?: { canEditWorkbook?: () => boolean },
   ) {
     super(initialSheets);
+    this.canEditWorkbook = opts?.canEditWorkbook ?? (() => true);
   }
 
   private refreshKeyFromSession(): void {
@@ -258,6 +262,7 @@ export class CollabWorkbookSheetStore extends WorkbookSheetStore {
   }
 
   override rename(id: string, newName: string): void {
+    if (!this.canEditWorkbook()) return;
     const before = this.getName(id);
     super.rename(id, newName);
     const after = this.getName(id);
@@ -276,6 +281,7 @@ export class CollabWorkbookSheetStore extends WorkbookSheetStore {
   }
 
   override move(id: string, toIndex: number): void {
+    if (!this.canEditWorkbook()) return;
     const before = this.listAll().map((s) => s.id).join("|");
     super.move(id, toIndex);
     const after = this.listAll().map((s) => s.id).join("|");
@@ -299,6 +305,7 @@ export class CollabWorkbookSheetStore extends WorkbookSheetStore {
   }
 
   override remove(id: string): void {
+    if (!this.canEditWorkbook()) return;
     super.remove(id);
 
     this.session.transactLocal(() => {
@@ -310,6 +317,7 @@ export class CollabWorkbookSheetStore extends WorkbookSheetStore {
   }
 
   override hide(id: string): void {
+    if (!this.canEditWorkbook()) return;
     const before = this.getById(id)?.visibility;
     super.hide(id);
     const after = this.getById(id)?.visibility;
@@ -326,6 +334,7 @@ export class CollabWorkbookSheetStore extends WorkbookSheetStore {
   }
 
   override unhide(id: string): void {
+    if (!this.canEditWorkbook()) return;
     const before = this.getById(id)?.visibility;
     super.unhide(id);
     const after = this.getById(id)?.visibility;
@@ -342,6 +351,7 @@ export class CollabWorkbookSheetStore extends WorkbookSheetStore {
   }
 
   override setVisibility(id: string, visibility: SheetVisibility): void {
+    if (!this.canEditWorkbook()) return;
     const before = this.getById(id)?.visibility;
     super.setVisibility(id, visibility);
     const after = this.getById(id)?.visibility;
@@ -358,6 +368,7 @@ export class CollabWorkbookSheetStore extends WorkbookSheetStore {
   }
 
   override setTabColor(id: string, color: TabColor | undefined): void {
+    if (!this.canEditWorkbook()) return;
     // Collab sheet metadata stores tab colors as 8-digit ARGB hex strings (e.g. "FFFF0000").
     // Normalize UI-provided `TabColor.rgb` values into that representation before writing.
     const raw = color?.rgb;

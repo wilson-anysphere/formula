@@ -105,6 +105,7 @@ import { openFormatCellsDialog } from "./formatting/openFormatCellsDialog.js";
 import { parseCollabShareLink, serializeCollabShareLink } from "./sharing/collabLink.js";
 import { saveCollabConnectionForWorkbook, loadCollabConnectionForWorkbook } from "./sharing/collabConnectionStore.js";
 import { loadCollabToken, storeCollabToken } from "./sharing/collabTokenStore.js";
+import { getWorkbookMutationPermission, READ_ONLY_SHEET_MUTATION_MESSAGE } from "./collab/permissionGuards";
 import { DesktopExtensionHostManager } from "./extensions/extensionHostManager.js";
 import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
 import { ContextKeyService } from "./extensions/contextKeys.js";
@@ -2846,7 +2847,9 @@ function syncSheetStoreFromCollabSession(session: CollabSession): void {
   collabSheetsSession = session;
 
   try {
-    workbookSheetStore = new CollabWorkbookSheetStore(session, sheets, collabSheetsKeyRef);
+    workbookSheetStore = new CollabWorkbookSheetStore(session, sheets, collabSheetsKeyRef, {
+      canEditWorkbook: () => getWorkbookMutationPermission(session).allowed,
+    });
   } catch (err) {
     // If collab sheet names are invalid/duplicated (shouldn't happen, but can if a remote
     // client writes bad metadata), fall back to using the stable sheet id as the display name
@@ -2856,6 +2859,7 @@ function syncSheetStoreFromCollabSession(session: CollabSession): void {
       session,
       sheets.map((sheet) => ({ ...sheet, name: sheet.id })),
       collabSheetsKeyRef,
+      { canEditWorkbook: () => getWorkbookMutationPermission(session).allowed },
     );
   }
 
@@ -2900,6 +2904,12 @@ async function handleAddSheet(): Promise<void> {
 
     const collabSession = app.getCollabSession?.() ?? null;
     if (collabSession) {
+      const permission = getWorkbookMutationPermission(collabSession);
+      if (!permission.allowed) {
+        showToast(permission.reason ?? READ_ONLY_SHEET_MUTATION_MESSAGE, "error");
+        return;
+      }
+
       // In collab mode, the Yjs `session.sheets` array is the authoritative sheet list.
       // Create the new sheet by updating that metadata so it propagates to other clients.
       const existing = listSheetsFromCollabSession(collabSession);
@@ -2995,6 +3005,14 @@ async function renameSheetById(
     return { id, name: oldDisplayName };
   }
 
+  const collabSession = app.getCollabSession?.() ?? null;
+  if (collabSession) {
+    const permission = getWorkbookMutationPermission(collabSession);
+    if (!permission.allowed) {
+      throw new Error(permission.reason ?? READ_ONLY_SHEET_MUTATION_MESSAGE);
+    }
+  }
+
   // Update UI metadata first so follow-up operations observe the new name.
   workbookSheetStore.rename(id, normalizedNewName);
 
@@ -3014,6 +3032,55 @@ async function renameSheetById(
   }
 
   return { id, name: workbookSheetStore.getName(id) ?? normalizedNewName };
+}
+
+const permissionGuardedSheetStoreCache = new WeakMap<WorkbookSheetStore, WorkbookSheetStore>();
+
+function createPermissionGuardedSheetStore(
+  store: WorkbookSheetStore,
+  getSession: () => CollabSession | null,
+): WorkbookSheetStore {
+  const cached = permissionGuardedSheetStoreCache.get(store);
+  if (cached) return cached;
+
+  const guardedMutations = new Set([
+    "addAfter",
+    "rename",
+    "move",
+    "remove",
+    "hide",
+    "unhide",
+    "setVisibility",
+    "setTabColor",
+    // Not used by sheet tabs directly, but include for completeness.
+    "replaceAll",
+  ]);
+
+  const guarded = new Proxy(store, {
+    get(target, prop) {
+      const value = (target as any)[prop];
+      if (typeof value !== "function") return value;
+
+      // Bind non-mutating methods to the underlying store so `this` remains correct.
+      const name = typeof prop === "string" ? prop : null;
+      if (name && guardedMutations.has(name)) {
+        return (...args: any[]) => {
+          const session = getSession();
+          const permission = getWorkbookMutationPermission(session);
+          if (session && !permission.allowed) {
+            throw new Error(permission.reason ?? READ_ONLY_SHEET_MUTATION_MESSAGE);
+          }
+          return value.apply(target, args);
+        };
+      }
+
+      return value.bind(target);
+    },
+  });
+
+  const out = guarded as unknown as WorkbookSheetStore;
+  permissionGuardedSheetStoreCache.set(store, out);
+  return out;
 }
 
 function renderSheetTabs(): void {
@@ -3037,7 +3104,7 @@ function renderSheetTabs(): void {
 
   sheetTabsReactRoot.render(
     React.createElement(SheetTabStrip, {
-      store: workbookSheetStore,
+      store: createPermissionGuardedSheetStore(workbookSheetStore, () => app.getCollabSession?.() ?? null),
       activeSheetId: app.getCurrentSheetId(),
       onActivateSheet: (sheetId: string) => {
         app.activateSheet(sheetId);
@@ -4873,6 +4940,11 @@ if (
 
       const collabSession = app.getCollabSession?.() ?? null;
       if (collabSession) {
+        const permission = getWorkbookMutationPermission(collabSession);
+        if (!permission.allowed) {
+          throw new Error(permission.reason ?? READ_ONLY_SHEET_MUTATION_MESSAGE);
+        }
+
         const normalizedName = validateSheetName(sheetName, { sheets: workbookSheetStore.listAll() });
 
         const existingIds = new Set(listSheetsFromCollabSession(collabSession).map((sheet) => sheet.id));
@@ -4966,6 +5038,14 @@ if (
       const sheetId = findSheetIdByName(name);
       if (!sheetId) {
         throw new Error(`Unknown sheet: ${name}`);
+      }
+
+      const collabSession = app.getCollabSession?.() ?? null;
+      if (collabSession) {
+        const permission = getWorkbookMutationPermission(collabSession);
+        if (!permission.allowed) {
+          throw new Error(permission.reason ?? READ_ONLY_SHEET_MUTATION_MESSAGE);
+        }
       }
 
       const doc = app.getDocument();

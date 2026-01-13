@@ -10,7 +10,14 @@ import {
 
 function makeSession(
   initial: Array<{ id: string; name?: string; visibility?: string; tabColor?: unknown }>,
-): { doc: Y.Doc; sheets: Y.Array<Y.Map<unknown>>; transactLocal: (fn: () => void) => void } {
+  role: "editor" | "viewer" | "commenter" = "editor",
+): {
+  doc: Y.Doc;
+  sheets: Y.Array<Y.Map<unknown>>;
+  transactLocal: (fn: () => void) => void;
+  getRole: () => string;
+  isReadOnly: () => boolean;
+} {
   const doc = new Y.Doc();
   const sheets = doc.getArray<Y.Map<unknown>>("sheets");
   doc.transact(() => {
@@ -23,7 +30,13 @@ function makeSession(
       sheets.push([map]);
     }
   });
-  return { doc, sheets, transactLocal: (fn) => doc.transact(fn) };
+  return {
+    doc,
+    sheets,
+    transactLocal: (fn) => doc.transact(fn),
+    getRole: () => role,
+    isReadOnly: () => role !== "editor",
+  };
 }
 
 describe("CollabWorkbookSheetStore", () => {
@@ -62,7 +75,9 @@ describe("CollabWorkbookSheetStore", () => {
     ]);
 
     const keyRef = { value: computeCollabSheetsKey(listSheetsFromCollabSession(session)) };
-    const store = new CollabWorkbookSheetStore(session as any, listSheetsFromCollabSession(session), keyRef);
+    const store = new CollabWorkbookSheetStore(session as any, listSheetsFromCollabSession(session), keyRef, {
+      canEditWorkbook: () => !session.isReadOnly(),
+    });
 
     store.hide("s2");
     expect(store.getById("s2")?.visibility).toBe("hidden");
@@ -82,7 +97,9 @@ describe("CollabWorkbookSheetStore", () => {
       { id: "s2", name: "Sheet2", visibility: "visible" },
     ]);
     const keyRef = { value: computeCollabSheetsKey(listSheetsFromCollabSession(session)) };
-    const store = new CollabWorkbookSheetStore(session as any, listSheetsFromCollabSession(session), keyRef);
+    const store = new CollabWorkbookSheetStore(session as any, listSheetsFromCollabSession(session), keyRef, {
+      canEditWorkbook: () => !session.isReadOnly(),
+    });
 
     store.setVisibility("s2", "veryHidden");
     expect(store.getById("s2")?.visibility).toBe("veryHidden");
@@ -103,7 +120,9 @@ describe("CollabWorkbookSheetStore", () => {
   it("writes tabColor changes back to session.sheets and canonicalizes to ARGB", () => {
     const session = makeSession([{ id: "s1", name: "Sheet1", visibility: "visible" }]);
     const keyRef = { value: computeCollabSheetsKey(listSheetsFromCollabSession(session)) };
-    const store = new CollabWorkbookSheetStore(session as any, listSheetsFromCollabSession(session), keyRef);
+    const store = new CollabWorkbookSheetStore(session as any, listSheetsFromCollabSession(session), keyRef, {
+      canEditWorkbook: () => !session.isReadOnly(),
+    });
 
     store.setTabColor("s1", { rgb: "ffff0000" });
     expect(store.getById("s1")?.tabColor?.rgb).toBe("FFFF0000");
@@ -120,7 +139,9 @@ describe("CollabWorkbookSheetStore", () => {
       { id: "b", name: "SheetB", visibility: "visible", tabColor: "FF00FF00" },
     ]);
     const keyRef = { value: computeCollabSheetsKey(listSheetsFromCollabSession(session)) };
-    const store = new CollabWorkbookSheetStore(session as any, listSheetsFromCollabSession(session), keyRef);
+    const store = new CollabWorkbookSheetStore(session as any, listSheetsFromCollabSession(session), keyRef, {
+      canEditWorkbook: () => !session.isReadOnly(),
+    });
 
     store.rename("a", "Alpha");
     const renamed = session.sheets.get(0) as any;
@@ -148,7 +169,9 @@ describe("CollabWorkbookSheetStore", () => {
     ]);
 
     const keyRef = { value: computeCollabSheetsKey(listSheetsFromCollabSession(session)) };
-    const store = new CollabWorkbookSheetStore(session as any, listSheetsFromCollabSession(session), keyRef);
+    const store = new CollabWorkbookSheetStore(session as any, listSheetsFromCollabSession(session), keyRef, {
+      canEditWorkbook: () => !session.isReadOnly(),
+    });
 
     store.remove("s2");
     expect(store.listAll().map((s) => s.id)).toEqual(["s1"]);
@@ -167,9 +190,46 @@ describe("CollabWorkbookSheetStore", () => {
       session as any,
       listSheetsFromCollabSession(session),
       { value: computeCollabSheetsKey(listSheetsFromCollabSession(session)) },
+      { canEditWorkbook: () => !session.isReadOnly() },
     );
 
     expect(store.listAll().map((s) => `${s.id}:${s.visibility}`)).toEqual(["v:veryHidden", "s:visible"]);
     expect(store.listVisible().map((s) => s.id)).toEqual(["s"]);
+  });
+
+  it.each(["viewer", "commenter"] as const)("does not mutate Yjs sheets when role is %s", (role) => {
+    const session = makeSession(
+      [
+        { id: "a", name: "SheetA", visibility: "visible" },
+        { id: "b", name: "SheetB", visibility: "visible" },
+      ],
+      role,
+    );
+    const keyRef = { value: computeCollabSheetsKey(listSheetsFromCollabSession(session)) };
+    const store = new CollabWorkbookSheetStore(session as any, listSheetsFromCollabSession(session), keyRef, {
+      canEditWorkbook: () => !session.isReadOnly(),
+    });
+
+    const snapshot = () =>
+      session.sheets.toArray().map((entry) => {
+        const map: any = entry;
+        return [map.get("id"), map.get("name"), map.get("visibility"), map.get("tabColor")] as const;
+      });
+
+    const beforeKey = keyRef.value;
+    const beforeSheets = snapshot();
+    const beforeOrder = store.listAll().map((s) => s.id);
+
+    store.rename("a", "Alpha");
+    store.move("a", 1);
+    store.hide("b");
+    store.unhide("b");
+    store.setVisibility("b", "veryHidden");
+    store.setTabColor("a", { rgb: "FFFF0000" });
+    store.remove("b");
+
+    expect(store.listAll().map((s) => s.id)).toEqual(beforeOrder);
+    expect(snapshot()).toEqual(beforeSheets);
+    expect(keyRef.value).toBe(beforeKey);
   });
 });
