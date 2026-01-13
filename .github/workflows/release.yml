@@ -65,18 +65,23 @@ jobs:
         include:
           - platform: macos-14
             label: macos-14
+            # The macOS job builds a universal bundle (x86_64 + arm64).
+            cache_target: universal-apple-darwin
             rust_target: ""
             tauri_args: ""
           - platform: ubuntu-24.04
             label: ubuntu-24.04
+            cache_target: x86_64-unknown-linux-gnu
             rust_target: ""
             tauri_args: "--bundles appimage,deb,rpm"
           - platform: windows-2022
             label: windows-2022 (x64)
+            cache_target: x86_64-pc-windows-msvc
             rust_target: x86_64-pc-windows-msvc
             tauri_args: "--target x86_64-pc-windows-msvc"
           - platform: windows-2022
             label: windows-2022 (arm64)
+            cache_target: aarch64-pc-windows-msvc
             rust_target: aarch64-pc-windows-msvc
             tauri_args: "--target aarch64-pc-windows-msvc"
 
@@ -217,9 +222,11 @@ jobs:
             apps/desktop/src-tauri/target/**/release/wbuild
             apps/desktop/src-tauri/target/.rustc_info.json
             apps/desktop/src-tauri/target/**/.rustc_info.json
-          key: cargo-target-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+          # Keep these caches isolated per Rust target triple so cross-compile jobs
+          # (e.g. Windows aarch64) don't thrash/overwrite the host-target cache.
+          key: cargo-target-desktop-release-${{ runner.os }}-${{ matrix.cache_target }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            cargo-target-${{ runner.os }}-${{ runner.arch }}-
+            cargo-target-desktop-release-${{ runner.os }}-${{ matrix.cache_target }}-
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -242,9 +249,21 @@ jobs:
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Cache wasm-pack binary
+        id: wasm-pack-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/wasm-pack
+            ~/.cargo/bin/wasm-pack.exe
+          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-v0.13.1
+          restore-keys: |
+            wasm-pack-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install wasm-pack (required for @formula/engine WASM build)
         # Pinned for release reproducibility. Known-good with this repo's WASM build
         # (`crates/formula-wasm` via `packages/engine/scripts/build-wasm.mjs`).
+        if: steps.wasm-pack-cache.outputs.cache-hit != 'true'
         run: cargo install wasm-pack --version 0.13.1 --locked
 
       - name: Smoke check packaged cross-origin isolation (COOP/COEP)
