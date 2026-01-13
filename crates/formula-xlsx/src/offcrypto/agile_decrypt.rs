@@ -1,6 +1,6 @@
 //! MS-OFFCRYPTO Agile decryption for OOXML `EncryptedPackage`.
 
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::engine::general_purpose::{STANDARD as BASE64_STANDARD, STANDARD_NO_PAD as BASE64_STANDARD_NO_PAD};
 use base64::Engine as _;
 use digest::Digest as _;
 use hmac::{Hmac, Mac};
@@ -444,11 +444,38 @@ fn parse_u32_attr(node: roxmltree::Node<'_, '_>, attr: &str) -> Result<u32> {
 
 fn parse_base64_attr(node: roxmltree::Node<'_, '_>, attr: &str) -> Result<Vec<u8>> {
     let val = required_attr(node, attr)?;
-    BASE64_STANDARD.decode(val.trim()).map_err(|source| OffCryptoError::Base64Decode {
-        element: node.tag_name().name().to_string(),
-        attr: attr.to_string(),
-        source,
-    })
+    decode_b64_attr(val, node.tag_name().name(), attr)
+}
+
+fn decode_b64_attr(value: &str, element: &str, attr: &str) -> Result<Vec<u8>> {
+    let bytes = value.as_bytes();
+
+    // Most inputs are already compact; only allocate if we see whitespace.
+    let mut cleaned: Option<Vec<u8>> = None;
+    for (idx, &b) in bytes.iter().enumerate() {
+        if matches!(b, b'\r' | b'\n' | b'\t' | b' ') {
+            let mut out = Vec::with_capacity(bytes.len());
+            out.extend_from_slice(&bytes[..idx]);
+            for &b2 in &bytes[idx..] {
+                if !matches!(b2, b'\r' | b'\n' | b'\t' | b' ') {
+                    out.push(b2);
+                }
+            }
+            cleaned = Some(out);
+            break;
+        }
+    }
+
+    let input = cleaned.as_deref().unwrap_or(bytes);
+    let decoded = BASE64_STANDARD
+        .decode(input)
+        .or_else(|_| BASE64_STANDARD_NO_PAD.decode(input))
+        .map_err(|source| OffCryptoError::Base64Decode {
+            element: element.to_string(),
+            attr: attr.to_string(),
+            source,
+        })?;
+    Ok(decoded)
 }
 
 fn parse_hash_algorithm(node: roxmltree::Node<'_, '_>, attr: &str) -> Result<HashAlgorithm> {

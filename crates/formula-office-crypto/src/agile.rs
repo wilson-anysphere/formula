@@ -1,3 +1,4 @@
+use base64::engine::general_purpose::{STANDARD as BASE64_STANDARD, STANDARD_NO_PAD as BASE64_STANDARD_NO_PAD};
 use base64::Engine;
 use hmac::{Hmac, Mac};
 use quick_xml::events::Event;
@@ -490,8 +491,6 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
 
     let mut tmp_password_attrs: Option<AgilePasswordAttrs> = None;
 
-    let b64 = base64::engine::general_purpose::STANDARD;
-
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => {
@@ -499,16 +498,16 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
                 let name = local_name(qname.as_ref());
                 match name {
                     b"keyData" => {
-                        let kd = parse_key_data_attrs(&e, &b64)?;
+                        let kd = parse_key_data_attrs(&e)?;
                         key_data = Some(kd);
                     }
                     b"dataIntegrity" => {
-                        let di = parse_data_integrity_attrs(&e, &b64)?;
+                        let di = parse_data_integrity_attrs(&e)?;
                         data_integrity = Some(di);
                     }
                     b"encryptedKey" => {
                         in_encrypted_key = true;
-                        tmp_password_attrs = Some(parse_password_key_encryptor_attrs(&e, &b64)?);
+                        tmp_password_attrs = Some(parse_password_key_encryptor_attrs(&e)?);
                     }
                     b"encryptedVerifierHashInput" if in_encrypted_key => {
                         capture = Some(CaptureKind::VerifierHashInput);
@@ -527,11 +526,11 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
                 let name = local_name(qname.as_ref());
                 match name {
                     b"keyData" => {
-                        let kd = parse_key_data_attrs(&e, &b64)?;
+                        let kd = parse_key_data_attrs(&e)?;
                         key_data = Some(kd);
                     }
                     b"dataIntegrity" => {
-                        let di = parse_data_integrity_attrs(&e, &b64)?;
+                        let di = parse_data_integrity_attrs(&e)?;
                         data_integrity = Some(di);
                     }
                     _ => {}
@@ -595,7 +594,7 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
                             )
                         })?
                         .to_string();
-                    let decoded = b64.decode(text.trim()).map_err(|_| {
+                    let decoded = decode_b64_attr(&text).map_err(|_| {
                         OfficeCryptoError::InvalidFormat(
                             "invalid base64 in EncryptionInfo".to_string(),
                         )
@@ -651,7 +650,6 @@ fn local_name(name: &[u8]) -> &[u8] {
 
 fn parse_key_data_attrs(
     e: &quick_xml::events::BytesStart<'_>,
-    b64: &base64::engine::GeneralPurpose,
 ) -> Result<AgileKeyData, OfficeCryptoError> {
     let mut salt_value: Option<Vec<u8>> = None;
     let mut block_size: Option<usize> = None;
@@ -670,7 +668,7 @@ fn parse_key_data_attrs(
         })?;
         match key {
             b"saltValue" => {
-                salt_value = Some(b64.decode(value.as_ref()).map_err(|_| {
+                salt_value = Some(decode_b64_attr(value.as_ref()).map_err(|_| {
                     OfficeCryptoError::InvalidFormat("invalid base64 saltValue".to_string())
                 })?);
             }
@@ -721,7 +719,6 @@ fn parse_key_data_attrs(
 
 fn parse_data_integrity_attrs(
     e: &quick_xml::events::BytesStart<'_>,
-    b64: &base64::engine::GeneralPurpose,
 ) -> Result<AgileDataIntegrity, OfficeCryptoError> {
     let mut encrypted_hmac_key: Option<Vec<u8>> = None;
     let mut encrypted_hmac_value: Option<Vec<u8>> = None;
@@ -735,14 +732,14 @@ fn parse_data_integrity_attrs(
         })?;
         match key {
             b"encryptedHmacKey" => {
-                encrypted_hmac_key = Some(b64.decode(value.as_ref()).map_err(|_| {
+                encrypted_hmac_key = Some(decode_b64_attr(value.as_ref()).map_err(|_| {
                     OfficeCryptoError::InvalidFormat(
                         "invalid base64 encryptedHmacKey".to_string(),
                     )
                 })?);
             }
             b"encryptedHmacValue" => {
-                encrypted_hmac_value = Some(b64.decode(value.as_ref()).map_err(|_| {
+                encrypted_hmac_value = Some(decode_b64_attr(value.as_ref()).map_err(|_| {
                     OfficeCryptoError::InvalidFormat(
                         "invalid base64 encryptedHmacValue".to_string(),
                     )
@@ -776,7 +773,6 @@ struct AgilePasswordAttrs {
 
 fn parse_password_key_encryptor_attrs(
     e: &quick_xml::events::BytesStart<'_>,
-    b64: &base64::engine::GeneralPurpose,
 ) -> Result<AgilePasswordAttrs, OfficeCryptoError> {
     let mut salt_value: Option<Vec<u8>> = None;
     let mut block_size: Option<usize> = None;
@@ -796,7 +792,7 @@ fn parse_password_key_encryptor_attrs(
         })?;
         match key {
             b"saltValue" => {
-                salt_value = Some(b64.decode(value.as_ref()).map_err(|_| {
+                salt_value = Some(decode_b64_attr(value.as_ref()).map_err(|_| {
                     OfficeCryptoError::InvalidFormat("invalid base64 saltValue".to_string())
                 })?);
             }
@@ -851,6 +847,31 @@ fn parse_password_key_encryptor_attrs(
             OfficeCryptoError::InvalidFormat("encryptedKey missing cipherChaining".to_string())
         })?,
     })
+}
+
+fn decode_b64_attr(value: &str) -> Result<Vec<u8>, base64::DecodeError> {
+    let bytes = value.as_bytes();
+
+    // Avoid allocating for the common case where no whitespace is present.
+    let mut cleaned: Option<Vec<u8>> = None;
+    for (idx, &b) in bytes.iter().enumerate() {
+        if matches!(b, b'\r' | b'\n' | b'\t' | b' ') {
+            let mut out = Vec::with_capacity(bytes.len());
+            out.extend_from_slice(&bytes[..idx]);
+            for &b2 in &bytes[idx..] {
+                if !matches!(b2, b'\r' | b'\n' | b'\t' | b' ') {
+                    out.push(b2);
+                }
+            }
+            cleaned = Some(out);
+            break;
+        }
+    }
+
+    let input = cleaned.as_deref().unwrap_or(bytes);
+    BASE64_STANDARD
+        .decode(input)
+        .or_else(|_| BASE64_STANDARD_NO_PAD.decode(input))
 }
 
 #[cfg(test)]
