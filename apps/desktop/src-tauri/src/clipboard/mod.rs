@@ -368,6 +368,27 @@ pub fn bytes_to_base64_within_limit(bytes: &[u8], max_bytes: usize) -> Option<St
     Some(STANDARD.encode(bytes))
 }
 
+/// Convert UTF-8-ish clipboard bytes into a `String`, trimming trailing NUL terminators.
+///
+/// Some clipboard producers (notably on Windows and occasionally via macOS NSPasteboard `dataForType`)
+/// include an extra `\0` terminator even when the payload is length-delimited. We strip any trailing
+/// NUL bytes/characters for consistency across platforms.
+///
+/// Returns `None` for empty inputs or when the trimmed output is empty.
+#[cfg(any(test, all(target_os = "macos", feature = "desktop")))]
+fn bytes_to_string_trim_nuls(bytes: &[u8]) -> Option<String> {
+    if bytes.is_empty() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(bytes);
+    let s = s.trim_end_matches('\0');
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
+}
+
 /// Clipboard contents read from the OS.
 ///
 /// This intentionally carries multiple representations of the same copied content
@@ -885,6 +906,41 @@ mod tests {
     #[test]
     fn string_within_limit_drops_large_strings() {
         assert_eq!(string_within_limit("abcd".to_string(), 3), None);
+    }
+
+    #[test]
+    fn bytes_to_string_trim_nuls_returns_none_for_empty_input() {
+        assert_eq!(bytes_to_string_trim_nuls(b""), None);
+    }
+
+    #[test]
+    fn bytes_to_string_trim_nuls_trims_trailing_nuls() {
+        assert_eq!(
+            bytes_to_string_trim_nuls(b"hello\0\0"),
+            Some("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn bytes_to_string_trim_nuls_preserves_interior_nuls() {
+        assert_eq!(
+            bytes_to_string_trim_nuls(b"he\0llo\0"),
+            Some("he\0llo".to_string())
+        );
+    }
+
+    #[test]
+    fn bytes_to_string_trim_nuls_returns_none_when_only_nuls() {
+        assert_eq!(bytes_to_string_trim_nuls(b"\0\0"), None);
+    }
+
+    #[test]
+    fn bytes_to_string_trim_nuls_is_best_effort_for_invalid_utf8() {
+        // 0xFF is invalid UTF-8 and will be replaced with U+FFFD.
+        assert_eq!(
+            bytes_to_string_trim_nuls(&[0xFF, 0x00]),
+            Some("\u{FFFD}".to_string())
+        );
     }
 
     #[test]

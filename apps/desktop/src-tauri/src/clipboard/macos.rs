@@ -15,8 +15,9 @@ use objc2::runtime::AnyObject;
 use std::ffi::{c_void, CStr};
 
 use super::{
-    normalize_base64_str, string_within_limit, ClipboardContent, ClipboardError, ClipboardWritePayload,
-    MAX_DECODED_IMAGE_BYTES, MAX_PNG_BYTES, MAX_TEXT_BYTES, MAX_TIFF_BYTES,
+    bytes_to_string_trim_nuls, normalize_base64_str, string_within_limit, ClipboardContent,
+    ClipboardError, ClipboardWritePayload, MAX_DECODED_IMAGE_BYTES, MAX_PNG_BYTES, MAX_TEXT_BYTES,
+    MAX_TIFF_BYTES,
 };
 
 // Ensure the framework crates are linked (and silence `unused_crate_dependencies`).
@@ -336,17 +337,17 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         // `NSString` instances (some clipboard producers can place very large plain text/HTML on the
         // pasteboard).
         let text = pasteboard_data_for_type(pasteboard, &*ty_string, MAX_TEXT_BYTES)
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .and_then(|bytes| bytes_to_string_trim_nuls(&bytes))
             .or_else(|| pasteboard_string_for_type_limited(pasteboard, &*ty_string, MAX_TEXT_BYTES))
             .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
 
         let html = pasteboard_data_for_type(pasteboard, &*ty_html, MAX_TEXT_BYTES)
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .and_then(|bytes| bytes_to_string_trim_nuls(&bytes))
             .or_else(|| pasteboard_string_for_type_limited(pasteboard, &*ty_html, MAX_TEXT_BYTES))
             .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
 
         let rtf = pasteboard_data_for_type(pasteboard, &*ty_rtf, MAX_TEXT_BYTES)
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .and_then(|bytes| bytes_to_string_trim_nuls(&bytes))
             .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
 
         // Prefer PNG when present, but fall back to TIFF (converted to PNG) for interoperability
