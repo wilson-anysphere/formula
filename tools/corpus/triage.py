@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -57,8 +58,13 @@ def _step_ok(start_ms: float, *, details: dict[str, Any] | None = None) -> StepR
 
 
 def _step_failed(start_ms: float, err: Exception) -> StepResult:
+    # Triage reports are uploaded as artifacts for both public and private corpora. Avoid leaking
+    # workbook content (sheet names, defined names, file paths, etc.) through exception strings by
+    # hashing the message and emitting only the digest (mirrors the Rust helper behavior).
+    msg = str(err)
+    digest = hashlib.sha256(msg.encode("utf-8")).hexdigest()
     return StepResult(
-        status="failed", duration_ms=int(_now_ms() - start_ms), error=str(err)
+        status="failed", duration_ms=int(_now_ms() - start_ms), error=f"sha256={digest}"
     )
 
 
@@ -526,7 +532,9 @@ def triage_workbook(
                     report["cell_images"] = cell_images
             report["functions"] = dict(_extract_function_counts(z))
     except Exception as e:  # noqa: BLE001 (triage tool)
-        report["features_error"] = str(e)
+        # Feature scanning failures should not leak exception strings into JSON artifacts.
+        msg = str(e)
+        report["features_error"] = f"sha256={hashlib.sha256(msg.encode('utf-8')).hexdigest()}"
 
     # Core triage (Rust): load → optional recalc/render → round-trip save → structural diff.
     try:
