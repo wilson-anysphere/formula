@@ -49,6 +49,42 @@ class DashboardTimingTests(unittest.TestCase):
         self.assertEqual(timings["render"]["count"], 0)
         self.assertIsNone(timings["render"]["p90_ms"])
 
+    def test_gate_errors_when_no_successful_samples(self) -> None:
+        import json
+        import io
+        import sys
+        import tempfile
+        from contextlib import redirect_stdout
+        from pathlib import Path
+
+        import tools.corpus.dashboard as dashboard_mod
+
+        with tempfile.TemporaryDirectory() as td:
+            triage_dir = Path(td)
+            reports_dir = triage_dir / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            # Only failed load step -> no successful timing samples.
+            (reports_dir / "r1.json").write_text(
+                json.dumps({"steps": {"load": {"status": "failed", "duration_ms": 123}}}),
+                encoding="utf-8",
+            )
+
+            original_argv = sys.argv
+            try:
+                sys.argv = [
+                    "dashboard.py",
+                    "--triage-dir",
+                    str(triage_dir),
+                    "--gate-load-p90-ms",
+                    "1000",
+                ]
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = dashboard_mod.main()
+            finally:
+                sys.argv = original_argv
+            self.assertEqual(rc, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -975,13 +975,23 @@ def main() -> int:
     gate_failures: list[str] = []
     if args.gate_load_p90_ms is not None:
         load_p90 = (timings.get("load") or {}).get("p90_ms")
-        if isinstance(load_p90, (int, float)) and load_p90 > args.gate_load_p90_ms:
+        if not isinstance(load_p90, (int, float)) or isinstance(load_p90, bool):
+            print(
+                "TIMING GATE ERROR: load p90 unavailable (no successful 'load' samples)."
+            )
+            return 2
+        if load_p90 > args.gate_load_p90_ms:
             gate_failures.append(
                 f"load_p90_ms={load_p90} exceeds threshold {args.gate_load_p90_ms}"
             )
     if args.gate_round_trip_p90_ms is not None:
         rt_p90 = (timings.get("round_trip") or {}).get("p90_ms")
-        if isinstance(rt_p90, (int, float)) and rt_p90 > args.gate_round_trip_p90_ms:
+        if not isinstance(rt_p90, (int, float)) or isinstance(rt_p90, bool):
+            print(
+                "TIMING GATE ERROR: round_trip p90 unavailable (no successful 'round_trip' samples)."
+            )
+            return 2
+        if rt_p90 > args.gate_round_trip_p90_ms:
             gate_failures.append(
                 f"round_trip_p90_ms={rt_p90} exceeds threshold {args.gate_round_trip_p90_ms}"
             )
