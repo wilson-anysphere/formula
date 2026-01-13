@@ -65,5 +65,21 @@ describe("summarizeSheetSchema", () => {
     expect(summary).toContain("R1 r=[Sheet1!A1:C3]");
     expect(summary).toContain("R…+1");
   });
-});
 
+  it("escapes delimiter characters so bracketed lists remain parseable", () => {
+    const schema = extractSheetSchema({
+      name: "Sheet1",
+      values: [
+        ["A|B", "C]D", "E\\F"],
+        [1, 2, 3],
+      ],
+      tables: [{ name: "T]1|2", range: "A1:C2" }],
+    });
+
+    const summary = summarizeSheetSchema(schema);
+    // Table name should escape `]` and `|`.
+    expect(summary).toContain("[T\\]1\\|2]");
+    // Headers should be escaped inside the bracketed list.
+    expect(summary).toContain("h=[A\\|B|C\\]D|E\\\\F]");
+  });
+});
