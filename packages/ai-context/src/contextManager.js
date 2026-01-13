@@ -604,6 +604,7 @@ export class ContextManager {
     const retrievedOut = shouldReturnRedactedStructured
       ? redactStructuredValue(retrieved, this.redactor, { signal, includeRestrictedContent: includeRestrictedContentForStructured })
       : retrieved;
+    const schemaForPrompt = compactSheetSchemaForPrompt(schemaOut);
 
     const sections = [
       ...((dlpRedactedCells > 0 || (dlpDecision?.decision === DLP_DECISION.REDACT && dlpHeuristicApplied))
@@ -644,7 +645,7 @@ export class ContextManager {
       {
         key: "schema",
         priority: 3,
-        text: this.redactor(`Sheet schema (schema-first):\n${stableJsonStringify(schemaOut)}`),
+        text: this.redactor(`Sheet schema (schema-first):\n${stableJsonStringify(schemaForPrompt)}`),
       },
       {
         key: "attachments",
@@ -1337,6 +1338,55 @@ export class ContextManager {
       signal,
     });
   }
+}
+
+/**
+ * Compact a SheetSchema for prompt inclusion.
+ *
+ * `extractSheetSchema()` includes small `sampleValues` arrays per column which can be:
+ * - token-expensive
+ * - privacy-sensitive (raw cell values)
+ *
+ * For prompt context, we keep a schema-first representation (names, ranges, types, counts)
+ * without embedding raw sample cell values.
+ *
+ * @param {any} schema
+ */
+function compactSheetSchemaForPrompt(schema) {
+  if (!schema || typeof schema !== "object") return schema;
+  const tables = Array.isArray(schema.tables) ? schema.tables : [];
+  const namedRanges = Array.isArray(schema.namedRanges) ? schema.namedRanges : [];
+  const dataRegions = Array.isArray(schema.dataRegions) ? schema.dataRegions : [];
+
+  return {
+    name: typeof schema.name === "string" ? schema.name : "",
+    tables: tables.map((t) => {
+      const columns = Array.isArray(t?.columns) ? t.columns : [];
+      return {
+        name: typeof t?.name === "string" ? t.name : "",
+        range: typeof t?.range === "string" ? t.range : "",
+        rowCount: Number.isFinite(t?.rowCount) ? Math.max(0, Math.floor(t.rowCount)) : 0,
+        columns: columns.map((c) => ({
+          name: typeof c?.name === "string" ? c.name : "",
+          type: typeof c?.type === "string" ? c.type : "mixed",
+        })),
+      };
+    }),
+    namedRanges: namedRanges.map((r) => ({
+      name: typeof r?.name === "string" ? r.name : "",
+      range: typeof r?.range === "string" ? r.range : "",
+    })),
+    dataRegions: dataRegions.map((r) => ({
+      range: typeof r?.range === "string" ? r.range : "",
+      hasHeader: Boolean(r?.hasHeader),
+      headers: Array.isArray(r?.headers) ? r.headers.map((h) => String(h ?? "")) : [],
+      inferredColumnTypes: Array.isArray(r?.inferredColumnTypes)
+        ? r.inferredColumnTypes.map((t) => String(t ?? "mixed"))
+        : [],
+      rowCount: Number.isFinite(r?.rowCount) ? Math.max(0, Math.floor(r.rowCount)) : 0,
+      columnCount: Number.isFinite(r?.columnCount) ? Math.max(0, Math.floor(r.columnCount)) : 0,
+    })),
+  };
 }
 
 /**
