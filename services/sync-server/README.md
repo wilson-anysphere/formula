@@ -238,12 +238,24 @@ Set:
 - `SYNC_SERVER_JWT_SECRET` (required)
 - `SYNC_SERVER_JWT_AUDIENCE` (default: `formula-sync`)
 - `SYNC_SERVER_JWT_ISSUER` (optional)
+- Optional strict claim enforcement (recommended in production):
+  - `SYNC_SERVER_JWT_REQUIRE_SUB`
+    - If `true`, require a non-empty `sub` claim (user id).
+    - Defaults to **`true` in production** (`NODE_ENV=production`), **`false` otherwise**.
+    - Missing/empty `sub` rejects the websocket upgrade with HTTP `403`.
+  - `SYNC_SERVER_JWT_REQUIRE_EXP`
+    - If `true`, require an `exp` claim (expiry time, unix seconds).
+    - Defaults to **`true` in production** (`NODE_ENV=production`), **`false` otherwise**.
+    - Missing `exp` rejects the websocket upgrade with HTTP `401`.
+    - Note: `jsonwebtoken` validates expiration *if present*; this flag enforces that the claim exists
+      at all.
 
-JWT payload must include:
+JWT payload claims:
 
-- `sub` (user id)
 - `docId` (document id / room name)
-- `role` (`owner|admin|editor|commenter|viewer`)
+- `role` (`owner|admin|editor|commenter|viewer`) – defaults to `editor` if omitted
+- `sub` (user id) – required when `SYNC_SERVER_JWT_REQUIRE_SUB=1` (see above)
+- `exp` (expiry time) – required when `SYNC_SERVER_JWT_REQUIRE_EXP=1` (see above)
 
 Optional claims:
 
@@ -289,6 +301,9 @@ Set:
 The request/response format is the same as the token introspection auth mode described below.
 
 The sync-server forwards `clientIp` and `userAgent` to the introspection endpoint when available.
+
+Note: This runs **in addition to** local JWT verification. A JWT that passes signature/claims checks
+can still be rejected if the introspection endpoint reports the session as inactive.
 
 ### Token introspection (auth mode)
 
