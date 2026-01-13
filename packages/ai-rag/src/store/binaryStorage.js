@@ -174,7 +174,15 @@ export class IndexedDBBinaryStorage {
   async _openOrNull() {
     const idb = getIndexedDBOrNull();
     if (!idb) return null;
-    if (this._dbPromise) return this._dbPromise.catch(() => null);
+    if (this._dbPromise) {
+      try {
+        return await this._dbPromise;
+      } catch {
+        // If opening failed (quota / permission / blocked), allow future attempts.
+        this._dbPromise = null;
+        return null;
+      }
+    }
 
     this._dbPromise = new Promise((resolve, reject) => {
       const request = idb.open(this.dbName, 1);
@@ -192,6 +200,7 @@ export class IndexedDBBinaryStorage {
     try {
       return await this._dbPromise;
     } catch {
+      this._dbPromise = null;
       return null;
     }
   }

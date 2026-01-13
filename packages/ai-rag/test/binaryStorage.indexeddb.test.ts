@@ -59,3 +59,38 @@ test("IndexedDBBinaryStorage namespaces per workbookId", async () => {
   expect(Array.from((await storageB.load()) ?? [])).toEqual([2, 2, 2]);
 });
 
+test("IndexedDBBinaryStorage stores the exact Uint8Array view (respects byteOffset)", async () => {
+  const dbName = uniqueDbName("ai-rag-idb-byteoffset");
+  const storage = new IndexedDBBinaryStorage({
+    dbName,
+    namespace: "formula.test.rag",
+    workbookId: "wb-view",
+  });
+
+  const base = new Uint8Array([9, 9, 1, 2, 3, 9, 9]);
+  const view = base.subarray(2, 5); // [1, 2, 3]
+  await storage.save(view);
+
+  expect(Array.from((await storage.load()) ?? [])).toEqual([1, 2, 3]);
+});
+
+test("IndexedDBBinaryStorage gracefully falls back when indexedDB is unavailable", async () => {
+  const dbName = uniqueDbName("ai-rag-idb-fallback");
+  const storage = new IndexedDBBinaryStorage({
+    dbName,
+    namespace: "formula.test.rag",
+    workbookId: "wb-fallback",
+  });
+
+  // Simulate an environment where IndexedDB is unavailable (e.g. Node, restricted webviews).
+  Object.defineProperty(globalThis, "indexedDB", { value: undefined, configurable: true });
+  try {
+    await expect(storage.save(new Uint8Array([1, 2, 3]))).resolves.toBeUndefined();
+    await expect(storage.load()).resolves.toBeNull();
+  } finally {
+    Object.defineProperty(globalThis, "indexedDB", { value: fakeIndexedDB, configurable: true });
+  }
+
+  // The earlier save should have been a no-op.
+  expect(await storage.load()).toBeNull();
+});
