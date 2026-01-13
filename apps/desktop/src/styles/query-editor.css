@@ -359,6 +359,7 @@
   color: var(--text-primary);
   cursor: pointer;
   font: inherit;
+  text-align: start;
   transition:
     background-color var(--motion-duration-fast) var(--motion-ease),
     border-color var(--motion-duration-fast) var(--motion-ease),
