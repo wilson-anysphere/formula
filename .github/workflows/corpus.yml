@@ -227,6 +227,7 @@ jobs:
             --input-scope "$INPUT_SCOPE" \
             --out-dir tools/corpus/out/private \
             --privacy-mode private \
+            --include-xlsb \
             --jobs "$JOBS" \
             "${EXTRA_FLAGS[@]}"
       - name: Generate dashboard (private)
