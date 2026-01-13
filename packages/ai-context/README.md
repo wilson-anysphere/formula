@@ -638,7 +638,8 @@ For single-sheet context (`buildContext()`), the default section priorities are:
 Notes:
 
 - `schema_summary` is a compact, deterministic, schema-first text summary (headers/types/counts) intended to survive tight budgets.
-- `schema` is compact JSON intended for additional detail, but it excludes per-column sample values.
+- `schema` is compact JSON intended for additional detail, but it excludes per-column sample values and is capped to a bounded
+  number of tables/regions/columns to keep serialization + prompts predictable.
 
 This means that when budgets shrink, **samples drop first**, then attachments, then schema JSON, etc.
 
