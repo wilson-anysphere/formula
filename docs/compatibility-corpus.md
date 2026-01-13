@@ -151,6 +151,13 @@ Examples:
 - `round_trip_shared_strings` – diffs include `xl/sharedStrings.xml`
 - `round_trip_media` – diffs include `xl/media/*`
 - `round_trip_doc_props` – diffs include `docProps/*`
+- `round_trip_workbook` – diffs include `xl/workbook.xml`
+- `round_trip_theme` – diffs include `xl/theme/*`
+- `round_trip_pivots` – diffs include `xl/pivotTables/*` or `xl/pivotCache/*`
+- `round_trip_charts` – diffs include `xl/charts/*`
+- `round_trip_drawings` – diffs include `xl/drawings/*`
+- `round_trip_tables` – diffs include `xl/tables/*`
+- `round_trip_external_links` – diffs include `xl/externalLinks/*`
 - `round_trip_other` – anything else
 
 For large private corpora, you can speed up triage by running workbooks in parallel:

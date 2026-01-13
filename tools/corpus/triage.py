@@ -292,8 +292,9 @@ def infer_round_trip_failure_kind(report: dict[str, Any]) -> str | None:
             return "round_trip_media"
         if "doc_props" in failure_groups:
             return "round_trip_doc_props"
-        return "round_trip_other"
 
+    # Either the Rust helper did not provide part-group summaries or the groups are too broad
+    # (e.g. everything classified as `other`). Fall back to part-name heuristics.
     failure_parts = {p.casefold() for p in _extract_failure_diff_parts(report)}
     if not failure_parts:
         return "round_trip_other"
@@ -318,6 +319,28 @@ def infer_round_trip_failure_kind(report: dict[str, Any]) -> str | None:
 
     if any(p.startswith("docprops/") for p in failure_parts):
         return "round_trip_doc_props"
+
+    # Additional high-signal buckets for common "other" churn.
+    if "xl/workbook.xml" in failure_parts:
+        return "round_trip_workbook"
+
+    if any(p.startswith("xl/theme/") for p in failure_parts):
+        return "round_trip_theme"
+
+    if any(p.startswith("xl/pivottables/") or p.startswith("xl/pivotcache/") for p in failure_parts):
+        return "round_trip_pivots"
+
+    if any(p.startswith("xl/charts/") for p in failure_parts):
+        return "round_trip_charts"
+
+    if any(p.startswith("xl/drawings/") for p in failure_parts):
+        return "round_trip_drawings"
+
+    if any(p.startswith("xl/tables/") for p in failure_parts):
+        return "round_trip_tables"
+
+    if any(p.startswith("xl/externallinks/") for p in failure_parts):
+        return "round_trip_external_links"
 
     return "round_trip_other"
 

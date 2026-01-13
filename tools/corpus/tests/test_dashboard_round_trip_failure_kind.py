@@ -119,9 +119,9 @@ class DashboardRoundTripFailureKindTests(unittest.TestCase):
             summary["failures_by_round_trip_failure_kind"],
             {
                 "round_trip_content_types": 1,
-                "round_trip_other": 1,
                 "round_trip_rels": 1,
                 "round_trip_styles": 1,
+                "round_trip_workbook": 1,
                 "round_trip_worksheets": 1,
             },
         )

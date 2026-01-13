@@ -17,8 +17,9 @@ The dashboard emits both human- and machine-readable outputs:
 - `summary.json` (includes the same data under `timings`)
 
 For round-trip failures (`failure_category=round_trip_diff`), triage reports also include a more
-actionable `round_trip_failure_kind` (based on diff part groups like rels/content-types/styles/worksheets),
-and the dashboard summarizes these under `failures_by_round_trip_failure_kind`.
+actionable `round_trip_failure_kind` (based on diff part groups like rels/content-types/styles/worksheets,
+plus common “other” buckets like workbook/theme/pivots), and the dashboard summarizes these under
+`failures_by_round_trip_failure_kind`.
 
 The dashboard also supports opt-in perf regression gates:
 
