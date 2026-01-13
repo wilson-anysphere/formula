@@ -58,6 +58,27 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("fires onBeginEdit once when focus begins editing", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onBeginEdit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit: () => {}, onBeginEdit });
+    view.setActiveCell({ address: "B2", input: "", value: null });
+
+    view.textarea.focus();
+
+    expect(onBeginEdit).toHaveBeenCalledTimes(1);
+    expect(onBeginEdit).toHaveBeenCalledWith("B2");
+
+    // Re-focusing while already editing should not re-fire onBeginEdit.
+    view.textarea.blur();
+    view.textarea.focus();
+    expect(onBeginEdit).toHaveBeenCalledTimes(1);
+
+    host.remove();
+  });
+
   it("hides commit/cancel buttons when not editing and shows them on focus", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
