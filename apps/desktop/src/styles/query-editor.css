@@ -253,6 +253,8 @@
 .query-editor__status {
   margin-top: 8px;
   color: var(--text-muted);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .query-editor__error {
