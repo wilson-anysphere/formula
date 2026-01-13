@@ -533,7 +533,8 @@ Notable metrics (prefix `sync_server_`):
       `sync_server_ws_connections_rejected_total{reason="token_too_long"}`.
 
 - Hard maximum document id (room name) size:
-  - 1024 bytes (UTF-8). Requests exceeding this are rejected with HTTP `414`.
+  - 1024 bytes (UTF-8). Requests exceeding this are rejected with HTTP `414` and increment
+    `sync_server_ws_connections_rejected_total{reason="doc_id_too_long"}`.
 
 - Connection limits:
   - `SYNC_SERVER_MAX_CONNECTIONS`
