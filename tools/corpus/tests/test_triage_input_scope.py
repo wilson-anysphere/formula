@@ -117,6 +117,63 @@ class TriageInputScopeTests(unittest.TestCase):
             triage_mod._build_rust_helper = original_build_rust_helper  # type: ignore[assignment]
             triage_mod._triage_paths = original_triage_paths  # type: ignore[assignment]
 
+    def test_main_private_mode_hashes_index_paths(self) -> None:
+        import tools.corpus.triage as triage_mod
+        from tools.corpus.util import sha256_hex
+
+        original_build_rust_helper = triage_mod._build_rust_helper
+        original_triage_paths = triage_mod._triage_paths
+        try:
+            triage_mod._build_rust_helper = lambda: Path("noop")  # type: ignore[assignment]
+
+            def _fake_triage_paths(paths, **_kwargs):  # type: ignore[no-untyped-def]
+                return [
+                    {
+                        "display_name": p.name,
+                        "sha256": "0" * 64,
+                        "result": {"open_ok": True, "round_trip_ok": True},
+                    }
+                    for p in paths
+                ]
+
+            triage_mod._triage_paths = _fake_triage_paths  # type: ignore[assignment]
+
+            with tempfile.TemporaryDirectory() as tmp:
+                corpus_dir = Path(tmp) / "corpus"
+                sanitized = corpus_dir / "sanitized"
+                sanitized.mkdir(parents=True)
+                (sanitized / "a.xlsx").write_bytes(b"dummy-xlsx")
+
+                out_dir = Path(tmp) / "out"
+
+                argv = sys.argv
+                try:
+                    sys.argv = [
+                        "tools.corpus.triage",
+                        "--corpus-dir",
+                        str(corpus_dir),
+                        "--out-dir",
+                        str(out_dir),
+                        "--privacy-mode",
+                        "private",
+                    ]
+                    with mock.patch("sys.stdout", new=io.StringIO()):
+                        rc = triage_mod.main()
+                finally:
+                    sys.argv = argv
+
+                self.assertEqual(rc, 0)
+                index = json.loads((out_dir / "index.json").read_text(encoding="utf-8"))
+                self.assertEqual(
+                    index["corpus_dir"], f"sha256={sha256_hex(str(corpus_dir).encode('utf-8'))}"
+                )
+                self.assertEqual(
+                    index["input_dir"], f"sha256={sha256_hex(str(sanitized).encode('utf-8'))}"
+                )
+        finally:
+            triage_mod._build_rust_helper = original_build_rust_helper  # type: ignore[assignment]
+            triage_mod._triage_paths = original_triage_paths  # type: ignore[assignment]
+
     def test_expectations_are_skipped_when_input_is_scoped(self) -> None:
         import tools.corpus.triage as triage_mod
 
