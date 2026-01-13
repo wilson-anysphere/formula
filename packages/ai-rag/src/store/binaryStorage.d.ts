@@ -4,6 +4,10 @@ export type BinaryStorage = {
   remove?(): Promise<void>;
 };
 
+export function toBase64(data: Uint8Array): string;
+
+export function fromBase64(encoded: string): Uint8Array;
+
 export class InMemoryBinaryStorage implements BinaryStorage {
   load(): Promise<Uint8Array | null>;
   save(data: Uint8Array): Promise<void>;
