@@ -195,14 +195,43 @@ jobs:
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Cache wasm-pack binary
+        id: wasm-pack-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/wasm-pack*
+          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
+          restore-keys: |
+            wasm-pack-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install wasm-pack (required for @formula/engine WASM build)
+        if: steps.wasm-pack-cache.outputs.cache-hit != 'true'
         run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked
 
+      - name: Cache pinned Tauri CLI binary (cargo-tauri)
+        id: tauri-cli-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri*
+          key: cargo-tauri-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
+          restore-keys: |
+            cargo-tauri-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install tauri-cli (installs the `cargo tauri` subcommand)
+        if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked --force
 
       - name: Print Tauri CLI version
         run: cargo tauri --version
+
+      - name: Cache Tauri tooling downloads
+        uses: actions/cache@v4
+        with:
+          # Tauri's cache directory lives under %LOCALAPPDATA% on Windows.
+          path: ${{ env.LOCALAPPDATA }}/tauri
+          key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
+          restore-keys: |
+            tauri-tooling-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Setup MSVC cross-compilation environment (amd64 → arm64)
         uses: ilammy/msvc-dev-cmd@7defe9254715b088f12dddd9942945a3d75cdad5 # v1.9.0
@@ -247,14 +276,19 @@ jobs:
           if (!(Test-Path $bundleDir)) {
             throw "Expected bundle directory not found: $bundleDir"
           }
-          $exe = Get-ChildItem -Path $bundleDir -Recurse -File -Filter *.exe
-          $msi = Get-ChildItem -Path $bundleDir -Recurse -File -Filter *.msi
-          if ($exe.Count -eq 0) {
-            throw "No .exe installer found under $bundleDir (expected NSIS)."
-          }
-          if ($msi.Count -eq 0) {
-            throw "No .msi installer found under $bundleDir (expected WiX)."
-          }
+
+          # Mirror the release workflow's Windows bundle detection so we don't pass just because
+          # helper executables (e.g. WebView2 bootstrapper) landed somewhere under bundle/.
+          $msi = @(Get-ChildItem -Path (Join-Path $bundleDir "msi") -Recurse -File -Filter "*.msi" -ErrorAction SilentlyContinue)
+          $exe = @()
+          $exe += @(Get-ChildItem -Path (Join-Path $bundleDir "nsis") -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue)
+          $exe += @(Get-ChildItem -Path (Join-Path $bundleDir "nsis-web") -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue)
+          # Exclude WebView2 helper installers; we only care about the Formula installer(s).
+          $exe = @($exe | Where-Object { $_.Name -notmatch '^MicrosoftEdgeWebview2' })
+
+          if ($exe.Count -eq 0) { throw "No .exe installer found under $bundleDir/nsis or $bundleDir/nsis-web (expected NSIS)." }
+          if ($msi.Count -eq 0) { throw "No .msi installer found under $bundleDir/msi (expected WiX)." }
+
           "## Windows ARM64 bundles" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           $files = @($exe + $msi) | Sort-Object FullName
