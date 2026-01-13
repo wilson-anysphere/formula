@@ -21,7 +21,9 @@ concurrency:
 jobs:
   conflict-marker-guard:
     name: "Guard: no merge conflict markers"
-    runs-on: ubuntu-latest
+    # Pinned runner images keep release workflows deterministic and avoid breakages
+    # when GitHub updates the default `*-latest` hosted runner images.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Fail if merge conflict markers are present
@@ -49,21 +51,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Pinned runner images keep release workflows deterministic and avoid breakages
+        # when GitHub updates the default `*-latest` hosted runner images.
         include:
-          - platform: macos-latest
-            label: macos-latest
+          - platform: macos-14
+            label: macos-14
             rust_target: ""
             tauri_args: ""
           - platform: ubuntu-24.04
             label: ubuntu-24.04
             rust_target: ""
             tauri_args: "--bundles appimage,deb,rpm"
-          - platform: windows-latest
-            label: windows-latest (x64)
+          - platform: windows-2022
+            label: windows-2022 (x64)
             rust_target: ""
             tauri_args: ""
-          - platform: windows-latest
-            label: windows-latest (arm64)
+          - platform: windows-2022
+            label: windows-2022 (arm64)
             rust_target: aarch64-pc-windows-msvc
             tauri_args: "--target aarch64-pc-windows-msvc"
 
@@ -84,7 +88,7 @@ jobs:
         run: node scripts/check-updater-config.mjs
 
       - name: Validate macOS entitlements (hardened runtime)
-        if: matrix.platform == 'macos-latest'
+        if: runner.os == 'macOS'
         run: node scripts/check-macos-entitlements.mjs
 
       - name: Setup pnpm
@@ -98,7 +102,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install macOS Rust targets (universal build)
-        if: matrix.platform == 'macos-latest'
+        if: runner.os == 'macOS'
         run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
       - name: Install Rust target (${{ matrix.rust_target }})
         if: matrix.rust_target != ''
@@ -113,14 +117,14 @@ jobs:
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
       # CARGO_HOME so cargo installs/builds share the same cache.
       - name: Use shared Cargo home for CI caching (Windows)
-        if: matrix.platform == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $cargoHome = Join-Path $env:USERPROFILE ".cargo"
           "CARGO_HOME=$cargoHome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Use shared Cargo home for CI caching (Unix)
-        if: matrix.platform != 'windows-latest'
+        if: runner.os != 'Windows'
         run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
 
       - name: Install WiX Toolset (required for MSI builds)
@@ -163,7 +167,7 @@ jobs:
           }
 
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-24.04'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -209,7 +213,7 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
 
       - name: Build and upload release assets (macOS universal)
-        if: matrix.platform == 'macos-latest'
+        if: runner.os == 'macOS'
         # Pinned for reproducible releases: avoid upstream `@v0` moving and breaking builds.
         # To upgrade, bump to a newer `v0.x.y` tag in a PR after verifying the release workflow.
         uses: tauri-apps/tauri-action@v0.6.1
@@ -231,7 +235,7 @@ jobs:
           prerelease: false
 
       - name: Build and upload release assets
-        if: matrix.platform != 'macos-latest'
+        if: runner.os != 'macOS'
         # Pinned for reproducible releases: avoid upstream `@v0` moving and breaking builds.
         # To upgrade, bump to a newer `v0.x.y` tag in a PR after verifying the release workflow.
         uses: tauri-apps/tauri-action@v0.6.1
@@ -365,7 +369,7 @@ jobs:
         run: bash scripts/ci/verify-linux-package-deps.sh
 
       - name: Verify macOS universal binary (lipo)
-        if: matrix.platform == 'macos-latest'
+        if: runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
@@ -445,7 +449,7 @@ jobs:
           }
 
       - name: Validate macOS notarization + stapling (Gatekeeper)
-        if: ${{ matrix.platform == 'macos-latest' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+        if: ${{ runner.os == 'macOS' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
         working-directory: apps/desktop/src-tauri
         shell: bash
         run: |
