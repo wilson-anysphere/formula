@@ -182,9 +182,23 @@ export class InMemoryVectorStore {
 function getMatrixBounds(values) {
   const rowCount = Array.isArray(values) ? values.length : 0;
   let colCount = 0;
-  for (const row of values) {
-    colCount = Math.max(colCount, row?.length ?? 0);
+  if (!Array.isArray(values) || rowCount === 0) return { rowCount: 0, colCount: 0 };
+
+  // Prefer a sparse-friendly scan for very large arrays. `for...of` visits holes,
+  // which can be unexpectedly expensive when callers pass Excel-scale sparse
+  // matrices (e.g. `new Array(1_048_576)` with only a few populated rows).
+  const LARGE_ROW_THRESHOLD = 10_000;
+  if (rowCount > LARGE_ROW_THRESHOLD) {
+    for (const key in values) {
+      const row = values[key];
+      colCount = Math.max(colCount, row?.length ?? 0);
+    }
+  } else {
+    for (const row of values) {
+      colCount = Math.max(colCount, row?.length ?? 0);
+    }
   }
+
   return { rowCount, colCount };
 }
 
