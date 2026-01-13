@@ -77,9 +77,11 @@ const WSBOOL_OPTION_FIT_TO_PAGE: u16 = 0x0100;
 // - 0 => landscape
 // - 1 => portrait
 const SETUP_GRBIT_PORTRAIT: u16 = 0x0002;
-// When set, printer settings are undefined (ignore paper size, scale, orientation, etc).
+// If set, printer-related fields in SETUP are undefined and must be ignored.
+// See [MS-XLS] 2.4.257 (SETUP), `fNoPls`.
 const SETUP_GRBIT_F_NOPLS: u16 = 0x0004;
-// When set, the `fPortrait` bit must be ignored and orientation defaults to portrait.
+// If set, `fPortrait` must be ignored and orientation defaults to portrait.
+// See [MS-XLS] 2.4.257 (SETUP), `fNoOrient`.
 const SETUP_GRBIT_F_NOORIENT: u16 = 0x0040;
 
 #[derive(Debug, Clone)]
@@ -118,6 +120,9 @@ pub(crate) fn parse_biff_sheet_print_settings(
     let mut setup_scale: Option<u16> = None;
     let mut setup_fit_width: Option<u16> = None;
     let mut setup_fit_height: Option<u16> = None;
+    // Track whether the last SETUP record had `fNoPls=1` so we can ignore scaling/orientation
+    // fields that are undefined per [MS-XLS].
+    let mut setup_no_pls: bool = false;
 
     let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
 
@@ -138,8 +143,9 @@ pub(crate) fn parse_biff_sheet_print_settings(
         match record.record_id {
             RECORD_SETUP => {
                 saw_any_record = true;
-                let (scale, fit_width, fit_height) =
+                let (scale, fit_width, fit_height, no_pls) =
                     parse_setup_record(&mut page_setup, data, record.offset, &mut out.warnings);
+                setup_no_pls = no_pls;
                 setup_scale = scale;
                 setup_fit_width = fit_width;
                 setup_fit_height = fit_height;
@@ -201,9 +207,13 @@ pub(crate) fn parse_biff_sheet_print_settings(
         }
     }
 
-    let fit_to_page = wsbool_fit_to_page.unwrap_or_else(|| {
-        setup_fit_width.unwrap_or(0) != 0 || setup_fit_height.unwrap_or(0) != 0
-    });
+    let fit_to_page = if setup_no_pls {
+        false
+    } else {
+        wsbool_fit_to_page.unwrap_or_else(|| {
+            setup_fit_width.unwrap_or(0) != 0 || setup_fit_height.unwrap_or(0) != 0
+        })
+    };
 
     // WSBOOL.fFitToPage can imply non-default scaling even when SETUP is missing. Treat it as a
     // signal that print settings exist so downstream import paths can preserve FitTo mode.
@@ -255,7 +265,7 @@ fn parse_setup_record(
     data: &[u8],
     offset: usize,
     warnings: &mut Vec<String>,
-) -> (Option<u16>, Option<u16>, Option<u16>) {
+) -> (Option<u16>, Option<u16>, Option<u16>, bool) {
     // BIFF8 SETUP record is 34 bytes:
     // [iPaperSize:u16][iScale:u16][iPageStart:u16][iFitWidth:u16][iFitHeight:u16]
     // [grbit:u16][iRes:u16][iVRes:u16][numHdr:f64][numFtr:f64][iCopies:u16]
@@ -278,17 +288,19 @@ fn parse_setup_record(
     let grbit = parse_u16_at(data, 10);
     let header_margin = parse_f64_at(data, 16);
     let footer_margin = parse_f64_at(data, 24);
-
     let mut scale_out = scale;
-    let (f_no_pls, f_no_orient, f_portrait) = match grbit {
-        Some(grbit) => (
-            (grbit & SETUP_GRBIT_F_NOPLS) != 0,
-            (grbit & SETUP_GRBIT_F_NOORIENT) != 0,
-            (grbit & SETUP_GRBIT_PORTRAIT) != 0,
-        ),
-        None => (false, false, false),
-    };
+    let mut f_no_pls = false;
+    let mut f_no_orient = false;
+    let mut f_portrait = false;
+    if let Some(grbit) = grbit {
+        f_no_pls = (grbit & SETUP_GRBIT_F_NOPLS) != 0;
+        f_no_orient = (grbit & SETUP_GRBIT_F_NOORIENT) != 0;
+        f_portrait = (grbit & SETUP_GRBIT_PORTRAIT) != 0;
+    }
 
+    // Per [MS-XLS], when `fNoPls` is set the printer-related fields are undefined and must be
+    // ignored. We still import the header/footer margins from `numHdr`/`numFtr` as those are not
+    // marked undefined by the spec (and Excel preserves them).
     if f_no_pls {
         // Per spec: iPaperSize/iScale/fPortrait/iRes/iVRes/iCopies are undefined; ignore them.
         // Also reset any previously seen printer-related values so "last wins" behaves as if
@@ -346,7 +358,7 @@ fn parse_setup_record(
         }
     }
 
-    (scale_out, fit_width, fit_height)
+    (scale_out, fit_width, fit_height, f_no_pls)
 }
 
 fn parse_margin_record(

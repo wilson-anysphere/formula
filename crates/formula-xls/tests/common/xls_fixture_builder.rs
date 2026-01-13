@@ -83,6 +83,12 @@ const ROW_OPTION_COLLAPSED: u16 = 0x1000;
 const COLINFO_OPTION_HIDDEN: u16 = 0x0001;
 const COLINFO_OPTION_COLLAPSED: u16 = 0x1000;
 
+// SETUP record `grbit` flags (BIFF8).
+// See [MS-XLS] 2.4.296 (SETUP).
+const SETUP_GRBIT_F_PORTRAIT: u16 = 0x0002; // 0=landscape, 1=portrait
+const SETUP_GRBIT_F_NOPLS: u16 = 0x0004;
+const SETUP_GRBIT_F_NOORIENT: u16 = 0x0040;
+
 // WSBOOL options.
 const WSBOOL_OPTION_FIT_TO_PAGE: u16 = 0x0100;
 
@@ -1106,6 +1112,74 @@ pub fn build_custom_paper_size_ge_256_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a single sheet with a `SETUP` record where
+/// `SETUP.fNoPls=1`.
+///
+/// This is used to validate that the importer ignores paper size/orientation/scaling fields while
+/// still importing header/footer margins (`numHdr`/`numFtr`).
+pub fn build_page_setup_flags_nopls_fixture_xls() -> Vec<u8> {
+    // `build_single_sheet_workbook_stream` always emits a single cell XF at index 16 (after 16
+    // style XFs).
+    let sheet_stream = build_page_setup_flags_sheet_stream(
+        16,
+        setup_record_with_grbit(
+            9,                  // iPaperSize (ignored due to fNoPls)
+            80,                 // iScale (ignored due to fNoPls)
+            0,                  // iFitWidth
+            0,                  // iFitHeight
+            SETUP_GRBIT_F_NOPLS, // fNoPls=1, fPortrait=0 (landscape)
+            0.5,                // numHdr (non-default)
+            0.6,                // numFtr (non-default)
+        ),
+    );
+    let workbook_stream =
+        build_single_sheet_workbook_stream("PageSetupNoPls", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a single sheet with a `SETUP` record where
+/// `SETUP.fNoOrient=1` (and `SETUP.fNoPls=0`).
+///
+/// This is used to validate that the importer treats orientation as the default portrait and
+/// ignores the `fPortrait` bit when `fNoOrient` is set.
+pub fn build_page_setup_flags_noorient_fixture_xls() -> Vec<u8> {
+    // `build_single_sheet_workbook_stream` always emits a single cell XF at index 16 (after 16
+    // style XFs).
+    let sheet_stream = build_page_setup_flags_sheet_stream(
+        16,
+        setup_record_with_grbit(
+            9,                     // A4
+            80,                    // iScale=80%
+            0,                     // iFitWidth
+            0,                     // iFitHeight
+            SETUP_GRBIT_F_NOORIENT, // fNoOrient=1, fPortrait=0 (landscape)
+            0.5,                   // numHdr (non-default)
+            0.6,                   // numFtr (non-default)
+        ),
+    );
+    let workbook_stream =
+        build_single_sheet_workbook_stream("PageSetupNoOrient", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 fn build_page_setup_fixture_sheet_stream(xf_cell: u16, mode: PageSetupScalingMode) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -1529,6 +1603,30 @@ fn setup_record(
     header_margin: f64,
     footer_margin: f64,
 ) -> Vec<u8> {
+    let mut grbit = 0u16;
+    if !landscape {
+        grbit |= SETUP_GRBIT_F_PORTRAIT;
+    }
+    setup_record_with_grbit(
+        paper_size,
+        scale,
+        fit_width,
+        fit_height,
+        grbit,
+        header_margin,
+        footer_margin,
+    )
+}
+
+fn setup_record_with_grbit(
+    paper_size: u16,
+    scale: u16,
+    fit_width: u16,
+    fit_height: u16,
+    grbit: u16,
+    header_margin: f64,
+    footer_margin: f64,
+) -> Vec<u8> {
     // BIFF8 SETUP record payload.
     let mut out = Vec::<u8>::new();
     out.extend_from_slice(&paper_size.to_le_bytes()); // iPaperSize
@@ -1536,12 +1634,6 @@ fn setup_record(
     out.extend_from_slice(&0u16.to_le_bytes()); // iPageStart
     out.extend_from_slice(&fit_width.to_le_bytes()); // iFitWidth
     out.extend_from_slice(&fit_height.to_le_bytes()); // iFitHeight
-    let mut grbit = 0u16;
-    // BIFF8 SETUP.grbit bit1 is `fPortrait` (0x0002): 0=landscape, 1=portrait.
-    // Keep the fixture builder API ergonomic by accepting `landscape: bool`.
-    if !landscape {
-        grbit |= 0x0002;
-    }
     out.extend_from_slice(&grbit.to_le_bytes()); // grbit
     out.extend_from_slice(&600u16.to_le_bytes()); // iRes
     out.extend_from_slice(&600u16.to_le_bytes()); // iVRes
@@ -1549,6 +1641,34 @@ fn setup_record(
     out.extend_from_slice(&footer_margin.to_le_bytes()); // numFtr
     out.extend_from_slice(&1u16.to_le_bytes()); // iCopies
     out
+}
+
+fn build_page_setup_flags_sheet_stream(xf_cell: u16, setup: Vec<u8>) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) => A1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // SETUP record under test.
+    push_record(&mut sheet, RECORD_SETUP, &setup);
+
+    // WSBOOL: explicit fFitToPage=0 so SETUP.iScale semantics are stable for the fixture.
+    push_record(&mut sheet, RECORD_WSBOOL, &0u16.to_le_bytes());
+
+    // A1: ensure calamine produces a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 0.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
 }
 
 fn hpagebreaks_record(breaks: &[u16]) -> Vec<u8> {

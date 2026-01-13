@@ -1135,6 +1135,14 @@ fn decode_rgce_impl(
                         ptg,
                     });
                 };
+                if rgce.len().saturating_sub(i) < 6 {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 6,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
 
                 let row_off =
                     i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) as i64;
@@ -1170,6 +1178,14 @@ fn decode_rgce_impl(
                         ptg,
                     });
                 };
+                if rgce.len().saturating_sub(i) < 12 {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 12,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
 
                 let row1_off =
                     i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) as i64;
