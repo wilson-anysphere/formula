@@ -53,6 +53,34 @@ pub static ES_MX: NumberLocale = NumberLocale {
     thousands_separator: Some(crate::Locale::en_us().thousands_sep),
 };
 
+/// Portuguese (Portugal).
+pub static PT_PT: NumberLocale = NumberLocale {
+    id: "pt-PT",
+    decimal_separator: crate::Locale::es_es().decimal_sep,
+    thousands_separator: Some(crate::Locale::es_es().thousands_sep),
+};
+
+/// Portuguese (Brazil).
+pub static PT_BR: NumberLocale = NumberLocale {
+    id: "pt-BR",
+    decimal_separator: crate::Locale::es_es().decimal_sep,
+    thousands_separator: Some(crate::Locale::es_es().thousands_sep),
+};
+
+/// Dutch (Netherlands).
+pub static NL_NL: NumberLocale = NumberLocale {
+    id: "nl-NL",
+    decimal_separator: crate::Locale::es_es().decimal_sep,
+    thousands_separator: Some(crate::Locale::es_es().thousands_sep),
+};
+
+/// Dutch (Belgium).
+pub static NL_BE: NumberLocale = NumberLocale {
+    id: "nl-BE",
+    decimal_separator: crate::Locale::es_es().decimal_sep,
+    thousands_separator: Some(crate::Locale::es_es().thousands_sep),
+};
+
 pub static IT_IT: NumberLocale = NumberLocale {
     id: "it-IT",
     decimal_separator: crate::Locale::it_it().decimal_sep,
@@ -127,6 +155,10 @@ fn normalize_locale_id(id: &str) -> Option<&'static str> {
         "fr-ch" => Some("fr-CH"),
         "es-es" | "es" => Some("es-ES"),
         "es-mx" => Some("es-MX"),
+        "pt-pt" | "pt" => Some("pt-PT"),
+        "pt-br" => Some("pt-BR"),
+        "nl-nl" | "nl" => Some("nl-NL"),
+        "nl-be" => Some("nl-BE"),
         "it-it" | "it" => Some("it-IT"),
         "it-ch" => Some("it-CH"),
         _ => {
@@ -138,6 +170,8 @@ fn normalize_locale_id(id: &str) -> Option<&'static str> {
                 "de" => Some("de-DE"),
                 "fr" => Some("fr-FR"),
                 "es" => Some("es-ES"),
+                "pt" => Some("pt-PT"),
+                "nl" => Some("nl-NL"),
                 "it" => Some("it-IT"),
                 _ => None,
             }
@@ -155,6 +189,10 @@ pub fn get_locale(id: &str) -> Option<&'static NumberLocale> {
         "fr-CH" => Some(&FR_CH),
         "es-ES" => Some(&ES_ES),
         "es-MX" => Some(&ES_MX),
+        "pt-PT" => Some(&PT_PT),
+        "pt-BR" => Some(&PT_BR),
+        "nl-NL" => Some(&NL_NL),
+        "nl-BE" => Some(&NL_BE),
         "it-IT" => Some(&IT_IT),
         "it-CH" => Some(&IT_CH),
         _ => None,
@@ -294,6 +332,11 @@ mod tests {
         assert_eq!(normalize_locale_id("es-ES"), Some("es-ES"));
         assert_eq!(normalize_locale_id("es-MX"), Some("es-MX"));
         assert_eq!(normalize_locale_id("es-AR"), Some("es-ES"));
+        assert_eq!(normalize_locale_id("pt-PT"), Some("pt-PT"));
+        assert_eq!(normalize_locale_id("pt_BR"), Some("pt-BR"));
+        assert_eq!(normalize_locale_id("pt-AO"), Some("pt-PT"));
+        assert_eq!(normalize_locale_id("nl"), Some("nl-NL"));
+        assert_eq!(normalize_locale_id("nl_BE"), Some("nl-BE"));
         assert_eq!(normalize_locale_id("it_it"), Some("it-IT"));
         assert_eq!(normalize_locale_id("it-CH"), Some("it-CH"));
         assert_eq!(normalize_locale_id("fr-FR-u-nu-latn"), Some("fr-FR"));
@@ -328,6 +371,14 @@ mod tests {
         let es = crate::Locale::es_es();
         assert_eq!(ES_ES.decimal_separator, es.decimal_sep);
         assert_eq!(ES_ES.thousands_separator, Some(es.thousands_sep));
+        assert_eq!(PT_PT.decimal_separator, es.decimal_sep);
+        assert_eq!(PT_PT.thousands_separator, Some(es.thousands_sep));
+        assert_eq!(PT_BR.decimal_separator, es.decimal_sep);
+        assert_eq!(PT_BR.thousands_separator, Some(es.thousands_sep));
+        assert_eq!(NL_NL.decimal_separator, es.decimal_sep);
+        assert_eq!(NL_NL.thousands_separator, Some(es.thousands_sep));
+        assert_eq!(NL_BE.decimal_separator, es.decimal_sep);
+        assert_eq!(NL_BE.thousands_separator, Some(es.thousands_sep));
 
         let it = crate::Locale::it_it();
         assert_eq!(IT_IT.decimal_separator, it.decimal_sep);
