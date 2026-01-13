@@ -2,6 +2,8 @@ import { InMemoryBinaryStorage } from "./binaryStorage.js";
 import { normalizeL2, toFloat32Array } from "./vectorMath.js";
 import { throwIfAborted } from "../utils/abort.js";
 
+const SCHEMA_VERSION = 2;
+
 function locateSqlJsFile(file, prefix = "") {
   try {
     if (typeof import.meta.resolve === "function") {
@@ -54,6 +56,69 @@ function float32ToBlob(vec) {
 }
 
 /**
+ * Split incoming metadata into structured fields stored in columns vs extra keys
+ * kept in metadata_json.
+ *
+ * @param {any} metadata
+ */
+function splitMetadata(metadata) {
+  const meta = metadata ?? {};
+  const rect = meta?.rect ?? null;
+
+  /** @type {any} */
+  const extra = { ...(meta ?? {}) };
+  delete extra.workbookId;
+  delete extra.sheetName;
+  delete extra.kind;
+  delete extra.title;
+  delete extra.rect;
+  delete extra.contentHash;
+  delete extra.tokenCount;
+  delete extra.text;
+
+  const workbookId = typeof meta.workbookId === "string" ? meta.workbookId : null;
+  const sheetName = typeof meta.sheetName === "string" ? meta.sheetName : null;
+  const kind = typeof meta.kind === "string" ? meta.kind : null;
+  const title = typeof meta.title === "string" ? meta.title : null;
+
+  const r0 = Number.isFinite(rect?.r0) ? rect.r0 : null;
+  const c0 = Number.isFinite(rect?.c0) ? rect.c0 : null;
+  const r1 = Number.isFinite(rect?.r1) ? rect.r1 : null;
+  const c1 = Number.isFinite(rect?.c1) ? rect.c1 : null;
+
+  const contentHash = typeof meta.contentHash === "string" ? meta.contentHash : null;
+  const tokenCount = Number.isFinite(meta.tokenCount) ? meta.tokenCount : null;
+  const text = typeof meta.text === "string" ? meta.text : null;
+
+  return {
+    workbookId,
+    sheetName,
+    kind,
+    title,
+    r0,
+    c0,
+    r1,
+    c1,
+    contentHash,
+    tokenCount,
+    text,
+    metadataJson: JSON.stringify(extra),
+  };
+}
+
+/**
+ * Parse extra metadata_json, treating "{}" as empty to avoid JSON.parse work in
+ * the common case where there are no extra keys.
+ *
+ * @param {string} json
+ */
+function parseExtraMetadata(json) {
+  if (!json || json === "{}") return {};
+  const parsed = JSON.parse(json);
+  return parsed && typeof parsed === "object" ? parsed : {};
+}
+
+/**
  * A persistent vector store backed by sql.js (SQLite compiled to WASM).
  *
  * Notes:
@@ -103,6 +168,7 @@ export class SqliteVectorStore {
     });
 
     store._ensureMeta(opts.dimension);
+    store._ensureSchemaVersion();
     return store;
   }
 
@@ -121,6 +187,16 @@ export class SqliteVectorStore {
         id TEXT PRIMARY KEY,
         workbook_id TEXT,
         vector BLOB NOT NULL,
+        sheet_name TEXT,
+        kind TEXT,
+        title TEXT,
+        r0 INTEGER,
+        c0 INTEGER,
+        r1 INTEGER,
+        c1 INTEGER,
+        content_hash TEXT,
+        token_count INTEGER,
+        text TEXT,
         metadata_json TEXT NOT NULL
       );
 
@@ -149,6 +225,208 @@ export class SqliteVectorStore {
       throw new Error(
         `SqliteVectorStore dimension mismatch: db has ${existingDim}, requested ${dimension}`
       );
+    }
+  }
+
+  _getMetaValue(key) {
+    const stmt = this._db.prepare("SELECT value FROM vector_store_meta WHERE key = ? LIMIT 1;");
+    stmt.bind([key]);
+    const hasRow = stmt.step();
+    const value = hasRow ? stmt.get()[0] : null;
+    stmt.free();
+    return value;
+  }
+
+  _setMetaValue(key, value) {
+    const stmt = this._db.prepare(`
+      INSERT INTO vector_store_meta (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+    `);
+    stmt.run([key, value]);
+    stmt.free();
+  }
+
+  _getTableColumns(table) {
+    const stmt = this._db.prepare(`PRAGMA table_info(${table});`);
+    /** @type {Set<string>} */
+    const cols = new Set();
+    while (stmt.step()) {
+      const row = stmt.get();
+      cols.add(String(row[1]));
+    }
+    stmt.free();
+    return cols;
+  }
+
+  _ensureVectorsColumnsV2() {
+    const cols = this._getTableColumns("vectors");
+    /** @type {[string, string][]} */
+    const desired = [
+      ["sheet_name", "TEXT"],
+      ["kind", "TEXT"],
+      ["title", "TEXT"],
+      ["r0", "INTEGER"],
+      ["c0", "INTEGER"],
+      ["r1", "INTEGER"],
+      ["c1", "INTEGER"],
+      ["content_hash", "TEXT"],
+      ["token_count", "INTEGER"],
+      ["text", "TEXT"],
+    ];
+
+    for (const [name, type] of desired) {
+      if (cols.has(name)) continue;
+      // SQLite has no "ADD COLUMN IF NOT EXISTS" in older versions; probe via
+      // PRAGMA table_info to keep migrations idempotent.
+      this._db.run(`ALTER TABLE vectors ADD COLUMN ${name} ${type};`);
+    }
+  }
+
+  _migrateVectorsToV2() {
+    this._ensureVectorsColumnsV2();
+
+    const select = this._db.prepare(`
+      SELECT
+        id,
+        workbook_id,
+        sheet_name,
+        kind,
+        title,
+        r0,
+        c0,
+        r1,
+        c1,
+        content_hash,
+        token_count,
+        text,
+        metadata_json
+      FROM vectors;
+    `);
+
+    const update = this._db.prepare(`
+      UPDATE vectors SET
+        workbook_id = ?,
+        sheet_name = ?,
+        kind = ?,
+        title = ?,
+        r0 = ?,
+        c0 = ?,
+        r1 = ?,
+        c1 = ?,
+        content_hash = ?,
+        token_count = ?,
+        text = ?,
+        metadata_json = ?
+      WHERE id = ?;
+    `);
+
+    try {
+      while (select.step()) {
+        const row = select.get();
+        const id = row[0];
+        const workbookIdCol = row[1];
+        const sheetNameCol = row[2];
+        const kindCol = row[3];
+        const titleCol = row[4];
+        const r0Col = row[5];
+        const c0Col = row[6];
+        const r1Col = row[7];
+        const c1Col = row[8];
+        const contentHashCol = row[9];
+        const tokenCountCol = row[10];
+        const textCol = row[11];
+        const metaJson = row[12];
+
+        const parsedMeta = metaJson ? JSON.parse(metaJson) : {};
+        const meta = parsedMeta && typeof parsedMeta === "object" ? parsedMeta : {};
+
+        const rect = meta?.rect ?? null;
+
+        const workbookId =
+          typeof workbookIdCol === "string"
+            ? workbookIdCol
+            : typeof meta.workbookId === "string"
+              ? meta.workbookId
+              : null;
+        const sheetName =
+          typeof meta.sheetName === "string"
+            ? meta.sheetName
+            : typeof sheetNameCol === "string"
+              ? sheetNameCol
+              : null;
+        const kind =
+          typeof meta.kind === "string" ? meta.kind : typeof kindCol === "string" ? kindCol : null;
+        const title =
+          typeof meta.title === "string"
+            ? meta.title
+            : typeof titleCol === "string"
+              ? titleCol
+              : null;
+
+        const r0 = Number.isFinite(rect?.r0) ? rect.r0 : Number.isFinite(r0Col) ? r0Col : null;
+        const c0 = Number.isFinite(rect?.c0) ? rect.c0 : Number.isFinite(c0Col) ? c0Col : null;
+        const r1 = Number.isFinite(rect?.r1) ? rect.r1 : Number.isFinite(r1Col) ? r1Col : null;
+        const c1 = Number.isFinite(rect?.c1) ? rect.c1 : Number.isFinite(c1Col) ? c1Col : null;
+
+        const contentHash =
+          typeof meta.contentHash === "string"
+            ? meta.contentHash
+            : typeof contentHashCol === "string"
+              ? contentHashCol
+              : null;
+        const tokenCount =
+          Number.isFinite(meta.tokenCount) ? meta.tokenCount : Number.isFinite(tokenCountCol) ? tokenCountCol : null;
+        const text = typeof meta.text === "string" ? meta.text : typeof textCol === "string" ? textCol : null;
+
+        // Rewrite metadata_json to include only non-standard keys.
+        /** @type {any} */
+        const extra = { ...(meta ?? {}) };
+        delete extra.workbookId;
+        delete extra.sheetName;
+        delete extra.kind;
+        delete extra.title;
+        delete extra.rect;
+        delete extra.contentHash;
+        delete extra.tokenCount;
+        delete extra.text;
+
+        update.run([
+          workbookId,
+          sheetName,
+          kind,
+          title,
+          r0,
+          c0,
+          r1,
+          c1,
+          contentHash,
+          tokenCount,
+          text,
+          JSON.stringify(extra),
+          id,
+        ]);
+      }
+    } finally {
+      select.free();
+      update.free();
+    }
+  }
+
+  _ensureSchemaVersion() {
+    const raw = this._getMetaValue("schema_version");
+    const current = raw == null ? 1 : Number(raw);
+    if (Number.isFinite(current) && current >= SCHEMA_VERSION) return;
+
+    this._db.run("BEGIN;");
+    try {
+      // v1 -> v2: add structured metadata columns and shrink metadata_json.
+      this._migrateVectorsToV2();
+
+      this._setMetaValue("schema_version", String(SCHEMA_VERSION));
+      this._db.run("COMMIT;");
+    } catch (err) {
+      this._db.run("ROLLBACK;");
+      throw err;
     }
   }
 
@@ -195,11 +473,36 @@ export class SqliteVectorStore {
     if (!records.length) return;
 
     const stmt = this._db.prepare(`
-      INSERT INTO vectors (id, workbook_id, vector, metadata_json)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO vectors (
+        id,
+        workbook_id,
+        vector,
+        sheet_name,
+        kind,
+        title,
+        r0,
+        c0,
+        r1,
+        c1,
+        content_hash,
+        token_count,
+        text,
+        metadata_json
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         workbook_id = excluded.workbook_id,
         vector = excluded.vector,
+        sheet_name = excluded.sheet_name,
+        kind = excluded.kind,
+        title = excluded.title,
+        r0 = excluded.r0,
+        c0 = excluded.c0,
+        r1 = excluded.r1,
+        c1 = excluded.c1,
+        content_hash = excluded.content_hash,
+        token_count = excluded.token_count,
+        text = excluded.text,
         metadata_json = excluded.metadata_json;
     `);
 
@@ -214,9 +517,23 @@ export class SqliteVectorStore {
         }
         const norm = normalizeL2(vec);
         const blob = float32ToBlob(norm);
-        const meta = r.metadata ?? {};
-        const workbookId = meta.workbookId ?? null;
-        stmt.run([r.id, workbookId, blob, JSON.stringify(meta)]);
+        const meta = splitMetadata(r.metadata);
+        stmt.run([
+          r.id,
+          meta.workbookId,
+          blob,
+          meta.sheetName,
+          meta.kind,
+          meta.title,
+          meta.r0,
+          meta.c0,
+          meta.r1,
+          meta.c1,
+          meta.contentHash,
+          meta.tokenCount,
+          meta.text,
+          meta.metadataJson,
+        ]);
       }
       this._db.run("COMMIT;");
       this._dirty = true;
@@ -288,7 +605,25 @@ export class SqliteVectorStore {
    * @param {string} id
    */
   async get(id) {
-    const stmt = this._db.prepare("SELECT vector, metadata_json FROM vectors WHERE id = ? LIMIT 1;");
+    const stmt = this._db.prepare(`
+      SELECT
+        vector,
+        workbook_id,
+        sheet_name,
+        kind,
+        title,
+        r0,
+        c0,
+        r1,
+        c1,
+        content_hash,
+        token_count,
+        text,
+        metadata_json
+      FROM vectors
+      WHERE id = ?
+      LIMIT 1;
+    `);
     stmt.bind([id]);
     if (!stmt.step()) {
       stmt.free();
@@ -298,7 +633,21 @@ export class SqliteVectorStore {
     stmt.free();
 
     const vec = blobToFloat32(row[0]);
-    const metadata = JSON.parse(row[1]);
+
+    const base = {};
+    if (row[1] != null) base.workbookId = row[1];
+    if (row[2] != null) base.sheetName = row[2];
+    if (row[3] != null) base.kind = row[3];
+    if (row[4] != null) base.title = row[4];
+    if (row[5] != null && row[6] != null && row[7] != null && row[8] != null) {
+      base.rect = { r0: row[5], c0: row[6], r1: row[7], c1: row[8] };
+    }
+    if (row[9] != null) base.contentHash = row[9];
+    if (row[10] != null) base.tokenCount = row[10];
+    if (row[11] != null) base.text = row[11];
+
+    const extra = parseExtraMetadata(row[12]);
+    const metadata = { ...extra, ...base };
     return { id, vector: new Float32Array(vec), metadata };
   }
 
@@ -317,8 +666,44 @@ export class SqliteVectorStore {
 
     throwIfAborted(signal);
     const sql = workbookId
-      ? `SELECT id, ${includeVector ? "vector," : ""} metadata_json FROM vectors WHERE workbook_id = ?`
-      : `SELECT id, ${includeVector ? "vector," : ""} metadata_json FROM vectors`;
+      ? `
+        SELECT
+          id,
+          ${includeVector ? "vector," : ""}
+          workbook_id,
+          sheet_name,
+          kind,
+          title,
+          r0,
+          c0,
+          r1,
+          c1,
+          content_hash,
+          token_count,
+          text,
+          metadata_json
+        FROM vectors
+        WHERE workbook_id = ?
+      `
+      : `
+        SELECT
+          id,
+          ${includeVector ? "vector," : ""}
+          workbook_id,
+          sheet_name,
+          kind,
+          title,
+          r0,
+          c0,
+          r1,
+          c1,
+          content_hash,
+          token_count,
+          text,
+          metadata_json
+        FROM vectors
+      `;
+
     const stmt = this._db.prepare(sql);
     try {
       if (workbookId) stmt.bind([workbookId]);
@@ -329,9 +714,33 @@ export class SqliteVectorStore {
         if (!stmt.step()) break;
         const row = stmt.get();
         const id = row[0];
+        const offset = includeVector ? 2 : 1;
         const vecBlob = includeVector ? row[1] : null;
-        const metaJson = includeVector ? row[2] : row[1];
-        const metadata = JSON.parse(metaJson);
+
+        const base = {};
+        if (row[offset] != null) base.workbookId = row[offset];
+        if (row[offset + 1] != null) base.sheetName = row[offset + 1];
+        if (row[offset + 2] != null) base.kind = row[offset + 2];
+        if (row[offset + 3] != null) base.title = row[offset + 3];
+        if (
+          row[offset + 4] != null &&
+          row[offset + 5] != null &&
+          row[offset + 6] != null &&
+          row[offset + 7] != null
+        ) {
+          base.rect = {
+            r0: row[offset + 4],
+            c0: row[offset + 5],
+            r1: row[offset + 6],
+            c1: row[offset + 7],
+          };
+        }
+        if (row[offset + 8] != null) base.contentHash = row[offset + 8];
+        if (row[offset + 9] != null) base.tokenCount = row[offset + 9];
+        if (row[offset + 10] != null) base.text = row[offset + 10];
+
+        const extra = parseExtraMetadata(row[offset + 11]);
+        const metadata = { ...extra, ...base };
         if (filter && !filter(metadata, id)) continue;
         out.push({
           id,
@@ -378,14 +787,42 @@ export class SqliteVectorStore {
 
     const sql = workbookId
       ? `
-        SELECT id, metadata_json, dot(vector, ?) AS score
+        SELECT
+          id,
+          workbook_id,
+          sheet_name,
+          kind,
+          title,
+          r0,
+          c0,
+          r1,
+          c1,
+          content_hash,
+          token_count,
+          text,
+          metadata_json,
+          dot(vector, ?) AS score
         FROM vectors
         WHERE workbook_id = ?
         ORDER BY score DESC, id ASC
         LIMIT ?;
       `
       : `
-        SELECT id, metadata_json, dot(vector, ?) AS score
+        SELECT
+          id,
+          workbook_id,
+          sheet_name,
+          kind,
+          title,
+          r0,
+          c0,
+          r1,
+          c1,
+          content_hash,
+          token_count,
+          text,
+          metadata_json,
+          dot(vector, ?) AS score
         FROM vectors
         ORDER BY score DESC, id ASC
         LIMIT ?;
@@ -407,9 +844,24 @@ export class SqliteVectorStore {
           rows += 1;
           const row = stmt.get();
           const id = row[0];
-          const metadata = JSON.parse(row[1]);
+
+          const base = {};
+          if (row[1] != null) base.workbookId = row[1];
+          if (row[2] != null) base.sheetName = row[2];
+          if (row[3] != null) base.kind = row[3];
+          if (row[4] != null) base.title = row[4];
+          if (row[5] != null && row[6] != null && row[7] != null && row[8] != null) {
+            base.rect = { r0: row[5], c0: row[6], r1: row[7], c1: row[8] };
+          }
+          if (row[9] != null) base.contentHash = row[9];
+          if (row[10] != null) base.tokenCount = row[10];
+          if (row[11] != null) base.text = row[11];
+
+          const extra = parseExtraMetadata(row[12]);
+          const metadata = { ...extra, ...base };
           if (filter && !filter(metadata, id)) continue;
-          const score = Number(row[2]);
+
+          const score = Number(row[13]);
           out.push({ id, score, metadata });
           if (out.length >= topK) break;
         }
