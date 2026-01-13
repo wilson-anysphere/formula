@@ -103,3 +103,27 @@ test("warn-only prints violations but exits 0", () => {
   assert.equal(proc.status, 0);
   assert.match(proc.stderr, /Bundle size budgets exceeded/i);
 });
+
+test("optional dist total budget (dist/**/*.js) can be enforced separately", () => {
+  const { root, distDir } = writeFixture({
+    indexHtml: `<!doctype html><html><head><script type="module" src="/assets/entry.js"></script></head></html>`,
+    files: {
+      "assets/entry.js": "x".repeat(512), // 0.5 KiB
+      "coi-check-worker.js": "y".repeat(2048), // 2 KiB (outside assets)
+    },
+  });
+
+  const proc = run(distDir, {
+    env: {
+      // Vite bundles are under budget...
+      FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB: "10",
+      FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB: "10",
+      // ...but total JS across dist should trip.
+      FORMULA_DESKTOP_JS_DIST_TOTAL_BUDGET_KB: "1",
+    },
+  });
+  fs.rmSync(root, { recursive: true, force: true });
+
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /FORMULA_DESKTOP_JS_DIST_TOTAL_BUDGET_KB/);
+});
