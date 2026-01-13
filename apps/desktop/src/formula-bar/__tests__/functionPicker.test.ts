@@ -131,9 +131,10 @@ describe("FormulaBarView fx function picker", () => {
 
     pickerInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
 
-    expect(view.textarea.value).toBe("=1+SUM(");
-    expect(view.textarea.selectionStart).toBe(view.textarea.value.length);
-    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length);
+    expect(view.textarea.value).toBe("=1+SUM()");
+    // Caret should land inside the parens: `=1+SUM(|)`.
+    expect(view.textarea.selectionStart).toBe(view.textarea.value.length - 1);
+    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length - 1);
 
     host.remove();
   });
