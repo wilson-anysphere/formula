@@ -13,6 +13,15 @@ Platform/architecture expectations for a release:
 The workflow also uploads updater metadata (`latest.json` + `latest.json.sig`) used by the Tauri
 updater.
 
+CI also runs a lightweight **Linux AppImage smoke test** (no GUI) to catch common packaging issues
+early:
+
+- Extract the generated `*.AppImage` via `--appimage-extract` (no FUSE required)
+- Verify the extracted main ELF binary architecture via `readelf -h`
+- Run `ldd` and fail the workflow if any shared libraries are `not found`
+
+See `scripts/ci/check-appimage.sh`.
+
 For the **exact** `latest.json.platforms` key names (and which asset each key should point to),
 see:
 
