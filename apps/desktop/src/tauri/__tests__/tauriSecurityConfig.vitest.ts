@@ -81,6 +81,11 @@ describe("tauri.conf.json security guardrails", () => {
     expect(config?.bundle?.windows?.allowDowngrades).toBe(true);
   });
 
+  it("pins a stable WiX upgradeCode so MSI upgrades/downgrades work", () => {
+    const config = loadTauriConfig();
+    expect(config?.bundle?.windows?.wix?.upgradeCode).toBe("a91423b1-a874-5245-a74f-62778e7f1e84");
+  });
+
   it("enables COOP/COEP headers for cross-origin isolation (SharedArrayBuffer)", () => {
     const config = loadTauriConfig();
     const headers = config?.app?.security?.headers as unknown;

@@ -1286,6 +1286,11 @@ Windows installers often block installing an older version over a newer one. For
 bundles are explicitly configured to **allow downgrades** via
 `bundle.windows.allowDowngrades: true` in `apps/desktop/src-tauri/tauri.conf.json`.
 
+MSI upgrades/downgrades also rely on a stable **WiX upgrade code**. This repo pins
+`bundle.windows.wix.upgradeCode` in `tauri.conf.json` so that future changes to `productName` do not
+accidentally break upgrades/downgrades (or create side-by-side installs). Do **not** change the
+upgrade code after shipping a release.
+
 Expected behavior when downgrading **manually** from the GitHub Releases page:
 
 - **NSIS `.exe` installer:** detects the newer installed version and shows a maintenance screen.

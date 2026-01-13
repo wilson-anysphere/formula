@@ -139,7 +139,10 @@
         "type": "downloadBootstrapper",
         "silent": true
       },
-      "allowDowngrades": true
+      "allowDowngrades": true,
+      "wix": {
+        "upgradeCode": "a91423b1-a874-5245-a74f-62778e7f1e84"
+      }
     }
   },
   "plugins": {
