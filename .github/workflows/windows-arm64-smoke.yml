@@ -66,6 +66,11 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.92.0
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
       # CARGO_HOME so cargo installs/builds share the same cache.
@@ -303,6 +308,9 @@ jobs:
             $mb = [Math]::Round($f.Length / 1MB, 2)
             "- `$rel` (${mb} MB)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           }
+
+      - name: Verify Windows installers bundle/reference WebView2 (bootstrapper/runtime)
+        run: python scripts/ci/check-windows-webview2-installer.py
 
       - name: Upload bundles
         uses: actions/upload-artifact@v4
