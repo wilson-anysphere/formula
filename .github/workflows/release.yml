@@ -533,6 +533,17 @@ jobs:
         if: steps.wasm-pack-cache.outputs.cache-hit != 'true'
         run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked
 
+      - name: Verify wasm-pack version
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${WASM_PACK_VERSION}"
+          actual="$(wasm-pack --version | tr -d '\r' | awk '{print $2}')"
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "Expected wasm-pack ${expected}, but found ${actual}." >&2
+            exit 1
+          fi
+
       - name: Smoke check packaged cross-origin isolation (COOP/COEP)
         # Optional: set `FORMULA_COI_CHECK_ALL_PLATFORMS=0` as a GitHub Actions variable to
         # only run this step on Linux (useful if a runner/platform regression makes the check flaky

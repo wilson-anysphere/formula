@@ -166,6 +166,17 @@ jobs:
         # incompatibilities before we cut a release.
         run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked
 
+      - name: Verify wasm-pack version
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${WASM_PACK_VERSION}"
+          actual="$(wasm-pack --version | tr -d '\r' | awk '{print $2}')"
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "Expected wasm-pack ${expected}, but found ${actual}." >&2
+            exit 1
+          fi
+
       - name: Build WASM bundle (wasm-pack)
         # Build before `pnpm install` so we fail fast on Rust/WASM toolchain issues
         # without paying the JS dependency install cost.

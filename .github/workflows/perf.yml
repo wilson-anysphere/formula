@@ -115,6 +115,18 @@ jobs:
         # when wasm-pack publishes a new incompatible version.
         run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked
 
+      - name: Verify wasm-pack version
+        if: steps.desktop_bench.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${WASM_PACK_VERSION}"
+          actual="$(wasm-pack --version | tr -d '\r' | awk '{print $2}')"
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "Expected wasm-pack ${expected}, but found ${actual}." >&2
+            exit 1
+          fi
+
       - name: Build desktop frontend assets (Vite → tauri.conf.json build.frontendDist)
         if: steps.desktop_bench.outputs.run == 'true'
         run: pnpm -C apps/desktop build
