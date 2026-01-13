@@ -201,6 +201,11 @@ jobs:
 
       - name: Desktop dist asset report
         run: node scripts/desktop_dist_asset_report.mjs
+        env:
+          # Optional: define these as GitHub Actions "Variables" to enable gating without
+          # changing the workflow. Leaving them unset (or empty) keeps the report informational.
+          FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB }}
+          FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB }}
 
       - name: Check desktop bundle size budgets
         run: pnpm -C apps/desktop check:bundle-size
