@@ -894,6 +894,16 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "PROB",
+    description: "Returns the probability that values in a range are between two limits.",
+    args: [
+      { name: "x_range", type: "range" },
+      { name: "prob_range", type: "range" },
+      { name: "lower_limit", type: "number" },
+      { name: "upper_limit", type: "number", optional: true },
+    ],
+  },
+  {
     name: "RSQ",
     description: "Returns the square of the Pearson product moment correlation coefficient.",
     args: [
@@ -1151,11 +1161,28 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "FVSCHEDULE",
+    description: "Returns the future value of an initial principal after applying a series of compound interest rates.",
+    args: [
+      { name: "principal", type: "number" },
+      { name: "schedule", type: "range" },
+    ],
+  },
+  {
     name: "IRR",
     description: "Returns the internal rate of return for a series of cash flows.",
     args: [
       { name: "values", type: "range" },
       { name: "guess", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "MIRR",
+    description: "Returns the modified internal rate of return for a series of periodic cash flows.",
+    args: [
+      { name: "values", type: "range" },
+      { name: "finance_rate", type: "number" },
+      { name: "reinvest_rate", type: "number" },
     ],
   },
   {
@@ -1211,6 +1238,23 @@ const CURATED_FUNCTIONS = [
       { name: "logical_test", type: "value" },
       { name: "value_if_true", type: "value" },
       { name: "value_if_false", type: "value", optional: true },
+    ],
+  },
+  {
+    name: "IFS",
+    description: "Checks whether one or more conditions are met and returns a value that corresponds to the first TRUE condition.",
+    args: [
+      { name: "logical_test1", type: "value", repeating: true },
+      { name: "value_if_true1", type: "value" },
+    ],
+  },
+  {
+    name: "SWITCH",
+    description: "Evaluates an expression against a list of values and returns the result corresponding to the first match.",
+    args: [
+      { name: "expression", type: "value" },
+      { name: "value1", type: "value", repeating: true },
+      { name: "result1", type: "value" },
     ],
   },
   {
@@ -1468,6 +1512,13 @@ const CURATED_FUNCTIONS = [
   {
     name: "FORMULATEXT",
     description: "Returns the formula in a given cell as text.",
+    args: [
+      { name: "reference", type: "range" },
+    ],
+  },
+  {
+    name: "ISFORMULA",
+    description: "Returns TRUE if there is a formula in a referenced cell.",
     args: [
       { name: "reference", type: "range" },
     ],

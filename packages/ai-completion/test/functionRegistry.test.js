@@ -129,6 +129,18 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("SCAN", 1), "Expected SCAN array to be a range");
   assert.equal(registry.isRangeArg("SCAN", 2), false, "Expected SCAN lambda not to be a range");
 
+  // Conditional logic with repeating (test/value) pairs
+  const ifs = registry.getFunction("IFS");
+  assert.ok(ifs, "Expected IFS to have a curated signature");
+  assert.equal(ifs?.args?.[0]?.name, "logical_test1", "Expected IFS arg1 name to be logical_test1");
+  assert.ok(ifs?.args?.[0]?.repeating, "Expected IFS logical_test1 to mark a repeating group");
+  assert.equal(ifs?.args?.[1]?.name, "value_if_true1", "Expected IFS arg2 name to be value_if_true1");
+
+  const sw = registry.getFunction("SWITCH");
+  assert.ok(sw, "Expected SWITCH to have a curated signature");
+  assert.equal(sw?.args?.[0]?.name, "expression", "Expected SWITCH arg1 name to be expression");
+  assert.ok(sw?.args?.[1]?.repeating, "Expected SWITCH value1 to mark a repeating group");
+
   // Legacy descriptive stats
   assert.ok(registry.isRangeArg("PERCENTILE", 0), "Expected PERCENTILE array to be a range");
   assert.ok(registry.isRangeArg("QUARTILE", 0), "Expected QUARTILE array to be a range");
@@ -158,8 +170,16 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.isRangeArg("CELL", 0), false, "Expected CELL info_type not to be a range");
   assert.ok(registry.isRangeArg("CELL", 1), "Expected CELL reference to be a range");
   assert.ok(registry.isRangeArg("FORMULATEXT", 0), "Expected FORMULATEXT reference to be a range");
+  assert.ok(registry.isRangeArg("ISFORMULA", 0), "Expected ISFORMULA reference to be a range");
   assert.ok(registry.isRangeArg("SHEET", 0), "Expected SHEET value to be a range");
   assert.ok(registry.isRangeArg("SHEETS", 0), "Expected SHEETS reference to be a range");
+
+  // Finance/stat functions that take ranges (catalog arg_types are too coarse)
+  assert.equal(registry.isRangeArg("FVSCHEDULE", 0), false, "Expected FVSCHEDULE principal not to be a range");
+  assert.ok(registry.isRangeArg("FVSCHEDULE", 1), "Expected FVSCHEDULE schedule to be a range");
+  assert.ok(registry.isRangeArg("MIRR", 0), "Expected MIRR values to be a range");
+  assert.ok(registry.isRangeArg("PROB", 0), "Expected PROB x_range to be a range");
+  assert.ok(registry.isRangeArg("PROB", 1), "Expected PROB prob_range to be a range");
 
   // Time-series forecasting functions
   assert.ok(registry.isRangeArg("FORECAST.ETS", 1), "Expected FORECAST.ETS values to be a range");
