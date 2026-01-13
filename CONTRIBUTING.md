@@ -8,7 +8,7 @@ This repository is early-stage and evolving quickly. Please open an issue before
 
 ### Prerequisites
 
-- Node.js (>= 20 recommended)
+- Node.js (>= 22 recommended; matches CI/release)
 - `pnpm` (see `packageManager` in the root `package.json`)
 
 ### Install
@@ -38,4 +38,3 @@ pnpm dev:web
 ## Code of Conduct
 
 This project follows the Contributor Covenant. See [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md).
-
