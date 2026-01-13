@@ -75,6 +75,24 @@ fn resolves_cache_parts_by_filename_when_workbook_omits_pivot_caches() {
     );
 }
 
+#[test]
+fn resolves_pivot_cache_parts_for_pivot_table() {
+    let fixture = include_bytes!("fixtures/pivot-full.xlsx");
+    let pkg = XlsxPackage::from_bytes(fixture).expect("read fixture");
+
+    let parts = pkg
+        .pivot_cache_parts_for_pivot_table("xl/pivotTables/pivotTable1.xml")
+        .expect("resolve pivot cache parts");
+
+    assert_eq!(
+        parts,
+        Some((
+            "xl/pivotCache/pivotCacheDefinition1.xml".to_string(),
+            "xl/pivotCache/pivotCacheRecords1.xml".to_string()
+        ))
+    );
+}
+
 fn build_synthetic_pivot_package() -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"

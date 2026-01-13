@@ -121,6 +121,47 @@ impl XlsxPackage {
 
         Ok(XlsxPivotGraph { pivot_tables })
     }
+
+    /// Resolve the pivot cache parts backing a given pivot table part.
+    ///
+    /// Returns `Ok(None)` when:
+    /// - `pivot_table_part` does not exist in the package,
+    /// - the pivot table does not reference a `cacheId`,
+    /// - the workbook does not define the corresponding pivot cache, or
+    /// - the cache definition / records parts cannot be resolved (including missing parts).
+    pub fn pivot_cache_parts_for_pivot_table(
+        &self,
+        pivot_table_part: &str,
+    ) -> Result<Option<(String, String)>, XlsxError> {
+        let Some(pivot_xml) = self.part(pivot_table_part) else {
+            return Ok(None);
+        };
+
+        let Some(cache_id) = parse_pivot_table_cache_id(pivot_xml)? else {
+            return Ok(None);
+        };
+
+        let cache_parts_by_id = cache_parts_by_id(self)?;
+        let Some(parts) = cache_parts_by_id.get(&cache_id) else {
+            return Ok(None);
+        };
+
+        let Some(definition_part) = parts.definition_part.clone() else {
+            return Ok(None);
+        };
+        if self.part(&definition_part).is_none() {
+            return Ok(None);
+        }
+
+        let Some(records_part) = parts.records_part.clone() else {
+            return Ok(None);
+        };
+        if self.part(&records_part).is_none() {
+            return Ok(None);
+        }
+
+        Ok(Some((definition_part, records_part)))
+    }
 }
 
 fn build_pivot_table_instance(
