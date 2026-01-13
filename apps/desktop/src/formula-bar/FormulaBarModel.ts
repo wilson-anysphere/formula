@@ -619,14 +619,21 @@ function formatSheetPrefix(id: string): string {
   return name ? `${name}!` : "";
 }
 
+const ARG_SEPARATOR_CACHE = new Map<string, string>();
+
 function inferArgSeparator(localeId: string): string {
   const locale = localeId?.trim?.() || "en-US";
+  const cached = ARG_SEPARATOR_CACHE.get(locale);
+  if (cached) return cached;
+
   try {
     // Excel typically uses `;` as the list/arg separator when the decimal separator is `,`.
-    // Infer this using Intl formatting rather than hardcoding locale tables.
-    const formatted = new Intl.NumberFormat(locale).format(1.1);
-    // E.g. "1.1", "1,1", "1٫1", ...
-    return formatted.includes(",") && !formatted.includes(".") ? "; " : ", ";
+    // Infer this using Intl rather than hardcoding locale tables.
+    const parts = new Intl.NumberFormat(locale).formatToParts(1.1);
+    const decimal = parts.find((p) => p.type === "decimal")?.value ?? ".";
+    const sep = decimal === "," ? "; " : ", ";
+    ARG_SEPARATOR_CACHE.set(locale, sep);
+    return sep;
   } catch {
     return ", ";
   }
