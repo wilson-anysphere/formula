@@ -124,6 +124,23 @@ describe("ToolExecutor include_formula_values", () => {
     expect(result.data?.statistics).toEqual({ mean: 3, sum: 6, count: 2 });
   });
 
+  it("compute_statistics can parse numeric string values from formula cells when enabled", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { formula: "=1+1", value: "2" });
+    workbook.setCell(parseA1Cell("Sheet1!B1"), { value: "4" });
+
+    const executor = new ToolExecutor(workbook, { include_formula_values: true });
+    const result = await executor.execute({
+      name: "compute_statistics",
+      parameters: { range: "Sheet1!A1:B1", measures: ["mean", "sum", "count"] },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("compute_statistics");
+    if (!result.ok || result.tool !== "compute_statistics") throw new Error("Unexpected tool result");
+    expect(result.data?.statistics).toEqual({ mean: 3, sum: 6, count: 2 });
+  });
+
   it("compute_statistics correlation can include formula-cell numeric values when enabled", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });
@@ -301,6 +318,28 @@ describe("ToolExecutor include_formula_values", () => {
     expect(result.data?.count).toBe(1);
   });
 
+  it("filter_range can compare numeric string formula values when enabled", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Value" });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { formula: "=1+1", value: "2" });
+
+    const executor = new ToolExecutor(workbook, { include_formula_values: true });
+    const result = await executor.execute({
+      name: "filter_range",
+      parameters: {
+        range: "Sheet1!A1:A2",
+        has_header: true,
+        criteria: [{ column: "A", operator: "greater", value: 1 }],
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("filter_range");
+    if (!result.ok || result.tool !== "filter_range") throw new Error("Unexpected tool result");
+    expect(result.data?.matching_rows).toEqual([2]);
+    expect(result.data?.count).toBe(1);
+  });
+
   it("filter_range compares formula cells using computed values under DLP ALLOW decisions when enabled", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Value" });
@@ -392,6 +431,28 @@ describe("ToolExecutor include_formula_values", () => {
     expect(workbook.getCell(parseA1Cell("Sheet1!A2")).value).toBe(2);
     expect(workbook.getCell(parseA1Cell("Sheet1!A3")).formula).toBe("=10");
     expect(workbook.getCell(parseA1Cell("Sheet1!A3")).value).toBe(10);
+  });
+
+  it("sort_range can order numeric string formula values when enabled", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Value" });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { formula: "=10", value: "10" });
+    workbook.setCell(parseA1Cell("Sheet1!A3"), { formula: "=2", value: "2" });
+
+    const executor = new ToolExecutor(workbook, { include_formula_values: true });
+    const result = await executor.execute({
+      name: "sort_range",
+      parameters: { range: "Sheet1!A1:A3", has_header: true, sort_by: [{ column: "A", order: "asc" }] },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("sort_range");
+    if (!result.ok || result.tool !== "sort_range") throw new Error("Unexpected tool result");
+
+    expect(workbook.getCell(parseA1Cell("Sheet1!A2")).formula).toBe("=2");
+    expect(workbook.getCell(parseA1Cell("Sheet1!A2")).value).toBe("2");
+    expect(workbook.getCell(parseA1Cell("Sheet1!A3")).formula).toBe("=10");
+    expect(workbook.getCell(parseA1Cell("Sheet1!A3")).value).toBe("10");
   });
 
   it("sort_range compares formula cells using computed values under DLP ALLOW decisions when enabled", async () => {
