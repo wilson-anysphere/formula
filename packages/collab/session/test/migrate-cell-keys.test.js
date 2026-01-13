@@ -122,6 +122,37 @@ test("migrateLegacyCellKeys is idempotent", () => {
   assert.deepEqual(second, { migrated: 0, removed: 0, collisions: 0 });
 });
 
+test("migrateLegacyCellKeys dryRun computes counts without mutating the doc", () => {
+  const doc = new Y.Doc();
+  const cells = doc.getMap("cells");
+  cells.set("Sheet1:1,2", makePlainCell(123));
+
+  const before = Y.encodeStateAsUpdate(doc);
+  const result = migrateLegacyCellKeys(doc, { dryRun: true });
+  const after = Y.encodeStateAsUpdate(doc);
+
+  assert.deepEqual(result, { migrated: 1, removed: 1, collisions: 0 });
+  assert.equal(Buffer.from(before).equals(Buffer.from(after)), true);
+
+  // No mutation: legacy key remains; canonical key not created.
+  assert.equal(cells.has("Sheet1:1,2"), true);
+  assert.equal(cells.has("Sheet1:1:2"), false);
+});
+
+test("migrateLegacyCellKeys migrates null values (does not drop data)", () => {
+  const doc = new Y.Doc();
+  const cells = doc.getMap("cells");
+
+  cells.set("Sheet1:9,9", null);
+
+  const result = migrateLegacyCellKeys(doc);
+  assert.deepEqual(result, { migrated: 1, removed: 1, collisions: 0 });
+
+  assert.equal(cells.has("Sheet1:9,9"), false);
+  assert.equal(cells.has("Sheet1:9:9"), true);
+  assert.equal(cells.get("Sheet1:9:9"), null);
+});
+
 test("migrateLegacyCellKeys deep-clones nested Yjs types (avoids integration errors)", () => {
   const doc = new Y.Doc();
   const cells = doc.getMap("cells");

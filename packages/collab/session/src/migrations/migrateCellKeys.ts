@@ -31,6 +31,12 @@ export type MigrateLegacyCellKeysOptions = {
 
 export type MigrateLegacyCellKeysResult = { migrated: number; removed: number; collisions: number };
 
+type CellsMapRead = {
+  keys: () => IterableIterator<unknown>;
+  get: (key: string) => unknown;
+  has: (key: string) => boolean;
+};
+
 type YMapLike = {
   get: (key: string) => unknown;
   set: (key: string, value: unknown) => void;
@@ -118,6 +124,114 @@ function cloneCellValue(value: unknown, MapCtor: new () => Y.Map<unknown>): unkn
   return out;
 }
 
+function getCellsMapForDryRun(doc: Y.Doc): CellsMapRead | null {
+  const existing = doc.share.get("cells");
+  if (!existing) return null;
+
+  // Fast path: already a Map-like root (including foreign module instances).
+  const map = getYMap(existing);
+  if (map) {
+    return map as unknown as CellsMapRead;
+  }
+
+  // Slow path: root is a generic `AbstractType` placeholder. Avoid calling
+  // `doc.getMap("cells")` since that would mutate the document (and may throw
+  // "different constructor" for foreign placeholders). Instead, inspect the
+  // internal `_map` structure to read keys/values without instantiating the root.
+  const placeholder = existing as any;
+  const internalMap = placeholder?._map;
+  if (!(internalMap instanceof Map)) return null;
+
+  // If this looks like an Array root, don't try to treat it as a Map.
+  const hasStart = placeholder?._start != null;
+  if (hasStart && internalMap.size === 0) return null;
+
+  function getValue(key: string): unknown {
+    const item = internalMap.get(key);
+    if (!item || item.deleted) return undefined;
+    const content = item.content?.getContent?.() ?? [];
+    return content[content.length - 1];
+  }
+
+  function hasKey(key: string): boolean {
+    const item = internalMap.get(key);
+    return Boolean(item && !item.deleted);
+  }
+
+  function* iterKeys(): IterableIterator<string> {
+    for (const [key, item] of internalMap.entries()) {
+      if (!item || item.deleted) continue;
+      yield String(key);
+    }
+  }
+
+  return {
+    keys: () => iterKeys(),
+    get: (key) => getValue(key),
+    has: (key) => hasKey(key),
+  };
+}
+
+function runMigrationDry(params: {
+  cells: CellsMapRead;
+  defaultSheetId: string;
+  conflict: CellKeyMigrationConflictStrategy;
+}): MigrateLegacyCellKeysResult {
+  const { cells, defaultSheetId, conflict } = params;
+
+  /** @type {Map<string, string[]>} */
+  const legacyKeysByCanonical = new Map<string, string[]>();
+  for (const rawKey of cells.keys()) {
+    const key = String(rawKey);
+    const canonical = normalizeCellKey(key, { defaultSheetId });
+    if (!canonical || canonical === key) continue;
+    const list = legacyKeysByCanonical.get(canonical);
+    if (list) list.push(key);
+    else legacyKeysByCanonical.set(canonical, [key]);
+  }
+
+  let migrated = 0;
+  let removed = 0;
+  let collisions = 0;
+
+  if (legacyKeysByCanonical.size === 0) return { migrated, removed, collisions };
+
+  for (const [canonicalKey, legacyKeysRaw] of legacyKeysByCanonical.entries()) {
+    const legacyKeys = legacyKeysRaw.slice().sort();
+    const canonicalExists = cells.has(canonicalKey);
+    const canonicalValue = canonicalExists ? cells.get(canonicalKey) : undefined;
+
+    const candidateCount = legacyKeys.length + (canonicalExists ? 1 : 0);
+    if (candidateCount > 1) collisions += candidateCount - 1;
+
+    const canonicalEncrypted = canonicalExists && isEncryptedCellValue(canonicalValue);
+    let legacyEncryptedKey: string | null = null;
+    if (!canonicalEncrypted) {
+      for (const k of legacyKeys) {
+        if (isEncryptedCellValue(cells.get(k))) {
+          legacyEncryptedKey = k;
+          break;
+        }
+      }
+    }
+
+    const hasEncrypted = canonicalEncrypted || legacyEncryptedKey != null;
+    const shouldWriteCanonical = (() => {
+      if (hasEncrypted) {
+        return !canonicalEncrypted && legacyEncryptedKey != null;
+      }
+      if (!canonicalExists) return true;
+      if (conflict === "prefer-canonical") return false;
+      return true; // prefer-legacy or merge
+    })();
+
+    if (shouldWriteCanonical) migrated += 1;
+    removed += legacyKeys.length;
+  }
+
+  return { migrated, removed, collisions };
+}
+
 function mergeCellValues(params: {
   canonical: unknown;
   legacies: unknown[];
@@ -192,7 +306,7 @@ function runMigration(params: {
 
     const hasEncrypted = canonicalEncrypted || legacyEncryptedKey != null;
 
-    let nextCanonicalValue: unknown | null = null;
+    let nextCanonicalValue: unknown = undefined;
     let shouldWriteCanonical = false;
 
     if (hasEncrypted) {
@@ -231,7 +345,7 @@ function runMigration(params: {
     }
 
     if (!dryRun) {
-      if (shouldWriteCanonical && nextCanonicalValue !== null) {
+      if (shouldWriteCanonical) {
         cells.set(canonicalKey, nextCanonicalValue);
         migrated += 1;
       }
@@ -242,7 +356,7 @@ function runMigration(params: {
         removed += 1;
       }
     } else {
-      if (shouldWriteCanonical && nextCanonicalValue !== null) migrated += 1;
+      if (shouldWriteCanonical) migrated += 1;
       removed += legacyKeys.length;
     }
   }
@@ -262,16 +376,10 @@ export function migrateLegacyCellKeys(doc: Y.Doc, opts: MigrateLegacyCellKeysOpt
   const conflict = opts.conflict ?? "prefer-canonical";
   const dryRun = Boolean(opts.dryRun);
 
-  // `getWorkbookRoots()` will create the `cells` root if missing. Avoid mutating
-  // in dry-run mode when the document has no workbook schema roots yet.
-  if (dryRun && !(doc as any).share?.has?.("cells")) {
-    return { migrated: 0, removed: 0, collisions: 0 };
-  }
-
   if (dryRun) {
-    // No transaction when dryRun=true.
-    const cells = getWorkbookRoots(doc).cells;
-    return runMigration({ cells, defaultSheetId, conflict, dryRun: true });
+    const cells = getCellsMapForDryRun(doc);
+    if (!cells) return { migrated: 0, removed: 0, collisions: 0 };
+    return runMigrationDry({ cells, defaultSheetId, conflict });
   }
 
   let result: MigrateLegacyCellKeysResult = { migrated: 0, removed: 0, collisions: 0 };
