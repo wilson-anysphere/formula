@@ -28,6 +28,21 @@ function resolveOverlayColorTokens(): {
   };
 }
 
+function resolveCanvasColor(input: string, fallback: string): string {
+  const value = String(input ?? "").trim();
+  if (!value) return fallback;
+
+  const match = /^var\(\s*(--[^,\s)]+)\s*(?:,\s*([^)]+))?\)$/.exec(value);
+  if (!match) return value;
+
+  const token = match[1];
+  const nestedFallback = match[2]?.trim() ?? "";
+  const resolved = resolveCssVar(token, { fallback: "" }).trim();
+  if (resolved) return resolved;
+  if (nestedFallback) return resolveCanvasColor(nestedFallback, fallback);
+  return fallback;
+}
+
 export interface GridGeometry {
   /** Sheet-space pixel origin for the top-left of a cell. */
   cellOriginPx(cell: { row: number; col: number }): { x: number; y: number };
@@ -441,12 +456,12 @@ function drawShape(
   }
 
   if (spec.geometry.type !== "line" && spec.fill.type === "solid") {
-    ctx.fillStyle = spec.fill.color;
+    ctx.fillStyle = resolveCanvasColor(spec.fill.color, colors.placeholderLabel);
     ctx.fill();
   }
 
   if (spec.stroke && strokeWidthPx > 0) {
-    ctx.strokeStyle = spec.stroke.color;
+    ctx.strokeStyle = resolveCanvasColor(spec.stroke.color, colors.placeholderLabel);
     ctx.lineWidth = strokeWidthPx;
     ctx.setLineDash(dashPatternForPreset(spec.stroke.dashPreset, strokeWidthPx));
     ctx.stroke();
