@@ -167,6 +167,18 @@ export interface ToolExecutorOptions {
   allowed_external_hosts?: string[];
   max_external_bytes?: number;
   /**
+   * When enabled, tools treat formula cells as having a computed value (via `cell.value`)
+   * instead of always treating them as `null`.
+   *
+   * This is opt-in because many backends (including the in-memory workbook) do not evaluate
+   * formulas and therefore store `value:null` for formula cells.
+   *
+   * DLP-safe default: when DLP is configured, formula values are only surfaced when the
+   * range-level decision is `ALLOW`. Under `REDACT`, formula values remain `null` to avoid
+   * leaking restricted content via computed results.
+   */
+  include_formula_values?: boolean;
+  /**
    * Hard cap on the number of cells `read_range` is allowed to return.
    *
    * This prevents accidental/looping tool calls from returning massive matrices
@@ -315,6 +327,7 @@ export class ToolExecutor {
         .map((host) => String(host).trim().toLowerCase())
         .filter((host) => host.length > 0),
       max_external_bytes: options.max_external_bytes ?? 1_000_000,
+      include_formula_values: options.include_formula_values ?? false,
       max_read_range_cells: options.max_read_range_cells ?? 5_000,
       max_read_range_chars: options.max_read_range_chars ?? 200_000,
       // Many tool implementations materialize a full `CellData[][]` grid in JS (e.g. sort/filter).
@@ -475,7 +488,8 @@ export class ToolExecutor {
 
     const cells = this.spreadsheet.readRange(range);
     if (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW) {
-      const values = cells.map((row) => row.map((cell) => (cell.formula ? null : cell.value)));
+      const includeFormulaValues = Boolean(this.options.include_formula_values);
+      const values = cells.map((row) => row.map((cell) => (cell.formula ? (includeFormulaValues ? cell.value : null) : cell.value)));
       const formulas = params.include_formulas
         ? cells.map((row) => row.map((cell) => cell.formula ?? null))
         : undefined;
@@ -836,10 +850,11 @@ export class ToolExecutor {
       }
     );
 
+    const includeFormulaValues = Boolean(this.options.include_formula_values);
     body.sort((left, right) => {
       for (const criterion of sortCriteria) {
         const orderMultiplier = criterion.order === "asc" ? 1 : -1;
-        const result = compareCellForSort(left[criterion.offset]!, right[criterion.offset]!);
+        const result = compareCellForSort(left[criterion.offset]!, right[criterion.offset]!, { includeFormulaValues });
         if (result !== 0) return result * orderMultiplier;
       }
       return 0;
@@ -878,6 +893,9 @@ export class ToolExecutor {
         return { offset, operator: criterion.operator, value: criterion.value, value2: criterion.value2 };
       });
 
+    // Only surface formula values when there is no DLP configured, or DLP is in pure ALLOW mode.
+    // Under REDACT, formula values are treated as unsafe (may depend on restricted cells).
+    const includeFormulaValues = Boolean(this.options.include_formula_values && (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW));
     const matchingRows: number[] = [];
     let matchCount = 0;
     for (let i = bodyOffset; i < rows.length; i++) {
@@ -888,10 +906,10 @@ export class ToolExecutor {
           const rowIndex = range.startRow + i;
           const colIndex = range.startCol + criterion.offset;
           if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
-            return matchesCriterion({ value: DLP_REDACTION_PLACEHOLDER }, criterion);
+            return matchesCriterion({ value: DLP_REDACTION_PLACEHOLDER }, criterion, { includeFormulaValues: false });
           }
         }
-        return matchesCriterion(cell, criterion);
+        return matchesCriterion(cell, criterion, { includeFormulaValues });
       });
       if (matches) {
         matchCount++;
@@ -1082,6 +1100,7 @@ export class ToolExecutor {
     }
     const measures: string[] = params.measures ?? [];
     const cells = this.spreadsheet.readRange(range);
+    const includeFormulaValues = Boolean(this.options.include_formula_values && (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW));
     const values: number[] = [];
     let redactedCellCount = 0;
     for (let r = 0; r < cells.length; r++) {
@@ -1095,7 +1114,7 @@ export class ToolExecutor {
             continue;
           }
         }
-        const numeric = toNumber(row[c]!);
+        const numeric = toNumber(row[c]!, { includeFormulaValues });
         if (numeric === null) continue;
         values.push(numeric);
       }
@@ -1173,16 +1192,16 @@ export class ToolExecutor {
             const row = cells[r]!;
             if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
               const rowIndex = range.startRow + r;
-              const leftAllowed = this.isDlpCellAllowed(dlp, rowIndex, range.startCol);
-              const rightAllowed = this.isDlpCellAllowed(dlp, rowIndex, range.startCol + 1);
-              if (!leftAllowed || !rightAllowed) continue;
-            }
-            const left = toNumber(row[0]!);
-            const right = toNumber(row[1]!);
-            if (left === null || right === null) continue;
-            pairs.push([left, right]);
+            const leftAllowed = this.isDlpCellAllowed(dlp, rowIndex, range.startCol);
+            const rightAllowed = this.isDlpCellAllowed(dlp, rowIndex, range.startCol + 1);
+            if (!leftAllowed || !rightAllowed) continue;
           }
-          stats.correlation = pairs.length ? correlation(pairs) : null;
+          const left = toNumber(row[0]!, { includeFormulaValues });
+          const right = toNumber(row[1]!, { includeFormulaValues });
+          if (left === null || right === null) continue;
+          pairs.push([left, right]);
+        }
+        stats.correlation = pairs.length ? correlation(pairs) : null;
           break;
         }
         default:
@@ -2255,14 +2274,17 @@ function ToolNameSchemaSafe(name: string): ToolName | null {
   return Object.prototype.hasOwnProperty.call(TOOL_REGISTRY, name) ? (name as ToolName) : null;
 }
 
-function compareCellForSort(left: CellData, right: CellData): number {
-  const leftValue = cellComparableValue(left);
-  const rightValue = cellComparableValue(right);
+function compareCellForSort(left: CellData, right: CellData, opts: { includeFormulaValues?: boolean } = {}): number {
+  const leftValue = cellComparableValue(left, opts);
+  const rightValue = cellComparableValue(right, opts);
   return compareScalars(leftValue, rightValue);
 }
 
-function cellComparableValue(cell: CellData): string | number | boolean | null {
-  if (cell.formula) return cell.formula;
+function cellComparableValue(cell: CellData, opts: { includeFormulaValues?: boolean } = {}): string | number | boolean | null {
+  if (cell.formula) {
+    if (opts.includeFormulaValues && cell.value !== null) return cell.value;
+    return cell.formula;
+  }
   return cell.value;
 }
 
@@ -2277,8 +2299,12 @@ function compareScalars(left: CellScalar | string, right: CellScalar | string): 
   return String(left).localeCompare(String(right));
 }
 
-function matchesCriterion(cell: CellData, criterion: { operator: string; value: string | number; value2?: string | number }): boolean {
-  const comparable = cellComparableValue(cell);
+function matchesCriterion(
+  cell: CellData,
+  criterion: { operator: string; value: string | number; value2?: string | number },
+  opts: { includeFormulaValues?: boolean } = {}
+): boolean {
+  const comparable = cellComparableValue(cell, opts);
   switch (criterion.operator) {
     case "equals":
       return String(comparable ?? "") === String(criterion.value);
@@ -2306,7 +2332,8 @@ function matchesCriterion(cell: CellData, criterion: { operator: string; value: 
   }
 }
 
-function toNumber(cell: CellData): number | null {
+function toNumber(cell: CellData, opts: { includeFormulaValues?: boolean } = {}): number | null {
+  if (cell.formula && !opts.includeFormulaValues) return null;
   return parseSpreadsheetNumber(cell.value);
 }
 
