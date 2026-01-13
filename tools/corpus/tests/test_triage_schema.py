@@ -77,6 +77,7 @@ class TriageSchemaTests(unittest.TestCase):
         ]
         md = _markdown_summary(summary, reports)
         self.assertIn("Diff (C/W/I)", md)
+        self.assertIn("Round-trip kind", md)
         self.assertIn("0/1/0", md)
         self.assertIn("Round-trip fail-on", md)
         # Calculate/render should not be reported as "0.0%" when triage skipped those steps.
