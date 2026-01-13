@@ -30,7 +30,7 @@ const ITER_COUNT: u32 = 50_000;
 const SHA1_LEN: usize = 20;
 
 pub mod encrypted_package;
-pub use encrypted_package::decrypt_encrypted_package;
+pub use encrypted_package::{agile_decrypt_package, decrypt_encrypted_package};
 
 const PASSWORD_KEY_ENCRYPTOR_NS: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/password";

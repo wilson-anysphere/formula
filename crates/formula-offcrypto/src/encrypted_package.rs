@@ -1,4 +1,8 @@
-use crate::{OffcryptoError, Reader};
+use crate::{AgileEncryptionInfo, OffcryptoError, Reader};
+
+use aes::{Aes128, Aes192, Aes256};
+use cbc::Decryptor;
+use cipher::{block_padding::NoPadding, BlockDecryptMut, KeyIvInit};
 
 /// Office encrypted packages are segmented into 4096-byte blocks.
 pub const ENCRYPTED_PACKAGE_SEGMENT_LEN: usize = 4096;
@@ -80,6 +84,81 @@ where
     }
 
     Ok(out)
+}
+
+/// Decrypt an ECMA-376 Agile `EncryptedPackage` stream.
+///
+/// Algorithm notes (matching `msoffcrypto`):
+/// - The first 8 bytes are the *unencrypted* payload size (little-endian).
+/// - Ciphertext begins at offset 8 and is decrypted in 4096-byte segments.
+/// - Each segment uses an IV derived from `HASH(keyDataSalt || u32le(i))[:16]`.
+/// - The final output is truncated to exactly the declared plaintext size.
+pub fn agile_decrypt_package(
+    info: &AgileEncryptionInfo,
+    secret_key: &[u8],
+    encrypted_package: &[u8],
+) -> Result<Vec<u8>, OffcryptoError> {
+    // Fast plausibility check to avoid attempting huge allocations for corrupt inputs.
+    if encrypted_package.len() < 8 {
+        return Err(OffcryptoError::Truncated {
+            context: "EncryptedPackageHeader.original_size",
+        });
+    }
+    let total_size = u64::from_le_bytes(
+        encrypted_package[0..8]
+            .try_into()
+            .expect("slice length checked"),
+    );
+    let plausible_max = (encrypted_package.len() as u64).saturating_mul(2);
+    if total_size > plausible_max {
+        return Err(OffcryptoError::EncryptedPackageSizeOverflow { total_size });
+    }
+
+    let mut iv_seed = Vec::with_capacity(info.key_data_salt.len() + 4);
+
+    decrypt_encrypted_package(encrypted_package, |segment_index, ciphertext, plaintext| {
+        iv_seed.clear();
+        iv_seed.extend_from_slice(&info.key_data_salt);
+        iv_seed.extend_from_slice(&segment_index.to_le_bytes());
+
+        let digest = info.key_data_hash_algorithm.digest(&iv_seed);
+        let mut iv = [0u8; 16];
+        iv.copy_from_slice(&digest[..16]);
+
+        plaintext.copy_from_slice(ciphertext);
+        let pt_len = plaintext.len();
+
+        match secret_key.len() {
+            16 => {
+                let decryptor = Decryptor::<Aes128>::new_from_slices(secret_key, &iv)
+                    .map_err(|_| OffcryptoError::InvalidKeyLength { len: secret_key.len() })?;
+                decryptor
+                    .decrypt_padded_mut::<NoPadding>(plaintext)
+                    .map_err(|_| OffcryptoError::InvalidCiphertextLength { len: pt_len })?;
+            }
+            24 => {
+                let decryptor = Decryptor::<Aes192>::new_from_slices(secret_key, &iv)
+                    .map_err(|_| OffcryptoError::InvalidKeyLength { len: secret_key.len() })?;
+                decryptor
+                    .decrypt_padded_mut::<NoPadding>(plaintext)
+                    .map_err(|_| OffcryptoError::InvalidCiphertextLength { len: pt_len })?;
+            }
+            32 => {
+                let decryptor = Decryptor::<Aes256>::new_from_slices(secret_key, &iv)
+                    .map_err(|_| OffcryptoError::InvalidKeyLength { len: secret_key.len() })?;
+                decryptor
+                    .decrypt_padded_mut::<NoPadding>(plaintext)
+                    .map_err(|_| OffcryptoError::InvalidCiphertextLength { len: pt_len })?;
+            }
+            _ => {
+                return Err(OffcryptoError::InvalidKeyLength {
+                    len: secret_key.len(),
+                })
+            }
+        }
+
+        Ok(())
+    })
 }
 
 #[cfg(test)]
