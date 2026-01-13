@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 
+use formula_model::sheet_name_eq_case_insensitive;
 use quick_xml::events::{BytesEnd, BytesStart, Event};
 use quick_xml::{Reader, Writer};
 use roxmltree::Document;
@@ -52,12 +53,23 @@ pub struct PreservedPivotParts {
     pub content_types_xml: Vec<u8>,
     /// Raw pivot/slicer/timeline parts copied byte-for-byte.
     pub parts: BTreeMap<String, Vec<u8>>,
+    /// Full sheet list from the source workbook (`xl/workbook.xml`) in display order.
+    ///
+    /// This enables name rewrites for pivot cache `worksheetSource` references when worksheets are
+    /// renamed between preservation and re-application.
+    pub workbook_sheets: Vec<PreservedWorkbookSheet>,
     /// The `<pivotCaches>` subtree from `xl/workbook.xml` (outer XML).
     pub workbook_pivot_caches: Option<Vec<u8>>,
     /// Relationships from `xl/_rels/workbook.xml.rels` required by `<pivotCaches>`.
     pub workbook_pivot_cache_rels: Vec<RelationshipStub>,
     /// Preserved `<pivotTables>` subtrees and `.rels` metadata per worksheet.
     pub sheet_pivot_tables: BTreeMap<String, PreservedSheetPivotTables>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreservedWorkbookSheet {
+    pub name: String,
+    pub index: usize,
 }
 
 /// Streaming variant of [`XlsxPackage::preserve_pivot_parts`].
@@ -184,9 +196,16 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
         workbook_rels_xml.as_deref(),
         |name| part_names.contains(name),
     )?;
+    let workbook_sheets = sheets
+        .iter()
+        .map(|sheet| PreservedWorkbookSheet {
+            name: sheet.name.clone(),
+            index: sheet.index,
+        })
+        .collect::<Vec<_>>();
     let mut sheet_pivot_tables: BTreeMap<String, PreservedSheetPivotTables> = BTreeMap::new();
 
-    for sheet in sheets {
+    for sheet in &sheets {
         let sheet_rels_part = rels_for_part(&sheet.part_name);
         let Some(sheet_rels_xml) = read_zip_part_optional(&mut archive, &sheet_rels_part)? else {
             continue;
@@ -256,7 +275,7 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
         }
 
         sheet_pivot_tables.insert(
-            sheet.name,
+            sheet.name.clone(),
             PreservedSheetPivotTables {
                 sheet_index: sheet.index,
                 sheet_id: sheet.sheet_id,
@@ -269,6 +288,7 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
     Ok(PreservedPivotParts {
         content_types_xml,
         parts,
+        workbook_sheets,
         workbook_pivot_caches,
         workbook_pivot_cache_rels,
         sheet_pivot_tables,
@@ -377,9 +397,16 @@ impl XlsxPackage {
         };
 
         let sheets = workbook_sheet_parts(self)?;
+        let workbook_sheets = sheets
+            .iter()
+            .map(|sheet| PreservedWorkbookSheet {
+                name: sheet.name.clone(),
+                index: sheet.index,
+            })
+            .collect::<Vec<_>>();
         let mut sheet_pivot_tables: BTreeMap<String, PreservedSheetPivotTables> = BTreeMap::new();
 
-        for sheet in sheets {
+        for sheet in &sheets {
             let Some(sheet_xml) = self.part(&sheet.part_name) else {
                 continue;
             };
@@ -439,7 +466,7 @@ impl XlsxPackage {
             }
 
             sheet_pivot_tables.insert(
-                sheet.name,
+                sheet.name.clone(),
                 PreservedSheetPivotTables {
                     sheet_index: sheet.index,
                     sheet_id: sheet.sheet_id,
@@ -452,6 +479,7 @@ impl XlsxPackage {
         Ok(PreservedPivotParts {
             content_types_xml,
             parts,
+            workbook_sheets,
             workbook_pivot_caches,
             workbook_pivot_cache_rels,
             sheet_pivot_tables,
@@ -470,8 +498,30 @@ impl XlsxPackage {
             return Ok(());
         }
 
+        let sheets = workbook_sheet_parts(self)?;
+        let mut sheet_name_map: HashMap<String, String> = HashMap::new();
+        for preserved_sheet in &preserved.workbook_sheets {
+            let Some(matched) =
+                match_sheet_by_name_or_index(&sheets, &preserved_sheet.name, preserved_sheet.index)
+            else {
+                continue;
+            };
+            if matched.name != preserved_sheet.name {
+                sheet_name_map.insert(preserved_sheet.name.clone(), matched.name.clone());
+            }
+        }
+
         for (name, bytes) in &preserved.parts {
-            self.set_part(name.clone(), bytes.clone());
+            let bytes = if is_pivot_cache_definition_part(name) {
+                rewrite_pivot_cache_definition_worksheet_source_sheets(
+                    bytes,
+                    name,
+                    &sheet_name_map,
+                )?
+            } else {
+                bytes.clone()
+            };
+            self.set_part(name.clone(), bytes);
         }
 
         self.merge_content_types(&preserved.content_types_xml, preserved.parts.keys())?;
@@ -506,7 +556,6 @@ impl XlsxPackage {
             }
         }
 
-        let sheets = workbook_sheet_parts(self)?;
         for (sheet_name, preserved_sheet) in &preserved.sheet_pivot_tables {
             let Some(sheet) =
                 match_sheet_by_name_or_index(&sheets, sheet_name, preserved_sheet.sheet_index)
@@ -544,6 +593,227 @@ impl XlsxPackage {
 
         Ok(())
     }
+}
+
+fn is_pivot_cache_definition_part(part_name: &str) -> bool {
+    part_name.starts_with("xl/pivotCache/")
+        && !part_name.contains("/_rels/")
+        && part_name.ends_with(".xml")
+        && part_name.contains("pivotCacheDefinition")
+}
+
+fn lookup_sheet_name<'a>(
+    name: &str,
+    mapping: &'a HashMap<String, String>,
+) -> Option<&'a str> {
+    if let Some(v) = mapping.get(name) {
+        return Some(v.as_str());
+    }
+    mapping
+        .iter()
+        .find(|(k, _)| sheet_name_eq_case_insensitive(k, name))
+        .map(|(_, v)| v.as_str())
+}
+
+fn worksheet_name_needs_quotes(name: &str) -> bool {
+    if name.is_empty() {
+        return true;
+    }
+    name.chars()
+        .any(|c| !c.is_ascii_alphanumeric() && c != '_')
+}
+
+fn escape_sheet_name_for_a1(name: &str) -> String {
+    name.replace('\'', "''")
+}
+
+fn rewrite_sheet_name_in_ref(ref_value: &str, mapping: &HashMap<String, String>) -> Option<String> {
+    let (sheet_token, range) = ref_value.rsplit_once('!')?;
+    let (sheet_name, was_quoted) = if sheet_token.starts_with('\'') && sheet_token.ends_with('\'') {
+        let inner = &sheet_token[1..sheet_token.len().saturating_sub(1)];
+        (inner.replace("''", "'"), true)
+    } else {
+        (sheet_token.to_string(), false)
+    };
+
+    let new_sheet = lookup_sheet_name(&sheet_name, mapping)?;
+    let quote = was_quoted || worksheet_name_needs_quotes(new_sheet);
+    let new_token = if quote {
+        format!("'{}'", escape_sheet_name_for_a1(new_sheet))
+    } else {
+        new_sheet.to_string()
+    };
+    Some(format!("{new_token}!{range}"))
+}
+
+fn rewrite_pivot_cache_definition_worksheet_source_sheets(
+    xml_bytes: &[u8],
+    part_name: &str,
+    sheet_name_map: &HashMap<String, String>,
+) -> Result<Vec<u8>, ChartExtractionError> {
+    if sheet_name_map.is_empty() {
+        return Ok(xml_bytes.to_vec());
+    }
+
+    let xml = std::str::from_utf8(xml_bytes)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
+
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = Writer::new(Vec::with_capacity(xml_bytes.len()));
+    let mut buf = Vec::new();
+    let mut rewritten = false;
+
+    loop {
+        let event = reader.read_event_into(&mut buf).map_err(|e| {
+            ChartExtractionError::XmlStructure(format!("{part_name}: xml parse error: {e}"))
+        })?;
+
+        match event {
+            Event::Eof => break,
+            Event::Start(ref e) => {
+                if e.local_name().as_ref().eq_ignore_ascii_case(b"worksheetSource") {
+                    let qname = e.name();
+                    let name = std::str::from_utf8(qname.as_ref()).map_err(|_| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: non-utf8 element name"
+                        ))
+                    })?;
+                    let mut out = BytesStart::new(name);
+                    for attr in e.attributes().with_checks(false) {
+                        let attr = attr.map_err(|e| {
+                            ChartExtractionError::XmlStructure(format!(
+                                "{part_name}: xml attribute error: {e}"
+                            ))
+                        })?;
+                        let key = attr.key.as_ref();
+                        let local = crate::openxml::local_name(key);
+                        if local.eq_ignore_ascii_case(b"sheet") {
+                            let value = attr.unescape_value().map_err(|e| {
+                                ChartExtractionError::XmlStructure(format!(
+                                    "{part_name}: xml attribute error: {e}"
+                                ))
+                            })?;
+                            if let Some(new_sheet) = lookup_sheet_name(value.as_ref(), sheet_name_map)
+                            {
+                                rewritten = true;
+                                let escaped = xml_escape(new_sheet);
+                                out.push_attribute((key, escaped.as_bytes()));
+                            } else {
+                                out.push_attribute((key, attr.value.as_ref()));
+                            }
+                        } else if local.eq_ignore_ascii_case(b"ref") {
+                            let value = attr.unescape_value().map_err(|e| {
+                                ChartExtractionError::XmlStructure(format!(
+                                    "{part_name}: xml attribute error: {e}"
+                                ))
+                            })?;
+                            if let Some(new_ref) =
+                                rewrite_sheet_name_in_ref(value.as_ref(), sheet_name_map)
+                            {
+                                rewritten = true;
+                                let escaped = xml_escape(&new_ref);
+                                out.push_attribute((key, escaped.as_bytes()));
+                            } else {
+                                out.push_attribute((key, attr.value.as_ref()));
+                            }
+                        } else {
+                            out.push_attribute((key, attr.value.as_ref()));
+                        }
+                    }
+
+                    writer.write_event(Event::Start(out)).map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: xml write error: {e}"
+                        ))
+                    })?;
+                } else {
+                    writer.write_event(Event::Start(e.to_owned())).map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: xml write error: {e}"
+                        ))
+                    })?;
+                }
+            }
+            Event::Empty(ref e) => {
+                if e.local_name().as_ref().eq_ignore_ascii_case(b"worksheetSource") {
+                    let qname = e.name();
+                    let name = std::str::from_utf8(qname.as_ref()).map_err(|_| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: non-utf8 element name"
+                        ))
+                    })?;
+                    let mut out = BytesStart::new(name);
+                    for attr in e.attributes().with_checks(false) {
+                        let attr = attr.map_err(|e| {
+                            ChartExtractionError::XmlStructure(format!(
+                                "{part_name}: xml attribute error: {e}"
+                            ))
+                        })?;
+                        let key = attr.key.as_ref();
+                        let local = crate::openxml::local_name(key);
+                        if local.eq_ignore_ascii_case(b"sheet") {
+                            let value = attr.unescape_value().map_err(|e| {
+                                ChartExtractionError::XmlStructure(format!(
+                                    "{part_name}: xml attribute error: {e}"
+                                ))
+                            })?;
+                            if let Some(new_sheet) = lookup_sheet_name(value.as_ref(), sheet_name_map)
+                            {
+                                rewritten = true;
+                                let escaped = xml_escape(new_sheet);
+                                out.push_attribute((key, escaped.as_bytes()));
+                            } else {
+                                out.push_attribute((key, attr.value.as_ref()));
+                            }
+                        } else if local.eq_ignore_ascii_case(b"ref") {
+                            let value = attr.unescape_value().map_err(|e| {
+                                ChartExtractionError::XmlStructure(format!(
+                                    "{part_name}: xml attribute error: {e}"
+                                ))
+                            })?;
+                            if let Some(new_ref) =
+                                rewrite_sheet_name_in_ref(value.as_ref(), sheet_name_map)
+                            {
+                                rewritten = true;
+                                let escaped = xml_escape(&new_ref);
+                                out.push_attribute((key, escaped.as_bytes()));
+                            } else {
+                                out.push_attribute((key, attr.value.as_ref()));
+                            }
+                        } else {
+                            out.push_attribute((key, attr.value.as_ref()));
+                        }
+                    }
+
+                    writer.write_event(Event::Empty(out)).map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: xml write error: {e}"
+                        ))
+                    })?;
+                } else {
+                    writer.write_event(Event::Empty(e.to_owned())).map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: xml write error: {e}"
+                        ))
+                    })?;
+                }
+            }
+            _ => {
+                writer.write_event(event.to_owned()).map_err(|e| {
+                    ChartExtractionError::XmlStructure(format!("{part_name}: xml write error: {e}"))
+                })?;
+            }
+        }
+
+        buf.clear();
+    }
+
+    if !rewritten {
+        return Ok(xml_bytes.to_vec());
+    }
+
+    Ok(writer.into_inner())
 }
 
 fn read_zip_part_optional<R: Read + Seek>(

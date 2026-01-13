@@ -87,6 +87,7 @@ fn build_prefixed_workbook_rels_xlsx_missing_styles_relationship() -> Vec<u8> {
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/customSheet.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
 </Types>"#;
 
     let root_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -112,6 +113,19 @@ fn build_prefixed_workbook_rels_xlsx_missing_styles_relationship() -> Vec<u8> {
   <sheetData/>
 </worksheet>"#;
 
+    // Include a minimal styles.xml part, but omit the workbook.xml.rels relationship to it.
+    // The writer should preserve the existing `rel:` prefix when inserting the missing
+    // relationship.
+    let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>
+  <fills count="1"><fill><patternFill patternType="none"/></fill></fills>
+  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>"#;
+
     let cursor = Cursor::new(Vec::new());
     let mut zip = ZipWriter::new(cursor);
     let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
@@ -131,6 +145,9 @@ fn build_prefixed_workbook_rels_xlsx_missing_styles_relationship() -> Vec<u8> {
     zip.start_file("xl/worksheets/customSheet.xml", options)
         .unwrap();
     zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/styles.xml", options).unwrap();
+    zip.write_all(styles_xml.as_bytes()).unwrap();
 
     zip.finish().unwrap().into_inner()
 }
