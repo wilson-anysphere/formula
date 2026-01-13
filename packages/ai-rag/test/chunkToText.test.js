@@ -55,6 +55,19 @@ test("chunkToText formats Date values as ISO strings", () => {
   assert.match(text, /Date=2024-01-02T03:04:05\.000Z/);
 });
 
+test("chunkToText formats object cell values via JSON for stable output", () => {
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 0 },
+    cells: [[{ v: "Meta" }], [{ v: { foo: "bar" } }]],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /Meta=\{"foo":"bar"\}/);
+});
+
 test("chunkToText detects header rows below a title row and preserves the title as pre-header context", () => {
   const chunk = {
     kind: "dataRegion",

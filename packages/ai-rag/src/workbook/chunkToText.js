@@ -13,6 +13,23 @@ function formatScalar(value) {
     // Date#toString locale/timezone output).
     return value.toISOString();
   }
+  if (value instanceof Error) {
+    const message = typeof value.message === "string" ? value.message.trim() : "";
+    const name = typeof value.name === "string" && value.name.trim() ? value.name.trim() : "Error";
+    return message ? `${name}: ${message}` : name;
+  }
+  if (typeof value === "object") {
+    // Some backends surface rich cell values (e.g. structured types / rich text).
+    // Prefer a stable, compact string representation over "[object Object]".
+    const text = /** @type {any} */ (value)?.text;
+    if (typeof text === "string") return formatScalar(text);
+    try {
+      const json = JSON.stringify(value);
+      if (typeof json === "string" && json !== "{}") return formatScalar(json);
+    } catch {
+      // fall through
+    }
+  }
   if (typeof value === "string") {
     const trimmed = value.replace(/\s+/g, " ").trim();
     // Our output format uses `|` as a column separator; replace literal pipes in
