@@ -398,14 +398,14 @@ support (e.g. the GNOME Shell “AppIndicator and KStatusNotifierItem Support”
 
 ## 5) Verifying a release
 
-After the workflow completes:
+After the workflow completes, open the GitHub Release (draft) and confirm the expected artifacts
+are attached:
 
 1. Open the GitHub Release (draft) and confirm:
    - Updater metadata: `latest.json` and `latest.json.sig`
-   - macOS (**universal**): `.dmg` and `.app.tar.gz`
-   - Windows **x64**: installer (NSIS `.exe` and/or `.msi`)
-   - Windows **ARM64**: installer (NSIS `.exe` and/or `.msi`)
-   - Linux: `.AppImage` + `.deb` + `.rpm`
+   - macOS (**universal**): `.dmg` (and/or `.app.tar.gz`)
+   - Windows (**x64 + ARM64**): installers (`.msi` and/or `.exe`) for each architecture
+   - Linux: `.AppImage`, `.deb`, `.rpm`
 
    If the release was built with updater signing secrets (`TAURI_PRIVATE_KEY`, `TAURI_KEY_PASSWORD`),
    expect a corresponding `.sig` signature file uploaded alongside the updater-consumed artifacts:
@@ -424,9 +424,69 @@ After the workflow completes:
    - `windows-x86_64` (Windows x64)
    - `windows-aarch64` (Windows ARM64)
    - `linux-x86_64` (Linux)
-3. Download/install on each platform (matching the architecture).
-4. Publish the release to make it visible to users and (if your updater endpoint references
-     GitHub) available for auto-update.
+3. Download the artifacts and do quick sanity checks:
+
+   ### macOS: confirm the app is universal
+
+   Run `lipo -info` on the bundled executable (`Formula.app/Contents/MacOS/formula-desktop`):
+
+   ```bash
+   # Option A: from the .app.tar.gz
+   app_tgz="$(ls Formula*.app.tar.gz | head -n 1)"
+   tar -xzf "$app_tgz"
+   lipo -info "Formula.app/Contents/MacOS/formula-desktop"
+
+   # Expected output includes both: x86_64 arm64
+   ```
+
+   If you only have a `.dmg`, mount it and inspect the `.app` inside:
+
+   ```bash
+   dmg="$(ls Formula*.dmg | head -n 1)"
+   mnt="$(mktemp -d)"
+   hdiutil attach "$dmg" -nobrowse -mountpoint "$mnt"
+   lipo -info "$mnt/Formula.app/Contents/MacOS/formula-desktop"
+   hdiutil detach "$mnt"
+   ```
+
+   ### Windows: confirm x64 vs arm64 + signatures (if enabled)
+
+   Check the machine type of the installed/bundled executable using `dumpbin` (Visual Studio tools):
+
+   ```bat
+   REM From a "Developer Command Prompt for VS"
+   dumpbin /headers path\to\Formula.exe | findstr /i machine
+
+   REM x64  => machine (8664)
+   REM arm64 => machine (AA64)
+   ```
+
+   If Authenticode signing is enabled, verify signatures:
+
+   ```bat
+   signtool verify /pa /v path\to\installer.exe
+   signtool verify /pa /v path\to\installer.msi
+   ```
+
+   ### Linux: inspect dependencies + `ldd` smoke check
+
+   ```bash
+   # Dependency metadata (ensure the runtime deps are present)
+   deb="$(ls Formula*.deb | head -n 1)"
+   rpm="$(ls Formula*.rpm | head -n 1)"
+
+   dpkg -I "$deb"
+   rpm -qpR "$rpm"
+
+   # Extract and ensure the main binary has no missing shared libraries.
+   tmpdir="$(mktemp -d)"
+   dpkg-deb -x "$deb" "$tmpdir"
+   ldd "$tmpdir/usr/bin/formula-desktop" | grep -q "not found" && exit 1 || true
+   ```
+
+4. Download/install on each platform (matching the architecture).
+5. Publish the release to make it visible to users and (if your updater endpoint references
+   GitHub) available for auto-update.
 
 Also verify **cross-origin isolation** is enabled in the packaged app (required for `SharedArrayBuffer` and the Pyodide Worker backend):
 

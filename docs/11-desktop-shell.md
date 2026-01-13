@@ -240,6 +240,10 @@ The repo’s custom `asset:` handler adds `Cross-Origin-Resource-Policy: cross-o
 
 ### `bundle.*` (packaging)
 
+Release CI (`.github/workflows/release.yml`) produces platform installers/bundles for **macOS/Windows/Linux**
+(including multi-arch artifacts like macOS universal and Windows x64+arm64). For the expected artifact
+list and verification commands, see `docs/release.md` (“Verifying a release”).
+
 Notable keys:
 
 - `bundle.fileAssociations` registers spreadsheet file types with the OS:
@@ -266,9 +270,12 @@ Auto-update is driven by the Tauri updater manifest (`latest.json`) uploaded to 
 
 ### `plugins.updater`
 
-Auto-update is configured under `plugins.updater` (Tauri v2 plugin config). In this repo it is enabled, but the public key is intentionally a placeholder:
+Auto-update is configured under `plugins.updater` (Tauri v2 plugin config). Release builds embed an
+updater public key (`pubkey`) and fetch update metadata from `endpoints` (this repo defaults to the
+GitHub Releases `latest.json` manifest; see `docs/release.md`):
 
-- `plugins.updater.pubkey` → set this for real releases (see `docs/release.md`)
+- `plugins.updater.pubkey` → updater public key (base64; safe to commit). Must match the private key
+  used in CI to sign update artifacts (see `docs/release.md`).
 - `plugins.updater.endpoints` → update JSON endpoint(s). This repo defaults to the GitHub Releases manifest:
   - `https://github.com/wilson-anysphere/formula/releases/latest/download/latest.json`
   - (The matching signature, `latest.json.sig`, is uploaded by `tauri-action` and verified using `pubkey`.)
