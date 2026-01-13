@@ -389,7 +389,13 @@ Notable unsupported patterns:
 
 The pivot engine produces grouped results (group keys + measures) suitable for pivot tables.
 
-Entry point: `formula_dax::pivot(...)` (`crates/formula-dax/src/pivot.rs`):
+Entry points (see `crates/formula-dax/src/pivot.rs`):
+
+- `formula_dax::pivot(...)` — returns a grouped table (`PivotResult`)
+- `formula_dax::pivot_crosstab(...)` / `pivot_crosstab_with_options(...)` — returns a crosstab-shaped 2D
+  grid (`PivotResultGrid`)
+
+### `pivot(...)`
 
 ```rust
 pub fn pivot(
@@ -406,9 +412,12 @@ pub fn pivot(
 - `base_table`: the table that is scanned/grouped (typically a fact table).
 - `group_by`: ordered list of grouping columns.
   - Some execution paths require every `GroupByColumn.table == base_table`.
-  - Row-scan paths support group keys from a related dimension table (one hop) when there is an active
-    relationship `base_table (many) -> dim_table (one)`. In that case the group key is computed using the
-    relationship’s `to_index` lookup (similar to `RELATED`).
+  - When `GroupByColumn.table != base_table`, the pivot engine will try to resolve a **unique active
+    relationship path** from `base_table` to the group-by table (a `ManyToOne` chain) and compute the key
+    via repeated relationship lookups (similar to `RELATED`, but possibly multi-hop).
+    - If no path exists, or there are multiple active paths, pivot returns an evaluation error.
+    - Current limitation: the path resolution uses relationship `is_active` flags only; it does not
+      consider `USERELATIONSHIP`/`CROSSFILTER` overrides stored in the `FilterContext`.
 - `measures`: list of named expressions to evaluate per group.
   - A `PivotMeasure` is *not* required to correspond to a named model measure; `expression` is parsed as DAX.
 - `filter`: the initial filter context applied to the pivot query.
@@ -442,13 +451,51 @@ pub fn pivot(
 
    Measures are then evaluated via `DaxEngine` per group. This is still *O(groups × measure_cost)*.
 
-3. **Row-scan planned group-by** (`pivot_planned_row_group_by`)  
-   Works for non-columnar backends (and supports grouping by related dimension columns), but still requires
-   that measures are plannable (same restrictions as path 1).
+3. **Columnar star-schema group-by + planned measures** (`pivot_columnar_star_schema_group_by`)  
+   Fast path when:
+   - the base table is columnar and supports `group_by_aggregations`
+   - `group_by` may include:
+     - base table columns, and
+     - one-hop related dimension columns (`base_table (many) -> dim_table (one)`; multi-hop is not supported)
+   - measures are plannable, and their required aggregations are composable for rollup:
+     - `AVERAGE` is currently not supported by this fast path
+     - `DISTINCTCOUNT` is only allowed when it is constant within the final group (i.e. the counted column is
+       itself part of the user-specified base-table group keys)
 
-4. **Fallback row-scan** (`pivot_row_scan`)  
+   Internally this groups by base-table columns and foreign keys, then “rolls up” those groups into the
+   requested dimension attribute keys using relationship lookups.
+
+4. **Row-scan planned group-by** (`pivot_planned_row_group_by`)  
+   Works for non-columnar backends (and supports grouping by related dimension columns via a unique active
+   relationship path), but still requires that measures are plannable (same restrictions as path 1).
+
+5. **Fallback row-scan** (`pivot_row_scan`)  
    Always works, but is the slowest: it scans base rows to enumerate groups, then evaluates each measure
    via `DaxEngine` per group.
+
+### `pivot_crosstab(...)`
+
+`pivot_crosstab` is a small helper that calls `pivot` with `row_fields + column_fields`, then reshapes the
+grouped result into a 2D grid.
+
+```rust
+pub fn pivot_crosstab(
+    model: &DataModel,
+    base_table: &str,
+    row_fields: &[GroupByColumn],
+    column_fields: &[GroupByColumn],
+    measures: &[PivotMeasure],
+    filter: &FilterContext,
+) -> DaxResult<PivotResultGrid>
+```
+
+- `PivotResultGrid.data[0]` is a header row.
+- Each subsequent row contains:
+  - the row-axis key values, followed by
+  - one value per `(column_key, measure)` combination.
+- Missing (row_key, col_key) combinations are filled with `BLANK`.
+
+Header formatting can be customized via `pivot_crosstab_with_options(..., &PivotCrosstabOptions { ... })`.
 
 ---
 
