@@ -71,7 +71,8 @@ die() {
   # If we're inside a GitHub Actions log group, close it so failures don't swallow the rest of the
   # job logs into the group.
   if [[ "${CHECK_APPIMAGE_GROUP_OPEN:-0}" -eq 1 ]]; then
-    echo "::endgroup::" >&2
+    # Workflow commands are parsed from stdout; emit the group terminator there.
+    echo "::endgroup::"
     CHECK_APPIMAGE_GROUP_OPEN=0
   fi
   echo "::error::check-appimage: $*" >&2
