@@ -504,8 +504,8 @@ All of this is encrypted-at-rest in production builds:
 
 Some Power Query connectors use OAuth (typically auth-code + PKCE). Formula Desktop can capture OAuth redirects via:
 
-- **Deep link (preferred):** `formula://…` (custom URI scheme handled by the OS)
-- **RFC 8252 loopback (fallback):** `http://127.0.0.1:<port>/…`, `http://localhost:<port>/…`, or `http://[::1]:<port>/…`
+- **Deep link (preferred):** `formula://oauth/callback` (custom URI scheme handled by the OS)
+- **RFC 8252 loopback (fallback):** `http://127.0.0.1:<port>/oauth/callback` (also supports `localhost` / `[::1]`)
 
 Redirects observed by the Rust host are forwarded to the UI via the `oauth-redirect` event. On startup the UI emits
 `oauth-redirect-ready` to flush any redirects that arrived before the listener was installed.

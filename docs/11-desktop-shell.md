@@ -580,10 +580,15 @@ Formula Desktop supports two redirect-capture strategies for OAuth (typically PK
 
 | Redirect URI in the auth request | How it’s captured | When to use |
 |---|---|---|
-| `formula://…` (custom scheme deep link) | OS launches/forwards a `formula://…` URL to the app (via `tauri-plugin-deep-link` + argv/single-instance handling); Rust forwards it to the frontend as `oauth-redirect` | **Preferred** when the provider allows custom schemes (no local port binding) |
+| `formula://…` (custom scheme deep link, e.g. `formula://oauth/callback`) | OS launches/forwards a `formula://…` URL to the app (via `tauri-plugin-deep-link` + argv/single-instance handling); Rust forwards it to the frontend as `oauth-redirect` | **Preferred** when the provider allows custom schemes (no local port binding) |
 | `http://127.0.0.1:<port>/…`, `http://localhost:<port>/…`, or `http://[::1]:<port>/…` (loopback) | Frontend detects a loopback `redirect_uri` query param in the auth URL and calls the Rust command `oauth_loopback_listen` to start a temporary local HTTP listener; the listener forwards the observed redirect as `oauth-redirect` | Fallback for providers that reject custom schemes |
 
 **How the frontend chooses:** `DesktopOAuthBroker.openAuthUrl(...)` (`apps/desktop/src/power-query/oauthBroker.ts`) inspects the auth URL’s `redirect_uri` query param. If it is a supported loopback URI, it invokes `oauth_loopback_listen` **before** opening the system browser; otherwise it relies on `formula://…` deep-link delivery.
+
+Recommended redirect URIs (used by the desktop Power Query UI):
+
+- Deep link: `formula://oauth/callback`
+- Loopback example (choose an unused port): `http://127.0.0.1:4242/oauth/callback`
 
 ##### Supported loopback redirect URIs
 
