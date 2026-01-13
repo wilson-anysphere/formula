@@ -236,7 +236,11 @@ pub struct PivotTablePageField {
     pub fld: u32,
     /// Selected item index (`pageField@item`), often `-1` for `(All)`.
     pub item: Option<i32>,
-    /// `pageField@hier` / `pageField@hierarchical` when present.
+    /// Hierarchy index (`pageField@hier`) when present.
+    pub hier: Option<u32>,
+    /// Display name (`pageField@name`) when present.
+    pub name: Option<String>,
+    /// `pageField@hierarchical` when present (non-standard).
     pub hierarchical: Option<bool>,
     /// `pageField@multipleItemSelectionAllowed` when present.
     pub multiple_item_selection_allowed: Option<bool>,
@@ -439,6 +443,8 @@ fn handle_start_element(
     if tag.eq_ignore_ascii_case(b"pageField") && *context == Some(FieldContext::Page) {
         let mut fld: Option<u32> = None;
         let mut item: Option<i32> = None;
+        let mut hier: Option<u32> = None;
+        let mut name: Option<String> = None;
         let mut hierarchical: Option<bool> = None;
         let mut multiple_item_selection_allowed: Option<bool> = None;
         for attr in start.attributes().with_checks(false) {
@@ -449,7 +455,11 @@ fn handle_start_element(
                 fld = value.parse::<u32>().ok();
             } else if key.eq_ignore_ascii_case(b"item") {
                 item = value.parse::<i32>().ok();
-            } else if key.eq_ignore_ascii_case(b"hier") || key.eq_ignore_ascii_case(b"hierarchical") {
+            } else if key.eq_ignore_ascii_case(b"hier") {
+                hier = value.parse::<u32>().ok();
+            } else if key.eq_ignore_ascii_case(b"name") {
+                name = Some(value);
+            } else if key.eq_ignore_ascii_case(b"hierarchical") {
                 hierarchical = parse_bool(&value);
             } else if key.eq_ignore_ascii_case(b"multipleItemSelectionAllowed") {
                 multiple_item_selection_allowed = parse_bool(&value);
@@ -459,6 +469,8 @@ fn handle_start_element(
             def.page_field_entries.push(PivotTablePageField {
                 fld,
                 item,
+                hier,
+                name,
                 hierarchical,
                 multiple_item_selection_allowed,
             });
@@ -708,12 +720,16 @@ mod tests {
                 PivotTablePageField {
                     fld: 2,
                     item: Some(3),
+                    hier: None,
+                    name: None,
                     hierarchical: None,
                     multiple_item_selection_allowed: None,
                 },
                 PivotTablePageField {
                     fld: 5,
                     item: Some(-1),
+                    hier: None,
+                    name: None,
                     hierarchical: None,
                     multiple_item_selection_allowed: None,
                 },

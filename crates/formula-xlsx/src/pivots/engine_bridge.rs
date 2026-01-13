@@ -79,6 +79,28 @@ fn pivot_cache_value_to_engine_inner(value: PivotCacheValue) -> PivotValue {
     }
 }
 
+fn pivot_value_to_key_part(value: PivotValue) -> PivotKeyPart {
+    match value {
+        PivotValue::Blank => PivotKeyPart::Blank,
+        PivotValue::Number(n) => {
+            // Match the pivot engine's internal canonicalization:
+            // - treat -0.0 and 0.0 as identical
+            // - canonicalize all NaNs to a single representation
+            let bits = if n == 0.0 {
+                0.0_f64.to_bits()
+            } else if n.is_nan() {
+                f64::NAN.to_bits()
+            } else {
+                n.to_bits()
+            };
+            PivotKeyPart::Number(bits)
+        }
+        PivotValue::Date(d) => PivotKeyPart::Date(d),
+        PivotValue::Text(s) => PivotKeyPart::Text(s),
+        PivotValue::Bool(b) => PivotKeyPart::Bool(b),
+    }
+}
+
 fn pivot_key_display_string(value: PivotValue) -> String {
     match value {
         PivotValue::Blank => "(blank)".to_string(),
@@ -171,14 +193,32 @@ pub fn pivot_table_to_engine_config(
         .collect::<Vec<_>>();
 
     let filter_fields = table
-        .page_fields
+        .page_field_entries
         .iter()
-        .filter_map(|idx| {
-            let field_idx = *idx as usize;
-            let source_field = cache_def.cache_fields.get(field_idx)?.name.clone();
+        .filter_map(|page_field| {
+            let field_idx = page_field.fld as usize;
+            let cache_field = cache_def.cache_fields.get(field_idx)?;
+            let source_field = cache_field.name.clone();
+
+            // `pageField@item` is typically a shared-item index for the field, with `-1` meaning
+            // "(All)". We currently model report filters as a single-selection allowed-set.
+            let allowed = page_field.item.and_then(|item| {
+                if item < 0 {
+                    return None;
+                }
+                let item_idx = usize::try_from(item).ok()?;
+                let shared_items = cache_field.shared_items.as_ref()?;
+                let item = shared_items.get(item_idx)?.clone();
+                let pivot_value = pivot_cache_value_to_engine(cache_def, field_idx, item);
+                let key_part = pivot_value_to_key_part(pivot_value);
+                let mut set = HashSet::new();
+                set.insert(key_part);
+                Some(set)
+            });
+
             Some(FilterField {
                 source_field,
-                allowed: None,
+                allowed,
             })
         })
         .collect::<Vec<_>>();
@@ -521,6 +561,44 @@ mod tests {
                     allowed: None
                 }
             ]
+        );
+    }
+
+    #[test]
+    fn pivot_table_to_engine_config_respects_page_field_item_selection() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <pageFields count="1">
+    <pageField fld="0" item="1"/>
+  </pageFields>
+</pivotTableDefinition>"#;
+
+        let table =
+            PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml).expect("parse");
+
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![PivotCacheField {
+                name: "Region".to_string(),
+                shared_items: Some(vec![
+                    PivotCacheValue::String("East".to_string()),
+                    PivotCacheValue::String("West".to_string()),
+                ]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let cfg = pivot_table_to_engine_config(&table, &cache_def);
+
+        let mut allowed = HashSet::new();
+        allowed.insert(PivotKeyPart::Text("West".to_string()));
+
+        assert_eq!(
+            cfg.filter_fields,
+            vec![FilterField {
+                source_field: "Region".to_string(),
+                allowed: Some(allowed),
+            }]
         );
     }
 
