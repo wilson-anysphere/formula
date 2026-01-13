@@ -747,6 +747,12 @@ async function verifyOnce({ apiBase, repo, tag, token, wantsManifestSig }) {
 
     const inlineSig = hasInlineSignature(entry);
     const expectedAssetType = EXPECTED_PLATFORMS.find((p) => p.key === platformKey)?.expectedUpdaterAsset ?? null;
+    const expectedArchForAsset =
+      platformKey === "windows-x86_64"
+        ? "x86_64"
+        : platformKey === "windows-aarch64"
+          ? "aarch64"
+          : null;
 
     for (const url of urls) {
       const assetName = filenameFromUrl(url);
@@ -758,6 +764,11 @@ async function verifyOnce({ apiBase, repo, tag, token, wantsManifestSig }) {
       if (expectedAssetType && !expectedAssetType.matches(assetName)) {
         missing.push(
           `Updater asset type mismatch for ${platformKey}: ${assetName} (expected ${expectedAssetType.description})`,
+        );
+      }
+      if (expectedArchForAsset && !archMatchesAssetName(expectedArchForAsset, assetName)) {
+        missing.push(
+          `Updater asset arch mismatch for ${platformKey}: ${assetName} (expected filename to include ${expectedArchForAsset} / x64 / arm64 token)`,
         );
       }
 
