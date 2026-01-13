@@ -60,6 +60,7 @@ fn can_convert_existing_value_cell_to_formula_preserving_style_in_both_patchers(
         new_style: None,
         new_formula: Some(encoded.rgce.clone()),
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
     }];
 
@@ -141,6 +142,7 @@ fn can_convert_various_value_record_types_to_formula_records() {
             new_style: None,
             new_formula: Some(num.clone()),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
         },
         // NUM (RK) -> BrtFmlaNum
@@ -151,6 +153,7 @@ fn can_convert_various_value_record_types_to_formula_records() {
             new_style: None,
             new_formula: Some(num.clone()),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
         },
         // CELL_ST -> BrtFmlaString
@@ -161,6 +164,7 @@ fn can_convert_various_value_record_types_to_formula_records() {
             new_style: None,
             new_formula: Some(text.clone()),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
         },
         // STRING (SST) -> BrtFmlaNum (cross-type conversion)
@@ -171,6 +175,7 @@ fn can_convert_various_value_record_types_to_formula_records() {
             new_style: None,
             new_formula: Some(num.clone()),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
         },
         // BOOL -> BrtFmlaBool
@@ -181,6 +186,7 @@ fn can_convert_various_value_record_types_to_formula_records() {
             new_style: None,
             new_formula: Some(boolf.clone()),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
         },
         // BOOLERR -> BrtFmlaError
@@ -191,6 +197,7 @@ fn can_convert_various_value_record_types_to_formula_records() {
             new_style: None,
             new_formula: Some(err.clone()),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
         },
         // BLANK -> BrtFmlaNum
@@ -201,6 +208,7 @@ fn can_convert_various_value_record_types_to_formula_records() {
             new_style: None,
             new_formula: Some(num.clone()),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
         },
     ];
@@ -306,6 +314,7 @@ fn cannot_convert_to_formula_with_blank_cached_value() {
         new_style: None,
         new_formula: Some(encoded.rgce),
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
     }];
 

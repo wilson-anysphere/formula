@@ -195,7 +195,7 @@ impl XlsbWorkbook {
         bytes: Vec<u8>,
         options: OpenOptions,
     ) -> Result<Self, ParseError> {
-        Self::open_from_owned_bytes(bytes, options)
+        Self::open_from_owned_bytes(bytes.into(), options)
     }
 
     /// Open an XLSB workbook from in-memory ZIP bytes.

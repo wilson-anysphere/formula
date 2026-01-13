@@ -1440,11 +1440,12 @@ fn convert_value_record_to_formula<W: io::Write>(
         )));
     }
 
+    let flags = edit.new_formula_flags.unwrap_or(0);
     match &edit.new_value {
-        CellValue::Number(v) => write_new_fmla_num(writer, col, style, *v, rgce, rgcb),
-        CellValue::Text(s) => write_new_fmla_string(writer, col, style, s, rgce, rgcb),
-        CellValue::Bool(v) => write_new_fmla_bool(writer, col, style, *v, rgce, rgcb),
-        CellValue::Error(v) => write_new_fmla_error(writer, col, style, *v, rgce, rgcb),
+        CellValue::Number(v) => write_new_fmla_num(writer, col, style, *v, flags, rgce, rgcb),
+        CellValue::Text(s) => write_new_fmla_string(writer, col, style, s, flags, rgce, rgcb),
+        CellValue::Bool(v) => write_new_fmla_bool(writer, col, style, *v, flags, rgce, rgcb),
+        CellValue::Error(v) => write_new_fmla_error(writer, col, style, *v, flags, rgce, rgcb),
         CellValue::Blank => Err(Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(

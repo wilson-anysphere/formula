@@ -167,6 +167,7 @@ fn shared_strings_save_converting_shared_string_cell_to_formula_decrements_total
             new_style: None,
             new_formula: Some(rgce.clone()),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
         }],
     )
@@ -225,6 +226,7 @@ fn streaming_shared_strings_save_converting_shared_string_cell_to_formula_decrem
             new_style: None,
             new_formula: Some(rgce.clone()),
             new_rgcb: None,
+            new_formula_flags: None,
             shared_string_index: None,
         }],
     )
