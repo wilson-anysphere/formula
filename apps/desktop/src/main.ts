@@ -2208,6 +2208,13 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "clipboard.pasteSpecial.formulas": true,
             "clipboard.pasteSpecial.formats": true,
             "clipboard.pasteSpecial.transpose": true,
+            // Sheet-view mutations (freeze panes) should not be available in read-only mode,
+            // since they would only apply locally and never sync to the shared document.
+            "view.window.freezePanes": true,
+            "view.freezePanes": true,
+            "view.freezeTopRow": true,
+            "view.freezeFirstColumn": true,
+            "view.unfreezePanes": true,
           }
         : null),
       ...(printExportAvailable

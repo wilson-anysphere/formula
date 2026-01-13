@@ -3720,19 +3720,27 @@ export class SpreadsheetApp {
   }
 
   freezePanes(): void {
+    if (this.isReadOnly()) return;
+    if (this.isEditing()) return;
     const active = this.selection.active;
     this.document.setFrozen(this.sheetId, active.row, active.col, { label: t("command.view.freezePanes") });
   }
 
   freezeTopRow(): void {
+    if (this.isReadOnly()) return;
+    if (this.isEditing()) return;
     this.document.setFrozen(this.sheetId, 1, 0, { label: t("command.view.freezeTopRow") });
   }
 
   freezeFirstColumn(): void {
+    if (this.isReadOnly()) return;
+    if (this.isEditing()) return;
     this.document.setFrozen(this.sheetId, 0, 1, { label: t("command.view.freezeFirstColumn") });
   }
 
   unfreezePanes(): void {
+    if (this.isReadOnly()) return;
+    if (this.isEditing()) return;
     this.document.setFrozen(this.sheetId, 0, 0, { label: t("command.view.unfreezePanes") });
   }
 

@@ -223,6 +223,12 @@ describe("SpreadsheetApp read-only collab UX", () => {
     app.openInlineAiEdit();
     expect(inlineEditOverlay?.hidden).toBe(true);
 
+    // Read-only users should not be able to change sheet view state (e.g. Freeze Panes),
+    // since those changes won't sync via the collab binder.
+    expect(app.getFrozen()).toEqual({ frozenRows: 0, frozenCols: 0 });
+    app.freezeTopRow();
+    expect(app.getFrozen()).toEqual({ frozenRows: 0, frozenCols: 0 });
+
     // Attempt an in-grid edit (F2).
     root.dispatchEvent(new KeyboardEvent("keydown", { key: "F2" }));
     // The cell editor overlay element is always present; it only becomes "open"
