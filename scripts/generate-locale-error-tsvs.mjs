@@ -81,8 +81,8 @@ function extractCanonicalErrorLiterals(rustSource) {
       `Duplicate error literals found in ${path.relative(repoRoot, rustErrorKindPath)}: ${inspect(codes)}`,
     );
   }
-  // Preserve source order (which matches the engine's canonical ErrorKind order).
-  return codes;
+  unique.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return unique;
 }
 
 /**

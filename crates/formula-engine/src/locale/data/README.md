@@ -77,6 +77,8 @@ Error literals themselves start with `#`, so error TSVs use a stricter comment c
 - Empty lines are ignored.
 - Data lines begin with the canonical error literal (e.g. `#VALUE!`).
 
+The generator outputs entries sorted by canonical error literal for deterministic diffs.
+
 ## Case-folding, Unicode, and why values are stored uppercase
 
 Excel treats function identifiers case-insensitively. Our locale translation layer matches that by

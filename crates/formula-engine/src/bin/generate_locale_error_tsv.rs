@@ -84,7 +84,10 @@ fn render_error_tsv(locale: &locale::FormulaLocale) -> String {
     out.push_str("# Canonical\tLocalized\n");
     out.push_str("# See `src/locale/data/README.md` for format + generators.\n\n");
 
-    for kind in all_error_kinds() {
+    // Keep the TSV deterministically ordered for stable diffs.
+    let mut kinds: Vec<ErrorKind> = all_error_kinds().into();
+    kinds.sort_by(|a, b| a.as_code().cmp(b.as_code()));
+    for kind in kinds {
         let canon = kind.as_code();
         let localized = locale.localized_error_literal(canon).unwrap_or(canon);
         out.push_str(canon);
