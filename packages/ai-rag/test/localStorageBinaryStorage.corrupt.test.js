@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Buffer as NodeBuffer } from "node:buffer";
 import test from "node:test";
 
 import { ChunkedLocalStorageBinaryStorage, LocalStorageBinaryStorage } from "../src/store/binaryStorage.js";
@@ -45,12 +46,42 @@ function withTempGlobalProp(name, value, fn) {
     });
 }
 
-test("LocalStorageBinaryStorage clears invalid base64 payloads on load (browser path)", async () => {
-  // Force the atob/btoa codepath in fromBase64/toBase64.
-  const originalBuffer = globalThis.Buffer;
-  // eslint-disable-next-line no-undef
-  globalThis.Buffer = undefined;
+async function withBrowserBase64(fn) {
+  const originalBuffer = Object.getOwnPropertyDescriptor(globalThis, "Buffer");
+  const originalAtob = Object.getOwnPropertyDescriptor(globalThis, "atob");
+  const originalBtoa = Object.getOwnPropertyDescriptor(globalThis, "btoa");
+
+  // Ensure we exercise the browser path in toBase64/fromBase64 by hiding global Buffer.
+  Object.defineProperty(globalThis, "Buffer", { value: undefined, configurable: true });
+
+  // Some Node versions don't expose atob/btoa; polyfill them for the duration of the test.
+  if (!originalAtob) {
+    Object.defineProperty(globalThis, "atob", {
+      value: (encoded) => NodeBuffer.from(encoded, "base64").toString("binary"),
+      configurable: true,
+    });
+  }
+  if (!originalBtoa) {
+    Object.defineProperty(globalThis, "btoa", {
+      value: (binary) => NodeBuffer.from(binary, "binary").toString("base64"),
+      configurable: true,
+    });
+  }
+
   try {
+    await fn();
+  } finally {
+    if (originalBuffer) Object.defineProperty(globalThis, "Buffer", originalBuffer);
+    else delete globalThis.Buffer;
+    if (originalAtob) Object.defineProperty(globalThis, "atob", originalAtob);
+    else delete globalThis.atob;
+    if (originalBtoa) Object.defineProperty(globalThis, "btoa", originalBtoa);
+    else delete globalThis.btoa;
+  }
+}
+
+test("LocalStorageBinaryStorage clears invalid base64 payloads on load (browser path)", async () => {
+  await withBrowserBase64(async () => {
     await withTempGlobalProp("localStorage", new MemoryLocalStorage(), async () => {
       const storage = new LocalStorageBinaryStorage({ namespace: "formula.test.rag", workbookId: "bad-b64" });
       globalThis.localStorage.setItem(storage.key, "%%%not-base64%%%");
@@ -58,16 +89,11 @@ test("LocalStorageBinaryStorage clears invalid base64 payloads on load (browser 
       assert.equal(loaded, null);
       assert.equal(globalThis.localStorage.getItem(storage.key), null, "expected invalid base64 key to be cleared");
     });
-  } finally {
-    globalThis.Buffer = originalBuffer;
-  }
+  });
 });
 
 test("ChunkedLocalStorageBinaryStorage clears invalid legacy base64 payloads on load (browser path)", async () => {
-  const originalBuffer = globalThis.Buffer;
-  // eslint-disable-next-line no-undef
-  globalThis.Buffer = undefined;
-  try {
+  await withBrowserBase64(async () => {
     await withTempGlobalProp("localStorage", new MemoryLocalStorage(), async () => {
       const legacy = new LocalStorageBinaryStorage({ namespace: "formula.test.rag", workbookId: "legacy-bad" });
       globalThis.localStorage.setItem(legacy.key, "%%%not-base64%%%");
@@ -81,16 +107,11 @@ test("ChunkedLocalStorageBinaryStorage clears invalid legacy base64 payloads on 
       assert.equal(loaded, null);
       assert.equal(globalThis.localStorage.getItem(legacy.key), null, "expected invalid legacy key to be cleared");
     });
-  } finally {
-    globalThis.Buffer = originalBuffer;
-  }
+  });
 });
 
 test("ChunkedLocalStorageBinaryStorage clears invalid chunk base64 payloads on load (browser path)", async () => {
-  const originalBuffer = globalThis.Buffer;
-  // eslint-disable-next-line no-undef
-  globalThis.Buffer = undefined;
-  try {
+  await withBrowserBase64(async () => {
     await withTempGlobalProp("localStorage", new MemoryLocalStorage(), async () => {
       const storage = new ChunkedLocalStorageBinaryStorage({
         namespace: "formula.test.rag",
@@ -107,8 +128,5 @@ test("ChunkedLocalStorageBinaryStorage clears invalid chunk base64 payloads on l
       assert.equal(globalThis.localStorage.getItem(`${storage.key}:meta`), null);
       assert.equal(globalThis.localStorage.getItem(`${storage.key}:0`), null);
     });
-  } finally {
-    globalThis.Buffer = originalBuffer;
-  }
+  });
 });
-
