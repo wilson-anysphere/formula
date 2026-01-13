@@ -890,7 +890,7 @@ are attached:
 
     Also confirm each platform entry points at the **updater-consumed** asset type:
     - `darwin-*` → `*.app.tar.gz` (preferred) or another `*.tar.gz` updater archive
-    - `windows-*` → `*.msi` or `*.exe` (depending on updater strategy)
+    - `windows-*` → `*.msi` (updater runs the Windows Installer; CI expects the manifest to reference the MSI)
     - `linux-*` → `*.AppImage`
 
 3. Download the artifacts and do quick sanity checks:
