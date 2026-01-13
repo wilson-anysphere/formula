@@ -195,6 +195,9 @@ Formula’s decryption support is intentionally scoped:
 - We aim to support the widely encountered BIFF8 variants needed for “real-world compatibility”.
 - Rare/obsolete variants should produce a clear “unsupported encryption scheme” error.
 
+Current behavior: Formula detects `FILEPASS` during `.xls` import and returns an
+“encrypted workbook not supported” error rather than attempting decryption.
+
 ---
 
 ## Public API: supplying passwords
@@ -251,8 +254,34 @@ Notes:
   to the relevant spec requirements (typically UTF-16LE for key derivation).
 - Callers should avoid logging passwords or embedding them in error messages.
 
-If you call the current APIs (`open_workbook` / `open_workbook_model`) on an encrypted workbook,
-they will return `Error::EncryptedWorkbook` until password support is integrated.
+This `*_with_options` API is **planned**; today `formula-io` exposes `open_workbook` and
+`open_workbook_model` only.
+
+If you call the current APIs on an encrypted workbook, they will return
+`Error::EncryptedWorkbook` until password support is integrated.
+
+#### Preflight detection (optional)
+
+Callers that want to decide whether to prompt for a password *before* attempting a full open can
+use `detect_workbook_encryption`:
+
+```rust
+use formula_io::{detect_workbook_encryption, WorkbookEncryptionKind};
+
+if let Some(info) = detect_workbook_encryption("book.xlsx")? {
+    match info.kind {
+        WorkbookEncryptionKind::OoxmlOleEncryptedPackage => {
+            // Encrypted OOXML wrapper (`EncryptionInfo` + `EncryptedPackage`).
+        }
+        WorkbookEncryptionKind::XlsFilepass => {
+            // Legacy `.xls` workbook stream contains BIFF `FILEPASS`.
+        }
+        WorkbookEncryptionKind::UnknownOleEncrypted => {
+            // Some other encrypted OLE container (treat as encrypted/unsupported).
+        }
+    }
+}
+```
 
 ### Desktop app flow (IPC + password prompt)
 
