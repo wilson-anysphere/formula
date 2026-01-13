@@ -39,6 +39,40 @@ describe("FormulaBarView name box dropdown menu", () => {
     expect(overlay?.hidden).toBe(true);
   });
 
+  it("opens via ArrowDown when the name box input is focused and selects via Enter", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onGoTo = vi.fn();
+    new FormulaBarView(host, {
+      onCommit: () => {},
+      onGoTo,
+      getNameBoxMenuItems: () => [
+        { label: "MyRange", reference: "'My Sheet'!A1:B2" },
+        { label: "Other", reference: "A1" },
+      ],
+    });
+
+    const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
+    expect(address).toBeInstanceOf(HTMLInputElement);
+    address!.focus();
+
+    address!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+
+    const overlay = document.querySelector<HTMLDivElement>('[data-testid="name-box-menu"]');
+    expect(overlay).toBeInstanceOf(HTMLDivElement);
+    expect(overlay?.hidden).toBe(false);
+
+    const firstItem = overlay!.querySelector<HTMLButtonElement>(".context-menu__item:not(:disabled)");
+    expect(firstItem).toBeInstanceOf(HTMLButtonElement);
+    expect(document.activeElement).toBe(firstItem);
+
+    // Enter should activate the focused item and close the menu.
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+    expect(onGoTo).toHaveBeenCalledWith("'My Sheet'!A1:B2");
+    expect(overlay?.hidden).toBe(true);
+  });
+
   it("navigates via onGoTo when selecting a menu item", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
