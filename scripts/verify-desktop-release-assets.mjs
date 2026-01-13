@@ -471,11 +471,19 @@ function validateLatestJson(manifest, expectedVersion, assetsByName) {
   } else {
     const { platforms } = foundPlatforms;
     const keys = Object.keys(platforms);
-    const requiredOsSubstrings = ["linux", "windows", "darwin"];
-    for (const os of requiredOsSubstrings) {
-      if (!keys.some((k) => k.toLowerCase().includes(os))) {
+    const requiredPlatformKeys = [
+      // Keep this list in sync with docs/desktop-updater-target-mapping.md and
+      // scripts/ci/validate-updater-manifest.mjs (which is the stricter CI validator).
+      "darwin-universal",
+      "windows-x86_64",
+      "windows-aarch64",
+      "linux-x86_64",
+      "linux-aarch64",
+    ];
+    for (const requiredKey of requiredPlatformKeys) {
+      if (!Object.prototype.hasOwnProperty.call(platforms, requiredKey)) {
         errors.push(
-          `latest.json platforms is missing an entry containing "${os}". Present keys: ${keys.length > 0 ? keys.join(", ") : "(none)"}`
+          `latest.json platforms is missing required key ${JSON.stringify(requiredKey)}. Present keys: ${keys.length > 0 ? keys.join(", ") : "(none)"}`
         );
       }
     }

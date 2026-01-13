@@ -22,14 +22,18 @@ test("validateLatestJson passes for a minimal manifest (version normalization + 
     version: "v0.1.0",
     platforms: {
       "linux-x86_64": { url: "https://example.com/Formula_0.1.0_x86_64.AppImage", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/Formula_0.1.0_arm64.AppImage", signature: "sig" },
       "windows-x86_64": { url: "https://example.com/Formula_0.1.0_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_0.1.0_arm64.msi", signature: "sig" },
       "darwin-universal": { url: "https://example.com/Formula_0.1.0.app.tar.gz", signature: "sig" },
     },
   };
 
   const assets = assetMap([
     "Formula_0.1.0_x86_64.AppImage",
+    "Formula_0.1.0_arm64.AppImage",
     "Formula_0.1.0_x64.msi",
+    "Formula_0.1.0_arm64.msi",
     "Formula_0.1.0.app.tar.gz",
   ]);
 
@@ -42,13 +46,21 @@ test("validateLatestJson finds a nested platforms map", () => {
     data: {
       platforms: {
         "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
-        "windows-x86_64": { url: "https://example.com/Formula.msi", signature: "sig" },
+        "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+        "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+        "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
         "darwin-universal": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
       },
     },
   };
 
-  const assets = assetMap(["Formula.AppImage", "Formula.msi", "Formula.app.tar.gz"]);
+  const assets = assetMap([
+    "Formula.AppImage",
+    "Formula_arm64.AppImage",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
+    "Formula.app.tar.gz",
+  ]);
   assert.doesNotThrow(() => validateLatestJson(manifest, "0.1.0", assets));
 });
 
@@ -57,14 +69,21 @@ test("validateLatestJson fails when a required OS is missing", () => {
     version: "0.1.0",
     platforms: {
       "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
-      "windows-x86_64": { url: "https://example.com/Formula.msi", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
     },
   };
 
-  const assets = assetMap(["Formula.AppImage", "Formula.msi"]);
+  const assets = assetMap([
+    "Formula.AppImage",
+    "Formula_arm64.AppImage",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
+  ]);
   assert.throws(
     () => validateLatestJson(manifest, "0.1.0", assets),
-    (err) => err instanceof ActionableError && err.message.includes("missing an entry containing \"darwin\""),
+    (err) => err instanceof ActionableError && err.message.includes("missing required key \"darwin-universal\""),
   );
 });
 
@@ -73,12 +92,19 @@ test("validateLatestJson fails when a platform URL references a missing asset", 
     version: "0.1.0",
     platforms: {
       "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
-      "windows-x86_64": { url: "https://example.com/Formula.msi", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
       "darwin-universal": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
     },
   };
 
-  const assets = assetMap(["Formula.AppImage", "Formula.msi"]);
+  const assets = assetMap([
+    "Formula.AppImage",
+    "Formula_arm64.AppImage",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
+  ]);
   assert.throws(
     () => validateLatestJson(manifest, "0.1.0", assets),
     (err) => err instanceof ActionableError && err.message.includes("but that asset is not present"),
@@ -90,7 +116,9 @@ test("validateLatestJson accepts missing inline signature when a sibling .sig as
     version: "0.1.0",
     platforms: {
       "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "" },
-      "windows-x86_64": { url: "https://example.com/Formula.msi", signature: "" },
+      "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "" },
       "darwin-universal": { url: "https://example.com/Formula.app.tar.gz", signature: "" },
     },
   };
@@ -98,8 +126,12 @@ test("validateLatestJson accepts missing inline signature when a sibling .sig as
   const assets = assetMap([
     "Formula.AppImage",
     "Formula.AppImage.sig",
-    "Formula.msi",
-    "Formula.msi.sig",
+    "Formula_arm64.AppImage",
+    "Formula_arm64.AppImage.sig",
+    "Formula_x64.msi",
+    "Formula_x64.msi.sig",
+    "Formula_arm64.msi",
+    "Formula_arm64.msi.sig",
     "Formula.app.tar.gz",
     "Formula.app.tar.gz.sig",
   ]);
@@ -112,15 +144,22 @@ test("validateLatestJson fails when both inline signature and sibling .sig are m
     version: "0.1.0",
     platforms: {
       "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "" },
-      "windows-x86_64": { url: "https://example.com/Formula.msi", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
       "darwin-universal": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
     },
   };
 
-  const assets = assetMap(["Formula.AppImage", "Formula.msi", "Formula.app.tar.gz"]);
+  const assets = assetMap([
+    "Formula.AppImage",
+    "Formula_arm64.AppImage",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
+    "Formula.app.tar.gz",
+  ]);
   assert.throws(
     () => validateLatestJson(manifest, "0.1.0", assets),
     (err) => err instanceof ActionableError && err.message.includes("missing a non-empty \"signature\""),
   );
 });
-
