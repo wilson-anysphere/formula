@@ -43,6 +43,31 @@ test("CollabSession direct setters reject unparseable cell keys when permissions
   doc.destroy();
 });
 
+test("CollabSession direct setters still parse supported legacy key formats when permissions are configured (viewer)", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc, schema: { autoInit: false } });
+  session.setPermissions({ role: "viewer", userId: "u-viewer", rangeRestrictions: [] });
+
+  const before = Y.encodeStateAsUpdate(doc);
+
+  // `${sheetId}:${row},${col}` legacy encoding.
+  await assert.rejects(session.setCellValue("Sheet1:0,0", "hacked"), /Permission denied/);
+  await assert.rejects(session.setCellFormula("Sheet1:0,0", "=HACK()"), /Permission denied/);
+
+  // `r{row}c{col}` legacy encoding (resolved against defaultSheetId).
+  await assert.rejects(session.setCellValue("r0c0", "hacked"), /Permission denied/);
+  await assert.rejects(session.setCellFormula("r0c0", "=HACK()"), /Permission denied/);
+
+  assert.equal(session.cells.has("Sheet1:0,0"), false);
+  assert.equal(session.cells.has("r0c0"), false);
+
+  const after = Y.encodeStateAsUpdate(doc);
+  assert.equal(Buffer.from(before).equals(Buffer.from(after)), true);
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession direct setters enforce rangeRestrictions for editors (no Yjs mutation)", async () => {
   const doc = new Y.Doc();
   const session = createCollabSession({ doc, schema: { autoInit: false } });
@@ -105,6 +130,44 @@ test("CollabSession direct setters reject unparseable cell keys when rangeRestri
   await assert.rejects(session.setCellFormula("bad-key", "=HACK()"), /Invalid cellKey/);
 
   assert.equal(session.cells.has("bad-key"), false);
+
+  const after = Y.encodeStateAsUpdate(doc);
+  assert.equal(Buffer.from(before).equals(Buffer.from(after)), true);
+
+  session.destroy();
+  doc.destroy();
+});
+
+test("CollabSession direct setters still parse supported legacy key formats when rangeRestrictions are configured (editor)", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc, schema: { autoInit: false } });
+
+  session.setPermissions({
+    role: "editor",
+    userId: "u-editor",
+    rangeRestrictions: [
+      {
+        sheetName: "Sheet1",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+        // Anyone can read, but only u-other can edit.
+        readAllowlist: [],
+        editAllowlist: ["u-other"],
+      },
+    ],
+  });
+
+  const before = Y.encodeStateAsUpdate(doc);
+
+  await assert.rejects(session.setCellValue("Sheet1:0,0", "hacked"), /Permission denied/);
+  await assert.rejects(session.setCellFormula("Sheet1:0,0", "=HACK()"), /Permission denied/);
+  await assert.rejects(session.setCellValue("r0c0", "hacked"), /Permission denied/);
+  await assert.rejects(session.setCellFormula("r0c0", "=HACK()"), /Permission denied/);
+
+  assert.equal(session.cells.has("Sheet1:0,0"), false);
+  assert.equal(session.cells.has("r0c0"), false);
 
   const after = Y.encodeStateAsUpdate(doc);
   assert.equal(Buffer.from(before).equals(Buffer.from(after)), true);
