@@ -108,6 +108,7 @@
   min-width: 0;
   width: 100%;
   padding: 6px 10px;
+  font: inherit;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-primary);
@@ -149,6 +150,7 @@
 .what-if__button {
   flex: 0 0 auto;
   padding: 6px 10px;
+  font: inherit;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-primary);
