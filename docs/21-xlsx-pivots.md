@@ -3,6 +3,10 @@
 This doc tracks **what `formula-xlsx` currently supports** for Excel pivots and related UX parts,
 what we **intentionally preserve without interpreting**, and the **known gaps / roadmap**.
 
+For the intended *cross-crate* ownership boundaries and end-to-end refresh flows (model schema vs
+compute vs XLSX import/export), see
+[ADR-0005: PivotTables ownership and data flow across crates](./adr/ADR-0005-pivot-tables-ownership-and-data-flow.md).
+
 The goal is team clarity: pivots are a large subsystem with many interdependent OPC parts, and
 regressions are easy to introduce when changing ZIP/relationship handling.
 

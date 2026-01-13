@@ -8,6 +8,10 @@ It is intended for contributors working on:
 - Relationship + filter propagation semantics
 - Pivot/group-by execution paths
 
+For overall PivotTable ownership boundaries (model schema vs worksheet pivots vs Data Model pivots)
+and end-to-end refresh flows across crates, see
+[ADR-0005: PivotTables ownership and data flow across crates](./adr/ADR-0005-pivot-tables-ownership-and-data-flow.md).
+
 The engine is intentionally small and implements a **subset** of DAX. Anything not listed under
 “Supported functions” or “Supported syntax” should be assumed **unsupported**.
 
@@ -560,4 +564,3 @@ This is not an exhaustive list, but the most common contributor-facing constrain
   - Table expressions are represented as `(table_name, row_indices)` rather than as independent rowsets.
 - **`/` operator**
   - The `/` operator performs raw `f64` division; use `DIVIDE(...)` for DAX-like blank/alternate behavior.
-
