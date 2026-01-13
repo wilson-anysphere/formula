@@ -52,6 +52,21 @@ test("desktop_dist_asset_report tolerates pnpm-style -- delimiter", () => {
   assert.doesNotMatch(proc.stdout, /### Grouped totals/);
 });
 
+test("desktop_dist_asset_report resolves missing relative --dist-dir against CWD (not repo root)", () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "formula-desktop-dist-cwd-"));
+  const missingName = `missing-dist-${process.pid}-${Date.now()}`;
+  const expected = path.join(cwd, missingName);
+
+  const proc = spawnSync(process.execPath, [scriptPath, "--dist-dir", missingName], {
+    encoding: "utf8",
+    cwd,
+  });
+
+  assert.equal(proc.status, 1);
+  assert.match(proc.stderr, /dist directory not found/i);
+  assert.ok(proc.stdout.includes(`Dist dir: \`${expected}\``), proc.stdout);
+});
+
 test("desktop_dist_asset_report enforces budgets when env vars are set", () => {
   const distDir = mkdtempSync(path.join(tmpdir(), "formula-desktop-dist-budget-"));
   createSizedFile(path.join(distDir, "assets", "a.bin"), 2_000_000);

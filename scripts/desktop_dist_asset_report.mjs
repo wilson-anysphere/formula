@@ -162,7 +162,10 @@ function parseArgs(argv) {
     // invoked from within `apps/desktop/`.
     const fromCwd = path.resolve(process.cwd(), out.distDir);
     const fromRepo = path.resolve(repoRoot, out.distDir);
-    out.distDir = existsSync(fromCwd) ? fromCwd : fromRepo;
+    // Only pick the repo-root version when it exists but the CWD one does not (common when people
+    // pass a repo-relative path while running from a subdirectory). Otherwise, stick with CWD
+    // resolution so missing-path errors point at what the user actually typed.
+    out.distDir = existsSync(fromRepo) && !existsSync(fromCwd) ? fromRepo : fromCwd;
   }
 
   return out;
