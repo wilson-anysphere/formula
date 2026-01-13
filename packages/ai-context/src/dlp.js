@@ -6,7 +6,10 @@
 const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const SSN_RE = /\b\d{3}-\d{2}-\d{4}\b/g;
 // Candidate detector only. Use Luhn validation before classifying/redacting.
-const CREDIT_CARD_CANDIDATE_RE = /\b(?:\d[ -]*?){13,19}\b/g;
+//
+// Keep the historical 13-16 digit range to avoid matching long numeric ids, while still
+// supporting common card formats and separators (spaces/dashes).
+const CREDIT_CARD_CANDIDATE_RE = /\b(?:\d[ -]*?){13,16}\b/g;
 
 // Phone numbers are noisy; keep the patterns conservative and validate digit count.
 // - International: require '+' prefix (E.164-like)
@@ -74,7 +77,7 @@ function luhnIsValid(digits) {
  */
 function isValidCreditCard(candidate) {
   const digits = digitsOnly(candidate);
-  if (digits.length < 13 || digits.length > 19) return false;
+  if (digits.length < 13 || digits.length > 16) return false;
   // Credit card IINs are (overwhelmingly) in the 2-6 range; this filters out
   // common high-volume numeric strings like timestamps that might pass Luhn by chance.
   // (Heuristic DLP prefers fewer false positives over perfect coverage.)
