@@ -67,6 +67,34 @@ proptest! {
             "records::BiffRecordIter panicked"
         );
 
+        // Best-effort BIFF substream iteration.
+        prop_assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut iter =
+                    records::BestEffortSubstreamIter::from_offset(&buf, start).expect("offset derived to be in-bounds");
+                while let Some(record) = iter.next() {
+                    // Basic invariants: returned slices must be in-bounds.
+                    let end = record
+                        .offset
+                        .checked_add(4)
+                        .and_then(|v| v.checked_add(record.data.len()))
+                        .expect("overflow computing record end");
+                    assert!(end <= buf.len(), "record extends past end of input");
+                }
+            }))
+            .is_ok(),
+            "records::BestEffortSubstreamIter panicked"
+        );
+
+        // Encryption preflight scan helper.
+        prop_assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = records::workbook_globals_has_filepass_record(&buf);
+            }))
+            .is_ok(),
+            "records::workbook_globals_has_filepass_record panicked"
+        );
+
         // Logical BIFF record iteration (CONTINUE coalescing).
         let allows_continuation: fn(u16) -> bool = |_| true;
         prop_assert!(
@@ -118,6 +146,20 @@ proptest! {
             "globals::parse_biff_workbook_globals panicked"
         );
 
+        // Additional workbook-global helpers used by the importer.
+        prop_assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = globals::parse_biff_codepage(&buf);
+                let sheets = globals::parse_biff_bound_sheets(&buf, BiffVersion::Biff8, CODEPAGE_1252)
+                    .expect("offset 0 should always be in-bounds");
+                for sheet in sheets {
+                    assert!(!sheet.name.contains('\0'), "BoundSheet name should have embedded NULs stripped");
+                }
+            }))
+            .is_ok(),
+            "globals::parse_biff_codepage/parse_biff_bound_sheets panicked"
+        );
+
         // Defined names parser.
         let sheet_names: &[String] = &[];
         prop_assert!(
@@ -155,6 +197,37 @@ proptest! {
             }))
             .is_ok(),
             "comments::parse_biff_sheet_notes panicked"
+        );
+
+        // Worksheet metadata parsers used by the importer.
+        prop_assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let protection = sheet::parse_biff_sheet_protection(&buf, 0).expect("offset 0 should always be in-bounds");
+                // Basic invariant: password hash is present iff non-zero (enforced by parser).
+                if let Some(hash) = protection.protection.password_hash {
+                    assert_ne!(hash, 0);
+                }
+
+                let view = sheet::parse_biff_sheet_view_state(&buf, 0).expect("offset 0 should always be in-bounds");
+                if let Some(zoom) = view.zoom {
+                    assert!(zoom.is_finite() && zoom > 0.0);
+                }
+
+                let merged = sheet::parse_biff_sheet_merged_cells(&buf, 0).expect("offset 0 should always be in-bounds");
+                for range in merged {
+                    assert!(range.start.row <= range.end.row);
+                    assert!(range.start.col <= range.end.col);
+                }
+
+                let xfs = sheet::parse_biff_sheet_cell_xf_indices_filtered(&buf, 0, None)
+                    .expect("offset 0 should always be in-bounds");
+                for (cell, _xf) in xfs {
+                    assert!(cell.row < formula_model::EXCEL_MAX_ROWS);
+                    assert!(cell.col < formula_model::EXCEL_MAX_COLS);
+                }
+            }))
+            .is_ok(),
+            "sheet metadata parsers panicked"
         );
 
         // Worksheet HLINK parser.
