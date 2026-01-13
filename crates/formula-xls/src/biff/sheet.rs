@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
 
-use formula_model::autofilter::{SortCondition, SortState};
 use formula_model::{
+    autofilter::{
+        FilterColumn, FilterCriterion, FilterJoin, FilterValue, SortCondition, SortState,
+    },
     CellRef, Hyperlink, HyperlinkTarget, ManualPageBreaks, Orientation, OutlinePr, PageSetup, Range,
     Scaling, SheetPane, SheetProtection, SheetSelection, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
@@ -29,6 +31,16 @@ const RECORD_AUTOFILTERINFO: u16 = 0x009D;
 const RECORD_FILTERMODE: u16 = 0x009B;
 /// SORT [MS-XLS 2.4.256]
 const RECORD_SORT: u16 = 0x0090;
+/// AutoFilter12 [MS-XLS 2.4.30] (Future Record Type; BIFF8 only)
+///
+/// Excel 2007+ can store filter criteria in BIFF8 using Future Record Type (FRT) records.
+/// These records begin with an `FrtHeader`. We detect record types via `FrtHeader.rt`, but
+/// Excel typically uses `record_id == rt`.
+const RECORD_AUTOFILTER12: u16 = 0x087E;
+/// Sort12 (Future Record Type; BIFF8 only)
+const RECORD_SORT12: u16 = 0x0880;
+/// SortData12 (Future Record Type; BIFF8 only)
+const RECORD_SORTDATA12: u16 = 0x0881;
 const RECORD_WSBOOL: u16 = 0x0081;
 /// MERGEDCELLS [MS-XLS 2.4.139]
 const RECORD_MERGEDCELLS: u16 = 0x00E5;
@@ -170,7 +182,10 @@ pub(crate) struct SheetRowColProperties {
     pub(crate) outline_pr: OutlinePr,
     /// Worksheet AutoFilter range inferred from BIFF metadata.
     pub(crate) auto_filter_range: Option<Range>,
-    /// Worksheet AutoFilter sort state, if the sheet substream contained a supported `SORT` record.
+    /// AutoFilter filter columns parsed from BIFF AutoFilter12 future records (best-effort).
+    pub(crate) auto_filter_columns: Vec<FilterColumn>,
+    /// Worksheet AutoFilter sort state, if the sheet substream contained a supported `SORT` record
+    /// (or other supported sort record).
     pub(crate) sort_state: Option<SortState>,
     /// Whether the worksheet contained a `FILTERMODE` record (indicating filtered rows).
     pub(crate) filter_mode: bool,
@@ -1168,6 +1183,7 @@ fn make_range(rw_first: u32, rw_last: u32, col_first: u32, col_last: u32) -> Res
 pub(crate) fn parse_biff_sheet_row_col_properties(
     workbook_stream: &[u8],
     start: usize,
+    codepage: u16,
 ) -> Result<SheetRowColProperties, String> {
     let mut props = SheetRowColProperties::default();
 
@@ -1178,6 +1194,12 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
     let mut dimensions: Option<(u32, u32, u32, u32)> = None;
     let mut autofilter_cols: Option<u32> = None;
     let mut saw_autofilter_info = false;
+
+    // Best-effort AutoFilter/SORT future records (AutoFilter12 / Sort12 / SortData12).
+    //
+    // We store columns in a map while parsing to de-duplicate any repeated records.
+    let mut autofilter12_columns: BTreeMap<u32, FilterColumn> = BTreeMap::new();
+    let mut saw_autofilter12 = false;
 
     let mut saw_eof = false;
     let mut warned_colinfo_first_oob = false;
@@ -1240,6 +1262,71 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                     format!("failed to parse SORT record at offset {}: {err}", record.offset),
                 ),
             },
+            // AutoFilter12 / Sort12 / SortData12 (BIFF8 Future Record Type records).
+            //
+            // These records start with an `FrtHeader` structure. The record id in the BIFF
+            // stream is often the same as `FrtHeader.rt`, but we still key off `rt` for
+            // robustness.
+            id if id >= 0x0850 && id <= 0x08FF => {
+                let Some((rt, frt_payload)) = parse_frt_header(record.data) else {
+                    // Not a valid FRT header; ignore silently.
+                    continue;
+                };
+
+                match rt {
+                    RECORD_AUTOFILTER12 => {
+                        saw_autofilter12 = true;
+                        match decode_autofilter12_record(frt_payload, codepage) {
+                            Ok(Some(column)) => {
+                                autofilter12_columns
+                                    .entry(column.col_id)
+                                    .or_insert(column);
+                            }
+                            Ok(None) => {
+                                // Record parsed but contained no recoverable values.
+                                if !props
+                                    .warnings
+                                    .iter()
+                                    .any(|w| w == "unsupported AutoFilter12")
+                                {
+                                    push_warning_bounded(
+                                        &mut props.warnings,
+                                        "unsupported AutoFilter12".to_string(),
+                                    );
+                                }
+                            }
+                            Err(_) => {
+                                // Best-effort: preserve nothing but surface a deterministic warning.
+                                if !props
+                                    .warnings
+                                    .iter()
+                                    .any(|w| w == "unsupported AutoFilter12")
+                                {
+                                    push_warning_bounded(
+                                        &mut props.warnings,
+                                        "unsupported AutoFilter12".to_string(),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    RECORD_SORT12 => {
+                        if !props.warnings.iter().any(|w| w == "unsupported Sort12") {
+                            push_warning_bounded(&mut props.warnings, "unsupported Sort12");
+                        }
+                    }
+                    RECORD_SORTDATA12 => {
+                        if !props
+                            .warnings
+                            .iter()
+                            .any(|w| w == "unsupported SortData12")
+                        {
+                            push_warning_bounded(&mut props.warnings, "unsupported SortData12");
+                        }
+                    }
+                    _ => {}
+                }
+            }
             // ROW [MS-XLS 2.4.184]
             RECORD_ROW => {
                 let data = record.data;
@@ -1391,6 +1478,22 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                 break;
             }
             _ => {}
+        }
+    }
+
+    if !autofilter12_columns.is_empty() {
+        props.auto_filter_columns = autofilter12_columns.into_values().collect();
+    } else if saw_autofilter12 && props.auto_filter_columns.is_empty() {
+        // If we observed an AutoFilter12 record but couldn't decode it, ensure we still emit at
+        // least one warning so callers can understand why filter criteria were dropped.
+        //
+        // Avoid duplicating the warning if the decode logic already pushed one.
+        if !props
+            .warnings
+            .iter()
+            .any(|w| w.contains("unsupported AutoFilter12"))
+        {
+            push_warning_bounded(&mut props.warnings, "unsupported AutoFilter12".to_string());
         }
     }
 
@@ -1549,6 +1652,105 @@ fn parse_sort_record_best_effort(data: &[u8]) -> Result<Option<SortState>, Strin
     } else {
         Ok(Some(SortState { conditions }))
     }
+}
+
+/// Parse an `FrtHeader` structure and return `(rt, payload_after_header)`.
+///
+/// `FrtHeader` is an 8-byte structure: `rt` (u16), `grbitFrt` (u16), and a reserved u32.
+fn parse_frt_header(data: &[u8]) -> Option<(u16, &[u8])> {
+    if data.len() < 8 {
+        return None;
+    }
+    let rt = u16::from_le_bytes([data[0], data[1]]);
+    Some((rt, &data[8..]))
+}
+
+/// Best-effort decode of an AutoFilter12 record payload (after `FrtHeader`).
+///
+/// AutoFilter12 is a BIFF8 Future Record Type (FRT) record used by Excel 2007+ to store
+/// newer AutoFilter semantics in `.xls` files.
+///
+/// The on-disk structure is complex. We currently implement a conservative subset that
+/// attempts to recover multi-value filters:
+/// - Treat the first u16 as `colId` (matching OOXML `filterColumn/@colId`).
+/// - Attempt to read a u16 value count from a few common offsets and then decode that many
+///   `XLUnicodeString` values.
+///
+/// If decoding fails, callers should treat the record as unsupported.
+fn decode_autofilter12_record(
+    payload: &[u8],
+    codepage: u16,
+) -> Result<Option<FilterColumn>, String> {
+    if payload.len() < 2 {
+        return Err("AutoFilter12 payload too short".to_string());
+    }
+    let col_id = u16::from_le_bytes([payload[0], payload[1]]) as u32;
+
+    // Candidate layouts:
+    // - [colId:u16][cVals:u16][vals...]
+    // - [colId:u16][flags:u16][cVals:u16][vals...]
+    // - [colId:u16][flags:u16][unused:u16][cVals:u16][vals...]
+    const MAX_VALUES: usize = 1024;
+    let candidates: &[(usize, usize)] = &[(2, 4), (4, 6), (6, 8)];
+
+    for &(count_off, vals_off) in candidates {
+        if payload.len() < vals_off {
+            continue;
+        }
+        let count_bytes = payload.get(count_off..count_off + 2).ok_or_else(|| {
+            format!(
+                "AutoFilter12 payload too short for count at offset {count_off} (len={})",
+                payload.len()
+            )
+        })?;
+        let mut count = u16::from_le_bytes([count_bytes[0], count_bytes[1]]) as usize;
+        if count == 0 {
+            continue;
+        }
+        // Basic sanity check: a BIFF8 XLUnicodeString is at least 3 bytes (cch:u16 + flags:u8).
+        if count > MAX_VALUES || count.saturating_mul(3) > payload.len().saturating_sub(vals_off) {
+            continue;
+        }
+
+        let mut pos = vals_off;
+        let mut values: Vec<String> = Vec::with_capacity(count.min(16));
+        while count > 0 {
+            let rest = payload.get(pos..).unwrap_or_default();
+            let Ok((mut s, used)) = strings::parse_biff8_unicode_string(rest, codepage) else {
+                values.clear();
+                break;
+            };
+            if s.contains('\0') {
+                s.retain(|ch| ch != '\0');
+            }
+            pos = pos.saturating_add(used);
+            values.push(s);
+            count -= 1;
+        }
+
+        if values.is_empty() {
+            continue;
+        }
+
+        let mut criteria = Vec::with_capacity(values.len());
+        for v in &values {
+            if let Ok(n) = v.parse::<f64>() {
+                criteria.push(FilterCriterion::Equals(FilterValue::Number(n)));
+            } else {
+                criteria.push(FilterCriterion::Equals(FilterValue::Text(v.clone())));
+            }
+        }
+
+        return Ok(Some(FilterColumn {
+            col_id,
+            join: FilterJoin::Any,
+            criteria,
+            values,
+            raw_xml: Vec::new(),
+        }));
+    }
+
+    Ok(None)
 }
 
 /// Parse merged cell regions from a worksheet BIFF substream.
@@ -2334,7 +2536,7 @@ mod tests {
         truncated.extend_from_slice(&[1, 2]); // missing 2 bytes
 
         let stream = [sheet_bof, row_record, truncated].concat();
-        let props = parse_biff_sheet_row_col_properties(&stream, 0).expect("parse");
+        let props = parse_biff_sheet_row_col_properties(&stream, 0, 1252).expect("parse");
         assert_eq!(props.rows.get(&1).and_then(|p| p.height), Some(20.0));
     }
 
@@ -2350,7 +2552,7 @@ mod tests {
         }
         stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
 
-        let props = parse_biff_sheet_row_col_properties(&stream, 0).expect("parse");
+        let props = parse_biff_sheet_row_col_properties(&stream, 0, 1252).expect("parse");
         assert_eq!(props.warnings.len(), MAX_WARNINGS_PER_SHEET + 1);
         assert_eq!(
             props
@@ -2715,7 +2917,7 @@ mod tests {
         let next_bof = record(records::RECORD_BOF_BIFF8, &[0u8; 16]);
 
         let stream = [sheet_bof, row_record, next_bof].concat();
-        let props = parse_biff_sheet_row_col_properties(&stream, 0).expect("parse");
+        let props = parse_biff_sheet_row_col_properties(&stream, 0, 1252).expect("parse");
         assert_eq!(props.rows.get(&1).and_then(|p| p.height), Some(20.0));
     }
 

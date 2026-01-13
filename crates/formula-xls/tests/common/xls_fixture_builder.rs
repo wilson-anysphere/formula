@@ -61,6 +61,8 @@ const RECORD_HLINK: u16 = 0x01B8;
 const RECORD_AUTOFILTERINFO: u16 = 0x009D;
 const RECORD_SORT: u16 = 0x0090;
 const RECORD_FILTERMODE: u16 = 0x009B;
+// Excel 2007+ may store newer filter semantics in BIFF8 via future records.
+const RECORD_AUTOFILTER12: u16 = 0x087E;
 const RECORD_WSBOOL: u16 = 0x0081;
 const RECORD_ROW: u16 = 0x0208;
 const RECORD_COLINFO: u16 = 0x007D;
@@ -2130,6 +2132,26 @@ pub fn build_autofilter_fixture_xls() -> Vec<u8> {
 /// This exercises import of `SheetAutoFilter.sort_state` from legacy `.xls` files.
 pub fn build_autofilter_sort_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_autofilter_sort_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a minimal BIFF8 `.xls` fixture containing a single sheet with an AutoFilter range and a
+/// BIFF8 Future Record Type `AutoFilter12` record.
+///
+/// Excel 2007+ can store filter criteria in legacy `.xls` files using `AutoFilter12` records. This
+/// fixture is hand-crafted to ensure our importer does not panic when such records are present and
+/// can recover at least one filter column when possible.
+pub fn build_autofilter12_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_autofilter12_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -8535,6 +8557,94 @@ fn build_autofilter_sort_workbook_stream() -> Vec<u8> {
             &[(1u16, true)], // key: column B descending
         ),
     );
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_autofilter12_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table (style XFs only).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF.
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Filter12");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // `_xlnm._FilterDatabase` (built-in name id 0x0D) scoped to the sheet (`itab=1`).
+    let filter_db_rgce = ptg_area(0, 4, 0, 2); // $A$1:$C$5
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &builtin_name_record(true, 1, 0x0D, &filter_db_rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 5) cols [0, 3) so A1:C5 exists.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&5u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // A1: a single General cell so calamine populates a range for the sheet.
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(0, 0, xf_general, 1.0),
+    );
+
+    // AUTOFILTERINFO: cEntries = 3 (A..C).
+    push_record(&mut sheet, RECORD_AUTOFILTERINFO, &3u16.to_le_bytes());
+
+    // AutoFilter12 record with a simple multi-value filter on the first column (colId=0).
+    //
+    // Layout (best-effort):
+    //   FrtHeader (8 bytes): rt, grbitFrt, reserved
+    //   colId (u16)
+    //   cVals (u16)
+    //   cVals * XLUnicodeString
+    let mut af12 = Vec::<u8>::new();
+    af12.extend_from_slice(&RECORD_AUTOFILTER12.to_le_bytes()); // FrtHeader.rt
+    af12.extend_from_slice(&0u16.to_le_bytes()); // grbitFrt
+    af12.extend_from_slice(&0u32.to_le_bytes()); // reserved
+    af12.extend_from_slice(&0u16.to_le_bytes()); // colId
+    af12.extend_from_slice(&2u16.to_le_bytes()); // cVals
+    write_unicode_string(&mut af12, "Alice");
+    write_unicode_string(&mut af12, "Bob");
+    push_record(&mut sheet, RECORD_AUTOFILTER12, &af12);
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
 

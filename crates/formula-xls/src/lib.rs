@@ -500,7 +500,7 @@ fn import_xls_path_with_biff_reader(
                     continue;
                 }
 
-                match biff::parse_biff_sheet_row_col_properties(workbook_stream, sheet.offset) {
+                match biff::parse_biff_sheet_row_col_properties(workbook_stream, sheet.offset, codepage) {
                     Ok(mut props) => {
                         warnings.extend(props.warnings.drain(..).map(|warning| {
                             ImportWarning::new(format!(
@@ -864,6 +864,9 @@ fn import_xls_path_with_biff_reader(
             let mut sheet_stream_autofilter_range: Option<Range> = None;
             let mut sheet_stream_filter_mode = false;
             let mut sheet_row_col_props: Option<&biff::SheetRowColProperties> = None;
+            let mut sheet_stream_filter_columns: Vec<formula_model::autofilter::FilterColumn> =
+                Vec::new();
+            let mut sheet_stream_sort_state: Option<formula_model::autofilter::SortState> = None;
 
             if let Some(props) = row_col_props
                 .as_ref()
@@ -875,6 +878,8 @@ fn import_xls_path_with_biff_reader(
                 apply_outline_properties(sheet, props);
 
                 sheet_stream_autofilter_range = props.auto_filter_range;
+                sheet_stream_filter_columns = props.auto_filter_columns.clone();
+                sheet_stream_sort_state = props.sort_state.clone();
 
                 if props.filter_mode {
                     // BIFF `FILTERMODE` indicates that some rows are currently hidden by a filter.
@@ -894,29 +899,32 @@ fn import_xls_path_with_biff_reader(
                 if let Some(range) = filter_database_range.or(sheet_stream_autofilter_range) {
                     sheet.auto_filter = Some(SheetAutoFilter {
                         range,
-                        filter_columns: Vec::new(),
-                        sort_state: sheet_row_col_props
-                            .and_then(|props| props.sort_state.clone())
-                            .filter(|sort_state| {
-                                sort_state.conditions.iter().all(|cond| {
-                                    cond.range.start.row >= range.start.row
-                                        && cond.range.end.row <= range.end.row
-                                        && cond.range.start.col >= range.start.col
-                                        && cond.range.end.col <= range.end.col
-                                })
-                            }),
+                        filter_columns: sheet_stream_filter_columns.clone(),
+                        sort_state: sheet_stream_sort_state.clone().filter(|sort_state| {
+                            // Best-effort guard: only attach sort state when the key ranges fall
+                            // within the AutoFilter range.
+                            sort_state.conditions.iter().all(|cond| {
+                                cond.range.start.row >= range.start.row
+                                    && cond.range.end.row <= range.end.row
+                                    && cond.range.start.col >= range.start.col
+                                    && cond.range.end.col <= range.end.col
+                            })
+                        }),
                         raw_xml: Vec::new(),
                     });
                 }
             }
 
-            // If the AutoFilter was already present (e.g. from earlier best-effort inference),
-            // populate sort state from the worksheet stream when available.
-            if let (Some(props), Some(af)) = (sheet_row_col_props, sheet.auto_filter.as_mut()) {
+            // If we have AutoFilter state from the worksheet stream, attach it to any existing
+            // AutoFilter range (for example, when the range was sourced from `_FilterDatabase` or
+            // from earlier best-effort range inference).
+            if let Some(af) = sheet.auto_filter.as_mut() {
+                if af.filter_columns.is_empty() && !sheet_stream_filter_columns.is_empty() {
+                    af.filter_columns = sheet_stream_filter_columns.clone();
+                }
+
                 if af.sort_state.is_none() {
-                    if let Some(sort_state) = props.sort_state.clone() {
-                        // Best-effort guard: only attach sort state when the key ranges fall
-                        // within the AutoFilter range.
+                    if let Some(sort_state) = sheet_stream_sort_state.clone() {
                         if sort_state.conditions.iter().all(|cond| {
                             cond.range.start.row >= af.range.start.row
                                 && cond.range.end.row <= af.range.end.row
