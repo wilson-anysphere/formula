@@ -245,11 +245,12 @@ jobs:
             apps/desktop/src-tauri/target/**/release/wbuild
             apps/desktop/src-tauri/target/.rustc_info.json
             apps/desktop/src-tauri/target/**/.rustc_info.json
-          # Keep these caches isolated per Rust target triple so cross-compile jobs
-          # (e.g. Windows aarch64) don't thrash/overwrite the host-target cache.
-          key: cargo-target-desktop-release-${{ runner.os }}-${{ matrix.cache_target }}-${{ hashFiles('Cargo.lock') }}
+          # Keep these caches isolated per Rust target triple + runner arch so cross-compile jobs
+          # (e.g. Windows aarch64) don't thrash/overwrite caches or restore host build-script
+          # binaries from an incompatible runner architecture.
+          key: cargo-target-desktop-release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            cargo-target-desktop-release-${{ runner.os }}-${{ matrix.cache_target }}-
+            cargo-target-desktop-release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
