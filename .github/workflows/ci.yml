@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Fail if merge conflict markers are present
         run: bash scripts/ci/check-merge-conflict-markers.sh
-      - name: Guard: Rust toolchain pins match rust-toolchain.toml
+      - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
         run: bash scripts/ci/check-rust-toolchain-pins.sh
 
   xlsx-roundtrip:
