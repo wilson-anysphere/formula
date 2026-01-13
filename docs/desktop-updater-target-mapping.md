@@ -43,8 +43,10 @@ keys.
 - `x86_64-unknown-linux-gnu` → `linux-x86_64`
 - `aarch64-unknown-linux-gnu` → `linux-aarch64`
 
-If a tagged release ever ships with a different key spelling, update both this document and the CI
-validator together.
+These are informational only — the canonical keys above are what we expect `tauri-action` to
+produce for Formula releases, and tagged-release CI validates those exact keys. If a tagged release
+ever ships with different platform identifiers, update both this document and the CI validator
+together.
 
 ## Mapping table (build target → platform key → updater artifact)
 
