@@ -225,7 +225,7 @@ pub enum OffcryptoError {
     ///
     /// This is primarily used by the "Standard-only" decrypt entrypoint to reject Agile inputs
     /// before attempting any password verification (avoiding misreporting `InvalidPassword`).
-    UnsupportedEncryption { encryption_type: EncryptionType },
+    UnsupportedEncryptionType { encryption_type: EncryptionType },
     /// Ciphertext length must be a multiple of 16 bytes for AES-ECB.
     InvalidCiphertextLength { len: usize },
     /// Invalid AES key length (expected 16, 24, or 32 bytes).
@@ -307,6 +307,14 @@ impl PartialEq for OffcryptoError {
             }
             (Self::InvalidPassword, Self::InvalidPassword) => true,
             (
+                Self::UnsupportedEncryptionType {
+                    encryption_type: a,
+                },
+                Self::UnsupportedEncryptionType {
+                    encryption_type: b,
+                },
+            ) => a == b,
+            (
                 Self::UnsupportedEncryption {
                     encryption_type: a,
                 },
@@ -352,7 +360,7 @@ impl fmt::Display for OffcryptoError {
             OffcryptoError::UnsupportedVersion { major, minor } => {
                 write!(f, "unsupported EncryptionInfo version {major}.{minor}")
             }
-            OffcryptoError::UnsupportedEncryption { encryption_type } => {
+            OffcryptoError::UnsupportedEncryptionType { encryption_type } => {
                 write!(f, "unsupported encryption type {encryption_type:?}")
             }
             OffcryptoError::InvalidCiphertextLength { len } => write!(
@@ -624,7 +632,7 @@ pub fn decrypt_standard_only(
                 aes_ecb_decrypt_in_place(&key, pt)
             })
         }
-        EncryptionInfo::Agile { .. } => Err(OffcryptoError::UnsupportedEncryption {
+        EncryptionInfo::Agile { .. } => Err(OffcryptoError::UnsupportedEncryptionType {
             encryption_type: EncryptionType::Agile,
         }),
         EncryptionInfo::Unsupported { version } => Err(OffcryptoError::UnsupportedVersion {

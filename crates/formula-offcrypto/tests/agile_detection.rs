@@ -53,7 +53,7 @@ fn detects_agile_and_rejects_in_standard_only_mode() {
     assert!(
         matches!(
             err,
-            OffcryptoError::UnsupportedEncryption {
+            OffcryptoError::UnsupportedEncryptionType {
                 encryption_type: EncryptionType::Agile
             }
         ),
