@@ -347,6 +347,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node (for JSON parsing in smoke tests)
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Build sync-server image
         run: docker build --build-arg npm_config_build_from_source=true -f services/sync-server/Dockerfile . -t formula-sync-server:ci
 
