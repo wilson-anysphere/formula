@@ -1810,7 +1810,11 @@ export class DesktopSharedGrid {
 
     const onPointerHover = (event: PointerEvent) => {
       if (this.resizePointerId != null || this.selectionPointerId != null) return;
-      const point = this.getViewportPoint(event);
+      // Avoid layout reads during high-frequency hover events by using `offsetX/offsetY`
+      // when the event targets the selection canvas (viewport coords in this case).
+      const useOffsets =
+        event.target === selectionCanvas && Number.isFinite(event.offsetX) && Number.isFinite(event.offsetY);
+      const point = useOffsets ? { x: event.offsetX, y: event.offsetY } : this.getViewportPoint(event);
 
       if (options.enableResize) {
         const hit = this.getResizeHit(point.x, point.y);

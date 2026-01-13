@@ -2298,7 +2298,13 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       if (resizePointerIdRef.current !== null || selectionPointerIdRef.current !== null) return;
       const renderer = rendererRef.current;
       if (!renderer) return;
-      const point = getViewportPoint(event);
+      // Avoid layout reads during high-frequency hover events by preferring `offsetX/offsetY`
+      // (already in viewport coords for the canvas layers) when safe.
+      const useOffsets =
+        (event.target === selectionCanvas || event.target instanceof HTMLCanvasElement) &&
+        Number.isFinite(event.offsetX) &&
+        Number.isFinite(event.offsetY);
+      const point = useOffsets ? { x: event.offsetX, y: event.offsetY } : getViewportPoint(event);
 
       if (enableResizeRef.current) {
         const hit = getResizeHit(point.x, point.y);
@@ -2328,7 +2334,11 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       if (interactionModeRef.current === "rangeSelection") return;
       const renderer = rendererRef.current;
       if (!renderer) return;
-      const point = getViewportPoint(event);
+      const useOffsets =
+        (event.target === selectionCanvas || event.target instanceof HTMLCanvasElement) &&
+        Number.isFinite(event.offsetX) &&
+        Number.isFinite(event.offsetY);
+      const point = useOffsets ? { x: event.offsetX, y: event.offsetY } : getViewportPoint(event);
 
       // Auto-fit is handled via pointer-driven double-click detection (so it works with
       // `pointerdown.preventDefault()` and on touch devices). Keep dblclick for in-cell edit only.
