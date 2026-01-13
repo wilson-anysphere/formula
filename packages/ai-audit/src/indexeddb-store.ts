@@ -77,21 +77,52 @@ export class IndexedDbAIAuditStore implements AIAuditStore {
     if (limit === 0) return [];
 
     const maxAgeCutoff = computeCutoffMs(this.maxAgeMs);
+    const afterTimestampMs = normalizeFiniteNumber(filters.after_timestamp_ms);
+    const beforeTimestampMs = normalizeFiniteNumber(filters.before_timestamp_ms);
+    const cursorTs = normalizeFiniteNumber(filters.cursor?.before_timestamp_ms);
+    const cursorId = typeof filters.cursor?.before_id === "string" ? filters.cursor.before_id : undefined;
+
+    const minTimestampInclusive = maxOfFinite(maxAgeCutoff, afterTimestampMs);
+    const upperBound = computeUpperBound(beforeTimestampMs, cursorTs);
 
     return withTransaction(db, this.storeName, "readonly", async (store) => {
       const index = store.index("timestamp_ms");
       const out: AIAuditEntry[] = [];
 
-      await cursorToPromise(index.openCursor(null, "prev"), (cursor) => {
+      const range = upperBound ? createUpperBoundRange(upperBound.value, upperBound.open) : null;
+
+      await cursorToPromise(index.openCursor(range, "prev"), (cursor) => {
         const value = cursor.value as AIAuditEntry;
         if (!value || typeof value !== "object") {
           cursor.continue();
           return;
         }
 
-        if (typeof maxAgeCutoff === "number" && value.timestamp_ms < maxAgeCutoff) {
-          // Cursor is descending by timestamp, so once we hit the cutoff we can stop.
+        if (typeof minTimestampInclusive === "number" && value.timestamp_ms < minTimestampInclusive) {
+          // Cursor is descending by timestamp, so once we hit the lower bound we can stop.
           return false;
+        }
+
+        if (typeof beforeTimestampMs === "number" && value.timestamp_ms >= beforeTimestampMs) {
+          cursor.continue();
+          return;
+        }
+
+        if (typeof cursorTs === "number") {
+          if (value.timestamp_ms > cursorTs) {
+            cursor.continue();
+            return;
+          }
+          if (value.timestamp_ms === cursorTs) {
+            if (!cursorId) {
+              cursor.continue();
+              return;
+            }
+            if (!(String(value.id) < cursorId)) {
+              cursor.continue();
+              return;
+            }
+          }
         }
 
         if (sessionId && value.session_id !== sessionId) {
@@ -290,6 +321,40 @@ function normalizeLimit(limit: AuditListFilters["limit"]): number | undefined {
 function normalizeFinitePositive(value: number | undefined): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
   return value;
+}
+
+function normalizeFiniteNumber(value: number | undefined): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return value;
+}
+
+function maxOfFinite(...values: Array<number | undefined>): number | undefined {
+  let out: number | undefined;
+  for (const value of values) {
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    out = out === undefined ? value : Math.max(out, value);
+  }
+  return out;
+}
+
+type UpperBound = { value: number; open: boolean };
+
+function computeUpperBound(beforeTimestampMs: number | undefined, cursorTimestampMs: number | undefined): UpperBound | undefined {
+  let out: UpperBound | undefined;
+
+  if (typeof beforeTimestampMs === "number") {
+    out = { value: beforeTimestampMs, open: true };
+  }
+
+  if (typeof cursorTimestampMs === "number") {
+    if (!out || cursorTimestampMs < out.value) {
+      out = { value: cursorTimestampMs, open: false };
+    } else if (cursorTimestampMs === out.value && out.open === false) {
+      out = { value: cursorTimestampMs, open: false };
+    }
+  }
+
+  return out;
 }
 
 function computeCutoffMs(maxAgeMs: number | undefined): number | undefined {

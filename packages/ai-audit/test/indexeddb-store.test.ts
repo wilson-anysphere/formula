@@ -86,6 +86,93 @@ describe("IndexedDbAIAuditStore", () => {
     expect(entries.map((e) => e.id)).toEqual(["newest", "middle", "older"]);
   });
 
+  it("filters by after_timestamp_ms (inclusive) and before_timestamp_ms (exclusive)", async () => {
+    const store = new IndexedDbAIAuditStore({ db_name: `ai_audit_test_${randomUUID()}` });
+
+    await store.logEntry(
+      createEntry({
+        id: "t1",
+        timestamp_ms: 1000,
+        session_id: "session-1",
+        mode: "chat"
+      })
+    );
+    await store.logEntry(
+      createEntry({
+        id: "t2",
+        timestamp_ms: 2000,
+        session_id: "session-1",
+        mode: "chat"
+      })
+    );
+    await store.logEntry(
+      createEntry({
+        id: "t3",
+        timestamp_ms: 3000,
+        session_id: "session-1",
+        mode: "chat"
+      })
+    );
+
+    expect((await store.listEntries({ after_timestamp_ms: 2000 })).map((e) => e.id)).toEqual(["t3", "t2"]);
+    expect((await store.listEntries({ after_timestamp_ms: 3000 })).map((e) => e.id)).toEqual(["t3"]);
+
+    expect((await store.listEntries({ before_timestamp_ms: 3000 })).map((e) => e.id)).toEqual(["t2", "t1"]);
+    expect((await store.listEntries({ before_timestamp_ms: 2000 })).map((e) => e.id)).toEqual(["t1"]);
+
+    expect((await store.listEntries({ after_timestamp_ms: 1500, before_timestamp_ms: 3000 })).map((e) => e.id)).toEqual([
+      "t2"
+    ]);
+  });
+
+  it("paginates stably with cursor across identical timestamps", async () => {
+    const store = new IndexedDbAIAuditStore({ db_name: `ai_audit_test_${randomUUID()}` });
+
+    await store.logEntry(
+      createEntry({
+        id: "a",
+        timestamp_ms: 5000,
+        session_id: "session-1",
+        mode: "chat"
+      })
+    );
+    await store.logEntry(
+      createEntry({
+        id: "b",
+        timestamp_ms: 5000,
+        session_id: "session-1",
+        mode: "chat"
+      })
+    );
+    await store.logEntry(
+      createEntry({
+        id: "c",
+        timestamp_ms: 5000,
+        session_id: "session-1",
+        mode: "chat"
+      })
+    );
+    await store.logEntry(
+      createEntry({
+        id: "z",
+        timestamp_ms: 4000,
+        session_id: "session-1",
+        mode: "chat"
+      })
+    );
+
+    const page1 = await store.listEntries({ limit: 2 });
+    expect(page1.map((e) => e.id)).toEqual(["c", "b"]);
+
+    const page2 = await store.listEntries({
+      limit: 2,
+      cursor: { before_timestamp_ms: page1[1]!.timestamp_ms, before_id: page1[1]!.id }
+    });
+    expect(page2.map((e) => e.id)).toEqual(["a", "z"]);
+
+    expect([...page1, ...page2].map((e) => e.id)).toEqual(["c", "b", "a", "z"]);
+  });
+
   it("supports filtering by session_id/workbook_id/mode (single or array) and limit", async () => {
     const store = new IndexedDbAIAuditStore({ db_name: `ai_audit_test_${randomUUID()}` });
     const base = Date.now();
@@ -210,4 +297,3 @@ describe("IndexedDbAIAuditStore", () => {
     expect(entries.map((e) => e.id)).toEqual(["fresh"]);
   });
 });
-
