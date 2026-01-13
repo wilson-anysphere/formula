@@ -379,6 +379,30 @@ class CorpusMinimizeTests(unittest.TestCase):
             ]
             self.assertNotIn("theme/theme1.xml", targets)
 
+    def test_required_core_parts_detects_xlsb_workbook_bin(self) -> None:
+        parts = {
+            "_rels/.rels": b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+                Target="xl/workbook.bin"/>
+</Relationships>""",
+            "xl/workbook.bin": b"BIN",
+            "xl/_rels/workbook.bin.rels": b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                Target="worksheets/sheet1.bin"/>
+</Relationships>""",
+            "xl/worksheets/sheet1.bin": b"SHEET",
+        }
+
+        required = minimize_mod._required_core_parts(parts)  # noqa: SLF001 (unit test)
+        self.assertIn("_rels/.rels", required)
+        self.assertIn("xl/workbook.bin", required)
+        self.assertIn("xl/_rels/workbook.bin.rels", required)
+        self.assertIn("xl/worksheets/sheet1.bin", required)
+
     def test_minimize_workbook_package_greedy_removal_stops_on_changed_critical_set(self) -> None:
         # Build a tiny (synthetic) XLSX-like zip with a removable theme part + a large binary part.
         # We'll mock `minimize_workbook` so we can unit test the greedy removal logic without

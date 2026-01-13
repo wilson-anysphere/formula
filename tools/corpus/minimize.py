@@ -514,34 +514,83 @@ def prune_xlsx_parts(
 
 
 def _required_core_parts(parts: dict[str, bytes]) -> set[str]:
-    required: set[str] = {
-        "[Content_Types].xml",
-        "_rels/.rels",
-        "xl/workbook.xml",
-        "xl/_rels/workbook.xml.rels",
-    }
-    # These are often required for formula-xlsx to parse cells correctly. Keep them when present.
-    for name in ("xl/styles.xml", "xl/sharedStrings.xml"):
-        if name in parts:
-            required.add(name)
+    required: set[str] = {"[Content_Types].xml", "_rels/.rels"}
 
-    # Keep all worksheets referenced by workbook.xml.rels.
-    rels_bytes = parts.get("xl/_rels/workbook.xml.rels")
-    if rels_bytes:
+    # Discover the workbook "main" part by parsing `_rels/.rels` (officeDocument relationship).
+    workbook_part: str | None = None
+    root_rels = parts.get("_rels/.rels")
+    if root_rels:
         try:
-            root = ET.fromstring(rels_bytes)
+            root = ET.fromstring(root_rels)
             for child in root.iter():
                 if _xml_local_name(child.tag) != "Relationship":
                     continue
                 ty = (child.attrib.get("Type") or "").strip()
-                if not ty.endswith("/worksheet"):
+                if not ty.lower().endswith("/officedocument"):
                     continue
                 target = child.attrib.get("Target") or ""
-                resolved = _resolve_relationship_target("xl/_rels/workbook.xml.rels", target)
+                resolved = _resolve_relationship_target("_rels/.rels", target)
+                if resolved and resolved in parts:
+                    workbook_part = resolved
+                    break
+        except Exception:
+            workbook_part = None
+
+    if workbook_part is None:
+        # Fallback for malformed packages missing `_rels/.rels` or officeDocument relationship.
+        for candidate in ("xl/workbook.xml", "xl/workbook.bin"):
+            if candidate in parts:
+                workbook_part = candidate
+                break
+
+    if workbook_part is None:
+        # Last resort: keep the hard-coded XLSX main parts if present.
+        for candidate in ("xl/workbook.xml", "xl/_rels/workbook.xml.rels"):
+            if candidate in parts:
+                required.add(candidate)
+        return required
+
+    required.add(workbook_part)
+
+    # Add the workbook relationships part if present.
+    wb_dir = posixpath.dirname(workbook_part)
+    wb_base = posixpath.basename(workbook_part)
+    wb_rels = f"{wb_dir}/_rels/{wb_base}.rels" if wb_dir else f"_rels/{wb_base}.rels"
+    if wb_rels in parts:
+        required.add(wb_rels)
+    else:
+        wb_rels = ""
+
+    # Keep parts referenced by workbook relationships that are commonly required for load:
+    # - worksheets
+    # - styles
+    # - shared strings
+    if wb_rels and wb_rels in parts:
+        try:
+            root = ET.fromstring(parts[wb_rels])
+            for child in root.iter():
+                if _xml_local_name(child.tag) != "Relationship":
+                    continue
+                ty = (child.attrib.get("Type") or "").strip()
+                ty_lower = ty.lower()
+                if not (
+                    ty_lower.endswith("/worksheet")
+                    or ty_lower.endswith("/styles")
+                    or ty_lower.endswith("/sharedstrings")
+                ):
+                    continue
+                target = child.attrib.get("Target") or ""
+                resolved = _resolve_relationship_target(wb_rels, target)
                 if resolved and resolved in parts:
                     required.add(resolved)
         except Exception:
             pass
+
+    # Fallback: keep typical XLSX parts if present (even if not referenced).
+    for name in ("xl/styles.xml", "xl/sharedStrings.xml"):
+        if name in parts:
+            required.add(name)
+
     return required
 
 
