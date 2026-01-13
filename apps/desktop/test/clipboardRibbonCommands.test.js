@@ -10,30 +10,22 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-test("Ribbon schema includes Home → Clipboard command ids", () => {
+test("Ribbon schema includes canonical clipboard command ids for Home → Clipboard", () => {
   const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
   const schema = fs.readFileSync(schemaPath, "utf8");
 
   const ids = [
     // Clipboard group core actions.
-    "home.clipboard.cut",
-    "home.clipboard.copy",
-    "home.clipboard.paste",
-    "home.clipboard.pasteSpecial",
+    "clipboard.cut",
+    "clipboard.copy",
+    "clipboard.paste",
+    "clipboard.pasteSpecial",
 
-    // Paste dropdown menu items.
-    "home.clipboard.paste.default",
-    "home.clipboard.paste.values",
-    "home.clipboard.paste.formulas",
-    "home.clipboard.paste.formats",
-    "home.clipboard.paste.transpose",
-
-    // Paste Special dropdown menu items.
-    "home.clipboard.pasteSpecial.dialog",
-    "home.clipboard.pasteSpecial.values",
-    "home.clipboard.pasteSpecial.formulas",
-    "home.clipboard.pasteSpecial.formats",
-    "home.clipboard.pasteSpecial.transpose",
+    // Paste dropdown menu items (also used by Paste Special dropdown).
+    "clipboard.pasteSpecial.values",
+    "clipboard.pasteSpecial.formulas",
+    "clipboard.pasteSpecial.formats",
+    "clipboard.pasteSpecial.transpose",
   ];
 
   for (const id of ids) {
@@ -41,40 +33,22 @@ test("Ribbon schema includes Home → Clipboard command ids", () => {
   }
 
   // Ensure the two primary controls are dropdowns.
-  assert.match(schema, /\bid:\s*["']home\.clipboard\.paste["'][\s\S]*?\bkind:\s*["']dropdown["']/);
-  assert.match(schema, /\bid:\s*["']home\.clipboard\.pasteSpecial["'][\s\S]*?\bkind:\s*["']dropdown["']/);
+  assert.match(schema, /\bid:\s*["']clipboard\.paste["'][\s\S]*?\bkind:\s*["']dropdown["']/);
+  assert.match(schema, /\bid:\s*["']clipboard\.pasteSpecial["'][\s\S]*?\bkind:\s*["']dropdown["']/);
 });
 
-test("Desktop main.ts wires Home → Clipboard ribbon commands to SpreadsheetApp clipboard ops", () => {
+test("Desktop main.ts routes clipboard ribbon commands through the CommandRegistry", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = fs.readFileSync(mainPath, "utf8");
 
-  const expects = [
-    { id: "home.clipboard.cut", pattern: /\bclipboardCut\(\)/ },
-    { id: "home.clipboard.copy", pattern: /\bclipboardCopy\(\)/ },
-    { id: "home.clipboard.paste", pattern: /\bclipboardPaste\(\)/ },
-    { id: "home.clipboard.paste.default", pattern: /\bclipboardPaste\(\)/ },
-    { id: "home.clipboard.paste.values", pattern: /\bclipboardPasteSpecial\(\s*["']values["']\s*\)/ },
-    { id: "home.clipboard.paste.formulas", pattern: /\bclipboardPasteSpecial\(\s*["']formulas["']\s*\)/ },
-    { id: "home.clipboard.paste.formats", pattern: /\bclipboardPasteSpecial\(\s*["']formats["']\s*\)/ },
-    { id: "home.clipboard.pasteSpecial.values", pattern: /\bclipboardPasteSpecial\(\s*["']values["']\s*\)/ },
-    { id: "home.clipboard.pasteSpecial.formulas", pattern: /\bclipboardPasteSpecial\(\s*["']formulas["']\s*\)/ },
-    { id: "home.clipboard.pasteSpecial.formats", pattern: /\bclipboardPasteSpecial\(\s*["']formats["']\s*\)/ },
-  ];
+  // Ensure legacy ribbon-only IDs are no longer handled explicitly.
+  assert.doesNotMatch(main, /\bcase\s+["']home\.clipboard\.cut["']:/);
+  assert.doesNotMatch(main, /\bcase\s+["']home\.clipboard\.copy["']:/);
+  assert.doesNotMatch(main, /\bcase\s+["']home\.clipboard\.paste["']:/);
+  assert.doesNotMatch(main, /\bcase\s+["']home\.clipboard\.pasteSpecial["']:/);
+  assert.doesNotMatch(main, /\bcase\s+["']home\.clipboard\.pasteSpecial\.dialog["']:/);
 
-  for (const { id, pattern } of expects) {
-    assert.match(main, new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`), `Expected main.ts to handle ${id}`);
-    assert.match(main, pattern, `Expected main.ts to invoke ${String(pattern)} for ${id}`);
-  }
-
-  // Paste special should surface the existing Paste Special menu items through a quick pick.
-  assert.match(main, /\bcase\s+["']home\.clipboard\.pasteSpecial\.dialog["']:/);
-  assert.match(main, /\bgetPasteSpecialMenuItems\(\)/);
-  assert.match(main, /\bshowQuickPick\(/);
-
-  // Transpose should invoke the spreadsheet paste pipeline (Excel-style).
-  assert.match(main, /\bcase\s+["']home\.clipboard\.paste\.transpose["']:/);
-  assert.match(main, /\bcase\s+["']home\.clipboard\.pasteSpecial\.transpose["']:/);
-  assert.match(main, /\bclipboardPasteSpecial\(\s*["']all["']\s*,\s*\{\s*transpose:\s*true\s*\}\s*\)/);
-  assert.doesNotMatch(main, /Paste Transpose not implemented/);
+  // Clipboard command IDs should be routed through the registry execution pipeline.
+  assert.match(main, /\bcommandId\.startsWith\(\s*["']clipboard\./);
+  assert.match(main, /\bexecuteBuiltinCommand\(\s*commandId\s*\)/);
 });

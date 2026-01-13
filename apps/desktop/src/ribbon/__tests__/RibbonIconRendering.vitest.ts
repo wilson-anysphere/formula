@@ -48,7 +48,7 @@ describe("Ribbon icon rendering", () => {
   it("does not render icons for dropdown menu items when they have no iconId", async () => {
     const { container, root } = renderRibbon();
 
-    const paste = container.querySelector<HTMLButtonElement>('[data-command-id="home.clipboard.paste"]');
+    const paste = container.querySelector<HTMLButtonElement>('[data-command-id="clipboard.paste"]');
     expect(paste).toBeInstanceOf(HTMLButtonElement);
 
     await act(async () => {
@@ -56,7 +56,7 @@ describe("Ribbon icon rendering", () => {
       await Promise.resolve();
     });
 
-    const pasteValues = container.querySelector<HTMLButtonElement>('[data-command-id="home.clipboard.paste.values"]');
+    const pasteValues = container.querySelector<HTMLButtonElement>('[data-command-id="clipboard.pasteSpecial.values"]');
     expect(pasteValues).toBeInstanceOf(HTMLButtonElement);
 
     expect(pasteValues?.querySelector(".ribbon-dropdown__icon")).toBeNull();

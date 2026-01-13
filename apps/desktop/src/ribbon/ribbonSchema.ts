@@ -25,7 +25,8 @@ export interface RibbonButtonDefinition {
   /**
    * Stable command identifier (used for wiring actions).
    *
-   * Convention: `{tab}.{group}.{command}` (e.g. `home.clipboard.paste`).
+   * Convention: prefer canonical CommandRegistry ids when available (e.g. `clipboard.copy`),
+   * otherwise use `{tab}.{group}.{command}` (e.g. `home.font.bold`).
    */
   id: string;
   label: string;
@@ -355,7 +356,7 @@ export const defaultRibbonSchema: RibbonSchema = {
           label: "Clipboard",
           buttons: [
             {
-              id: "home.clipboard.paste",
+              id: "clipboard.paste",
               label: "Paste",
               ariaLabel: "Paste",
               iconId: "paste",
@@ -363,30 +364,30 @@ export const defaultRibbonSchema: RibbonSchema = {
               size: "large",
               testId: "ribbon-paste",
               menuItems: [
-                { id: "home.clipboard.paste.default", label: "Paste", ariaLabel: "Paste", iconId: "paste" },
-                { id: "home.clipboard.paste.values", label: "Paste Values", ariaLabel: "Paste Values" },
-                { id: "home.clipboard.paste.formulas", label: "Paste Formulas", ariaLabel: "Paste Formulas", iconId: "function" },
-                { id: "home.clipboard.paste.formats", label: "Paste Formatting", ariaLabel: "Paste Formatting", iconId: "palette" },
-                { id: "home.clipboard.paste.transpose", label: "Transpose", ariaLabel: "Transpose", iconId: "refresh" },
+                { id: "clipboard.paste", label: "Paste", ariaLabel: "Paste", iconId: "paste" },
+                { id: "clipboard.pasteSpecial.values", label: "Paste Values", ariaLabel: "Paste Values" },
+                { id: "clipboard.pasteSpecial.formulas", label: "Paste Formulas", ariaLabel: "Paste Formulas", iconId: "function" },
+                { id: "clipboard.pasteSpecial.formats", label: "Paste Formatting", ariaLabel: "Paste Formatting", iconId: "palette" },
+                { id: "clipboard.pasteSpecial.transpose", label: "Transpose", ariaLabel: "Transpose", iconId: "refresh" },
               ],
             },
             {
-              id: "home.clipboard.pasteSpecial",
+              id: "clipboard.pasteSpecial",
               label: "Paste Special",
               ariaLabel: "Paste Special",
               iconId: "pasteSpecial",
               kind: "dropdown",
               size: "small",
               menuItems: [
-                { id: "home.clipboard.pasteSpecial.dialog", label: "Paste Special…", ariaLabel: "Paste Special", iconId: "pasteSpecial" },
-                { id: "home.clipboard.pasteSpecial.values", label: "Values", ariaLabel: "Paste Values" },
-                { id: "home.clipboard.pasteSpecial.formulas", label: "Formulas", ariaLabel: "Paste Formulas", iconId: "function" },
-                { id: "home.clipboard.pasteSpecial.formats", label: "Formats", ariaLabel: "Paste Formats", iconId: "palette" },
-                { id: "home.clipboard.pasteSpecial.transpose", label: "Transpose", ariaLabel: "Transpose", iconId: "refresh" },
+                { id: "clipboard.pasteSpecial", label: "Paste Special…", ariaLabel: "Paste Special", iconId: "pasteSpecial" },
+                { id: "clipboard.pasteSpecial.values", label: "Values", ariaLabel: "Paste Values" },
+                { id: "clipboard.pasteSpecial.formulas", label: "Formulas", ariaLabel: "Paste Formulas", iconId: "function" },
+                { id: "clipboard.pasteSpecial.formats", label: "Formats", ariaLabel: "Paste Formats", iconId: "palette" },
+                { id: "clipboard.pasteSpecial.transpose", label: "Transpose", ariaLabel: "Transpose", iconId: "refresh" },
               ],
             },
-            { id: "home.clipboard.cut", label: "Cut", ariaLabel: "Cut", iconId: "cut", size: "icon" },
-            { id: "home.clipboard.copy", label: "Copy", ariaLabel: "Copy", iconId: "copy", size: "icon" },
+            { id: "clipboard.cut", label: "Cut", ariaLabel: "Cut", iconId: "cut", size: "icon" },
+            { id: "clipboard.copy", label: "Copy", ariaLabel: "Copy", iconId: "copy", size: "icon" },
             { id: "home.clipboard.formatPainter", label: "Format Painter", ariaLabel: "Format Painter", iconId: "formatPainter", size: "small" },
             {
               id: "home.clipboard.clipboardPane",

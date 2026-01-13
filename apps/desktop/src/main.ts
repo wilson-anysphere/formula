@@ -8511,6 +8511,13 @@ mountRibbon(ribbonReactRoot, {
       return;
     }
 
+    // Ribbon/menus/keybindings should all route clipboard actions through the CommandRegistry so
+    // execution tracking + keybinding wiring stay consistent.
+    if (commandId.startsWith("clipboard.")) {
+      executeBuiltinCommand(commandId);
+      return;
+    }
+
     if (
       commandId === "data.queriesConnections.refreshAll" ||
       commandId === "data.queriesConnections.refreshAll.refresh" ||
@@ -9151,71 +9158,8 @@ mountRibbon(ribbonReactRoot, {
         return;
       }
 
-      case "home.clipboard.cut":
-        void app.clipboardCut();
-        app.focus();
-        return;
-      case "home.clipboard.copy":
-        void app.clipboardCopy();
-        app.focus();
-        return;
       case "home.clipboard.formatPainter":
         armFormatPainter();
-        return;
-      case "home.clipboard.paste":
-      case "home.clipboard.paste.default":
-        void app.clipboardPaste();
-        // Ribbon dropdown menu items restore focus to the trigger button after dispatching the
-        // command. Defer grid focus so keyboard shortcuts continue to work even if the clipboard
-        // operation is a no-op (e.g. blocked clipboard permissions).
-        queueMicrotask(() => app.focus());
-        return;
-      case "home.clipboard.paste.values":
-        void app.clipboardPasteSpecial("values");
-        queueMicrotask(() => app.focus());
-        return;
-      case "home.clipboard.paste.formulas":
-        void app.clipboardPasteSpecial("formulas");
-        queueMicrotask(() => app.focus());
-        return;
-      case "home.clipboard.paste.formats":
-        void app.clipboardPasteSpecial("formats");
-        queueMicrotask(() => app.focus());
-        return;
-      case "home.clipboard.paste.transpose":
-        void app.clipboardPasteSpecial("all", { transpose: true });
-        queueMicrotask(() => app.focus());
-        return;
-      case "home.clipboard.pasteSpecial":
-      case "home.clipboard.pasteSpecial.dialog":
-        void (async () => {
-          const picked = await showQuickPick(
-            getPasteSpecialMenuItems().map((item) => ({ label: item.label, value: item })),
-            { placeHolder: t("clipboard.pasteSpecial.title") },
-          );
-          if (picked == null) {
-            app.focus();
-            return;
-          }
-          await app.clipboardPasteSpecial(picked.mode);
-          app.focus();
-        })();
-        return;
-      case "home.clipboard.pasteSpecial.values":
-        void app.clipboardPasteSpecial("values");
-        queueMicrotask(() => app.focus());
-        return;
-      case "home.clipboard.pasteSpecial.formulas":
-        void app.clipboardPasteSpecial("formulas");
-        queueMicrotask(() => app.focus());
-        return;
-      case "home.clipboard.pasteSpecial.formats":
-        void app.clipboardPasteSpecial("formats");
-        queueMicrotask(() => app.focus());
-        return;
-      case "home.clipboard.pasteSpecial.transpose":
-        void app.clipboardPasteSpecial("all", { transpose: true });
-        queueMicrotask(() => app.focus());
         return;
 
       case "view.macros.viewMacros":

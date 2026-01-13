@@ -52,7 +52,7 @@ describe("Ribbon a11y + keyboard navigation", () => {
   it("only sets aria-haspopup=\"menu\" when a dropdown button actually has menu items", () => {
     const { container, root } = renderRibbon();
 
-    const paste = container.querySelector<HTMLButtonElement>('[data-command-id="home.clipboard.paste"]');
+    const paste = container.querySelector<HTMLButtonElement>('[data-command-id="clipboard.paste"]');
     expect(paste).toBeInstanceOf(HTMLButtonElement);
     expect(paste?.getAttribute("aria-haspopup")).toBe("menu");
 
@@ -74,7 +74,7 @@ describe("Ribbon a11y + keyboard navigation", () => {
   it("closes an open ribbon dropdown menu when pressing Tab from a menuitem", async () => {
     const { container, root } = renderRibbon();
 
-    const paste = container.querySelector<HTMLButtonElement>('[data-command-id="home.clipboard.paste"]');
+    const paste = container.querySelector<HTMLButtonElement>('[data-command-id="clipboard.paste"]');
     expect(paste).toBeInstanceOf(HTMLButtonElement);
 
     await act(async () => {

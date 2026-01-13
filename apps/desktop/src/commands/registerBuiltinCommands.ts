@@ -709,7 +709,15 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "clipboard.pasteSpecial.values",
     t("clipboard.pasteSpecial.pasteValues"),
-    () => app.clipboardPasteSpecial("values"),
+    async () => {
+      if (getTextEditingTarget()) return;
+      if ((app as any).isFormulaBarEditing?.()) return;
+      try {
+        await app.clipboardPasteSpecial("values");
+      } finally {
+        app.focus();
+      }
+    },
     {
       category: t("commandCategory.editing"),
       icon: null,
@@ -721,7 +729,15 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "clipboard.pasteSpecial.formulas",
     t("clipboard.pasteSpecial.pasteFormulas"),
-    () => app.clipboardPasteSpecial("formulas"),
+    async () => {
+      if (getTextEditingTarget()) return;
+      if ((app as any).isFormulaBarEditing?.()) return;
+      try {
+        await app.clipboardPasteSpecial("formulas");
+      } finally {
+        app.focus();
+      }
+    },
     {
       category: t("commandCategory.editing"),
       icon: null,
@@ -733,7 +749,15 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "clipboard.pasteSpecial.formats",
     t("clipboard.pasteSpecial.pasteFormats"),
-    () => app.clipboardPasteSpecial("formats"),
+    async () => {
+      if (getTextEditingTarget()) return;
+      if ((app as any).isFormulaBarEditing?.()) return;
+      try {
+        await app.clipboardPasteSpecial("formats");
+      } finally {
+        app.focus();
+      }
+    },
     {
       category: t("commandCategory.editing"),
       icon: null,
@@ -742,18 +766,47 @@ export function registerBuiltinCommands(params: {
     },
   );
 
+  commandRegistry.registerBuiltinCommand(
+    "clipboard.pasteSpecial.transpose",
+    t("clipboard.pasteSpecial.transpose"),
+    async () => {
+      if (getTextEditingTarget()) return;
+      if ((app as any).isFormulaBarEditing?.()) return;
+      try {
+        await app.clipboardPasteSpecial("all", { transpose: true });
+      } finally {
+        app.focus();
+      }
+    },
+    {
+      category: t("commandCategory.editing"),
+      icon: null,
+      description: t("commandDescription.clipboard.pasteSpecial.transpose"),
+      keywords: ["paste", "clipboard", "transpose"],
+    },
+  );
+
   const pasteSpecialTitle = t("clipboard.pasteSpecial.title");
   commandRegistry.registerBuiltinCommand(
     "clipboard.pasteSpecial",
     pasteSpecialTitle,
     async () => {
+      if (getTextEditingTarget()) return;
+      if ((app as any).isFormulaBarEditing?.()) return;
       const items = getPasteSpecialMenuItems();
       const picked = await showQuickPick(
         items.map((item) => ({ label: item.label, value: item.mode })),
         { placeHolder: pasteSpecialTitle },
       );
-      if (!picked) return;
-      await commandRegistry.executeCommand(`clipboard.pasteSpecial.${picked === "all" ? "all" : picked}`);
+      if (!picked) {
+        app.focus();
+        return;
+      }
+      try {
+        await commandRegistry.executeCommand(`clipboard.pasteSpecial.${picked === "all" ? "all" : picked}`);
+      } finally {
+        app.focus();
+      }
     },
     {
       category: t("commandCategory.editing"),
