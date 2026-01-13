@@ -433,13 +433,17 @@ docker run --rm -it \
   -v "$PWD/target/release/bundle/deb:/deb" \
   ubuntu:24.04 bash -lc '
     apt-get update
-    apt-get install -y /deb/*.deb
+    apt-get install -y --no-install-recommends /deb/*.deb
     ldd /usr/bin/formula-desktop | grep -q "not found" && exit 1 || true
   '
 ```
 
-CI guardrail: tagged releases run `bash scripts/ci/verify-linux-package-deps.sh`, which inspects the produced `.deb` with
-`dpkg -I` / `dpkg-deb -f` and fails the workflow if the **core runtime dependencies** are missing from `Depends:`.
+CI guardrails (tagged releases):
+
+- `bash scripts/ci/verify-linux-package-deps.sh` inspects the produced `.deb` with `dpkg -I` / `dpkg-deb -f` and fails the
+  workflow if the **core runtime dependencies** are missing from `Depends:`.
+- `bash scripts/ci/linux-package-install-smoke.sh deb` installs the `.deb` into a clean Ubuntu container and fails if
+  `ldd /usr/bin/formula-desktop` reports missing shared libraries.
 
 ## Linux: `.rpm` runtime dependencies (Fedora/RHEL-family)
 
@@ -481,13 +485,17 @@ docker run --rm -it \
   -v "$PWD/target/release/bundle/rpm:/rpm" \
   fedora:40 bash -lc '
     # The Tauri updater `.sig` files are *not* RPM GPG signatures, so install with --nogpgcheck.
-    dnf -y install --nogpgcheck /rpm/*.rpm
+    dnf -y install --nogpgcheck --setopt=install_weak_deps=False /rpm/*.rpm
     ldd /usr/bin/formula-desktop | grep -q "not found" && exit 1 || true
   '
 ```
 
-CI guardrail: tagged releases run `bash scripts/ci/verify-linux-package-deps.sh`, which inspects the produced `.rpm` with
-`rpm -qpR` and fails the workflow if the **core runtime dependencies** are missing from the RPM metadata.
+CI guardrails (tagged releases):
+
+- `bash scripts/ci/verify-linux-package-deps.sh` inspects the produced `.rpm` with `rpm -qpR` and fails the workflow if the
+  **core runtime dependencies** are missing from the RPM metadata.
+- `bash scripts/ci/linux-package-install-smoke.sh rpm` installs the `.rpm` into a clean Fedora container and fails if
+  `ldd /usr/bin/formula-desktop` reports missing shared libraries.
 
 Note: showing a tray icon also requires a desktop environment with **StatusNotifier/AppIndicator**
 support (e.g. the GNOME Shell “AppIndicator and KStatusNotifierItem Support” extension).
