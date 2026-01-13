@@ -721,17 +721,28 @@ fn write_new_row<W: Write>(
     let mut row_start = BytesStart::new(tags.row.as_str());
     let row_str = row_num.to_string();
     row_start.push_attribute(("r", row_str.as_str()));
-    let height_str = sheet
-        .row_properties(row_num.saturating_sub(1))
-        .and_then(|props| props.height.map(|h| h.to_string()));
-    if let Some(props) = sheet.row_properties(row_num.saturating_sub(1)) {
-        if let Some(height_str) = &height_str {
-            row_start.push_attribute(("ht", height_str.as_str()));
-            row_start.push_attribute(("customHeight", "1"));
-        }
-        if props.hidden {
-            row_start.push_attribute(("hidden", "1"));
-        }
+
+    let outline_entry = sheet.outline.rows.entry(row_num);
+    let row_props = sheet.row_properties(row_num.saturating_sub(1));
+
+    let height_str = row_props.and_then(|props| props.height.map(|h| h.to_string()));
+    if let Some(height_str) = &height_str {
+        row_start.push_attribute(("ht", height_str.as_str()));
+        row_start.push_attribute(("customHeight", "1"));
+    }
+
+    let is_hidden = row_props.is_some_and(|p| p.hidden) || outline_entry.hidden.is_hidden();
+    if is_hidden {
+        row_start.push_attribute(("hidden", "1"));
+    }
+
+    let outline_level_str =
+        (outline_entry.level > 0).then(|| outline_entry.level.to_string());
+    if let Some(level_str) = &outline_level_str {
+        row_start.push_attribute(("outlineLevel", level_str.as_str()));
+    }
+    if outline_entry.collapsed {
+        row_start.push_attribute(("collapsed", "1"));
     }
 
     writer.write_event(Event::Start(row_start))?;

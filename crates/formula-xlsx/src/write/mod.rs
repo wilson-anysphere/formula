@@ -800,6 +800,26 @@ fn build_parts(
 
         let cols_changed = &sheet.col_properties != &orig_cols;
 
+        // `parse_col_properties` ignores outline-related attributes (`outlineLevel`, `collapsed`).
+        // If callers mutate only `sheet.outline.cols`, we still need to rewrite `<cols>` so the
+        // outline metadata is preserved/emitted.
+        let outline_cols_changed = if orig.is_some()
+            && sheet
+                .outline
+                .cols
+                .iter()
+                .any(|(_, entry)| entry.level > 0 || entry.hidden.is_hidden() || entry.collapsed)
+        {
+            let desired = cols_xml_props_from_sheet(sheet);
+            let orig_xml = std::str::from_utf8(orig.expect("checked is_some")).map_err(|e| {
+                WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            })?;
+            let original_cols = parse_cols_xml_props(orig_xml)?;
+            desired != original_cols
+        } else {
+            false
+        };
+
         let autofilter_changed = sheet.auto_filter.as_ref() != orig_autofilter.as_ref();
 
         let sheet_protection_changed = if sheet.sheet_protection.enabled {
@@ -830,6 +850,7 @@ fn build_parts(
             && !hyperlinks_changed
             && !views_changed
             && !cols_changed
+            && !outline_cols_changed
             && !autofilter_changed
             && !sheet_protection_changed
         {
@@ -847,7 +868,7 @@ fn build_parts(
         if is_new_sheet || views_changed {
             sheet_xml = update_sheet_views_xml(&sheet_xml, desired_views)?;
         }
-        if is_new_sheet || cols_changed {
+        if is_new_sheet || cols_changed || outline_cols_changed {
             let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(&sheet_xml)?;
             let cols_xml = render_cols(sheet, worksheet_prefix.as_deref());
             sheet_xml = update_cols_xml(&sheet_xml, &cols_xml)?;
@@ -1399,6 +1420,88 @@ fn parse_col_properties(
                     if entry.width.is_none() && !entry.hidden {
                         map.remove(&col);
                     }
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(map)
+}
+
+fn parse_cols_xml_props(xml: &str) -> Result<BTreeMap<u32, ColXmlProps>, WriteError> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    let mut in_cols = false;
+    let mut map: BTreeMap<u32, ColXmlProps> = BTreeMap::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(e) if e.local_name().as_ref() == b"cols" => in_cols = true,
+            Event::End(e) if e.local_name().as_ref() == b"cols" => {
+                in_cols = false;
+                drop(e);
+            }
+            Event::Start(e) | Event::Empty(e) if in_cols && e.local_name().as_ref() == b"col" => {
+                let mut min: Option<u32> = None;
+                let mut max: Option<u32> = None;
+                let mut width: Option<f32> = None;
+                let mut custom_width: Option<bool> = None;
+                let mut hidden = false;
+                let mut outline_level: u8 = 0;
+                let mut collapsed = false;
+
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    let val = attr.unescape_value()?.into_owned();
+                    match attr.key.as_ref() {
+                        b"min" => min = val.parse().ok(),
+                        b"max" => max = val.parse().ok(),
+                        b"width" => width = val.parse().ok(),
+                        b"customWidth" => custom_width = Some(parse_xml_bool(&val)),
+                        b"hidden" => hidden = parse_xml_bool(&val),
+                        b"outlineLevel" => outline_level = val.parse().unwrap_or(0),
+                        b"collapsed" => collapsed = parse_xml_bool(&val),
+                        _ => {}
+                    }
+                }
+
+                let Some(min) = min else { continue };
+                let max = max.unwrap_or(min).min(formula_model::EXCEL_MAX_COLS);
+                if min == 0 || max == 0 || min > formula_model::EXCEL_MAX_COLS {
+                    continue;
+                }
+
+                let width = if custom_width == Some(false) {
+                    None
+                } else {
+                    width
+                };
+
+                if width.is_none() && !hidden && outline_level == 0 && !collapsed {
+                    continue;
+                }
+
+                for col_1_based in min..=max {
+                    if col_1_based == 0 || col_1_based > formula_model::EXCEL_MAX_COLS {
+                        continue;
+                    }
+                    let entry = map.entry(col_1_based).or_insert_with(|| ColXmlProps {
+                        width: None,
+                        hidden: false,
+                        outline_level: 0,
+                        collapsed: false,
+                    });
+                    if let Some(width) = width {
+                        entry.width = Some(width);
+                    }
+                    entry.hidden |= hidden;
+                    entry.outline_level = entry.outline_level.max(outline_level);
+                    entry.collapsed |= collapsed;
                 }
             }
             _ => {}
@@ -3791,10 +3894,7 @@ struct ColXmlProps {
     collapsed: bool,
 }
 
-fn render_cols(sheet: &Worksheet, prefix: Option<&str>) -> String {
-    let cols_tag = crate::xml::prefixed_tag(prefix, "cols");
-    let col_tag = crate::xml::prefixed_tag(prefix, "col");
-
+fn cols_xml_props_from_sheet(sheet: &Worksheet) -> BTreeMap<u32, ColXmlProps> {
     // OOXML column indices are 1-based. The model stores `col_properties` 0-based, and
     // `outline.cols` 1-based.
     let mut col_xml_props: BTreeMap<u32, ColXmlProps> = BTreeMap::new();
@@ -3835,6 +3935,15 @@ fn render_cols(sheet: &Worksheet, prefix: Option<&str>) -> String {
                 collapsed: entry.collapsed,
             });
     }
+
+    col_xml_props
+}
+
+fn render_cols(sheet: &Worksheet, prefix: Option<&str>) -> String {
+    let cols_tag = crate::xml::prefixed_tag(prefix, "cols");
+    let col_tag = crate::xml::prefixed_tag(prefix, "col");
+
+    let col_xml_props = cols_xml_props_from_sheet(sheet);
 
     if col_xml_props.is_empty() {
         return String::new();
