@@ -327,6 +327,10 @@
   border-color: var(--border);
 }
 
+.query-editor-steps__button:active {
+  background: var(--bg-active);
+}
+
 .query-editor-steps__button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
@@ -409,6 +413,10 @@
 .query-editor-add-step__menu-item:hover {
   background: var(--bg-hover);
   border-color: var(--border);
+}
+
+.query-editor-add-step__menu-item:active {
+  background: var(--bg-active);
 }
 
 .query-editor-add-step__menu-item:focus-visible {
