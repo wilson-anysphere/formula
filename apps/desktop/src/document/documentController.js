@@ -326,6 +326,16 @@ function normalizeFormula(formula) {
  *   frozenRows: number,
  *   frozenCols: number,
  *   /**
+ *    * Merged-cell regions for this sheet (Excel-style).
+ *    *
+ *    * Ranges use inclusive end coordinates (`endRow`/`endCol` are inclusive) and
+ *    * are anchored at the top-left cell (`startRow`/`startCol`).
+ *    *
+ *    * This lives on the sheet view state so it can reuse the existing
+ *    * undo/redo + snapshot plumbing for sheet view deltas.
+ *    *\/
+ *   mergedRanges?: Array<{ startRow: number, endRow: number, startCol: number, endCol: number }>,
+ *   /**
  *    * Sparse column width overrides (base units, zoom=1), keyed by 0-based column index.
  *    * Values are interpreted by the UI layer (e.g. shared grid) and are not validated against
  *    * a default width here.
@@ -450,6 +460,56 @@ function normalizeSheetViewState(view) {
     return num;
   };
 
+  const normalizeMergedRanges = (raw) => {
+    if (!raw) return null;
+
+    // Accept:
+    // - Array<{startRow,endRow,startCol,endCol}>
+    // - Array<{start:{row,col},end:{row,col}}>
+    // - { regions: Array<{ range: {...} }> } (formula-model shape)
+    /** @type {any[]} */
+    const entries = (() => {
+      if (Array.isArray(raw)) return raw;
+      if (typeof raw === "object" && Array.isArray(raw?.regions)) {
+        return raw.regions.map((r) => r?.range ?? r);
+      }
+      return [];
+    })();
+
+    /** @type {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }>} */
+    const out = [];
+    const seen = new Set();
+
+    for (const entry of entries) {
+      if (!entry) continue;
+      const range = entry?.range ?? entry;
+      const startRowNum = Number(range?.startRow ?? range?.start?.row);
+      const endRowNum = Number(range?.endRow ?? range?.end?.row);
+      const startColNum = Number(range?.startCol ?? range?.start?.col);
+      const endColNum = Number(range?.endCol ?? range?.end?.col);
+      if (!Number.isInteger(startRowNum) || startRowNum < 0) continue;
+      if (!Number.isInteger(endRowNum) || endRowNum < 0) continue;
+      if (!Number.isInteger(startColNum) || startColNum < 0) continue;
+      if (!Number.isInteger(endColNum) || endColNum < 0) continue;
+
+      const startRow = Math.min(startRowNum, endRowNum);
+      const endRow = Math.max(startRowNum, endRowNum);
+      const startCol = Math.min(startColNum, endColNum);
+      const endCol = Math.max(startColNum, endColNum);
+
+      // Ignore single-cell merges (no-op).
+      if (startRow === endRow && startCol === endCol) continue;
+
+      const key = `${startRow},${startCol},${endRow},${endCol}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ startRow, endRow, startCol, endCol });
+    }
+
+    out.sort((a, b) => (a.startRow - b.startRow === 0 ? a.startCol - b.startCol : a.startRow - b.startRow));
+    return out.length === 0 ? null : out;
+  };
+
   const normalizeAxisOverrides = (raw) => {
     if (!raw) return null;
 
@@ -481,10 +541,14 @@ function normalizeSheetViewState(view) {
 
   const colWidths = normalizeAxisOverrides(view?.colWidths);
   const rowHeights = normalizeAxisOverrides(view?.rowHeights);
+  const mergedRanges = normalizeMergedRanges(
+    view?.mergedRanges ?? view?.merged_ranges ?? view?.mergedRegions ?? view?.merged_regions,
+  );
 
   return {
     frozenRows: normalizeFrozenCount(view?.frozenRows),
     frozenCols: normalizeFrozenCount(view?.frozenCols),
+    ...(mergedRanges ? { mergedRanges } : {}),
     ...(colWidths ? { colWidths } : {}),
     ...(rowHeights ? { rowHeights } : {}),
   };
@@ -504,6 +568,14 @@ function emptySheetViewState() {
 function cloneSheetViewState(view) {
   /** @type {SheetViewState} */
   const next = { frozenRows: view.frozenRows, frozenCols: view.frozenCols };
+  if (Array.isArray(view.mergedRanges)) {
+    next.mergedRanges = view.mergedRanges.map((r) => ({
+      startRow: r.startRow,
+      endRow: r.endRow,
+      startCol: r.startCol,
+      endCol: r.endCol,
+    }));
+  }
   if (view.colWidths) next.colWidths = { ...view.colWidths };
   if (view.rowHeights) next.rowHeights = { ...view.rowHeights };
   return next;
@@ -534,9 +606,26 @@ function sheetViewStateEquals(a, b) {
     return true;
   };
 
+  const mergedRangesEqual = (left, right) => {
+    const la = Array.isArray(left) ? left : [];
+    const ra = Array.isArray(right) ? right : [];
+    if (la.length !== ra.length) return false;
+    for (let i = 0; i < la.length; i += 1) {
+      const l = la[i];
+      const r = ra[i];
+      if (!l || !r) return false;
+      if (l.startRow !== r.startRow) return false;
+      if (l.endRow !== r.endRow) return false;
+      if (l.startCol !== r.startCol) return false;
+      if (l.endCol !== r.endCol) return false;
+    }
+    return true;
+  };
+
   return (
     a.frozenRows === b.frozenRows &&
     a.frozenCols === b.frozenCols &&
+    mergedRangesEqual(a.mergedRanges, b.mergedRanges) &&
     axisEquals(a.colWidths, b.colWidths) &&
     axisEquals(a.rowHeights, b.rowHeights)
   );
@@ -3715,6 +3804,70 @@ export class DocumentController {
   }
 
   /**
+   * List merged-cell regions for a sheet.
+   *
+   * Ranges use inclusive end coordinates (`endRow`/`endCol` are inclusive).
+   *
+   * @param {string} sheetId
+   * @returns {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }>}
+   */
+  getMergedRanges(sheetId) {
+    const view = this.model.getSheetView(sheetId);
+    return Array.isArray(view?.mergedRanges)
+      ? view.mergedRanges.map((r) => ({
+          startRow: r.startRow,
+          endRow: r.endRow,
+          startCol: r.startCol,
+          endCol: r.endCol,
+        }))
+      : [];
+  }
+
+  /**
+   * Resolve a cell inside a merged region to its anchor cell (top-left).
+   *
+   * @param {string} sheetId
+   * @param {CellCoord | string} coord
+   * @returns {{ row: number, col: number } | null}
+   */
+  getMergedMasterCell(sheetId, coord) {
+    const c = typeof coord === "string" ? parseA1(coord) : coord;
+    const ranges = this.getMergedRanges(sheetId);
+    for (const r of ranges) {
+      if (c.row < r.startRow || c.row > r.endRow) continue;
+      if (c.col < r.startCol || c.col > r.endCol) continue;
+      return { row: r.startRow, col: r.startCol };
+    }
+    return null;
+  }
+
+  /**
+   * Replace merged-cell regions for a sheet.
+   *
+   * @param {string} sheetId
+   * @param {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }>} mergedRanges
+   * @param {{ label?: string, mergeKey?: string }} [options]
+   */
+  setMergedRanges(sheetId, mergedRanges, options = {}) {
+    if (!this.#canEditSheetView(sheetId)) return;
+    const before = this.model.getSheetView(sheetId);
+    const after = cloneSheetViewState(before);
+    if (Array.isArray(mergedRanges) && mergedRanges.length > 0) {
+      after.mergedRanges = mergedRanges.map((r) => ({
+        startRow: r.startRow,
+        endRow: r.endRow,
+        startCol: r.startCol,
+        endCol: r.endCol,
+      }));
+    } else {
+      delete after.mergedRanges;
+    }
+    const normalized = normalizeSheetViewState(after);
+    if (sheetViewStateEquals(before, normalized)) return;
+    this.#applyUserSheetViewDeltas([{ sheetId, before, after: normalized }], options);
+  }
+
+  /**
    * Set frozen pane counts for a sheet.
    *
    * This is undoable and persisted in `encodeState()` snapshots.
@@ -3882,6 +4035,14 @@ export class DocumentController {
       if (meta.tabColor) out.tabColor = cloneTabColor(meta.tabColor);
       if (view.colWidths && Object.keys(view.colWidths).length > 0) out.colWidths = view.colWidths;
       if (view.rowHeights && Object.keys(view.rowHeights).length > 0) out.rowHeights = view.rowHeights;
+      if (Array.isArray(view.mergedRanges) && view.mergedRanges.length > 0) {
+        out.mergedRanges = view.mergedRanges.map((r) => ({
+          startRow: r.startRow,
+          endRow: r.endRow,
+          startCol: r.startCol,
+          endCol: r.endCol,
+        }));
+      }
 
       // Layered formatting (sheet/col/row).
       out.defaultFormat = sheet && sheet.defaultStyleId !== 0 ? this.styleTable.get(sheet.defaultStyleId) : null;
@@ -4097,6 +4258,7 @@ export class DocumentController {
         frozenCols: sheet?.frozenCols,
         colWidths: sheet?.colWidths,
         rowHeights: sheet?.rowHeights,
+        mergedRanges: sheet?.mergedRanges ?? sheet?.merged_ranges ?? sheet?.mergedRegions ?? sheet?.merged_regions,
       });
       /** @type {Map<string, CellState>} */
       const cellMap = new Map();
