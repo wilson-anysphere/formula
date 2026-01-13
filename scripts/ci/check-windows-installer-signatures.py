@@ -97,6 +97,21 @@ def _run_signtool(signtool: str, installer: Path) -> tuple[int, str]:
     out = proc.stdout.decode("utf-8", errors="replace")
     return (proc.returncode, out)
 
+def _assert_timestamped(signtool_output: str) -> str | None:
+    """
+    Return an error string if the signature appears to be missing a timestamp.
+
+    We rely on timestamping so signatures remain valid after the signing cert expires.
+    """
+
+    out_lc = signtool_output.lower()
+    # Typical signtool output includes either:
+    # - "The signature is timestamped."
+    # - "The signature is not timestamped."
+    if "not timestamped" in out_lc:
+        return "signature is not timestamped"
+    return None
+
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Verify Authenticode signatures on Windows installers.")
@@ -161,6 +176,10 @@ def main(argv: list[str]) -> int:
             if code != 0:
                 failures.append(f"{rel} (signtool exit code {code})\n{out}")
                 continue
+            ts_err = _assert_timestamped(out)
+            if ts_err is not None:
+                failures.append(f"{rel} ({ts_err})\n{out}")
+                continue
             print(f"sigcheck: OK {rel}")
 
     print(f"sigcheck: using signtool={signtool}")
@@ -179,4 +198,3 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-
