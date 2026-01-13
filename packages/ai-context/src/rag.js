@@ -114,7 +114,16 @@ export class InMemoryVectorStore {
       scored.push({ item, score: cosineSimilarity(queryEmbedding, item.embedding) });
     }
     throwIfAborted(signal);
-    scored.sort((a, b) => b.score - a.score);
+    scored.sort((a, b) => {
+      // Sort by score descending, but ensure deterministic ordering when multiple
+      // items share the same similarity score (e.g. identical embeddings).
+      if (a.score > b.score) return -1;
+      if (a.score < b.score) return 1;
+      // Tie-break by id so prompt context ordering is stable.
+      if (a.item.id < b.item.id) return -1;
+      if (a.item.id > b.item.id) return 1;
+      return 0;
+    });
     throwIfAborted(signal);
     return scored.slice(0, topK);
   }
