@@ -9628,7 +9628,10 @@ try {
     quitApp: async () => {
       await flushCollabLocalPersistenceBestEffort({
         session: app.getCollabSession?.() ?? null,
-        whenIdle: () => app.whenIdle(),
+        whenIdle: async () => {
+          await app.whenIdle();
+          await app.whenCollabBinderIdle();
+        },
       });
       if (!invoke) {
         window.close();
@@ -9641,7 +9644,10 @@ try {
     restartApp: async () => {
       await flushCollabLocalPersistenceBestEffort({
         session: app.getCollabSession?.() ?? null,
-        whenIdle: () => app.whenIdle(),
+        whenIdle: async () => {
+          await app.whenIdle();
+          await app.whenCollabBinderIdle();
+        },
       });
       if (!invoke) {
         window.close();
@@ -10307,7 +10313,10 @@ try {
       await drainBackendSync();
       await flushCollabLocalPersistenceBestEffort({
         session: app.getCollabSession?.() ?? null,
-        whenIdle: () => app.whenIdle(),
+        whenIdle: async () => {
+          await app.whenIdle();
+          await app.whenCollabBinderIdle();
+        },
       });
       if (!invoke) {
         window.close();

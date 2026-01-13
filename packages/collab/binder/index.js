@@ -2624,6 +2624,32 @@ export function bindYjsToDocumentController(options) {
       hydrateFromYjs();
       hydrateSheetViewsFromYjs();
     },
+    /**
+     * Wait for any pending binder work to settle.
+     *
+     * - DocumentController → Yjs writes are serialized through `writeChain`/`sheetWriteChain`
+     *   (encryption can be async).
+     * - Yjs → DocumentController applications are serialized through `applyChain`
+     *   (decryption can be async).
+     *
+     * This helper is best-effort and primarily intended for teardown flows (e.g. flushing
+     * local persistence before a hard process exit).
+     */
+    async whenIdle() {
+      const waitForChain = async (getChain) => {
+        while (true) {
+          const current = getChain();
+          await current.catch(() => {});
+          if (getChain() === current) return;
+        }
+      };
+
+      await Promise.all([
+        waitForChain(() => writeChain),
+        waitForChain(() => sheetWriteChain),
+        waitForChain(() => applyChain),
+      ]);
+    },
     destroy() {
       unsubscribe?.();
       cells.unobserveDeep(handleCellsDeepChange);

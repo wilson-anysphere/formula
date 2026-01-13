@@ -948,7 +948,7 @@ export class SpreadsheetApp {
   private readOnly = false;
   private readOnlyRole: string | null = null;
   private collabPermissionsUnsubscribe: (() => void) | null = null;
-  private collabBinder: { destroy: () => void; rehydrate?: () => void } | null = null;
+  private collabBinder: { destroy: () => void; rehydrate?: () => void; whenIdle?: () => Promise<void> } | null = null;
   private collabSelectionUnsubscribe: (() => void) | null = null;
   private collabPresenceUnsubscribe: (() => void) | null = null;
   private conflictUi: ConflictUiController | null = null;
@@ -3801,6 +3801,23 @@ export class SpreadsheetApp {
 
   getCollabSession(): CollabSession | null {
     return this.collabSession;
+  }
+
+  /**
+   * Best-effort helper to await any pending DocumentController ↔︎ Yjs binder work.
+   *
+   * This is primarily used during teardown/quit flows to reduce the chance of
+   * flushing local persistence before queued binder writes have been applied to
+   * the shared Yjs document (encryption can make binder writes async).
+   */
+  async whenCollabBinderIdle(): Promise<void> {
+    const binder = this.collabBinder;
+    if (!binder || typeof binder.whenIdle !== "function") return;
+    try {
+      await binder.whenIdle();
+    } catch {
+      // Best-effort; never block callers (e.g. quit) on binder errors.
+    }
   }
 
   getCollabEncryptionKeyStore(): CollabEncryptionKeyStore | null {

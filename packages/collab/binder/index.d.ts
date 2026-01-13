@@ -197,6 +197,13 @@ export interface BindYjsToDocumentControllerBinding {
    * imports an encryption key) without any Yjs document mutation.
    */
   rehydrate(): void;
+  /**
+   * Wait for any pending binder work to settle.
+   *
+   * Useful for teardown flows (e.g. flushing local persistence before a hard
+   * process exit).
+   */
+  whenIdle(): Promise<void>;
 }
 
 export function bindYjsToDocumentController(
