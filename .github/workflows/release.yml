@@ -224,17 +224,6 @@ jobs:
       - name: Validate Tauri updater config
         run: node scripts/check-updater-config.mjs
 
-      - name: Validate Windows WebView2 installer configuration
-        run: node scripts/ci/check-webview2-install-mode.mjs
-
-      - name: Validate Windows Authenticode timestamp URL (HTTPS)
-        run: node scripts/ci/check-windows-timestamp-url.mjs
-        env:
-          FORMULA_WINDOWS_TIMESTAMP_URL: ${{ steps.params.outputs.windows_timestamp_url }}
-
-      - name: Validate Windows downgrade / rollback support (allowDowngrades)
-        run: node scripts/ci/check-windows-allow-downgrades.mjs
-
       - name: Validate Tauri updater signing secrets
         # Forks/dry-runs often do not configure release secrets. We always validate updater
         # signing secrets in the upstream repo (so official releases can't ship without
@@ -247,6 +236,17 @@ jobs:
         env:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+      - name: Validate Windows WebView2 installer configuration
+        run: node scripts/ci/check-webview2-install-mode.mjs
+
+      - name: Validate Windows Authenticode timestamp URL (HTTPS)
+        run: node scripts/ci/check-windows-timestamp-url.mjs
+        env:
+          FORMULA_WINDOWS_TIMESTAMP_URL: ${{ steps.params.outputs.windows_timestamp_url }}
+
+      - name: Validate Windows downgrade / rollback support (allowDowngrades)
+        run: node scripts/ci/check-windows-allow-downgrades.mjs
 
       # Fail fast (before any platform builds start) if maintainers require code signing or if
       # signing secrets are partially configured. This avoids wasting build time and uploading
