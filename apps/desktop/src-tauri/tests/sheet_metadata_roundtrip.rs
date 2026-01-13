@@ -294,6 +294,16 @@ fn sheet_metadata_restores_from_on_disk_autosave_db() {
             });
         }
 
+        // Simulate imported metadata that the UI doesn't set directly (theme-based tab colors).
+        // The desktop host API currently only accepts explicit ARGB `rgb` updates.
+        if let Some(sheet3) = workbook.sheets.iter_mut().find(|s| s.id == "Sheet3") {
+            sheet3.tab_color = Some(TabColor {
+                theme: Some(1),
+                tint: Some(0.5),
+                ..Default::default()
+            });
+        }
+
         state
             .load_workbook_persistent(workbook, location.clone())
             .expect("load workbook");

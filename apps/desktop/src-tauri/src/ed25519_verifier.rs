@@ -76,6 +76,12 @@ mod tests {
     use ed25519_dalek::{Signer, SigningKey};
     use pkcs8::{EncodePublicKey, LineEnding};
 
+    const BROWSER_VERIFIER_JS_PATH: &str = "shared/extension-package/v2-browser.mjs";
+    const BROWSER_VERIFIER_JS_SOURCE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../shared/extension-package/v2-browser.mjs"
+    ));
+
     fn test_keypair() -> (SigningKey, String) {
         let signing_key = SigningKey::from_bytes(&[7u8; 32]);
         let public_key_pem = signing_key
@@ -188,5 +194,400 @@ mod tests {
             err.to_ascii_lowercase().contains("signature base64 is too large"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn browser_and_desktop_limits_stay_in_sync() {
+        let js_payload = js_const_usize(BROWSER_VERIFIER_JS_SOURCE, "MAX_SIGNATURE_PAYLOAD_BYTES")
+            .unwrap_or_else(|err| panic!("{err}"));
+        let js_pem = js_const_usize(BROWSER_VERIFIER_JS_SOURCE, "MAX_PUBLIC_KEY_PEM_BYTES")
+            .unwrap_or_else(|err| panic!("{err}"));
+        let js_sig_b64 = js_const_usize(BROWSER_VERIFIER_JS_SOURCE, "MAX_SIGNATURE_BASE64_BYTES")
+            .unwrap_or_else(|err| panic!("{err}"));
+
+        assert_eq!(
+            MAX_SIGNATURE_PAYLOAD_BYTES, js_payload,
+            "Ed25519 verifier limit drift: MAX_SIGNATURE_PAYLOAD_BYTES differs between Rust ({MAX_SIGNATURE_PAYLOAD_BYTES}) \
+             and {BROWSER_VERIFIER_JS_PATH} ({js_payload}). Update both sides to match."
+        );
+        assert_eq!(
+            MAX_PUBLIC_KEY_PEM_BYTES, js_pem,
+            "Ed25519 verifier limit drift: MAX_PUBLIC_KEY_PEM_BYTES differs between Rust ({MAX_PUBLIC_KEY_PEM_BYTES}) \
+             and {BROWSER_VERIFIER_JS_PATH} ({js_pem}). Update both sides to match."
+        );
+        assert_eq!(
+            MAX_SIGNATURE_BASE64_BYTES, js_sig_b64,
+            "Ed25519 verifier limit drift: MAX_SIGNATURE_BASE64_BYTES differs between Rust ({MAX_SIGNATURE_BASE64_BYTES}) \
+             and {BROWSER_VERIFIER_JS_PATH} ({js_sig_b64}). Update both sides to match."
+        );
+    }
+
+    fn js_const_usize(source: &str, name: &str) -> Result<usize, String> {
+        let expr = extract_js_const_expression(source, name)?;
+        parse_js_usize_expr(expr).map_err(|err| {
+            format!(
+                "Failed to parse `{name}` in {BROWSER_VERIFIER_JS_PATH}.\n\
+                 Found expression: `{expr}`\n\
+                 Error: {err}\n\
+                 Expected a top-level declaration like:\n\
+                   const {name} = 5 * 1024 * 1024;\n\
+                 (only integer literals, `*`, and parentheses are supported)."
+            )
+        })
+    }
+
+    fn extract_js_const_expression<'a>(source: &'a str, name: &str) -> Result<&'a str, String> {
+        let bytes = source.as_bytes();
+        let mut i = 0usize;
+        while i < bytes.len() {
+            skip_js_ws_and_comments(source, &mut i)?;
+            if i >= bytes.len() {
+                break;
+            }
+
+            match bytes[i] {
+                b'\'' | b'"' => {
+                    let quote = bytes[i];
+                    skip_js_string(source, &mut i, quote)?;
+                }
+                b'`' => {
+                    skip_js_template_literal(source, &mut i)?;
+                }
+                b if is_js_ident_start(b) => {
+                    let ident = parse_js_ident(source, &mut i);
+                    if ident != "const" {
+                        continue;
+                    }
+
+                    skip_js_ws_and_comments(source, &mut i)?;
+                    if i >= bytes.len() {
+                        break;
+                    }
+
+                    // Skip destructuring `const { ... } = ...;` / `const [ ... ] = ...;`
+                    if bytes[i] == b'{' || bytes[i] == b'[' {
+                        let semi = find_js_statement_terminator(source, i)?;
+                        i = semi + 1;
+                        continue;
+                    }
+
+                    if !is_js_ident_start(bytes[i]) {
+                        continue;
+                    }
+                    let var_name = parse_js_ident(source, &mut i);
+                    if var_name != name {
+                        // Skip the rest of this `const` statement so we don't accidentally treat
+                        // a later identifier as a new declaration.
+                        let semi = find_js_statement_terminator(source, i)?;
+                        i = semi + 1;
+                        continue;
+                    }
+
+                    skip_js_ws_and_comments(source, &mut i)?;
+                    if i >= bytes.len() || bytes[i] != b'=' {
+                        let line = 1 + bytes[..i].iter().filter(|b| **b == b'\n').count();
+                        return Err(format!(
+                            "Found `const {name}` in {BROWSER_VERIFIER_JS_PATH} (line {line}) but did not find `=`. \
+                             Expected `const {name} = <expr>;`."
+                        ));
+                    }
+                    i += 1; // '='
+
+                    let expr_start = i;
+                    let semi = find_js_statement_terminator(source, i)?;
+                    let expr = source[expr_start..semi].trim();
+                    if expr.is_empty() {
+                        let line = 1 + bytes[..expr_start].iter().filter(|b| **b == b'\n').count();
+                        return Err(format!(
+                            "Found `const {name}` in {BROWSER_VERIFIER_JS_PATH} (line {line}) but the assigned expression was empty."
+                        ));
+                    }
+                    return Ok(expr);
+                }
+                _ => {
+                    i += 1;
+                }
+            }
+        }
+
+        Err(format!(
+            "Failed to find `{name}` constant in {BROWSER_VERIFIER_JS_PATH}.\n\
+             Expected a top-level declaration like:\n\
+               const {name} = 5 * 1024 * 1024;\n\
+             If the browser verifier was refactored, update this test parser accordingly so Rust and JS limits stay in sync."
+        ))
+    }
+
+    fn skip_js_ws_and_comments(source: &str, i: &mut usize) -> Result<(), String> {
+        let bytes = source.as_bytes();
+        while *i < bytes.len() {
+            match bytes[*i] {
+                b' ' | b'\t' | b'\n' | b'\r' => *i += 1,
+                b'/' if *i + 1 < bytes.len() && bytes[*i + 1] == b'/' => {
+                    *i += 2;
+                    while *i < bytes.len() && bytes[*i] != b'\n' {
+                        *i += 1;
+                    }
+                }
+                b'/' if *i + 1 < bytes.len() && bytes[*i + 1] == b'*' => {
+                    *i += 2;
+                    let mut found = false;
+                    while *i + 1 < bytes.len() {
+                        if bytes[*i] == b'*' && bytes[*i + 1] == b'/' {
+                            *i += 2;
+                            found = true;
+                            break;
+                        }
+                        *i += 1;
+                    }
+                    if !found {
+                        return Err(format!(
+                            "Unterminated block comment while parsing {BROWSER_VERIFIER_JS_PATH}"
+                        ));
+                    }
+                }
+                _ => break,
+            }
+        }
+        Ok(())
+    }
+
+    fn skip_js_string(source: &str, i: &mut usize, quote: u8) -> Result<(), String> {
+        let bytes = source.as_bytes();
+        debug_assert!(quote == b'\'' || quote == b'"');
+        *i += 1; // opening quote
+        while *i < bytes.len() {
+            match bytes[*i] {
+                b'\\' => *i = (*i + 2).min(bytes.len()),
+                b if b == quote => {
+                    *i += 1;
+                    return Ok(());
+                }
+                _ => *i += 1,
+            }
+        }
+        Err(format!(
+            "Unterminated string literal while parsing {BROWSER_VERIFIER_JS_PATH}"
+        ))
+    }
+
+    fn skip_js_template_literal(source: &str, i: &mut usize) -> Result<(), String> {
+        let bytes = source.as_bytes();
+        debug_assert!(bytes.get(*i) == Some(&b'`'));
+        *i += 1; // opening backtick
+        while *i < bytes.len() {
+            match bytes[*i] {
+                b'\\' => *i = (*i + 2).min(bytes.len()),
+                b'`' => {
+                    *i += 1;
+                    return Ok(());
+                }
+                _ => *i += 1,
+            }
+        }
+        Err(format!(
+            "Unterminated template literal while parsing {BROWSER_VERIFIER_JS_PATH}"
+        ))
+    }
+
+    fn find_js_statement_terminator(source: &str, mut i: usize) -> Result<usize, String> {
+        let bytes = source.as_bytes();
+        while i < bytes.len() {
+            match bytes[i] {
+                b';' => return Ok(i),
+                b'\'' | b'"' => {
+                    let quote = bytes[i];
+                    skip_js_string(source, &mut i, quote)?;
+                }
+                b'`' => {
+                    skip_js_template_literal(source, &mut i)?;
+                }
+                b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'/' => {
+                    i += 2;
+                    while i < bytes.len() && bytes[i] != b'\n' {
+                        i += 1;
+                    }
+                }
+                b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'*' => {
+                    i += 2;
+                    let mut found = false;
+                    while i + 1 < bytes.len() {
+                        if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                            i += 2;
+                            found = true;
+                            break;
+                        }
+                        i += 1;
+                    }
+                    if !found {
+                        return Err(format!(
+                            "Unterminated block comment while parsing {BROWSER_VERIFIER_JS_PATH}"
+                        ));
+                    }
+                }
+                _ => i += 1,
+            }
+        }
+        Err(format!(
+            "Failed to find statement terminator `;` while parsing {BROWSER_VERIFIER_JS_PATH}"
+        ))
+    }
+
+    fn is_js_ident_start(b: u8) -> bool {
+        b.is_ascii_alphabetic() || b == b'_' || b == b'$'
+    }
+
+    fn is_js_ident_continue(b: u8) -> bool {
+        is_js_ident_start(b) || b.is_ascii_digit()
+    }
+
+    fn parse_js_ident<'a>(source: &'a str, i: &mut usize) -> &'a str {
+        let bytes = source.as_bytes();
+        let start = *i;
+        *i += 1;
+        while *i < bytes.len() && is_js_ident_continue(bytes[*i]) {
+            *i += 1;
+        }
+        &source[start..*i]
+    }
+
+    fn parse_js_usize_expr(expr: &str) -> Result<usize, String> {
+        let expr = strip_js_comments(expr)?;
+        let tokens = tokenize_js_mul_expr(&expr)?;
+        let mut idx = 0usize;
+        let value = parse_js_mul_expr(&tokens, &mut idx)?;
+        if idx != tokens.len() {
+            return Err(format!(
+                "Unexpected trailing tokens after parsing expression: `{}`",
+                &expr
+            ));
+        }
+        usize::try_from(value).map_err(|_| "Value does not fit in usize".to_string())
+    }
+
+    fn strip_js_comments(input: &str) -> Result<String, String> {
+        let bytes = input.as_bytes();
+        let mut out = String::with_capacity(input.len());
+        let mut i = 0usize;
+        while i < bytes.len() {
+            if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                i += 2;
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                i += 2;
+                let mut found = false;
+                while i + 1 < bytes.len() {
+                    if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                        i += 2;
+                        found = true;
+                        break;
+                    }
+                    i += 1;
+                }
+                if !found {
+                    return Err("Unterminated block comment in expression".to_string());
+                }
+                continue;
+            }
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+        Ok(out)
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    enum JsTok {
+        Num(u64),
+        Star,
+        LParen,
+        RParen,
+    }
+
+    fn tokenize_js_mul_expr(expr: &str) -> Result<Vec<JsTok>, String> {
+        let bytes = expr.as_bytes();
+        let mut tokens = Vec::new();
+        let mut i = 0usize;
+        while i < bytes.len() {
+            match bytes[i] {
+                b' ' | b'\t' | b'\n' | b'\r' => {
+                    i += 1;
+                }
+                b'(' => {
+                    tokens.push(JsTok::LParen);
+                    i += 1;
+                }
+                b')' => {
+                    tokens.push(JsTok::RParen);
+                    i += 1;
+                }
+                b'*' => {
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                        return Err("Unsupported operator `**` (use explicit `*` multiplications)".to_string());
+                    }
+                    tokens.push(JsTok::Star);
+                    i += 1;
+                }
+                b'0'..=b'9' => {
+                    let start = i;
+                    i += 1;
+                    while i < bytes.len() {
+                        match bytes[i] {
+                            b'0'..=b'9' | b'_' => i += 1,
+                            _ => break,
+                        }
+                    }
+                    let raw = &expr[start..i];
+                    let normalized: String = raw.chars().filter(|c| *c != '_').collect();
+                    let value = normalized
+                        .parse::<u64>()
+                        .map_err(|err| format!("Invalid integer literal `{raw}`: {err}"))?;
+                    tokens.push(JsTok::Num(value));
+                }
+                other => {
+                    return Err(format!(
+                        "Unexpected character `{}` in expression `{expr}`",
+                        other as char
+                    ));
+                }
+            }
+        }
+        Ok(tokens)
+    }
+
+    fn parse_js_mul_expr(tokens: &[JsTok], idx: &mut usize) -> Result<u64, String> {
+        let mut value = parse_js_term(tokens, idx)?;
+        while matches!(tokens.get(*idx), Some(JsTok::Star)) {
+            *idx += 1; // '*'
+            let rhs = parse_js_term(tokens, idx)?;
+            value = value
+                .checked_mul(rhs)
+                .ok_or_else(|| "Expression overflowed u64".to_string())?;
+        }
+        Ok(value)
+    }
+
+    fn parse_js_term(tokens: &[JsTok], idx: &mut usize) -> Result<u64, String> {
+        match tokens.get(*idx).copied() {
+            Some(JsTok::Num(n)) => {
+                *idx += 1;
+                Ok(n)
+            }
+            Some(JsTok::LParen) => {
+                *idx += 1;
+                let value = parse_js_mul_expr(tokens, idx)?;
+                match tokens.get(*idx) {
+                    Some(JsTok::RParen) => {
+                        *idx += 1;
+                        Ok(value)
+                    }
+                    _ => Err("Expected `)`".to_string()),
+                }
+            }
+            _ => Err("Expected an integer literal or parenthesized expression".to_string()),
+        }
     }
 }
