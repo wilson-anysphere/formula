@@ -20,7 +20,15 @@ import {
 } from "@formula/collab-encryption";
 import type { CollabPersistence, CollabPersistenceBinding } from "@formula/collab-persistence";
 
-import { assertValidRole, getCellPermissions, maskCellValue, normalizeRestriction } from "../../permissions/index.js";
+import {
+  assertValidRole,
+  getCellPermissions,
+  maskCellValue,
+  normalizeRestriction,
+  roleCanComment,
+  roleCanEdit,
+  roleCanShare,
+} from "../../permissions/index.js";
 import {
   makeCellKey as makeCellKeyImpl,
   normalizeCellKey as normalizeCellKeyImpl,
@@ -1513,6 +1521,61 @@ export class CollabSession {
     };
   }
 
+  /**
+   * Returns the current session permissions, or null when `setPermissions()` has
+   * never been called.
+   *
+   * Note: This returns a defensive copy of the permissions object so consumers
+   * can't mutate the session's internal `rangeRestrictions` array by accident.
+   */
+  getPermissions(): SessionPermissions | null {
+    const permissions = this.permissions;
+    if (!permissions) return null;
+    return {
+      role: permissions.role,
+      userId: permissions.userId ?? null,
+      rangeRestrictions: Array.isArray(permissions.rangeRestrictions) ? [...permissions.rangeRestrictions] : [],
+    };
+  }
+
+  /**
+   * Convenience accessor for the current document role, or null when
+   * `setPermissions()` has never been called.
+   */
+  getRole(): DocumentRole | null {
+    return this.permissions?.role ?? null;
+  }
+
+  /**
+   * Returns true when the current role can create comments/annotations.
+   * Defaults to false when permissions are unset.
+   */
+  canComment(): boolean {
+    const role = this.permissions?.role ?? null;
+    if (!role) return false;
+    return roleCanComment(role);
+  }
+
+  /**
+   * Returns true when the current role can share/manage access (typically
+   * owner/admin only). Defaults to false when permissions are unset.
+   */
+  canShare(): boolean {
+    const role = this.permissions?.role ?? null;
+    if (!role) return false;
+    return roleCanShare(role);
+  }
+
+  /**
+   * Returns true when permissions are configured and the current role is
+   * read-only (i.e. cannot edit).
+   */
+  isReadOnly(): boolean {
+    const role = this.permissions?.role ?? null;
+    if (!role) return false;
+    return !roleCanEdit(role);
+  }
+
   canEditCell(cell: CellAddress): boolean {
     const canEditByPermissions = this.permissions
       ? getCellPermissions({
@@ -1717,17 +1780,36 @@ export class CollabSession {
     this.doc.transact(fn, this.origin);
   }
 
-  async setCellValue(cellKey: string, value: unknown): Promise<void> {
+  /**
+   * Sets a cell value directly in the shared Yjs document.
+   *
+   * When session permissions are configured via `setPermissions()`, this method
+   * enforces edit permissions and throws when the caller cannot edit the target
+   * cell.
+   *
+   * Escape hatch: internal tooling (e.g. migrations/admin repair scripts) may
+   * bypass permission checks by passing `{ ignorePermissions: true }`. This
+   * does *not* bypass encryption invariants.
+   */
+  async setCellValue(cellKey: string, value: unknown, options?: { ignorePermissions?: boolean }): Promise<void> {
+    const ignorePermissions = options?.ignorePermissions === true;
     const userId = this.permissions?.userId ?? null;
 
     const cellData = this.cells.get(cellKey);
     const existingCell = getYMapCell(cellData);
     const parsedMaybe = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
+
+    if (this.permissions && !ignorePermissions && parsedMaybe && !this.canEditCell(parsedMaybe)) {
+      throw new Error(`Permission denied: cannot edit cell ${makeCellKey(parsedMaybe)}`);
+    }
+
     const existingEnc = existingCell?.get("enc") ?? (parsedMaybe ? this.getEncryptedPayloadForCell(parsedMaybe) : undefined);
 
     const needsCellAddress = this.encryption != null || existingEnc !== undefined;
     const parsed = needsCellAddress ? parsedMaybe : null;
-    if (needsCellAddress && !parsed) throw new Error(`Invalid cellKey: ${cellKey}`);
+    if (needsCellAddress && !parsed) {
+      throw new Error(`Invalid cellKey "${cellKey}": expected "SheetId:row:col"`);
+    }
 
     const key = parsed && this.encryption ? this.encryption.keyForCell(parsed) : null;
     const shouldEncrypt =
@@ -1829,15 +1911,38 @@ export class CollabSession {
     });
   }
 
-  async setCellFormula(cellKey: string, formula: string | null): Promise<void> {
+  /**
+   * Sets a cell formula directly in the shared Yjs document.
+   *
+   * When session permissions are configured via `setPermissions()`, this method
+   * enforces edit permissions and throws when the caller cannot edit the target
+   * cell.
+   *
+   * Escape hatch: internal tooling (e.g. migrations/admin repair scripts) may
+   * bypass permission checks by passing `{ ignorePermissions: true }`. This
+   * does *not* bypass encryption invariants.
+   */
+  async setCellFormula(
+    cellKey: string,
+    formula: string | null,
+    options?: { ignorePermissions?: boolean }
+  ): Promise<void> {
+    const ignorePermissions = options?.ignorePermissions === true;
     const cellData = this.cells.get(cellKey);
     const existingCell = getYMapCell(cellData);
     const parsedMaybe = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
+
+    if (this.permissions && !ignorePermissions && parsedMaybe && !this.canEditCell(parsedMaybe)) {
+      throw new Error(`Permission denied: cannot edit cell ${makeCellKey(parsedMaybe)}`);
+    }
+
     const existingEnc = existingCell?.get("enc") ?? (parsedMaybe ? this.getEncryptedPayloadForCell(parsedMaybe) : undefined);
 
     const needsCellAddress = this.encryption != null || existingEnc !== undefined;
     const parsed = needsCellAddress ? parsedMaybe : null;
-    if (needsCellAddress && !parsed) throw new Error(`Invalid cellKey: ${cellKey}`);
+    if (needsCellAddress && !parsed) {
+      throw new Error(`Invalid cellKey "${cellKey}": expected "SheetId:row:col"`);
+    }
 
     const key = parsed && this.encryption ? this.encryption.keyForCell(parsed) : null;
     const wantsEncryption =
