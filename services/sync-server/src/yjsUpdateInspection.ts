@@ -214,17 +214,17 @@ function resolveEffectiveParentInfo(
     return { ok: false, kind: "unknown", reason: "not_item_struct" };
   }
 
-  const visited = opts?.visited ?? new Set<unknown>();
-  if (visited.has(item)) {
-    return { ok: false, kind: "unknown", reason: "cycle_in_parent_resolution" };
-  }
-  visited.add(item);
-
   const parent = item.parent;
   const parentSub = typeof item.parentSub === "string" ? item.parentSub : null;
   if (parent !== null && parent !== undefined) {
     return { ok: true, parent, parentSub };
   }
+
+  const visited = opts?.visited ?? new Set<unknown>();
+  if (visited.has(item)) {
+    return { ok: false, kind: "unknown", reason: "cycle_in_parent_resolution" };
+  }
+  visited.add(item);
 
   // Mirror the "copy parent info from origin/rightOrigin" behavior from Item.getMissing.
   const originId = isIdLike(item.origin) ? item.origin : null;
@@ -253,6 +253,10 @@ function resolveEffectiveParentInfo(
 
 type PathResolution =
   | { ok: true; root: string; keyPath: string[] }
+  | { ok: false; kind: "gc" | "unknown"; reason: string };
+
+type RootResolution =
+  | { ok: true; root: string }
   | { ok: false; kind: "gc" | "unknown"; reason: string };
 
 function computePathForType(
@@ -305,6 +309,82 @@ function computePathForType(
   }
 
   return { ok: true, root, keyPath: keys };
+}
+
+function computeRootForType(type: AbstractTypeLike): RootResolution {
+  let current: unknown = type;
+
+  for (let i = 0; i < MAX_RESOLUTION_DEPTH; i += 1) {
+    if (!isAbstractTypeLike(current)) {
+      return { ok: false, kind: "unknown", reason: "type_walk_non_abstract_type" };
+    }
+    const insertionItem = (current as any)._item;
+    if (!insertionItem) {
+      // `current` is a root type.
+      let root: string | null = null;
+      try {
+        root = (Y as any).findRootTypeKey(current);
+      } catch {
+        root = null;
+      }
+      if (typeof root !== "string") {
+        return { ok: false, kind: "unknown", reason: "unable_to_find_root_type_key" };
+      }
+      return { ok: true, root };
+    }
+
+    current = (insertionItem as any).parent;
+    if (current == null) {
+      return { ok: false, kind: "unknown", reason: "type_walk_missing_parent" };
+    }
+  }
+
+  // We didn't reach a root type within our depth budget, so we can't confidently resolve the root.
+  return { ok: false, kind: "unknown", reason: "max_type_walk_depth" };
+}
+
+function computeRootForItem(
+  item: unknown,
+  ctx: { decodedIndex: StructIndex; store: StoreLike | undefined },
+  depth: number = 0
+): RootResolution {
+  if (depth > MAX_RESOLUTION_DEPTH) {
+    return { ok: false, kind: "unknown", reason: "max_item_walk_depth" };
+  }
+  if (!isItemStructLike(item)) {
+    return { ok: false, kind: "unknown", reason: "not_item_struct" };
+  }
+
+  let parent: unknown = item.parent;
+  if (parent === null || parent === undefined) {
+    const parentRes = resolveEffectiveParentInfo(item, ctx);
+    if (!parentRes.ok) return parentRes;
+    parent = parentRes.parent;
+  }
+
+  if (typeof parent === "string") {
+    if (parent.length === 0) {
+      return { ok: false, kind: "unknown", reason: "missing_container_root" };
+    }
+    return { ok: true, root: parent };
+  }
+
+  if (isIdLike(parent)) {
+    const insertionStruct = resolveStructById({ id: parent, decodedIndex: ctx.decodedIndex, store: ctx.store });
+    if (!insertionStruct) {
+      return { ok: false, kind: "unknown", reason: "parent_id_not_found" };
+    }
+    if (isGcStruct(insertionStruct)) {
+      return { ok: false, kind: "gc", reason: "parent_id_points_to_gc" };
+    }
+    return computeRootForItem(insertionStruct, ctx, depth + 1);
+  }
+
+  if (isAbstractTypeLike(parent)) {
+    return computeRootForType(parent);
+  }
+
+  return { ok: false, kind: "unknown", reason: "unsupported_parent_type" };
 }
 
 function computeRootAndKeyPathForItem(
@@ -441,6 +521,171 @@ function safeDecodeUpdate(update: Uint8Array): { structs: unknown[]; ds: unknown
   }
 
   return decodeV2();
+}
+
+/**
+ * Optimized reserved-root inspection intended for per-message websocket guards.
+ *
+ * This avoids building `keyPath` arrays for every struct in the common case where the
+ * update does *not* touch a reserved root. If a reserved root touch is detected, we
+ * compute the full `keyPath` only for that first touch (sufficient for logging).
+ */
+export function inspectUpdateForReservedRootGuard(params: InspectUpdateParams): InspectUpdateResult {
+  const maxTouches = params.maxTouches ?? 1;
+  const touches: ReservedRootTouch[] = [];
+
+  const ydoc = params.ydoc as DocLike;
+  const store = ydoc?.store;
+  if (!store || store.pendingStructs || store.pendingDs) {
+    return failClosed("ydoc_store_pending");
+  }
+
+  const decoded = safeDecodeUpdate(params.update);
+  if (!decoded) {
+    return failClosed("decode_failed");
+  }
+
+  const decodedIndex = buildStructIndex(decoded.structs);
+
+  const maybeReserved = (root: string) =>
+    isReservedRoot(root, params.reservedRootNames, params.reservedRootPrefixes);
+
+  const recordFirstTouchForStruct = (struct: unknown, kind: ReservedRootTouchKind) => {
+    const pathRes = computeRootAndKeyPathForItem(struct, { decodedIndex, store });
+    if (!pathRes.ok) {
+      return failClosed(pathRes.reason, pathRes.kind);
+    }
+    touches.push({ root: pathRes.root, keyPath: pathRes.keyPath, kind });
+    return touches.length >= maxTouches ? { touchesReserved: true, touches } : null;
+  };
+
+  // Inspect newly inserted structs.
+  for (const struct of decoded.structs) {
+    if (!isItemStructLike(struct)) continue;
+    const rootRes = computeRootForItem(struct, { decodedIndex, store });
+    if (!rootRes.ok) {
+      // If we can't confidently inspect, fail closed.
+      return failClosed(rootRes.reason, rootRes.kind);
+    }
+    if (maybeReserved(rootRes.root)) {
+      const res = recordFirstTouchForStruct(struct, "insert");
+      if (res) return res;
+    }
+  }
+
+  // Inspect delete set ranges using the server doc store.
+  const ds = decoded.ds as any;
+  const dsClients: Map<number, unknown[]> | null =
+    ds && ds.clients instanceof Map ? (ds.clients as Map<number, unknown[]>) : null;
+
+  if (dsClients) {
+    for (const [client, deletes] of dsClients.entries()) {
+      if (!Array.isArray(deletes) || deletes.length === 0) continue;
+      const storeStructs = store.clients?.get(client) ?? null;
+      const decodedStructs = decodedIndex.get(client) ?? null;
+      if (!storeStructs && !decodedStructs) {
+        return failClosed("delete_set_client_missing_in_store_and_update");
+      }
+
+      const storeState = (() => {
+        if (!storeStructs || storeStructs.length === 0) return 0;
+        const last = storeStructs[storeStructs.length - 1];
+        const lastId = safeStructId(last);
+        const lastLen = safeStructLen(last);
+        if (!lastId || lastLen === null) return null;
+        return lastId.clock + lastLen;
+      })();
+
+      const decodedState = (() => {
+        if (!decodedStructs || decodedStructs.length === 0) return 0;
+        const last = decodedStructs[decodedStructs.length - 1];
+        const lastId = safeStructId(last);
+        const lastLen = safeStructLen(last);
+        if (!lastId || lastLen === null) return null;
+        return lastId.clock + lastLen;
+      })();
+
+      if (storeState === null || decodedState === null) {
+        return failClosed("malformed_store_or_update_struct");
+      }
+
+      const clientState = Math.max(storeState, decodedState);
+
+      for (const del of deletes) {
+        const clock = typeof (del as any)?.clock === "number" ? (del as any).clock : null;
+        const len = typeof (del as any)?.len === "number" ? (del as any).len : null;
+        if (clock === null || len === null) {
+          return failClosed("malformed_delete_set");
+        }
+        if (len <= 0) continue;
+
+        const endClock = clock + len;
+        if (clock < 0 || endClock > clientState) {
+          // We can't resolve the full delete range against the current store state
+          // without splitting or pending updates. Fail closed.
+          return failClosed("delete_set_range_out_of_bounds");
+        }
+
+        const processStructArray = (structs: readonly unknown[]) => {
+          // Find first struct that overlaps [clock, endClock)
+          let index = lowerBoundByClock(structs, clock);
+          if (index > 0 && structRangeContains(structs[index - 1], clock)) {
+            index -= 1;
+          }
+          for (let i = index; i < structs.length; i += 1) {
+            const s = structs[i];
+            const sId = safeStructId(s);
+            const sLen = safeStructLen(s);
+            if (!sId || sLen === null) {
+              throw new Error("malformed_struct");
+            }
+            if (sId.clock >= endClock) break;
+            // s overlaps [clock, endClock)
+            if (!isItemStructLike(s)) continue;
+            const rootRes = computeRootForItem(s, { decodedIndex, store });
+            if (!rootRes.ok) {
+              throw new Error(`${rootRes.kind}:${rootRes.reason}`);
+            }
+            if (maybeReserved(rootRes.root)) {
+              const pathRes = computeRootAndKeyPathForItem(s, { decodedIndex, store });
+              if (!pathRes.ok) {
+                throw new Error(`${pathRes.kind}:${pathRes.reason}`);
+              }
+              touches.push({ root: pathRes.root, keyPath: pathRes.keyPath, kind: "delete" });
+              if (touches.length >= maxTouches) return;
+            }
+          }
+        };
+
+        // Ensure we can resolve the starting point in either store structs or update structs.
+        const startId: IDLike = { client, clock };
+        const startInStore = storeStructs ? findStructInSortedArray(storeStructs, startId) : null;
+        const startInUpdate = decodedStructs ? findStructInSortedArray(decodedStructs, startId) : null;
+        if (!startInStore && !startInUpdate) {
+          return failClosed("delete_set_start_not_found");
+        }
+
+        try {
+          if (storeStructs) processStructArray(storeStructs);
+          if (touches.length >= maxTouches) {
+            return { touchesReserved: true, touches: touches.slice(0, maxTouches) };
+          }
+          if (decodedStructs) processStructArray(decodedStructs);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.startsWith("gc:")) return failClosed(msg.slice(3), "gc");
+          if (msg.startsWith("unknown:")) return failClosed(msg.slice(8), "unknown");
+          return failClosed("malformed_store_struct");
+        }
+
+        if (touches.length >= maxTouches) {
+          return { touchesReserved: true, touches: touches.slice(0, maxTouches) };
+        }
+      }
+    }
+  }
+
+  return { touchesReserved: touches.length > 0, touches };
 }
 
 export function inspectUpdate(params: InspectUpdateParams): InspectUpdateResult {

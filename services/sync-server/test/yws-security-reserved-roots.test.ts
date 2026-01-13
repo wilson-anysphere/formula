@@ -261,6 +261,99 @@ for (const innerType of [1, 2]) {
     );
 
     test(
+      `reservedRootGuard: rejects nested reserved root mutation derived from store (innerType=${innerType}, role=${role})`,
+      () => {
+        const docName = `doc-reserved-roots-nested-store-${innerType}-${role}`;
+        const userId = "attacker";
+
+        const serverDoc = new Y.Doc();
+        serverDoc.transact(() => {
+          const record = new Y.Map<any>();
+          record.set("checkpointLocked", false);
+          serverDoc.getMap("versions").set("v1", record);
+        });
+
+        const attackerDoc = new Y.Doc();
+        Y.applyUpdate(attackerDoc, Y.encodeStateAsUpdate(serverDoc));
+        const recordClient = attackerDoc.getMap("versions").get("v1") as any;
+        assert.ok(recordClient && typeof recordClient.set === "function");
+        recordClient.set("checkpointLocked", true);
+
+        const update = Y.encodeStateAsUpdate(attackerDoc, Y.encodeStateVector(serverDoc));
+
+        // Ensure this scenario actually exercises the "parent omitted, copy from origin"
+        // encoding where the root/keyPath must be derived from the server store.
+        const decoded = Y.decodeUpdate(update) as any;
+        const sawParentOmitted =
+          Array.isArray(decoded?.structs) &&
+          decoded.structs.some(
+            (s: any) =>
+              s &&
+              typeof s === "object" &&
+              "id" in s &&
+              "parent" in s &&
+              (s as any).parent == null
+          );
+        assert.equal(sawParentOmitted, true);
+
+        const message = concatUint8Arrays([
+          encodeVarUint(0), // sync outer message
+          encodeVarUint(innerType), // SyncStep2 (1) or Update (2)
+          encodeVarUint(update.length),
+          update,
+        ]);
+
+        const ws = new FakeWebSocket() as unknown as WebSocket;
+        const warnCalls: Array<{ obj: Record<string, unknown>; event: string }> = [];
+        const logger = {
+          warn(obj: Record<string, unknown>, event: string) {
+            warnCalls.push({ obj, event });
+          },
+        } as any;
+
+        installYwsSecurity(ws, {
+          docName,
+          auth: {
+            userId,
+            tokenType: "jwt",
+            docId: docName,
+            orgId: null,
+            role,
+          },
+          logger,
+          ydoc: serverDoc,
+          limits: {
+            maxMessageBytes: 10_000_000,
+            maxAwarenessStateBytes: 10_000_000,
+            maxAwarenessEntries: 1_000,
+          },
+        });
+
+        let delivered = 0;
+        ws.on("message", () => {
+          delivered += 1;
+        });
+
+        ws.emit("message", message, true);
+
+        assert.equal(delivered, 0);
+        assert.ok((ws as any).closeCalls.length >= 1);
+        assert.deepEqual((ws as any).closeCalls[0], {
+          code: 1008,
+          reason: "reserved root mutation",
+        });
+
+        assert.equal(warnCalls.length, 1);
+        assert.equal(warnCalls[0].event, "reserved_root_mutation_rejected");
+        assert.equal(warnCalls[0].obj.docName, docName);
+        assert.equal(warnCalls[0].obj.userId, userId);
+        assert.equal(warnCalls[0].obj.role, role);
+        assert.equal(warnCalls[0].obj.root, "versions");
+        assert.deepEqual(warnCalls[0].obj.keyPath, ["v1", "checkpointLocked"]);
+      }
+    );
+
+    test(
       `reservedRootGuard: rejects delete-only reserved root mutation (innerType=${innerType}, role=${role})`,
       () => {
         const docName = `doc-reserved-roots-delete-${innerType}-${role}`;

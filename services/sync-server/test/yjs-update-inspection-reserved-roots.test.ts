@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { inspectUpdate } from "../src/yjsUpdateInspection.js";
+import { inspectUpdate, inspectUpdateForReservedRootGuard } from "../src/yjsUpdateInspection.js";
 import { Y } from "./yjs-interop.ts";
 
 const reservedRootNames = new Set<string>(["versions", "versionsMeta"]);
@@ -665,4 +665,47 @@ test("yjs update inspection: decodes v2 updates via fallback", () => {
 
   serverDoc.destroy();
   clientDoc.destroy();
+});
+
+test("yjs update inspection (optimized): matches inspectUpdate root + keyPath on rejection", () => {
+  const serverDoc = new Y.Doc();
+  serverDoc.getMap("versions").set("v1", new Y.Map());
+
+  const attackerDoc = new Y.Doc();
+  Y.applyUpdate(attackerDoc, Y.encodeStateAsUpdate(serverDoc));
+  const recordClient = attackerDoc.getMap("versions").get("v1") as any;
+  assert.ok(recordClient && typeof recordClient.set === "function");
+  recordClient.set("checkpointLocked", true);
+
+  const update = Y.encodeStateAsUpdate(attackerDoc, Y.encodeStateVector(serverDoc));
+
+  const full = inspectUpdate({
+    ydoc: serverDoc,
+    update,
+    reservedRootNames,
+    reservedRootPrefixes,
+    maxTouches: 1,
+  });
+  const optimized = inspectUpdateForReservedRootGuard({
+    ydoc: serverDoc,
+    update,
+    reservedRootNames,
+    reservedRootPrefixes,
+    maxTouches: 1,
+  });
+
+  assert.equal(full.touchesReserved, true);
+  assert.equal(optimized.touchesReserved, true);
+  assert.equal(full.unknownReason, optimized.unknownReason);
+
+  const fullTouch = full.touches[0];
+  const optTouch = optimized.touches[0];
+  assert.ok(fullTouch);
+  assert.ok(optTouch);
+  assert.equal(optTouch.root, fullTouch.root);
+  assert.deepEqual(optTouch.keyPath, fullTouch.keyPath);
+  assert.equal(optTouch.kind, fullTouch.kind);
+
+  serverDoc.destroy();
+  attackerDoc.destroy();
 });

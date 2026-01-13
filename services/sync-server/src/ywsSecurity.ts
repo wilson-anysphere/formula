@@ -8,7 +8,7 @@ import type { SyncServerMetrics } from "./metrics.js";
 import { Y } from "./yjs.js";
 import {
   collectTouchedRootMapKeys,
-  inspectUpdate,
+  inspectUpdateForReservedRootGuard,
   type ReservedRootTouchKind,
 } from "./yjsUpdateInspection.js";
 
@@ -721,7 +721,7 @@ export function installYwsSecurity(
           return { drop: true };
         }
 
-        const inspection = inspectUpdate({
+        const inspection = inspectUpdateForReservedRootGuard({
           ydoc,
           update: updateBytes,
           reservedRootNames,
@@ -789,7 +789,7 @@ export function installYwsSecurity(
       }
 
       if (reservedRootGuardEnabled && isSyncUpdate && updateBytes) {
-        const inspection = inspectUpdate({
+        const inspection = inspectUpdateForReservedRootGuard({
           ydoc,
           update: updateBytes,
           reservedRootNames,
