@@ -385,9 +385,17 @@ jobs:
           shopt -s nullglob
 
           # Prefer the universal target output when present (Tauri's universal build writes
-          # to `target/universal-apple-darwin/...`). Fall back to searching the entire
-          # target dir so we fail loudly with useful debugging output if layouts change.
+          # to `target/universal-apple-darwin/...`). Fall back to searching common Cargo
+          # target roots so we fail loudly with useful debugging output if layouts change.
+          #
+          # Note: this repo is a Cargo workspace, so building from `apps/desktop/src-tauri`
+          # typically writes to the workspace root `target/` directory (not `src-tauri/target`).
+          search_roots=(
+            target
+            apps/desktop/src-tauri/target
+          )
           candidates=(
+            target/universal-apple-darwin/release/bundle/macos/Formula.app/Contents/MacOS/formula-desktop
             apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Formula.app/Contents/MacOS/formula-desktop
           )
 
@@ -400,18 +408,36 @@ jobs:
           done
 
           if [[ -z "$bin_path" ]]; then
-            bin_path="$(find apps/desktop/src-tauri/target -type f -path "*/universal-apple-darwin/*/Formula.app/Contents/MacOS/formula-desktop" | head -n 1 || true)"
+            for root in "${search_roots[@]}"; do
+              if [[ -d "$root" ]]; then
+                bin_path="$(find "$root" -type f -path "*/universal-apple-darwin/*/Formula.app/Contents/MacOS/formula-desktop" | head -n 1 || true)"
+                if [[ -n "$bin_path" ]]; then
+                  break
+                fi
+              fi
+            done
           fi
 
           if [[ -z "$bin_path" ]]; then
-            bin_path="$(find apps/desktop/src-tauri/target -type f -path "*Formula.app/Contents/MacOS/formula-desktop" | head -n 1 || true)"
+            for root in "${search_roots[@]}"; do
+              if [[ -d "$root" ]]; then
+                bin_path="$(find "$root" -type f -path "*Formula.app/Contents/MacOS/formula-desktop" | head -n 1 || true)"
+                if [[ -n "$bin_path" ]]; then
+                  break
+                fi
+              fi
+            done
           fi
 
           if [[ -z "$bin_path" ]]; then
             echo "::error::Could not find packaged macOS app binary (expected **/Formula.app/Contents/MacOS/formula-desktop)"
-            echo "Searched under: apps/desktop/src-tauri/target"
+            echo "Searched under: ${search_roots[*]}"
             echo "Formula.app bundles found:"
-            find apps/desktop/src-tauri/target -type d -name "Formula.app" -print || true
+            for root in "${search_roots[@]}"; do
+              if [[ -d "$root" ]]; then
+                find "$root" -type d -name "Formula.app" -print || true
+              fi
+            done
             exit 1
           fi
 
