@@ -80,6 +80,94 @@ function filenameFromUrl(maybeUrl) {
 }
 
 /**
+ * Expected updater payload extensions per OS platform.
+ *
+ * Note: `latest.json` is an updater manifest, not a "download the installer"
+ * manifest. It can be structurally valid (and reference an existing asset) but
+ * still be unusable if it points at a non-updater artifact type:
+ * - macOS: `.dmg` is an installer; updater typically needs `.app.tar.gz`
+ * - Linux: `.deb`/`.rpm` are installers; updater typically needs AppImage
+ * - Windows: updater payloads are typically `.zip` (`.msi.zip` / `.exe.zip`)
+ *
+ * @param {string} platformKey
+ * @param {{ allowWindowsMsi?: boolean; allowWindowsExe?: boolean }} [opts]
+ * @returns {string[]}
+ */
+function expectedUpdaterExtensions(platformKey, opts = {}) {
+  const lower = platformKey.toLowerCase();
+
+  if (lower.includes("darwin")) {
+    return [".app.tar.gz", ".tar.gz"];
+  }
+  if (lower.includes("linux")) {
+    return [".AppImage", ".AppImage.tar.gz"];
+  }
+  if (lower.includes("windows")) {
+    /** @type {string[]} */
+    const out = [".zip", ".msi.zip", ".exe.zip"];
+    if (opts.allowWindowsMsi) out.push(".msi");
+    if (opts.allowWindowsExe) out.push(".exe");
+    return out;
+  }
+  return [];
+}
+
+/**
+ * Validate that the updater manifest references an update-friendly artifact for
+ * the target OS.
+ *
+ * @param {string} platformKey
+ * @param {string} filename
+ * @param {{ allowWindowsMsi?: boolean; allowWindowsExe?: boolean }} [opts]
+ * @returns {string | null}
+ */
+function validateUpdaterFilenameForPlatform(platformKey, filename, opts = {}) {
+  const lowerPlatform = platformKey.toLowerCase();
+  const lowerFilename = filename.toLowerCase();
+
+  if (lowerPlatform.includes("darwin")) {
+    if (lowerFilename.endsWith(".dmg")) {
+      return "macOS updater entries must not reference .dmg installers.";
+    }
+    if (!lowerFilename.endsWith(".tar.gz")) {
+      return "macOS updater entries must reference an update-friendly archive (typically .app.tar.gz / .tar.gz).";
+    }
+    return null;
+  }
+
+  if (lowerPlatform.includes("linux")) {
+    if (lowerFilename.endsWith(".deb") || lowerFilename.endsWith(".rpm")) {
+      return "Linux updater entries must not reference .deb/.rpm installers.";
+    }
+    if (!(lowerFilename.endsWith(".appimage") || lowerFilename.endsWith(".appimage.tar.gz"))) {
+      return "Linux updater entries must reference an AppImage updater payload (typically .AppImage / .AppImage.tar.gz).";
+    }
+    return null;
+  }
+
+  if (lowerPlatform.includes("windows")) {
+    if (lowerFilename.endsWith(".msi") && !opts.allowWindowsMsi) {
+      return 'Windows updater entries must not reference a raw \".msi\" (pass --allow-windows-msi to permit).';
+    }
+    if (lowerFilename.endsWith(".exe") && !opts.allowWindowsExe) {
+      return 'Windows updater entries must not reference a raw \".exe\" installer (pass --allow-windows-exe to permit).';
+    }
+
+    const allowed = [".zip"];
+    if (opts.allowWindowsMsi) allowed.push(".msi");
+    if (opts.allowWindowsExe) allowed.push(".exe");
+    if (!allowed.some((ext) => lowerFilename.endsWith(ext))) {
+      return "Windows updater entries must reference an updater payload archive (typically .zip / .msi.zip / .exe.zip).";
+    }
+    return null;
+  }
+
+  // Unknown platform keys are ignored; the updater toolchain may introduce new
+  // keys over time.
+  return null;
+}
+
+/**
  * @param {unknown} value
  * @returns {value is Record<string, unknown>}
  */
@@ -423,6 +511,8 @@ function usage() {
       "Options:",
       "  --tag <tag>        Release tag (default: env GITHUB_REF_NAME)",
       "  --repo <owner/repo> GitHub repo (default: env GITHUB_REPOSITORY)",
+      "  --allow-windows-msi Allow raw .msi in latest.json Windows entries (defaults to disallowed).",
+      "  --allow-windows-exe Allow raw .exe in latest.json Windows entries (defaults to disallowed).",
       "  --out <path>       Output path for SHA256SUMS.txt (default: ./SHA256SUMS.txt)",
       "  --all-assets       Hash all release assets (still excludes .sig by default)",
       "  --include-sigs     Include .sig assets in SHA256SUMS (use with --all-assets to match CI)",
@@ -456,11 +546,13 @@ function usage() {
  * @param {string[]} argv
  */
 function parseArgs(argv) {
-  /** @type {{ tag?: string; repo?: string; out?: string; dryRun: boolean; verifyAssets: boolean; help: boolean; expectationsFile?: string; expectedTargets: string[]; includeSigs: boolean; allAssets: boolean }} */
+  /** @type {{ tag?: string; repo?: string; out?: string; dryRun: boolean; verifyAssets: boolean; help: boolean; allowWindowsMsi: boolean; allowWindowsExe: boolean; expectationsFile?: string; expectedTargets: string[]; includeSigs: boolean; allAssets: boolean }} */
   const parsed = {
     dryRun: false,
     verifyAssets: false,
     help: false,
+    allowWindowsMsi: false,
+    allowWindowsExe: false,
     expectedTargets: [],
     includeSigs: false,
     allAssets: false,
@@ -481,6 +573,14 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (arg === "--dry-run") {
       parsed.dryRun = true;
+      continue;
+    }
+    if (arg === "--allow-windows-msi") {
+      parsed.allowWindowsMsi = true;
+      continue;
+    }
+    if (arg === "--allow-windows-exe") {
+      parsed.allowWindowsExe = true;
       continue;
     }
     if (arg === "--verify-assets") {
@@ -800,8 +900,9 @@ function isPrimaryBundleOrSig(name, { includeSigs }) {
  * @param {any} manifest
  * @param {string} expectedVersion
  * @param {Map<string, any>} assetsByName
+ * @param {{ allowWindowsMsi?: boolean; allowWindowsExe?: boolean }} [opts]
  */
-function validateLatestJson(manifest, expectedVersion, assetsByName) {
+function validateLatestJson(manifest, expectedVersion, assetsByName, opts = {}) {
   /** @type {string[]} */
   const errors = [];
 
@@ -867,6 +968,18 @@ function validateLatestJson(manifest, expectedVersion, assetsByName) {
           `latest.json platforms[${JSON.stringify(platformKey)}].url did not contain a valid filename: ${JSON.stringify(url)}`
         );
         continue;
+      }
+
+      const typeError = validateUpdaterFilenameForPlatform(platformKey, filename, opts);
+      if (typeError) {
+        const expected = expectedUpdaterExtensions(platformKey, opts);
+        errors.push(
+          [
+            `latest.json platforms[${JSON.stringify(platformKey)}].url points at ${JSON.stringify(url)}.`,
+            `Expected file extensions for this OS: ${expected.length > 0 ? expected.join(", ") : "(unknown)"}.`,
+            typeError,
+          ].join(" ")
+        );
       }
 
       if (!assetsByName.has(filename)) {
@@ -1366,7 +1479,10 @@ async function main() {
           `This usually means the manifest/signature were generated with a different key, or assets were tampered with.`,
         ]);
       }
-      validateLatestJson(manifest, expectedVersion, assetsByName);
+      validateLatestJson(manifest, expectedVersion, assetsByName, {
+        allowWindowsMsi: args.allowWindowsMsi,
+        allowWindowsExe: args.allowWindowsExe,
+      });
 
       if (expectationsEnabled) {
         validateReleaseExpectations({
@@ -1495,11 +1611,13 @@ if (isMainModule) {
 
 export {
   ActionableError,
+  expectedUpdaterExtensions,
   filenameFromUrl,
   findPlatformsObject,
   isPrimaryBundleOrSig,
   isPrimaryBundleAssetName,
   normalizeVersion,
+  validateUpdaterFilenameForPlatform,
   validateReleaseExpectations,
   verifyUpdaterManifestSignature,
   validateLatestJson,
