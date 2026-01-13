@@ -178,6 +178,11 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("ISFORMULA", 0), "Expected ISFORMULA reference to be a range");
   assert.ok(registry.isRangeArg("SHEET", 0), "Expected SHEET value to be a range");
   assert.ok(registry.isRangeArg("SHEETS", 0), "Expected SHEETS reference to be a range");
+  assert.ok(registry.isRangeArg("GETPIVOTDATA", 1), "Expected GETPIVOTDATA pivot_table to be a range");
+  assert.ok(
+    registry.getFunction("GETPIVOTDATA")?.args?.[2]?.repeating,
+    "Expected GETPIVOTDATA field/item pairs to repeat"
+  );
 
   // Finance/stat functions that take ranges (catalog arg_types are too coarse)
   assert.equal(registry.isRangeArg("FVSCHEDULE", 0), false, "Expected FVSCHEDULE principal not to be a range");
@@ -185,6 +190,7 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("MIRR", 0), "Expected MIRR values to be a range");
   assert.ok(registry.isRangeArg("PROB", 0), "Expected PROB x_range to be a range");
   assert.ok(registry.isRangeArg("PROB", 1), "Expected PROB prob_range to be a range");
+  assert.ok(registry.isRangeArg("SERIESSUM", 3), "Expected SERIESSUM coefficients to be a range");
 
   // Time-series forecasting functions
   assert.ok(registry.isRangeArg("FORECAST.ETS", 1), "Expected FORECAST.ETS values to be a range");

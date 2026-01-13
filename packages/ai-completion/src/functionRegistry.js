@@ -904,6 +904,16 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "SERIESSUM",
+    description: "Returns the sum of a power series based on the formula.",
+    args: [
+      { name: "x", type: "number" },
+      { name: "n", type: "number" },
+      { name: "m", type: "number" },
+      { name: "coefficients", type: "range" },
+    ],
+  },
+  {
     name: "RSQ",
     description: "Returns the square of the Pearson product moment correlation coefficient.",
     args: [
@@ -1521,6 +1531,16 @@ const CURATED_FUNCTIONS = [
     description: "Returns TRUE if there is a formula in a referenced cell.",
     args: [
       { name: "reference", type: "range" },
+    ],
+  },
+  {
+    name: "GETPIVOTDATA",
+    description: "Returns data stored in a PivotTable report.",
+    args: [
+      { name: "data_field", type: "string" },
+      { name: "pivot_table", type: "range" },
+      { name: "field1", type: "string", repeating: true },
+      { name: "item1", type: "string" },
     ],
   },
   {
