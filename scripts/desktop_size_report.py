@@ -168,17 +168,18 @@ def _render_markdown(
     lines.append("| Artifact | Size (bytes) | Size (MB) | Over limit |")
     lines.append("| --- | ---: | ---: | :---: |")
 
-    def over(size_mb: float, limit_mb: float | None) -> str:
+    def over(size_bytes: int, limit_mb: float | None) -> str:
         if limit_mb is None:
             return ""
-        return "YES" if size_mb > limit_mb else ""
+        limit_bytes = int(round(limit_mb * MB_BYTES))
+        return "YES" if size_bytes > limit_bytes else ""
 
     lines.append(
         "| `{}` | {} | {} | {} |".format(
             _relpath(binary.path, repo_root),
             binary.size_bytes,
             f"{binary.size_mb:.1f}",
-            over(binary.size_mb, binary_limit_mb),
+            over(binary.size_bytes, binary_limit_mb),
         )
     )
     lines.append(
@@ -186,7 +187,7 @@ def _render_markdown(
             _relpath(dist.path, repo_root),
             dist.size_bytes,
             f"{dist.size_mb:.1f}",
-            over(dist.size_mb, dist_limit_mb),
+            over(dist.size_bytes, dist_limit_mb),
         )
     )
     if dist_gzip is not None:
@@ -238,7 +239,9 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    repo_root = Path.cwd()
+    cwd = Path.cwd()
+    # Prefer repo-root-relative reporting (stable in CI) even when invoked from a subdirectory.
+    repo_root = Path(__file__).resolve().parent.parent
 
     try:
         binary_limit_mb = _parse_optional_limit_mb("FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB")
@@ -247,18 +250,32 @@ def main() -> int:
         print(f"desktop-size: ERROR {exc}", file=sys.stderr)
         return 2
 
-    if not args.binary.is_file():
-        print(f"desktop-size: ERROR binary not found: {args.binary}", file=sys.stderr)
+    binary_path = args.binary
+    if not binary_path.is_absolute():
+        if (cwd / binary_path).is_file():
+            binary_path = cwd / binary_path
+        elif (repo_root / binary_path).is_file():
+            binary_path = repo_root / binary_path
+
+    dist_path = args.dist
+    if not dist_path.is_absolute():
+        if (cwd / dist_path).is_dir():
+            dist_path = cwd / dist_path
+        elif (repo_root / dist_path).is_dir():
+            dist_path = repo_root / dist_path
+
+    if not binary_path.is_file():
+        print(f"desktop-size: ERROR binary not found: {binary_path}", file=sys.stderr)
         return 2
-    if not args.dist.is_dir():
-        print(f"desktop-size: ERROR dist directory not found: {args.dist}", file=sys.stderr)
+    if not dist_path.is_dir():
+        print(f"desktop-size: ERROR dist directory not found: {dist_path}", file=sys.stderr)
         return 2
 
-    binary = SizedPath(path=args.binary, size_bytes=args.binary.stat().st_size)
-    dist = SizedPath(path=args.dist, size_bytes=_dir_size_bytes(args.dist))
+    binary = SizedPath(path=binary_path, size_bytes=binary_path.stat().st_size)
+    dist = SizedPath(path=dist_path, size_bytes=_dir_size_bytes(dist_path))
     dist_gzip: SizedPath | None = None
     if args.gzip:
-        dist_gzip = SizedPath(path=args.dist, size_bytes=_tar_gz_dir_size_bytes(args.dist))
+        dist_gzip = SizedPath(path=dist_path, size_bytes=_tar_gz_dir_size_bytes(dist_path))
 
     md = _render_markdown(
         binary=binary,
@@ -303,12 +320,12 @@ def main() -> int:
             f.write("\n")
 
     offenders: list[str] = []
-    if binary_limit_mb is not None and binary.size_mb > binary_limit_mb:
+    if binary_limit_mb is not None and binary.size_bytes > int(round(binary_limit_mb * MB_BYTES)):
         offenders.append(
             f"binary size {_human_bytes(binary.size_bytes)} exceeds limit {binary_limit_mb} MB "
             "(FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB)"
         )
-    if dist_limit_mb is not None and dist.size_mb > dist_limit_mb:
+    if dist_limit_mb is not None and dist.size_bytes > int(round(dist_limit_mb * MB_BYTES)):
         offenders.append(
             f"dist size {_human_bytes(dist.size_bytes)} exceeds limit {dist_limit_mb} MB "
             "(FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB)"
