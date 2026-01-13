@@ -400,3 +400,25 @@ test("SqliteVectorStore.query throws when stored vector blob has wrong length (d
     await store.close();
   }
 });
+
+test(
+  "SqliteVectorStore throws when stored vector blob byte length is not a multiple of 4",
+  { skip: !sqlJsAvailable },
+  async () => {
+    const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
+    try {
+      const badBlob = new Uint8Array([1, 2, 3, 4, 5]);
+      const stmt = store._db.prepare(
+        "INSERT INTO vectors (id, workbook_id, vector, metadata_json) VALUES (?, ?, ?, ?);"
+      );
+      stmt.run(["bad-bytes", null, badBlob, "{}"]);
+      stmt.free();
+
+      await assert.rejects(store.get("bad-bytes"), /Invalid vector blob length/);
+      await assert.rejects(store.list(), /Invalid vector blob length/);
+      await assert.rejects(store.query([1, 0, 0], 1), /Invalid vector blob length/);
+    } finally {
+      await store.close();
+    }
+  }
+);
