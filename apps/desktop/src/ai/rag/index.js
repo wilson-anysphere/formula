@@ -1,6 +1,7 @@
 import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
 import {
   HashEmbedder,
+  IndexedDBBinaryStorage,
   LocalStorageBinaryStorage,
   SqliteVectorStore,
   indexWorkbook,
@@ -10,10 +11,21 @@ import {
  * Desktop-oriented wiring for workbook RAG.
  *
  * Tauri webviews do not expose Node filesystem APIs, so persistence defaults to
- * LocalStorage (stable per-workbook key).
+ * browser storage (stable per-workbook key).
  */
 function defaultSqliteStorage(workbookId) {
-  return new LocalStorageBinaryStorage({ namespace: "formula.desktop.rag.sqlite", workbookId });
+  const namespace = "formula.desktop.rag.sqlite";
+  const hasIndexedDB =
+    // eslint-disable-next-line no-undef
+    typeof indexedDB !== "undefined" || (globalThis && "indexedDB" in globalThis && globalThis.indexedDB);
+
+  // Prefer IndexedDB for large SQLite exports (binary storage + higher quotas).
+  if (hasIndexedDB) {
+    return new IndexedDBBinaryStorage({ namespace, workbookId, dbName: "formula.desktop.rag.sqlite" });
+  }
+
+  // Fallback for restricted environments that disable IndexedDB.
+  return new LocalStorageBinaryStorage({ namespace, workbookId });
 }
 
 export async function createDesktopRagSqlite(opts) {
