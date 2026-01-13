@@ -58,21 +58,38 @@ void parsed;
   await writeFile(entryFile, source, "utf8");
 
   try {
-    const options: ts.CompilerOptions = {
-      // Keep the compilation as close to the repo defaults as possible.
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      lib: ["ES2022", "DOM", "DOM.Iterable"],
-      types: ["node"],
-      strict: true,
-      allowJs: true,
-      checkJs: false,
-      skipLibCheck: true,
-      noEmit: true,
-    };
+    // `ts.createProgram()` expects resolved lib file names (e.g. `lib.es2022.d.ts`),
+    // while tsconfig-style options use human-friendly lib names (e.g. `"ES2022"`).
+    // Use TypeScript's JSON conversion helper so this test stays resilient across
+    // TypeScript versions.
+    const converted = ts.convertCompilerOptionsFromJson(
+      {
+        // Keep the compilation as close to the repo defaults as possible.
+        target: "ES2022",
+        module: "ESNext",
+        moduleResolution: "Bundler",
+        lib: ["ES2022", "DOM", "DOM.Iterable"],
+        types: ["node"],
+        strict: true,
+        allowJs: true,
+        checkJs: false,
+        skipLibCheck: true,
+        noEmit: true,
+      },
+      process.cwd(),
+    );
 
-    const program = ts.createProgram([entryFile], options);
+    if (converted.errors.length > 0) {
+      const host: ts.FormatDiagnosticsHost = {
+        getCanonicalFileName: (fileName) => fileName,
+        getCurrentDirectory: () => process.cwd(),
+        getNewLine: () => "\n",
+      };
+      const formatted = ts.formatDiagnosticsWithColorAndContext(converted.errors, host);
+      throw new Error(`TypeScript compiler option parsing failed:\n${formatted}`);
+    }
+
+    const program = ts.createProgram([entryFile], converted.options);
     const diagnostics = ts.getPreEmitDiagnostics(program);
 
     if (diagnostics.length > 0) {
