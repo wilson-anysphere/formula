@@ -292,6 +292,44 @@ maybeTest("SqliteVectorStore can reset dimension mismatch even when storage.remo
   await store3.close();
 });
 
+maybeTest("SqliteVectorStore can reset dimension mismatch when using ChunkedLocalStorageBinaryStorage", async () => {
+  const storage = new ChunkedLocalStorageBinaryStorage({
+    namespace: "formula.test.rag.sqlite",
+    workbookId: "sqlite-store-chunked-dim-mismatch",
+    chunkSizeChars: 128,
+  });
+
+  const store1 = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: true });
+  await store1.upsert([{ id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb" } }]);
+  await store1.close();
+
+  const store2 = await SqliteVectorStore.create({
+    storage,
+    dimension: 4,
+    autoSave: true,
+    resetOnDimensionMismatch: true,
+  });
+
+  expect(await store2.list()).toEqual([]);
+
+  await store2.upsert([{ id: "c", vector: [1, 0, 0, 0], metadata: { workbookId: "wb" } }]);
+  const hits = await store2.query([1, 0, 0, 0], 1, { workbookId: "wb" });
+  expect(hits[0]?.id).toBe("c");
+
+  await store2.close();
+
+  // Ensure subsequent opens do not repeatedly reset.
+  const store3 = await SqliteVectorStore.create({
+    storage,
+    dimension: 4,
+    autoSave: false,
+    resetOnDimensionMismatch: false,
+  });
+  const list = await store3.list();
+  expect(list.map((r) => r.id)).toEqual(["c"]);
+  await store3.close();
+});
+
 maybeTest("SqliteVectorStore throws on dimension mismatch when resetOnDimensionMismatch=false", async () => {
   const storage = new InMemoryBinaryStorage();
 
