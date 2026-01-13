@@ -321,7 +321,18 @@ main() {
     fi
 
     echo "Main binary: $main_bin"
-    file "$main_bin"
+    local file_out
+    file_out="$(file -b "$main_bin")"
+    echo "$main_bin: $file_out"
+    if grep -q "not stripped" <<<"$file_out"; then
+      die "main binary is not stripped (expected stripped): $file_out"
+    fi
+
+    # Ensure no DWARF debug sections are present in the shipped AppImage binary.
+    # (Stripping should remove these, but guard against regressions.)
+    if readelf -S --wide "$main_bin" | grep -q '\.debug_'; then
+      die "main binary contains .debug_* sections (expected stripped)"
+    fi
 
     # Architecture assertion.
     local machine_line=""

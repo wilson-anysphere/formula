@@ -22,6 +22,8 @@ require_cmd grep
 require_cmd dpkg
 require_cmd dpkg-deb
 require_cmd rpm
+require_cmd file
+require_cmd readelf
 
 target_dirs=()
 
@@ -179,6 +181,26 @@ assert_contains_any() {
 
 echo "verify-linux-package-deps: found ${#debs[@]} .deb and ${#rpms[@]} .rpm artifact(s)"
 
+assert_stripped_elf() {
+  local elf_path="$1"
+  local artifact="$2"
+
+  if [[ ! -f "$elf_path" ]]; then
+    fail "$artifact: expected ELF binary not found at: $elf_path"
+  fi
+
+  local out
+  out="$(file -b "$elf_path" || true)"
+  echo "verify-linux-package-deps: file $elf_path -> $out"
+  if echo "$out" | grep -q "not stripped"; then
+    fail "$artifact: binary is not stripped (expected stripped): $out"
+  fi
+
+  if readelf -S --wide "$elf_path" 2>/dev/null | grep -q '\.debug_'; then
+    fail "$artifact: ELF contains .debug_* sections (expected stripped)"
+  fi
+}
+
 for deb in "${debs[@]}"; do
   echo "::group::verify-linux-package-deps: dpkg -I $(basename "$deb")"
   dpkg -I "$deb"
@@ -202,6 +224,14 @@ for deb in "${debs[@]}"; do
   assert_contains_any "$depends" "$deb" "AppIndicator (tray)" "appindicator"
   assert_contains_any "$depends" "$deb" "librsvg2 (icons)" "librsvg2"
   assert_contains_any "$depends" "$deb" "OpenSSL (libssl)" "libssl"
+
+  # Ensure the packaged binary itself is stripped (no accidental debug/symbol sections shipped).
+  echo "::group::verify-linux-package-deps: stripped binary check (deb) $(basename "$deb")"
+  tmpdir="$(mktemp -d)"
+  dpkg-deb -x "$deb" "$tmpdir"
+  assert_stripped_elf "$tmpdir/usr/bin/formula-desktop" "$(basename "$deb")"
+  rm -rf "$tmpdir"
+  echo "::endgroup::"
 done
 
 for rpm_path in "${rpms[@]}"; do
