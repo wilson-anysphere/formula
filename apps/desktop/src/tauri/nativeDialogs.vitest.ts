@@ -29,6 +29,26 @@ describe("tauri/nativeDialogs", () => {
     expect(windowAlert).not.toHaveBeenCalled();
   });
 
+  it("supports the __TAURI__.plugin.dialog API shape", async () => {
+    const tauriConfirm = vi.fn(async () => true);
+    const tauriMessage = vi.fn(async () => undefined);
+
+    const windowConfirm = vi.fn(() => false);
+    const windowAlert = vi.fn(() => undefined);
+
+    vi.stubGlobal("__TAURI__", { plugin: { dialog: { confirm: tauriConfirm, message: tauriMessage } } });
+    vi.stubGlobal("window", { confirm: windowConfirm, alert: windowAlert });
+
+    const ok = await nativeDialogs.confirm("Discard?", { title: "Formula" });
+    expect(ok).toBe(true);
+    expect(tauriConfirm).toHaveBeenCalledWith("Discard?", { title: "Formula" });
+    expect(windowConfirm).not.toHaveBeenCalled();
+
+    await nativeDialogs.alert("Failed to open workbook", { title: "Formula" });
+    expect(tauriMessage).toHaveBeenCalledWith("Failed to open workbook", { title: "Formula" });
+    expect(windowAlert).not.toHaveBeenCalled();
+  });
+
   it("falls back to window.confirm/alert when Tauri dialog APIs are unavailable", async () => {
     const windowConfirm = vi.fn(() => true);
     const windowAlert = vi.fn(() => undefined);
