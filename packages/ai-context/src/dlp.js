@@ -96,12 +96,16 @@ function hasValidCreditCard(text) {
  */
 function isValidPhone(candidate) {
   const raw = String(candidate);
-  const digits = digitsOnly(raw);
   if (raw.includes("+")) {
+    const digits = digitsOnly(raw);
     // International (+ prefix required by regex): allow 10-15 digits as a conservative E.164-ish bound.
     if (digits.length < 10 || digits.length > 15) return false;
     return digits[0] !== "0";
   }
+
+  // Strip common US extension suffixes (e.g. "ext 123", "x123").
+  const main = raw.replace(/\s*(?:ext|x|#)\s*\d{1,5}$/i, "");
+  const digits = digitsOnly(main);
   // US-ish. Accept 10 digits, or 11 with leading 1.
   if (digits.length === 10) return true;
   if (digits.length === 11 && digits[0] === "1") return true;

@@ -20,6 +20,12 @@ describe("dlp heuristic", () => {
     expect(classifyText(text).findings).toContain("phone_number");
   });
 
+  it("detects and redacts US phone numbers with extensions", () => {
+    const text = "Dial (415) 555-2671 ext 1234 for support.";
+    expect(classifyText(text).findings).toContain("phone_number");
+    expect(redactText(text)).toBe("Dial [REDACTED_PHONE] for support.");
+  });
+
   it("detects common API keys/tokens with conservative patterns", () => {
     const awsAccessKeyId = "AKIAIOSFODNN7EXAMPLE";
     const ghToken = "ghp_123456789012345678901234567890123456";
