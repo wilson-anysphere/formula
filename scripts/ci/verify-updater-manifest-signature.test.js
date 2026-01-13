@@ -215,6 +215,44 @@ test("supports minisign signature *files* (comment + payload lines)", () => {
   assert.match(proc.stdout, /signature OK/);
 });
 
+test("fails when minisign signature comment key id does not match payload key id", () => {
+  const tmp = makeTempDir();
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const rawPubkey = rawEd25519PublicKey(publicKey);
+
+  const pubKeyId = Buffer.from([9, 9, 9, 9, 9, 9, 9, 9]);
+  const sigKeyId = Buffer.from([7, 7, 7, 7, 7, 7, 7, 7]);
+
+  const pubKeyIdHex = Buffer.from(pubKeyId).reverse().toString("hex").toUpperCase();
+  const sigKeyIdHex = Buffer.from(sigKeyId).reverse().toString("hex").toUpperCase();
+
+  const pubPayload = Buffer.concat([Buffer.from([0x45, 0x64]), pubKeyId, rawPubkey]);
+  const pubPayloadLine = pubPayload.toString("base64").replace(/=+$/, "");
+  const minisignPubkeyFile = `untrusted comment: minisign public key: ${pubKeyIdHex}\n${pubPayloadLine}\n`;
+  const tauriPubkey = Buffer.from(minisignPubkeyFile, "utf8").toString("base64");
+
+  const latestJsonPath = path.join(tmp, "latest.json");
+  const latestSigPath = path.join(tmp, "latest.json.sig");
+  const configPath = path.join(tmp, "tauri.conf.json");
+
+  const latestJsonBytes = Buffer.from(JSON.stringify({ version: "0.1.0", platforms: {} }), "utf8");
+  const signature = sign(null, latestJsonBytes, privateKey);
+
+  const minisignSigPayload = Buffer.concat([Buffer.from([0x45, 0x64]), sigKeyId, Buffer.from(signature)]);
+  const sigPayloadLine = minisignSigPayload.toString("base64").replace(/=+$/, "");
+  const minisignSigFile = `untrusted comment: minisign signature: ${pubKeyIdHex}\n${sigPayloadLine}\n`;
+
+  writeFileSync(latestJsonPath, latestJsonBytes);
+  writeFileSync(latestSigPath, minisignSigFile, "utf8");
+  writeFileSync(configPath, JSON.stringify({ plugins: { updater: { pubkey: tauriPubkey } } }, null, 2));
+
+  const proc = run({ configPath, latestJsonPath, latestSigPath });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /comment key id/i);
+  assert.match(proc.stderr, new RegExp(pubKeyIdHex));
+  assert.match(proc.stderr, new RegExp(sigKeyIdHex));
+});
+
 test("fails when minisign pubkey comment key id does not match payload key id", () => {
   const tmp = makeTempDir();
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");

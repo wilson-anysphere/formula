@@ -80,6 +80,15 @@ function extractKeyIdFromPublicKeyComment(line) {
 }
 
 /**
+ * @param {string} line
+ * @returns {string | null}
+ */
+function extractKeyIdFromSignatureComment(line) {
+  const match = line.match(/minisign signature:\s*([0-9a-fA-F]{16})\b/);
+  return match ? match[1].toUpperCase() : null;
+}
+
+/**
  * Minisign encodes key ids as little-endian bytes, while the comment line prints the key id as
  * uppercase hex in big-endian order.
  *
@@ -224,9 +233,12 @@ export function parseTauriUpdaterSignature(signatureText, label = "signature") {
   const lines = nonEmptyLines(trimmed);
   /** @type {string} */
   let base64Line;
+  /** @type {string | null} */
+  let commentKeyId = null;
 
   if (lines.length >= 2 && lines[0].startsWith("untrusted comment:")) {
     // minisign signature file (2 or 4 lines); the payload is always the second line.
+    commentKeyId = extractKeyIdFromSignatureComment(lines[0]);
     base64Line = lines[1];
   } else if (lines.length === 1) {
     base64Line = lines[0];
@@ -262,13 +274,19 @@ export function parseTauriUpdaterSignature(signatureText, label = "signature") {
       );
     }
     const keyIdLe = bytes.subarray(2, 10);
+    const keyId = formatKeyId(keyIdLe);
     const signature = bytes.subarray(10);
     if (signature.length !== 64) {
       throw new Error(
         `${label} minisign payload has ${signature.length} signature bytes (expected 64).`,
       );
     }
-    return { signatureBytes: Buffer.from(signature), keyId: formatKeyId(keyIdLe), format: "minisign" };
+    if (commentKeyId && commentKeyId !== keyId) {
+      throw new Error(
+        `${label} minisign comment key id (${commentKeyId}) does not match payload key id (${keyId}).`,
+      );
+    }
+    return { signatureBytes: Buffer.from(signature), keyId, format: "minisign" };
   }
 
   throw new Error(
