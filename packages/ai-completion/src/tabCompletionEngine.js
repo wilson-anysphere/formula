@@ -538,11 +538,21 @@ export class TabCompletionEngine {
               // When the candidate doesn't extend the typed prefix, don't emit it.
               if (typeof candidate?.range !== "string") continue;
               if (!candidate.range.startsWith(sheetArg.rangePrefix)) continue;
-              if (candidate.range.length <= sheetArg.rangePrefix.length) continue;
 
-              addReplacement(`${rawPrefix}${candidate.range.slice(sheetArg.rangePrefix.length)}`, {
-                confidence: Math.min(0.85, candidate.confidence + 0.05),
-              });
+              const suffix = candidate.range.slice(sheetArg.rangePrefix.length);
+              const replacement = `${rawPrefix}${suffix}`;
+
+              // If the candidate doesn't actually extend the typed range prefix, only
+              // keep it when it will still be useful by auto-closing unbalanced parens
+              // (e.g. "=SUM(Sheet2!A:A" -> "=SUM(Sheet2!A:A)").
+              if (suffix.length === 0) {
+                const wouldAutoClose =
+                  cursor === input.length && functionCouldBeComplete && !replacement.endsWith("!");
+                if (!wouldAutoClose) continue;
+                if (closeUnbalancedParens(input) === input) continue;
+              }
+
+              addReplacement(replacement, { confidence: Math.min(0.85, candidate.confidence + 0.05) });
             }
         }
       }

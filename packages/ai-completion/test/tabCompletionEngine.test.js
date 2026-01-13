@@ -2593,6 +2593,40 @@ test("Sheet-qualified partial range prefixes do not emit non-insertions (Sheet2!
   );
 });
 
+test("Sheet-qualified whole-column ranges still allow auto-closing parens (=SUM(Sheet2!A:A → ...))", async () => {
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`Sheet2!A${r}`] = r;
+
+  const cellContext = {
+    getCellValue(row, col, sheetName) {
+      const sheet = sheetName ?? "Sheet1";
+      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
+      return values[a1] ?? null;
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM(Sheet2!A:A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(Sheet2!A:A)"),
+    `Expected an auto-closed paren suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Sheet-qualified ranges work when the quoted sheet name contains a comma", async () => {
   const values = {};
   for (let r = 1; r <= 10; r++) values[`Jan,2024!A${r}`] = r;
