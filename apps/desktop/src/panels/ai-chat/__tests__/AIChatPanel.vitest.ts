@@ -406,6 +406,44 @@ describe("AIChatPanel tool-calling history", () => {
 });
 
 describe("AIChatPanel attachments UI", () => {
+  it("disables attach selection when no selection is available and exposes tooltip text", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const sendMessage = vi.fn(async () => {
+      return { messages: [], final: "Ok" };
+    });
+
+    const getSelectionAttachment = vi.fn(() => null);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          systemPrompt: "system",
+          sendMessage,
+          getSelectionAttachment,
+        }),
+      );
+    });
+
+    const attachSelectionBtn = container.querySelector('[data-testid="ai-chat-attach-selection"]') as HTMLButtonElement | null;
+    expect(attachSelectionBtn).toBeInstanceOf(HTMLButtonElement);
+    expect(attachSelectionBtn?.disabled).toBe(true);
+
+    // Disabled buttons don't reliably show native title tooltips, so we wrap them.
+    const wrap = attachSelectionBtn?.parentElement;
+    expect(wrap?.classList.contains("ai-chat-panel__attachment-button-wrap")).toBe(true);
+    expect(wrap?.getAttribute("title")).toBe("No selection available");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("can attach and remove a selection before sending (and includes attachments on the user message)", async () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
