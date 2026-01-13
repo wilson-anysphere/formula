@@ -44,6 +44,18 @@ pub fn slicer_selection_to_row_filter(
     slicer_selection_to_row_filter_with_resolver(field, selection, |_| None)
 }
 
+/// Convert a parsed slicer selection into a pivot-engine filter field.
+///
+/// This is the pivot-engine equivalent of [`slicer_selection_to_row_filter`]: item keys are treated
+/// as text unless the caller provides a resolver via
+/// [`slicer_selection_to_engine_filter_field_with_resolver`].
+pub fn slicer_selection_to_engine_filter_field(
+    field: impl Into<String>,
+    selection: &SlicerSelectionState,
+) -> formula_engine::pivot::FilterField {
+    slicer_selection_to_engine_filter_field_with_resolver(field, selection, |_| None)
+}
+
 /// Convert a parsed slicer selection into a model-level row filter, using `resolve` to map
 /// slicer item keys to typed [`ScalarValue`]s.
 ///
