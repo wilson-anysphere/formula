@@ -1,9 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { InMemoryWorkbook } from "../../packages/search/index.js";
+import { InMemoryWorkbook, parseGoTo } from "../../packages/search/index.js";
 import { FindReplaceController } from "../../apps/desktop/src/panels/find-replace/findReplaceController.js";
-import { NameBoxController } from "../../apps/desktop/src/formula-bar/name-box/nameBoxController.js";
 
 test("e2e flow: find next, go to, replace all", async () => {
   const wb = new InMemoryWorkbook();
@@ -29,6 +28,17 @@ test("e2e flow: find next, go to, replace all", async () => {
   let activeCell = { sheetName: "Sheet1", row: 0, col: 0 };
   let selectedRange = null;
 
+  function submitGoTo(text) {
+    const parsed = parseGoTo(text, { workbook: wb, currentSheetName: activeCell.sheetName });
+    if (parsed.type !== "range") return;
+    const { range } = parsed;
+    if (range.startRow === range.endRow && range.startCol === range.endCol) {
+      activeCell = { sheetName: parsed.sheetName, row: range.startRow, col: range.startCol };
+    } else {
+      selectedRange = { sheetName: parsed.sheetName, range };
+    }
+  }
+
   const controller = new FindReplaceController({
     workbook: wb,
     getCurrentSheetName: () => activeCell.sheetName,
@@ -47,28 +57,16 @@ test("e2e flow: find next, go to, replace all", async () => {
   assert.equal(m1.address, "Sheet1!B1");
   assert.deepEqual(activeCell, { sheetName: "Sheet1", row: 0, col: 1 });
 
-  const nameBox = new NameBoxController({
-    workbook: wb,
-    getCurrentSheetName: () => activeCell.sheetName,
-    getActiveCell: () => activeCell,
-    setActiveCell: (next) => {
-      activeCell = next;
-    },
-    selectRange: ({ sheetName, range }) => {
-      selectedRange = { sheetName, range };
-    },
-  });
-
   // Go to a sheet-qualified ref
-  nameBox.submit("Sheet2!A1");
+  submitGoTo("Sheet2!A1");
   assert.deepEqual(activeCell, { sheetName: "Sheet2", row: 0, col: 0 });
 
   // Go to a named range
-  nameBox.submit("MyRange");
+  submitGoTo("MyRange");
   assert.deepEqual(activeCell, { sheetName: "Sheet2", row: 0, col: 0 });
 
   // Go to a table structured ref (column)
-  nameBox.submit("Table1[ColB]");
+  submitGoTo("Table1[ColB]");
   assert.deepEqual(selectedRange, {
     sheetName: "Sheet1",
     range: { startRow: 0, endRow: 1, startCol: 1, endCol: 1 },
