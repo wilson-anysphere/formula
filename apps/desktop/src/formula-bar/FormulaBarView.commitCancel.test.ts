@@ -546,7 +546,10 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(picker.hidden).toBe(true);
     expect(view.model.isEditing).toBe(true);
     expect(onCommit).not.toHaveBeenCalled();
-    expect(view.textarea.value).toBe("=SUM(");
+    expect(view.textarea.value).toBe("=SUM()");
+    // Cursor should be inside parens so typing immediately adds arguments.
+    expect(view.textarea.selectionStart).toBe(view.textarea.value.length - 1);
+    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length - 1);
     expect(document.activeElement).toBe(view.textarea);
 
     const second = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
@@ -554,7 +557,7 @@ describe("FormulaBarView commit/cancel UX", () => {
 
     expect(second.defaultPrevented).toBe(true);
     expect(onCommit).toHaveBeenCalledTimes(1);
-    expect(onCommit).toHaveBeenCalledWith("=SUM(", { reason: "enter", shift: false });
+    expect(onCommit).toHaveBeenCalledWith("=SUM()", { reason: "enter", shift: false });
     expect(view.model.isEditing).toBe(false);
 
     host.remove();
