@@ -72,6 +72,22 @@ describe("createLocaleAwarePartialFormulaParser", () => {
     expect(result.expectingRange).toBe(true);
   });
 
+  it("canonicalizes localized function names even when falling back to the JS parser", async () => {
+    setLocale("de-DE");
+
+    const parser = createLocaleAwarePartialFormulaParser({});
+    const fnRegistry = new FunctionRegistry();
+
+    const input = "=SUMME(A1;";
+    const result = await parser(input, input.length, fnRegistry);
+
+    expect(result.isFormula).toBe(true);
+    expect(result.inFunctionCall).toBe(true);
+    expect(result.functionName).toBe("SUM");
+    expect(result.argIndex).toBe(1);
+    expect(result.expectingRange).toBe(true);
+  });
+
   it("falls back to the JS parser when the engine throws", async () => {
     setLocale("en-US");
 
