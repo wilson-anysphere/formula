@@ -29,6 +29,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Guard: Rust toolchain pins match rust-toolchain.toml
+        shell: bash
+        run: bash scripts/ci/check-rust-toolchain-pins.sh
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -41,7 +45,7 @@ jobs:
           cache: pnpm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.92.0
 
       # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
