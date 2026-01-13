@@ -27,6 +27,8 @@ const RESTRICTED_CLASSIFICATION_RANK = classificationRank(CLASSIFICATION_LEVEL.R
 
 const DEFAULT_SHEET_INDEX_CACHE_LIMIT = 32;
 const DEFAULT_RAG_MAX_CHUNK_ROWS = 30;
+const DEFAULT_RAG_CHUNK_ROW_OVERLAP = 3;
+const DEFAULT_RAG_MAX_CHUNKS_PER_REGION = 50;
 const SHEET_INDEX_SIGNATURE_VERSION = 1;
 const SHEET_SCHEMA_SIGNATURE_VERSION = 1;
 
@@ -177,8 +179,12 @@ function computeSheetIndexSignature(sheet, options = {}) {
   const maxChunkRows = options.maxChunkRows ?? DEFAULT_RAG_MAX_CHUNK_ROWS;
   const valuesHash = options.valuesHash ?? stableHashValue(sheet?.values ?? [], { signal });
   const splitRegions = options.splitRegions === true;
-  const chunkRowOverlap = splitRegions ? options.chunkRowOverlap : undefined;
-  const maxChunksPerRegion = splitRegions ? options.maxChunksPerRegion : undefined;
+  const chunkRowOverlap = splitRegions
+    ? normalizeOptionalNonNegativeInt(options.chunkRowOverlap) ?? DEFAULT_RAG_CHUNK_ROW_OVERLAP
+    : undefined;
+  const maxChunksPerRegion = splitRegions
+    ? normalizeOptionalNonNegativeInt(options.maxChunksPerRegion) ?? DEFAULT_RAG_MAX_CHUNKS_PER_REGION
+    : undefined;
 
   let hash = FNV_OFFSET_64;
   hash = fnv1a64Update(hash, `sig:v${SHEET_INDEX_SIGNATURE_VERSION}\n`);
@@ -187,10 +193,8 @@ function computeSheetIndexSignature(sheet, options = {}) {
   hash = fnv1a64Update(hash, `maxChunkRows:${String(maxChunkRows)}\n`);
   hash = fnv1a64Update(hash, `splitRegions:${splitRegions ? "1" : "0"}\n`);
   if (splitRegions) {
-    const overlapKey = chunkRowOverlap === undefined || chunkRowOverlap === null ? "" : String(chunkRowOverlap);
-    const maxChunksKey = maxChunksPerRegion === undefined || maxChunksPerRegion === null ? "" : String(maxChunksPerRegion);
-    hash = fnv1a64Update(hash, `chunkRowOverlap:${overlapKey}\n`);
-    hash = fnv1a64Update(hash, `maxChunksPerRegion:${maxChunksKey}\n`);
+    hash = fnv1a64Update(hash, `chunkRowOverlap:${String(chunkRowOverlap)}\n`);
+    hash = fnv1a64Update(hash, `maxChunksPerRegion:${String(maxChunksPerRegion)}\n`);
   }
   hash = fnv1a64Update(hash, "values:");
   hash = fnv1a64Update(hash, valuesHash);
@@ -632,8 +636,12 @@ export class ContextManager {
     const safeCellCap = normalizeNonNegativeInt(params.limits?.maxContextCells, this.maxContextCells);
     const maxChunkRows = normalizeNonNegativeInt(params.limits?.maxChunkRows, this.maxChunkRows);
     const splitRegions = params.limits?.splitRegions === true;
-    const chunkRowOverlap = normalizeOptionalNonNegativeInt(params.limits?.chunkRowOverlap);
-    const maxChunksPerRegion = normalizeOptionalNonNegativeInt(params.limits?.maxChunksPerRegion);
+    const chunkRowOverlap = splitRegions
+      ? normalizeOptionalNonNegativeInt(params.limits?.chunkRowOverlap) ?? DEFAULT_RAG_CHUNK_ROW_OVERLAP
+      : undefined;
+    const maxChunksPerRegion = splitRegions
+      ? normalizeOptionalNonNegativeInt(params.limits?.maxChunksPerRegion) ?? DEFAULT_RAG_MAX_CHUNKS_PER_REGION
+      : undefined;
     const rawValues = Array.isArray(rawSheet?.values) ? rawSheet.values : [];
     // Respect both the row cap and the total cell cap.
     // If `maxContextRows` is larger than `maxContextCells`, we need to clamp the row count

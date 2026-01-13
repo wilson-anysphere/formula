@@ -477,6 +477,34 @@ test("buildContext: splitRegions indexes multiple row windows for tall sheets", 
   assert.match(out.retrieved[0].preview, /\bspecialtoken\b/);
 });
 
+test("buildContext: splitRegions default overlap/maxChunks match explicit values for cache signatures", async () => {
+  const ragIndex = new RagIndex();
+  let indexCalls = 0;
+  const originalIndexSheet = ragIndex.indexSheet.bind(ragIndex);
+  ragIndex.indexSheet = async (...args) => {
+    indexCalls++;
+    return originalIndexSheet(...args);
+  };
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, ragIndex });
+  const values = [];
+  for (let r = 0; r < 100; r++) values.push([`Row${r + 1}`]);
+  const sheet = makeSheet(values);
+
+  await cm.buildContext({
+    sheet,
+    query: "row",
+    limits: { maxChunkRows: 10, splitRegions: true },
+  });
+  await cm.buildContext({
+    sheet,
+    query: "row",
+    limits: { maxChunkRows: 10, splitRegions: true, chunkRowOverlap: 3, maxChunksPerRegion: 50 },
+  });
+
+  assert.equal(indexCalls, 1);
+});
+
 test("buildContext: negative maxContextRows/maxContextCells fall back to defaults", async () => {
   const cm = new ContextManager({ tokenBudgetTokens: 1_000, maxContextRows: -1, maxContextCells: -1 });
   const sheet = makeSheet([["r1"], ["r2"], ["r3"], ["r4"], ["r5"]]);
