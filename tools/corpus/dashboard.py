@@ -133,6 +133,63 @@ def _round_trip_size_overhead(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "count_over_1_10": sum(1 for r in ratios if r > 1.10),
     }
 
+
+def _part_change_ratio_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate privacy-safe part-level diff ratios from triage reports.
+
+    These ratios are stable across runs and do not leak workbook content: they only count whether
+    a part changed, not what changed.
+    """
+
+    ratios: list[float] = []
+    critical_ratios: list[float] = []
+
+    for r in reports:
+        diff_step = (r.get("steps") or {}).get("diff") or {}
+        if not isinstance(diff_step, dict):
+            continue
+        if diff_step.get("status") != "ok":
+            continue
+
+        details = diff_step.get("details") or {}
+        if not isinstance(details, dict):
+            continue
+        part_stats = details.get("part_stats") or {}
+        if not isinstance(part_stats, dict):
+            continue
+
+        parts_total = part_stats.get("parts_total")
+        parts_changed = part_stats.get("parts_changed")
+        parts_changed_critical = part_stats.get("parts_changed_critical")
+        if not (
+            isinstance(parts_total, int)
+            and isinstance(parts_changed, int)
+            and isinstance(parts_changed_critical, int)
+        ):
+            continue
+        if parts_total <= 0:
+            continue
+
+        ratios.append(parts_changed / parts_total)
+        critical_ratios.append(parts_changed_critical / parts_total)
+
+    def _summarize(values: list[float]) -> dict[str, Any]:
+        values.sort()
+        if not values:
+            return {"count": 0, "mean": None, "p50": None, "p90": None, "max": None}
+        return {
+            "count": len(values),
+            "mean": statistics.fmean(values),
+            "p50": _percentile(values, 0.50),
+            "p90": _percentile(values, 0.90),
+            "max": values[-1],
+        }
+
+    return {
+        "part_change_ratio": _summarize(ratios),
+        "part_change_ratio_critical": _summarize(critical_ratios),
+    }
+
 TREND_MAX_ENTRIES = 90
 
 
@@ -469,6 +526,51 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
         lines.append("|---|---:|")
         for row in top_any_groups[:10]:
             lines.append(f"| {row['group']} | {row['count']} |")
+        lines.append("")
+
+    part_ratio = summary.get("part_change_ratio") or {}
+    part_ratio_critical = summary.get("part_change_ratio_critical") or {}
+    if isinstance(part_ratio, dict) and part_ratio.get("count", 0):
+        lines.append("## Part-level change ratio (privacy-safe)")
+        lines.append("")
+        lines.append("| Metric | Mean | P50 | P90 | N |")
+        lines.append("|---|---:|---:|---:|---:|")
+
+        def _fmt_pct(v: Any) -> str:
+            if v is None:
+                return "—"
+            try:
+                return f"{float(v):.1%}"
+            except Exception:  # noqa: BLE001
+                return "—"
+
+        lines.append(
+            "| parts_changed / parts_total | "
+            + " | ".join(
+                [
+                    _fmt_pct(part_ratio.get("mean")),
+                    _fmt_pct(part_ratio.get("p50")),
+                    _fmt_pct(part_ratio.get("p90")),
+                    str(part_ratio.get("count", 0)),
+                ]
+            )
+            + " |"
+        )
+
+        if not isinstance(part_ratio_critical, dict):
+            part_ratio_critical = {}
+        lines.append(
+            "| parts_changed_critical / parts_total | "
+            + " | ".join(
+                [
+                    _fmt_pct(part_ratio_critical.get("mean")),
+                    _fmt_pct(part_ratio_critical.get("p50")),
+                    _fmt_pct(part_ratio_critical.get("p90")),
+                    str(part_ratio_critical.get("count", 0)),
+                ]
+            )
+            + " |"
+        )
         lines.append("")
     lines.append("## Per-workbook")
     lines.append("")
@@ -859,6 +961,8 @@ def main() -> int:
     }
     if style_summary:
         summary["style"] = style_summary
+
+    summary.update(_part_change_ratio_summary(reports))
 
     write_json(out_dir / "summary.json", summary)
     (out_dir / "summary.md").write_text(

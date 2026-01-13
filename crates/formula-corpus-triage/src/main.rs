@@ -169,6 +169,13 @@ struct DiffCounts {
 }
 
 #[derive(Debug, Serialize)]
+struct DiffPartStats {
+    parts_total: usize,
+    parts_changed: usize,
+    parts_changed_critical: usize,
+}
+
+#[derive(Debug, Serialize)]
 struct DiffEntry {
     fingerprint: String,
     severity: String,
@@ -191,6 +198,7 @@ struct PartDiffSummary {
 struct DiffDetails {
     ignore: Vec<String>,
     counts: DiffCounts,
+    part_stats: DiffPartStats,
     equal: bool,
     parts_with_diffs: Vec<PartDiffSummary>,
     critical_parts: Vec<String>,
@@ -610,9 +618,7 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
     let ignore: BTreeSet<String> = args
         .ignore_parts
         .iter()
-        .map(|s| s.trim())
-        .map(|s| s.replace('\\', "/"))
-        .map(|s| s.trim_start_matches('/').to_string())
+        .map(|s| normalize_opc_part_name(s))
         .filter(|s| !s.is_empty())
         .collect();
     let mut ignore_sorted: Vec<String> = ignore.iter().cloned().collect();
@@ -620,6 +626,19 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
 
     let expected_archive = xlsx_diff::WorkbookArchive::from_bytes(expected)?;
     let actual_archive = xlsx_diff::WorkbookArchive::from_bytes(actual)?;
+
+    // Part-level stats are computed after applying ignore rules, mirroring the diff itself.
+    let expected_parts: BTreeSet<&str> = expected_archive
+        .part_names()
+        .into_iter()
+        .filter(|part| !ignore.contains(*part))
+        .collect();
+    let actual_parts: BTreeSet<&str> = actual_archive
+        .part_names()
+        .into_iter()
+        .filter(|part| !ignore.contains(*part))
+        .collect();
+    let parts_total = expected_parts.union(&actual_parts).count();
 
     let report = xlsx_diff::diff_archives_with_options(
         &expected_archive,
@@ -633,6 +652,8 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
     );
 
     let (parts_with_diffs, critical_parts, part_groups) = summarize_diffs_by_part(&report);
+    let parts_changed = parts_with_diffs.len();
+    let parts_changed_critical = critical_parts.len();
 
     let counts = DiffCounts {
         critical: report.count(xlsx_diff::Severity::Critical),
@@ -689,6 +710,11 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
     Ok(DiffDetails {
         ignore: ignore_sorted,
         counts,
+        part_stats: DiffPartStats {
+            parts_total,
+            parts_changed,
+            parts_changed_critical,
+        },
         equal,
         parts_with_diffs,
         critical_parts,
@@ -791,6 +817,27 @@ fn part_group(part: &str) -> &'static str {
         return "doc_props";
     }
     "other"
+}
+
+fn normalize_opc_part_name(part: &str) -> String {
+    normalize_opc_path(part.trim().trim_start_matches('/'))
+}
+
+fn normalize_opc_path(path: &str) -> String {
+    // Keep in sync with `xlsx-diff`'s internal normalization logic so ignore rules and part-level
+    // stats remain stable and match the diff report semantics.
+    let normalized = path.replace('\\', "/");
+    let mut out: Vec<&str> = Vec::new();
+    for segment in normalized.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                out.pop();
+            }
+            _ => out.push(segment),
+        }
+    }
+    out.join("/")
 }
 
 fn recalc_against_cached(doc: &formula_xlsx::XlsxDocument) -> Result<Option<RecalcDetails>> {
@@ -1144,7 +1191,7 @@ fn render_smoke(doc: &formula_xlsx::XlsxDocument) -> Result<RenderDetails> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+    use std::io::{Cursor, Write};
     use zip::write::FileOptions;
     use zip::{CompressionMethod, ZipWriter};
 
@@ -1175,6 +1222,50 @@ mod tests {
                 NormalizedValue::Error(expected_code.to_string())
             );
         }
+    }
+
+    fn make_zip(parts: &[(&str, &str)]) -> Vec<u8> {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let opts = FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
+
+        for (name, content) in parts {
+            zip.start_file(*name, opts).unwrap();
+            zip.write_all(content.as_bytes()).unwrap();
+        }
+
+        zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn diff_part_stats_counts_parts_after_ignore_and_by_severity() {
+        let expected = make_zip(&[
+            ("xl/workbook.xml", "<workbook foo=\"1\"/>"),
+            ("docProps/app.xml", "<app foo=\"1\"/>"),
+            ("xl/theme/theme1.xml", "<theme foo=\"1\"/>"),
+            ("xl/styles.xml", "<styles foo=\"1\"/>"),
+        ]);
+
+        let actual = make_zip(&[
+            ("xl/workbook.xml", "<workbook foo=\"2\"/>"), // critical diff
+            ("docProps/app.xml", "<app foo=\"2\"/>"),     // ignored diff
+            ("xl/theme/theme1.xml", "<theme foo=\"1\"/>"), // unchanged
+            ("docProps/core.xml", "<core foo=\"1\"/>"),   // extra part (info)
+        ]);
+
+        let args = Args {
+            input: PathBuf::from("dummy.xlsx"),
+            format: WorkbookFormat::Xlsx,
+            ignore_parts: vec!["docProps/app.xml".to_string()],
+            diff_limit: 100,
+            recalc: false,
+            render_smoke: false,
+        };
+
+        let details = diff_workbooks(&expected, &actual, &args).unwrap();
+        assert_eq!(details.part_stats.parts_total, 4);
+        assert_eq!(details.part_stats.parts_changed, 3);
+        assert_eq!(details.part_stats.parts_changed_critical, 2);
     }
 
     #[test]
