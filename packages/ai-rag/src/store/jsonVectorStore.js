@@ -179,10 +179,12 @@ export class JsonVectorStore extends InMemoryVectorStore {
    * @param {{ id: string, metadata: any }[]} records
    */
   async updateMetadata(records) {
+    if (!records.length) return;
     await this.load();
     await super.updateMetadata(records);
     this._dirty = true;
-    if (this._autoSave) await this._persist();
+    this._mutationVersion += 1;
+    if (this._autoSave) await this._enqueuePersist();
   }
 
   async delete(ids) {

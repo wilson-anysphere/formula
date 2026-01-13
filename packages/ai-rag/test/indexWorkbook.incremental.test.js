@@ -3,6 +3,9 @@ import test from "node:test";
 
 import { HashEmbedder } from "../src/embedding/hashEmbedder.js";
 import { InMemoryVectorStore } from "../src/store/inMemoryVectorStore.js";
+import { InMemoryBinaryStorage } from "../src/store/binaryStorage.js";
+import { JsonVectorStore } from "../src/store/jsonVectorStore.js";
+import { SqliteVectorStore } from "../src/store/sqliteVectorStore.js";
 import { indexWorkbook } from "../src/pipeline/indexWorkbook.js";
 
 function defer() {
@@ -51,6 +54,13 @@ function makeWorkbookTwoTables() {
       { name: "T2", sheetName: "Sheet1", rect: { r0: 0, c0: 3, r1: 1, c1: 4 } },
     ],
   };
+}
+
+let sqlJsAvailable = true;
+try {
+  await import("sql.js");
+} catch {
+  sqlJsAvailable = false;
 }
 
 test("indexWorkbook is incremental (unchanged chunks are skipped)", async () => {
@@ -129,6 +139,96 @@ test("indexWorkbook persists metadata-only changes without re-embedding", async 
     assert.equal(r.metadata.tag, "v2");
   }
 });
+
+test("indexWorkbook persists metadata-only changes for JsonVectorStore", async () => {
+  const workbook = makeWorkbook();
+  const baseEmbedder = new HashEmbedder({ dimension: 128 });
+  const storage = new InMemoryBinaryStorage();
+  const store = new JsonVectorStore({ storage, dimension: 128, autoSave: true });
+
+  let embedCalls = 0;
+  const embedder = {
+    name: baseEmbedder.name,
+    async embedTexts(texts, options) {
+      embedCalls += 1;
+      return baseEmbedder.embedTexts(texts, options);
+    },
+  };
+
+  await indexWorkbook({
+    workbook,
+    vectorStore: store,
+    embedder,
+    transform: (record) => ({ metadata: { ...record.metadata, tag: "v1" } }),
+  });
+
+  const second = await indexWorkbook({
+    workbook,
+    vectorStore: store,
+    embedder,
+    transform: (record) => ({ metadata: { ...record.metadata, tag: "v2" } }),
+  });
+  assert.equal(second.upserted, 0);
+  assert.equal(second.deleted, 0);
+  assert.equal(embedCalls, 1);
+
+  await store.close();
+
+  const store2 = new JsonVectorStore({ storage, dimension: 128, autoSave: false });
+  const records = await store2.list({ workbookId: workbook.id, includeVector: false });
+  assert.ok(records.length > 0);
+  for (const r of records) {
+    assert.equal(r.metadata.tag, "v2");
+  }
+  await store2.close();
+});
+
+test(
+  "indexWorkbook persists metadata-only changes for SqliteVectorStore",
+  { skip: !sqlJsAvailable },
+  async () => {
+    const workbook = makeWorkbook();
+    const baseEmbedder = new HashEmbedder({ dimension: 128 });
+    const storage = new InMemoryBinaryStorage();
+    const store = await SqliteVectorStore.create({ storage, dimension: 128, autoSave: true });
+
+    let embedCalls = 0;
+    const embedder = {
+      name: baseEmbedder.name,
+      async embedTexts(texts, options) {
+        embedCalls += 1;
+        return baseEmbedder.embedTexts(texts, options);
+      },
+    };
+
+    await indexWorkbook({
+      workbook,
+      vectorStore: store,
+      embedder,
+      transform: (record) => ({ metadata: { ...record.metadata, tag: "v1" } }),
+    });
+
+    const second = await indexWorkbook({
+      workbook,
+      vectorStore: store,
+      embedder,
+      transform: (record) => ({ metadata: { ...record.metadata, tag: "v2" } }),
+    });
+    assert.equal(second.upserted, 0);
+    assert.equal(second.deleted, 0);
+    assert.equal(embedCalls, 1);
+
+    await store.close();
+
+    const store2 = await SqliteVectorStore.create({ storage, dimension: 128, autoSave: false });
+    const records = await store2.list({ workbookId: workbook.id, includeVector: false });
+    assert.ok(records.length > 0);
+    for (const r of records) {
+      assert.equal(r.metadata.tag, "v2");
+    }
+    await store2.close();
+  }
+);
 
 test("indexWorkbook only upserts changed chunks", async () => {
   const workbook = makeWorkbookTwoTables();

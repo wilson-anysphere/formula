@@ -711,19 +711,44 @@ export class SqliteVectorStore {
 
     const stmt = this._db.prepare(`
       UPDATE vectors
-      SET workbook_id = ?, metadata_json = ?
+      SET
+        workbook_id = ?,
+        sheet_name = ?,
+        kind = ?,
+        title = ?,
+        r0 = ?,
+        c0 = ?,
+        r1 = ?,
+        c1 = ?,
+        content_hash = ?,
+        token_count = ?,
+        text = ?,
+        metadata_json = ?
       WHERE id = ?;
     `);
 
     this._db.run("BEGIN;");
     try {
       for (const r of records) {
-        const meta = r.metadata ?? {};
-        // Keep workbook_id aligned with metadata_json for efficient workbook filtering.
-        const workbookId = meta.workbookId ?? null;
-        stmt.run([workbookId, JSON.stringify(meta), r.id]);
+        const meta = splitMetadata(r.metadata);
+        stmt.run([
+          meta.workbookId,
+          meta.sheetName,
+          meta.kind,
+          meta.title,
+          meta.r0,
+          meta.c0,
+          meta.r1,
+          meta.c1,
+          meta.contentHash,
+          meta.tokenCount,
+          meta.text,
+          meta.metadataJson,
+          r.id,
+        ]);
       }
       this._db.run("COMMIT;");
+      this._dirty = true;
     } catch (err) {
       this._db.run("ROLLBACK;");
       throw err;
@@ -731,7 +756,7 @@ export class SqliteVectorStore {
       stmt.free();
     }
 
-    if (this._autoSave) await this._persist();
+    if (this._autoSave) await this._enqueuePersist();
   }
 
   /**
