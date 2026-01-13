@@ -6,7 +6,8 @@
  * Validates:
  * - `latest.json` updater manifest structure + version correctness
  * - every `platforms[*].url` in `latest.json` points at an uploaded asset
- * - `latest.json.sig` exists (manifest signing)
+ * - `latest.json.sig` exists and verifies against the updater public key in
+ *   `apps/desktop/src-tauri/tauri.conf.json` (`plugins.updater.pubkey`)
  * - optional per-bundle signature coverage (either `signature` in JSON or a
  *   sibling `<bundle>.sig` release asset)
  *
@@ -20,13 +21,18 @@
  *   GITHUB_TOKEN (or GH_TOKEN) - token with access to the repo's releases
  */
 
-import { createHash } from "node:crypto";
+import { createHash, verify } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { Readable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import {
+  ed25519PublicKeyFromRaw,
+  parseTauriUpdaterPubkey,
+  parseTauriUpdaterSignature,
+} from "./ci/tauri-minisign.mjs";
 
 class ActionableError extends Error {
   /**
@@ -43,6 +49,7 @@ class ActionableError extends Error {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tauriConfigRelativePath = "apps/desktop/src-tauri/tauri.conf.json";
 const tauriConfigPath = path.join(repoRoot, tauriConfigRelativePath);
+const PLACEHOLDER_PUBKEY = "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY";
 
 /**
  * @param {string} value
@@ -163,6 +170,7 @@ function usage() {
       "  --repo <owner/repo> GitHub repo (default: env GITHUB_REPOSITORY)",
       "  --out <path>       Output path for SHA256SUMS.txt (default: ./SHA256SUMS.txt)",
       "  --dry-run          Validate manifest/assets only (skip bundle hashing)",
+      "  --verify-assets    Download updater assets referenced in latest.json and verify their signatures (slow)",
       "  -h, --help         Show help",
       "",
       "Env:",
@@ -180,8 +188,8 @@ function usage() {
  * @param {string[]} argv
  */
 function parseArgs(argv) {
-  /** @type {{ tag?: string; repo?: string; out?: string; dryRun: boolean; help: boolean }} */
-  const parsed = { dryRun: false, help: false };
+  /** @type {{ tag?: string; repo?: string; out?: string; dryRun: boolean; verifyAssets: boolean; help: boolean }} */
+  const parsed = { dryRun: false, verifyAssets: false, help: false };
 
   const takeValue = (i, flag) => {
     const value = argv[i + 1];
@@ -198,6 +206,10 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (arg === "--dry-run") {
       parsed.dryRun = true;
+      continue;
+    }
+    if (arg === "--verify-assets") {
+      parsed.verifyAssets = true;
       continue;
     }
     if (arg === "--help" || arg === "-h") {
@@ -379,6 +391,41 @@ async function downloadReleaseAssetText(asset, token) {
 }
 
 /**
+ * Download a release asset and return the raw bytes.
+ *
+ * Note: this buffers the entire asset in memory (required for Ed25519 verification). Keep usage
+ * behind explicit flags for large binaries.
+ *
+ * @param {{ name: string; url?: string; browser_download_url?: string; size?: number }} asset
+ * @param {string} token
+ */
+async function downloadReleaseAssetBytes(asset, token) {
+  const downloadUrl =
+    typeof asset.url === "string" && asset.url.length > 0
+      ? asset.url
+      : asset.browser_download_url;
+  if (typeof downloadUrl !== "string" || downloadUrl.trim().length === 0) {
+    throw new ActionableError(`Release asset "${asset.name}" is missing a download URL.`, [
+      `Expected GitHub API to provide "url" or "browser_download_url".`,
+    ]);
+  }
+
+  const res = await fetchGitHub(downloadUrl, {
+    token,
+    accept: "application/octet-stream",
+  });
+  if (!res.ok) {
+    const body = await safeReadBody(res);
+    throw new ActionableError(`Failed to download release asset "${asset.name}".`, [
+      `${res.status} ${res.statusText}`,
+      body ? `Response: ${body}` : "Response body was empty.",
+      `URL: ${downloadUrl}`,
+    ]);
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/**
  * @param {{ name: string; size?: number; url?: string; browser_download_url?: string }} asset
  * @param {string} token
  */
@@ -534,6 +581,117 @@ function validateLatestJson(manifest, expectedVersion, assetsByName) {
   }
 }
 
+/**
+ * (Optional) Verify updater asset signatures for each platform entry in latest.json.
+ *
+ * This downloads the referenced updater artifacts (can be large). Keep it behind an explicit flag.
+ *
+ * @param {{
+ *   manifest: any,
+ *   assetsByName: Map<string, any>,
+ *   token: string,
+ *   publicKey: crypto.KeyObject,
+ *   pubkeyKeyId: string | null,
+ * }} opts
+ */
+async function verifyUpdaterPlatformAssetSignatures({ manifest, assetsByName, token, publicKey, pubkeyKeyId }) {
+  const platforms = manifest?.platforms;
+  if (!platforms || typeof platforms !== "object" || Array.isArray(platforms)) {
+    throw new ActionableError("latest.json is missing a 'platforms' object; cannot verify updater asset signatures.");
+  }
+
+  const entries = Object.entries(platforms);
+  if (entries.length === 0) {
+    throw new ActionableError("latest.json 'platforms' object is empty; cannot verify updater asset signatures.");
+  }
+
+  console.log(`Verifying updater asset signatures for ${entries.length} platform(s)...`);
+  for (const [platformKey, entry] of entries) {
+    if (!entry || typeof entry !== "object") continue;
+
+    const url = typeof entry.url === "string" ? entry.url.trim() : "";
+    if (!url) continue;
+
+    const assetName = filenameFromUrl(url);
+    if (!assetName) continue;
+
+    const asset = assetsByName.get(assetName);
+    if (!asset) {
+      throw new ActionableError(`Updater asset is missing from the GitHub Release.`, [
+        `platform: ${platformKey}`,
+        `asset: ${assetName}`,
+        `url: ${url}`,
+      ]);
+    }
+
+    const inlineSig = typeof entry.signature === "string" ? entry.signature.trim() : "";
+    let signatureText = inlineSig;
+    let signatureSource = inlineSig ? "inline" : "asset";
+
+    if (!signatureText) {
+      const sigAssetName = `${assetName}.sig`;
+      const sigAsset = assetsByName.get(sigAssetName);
+      if (!sigAsset) {
+        // This should have been caught by validateLatestJson, but keep this check defensive.
+        throw new ActionableError(`Missing updater asset signature.`, [
+          `platform: ${platformKey}`,
+          `asset: ${assetName}`,
+          `expected either platforms[${JSON.stringify(platformKey)}].signature or a release asset "${sigAssetName}"`,
+        ]);
+      }
+      signatureText = await downloadReleaseAssetText(sigAsset, token);
+      signatureSource = sigAssetName;
+    }
+
+    if (signatureText.trim().length === 0) {
+      throw new ActionableError(`Updater asset signature file is empty.`, [
+        `platform: ${platformKey}`,
+        `asset: ${assetName}`,
+        `signature source: ${signatureSource}`,
+      ]);
+    }
+
+    let parsedSig;
+    try {
+      parsedSig = parseTauriUpdaterSignature(signatureText, `${platformKey}.signature`);
+    } catch (err) {
+      throw new ActionableError(`Failed to parse updater asset signature.`, [
+        `platform: ${platformKey}`,
+        `asset: ${assetName}`,
+        `signature source: ${signatureSource}`,
+        err instanceof Error ? err.message : String(err),
+      ]);
+    }
+
+    if (parsedSig.keyId && pubkeyKeyId && parsedSig.keyId !== pubkeyKeyId) {
+      throw new ActionableError(`Updater asset signature key id mismatch.`, [
+        `platform: ${platformKey}`,
+        `asset: ${assetName}`,
+        `signature key id: ${parsedSig.keyId}`,
+        `updater pubkey key id: ${pubkeyKeyId}`,
+      ]);
+    }
+
+    const size = typeof asset.size === "number" ? asset.size : undefined;
+    console.log(
+      `- ${platformKey}: downloading ${assetName}${size ? ` (${formatBytes(size)})` : ""} for signature verification...`
+    );
+    const assetBytes = await downloadReleaseAssetBytes(asset, token);
+    const ok = verify(null, assetBytes, publicKey, parsedSig.signatureBytes);
+    if (!ok) {
+      throw new ActionableError(`Updater asset signature verification failed.`, [
+        `platform: ${platformKey}`,
+        `asset: ${assetName}`,
+        `url: ${url}`,
+        `signature source: ${signatureSource}`,
+        `This usually means the asset or signature was tampered with, or TAURI_PRIVATE_KEY does not match plugins.updater.pubkey.`,
+      ]);
+    }
+  }
+
+  console.log("Verified updater asset signatures.");
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
@@ -575,6 +733,39 @@ async function main() {
     config?.version,
     `${tauriConfigRelativePath} → "version"`
   );
+  const updaterPubkeyBase64 = requireNonEmptyString(
+    config?.plugins?.updater?.pubkey,
+    `${tauriConfigRelativePath} → plugins.updater.pubkey`
+  );
+  if (
+    updaterPubkeyBase64 === PLACEHOLDER_PUBKEY ||
+    updaterPubkeyBase64.includes("REPLACE_WITH")
+  ) {
+    throw new ActionableError(`Invalid updater public key (placeholder).`, [
+      `Expected ${tauriConfigRelativePath} → plugins.updater.pubkey to be the real updater public key (base64).`,
+    ]);
+  }
+
+  /** @type {{ publicKeyBytes: Buffer; keyId: string | null }} */
+  let parsedPubkey;
+  try {
+    parsedPubkey = parseTauriUpdaterPubkey(updaterPubkeyBase64);
+  } catch (err) {
+    throw new ActionableError(`Invalid updater public key.`, [
+      `Failed to parse ${tauriConfigRelativePath} → plugins.updater.pubkey.`,
+      err instanceof Error ? err.message : String(err),
+    ]);
+  }
+
+  let publicKey;
+  try {
+    publicKey = ed25519PublicKeyFromRaw(parsedPubkey.publicKeyBytes);
+  } catch (err) {
+    throw new ActionableError(`Invalid updater public key.`, [
+      `Failed to construct an Ed25519 public key from plugins.updater.pubkey.`,
+      err instanceof Error ? err.message : String(err),
+    ]);
+  }
 
   /** @type {any} */
   let release;
@@ -630,7 +821,8 @@ async function main() {
         ]);
       }
 
-      const latestJsonText = await downloadReleaseAssetText(latestJsonAsset, ghToken);
+      const latestJsonBytes = await downloadReleaseAssetBytes(latestJsonAsset, ghToken);
+      const latestJsonText = latestJsonBytes.toString("utf8");
       try {
         manifest = JSON.parse(latestJsonText);
       } catch (err) {
@@ -644,6 +836,31 @@ async function main() {
       if (latestSigText.trim().length === 0) {
         throw new ActionableError(`latest.json.sig downloaded successfully but was empty.`, [
           "This likely indicates an upstream signing/upload failure.",
+        ]);
+      }
+
+      /** @type {{ signatureBytes: Buffer; keyId: string | null }} */
+      let parsedSig;
+      try {
+        parsedSig = parseTauriUpdaterSignature(latestSigText, "latest.json.sig");
+      } catch (err) {
+        throw new ActionableError(`Failed to parse latest.json.sig as a Tauri updater signature.`, [
+          err instanceof Error ? err.message : String(err),
+        ]);
+      }
+
+      if (parsedSig.keyId && parsedPubkey.keyId && parsedSig.keyId !== parsedPubkey.keyId) {
+        throw new ActionableError(`Updater manifest signature key id mismatch.`, [
+          `latest.json.sig uses key id ${parsedSig.keyId}, but plugins.updater.pubkey is ${parsedPubkey.keyId}.`,
+          `This usually means TAURI_PRIVATE_KEY does not correspond to the committed plugins.updater.pubkey.`,
+        ]);
+      }
+
+      const signatureOk = verify(null, latestJsonBytes, publicKey, parsedSig.signatureBytes);
+      if (!signatureOk) {
+        throw new ActionableError(`Updater manifest signature verification failed.`, [
+          `latest.json.sig does not verify latest.json using the updater public key embedded in ${tauriConfigRelativePath}.`,
+          `This usually means the manifest/signature were generated with a different key, or assets were tampered with.`,
         ]);
       }
 
@@ -671,6 +888,16 @@ async function main() {
 
   if (lastError) {
     throw lastError;
+  }
+
+  if (args.verifyAssets) {
+    await verifyUpdaterPlatformAssetSignatures({
+      manifest,
+      assetsByName,
+      token: ghToken,
+      publicKey,
+      pubkeyKeyId: parsedPubkey.keyId,
+    });
   }
 
   if (args.dryRun) {
