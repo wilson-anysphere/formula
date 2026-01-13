@@ -39,6 +39,12 @@ fi
 
 die() {
   # Use a GitHub Actions error annotation when possible; still readable locally.
+  #
+  # If we're inside a GitHub Actions log group, close it so failures don't swallow the rest of the
+  # job logs into the group.
+  if [[ "${CHECK_APPIMAGE_GROUP_OPEN:-0}" -eq 1 ]]; then
+    echo "::endgroup::" >&2
+  fi
   echo "::error::check-appimage: $*" >&2
   exit 1
 }
@@ -307,6 +313,7 @@ main() {
   echo "Found ${#appimages[@]} AppImage artifact(s)."
   for appimage in "${appimages[@]}"; do
     echo "::group::check-appimage: $appimage"
+    CHECK_APPIMAGE_GROUP_OPEN=1
     echo "==> Checking AppImage: $appimage"
 
     if [ ! -s "$appimage" ]; then
@@ -408,6 +415,7 @@ main() {
     trap - EXIT
     echo "OK: $appimage"
     echo "::endgroup::"
+    CHECK_APPIMAGE_GROUP_OPEN=0
   done
 }
 
