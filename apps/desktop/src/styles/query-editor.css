@@ -528,18 +528,25 @@
 .query-editor-preview__th {
   position: sticky;
   top: 0;
+  z-index: 1;
   background: var(--grid-header-bg);
   border-bottom: 1px solid var(--panel-border);
   padding: 6px;
   text-align: start;
   font-size: 12px;
   color: var(--text-primary);
+  font-weight: 600;
+}
+
+.query-editor-preview__table tbody tr:hover {
+  background: var(--bg-hover);
 }
 
 .query-editor-preview__td {
   border-bottom: 1px solid var(--panel-border);
   padding: 6px;
   font-size: 12px;
+  vertical-align: top;
 }
 
 /* Responsive layout: when docked panels are narrow, stack the sidebar above the
