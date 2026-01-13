@@ -10,7 +10,7 @@ use core::fmt;
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
 
-use base64::engine::general_purpose::STANDARD;
+use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD};
 use base64::Engine;
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::Reader as XmlReader;
@@ -225,7 +225,6 @@ impl fmt::Display for OffcryptoError {
 }
 
 impl std::error::Error for OffcryptoError {}
-
 struct Reader<'a> {
     bytes: &'a [u8],
     pos: usize,
@@ -800,10 +799,41 @@ fn parse_password_encrypted_key_attrs<'a>(
     ))
 }
 
+fn decode_b64_attr(value: &str) -> Result<Vec<u8>, OffcryptoError> {
+    // Some producers pretty-print the `EncryptionInfo` XML and may insert whitespace into long
+    // base64 attribute values. Additionally, some omit `=` padding. Be permissive.
+    let bytes = value.as_bytes();
+
+    // Avoid allocating in the common case where there is no whitespace.
+    let mut cleaned: Option<Vec<u8>> = None;
+    for (idx, &b) in bytes.iter().enumerate() {
+        if matches!(b, b'\r' | b'\n' | b'\t' | b' ') {
+            let mut out = Vec::with_capacity(bytes.len());
+            out.extend_from_slice(&bytes[..idx]);
+            for &b2 in &bytes[idx..] {
+                if !matches!(b2, b'\r' | b'\n' | b'\t' | b' ') {
+                    out.push(b2);
+                }
+            }
+            cleaned = Some(out);
+            break;
+        }
+    }
+
+    let input = cleaned.as_deref().unwrap_or(bytes);
+    STANDARD
+        .decode(input)
+        .or_else(|_| STANDARD_NO_PAD.decode(input))
+        .map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+            context: "invalid base64 value",
+        })
+}
+
 fn decode_base64(value: &[u8]) -> Result<Vec<u8>, OffcryptoError> {
-    STANDARD.decode(value).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
-        context: "invalid base64 value",
-    })
+    let s = std::str::from_utf8(value).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+        context: "invalid UTF-8 base64 value",
+    })?;
+    decode_b64_attr(s)
 }
 
 fn parse_decimal_u32(value: &[u8], _name: &'static str) -> Result<u32, OffcryptoError> {
@@ -963,18 +993,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn decode_b64_attr_padded() {
+        let decoded = decode_b64_attr("AQIDBA==").expect("decode");
+        assert_eq!(decoded, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn decode_b64_attr_unpadded() {
+        let decoded = decode_b64_attr("AQIDBA").expect("decode");
+        assert_eq!(decoded, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn decode_b64_attr_whitespace() {
+        let decoded = decode_b64_attr("A QID\r\nBA==\t").expect("decode");
+        assert_eq!(decoded, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
     fn parses_minimal_agile_encryption_info() {
+        // Include unpadded base64 and embedded whitespace to match the tolerant
+        // decoding behavior required for pretty-printed EncryptionInfo XML.
         let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
     xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
-  <keyData saltValue="AAECAwQFBgcICQoLDA0ODw==" hashAlgorithm="SHA256" blockSize="16"/>
-  <dataIntegrity encryptedHmacKey="EBESEw==" encryptedHmacValue="qrvM"/>
+  <keyData saltValue="AAECAwQF BgcICQoLDA0ODw" hashAlgorithm="SHA256" blockSize="16"/>
+  <dataIntegrity encryptedHmacKey="EBE SEw" encryptedHmacValue="q rvM"/>
   <keyEncryptors>
     <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
-      <p:encryptedKey spinCount="100000" saltValue="AQIDBA==" hashAlgorithm="SHA512" keyBits="256"
-        encryptedKeyValue="BQYHCA=="
-        encryptedVerifierHashInput="CQoLDA=="
-        encryptedVerifierHashValue="DQ4PEA=="/>
+      <p:encryptedKey spinCount="100000" saltValue="AQID BA" hashAlgorithm="SHA512" keyBits="256"
+        encryptedKeyValue="BQY HCA"
+        encryptedVerifierHashInput="CQoL DA"
+        encryptedVerifierHashValue="DQ4P EA"/>
     </keyEncryptor>
   </keyEncryptors>
 </encryption>
