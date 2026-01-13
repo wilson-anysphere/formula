@@ -50,11 +50,17 @@
 //! (wrong password vs unsupported algorithms vs file corruption) without leaking sensitive inputs
 //! such as passwords or derived keys.
 
+mod agile;
 mod aes_cbc;
 mod agile_decrypt;
 mod crypto;
 mod error;
 
+pub use agile::{
+    decrypt_agile_encrypted_package_stream, decrypt_agile_encrypted_package_stream_with_key,
+    decrypt_agile_keys, parse_agile_encryption_info_stream, AgileDataIntegrity, AgileDecryptedKeys,
+    AgileEncryptionInfo, AgileKeyData, AgilePasswordKeyEncryptor,
+};
 pub use aes_cbc::{
     decrypt_aes_cbc_no_padding, decrypt_aes_cbc_no_padding_in_place, AesCbcDecryptError,
     AES_BLOCK_SIZE,
