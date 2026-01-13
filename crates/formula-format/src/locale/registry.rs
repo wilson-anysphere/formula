@@ -118,7 +118,8 @@ fn normalize_locale_id(id: &str) -> Option<&'static str> {
     // - treat `-` and `_` as equivalent
     // - match case-insensitively
     //
-    // This intentionally supports a small set of locales the formatter ships with.
+    // This intentionally supports a small set of locales the formatter ships with (plus a
+    // best-effort language/region fallback for common variants).
     let mut key = String::with_capacity(trimmed.len());
     for ch in trimmed.chars() {
         let ch = match ch {
@@ -137,45 +138,53 @@ fn normalize_locale_id(id: &str) -> Option<&'static str> {
         key.truncate(idx);
     }
 
-    // Drop BCP-47 extensions (`en-US-u-nu-latn`, `fr-FR-x-private`, ...). For our purposes we only
-    // care about the language/region portion.
-    if let Some(idx) = key.find("-u-") {
-        key.truncate(idx);
-    }
-    if let Some(idx) = key.find("-x-") {
-        key.truncate(idx);
+    // Parse BCP-47 tags and variants such as `de-CH-1996` or `fr-Latn-FR-u-nu-latn`. We only care
+    // about the language + optional region, ignoring script/variants/extensions.
+    let parts: Vec<&str> = key.split('-').filter(|p| !p.is_empty()).collect();
+    let lang = *parts.first()?;
+    let mut idx = 1;
+    if parts
+        .get(idx)
+        .is_some_and(|p| p.len() == 4 && p.chars().all(|c| c.is_ascii_alphabetic()))
+    {
+        idx += 1;
     }
 
-    match key.as_str() {
-        "en-us" | "en" => Some("en-US"),
-        "en-gb" | "en-uk" => Some("en-GB"),
-        "de-de" | "de" => Some("de-DE"),
-        "de-ch" => Some("de-CH"),
-        "fr-fr" | "fr" => Some("fr-FR"),
-        "fr-ch" => Some("fr-CH"),
-        "es-es" | "es" => Some("es-ES"),
-        "es-mx" => Some("es-MX"),
-        "pt-pt" | "pt" => Some("pt-PT"),
-        "pt-br" => Some("pt-BR"),
-        "nl-nl" | "nl" => Some("nl-NL"),
-        "nl-be" => Some("nl-BE"),
-        "it-it" | "it" => Some("it-IT"),
-        "it-ch" => Some("it-CH"),
-        _ => {
-            // Fall back to the language part for region-specific variants we don't explicitly list
-            // (e.g. `fr-CA`, `de-AT`, `en-AU`).
-            let lang = key.split('-').next().unwrap_or("");
-            match lang {
-                "en" => Some("en-US"),
-                "de" => Some("de-DE"),
-                "fr" => Some("fr-FR"),
-                "es" => Some("es-ES"),
-                "pt" => Some("pt-PT"),
-                "nl" => Some("nl-NL"),
-                "it" => Some("it-IT"),
-                _ => None,
-            }
-        }
+    let region = parts.get(idx).copied().filter(|p| {
+        (p.len() == 2 && p.chars().all(|c| c.is_ascii_alphabetic()))
+            || (p.len() == 3 && p.chars().all(|c| c.is_ascii_digit()))
+    });
+
+    match lang {
+        "en" => match region {
+            Some("gb") | Some("uk") => Some("en-GB"),
+            _ => Some("en-US"),
+        },
+        "de" => match region {
+            Some("ch") => Some("de-CH"),
+            _ => Some("de-DE"),
+        },
+        "fr" => match region {
+            Some("ch") => Some("fr-CH"),
+            _ => Some("fr-FR"),
+        },
+        "es" => match region {
+            Some("mx") => Some("es-MX"),
+            _ => Some("es-ES"),
+        },
+        "it" => match region {
+            Some("ch") => Some("it-CH"),
+            _ => Some("it-IT"),
+        },
+        "pt" => match region {
+            Some("br") => Some("pt-BR"),
+            _ => Some("pt-PT"),
+        },
+        "nl" => match region {
+            Some("be") => Some("nl-BE"),
+            _ => Some("nl-NL"),
+        },
+        _ => None,
     }
 }
 
@@ -323,12 +332,15 @@ mod tests {
         assert_eq!(normalize_locale_id("en-GB"), Some("en-GB"));
         assert_eq!(normalize_locale_id("en_uk"), Some("en-GB"));
         assert_eq!(normalize_locale_id("en-AU"), Some("en-US"));
+        assert_eq!(normalize_locale_id("en-GB-oed"), Some("en-GB"));
         assert_eq!(normalize_locale_id("de"), Some("de-DE"));
         assert_eq!(normalize_locale_id("de-AT"), Some("de-DE"));
         assert_eq!(normalize_locale_id("de_ch"), Some("de-CH"));
+        assert_eq!(normalize_locale_id("de-CH-1996"), Some("de-CH"));
         assert_eq!(normalize_locale_id("fr_fr"), Some("fr-FR"));
         assert_eq!(normalize_locale_id("fr-CA"), Some("fr-FR"));
         assert_eq!(normalize_locale_id("fr_CH"), Some("fr-CH"));
+        assert_eq!(normalize_locale_id("fr-CH-1996"), Some("fr-CH"));
         assert_eq!(normalize_locale_id("es-ES"), Some("es-ES"));
         assert_eq!(normalize_locale_id("es-MX"), Some("es-MX"));
         assert_eq!(normalize_locale_id("es-AR"), Some("es-ES"));
@@ -340,6 +352,7 @@ mod tests {
         assert_eq!(normalize_locale_id("it_it"), Some("it-IT"));
         assert_eq!(normalize_locale_id("it-CH"), Some("it-CH"));
         assert_eq!(normalize_locale_id("fr-FR-u-nu-latn"), Some("fr-FR"));
+        assert_eq!(normalize_locale_id("fr-Latn-FR-u-nu-latn"), Some("fr-FR"));
         assert_eq!(normalize_locale_id(""), None);
     }
 

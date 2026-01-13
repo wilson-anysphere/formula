@@ -113,9 +113,11 @@ fn get_locale_normalizes_common_locale_id_spellings() {
     assert_eq!(locale::get_locale("en_US.UTF-8").unwrap().id, "en-US");
     assert_eq!(locale::get_locale("de_ch").unwrap().id, "de-CH");
     assert_eq!(locale::get_locale("de_AT").unwrap().id, "de-DE");
+    assert_eq!(locale::get_locale("de-CH-1996").unwrap().id, "de-CH");
     assert_eq!(locale::get_locale("fr_fr").unwrap().id, "fr-FR");
     assert_eq!(locale::get_locale("fr_ch").unwrap().id, "fr-CH");
     assert_eq!(locale::get_locale("fr-CA").unwrap().id, "fr-FR");
+    assert_eq!(locale::get_locale("fr-Latn-FR-u-nu-latn").unwrap().id, "fr-FR");
     assert_eq!(locale::get_locale("es").unwrap().id, "es-ES");
     assert_eq!(locale::get_locale("es-MX").unwrap().id, "es-MX");
     assert_eq!(locale::get_locale("pt").unwrap().id, "pt-PT");
