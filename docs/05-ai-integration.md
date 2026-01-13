@@ -412,6 +412,7 @@ class AgentEngine {
 
 **Code entrypoints:**
 - Core context builder (schema + sampling + RAG hooks) + DLP redaction/blocking: [`packages/ai-context/src/contextManager.js`](../packages/ai-context/src/contextManager.js)
+- Package usage + examples (token budgeting + DLP notes): [`packages/ai-context/README.md`](../packages/ai-context/README.md)
 - Desktop wrapper that builds per-message workbook context + budgets tokens: [`apps/desktop/src/ai/context/WorkbookContextBuilder.ts`](../apps/desktop/src/ai/context/WorkbookContextBuilder.ts)
 - Desktop RAG service (persistent local index; deterministic hash embeddings): [`apps/desktop/src/ai/rag/ragService.ts`](../apps/desktop/src/ai/rag/ragService.ts)
 
