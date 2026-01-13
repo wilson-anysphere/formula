@@ -757,6 +757,34 @@ test("indexWorkbook rejects when embedder returns a non-array result (no partial
   assert.deepEqual(await store.list({ workbookId: workbook.id, includeVector: false }), []);
 });
 
+test("indexWorkbook rejects when embedder returns an invalid vector entry (no partial writes)", async () => {
+  const workbook = makeWorkbookTwoTables();
+
+  /** @type {any[]} */
+  const upserted = [];
+  const vectorStore = {
+    async list() {
+      return [];
+    },
+    async upsert(records) {
+      upserted.push(...records);
+    },
+  };
+
+  const embedder = {
+    async embedTexts(texts) {
+      return texts.map((_, i) => (i === 0 ? new Float32Array(8) : undefined));
+    },
+  };
+
+  await assert.rejects(
+    indexWorkbook({ workbook, vectorStore, embedder }),
+    /returned an invalid vector/
+  );
+
+  assert.deepEqual(upserted, []);
+});
+
 test("indexWorkbook rejects when embedder vectors have the wrong dimension (no partial writes)", async () => {
   const workbook = makeWorkbookTwoTables();
   const store = new InMemoryVectorStore({ dimension: 128 });

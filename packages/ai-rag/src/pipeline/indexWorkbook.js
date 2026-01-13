@@ -265,15 +265,18 @@ export async function indexWorkbook(params) {
     }
 
     const expectedDim = vectorStore?.dimension;
-    if (Number.isFinite(expectedDim)) {
-      for (let i = 0; i < vectors.length; i += 1) {
-        const vec = vectors[i];
-        const len = vec?.length;
-        if (!Number.isFinite(len) || len !== expectedDim) {
-          throw new Error(
-            `Vector dimension mismatch for id=${toUpsert[i].id}: expected ${expectedDim}, got ${len}`
-          );
-        }
+    for (let i = 0; i < vectors.length; i += 1) {
+      const vec = vectors[i];
+      const len = vec?.length;
+      if (!Number.isFinite(len)) {
+        throw new Error(
+          `embedder.embedTexts returned an invalid vector for id=${toUpsert[i].id}: expected an array-like vector with a finite length`
+        );
+      }
+      if (Number.isFinite(expectedDim) && len !== expectedDim) {
+        throw new Error(
+          `Vector dimension mismatch for id=${toUpsert[i].id}: expected ${expectedDim}, got ${len}`
+        );
       }
     }
   }
