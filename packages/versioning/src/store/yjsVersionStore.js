@@ -687,11 +687,27 @@ export class YjsVersionStore {
 
     /** @type {Set<string>} */
     const staleIds = new Set();
+    /** @type {Set<string>} */
+    const finalizeIds = new Set();
 
     this.versions.forEach((value, key) => {
       if (typeof key !== "string") return;
       if (!isYMap(value)) return;
       if (value.get("snapshotComplete") !== false) return;
+
+      // If all chunks are present but the writer crashed before flipping the
+      // `snapshotComplete` flag, we can safely finalize the record instead of
+      // deleting it (keeps the snapshot recoverable and allows normal retention
+      // to apply).
+      const expectedChunks = value.get("snapshotChunkCountExpected");
+      const chunksArr = value.get("snapshotChunks");
+      if (typeof expectedChunks === "number" && expectedChunks >= 0 && isYArray(chunksArr)) {
+        const actual = typeof chunksArr.length === "number" ? chunksArr.length : chunksArr.toArray().length;
+        if (actual >= expectedChunks) {
+          finalizeIds.add(key);
+          return;
+        }
+      }
 
       // Prefer `createdAtMs` if present (newer schema), falling back to the
       // version timestamp for backwards compatibility.
@@ -706,10 +722,22 @@ export class YjsVersionStore {
       if (nowMs - ts >= olderThanMs) staleIds.add(key);
     });
 
-    if (staleIds.size === 0) return { prunedIds: [] };
+    if (staleIds.size === 0 && finalizeIds.size === 0) return { prunedIds: [] };
 
     const prunedIds = Array.from(staleIds);
     this.doc.transact(() => {
+      for (const id of finalizeIds) {
+        const raw = this.versions.get(id);
+        if (!isYMap(raw)) continue;
+        if (raw.get("snapshotComplete") !== false) continue;
+        const expectedChunks = raw.get("snapshotChunkCountExpected");
+        const chunksArr = raw.get("snapshotChunks");
+        if (typeof expectedChunks !== "number" || expectedChunks < 0 || !isYArray(chunksArr)) continue;
+        const actual = typeof chunksArr.length === "number" ? chunksArr.length : chunksArr.toArray().length;
+        if (actual < expectedChunks) continue;
+        raw.set("snapshotComplete", true);
+      }
+
       for (const id of staleIds) this.versions.delete(id);
 
       const order = this.meta.get("order");

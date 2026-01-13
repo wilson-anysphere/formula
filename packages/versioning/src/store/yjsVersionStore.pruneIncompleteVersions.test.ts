@@ -148,4 +148,47 @@ describe("YjsVersionStore: pruneIncompleteVersions()", () => {
     expect(doc.getMap("versions").get("incomplete")).toBeDefined();
     expect((doc.getMap("versionsMeta").get("order") as any)?.toArray?.()).toEqual(["incomplete"]);
   });
+
+  it("finalizes records that have all expected chunks even if snapshotComplete=false", async () => {
+    const doc = new Y.Doc();
+    const store = new YjsVersionStore({
+      doc,
+      writeMode: "stream",
+      chunkSize: 1024,
+      maxChunksPerTransaction: 2,
+    });
+
+    doc.transact(() => {
+      const versions = doc.getMap("versions");
+      const meta = doc.getMap("versionsMeta");
+      const order = new Y.Array<string>();
+      meta.set("order", order);
+
+      const record = new Y.Map<any>();
+      record.set("schemaVersion", 1);
+      record.set("id", "recoverable");
+      record.set("kind", "snapshot");
+      record.set("timestampMs", 1);
+      record.set("createdAtMs", 1);
+      record.set("compression", "none");
+      record.set("snapshotEncoding", "chunks");
+      record.set("snapshotChunkCountExpected", 1);
+      record.set("snapshotComplete", false);
+      const chunks = new Y.Array<Uint8Array>();
+      chunks.push([new Uint8Array([4, 5, 6])]);
+      record.set("snapshotChunks", chunks);
+      versions.set("recoverable", record);
+      order.push(["recoverable"]);
+    }, "test");
+
+    expect(await store.getVersion("recoverable")).toBeNull();
+
+    await store.pruneIncompleteVersions({ olderThanMs: 0 });
+
+    const recovered = await store.getVersion("recoverable");
+    expect(recovered?.id).toBe("recoverable");
+    expect(Array.from(recovered!.snapshot)).toEqual([4, 5, 6]);
+    expect((doc.getMap("versions").get("recoverable") as any)?.get?.("snapshotComplete")).toBe(true);
+    expect((doc.getMap("versionsMeta").get("order") as any)?.toArray?.()).toEqual(["recoverable"]);
+  });
 });
