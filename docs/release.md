@@ -127,7 +127,7 @@ This repo already includes the updater **public key** in `apps/desktop/src-tauri
 
 Add the following repository secrets (required for updater signing; password optional):
 
-- `TAURI_PRIVATE_KEY` – the private key string printed by `tauri signer generate` (PEM or base64)
+- `TAURI_PRIVATE_KEY` – the private key string printed by `cargo tauri signer generate` (PEM or base64)
 - `TAURI_KEY_PASSWORD` – optional; only needed if the private key was generated with a password
 
 The release workflow passes these to `tauri-apps/tauri-action`, which signs the update artifacts.
