@@ -203,7 +203,8 @@ def _7z_extract_and_find_marker(archive: Path, markers: list[str]) -> str | None
         for root, _, files in os.walk(tmpdir):
             for f in files:
                 name_lc = f.lower()
-                for m_lc, m in zip(marker_lc, markers, strict=False):
+                # Avoid `zip(..., strict=...)` so this script can run on older Python versions too.
+                for m_lc, m in zip(marker_lc, markers):
                     if m_lc in name_lc:
                         # Return the canonical marker string (not the filename we found).
                         return m
