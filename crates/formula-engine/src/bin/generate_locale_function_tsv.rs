@@ -148,6 +148,8 @@ fn render_tsv(
     catalog: &[String],
     existing: &BTreeMap<String, String>,
 ) -> String {
+    const README_HEADER: &str = "# See `src/locale/data/README.md` for format + generators.";
+
     // Always start with the standard header; preserve any additional comment lines that were
     // already present in the file for provenance.
     let mut out = String::new();
@@ -161,13 +163,17 @@ fn render_tsv(
         if trimmed == "# Canonical\tLocalized" {
             continue;
         }
+        if trimmed == README_HEADER {
+            continue;
+        }
         if trimmed.starts_with('#') {
             out.push_str(trimmed);
             out.push('\n');
         }
     }
 
-    out.push_str("# See `src/locale/data/README.md` for format + generators.\n\n");
+    out.push_str(README_HEADER);
+    out.push_str("\n\n");
 
     for canonical in catalog {
         let localized = existing
