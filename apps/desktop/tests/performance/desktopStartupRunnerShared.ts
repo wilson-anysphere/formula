@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createInterface, type Interface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -15,10 +15,10 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')
 
 const perfHome = resolve(repoRoot, 'target', 'perf-home');
 const perfTmp = resolve(perfHome, 'tmp');
-const perfXdgConfig = resolve(perfHome, '.config');
-const perfXdgCache = resolve(perfHome, '.cache');
-const perfXdgState = resolve(perfHome, '.local', 'state');
-const perfXdgData = resolve(perfHome, '.local', 'share');
+const perfXdgConfig = resolve(perfHome, 'xdg-config');
+const perfXdgCache = resolve(perfHome, 'xdg-cache');
+const perfXdgState = resolve(perfHome, 'xdg-state');
+const perfXdgData = resolve(perfHome, 'xdg-data');
 const perfAppData = resolve(perfHome, 'AppData', 'Roaming');
 const perfLocalAppData = resolve(perfHome, 'AppData', 'Local');
 
@@ -197,6 +197,10 @@ function closeReadline(rl: Interface | null): void {
 
 export async function runOnce({ binPath, timeoutMs, envOverrides }: RunOnceOptions): Promise<StartupMetrics> {
   // Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
+  // Optionally, force a clean state between iterations to avoid cache pollution.
+  if (process.env.FORMULA_DESKTOP_BENCH_RESET_HOME === '1') {
+    rmSync(perfHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
   mkdirSync(perfHome, { recursive: true });
   mkdirSync(perfTmp, { recursive: true });
   mkdirSync(perfXdgConfig, { recursive: true });
@@ -357,4 +361,3 @@ export async function runOnce({ binPath, timeoutMs, envOverrides }: RunOnceOptio
     });
   });
 }
-

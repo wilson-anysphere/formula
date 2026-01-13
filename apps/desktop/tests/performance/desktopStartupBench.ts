@@ -1,3 +1,22 @@
+/**
+ * Desktop startup benchmark (Tauri binary).
+ *
+ * Reproducibility + safety:
+ * - The desktop process is spawned with *all* user-data directories redirected under
+ *   `target/perf-home` so the benchmark cannot read/write the real user profile.
+ * - This avoids polluting developer machines and reduces variance on CI where cached home
+ *   directories can otherwise leak across runs.
+ *
+ * Environment isolation is implemented in `desktopStartupRunnerShared.ts`:
+ * - All platforms: `HOME` + `USERPROFILE` => `target/perf-home`
+ * - Linux: `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME` => `target/perf-home/xdg-*`
+ * - Windows: `APPDATA`, `LOCALAPPDATA`, `TEMP`, `TMP` => `target/perf-home/*`
+ * - macOS/Linux: `TMPDIR` => `target/perf-home/tmp`
+ *
+ * Reset behavior:
+ * - Set `FORMULA_DESKTOP_BENCH_RESET_HOME=1` to delete `target/perf-home` before *each* iteration.
+ */
+
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
