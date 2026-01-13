@@ -118,10 +118,16 @@ export interface PartialFormulaContext {
   currentArg?: { text: string; start: number; end: number };
 }
 
+/**
+ * Signature accepted by {@link TabCompletionEngine}'s `parsePartialFormula` injection point.
+ *
+ * Callers may provide either a synchronous implementation (fast JS parser) or an async one
+ * (e.g. locale-aware WASM partial parse).
+ */
 export type ParsePartialFormula = (
   input: string,
   cursorPosition: number,
-  functionRegistry: { isRangeArg: (fnName: string, argIndex: number) => boolean },
+  functionRegistry: { isRangeArg: (fnName: string, argIndex: number) => boolean }
 ) => PartialFormulaContext | Promise<PartialFormulaContext>;
 
 export function parsePartialFormula(

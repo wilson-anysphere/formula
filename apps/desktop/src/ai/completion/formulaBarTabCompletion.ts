@@ -128,6 +128,7 @@ export class FormulaBarTabCompletionController {
       schemaProvider,
       parsePartialFormula: createLocaleAwarePartialFormulaParser({
         getEngineClient: typeof opts.getEngineClient === "function" ? opts.getEngineClient : undefined,
+        timeoutMs: 10,
       }),
       // Keep room for a backend (Cursor) suggestion even when the rule-based engine
       // returns a full set of top-level starters (which otherwise consumes the
@@ -200,6 +201,7 @@ export class FormulaBarTabCompletionController {
 
     const draft = model.draft;
     const cursor = model.cursorStart;
+
     const activeCell = model.activeCell.address;
     const sheetId = this.#getSheetId();
     const cellsVersion = this.#cellsVersion;

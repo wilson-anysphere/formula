@@ -52,7 +52,11 @@ export class TabCompletionEngine {
   /**
    * @param {{
    *   functionRegistry?: FunctionRegistry,
-   *   parsePartialFormula?: typeof parsePartialFormulaFallback | ((input: string, cursorPosition: number, functionRegistry: FunctionRegistry) => any | Promise<any>),
+   *   parsePartialFormula?: typeof parsePartialFormulaFallback | ((
+   *     input: string,
+   *     cursorPosition: number,
+   *     functionRegistry: FunctionRegistry
+   *   ) => ReturnType<typeof parsePartialFormulaFallback> | Promise<ReturnType<typeof parsePartialFormulaFallback>>),
    *   completionClient?: { completeTabCompletion: (req: { input: string, cursorPosition: number, cellA1: string, signal?: AbortSignal }) => Promise<string> } | null,
    *   schemaProvider?: SchemaProvider | null,
    *   cache?: LRUCache,
@@ -184,7 +188,15 @@ export class TabCompletionEngine {
     /** @type {ReturnType<typeof parsePartialFormulaFallback>} */
     let parsed;
     try {
-      parsed = await Promise.resolve(this.parsePartialFormula(input, cursorPosition, this.functionRegistry));
+      // `parsePartialFormula` runs on every keystroke. Allow injectors to return
+      // either a sync result (fast JS parser) or a Promise (e.g. WASM-backed parse)
+      // without forcing an `await` in the common sync case.
+      const maybeParsed = this.parsePartialFormula(input, cursorPosition, this.functionRegistry);
+      if (isThenable(maybeParsed)) {
+        parsed = await maybeParsed;
+      } else {
+        parsed = maybeParsed;
+      }
     } catch {
       // Parsing is best-effort. If a caller-provided parser throws (e.g. WASM engine unavailable),
       // fall back to the built-in JS parser so tab completion remains responsive.
@@ -1474,6 +1486,10 @@ function clampCursor(input, cursorPosition) {
   if (cursorPosition < 0) return 0;
   if (cursorPosition > input.length) return input.length;
   return cursorPosition;
+}
+
+function isThenable(value) {
+  return Boolean(value && typeof value.then === "function");
 }
 
 function replaceSpan(input, start, end, replacement) {

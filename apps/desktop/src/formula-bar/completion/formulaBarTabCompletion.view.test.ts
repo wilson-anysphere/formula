@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DocumentController } from "../../document/documentController.js";
 import { FormulaBarView } from "../FormulaBarView.js";
 import { FormulaBarTabCompletionController } from "../../ai/completion/formulaBarTabCompletion.js";
+import { getLocale, setLocale } from "../../i18n/index.js";
 
 describe("FormulaBarView tab completion (integration)", () => {
   it("caps preview evaluation cell reads (MAX_CELL_READS) for large formulas", async () => {
@@ -135,6 +136,94 @@ describe("FormulaBarView tab completion (integration)", () => {
 
     completion.destroy();
     host.remove();
+  });
+
+  it("uses the WASM partial parser (when available) to understand localized function names", async () => {
+    const prevLocale = getLocale();
+    setLocale("de-DE");
+    const doc = new DocumentController();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    const calls: unknown[][] = [];
+    const engineStub = {
+      parseFormulaPartial: async (...args: unknown[]) => {
+        calls.push(args);
+        // In de-DE Excel, VLOOKUP is localized as SVERWEIS. The WASM engine returns canonical
+        // function metadata so tab-completion can still apply range-arg heuristics.
+        return { context: { function: { name: "VLOOKUP", argIndex: 1 } }, error: null, ast: {} };
+      },
+    };
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+      getEngineClient: () => engineStub as any,
+    });
+    try {
+      for (let row = 0; row < 10; row += 1) {
+        doc.setCellValue("Sheet1", { row, col: 0 }, row + 1);
+      }
+      view.setActiveCell({ address: "B11", input: "", value: null });
+
+      // In semicolon locales like de-DE, `,` is commonly used as the decimal separator while `;`
+      // separates arguments.
+      view.focus({ cursor: "end" });
+      view.textarea.value = "=SVERWEIS(1,2;A";
+      view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+      view.textarea.dispatchEvent(new Event("input"));
+
+      await completion.flushTabCompletion();
+
+      expect(calls).toHaveLength(1);
+      expect(view.model.aiSuggestion()).toBe("=SVERWEIS(1,2;A1:A10");
+    } finally {
+      completion.destroy();
+      host.remove();
+      setLocale(prevLocale);
+    }
+  });
+ 
+  it("falls back to the JS parser when the WASM partial parser throws", async () => {
+    const prevLocale = getLocale();
+    setLocale("de-DE");
+    const doc = new DocumentController();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    const engineStub = {
+      parseFormulaPartial: () => {
+        throw new Error("engine not ready");
+      },
+    };
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+      getEngineClient: () => engineStub as any,
+    });
+    try {
+      for (let row = 0; row < 10; row += 1) {
+        doc.setCellValue("Sheet1", { row, col: 0 }, row + 1);
+      }
+      view.setActiveCell({ address: "B11", input: "", value: null });
+
+      view.focus({ cursor: "end" });
+      view.textarea.value = "=SUM(A";
+      view.textarea.setSelectionRange(6, 6);
+      view.textarea.dispatchEvent(new Event("input"));
+
+      await completion.flushTabCompletion();
+
+      // JS fallback still provides range suggestions.
+      expect(view.model.aiSuggestion()).toBe("=SUM(A1:A10)");
+    } finally {
+      completion.destroy();
+      host.remove();
+      setLocale(prevLocale);
+    }
   });
 
   it("suggests named ranges when typing a range argument", async () => {

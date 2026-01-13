@@ -2600,6 +2600,7 @@ export class SpreadsheetApp {
         schemaProvider: {
           getNamedRanges: () => {
             const formatSheetPrefix = (id: string): string => {
+
               const token = formatSheetNameForA1(id);
               return token ? `${token}!` : "";
             };
