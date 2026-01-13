@@ -10,11 +10,15 @@
 //! - Compute aggregations (sum/count/avg/min/max + stddev/var variants)
 //! - Produce a table with grand totals and basic subtotals.
 
+#[cfg(test)]
 use chrono::NaiveDate;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-pub use formula_model::pivots::ShowAsType;
+pub use formula_model::pivots::{
+    AggregationType, CalculatedField, CalculatedItem, FilterField, GrandTotals, Layout, PivotConfig,
+    PivotField, PivotKeyPart, PivotValue, ShowAsType, SortOrder, SubtotalPosition, ValueField,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -42,220 +46,6 @@ pub enum PivotError {
         item: String,
         message: String,
     },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum AggregationType {
-    Sum,
-    Count,
-    Average,
-    Min,
-    Max,
-    Product,
-    CountNumbers,
-    StdDev,
-    StdDevP,
-    Var,
-    VarP,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Layout {
-    Compact,
-    Tabular,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum SubtotalPosition {
-    Top,
-    Bottom,
-    None,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GrandTotals {
-    pub rows: bool,
-    pub columns: bool,
-}
-
-impl Default for GrandTotals {
-    fn default() -> Self {
-        Self {
-            rows: true,
-            columns: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", content = "value", rename_all = "camelCase")]
-pub enum PivotValue {
-    Blank,
-    Number(f64),
-    Date(NaiveDate),
-    Text(String),
-    Bool(bool),
-}
-
-impl PivotValue {
-    fn canonical_number_bits(n: f64) -> u64 {
-        if n == 0.0 {
-            // Treat -0.0 and 0.0 as the same pivot item (Excel displays them identically).
-            return 0.0_f64.to_bits();
-        }
-        if n.is_nan() {
-            // Canonicalize all NaNs to a single representation so we don't emit multiple "NaN" rows.
-            return f64::NAN.to_bits();
-        }
-        n.to_bits()
-    }
-
-    fn to_key_part(&self) -> PivotKeyPart {
-        match self {
-            PivotValue::Blank => PivotKeyPart::Blank,
-            PivotValue::Number(n) => PivotKeyPart::Number(Self::canonical_number_bits(*n)),
-            PivotValue::Date(d) => PivotKeyPart::Date(*d),
-            PivotValue::Text(s) => PivotKeyPart::Text(s.clone()),
-            PivotValue::Bool(b) => PivotKeyPart::Bool(*b),
-        }
-    }
-
-    fn display_string(&self) -> String {
-        match self {
-            PivotValue::Blank => String::new(),
-            PivotValue::Number(n) => {
-                // Keep it simple; Excel has more nuanced formatting.
-                if n.fract() == 0.0 {
-                    format!("{}", *n as i64)
-                } else {
-                    format!("{n}")
-                }
-            }
-            PivotValue::Date(d) => d.to_string(),
-            PivotValue::Text(s) => s.clone(),
-            PivotValue::Bool(b) => b.to_string(),
-        }
-    }
-
-    fn as_number(&self) -> Option<f64> {
-        match self {
-            PivotValue::Number(n) => Some(*n),
-            _ => None,
-        }
-    }
-
-    fn is_blank(&self) -> bool {
-        matches!(self, PivotValue::Blank)
-    }
-}
-
-impl From<&str> for PivotValue {
-    fn from(value: &str) -> Self {
-        PivotValue::Text(value.to_string())
-    }
-}
-
-impl From<String> for PivotValue {
-    fn from(value: String) -> Self {
-        PivotValue::Text(value)
-    }
-}
-
-impl From<f64> for PivotValue {
-    fn from(value: f64) -> Self {
-        PivotValue::Number(value)
-    }
-}
-
-impl From<i64> for PivotValue {
-    fn from(value: i64) -> Self {
-        PivotValue::Number(value as f64)
-    }
-}
-
-impl From<NaiveDate> for PivotValue {
-    fn from(value: NaiveDate) -> Self {
-        PivotValue::Date(value)
-    }
-}
-
-impl From<bool> for PivotValue {
-    fn from(value: bool) -> Self {
-        PivotValue::Bool(value)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(tag = "type", content = "value", rename_all = "camelCase")]
-pub enum PivotKeyPart {
-    Blank,
-    Number(u64),
-    Date(NaiveDate),
-    Text(String),
-    Bool(bool),
-}
-
-impl PivotKeyPart {
-    fn kind_rank(&self) -> u8 {
-        match self {
-            PivotKeyPart::Number(_) => 0,
-            PivotKeyPart::Date(_) => 1,
-            PivotKeyPart::Text(_) => 2,
-            PivotKeyPart::Bool(_) => 3,
-            PivotKeyPart::Blank => 4,
-        }
-    }
-
-    fn display_string(&self) -> String {
-        match self {
-            PivotKeyPart::Blank => "(blank)".to_string(),
-            PivotKeyPart::Number(bits) => {
-                PivotValue::Number(f64::from_bits(*bits)).display_string()
-            }
-            PivotKeyPart::Date(d) => d.to_string(),
-            PivotKeyPart::Text(s) => s.clone(),
-            PivotKeyPart::Bool(b) => b.to_string(),
-        }
-    }
-}
-
-impl PartialOrd for PivotKeyPart {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for PivotKeyPart {
-    fn cmp(&self, other: &Self) -> Ordering {
-        let rank_cmp = self.kind_rank().cmp(&other.kind_rank());
-        if rank_cmp != Ordering::Equal {
-            // Excel uses a fixed cross-type ordering (numbers/dates, then text, then booleans,
-            // blanks last) regardless of ascending/descending selection. Pivots currently always
-            // sort ascending within that global type ordering.
-            return rank_cmp;
-        }
-
-        match (self, other) {
-            (PivotKeyPart::Blank, PivotKeyPart::Blank) => Ordering::Equal,
-            (PivotKeyPart::Number(a), PivotKeyPart::Number(b)) => {
-                let a = f64::from_bits(*a);
-                let b = f64::from_bits(*b);
-                a.total_cmp(&b)
-            }
-            (PivotKeyPart::Date(a), PivotKeyPart::Date(b)) => a.cmp(b),
-            (PivotKeyPart::Text(a), PivotKeyPart::Text(b)) => {
-                let a_fold = a.to_ascii_lowercase();
-                let b_fold = b.to_ascii_lowercase();
-                a_fold.cmp(&b_fold).then_with(|| a.cmp(b))
-            }
-            (PivotKeyPart::Bool(a), PivotKeyPart::Bool(b)) => a.cmp(b),
-            _ => Ordering::Equal,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -425,109 +215,6 @@ impl PivotCache {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PivotField {
-    pub source_field: String,
-    #[serde(default)]
-    pub sort_order: SortOrder,
-    #[serde(default)]
-    pub manual_sort: Option<Vec<PivotKeyPart>>,
-}
-
-impl PivotField {
-    pub fn new(source_field: impl Into<String>) -> Self {
-        Self {
-            source_field: source_field.into(),
-            sort_order: SortOrder::default(),
-            manual_sort: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum SortOrder {
-    Ascending,
-    Descending,
-    Manual,
-}
-
-impl Default for SortOrder {
-    fn default() -> Self {
-        Self::Ascending
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ValueField {
-    pub source_field: String,
-    pub name: String,
-    pub aggregation: AggregationType,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub show_as: Option<ShowAsType>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_field: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_item: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FilterField {
-    pub source_field: String,
-    /// Allowed values. `None` means allow all.
-    pub allowed: Option<HashSet<PivotKeyPart>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CalculatedField {
-    pub name: String,
-    pub formula: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CalculatedItem {
-    pub field: String,
-    pub name: String,
-    pub formula: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PivotConfig {
-    pub row_fields: Vec<PivotField>,
-    pub column_fields: Vec<PivotField>,
-    pub value_fields: Vec<ValueField>,
-    pub filter_fields: Vec<FilterField>,
-    #[serde(default)]
-    pub calculated_fields: Vec<CalculatedField>,
-    #[serde(default)]
-    pub calculated_items: Vec<CalculatedItem>,
-    pub layout: Layout,
-    pub subtotals: SubtotalPosition,
-    pub grand_totals: GrandTotals,
-}
-
-impl Default for PivotConfig {
-    fn default() -> Self {
-        Self {
-            row_fields: Vec::new(),
-            column_fields: Vec::new(),
-            value_fields: Vec::new(),
-            filter_fields: Vec::new(),
-            calculated_fields: Vec::new(),
-            calculated_items: Vec::new(),
-            layout: Layout::Tabular,
-            subtotals: SubtotalPosition::None,
-            grand_totals: GrandTotals::default(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PivotResult {
@@ -619,6 +306,7 @@ impl CreatePivotTableRequest {
                         .unwrap_or_else(|| format!("{:?} of {}", vf.aggregation, vf.field)),
                     source_field: vf.field,
                     aggregation: vf.aggregation,
+                    number_format: None,
                     show_as: None,
                     base_field: None,
                     base_item: None,
@@ -1053,7 +741,7 @@ impl PivotEngine {
             Layout::Compact => {
                 row.push(PivotValue::Text("Row Labels".to_string()));
             }
-            Layout::Tabular => {
+            Layout::Outline | Layout::Tabular => {
                 for f in &cfg.row_fields {
                     row.push(PivotValue::Text(f.source_field.clone()));
                 }
@@ -1121,7 +809,7 @@ impl PivotEngine {
                     .join(" / ");
                 row.push(label.unwrap_or_else(|| PivotValue::Text(s)));
             }
-            Layout::Tabular => {
+            Layout::Outline | Layout::Tabular => {
                 for (idx, part) in row_key.0.iter().enumerate() {
                     if idx == 0 {
                         if let Some(l) = label.as_ref() {
@@ -1178,7 +866,7 @@ impl PivotEngine {
             Layout::Compact => {
                 row.push(label);
             }
-            Layout::Tabular => {
+            Layout::Outline | Layout::Tabular => {
                 if cfg.row_fields.is_empty() {
                     // Preserve previous behavior: still emit a label cell even if there are no row fields.
                     row.push(label);
@@ -1313,7 +1001,7 @@ impl PivotEngine {
 
         let row_label_width = match cfg.layout {
             Layout::Compact => 1,
-            Layout::Tabular => cfg.row_fields.len(),
+            Layout::Outline | Layout::Tabular => cfg.row_fields.len(),
         };
 
         let regular_column_count = col_keys.len() * value_field_count;
@@ -1866,6 +1554,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: None,
                 base_field: None,
                 base_item: None,
@@ -1916,6 +1605,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: None,
                 base_field: None,
                 base_item: None,
@@ -1966,6 +1656,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: None,
                 base_field: None,
                 base_item: None,
@@ -2021,6 +1712,7 @@ mod tests {
                 source_field: "Value".to_string(),
                 name: "Sum of Value".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: None,
                 base_field: None,
                 base_item: None,
@@ -2071,6 +1763,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: None,
                 base_field: None,
                 base_item: None,
@@ -2128,6 +1821,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: None,
                 base_field: None,
                 base_item: None,
@@ -2178,6 +1872,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: None,
                 base_field: None,
                 base_item: None,
@@ -2231,6 +1926,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: None,
                 base_field: None,
                 base_item: None,
@@ -2279,6 +1975,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: None,
                 base_field: None,
                 base_item: None,
@@ -2328,6 +2025,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: None,
                 base_field: None,
                 base_item: None,
@@ -2378,6 +2076,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: None,
                 base_field: None,
                 base_item: None,
@@ -2438,6 +2137,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: None,
                 base_field: None,
                 base_item: None,
@@ -2524,6 +2224,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: Some(ShowAsType::PercentOfGrandTotal),
                 base_field: None,
                 base_item: None,
@@ -2569,6 +2270,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: None,
                 base_field: None,
                 base_item: None,
@@ -2614,6 +2316,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: Some(ShowAsType::PercentOfRowTotal),
                 base_field: None,
                 base_item: None,
@@ -2664,6 +2367,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: Some(ShowAsType::PercentOfColumnTotal),
                 base_field: None,
                 base_item: None,
@@ -2713,6 +2417,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: Some(ShowAsType::RunningTotal),
                 base_field: None,
                 base_item: None,
@@ -2758,6 +2463,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: Some(ShowAsType::RankAscending),
                 base_field: None,
                 base_item: None,
@@ -2803,6 +2509,7 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: Some(ShowAsType::RankDescending),
                 base_field: None,
                 base_item: None,
@@ -2864,6 +2571,7 @@ mod tests {
                 source_field: "Amount".to_string(),
                 name: "Sum of Amount".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: None,
                 base_field: None,
                 base_item: None,

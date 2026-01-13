@@ -1,6 +1,7 @@
 use chrono::NaiveDate;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
@@ -89,6 +90,16 @@ pub enum PivotKeyPart {
 }
 
 impl PivotKeyPart {
+    fn kind_rank(&self) -> u8 {
+        match self {
+            PivotKeyPart::Number(_) => 0,
+            PivotKeyPart::Date(_) => 1,
+            PivotKeyPart::Text(_) => 2,
+            PivotKeyPart::Bool(_) => 3,
+            PivotKeyPart::Blank => 4,
+        }
+    }
+
     /// Human-friendly (Excel-like) string representation of a pivot item value.
     pub fn display_string(&self) -> String {
         match self {
@@ -97,6 +108,41 @@ impl PivotKeyPart {
             PivotKeyPart::Date(d) => d.to_string(),
             PivotKeyPart::Text(s) => s.clone(),
             PivotKeyPart::Bool(b) => b.to_string(),
+        }
+    }
+}
+
+impl PartialOrd for PivotKeyPart {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PivotKeyPart {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let rank_cmp = self.kind_rank().cmp(&other.kind_rank());
+        if rank_cmp != Ordering::Equal {
+            // Excel uses a fixed cross-type ordering (numbers/dates, then text, then booleans,
+            // blanks last) regardless of ascending/descending selection. Pivots currently always
+            // sort ascending within that global type ordering.
+            return rank_cmp;
+        }
+
+        match (self, other) {
+            (PivotKeyPart::Blank, PivotKeyPart::Blank) => Ordering::Equal,
+            (PivotKeyPart::Number(a), PivotKeyPart::Number(b)) => {
+                let a = f64::from_bits(*a);
+                let b = f64::from_bits(*b);
+                a.total_cmp(&b)
+            }
+            (PivotKeyPart::Date(a), PivotKeyPart::Date(b)) => a.cmp(b),
+            (PivotKeyPart::Text(a), PivotKeyPart::Text(b)) => {
+                let a_fold = a.to_ascii_lowercase();
+                let b_fold = b.to_ascii_lowercase();
+                a_fold.cmp(&b_fold).then_with(|| a.cmp(b))
+            }
+            (PivotKeyPart::Bool(a), PivotKeyPart::Bool(b)) => a.cmp(b),
+            _ => Ordering::Equal,
         }
     }
 }
@@ -234,7 +280,7 @@ impl PivotField {
 pub struct FilterField {
     pub source_field: String,
     /// Allowed values. `None` means allow all.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub allowed: Option<HashSet<PivotKeyPart>>,
 }
 

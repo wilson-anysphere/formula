@@ -207,6 +207,7 @@ pub fn pivot_table_to_engine_config(
                 source_field,
                 name,
                 aggregation,
+                number_format: None,
                 show_as,
                 base_field,
                 base_item,
