@@ -57,8 +57,31 @@ export function suggestRanges(params) {
     return [];
   }
 
-  const arg = (currentArgText ?? "").trim();
-  if (arg.length === 0) return [];
+  let arg = (currentArgText ?? "").trim();
+
+  // Empty argument ranges (e.g. "=SUM(") - still provide suggestions. Use the
+  // active cell column as the default so the completion remains a pure insertion.
+  if (arg.length === 0) {
+    if (cellRef.col > EXCEL_MAX_COL_INDEX) return [];
+    arg = columnIndexToLetter(cellRef.col);
+  }
+
+  // Partial column-range token (A:) -> suggest A:A. Avoid suggesting A1:A10 since
+  // that would require inserting characters *before* the typed ':' (not a pure insertion).
+  const colRangePrefix = /^(\$?)([A-Za-z]{1,3}):$/.exec(arg);
+  if (colRangePrefix) {
+    const colPrefix = colRangePrefix[1] === "$" ? "$" : "";
+    const colToken = colRangePrefix[2];
+    const colIndex = safeColumnLetterToIndex(colToken.toUpperCase());
+    if (colIndex === null) return [];
+    return [
+      {
+        range: `${colPrefix}${colToken}:${colPrefix}${colToken}`,
+        confidence: 0.35,
+        reason: "entire_column",
+      },
+    ];
+  }
 
   // Only handle conservative A1-style column/cell prefixes, plus partial range syntax:
   // - A / A1 / $A$1

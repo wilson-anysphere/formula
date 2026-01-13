@@ -172,7 +172,7 @@ test("suggestRanges preserves absolute column/row prefixes in A1 output", () => 
   assert.equal(absBoth[0].range, "$A$1:$A$3");
 });
 
-test("suggestRanges completes partial A1 range syntax (A1: -> A1:A10)", () => {
+test("suggestRanges completes partial A1 range syntax (A1: -> A1:A10) and preserves absolute markers ($A$1:)", () => {
   const ctx = createColumnAContext(Array.from({ length: 10 }, (_, i) => [i, i + 1]));
 
   const suggestions = suggestRanges({
@@ -182,6 +182,14 @@ test("suggestRanges completes partial A1 range syntax (A1: -> A1:A10)", () => {
   });
 
   assert.equal(suggestions[0].range, "A1:A10");
+
+  const absSuggestions = suggestRanges({
+    currentArgText: "$A$1:",
+    cellRef: { row: 20, col: 0 },
+    surroundingCells: ctx,
+  });
+
+  assert.equal(absSuggestions[0].range, "$A$1:$A$10");
 });
 
 test("suggestRanges supports partial end-column prefixes for multi-letter columns (AB1:A -> AB1:AB3)", () => {
@@ -202,7 +210,7 @@ test("suggestRanges supports partial end-column prefixes for multi-letter column
   assert.equal(suggestions[0].range, "AB1:AB3");
 });
 
-test("suggestRanges accepts partial column range syntax (A: -> A1:A3)", () => {
+test("suggestRanges completes partial column range syntax (A: -> A:A)", () => {
   const ctx = createColumnAContext([
     [0, 10],
     [1, 20],
@@ -215,7 +223,8 @@ test("suggestRanges accepts partial column range syntax (A: -> A1:A3)", () => {
     surroundingCells: ctx,
   });
 
-  assert.equal(suggestions[0].range, "A1:A3");
+  assert.equal(suggestions.length, 1);
+  assert.equal(suggestions[0].range, "A:A");
 });
 
 test("suggestRanges is conservative for multi-column prefixes (A1:B -> no suggestions)", () => {
@@ -432,6 +441,41 @@ test("suggestRanges does not suggest a 2D table range when only one column is po
     !suggestions.some((s) => /A\\d+:[B-Z]/.test(s.range)),
     `Expected no multi-column A1 range suggestions, got: ${suggestions.map((s) => s.range).join(", ")}`
   );
+});
+
+test("suggestRanges returns suggestions for an empty argument using the active cell column", () => {
+  const ctx = createGridContext([
+    [0, 1, 10], // B1
+    [1, 1, 20], // B2
+    [2, 1, 30], // B3
+  ]);
+
+  const suggestions = suggestRanges({
+    currentArgText: "",
+    cellRef: { row: 3, col: 1 }, // B4
+    surroundingCells: ctx,
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.range === "B:B"),
+    `Expected suggestions to contain B:B, got: ${suggestions.map((s) => s.range).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.range === "B1:B3"),
+    `Expected suggestions to contain B1:B3, got: ${suggestions.map((s) => s.range).join(", ")}`
+  );
+});
+
+test("suggestRanges completes partial range syntax with an explicit end column token (A1:A -> A1:A10)", () => {
+  const ctx = createColumnAContext(Array.from({ length: 10 }, (_, i) => [i, i + 1]));
+
+  const suggestions = suggestRanges({
+    currentArgText: "A1:A",
+    cellRef: { row: 20, col: 0 },
+    surroundingCells: ctx,
+  });
+
+  assert.equal(suggestions[0].range, "A1:A10");
 });
 
 test("suggestRanges returns no suggestions for columns beyond Excel max (XFD)", () => {
