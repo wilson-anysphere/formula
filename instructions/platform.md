@@ -362,7 +362,9 @@ await invoke("check_for_updates", { source: "manual" });
 
 ### macOS
 
-- Use `entitlements.plist` for sandboxing
+- macOS code signing uses `apps/desktop/src-tauri/entitlements.plist` (wired via `bundle.macOS.entitlements` in `tauri.conf.json`).
+  - For Developer ID distribution with the hardened runtime, this file must include the WKWebView/JavaScriptCore JIT entitlements (`com.apple.security.cs.allow-jit`, `com.apple.security.cs.allow-unsigned-executable-memory`) or the signed app may launch with a blank WebView.
+  - If we ever enable the App Sandbox in the future, this file is also where sandbox entitlements live.
 - Notarize for Gatekeeper
 - Support Apple Silicon (aarch64) and Intel (x86_64)
 - Use `.icns` icon format
