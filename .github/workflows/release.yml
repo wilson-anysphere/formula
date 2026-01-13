@@ -400,15 +400,20 @@ jobs:
 
           # Tauri bundles normally live under `src-tauri/target/release/bundle`, but can also
           # end up under `src-tauri/target/<triple>/release/bundle` if `--target` is used.
-          bundle_root="apps/desktop/src-tauri/target"
-          if [[ ! -d "$bundle_root" ]]; then
-            echo "Expected Tauri target directory not found: $bundle_root" >&2
+          bundle_roots=()
+          for root in "apps/desktop/src-tauri/target" "target"; do
+            if [[ -d "$root" ]]; then
+              bundle_roots+=("$root")
+            fi
+          done
+          if ((${#bundle_roots[@]} == 0)); then
+            echo "Expected Tauri target directory not found. Looked in: apps/desktop/src-tauri/target and target" >&2
             exit 1
           fi
 
-          mapfile -d '' appimages < <(find "$bundle_root" -type f -path '*/release/bundle/appimage/*.AppImage' -print0)
-          mapfile -d '' debs < <(find "$bundle_root" -type f -path '*/release/bundle/deb/*.deb' -print0)
-          mapfile -d '' rpms < <(find "$bundle_root" -type f -path '*/release/bundle/rpm/*.rpm' -print0)
+          mapfile -d '' appimages < <(find "${bundle_roots[@]}" -type f -path '*/release/bundle/appimage/*.AppImage' -print0)
+          mapfile -d '' debs < <(find "${bundle_roots[@]}" -type f -path '*/release/bundle/deb/*.deb' -print0)
+          mapfile -d '' rpms < <(find "${bundle_roots[@]}" -type f -path '*/release/bundle/rpm/*.rpm' -print0)
 
           echo "Bundle outputs:"
           printf '  AppImage: %s\n' "${#appimages[@]}"
