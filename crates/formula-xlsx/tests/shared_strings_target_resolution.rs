@@ -1,6 +1,7 @@
 use std::io::{Cursor, Read, Write};
 
 use formula_model::CellRef;
+use formula_model::CellValue;
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -55,10 +56,16 @@ fn xlsx_document_resolves_shared_strings_part_from_workbook_rels(
     // Ensure we actually loaded the shared strings.
     let sheet_id = doc.workbook.sheets[0].id;
     let sheet = doc.workbook.sheet(sheet_id).unwrap();
-    assert_eq!(
-        sheet.value(CellRef::from_a1("A1")?),
-        formula_model::CellValue::String("Hello Bold Italic".to_string())
-    );
+    match sheet.value(CellRef::from_a1("A1")?) {
+        CellValue::RichText(rich) => {
+            assert_eq!(rich.text, "Hello Bold Italic");
+            assert!(
+                !rich.runs.is_empty(),
+                "expected rich text runs to be preserved for shared string"
+            );
+        }
+        other => panic!("expected A1 to be rich text, got {other:?}"),
+    }
     assert_eq!(
         sheet.value(CellRef::from_a1("A2")?),
         formula_model::CellValue::String("Plain".to_string())

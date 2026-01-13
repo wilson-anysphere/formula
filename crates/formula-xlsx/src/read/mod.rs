@@ -3901,12 +3901,18 @@ fn interpret_cell_value(
         Some("s") => {
             let raw = v_text.clone().unwrap_or_default();
             let idx: u32 = raw.parse().unwrap_or(0);
-            let text = shared_strings
+            let value = shared_strings
                 .get(idx as usize)
-                .map(|rt| rt.text.clone())
-                .unwrap_or_default();
+                .map(|rich| {
+                    if rich.runs.is_empty() {
+                        CellValue::String(rich.text.clone())
+                    } else {
+                        CellValue::RichText(rich.clone())
+                    }
+                })
+                .unwrap_or_else(|| CellValue::String(String::new()));
             (
-                CellValue::String(text),
+                value,
                 Some(CellValueKind::SharedString { index: idx }),
                 Some(raw),
             )
@@ -3990,11 +3996,16 @@ fn interpret_cell_value_without_meta(
         Some("s") => {
             let raw = v_text.as_deref().unwrap_or_default();
             let idx: u32 = raw.parse().unwrap_or(0);
-            let text = shared_strings
+            shared_strings
                 .get(idx as usize)
-                .map(|rt| rt.text.clone())
-                .unwrap_or_default();
-            CellValue::String(text)
+                .map(|rich| {
+                    if rich.runs.is_empty() {
+                        CellValue::String(rich.text.clone())
+                    } else {
+                        CellValue::RichText(rich.clone())
+                    }
+                })
+                .unwrap_or_else(|| CellValue::String(String::new()))
         }
         Some("b") => CellValue::Boolean(v_text.as_deref() == Some("1")),
         Some("e") => {

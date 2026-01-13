@@ -1826,11 +1826,16 @@ fn interpret_cell_value(
         Some("s") => {
             let raw = v_text.clone().unwrap_or_default();
             let idx: u32 = raw.parse().unwrap_or(0);
-            let text = shared_strings
+            shared_strings
                 .get(idx as usize)
-                .map(|rt| rt.text.clone())
-                .unwrap_or_default();
-            CellValue::String(text)
+                .map(|rich| {
+                    if rich.runs.is_empty() {
+                        CellValue::String(rich.text.clone())
+                    } else {
+                        CellValue::RichText(rich.clone())
+                    }
+                })
+                .unwrap_or_else(|| CellValue::String(String::new()))
         }
         Some("b") => {
             let raw = v_text.clone().unwrap_or_default();

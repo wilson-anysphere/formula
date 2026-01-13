@@ -130,13 +130,20 @@ fn fast_reader_matches_full_reader_for_values_and_formulas() {
         }
 
         if case.fixture.ends_with("rich-text-shared-strings.xlsx") {
-            assert_eq!(
-                fast.sheets[0]
-                    .cell(CellRef::from_a1("A1").unwrap())
-                    .unwrap()
-                    .value,
-                CellValue::String("Hello Bold Italic".to_string())
-            );
+            let value = &fast.sheets[0]
+                .cell(CellRef::from_a1("A1").unwrap())
+                .unwrap()
+                .value;
+            match value {
+                CellValue::RichText(rich) => {
+                    assert_eq!(rich.text, "Hello Bold Italic");
+                    assert!(
+                        !rich.runs.is_empty(),
+                        "expected rich text runs to be preserved for shared string"
+                    );
+                }
+                other => panic!("expected A1 to be rich text, got {other:?}"),
+            }
         }
     }
 }
