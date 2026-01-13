@@ -92,11 +92,18 @@ Notes:
   - Cold-start targets (defaults shown; legacy unscoped vars are still accepted as fallbacks):
     - `FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS` (default: 500)
     - `FORMULA_DESKTOP_COLD_FIRST_RENDER_TARGET_MS` (default: 500)
+    - `FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS` (default: 800) — p95 budget for `webview_loaded_ms` (native WebView page-load complete)
     - `FORMULA_DESKTOP_COLD_TTI_TARGET_MS` (default: 1000)
   - Warm-start targets (optional; default to the cold targets if unset):
     - `FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS`
     - `FORMULA_DESKTOP_WARM_FIRST_RENDER_TARGET_MS`
     - `FORMULA_DESKTOP_WARM_TTI_TARGET_MS`
+  - Shell-only target overrides (optional; fall back to the full-startup targets above if unset):
+    - `FORMULA_DESKTOP_SHELL_COLD_WINDOW_VISIBLE_TARGET_MS`
+    - `FORMULA_DESKTOP_SHELL_COLD_TTI_TARGET_MS`
+    - `FORMULA_DESKTOP_SHELL_WARM_WINDOW_VISIBLE_TARGET_MS`
+    - `FORMULA_DESKTOP_SHELL_WARM_TTI_TARGET_MS`
+    - `FORMULA_DESKTOP_SHELL_WEBVIEW_LOADED_TARGET_MS`
   - `FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=1` to fail the command when p95 exceeds the targets (useful for CI gating)
   - `FORMULA_RUN_DESKTOP_STARTUP_BENCH=1` to allow running in CI (the runner skips in CI by default)
   - `FORMULA_DESKTOP_BIN=/path/to/formula-desktop` to benchmark a custom binary
