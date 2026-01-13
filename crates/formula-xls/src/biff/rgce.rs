@@ -30,6 +30,26 @@ const BIFF8_MAX_ROW0: i64 = u16::MAX as i64;
 // Columns are stored in a 14-bit field in many BIFF8 structures.
 const BIFF8_MAX_COL0: i64 = 0x3FFF;
 
+// Cap the number of decode warnings produced for a single rgce stream. Corrupt token streams can
+// otherwise generate an unbounded number of warnings (e.g. repeated PtgExp/PtgTbl tokens), which
+// can lead to excessive memory usage and noisy UX.
+const MAX_RGCE_WARNINGS: usize = 50;
+const RGCE_WARNINGS_SUPPRESSED_MESSAGE: &str = "additional rgce decode warnings suppressed";
+
+fn push_warning(warnings: &mut Vec<String>, msg: impl Into<String>, suppressed: &mut bool) {
+    if *suppressed {
+        return;
+    }
+
+    if warnings.len() < MAX_RGCE_WARNINGS {
+        warnings.push(msg.into());
+        return;
+    }
+
+    warnings.push(RGCE_WARNINGS_SUPPRESSED_MESSAGE.to_string());
+    *suppressed = true;
+}
+
 /// Context needed to decode BIFF8 `rgce` streams that may reference workbook-scoped metadata such
 /// as sheets (`EXTERNSHEET`) and other defined names (`NAME` table).
 #[derive(Debug, Clone)]
@@ -287,6 +307,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
     let mut input = rgce;
     let mut stack: Vec<ExprFragment> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
+    let mut warnings_suppressed = false;
     let mut warned_default_base_for_relative = false;
 
     while !input.is_empty() {
@@ -303,35 +324,55 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // Payload: 4 bytes (row/col).
             0x01 | 0x02 => {
                 if input.len() < 4 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 input = &input[4..];
-                warnings.push(format!(
-                    "encountered unsupported rgce token 0x{ptg:02X} (PtgExp/PtgTbl); rendering #UNKNOWN!"
-                ));
+                push_warning(
+                    &mut warnings,
+                    format!(
+                        "encountered unsupported rgce token 0x{ptg:02X} (PtgExp/PtgTbl); rendering #UNKNOWN!"
+                    ),
+                    &mut warnings_suppressed,
+                );
                 stack.push(ExprFragment::new("#UNKNOWN!".to_string()));
             }
             // Binary operators.
             0x03..=0x11 => {
                 let Some(op) = op_str(ptg) else {
-                    warnings.push(format!("unsupported rgce token 0x{ptg:02X}"));
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        format!("unsupported rgce token 0x{ptg:02X}"),
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 };
                 let prec = binary_precedence(ptg).expect("precedence for binary ops");
 
                 let right = match stack.pop() {
                     Some(v) => v,
                     None => {
-                        warnings.push("rgce stack underflow".to_string());
-                        return unsupported(ptg, warnings);
+                        push_warning(
+                            &mut warnings,
+                            "rgce stack underflow",
+                            &mut warnings_suppressed,
+                        );
+                        return unsupported(ptg, warnings, &mut warnings_suppressed);
                     }
                 };
                 let left = match stack.pop() {
                     Some(v) => v,
                     None => {
-                        warnings.push("rgce stack underflow".to_string());
-                        return unsupported(ptg, warnings);
+                        push_warning(
+                            &mut warnings,
+                            "rgce stack underflow",
+                            &mut warnings_suppressed,
+                        );
+                        return unsupported(ptg, warnings, &mut warnings_suppressed);
                     }
                 };
 
@@ -365,8 +406,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let expr = match stack.pop() {
                     Some(v) => v,
                     None => {
-                        warnings.push("rgce stack underflow".to_string());
-                        return unsupported(ptg, warnings);
+                        push_warning(
+                            &mut warnings,
+                            "rgce stack underflow",
+                            &mut warnings_suppressed,
+                        );
+                        return unsupported(ptg, warnings, &mut warnings_suppressed);
                     }
                 };
                 let inner = if expr.precedence < prec && !expr.is_missing {
@@ -387,8 +432,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let expr = match stack.pop() {
                     Some(v) => v,
                     None => {
-                        warnings.push("rgce stack underflow".to_string());
-                        return unsupported(ptg, warnings);
+                        push_warning(
+                            &mut warnings,
+                            "rgce stack underflow",
+                            &mut warnings_suppressed,
+                        );
+                        return unsupported(ptg, warnings, &mut warnings_suppressed);
                     }
                 };
                 let inner = if expr.precedence < prec && !expr.is_missing {
@@ -409,8 +458,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let expr = match stack.pop() {
                     Some(v) => v,
                     None => {
-                        warnings.push("rgce stack underflow".to_string());
-                        return unsupported(ptg, warnings);
+                        push_warning(
+                            &mut warnings,
+                            "rgce stack underflow",
+                            &mut warnings_suppressed,
+                        );
+                        return unsupported(ptg, warnings, &mut warnings_suppressed);
                     }
                 };
                 let inner = if expr.precedence < prec && !expr.is_missing {
@@ -430,8 +483,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let expr = match stack.pop() {
                     Some(v) => v,
                     None => {
-                        warnings.push("rgce stack underflow".to_string());
-                        return unsupported(ptg, warnings);
+                        push_warning(
+                            &mut warnings,
+                            "rgce stack underflow",
+                            &mut warnings_suppressed,
+                        );
+                        return unsupported(ptg, warnings, &mut warnings_suppressed);
                     }
                 };
                 stack.push(ExprFragment {
@@ -453,8 +510,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     stack.push(ExprFragment::new(format!("\"{escaped}\"")));
                 }
                 Err(err) => {
-                    warnings.push(format!("failed to decode PtgStr: {err}"));
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        format!("failed to decode PtgStr: {err}"),
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
             },
             // PtgExtend / PtgExtendV / PtgExtendA (ptg=0x18 variants).
@@ -469,8 +530,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // stays aligned.
             0x18 | 0x38 | 0x58 | 0x78 => {
                 let Some(&etpg) = input.first() else {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 };
 
                 match etpg {
@@ -478,8 +543,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     0x19 => {
                         // Payload: [etpg: u8][12-byte PtgList payload]
                         if input.len() < 13 {
-                            warnings.push("unexpected end of rgce stream".to_string());
-                            return unsupported(ptg, warnings);
+                            push_warning(
+                                &mut warnings,
+                                "unexpected end of rgce stream",
+                                &mut warnings_suppressed,
+                            );
+                            return unsupported(ptg, warnings, &mut warnings_suppressed);
                         }
                         let mut payload = [0u8; 12];
                         payload.copy_from_slice(&input[1..13]);
@@ -498,10 +567,14 @@ pub(crate) fn decode_biff8_rgce_with_base(
                             FLAG_ALL | FLAG_HEADERS | FLAG_DATA | FLAG_TOTALS | FLAG_THIS_ROW;
                         let unknown = flags16 & !KNOWN_FLAGS;
                         if unknown != 0 {
-                            warnings.push(format!(
-                                "PtgList structured ref has unknown flags 0x{unknown:04X} (raw=0x{:08X})",
-                                decoded.flags
-                            ));
+                            push_warning(
+                                &mut warnings,
+                                format!(
+                                    "PtgList structured ref has unknown flags 0x{unknown:04X} (raw=0x{:08X})",
+                                    decoded.flags
+                                ),
+                                &mut warnings_suppressed,
+                            );
                         }
 
                         let item = if flags16 & FLAG_THIS_ROW != 0 {
@@ -559,13 +632,21 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     }
                     _ => {
                         if input.len() < 5 {
-                            warnings.push("unexpected end of rgce stream".to_string());
-                            return unsupported(ptg, warnings);
+                            push_warning(
+                                &mut warnings,
+                                "unexpected end of rgce stream",
+                                &mut warnings_suppressed,
+                            );
+                            return unsupported(ptg, warnings, &mut warnings_suppressed);
                         }
                         input = &input[5..];
-                        warnings.push(format!(
-                            "skipped opaque 5-byte payload token 0x{ptg:02X} (Ptg18 variant) in rgce"
-                        ));
+                        push_warning(
+                            &mut warnings,
+                            format!(
+                                "skipped opaque 5-byte payload token 0x{ptg:02X} (Ptg18 variant) in rgce"
+                            ),
+                            &mut warnings_suppressed,
+                        );
                     }
                 }
             }
@@ -575,8 +656,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // the printed formula text, but some do (notably tAttrSum).
             0x19 => {
                 if input.len() < 3 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 let grbit = input[0];
                 let w_attr = u16::from_le_bytes([input[1], input[2]]);
@@ -589,8 +674,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     // tAttrChoose is followed by a jump table of u16 offsets; consume it.
                     let needed = (w_attr as usize).saturating_mul(2);
                     if input.len() < needed {
-                        warnings.push("unexpected end of rgce stream".to_string());
-                        return unsupported(ptg, warnings);
+                        push_warning(
+                            &mut warnings,
+                            "unexpected end of rgce stream",
+                            &mut warnings_suppressed,
+                        );
+                        return unsupported(ptg, warnings, &mut warnings_suppressed);
                     }
                     input = &input[needed..];
                 }
@@ -599,8 +688,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     let expr = match stack.pop() {
                         Some(v) => v,
                         None => {
-                            warnings.push("rgce stack underflow".to_string());
-                            return unsupported(ptg, warnings);
+                            push_warning(
+                                &mut warnings,
+                                "rgce stack underflow",
+                                &mut warnings_suppressed,
+                            );
+                            return unsupported(ptg, warnings, &mut warnings_suppressed);
                         }
                     };
                     stack.push(format_function_call("SUM", vec![expr]));
@@ -609,8 +702,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // Error literal.
             0x1C => {
                 let Some((&err, rest)) = input.split_first() else {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 };
                 input = rest;
                 let text = match err {
@@ -629,7 +726,11 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     0x30 => "#BLOCKED!",
                     0x31 => "#UNKNOWN!",
                     other => {
-                        warnings.push(format!("unknown error literal 0x{other:02X} in rgce"));
+                        push_warning(
+                            &mut warnings,
+                            format!("unknown error literal 0x{other:02X} in rgce"),
+                            &mut warnings_suppressed,
+                        );
                         "#UNKNOWN!"
                     }
                 };
@@ -638,8 +739,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // Bool literal.
             0x1D => {
                 let Some((&b, rest)) = input.split_first() else {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 };
                 input = rest;
                 stack.push(ExprFragment::new(
@@ -649,8 +754,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // Int literal.
             0x1E => {
                 if input.len() < 2 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 let n = u16::from_le_bytes([input[0], input[1]]);
                 input = &input[2..];
@@ -659,8 +768,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // Num literal.
             0x1F => {
                 if input.len() < 8 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 let mut bytes = [0u8; 8];
                 bytes.copy_from_slice(&input[..8]);
@@ -674,18 +787,30 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // we render a parseable placeholder and continue decoding.
             0x20 | 0x40 | 0x60 => {
                 if input.len() < 7 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 input = &input[7..];
-                warnings.push("PtgArray constant is not supported; rendering #UNKNOWN!".to_string());
+                push_warning(
+                    &mut warnings,
+                    "PtgArray constant is not supported; rendering #UNKNOWN!",
+                    &mut warnings_suppressed,
+                );
                 stack.push(ExprFragment::new("#UNKNOWN!".to_string()));
             }
             // PtgFunc: [iftab: u16] (fixed arg count is implicit).
             0x21 | 0x41 | 0x61 => {
                 if input.len() < 2 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 let func_id = u16::from_le_bytes([input[0], input[1]]);
                 input = &input[2..];
@@ -693,9 +818,13 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 if let Some(spec) = formula_biff::function_spec_from_id(func_id) {
                     // Only handle fixed arity here.
                     if spec.min_args != spec.max_args {
-                        warnings.push(format!(
-                            "unsupported variable-arity BIFF function id 0x{func_id:04X} (PtgFunc) in rgce"
-                        ));
+                        push_warning(
+                            &mut warnings,
+                            format!(
+                                "unsupported variable-arity BIFF function id 0x{func_id:04X} (PtgFunc) in rgce"
+                            ),
+                            &mut warnings_suppressed,
+                        );
                         // Best-effort: treat as a unary function call so the formula remains
                         // parseable.
                         let name = spec.name;
@@ -709,8 +838,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
 
                     let argc = spec.min_args as usize;
                     if stack.len() < argc {
-                        warnings.push("rgce stack underflow".to_string());
-                        return unsupported(ptg, warnings);
+                        push_warning(
+                            &mut warnings,
+                            "rgce stack underflow",
+                            &mut warnings_suppressed,
+                        );
+                        return unsupported(ptg, warnings, &mut warnings_suppressed);
                     }
                     let mut args = Vec::with_capacity(argc);
                     for _ in 0..argc {
@@ -730,9 +863,13 @@ pub(crate) fn decode_biff8_rgce_with_base(
                             &name_owned
                         }
                     };
-                    warnings.push(format!(
-                        "unknown BIFF function id 0x{func_id:04X} (PtgFunc) in rgce; assuming unary"
-                    ));
+                    push_warning(
+                        &mut warnings,
+                        format!(
+                            "unknown BIFF function id 0x{func_id:04X} (PtgFunc) in rgce; assuming unary"
+                        ),
+                        &mut warnings_suppressed,
+                    );
                     let mut args = Vec::new();
                     if let Some(arg) = stack.pop() {
                         args.push(arg);
@@ -743,24 +880,36 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // PtgFuncVar: [argc: u8][iftab: u16]
             0x22 | 0x42 | 0x62 => {
                 if input.len() < 3 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 let argc = input[0] as usize;
                 let func_id = u16::from_le_bytes([input[1], input[2]]);
                 input = &input[3..];
 
                 if stack.len() < argc {
-                    warnings.push("rgce stack underflow".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "rgce stack underflow",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
 
                 // Excel uses a sentinel function id for user-defined functions: the top-of-stack
                 // item is the function name, followed by args.
                 if func_id == formula_biff::FTAB_USER_DEFINED {
                     if argc == 0 {
-                        warnings.push("rgce stack underflow".to_string());
-                        return unsupported(ptg, warnings);
+                        push_warning(
+                            &mut warnings,
+                            "rgce stack underflow",
+                            &mut warnings_suppressed,
+                        );
+                        return unsupported(ptg, warnings, &mut warnings_suppressed);
                     }
                     let func_name = stack.pop().expect("len checked").text;
                     let mut args = Vec::with_capacity(argc.saturating_sub(1));
@@ -774,9 +923,13 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     let name = match formula_biff::function_id_to_name(func_id) {
                         Some(name) => name,
                         None => {
-                            warnings.push(format!(
-                                "unknown BIFF function id 0x{func_id:04X} (PtgFuncVar) in rgce"
-                            ));
+                            push_warning(
+                                &mut warnings,
+                                format!(
+                                    "unknown BIFF function id 0x{func_id:04X} (PtgFuncVar) in rgce"
+                                ),
+                                &mut warnings_suppressed,
+                            );
                             // Emit a parseable identifier-like function name that preserves the
                             // raw BIFF function id.
                             name_owned = format!("_UNKNOWN_FUNC_0x{func_id:04X}");
@@ -795,8 +948,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // PtgName (defined name reference).
             0x23 | 0x43 | 0x63 => {
                 if input.len() < 6 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
 
                 let is_value_class = (ptg & 0x60) == 0x40;
@@ -807,16 +964,24 @@ pub(crate) fn decode_biff8_rgce_with_base(
 
                 let idx = name_id.saturating_sub(1) as usize;
                 let Some(meta) = ctx.defined_names.get(idx) else {
-                    warnings.push(format!("PtgName references missing name index {name_id}"));
+                    push_warning(
+                        &mut warnings,
+                        format!("PtgName references missing name index {name_id}"),
+                        &mut warnings_suppressed,
+                    );
                     // `#NAME_ID(...)` is not a valid Excel token; fall back to a parseable error
                     // literal and keep the id in warnings.
                     stack.push(ExprFragment::new("#NAME?".to_string()));
                     continue;
                 };
                 if meta.name.is_empty() {
-                    warnings.push(format!(
-                        "PtgName references empty defined name at index {name_id} (0-based idx={idx})"
-                    ));
+                    push_warning(
+                        &mut warnings,
+                        format!(
+                            "PtgName references empty defined name at index {name_id} (0-based idx={idx})"
+                        ),
+                        &mut warnings_suppressed,
+                    );
                     stack.push(ExprFragment::new("#NAME?".to_string()));
                     continue;
                 }
@@ -830,10 +995,14 @@ pub(crate) fn decode_biff8_rgce_with_base(
                         || meta.name.starts_with('#')
                         || meta.name.starts_with('\''))
                 {
-                    warnings.push(format!(
-                        "PtgName references sheet-scoped name `{}` (index {name_id}) that cannot be rendered parseably after a sheet prefix; using #NAME?",
-                        meta.name
-                    ));
+                    push_warning(
+                        &mut warnings,
+                        format!(
+                            "PtgName references sheet-scoped name `{}` (index {name_id}) that cannot be rendered parseably after a sheet prefix; using #NAME?",
+                            meta.name
+                        ),
+                        &mut warnings_suppressed,
+                    );
                     stack.push(ExprFragment::new("#NAME?".to_string()));
                     continue;
                 }
@@ -846,10 +1015,14 @@ pub(crate) fn decode_biff8_rgce_with_base(
                             format!("{sheet}!{}", meta.name)
                         }
                         None => {
-                            warnings.push(format!(
-                                "PtgName references sheet-scoped name `{}` with out-of-range sheet index {sheet_idx}",
-                                meta.name
-                            ));
+                            push_warning(
+                                &mut warnings,
+                                format!(
+                                    "PtgName references sheet-scoped name `{}` with out-of-range sheet index {sheet_idx}",
+                                    meta.name
+                                ),
+                                &mut warnings_suppressed,
+                            );
                             meta.name.clone()
                         }
                     },
@@ -875,8 +1048,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // Payload: [ixti: u16][iname: u16][reserved: u16]
             0x39 | 0x59 | 0x79 => {
                 if input.len() < 6 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 let ixti = u16::from_le_bytes([input[0], input[1]]);
                 let iname = u16::from_le_bytes([input[2], input[3]]);
@@ -910,7 +1087,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
                         }
                     }
                     Err(err) => {
-                        warnings.push(err);
+                        push_warning(&mut warnings, err, &mut warnings_suppressed);
                         stack.push(ExprFragment::new("#REF!".to_string()));
                     }
                 }
@@ -918,8 +1095,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // PtgRef (2D)
             0x24 | 0x44 | 0x64 => {
                 if input.len() < 4 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 let row = u16::from_le_bytes([input[0], input[1]]);
                 let col = u16::from_le_bytes([input[2], input[3]]);
@@ -929,8 +1110,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // PtgArea (2D)
             0x25 | 0x45 | 0x65 => {
                 if input.len() < 8 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 let row1 = u16::from_le_bytes([input[0], input[1]]);
                 let row2 = u16::from_le_bytes([input[2], input[3]]);
@@ -946,13 +1131,24 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 // relative flags differ between endpoints.
                 let area = if is_single_cell {
                     if (col1 & RELATIVE_MASK) != (col2 & RELATIVE_MASK) {
-                        warnings.push(format!(
-                            "BIFF8 single-cell area has mismatched relative flags (colFirst=0x{col1:04X}, colLast=0x{col2:04X}); using first"
-                        ));
+                        push_warning(
+                            &mut warnings,
+                            format!(
+                                "BIFF8 single-cell area has mismatched relative flags (colFirst=0x{col1:04X}, colLast=0x{col2:04X}); using first"
+                            ),
+                            &mut warnings_suppressed,
+                        );
                     }
                     format_cell_ref(row1, col1)
                 } else {
-                    format_area_ref_ptg_area(row1, col1, row2, col2, &mut warnings)
+                    format_area_ref_ptg_area(
+                        row1,
+                        col1,
+                        row2,
+                        col2,
+                        &mut warnings,
+                        &mut warnings_suppressed,
+                    )
                 };
 
                 if is_value_class && !is_single_cell {
@@ -974,14 +1170,22 @@ pub(crate) fn decode_biff8_rgce_with_base(
             0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
             | 0x2E | 0x4E | 0x6E => {
                 if input.len() < 2 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 let cce = u16::from_le_bytes([input[0], input[1]]) as usize;
                 input = &input[2..];
                 if input.len() < cce {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 input = &input[cce..];
             }
@@ -991,8 +1195,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // `PtgAreaErrN`; in BIFF8 the ptg id is the same regardless of context.
             0x2A | 0x4A | 0x6A => {
                 if input.len() < 4 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 input = &input[4..];
                 stack.push(ExprFragment::new("#REF!".to_string()));
@@ -1000,8 +1208,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // PtgAreaErr / PtgAreaErrN: [rwFirst: u16][rwLast: u16][colFirst: u16][colLast: u16]
             0x2B | 0x4B | 0x6B => {
                 if input.len() < 8 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 input = &input[8..];
                 stack.push(ExprFragment::new("#REF!".to_string()));
@@ -1009,8 +1221,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // PtgRefN: [rw: u16][col: u16]
             0x2C | 0x4C | 0x6C => {
                 if input.len() < 4 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 let row_raw = u16::from_le_bytes([input[0], input[1]]);
                 let col_field = u16::from_le_bytes([input[2], input[3]]);
@@ -1019,9 +1235,10 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     && !warned_default_base_for_relative
                     && (col_field & RELATIVE_MASK) != 0
                 {
-                    warnings.push(
-                        "relative reference tokens are interpreted relative to A1 (no base cell provided)"
-                            .to_string(),
+                    push_warning(
+                        &mut warnings,
+                        "relative reference tokens are interpreted relative to A1 (no base cell provided)",
+                        &mut warnings_suppressed,
                     );
                     warned_default_base_for_relative = true;
                 }
@@ -1030,14 +1247,19 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     col_field,
                     base,
                     &mut warnings,
+                    &mut warnings_suppressed,
                     "PtgRefN",
                 )));
             }
             // PtgAreaN: [rwFirst: u16][rwLast: u16][colFirst: u16][colLast: u16]
             0x2D | 0x4D | 0x6D => {
                 if input.len() < 8 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 let is_value_class = (ptg & 0x60) == 0x40;
                 let row_first_raw = u16::from_le_bytes([input[0], input[1]]);
@@ -1050,9 +1272,10 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     && ((col_first_field & RELATIVE_MASK) != 0
                         || (col_last_field & RELATIVE_MASK) != 0)
                 {
-                    warnings.push(
-                        "relative reference tokens are interpreted relative to A1 (no base cell provided)"
-                            .to_string(),
+                    push_warning(
+                        &mut warnings,
+                        "relative reference tokens are interpreted relative to A1 (no base cell provided)",
+                        &mut warnings_suppressed,
                     );
                     warned_default_base_for_relative = true;
                 }
@@ -1063,6 +1286,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     col_last_field,
                     base,
                     &mut warnings,
+                    &mut warnings_suppressed,
                     "PtgAreaN",
                 );
                 if area == "#REF!" {
@@ -1085,8 +1309,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // PtgRef3d
             0x3A | 0x5A | 0x7A => {
                 if input.len() < 6 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 let ixti = u16::from_le_bytes([input[0], input[1]]);
                 let row = u16::from_le_bytes([input[2], input[3]]);
@@ -1096,7 +1324,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let sheet_prefix = match format_sheet_ref(ixti, ctx) {
                     Ok(v) => v,
                     Err(err) => {
-                        warnings.push(err);
+                        push_warning(&mut warnings, err, &mut warnings_suppressed);
                         stack.push(ExprFragment::new("#REF!".to_string()));
                         continue;
                     }
@@ -1107,8 +1335,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // PtgArea3d
             0x3B | 0x5B | 0x7B => {
                 if input.len() < 10 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 let is_value_class = (ptg & 0x60) == 0x40;
                 let ixti = u16::from_le_bytes([input[0], input[1]]);
@@ -1121,7 +1353,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let sheet_prefix = match format_sheet_ref(ixti, ctx) {
                     Ok(v) => v,
                     Err(err) => {
-                        warnings.push(err);
+                        push_warning(&mut warnings, err, &mut warnings_suppressed);
                         stack.push(ExprFragment::new("#REF!".to_string()));
                         continue;
                     }
@@ -1131,13 +1363,24 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     row1 == row2 && (col1 & COL_INDEX_MASK) == (col2 & COL_INDEX_MASK);
                 let area = if is_single_cell {
                     if (col1 & RELATIVE_MASK) != (col2 & RELATIVE_MASK) {
-                        warnings.push(format!(
-                            "BIFF8 3D single-cell area has mismatched relative flags (colFirst=0x{col1:04X}, colLast=0x{col2:04X}); using first"
-                        ));
+                        push_warning(
+                            &mut warnings,
+                            format!(
+                                "BIFF8 3D single-cell area has mismatched relative flags (colFirst=0x{col1:04X}, colLast=0x{col2:04X}); using first"
+                            ),
+                            &mut warnings_suppressed,
+                        );
                     }
                     format_cell_ref(row1, col1)
                 } else {
-                    format_area_ref_ptg_area(row1, col1, row2, col2, &mut warnings)
+                    format_area_ref_ptg_area(
+                        row1,
+                        col1,
+                        row2,
+                        col2,
+                        &mut warnings,
+                        &mut warnings_suppressed,
+                    )
                 };
 
                 if is_value_class && !is_single_cell {
@@ -1156,8 +1399,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // Payload matches `PtgRef3d`: [ixti: u16][row: u16][col: u16]
             0x3C | 0x5C | 0x7C => {
                 if input.len() < 6 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 input = &input[6..];
                 stack.push(ExprFragment::new("#REF!".to_string()));
@@ -1167,8 +1414,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // Payload matches `PtgArea3d`: [ixti: u16][row1: u16][row2: u16][col1: u16][col2: u16]
             0x3D | 0x5D | 0x7D => {
                 if input.len() < 10 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 input = &input[10..];
                 stack.push(ExprFragment::new("#REF!".to_string()));
@@ -1176,8 +1427,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // PtgRefN3d (relative/absolute 3D reference): [ixti: u16][rw: u16][col: u16]
             0x3E | 0x5E | 0x7E => {
                 if input.len() < 6 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 let ixti = u16::from_le_bytes([input[0], input[1]]);
                 let row_raw = u16::from_le_bytes([input[2], input[3]]);
@@ -1188,14 +1443,22 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     && !warned_default_base_for_relative
                     && (col_field & RELATIVE_MASK) != 0
                 {
-                    warnings.push(
-                        "relative reference tokens are interpreted relative to A1 (no base cell provided)"
-                            .to_string(),
+                    push_warning(
+                        &mut warnings,
+                        "relative reference tokens are interpreted relative to A1 (no base cell provided)",
+                        &mut warnings_suppressed,
                     );
                     warned_default_base_for_relative = true;
                 }
 
-                let cell = decode_ref_n(row_raw, col_field, base, &mut warnings, "PtgRefN3d");
+                let cell = decode_ref_n(
+                    row_raw,
+                    col_field,
+                    base,
+                    &mut warnings,
+                    &mut warnings_suppressed,
+                    "PtgRefN3d",
+                );
                 if cell == "#REF!" {
                     stack.push(ExprFragment::new(cell));
                     continue;
@@ -1204,7 +1467,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let sheet_prefix = match format_sheet_ref(ixti, ctx) {
                     Ok(v) => v,
                     Err(err) => {
-                        warnings.push(err);
+                        push_warning(&mut warnings, err, &mut warnings_suppressed);
                         stack.push(ExprFragment::new("#REF!".to_string()));
                         continue;
                     }
@@ -1215,8 +1478,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
             // [ixti: u16][rwFirst: u16][rwLast: u16][colFirst: u16][colLast: u16]
             0x3F | 0x5F | 0x7F => {
                 if input.len() < 10 {
-                    warnings.push("unexpected end of rgce stream".to_string());
-                    return unsupported(ptg, warnings);
+                    push_warning(
+                        &mut warnings,
+                        "unexpected end of rgce stream",
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 let is_value_class = (ptg & 0x60) == 0x40;
                 let ixti = u16::from_le_bytes([input[0], input[1]]);
@@ -1231,9 +1498,10 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     && ((col_first_field & RELATIVE_MASK) != 0
                         || (col_last_field & RELATIVE_MASK) != 0)
                 {
-                    warnings.push(
-                        "relative reference tokens are interpreted relative to A1 (no base cell provided)"
-                            .to_string(),
+                    push_warning(
+                        &mut warnings,
+                        "relative reference tokens are interpreted relative to A1 (no base cell provided)",
+                        &mut warnings_suppressed,
                     );
                     warned_default_base_for_relative = true;
                 }
@@ -1245,6 +1513,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     col_last_field,
                     base,
                     &mut warnings,
+                    &mut warnings_suppressed,
                     "PtgAreaN3d",
                 );
                 if area == "#REF!" {
@@ -1255,7 +1524,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let sheet_prefix = match format_sheet_ref(ixti, ctx) {
                     Ok(v) => v,
                     Err(err) => {
-                        warnings.push(err);
+                        push_warning(&mut warnings, err, &mut warnings_suppressed);
                         stack.push(ExprFragment::new("#REF!".to_string()));
                         continue;
                     }
@@ -1273,8 +1542,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 }
             }
             other => {
-                warnings.push(format!("unsupported rgce token 0x{other:02X}"));
-                return unsupported(other, warnings);
+                push_warning(
+                    &mut warnings,
+                    format!("unsupported rgce token 0x{other:02X}"),
+                    &mut warnings_suppressed,
+                );
+                return unsupported(other, warnings, &mut warnings_suppressed);
             }
         }
     }
@@ -1283,10 +1556,11 @@ pub(crate) fn decode_biff8_rgce_with_base(
         0 => String::new(),
         1 => stack.pop().expect("len checked").text,
         _ => {
-            warnings.push(format!(
-                "rgce decode ended with {} expressions on stack",
-                stack.len()
-            ));
+            push_warning(
+                &mut warnings,
+                format!("rgce decode ended with {} expressions on stack", stack.len()),
+                &mut warnings_suppressed,
+            );
             stack.pop().expect("non-empty").text
         }
     };
@@ -1294,11 +1568,11 @@ pub(crate) fn decode_biff8_rgce_with_base(
     DecodeRgceResult { text, warnings }
 }
 
-fn unsupported(ptg: u8, warnings: Vec<String>) -> DecodeRgceResult {
+fn unsupported(ptg: u8, warnings: Vec<String>, suppressed: &mut bool) -> DecodeRgceResult {
     let mut warnings = warnings;
     let msg = format!("unsupported rgce token 0x{ptg:02X}");
     if !warnings.iter().any(|w| w == &msg) {
-        warnings.push(msg);
+        push_warning(&mut warnings, msg, suppressed);
     }
     DecodeRgceResult {
         // Use a parseable, stable Excel error literal so callers can round-trip the decoded
@@ -1322,6 +1596,7 @@ fn decode_ref_n(
     col_field: u16,
     base: CellCoord,
     warnings: &mut Vec<String>,
+    suppressed: &mut bool,
     ptg_name: &str,
 ) -> String {
     let row_relative = (col_field & ROW_RELATIVE_BIT) == ROW_RELATIVE_BIT;
@@ -1358,10 +1633,14 @@ fn decode_ref_n(
         } else {
             format!("col={col_raw}")
         };
-        warnings.push(format!(
-            "{ptg_name} produced out-of-bounds reference: base=({},{}), {row_desc}, {col_desc} -> #REF!",
-            base.row, base.col
-        ));
+        push_warning(
+            warnings,
+            format!(
+                "{ptg_name} produced out-of-bounds reference: base=({},{}), {row_desc}, {col_desc} -> #REF!",
+                base.row, base.col
+            ),
+            suppressed,
+        );
         return "#REF!".to_string();
     }
 
@@ -1376,6 +1655,7 @@ fn decode_area_n(
     col2_field: u16,
     base: CellCoord,
     warnings: &mut Vec<String>,
+    suppressed: &mut bool,
     ptg_name: &str,
 ) -> String {
     let row1_relative = (col1_field & ROW_RELATIVE_BIT) == ROW_RELATIVE_BIT;
@@ -1431,10 +1711,14 @@ fn decode_area_n(
         } else {
             format!("col2={col2_raw}")
         };
-        warnings.push(format!(
-            "{ptg_name} produced out-of-bounds area: base=({},{}), {row1_desc}, {row2_desc}, {col1_desc}, {col2_desc} -> #REF!",
-            base.row, base.col
-        ));
+        push_warning(
+            warnings,
+            format!(
+                "{ptg_name} produced out-of-bounds area: base=({},{}), {row1_desc}, {row2_desc}, {col1_desc}, {col2_desc} -> #REF!",
+                base.row, base.col
+            ),
+            suppressed,
+        );
         return "#REF!".to_string();
     }
 
@@ -1511,6 +1795,7 @@ fn format_area_ref_ptg_area(
     row2: u16,
     col2: u16,
     warnings: &mut Vec<String>,
+    suppressed: &mut bool,
 ) -> String {
     let col1_idx = col1 & COL_INDEX_MASK;
     let col2_idx = col2 & COL_INDEX_MASK;
@@ -1534,17 +1819,25 @@ fn format_area_ref_ptg_area(
 
     if is_whole_row && is_whole_col {
         // Degenerate/garbage: avoid choosing one shorthand over the other.
-        warnings.push(format!(
-            "BIFF8 area matches both whole-row and whole-column patterns (rwFirst={row1}, rwLast={row2}, colFirst=0x{col1:04X}, colLast=0x{col2:04X}); rendering as explicit A1-style area"
-        ));
+        push_warning(
+            warnings,
+            format!(
+                "BIFF8 area matches both whole-row and whole-column patterns (rwFirst={row1}, rwLast={row2}, colFirst=0x{col1:04X}, colLast=0x{col2:04X}); rendering as explicit A1-style area"
+            ),
+            suppressed,
+        );
         return format_area_ref(row1, col1, row2, col2);
     }
 
     if is_whole_row {
         let row_rel = if row1_rel != row2_rel {
-            warnings.push(format!(
-                "BIFF8 whole-row area has mismatched row-relative flags (colFirst=0x{col1:04X}, colLast=0x{col2:04X}); using first"
-            ));
+            push_warning(
+                warnings,
+                format!(
+                    "BIFF8 whole-row area has mismatched row-relative flags (colFirst=0x{col1:04X}, colLast=0x{col2:04X}); using first"
+                ),
+                suppressed,
+            );
             row1_rel
         } else {
             row1_rel
@@ -1557,9 +1850,13 @@ fn format_area_ref_ptg_area(
 
     if is_whole_col {
         let col_rel = if col1_rel != col2_rel {
-            warnings.push(format!(
-                "BIFF8 whole-column area has mismatched col-relative flags (colFirst=0x{col1:04X}, colLast=0x{col2:04X}); using first"
-            ));
+            push_warning(
+                warnings,
+                format!(
+                    "BIFF8 whole-column area has mismatched col-relative flags (colFirst=0x{col1:04X}, colLast=0x{col2:04X}); using first"
+                ),
+                suppressed,
+            );
             col1_rel
         } else {
             col1_rel
@@ -5383,5 +5680,38 @@ mod tests {
             decoded.warnings
         );
         assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn caps_rgce_decode_warnings() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // Repeated `PtgExp` tokens are valid BIFF8 tokens but unexpected in NAME rgce streams. When
+        // present in malformed/corrupt inputs they can occur in long runs, generating one warning
+        // per token.
+        let reps = MAX_RGCE_WARNINGS + 25;
+        let mut rgce = Vec::with_capacity(reps * 5);
+        for _ in 0..reps {
+            rgce.extend_from_slice(&[0x01, 0, 0, 0, 0]);
+        }
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert!(
+            decoded.warnings.len() <= MAX_RGCE_WARNINGS + 1,
+            "warning cap exceeded: len={} warnings={:?}",
+            decoded.warnings.len(),
+            decoded.warnings
+        );
+        assert!(
+            decoded
+                .warnings
+                .iter()
+                .any(|w| w == RGCE_WARNINGS_SUPPRESSED_MESSAGE),
+            "expected suppression message, warnings={:?}",
+            decoded.warnings
+        );
     }
 }
