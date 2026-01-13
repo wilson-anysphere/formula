@@ -11,6 +11,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+formula-dax = { path = "../formula-dax" }
 formula-engine = { path = "../formula-engine" }
 formula-model = { path = "../formula-model" }
 formula-xlsx = { path = "../formula-xlsx" }

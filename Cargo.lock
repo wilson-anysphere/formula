@@ -2325,6 +2325,7 @@ dependencies = [
 name = "formula-wasm"
 version = "0.1.0"
 dependencies = [
+ "formula-dax",
  "formula-engine",
  "formula-model",
  "formula-xlsx",

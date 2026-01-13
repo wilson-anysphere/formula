@@ -22,6 +22,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use wasm_bindgen::prelude::*;
 
+mod dax;
+pub use dax::WasmDaxDataModel;
+
 pub const DEFAULT_SHEET: &str = "Sheet1";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
