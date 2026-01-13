@@ -71,6 +71,40 @@ test("buildContext: concurrent calls share a single indexing pass", async () => 
   assert.equal(indexCalls, 1);
 });
 
+test("buildContext: aborts while waiting for an in-flight sheet index", async () => {
+  const ragIndex = new RagIndex();
+  let releaseGate;
+  const gate = new Promise((resolve) => {
+    releaseGate = resolve;
+  });
+  const originalIndexSheet = ragIndex.indexSheet.bind(ragIndex);
+  ragIndex.indexSheet = async (...args) => {
+    await gate;
+    return originalIndexSheet(...args);
+  };
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1000, ragIndex });
+  const sheet = makeSheet([
+    ["Region", "Revenue"],
+    ["North", 1000],
+    ["South", 2000],
+  ]);
+
+  const p1 = cm.buildContext({ sheet, query: "revenue" });
+  // Let p1 enter indexSheet and hold the per-sheet lock.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const abortController = new AbortController();
+  const p2 = cm.buildContext({ sheet, query: "north", signal: abortController.signal });
+  // Let p2 start waiting for the lock before aborting.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  abortController.abort();
+
+  await assert.rejects(p2, { name: "AbortError" });
+  releaseGate();
+  await p1;
+});
+
 test("buildContext: cacheSheetIndex=false re-indexes even when the sheet is unchanged", async () => {
   const ragIndex = new RagIndex();
   let indexCalls = 0;
