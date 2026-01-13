@@ -419,6 +419,10 @@ fn decode_rgce_impl(rgce: &[u8], rgcb: Option<&[u8]>) -> Result<String, DecodeRg
             //
             // Most attributes are evaluation hints or formatting metadata. We treat them as
             // non-printing tokens, but must consume their payload so later ptgs stay aligned.
+            //
+            // Excel also uses `tAttrSum` as an optimization where `SUM(A1:A10)` is encoded as:
+            //   PtgArea(A1:A10) + PtgAttr(tAttrSum)
+            // with no explicit `PtgFuncVar(SUM)` token.
             0x19 => {
                 if input.len() < 3 {
                     return Err(DecodeRgceError::UnexpectedEof);
@@ -428,6 +432,25 @@ fn decode_rgce_impl(rgce: &[u8], rgcb: Option<&[u8]>) -> Result<String, DecodeRg
                 input = &input[3..];
 
                 const T_ATTR_CHOOSE: u8 = 0x04;
+                const T_ATTR_SUM: u8 = 0x10;
+
+                if grbit & T_ATTR_SUM != 0 {
+                    let arg = stack.pop().ok_or(DecodeRgceError::UnexpectedEof)?;
+                    let mut text = String::new();
+                    text.push_str("SUM(");
+                    if !arg.is_missing {
+                        if arg.contains_union {
+                            text.push('(');
+                            text.push_str(&arg.text);
+                            text.push(')');
+                        } else {
+                            text.push_str(&arg.text);
+                        }
+                    }
+                    text.push(')');
+                    stack.push(ExprFragment::new(text));
+                }
+
                 if grbit & T_ATTR_CHOOSE != 0 {
                     // `tAttrChoose` is followed by a jump table of `u16` offsets (wAttr entries).
                     let needed = (w_attr as usize).saturating_mul(2);
