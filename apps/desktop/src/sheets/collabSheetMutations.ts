@@ -39,14 +39,21 @@ export function tryInsertCollabSheet(params: {
     if (idx >= 0) insertIndex = idx + 1;
   }
 
+  const sheetsArray: any = (params.session as any)?.sheets ?? null;
+  const isYjsSheetsArray = Boolean(sheetsArray && typeof sheetsArray === "object" && sheetsArray.doc);
+
   params.session.transactLocal(() => {
-    const sheet = new Y.Map<unknown>();
-    sheet.set("id", sheetId);
-    sheet.set("name", name);
-    sheet.set("visibility", visibility);
-    params.session.sheets.insert(insertIndex, [sheet as any]);
+    if (isYjsSheetsArray) {
+      const sheet = new Y.Map<unknown>();
+      // Attach first, then populate fields (Yjs types can warn when accessed before attachment).
+      params.session.sheets.insert(insertIndex, [sheet as any]);
+      sheet.set("id", sheetId);
+      sheet.set("name", name);
+      sheet.set("visibility", visibility);
+    } else {
+      params.session.sheets.insert(insertIndex, [{ id: sheetId, name, visibility } as any]);
+    }
   });
 
   return { inserted: true, index: insertIndex };
 }
-

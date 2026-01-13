@@ -4680,11 +4680,6 @@ if (
 
       const collabSession = app.getCollabSession?.() ?? null;
       if (collabSession) {
-        const permission = getWorkbookMutationPermission(collabSession);
-        if (!permission.allowed) {
-          throw new Error(permission.reason ?? READ_ONLY_SHEET_MUTATION_MESSAGE);
-        }
-
         const normalizedName = validateSheetName(sheetName, { sheets: workbookSheetStore.listAll() });
 
         const existingIds = new Set(listSheetsFromCollabSession(collabSession).map((sheet) => sheet.id));
@@ -4703,28 +4698,16 @@ if (
           id = `${id}_${Math.random().toString(16).slice(2)}`;
         }
 
-        collabSession.transactLocal(() => {
-          const activeIdx = findCollabSheetIndexById(collabSession, activeId);
-          const insertIndex = activeIdx >= 0 ? activeIdx + 1 : collabSession.sheets.length;
-
-          // Prefer inserting a real Y.Map when `session.sheets` is backed by Yjs.
-          // Some environments provide a lightweight `session.sheets` implementation that stores
-          // plain JS objects and does not attach Yjs types to a Y.Doc; in that case insert a
-          // plain `{ id, name, visibility }` entry instead.
-          const sheetsArray: any = (collabSession as any)?.sheets ?? null;
-          const isYjsSheetsArray = Boolean(sheetsArray && typeof sheetsArray === "object" && sheetsArray.doc);
-
-          if (isYjsSheetsArray) {
-            const sheet = new Y.Map<unknown>();
-            // Attach first, then populate fields (Yjs types warn when accessed before attachment).
-            collabSession.sheets.insert(insertIndex, [sheet as any]);
-            sheet.set("id", id);
-            sheet.set("name", normalizedName);
-            sheet.set("visibility", "visible");
-          } else {
-            collabSession.sheets.insert(insertIndex, [{ id, name: normalizedName, visibility: "visible" } as any]);
-          }
+        const inserted = tryInsertCollabSheet({
+          session: collabSession,
+          sheetId: id,
+          name: normalizedName,
+          visibility: "visible",
+          insertAfterSheetId: activeId,
         });
+        if (!inserted.inserted) {
+          throw new Error(inserted.reason);
+        }
 
         // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
         doc.getCell(id, { row: 0, col: 0 });
