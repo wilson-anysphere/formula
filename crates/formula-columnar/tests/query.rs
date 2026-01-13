@@ -600,6 +600,83 @@ fn group_by_multiple_keys_and_multiple_new_aggs_smoke() {
 }
 
 #[test]
+fn group_by_var_and_stddev_sample_vs_population_semantics() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "v".to_owned(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let rows = vec![
+        vec![Value::String(Arc::<str>::from("A")), Value::Number(1.0)],
+        vec![Value::String(Arc::<str>::from("A")), Value::Number(3.0)],
+        vec![Value::String(Arc::<str>::from("A")), Value::Null],
+        vec![Value::String(Arc::<str>::from("B")), Value::Number(5.0)],
+        vec![Value::String(Arc::<str>::from("C")), Value::Null],
+    ];
+    let table = build_table(schema, rows);
+
+    let result = table
+        .group_by(
+            &[0],
+            &[
+                AggSpec::var(1).with_name("var_s"),
+                AggSpec::std_dev(1).with_name("std_s"),
+                AggSpec::var_p(1).with_name("var_p"),
+                AggSpec::std_dev_p(1).with_name("std_p"),
+            ],
+        )
+        .unwrap();
+    assert_eq!(result.row_count(), 3);
+
+    let cols = result.to_values();
+    let mut lookup = std::collections::HashMap::<String, (Value, Value, Value, Value)>::new();
+    for r in 0..result.row_count() {
+        let key = match &cols[0][r] {
+            Value::Null => "<null>".to_owned(),
+            Value::String(s) => s.as_ref().to_owned(),
+            other => format!("{other:?}"),
+        };
+        lookup.insert(
+            key,
+            (
+                cols[1][r].clone(), // var_s
+                cols[2][r].clone(), // std_s
+                cols[3][r].clone(), // var_p
+                cols[4][r].clone(), // std_p
+            ),
+        );
+    }
+
+    // A: values {1,3} -> mean 2
+    // sample var = ((-1)^2 + (1)^2)/(2-1) = 2
+    // pop var = ((-1)^2 + (1)^2)/2 = 1
+    let a = lookup.get("A").unwrap();
+    assert_eq!(a.0, Value::Number(2.0));
+    assert_eq!(a.1, Value::Number((2.0f64).sqrt()));
+    assert_eq!(a.2, Value::Number(1.0));
+    assert_eq!(a.3, Value::Number(1.0));
+
+    // B: single value -> sample var/stddev are NULL, population var/stddev are 0.
+    let b = lookup.get("B").unwrap();
+    assert_eq!(b.0, Value::Null);
+    assert_eq!(b.1, Value::Null);
+    assert_eq!(b.2, Value::Number(0.0));
+    assert_eq!(b.3, Value::Number(0.0));
+
+    // C: all null -> all outputs NULL.
+    let c = lookup.get("C").unwrap();
+    assert_eq!(c.0, Value::Null);
+    assert_eq!(c.1, Value::Null);
+    assert_eq!(c.2, Value::Null);
+    assert_eq!(c.3, Value::Null);
+}
+
+#[test]
 fn hash_join_handles_duplicate_keys() {
     let schema = vec![ColumnSchema {
         name: "k".to_owned(),
