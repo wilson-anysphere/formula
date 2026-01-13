@@ -15,7 +15,8 @@ use crate::eval::{
 use crate::graph::{CellDeps, DependencyGraph as CalcGraph, Precedent, SheetRange};
 use crate::iterative;
 use crate::locale::{
-    canonicalize_formula, canonicalize_formula_with_style, FormulaLocale, ValueLocaleConfig,
+    canonicalize_formula, canonicalize_formula_with_style, localize_formula,
+    localize_formula_with_style, FormulaLocale, ValueLocaleConfig,
 };
 use crate::value::{Array, ErrorKind, Value};
 use formula_model::{CellId, CellRef, Range, Table, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
@@ -1555,6 +1556,20 @@ impl Engine {
         self.workbook.get_cell(key)?.formula.as_deref()
     }
 
+    /// Returns the formula for `addr` localized to `locale`.
+    ///
+    /// The engine persists formulas as canonical A1 strings. This translates the stored formula
+    /// on demand using [`crate::locale::localize_formula`].
+    pub fn get_cell_formula_localized(
+        &self,
+        sheet: &str,
+        addr: &str,
+        locale: &FormulaLocale,
+    ) -> Option<String> {
+        let formula = self.get_cell_formula(sheet, addr)?;
+        localize_formula(formula, locale).ok()
+    }
+
     /// Returns the formula for `addr` rendered in R1C1 reference style.
     ///
     /// The engine persists formulas as canonical A1 strings; this converts them on demand using the
@@ -1587,6 +1602,21 @@ impl Engine {
             omit_equals: false,
         })
         .ok()
+    }
+
+    /// Returns the formula for `addr` rendered in localized R1C1 reference style.
+    ///
+    /// The engine stores canonical A1 strings. This first converts the formula to canonical R1C1
+    /// using [`Engine::get_cell_formula_r1c1`], then translates it using
+    /// [`crate::locale::localize_formula_with_style`].
+    pub fn get_cell_formula_localized_r1c1(
+        &self,
+        sheet: &str,
+        addr: &str,
+        locale: &FormulaLocale,
+    ) -> Option<String> {
+        let formula_r1c1 = self.get_cell_formula_r1c1(sheet, addr)?;
+        localize_formula_with_style(&formula_r1c1, locale, crate::ReferenceStyle::R1C1).ok()
     }
 
     pub fn apply_operation(&mut self, op: EditOp) -> Result<EditResult, EditError> {

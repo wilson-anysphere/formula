@@ -562,6 +562,36 @@ fn engine_accepts_localized_formulas_and_persists_canonical() {
 }
 
 #[test]
+fn engine_get_cell_formula_localized_displays_locale_specific_formula() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM(1.5,2.5)")
+        .unwrap();
+
+    assert_eq!(
+        engine
+            .get_cell_formula_localized("Sheet1", "A1", &locale::DE_DE)
+            .as_deref(),
+        Some("=SUMME(1,5;2,5)")
+    );
+}
+
+#[test]
+fn engine_get_cell_formula_localized_r1c1_displays_locale_specific_references_and_separators() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "C5", "=SUM(A1,B1)")
+        .unwrap();
+
+    assert_eq!(
+        engine
+            .get_cell_formula_localized_r1c1("Sheet1", "C5", &locale::DE_DE)
+            .as_deref(),
+        Some("=SUMME(R[-4]C[-2];R[-4]C[-1])")
+    );
+}
+
+#[test]
 fn engine_accepts_localized_external_data_formulas_and_persists_canonical() {
     for (locale, localized_cube, localized_err) in [
         (
