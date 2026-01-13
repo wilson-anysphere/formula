@@ -12,19 +12,23 @@
  *   The script automatically enforces the latency budget when `CI=1` or when
  *   `--ci` is passed.
  */
+import { writeFileSync } from "node:fs";
 import { TabCompletionEngine } from "../src/tabCompletionEngine.js";
 
-const DEFAULT_RUNS = 200;
-const DEFAULT_WARMUP = 50;
+// Keep the benchmark fast (<5s) even on slower machines.
+const DEFAULT_RUNS = 50;
+const DEFAULT_WARMUP = 10;
 const DEFAULT_BUDGET_MS = 100;
 
 function parseArgs(argv) {
-  /** @type {{runs:number, warmup:number, budgetMs:number, ci:boolean}} */
+  /** @type {{runs:number, warmup:number, budgetMs:number, ci:boolean, output:string|null, details:string|null}} */
   const out = {
     runs: parsePositiveInt(process.env.BENCH_RUNS, DEFAULT_RUNS),
     warmup: parsePositiveInt(process.env.BENCH_WARMUP, DEFAULT_WARMUP),
     budgetMs: parsePositiveInt(process.env.BENCH_BUDGET_MS, DEFAULT_BUDGET_MS),
     ci: isTruthy(process.env.CI),
+    output: null,
+    details: null,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -39,6 +43,14 @@ function parseArgs(argv) {
     }
     if (arg === "--budget-ms") {
       out.budgetMs = parsePositiveInt(argv[++i], out.budgetMs);
+      continue;
+    }
+    if (arg === "--output") {
+      out.output = argv[++i] ?? out.output;
+      continue;
+    }
+    if (arg === "--details") {
+      out.details = argv[++i] ?? out.details;
       continue;
     }
     if (arg === "--ci") {
@@ -65,6 +77,8 @@ Options:
   --runs <n>        Measured iterations per scenario (default: ${DEFAULT_RUNS})
   --warmup <n>      Warmup iterations per scenario (default: ${DEFAULT_WARMUP})
   --budget-ms <n>   CI p95 budget per scenario (default: ${DEFAULT_BUDGET_MS})
+  --output <path>   Write action-style JSON results (p95 ms) to a file
+  --details <path>  Write detailed JSON results (p50/p95/mean/min/max) to a file
   --ci              Enforce the budget (also enabled automatically when CI=1)
 `);
 }
@@ -139,7 +153,7 @@ async function runScenario({ name, warmup, runs, fn }) {
 }
 
 async function main() {
-  const { runs, warmup, budgetMs, ci } = parseArgs(process.argv.slice(2));
+  const { runs, warmup, budgetMs, ci, output, details } = parseArgs(process.argv.slice(2));
 
   // Disable caching so the benchmark exercises the full "cold path" per run.
   // The "per-keystroke" UX typically involves distinct inputs, so cache hits are
@@ -235,6 +249,8 @@ async function main() {
 
   /** @type {{name:string, p95:number}[]} */
   const failures = [];
+  /** @type {any[]} */
+  const detailedResults = [];
   for (const scenario of scenarios) {
     const result = await runScenario({
       name: scenario.name,
@@ -242,6 +258,7 @@ async function main() {
       runs,
       fn: scenario.fn,
     });
+    detailedResults.push(result);
     console.log(
       `${result.name}\n  p50 ${fmtMs(result.p50)}  p95 ${fmtMs(result.p95)}  mean ${fmtMs(result.mean)}  min ${fmtMs(result.min)}  max ${fmtMs(result.max)}`
     );
@@ -257,7 +274,29 @@ async function main() {
     for (const f of failures) console.error(`  ${f.name}: p95=${fmtMs(f.p95)}`);
     process.exitCode = 1;
   }
+
+  if (output) {
+    /** @type {{name:string, unit:"ms", value:number}[]} */
+    const actionResults = detailedResults.map((r) => ({ name: r.name, unit: "ms", value: r.p95 }));
+    writeFileSync(output, JSON.stringify(actionResults, null, 2));
+  }
+
+  if (details) {
+    writeFileSync(
+      details,
+      JSON.stringify(
+        {
+          generatedAt: new Date().toISOString(),
+          runs,
+          warmup,
+          budgetMs,
+          results: detailedResults,
+        },
+        null,
+        2
+      )
+    );
+  }
 }
 
 await main();
-
