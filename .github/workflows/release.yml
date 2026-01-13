@@ -695,7 +695,7 @@ jobs:
           releaseDraft: true
           # Mark GitHub Releases as prereleases when the semver tag contains a
           # prerelease suffix like `-beta.1` or `-rc.0` (e.g. `v1.2.3-beta.1`).
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(needs.validate-version.outputs.release_tag, '-') }}
 
       - name: Build desktop bundles (macOS universal, dry run)
         if: runner.os == 'macOS' && needs.validate-version.outputs.upload != 'true'
@@ -777,7 +777,9 @@ jobs:
             Automated build for ${{ needs.validate-version.outputs.release_tag }}.
             See the assets below for the installers/bundles.
           releaseDraft: true
-          prerelease: false
+          # Mark GitHub Releases as prereleases when the semver tag contains a
+          # prerelease suffix like `-beta.1` or `-rc.0` (e.g. `v1.2.3-beta.1`).
+          prerelease: ${{ contains(needs.validate-version.outputs.release_tag, '-') }}
 
       - name: Build desktop bundles (dry run)
         if: runner.os != 'macOS' && needs.validate-version.outputs.upload != 'true'
