@@ -326,6 +326,10 @@ into the in-memory table.
 - `suppress_implicit_measure_context_transition: bool`  
   Internal flag used to keep `CALCULATE` semantics correct.
 
+Note: `column_filters` is currently a **set-based** representation (allowed values), not a predicate/range-based one.
+This matters for PivotTables / timelines: expressing a date range like `[start, end]` requires either materializing a
+potentially-large allowed set, or extending `FilterContext` to support `>=`/`<=` style predicates.
+
 Public helper APIs on `FilterContext` that are useful when calling the engine from Rust:
 
 - `FilterContext::with_column_equals(table, column, value)`
