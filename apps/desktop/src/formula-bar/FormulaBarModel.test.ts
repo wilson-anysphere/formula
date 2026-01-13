@@ -122,6 +122,28 @@ describe("FormulaBarModel", () => {
     expect(model.hoveredReference()).toEqual(parseA1Range("A2:A3"));
   });
 
+  it("resolves nested structured refs (e.g. [[#All],[Column]]) when tables are configured", () => {
+    const model = new FormulaBarModel();
+    model.setExtractFormulaReferencesOptions({
+      tables: [
+        {
+          name: "Table1",
+          columns: ["Amount"],
+          startRow: 0,
+          startCol: 0,
+          endRow: 2,
+          endCol: 0,
+          sheetName: "Sheet1",
+        },
+      ],
+    });
+
+    model.setActiveCell({ address: "A1", input: "", value: null });
+    model.setHoveredReference("Table1[[#All],[Amount]]");
+    // #All includes the header row; with a 3-row table this is A1:A3.
+    expect(model.hoveredReference()).toEqual(parseA1Range("A1:A3"));
+  });
+
   it("includes named ranges in reference highlights when a resolver is provided", () => {
     const model = new FormulaBarModel();
     model.setNameResolver((name) =>
