@@ -65,7 +65,19 @@ function normalizeToken(token) {
  */
 function tokenize(text, options = {}) {
   if (typeof text !== "string") return [];
-  const raw = text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  // Split common schema identifier styles to improve overlap:
+  // - "RevenueByRegion" -> "Revenue By Region"
+  // - "revenue_by_region" -> "revenue by region"
+  // - "Revenue2024" -> "Revenue 2024"
+  const expanded = text
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    // "ABCDef" -> "ABC Def" (acronym boundary)
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+    .replace(/([a-zA-Z])(\d)/g, "$1 $2")
+    .replace(/(\d)([a-zA-Z])/g, "$1 $2");
+
+  const raw = expanded.toLowerCase().match(/[a-z0-9]+/g) ?? [];
   const out = [];
   const seen = new Set();
   for (const t of raw) {

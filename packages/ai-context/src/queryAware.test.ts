@@ -101,4 +101,25 @@ describe("queryAware region selection", () => {
     const picked = pickBestRegionForQuery(schema, "revenue by region");
     expect(picked).toEqual({ type: "table", index: 0, range: "Sheet1!A1:B3" });
   });
+
+  it("matches camelCase / snake_case schema names", () => {
+    const sheet = {
+      name: "Sheet1",
+      values: [
+        ["Foo", "Bar", null, "Baz", "Qux"],
+        [1, 2, null, 3, 4],
+        [5, 6, null, 7, 8],
+        [9, 10, null, 11, 12],
+      ],
+      tables: [
+        { name: "RevenueByRegion", range: "A1:B4" },
+        { name: "cost_data", range: "D1:E4" },
+      ],
+    };
+
+    const schema = extractSheetSchema(sheet as any);
+
+    expect(pickBestRegionForQuery(schema, "revenue")).toEqual({ type: "table", index: 0, range: "Sheet1!A1:B4" });
+    expect(pickBestRegionForQuery(schema, "cost")).toEqual({ type: "table", index: 1, range: "Sheet1!D1:E4" });
+  });
 });
