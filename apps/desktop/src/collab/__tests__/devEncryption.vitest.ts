@@ -197,6 +197,15 @@ describe("dev collab encryption toggle", () => {
     expect(yCellAfter?.get("enc")).toEqual(encBefore);
     expect(yCellAfter?.get("value")).toBeUndefined();
     expect(yCellAfter?.get("formula")).toBeUndefined();
+
+    // Session-level APIs should also refuse to write plaintext into an encrypted cell
+    // when the session has no encryption key.
+    expect(sessionWithoutKey.canEditCell({ sheetId: "Sheet1", row: 0, col: 0 })).toBe(false);
+    await expect(sessionWithoutKey.setCellValue(cellKey, "hacked-again")).rejects.toThrow(/Missing encryption key/i);
+    const yCellAfterSessionWrite = sessionWithKey.cells.get(cellKey) as any;
+    expect(yCellAfterSessionWrite?.get("enc")).toEqual(encBefore);
+    expect(yCellAfterSessionWrite?.get("value")).toBeUndefined();
+    expect(yCellAfterSessionWrite?.get("formula")).toBeUndefined();
     binder2.destroy();
   });
 });
