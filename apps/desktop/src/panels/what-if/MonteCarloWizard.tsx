@@ -79,153 +79,166 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
   }
 
   return (
-    <div style={{ padding: 16, border: "1px solid var(--panel-border)", borderRadius: 8 }}>
-      <h3 style={{ marginTop: 0 }}>{t("whatIf.monteCarlo.title")}</h3>
+    <div className="what-if-panel" role="region" aria-label={t("whatIf.monteCarlo.title")} data-testid="monte-carlo-wizard">
+      <h3 className="what-if-panel__title">{t("whatIf.monteCarlo.title")}</h3>
 
-      {error ? <p style={{ color: "var(--error)" }}>{error}</p> : null}
+      {error ? (
+        <p className="what-if__message what-if__message--error" role="alert">
+          {error}
+        </p>
+      ) : null}
 
-      <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr 1fr", alignItems: "end" }}>
-        <label style={{ display: "grid", gap: 4 }}>
-          <span>{t("whatIf.monteCarlo.iterations")}</span>
-          <input value={iterations} onChange={(e) => setIterations(e.target.value)} disabled={running} />
+      <div className="what-if-grid what-if-grid--fit">
+        <label className="what-if__field">
+          <span className="what-if__label">{t("whatIf.monteCarlo.iterations")}</span>
+          <input className="what-if__input" value={iterations} onChange={(e) => setIterations(e.target.value)} disabled={running} />
         </label>
 
-        <label style={{ display: "grid", gap: 4 }}>
-          <span>{t("whatIf.monteCarlo.seed")}</span>
-          <input value={seed} onChange={(e) => setSeed(e.target.value)} disabled={running} />
+        <label className="what-if__field">
+          <span className="what-if__label">{t("whatIf.monteCarlo.seed")}</span>
+          <input className="what-if__input" value={seed} onChange={(e) => setSeed(e.target.value)} disabled={running} />
         </label>
 
-        <label style={{ display: "grid", gap: 4 }}>
-          <span>{t("whatIf.monteCarlo.outputCells")}</span>
-          <input value={outputCells} onChange={(e) => setOutputCells(e.target.value)} disabled={running} />
+        <label className="what-if__field">
+          <span className="what-if__label">{t("whatIf.monteCarlo.outputCells")}</span>
+          <input className="what-if__input" value={outputCells} onChange={(e) => setOutputCells(e.target.value)} disabled={running} />
         </label>
       </div>
 
-      <div style={{ marginTop: 16 }}>
-        <h4 style={{ margin: "8px 0" }}>{t("whatIf.monteCarlo.inputs")}</h4>
-        <div style={{ display: "grid", gap: 8 }}>
+      <div className="what-if__section">
+        <h4 className="what-if__section-title">{t("whatIf.monteCarlo.inputs")}</h4>
+        <div className="what-if-monte-carlo__inputs">
           {inputs.map((input, idx) => (
-            <div
-              key={idx}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "110px 1fr 1fr auto",
-                gap: 8,
-                alignItems: "center",
-              }}
-            >
-              <input
-                value={input.cell}
-                onChange={(e) => updateInput(idx, { cell: e.target.value })}
-                disabled={running}
-                placeholder="A1"
-              />
+            <div key={idx} className="what-if-monte-carlo__input-row" data-testid={`monte-carlo-input-${idx}`}>
+              <div className="what-if-monte-carlo__input-cell">
+                <input
+                  className="what-if__input"
+                  value={input.cell}
+                  onChange={(e) => updateInput(idx, { cell: e.target.value })}
+                  disabled={running}
+                  placeholder="A1"
+                  aria-label="Input cell"
+                />
+              </div>
 
-              <select
-                value={input.distribution.type}
-                onChange={(e) => {
-                  const type = e.target.value as Distribution["type"];
-                  // Keep it simple: switching resets to a reasonable default.
-                  const distribution: Distribution =
-                    type === "normal"
-                      ? { type, mean: 0, stdDev: 1 }
-                      : type === "uniform"
-                        ? { type, min: 0, max: 1 }
-                        : type === "triangular"
-                          ? { type, min: 0, mode: 0.5, max: 1 }
-                          : type === "lognormal"
-                            ? { type, mean: 0, stdDev: 1 }
-                            : type === "exponential"
-                              ? { type, rate: 1 }
-                              : type === "poisson"
-                                ? { type, lambda: 1 }
-                                : { type: "normal", mean: 0, stdDev: 1 };
-                  updateInput(idx, { distribution });
-                }}
-                disabled={running}
-              >
-                <option value="normal">{t("whatIf.distribution.normal")}</option>
-                <option value="uniform">{t("whatIf.distribution.uniform")}</option>
-                <option value="triangular">{t("whatIf.distribution.triangular")}</option>
-                <option value="lognormal">{t("whatIf.distribution.lognormal")}</option>
-                <option value="exponential">{t("whatIf.distribution.exponential")}</option>
-                <option value="poisson">{t("whatIf.distribution.poisson")}</option>
-              </select>
+              <div className="what-if-monte-carlo__input-type">
+                <select
+                  className="what-if__select"
+                  value={input.distribution.type}
+                  onChange={(e) => {
+                    const type = e.target.value as Distribution["type"];
+                    // Keep it simple: switching resets to a reasonable default.
+                    const distribution: Distribution =
+                      type === "normal"
+                        ? { type, mean: 0, stdDev: 1 }
+                        : type === "uniform"
+                          ? { type, min: 0, max: 1 }
+                          : type === "triangular"
+                            ? { type, min: 0, mode: 0.5, max: 1 }
+                            : type === "lognormal"
+                              ? { type, mean: 0, stdDev: 1 }
+                              : type === "exponential"
+                                ? { type, rate: 1 }
+                                : type === "poisson"
+                                  ? { type, lambda: 1 }
+                                  : { type: "normal", mean: 0, stdDev: 1 };
+                    updateInput(idx, { distribution });
+                  }}
+                  disabled={running}
+                  aria-label="Distribution type"
+                >
+                  <option value="normal">{t("whatIf.distribution.normal")}</option>
+                  <option value="uniform">{t("whatIf.distribution.uniform")}</option>
+                  <option value="triangular">{t("whatIf.distribution.triangular")}</option>
+                  <option value="lognormal">{t("whatIf.distribution.lognormal")}</option>
+                  <option value="exponential">{t("whatIf.distribution.exponential")}</option>
+                  <option value="poisson">{t("whatIf.distribution.poisson")}</option>
+                </select>
+              </div>
 
-              <input
-                value={JSON.stringify(input.distribution)}
-                onChange={(e) => {
-                  try {
-                    const parsed = JSON.parse(e.target.value) as Distribution;
-                    updateInput(idx, { distribution: parsed });
-                  } catch {
-                    // Allow partial JSON edits.
-                  }
-                }}
-                disabled={running}
-                style={{ fontFamily: "monospace", fontSize: 12 }}
-              />
+              <div className="what-if-monte-carlo__input-json">
+                <input
+                  className="what-if__input what-if__input--mono"
+                  value={JSON.stringify(input.distribution)}
+                  onChange={(e) => {
+                    try {
+                      const parsed = JSON.parse(e.target.value) as Distribution;
+                      updateInput(idx, { distribution: parsed });
+                    } catch {
+                      // Allow partial JSON edits.
+                    }
+                  }}
+                  disabled={running}
+                  aria-label="Distribution JSON"
+                />
+              </div>
 
-              <button
-                onClick={() => setInputs((prev) => prev.filter((_, i) => i !== idx))}
-                disabled={running || inputs.length <= 1}
-              >
-                {t("whatIf.monteCarlo.remove")}
-              </button>
+              <div className="what-if-monte-carlo__input-actions">
+                <button
+                  type="button"
+                  className="what-if__button"
+                  onClick={() => setInputs((prev) => prev.filter((_, i) => i !== idx))}
+                  disabled={running || inputs.length <= 1}
+                >
+                  {t("whatIf.monteCarlo.remove")}
+                </button>
+              </div>
             </div>
           ))}
 
-          <div>
-            <button onClick={() => setInputs((prev) => [...prev, defaultDistribution()])} disabled={running}>
+          <div className="what-if__actions">
+            <button type="button" className="what-if__button" onClick={() => setInputs((prev) => [...prev, defaultDistribution()])} disabled={running}>
               {t("whatIf.monteCarlo.addInput")}
             </button>
           </div>
         </div>
       </div>
 
-      <div style={{ marginTop: 16 }}>
-        <button onClick={run} disabled={running}>
+      <div className="what-if__actions">
+        <button type="button" className="what-if__button what-if__button--primary" onClick={run} disabled={running}>
           {running ? t("whatIf.monteCarlo.running") : t("whatIf.monteCarlo.runSimulation")}
         </button>
       </div>
 
       {progress ? (
-        <p style={{ marginTop: 12, fontFamily: "monospace", fontSize: 12 }}>
+        <div className="what-if__message what-if__mono-block" role="status" data-testid="monte-carlo-progress">
           {tWithVars("whatIf.monteCarlo.progressIterations", {
             completed: progress.completedIterations,
             total: progress.totalIterations,
           })}
-        </p>
+        </div>
       ) : null}
 
       {result ? (
-        <div style={{ marginTop: 16 }}>
-          <h4 style={{ margin: "8px 0" }}>{t("whatIf.monteCarlo.results")}</h4>
-          {Object.entries(result.outputStats).map(([cell, stats]) => (
-            <div key={cell} style={{ marginBottom: 12 }}>
-              <strong>{cell}</strong>
-              <div style={{ fontFamily: "monospace", fontSize: 12 }}>
-                <div>
-                  {t("whatIf.stats.mean")}: {stats.mean}
-                </div>
-                <div>
-                  {t("whatIf.stats.median")}: {stats.median}
-                </div>
-                <div>
-                  {t("whatIf.stats.stdDev")}: {stats.stdDev}
-                </div>
-                <div>
-                  {t("whatIf.stats.minMax")}: {stats.min} / {stats.max}
-                </div>
-                <div>
-                  {tWithVars("whatIf.stats.percentile", { p: 5 })}: {stats.percentiles["5"]}
-                </div>
-                <div>
-                  {tWithVars("whatIf.stats.percentile", { p: 95 })}: {stats.percentiles["95"]}
+        <div className="what-if__section" data-testid="monte-carlo-results">
+          <h4 className="what-if__section-title">{t("whatIf.monteCarlo.results")}</h4>
+          <div className="what-if-grid">
+            {Object.entries(result.outputStats).map(([cell, stats]) => (
+              <div key={cell} className="what-if-monte-carlo__result">
+                <div className="what-if-monte-carlo__result-title">{cell}</div>
+                <div className="what-if__mono-block">
+                  <div>
+                    {t("whatIf.stats.mean")}: {stats.mean}
+                  </div>
+                  <div>
+                    {t("whatIf.stats.median")}: {stats.median}
+                  </div>
+                  <div>
+                    {t("whatIf.stats.stdDev")}: {stats.stdDev}
+                  </div>
+                  <div>
+                    {t("whatIf.stats.minMax")}: {stats.min} / {stats.max}
+                  </div>
+                  <div>
+                    {tWithVars("whatIf.stats.percentile", { p: 5 })}: {stats.percentiles["5"]}
+                  </div>
+                  <div>
+                    {tWithVars("whatIf.stats.percentile", { p: 95 })}: {stats.percentiles["95"]}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       ) : null}
     </div>

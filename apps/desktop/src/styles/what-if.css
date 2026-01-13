@@ -1,0 +1,331 @@
+/*
+  Styles for the What-If Analysis UI (Scenario Manager / Goal Seek / Monte Carlo).
+
+  This file intentionally uses only design tokens from `tokens.css` and does not
+  hardcode colors (enforced by `noHardcodedColors.test.js`).
+*/
+
+.what-if-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  min-width: 0;
+  min-height: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.what-if-panel__title {
+  margin: 0;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.what-if-dialog {
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(640px, calc(100vh - 32px));
+  overflow: auto;
+}
+
+.what-if-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.what-if-dialog__header .dialog__title {
+  margin: 0;
+}
+
+.what-if-dialog__content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.what-if__message {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.what-if__message--error {
+  border-color: var(--error);
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.what-if__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.what-if__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.what-if__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.what-if__field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.what-if__field--grow {
+  flex: 1 1 240px;
+}
+
+.what-if__label {
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.what-if__input,
+.what-if__select {
+  min-width: 0;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.what-if__input:focus,
+.what-if__select:focus {
+  outline: none;
+}
+
+.what-if__input:focus-visible,
+.what-if__select:focus-visible {
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+@supports not selector(:focus-visible) {
+  .what-if__input:focus,
+  .what-if__select:focus {
+    border-color: var(--selection-border);
+    box-shadow: 0 0 0 2px var(--selection-bg);
+  }
+}
+
+.what-if__input--mono {
+  font:
+    12px/16px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+}
+
+.what-if__button {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.what-if__button:hover {
+  background: var(--bg-tertiary);
+}
+
+.what-if__button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.what-if__button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.what-if__button--primary {
+  background: var(--accent);
+  border-color: var(--accent-border);
+  color: var(--text-on-accent);
+  font-weight: 700;
+}
+
+.what-if__button--primary:hover {
+  background: var(--accent);
+}
+
+.what-if__meta {
+  display: grid;
+  gap: 4px;
+  color: var(--text-secondary);
+}
+
+.what-if__meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.what-if__meta-label {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.what-if__meta-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.what-if__section-title {
+  margin: 0;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.what-if__table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+}
+
+.what-if-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.what-if-table th,
+.what-if-table td {
+  padding: 6px 10px;
+  text-align: start;
+  border-bottom: 1px solid var(--border);
+}
+
+.what-if-table th {
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+}
+
+.what-if-table tr:last-child td {
+  border-bottom: none;
+}
+
+.what-if__mono-block {
+  font:
+    12px/16px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+}
+
+.what-if-grid {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.what-if-grid--fit {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  align-items: end;
+}
+
+.what-if-monte-carlo__inputs {
+  display: grid;
+  gap: 8px;
+}
+
+.what-if-monte-carlo__input-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  min-width: 0;
+}
+
+.what-if-monte-carlo__input-row > * {
+  min-width: 0;
+}
+
+.what-if-monte-carlo__input-cell {
+  flex: 1 1 92px;
+}
+
+.what-if-monte-carlo__input-type {
+  flex: 1 1 160px;
+}
+
+.what-if-monte-carlo__input-json {
+  flex: 1 1 220px;
+}
+
+.what-if-monte-carlo__input-actions {
+  flex: 0 0 auto;
+}
+
+.what-if-monte-carlo__result {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  display: grid;
+  gap: 8px;
+}
+
+.what-if-monte-carlo__result-title {
+  font-weight: 700;
+  color: var(--text-primary);
+}

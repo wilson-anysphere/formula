@@ -1,10 +1,27 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-import type { Scenario, SummaryReport, WhatIfApi } from "./types";
+import type { Scenario, SummaryReport, WhatIfApi, WhatIfCellValue } from "./types";
 import { t } from "../../i18n/index.js";
 
 export interface ScenarioManagerPanelProps {
   api: WhatIfApi;
+}
+
+function formatWhatIfCellValue(value: WhatIfCellValue | undefined): string {
+  if (!value) return "";
+  switch (value.type) {
+    case "number":
+      return String(value.value);
+    case "text":
+      return value.value;
+    case "bool":
+      return value.value ? "TRUE" : "FALSE";
+    case "blank":
+      return "";
+    default:
+      // Exhaustive check: ensure we still render something if the backend adds a new type.
+      return String((value as unknown) ?? "");
+  }
 }
 
 export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
@@ -76,85 +93,93 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
   }
 
   return (
-    <div style={{ padding: 16, border: "1px solid var(--panel-border)", borderRadius: 8 }}>
-      <h3 style={{ marginTop: 0 }}>{t("whatIf.scenario.title")}</h3>
+    <div className="what-if-panel" role="region" aria-label={t("whatIf.scenario.title")} data-testid="scenario-manager-panel">
+      <h3 className="what-if-panel__title">{t("whatIf.scenario.title")}</h3>
 
-      {error ? <p style={{ color: "var(--error)" }}>{error}</p> : null}
+      {error ? (
+        <p className="what-if__message what-if__message--error" role="alert">
+          {error}
+        </p>
+      ) : null}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center" }}>
-        <select
-          value={selectedScenarioId ?? ""}
-          onChange={(e) => setSelectedScenarioId(e.target.value ? Number(e.target.value) : null)}
-        >
-          <option value="">{t("whatIf.scenario.selectPlaceholder")}</option>
-          {scenarios.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
+      <div className="what-if__row">
+        <label className="what-if__field what-if__field--grow">
+          <span className="what-if__label">{t("whatIf.scenario.table.scenario")}</span>
+          <select
+            className="what-if__select"
+            value={selectedScenarioId ?? ""}
+            onChange={(e) => setSelectedScenarioId(e.target.value ? Number(e.target.value) : null)}
+          >
+            <option value="">{t("whatIf.scenario.selectPlaceholder")}</option>
+            {scenarios.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </label>
 
-        <button onClick={applySelected} disabled={selectedScenarioId == null}>
+        <button type="button" className="what-if__button what-if__button--primary" onClick={applySelected} disabled={selectedScenarioId == null}>
           {t("whatIf.scenario.apply")}
         </button>
       </div>
 
       {selectedScenario ? (
-        <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-secondary)" }}>
-          <div>
-            {t("whatIf.scenario.changingCells")}: {selectedScenario.changingCells.join(", ") || "—"}
+        <div className="what-if__meta" data-testid="scenario-manager-selected-meta">
+          <div className="what-if__meta-row">
+            <span className="what-if__meta-label">{t("whatIf.scenario.changingCells")}:</span>
+            <span className="what-if__meta-value">{selectedScenario.changingCells.join(", ") || "—"}</span>
           </div>
           {selectedScenario.comment ? (
-            <div>
-              {t("whatIf.scenario.comment")}: {selectedScenario.comment}
+            <div className="what-if__meta-row">
+              <span className="what-if__meta-label">{t("whatIf.scenario.comment")}:</span>
+              <span className="what-if__meta-value">{selectedScenario.comment}</span>
             </div>
           ) : null}
         </div>
       ) : null}
 
-      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <button onClick={restoreBase}>{t("whatIf.scenario.restoreBase")}</button>
-        <button onClick={generateReport} disabled={scenarios.length === 0}>
+      <div className="what-if__actions">
+        <button type="button" className="what-if__button" onClick={restoreBase}>
+          {t("whatIf.scenario.restoreBase")}
+        </button>
+        <button type="button" className="what-if__button" onClick={generateReport} disabled={scenarios.length === 0}>
           {t("whatIf.scenario.summaryReport")}
         </button>
       </div>
 
-      <div style={{ marginTop: 12 }}>
-        <label style={{ display: "grid", gap: 4 }}>
-          <span>{t("whatIf.scenario.resultCellsLabel")}</span>
-          <input value={resultCells} onChange={(e) => setResultCells(e.target.value)} />
-        </label>
-      </div>
+      <label className="what-if__field">
+        <span className="what-if__label">{t("whatIf.scenario.resultCellsLabel")}</span>
+        <input className="what-if__input" value={resultCells} onChange={(e) => setResultCells(e.target.value)} />
+      </label>
 
       {report ? (
-        <div style={{ marginTop: 16 }}>
-          <h4 style={{ margin: "8px 0" }}>{t("whatIf.scenario.summaryTitle")}</h4>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: "start", borderBottom: "1px solid var(--border)" }}>
-                  {t("whatIf.scenario.table.scenario")}
-                </th>
-                {report.resultCells.map((cell) => (
-                  <th key={cell} style={{ textAlign: "start", borderBottom: "1px solid var(--border)" }}>
-                    {cell}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(report.results).map(([scenarioName, row]) => (
-                <tr key={scenarioName}>
-                  <td style={{ padding: "4px 0" }}>{scenarioName}</td>
+        <div className="what-if__section" data-testid="scenario-manager-report">
+          <h4 className="what-if__section-title">{t("whatIf.scenario.summaryTitle")}</h4>
+          <div className="what-if__table-wrap">
+            <table className="what-if-table">
+              <thead>
+                <tr>
+                  <th scope="col">{t("whatIf.scenario.table.scenario")}</th>
                   {report.resultCells.map((cell) => (
-                    <td key={cell} style={{ padding: "4px 0" }}>
-                      {String(row[cell] ?? "")}
-                    </td>
+                    <th scope="col" key={cell}>
+                      {cell}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {Object.entries(report.results).map(([scenarioName, row]) => (
+                  <tr key={scenarioName}>
+                    <td>{scenarioName}</td>
+                    {report.resultCells.map((cell) => (
+                      <td key={cell}>{formatWhatIfCellValue(row[cell])}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : null}
     </div>

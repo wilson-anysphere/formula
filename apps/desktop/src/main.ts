@@ -20,6 +20,7 @@ import "./styles/conflicts.css";
 import "./styles/macros-runner.css";
 import "./styles/script-editor.css";
 import "./styles/python-panel.css";
+import "./styles/what-if.css";
 
 import React from "react";
 import { createRoot } from "react-dom/client";
