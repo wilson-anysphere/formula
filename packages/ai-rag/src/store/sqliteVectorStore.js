@@ -979,11 +979,12 @@ export class SqliteVectorStore {
     const includeVector = opts?.includeVector ?? true;
 
     throwIfAborted(signal);
+    const vectorSelect = includeVector ? "vector" : "length(vector) AS vector_bytes";
     const sql = workbookId
       ? `
         SELECT
           id,
-          ${includeVector ? "vector," : ""}
+          ${vectorSelect},
           workbook_id,
           sheet_name,
           kind,
@@ -1002,7 +1003,7 @@ export class SqliteVectorStore {
       : `
         SELECT
           id,
-          ${includeVector ? "vector," : ""}
+          ${vectorSelect},
           workbook_id,
           sheet_name,
           kind,
@@ -1028,8 +1029,8 @@ export class SqliteVectorStore {
         if (!stmt.step()) break;
         const row = stmt.get();
         const id = row[0];
-        const offset = includeVector ? 2 : 1;
-        const vecBlob = includeVector ? row[1] : null;
+        const offset = 2;
+        const vecBlobOrBytes = row[1];
 
         const base = {};
         if (row[offset] != null) base.workbookId = row[offset];
@@ -1059,7 +1060,7 @@ export class SqliteVectorStore {
         let vecOut;
         if (includeVector) {
           const vec = blobToFloat32WithContext(
-            vecBlob,
+            vecBlobOrBytes,
             `SqliteVectorStore.list() failed to decode stored vector blob for id=${JSON.stringify(id)}`
           );
           assertVectorDim(
@@ -1068,6 +1069,14 @@ export class SqliteVectorStore {
             `SqliteVectorStore.list() vector dimension mismatch for id=${JSON.stringify(id)}`
           );
           vecOut = new Float32Array(vec);
+        } else {
+          const bytes = Number(vecBlobOrBytes);
+          const expectedBytes = this._dimension * 4;
+          if (bytes !== expectedBytes) {
+            throw new Error(
+              `SqliteVectorStore.list() vector blob byte length mismatch for id=${JSON.stringify(id)}: expected ${expectedBytes}, got ${bytes}`
+            );
+          }
         }
         out.push({
           id,

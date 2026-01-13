@@ -481,6 +481,7 @@ test("SqliteVectorStore.list throws when stored vector blob has wrong length", {
     stmt.free();
 
     await assert.rejects(store.list(), /expected 3/);
+    await assert.rejects(store.list({ includeVector: false }), /expected 12/);
   } finally {
     await store.close();
   }
