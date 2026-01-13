@@ -17,7 +17,7 @@ This is intended for CI/release workflows to catch:
 Environment variables:
   CARGO_TARGET_DIR         Optional Cargo target directory override (also used for artifact discovery)
   FORMULA_DEB_SMOKE_IMAGE  Ubuntu image to use (default: ubuntu:24.04)
-  FORMULA_RPM_SMOKE_IMAGE  Fedora image to use (default: fedora:40)
+  FORMULA_RPM_SMOKE_IMAGE  RPM-based image to use (default: fedora:40; supports openSUSE too)
 EOF
 }
 
@@ -202,11 +202,23 @@ rpm_smoke_test_dir() {
     bash -euxo pipefail -c '
       echo "Container OS:"; cat /etc/os-release
       echo "Mounted artifacts:"; ls -lah /mounted
-      # Ensure metadata is available, then install the local RPM.
-      # The Tauri updater `.sig` files are not RPM GPG signatures, and we generally do not GPG-sign
-      # the built RPM in CI. Use --nogpgcheck so the smoke test validates runtime deps rather than
-      # failing on signing policy.
-      dnf -y install --nogpgcheck --setopt=install_weak_deps=False /mounted/*.rpm
+      # Install the local RPM using whatever package manager is available in the container.
+      #
+      # - Fedora/RHEL-family: `dnf`
+      # - openSUSE: `zypper`
+      #
+      # Note: the Tauri updater `.sig` files are not RPM GPG signatures, and we generally do not
+      # GPG-sign the built RPM in CI. Use `--nogpgcheck` / `--allow-unsigned-rpm` so the smoke test
+      # validates runtime deps rather than failing on signing policy.
+      if command -v dnf >/dev/null 2>&1; then
+        dnf -y install --nogpgcheck --setopt=install_weak_deps=False /mounted/*.rpm
+      elif command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive refresh
+        zypper --non-interactive install --no-recommends --allow-unsigned-rpm /mounted/*.rpm
+      else
+        echo "linux-package-install-smoke: no supported RPM package manager found (expected dnf or zypper)" >&2
+        exit 1
+      fi
 
       test -x /usr/bin/formula-desktop
       set +e
