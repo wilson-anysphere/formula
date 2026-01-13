@@ -122,3 +122,44 @@ test("YjsBranchStore.ensureDocument repairs meta.rootCommitId pointing at an inc
   assert.equal(meta.get("rootCommitId"), originalRoot);
 });
 
+test("YjsBranchStore.ensureDocument can recover when root commit is mid snapshot migration (commitComplete=false but patch is inline)", async () => {
+  const ydoc = new Y.Doc();
+  const docId = "doc1";
+  const actor = { userId: "u1", role: "owner" };
+
+  // Seed history using JSON payloads so the root commit contains an inline patch.
+  const seedStore = new YjsBranchStore({ ydoc, payloadEncoding: "json" });
+  await seedStore.ensureDocument(docId, actor, { sheets: {} });
+
+  const meta = ydoc.getMap("branching:meta");
+  const commits = ydoc.getMap("branching:commits");
+  const rootId = meta.get("rootCommitId");
+  assert.ok(typeof rootId === "string" && rootId.length > 0);
+
+  const rootCommit = commits.get(rootId);
+  assert.ok(rootCommit instanceof Y.Map);
+  assert.ok(rootCommit.get("patch") !== undefined);
+
+  // Simulate an interrupted migration that tried to write a gzip-chunks snapshot
+  // for the root commit but crashed mid-write.
+  ydoc.transact(() => {
+    rootCommit.delete("snapshot");
+    rootCommit.set("commitComplete", false);
+    rootCommit.set("snapshotEncoding", "gzip-chunks");
+    const chunks = new Y.Array();
+    chunks.push([new Uint8Array([1, 2, 3])]);
+    rootCommit.set("snapshotChunks", chunks);
+  });
+
+  const repairStore = new YjsBranchStore({
+    ydoc,
+    payloadEncoding: "gzip-chunks",
+    maxChunksPerTransaction: 1,
+  });
+
+  await repairStore.ensureDocument(docId, actor, { sheets: {} });
+
+  const repaired = commits.get(rootId);
+  assert.ok(repaired instanceof Y.Map);
+  assert.equal(repaired.get("commitComplete"), true);
+ });

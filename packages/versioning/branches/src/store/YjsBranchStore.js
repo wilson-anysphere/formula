@@ -505,25 +505,34 @@ export class YjsBranchStore {
       // commits around (commitComplete=false). Ensure document repair doesn't
       // select those as the root commit pointer.
       if (!this.#isCommitComplete(rootCommitMap)) {
-        const inferredRoot = this.#inferRootCommitId(docId);
-        if (
-          typeof inferredRoot === "string" &&
-          inferredRoot.length > 0 &&
-          inferredRoot !== rootCommitId
-        ) {
-          this.#ydoc.transact(() => {
-            const current = this.#meta.get("rootCommitId");
-            if (current !== rootCommitId) return;
-            this.#meta.set("rootCommitId", inferredRoot);
-          });
-          rootCommitId = inferredRoot;
-          existingRoot = inferredRoot;
-          rootCommitMap = getYMap(this.#commits.get(rootCommitId));
-          if (!rootCommitMap) throw new Error(`Root commit not found: ${rootCommitId}`);
-        } else {
-          throw new Error(
-            `YjsBranchStore: root commit not fully written yet (commitComplete=false): ${rootCommitId}`
-          );
+        // Some repairs/migrations can write chunk payloads across multiple
+        // transactions (e.g. restoring a missing root snapshot). If we crashed
+        // mid-write, `commitComplete=false` may linger even though the commit still
+        // contains an inline JSON patch/snapshot that lets us safely proceed and
+        // finish the migration.
+        const hasInlinePayload =
+          rootCommitMap.get("patch") !== undefined || rootCommitMap.get("snapshot") !== undefined;
+        if (!hasInlinePayload) {
+          const inferredRoot = this.#inferRootCommitId(docId);
+          if (
+            typeof inferredRoot === "string" &&
+            inferredRoot.length > 0 &&
+            inferredRoot !== rootCommitId
+          ) {
+            this.#ydoc.transact(() => {
+              const current = this.#meta.get("rootCommitId");
+              if (current !== rootCommitId) return;
+              this.#meta.set("rootCommitId", inferredRoot);
+            });
+            rootCommitId = inferredRoot;
+            existingRoot = inferredRoot;
+            rootCommitMap = getYMap(this.#commits.get(rootCommitId));
+            if (!rootCommitMap) throw new Error(`Root commit not found: ${rootCommitId}`);
+          } else {
+            throw new Error(
+              `YjsBranchStore: root commit not fully written yet (commitComplete=false): ${rootCommitId}`
+            );
+          }
         }
       }
 
