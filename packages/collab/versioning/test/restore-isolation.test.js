@@ -138,6 +138,19 @@ test("CollabVersioning restoreVersion supports caller-provided excludeRoots (cus
 
   const checkpoint = await versioning.createCheckpoint({ name: "checkpoint-1" });
 
+  // Ensure the snapshot bytes themselves do not include the excluded roots.
+  const snapshotDoc = new Y.Doc();
+  t.after(() => snapshotDoc.destroy());
+  Y.applyUpdate(snapshotDoc, checkpoint.snapshot);
+
+  assert.equal(snapshotDoc.share.has("myBranching:branches"), false);
+  assert.equal(snapshotDoc.share.has("myBranching:commits"), false);
+  assert.equal(snapshotDoc.share.has("myBranching:meta"), false);
+
+  // And that the snapshot contains the expected workbook state.
+  assert.equal(snapshotDoc.getMap("metadata").get("title"), "Before");
+  assert.equal(snapshotDoc.getMap("cells").get("Sheet1:0:0"), "alpha");
+
   // Mutate workbook roots.
   metadata.set("title", "After");
   cells.set("Sheet1:0:0", "beta");
@@ -160,6 +173,35 @@ test("CollabVersioning restoreVersion supports caller-provided excludeRoots (cus
   assert.equal(commits.has("c1"), false);
   assert.equal(commits.get("c2"), "commit-v2");
   assert.equal(branchingMeta.get("currentBranchName"), "feature");
+});
+
+test("CollabVersioning does not mark dirty for caller-excluded custom root updates", async (t) => {
+  const doc = new Y.Doc();
+  t.after(() => doc.destroy());
+
+  // Instantiate roots before attaching VersionManager listeners so the test only
+  // measures the effects of *updates*.
+  const cells = doc.getMap("cells");
+  const branches = doc.getMap("myBranching:branches");
+
+  const versioning = createCollabVersioning({
+    // @ts-expect-error - minimal session stub for unit tests
+    session: { doc },
+    autoStart: false,
+    excludeRoots: ["myBranching:branches", "myBranching:commits", "myBranching:meta"],
+  });
+  t.after(() => versioning.destroy());
+
+  assert.equal(versioning.manager.dirty, false);
+
+  // Internal branch graph churn should not make the workbook dirty.
+  branches.set("main", "branch-v1");
+  assert.equal(versioning.manager.dirty, false);
+  assert.equal(await versioning.manager.maybeSnapshot(), null);
+
+  // Real workbook edits should still mark dirty.
+  cells.set("Sheet1:0:0", "alpha");
+  assert.equal(versioning.manager.dirty, true);
 });
 
 test("CollabVersioning does not mark dirty for excluded internal root updates", async (t) => {
