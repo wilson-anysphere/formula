@@ -12,6 +12,7 @@ members = [
   "crates/formula-format",
   "crates/formula-io",
   "crates/formula-model",
+  "crates/formula-offcrypto",
   "crates/formula-office-crypto",
   "crates/formula-storage",
   "crates/formula-vba",
