@@ -450,6 +450,16 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
+      - name: "Guard: locale function TSVs match generator output"
+        env:
+          # The function TSV generator derives its header date from SOURCE_DATE_EPOCH.
+          # Keep this pinned so CI never rewrites the committed TSV headers.
+          SOURCE_DATE_EPOCH: "0"
+        run: node scripts/generate-locale-function-tsv.js --check
+
+      - name: "Guard: locale error TSVs match generator output"
+        run: node scripts/generate-locale-error-tsvs.mjs --check
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
