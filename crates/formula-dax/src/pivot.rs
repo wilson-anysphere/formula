@@ -467,15 +467,7 @@ fn build_group_key_accessors<'a>(
                 .get(rel_idx)
                 .expect("relationship index from path");
 
-            let from_table_ref = model
-                .table(&rel_info.rel.from_table)
-                .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.from_table.clone()))?;
-            let from_idx = from_table_ref
-                .column_idx(&rel_info.rel.from_column)
-                .ok_or_else(|| DaxError::UnknownColumn {
-                    table: rel_info.rel.from_table.clone(),
-                    column: rel_info.rel.from_column.clone(),
-                })?;
+            let from_idx = rel_info.from_idx;
 
             let to_table_ref = model
                 .table(&rel_info.rel.to_table)
@@ -1474,7 +1466,6 @@ fn pivot_columnar_star_schema_group_by(
             .relationships()
             .get(path[0])
             .expect("relationship index from path");
-
         // This fast path assumes each foreign-key value maps to at most one row on the related
         // table (i.e. "one" side). Many-to-many relationships can map to multiple rows and require
         // full row-wise evaluation.
@@ -1482,12 +1473,7 @@ fn pivot_columnar_star_schema_group_by(
             return Ok(None);
         }
 
-        let from_idx = table_ref
-            .column_idx(&rel_info.rel.from_column)
-            .ok_or_else(|| DaxError::UnknownColumn {
-                table: base_table.to_string(),
-                column: rel_info.rel.from_column.clone(),
-            })?;
+        let from_idx = rel_info.from_idx;
 
         let pos = *idx_to_pos.entry(from_idx).or_insert_with(|| {
             let pos = group_idxs.len();

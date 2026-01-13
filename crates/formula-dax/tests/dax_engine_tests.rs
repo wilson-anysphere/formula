@@ -564,6 +564,121 @@ fn relatedtable_supports_iterators() {
 }
 
 #[test]
+fn relatedtable_supports_iterators_for_columnar_relationships() {
+    // Columnar tables are immutable (so we can't add calculated columns), but `RELATEDTABLE`
+    // should still work in row context.
+    let mut model = DataModel::new();
+
+    let customers_schema = vec![
+        ColumnSchema {
+            name: "CustomerId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Name".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut customers = ColumnarTableBuilder::new(customers_schema, options);
+    customers.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String(Arc::<str>::from("Alice")),
+    ]);
+    customers.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::String(Arc::<str>::from("Bob")),
+    ]);
+    customers.append_row(&[
+        formula_columnar::Value::Number(3.0),
+        formula_columnar::Value::String(Arc::<str>::from("Carol")),
+    ]);
+    model
+        .add_table(Table::from_columnar("Customers", customers.finalize()))
+        .unwrap();
+
+    let orders_schema = vec![
+        ColumnSchema {
+            name: "OrderId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "CustomerId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut orders = ColumnarTableBuilder::new(orders_schema, options);
+    orders.append_row(&[
+        formula_columnar::Value::Number(100.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+    ]);
+    orders.append_row(&[
+        formula_columnar::Value::Number(101.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(20.0),
+    ]);
+    orders.append_row(&[
+        formula_columnar::Value::Number(102.0),
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(5.0),
+    ]);
+    orders.append_row(&[
+        formula_columnar::Value::Number(103.0),
+        formula_columnar::Value::Number(3.0),
+        formula_columnar::Value::Number(8.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Orders", orders.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Orders_Customers".into(),
+            from_table: "Orders".into(),
+            from_column: "CustomerId".into(),
+            to_table: "Customers".into(),
+            to_column: "CustomerId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let customers = model.table("Customers").unwrap();
+    let mut values = Vec::new();
+    for row in 0..customers.row_count() {
+        let mut row_ctx = RowContext::default();
+        row_ctx.push("Customers", row);
+        values.push(
+            engine
+                .evaluate(
+                    &model,
+                    "SUMX(RELATEDTABLE(Orders), Orders[Amount])",
+                    &FilterContext::empty(),
+                    &row_ctx,
+                )
+                .unwrap(),
+        );
+    }
+
+    assert_eq!(values, vec![30.0.into(), 5.0.into(), 8.0.into()]);
+}
+
+#[test]
 fn calculate_transitions_row_context_to_filter_context_for_measures() {
     let mut model = build_model();
     model
@@ -2721,6 +2836,78 @@ fn relationship_blank_dimension_member_includes_unmatched_facts() {
         .push_row(vec![101.into(), 999.into(), 7.0.into()])
         .unwrap();
     model.add_table(orders).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Orders_Customers".into(),
+            from_table: "Orders".into(),
+            from_column: "CustomerId".into(),
+            to_table: "Customers".into(),
+            to_column: "CustomerId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    let blank_region =
+        FilterContext::empty().with_column_equals("Customers", "Region", Value::Blank);
+    assert_eq!(
+        model
+            .evaluate_measure("Total Sales", &blank_region)
+            .unwrap(),
+        7.0.into()
+    );
+}
+
+#[test]
+fn columnar_relationship_blank_dimension_member_includes_unmatched_facts() {
+    // Same as `relationship_blank_dimension_member_includes_unmatched_facts`, but with a
+    // columnar fact table (the relationship should not materialize a full key->rowlist index).
+    let mut model = DataModel::new();
+
+    let mut customers = Table::new("Customers", vec!["CustomerId", "Region"]);
+    customers.push_row(vec![1.into(), "East".into()]).unwrap();
+    customers.push_row(vec![2.into(), "West".into()]).unwrap();
+    model.add_table(customers).unwrap();
+
+    let orders_schema = vec![
+        ColumnSchema {
+            name: "OrderId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "CustomerId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut orders = ColumnarTableBuilder::new(orders_schema, options);
+    orders.append_row(&[
+        formula_columnar::Value::Number(100.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+    ]);
+    orders.append_row(&[
+        formula_columnar::Value::Number(101.0),
+        formula_columnar::Value::Number(999.0),
+        formula_columnar::Value::Number(7.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Orders", orders.finalize()))
+        .unwrap();
 
     model
         .add_relationship(Relationship {

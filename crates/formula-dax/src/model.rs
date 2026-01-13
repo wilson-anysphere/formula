@@ -478,6 +478,10 @@ impl RowSet {
 #[derive(Clone, Debug)]
 pub(crate) struct RelationshipInfo {
     pub(crate) rel: Relationship,
+    /// Column index of `rel.from_column` in the `from_table`.
+    pub(crate) from_idx: usize,
+    /// Column index of `rel.to_column` in the `to_table`.
+    pub(crate) to_idx: usize,
     pub(crate) to_index: HashMap<Value, RowSet>,
     /// Relationship index for the fact-side (from_table) foreign key.
     ///
@@ -488,9 +492,6 @@ pub(crate) struct RelationshipInfo {
     /// In that case this stays `None` and the engine relies on columnar primitives such as
     /// [`TableBackend::filter_eq`], [`TableBackend::filter_in`], and
     /// [`TableBackend::distinct_values_filtered`].
-    ///
-    /// Note: many-to-many relationships are intentionally excluded from this optimization (they
-    /// are handled separately).
     pub(crate) from_index: Option<HashMap<Value, Vec<usize>>>,
 
     /// Resolved column index of `rel.from_column` on `rel.from_table`.
@@ -821,120 +822,37 @@ impl DataModel {
             }
         }
 
-        let (from_index, unmatched_fact_rows) = if relationship.cardinality == Cardinality::ManyToMany
-        {
-            // Many-to-many relationships are handled separately; keep the existing in-memory
-            // indexing behavior (materialize the full FK -> row list map), even for columnar
-            // tables.
-            let mut from_index: HashMap<Value, Vec<usize>> = HashMap::new();
-            for row in 0..from_table.row_count() {
-                let value = from_table
-                    .value_by_idx(row, from_idx)
-                    .unwrap_or(Value::Blank);
-                from_index.entry(value).or_default().push(row);
-            }
-
-            if relationship.enforce_referential_integrity {
+        let (from_index, unmatched_fact_rows) = match &from_table.storage {
+            TableStorage::InMemory(_) => {
+                let mut from_index: HashMap<Value, Vec<usize>> = HashMap::new();
                 for row in 0..from_table.row_count() {
                     let value = from_table
                         .value_by_idx(row, from_idx)
                         .unwrap_or(Value::Blank);
-                    if value.is_blank() {
-                        continue;
-                    }
-                    if !to_index.contains_key(&value) {
-                        return Err(DaxError::ReferentialIntegrityViolation {
-                            relationship: relationship.name.clone(),
-                            from_table: relationship.from_table.clone(),
-                            from_column: from_col.clone(),
-                            to_table: relationship.to_table.clone(),
-                            to_column: to_col.clone(),
+                    let rows = from_index.entry(value.clone()).or_default();
+
+                    // For 1:1 relationships, the "from" side must also be unique. We treat
+                    // BLANK as a real key for uniqueness, matching the existing to-side semantics.
+                    if relationship.cardinality == Cardinality::OneToOne && !rows.is_empty() {
+                        return Err(DaxError::NonUniqueKey {
+                            table: relationship.from_table.clone(),
+                            column: from_col.clone(),
                             value: value.clone(),
                         });
                     }
-                }
-            }
 
-            (Some(from_index), None)
-        } else {
-            match &from_table.storage {
-                TableStorage::InMemory(_) => {
-                    let mut from_index: HashMap<Value, Vec<usize>> = HashMap::new();
+                    rows.push(row);
+                }
+
+                if relationship.enforce_referential_integrity {
                     for row in 0..from_table.row_count() {
                         let value = from_table
                             .value_by_idx(row, from_idx)
                             .unwrap_or(Value::Blank);
-                        let rows = from_index.entry(value.clone()).or_default();
-
-                        // For 1:1 relationships, the "from" side must also be unique. We treat
-                        // BLANK as a real key for uniqueness, matching the existing to-side
-                        // semantics.
-                        if relationship.cardinality == Cardinality::OneToOne && !rows.is_empty() {
-                            return Err(DaxError::NonUniqueKey {
-                                table: relationship.from_table.clone(),
-                                column: from_col.clone(),
-                                value: value.clone(),
-                            });
+                        if value.is_blank() {
+                            continue;
                         }
-
-                        rows.push(row);
-                    }
-
-                    if relationship.enforce_referential_integrity {
-                        for row in 0..from_table.row_count() {
-                            let value = from_table
-                                .value_by_idx(row, from_idx)
-                                .unwrap_or(Value::Blank);
-                            if value.is_blank() {
-                                continue;
-                            }
-                            if !to_index.contains_key(&value) {
-                                return Err(DaxError::ReferentialIntegrityViolation {
-                                    relationship: relationship.name.clone(),
-                                    from_table: relationship.from_table.clone(),
-                                    from_column: from_col.clone(),
-                                    to_table: relationship.to_table.clone(),
-                                    to_column: to_col.clone(),
-                                    value: value.clone(),
-                                });
-                            }
-                        }
-                    }
-
-                    (Some(from_index), None)
-                }
-                TableStorage::Columnar(_) => {
-                    // Avoid materializing `from_index` for columnar fact tables. Instead,
-                    // precompute the (usually small) set of fact rows that belong to the virtual
-                    // blank dimension member.
-                    let mut unmatched = Vec::new();
-                    let mut seen = (relationship.cardinality == Cardinality::OneToOne)
-                        .then_some(HashSet::<Value>::new());
-                    for row in 0..from_table.row_count() {
-                        let value = from_table
-                            .value_by_idx(row, from_idx)
-                            .unwrap_or(Value::Blank);
-
-                        if let Some(seen) = seen.as_mut() {
-                            if !seen.insert(value.clone()) {
-                                return Err(DaxError::NonUniqueKey {
-                                    table: relationship.from_table.clone(),
-                                    column: from_col.clone(),
-                                    value: value.clone(),
-                                });
-                            }
-                        }
-
-                        let matched = to_index.contains_key(&value);
-
-                        if value.is_blank() || !matched {
-                            unmatched.push(row);
-                        }
-
-                        if relationship.enforce_referential_integrity
-                            && !value.is_blank()
-                            && !matched
-                        {
+                        if !to_index.contains_key(&value) {
                             return Err(DaxError::ReferentialIntegrityViolation {
                                 relationship: relationship.name.clone(),
                                 from_table: relationship.from_table.clone(),
@@ -945,14 +863,58 @@ impl DataModel {
                             });
                         }
                     }
-
-                    (None, Some(unmatched))
                 }
+
+                (Some(from_index), None)
+            }
+            TableStorage::Columnar(_) => {
+                // Avoid materializing `from_index` for columnar fact tables. Instead, precompute
+                // the (usually small) set of fact rows that belong to the virtual blank dimension
+                // member.
+                let mut unmatched = Vec::new();
+                let mut seen = (relationship.cardinality == Cardinality::OneToOne)
+                    .then_some(HashSet::<Value>::new());
+                for row in 0..from_table.row_count() {
+                    let value = from_table
+                        .value_by_idx(row, from_idx)
+                        .unwrap_or(Value::Blank);
+
+                    if let Some(seen) = seen.as_mut() {
+                        if !seen.insert(value.clone()) {
+                            return Err(DaxError::NonUniqueKey {
+                                table: relationship.from_table.clone(),
+                                column: from_col.clone(),
+                                value: value.clone(),
+                            });
+                        }
+                    }
+
+                    let matched = to_index.contains_key(&value);
+
+                    if value.is_blank() || !matched {
+                        unmatched.push(row);
+                    }
+
+                    if relationship.enforce_referential_integrity && !value.is_blank() && !matched {
+                        return Err(DaxError::ReferentialIntegrityViolation {
+                            relationship: relationship.name.clone(),
+                            from_table: relationship.from_table.clone(),
+                            from_column: from_col.clone(),
+                            to_table: relationship.to_table.clone(),
+                            to_column: to_col.clone(),
+                            value: value.clone(),
+                        });
+                    }
+                }
+
+                (None, Some(unmatched))
             }
         };
 
         self.relationships.push(RelationshipInfo {
             rel: relationship,
+            from_idx,
+            to_idx,
             to_index,
             from_index,
             from_column_idx: from_idx,
@@ -1775,9 +1737,7 @@ impl DataModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use formula_columnar::{
-        ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions,
-    };
+    use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions};
     use std::time::Instant;
 
     #[test]
@@ -1858,5 +1818,46 @@ mod tests {
             "relationship_large_columnar_does_not_explode_memory: built relationship over {rows} fact rows in {:?}",
             elapsed
         );
+    }
+
+    #[test]
+    fn columnar_relationships_do_not_build_from_row_list_index() {
+        let mut model = DataModel::new();
+
+        let mut dim = Table::new("Dim", vec!["Id"]);
+        dim.push_row(vec![1.into()]).unwrap();
+        model.add_table(dim).unwrap();
+
+        let schema = vec![ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        }];
+        let options = TableOptions {
+            page_size_rows: 64,
+            cache: PageCacheConfig { max_entries: 4 },
+        };
+        let mut fact = ColumnarTableBuilder::new(schema, options);
+        fact.append_row(&[formula_columnar::Value::Number(1.0)]);
+        fact.append_row(&[formula_columnar::Value::Number(2.0)]);
+        model
+            .add_table(Table::from_columnar("Fact", fact.finalize()))
+            .unwrap();
+
+        model
+            .add_relationship(Relationship {
+                name: "Fact_Dim".into(),
+                from_table: "Fact".into(),
+                from_column: "Id".into(),
+                to_table: "Dim".into(),
+                to_column: "Id".into(),
+                cardinality: Cardinality::OneToMany,
+                cross_filter_direction: CrossFilterDirection::Single,
+                is_active: true,
+                enforce_referential_integrity: false,
+            })
+            .unwrap();
+
+        let rel = model.relationships.first().expect("relationship exists");
+        assert!(rel.from_index.is_none());
     }
 }
