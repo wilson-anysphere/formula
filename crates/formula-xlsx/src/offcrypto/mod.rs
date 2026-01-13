@@ -54,6 +54,7 @@ mod agile;
 mod aes_cbc;
 mod agile_decrypt;
 mod crypto;
+mod encryption_info;
 mod error;
 
 pub use agile::{
@@ -70,6 +71,10 @@ pub use crypto::{
     derive_iv, derive_key, hash_password, CryptoError, HashAlgorithm, HMAC_KEY_BLOCK,
     HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
     derive_segment_iv, segment_block_key,
+};
+pub use encryption_info::{
+    parse_agile_encryption_info_xml, AgileEncryptionInfo, EncryptionInfoWarning, PasswordKeyEncryptor,
+    KEY_ENCRYPTOR_URI_CERTIFICATE, KEY_ENCRYPTOR_URI_PASSWORD,
 };
 pub use error::{OffCryptoError, Result};
 

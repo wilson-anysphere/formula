@@ -54,6 +54,17 @@ pub enum OffCryptoError {
         reason: String,
     },
 
+    #[error("{message}")]
+    UnsupportedKeyEncryptor {
+        /// The set of `<keyEncryptor uri="...">` values present in the file.
+        ///
+        /// Office can emit multiple encryptors (e.g. password + certificate). Formula currently
+        /// supports only the password key encryptor.
+        available_uris: Vec<String>,
+        /// User-facing error message (pre-formatted so it can include helpful context/hints).
+        message: String,
+    },
+
     #[error(
         "EncryptionInfo XML invalid base64 value for attribute `{attr}` on element `{element}`: {source}"
     )]
