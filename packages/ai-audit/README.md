@@ -77,3 +77,36 @@ Notes:
 - `bigint` values are exported as decimal strings.
 - Circular references are replaced with the placeholder string `"[Circular]"`.
 - Values that throw during serialization (e.g. getters) are replaced with `"[Unserializable]"`.
+
+## Querying audit entries (time ranges + pagination)
+
+All stores implement `store.listEntries(filters?: AuditListFilters)` and always return entries in **newest-first** order.
+
+Useful filters:
+- `after_timestamp_ms` (inclusive lower bound)
+- `before_timestamp_ms` (exclusive upper bound)
+- `cursor: { before_timestamp_ms, before_id? }` for stable pagination
+- `limit` applies after filtering
+
+### Example: last 24h (first page)
+
+```ts
+const page1 = await store.listEntries({
+  workbook_id,
+  after_timestamp_ms: Date.now() - 24 * 60 * 60 * 1000,
+  limit: 50,
+});
+```
+
+### Example: fetch the next page (stable even with identical timestamps)
+
+```ts
+const last = page1.at(-1);
+const page2 = last
+  ? await store.listEntries({
+      workbook_id,
+      limit: 50,
+      cursor: { before_timestamp_ms: last.timestamp_ms, before_id: last.id },
+    })
+  : [];
+```

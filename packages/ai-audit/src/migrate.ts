@@ -54,7 +54,11 @@ export async function migrateLocalStorageAuditEntriesToSqlite(
   const entries = await sourceStore.listEntries(filters);
   // Insert oldest-to-newest to preserve a stable write order (especially if the
   // destination store enforces retention policies at write-time).
-  entries.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+  entries.sort((a, b) => {
+    if (a.timestamp_ms !== b.timestamp_ms) return a.timestamp_ms - b.timestamp_ms;
+    if (a.id === b.id) return 0;
+    return a.id < b.id ? -1 : 1;
+  });
 
   for (const entry of entries) {
     try {
@@ -130,4 +134,3 @@ function safeLocalStorage(): Storage | null {
 
   return null;
 }
-
