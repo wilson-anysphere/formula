@@ -3998,13 +3998,19 @@ export class SpreadsheetApp {
       return;
     }
 
-    // Cancel any in-flight background decode so stale work doesn't keep bitmaps alive.
-    this.activeSheetBackgroundAbort?.abort();
-    this.activeSheetBackgroundAbort = null;
+    // If the desired image id hasn't changed and we already have an in-flight decode,
+    // keep it running so we don't churn/abort repeatedly on incidental refresh calls.
+    if (desiredId === this.activeSheetBackgroundImageId && this.activeSheetBackgroundAbort) {
+      return;
+    }
 
     // If the background id changed, clear current state and repaint immediately so stale
     // patterns disappear (even if the new image is still decoding).
     if (desiredId !== this.activeSheetBackgroundImageId) {
+      // Cancel any in-flight background decode for the prior image id.
+      this.activeSheetBackgroundAbort?.abort();
+      this.activeSheetBackgroundAbort = null;
+
       this.activeSheetBackgroundImageId = desiredId;
       this.activeSheetBackgroundBitmap = null;
       this.activeSheetBackgroundLoadToken += 1;
@@ -4049,6 +4055,11 @@ export class SpreadsheetApp {
           this.sharedGrid.renderer.setBackgroundPatternImage(null);
         } else {
           this.refresh();
+        }
+      })
+      .finally(() => {
+        if (this.activeSheetBackgroundAbort === abort) {
+          this.activeSheetBackgroundAbort = null;
         }
       });
 
