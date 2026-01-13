@@ -214,10 +214,11 @@ function normalizeTabColor(raw) {
 function sheetViewMetaFromSheetEntry(entry) {
   const rawView = readYMapOrObject(entry, "view");
   if (rawView !== undefined) {
-    const view = yjsValueToJson(rawView);
+    // Avoid converting the entire view object to JSON (it can contain large maps
+    // like `colWidths`/`rowHeights`). We only need frozen pane counts here.
     return {
-      frozenRows: normalizeFrozenCount(view?.frozenRows),
-      frozenCols: normalizeFrozenCount(view?.frozenCols),
+      frozenRows: normalizeFrozenCount(readYMapOrObject(rawView, "frozenRows")),
+      frozenCols: normalizeFrozenCount(readYMapOrObject(rawView, "frozenCols")),
     };
   }
 
