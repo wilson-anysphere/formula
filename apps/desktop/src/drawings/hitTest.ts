@@ -104,10 +104,61 @@ export function buildHitTestIndex(
   return { ordered, bounds, buckets, global, bucketSizePx };
 }
 
-export function hitTestDrawings(index: HitTestIndex, viewport: Viewport, x: number, y: number): HitTestResult | null {
-  // Convert from screen-space to sheet-space.
-  const sheetX = x + viewport.scrollX;
-  const sheetY = y + viewport.scrollY;
+export function hitTestDrawings(
+  index: HitTestIndex,
+  viewport: Viewport,
+  x: number,
+  y: number,
+  geom: GridGeometry,
+): HitTestResult | null {
+  const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+  const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+
+  // Ignore pointer events over the header area; drawings are rendered under headers.
+  if (x < headerOffsetX || y < headerOffsetY) return null;
+
+  const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
+  const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
+
+  const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
+  const derivedFrozenContentWidth = (() => {
+    if (frozenCols <= 0) return 0;
+    try {
+      return geom.cellOriginPx({ row: 0, col: frozenCols }).x;
+    } catch {
+      return 0;
+    }
+  })();
+  const derivedFrozenContentHeight = (() => {
+    if (frozenRows <= 0) return 0;
+    try {
+      return geom.cellOriginPx({ row: frozenRows, col: 0 }).y;
+    } catch {
+      return 0;
+    }
+  })();
+
+  const frozenBoundaryX = clamp(
+    Number.isFinite(viewport.frozenWidthPx) ? viewport.frozenWidthPx! : headerOffsetX + derivedFrozenContentWidth,
+    headerOffsetX,
+    viewport.width,
+  );
+  const frozenBoundaryY = clamp(
+    Number.isFinite(viewport.frozenHeightPx) ? viewport.frozenHeightPx! : headerOffsetY + derivedFrozenContentHeight,
+    headerOffsetY,
+    viewport.height,
+  );
+
+  const inFrozenCols = x < frozenBoundaryX;
+  const inFrozenRows = y < frozenBoundaryY;
+
+  // Convert from screen-space to sheet-space using the same frozen-pane scroll semantics
+  // as `DrawingOverlay.render()`.
+  const scrollX = inFrozenCols ? 0 : viewport.scrollX;
+  const scrollY = inFrozenRows ? 0 : viewport.scrollY;
+  const sheetX = x - headerOffsetX + scrollX;
+  const sheetY = y - headerOffsetY + scrollY;
 
   const bx = Math.floor(sheetX / index.bucketSizePx);
   const by = Math.floor(sheetY / index.bucketSizePx);
@@ -130,15 +181,27 @@ export function hitTestDrawings(index: HitTestIndex, viewport: Viewport, x: numb
     if (next === last) continue;
     last = next;
 
+    const obj = index.ordered[next]!;
     const rect = index.bounds[next]!;
+
+    const anchor = obj.anchor;
+    const objInFrozenRows = anchor.type === "absolute" ? false : anchor.from.cell.row < frozenRows;
+    const objInFrozenCols = anchor.type === "absolute" ? false : anchor.from.cell.col < frozenCols;
+
+    // Excel-like pane routing: each drawing belongs to exactly one quadrant, so pointer
+    // hits are constrained to the quadrant under the cursor.
+    if (objInFrozenRows !== inFrozenRows || objInFrozenCols !== inFrozenCols) continue;
+
     if (pointInRect(sheetX, sheetY, rect)) {
+      const screenScrollX = objInFrozenCols ? 0 : viewport.scrollX;
+      const screenScrollY = objInFrozenRows ? 0 : viewport.scrollY;
       const screen = {
-        x: rect.x - viewport.scrollX,
-        y: rect.y - viewport.scrollY,
+        x: rect.x - screenScrollX + headerOffsetX,
+        y: rect.y - screenScrollY + headerOffsetY,
         width: rect.width,
         height: rect.height,
       };
-      return { object: index.ordered[next]!, bounds: screen };
+      return { object: obj, bounds: screen };
     }
   }
 

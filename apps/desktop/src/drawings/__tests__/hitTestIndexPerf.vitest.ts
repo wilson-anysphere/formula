@@ -44,8 +44,8 @@ describe("drawings hit test index perf", () => {
 
     for (let i = 0; i < 200; i += 1) {
       // No object is near (25, 25) so this exercises the "miss" path repeatedly.
-      expect(hitTestDrawings(index, viewport, 25, 25)).toBeNull();
-    }
+        expect(hitTestDrawings(index, viewport, 25, 25, geom)).toBeNull();
+      }
 
     expect(sortSpy).toHaveBeenCalledTimes(0);
   });
@@ -59,7 +59,7 @@ describe("drawings hit test index perf", () => {
     ];
 
     const index = buildHitTestIndex(objects, geom, { bucketSizePx: 128, maxBucketsPerObject: 64 });
-    const hit = hitTestDrawings(index, viewport, 6, 6);
+    const hit = hitTestDrawings(index, viewport, 6, 6, geom);
     expect(hit?.object.id).toBe(1);
   });
 });

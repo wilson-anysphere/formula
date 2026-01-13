@@ -76,7 +76,7 @@ export class DrawingInteractionController {
     }
 
     const index = this.getHitTestIndex(objects);
-    const hit = hitTestDrawings(index, viewport, e.offsetX, e.offsetY);
+    const hit = hitTestDrawings(index, viewport, e.offsetX, e.offsetY, this.geom);
     this.selectedId = hit?.object.id ?? null;
     this.callbacks.onSelectionChange?.(this.selectedId);
     if (!hit) {
