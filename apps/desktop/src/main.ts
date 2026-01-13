@@ -93,6 +93,7 @@ import { FORMULA_RELEASES_URL, installUpdaterUi } from "./tauri/updaterUi";
 import { installOpenFileIpc } from "./tauri/openFileIpc";
 import { notify } from "./tauri/notifications";
 import { registerAppQuitHandlers, requestAppQuit } from "./tauri/appQuit";
+import { flushCollabLocalPersistenceBestEffort } from "./tauri/quitFlush";
 import { checkForUpdatesFromCommandPalette } from "./tauri/updater.js";
 import type { WorkbookInfo } from "@formula/workbook-backend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
@@ -9622,6 +9623,10 @@ try {
     },
     drainBackendSync,
     quitApp: async () => {
+      await flushCollabLocalPersistenceBestEffort({
+        session: app.getCollabSession?.() ?? null,
+        whenIdle: () => app.whenIdle(),
+      });
       if (!invoke) {
         window.close();
         return;
@@ -9631,6 +9636,10 @@ try {
       await invoke("quit_app");
     },
     restartApp: async () => {
+      await flushCollabLocalPersistenceBestEffort({
+        session: app.getCollabSession?.() ?? null,
+        whenIdle: () => app.whenIdle(),
+      });
       if (!invoke) {
         window.close();
         return;
@@ -10293,6 +10302,10 @@ try {
       // Best-effort flush of any macro-driven workbook edits before exiting.
       await new Promise<void>((resolve) => queueMicrotask(resolve));
       await drainBackendSync();
+      await flushCollabLocalPersistenceBestEffort({
+        session: app.getCollabSession?.() ?? null,
+        whenIdle: () => app.whenIdle(),
+      });
       if (!invoke) {
         window.close();
         return;

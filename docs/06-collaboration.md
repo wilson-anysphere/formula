@@ -404,6 +404,8 @@ Two important operational details:
 
 `CollabSession.flushLocalPersistence()` delegates to the underlying persistence `flush(docId)` when present. Desktop typically calls it during teardown (or before closing a window) to reduce the chance of losing the last few edits.
 
+Desktop note: the Tauri desktop app calls `flushLocalPersistence()` as part of the quit/restart flow (best-effort with a short timeout) to reduce the risk of losing recent offline/unsynced edits when the process hard-exits.
+
 If you use `persistence` or offline auto-connect gating, the initial WebSocket connection may be delayed until hydration completes (so offline edits are present before syncing).
 
 Implementation: see `scheduleProviderConnectAfterHydration()` in [`packages/collab/session/src/index.ts`](../packages/collab/session/src/index.ts).
