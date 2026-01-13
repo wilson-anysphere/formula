@@ -130,6 +130,24 @@ const COLINFO_OPTION_COLLAPSED: u16 = 0x1000;
 const MAX_WARNINGS_PER_SHEET: usize = 50;
 const WARNINGS_SUPPRESSED_MESSAGE: &str = "additional warnings suppressed";
 
+/// Cap warnings collected by worksheet *metadata* scans (view-state/protection).
+///
+/// These scans are best-effort and intentionally resilient to malformed records. Without a cap, a
+/// crafted `.xls` can allocate an unbounded number of warning strings.
+const MAX_WARNINGS_PER_SHEET_METADATA: usize = MAX_WARNINGS_PER_SHEET;
+const SHEET_METADATA_WARNINGS_SUPPRESSED: &str = "additional sheet metadata warnings suppressed";
+
+fn push_sheet_metadata_warning(warnings: &mut Vec<String>, warning: impl Into<String>) {
+    if warnings.len() < MAX_WARNINGS_PER_SHEET_METADATA {
+        warnings.push(warning.into());
+        return;
+    }
+    // Add a single terminal warning so callers have a hint that the import was noisy.
+    if warnings.len() == MAX_WARNINGS_PER_SHEET_METADATA {
+        warnings.push(SHEET_METADATA_WARNINGS_SUPPRESSED.to_string());
+    }
+}
+
 // WSBOOL (0x0081) is a bitfield of worksheet boolean properties.
 //
 // Note: In BIFF8, the outline-related flags use inverted semantics:
@@ -261,7 +279,7 @@ pub(crate) fn parse_biff_sheet_protection(
         let record = match record {
             Ok(r) => r,
             Err(err) => {
-                push_warning_bounded(&mut out.warnings, format!("malformed BIFF record: {err}"));
+                push_sheet_metadata_warning(&mut out.warnings, format!("malformed BIFF record: {err}"));
                 break;
             }
         };
@@ -274,7 +292,7 @@ pub(crate) fn parse_biff_sheet_protection(
         match record.record_id {
             RECORD_PROTECT => {
                 if data.len() < 2 {
-                    push_warning_bounded(
+                    push_sheet_metadata_warning(
                         &mut out.warnings,
                         format!("truncated PROTECT record at offset {}", record.offset),
                     );
@@ -285,7 +303,7 @@ pub(crate) fn parse_biff_sheet_protection(
             }
             RECORD_PASSWORD => {
                 if data.len() < 2 {
-                    push_warning_bounded(
+                    push_sheet_metadata_warning(
                         &mut out.warnings,
                         format!("truncated PASSWORD record at offset {}", record.offset),
                     );
@@ -296,7 +314,7 @@ pub(crate) fn parse_biff_sheet_protection(
             }
             RECORD_OBJPROTECT => {
                 if data.len() < 2 {
-                    push_warning_bounded(
+                    push_sheet_metadata_warning(
                         &mut out.warnings,
                         format!("truncated OBJPROTECT record at offset {}", record.offset),
                     );
@@ -309,7 +327,7 @@ pub(crate) fn parse_biff_sheet_protection(
             }
             RECORD_SCENPROTECT => {
                 if data.len() < 2 {
-                    push_warning_bounded(
+                    push_sheet_metadata_warning(
                         &mut out.warnings,
                         format!("truncated SCENPROTECT record at offset {}", record.offset),
                     );
@@ -322,7 +340,7 @@ pub(crate) fn parse_biff_sheet_protection(
                 match parse_biff_feat_hdr_sheet_protection_allow_mask(data, record.record_id) {
                     Ok(Some(mask)) => apply_sheet_protection_allow_mask(&mut out.protection, mask),
                     Ok(None) => {}
-                    Err(err) => push_warning_bounded(
+                    Err(err) => push_sheet_metadata_warning(
                         &mut out.warnings,
                         format!(
                             "failed to parse FEATHEADR record at offset {}: {err}",
@@ -335,7 +353,7 @@ pub(crate) fn parse_biff_sheet_protection(
                 match parse_biff_feat_record_sheet_protection_allow_mask(data, record.record_id) {
                     Ok(Some(mask)) => apply_sheet_protection_allow_mask(&mut out.protection, mask),
                     Ok(None) => {}
-                    Err(err) => push_warning_bounded(
+                    Err(err) => push_sheet_metadata_warning(
                         &mut out.warnings,
                         format!("failed to parse FEAT record at offset {}: {err}", record.offset),
                     ),
@@ -546,7 +564,7 @@ pub(crate) fn parse_biff_sheet_view_state(
         let record = match next {
             Ok(r) => r,
             Err(err) => {
-                push_warning_bounded(&mut out.warnings, format!("malformed BIFF record: {err}"));
+                push_sheet_metadata_warning(&mut out.warnings, format!("malformed BIFF record: {err}"));
                 break;
             }
         };
@@ -564,30 +582,31 @@ pub(crate) fn parse_biff_sheet_view_state(
                     out.show_zeros = Some(window2.show_zeros);
                     window2_frozen = Some(window2.frozen_panes);
                 }
-                Err(err) => push_warning_bounded(
+                Err(err) => push_sheet_metadata_warning(
                     &mut out.warnings,
                     format!("failed to parse WINDOW2 record: {err}"),
                 ),
             },
             RECORD_SCL => match parse_scl_zoom(data) {
                 Ok(zoom) => out.zoom = Some(zoom),
-                Err(err) => {
-                    push_warning_bounded(&mut out.warnings, format!("failed to parse SCL record: {err}"))
-                }
+                Err(err) => push_sheet_metadata_warning(
+                    &mut out.warnings,
+                    format!("failed to parse SCL record: {err}"),
+                ),
             },
             RECORD_PANE => match parse_pane_record(data, window2_frozen) {
                 Ok((pane, pnn_act)) => {
                     out.pane = Some(pane);
                     active_pane = Some(pnn_act);
                 }
-                Err(err) => push_warning_bounded(
+                Err(err) => push_sheet_metadata_warning(
                     &mut out.warnings,
                     format!("failed to parse PANE record: {err}"),
                 ),
             },
             RECORD_SELECTION => match parse_selection_record_best_effort(data) {
                 Ok((pane, selection)) => selections.push((pane, selection)),
-                Err(err) => push_warning_bounded(
+                Err(err) => push_sheet_metadata_warning(
                     &mut out.warnings,
                     format!("failed to parse SELECTION record: {err}"),
                 ),
@@ -3208,6 +3227,56 @@ mod tests {
                 .iter()
                 .any(|w| w.contains("truncated SCENPROTECT record")),
             "expected truncated-SCENPROTECT warning, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn sheet_view_state_metadata_warnings_are_capped() {
+        let mut stream: Vec<u8> = Vec::new();
+        for _ in 0..(MAX_WARNINGS_PER_SHEET_METADATA + 25) {
+            stream.extend_from_slice(&record(RECORD_WINDOW2, &[0u8; 1]));
+        }
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff_sheet_view_state(&stream, 0).expect("parse");
+        assert!(
+            parsed.warnings.len() <= MAX_WARNINGS_PER_SHEET_METADATA + 1,
+            "expected warnings to be capped at {} (+1 suppression), got {}",
+            MAX_WARNINGS_PER_SHEET_METADATA,
+            parsed.warnings.len()
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w == SHEET_METADATA_WARNINGS_SUPPRESSED),
+            "expected suppression warning, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn sheet_protection_metadata_warnings_are_capped() {
+        let mut stream: Vec<u8> = Vec::new();
+        for _ in 0..(MAX_WARNINGS_PER_SHEET_METADATA + 25) {
+            stream.extend_from_slice(&record(RECORD_PROTECT, &[0u8; 1]));
+        }
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff_sheet_protection(&stream, 0).expect("parse");
+        assert!(
+            parsed.warnings.len() <= MAX_WARNINGS_PER_SHEET_METADATA + 1,
+            "expected warnings to be capped at {} (+1 suppression), got {}",
+            MAX_WARNINGS_PER_SHEET_METADATA,
+            parsed.warnings.len()
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w == SHEET_METADATA_WARNINGS_SUPPRESSED),
+            "expected suppression warning, got {:?}",
             parsed.warnings
         );
     }
