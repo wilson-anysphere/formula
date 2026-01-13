@@ -137,23 +137,17 @@ export function PivotBuilderPanel({
   );
 
   return (
-    <div style={{ padding: 12, display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12 }}>
+    <div className="pivot-builder__builder">
       <section>
-        <h3 style={{ margin: "0 0 8px 0" }}>{t("pivotBuilder.fields.title")}</h3>
-        <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 6 }}>
+        <h3 className="pivot-builder__fields-title">{t("pivotBuilder.fields.title")}</h3>
+        <ul className="pivot-builder__fields-list">
           {availableFields.map((f) => (
             <li
               key={f}
               data-testid={`pivot-field-${testIdSafe(f)}`}
               draggable
               onDragStart={(e) => onDragStartField(f, e)}
-              style={{
-                padding: "6px 8px",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                cursor: "grab",
-                userSelect: "none",
-              }}
+              className="pivot-builder__field"
             >
               {f}
             </li>
@@ -161,7 +155,7 @@ export function PivotBuilderPanel({
         </ul>
       </section>
 
-      <section style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <section className="pivot-builder__drop-zones">
         <DropArea
           title={t("pivotBuilder.dropArea.rows")}
           testId="pivot-drop-rows"
@@ -191,27 +185,20 @@ export function PivotBuilderPanel({
           onDragOver={onDragOver}
         >
           {config.valueFields.length === 0 ? (
-            <div style={{ color: "var(--text-secondary)" }}>{t("pivotBuilder.values.emptyHint")}</div>
+            <div className="pivot-builder__empty-hint">{t("pivotBuilder.values.emptyHint")}</div>
           ) : (
-            <div style={{ display: "grid", gap: 8 }}>
+            <div className="pivot-builder__value-fields">
               {config.valueFields.map((vf, idx) => (
                 <div
                   key={`${vf.sourceField}-${idx}`}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: 8,
-                    padding: 8,
-                    border: "1px solid var(--border)",
-                    borderRadius: 6,
-                  }}
+                  className="pivot-builder__value-field"
                 >
                   <div>
-                    <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t("pivotBuilder.value.fieldLabel")}</div>
+                    <div className="pivot-builder__meta-label">{t("pivotBuilder.value.fieldLabel")}</div>
                     <div>{vf.sourceField}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t("pivotBuilder.value.aggregationLabel")}</div>
+                    <div className="pivot-builder__meta-label">{t("pivotBuilder.value.aggregationLabel")}</div>
                     <select
                       data-testid={`pivot-value-aggregation-${idx}`}
                       value={vf.aggregation}
@@ -241,8 +228,8 @@ export function PivotBuilderPanel({
           ))}
         </DropArea>
 
-        <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 16 }}>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <div className="pivot-builder__options-row">
+          <label className="pivot-builder__label">
             <input
               data-testid="pivot-grand-totals-rows"
               type="checkbox"
@@ -251,7 +238,7 @@ export function PivotBuilderPanel({
             />
             {t("pivotBuilder.options.grandTotalsRows")}
           </label>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <label className="pivot-builder__label">
             <input
               data-testid="pivot-grand-totals-columns"
               type="checkbox"
@@ -264,20 +251,14 @@ export function PivotBuilderPanel({
           </label>
         </div>
 
-        <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button
-            onClick={() => applyConfig(DEFAULT_CONFIG)}
-            type="button"
-            style={{ padding: "6px 10px" }}
-            data-testid="pivot-reset"
-          >
+        <div className="pivot-builder__actions-row">
+          <button onClick={() => applyConfig(DEFAULT_CONFIG)} type="button" data-testid="pivot-reset">
             {t("pivotBuilder.actions.reset")}
           </button>
           <button
             onClick={() => onCreate?.(config)}
             type="button"
             disabled={Boolean(createDisabled) || config.valueFields.length === 0}
-            style={{ padding: "6px 10px" }}
             data-testid="pivot-create"
           >
             {createLabel ?? t("pivotBuilder.actions.create")}
@@ -306,33 +287,16 @@ function DropArea({
       data-testid={testId}
       onDrop={onDrop}
       onDragOver={onDragOver}
-      style={{
-        minHeight: 120,
-        padding: 10,
-        border: "1px dashed var(--border)",
-        borderRadius: 8,
-      }}
+      className="pivot-builder__drop-area"
     >
-      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 8 }}>{title}</div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{children}</div>
+      <div className="pivot-builder__drop-title">{title}</div>
+      <div className="pivot-builder__drop-content">{children}</div>
     </div>
   );
 }
 
 function Pill({ label }: { label: string }) {
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        padding: "3px 8px",
-        borderRadius: 999,
-        background: "var(--bg-tertiary)",
-        border: "1px solid var(--border)",
-        fontSize: 12,
-      }}
-    >
-      {label}
-    </span>
+    <span className="pivot-builder__pill">{label}</span>
   );
 }

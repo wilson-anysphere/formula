@@ -1,0 +1,343 @@
+/*
+  Pivot Builder panel UI (src/panels/pivot-builder/*).
+
+  This file intentionally uses only design tokens from `tokens.css` and does not
+  hardcode colors (enforced by `noHardcodedColors.test.js`).
+*/
+
+.pivot-builder {
+  display: grid;
+  gap: 10px;
+}
+
+.pivot-builder__config {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pivot-builder__section {
+  display: grid;
+  gap: 6px;
+}
+
+.pivot-builder__section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.pivot-builder__controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pivot-builder__radio-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.pivot-builder__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pivot-builder__label-text {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+}
+
+.pivot-builder__error {
+  color: var(--error);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.pivot-builder__progress {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.pivot-builder__muted {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.pivot-builder__pivots {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.pivot-builder__pivots-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.pivot-builder__pivots-list {
+  display: grid;
+  gap: 6px;
+}
+
+.pivot-builder__pivot-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+}
+
+.pivot-builder__pivot-item-info {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.pivot-builder__pivot-item-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pivot-builder__pivot-item-meta {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Controls ------------------------------------------------------------ */
+
+.pivot-builder input:not([type="checkbox"]):not([type="radio"]),
+.pivot-builder select {
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 16px;
+  outline: none;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.pivot-builder input:not([type="checkbox"]):not([type="radio"]):focus,
+.pivot-builder select:focus {
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.pivot-builder button {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 16px;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.pivot-builder button:hover {
+  background: var(--bg-hover);
+}
+
+.pivot-builder button:active {
+  background: var(--bg-active);
+}
+
+.pivot-builder button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.pivot-builder button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.pivot-builder__input--range {
+  width: 140px;
+}
+
+.pivot-builder__input--sheet-name {
+  width: 200px;
+}
+
+.pivot-builder__input--cell {
+  width: 80px;
+}
+
+.pivot-builder__input--pivot-name {
+  width: 100%;
+  max-width: 360px;
+}
+
+/* --- Drag-and-drop builder ---------------------------------------------- */
+
+.pivot-builder__builder {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.pivot-builder__fields-title {
+  margin: 0 0 6px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.pivot-builder__fields-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.pivot-builder__field {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: grab;
+  user-select: none;
+  font-size: 12px;
+  line-height: 16px;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease);
+}
+
+.pivot-builder__field:hover {
+  background: var(--bg-hover);
+}
+
+.pivot-builder__drop-zones {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pivot-builder__drop-area {
+  min-height: 96px;
+  padding: 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+}
+
+.pivot-builder__drop-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.pivot-builder__drop-content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pivot-builder__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-primary);
+}
+
+.pivot-builder__empty-hint {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.pivot-builder__value-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.pivot-builder__value-field {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+}
+
+.pivot-builder__meta-label {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.pivot-builder__value-field select {
+  width: 100%;
+}
+
+.pivot-builder__options-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pivot-builder__actions-row {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+

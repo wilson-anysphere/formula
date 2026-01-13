@@ -641,13 +641,13 @@ export function PivotBuilderPanelContainer(props: Props) {
   );
 
   return (
-    <div style={{ padding: 12, display: "grid", gap: 12 }}>
-      <div style={{ display: "grid", gap: 10, borderBottom: "1px solid var(--border)", paddingBottom: 12 }}>
-        <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t("pivotBuilder.source.title")}</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t("pivotBuilder.source.sheetLabel")}</span>
+    <div className="pivot-builder">
+      <div className="pivot-builder__config">
+        <div className="pivot-builder__section">
+          <div className="pivot-builder__section-title">{t("pivotBuilder.source.title")}</div>
+          <div className="pivot-builder__controls-row">
+            <label className="pivot-builder__label">
+              <span className="pivot-builder__label-text">{t("pivotBuilder.source.sheetLabel")}</span>
               <select
                 data-testid="pivot-source-sheet"
                 value={sourceSheetId}
@@ -661,14 +661,14 @@ export function PivotBuilderPanelContainer(props: Props) {
               </select>
             </label>
 
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t("pivotBuilder.source.rangeLabel")}</span>
+            <label className="pivot-builder__label">
+              <span className="pivot-builder__label-text">{t("pivotBuilder.source.rangeLabel")}</span>
               <input
+                className="pivot-builder__input--range"
                 data-testid="pivot-source-range"
                 value={sourceRangeText}
                 onChange={(e) => setSourceRangeText(e.target.value)}
                 onBlur={() => parseSourceRangeText(sourceRangeText)}
-                style={{ width: 140 }}
               />
             </label>
 
@@ -676,14 +676,14 @@ export function PivotBuilderPanelContainer(props: Props) {
               {t("pivotBuilder.source.useSelection")}
             </button>
           </div>
-          {sourceError ? <div style={{ color: "var(--error)" }}>{sourceError}</div> : null}
-          {fieldsError ? <div style={{ color: "var(--error)" }}>{fieldsError}</div> : null}
+          {sourceError ? <div className="pivot-builder__error">{sourceError}</div> : null}
+          {fieldsError ? <div className="pivot-builder__error">{fieldsError}</div> : null}
         </div>
 
-        <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t("pivotBuilder.destination.title")}</div>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <div className="pivot-builder__section">
+          <div className="pivot-builder__section-title">{t("pivotBuilder.destination.title")}</div>
+          <div className="pivot-builder__radio-row">
+            <label className="pivot-builder__label">
               <input
                 data-testid="pivot-destination-new"
                 type="radio"
@@ -693,7 +693,7 @@ export function PivotBuilderPanelContainer(props: Props) {
               />
               {t("pivotBuilder.destination.newSheet")}
             </label>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <label className="pivot-builder__label">
               <input
                 data-testid="pivot-destination-existing"
                 type="radio"
@@ -705,20 +705,20 @@ export function PivotBuilderPanelContainer(props: Props) {
             </label>
           </div>
 
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <div className="pivot-builder__controls-row">
             {destinationKind === "new" ? (
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t("pivotBuilder.destination.sheetName")}</span>
+              <label className="pivot-builder__label">
+                <span className="pivot-builder__label-text">{t("pivotBuilder.destination.sheetName")}</span>
                 <input
+                  className="pivot-builder__input--sheet-name"
                   data-testid="pivot-destination-new-sheet-name"
                   value={newSheetName}
                   onChange={(e) => setNewSheetName(e.target.value)}
-                  style={{ width: 200 }}
                 />
               </label>
             ) : (
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t("pivotBuilder.destination.sheetLabel")}</span>
+              <label className="pivot-builder__label">
+                <span className="pivot-builder__label-text">{t("pivotBuilder.destination.sheetLabel")}</span>
                 <select
                   data-testid="pivot-destination-sheet"
                   value={destSheetId}
@@ -734,35 +734,35 @@ export function PivotBuilderPanelContainer(props: Props) {
             )}
 
             {destinationKind === "new" && newSheetNameError ? (
-              <div style={{ color: "var(--error)" }}>{newSheetNameError}</div>
+              <div className="pivot-builder__error">{newSheetNameError}</div>
             ) : null}
 
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t("pivotBuilder.destination.startCell")}</span>
+            <label className="pivot-builder__label">
+              <span className="pivot-builder__label-text">{t("pivotBuilder.destination.startCell")}</span>
               <input
+                className="pivot-builder__input--cell"
                 data-testid="pivot-destination-cell"
                 value={destCellA1}
                 onChange={(e) => setDestCellA1(e.target.value)}
-                style={{ width: 80 }}
               />
             </label>
           </div>
         </div>
 
-        <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t("pivotBuilder.name.title")}</div>
+        <div className="pivot-builder__section">
+          <div className="pivot-builder__section-title">{t("pivotBuilder.name.title")}</div>
           <input
+            className="pivot-builder__input--pivot-name"
             data-testid="pivot-name"
             value={pivotName}
             onChange={(e) => setPivotName(e.target.value)}
-            style={{ maxWidth: 360 }}
           />
         </div>
 
-        {actionError ? <div style={{ color: "var(--error)" }}>{actionError}</div> : null}
+        {actionError ? <div className="pivot-builder__error">{actionError}</div> : null}
 
         {busy ? (
-          <div data-testid="pivot-progress" style={{ color: "var(--text-secondary)", fontSize: 12 }}>
+          <div data-testid="pivot-progress" className="pivot-builder__progress">
             {busy.kind === "create"
               ? t("pivotBuilder.progress.creating")
               : t("pivotBuilder.progress.refreshing")}
@@ -777,28 +777,21 @@ export function PivotBuilderPanelContainer(props: Props) {
         createLabel={busy?.kind === "create" ? t("pivotBuilder.progress.creating") : undefined}
       />
 
-      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "grid", gap: 8 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>{t("pivotBuilder.pivots.title")}</div>
+      <div className="pivot-builder__pivots">
+        <div className="pivot-builder__pivots-title">{t("pivotBuilder.pivots.title")}</div>
         {pivots.length === 0 ? (
-          <div style={{ color: "var(--text-secondary)", fontSize: 12 }}>{t("pivotBuilder.pivots.empty")}</div>
+          <div className="pivot-builder__muted">{t("pivotBuilder.pivots.empty")}</div>
         ) : (
-          <div style={{ display: "grid", gap: 6 }}>
+          <div className="pivot-builder__pivots-list">
             {pivots.map((p) => (
               <div
                 key={p.id}
                 data-testid={`pivot-item-${p.id}`}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: 8,
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                }}
+                className="pivot-builder__pivot-item"
               >
-                <div style={{ display: "grid" }}>
-                  <div style={{ fontWeight: 600 }}>{p.name}</div>
-                  <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                <div className="pivot-builder__pivot-item-info">
+                  <div className="pivot-builder__pivot-item-name">{p.name}</div>
+                  <div className="pivot-builder__pivot-item-meta">
                     {formatSheetNameForA1(sheetDisplayName(p.source_sheet_id) || p.source_sheet_id)}!{rangeToA1({
                       startRow: p.source_range.start_row,
                       startCol: p.source_range.start_col,
