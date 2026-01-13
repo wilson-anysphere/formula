@@ -75,10 +75,36 @@ describe('terminateProcessTree', () => {
     expect(childKill).not.toHaveBeenCalled();
   });
 
+  it('does not use taskkill on Windows in graceful mode', () => {
+    const spawnSync = vi.fn(() => ({ status: 0 }) as any);
+    const childKill = vi.fn();
+
+    terminateProcessTree({ pid: 9001, kill: childKill } as any, 'graceful', {
+      platform: 'win32',
+      spawnSync,
+    });
+
+    expect(spawnSync).not.toHaveBeenCalled();
+    expect(childKill).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back to killing just the root pid on Windows if taskkill throws', () => {
     const spawnSync = vi.fn(() => {
       throw new Error('taskkill unavailable');
     });
+    const childKill = vi.fn();
+
+    terminateProcessTree({ pid: 9001, kill: childKill } as any, 'force', {
+      platform: 'win32',
+      spawnSync,
+    });
+
+    expect(spawnSync).toHaveBeenCalledTimes(1);
+    expect(childKill).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to killing just the root pid on Windows if taskkill exits non-zero', () => {
+    const spawnSync = vi.fn(() => ({ status: 1, error: undefined }) as any);
     const childKill = vi.fn();
 
     terminateProcessTree({ pid: 9001, kill: childKill } as any, 'force', {
@@ -104,4 +130,3 @@ describe('terminateProcessTree', () => {
     expect(processKill).not.toHaveBeenCalled();
   });
 });
-
