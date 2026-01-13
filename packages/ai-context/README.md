@@ -458,6 +458,7 @@ The policy engine can return decisions like **ALLOW**, **REDACT**, or **BLOCK** 
 
 - throw on **BLOCK** (callers should catch `DlpViolationError`)
 - redact content on **REDACT** (sheet cells or retrieved chunks depending on the call)
+- redact *sensitive queries* before embedding when policy would not allow cloud AI processing for that query (defense-in-depth)
 - emit audit events when an `auditLogger` is provided
 
 Use this when you have real classification data (document/sheet/range/cell scopes) and need deterministic enforcement.
@@ -484,6 +485,13 @@ For cloud AI processing, the DLP policy rule (`DLP_ACTION.AI_CLOUD_PROCESSING` /
 
 - reduce accidental leakage
 - help keep retrieval/indexing “safe by default”
+
+When **structured DLP** is enabled (`buildContext({ dlp })` / `buildWorkbookContext({ dlp })`), `ContextManager` also uses
+`classifyText()` as a **conservative heuristic input** to the policy engine:
+
+- any heuristic “sensitive” finding is treated as a `Restricted` classification (`heuristic:*` labels)
+- policy is evaluated on `max(structured, heuristic)` so rules can **BLOCK** or **REDACT** even when there are no
+  structured classification records
 
 They are **not** a substitute for structured DLP.
 
