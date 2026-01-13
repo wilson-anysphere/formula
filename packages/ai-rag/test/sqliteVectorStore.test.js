@@ -547,3 +547,26 @@ test(
     }
   }
 );
+
+test("SqliteVectorStore dot() handles unaligned Uint8Array blobs (copies into aligned buffer)", { skip: !sqlJsAvailable }, async () => {
+  const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
+  try {
+    // Create a Uint8Array view with an unaligned byteOffset.
+    const raw = new Uint8Array(new Float32Array([1, 0, 0]).buffer);
+    const buf = new ArrayBuffer(raw.byteLength + 1);
+    const unaligned = new Uint8Array(buf, 1, raw.byteLength);
+    unaligned.set(raw);
+
+    const stmt = store._db.prepare("SELECT dot(?, ?) AS score;");
+    try {
+      stmt.bind([unaligned, unaligned]);
+      assert.ok(stmt.step());
+      const [score] = stmt.get();
+      assert.equal(Number(score), 1);
+    } finally {
+      stmt.free();
+    }
+  } finally {
+    await store.close();
+  }
+});
