@@ -380,4 +380,61 @@ describe("drawings selection handles", () => {
     pointerMove({ offsetX: 40, offsetY: 5, pointerId: 1 });
     expect(canvas.style.cursor).toBe("default");
   });
+
+  it("resets the cursor to default on pointerleave when idle", () => {
+    const listeners = new Map<string, (e: any) => void>();
+    const canvas: any = {
+      style: { cursor: "" },
+      addEventListener: (type: string, cb: (e: any) => void) => listeners.set(type, cb),
+      removeEventListener: (type: string) => listeners.delete(type),
+      setPointerCapture: vi.fn(),
+      releasePointerCapture: vi.fn(),
+    };
+
+    const geom: GridGeometry = {
+      cellOriginPx: () => ({ x: 0, y: 0 }),
+      cellSizePx: () => ({ width: 0, height: 0 }),
+    };
+
+    const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 500, height: 500, dpr: 1 };
+
+    let objects: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "shape", label: "shape" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(200) },
+          size: { cx: pxToEmu(80), cy: pxToEmu(40) },
+        },
+        zOrder: 0,
+      },
+    ];
+
+    const callbacks = {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next: DrawingObject[]) => {
+        objects = next;
+      },
+      onSelectionChange: vi.fn(),
+    };
+
+    new DrawingInteractionController(canvas as HTMLCanvasElement, geom, callbacks);
+
+    const pointerDown = listeners.get("pointerdown")!;
+    const pointerUp = listeners.get("pointerup")!;
+    const pointerMove = listeners.get("pointermove")!;
+    const pointerLeave = listeners.get("pointerleave")!;
+
+    // Select then hover a handle.
+    pointerDown({ offsetX: 140, offsetY: 220, pointerId: 1 });
+    pointerUp({ offsetX: 140, offsetY: 220, pointerId: 1 });
+    pointerMove({ offsetX: 100, offsetY: 200, pointerId: 1 });
+    expect(canvas.style.cursor).toBe("nwse-resize");
+
+    // Leaving the canvas should reset the cursor.
+    pointerLeave({});
+    expect(canvas.style.cursor).toBe("default");
+  });
 });

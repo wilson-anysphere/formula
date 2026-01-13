@@ -49,6 +49,7 @@ export class DrawingInteractionController {
   ) {
     this.canvas.addEventListener("pointerdown", this.onPointerDown);
     this.canvas.addEventListener("pointermove", this.onPointerMove);
+    this.canvas.addEventListener("pointerleave", this.onPointerLeave);
     this.canvas.addEventListener("pointerup", this.onPointerUp);
     this.canvas.addEventListener("pointercancel", this.onPointerUp);
   }
@@ -56,6 +57,7 @@ export class DrawingInteractionController {
   dispose(): void {
     this.canvas.removeEventListener("pointerdown", this.onPointerDown);
     this.canvas.removeEventListener("pointermove", this.onPointerMove);
+    this.canvas.removeEventListener("pointerleave", this.onPointerLeave);
     this.canvas.removeEventListener("pointerup", this.onPointerUp);
     this.canvas.removeEventListener("pointercancel", this.onPointerUp);
   }
@@ -211,6 +213,12 @@ export class DrawingInteractionController {
     this.resizing = null;
     this.canvas.releasePointerCapture(e.pointerId);
     this.updateCursor(e.offsetX, e.offsetY);
+  };
+
+  private readonly onPointerLeave = () => {
+    // Avoid leaving the resize/move cursor stuck when the pointer leaves the overlay canvas.
+    if (this.dragging || this.resizing) return;
+    this.canvas.style.cursor = "default";
   };
 
   private updateCursor(x: number, y: number): void {
