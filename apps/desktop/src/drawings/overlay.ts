@@ -1,6 +1,7 @@
 import type { Anchor, DrawingObject, ImageStore, Rect } from "./types";
 import { ImageBitmapCache } from "./imageBitmapCache";
 import { graphicFramePlaceholderLabel, isGraphicFrame, parseShapeRenderSpec, type ShapeRenderSpec } from "./shapeRenderer";
+import { parseDrawingMLShapeText, type ShapeTextLayout, type ShapeTextRun } from "./drawingml/shapeText";
 import { resolveCssVar } from "../theme/cssVars.js";
 import { getResizeHandleCenters, RESIZE_HANDLE_SIZE_PX } from "./selectionHandles";
 
@@ -117,6 +118,7 @@ export function anchorToRectPx(anchor: Anchor, geom: GridGeometry): Rect {
 export class DrawingOverlay {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly bitmapCache = new ImageBitmapCache();
+  private readonly shapeTextCache = new Map<number, { rawXml: string; parsed: ShapeTextLayout | null }>();
   private selectedId: number | null = null;
 
   constructor(
@@ -218,25 +220,72 @@ export class DrawingOverlay {
       }
 
       if (obj.kind.type === "shape") {
+        const rawXml = (obj.kind as any).rawXml ?? (obj.kind as any).raw_xml;
+        const rawXmlText = typeof rawXml === "string" ? rawXml : "";
+
+        // Parse `<xdr:txBody>` once and cache; avoid reparsing XML on every frame.
+        let cachedText = this.shapeTextCache.get(obj.id);
+        if (!cachedText || cachedText.rawXml !== rawXmlText) {
+          cachedText = { rawXml: rawXmlText, parsed: parseDrawingMLShapeText(rawXmlText) };
+          this.shapeTextCache.set(obj.id, cachedText);
+        }
+        const textLayout = cachedText.parsed;
+        const textParsed = textLayout !== null;
+        const hasText = textLayout ? textLayout.textRuns.map((r) => r.text).join("").trim().length > 0 : false;
+
         let rendered = false;
         let spec: ShapeRenderSpec | null = null;
         try {
-          const rawXml = obj.kind.rawXml ?? obj.kind.raw_xml;
-          spec = typeof rawXml === "string" ? parseShapeRenderSpec(rawXml) : null;
+          spec = rawXmlText ? parseShapeRenderSpec(rawXmlText) : null;
         } catch {
           spec = null;
         }
+
         if (spec) {
+          const specToDraw = hasText ? { ...spec, label: undefined } : spec;
           withClip(() => {
             try {
-              drawShape(ctx, screenRect, spec!, colors);
+              drawShape(ctx, screenRect, specToDraw, colors);
+              if (hasText) {
+                renderShapeText(ctx, screenRect, textLayout!, { defaultColor: colors.placeholderLabel });
+              }
               rendered = true;
             } catch {
               rendered = false;
             }
           });
+          if (rendered) continue;
         }
-        if (rendered) continue;
+
+        // If we couldn't render the shape geometry but we did successfully parse text,
+        // still render the text within the anchored bounds (and skip placeholders).
+        if (hasText) {
+          withClip(() => {
+            ctx.save();
+            try {
+              ctx.beginPath();
+              ctx.rect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+              ctx.clip();
+              renderShapeText(ctx, screenRect, textLayout!, { defaultColor: colors.placeholderLabel });
+            } finally {
+              ctx.restore();
+            }
+          });
+          continue;
+        }
+
+        // Shape parsed but has no text: keep an empty bounds placeholder (no label).
+        if (textParsed) {
+          withClip(() => {
+            ctx.save();
+            ctx.strokeStyle = colors.placeholderOtherStroke;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 2]);
+            ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+            ctx.restore();
+          });
+          continue;
+        }
       }
 
       // Placeholder rendering for shapes/charts/unknown.
@@ -521,4 +570,202 @@ function resolvePaneLayout(
       bottomRight: { x: x1, y: y1, width: scrollableWidth, height: scrollableHeight },
     },
   };
+}
+
+const DEFAULT_SHAPE_FONT_FAMILY = "Calibri, sans-serif";
+const DEFAULT_SHAPE_FONT_SIZE_PT = 11;
+const PX_PER_PT = PX_PER_INCH / 72;
+
+type RenderedSegment = {
+  text: string;
+  run: ShapeTextRun;
+  font: string;
+  fontSizePx: number;
+  color: string;
+  underline: boolean;
+  width: number;
+};
+
+type RenderedLine = {
+  segments: RenderedSegment[];
+  width: number;
+  height: number;
+};
+
+function shapeRunFont(run: ShapeTextRun): { font: string; fontSizePx: number } {
+  const fontSizePt = run.fontSizePt ?? DEFAULT_SHAPE_FONT_SIZE_PT;
+  const fontSizePx = Math.max(1, fontSizePt * PX_PER_PT);
+  const family = run.fontFamily?.trim() || DEFAULT_SHAPE_FONT_FAMILY;
+  const parts: string[] = [];
+  if (run.italic) parts.push("italic");
+  if (run.bold) parts.push("bold");
+  parts.push(`${fontSizePx}px`);
+  parts.push(family);
+  return { font: parts.join(" "), fontSizePx };
+}
+
+function runKey(run: ShapeTextRun): string {
+  return [
+    run.bold ? "b" : "",
+    run.italic ? "i" : "",
+    run.underline ? "u" : "",
+    run.fontSizePt ?? "",
+    run.fontFamily ?? "",
+    run.color ?? "",
+  ].join("|");
+}
+
+function layoutShapeTextLines(
+  ctx: CanvasRenderingContext2D,
+  runs: ShapeTextRun[],
+  maxWidth: number,
+  opts: { wrap: boolean; defaultColor: string },
+): RenderedLine[] {
+  const lines: RenderedLine[] = [];
+  let segments: RenderedSegment[] = [];
+  let width = 0;
+  let maxFontSizePx = 0;
+
+  const flush = () => {
+    if (segments.length === 0) {
+      lines.push({ segments: [], width: 0, height: DEFAULT_SHAPE_FONT_SIZE_PT * PX_PER_PT * 1.2 });
+    } else {
+      lines.push({
+        segments,
+        width,
+        height: Math.max(1, maxFontSizePx) * 1.2,
+      });
+    }
+    segments = [];
+    width = 0;
+    maxFontSizePx = 0;
+  };
+
+  const appendText = (text: string, run: ShapeTextRun) => {
+    if (text === "") return;
+    const { font, fontSizePx } = shapeRunFont(run);
+    ctx.font = font;
+    const measured = ctx.measureText(text).width;
+    const color = run.color ?? opts.defaultColor;
+    const underline = Boolean(run.underline);
+
+    maxFontSizePx = Math.max(maxFontSizePx, fontSizePx);
+
+    const key = runKey(run);
+    const prev = segments[segments.length - 1];
+    if (prev && runKey(prev.run) === key && prev.color === color && prev.font === font) {
+      prev.text += text;
+      prev.width += measured;
+    } else {
+      segments.push({ text, run, font, fontSizePx, color, underline, width: measured });
+    }
+    width += measured;
+  };
+
+  const wrapTextChunk = (chunk: string, run: ShapeTextRun) => {
+    if (!opts.wrap || maxWidth <= 0) {
+      appendText(chunk, run);
+      return;
+    }
+
+    const tokens = chunk.split(/(\s+)/);
+    for (const token of tokens) {
+      if (token === "") continue;
+      if (segments.length === 0 && token.trim() === "") continue;
+
+      const { font } = shapeRunFont(run);
+      ctx.font = font;
+      const tokenWidth = ctx.measureText(token).width;
+      if (segments.length > 0 && width + tokenWidth > maxWidth) {
+        flush();
+        if (token.trim() === "") continue;
+      }
+
+      appendText(token, run);
+    }
+  };
+
+  for (const run of runs) {
+    const pieces = String(run.text ?? "").split("\n");
+    for (let i = 0; i < pieces.length; i += 1) {
+      const chunk = pieces[i] ?? "";
+      wrapTextChunk(chunk, run);
+      if (i !== pieces.length - 1) {
+        flush();
+      }
+    }
+  }
+
+  if (segments.length > 0 || lines.length === 0) {
+    flush();
+  }
+
+  return lines;
+}
+
+function renderShapeText(
+  ctx: CanvasRenderingContext2D,
+  bounds: Rect,
+  layout: ShapeTextLayout,
+  opts: { defaultColor: string },
+): void {
+  const padding = 4;
+  const inner = {
+    x: bounds.x + padding,
+    y: bounds.y + padding,
+    width: Math.max(0, bounds.width - padding * 2),
+    height: Math.max(0, bounds.height - padding * 2),
+  };
+  if (inner.width <= 0 || inner.height <= 0) return;
+  if (layout.textRuns.length === 0) return;
+
+  const wrap = layout.wrap ?? true;
+  const lines = layoutShapeTextLines(ctx, layout.textRuns, inner.width, { wrap, defaultColor: opts.defaultColor });
+  if (lines.length === 0) return;
+
+  const totalHeight = lines.reduce((sum, line) => sum + line.height, 0);
+  const vertical = layout.vertical ?? "top";
+  let y = inner.y;
+  if (vertical === "middle") {
+    y = inner.y + (inner.height - totalHeight) / 2;
+  } else if (vertical === "bottom") {
+    y = inner.y + (inner.height - totalHeight);
+  }
+  y = Math.max(inner.y, y);
+
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+  ctx.globalAlpha = 1;
+
+  const alignment = layout.alignment ?? "left";
+  for (const line of lines) {
+    let x = inner.x;
+    if (alignment === "center") {
+      x = inner.x + (inner.width - line.width) / 2;
+    } else if (alignment === "right") {
+      x = inner.x + (inner.width - line.width);
+    }
+    x = Math.max(inner.x, x);
+
+    for (const seg of line.segments) {
+      if (!seg.text) continue;
+      ctx.font = seg.font;
+      ctx.fillStyle = seg.color;
+      ctx.fillText(seg.text, x, y);
+      if (seg.underline) {
+        ctx.strokeStyle = seg.color;
+        ctx.lineWidth = 1;
+        const underlineY = y + seg.fontSizePx;
+        ctx.beginPath();
+        ctx.moveTo(x, underlineY);
+        ctx.lineTo(x + seg.width, underlineY);
+        ctx.stroke();
+      }
+      x += seg.width;
+      if (x > inner.x + inner.width) break;
+    }
+
+    y += line.height;
+    if (y > inner.y + inner.height) break;
+  }
 }

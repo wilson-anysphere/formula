@@ -63,6 +63,7 @@ tests (see `rich-data/README.md` and check `docProps/app.xml` for provenance).
   - `comments.xlsx` - legacy comments parts.
   - `grouped-rows.xlsx` - outline/grouped rows metadata.
   - `image.xlsx` - embedded image (`xl/media/image1.png`) + drawing relationship.
+  - `shape-textbox.xlsx` - **synthetic** DrawingML shape with `<xdr:txBody>` text (used by UI shape text rendering).
   - `image-in-cell.xlsx` - **real Excel** “Place in Cell” image values using `xl/metadata.xml` + `xl/richData/*` (no `xl/cellimages.xml`; see `basic/image-in-cell.md`).
   - `image-in-cell-richdata.xlsx` - **synthetic** minimal in-cell image via rich values (`xl/metadata.xml` + `xl/richData/*`; see `basic/image-in-cell-richdata.md`).
   - `cell-images.xlsx` / `cellimages.xlsx` - **synthetic** in-cell image store part only (`xl/cellImages.xml` or `xl/cellimages.xml` + `.rels`) referencing `xl/media/image1.png` (not Excel ground truth; see `basic/cell-images.md` and `basic/cellimages.md`).
