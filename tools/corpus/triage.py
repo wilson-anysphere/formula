@@ -1407,6 +1407,10 @@ def _triage_paths(
     if jobs < 1:
         jobs = 1
 
+    # Clamp to the number of workbooks so we don't spin up unnecessary worker processes for small
+    # corpora (and so downstream CPU tuning can use the effective worker count).
+    worker_count = min(jobs, len(paths)) if paths else 1
+
     reports_by_index: list[dict[str, Any] | None] = [None] * len(paths)
     diff_ignore_tuple = tuple(sorted({p for p in diff_ignore if p}))
     diff_ignore_path_tuple = tuple(sorted({p for p in diff_ignore_path if p and p.strip()}))
@@ -1414,7 +1418,7 @@ def _triage_paths(
         sorted({p for p in diff_ignore_path_in if p and p.strip()})
     )
 
-    if jobs == 1 or len(paths) <= 1:
+    if worker_count == 1 or len(paths) <= 1:
         for idx, path in enumerate(paths):
             res = _triage_one_path(
                 str(path),
@@ -1441,8 +1445,8 @@ def _triage_paths(
     # Large private corpora can contain thousands of workbooks. Submitting one Future per workbook
     # up-front creates unnecessary memory overhead. Instead, keep a bounded number of tasks
     # in-flight and feed the executor as work completes.
-    prefetch = max(jobs * 2, 1)
-    with executor_cls(max_workers=jobs) as executor:
+    prefetch = max(worker_count * 2, 1)
+    with executor_cls(max_workers=worker_count) as executor:
         pending: dict[concurrent.futures.Future[dict[str, Any] | LeakScanFailure], int] = {}
         path_iter = iter(enumerate(paths))
 
@@ -1621,11 +1625,6 @@ def main() -> int:
     if args.jobs < 1:
         parser.error("--jobs must be >= 1")
 
-    # When running multiple Rust helpers in parallel, cap Rayon parallelism per-process to avoid
-    # accidental CPU oversubscription (each helper would otherwise default to all cores).
-    if args.jobs > 1 and not os.environ.get("RAYON_NUM_THREADS"):
-        cpu = os.cpu_count() or 1
-        os.environ["RAYON_NUM_THREADS"] = str(max(1, cpu // args.jobs))
     diff_ignore = _compute_diff_ignore(
         diff_ignore=args.diff_ignore, use_default=not args.no_default_diff_ignore
     )
@@ -1648,6 +1647,14 @@ def main() -> int:
     rust_exe = _build_rust_helper()
 
     paths = list(iter_workbook_paths(input_dir, include_xlsb=args.include_xlsb))
+
+    # When running multiple Rust helpers in parallel, cap Rayon parallelism per-process to avoid
+    # accidental CPU oversubscription (each helper would otherwise default to all cores). Clamp to
+    # the effective worker count so small corpora don't artificially cap Rayon parallelism.
+    effective_workers = min(args.jobs, len(paths)) if paths else 1
+    if effective_workers > 1 and not os.environ.get("RAYON_NUM_THREADS"):
+        cpu = os.cpu_count() or 1
+        os.environ["RAYON_NUM_THREADS"] = str(max(1, cpu // effective_workers))
     triage_out = _triage_paths(
         paths,
         rust_exe=str(rust_exe),
