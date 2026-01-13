@@ -113,6 +113,30 @@ test("CollabSession setCells ignorePermissions bypasses permission checks (but s
   doc.destroy();
 });
 
+test("CollabSession setCells only bypasses permissions when ignorePermissions is explicitly true", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc, schema: { autoInit: false } });
+  session.setPermissions({ role: "viewer", userId: "u-viewer", rangeRestrictions: [] });
+
+  const before = Y.encodeStateAsUpdate(doc);
+
+  // `ignorePermissions` is an explicit escape hatch; non-boolean truthy values
+  // should not bypass permission enforcement.
+  await assert.rejects(
+    // @ts-expect-error intentionally invalid type
+    session.setCells([{ cellKey: "Sheet1:0:0", value: "hacked" }], { ignorePermissions: "true" }),
+    /Permission denied/,
+  );
+
+  assert.equal(session.cells.has("Sheet1:0:0"), false);
+
+  const after = Y.encodeStateAsUpdate(doc);
+  assert.equal(Buffer.from(before).equals(Buffer.from(after)), true);
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession setCells encrypts protected cells and never writes plaintext into `enc` cells", async () => {
   const docId = "collab-session-setCells-encryption-test-doc";
   const doc = new Y.Doc({ guid: docId });

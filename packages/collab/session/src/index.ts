@@ -2494,6 +2494,7 @@ export class CollabSession {
     opts: { ignorePermissions?: boolean } = {}
   ): Promise<void> {
     if (!Array.isArray(updates) || updates.length === 0) return;
+    const ignorePermissions = opts?.ignorePermissions === true;
 
     const planned: Array<{
       cellKey: string;
@@ -2529,7 +2530,7 @@ export class CollabSession {
     }
 
     // Permission gate: reject the entire batch before encrypting/writing anything.
-    if (this.permissions && !opts.ignorePermissions) {
+    if (this.permissions && !ignorePermissions) {
       for (const update of planned) {
         if (!update.parsed) throw new Error(`Invalid cellKey: ${update.cellKey}`);
         if (!this.canEditCell(update.parsed)) {
