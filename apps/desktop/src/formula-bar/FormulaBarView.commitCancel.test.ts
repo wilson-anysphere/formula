@@ -65,6 +65,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith("=1+2", { reason: "enter", shift: false });
     expect(view.model.isEditing).toBe(false);
+    expect(view.model.draft).toBe("=1+2");
     expect(view.model.activeCell.input).toBe("=1+2");
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(cancel.hidden).toBe(true);
@@ -149,6 +150,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(onCommit).not.toHaveBeenCalled();
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(view.model.isEditing).toBe(false);
+    expect(view.model.draft).toBe("original");
     expect(view.model.activeCell.input).toBe("original");
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(view.textarea.value).toBe("original");
@@ -181,6 +183,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(onCommit).not.toHaveBeenCalled();
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(view.model.isEditing).toBe(false);
+    expect(view.model.draft).toBe("start");
     expect(view.model.activeCell.input).toBe("start");
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(view.textarea.value).toBe("start");
@@ -200,6 +203,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(onCommit).toHaveBeenCalledWith("commit-me", { reason: "command", shift: false });
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(view.model.isEditing).toBe(false);
+    expect(view.model.draft).toBe("commit-me");
     expect(view.model.activeCell.input).toBe("commit-me");
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(cancel.hidden).toBe(true);
