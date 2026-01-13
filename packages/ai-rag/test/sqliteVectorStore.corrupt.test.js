@@ -127,3 +127,14 @@ test(
     assert.deepEqual(Array.from(stored.slice(0, 16)), expectedHeader);
   }
 );
+
+test(
+  "SqliteVectorStore resetOnCorrupt=false throws on invalid persisted bytes",
+  { skip: !sqlJsAvailable },
+  async () => {
+    // Not a real SQLite file header; should fail to open as an existing DB.
+    const storage = new TestBinaryStorage(new TextEncoder().encode("not a sqlite database"));
+    await assert.rejects(SqliteVectorStore.create({ storage, dimension: 3, autoSave: false, resetOnCorrupt: false }));
+    assert.equal(storage.removed, false);
+  }
+);
