@@ -33,6 +33,11 @@ test("macOS entitlements preflight passes when required JIT keys are present", a
   try {
     await writeFixtureFile(
       tmpRoot,
+      "apps/desktop/src-tauri/tauri.conf.json",
+      JSON.stringify({ bundle: { macOS: { entitlements: "entitlements.plist" } } }, null, 2) + "\n",
+    );
+    await writeFixtureFile(
+      tmpRoot,
       "apps/desktop/src-tauri/entitlements.plist",
       [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -61,6 +66,11 @@ test("macOS entitlements preflight fails when allow-jit entitlement is missing",
   try {
     await writeFixtureFile(
       tmpRoot,
+      "apps/desktop/src-tauri/tauri.conf.json",
+      JSON.stringify({ bundle: { macOS: { entitlements: "entitlements.plist" } } }, null, 2) + "\n",
+    );
+    await writeFixtureFile(
+      tmpRoot,
       "apps/desktop/src-tauri/entitlements.plist",
       [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -82,4 +92,3 @@ test("macOS entitlements preflight fails when allow-jit entitlement is missing",
     await fs.rm(tmpRoot, { recursive: true, force: true });
   }
 });
-

@@ -47,7 +47,7 @@ function hasTrueEntitlement(xml, key) {
 function parseArgs(argv) {
   let repoRoot = defaultRepoRoot;
   /** @type {string | undefined} */
-  let entitlementsPath;
+  let entitlementsPathOverride;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -63,7 +63,7 @@ function parseArgs(argv) {
           "",
           "Defaults:",
           "  --root defaults to the repository root (derived from this script's location).",
-          "  --path defaults to apps/desktop/src-tauri/entitlements.plist under --root.",
+          "  --path defaults to the file referenced by bundle.macOS.entitlements in apps/desktop/src-tauri/tauri.conf.json.",
           "",
         ].join("\n"),
       );
@@ -85,25 +85,56 @@ function parseArgs(argv) {
       const value = argv[i + 1];
       if (!value) {
         errBlock("macOS entitlements preflight failed", [`Missing value for --path.`]);
-        return { repoRoot, entitlementsPath: entitlementsPath ?? "" };
+        return { repoRoot, entitlementsPathOverride: entitlementsPathOverride ?? "" };
       }
-      entitlementsPath = value;
+      entitlementsPathOverride = value;
       i += 1;
       continue;
     }
   }
 
-  const resolvedEntitlementsPath = entitlementsPath
-    ? path.isAbsolute(entitlementsPath)
-      ? entitlementsPath
-      : path.resolve(repoRoot, entitlementsPath)
-    : path.join(repoRoot, "apps", "desktop", "src-tauri", "entitlements.plist");
+  const resolvedEntitlementsPathOverride = entitlementsPathOverride
+    ? path.isAbsolute(entitlementsPathOverride)
+      ? entitlementsPathOverride
+      : path.resolve(repoRoot, entitlementsPathOverride)
+    : "";
 
-  return { repoRoot, entitlementsPath: resolvedEntitlementsPath };
+  return { repoRoot, entitlementsPathOverride: resolvedEntitlementsPathOverride };
 }
 
 function main() {
-  const { repoRoot, entitlementsPath } = parseArgs(process.argv.slice(2));
+  const { repoRoot, entitlementsPathOverride } = parseArgs(process.argv.slice(2));
+  const configPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
+  const relativeConfigPath = path.relative(repoRoot, configPath);
+
+  let entitlementsPath = entitlementsPathOverride;
+
+  if (!entitlementsPath) {
+    /** @type {any} */
+    let config;
+    try {
+      config = JSON.parse(readFileSync(configPath, "utf8"));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      errBlock(`macOS entitlements preflight failed`, [
+        `Failed to read/parse ${relativeConfigPath}.`,
+        `Error: ${msg}`,
+      ]);
+      return;
+    }
+
+    const entitlementsSetting = config?.bundle?.macOS?.entitlements;
+    if (typeof entitlementsSetting !== "string" || entitlementsSetting.trim().length === 0) {
+      errBlock(`Invalid macOS signing config (${relativeConfigPath})`, [
+        `Expected bundle.macOS.entitlements to be a non-empty string path.`,
+        `This repo requires an explicit entitlements plist so WKWebView/JavaScriptCore can run under the hardened runtime.`,
+      ]);
+      return;
+    }
+
+    entitlementsPath = path.resolve(path.dirname(configPath), entitlementsSetting);
+  }
+
   if (!entitlementsPath) {
     // Argument parsing already reported an error.
     return;
