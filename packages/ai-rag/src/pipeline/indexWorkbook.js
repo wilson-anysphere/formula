@@ -37,10 +37,13 @@ export function approximateTokenCount(text) {
 export async function indexWorkbook(params) {
   const signal = params.signal;
   const onProgress = typeof params.onProgress === "function" ? params.onProgress : undefined;
-  const embedBatchSize =
-    typeof params.embedBatchSize === "number" && params.embedBatchSize > 0
-      ? params.embedBatchSize
-      : Infinity;
+  const embedBatchSize = (() => {
+    const raw = params.embedBatchSize;
+    if (typeof raw !== "number" || raw <= 0) return Infinity;
+    if (Number.isFinite(raw)) return Math.max(1, Math.floor(raw));
+    // Allow Infinity to preserve current behavior.
+    return raw;
+  })();
   throwIfAborted(signal);
   const { workbook, vectorStore, embedder } = params;
   const rawEmbedderName = embedder?.name;
