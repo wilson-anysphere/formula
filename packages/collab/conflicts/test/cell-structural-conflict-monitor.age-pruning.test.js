@@ -3,6 +3,43 @@ import assert from "node:assert/strict";
 import * as Y from "yjs";
 import { CellStructuralConflictMonitor } from "../src/cell-structural-conflict-monitor.js";
 
+test("CellStructuralConflictMonitor prunes old op records opportunistically on op log writes", () => {
+  const doc = new Y.Doc();
+  const cells = doc.getMap("cells");
+  const ops = doc.getMap("cellStructuralOps");
+
+  const monitor = new CellStructuralConflictMonitor({
+    doc,
+    cells,
+    localUserId: "local",
+    onConflict: () => {},
+    maxOpRecordAgeMs: 1_000,
+  });
+
+  // Constructor performs an initial forced prune and sets an internal throttle
+  // timestamp; reset it so this test can exercise the on-write pruning hook
+  // deterministically without waiting for real time.
+  monitor._lastAgePruneAt = 0;
+
+  const now = Date.now();
+  const oldId = "op-old-write";
+  doc.transact(() => {
+    ops.set(oldId, {
+      id: oldId,
+      kind: "edit",
+      userId: "remote",
+      createdAt: now - 60_000,
+      beforeState: [],
+      afterState: [],
+    });
+  });
+
+  assert.equal(ops.has(oldId), false);
+
+  monitor.dispose();
+  doc.destroy();
+});
+
 test("CellStructuralConflictMonitor prunes old shared op records by age when enabled", () => {
   const doc = new Y.Doc();
   const cells = doc.getMap("cells");
