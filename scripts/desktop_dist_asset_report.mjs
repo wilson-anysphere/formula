@@ -9,6 +9,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const BYTES_PER_MB = 1_000_000;
 const DEFAULT_TOP_N = 25;
 const DEFAULT_GROUP_DEPTH = 1;
+const DEFAULT_GROUP_LIMIT = 25;
 const DEFAULT_TYPE_LIMIT = 15;
 
 /**
@@ -250,7 +251,10 @@ function renderHeaderLines(distDir, totalBytes, totalFiles, budgets) {
     budgets;
   /** @type {string[]} */
   const lines = [];
-  lines.push("## Desktop dist asset report");
+  const runnerOs = (process.env.RUNNER_OS ?? "").trim();
+  let heading = "## Desktop dist asset report";
+  if (runnerOs) heading += ` (${runnerOs})`;
+  lines.push(heading);
   lines.push("");
 
   let displayDist = distDir;
@@ -358,7 +362,7 @@ function renderTopFilesTable(files, totalBytes, topN, singleBudgetMb) {
  * @param {number} groupDepth
  * @returns {string[]}
  */
-function renderGroupedTotals(files, totalBytes, groupDepth) {
+function renderGroupedTotals(files, totalBytes, groupDepth, limit) {
   /** @type {Map<string, { bytes: number, files: number }>} */
   const groups = new Map();
 
@@ -376,6 +380,7 @@ function renderGroupedTotals(files, totalBytes, groupDepth) {
   }
 
   const sorted = Array.from(groups.entries()).sort((a, b) => b[1].bytes - a[1].bytes);
+  const top = sorted.slice(0, limit);
 
   /** @type {string[]} */
   const lines = [];
@@ -384,10 +389,19 @@ function renderGroupedTotals(files, totalBytes, groupDepth) {
   lines.push("| Group | Files | Size | Share |");
   lines.push("| --- | ---: | ---: | ---: |");
 
-  for (const [key, value] of sorted) {
+  for (const [key, value] of top) {
     const share = totalBytes > 0 ? `${((value.bytes / totalBytes) * 100).toFixed(1)}%` : "0.0%";
     lines.push(
       `| \`${key}\` | ${formatInt(value.files)} | ${formatBytesAndMb(value.bytes)} | ${share} |`,
+    );
+  }
+
+  if (sorted.length > top.length) {
+    const remainingFiles = sorted.slice(top.length).reduce((acc, [, v]) => acc + v.files, 0);
+    const remainingBytes = sorted.slice(top.length).reduce((acc, [, v]) => acc + v.bytes, 0);
+    const share = totalBytes > 0 ? `${((remainingBytes / totalBytes) * 100).toFixed(1)}%` : "0.0%";
+    lines.push(
+      `| _(other)_ | ${formatInt(remainingFiles)} | ${formatBytesAndMb(remainingBytes)} | ${share} |`,
     );
   }
 
@@ -553,7 +567,9 @@ try {
       },
     );
     const topLines = renderTopFilesTable(files, totalBytes, args.topN, singleBudgetMb);
-    const groupLines = args.groups ? renderGroupedTotals(files, totalBytes, args.groupDepth) : [];
+    const groupLines = args.groups
+      ? renderGroupedTotals(files, totalBytes, args.groupDepth, DEFAULT_GROUP_LIMIT)
+      : [];
     const typeLines = args.types ? renderTypeTotals(files, totalBytes, DEFAULT_TYPE_LIMIT) : [];
 
     const markdown = [...headerLines, ...topLines, ...groupLines, ...typeLines].join("\n");
