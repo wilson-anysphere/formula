@@ -368,3 +368,31 @@ test("rejects websocket upgrade with 503 when encrypted file persistence can't b
     503
   );
 });
+
+test("rejects websocket upgrade with 503 when LevelDB persistence load fails", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-ready-leveldb-fail-"));
+
+  class FailingLeveldbPersistence extends SlowInMemoryLeveldbPersistence {
+    override async getYDoc(_docName: string): Promise<Y.Doc> {
+      throw new Error("simulated getYDoc failure");
+    }
+  }
+
+  const ldb = new FailingLeveldbPersistence(0);
+
+  const logger = createLogger("silent");
+  const server = createSyncServer(createLeveldbConfig(dataDir), logger, {
+    createLeveldbPersistence: () => ldb as any,
+  });
+  await server.start();
+
+  t.after(async () => {
+    await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const docName = "ready-leveldb-fail";
+  await expectWebSocketUpgradeStatus(`${server.getWsUrl()}/${docName}?token=test-token`, 503);
+});

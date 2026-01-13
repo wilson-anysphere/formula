@@ -85,6 +85,7 @@ test("ws upgrade rejection metrics include pre-initialized reasons and increment
     "tombstone",
     "retention_purging",
     "max_connections_per_doc",
+    "persistence_load_failed",
     "doc_id_too_long",
     "missing_doc_id",
     "method_not_allowed",
