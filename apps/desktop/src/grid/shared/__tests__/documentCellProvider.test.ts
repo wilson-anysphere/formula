@@ -237,8 +237,8 @@ describe("DocumentCellProvider (shared grid)", () => {
       getSheetId: () => "sheet-1",
       getCell: () => ({ value: "hello", formula: null }),
       // Make the grid big enough to cover the invalidation region.
-      rowCount: 1_000,
-      colCount: 1_000,
+      rowCount: 1_001,
+      colCount: 1_001,
       sheetCacheMaxSize,
     });
 
@@ -246,18 +246,34 @@ describe("DocumentCellProvider (shared grid)", () => {
     provider.getCell(1, 1);
 
     const updates: any[] = [];
-    provider.subscribe((update) => updates.push(update));
+    const unsubscribe = provider.subscribe((update) => updates.push(update));
 
     const sheetCache = (provider as any).sheetCaches.get("sheet-1");
     expect(sheetCache).toBeTruthy();
     const keysSpy = vi.spyOn(sheetCache, "keys");
 
+    // 300x300 = 90k cells: above the direct-evict cutoff (50k) but below `sheetCacheMaxSize`.
+    // This should still take the scan path (no invalidateAll).
+    provider.invalidateDocCells({ startRow: 0, endRow: 300, startCol: 0, endCol: 300 });
+    expect(keysSpy).toHaveBeenCalled();
+    expect(updates).toEqual([
+      {
+        type: "cells",
+        range: { startRow: 1, endRow: 301, startCol: 1, endCol: 301 },
+      },
+    ]);
+    expect((provider as any).sheetCaches.size).toBe(1);
+
+    updates.length = 0;
+    keysSpy.mockClear();
+
     // 500x500 = 250k cells (~125% of sheetCacheMaxSize). This should take the invalidateAll path.
     provider.invalidateDocCells({ startRow: 0, endRow: 500, startCol: 0, endCol: 500 });
-
     expect(keysSpy).not.toHaveBeenCalled();
     expect(updates).toEqual([{ type: "invalidateAll" }]);
     expect((provider as any).sheetCaches.size).toBe(0);
+
+    unsubscribe();
   });
 
   it("looks up comment metadata by numeric coords (no A1 string conversion)", () => {
