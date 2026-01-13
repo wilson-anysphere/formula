@@ -47,11 +47,17 @@ describe("tauri.conf.json security guardrails", () => {
     const mode = config?.bundle?.windows?.webviewInstallMode as unknown;
     expect(mode, "expected bundle.windows.webviewInstallMode to be set (do not rely on WebView2 being preinstalled)").toBeTruthy();
 
+    const allowed = new Set(["downloadBootstrapper", "embedBootstrapper", "offlineInstaller", "fixedRuntime"]);
+
     if (typeof mode === "string") {
       expect(
         mode.toLowerCase(),
         "bundle.windows.webviewInstallMode must not be 'skip' (installer must install WebView2 on fresh machines)",
       ).not.toBe("skip");
+      expect(
+        allowed.has(mode.trim()),
+        `bundle.windows.webviewInstallMode must be one of: ${Array.from(allowed).join(", ")}`,
+      ).toBe(true);
       return;
     }
 
@@ -64,6 +70,10 @@ describe("tauri.conf.json security guardrails", () => {
       type.toLowerCase(),
       "bundle.windows.webviewInstallMode.type must not be 'skip' (installer must install WebView2 on fresh machines)",
     ).not.toBe("skip");
+    expect(
+      allowed.has(type),
+      `bundle.windows.webviewInstallMode.type must be one of: ${Array.from(allowed).join(", ")}`,
+    ).toBe(true);
   });
 
   it("allows manual Windows downgrades (rollback via Releases page)", () => {
