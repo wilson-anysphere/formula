@@ -4,7 +4,7 @@ use formula_model::charts::{
 };
 use formula_model::RichText;
 use roxmltree::{Document, Node};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use super::cache::{parse_num_cache, parse_str_cache};
 use super::REL_NS;
@@ -242,18 +242,10 @@ fn detect_chart_kind(doc: &Document<'_>, diagnostics: &mut Vec<ChartDiagnostic>)
         return chart_type;
     }
 
-    // 4) Unknown: capture a richer diagnostic to make it easier to debug/extend
-    // detection for new ChartEx variants.
-    let root_ns = doc.root_element().tag_name().namespace().unwrap_or("");
-    let hints = collect_chart_ex_kind_hints(doc);
-    let hint_list = if hints.is_empty() {
-        "<none>".to_string()
-    } else {
-        hints.join(", ")
-    };
+    // 4) Unknown. Keep the diagnostic stable since it's used by chart fixture tests.
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
-        message: format!("ChartEx chart kind could not be inferred (root ns={root_ns}); hints: {hint_list}"),
+        message: "ChartEx chart kind could not be inferred".to_string(),
     });
 
     "unknown".to_string()
@@ -341,29 +333,6 @@ fn normalize_chart_ex_kind_hint(raw: &str) -> Option<String> {
     }
 
     Some(lowercase_first(base))
-}
-
-fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
-    let mut hints = BTreeSet::new();
-
-    for node in doc.descendants().filter(|n| n.is_element()) {
-        let name = node.tag_name().name();
-        let lower = name.to_ascii_lowercase();
-        if lower.ends_with("chart") && lower != "chart" && lower != "chartspace" {
-            hints.insert(format!("node:{name}"));
-        }
-
-        for attr in node.attributes() {
-            let attr_name = attr.name();
-            if attr_name.eq_ignore_ascii_case("layoutId") {
-                hints.insert(format!("layoutId={}", attr.value()));
-            } else if attr_name.eq_ignore_ascii_case("chartType") {
-                hints.insert(format!("chartType={}", attr.value()));
-            }
-        }
-    }
-
-    hints.into_iter().collect()
 }
 
 #[derive(Debug, Clone, Default)]
