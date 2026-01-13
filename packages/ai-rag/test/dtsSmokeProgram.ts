@@ -12,6 +12,7 @@ import {
   rectToA1,
   workbookFromSpreadsheetApi,
 } from "../src/index.js";
+import { fromBase64, toBase64 } from "../src/store/binaryStorage.js";
 
 // This file is intentionally not executed. It's a compilation target for the
 // d.ts smoke test to ensure our hand-written declaration files match the
@@ -63,6 +64,10 @@ async function smoke() {
   const key: string = localStorage.key;
   void key;
 
+  const encoded: string = toBase64(new Uint8Array([1, 2, 3]));
+  const decoded: Uint8Array = fromBase64(encoded);
+  void decoded;
+
   const workbook = { id: "wb", sheets: [{ name: "Sheet1", cells: [[{ v: "hello" }]] }] };
   const chunks = chunkWorkbook(workbook, { signal: abortController.signal });
   const text = chunkToText(chunks[0], { sampleRows: 1 });
@@ -96,4 +101,3 @@ async function smoke() {
 }
 
 void smoke;
-
