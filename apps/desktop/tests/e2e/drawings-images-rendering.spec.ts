@@ -180,8 +180,8 @@ test.describe("drawing + image rendering regressions", () => {
 
       const overlay = (app as any).drawingOverlay;
       if (!overlay) throw new Error("Missing SpreadsheetApp.drawingOverlay");
-      const canvas = (overlay as any).canvas as HTMLCanvasElement | undefined;
-      if (!canvas) throw new Error("Missing DrawingOverlay.canvas");
+      const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="drawing-layer-canvas"]');
+      if (!canvas) throw new Error("Missing drawing-layer-canvas element");
 
       const images = (app as any).drawingImages;
       if (!images || typeof images.set !== "function") {
@@ -313,8 +313,8 @@ test.describe("drawing + image rendering regressions", () => {
       const rect = app.getCellRectA1("A1");
       if (!rect) throw new Error("Missing A1 rect");
 
-      const canvas = app.referenceCanvas as HTMLCanvasElement | undefined;
-      if (!canvas) throw new Error("Missing shared grid content canvas");
+      const canvas = document.querySelector<HTMLCanvasElement>("canvas.grid-canvas--content");
+      if (!canvas) throw new Error("Missing grid content canvas");
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Missing content canvas 2d context");
 
