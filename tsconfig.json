@@ -19,6 +19,7 @@
     "packages/ai-tools/**/*.ts",
     "packages/ai-audit/**/*.ts",
     "packages/ai-audit/**/*.d.ts",
+    "packages/collab/binder/test/types.typecheck.ts",
     "packages/llm/**/*.ts",
     "packages/engine/**/*.ts",
     "vitest.config.ts"
