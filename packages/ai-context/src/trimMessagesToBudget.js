@@ -385,7 +385,35 @@ export async function trimMessagesToBudget(params) {
   }
 
   const generatedSummaries = otherMessages.filter(isGeneratedSummaryMessage);
-  const nonSummaryOtherMessages = otherMessages.filter((m) => !isGeneratedSummaryMessage(m));
+  let nonSummaryOtherMessages = otherMessages.filter((m) => !isGeneratedSummaryMessage(m));
+
+  /** @type {any[]} */
+  const orphanToolMessages = [];
+  if (preserveToolCallPairs && nonSummaryOtherMessages.length > 0) {
+    /** @type {any[]} */
+    const filtered = [];
+    let inToolGroup = false;
+    for (const msg of nonSummaryOtherMessages) {
+      throwIfAborted(signal);
+      if (isAssistantToolCallMessage(msg)) {
+        filtered.push(msg);
+        inToolGroup = true;
+        continue;
+      }
+      if (isToolMessage(msg)) {
+        if (inToolGroup) {
+          filtered.push(msg);
+        } else {
+          // If the input already contains orphan tool messages, avoid preserving them when trimming.
+          orphanToolMessages.push(msg);
+        }
+        continue;
+      }
+      filtered.push(msg);
+      inToolGroup = false;
+    }
+    nonSummaryOtherMessages = filtered;
+  }
 
   // Enforce a count cap on non-system messages (prevents unbounded growth even when
   // many short messages would still fit under the token budget).
@@ -436,7 +464,7 @@ export async function trimMessagesToBudget(params) {
   const { kept: recentKept, dropped: droppedFromRecent } = takeTailWithinBudget(recentByCount, recentBudget, estimator, signal, {
     preserveToolCallPairs,
   });
-  const toSummarize = [...generatedSummaries, ...olderByCount, ...droppedToolGroups, ...droppedFromRecent];
+  const toSummarize = [...generatedSummaries, ...orphanToolMessages, ...olderByCount, ...droppedToolGroups, ...droppedFromRecent];
 
   /** @type {any[]} */
   const out = [...systemTrimmed];

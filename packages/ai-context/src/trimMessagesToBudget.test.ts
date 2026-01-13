@@ -203,6 +203,33 @@ describe("trimMessagesToBudget", () => {
     expect(estimator.estimateMessagesTokens(trimmed)).toBeLessThanOrEqual(220);
   });
 
+  it("drops orphan tool messages when trimming with preserveToolCallPairs", async () => {
+    const estimator = createHeuristicTokenEstimator({ charsPerToken: 1, tokensPerMessageOverhead: 0 });
+
+    const messages = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "older-" + "x".repeat(200) },
+      // Orphan tool message (no preceding assistant toolCalls message).
+      { role: "tool", toolCallId: "call-1", content: "orphan-tool-result" },
+      { role: "user", content: "latest question" }
+    ];
+
+    const trimmed = await trimMessagesToBudget({
+      messages,
+      maxTokens: 200,
+      reserveForOutputTokens: 0,
+      estimator,
+      keepLastMessages: 2,
+      summaryMaxTokens: 180
+    });
+
+    expect(trimmed.some((m) => m.role === "tool")).toBe(false);
+
+    const summary = trimmed.find((m) => typeof m.content === "string" && m.content.startsWith(CONTEXT_SUMMARY_MARKER));
+    expect(summary).toBeTruthy();
+    expect(String(summary?.content)).toContain("orphan-tool-result");
+  });
+
   it("can disable tool-call coherence (preserveToolCallPairs=false)", async () => {
     const estimator = createHeuristicTokenEstimator({ charsPerToken: 1, tokensPerMessageOverhead: 0 });
 
