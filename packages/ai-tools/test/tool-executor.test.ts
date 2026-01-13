@@ -469,16 +469,89 @@ describe("ToolExecutor", () => {
     expect(result.error?.message).toMatch(/10000/);
   });
 
-  it("read_range enforces max_read_range_chars to prevent huge cell payloads", async () => {
+  it("read_range normalizes object cell values to JSON-safe scalars", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);
 
-    // Default limit is 200,000 chars; ensure we exceed it with a single cell.
-    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "x".repeat(210_000) });
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: { foo: "bar" } as any });
 
     const result = await executor.execute({
       name: "read_range",
       parameters: { range: "Sheet1!A1:A1" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.values).toEqual([['{"foo":"bar"}']]);
+    expect(typeof result.data?.values?.[0]?.[0]).toBe("string");
+    expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
+  it("read_range truncates huge string cell payloads (per-cell) and stays JSON-serializable", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    const raw = "x".repeat(210_000);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: raw });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A1" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    const value = result.data?.values?.[0]?.[0];
+    expect(typeof value).toBe("string");
+    expect(value).toBe(`${raw.slice(0, 10_000)}…[truncated 200000 chars]`);
+    expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
+  it("read_range truncates huge object cell payloads (stringified) and stays JSON-serializable", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    const obj = { foo: "y".repeat(50_000) };
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: obj as any });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A1" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    const expectedJson = JSON.stringify(obj);
+    const value = result.data?.values?.[0]?.[0];
+    expect(typeof value).toBe("string");
+    expect(value).toBe(`${expectedJson.slice(0, 10_000)}…[truncated ${expectedJson.length - 10_000} chars]`);
+    expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
+  it("read_range enforces max_read_range_chars based on normalized output size", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    // 21 * (10k chars) ~= 210k chars, exceeding default max_read_range_chars (200k).
+    const long = "x".repeat(10_000);
+    const set = await executor.execute({
+      name: "set_range",
+      parameters: {
+        range: "Sheet1!A1:U1",
+        values: [Array.from({ length: 21 }, () => long)],
+      },
+    });
+    expect(set.ok).toBe(true);
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:U1" },
     });
 
     expect(result.ok).toBe(false);

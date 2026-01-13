@@ -26,6 +26,42 @@ function normalizeFormulaTextOpt(value: unknown): string | null {
   return `=${stripped}`;
 }
 
+const DEFAULT_READ_RANGE_MAX_CELL_CHARS = 10_000;
+
+function truncateCellString(value: string, maxChars: number): string {
+  const limit = Number.isFinite(maxChars) ? Math.max(0, Math.floor(maxChars)) : DEFAULT_READ_RANGE_MAX_CELL_CHARS;
+  if (limit === 0) return "";
+  if (value.length <= limit) return value;
+  const truncated = value.length - limit;
+  return `${value.slice(0, limit)}…[truncated ${truncated} chars]`;
+}
+
+function normalizeCellOutput(value: unknown, opts: { maxChars?: number } = {}): CellScalar {
+  const maxChars = opts.maxChars ?? DEFAULT_READ_RANGE_MAX_CELL_CHARS;
+
+  // Normalize `undefined` to null for schema safety.
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === "string") return truncateCellString(value, maxChars);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+
+  let serialized: string;
+  try {
+    const json = JSON.stringify(value);
+    serialized = typeof json === "string" ? json : String(value);
+  } catch {
+    serialized = String(value);
+  }
+  return truncateCellString(serialized, maxChars);
+}
+
+function normalizeFormulaOutput(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") return value;
+  const normalized = normalizeCellOutput(value);
+  return normalized === null ? null : String(normalized);
+}
+
 export interface ToolExecutionError {
   code: "validation_error" | "not_implemented" | "permission_denied" | "runtime_error";
   message: string;
@@ -489,9 +525,11 @@ export class ToolExecutor {
     const cells = this.spreadsheet.readRange(range);
     if (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW) {
       const includeFormulaValues = Boolean(this.options.include_formula_values);
-      const values = cells.map((row) => row.map((cell) => (cell.formula ? (includeFormulaValues ? cell.value : null) : cell.value)));
+      const values = cells.map((row) =>
+        row.map((cell) => normalizeCellOutput(cell.formula ? (includeFormulaValues ? cell.value : null) : cell.value))
+      );
       const formulas = params.include_formulas
-        ? cells.map((row) => row.map((cell) => cell.formula ?? null))
+        ? cells.map((row) => row.map((cell) => normalizeFormulaOutput(cell.formula)))
         : undefined;
       if (dlp) {
         this.logToolDlpDecision({ tool: "read_range", range, dlp, redactedCellCount: 0 });
@@ -520,8 +558,8 @@ export class ToolExecutor {
             formulasRow[c] = DLP_REDACTION_PLACEHOLDER;
             continue;
           }
-          valuesRow[c] = cell.formula ? null : cell.value;
-          formulasRow[c] = cell.formula ?? null;
+          valuesRow[c] = normalizeCellOutput(cell.formula ? null : cell.value);
+          formulasRow[c] = normalizeFormulaOutput(cell.formula);
         }
         values.push(valuesRow);
         formulas.push(formulasRow);
@@ -544,7 +582,7 @@ export class ToolExecutor {
           valuesRow[c] = DLP_REDACTION_PLACEHOLDER;
           continue;
         }
-        valuesRow[c] = cell.formula ? null : cell.value;
+        valuesRow[c] = normalizeCellOutput(cell.formula ? null : cell.value);
       }
       values.push(valuesRow);
     }
