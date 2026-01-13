@@ -61,7 +61,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
 
     expect(onCommit).toHaveBeenCalledTimes(1);
-    expect(onCommit).toHaveBeenCalledWith("=1+2");
+    expect(onCommit).toHaveBeenCalledWith("=1+2", { reason: "enter", shift: false });
     expect(view.model.isEditing).toBe(false);
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(cancel.hidden).toBe(true);
@@ -166,7 +166,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     commit.click();
 
     expect(onCommit).toHaveBeenCalledTimes(1);
-    expect(onCommit).toHaveBeenCalledWith("commit-me");
+    expect(onCommit).toHaveBeenCalledWith("commit-me", { reason: "command", shift: false });
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(view.model.isEditing).toBe(false);
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
