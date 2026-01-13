@@ -4,6 +4,34 @@ import type { AIAuditEntry } from "../src/types.js";
 import { serializeAuditEntries } from "../src/export.js";
 
 describe("serializeAuditEntries", () => {
+  it("defaults to NDJSON output with tool result redaction enabled", () => {
+    const entries: AIAuditEntry[] = [
+      {
+        id: "audit-1",
+        timestamp_ms: 1,
+        session_id: "session",
+        mode: "chat",
+        input: { prompt: "hi" },
+        model: "unit-test-model",
+        tool_calls: [
+          {
+            name: "tool",
+            parameters: { a: 1 },
+            result: { secret: "should-not-export" },
+          },
+        ],
+      },
+    ];
+
+    const output = serializeAuditEntries(entries);
+    const lines = output.split("\n");
+
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0]!) as AIAuditEntry;
+    expect(Array.isArray(parsed)).toBe(false);
+    expect(parsed.tool_calls[0]).not.toHaveProperty("result");
+  });
+
   it("formats NDJSON with one JSON object per line", () => {
     const entries: AIAuditEntry[] = [
       {
