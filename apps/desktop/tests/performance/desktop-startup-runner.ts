@@ -6,7 +6,7 @@ import {
   percentile,
   runOnce,
   type StartupMetrics,
-} from "./desktopStartupRunnerShared.ts";
+} from "./desktopStartupUtil.ts";
 
 // Benchmark environment knobs:
 // - `FORMULA_DISABLE_STARTUP_UPDATE_CHECK=1` prevents the release updater from running a

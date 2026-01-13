@@ -7,7 +7,7 @@
  * - This avoids polluting developer machines and reduces variance on CI where cached home
  *   directories can otherwise leak across runs.
  *
- * Environment isolation is implemented in `desktopStartupRunnerShared.ts`:
+ * Environment isolation is implemented in `desktopStartupUtil.ts`:
  * - All platforms: `HOME` + `USERPROFILE` => `target/perf-home`
  * - Linux: `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME` => `target/perf-home/xdg-*`
  * - Windows: `APPDATA`, `LOCALAPPDATA`, `TEMP`, `TMP` => `target/perf-home/*`
@@ -19,7 +19,6 @@
  * - `FORMULA_DESKTOP_STARTUP_MODE=warm`: reset `target/perf-home` once, then reuse it so subsequent
  *   launches benefit from persisted caches (first run is treated as warmup).
  */
-
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -32,7 +31,7 @@ import {
   runOnce,
   stdDev,
   type StartupMetrics,
-} from './desktopStartupRunnerShared.ts';
+} from './desktopStartupUtil.ts';
 
 // Benchmark environment knobs:
 // - `FORMULA_DISABLE_STARTUP_UPDATE_CHECK=1` prevents the release updater from running a
@@ -92,7 +91,7 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
 
   const envOverrides: NodeJS.ProcessEnv = { FORMULA_DISABLE_STARTUP_UPDATE_CHECK: '1' };
 
-  // `desktopStartupRunnerShared.runOnce()` can optionally reset `target/perf-home` on each
+  // `desktopStartupUtil.runOnce()` can optionally reset `target/perf-home` on each
   // invocation via this parent-process env var. Make startup mode deterministic by managing
   // it here (and restoring the previous value after the benchmark completes).
   const prevResetHome = process.env.FORMULA_DESKTOP_BENCH_RESET_HOME;
