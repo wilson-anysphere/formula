@@ -192,18 +192,24 @@ Range suggestions are implemented in `packages/ai-completion/src/rangeSuggester.
 
 `suggestRanges({ currentArgText, cellRef, surroundingCells, sheetName?, maxScanRows?, maxScanCols? })`:
 
-1. **Accepts only simple A1 prefixes (pure-insertion friendly)**
-   - Regex: `^(\$?)([A-Za-z]{1,3})(?:(\$?)(\d+))?$`
-   - Examples that work: `A`, `$A`, `A1`, `$A$1`
-   - Examples that do *not* work today: `A:A`, `A1:`, `A1:B`, `A1:B10`, `Table1[Col]`
-   - The suggester does not “repair” references by inserting missing characters *before* the caret; it only proposes a longer token that starts with the user-typed prefix (so UIs can treat it as a pure insertion).
+1. **Accepts only conservative A1-style prefixes (pure-insertion friendly)**
+   - Base token regex (no `:`): `^(\$?)([A-Za-z]{1,3})(?:(\$?)(\d+))?$`
+   - Supported prefix forms include:
+     - `A`, `$A`, `A1`, `$A$1`
+     - partial range prefixes: `A:`, `A1:`, `$A$1:`
+     - single-column range prefixes: `A:A`, `A1:A` (also supports partially-typed end-column tokens for multi-letter columns, e.g. `AB1:A`)
+   - Empty argument (`currentArgText === ""`) is allowed: the suggester defaults to the **active cell’s column** so it can still propose ranges while remaining a pure insertion.
+   - Special-case: when the user types a partial **column range** like `A:`, we only suggest `A:A` (we do *not* suggest `A1:A10` because that would require inserting characters *before* the typed `:` and would not be a pure insertion).
+   - Examples that do *not* work today: `A1:B`, `A1:B10`, `Table1[Col]` (multi-column ranges are intentionally rejected).
 
 2. **Find a contiguous non-empty block in the typed column**
    - If the user provided a row (`A5`), treat that cell as the start and scan **down** until the first empty cell (`reason: contiguous_down_from_start`).
-     - If the explicitly provided start cell is empty, no contiguous-block suggestion is produced.
+      - If the explicitly provided start cell is empty, no contiguous-block suggestion is produced.
    - Otherwise (user typed only a column, like `A`):
-     - First scan **up** from the row above the current cell, skipping blank separators to find the nearest non-empty cell, then expand to the full contiguous block (`reason: contiguous_above_current_cell`).
-     - **Downward scan fallback:** if there is no data above (within the scan budget), scan **down** from the row below the current cell using the same “skip blanks then expand” logic (`reason: contiguous_below_current_cell`).
+      - First scan **up** from the row above the current cell, skipping blank separators to find the nearest non-empty cell, then expand to the full contiguous block (`reason: contiguous_above_current_cell`).
+      - **Downward scan fallback:** if there is no data above (within the scan budget), scan **down** using the same “skip blanks then expand” logic (`reason: contiguous_below_current_cell`).
+        - If the active cell is in the referenced column, scanning starts at the row **below** the active cell.
+        - If the active cell is in a different column (e.g. formula in `B2` referencing `A`), scanning starts on the **same row** so same-row values can be included.
 
 3. **Numeric trimming heuristic (implicit scans)**
    - If a block is “mostly numeric”, non-numeric *edge* cells are treated as header/footer and trimmed (common for a text header row above numeric data).
@@ -211,11 +217,11 @@ Range suggestions are implemented in `packages/ai-completion/src/rangeSuggester.
 
 4. **Optional 2D table range suggestion (expand to the right)**
    - When a contiguous vertical block is found, the suggester also tries to expand that block **to the right** into a rectangular 2D range (e.g. `A1:D10`).
-     - When available, the table detector uses the *untrimmed* block (before numeric header trimming) so the resulting 2D range can include a header row.
+      - When available, the table detector uses the *untrimmed* block (before numeric header trimming) so the resulting 2D range can include a header row.
    - It grows column-by-column until it hits:
      - an entirely empty column (a “gap”), or
      - a column whose non-empty coverage over the rows is too low (currently `< 0.6`)
-   - This is bounded by `maxScanCols` and returned with `reason` strings like `contiguous_table_above_current_cell` / `contiguous_table_down_from_start` (the table range is appended after the “entire column” suggestion for compatibility).
+   - This is bounded by `maxScanCols` and returned with `reason` strings like `contiguous_table_above_current_cell` / `contiguous_table_below_current_cell` / `contiguous_table_down_from_start` (the table range is appended after the “entire column” suggestion for compatibility).
 
 5. **Return up to three candidates**
    - `A1:A10` (contiguous 1D block, higher confidence)
@@ -233,7 +239,9 @@ This is not a full “current region” detector. In particular, it:
 - only expands **to the right** from the typed column (it does not scan left to find a table’s true start column)
 - doesn’t infer row-only/horizontal ranges
 - doesn’t look at formatting/table borders
-- doesn’t try to repair invalid/incomplete references beyond the simple prefix regex
+- is intentionally conservative about complex/ambiguous references:
+  - it rejects multi-column range prefixes like `A1:B` rather than guessing a 2D region
+  - it only supports the limited prefix forms described above (it won’t rewrite/repair arbitrary range syntax)
 
 ### Adding new heuristics safely (no OOM, stay <100ms)
 
