@@ -109,3 +109,31 @@ test("ChunkedLocalStorageBinaryStorage clears missing chunk keys on load", async
     }
   }
 });
+
+test("ChunkedLocalStorageBinaryStorage clears orphaned chunks when meta is missing", async () => {
+  const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const ls = new MemoryLocalStorage();
+  Object.defineProperty(globalThis, "localStorage", { value: ls, configurable: true });
+  try {
+    const storage = new ChunkedLocalStorageBinaryStorage({
+      namespace: "formula.test.rag",
+      workbookId: "orphan-chunks",
+      chunkSizeChars: 8,
+    });
+
+    // Simulate a partial write where chunk 0 was written but :meta wasn't.
+    ls.setItem(`${storage.key}:0`, "orphaned");
+    assert.equal(ls.getItem(`${storage.key}:meta`), null);
+
+    const loaded = await storage.load();
+    assert.equal(loaded, null);
+    assert.deepEqual(listKeysWithPrefix(ls, `${storage.key}:`), []);
+  } finally {
+    if (originalLocalStorage) {
+      Object.defineProperty(globalThis, "localStorage", originalLocalStorage);
+    } else {
+      // eslint-disable-next-line no-undef
+      delete globalThis.localStorage;
+    }
+  }
+});

@@ -91,7 +91,20 @@ export class ChunkedLocalStorageBinaryStorage {
       // `${namespace}:${workbookId}` key (LocalStorageBinaryStorage). If we find a legacy
       // value, decode it and opportunistically migrate it into the chunked format.
       const legacy = storage.getItem(this.key);
-      if (!legacy) return null;
+      if (!legacy) {
+        // If a previous write partially completed (chunks written but meta missing),
+        // clear the orphaned chunks so localStorage doesn't slowly fill up.
+        // We probe for chunk 0 first to avoid scanning `storage.length` in the common case.
+        const orphanChunk0 = storage.getItem(`${this.key}:0`);
+        if (typeof orphanChunk0 === "string") {
+          try {
+            await this.remove();
+          } catch {
+            // ignore
+          }
+        }
+        return null;
+      }
       try {
         const decoded = fromBase64(legacy);
         // Best-effort migration: write in chunked format and remove the legacy key to
