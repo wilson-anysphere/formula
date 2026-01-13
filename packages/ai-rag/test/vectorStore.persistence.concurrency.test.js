@@ -290,6 +290,8 @@ test(
   { skip: !sqlJsAvailable },
   async () => {
     const storage = new ControlledBinaryStorage();
+    const modulePath = "../src/store/" + "sqliteVectorStore.js";
+    const { SqliteVectorStore } = await import(modulePath);
     const store = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: true });
 
     // Seed one record. Pre-release the initial save so it completes immediately.

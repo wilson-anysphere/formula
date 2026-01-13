@@ -114,6 +114,21 @@ function defineVectorStoreConformanceSuite(name, createStore, opts) {
         assert.equal(res[0].metadata.label, "Inc");
       });
 
+      await t.test("updateMetadata updates metadata without changing vectors", async () => {
+        if (typeof store.updateMetadata !== "function") return;
+        const before = await store.get("inc");
+        assert.ok(before);
+        const beforeVec = Array.from(before.vector);
+
+        await store.updateMetadata([{ id: "inc", metadata: { ...before.metadata, label: "Inc2" } }]);
+
+        const after = await store.get("inc");
+        assert.ok(after);
+        assert.deepEqual(Array.from(after.vector), beforeVec);
+        assert.equal(after.metadata.workbookId, "wb-include");
+        assert.equal(after.metadata.label, "Inc2");
+      });
+
       await t.test("query(vector, topK, { workbookId }) returns topK ordered desc", async () => {
         const hits = await store.query([1, 0, 0], 3, { workbookId: "wb-query" });
         assert.equal(hits.length, 3);
