@@ -46,9 +46,9 @@ describe("FormulaBarView fx function picker", () => {
 
     pickerInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
 
-    expect(view.textarea.value).toBe("=SUM(");
-    expect(view.textarea.selectionStart).toBe(view.textarea.value.length);
-    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length);
+    expect(view.textarea.value).toBe("=SUM()");
+    expect(view.textarea.selectionStart).toBe(view.textarea.value.length - 1);
+    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length - 1);
     expect(document.activeElement).toBe(view.textarea);
 
     host.remove();
@@ -83,9 +83,9 @@ describe("FormulaBarView fx function picker", () => {
     // Insert selected function.
     pickerInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
 
-    expect(view.textarea.value).toBe(`=${secondName}(`);
-    expect(view.textarea.selectionStart).toBe(view.textarea.value.length);
-    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length);
+    expect(view.textarea.value).toBe(`=${secondName}()`);
+    expect(view.textarea.selectionStart).toBe(view.textarea.value.length - 1);
+    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length - 1);
 
     host.remove();
   });
