@@ -99,10 +99,12 @@ export function createDevEncryptionConfig(opts: {
   const key = deriveDevEncryptionKey(opts.docId);
   const range = opts.range;
   return {
-    keyForCell: (cell: CellAddress) => {
-      if (!cellInRange(cell, range)) return null;
-      return key;
-    },
+    // Key is doc-scoped (dev-only). We return it for *all* cells so clients can
+    // still decrypt previously-encrypted cells even if the demo range changes.
+    //
+    // Encryption is restricted to the demo range via `shouldEncryptCell`.
+    keyForCell: () => key,
+    shouldEncryptCell: (cell: CellAddress) => cellInRange(cell, range),
   };
 }
 
@@ -143,4 +145,3 @@ export function resolveDevCollabEncryptionFromSearch(opts: {
     defaultRangeRef: opts.defaultRangeRef,
   });
 }
-
