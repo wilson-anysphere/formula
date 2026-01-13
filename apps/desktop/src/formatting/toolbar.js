@@ -670,6 +670,28 @@ export function toggleUnderline(doc, sheetId, range, options = {}) {
   return applied;
 }
 
+export function toggleStrikethrough(doc, sheetId, range, options = {}) {
+  if (!ensureSafeFormattingRange(range)) return false;
+  const next =
+    typeof options.next === "boolean"
+      ? options.next
+      : !allCellsMatch(doc, sheetId, range, (s) => {
+          // Excel/OOXML styles can encode strike at either `font.strike` or top-level `strike`.
+          // Prefer the font-level value when present (it overrides the legacy top-level field).
+          const fontStrike = s?.font?.strike;
+          if (typeof fontStrike === "boolean") return fontStrike;
+          const strike = s?.strike;
+          if (typeof strike === "boolean") return strike;
+          return false;
+        });
+  let applied = true;
+  for (const r of normalizeRanges(range)) {
+    const ok = doc.setRangeFormat(sheetId, r, { font: { strike: next } }, { label: "Strikethrough" });
+    if (ok === false) applied = false;
+  }
+  return applied;
+}
+
 export function setFontSize(doc, sheetId, range, sizePt) {
   if (!ensureSafeFormattingRange(range)) return false;
   let applied = true;

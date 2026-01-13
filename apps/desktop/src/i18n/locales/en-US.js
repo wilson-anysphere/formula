@@ -249,6 +249,7 @@ export const enUS = {
   "command.format.toggleBold": "Bold",
   "command.format.toggleItalic": "Italic",
   "command.format.toggleUnderline": "Underline",
+  "command.format.toggleStrikethrough": "Strikethrough",
   "command.format.toggleWrapText": "Wrap Text",
   "command.format.numberFormat.general": "General",
   "command.format.numberFormat.number": "Number",

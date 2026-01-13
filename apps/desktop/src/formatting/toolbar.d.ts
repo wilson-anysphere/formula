@@ -26,6 +26,12 @@ export function toggleUnderline(
   range: RangeInputOrRanges,
   options?: { next?: boolean },
 ): boolean;
+export function toggleStrikethrough(
+  doc: DocumentController,
+  sheetId: string,
+  range: RangeInputOrRanges,
+  options?: { next?: boolean },
+): boolean;
 
 export function applyAllBorders(
   doc: DocumentController,

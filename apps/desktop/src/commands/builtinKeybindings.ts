@@ -346,6 +346,14 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: WHEN_SPREADSHEET_READY,
   },
   {
+    command: "format.toggleStrikethrough",
+    key: "ctrl+5",
+    // Excel uses Ctrl+5 for strikethrough. On macOS, prefer keeping the same chord
+    // rather than consuming a Cmd-based shortcut.
+    mac: "ctrl+5",
+    when: WHEN_SPREADSHEET_READY,
+  },
+  {
     command: "format.numberFormat.currency",
     key: "ctrl+shift+$",
     mac: "cmd+shift+$",

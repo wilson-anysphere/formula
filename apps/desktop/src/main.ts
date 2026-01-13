@@ -150,6 +150,7 @@ import {
   setHorizontalAlign,
   toggleBold,
   toggleItalic,
+  toggleStrikethrough,
   toggleUnderline,
   toggleWrap,
   type CellRange,
@@ -2057,7 +2058,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "format.toggleBold": formatState.bold,
       "format.toggleItalic": formatState.italic,
       "format.toggleUnderline": formatState.underline,
-      "home.font.strikethrough": formatState.strikethrough,
+      "format.toggleStrikethrough": formatState.strikethrough,
       "format.toggleWrapText": formatState.wrapText,
       "home.alignment.alignLeft": formatState.align === "left",
       "home.alignment.center": formatState.align === "center",
@@ -2149,16 +2150,16 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const outlineDisabled = app.getGridMode() === "shared";
     const disabledById = {
       ...(isEditing
-        ? {
-            // Formatting commands are disabled while editing (Excel-style behavior).
-            "format.toggleBold": true,
-            "format.toggleItalic": true,
-            "format.toggleUnderline": true,
-            "home.font.strikethrough": true,
-            "home.font.fontName": true,
-            "home.font.fontSize": true,
-            "home.font.increaseFont": true,
-            "home.font.decreaseFont": true,
+          ? {
+              // Formatting commands are disabled while editing (Excel-style behavior).
+              "format.toggleBold": true,
+              "format.toggleItalic": true,
+              "format.toggleUnderline": true,
+              "format.toggleStrikethrough": true,
+              "home.font.fontName": true,
+              "home.font.fontSize": true,
+              "home.font.increaseFont": true,
+              "home.font.decreaseFont": true,
             "home.font.fontColor": true,
             "home.font.fillColor": true,
             "home.font.borders": true,
@@ -5309,6 +5310,18 @@ if (
   );
 
   commandRegistry.registerBuiltinCommand(
+    "format.toggleStrikethrough",
+    t("command.format.toggleStrikethrough"),
+    (next?: boolean) =>
+      applyFormattingToSelection(
+        t("command.format.toggleStrikethrough"),
+        (doc, sheetId, ranges) => toggleStrikethrough(doc, sheetId, ranges, { next }),
+        { forceBatch: true },
+      ),
+    { category: commandCategoryFormat },
+  );
+
+  commandRegistry.registerBuiltinCommand(
     "format.toggleWrapText",
     t("command.format.toggleWrapText"),
     (next?: boolean) =>
@@ -8382,14 +8395,9 @@ mountRibbon(ribbonReactRoot, {
         app.focus();
         return;
       }
-      case "home.font.strikethrough":
-        applyFormattingToSelection("Strikethrough", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { font: { strike: pressed } }, { label: "Strikethrough" });
-            if (ok === false) applied = false;
-          }
-          return applied;
+      case "format.toggleStrikethrough":
+        void commandRegistry.executeCommand("format.toggleStrikethrough", pressed).catch((err) => {
+          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
         });
         return;
       case "format.toggleWrapText":
@@ -8409,11 +8417,7 @@ mountRibbon(ribbonReactRoot, {
       });
     };
 
-    if (
-      commandId === "format.toggleBold" ||
-      commandId === "format.toggleItalic" ||
-      commandId === "format.toggleUnderline"
-    ) {
+    if (commandId === "format.toggleBold" || commandId === "format.toggleItalic" || commandId === "format.toggleUnderline") {
       executeBuiltinCommand(commandId);
       return;
     }
@@ -8422,7 +8426,7 @@ mountRibbon(ribbonReactRoot, {
     // semantics in `onToggle` (since it provides the `pressed` state). Avoid
     // falling through to the default "unimplemented" toast here.
     if (
-      commandId === "home.font.strikethrough" ||
+      commandId === "format.toggleStrikethrough" ||
       commandId === "format.toggleWrapText" ||
       commandId === "view.toggleShowFormulas" ||
       commandId === "view.togglePerformanceStats" ||

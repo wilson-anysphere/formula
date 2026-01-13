@@ -197,6 +197,7 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("comments.togglePanel", otherIndex)).toBe("Ctrl+Shift+M");
     expect(otherIndex.get("comments.togglePanel")).toEqual(expect.arrayContaining(["Ctrl+Shift+M", "Ctrl+Shift+Meta+M"]));
     expect(getPrimaryCommandKeybindingDisplay("format.toggleItalic", otherIndex)).toBe("Ctrl+I");
+    expect(getPrimaryCommandKeybindingDisplay("format.toggleStrikethrough", otherIndex)).toBe("Ctrl+5");
     expect(getPrimaryCommandKeybindingDisplay("edit.fillDown", otherIndex)).toBe("Ctrl+D");
     expect(getPrimaryCommandKeybindingDisplay("edit.fillRight", otherIndex)).toBe("Ctrl+R");
     expect(getPrimaryCommandKeybindingDisplay("edit.selectCurrentRegion", otherIndex)).toBe("Ctrl+Shift+*");
@@ -245,6 +246,7 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("comments.togglePanel", macIndex)).toBe("⇧⌘M");
     expect(macIndex.get("comments.togglePanel")).toEqual(expect.arrayContaining(["⇧⌘M", "⌃⇧⌘M"]));
     expect(getPrimaryCommandKeybindingDisplay("format.toggleItalic", macIndex)).toBe("⌃I");
+    expect(getPrimaryCommandKeybindingDisplay("format.toggleStrikethrough", macIndex)).toBe("⌃5");
     expect(getPrimaryCommandKeybindingDisplay("edit.fillDown", macIndex)).toBe("⌘D");
     expect(getPrimaryCommandKeybindingDisplay("edit.fillRight", macIndex)).toBe("⌘R");
     expect(getPrimaryCommandKeybindingDisplay("edit.selectCurrentRegion", macIndex)).toBe("⇧⌘*");

@@ -503,7 +503,7 @@ export const defaultRibbonSchema: RibbonSchema = {
             { id: "format.toggleBold", label: "Bold", ariaLabel: "Bold", iconId: "bold", kind: "toggle", size: "icon" },
             { id: "format.toggleItalic", label: "Italic", ariaLabel: "Italic", iconId: "italic", kind: "toggle", size: "icon" },
             { id: "format.toggleUnderline", label: "Underline", ariaLabel: "Underline", iconId: "underline", kind: "toggle", size: "icon" },
-            { id: "home.font.strikethrough", label: "Strike", ariaLabel: "Strikethrough", iconId: "strikethrough", kind: "toggle", size: "icon" },
+            { id: "format.toggleStrikethrough", label: "Strike", ariaLabel: "Strikethrough", iconId: "strikethrough", kind: "toggle", size: "icon" },
             { id: "home.font.subscript", label: "Subscript", ariaLabel: "Subscript", iconId: "subscript", kind: "toggle", size: "icon" },
             { id: "home.font.superscript", label: "Superscript", ariaLabel: "Superscript", iconId: "superscript", kind: "toggle", size: "icon" },
             {
