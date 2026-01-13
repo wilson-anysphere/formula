@@ -22,9 +22,11 @@
     <true/>
 
     <!--
-      Intentionally *not* enabling `com.apple.security.cs.disable-library-validation`:
-      Formula does not load third-party / unsigned dylibs at runtime. If we ever introduce
-      dlopen-based plugins or unsigned external frameworks, revisit this.
+      Intentionally *not* enabling:
+      - `com.apple.security.cs.disable-executable-page-protection` (broader W+X permission; prefer the more targeted JIT entitlements above)
+      - `com.apple.security.cs.disable-library-validation` (Formula does not load third-party / unsigned dylibs at runtime)
+
+      If we ever introduce dlopen-based plugins or unsigned external frameworks, revisit.
     -->
   </dict>
 </plist>
