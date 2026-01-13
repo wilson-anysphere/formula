@@ -29,7 +29,10 @@ pub enum ChartExParseError {
 /// - surfaces a stable chart kind string via `ChartKind::Unknown { name:
 ///   \"ChartEx:<kind>\" }`,
 /// - records diagnostics indicating that ChartEx is not yet fully modeled.
-pub fn parse_chart_ex(chart_ex_xml: &[u8], part_name: &str) -> Result<ChartModel, ChartExParseError> {
+pub fn parse_chart_ex(
+    chart_ex_xml: &[u8],
+    part_name: &str,
+) -> Result<ChartModel, ChartExParseError> {
     let xml = std::str::from_utf8(chart_ex_xml).map_err(|e| ChartExParseError::XmlNonUtf8 {
         part_name: part_name.to_string(),
         source: e,
@@ -48,9 +51,7 @@ pub fn parse_chart_ex(chart_ex_xml: &[u8], part_name: &str) -> Result<ChartModel
 
     let mut diagnostics = vec![ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
-        message: format!(
-            "ChartEx root <{root_name}> (ns={root_ns}) parsed as placeholder model"
-        ),
+        message: format!("ChartEx root <{root_name}> (ns={root_ns}) parsed as placeholder model"),
     }];
 
     if kind == "unknown" {
@@ -64,14 +65,19 @@ pub fn parse_chart_ex(chart_ex_xml: &[u8], part_name: &str) -> Result<ChartModel
         .map(|chart_type_node| {
             chart_type_node
                 .descendants()
-                .filter(|n| n.is_element() && (n.tag_name().name() == "ser" || n.tag_name().name() == "series"))
+                .filter(|n| {
+                    n.is_element()
+                        && (n.tag_name().name() == "ser" || n.tag_name().name() == "series")
+                })
                 .map(|n| parse_series(n, &mut diagnostics))
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
 
     Ok(ChartModel {
-        chart_kind: ChartKind::Unknown { name: chart_name.clone() },
+        chart_kind: ChartKind::Unknown {
+            name: chart_name.clone(),
+        },
         title: None,
         legend: None,
         plot_area: PlotAreaModel::Unknown { name: chart_name },
@@ -196,6 +202,7 @@ fn parse_series_text_data(
         return Some(SeriesTextData {
             formula: num.formula,
             cache,
+            multi_cache: None,
         });
     }
 
@@ -240,7 +247,11 @@ fn parse_str_ref(str_ref_node: Node<'_, '_>) -> SeriesTextData {
         .find(|n| n.is_element() && n.tag_name().name() == "strCache")
         .and_then(parse_str_cache);
 
-    SeriesTextData { formula, cache }
+    SeriesTextData {
+        formula,
+        cache,
+        multi_cache: None,
+    }
 }
 
 fn parse_num_ref(

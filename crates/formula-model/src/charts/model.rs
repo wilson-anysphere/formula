@@ -250,6 +250,11 @@ pub struct SeriesPointStyle {
 pub struct SeriesTextData {
     pub formula: Option<String>,
     pub cache: Option<Vec<String>>,
+    /// Multi-level category label cache (`c:multiLvlStrRef` / `c:multiLvlStrLit`).
+    ///
+    /// Outer index = level, inner index = point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multi_cache: Option<Vec<Vec<String>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

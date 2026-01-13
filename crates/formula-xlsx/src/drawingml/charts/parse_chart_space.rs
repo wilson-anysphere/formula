@@ -670,6 +670,28 @@ fn parse_series_text_data(
     diagnostics: &mut Vec<ChartDiagnostic>,
     context: &str,
 ) -> Option<SeriesTextData> {
+    if let Some(multi_lvl_str_ref) = data_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "multiLvlStrRef")
+    {
+        return Some(parse_multi_lvl_str_ref(
+            multi_lvl_str_ref,
+            diagnostics,
+            context,
+        ));
+    }
+
+    if let Some(multi_lvl_str_lit) = data_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "multiLvlStrLit")
+    {
+        return Some(parse_multi_lvl_str_lit(
+            multi_lvl_str_lit,
+            diagnostics,
+            context,
+        ));
+    }
+
     if let Some(str_ref) = data_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "strRef")
@@ -692,10 +714,73 @@ fn parse_series_text_data(
         return Some(SeriesTextData {
             formula: num.formula,
             cache,
+            multi_cache: None,
         });
     }
 
     None
+}
+
+fn parse_multi_lvl_str_ref(
+    multi_lvl_str_ref_node: Node<'_, '_>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> SeriesTextData {
+    let formula = descendant_text(multi_lvl_str_ref_node, "f").map(str::to_string);
+    let multi_cache = multi_lvl_str_ref_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "multiLvlStrCache")
+        .and_then(|cache| parse_multi_lvl_str_cache(cache, diagnostics, context));
+
+    SeriesTextData {
+        formula,
+        cache: None,
+        multi_cache,
+    }
+}
+
+fn parse_multi_lvl_str_lit(
+    multi_lvl_str_lit_node: Node<'_, '_>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> SeriesTextData {
+    let multi_cache = parse_multi_lvl_str_cache(multi_lvl_str_lit_node, diagnostics, context);
+
+    SeriesTextData {
+        formula: None,
+        cache: None,
+        multi_cache,
+    }
+}
+
+fn parse_multi_lvl_str_cache(
+    cache_node: Node<'_, '_>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> Option<Vec<Vec<String>>> {
+    let mut levels = Vec::new();
+
+    for (lvl_idx, lvl) in cache_node
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "lvl")
+        .enumerate()
+    {
+        let lvl_context = format!("{context}: multi-level label lvl[{lvl_idx}]");
+        let values = lvl
+            .children()
+            .find(|n| n.is_element() && n.tag_name().name() == "strCache")
+            .and_then(|cache| parse_str_cache(cache, diagnostics, &lvl_context))
+            .or_else(|| parse_str_cache(lvl, diagnostics, &lvl_context));
+        if let Some(values) = values {
+            levels.push(values);
+        }
+    }
+
+    if levels.is_empty() {
+        None
+    } else {
+        Some(levels)
+    }
 }
 
 fn parse_series_number_data(
@@ -750,7 +835,11 @@ fn parse_str_ref(
         .find(|n| n.is_element() && n.tag_name().name() == "strCache")
         .and_then(|cache| parse_str_cache(cache, diagnostics, context));
 
-    SeriesTextData { formula, cache }
+    SeriesTextData {
+        formula,
+        cache,
+        multi_cache: None,
+    }
 }
 
 fn parse_num_ref(
