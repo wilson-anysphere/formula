@@ -193,12 +193,13 @@ export class CollabVersioning {
   }
 
   /**
-   * Stops auto snapshot timers created by {@link VersionManager}.
+   * Stops auto snapshot timers created by {@link VersionManager} and removes
+   * its document update listeners.
    *
    * This does not destroy the underlying CollabSession or VersionStore.
    */
   destroy(): void {
-    this.manager.stopAutoSnapshot();
+    this.manager.destroy();
   }
 
   listVersions(): Promise<VersionRecord[]> {

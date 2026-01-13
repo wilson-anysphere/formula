@@ -193,8 +193,13 @@ export class VersionManager extends SimpleEventEmitter {
     this.dirty = false;
     this._timer = null;
     this._autoSnapshotInFlight = false;
+    this._destroyed = false;
     /** @type {Promise<void>} */
     this._pruneChain = Promise.resolve();
+    /** @type {null | (() => void)} */
+    this._unsubscribeDocUpdates = null;
+    /** @type {null | (() => void)} */
+    this._docUpdateListener = null;
     this.retention = opts.retention
       ? {
           maxSnapshots: opts.retention.maxSnapshots,
@@ -206,9 +211,14 @@ export class VersionManager extends SimpleEventEmitter {
 
     // Mark dirty on any document update.
     if (this.doc?.on) {
-      this.doc.on("update", () => {
+      const onUpdate = () => {
         this.markDirty();
-      });
+      };
+      this._docUpdateListener = onUpdate;
+      const maybeUnsubscribe = this.doc.on("update", onUpdate);
+      if (typeof maybeUnsubscribe === "function") {
+        this._unsubscribeDocUpdates = maybeUnsubscribe;
+      }
     }
 
     if (opts.autoStart ?? true) {
@@ -217,7 +227,31 @@ export class VersionManager extends SimpleEventEmitter {
   }
 
   markDirty() {
+    if (this._destroyed) return;
     this.dirty = true;
+  }
+
+  destroy() {
+    if (this._destroyed) return;
+    this._destroyed = true;
+    this.stopAutoSnapshot();
+    const unsubscribe = this._unsubscribeDocUpdates;
+    this._unsubscribeDocUpdates = null;
+    if (typeof unsubscribe === "function") {
+      try {
+        unsubscribe();
+      } catch {
+        // ignore
+      }
+    } else if (this.doc && typeof this.doc.off === "function" && this._docUpdateListener) {
+      try {
+        this.doc.off("update", this._docUpdateListener);
+      } catch {
+        // ignore
+      }
+    }
+    this._docUpdateListener = null;
+    this.removeAllListeners();
   }
 
   /**

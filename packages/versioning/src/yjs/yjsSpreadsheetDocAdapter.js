@@ -652,11 +652,12 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
         throw new Error(`Unsupported event: ${event}`);
       }
       if (!excludedRoots || excludedRoots.size === 0) {
-        doc.on("update", () => listener());
-        return;
+        const wrappedListener = () => listener();
+        doc.on("update", wrappedListener);
+        return () => doc.off("update", wrappedListener);
       }
 
-      doc.on("update", (_update, _origin, _doc, transaction) => {
+      const wrappedListener = (_update, _origin, _doc, transaction) => {
         // We only want to surface changes that touch non-excluded roots.
         // When using YjsVersionStore the version-history itself lives inside the
         // same Y.Doc. Without this filter, saving/pruning versions would mark the
@@ -682,7 +683,9 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
             return;
           }
         }
-      });
+      };
+      doc.on("update", wrappedListener);
+      return () => doc.off("update", wrappedListener);
     },
   };
 }
