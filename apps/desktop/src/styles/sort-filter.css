@@ -39,6 +39,11 @@
   margin: 0;
 }
 
+.formula-sort-filter__checkbox:focus-visible {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
+}
+
 .formula-sort-filter__button {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -108,6 +113,18 @@
 .formula-sort-filter__row:focus-within {
   outline: 2px solid var(--selection-border);
   outline-offset: 2px;
+}
+
+/* Prefer focus-visible row styling when supported, but keep `:focus-within` as a fallback. */
+@supports selector(:has(*)) {
+  .formula-sort-filter__row:focus-within {
+    outline: none;
+  }
+
+  .formula-sort-filter__row:has(:focus-visible) {
+    outline: 2px solid var(--selection-border);
+    outline-offset: 2px;
+  }
 }
 
 /* --- FilterDropdown ------------------------------------------------------- */
@@ -207,4 +224,3 @@
   padding: 6px;
   border-top: 1px solid var(--border);
 }
-
