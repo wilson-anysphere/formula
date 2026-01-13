@@ -87,6 +87,10 @@ export class CursorTabCompletionClient {
         headers,
         // Cursor authentication is handled by the session (cookies). When the
         // backend is cross-origin, this requires CORS support + credentials.
+        //
+        // Some environments (e.g. desktop wrappers, servers) may not have access
+        // to session cookies; callers can instead supply `getAuthHeaders()` to
+        // provide Cursor-managed auth headers.
         credentials: "include",
         body: JSON.stringify({ input, cursorPosition, cellA1 }),
         signal: controller.signal,

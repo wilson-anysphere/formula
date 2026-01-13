@@ -53,7 +53,7 @@ export class TabCompletionEngine {
    * @param {{
    *   functionRegistry?: FunctionRegistry,
    *   parsePartialFormula?: typeof parsePartialFormulaFallback | ((input: string, cursorPosition: number, functionRegistry: FunctionRegistry) => any | Promise<any>),
-   *   completionClient?: { completeTabCompletion: (req: { input: string, cursorPosition: number, cellA1: string }) => Promise<string> } | null,
+   *   completionClient?: { completeTabCompletion: (req: { input: string, cursorPosition: number, cellA1: string, signal?: AbortSignal }) => Promise<string> } | null,
    *   schemaProvider?: SchemaProvider | null,
    *   cache?: LRUCache,
    *   cacheSize?: number,
