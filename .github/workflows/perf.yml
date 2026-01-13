@@ -266,7 +266,7 @@ jobs:
         if: always() && steps.desktop_bench.outputs.run == 'true' && steps.build_desktop_binary.outcome == 'success'
         # Informational by default. To turn this into a gate, set the repo variable
         # `FORMULA_ENFORCE_DESKTOP_BINARY_SIZE=1` (and a `FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB` budget).
-        continue-on-error: ${{ vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE != '1' }}
+        continue-on-error: ${{ !(vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == '1' || vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == 'true' || vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == 'yes' || vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == 'on') }}
         env:
           FORMULA_ENFORCE_DESKTOP_BINARY_SIZE: ${{ vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE }}
           FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB }}
