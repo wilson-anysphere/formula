@@ -146,7 +146,17 @@ jobs:
       - name: Check formula-wasm builds for wasm32
         run: cargo check -p formula-wasm --target wasm32-unknown-unknown --all-targets --locked
 
+      - name: Cache wasm-pack binary
+        id: wasm-pack-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/wasm-pack
+          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
+          restore-keys: |
+            wasm-pack-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install wasm-pack
+        if: steps.wasm-pack-cache.outputs.cache-hit != 'true'
         # Pinned to match the tagged release workflow so CI catches WASM toolchain
         # incompatibilities before we cut a release.
         run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked
