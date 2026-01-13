@@ -1,8 +1,8 @@
 import { test } from "vitest";
 import * as ts from "typescript";
-import { readFile } from "node:fs/promises";
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 function formatDiagnostics(diagnostics: readonly ts.Diagnostic[]) {
   return ts.formatDiagnosticsWithColorAndContext(diagnostics, {
@@ -129,26 +129,44 @@ test("ai-rag index exports match index.d.ts (API surface consistency)", async ()
 });
 
 test("ai-rag module exports match adjacent .d.ts files", async () => {
-  const modules: Array<{ js: string; dts: string }> = [
-    { js: "../src/pipeline/indexWorkbook.js", dts: "../src/pipeline/indexWorkbook.d.ts" },
-    { js: "../src/workbook/chunkWorkbook.js", dts: "../src/workbook/chunkWorkbook.d.ts" },
-    { js: "../src/workbook/chunkToText.js", dts: "../src/workbook/chunkToText.d.ts" },
-    { js: "../src/store/binaryStorage.js", dts: "../src/store/binaryStorage.d.ts" },
-    { js: "../src/store/inMemoryVectorStore.js", dts: "../src/store/inMemoryVectorStore.d.ts" },
-    { js: "../src/store/jsonVectorStore.js", dts: "../src/store/jsonVectorStore.d.ts" },
-    { js: "../src/store/sqliteVectorStore.js", dts: "../src/store/sqliteVectorStore.d.ts" },
-  ];
+  const srcDir = fileURLToPath(new URL("../src/", import.meta.url));
 
-  for (const { js, dts } of modules) {
-    const runtimeModule = await import(js);
+  async function collectDtsFiles(dir: string): Promise<string[]> {
+    const out: string[] = [];
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        out.push(...(await collectDtsFiles(fullPath)));
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith(".d.ts")) continue;
+      out.push(fullPath);
+    }
+    return out;
+  }
+
+  const dtsFiles = await collectDtsFiles(srcDir);
+  for (const dtsPath of dtsFiles) {
+    const jsPath = dtsPath.slice(0, -".d.ts".length) + ".js";
+    try {
+      const jsStats = await stat(jsPath);
+      if (!jsStats.isFile()) continue;
+    } catch {
+      // Ignore declaration files that don't have an adjacent runtime module.
+      continue;
+    }
+
+    const runtimeModule = await import(pathToFileURL(jsPath).href);
     const runtimeExports = Object.keys(runtimeModule).filter((key) => key !== "default");
 
-    const dtsPath = fileURLToPath(new URL(dts, import.meta.url));
     const dtsText = await readFile(dtsPath, "utf8");
     const dtsSource = ts.createSourceFile(dtsPath, dtsText, ts.ScriptTarget.Latest, true);
     const declaredExports = collectNamedExports(dtsSource);
 
-    assertSameSet(`${js} exports`, runtimeExports, declaredExports);
+    const label = relative(srcDir, jsPath).split("\\").join("/");
+    assertSameSet(`${label} exports`, runtimeExports, declaredExports);
   }
 });
 
