@@ -360,8 +360,17 @@ jobs:
           # - target/release/bundle/dmg/*.dmg
           # - target/release/bundle/macos/*.app
           # - target/<triple>/release/bundle/... (when building for non-host targets)
-          mapfile -t dmgs < <(find target -type f -path "*/release/bundle/*/*.dmg" -print | sort)
-          mapfile -t apps < <(find target -type d -path "*/release/bundle/*/*.app" -print | sort)
+          # Avoid bash `mapfile` (not available on macOS's system bash 3.x).
+          dmgs=()
+          while IFS= read -r -d '' dmg; do
+            dmgs+=("$dmg")
+          done < <(find target -type f -path "*/release/bundle/*/*.dmg" -print0)
+
+          # Prune at the first matching .app so we don't accidentally validate nested helper apps.
+          apps=()
+          while IFS= read -r -d '' app; do
+            apps+=("$app")
+          done < <(find target -type d -path "*/release/bundle/*/*.app" -prune -print0)
 
           if [[ ${#dmgs[@]} -eq 0 && ${#apps[@]} -eq 0 ]]; then
             echo "::error::No macOS bundle artifacts (.dmg or .app) were found under target/**/release/bundle/**."
@@ -437,7 +446,10 @@ jobs:
             echo "::group::No standalone .app found; validating the .app inside DMG: $dmg"
 
             if hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir" >/dev/null; then
-              mapfile -t mounted_apps < <(find "$mount_dir" -maxdepth 2 -type d -name "*.app" -print | sort)
+              mounted_apps=()
+              while IFS= read -r -d '' app; do
+                mounted_apps+=("$app")
+              done < <(find "$mount_dir" -type d -name "*.app" -prune -print0)
               if [[ ${#mounted_apps[@]} -eq 0 ]]; then
                 echo "::error::Mounted DMG but did not find a .app bundle inside: $dmg"
                 fail=1
