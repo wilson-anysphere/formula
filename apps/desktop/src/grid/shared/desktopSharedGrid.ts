@@ -299,6 +299,7 @@ export class DesktopSharedGrid {
       this.renderer.subscribeViewport(
         () => {
           this.syncScrollbars();
+          this.emitScroll();
         },
         { animationFrame: true }
       )

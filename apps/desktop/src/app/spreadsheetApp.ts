@@ -4116,10 +4116,6 @@ export class SpreadsheetApp {
     }
 
     this.sharedGrid.renderer.applyAxisSizeOverrides({ rows: rowSizes, cols: colSizes }, { resetUnspecified: true });
-    // Axis size changes can affect the scrollable content size (max scroll, scrollbar thumb size)
-    // without changing the current scroll offsets. Force the DesktopSharedGrid scrollbars to
-    // re-measure so the thumb reflects the updated total size.
-    this.sharedGrid.scrollBy(0, 0);
   }
 
   freezePanes(): void {
@@ -5587,9 +5583,6 @@ export class SpreadsheetApp {
         if (isDefault) renderer.resetRowHeight(change.index);
         else renderer.setRowHeight(change.index, prev);
       }
-
-      // Force a scrollbar + overlay sync after restoring the axis size.
-      this.sharedGrid.scrollBy(0, 0);
 
       // Restore focus to the active editing surface so the user can continue typing.
       // In read-only mode there should be no active editor, but keep the defensive
