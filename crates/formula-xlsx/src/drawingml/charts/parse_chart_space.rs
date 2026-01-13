@@ -44,6 +44,8 @@ pub fn parse_chart_space(
     let mut diagnostics = Vec::new();
 
     let chart_space = doc.root_element();
+    let style_id = child_attr(chart_space, "style", "val").and_then(|v| v.parse::<u32>().ok());
+    let rounded_corners = child_attr(chart_space, "roundedCorners", "val").map(parse_ooxml_bool);
     let chart_area_style = chart_space
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "spPr")
@@ -75,6 +77,9 @@ pub fn parse_chart_space(
             ChartSpaceParseError::XmlStructure(format!("{part_name}: missing <c:chart>"))
         })?;
 
+    let disp_blanks_as = child_attr(chart_node, "dispBlanksAs", "val").map(str::to_string);
+    let plot_vis_only = child_attr(chart_node, "plotVisOnly", "val").map(parse_ooxml_bool);
+
     let title = parse_title(chart_node, &mut diagnostics);
     let legend = parse_legend(chart_node, &mut diagnostics);
 
@@ -94,6 +99,10 @@ pub fn parse_chart_space(
             },
             axes: Vec::new(),
             series: Vec::new(),
+            style_id,
+            rounded_corners,
+            disp_blanks_as,
+            plot_vis_only,
             chart_area_style,
             plot_area_style: None,
             diagnostics,
@@ -115,6 +124,10 @@ pub fn parse_chart_space(
         plot_area,
         axes,
         series,
+        style_id,
+        rounded_corners,
+        disp_blanks_as,
+        plot_vis_only,
         chart_area_style,
         plot_area_style,
         diagnostics,

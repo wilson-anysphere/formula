@@ -79,6 +79,7 @@
         "yValues": null
       }
     ],
+    "plotVisOnly": true,
     "diagnostics": []
   }
 }

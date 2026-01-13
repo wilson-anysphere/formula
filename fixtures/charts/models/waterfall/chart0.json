@@ -117,6 +117,7 @@
         ]
       }
     ],
+    "plotVisOnly": true,
     "diagnostics": [
       {
         "level": "warning",

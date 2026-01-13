@@ -66,6 +66,8 @@
         "yValues": null
       }
     ],
+    "dispBlanksAs": "zero",
+    "plotVisOnly": true,
     "diagnostics": []
   }
 }

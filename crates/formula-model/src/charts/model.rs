@@ -13,6 +13,18 @@ pub struct ChartModel {
     pub plot_area: PlotAreaModel,
     pub axes: Vec<AxisModel>,
     pub series: Vec<SeriesModel>,
+    /// Built-in chart style index (`c:chartSpace/c:style/@val`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style_id: Option<u32>,
+    /// Whether rounded corners are enabled (`c:chartSpace/c:roundedCorners/@val`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rounded_corners: Option<bool>,
+    /// How to display blanks (`c:chart/c:dispBlanksAs/@val`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disp_blanks_as: Option<String>,
+    /// Whether only visible cells are plotted (`c:chart/c:plotVisOnly/@val`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plot_vis_only: Option<bool>,
     /// Chart area shape properties (`c:chartSpace/c:spPr`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chart_area_style: Option<ShapeStyle>,
