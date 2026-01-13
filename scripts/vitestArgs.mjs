@@ -12,15 +12,9 @@
  * @returns {string[]}
  */
 export function normalizeVitestArgs(rawArgs) {
-  let args = rawArgs.slice();
-  // Strip only the first occurrence so callers can still pass a literal `--` later
-  // if they really need to.
-  const delimiterIdx = args.indexOf("--");
-  if (delimiterIdx >= 0) {
-    args = [...args.slice(0, delimiterIdx), ...args.slice(delimiterIdx + 1)];
-  }
-
-  return args.map((arg) => {
+  // pnpm forwards `--` delimiters to scripts verbatim. Strip all bare `--`
+  // tokens so Vitest doesn't treat them as test patterns.
+  return rawArgs.filter((arg) => arg !== "--").map((arg) => {
     if (arg === "--silent") return "--silent=true";
     return arg;
   });

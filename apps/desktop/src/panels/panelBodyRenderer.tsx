@@ -405,7 +405,11 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
         return;
       }
       makeBodyFillAvailableHeight(body);
-      renderReactPanel(panelId, body, <CollabVersionHistoryPanel session={session} />);
+      renderReactPanel(
+        panelId,
+        body,
+        <CollabVersionHistoryPanel session={session} sheetNameResolver={options.sheetNameResolver ?? null} />,
+      );
       return;
     }
 

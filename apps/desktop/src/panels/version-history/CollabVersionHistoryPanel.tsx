@@ -3,9 +3,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import type { CollabSession } from "@formula/collab-session";
 
 import { buildVersionHistoryItems } from "./VersionHistoryPanel.js";
+import { VersionHistoryCompareSection } from "./VersionHistoryCompare.js";
 import { t, tWithVars } from "../../i18n/index.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
 import { useReservedRootGuardError } from "../collabReservedRootGuard.js";
+import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 
 function formatVersionTimestamp(timestampMs: number): string {
   try {
@@ -15,7 +17,13 @@ function formatVersionTimestamp(timestampMs: number): string {
   }
 }
 
-export function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
+export function CollabVersionHistoryPanel({
+  session,
+  sheetNameResolver = null,
+}: {
+  session: CollabSession;
+  sheetNameResolver?: SheetNameResolver | null;
+}) {
   const reservedRootGuardError = useReservedRootGuardError((session as any)?.provider ?? null);
   const mutationsDisabled = Boolean(reservedRootGuardError);
 
@@ -24,7 +32,6 @@ export function CollabVersionHistoryPanel({ session }: { session: CollabSession 
       {reservedRootGuardError}
     </div>
   ) : null;
-
   // `@formula/collab-versioning` depends on the core versioning subsystem, which can pull in
   // Node-only modules (e.g. `node:events`). Avoid importing it at desktop shell startup so
   // split-view/grid e2e can boot without requiring those polyfills; load it lazily when the
@@ -357,6 +364,13 @@ export function CollabVersionHistoryPanel({ session }: { session: CollabSession 
           ) : null}
         </div>
       ) : null}
+
+      <VersionHistoryCompareSection
+        versionId={selectedId}
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        versionManager={(collabVersioning as any)?.manager ?? null}
+        sheetNameResolver={sheetNameResolver}
+      />
     </div>
   );
 }

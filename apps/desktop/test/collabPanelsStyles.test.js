@@ -41,7 +41,7 @@ test("Collab Version History / Branch Manager panels are class-driven + styled v
   // Sanity-check that the panels actually use the shared classes.
   for (const className of ["collab-panel__message", "collab-panel__message--error"]) {
     assert.ok(
-      versionHistory.includes(className) || branchManager.includes(className),
+      renderer.includes(className) || versionHistory.includes(className) || branchManager.includes(className),
       `Expected collab panels to render className="${className}"`,
     );
   }

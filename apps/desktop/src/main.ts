@@ -8608,6 +8608,27 @@ function handleRibbonCommand(commandId: string): void {
         armFormatPainter();
         return;
 
+      case "view.appearance.theme.system":
+        themeController.setThemePreference("system");
+        scheduleRibbonSelectionFormatStateUpdate();
+        app.focus();
+        return;
+      case "view.appearance.theme.light":
+        themeController.setThemePreference("light");
+        scheduleRibbonSelectionFormatStateUpdate();
+        app.focus();
+        return;
+      case "view.appearance.theme.dark":
+        themeController.setThemePreference("dark");
+        scheduleRibbonSelectionFormatStateUpdate();
+        app.focus();
+        return;
+      case "view.appearance.theme.highContrast":
+        themeController.setThemePreference("high-contrast");
+        scheduleRibbonSelectionFormatStateUpdate();
+        app.focus();
+        return;
+
       case "view.macros.viewMacros":
       case "view.macros.viewMacros.run":
       case "view.macros.viewMacros.edit":

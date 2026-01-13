@@ -5,7 +5,6 @@
  * We keep parsing lightweight and cache results since these helpers can be
  * called frequently while rendering.
  */
-
 /**
  * Returns true when the raw DrawingML payload contains a `graphicFrame` element.
  *

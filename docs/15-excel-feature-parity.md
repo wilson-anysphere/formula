@@ -98,11 +98,11 @@ pnpm -w run report:function-parity -- --update-doc
 ```text
 Function parity report (catalog ↔ BIFF FTAB)
 
-Catalog functions (shared/functionCatalog.json): 472
+Catalog functions (shared/functionCatalog.json): 495
 FTAB functions (crates/formula-biff/src/ftab.rs): 478
-Catalog ∩ FTAB (case-insensitive name match): 342
-FTAB \ Catalog (missing from catalog): 136
-Catalog \ FTAB (not present in FTAB): 130
+Catalog ∩ FTAB (case-insensitive name match): 357
+FTAB \ Catalog (missing from catalog): 121
+Catalog \ FTAB (not present in FTAB): 138
 ```
 <!-- END GENERATED: report-function-parity -->
 

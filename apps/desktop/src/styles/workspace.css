@@ -455,6 +455,209 @@
   color: var(--text-primary);
 }
 
+.collab-version-history__compare {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.collab-version-history__compare-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.collab-version-history__compare-title {
+  margin: 0;
+  font-size: 14px;
+}
+
+.collab-version-history__compare-loading,
+.collab-version-history__compare-empty {
+  color: var(--text-secondary);
+}
+
+.collab-version-history__compare-error {
+  color: var(--error);
+}
+
+.collab-version-history__compare-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.collab-version-history__compare-summary-label {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.collab-version-history__compare-summary-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.collab-version-history__compare-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.collab-version-history__compare-badge--added {
+  border-color: var(--success);
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.collab-version-history__compare-badge--removed {
+  border-color: var(--error);
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.collab-version-history__compare-badge--modified {
+  border-color: var(--warning);
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.collab-version-history__compare-badge--moved {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.collab-version-history__compare-badge--format {
+  border-color: var(--border);
+  background: var(--bg-inset);
+  color: var(--text-secondary);
+}
+
+.collab-version-history__compare-controls {
+  margin-bottom: 10px;
+}
+
+.collab-version-history__compare-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.collab-version-history__compare-select {
+  min-width: 0;
+}
+
+.collab-version-history__diff-group {
+  margin-bottom: 12px;
+}
+
+.collab-version-history__diff-group-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.collab-version-history__diff-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  margin-bottom: 6px;
+  background: var(--bg-primary);
+}
+
+.collab-version-history__diff-row--added {
+  border-color: var(--success);
+  background: var(--success-bg);
+}
+
+.collab-version-history__diff-row--removed {
+  border-color: var(--error);
+  background: var(--error-bg);
+}
+
+.collab-version-history__diff-row--modified {
+  border-color: var(--warning);
+  background: var(--warning-bg);
+}
+
+.collab-version-history__diff-row--moved {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+.collab-version-history__diff-row--format {
+  border-color: var(--border);
+  background: var(--bg-inset);
+}
+
+.collab-version-history__diff-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.collab-version-history__diff-cell-ref {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.collab-version-history__diff-row-values {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.collab-version-history__diff-row-label {
+  color: var(--text-secondary);
+}
+
+.collab-version-history__diff-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  word-break: break-word;
+}
+
+.collab-version-history__formula-diff {
+  margin-top: 6px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.collab-version-history__formula-op--insert {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.collab-version-history__formula-op--delete {
+  background: var(--error-bg);
+  color: var(--error);
+  text-decoration: line-through;
+}
+
+.collab-version-history__sheet-diff-empty {
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
 .branch-manager {
   flex: 1;
   min-height: 0;
