@@ -3592,6 +3592,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn catch_calamine_panic_with_context_prefixes_message() {
+        let err = catch_calamine_panic_with_context("some context", || panic!("boom"))
+            .expect_err("expected panic to be converted to ImportError");
+        let ImportError::CalaminePanic(message) = err else {
+            panic!("unexpected error variant: {err:?}");
+        };
+        assert!(
+            message.contains("some context"),
+            "expected context prefix in message, got: {message}"
+        );
+        assert!(
+            message.contains("boom"),
+            "expected panic payload in message, got: {message}"
+        );
+    }
+
     fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&(data.len() as u16).to_le_bytes());

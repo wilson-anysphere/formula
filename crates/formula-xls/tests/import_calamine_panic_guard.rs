@@ -35,9 +35,18 @@ fn import_without_biff_never_panics_on_calamine_panic() {
 
     let result = result.unwrap();
     if calamine_panicked {
+        let Err(formula_xls::ImportError::CalaminePanic(message)) = result else {
+            panic!("expected CalaminePanic error when calamine panics, got: {result:?}");
+        };
+        // The importer should attach some context about what it was doing when the panic occurred.
         assert!(
-            matches!(result, Err(formula_xls::ImportError::CalaminePanic(_))),
-            "expected CalaminePanic error when calamine panics, got: {result:?}"
+            message.contains("opening `.xls` via calamine")
+                || message.contains("reading sheet metadata")
+                || message.contains("reading defined names")
+                || message.contains("reading cell values")
+                || message.contains("reading formulas")
+                || message.contains("reading merged cells"),
+            "expected contextual CalaminePanic message, got: {message}"
         );
     }
 }
