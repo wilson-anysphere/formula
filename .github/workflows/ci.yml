@@ -136,6 +136,9 @@ jobs:
       - name: Check formula-vba builds for wasm32
         run: cargo check -p formula-vba --target wasm32-unknown-unknown --all-targets --locked
 
+      - name: Check formula-offcrypto builds for wasm32
+        run: cargo check -p formula-offcrypto --target wasm32-unknown-unknown --all-targets --locked
+
       - name: Check formula-wasm builds for wasm32
         run: cargo check -p formula-wasm --target wasm32-unknown-unknown --all-targets --locked
 
