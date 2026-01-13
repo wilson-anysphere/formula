@@ -1,4 +1,4 @@
-# Compatibility corpus ("real-world XLSX zoo")
+# Compatibility corpus ("real-world XLSX/XLSB zoo")
 
 ## Why this exists
 
@@ -307,7 +307,7 @@ python -m tools.corpus.promote_public \
 ```
 
 The command:
-1) writes `tools/corpus/public/<name>.xlsx.b64`,
+1) writes `tools/corpus/public/<name>.(xlsx|xlsm|xlsb).b64`,
 2) runs triage on the resulting bytes, and
 3) updates `tools/corpus/public/expectations.json` (refusing to overwrite unless `--force` is passed).
 
