@@ -19,6 +19,44 @@ function readableStreamFromChunks(chunks: string[]): ReadableStream<Uint8Array> 
 }
 
 describe("CursorLLMClient.streamChat", () => {
+  it("aborts the underlying request when the consumer stops iterating early", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    let cancelCalled = false;
+    const encoder = new TextEncoder();
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode('data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":null}]}\n\n'),
+        );
+        // Keep the stream open so early-cancel cleanup must trigger cancellation.
+      },
+      cancel() {
+        cancelCalled = true;
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: any) => {
+        capturedSignal = init.signal;
+        return new Response(stream, { status: 200 });
+      }) as any,
+    );
+
+    const client = new CursorLLMClient({ baseUrl: "https://example.com", timeoutMs: 1_000, model: "gpt-test" });
+
+    const events: ChatStreamEvent[] = [];
+    for await (const event of client.streamChat({ messages: [{ role: "user", content: "hi" }] as any })) {
+      events.push(event);
+      break;
+    }
+
+    expect(events).toEqual([{ type: "text", delta: "Hi" }]);
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(cancelCalled).toBe(true);
+  });
+
   it("emits text + tool call deltas from SSE chunks", async () => {
     const chunks = [
       // Split the first SSE frame across chunks to ensure buffering works.
@@ -47,6 +85,53 @@ describe("CursorLLMClient.streamChat", () => {
       { type: "tool_call_delta", id: "call_1", delta: 'A1"}' },
       { type: "tool_call_end", id: "call_1" },
       { type: "done", usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 } },
+    ]);
+  });
+
+  it("ignores non-JSON heartbeat frames like `data: ping`", async () => {
+    const chunks = [
+      'data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":null}]}\n\n',
+      "data: ping\n\n",
+      'data: {"choices":[{"delta":{"content":" there"},"finish_reason":null}]}\n\n',
+      "data: [DONE]\n\n",
+    ];
+
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(readableStreamFromChunks(chunks), { status: 200 })) as any);
+
+    const client = new CursorLLMClient({ baseUrl: "https://example.com", timeoutMs: 1_000, model: "gpt-test" });
+
+    const events: ChatStreamEvent[] = [];
+    for await (const event of client.streamChat({ messages: [{ role: "user", content: "hi" }] as any })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "text", delta: "Hi" },
+      { type: "text", delta: " there" },
+      { type: "done" },
+    ]);
+  });
+
+  it("processes a trailing SSE frame when the stream ends without `\\n\\n`", async () => {
+    const chunks = [
+      'data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":null}]}\n\n',
+      // Missing the terminating blank line and no [DONE] frame.
+      'data: {"choices":[{"delta":{"content":"!"},"finish_reason":null}]}',
+    ];
+
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(readableStreamFromChunks(chunks), { status: 200 })) as any);
+
+    const client = new CursorLLMClient({ baseUrl: "https://example.com", timeoutMs: 1_000, model: "gpt-test" });
+
+    const events: ChatStreamEvent[] = [];
+    for await (const event of client.streamChat({ messages: [{ role: "user", content: "hi" }] as any })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "text", delta: "Hi" },
+      { type: "text", delta: "!" },
+      { type: "done" },
     ]);
   });
 
@@ -318,4 +403,3 @@ describe("CursorLLMClient.streamChat", () => {
     ]);
   });
 });
-

@@ -307,9 +307,14 @@ export class CursorLLMClient {
     const controller = new AbortController();
     const removeRequestAbortListener = forwardAbortSignal(request?.signal, controller);
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    /** @type {ReadableStreamDefaultReader<Uint8Array> | null} */
+    let reader = null;
+    let finishedNaturally = false;
 
     try {
       const headers = await this._resolveHeaders();
+      // Hint to proxies/backends that we expect SSE framing.
+      if (!("Accept" in headers)) headers.Accept = "text/event-stream";
 
       const requestBody = {
         model: request.model ?? this.model,
@@ -350,7 +355,7 @@ export class CursorLLMClient {
         }
       }
 
-      const reader = response.body?.getReader();
+      reader = response.body?.getReader() ?? null;
       if (!reader) {
         const full = await this.chat({ ...request, signal: controller.signal });
         const text = full.message.content ?? "";
@@ -371,6 +376,7 @@ export class CursorLLMClient {
                   : undefined,
             }
           : undefined;
+        finishedNaturally = true;
         yield usage ? { type: "done", usage } : { type: "done" };
         return;
       }
@@ -448,6 +454,105 @@ export class CursorLLMClient {
         }
       }
 
+      /**
+       * @param {string} part
+       * @returns {string | null}
+       */
+      function extractDataFromSsePart(part) {
+        const lines = part.split(/\r?\n/);
+        const dataLines = [];
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          dataLines.push(line.slice("data:".length).trimStart());
+        }
+        if (!dataLines.length) return null;
+        const data = dataLines.join("\n").trim();
+        if (!data) return null;
+        return data;
+      }
+
+      /**
+       * @param {string} data
+       * @returns {any | null}
+       */
+      function parseSseJsonData(data) {
+        const first = data[0];
+        // Cursor (and most OpenAI-compatible backends) only stream JSON objects.
+        // Ignore keep-alive/heartbeat frames like `data: ping`.
+        if (first !== "{" && first !== "[") return null;
+        try {
+          return JSON.parse(data);
+        } catch (error) {
+          const snippet = data.length > 200 ? `${data.slice(0, 200)}…` : data;
+          throw new Error(`Cursor streamChat SSE JSON parse error: ${snippet}`);
+        }
+      }
+
+      /**
+       * @param {any} json
+       */
+      function* handleStreamJson(json) {
+        if (json.usage && typeof json.usage === "object") {
+          usage = {
+            promptTokens: json.usage.prompt_tokens,
+            completionTokens: json.usage.completion_tokens,
+            totalTokens: json.usage.total_tokens,
+          };
+        }
+
+        const choice = json.choices?.[0];
+        const delta = choice?.delta;
+
+        const textDelta = delta?.content;
+        if (typeof textDelta === "string" && textDelta.length > 0) {
+          yield { type: "text", delta: textDelta };
+        }
+
+        const toolCalls = delta?.tool_calls;
+        if (Array.isArray(toolCalls)) {
+          for (const callDelta of toolCalls) {
+            const index = callDelta?.index;
+            if (typeof index !== "number") continue;
+
+            const state = toolCallsByIndex.get(index) ?? { started: false, pendingArgs: "", args: "" };
+            const idFromDelta = typeof callDelta?.id === "string" ? callDelta.id : null;
+            const nameFromDelta = typeof callDelta?.function?.name === "string" ? callDelta.function.name : null;
+            const argsFragment = typeof callDelta?.function?.arguments === "string" ? callDelta.function.arguments : null;
+
+            if (idFromDelta) state.id = idFromDelta;
+            if (nameFromDelta) state.name = nameFromDelta;
+
+            toolCallsByIndex.set(index, state);
+
+            if (argsFragment) {
+              // Best-effort diffing: tolerate backends that repeatedly send the
+              // full argument string instead of deltas.
+              let deltaArgs = argsFragment;
+              if (typeof state.args === "string" && argsFragment.startsWith(state.args)) {
+                deltaArgs = argsFragment.slice(state.args.length);
+                state.args = argsFragment;
+              } else {
+                state.args = (state.args ?? "") + argsFragment;
+              }
+
+              if (deltaArgs) {
+                if (state.id && state.started) {
+                  yield { type: "tool_call_delta", id: state.id, delta: deltaArgs };
+                } else {
+                  state.pendingArgs += deltaArgs;
+                }
+              }
+            }
+          }
+          for (const event of startToolCallsInOrder()) yield event;
+        }
+
+        if (typeof choice?.finish_reason === "string" && choice.finish_reason === "tool_calls") {
+          for (const event of flushPendingToolCalls()) yield event;
+          for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
+        }
+      }
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -457,92 +562,64 @@ export class CursorLLMClient {
         buffer = parts.pop() ?? "";
 
         for (const part of parts) {
-          const lines = part.split(/\r?\n/);
-          const dataLines = [];
-          for (const line of lines) {
-            if (!line.startsWith("data:")) continue;
-            dataLines.push(line.slice("data:".length).trimStart());
-          }
-          if (!dataLines.length) continue;
-          const data = dataLines.join("\n").trim();
+          const data = extractDataFromSsePart(part);
           if (!data) continue;
 
           if (data === "[DONE]") {
             for (const event of flushPendingToolCalls()) yield event;
             for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
+            finishedNaturally = true;
             yield usage ? { type: "done", usage } : { type: "done" };
             return;
           }
 
-          const json = JSON.parse(data);
-          if (json.usage && typeof json.usage === "object") {
-            usage = {
-              promptTokens: json.usage.prompt_tokens,
-              completionTokens: json.usage.completion_tokens,
-              totalTokens: json.usage.total_tokens,
-            };
-          }
-          const choice = json.choices?.[0];
-          const delta = choice?.delta;
+          const json = parseSseJsonData(data);
+          if (!json) continue;
+          for (const event of handleStreamJson(json)) yield event;
+        }
+      }
 
-          const textDelta = delta?.content;
-          if (typeof textDelta === "string" && textDelta.length > 0) {
-            yield { type: "text", delta: textDelta };
-          }
-
-          const toolCalls = delta?.tool_calls;
-          if (Array.isArray(toolCalls)) {
-            for (const callDelta of toolCalls) {
-              const index = callDelta?.index;
-              if (typeof index !== "number") continue;
-
-              const state = toolCallsByIndex.get(index) ?? { started: false, pendingArgs: "", args: "" };
-              const idFromDelta = typeof callDelta?.id === "string" ? callDelta.id : null;
-              const nameFromDelta = typeof callDelta?.function?.name === "string" ? callDelta.function.name : null;
-              const argsFragment =
-                typeof callDelta?.function?.arguments === "string" ? callDelta.function.arguments : null;
-
-              if (idFromDelta) state.id = idFromDelta;
-              if (nameFromDelta) state.name = nameFromDelta;
-
-              toolCallsByIndex.set(index, state);
-
-              if (argsFragment) {
-                // Best-effort diffing: tolerate backends that repeatedly send the
-                // full argument string instead of deltas.
-                let deltaArgs = argsFragment;
-                if (typeof state.args === "string" && argsFragment.startsWith(state.args)) {
-                  deltaArgs = argsFragment.slice(state.args.length);
-                  state.args = argsFragment;
-                } else {
-                  state.args = (state.args ?? "") + argsFragment;
-                }
-
-                if (deltaArgs) {
-                  if (state.id && state.started) {
-                    yield { type: "tool_call_delta", id: state.id, delta: deltaArgs };
-                  } else {
-                    state.pendingArgs += deltaArgs;
-                  }
-                }
-              }
-            }
-            for (const event of startToolCallsInOrder()) yield event;
-          }
-
-          if (typeof choice?.finish_reason === "string" && choice.finish_reason === "tool_calls") {
+      buffer += decoder.decode();
+      // Some backends close the HTTP stream without a trailing `\n\n`. Process any
+      // remaining buffered SSE frame instead of silently dropping it.
+      if (buffer.trim()) {
+        const data = extractDataFromSsePart(buffer);
+        if (data) {
+          if (data === "[DONE]") {
             for (const event of flushPendingToolCalls()) yield event;
             for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
+            finishedNaturally = true;
+            yield usage ? { type: "done", usage } : { type: "done" };
+            return;
+          }
+          const json = parseSseJsonData(data);
+          if (json) {
+            for (const event of handleStreamJson(json)) yield event;
           }
         }
       }
 
       for (const event of flushPendingToolCalls()) yield event;
       for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
+      finishedNaturally = true;
       yield usage ? { type: "done", usage } : { type: "done" };
     } finally {
       clearTimeout(timeout);
       removeRequestAbortListener?.();
+      if (!finishedNaturally) {
+        try {
+          controller.abort();
+        } catch {
+          // ignore
+        }
+        if (reader) {
+          try {
+            await reader.cancel();
+          } catch {
+            // ignore
+          }
+        }
+      }
     }
   }
 }
