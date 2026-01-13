@@ -38,7 +38,7 @@ concurrency:
   # dispatch runs for a given tag can't overlap with the corresponding tag push run.
   # NOTE: `github.event.inputs.*` may be empty/undefined for optional inputs, so guard `startsWith`
   # with truthy checks to avoid evaluation errors.
-  group: desktop-release-${{ github.event_name == 'workflow_dispatch' && ((github.event.inputs.tag && (startsWith(github.event.inputs.tag, 'v') && github.event.inputs.tag || format('v{0}', github.event.inputs.tag))) || (github.event.inputs.version && (startsWith(github.event.inputs.version, 'v') && github.event.inputs.version || format('v{0}', github.event.inputs.version))) || github.ref_name) || github.ref_name }}
+  group: desktop-release-${{ github.event_name == 'workflow_dispatch' && ((github.event.inputs.tag && (startsWith(github.event.inputs.tag, 'refs/tags/') && github.event.inputs.tag || (startsWith(github.event.inputs.tag, 'v') && format('refs/tags/{0}', github.event.inputs.tag) || format('refs/tags/v{0}', github.event.inputs.tag)))) || (github.event.inputs.version && (startsWith(github.event.inputs.version, 'refs/tags/') && github.event.inputs.version || (startsWith(github.event.inputs.version, 'v') && format('refs/tags/{0}', github.event.inputs.version) || format('refs/tags/v{0}', github.event.inputs.version)))) || github.ref) || github.ref }}
   # Queue (don't cancel) subsequent runs so each tag's release assets are written
   # atomically by a single workflow run.
   cancel-in-progress: false
