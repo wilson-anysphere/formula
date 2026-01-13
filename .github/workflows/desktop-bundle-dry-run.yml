@@ -135,10 +135,6 @@ jobs:
       - name: Install wasm-pack (required for @formula/engine WASM build)
         run: cargo install wasm-pack --locked
 
-      - name: Smoke check packaged cross-origin isolation (COOP/COEP)
-        if: matrix.platform == 'ubuntu-24.04'
-        run: pnpm -C apps/desktop check:coi
-
       - name: Build desktop bundles (dry run, signing disabled)
         if: ${{ !inputs.enableSigning }}
         uses: tauri-apps/tauri-action@v0
@@ -169,6 +165,10 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         with:
           projectPath: apps/desktop
+
+      - name: Smoke check packaged cross-origin isolation (COOP/COEP)
+        if: matrix.platform == 'ubuntu-24.04'
+        run: pnpm -C apps/desktop check:coi -- --no-build
 
       - name: Validate Linux bundles (AppImage/RPM/DEB)
         if: matrix.platform == 'ubuntu-24.04'

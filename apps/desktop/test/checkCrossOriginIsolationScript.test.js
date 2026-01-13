@@ -53,6 +53,13 @@ test("pnpm check:coi script builds via cargo_agent and targets the desktop tauri
     "expected COI smoke-check script to respect CARGO_TARGET_DIR when locating the built binary",
   );
 
+  // Some build setups (including certain CI invocations) emit to `apps/desktop/target`.
+  assert.match(
+    src,
+    /path\.join\(\s*repoRoot\s*,\s*["']apps["']\s*,\s*["']desktop["']\s*,\s*["']target["']\s*\)/,
+    "expected COI smoke-check script to consider apps/desktop/target when locating the built binary",
+  );
+
   // Must build the desktop frontend (Vite).
   assert.match(
     src,

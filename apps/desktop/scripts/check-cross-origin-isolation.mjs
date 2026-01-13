@@ -160,11 +160,13 @@ function detectBuiltDesktopBinary() {
   // Common locations:
   // - workspace build: target/release
   // - standalone Tauri app: apps/desktop/src-tauri/target/release
+  // - builds invoked from `apps/desktop`: apps/desktop/target/release
   // - cross-compiled: target/<triple>/release
   for (const targetDir of [
     cargoTargetDir(),
     path.join(repoRoot, "target"),
     path.join(repoRoot, "apps", "desktop", "src-tauri", "target"),
+    path.join(repoRoot, "apps", "desktop", "target"),
   ]) {
     for (const c of findBinaryInTargetDir(targetDir, exe)) {
       maybeAddCandidate(candidates, c);
@@ -270,6 +272,7 @@ async function main() {
     const searched = [
       path.join(repoRoot, "target", "release", exe),
       path.join(repoRoot, "apps", "desktop", "src-tauri", "target", "release", exe),
+      path.join(repoRoot, "apps", "desktop", "target", "release", exe),
       path.join(repoRoot, "target", "<triple>", "release", exe),
     ];
     console.error("[coi-check] ERROR: could not find a built desktop binary to run.");
