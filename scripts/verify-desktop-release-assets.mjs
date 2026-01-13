@@ -17,7 +17,7 @@
  *   node scripts/verify-desktop-release-assets.mjs --tag v0.1.0 --repo owner/repo
  *
  * Required env:
- *   GITHUB_TOKEN - token with access to the repo's releases
+ *   GITHUB_TOKEN (or GH_TOKEN) - token with access to the repo's releases
  */
 
 import { createHash } from "node:crypto";
@@ -111,6 +111,7 @@ function usage() {
       "",
       "Env:",
       "  GITHUB_TOKEN       GitHub token with permission to read release assets",
+      "  GH_TOKEN           Alternative token env var (supported for local runs)",
       "",
       "Examples:",
       `  ${cmd} --tag v0.2.3 --repo wilson/formula`,
@@ -476,9 +477,10 @@ async function main() {
   }
 
   const token = process.env.GITHUB_TOKEN;
-  if (!token) {
-    throw new ActionableError("Missing env var: GITHUB_TOKEN", [
-      "Set GITHUB_TOKEN to a token that can read the repo's releases.",
+  const ghToken = token ?? process.env.GH_TOKEN;
+  if (!ghToken) {
+    throw new ActionableError("Missing env var: GITHUB_TOKEN (or GH_TOKEN)", [
+      "Set GITHUB_TOKEN (or GH_TOKEN) to a token that can read the repo's releases.",
       "In GitHub Actions, you can usually use: env: { GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} }",
     ]);
   }
@@ -529,10 +531,10 @@ async function main() {
 
   for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
     try {
-      release = await getReleaseByTag(repo, tag, token);
+      release = await getReleaseByTag(repo, tag, ghToken);
       const releaseId = release.id;
 
-      assets = await listAllReleaseAssets(repo, releaseId, token);
+      assets = await listAllReleaseAssets(repo, releaseId, ghToken);
       assetsByName = new Map();
       for (const asset of assets) {
         if (asset && typeof asset === "object" && typeof asset.name === "string") {
@@ -564,7 +566,7 @@ async function main() {
         ]);
       }
 
-      const latestJsonText = await downloadReleaseAssetText(latestJsonAsset, token);
+      const latestJsonText = await downloadReleaseAssetText(latestJsonAsset, ghToken);
       try {
         manifest = JSON.parse(latestJsonText);
       } catch (err) {
@@ -574,7 +576,7 @@ async function main() {
       }
 
       // Download latest.json.sig to ensure it's actually readable (not just present in the listing).
-      const latestSigText = await downloadReleaseAssetText(latestJsonSigAsset, token);
+      const latestSigText = await downloadReleaseAssetText(latestJsonSigAsset, ghToken);
       if (latestSigText.trim().length === 0) {
         throw new ActionableError(`latest.json.sig downloaded successfully but was empty.`, [
           "This likely indicates an upstream signing/upload failure.",
@@ -640,7 +642,7 @@ async function main() {
     console.log(
       `Hashing (${i + 1}/${primaryAssets.length}) ${asset.name}${size ? ` (${formatBytes(size)})` : ""}...`
     );
-    const digest = await sha256OfReleaseAsset(asset, token);
+    const digest = await sha256OfReleaseAsset(asset, ghToken);
     lines.push(`${digest}  ${asset.name}`);
   }
 
