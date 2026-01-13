@@ -7,13 +7,13 @@ use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
+use formula_model::drawings::{DrawingObject, ImageData, ImageId};
 use formula_model::rich_text::RichText;
 use formula_model::{
     normalize_formula_text, Cell, CellRef, CellValue, Comment, CommentKind, DefinedNameScope,
     ErrorValue, Range, SheetProtection, SheetVisibility, Workbook, WorkbookProtection,
     WorkbookWindow, WorkbookWindowState,
 };
-use formula_model::drawings::{DrawingObject, ImageData, ImageId};
 use quick_xml::events::attributes::AttrError;
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -32,12 +32,12 @@ use crate::tables::{parse_table, TABLE_REL_TYPE};
 use crate::theme::convert::to_model_theme_palette;
 use crate::theme::parse_theme_palette;
 use crate::zip_util::open_zip_part;
+use crate::WorkbookKind;
 use crate::{parse_worksheet_hyperlinks, XlsxError};
 use crate::{
     CalcPr, CellMeta, CellValueKind, DateSystem, FormulaMeta, SheetMeta, XlsxDocument, XlsxMeta,
 };
 use crate::WorksheetCommentPartNames;
-use crate::WorkbookKind;
 
 mod rich_values;
 
@@ -212,6 +212,7 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
     for (sheet_index, sheet) in sheets.into_iter().enumerate() {
         let ws_id = workbook.add_sheet(sheet.name.clone())?;
         worksheet_ids_by_index.push(ws_id);
+
         {
             let ws = workbook
                 .sheet_mut(ws_id)
@@ -228,6 +229,24 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         let sheet_xml = read_zip_part_optional(archive, &sheet.path)?.ok_or(
             ReadError::MissingPart("worksheet part referenced from workbook.xml.rels"),
         )?;
+
+        // Worksheet print settings (page setup/margins, manual page breaks) live in the worksheet XML.
+        // This is parsed via a streaming extractor (quick-xml) to avoid DOM parsing.
+        let (page_setup, manual_breaks) = crate::print::parse_worksheet_print_settings(&sheet_xml)
+            .unwrap_or_else(|_| {
+                (
+                    crate::print::PageSetup::default(),
+                    crate::print::ManualPageBreaks::default(),
+                )
+            });
+        let page_setup = page_setup_to_model(page_setup);
+        if page_setup != formula_model::PageSetup::default() {
+            workbook.set_sheet_page_setup(ws_id, page_setup);
+        }
+        let manual_breaks = manual_page_breaks_to_model(manual_breaks);
+        if !manual_breaks.is_empty() {
+            workbook.set_manual_page_breaks(ws_id, manual_breaks);
+        }
 
         // Worksheet-level metadata lives inside the worksheet part (and sometimes its .rels).
         let sheet_xml_str = std::str::from_utf8(&sheet_xml)?;
@@ -740,13 +759,16 @@ fn detect_workbook_kind_from_content_types(xml: &[u8]) -> Option<WorkbookKind> {
     loop {
         match reader.read_event_into(&mut buf).ok()? {
             Event::Start(e) | Event::Empty(e)
-                if crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Override") =>
+                if crate::openxml::local_name(e.name().as_ref())
+                    .eq_ignore_ascii_case(b"Override") =>
             {
                 let mut part_name = None;
                 let mut content_type = None;
                 for attr in e.attributes().with_checks(false).flatten() {
                     match crate::openxml::local_name(attr.key.as_ref()) {
-                        b"PartName" => part_name = attr.unescape_value().ok().map(|v| v.into_owned()),
+                        b"PartName" => {
+                            part_name = attr.unescape_value().ok().map(|v| v.into_owned())
+                        }
                         b"ContentType" => {
                             content_type = attr.unescape_value().ok().map(|v| v.into_owned())
                         }
@@ -856,8 +878,10 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     let mut sheet_meta: Vec<SheetMeta> = Vec::with_capacity(sheets.len());
     let mut cell_meta = std::collections::HashMap::new();
     let mut rich_value_cells = std::collections::HashMap::new();
-    let mut comment_part_names: std::collections::HashMap<formula_model::WorksheetId, WorksheetCommentPartNames> =
-        std::collections::HashMap::new();
+    let mut comment_part_names: std::collections::HashMap<
+        formula_model::WorksheetId,
+        WorksheetCommentPartNames,
+    > = std::collections::HashMap::new();
     let mut comment_snapshot: std::collections::HashMap<formula_model::WorksheetId, Vec<Comment>> =
         std::collections::HashMap::new();
 
@@ -883,6 +907,26 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         let sheet_xml = part_bytes_tolerant(&parts, &sheet.path).ok_or(ReadError::MissingPart(
             "worksheet part referenced from workbook.xml.rels",
         ))?;
+
+        // Worksheet print settings (page setup/margins, manual page breaks) live in the worksheet XML.
+        // Parse them via a streaming extractor to avoid DOM parsing.
+        let (page_setup, manual_breaks) = crate::print::parse_worksheet_print_settings(sheet_xml)
+            .unwrap_or_else(|_| {
+                (
+                    crate::print::PageSetup::default(),
+                    crate::print::ManualPageBreaks::default(),
+                )
+            });
+        let page_setup = page_setup_to_model(page_setup);
+        if page_setup != formula_model::PageSetup::default() {
+            workbook.set_sheet_page_setup(ws_id, page_setup);
+        }
+        let manual_breaks = manual_page_breaks_to_model(manual_breaks);
+        if !manual_breaks.is_empty() {
+            workbook.set_manual_page_breaks(ws_id, manual_breaks);
+        }
+
+        // Worksheet-level metadata lives inside the worksheet part (and sometimes its .rels).
         let sheet_xml_str = std::str::from_utf8(sheet_xml)?;
 
         // Worksheet relationships are needed to resolve table parts, hyperlinks, and drawings.
@@ -1454,7 +1498,8 @@ impl Default for ValueMetadataBlock {
 
 impl MetadataPart {
     fn parse(xml: &[u8]) -> Result<Self, ReadError> {
-        if let Ok(parsed) = crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map(xml)
+        if let Ok(parsed) =
+            crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map(xml)
         {
             if !parsed.is_empty() {
                 // The DOM-based rich value metadata parser returns a mapping keyed by 1-based `vm`
@@ -1654,11 +1699,8 @@ impl MetadataPart {
                         let attr = attr?;
                         let key = crate::openxml::local_name(attr.key.as_ref());
                         if key == b"i" || key == b"idx" || key == b"index" || key == b"v" {
-                            current_future_rich_idx = attr
-                                .unescape_value()?
-                                .into_owned()
-                                .parse::<u32>()
-                                .ok();
+                            current_future_rich_idx =
+                                attr.unescape_value()?.into_owned().parse::<u32>().ok();
                             if current_future_rich_idx.is_some() {
                                 break;
                             }
@@ -1821,10 +1863,11 @@ impl MetadataPart {
             RcIndexBase::OneBased => t
                 .checked_sub(1)
                 .is_some_and(|t0| self.rich_type_indices.contains(&t0)),
-            RcIndexBase::Unknown => self.rich_type_indices.contains(&t)
-                || t
-                    .checked_sub(1)
-                    .is_some_and(|t0| self.rich_type_indices.contains(&t0)),
+            RcIndexBase::Unknown => {
+                self.rich_type_indices.contains(&t)
+                    || t.checked_sub(1)
+                        .is_some_and(|t0| self.rich_type_indices.contains(&t0))
+            }
         }
     }
 
@@ -2017,8 +2060,7 @@ fn parse_workbook_metadata(
         ParsedWorkbookView,
     ),
     ReadError,
->
-{
+> {
     let mut reader = Reader::from_reader(workbook_xml);
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
@@ -2068,7 +2110,9 @@ fn parse_workbook_metadata(
                     let attr = attr?;
                     let value = attr.unescape_value()?.into_owned();
                     match attr.key.as_ref() {
-                        b"lockStructure" => workbook_protection.lock_structure = parse_xml_bool(&value),
+                        b"lockStructure" => {
+                            workbook_protection.lock_structure = parse_xml_bool(&value)
+                        }
                         b"lockWindows" => workbook_protection.lock_windows = parse_xml_bool(&value),
                         b"workbookPassword" => {
                             workbook_protection.password_hash =
@@ -2086,11 +2130,8 @@ fn parse_workbook_metadata(
                     match attr.key.as_ref() {
                         b"activeTab" => {
                             if workbook_view.active_tab.is_none() {
-                                workbook_view.active_tab = attr
-                                    .unescape_value()?
-                                    .into_owned()
-                                    .parse::<usize>()
-                                    .ok();
+                                workbook_view.active_tab =
+                                    attr.unescape_value()?.into_owned().parse::<usize>().ok();
                             }
                         }
                         b"xWindow" => {
@@ -2102,13 +2143,11 @@ fn parse_workbook_metadata(
                             saw_window_attr = true;
                         }
                         b"windowWidth" => {
-                            window.width =
-                                attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                            window.width = attr.unescape_value()?.into_owned().parse::<u32>().ok();
                             saw_window_attr = true;
                         }
                         b"windowHeight" => {
-                            window.height =
-                                attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                            window.height = attr.unescape_value()?.into_owned().parse::<u32>().ok();
                             saw_window_attr = true;
                         }
                         b"windowState" => {
@@ -2455,7 +2494,9 @@ fn parse_worksheet_into_model(
                     let val = attr.unescape_value()?.into_owned();
                     match attr.key.as_ref() {
                         b"sheet" => protection.enabled = parse_xml_bool(&val),
-                        b"selectLockedCells" => protection.select_locked_cells = parse_xml_bool(&val),
+                        b"selectLockedCells" => {
+                            protection.select_locked_cells = parse_xml_bool(&val)
+                        }
                         b"selectUnlockedCells" => {
                             protection.select_unlocked_cells = parse_xml_bool(&val)
                         }
@@ -2682,9 +2723,11 @@ fn parse_worksheet_into_model(
                         cell.formula = formula_in_model;
                         cell.style_id = current_style;
 
-                        if let (Some(vm), Some(_metadata_part), Some(_rich_value_cells)) =
-                            (current_vm.as_deref(), metadata_part, rich_value_cells.as_mut())
-                        {
+                        if let (Some(vm), Some(_metadata_part), Some(_rich_value_cells)) = (
+                            current_vm.as_deref(),
+                            metadata_part,
+                            rich_value_cells.as_mut(),
+                        ) {
                             if let Ok(vm_idx) = vm.parse::<u32>() {
                                 pending_vm_cells.push((cell_ref, vm_idx));
                             }
@@ -2938,6 +2981,53 @@ fn parse_xml_u16_hex(val: &str) -> Option<u16> {
         return None;
     }
     u16::from_str_radix(trimmed, 16).ok()
+}
+
+fn page_setup_to_model(setup: crate::print::PageSetup) -> formula_model::PageSetup {
+    let orientation = match setup.orientation {
+        crate::print::Orientation::Portrait => formula_model::Orientation::Portrait,
+        crate::print::Orientation::Landscape => formula_model::Orientation::Landscape,
+    };
+
+    let scaling = match setup.scaling {
+        crate::print::Scaling::Percent(pct) => formula_model::Scaling::Percent(pct),
+        crate::print::Scaling::FitTo { width, height } => {
+            formula_model::Scaling::FitTo { width, height }
+        }
+    };
+
+    formula_model::PageSetup {
+        orientation,
+        paper_size: formula_model::PaperSize {
+            code: setup.paper_size.code,
+        },
+        margins: formula_model::PageMargins {
+            left: setup.margins.left,
+            right: setup.margins.right,
+            top: setup.margins.top,
+            bottom: setup.margins.bottom,
+            header: setup.margins.header,
+            footer: setup.margins.footer,
+        },
+        scaling,
+    }
+}
+
+fn manual_page_breaks_to_model(
+    breaks: crate::print::ManualPageBreaks,
+) -> formula_model::ManualPageBreaks {
+    let mut out = formula_model::ManualPageBreaks::default();
+    for id in breaks.row_breaks_after {
+        if id > 0 {
+            out.row_breaks_after.insert(id - 1);
+        }
+    }
+    for id in breaks.col_breaks_after {
+        if id > 0 {
+            out.col_breaks_after.insert(id - 1);
+        }
+    }
+    out
 }
 
 fn parse_table_part_ids(xml: &[u8]) -> Result<Vec<String>, ReadError> {
@@ -3311,7 +3401,10 @@ mod tests {
         // placeholder retention logic in `set_cell_value`.
         doc.set_cell_value(sheet_id, a1, CellValue::Number(1.0));
         let meta = doc.cell_meta(sheet_id, a1).expect("cell meta exists");
-        assert_eq!(meta.vm, None, "expected vm to be dropped for non-placeholder values");
+        assert_eq!(
+            meta.vm, None,
+            "expected vm to be dropped for non-placeholder values"
+        );
         assert_eq!(
             meta.cm.as_deref(),
             Some("2"),

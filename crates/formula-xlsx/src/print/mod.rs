@@ -10,6 +10,7 @@ pub use a1::{
 };
 pub use page_breaks::{calculate_pages, Page};
 pub use pdf::export_range_to_pdf_bytes;
+pub(crate) use xlsx::parse_worksheet_print_settings;
 pub use xlsx::{
     read_workbook_print_settings, read_workbook_print_settings_from_reader, write_workbook_print_settings,
 };

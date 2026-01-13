@@ -370,7 +370,7 @@ fn parse_relationship(e: &BytesStart<'_>) -> Result<Option<(String, String)>, Pr
     }
 }
 
-fn parse_worksheet_print_settings(
+pub(crate) fn parse_worksheet_print_settings(
     sheet_xml: &[u8],
 ) -> Result<(PageSetup, ManualPageBreaks), PrintError> {
     let mut reader = Reader::from_reader(sheet_xml);
