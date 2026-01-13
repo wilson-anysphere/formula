@@ -71,6 +71,36 @@ test("prints \"signature OK\" when latest.json.sig matches latest.json (raw pubk
   assert.match(proc.stdout, /signature OK/);
 });
 
+test("supports base64url for both pubkey and signature", () => {
+  const tmp = makeTempDir();
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const rawPubkey = rawEd25519PublicKey(publicKey);
+
+  const latestJsonPath = path.join(tmp, "latest.json");
+  const latestSigPath = path.join(tmp, "latest.json.sig");
+  const configPath = path.join(tmp, "tauri.conf.json");
+
+  const latestJsonBytes = Buffer.from(JSON.stringify({ version: "0.1.0", platforms: {} }), "utf8");
+  const signature = sign(null, latestJsonBytes, privateKey);
+
+  const toBase64Url = (b64) => b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+  writeFileSync(latestJsonPath, latestJsonBytes);
+  writeFileSync(latestSigPath, toBase64Url(Buffer.from(signature).toString("base64")));
+  writeFileSync(
+    configPath,
+    JSON.stringify(
+      { plugins: { updater: { pubkey: toBase64Url(rawPubkey.toString("base64")) } } },
+      null,
+      2,
+    ),
+  );
+
+  const proc = run({ configPath, latestJsonPath, latestSigPath });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /signature OK/);
+});
+
 test("fails when latest.json.sig does not match latest.json", () => {
   const tmp = makeTempDir();
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -150,4 +180,3 @@ test("supports minisign key/signature structures (\"Ed\" + keyId + bytes)", () =
   assert.equal(proc.status, 0, proc.stderr);
   assert.match(proc.stdout, /signature OK/);
 });
-
