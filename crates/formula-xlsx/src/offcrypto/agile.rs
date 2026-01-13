@@ -1187,9 +1187,9 @@ mod tests {
   <dataIntegrity encryptedHmacKey="EBESEw==" encryptedHmacValue="qrvM"/>
   <keyEncryptors>
     <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
-      <p:encryptedKey saltSize="16" blockSize="16" keyBits="256" hashSize="32"
-                      spinCount="100000" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA256"
-                      saltValue="AAECAwQFBgcICQoLDA0ODw=="
+                       <p:encryptedKey saltSize="16" blockSize="16" keyBits="256" hashSize="32"
+                       spinCount="100000" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA256"
+                      saltValue="AQIDBAUGBwgJCgsMDQ4PEA=="
                       encryptedVerifierHashInput="CQoLDA=="
                       encryptedVerifierHashValue="DQ4PEA=="
                       encryptedKeyValue="BQYHCA=="/>

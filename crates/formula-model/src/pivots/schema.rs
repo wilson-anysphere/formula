@@ -121,11 +121,13 @@ impl From<&str> for PivotFieldRef {
         Self::from_unstructured(value)
     }
 }
+
 impl PartialEq<&str> for PivotFieldRef {
     fn eq(&self, other: &&str) -> bool {
         matches!(self, PivotFieldRef::CacheFieldName(name) if name == other)
     }
 }
+
 impl Serialize for PivotFieldRef {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

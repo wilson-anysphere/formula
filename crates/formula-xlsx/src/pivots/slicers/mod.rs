@@ -208,6 +208,12 @@ pub struct SlicerDefinition {
     pub cache_part: Option<String>,
     pub cache_name: Option<String>,
     pub source_name: Option<String>,
+    /// Best-effort resolved pivot-cache field/column name this slicer filters.
+    ///
+    /// Excel often only persists a `sourceName` (frequently the pivot table name) and does not
+    /// explicitly store the filtered field. When available, we map slicer/timeline metadata back to
+    /// the connected pivot cache definition to recover the underlying field name.
+    pub field_name: Option<String>,
     pub connected_pivot_tables: Vec<String>,
     /// Table parts (`xl/tables/table*.xml`) referenced by the slicer cache relationships.
     pub connected_tables: Vec<String>,
@@ -228,6 +234,8 @@ pub struct TimelineDefinition {
     pub cache_part: Option<String>,
     pub cache_name: Option<String>,
     pub source_name: Option<String>,
+    /// Best-effort resolved pivot-cache field/column name this timeline filters.
+    pub field_name: Option<String>,
     pub base_field: Option<u32>,
     pub level: Option<u32>,
     pub connected_pivot_tables: Vec<String>,
@@ -808,6 +816,9 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
         .and_then(|bytes| parse_workbook_date_system(bytes).ok())
         .unwrap_or_default();
     let excel_date_system = date_system.to_engine_date_system();
+    // Pivot cache resolution is best-effort; slicer/timeline parsing should not fail just because
+    // the pivot relationship graph can't be resolved.
+    let pivot_graph = package.pivot_graph().ok();
 
     let slicer_parts = package
         .part_names()
@@ -952,6 +963,14 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             .and_then(|bytes| parse_slicer_cache_selection(bytes).ok())
             .unwrap_or_default();
 
+        let field_name = resolve_slicer_field_name(
+            package,
+            pivot_graph.as_ref(),
+            cache_part.as_deref(),
+            &connected_pivot_tables,
+            &selection,
+        );
+
         slicers.push(SlicerDefinition {
             part_name: part_name.clone(),
             name: parsed.name,
@@ -959,6 +978,7 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             cache_part,
             cache_name,
             source_name,
+            field_name,
             connected_pivot_tables,
             connected_tables,
             placed_on_drawings,
@@ -1024,6 +1044,13 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             }
         }
 
+        let field_name = resolve_timeline_field_name(
+            package,
+            pivot_graph.as_ref(),
+            base_field,
+            &connected_pivot_tables,
+        );
+
         timelines.push(TimelineDefinition {
             part_name: part_name.clone(),
             name: parsed.name,
@@ -1031,6 +1058,7 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             cache_part,
             cache_name,
             source_name,
+            field_name,
             base_field,
             level,
             connected_pivot_tables,
@@ -1824,6 +1852,7 @@ fn parse_workbook_date_system(xml: &[u8]) -> Result<DateSystem, XlsxError> {
 struct ResolvedSlicerCacheDefinition {
     cache_name: Option<String>,
     source_name: Option<String>,
+    field_index: Option<u32>,
     connected_pivot_tables: Vec<String>,
     connected_tables: Vec<String>,
 }
@@ -1867,6 +1896,7 @@ fn resolve_slicer_cache_definition(
     Ok(ResolvedSlicerCacheDefinition {
         cache_name: parsed.cache_name,
         source_name: parsed.source_name,
+        field_index: parsed.field_index,
         connected_pivot_tables: connected_pivot_tables.into_iter().collect(),
         connected_tables,
     })
@@ -2027,6 +2057,7 @@ fn parse_slicer_xml(xml: &[u8]) -> Result<ParsedSlicerXml, XlsxError> {
 struct ParsedSlicerCacheXml {
     cache_name: Option<String>,
     source_name: Option<String>,
+    field_index: Option<u32>,
     pivot_table_rids: Vec<String>,
 }
 
@@ -2037,7 +2068,33 @@ fn parse_slicer_cache_xml(xml: &[u8]) -> Result<ParsedSlicerCacheXml, XlsxError>
 
     let mut cache_name = None;
     let mut source_name = None;
+    let mut field_index = None;
     let mut pivot_table_rids = Vec::new();
+
+    fn capture_field_index(field_index: &mut Option<u32>, key: &[u8], value: &str) {
+        if field_index.is_some() {
+            return;
+        }
+        // Excel/OOXML producers are not consistent about how they encode the filtered field.
+        // Be tolerant and capture the first numeric value we see for a field-ish attribute.
+        if key.eq_ignore_ascii_case(b"field")
+            || key.eq_ignore_ascii_case(b"fieldId")
+            || key.eq_ignore_ascii_case(b"fieldIndex")
+            || key.eq_ignore_ascii_case(b"sourceField")
+            || key.eq_ignore_ascii_case(b"sourceFieldId")
+            || key.eq_ignore_ascii_case(b"sourceFieldIndex")
+            || key.eq_ignore_ascii_case(b"pivotField")
+            || key.eq_ignore_ascii_case(b"pivotFieldId")
+            || key.eq_ignore_ascii_case(b"pivotFieldIndex")
+            || key.eq_ignore_ascii_case(b"baseField")
+            || key.eq_ignore_ascii_case(b"fld")
+        {
+            if let Ok(idx) = value.trim().parse::<u32>() {
+                *field_index = Some(idx);
+            }
+        }
+    }
+
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(start) | Event::Empty(start) => {
@@ -2052,6 +2109,8 @@ fn parse_slicer_cache_xml(xml: &[u8]) -> Result<ParsedSlicerCacheXml, XlsxError>
                             cache_name = Some(value);
                         } else if key.eq_ignore_ascii_case(b"sourceName") {
                             source_name = Some(value);
+                        } else {
+                            capture_field_index(&mut field_index, key, &value);
                         }
                     }
                 } else if tag.eq_ignore_ascii_case(b"slicerCachePivotTable") {
@@ -2060,6 +2119,15 @@ fn parse_slicer_cache_xml(xml: &[u8]) -> Result<ParsedSlicerCacheXml, XlsxError>
                         if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"id") {
                             pivot_table_rids.push(attr.unescape_value()?.into_owned());
                         }
+                    }
+                } else {
+                    // Some producers store field indices on nested elements (e.g. table/pivot slicer
+                    // cache variants). Capture field-ish attributes anywhere in the slicer cache XML.
+                    for attr in start.attributes().with_checks(false) {
+                        let attr = attr?;
+                        let key = local_name(attr.key.as_ref());
+                        let value = attr.unescape_value()?.into_owned();
+                        capture_field_index(&mut field_index, key, &value);
                     }
                 }
             }
@@ -2072,7 +2140,494 @@ fn parse_slicer_cache_xml(xml: &[u8]) -> Result<ParsedSlicerCacheXml, XlsxError>
     Ok(ParsedSlicerCacheXml {
         cache_name,
         source_name,
+        field_index,
         pivot_table_rids,
+    })
+}
+
+fn resolve_timeline_field_name(
+    package: &XlsxPackage,
+    pivot_graph: Option<&crate::pivots::graph::XlsxPivotGraph>,
+    base_field: Option<u32>,
+    connected_pivot_tables: &[String],
+) -> Option<String> {
+    let base_field = base_field?;
+    let pivot_table_part = connected_pivot_tables.first()?;
+    resolve_pivot_cache_field_name(
+        package,
+        pivot_graph,
+        pivot_table_part,
+        base_field,
+    )
+}
+
+fn resolve_slicer_field_name(
+    package: &XlsxPackage,
+    pivot_graph: Option<&crate::pivots::graph::XlsxPivotGraph>,
+    cache_part: Option<&str>,
+    connected_pivot_tables: &[String],
+    selection: &SlicerSelectionState,
+) -> Option<String> {
+    // First, see if the slicer cache definition includes an explicit field index.
+    if let Some(cache_part) = cache_part {
+        if let Ok(resolved) = resolve_slicer_cache_definition(package, cache_part) {
+            if let (Some(field_index), Some(pivot_table_part)) =
+                (resolved.field_index, connected_pivot_tables.first())
+            {
+                if let Some(name) = resolve_pivot_cache_field_name(
+                    package,
+                    pivot_graph,
+                    pivot_table_part,
+                    field_index,
+                ) {
+                    return Some(name);
+                }
+            }
+        }
+    }
+
+    infer_slicer_field_name(package, pivot_graph, connected_pivot_tables, selection)
+}
+
+fn resolve_pivot_cache_parts(
+    package: &XlsxPackage,
+    pivot_graph: Option<&crate::pivots::graph::XlsxPivotGraph>,
+    pivot_table_part: &str,
+) -> Option<(String, Option<String>)> {
+    if let Some(graph) = pivot_graph {
+        if let Some(instance) = graph
+            .pivot_tables
+            .iter()
+            .find(|pt| pt.pivot_table_part == pivot_table_part)
+        {
+            if let Some(def_part) = instance.cache_definition_part.clone() {
+                return Some((def_part, instance.cache_records_part.clone()));
+            }
+        }
+    }
+
+    // Fallback: parse `cacheId` from the pivot table and use the canonical naming convention.
+    let bytes = package.part(pivot_table_part)?;
+    let cache_id = parse_pivot_table_cache_id(bytes)?;
+    let def_guess = format!("xl/pivotCache/pivotCacheDefinition{cache_id}.xml");
+    if package.part(&def_guess).is_none() {
+        return None;
+    }
+    let records_guess = format!("xl/pivotCache/pivotCacheRecords{cache_id}.xml");
+    let records_part = package.part(&records_guess).map(|_| records_guess);
+    Some((def_guess, records_part))
+}
+
+fn parse_pivot_table_cache_id(xml: &[u8]) -> Option<u32> {
+    let mut reader = Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    loop {
+        let event = reader.read_event_into(&mut buf).ok()?;
+        match event {
+            Event::Start(e) | Event::Empty(e) => {
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"pivotTableDefinition") {
+                    for attr in e.attributes().with_checks(false) {
+                        let attr = attr.ok()?;
+                        if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"cacheId") {
+                            let value = attr.unescape_value().ok()?.into_owned();
+                            return value.parse::<u32>().ok();
+                        }
+                    }
+                    return None;
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    None
+}
+
+fn resolve_pivot_cache_field_name(
+    package: &XlsxPackage,
+    pivot_graph: Option<&crate::pivots::graph::XlsxPivotGraph>,
+    pivot_table_part: &str,
+    field_index: u32,
+) -> Option<String> {
+    let (def_part, _) = resolve_pivot_cache_parts(package, pivot_graph, pivot_table_part)?;
+    let def = package
+        .pivot_cache_definition(&def_part)
+        .ok()
+        .flatten()?;
+    def.cache_fields
+        .get(field_index as usize)
+        .map(|f| f.name.clone())
+}
+
+fn infer_slicer_field_name(
+    package: &XlsxPackage,
+    pivot_graph: Option<&crate::pivots::graph::XlsxPivotGraph>,
+    connected_pivot_tables: &[String],
+    selection: &SlicerSelectionState,
+) -> Option<String> {
+    let candidate_items: Vec<String> = if !selection.available_items.is_empty() {
+        selection.available_items.clone()
+    } else if let Some(selected) = &selection.selected_items {
+        selected.iter().cloned().collect()
+    } else {
+        Vec::new()
+    };
+
+    let candidate_items: HashSet<String> = candidate_items
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if candidate_items.is_empty() {
+        return None;
+    }
+
+    let mut match_sets = Vec::new();
+    for pivot_table_part in connected_pivot_tables {
+        let Some(matches) = matching_fields_for_pivot_table(
+            package,
+            pivot_graph,
+            pivot_table_part,
+            &candidate_items,
+        ) else {
+            continue;
+        };
+        if !matches.is_empty() {
+            match_sets.push(matches);
+        }
+    }
+
+    if match_sets.is_empty() {
+        return None;
+    }
+
+    let mut intersection = match_sets[0].clone();
+    for matches in match_sets.iter().skip(1) {
+        intersection = intersection
+            .intersection(matches)
+            .cloned()
+            .collect::<HashSet<_>>();
+    }
+    if intersection.len() == 1 {
+        return intersection.into_iter().next();
+    }
+
+    let mut union = HashSet::new();
+    for matches in match_sets {
+        union.extend(matches);
+    }
+    if union.len() == 1 {
+        return union.into_iter().next();
+    }
+
+    None
+}
+
+fn matching_fields_for_pivot_table(
+    package: &XlsxPackage,
+    pivot_graph: Option<&crate::pivots::graph::XlsxPivotGraph>,
+    pivot_table_part: &str,
+    candidate_items: &HashSet<String>,
+) -> Option<HashSet<String>> {
+    let (def_part, records_part) = resolve_pivot_cache_parts(package, pivot_graph, pivot_table_part)?;
+    let def = package.pivot_cache_definition(&def_part).ok().flatten()?;
+    if def.cache_fields.is_empty() {
+        return None;
+    }
+
+    let shared_items = package
+        .part(&def_part)
+        .and_then(|bytes| parse_pivot_cache_shared_items(bytes).ok())
+        .unwrap_or_default();
+
+    let field_count = def.cache_fields.len();
+    let mut matches = HashSet::new();
+    let mut needs_records = vec![true; field_count];
+
+    // If shared items are available, use them directly to match candidate values without
+    // scanning cache records.
+    for idx in 0..field_count {
+        let Some(items) = shared_items.get(idx) else {
+            continue;
+        };
+        if items.is_empty() {
+            continue;
+        }
+        let values: HashSet<&str> = items.iter().map(|s| s.trim()).collect();
+        if candidate_items.iter().all(|item| {
+            values.contains(item.as_str())
+                || item
+                    .parse::<usize>()
+                    .ok()
+                    .is_some_and(|idx| idx < items.len())
+        }) {
+            matches.insert(def.cache_fields[idx].name.clone());
+        }
+        needs_records[idx] = false;
+    }
+
+    if needs_records.iter().all(|v| !*v) {
+        return Some(matches);
+    }
+
+    let Some(records_part) = records_part else {
+        // No cache records and no shared item metadata for some fields.
+        return Some(matches);
+    };
+
+    let Some(records_bytes) = package.part(&records_part) else {
+        return Some(matches);
+    };
+
+    let mut found: Vec<HashSet<String>> = (0..field_count).map(|_| HashSet::new()).collect();
+    let mut done = vec![false; field_count];
+
+    let mut reader = crate::pivots::cache_records::PivotCacheRecordsReader::new(records_bytes);
+    while let Some(record) = reader.next_record() {
+        for field_idx in 0..field_count {
+            if !needs_records[field_idx] || done[field_idx] {
+                continue;
+            }
+            let value = record
+                .get(field_idx)
+                .cloned()
+                .unwrap_or(crate::pivots::cache_records::PivotCacheValue::Missing);
+
+            let shared_for_field = shared_items.get(field_idx);
+            if capture_candidate_items_from_value(
+                &value,
+                shared_for_field,
+                candidate_items,
+                &mut found[field_idx],
+            ) {
+                done[field_idx] = true;
+            }
+        }
+
+        if needs_records
+            .iter()
+            .enumerate()
+            .all(|(idx, needs)| !*needs || done[idx])
+        {
+            break;
+        }
+    }
+
+    for idx in 0..field_count {
+        if needs_records[idx] && found[idx].len() == candidate_items.len() {
+            matches.insert(def.cache_fields[idx].name.clone());
+        }
+    }
+
+    Some(matches)
+}
+
+fn capture_candidate_items_from_value(
+    value: &crate::pivots::cache_records::PivotCacheValue,
+    shared_items_for_field: Option<&Vec<String>>,
+    candidate_items: &HashSet<String>,
+    found: &mut HashSet<String>,
+) -> bool {
+    use crate::pivots::cache_records::PivotCacheValue;
+
+    if found.len() == candidate_items.len() {
+        return true;
+    }
+
+    match value {
+        PivotCacheValue::Missing => {}
+        PivotCacheValue::String(s) => {
+            let v = s.trim();
+            if !v.is_empty() && candidate_items.contains(v) {
+                found.insert(v.to_string());
+            }
+        }
+        PivotCacheValue::Number(n) => {
+            let s = n.to_string();
+            if candidate_items.contains(s.as_str()) {
+                found.insert(s);
+            }
+        }
+        PivotCacheValue::Bool(b) => {
+            let raw = if *b { "1" } else { "0" };
+            if candidate_items.contains(raw) {
+                found.insert(raw.to_string());
+            }
+            let lower = if *b { "true" } else { "false" };
+            if candidate_items.contains(lower) {
+                found.insert(lower.to_string());
+            }
+            let upper = if *b { "TRUE" } else { "FALSE" };
+            if candidate_items.contains(upper) {
+                found.insert(upper.to_string());
+            }
+        }
+        PivotCacheValue::Error(e) => {
+            let v = e.trim();
+            if !v.is_empty() && candidate_items.contains(v) {
+                found.insert(v.to_string());
+            }
+        }
+        PivotCacheValue::DateTime(dt) => {
+            let v = dt.trim();
+            if !v.is_empty() && candidate_items.contains(v) {
+                found.insert(v.to_string());
+            }
+            if let Some(date) = crate::pivots::cache_records::pivot_cache_datetime_to_naive_date(v)
+            {
+                let iso = format!("{:04}-{:02}-{:02}", date.year(), date.month(), date.day());
+                if candidate_items.contains(iso.as_str()) {
+                    found.insert(iso);
+                }
+            }
+        }
+        PivotCacheValue::Index(idx) => {
+            let raw = idx.to_string();
+            if candidate_items.contains(raw.as_str()) {
+                found.insert(raw);
+            }
+            if let Some(items) = shared_items_for_field.and_then(|v| v.get(*idx as usize)) {
+                let v = items.trim();
+                if !v.is_empty() && candidate_items.contains(v) {
+                    found.insert(v.to_string());
+                }
+            }
+        }
+    }
+
+    found.len() == candidate_items.len()
+}
+
+fn parse_pivot_cache_shared_items(xml: &[u8]) -> Result<Vec<Vec<String>>, XlsxError> {
+    let mut reader = Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    let mut out: Vec<Vec<String>> = Vec::new();
+    let mut current_field: Option<usize> = None;
+    let mut in_shared_items = false;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(start) => {
+                let name = start.name();
+                let tag = local_name(name.as_ref());
+                if tag.eq_ignore_ascii_case(b"cacheField") {
+                    out.push(Vec::new());
+                    current_field = Some(out.len() - 1);
+                    in_shared_items = false;
+                } else if tag.eq_ignore_ascii_case(b"sharedItems") {
+                    in_shared_items = true;
+                } else if in_shared_items {
+                    if let Some(field_idx) = current_field {
+                        if let Some(value) = parse_cache_shared_item_start(&mut reader, &start)? {
+                            out[field_idx].push(value);
+                        }
+                    }
+                }
+            }
+            Event::Empty(start) => {
+                let name = start.name();
+                let tag = local_name(name.as_ref());
+                if tag.eq_ignore_ascii_case(b"cacheField") {
+                    out.push(Vec::new());
+                    current_field = Some(out.len() - 1);
+                    in_shared_items = false;
+                } else if tag.eq_ignore_ascii_case(b"sharedItems") {
+                    in_shared_items = true;
+                } else if in_shared_items {
+                    if let Some(field_idx) = current_field {
+                        if let Some(value) = parse_cache_shared_item_empty(&start)? {
+                            out[field_idx].push(value);
+                        }
+                    }
+                }
+            }
+            Event::End(end) => {
+                let name = end.name();
+                let tag = local_name(name.as_ref());
+                if tag.eq_ignore_ascii_case(b"cacheField") {
+                    current_field = None;
+                    in_shared_items = false;
+                } else if tag.eq_ignore_ascii_case(b"sharedItems") {
+                    in_shared_items = false;
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
+}
+
+fn parse_cache_shared_item_empty(
+    start: &quick_xml::events::BytesStart<'_>,
+) -> Result<Option<String>, XlsxError> {
+    let name = start.name();
+    let tag = local_name(name.as_ref());
+    let attr_v = start
+        .attributes()
+        .with_checks(false)
+        .filter_map(|a| a.ok())
+        .find(|a| local_name(a.key.as_ref()).eq_ignore_ascii_case(b"v"))
+        .and_then(|a| a.unescape_value().ok())
+        .map(|v| v.into_owned());
+
+    let value = match tag {
+        b"m" => Some(String::new()),
+        b"s" | b"n" | b"d" | b"e" => attr_v,
+        b"b" => attr_v.map(|v| {
+            if v.trim() == "1" || v.trim().eq_ignore_ascii_case("true") {
+                "TRUE".to_string()
+            } else {
+                "FALSE".to_string()
+            }
+        }),
+        _ => None,
+    };
+    Ok(value)
+}
+
+fn parse_cache_shared_item_start(
+    reader: &mut Reader<Cursor<&[u8]>>,
+    start: &quick_xml::events::BytesStart<'_>,
+) -> Result<Option<String>, XlsxError> {
+    // Shared item elements are typically self-closing, but be tolerant of wrapped/text forms.
+    let name = start.name();
+    let tag = local_name(name.as_ref());
+    let value = parse_cache_shared_item_empty(start)?;
+    if value.is_some() {
+        // Skip to end of the element to keep the reader state consistent.
+        let mut skip_buf = Vec::new();
+        reader.read_to_end_into(start.name(), &mut skip_buf)?;
+        return Ok(value);
+    }
+
+    // Fallback: read text content.
+    let mut buf = Vec::new();
+    let mut out = None;
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Text(e) => {
+                if out.is_none() {
+                    out = Some(e.unescape()?.into_owned());
+                }
+            }
+            Event::End(e) if e.name() == start.name() => break,
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    let out = out.map(|s| s.trim().to_string());
+    Ok(match tag {
+        b"m" => Some(String::new()),
+        _ => out.filter(|s| !s.is_empty()),
     })
 }
 

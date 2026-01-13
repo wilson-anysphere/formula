@@ -335,7 +335,7 @@ pub fn timeline_selection_to_engine_filter(
     selection: &TimelineSelectionState,
     cache: &PivotCache,
 ) -> Option<FilterField> {
-    let field = field.into();
+    let field_name = field.into();
     let start = selection.start.as_deref().and_then(parse_iso_ymd);
     let end = selection.end.as_deref().and_then(parse_iso_ymd);
 
@@ -343,7 +343,7 @@ pub fn timeline_selection_to_engine_filter(
         return None;
     }
 
-    let values = cache.unique_values.get(&field)?;
+    let values = cache.unique_values.get(&field_name)?;
     let mut allowed = HashSet::new();
     for value in values {
         let PivotValue::Date(date) = value else {
@@ -359,7 +359,7 @@ pub fn timeline_selection_to_engine_filter(
     }
 
     Some(FilterField {
-        source_field: PivotFieldRef::CacheFieldName(field),
+        source_field: PivotFieldRef::CacheFieldName(field_name),
         allowed: Some(allowed),
     })
 }
@@ -1348,6 +1348,7 @@ mod tests {
             cache_name: Some("RegionSlicerCache".to_string()),
             // Some producers persist the pivot table name in `sourceName` instead of the field name.
             source_name: Some("PivotTable1".to_string()),
+            field_name: None,
             connected_pivot_tables: vec!["xl/pivotTables/pivotTable1.xml".to_string()],
             connected_tables: vec![],
             placed_on_drawings: vec![],
@@ -1466,6 +1467,7 @@ mod tests {
             cache_part: None,
             cache_name: Some("DateTimelineCache".to_string()),
             source_name: None,
+            field_name: None,
             base_field: None,
             level: None,
             connected_pivot_tables: vec!["xl/pivotTables/pivotTable1.xml".to_string()],

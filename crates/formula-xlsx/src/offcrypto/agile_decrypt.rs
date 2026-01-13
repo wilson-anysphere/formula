@@ -64,9 +64,8 @@ struct AgileEncryptionInfo {
 enum PasswordKeyIvDerivation {
     /// MS-OFFCRYPTO spec behavior: use `p:encryptedKey.saltValue` truncated to `blockSize`.
     SaltValue,
-    /// Compatibility behavior observed in some producers: derive the IV via the standard
-    /// `Hash(saltValue || blockKey)` algorithm (using the same block key constants as key
-    /// derivation).
+    /// Compatibility behavior observed in some producers: derive the IV using the standard Agile
+    /// `derive_iv(saltValue, blockKey, blockSize, hashAlgorithm)` scheme.
     Derived,
 }
 
