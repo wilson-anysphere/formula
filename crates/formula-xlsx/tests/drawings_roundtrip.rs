@@ -253,6 +253,7 @@ fn drawings_import_round_trip_preserves_media_and_unknown_elements() {
             )
         })
         .unwrap();
+    assert_eq!(img.size, Some(EmuSize::new(952_500, 952_500)));
     match img.anchor {
         Anchor::TwoCell { from, to } => {
             assert_eq!(from.cell, CellRef::new(1, 1));
