@@ -112,6 +112,10 @@ export class FormulaBarTabCompletionController {
     this.#completion = new TabCompletionEngine({
       completionClient,
       schemaProvider,
+      // Keep room for a backend (Cursor) suggestion even when the rule-based engine
+      // returns a full set of top-level starters (which otherwise consumes the
+      // default `maxSuggestions=5` budget).
+      maxSuggestions: 6,
       // Keep tab completion responsive even if the backend is slow/unavailable.
       completionTimeoutMs: 100,
     });
@@ -209,10 +213,6 @@ export class FormulaBarTabCompletionController {
       getCellValue: (row: number, col: number, sheetName?: string): unknown => {
         if (row < 0 || col < 0) return null;
         if (this.#limits && (row >= this.#limits.maxRows || col >= this.#limits.maxCols)) return null;
-        // Avoid materializing sheets during completion. DocumentController creates
-        // sheets lazily on read, so in an empty workbook we treat surrounding cells
-        // as unknown/empty rather than forcing the current sheet into existence.
-        if (knownSheets.length === 0) return null;
 
         const targetSheet =
           typeof sheetName === "string" && sheetName.length > 0 ? resolveSheetId(sheetName) : hasCurrentSheet ? sheetId : null;
@@ -456,11 +456,6 @@ function createPreviewEvaluator(params: {
       if (memo.has(key)) return memo.get(key) as SpreadsheetValue;
       if (stack.has(key)) return "#REF!";
 
-      // DocumentController creates sheets lazily on read; tab completion previews should be
-      // side-effect free. If the workbook hasn't materialized any sheets yet, treat all cell
-      // references as invalid rather than forcing the current sheet into existence.
-      if (knownSheets.length === 0) return "#REF!";
-
       stack.add(key);
       const state = document.getCell(targetSheet, normalized) as { value: unknown; formula: string | null };
       let value: SpreadsheetValue;
@@ -683,6 +678,9 @@ function bestPureInsertionSuggestion({
   suffix: string;
   suggestions: Suggestion[];
 }): Suggestion | null {
+  let first: Suggestion | null = null;
+  let bestBackend: Suggestion | null = null;
+
   for (const s of suggestions) {
     if (!s || typeof s.text !== "string") continue;
     if (s.text === draft) continue;
@@ -695,8 +693,18 @@ function bestPureInsertionSuggestion({
     // Ensure the suggested text actually represents an insertion at the caret.
     if (s.text.slice(cursor, s.text.length - suffix.length).length !== ghostLength) continue;
 
-    return s;
+    if (!first) first = s;
+
+    // Cursor backend suggestions are encoded as "formula" suggestions where
+    // `displayText` equals the full suggested text. Prefer those over the
+    // rule-based starter/function suggestions when available.
+    const isBackendFormula = s.type === "formula" && s.displayText === s.text;
+    if (isBackendFormula) {
+      if (!bestBackend || (s.confidence ?? 0) > (bestBackend.confidence ?? 0)) {
+        bestBackend = s;
+      }
+    }
   }
 
-  return null;
+  return bestBackend ?? first;
 }
