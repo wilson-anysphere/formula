@@ -327,6 +327,7 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
             }
         }
     }
+    out.sort();
     out
 }
 
