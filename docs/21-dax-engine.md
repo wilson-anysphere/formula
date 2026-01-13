@@ -750,12 +750,14 @@ assert_eq!(result.columns, vec!["Fact[Category]".to_string(), "Total".to_string(
 This is not an exhaustive list, but the most common contributor-facing constraints:
 
 - **Relationships**
-  - `OneToMany` and `OneToOne` are supported; `ManyToMany` is not.
+  - `OneToMany`, `OneToOne`, and `ManyToMany` are supported.
   - Only single-column relationships are supported.
-  - Some APIs consult only `Relationship::is_active` and do not apply `FilterContext` relationship
-    overrides (notably `RELATED` and pivot group-by path discovery).
+  - Grouping/pivoting by columns across a `ManyToMany` relationship is ambiguous today and will
+    error rather than expanding a base row into multiple related rows.
 - **DAX language coverage**
-  - No variables (`VAR`/`RETURN`), no `IN`, no table constructors.
+  - Variables (`VAR`/`RETURN`) and simple table constructors are supported.
+  - The `IN` operator is currently only supported in `CALCULATE` filter arguments with a one-column
+    table constructor on the right-hand side.
   - Most scalar/table functions are unimplemented (anything not listed above).
 - **Types**
   - Only `Blank`, `Number(f64)`, `Boolean`, and `Text` exist at the DAX layer.
