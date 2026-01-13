@@ -386,13 +386,33 @@ fn parse_anchor(anchor_node: &roxmltree::Node<'_, '_>) -> Result<Anchor> {
 fn parse_anchor_point(node: &roxmltree::Node<'_, '_>) -> Result<AnchorPoint> {
     let col = parse_child_text_i64(node, "col")? as u32;
     let row = parse_child_text_i64(node, "row")? as u32;
-    let col_off = parse_child_text_i64(node, "colOff")?;
-    let row_off = parse_child_text_i64(node, "rowOff")?;
+    // Some producers omit `colOff`/`rowOff`; default to 0 for best-effort parsing.
+    let col_off = parse_child_text_i64_or_zero(node, "colOff")?;
+    let row_off = parse_child_text_i64_or_zero(node, "rowOff")?;
 
     Ok(AnchorPoint::new(
         CellRef::new(row, col),
         CellOffset::new(col_off, row_off),
     ))
+}
+
+fn parse_child_text_i64_or_zero(node: &roxmltree::Node<'_, '_>, child: &str) -> Result<Emu> {
+    let child_node = node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == child);
+    let Some(child_node) = child_node else {
+        return Ok(0);
+    };
+
+    let value = child_node.text().unwrap_or_default();
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(0);
+    }
+
+    trimmed
+        .parse::<i64>()
+        .map_err(|e| XlsxError::Invalid(format!("invalid {child} value {value:?}: {e}")))
 }
 
 fn parse_child_text_i64(node: &roxmltree::Node<'_, '_>, child: &str) -> Result<Emu> {
