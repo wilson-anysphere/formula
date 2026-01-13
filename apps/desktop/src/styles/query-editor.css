@@ -73,6 +73,10 @@
   cursor: default;
 }
 
+.query-editor-container__toolbar select:disabled:hover {
+  background: var(--bg-primary);
+}
+
 .query-editor-container__toolbar select:focus-visible {
   border-color: var(--selection-border);
   box-shadow: 0 0 0 2px var(--selection-bg);
@@ -376,6 +380,8 @@
   box-shadow: var(--shadow-surface);
   max-width: 100%;
   box-sizing: border-box;
+  max-block-size: min(360px, 50vh);
+  overflow: auto;
 }
 
 .query-editor-add-step__menu-group {
