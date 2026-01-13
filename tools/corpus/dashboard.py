@@ -692,6 +692,8 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
     if timings:
         lines.append("## Timings")
         lines.append("")
+        lines.append("_Computed from successful (`status: ok`) step executions only._")
+        lines.append("")
         lines.append("| Step | Count | Mean (ms) | P50 (ms) | P90 (ms) | Max (ms) |")
         lines.append("|---|---:|---:|---:|---:|---:|")
 
