@@ -87,16 +87,56 @@ function luhnIsValid(digits) {
 function isValidCreditCard(candidate) {
   const digits = digitsOnly(candidate);
   if (digits.length < 13 || digits.length > 16) return false;
-  // Credit card IINs are (overwhelmingly) in the 2-6 range; this filters out
-  // common high-volume numeric strings like timestamps that might pass Luhn by chance.
-  // (Heuristic DLP prefers fewer false positives over perfect coverage.)
-  if (!/[2-6]/.test(digits[0])) return false;
   // All-same digits are almost certainly noise.
   if (isAllSameDigit(digits)) return false;
-
-  // 13-digit cards are typically Visa (4xxx...). Avoid flagging generic 13-digit IDs.
-  if (digits.length === 13 && digits[0] !== "4") return false;
+  // Further reduce false positives by only accepting well-known card IIN ranges.
+  if (!matchesKnownCardBrand(digits)) return false;
   return luhnIsValid(digits);
+}
+
+/**
+ * Heuristic allowlist for major card network IIN ranges.
+ *
+ * This intentionally does not attempt to cover every possible issuer/network; the goal
+ * is to reduce false positives when scanning arbitrary spreadsheet text.
+ *
+ * @param {string} digits
+ */
+function matchesKnownCardBrand(digits) {
+  const len = digits.length;
+  const d2 = len >= 2 ? Number.parseInt(digits.slice(0, 2), 10) : NaN;
+  const d3 = len >= 3 ? Number.parseInt(digits.slice(0, 3), 10) : NaN;
+  const d4 = len >= 4 ? Number.parseInt(digits.slice(0, 4), 10) : NaN;
+
+  // Visa: 13 or 16 digits, starts with 4.
+  if (digits[0] === "4") return len === 13 || len === 16;
+
+  // MasterCard: 16 digits, 51-55 or 2221-2720.
+  if (len === 16) {
+    if (d2 >= 51 && d2 <= 55) return true;
+    if (d4 >= 2221 && d4 <= 2720) return true;
+  }
+
+  // American Express: 15 digits, 34 or 37.
+  if (len === 15 && (d2 === 34 || d2 === 37)) return true;
+
+  // Discover: 16 digits, 6011, 65, 644-649.
+  if (len === 16) {
+    if (digits.startsWith("6011")) return true;
+    if (d2 === 65) return true;
+    if (d3 >= 644 && d3 <= 649) return true;
+  }
+
+  // JCB: 16 digits, 3528-3589.
+  if (len === 16 && d4 >= 3528 && d4 <= 3589) return true;
+
+  // Diners Club: 14 digits, 300-305, 36, 38, 39.
+  if (len === 14) {
+    if (d3 >= 300 && d3 <= 305) return true;
+    if (d2 === 36 || d2 === 38 || d2 === 39) return true;
+  }
+
+  return false;
 }
 
 /**

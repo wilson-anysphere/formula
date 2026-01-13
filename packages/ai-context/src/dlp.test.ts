@@ -6,6 +6,10 @@ describe("dlp heuristic", () => {
   it("only flags Luhn-valid credit card numbers (keeps formatting variants)", () => {
     const validSpaced = "My card is 4111 1111 1111 1111.";
     const validDashed = "Or use 5500-0000-0000-0004 for testing.";
+    const validAmex = "Amex: 3782 822463 10005";
+    const validDiscover = "Discover: 6011 1111 1111 1117";
+    const validJcb = "JCB: 3530 1113 3330 0000";
+    const validDiners = "Diners: 3056 930902 5904";
     const invalid = "Not a real card: 4111 1111 1111 1112.";
     const obviouslyInvalid = "Also not a card: 0000 0000 0000 0000.";
     // Luhn-valid but unrealistic (common in ids/timestamps). Should not be flagged.
@@ -13,6 +17,10 @@ describe("dlp heuristic", () => {
 
     expect(classifyText(validSpaced).findings).toContain("credit_card");
     expect(classifyText(validDashed).findings).toContain("credit_card");
+    expect(classifyText(validAmex).findings).toContain("credit_card");
+    expect(classifyText(validDiscover).findings).toContain("credit_card");
+    expect(classifyText(validJcb).findings).toContain("credit_card");
+    expect(classifyText(validDiners).findings).toContain("credit_card");
     expect(classifyText(invalid).findings).not.toContain("credit_card");
     expect(classifyText(obviouslyInvalid).findings).not.toContain("credit_card");
     expect(classifyText(luhnValidButNotCard).findings).not.toContain("credit_card");
