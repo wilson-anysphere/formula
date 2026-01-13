@@ -428,8 +428,24 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "PERCENTILE.EXC",
+    description: "Returns the k-th percentile of values in a range, exclusive.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "k", type: "number" },
+    ],
+  },
+  {
     name: "QUARTILE.INC",
     description: "Returns the quartile of a data set.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "quart", type: "number" },
+    ],
+  },
+  {
+    name: "QUARTILE.EXC",
+    description: "Returns the quartile of a data set, exclusive.",
     args: [
       { name: "array", type: "range" },
       { name: "quart", type: "number" },
@@ -442,6 +458,93 @@ const CURATED_FUNCTIONS = [
       { name: "number", type: "number" },
       { name: "ref", type: "range" },
       { name: "order", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "RANK.AVG",
+    description: "Returns the rank of a number in a list of numbers, with ties averaged.",
+    args: [
+      { name: "number", type: "number" },
+      { name: "ref", type: "range" },
+      { name: "order", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "MODE.SNGL",
+    description: "Returns the most common value in a data set.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "MODE.MULT",
+    description: "Returns a vertical array of the most frequently occurring, or repetitive values in an array or range of data.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "MODE",
+    description: "Returns the most common value in a data set (legacy).",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "AVEDEV",
+    description: "Returns the average of the absolute deviations of data points from their mean.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "DEVSQ",
+    description: "Returns the sum of squares of deviations of data points from their sample mean.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "KURT",
+    description: "Returns the kurtosis of a data set.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "SKEW",
+    description: "Returns the skewness of a distribution.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "SKEW.P",
+    description: "Returns the skewness of a population.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "GEOMEAN",
+    description: "Returns the geometric mean.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "HARMEAN",
+    description: "Returns the harmonic mean.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "TRIMMEAN",
+    description: "Returns the mean of the interior portion of a data set.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "percent", type: "number" },
     ],
   },
   {

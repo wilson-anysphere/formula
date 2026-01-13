@@ -109,4 +109,11 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("FTEST", 0), "Expected FTEST array1 to be a range");
   assert.ok(registry.isRangeArg("Z.TEST", 0), "Expected Z.TEST array to be a range");
   assert.ok(registry.isRangeArg("ZTEST", 0), "Expected ZTEST array to be a range");
+
+  // Additional common stats functions
+  assert.ok(registry.isRangeArg("PERCENTILE.EXC", 0), "Expected PERCENTILE.EXC array to be a range");
+  assert.ok(registry.isRangeArg("QUARTILE.EXC", 0), "Expected QUARTILE.EXC array to be a range");
+  assert.ok(registry.isRangeArg("RANK.AVG", 1), "Expected RANK.AVG ref to be a range");
+  assert.ok(registry.isRangeArg("MODE.SNGL", 0), "Expected MODE.SNGL arg1 to be a range");
+  assert.ok(registry.isRangeArg("TRIMMEAN", 0), "Expected TRIMMEAN array to be a range");
 });
