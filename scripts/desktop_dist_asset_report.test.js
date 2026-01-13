@@ -26,7 +26,7 @@ test("desktop_dist_asset_report emits markdown with top offenders + grouped tota
   createSizedFile(path.join(distDir, "assets", "a.bin"), 2_000_000);
   createSizedFile(path.join(distDir, "pyodide", "b.wasm"), 5_000_000);
 
-  const proc = spawnSync(process.execPath, [scriptPath, "--dist-dir", distDir, "--top", "2"], {
+  const proc = spawnSync(process.execPath, [scriptPath, "--dist-dir", distDir, "--top", "2", "--group-depth", "2"], {
     encoding: "utf8",
   });
 
@@ -36,6 +36,8 @@ test("desktop_dist_asset_report emits markdown with top offenders + grouped tota
   assert.match(proc.stdout, /`pyodide\/b\.wasm`/);
   assert.match(proc.stdout, /### Grouped totals/);
   assert.match(proc.stdout, /`pyodide\/`/);
+  assert.match(proc.stdout, /`assets\/`/);
+  assert.doesNotMatch(proc.stdout, /`assets\/a\.bin\/`/);
 });
 
 test("desktop_dist_asset_report enforces budgets when env vars are set", () => {
@@ -58,4 +60,3 @@ test("desktop_dist_asset_report enforces budgets when env vars are set", () => {
   assert.match(proc.stdout, /Budgets:/);
   assert.match(proc.stdout, /\*\*FAIL\*\*/);
 });
-

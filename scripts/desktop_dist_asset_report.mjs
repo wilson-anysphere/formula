@@ -322,8 +322,8 @@ function renderGroupedTotals(files, totalBytes, groupDepth) {
 
   for (const f of files) {
     const parts = f.relPath.split("/");
-    const key =
-      parts.length === 1 ? "(root)" : `${parts.slice(0, Math.max(1, groupDepth)).join("/")}/`;
+    const dirParts = parts.slice(0, -1);
+    const key = dirParts.length === 0 ? "(root)" : `${dirParts.slice(0, groupDepth).join("/")}/`;
     const prev = groups.get(key);
     if (prev) {
       prev.bytes += f.sizeBytes;
