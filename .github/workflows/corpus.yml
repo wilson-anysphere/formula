@@ -333,6 +333,24 @@ jobs:
               f"- Part change ratio p90 (critical): **{pct(cur.get('part_change_ratio_critical_p90'))}** "
               f"({delta_pct(prev.get('part_change_ratio_critical_p90'), cur.get('part_change_ratio_critical_p90'))})"
           )
+
+          prev_kinds = prev.get("failures_by_round_trip_failure_kind") or {}
+          cur_kinds = cur.get("failures_by_round_trip_failure_kind") or {}
+          if isinstance(prev_kinds, dict) and isinstance(cur_kinds, dict) and cur_kinds:
+              items = []
+              for k, v in cur_kinds.items():
+                  if isinstance(v, bool) or not isinstance(v, int):
+                      continue
+                  items.append((k, int(v)))
+              items.sort(key=lambda kv: (-kv[1], kv[0]))
+              top = items[:3]
+              if top:
+                  parts = []
+                  for k, v in top:
+                      prev_v = prev_kinds.get(k)
+                      prev_i = int(prev_v) if isinstance(prev_v, int) and not isinstance(prev_v, bool) else 0
+                      parts.append(f\"{k}={v} ({v - prev_i:+d})\")
+                  lines.append(f\"- Top round-trip failure kinds: {', '.join(parts)}\")
            
           prev_diff = prev.get("diff_totals") or {}
           cur_diff = cur.get("diff_totals") or {}
