@@ -37,6 +37,44 @@ export type ExtractedFormulaReferences = {
 
 export type ColoredFormulaReference = FormulaReference & { color: string };
 
+export type StructuredTableInfo = {
+  /** Table name as used in structured references (e.g. `Table1`). */
+  name: string;
+  /** Column names in table order. */
+  columns: readonly string[];
+  /** Optional sheet name the table belongs to. */
+  sheet?: string;
+  /** Legacy alias (matches the completion schema provider contract). */
+  sheetName?: string;
+  /** 0-based inclusive coordinates of the full table range (including header row). */
+  startRow?: number;
+  startCol?: number;
+  endRow?: number;
+  endCol?: number;
+};
+
+export type ExtractFormulaReferencesOptions = {
+  /**
+   * Optional resolver for non-A1 identifiers (e.g. named ranges).
+   *
+   * If provided, any identifier token that is not a function call (no immediate `(`)
+   * and is not the TRUE/FALSE literals will be passed through this resolver. Only
+   * identifiers that resolve to a range will be included in the output.
+   */
+  resolveName?: (name: string) => FormulaReferenceRange | null;
+  /**
+   * Optional resolver for structured references (e.g. `Table1[Amount]`).
+   *
+   * When provided, this is consulted after A1 parsing fails.
+   */
+  resolveStructuredRef?: (refText: string) => FormulaReferenceRange | null;
+  /**
+   * Optional table metadata used to resolve Excel structured references into A1-style
+   * coordinates for highlighting.
+   */
+  tables?: ReadonlyMap<string, StructuredTableInfo> | ReadonlyArray<StructuredTableInfo>;
+};
+
 export const FORMULA_REFERENCE_PALETTE: readonly string[] = [
   // Excel-ish palette (blue, red, green, purple, teal, orange, …).
   "#4F81BD",
@@ -48,17 +86,6 @@ export const FORMULA_REFERENCE_PALETTE: readonly string[] = [
   "#1F497D",
   "#943634"
 ];
-
-export type ExtractFormulaReferencesOptions = {
-  /**
-   * Optional resolver for non-A1 identifiers (e.g. named ranges).
-   *
-   * If provided, any identifier token that is not a function call (no immediate `(`)
-   * and is not the TRUE/FALSE literals will be passed through this resolver. Only
-   * identifiers that resolve to a range will be included in the output.
-   */
-  resolveName?: (name: string) => FormulaReferenceRange | null;
-};
 
 export function extractFormulaReferences(
   input: string,
@@ -72,7 +99,7 @@ export function extractFormulaReferences(
 
   for (const token of tokens) {
     if (token.type === "reference") {
-      const parsed = parseA1RangeWithSheet(token.text);
+      const parsed = parseA1RangeWithSheet(token.text) ?? resolveStructuredReference(token.text, opts);
       if (!parsed) continue;
       references.push({
         text: token.text,
@@ -96,6 +123,7 @@ export function extractFormulaReferences(
         start: token.start,
         end: token.end
       });
+      continue;
     }
   }
 
@@ -477,6 +505,36 @@ function tryReadReference(input: string, start: number): { text: string; end: nu
   return { text: prefix + first.text, end: i };
 }
 
+function tryReadStructuredReference(input: string, start: number): { text: string; end: number } | null {
+  if (!isIdentifierStart(input[start] ?? "")) return null;
+
+  let i = start + 1;
+  while (i < input.length && isIdentifierPart(input[i]!)) i += 1;
+  if (input[i] !== "[") return null;
+
+  // Bracket matching: structured references can contain nested brackets (e.g.
+  // `Table1[[#All],[Amount]]`).
+  let depth = 0;
+  let j = i;
+  while (j < input.length) {
+    const ch = input[j]!;
+    if (ch === "[") depth += 1;
+    else if (ch === "]") {
+      depth -= 1;
+      if (depth === 0) {
+        const end = j + 1;
+        const text = input.slice(start, end);
+        // Only claim this token when it matches a supported structured ref pattern.
+        if (!parseStructuredReferenceText(text)) return null;
+        return { text, end };
+      }
+    }
+    j += 1;
+  }
+
+  return null;
+}
+
 function tokenizeFormula(input: string): FormulaToken[] {
   const tokens: FormulaToken[] = [];
   let i = 0;
@@ -555,6 +613,13 @@ function tokenizeFormula(input: string): FormulaToken[] {
         i = ref.end;
         continue;
       }
+    }
+
+    const structured = tryReadStructuredReference(input, i);
+    if (structured) {
+      tokens.push({ type: "reference", text: structured.text, start: i, end: structured.end });
+      i = structured.end;
+      continue;
     }
 
     if (isIdentifierStart(ch)) {
@@ -639,4 +704,109 @@ function parseA1RangeWithSheet(rangeRef: string): FormulaReferenceRange | null {
     endCol: Math.max(start.col, end.col),
     endRow: Math.max(start.row, end.row)
   };
+}
+
+type ParsedStructuredReference = {
+  tableName: string;
+  columnName: string;
+  includeHeader: boolean;
+};
+
+function parseStructuredReferenceText(text: string): ParsedStructuredReference | null {
+  const firstBracket = text.indexOf("[");
+  if (firstBracket <= 0) return null;
+  const tableName = text.slice(0, firstBracket);
+  const suffix = text.slice(firstBracket);
+  if (!tableName || !suffix) return null;
+
+  // Supported patterns:
+  //   TableName[ColumnName]
+  //   TableName[[#All],[ColumnName]]
+  const allMatch = /^\[\[\s*#all\s*\]\s*,\s*\[\s*([^\]]+?)\s*\]\]$/i.exec(suffix);
+  if (allMatch) {
+    return { tableName, columnName: allMatch[1]!, includeHeader: true };
+  }
+
+  const simpleMatch = /^\[\s*([^\[\]]+?)\s*\]$/.exec(suffix);
+  if (simpleMatch) {
+    return { tableName, columnName: simpleMatch[1]!, includeHeader: false };
+  }
+
+  return null;
+}
+
+function resolveStructuredReference(refText: string, opts: ExtractFormulaReferencesOptions | undefined): FormulaReferenceRange | null {
+  if (!opts) return null;
+
+  if (typeof opts.resolveStructuredRef === "function") {
+    const resolved = opts.resolveStructuredRef(refText);
+    if (resolved) return resolved;
+  }
+
+  const tables = opts.tables;
+  if (!tables) return null;
+  const parsed = parseStructuredReferenceText(refText);
+  if (!parsed) return null;
+
+  const table = findTableInfo(tables, parsed.tableName);
+  if (!table) return null;
+
+  const startRow = table.startRow;
+  const endRow = table.endRow;
+  const startCol = table.startCol;
+  const endCol = table.endCol;
+  if (![startRow, endRow, startCol, endCol].every((v) => Number.isFinite(v))) return null;
+
+  const columnIndex = table.columns.findIndex((c) => String(c).toLowerCase() === parsed.columnName.toLowerCase());
+  if (columnIndex < 0) return null;
+
+  const col = startCol! + columnIndex;
+  const minCol = Math.min(startCol!, endCol!);
+  const maxCol = Math.max(startCol!, endCol!);
+  if (col < minCol || col > maxCol) return null;
+
+  let refStartRow = startRow!;
+  const refEndRow = endRow!;
+  if (!parsed.includeHeader && refEndRow > refStartRow) {
+    // Exclude header row when the table has at least one data row.
+    refStartRow = refStartRow + 1;
+  }
+
+  return {
+    sheet: table.sheet ?? table.sheetName,
+    startRow: Math.min(refStartRow, refEndRow),
+    endRow: Math.max(refStartRow, refEndRow),
+    startCol: col,
+    endCol: col
+  };
+}
+
+function findTableInfo(
+  tables: ReadonlyMap<string, StructuredTableInfo> | ReadonlyArray<StructuredTableInfo>,
+  tableName: string
+): StructuredTableInfo | null {
+  const target = tableName.toLowerCase();
+
+  if (isStructuredTableArray(tables)) {
+    for (const table of tables) {
+      const name = (table?.name ?? "").toString();
+      if (name.toLowerCase() === target) return table;
+    }
+    return null;
+  }
+
+  const direct = tables.get(tableName);
+  if (direct) return direct;
+
+  for (const [key, table] of tables.entries()) {
+    if (key.toLowerCase() === target) return table;
+    if ((table?.name ?? "").toLowerCase() === target) return table;
+  }
+  return null;
+}
+
+function isStructuredTableArray(
+  tables: ReadonlyMap<string, StructuredTableInfo> | ReadonlyArray<StructuredTableInfo>
+): tables is ReadonlyArray<StructuredTableInfo> {
+  return Array.isArray(tables);
 }

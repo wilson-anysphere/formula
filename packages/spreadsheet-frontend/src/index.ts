@@ -15,7 +15,8 @@ export type {
   ColoredFormulaReference,
   ExtractFormulaReferencesOptions,
   FormulaReference,
-  FormulaReferenceRange
+  FormulaReferenceRange,
+  StructuredTableInfo
 } from "./formulaReferences.ts";
 export { assignFormulaReferenceColors, extractFormulaReferences, FORMULA_REFERENCE_PALETTE } from "./formulaReferences.ts";
 

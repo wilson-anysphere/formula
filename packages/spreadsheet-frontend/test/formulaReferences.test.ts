@@ -122,6 +122,91 @@ describe("extractFormulaReferences", () => {
     // Caret at end of token should still count as inside.
     expect(extractFormulaReferences(input, tokenEnd, tokenEnd, { resolveName }).activeIndex).toBe(0);
   });
+  });
+
+  it("extracts structured table references (data rows only)", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          // Full table range (including header row) is A1:B4 in Excel terms.
+          startRow: 0,
+          startCol: 0,
+          endRow: 3,
+          endCol: 1,
+          columns: ["Item", "Amount"]
+        }
+      ]
+    ]);
+
+    const input = "=SUM(Table1[Amount])";
+    const { references } = extractFormulaReferences(input, 0, 0, { tables });
+    expect(references).toHaveLength(1);
+    expect(references[0]).toEqual({
+      text: "Table1[Amount]",
+      range: { sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 3, endCol: 1 },
+      index: 0,
+      start: input.indexOf("Table1"),
+      end: input.indexOf("Table1") + "Table1[Amount]".length
+    });
+  });
+
+  it("extracts structured table references with #All (includes header row)", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          startRow: 0,
+          startCol: 0,
+          endRow: 3,
+          endCol: 1,
+          columns: ["Item", "Amount"]
+        }
+      ]
+    ]);
+
+    const input = "=SUM(Table1[[#All],[Amount]])";
+    const { references } = extractFormulaReferences(input, 0, 0, { tables });
+    expect(references).toHaveLength(1);
+    expect(references[0]).toEqual({
+      text: "Table1[[#All],[Amount]]",
+      range: { sheet: "Sheet1", startRow: 0, startCol: 1, endRow: 3, endCol: 1 },
+      index: 0,
+      start: input.indexOf("Table1"),
+      end: input.indexOf("Table1") + "Table1[[#All],[Amount]]".length
+    });
+  });
+
+  it("treats a structured ref as the active reference even when the caret is after an internal comma", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          startRow: 0,
+          startCol: 0,
+          endRow: 3,
+          endCol: 1,
+          columns: ["Item", "Amount"]
+        }
+      ]
+    ]);
+
+    const input = "=SUM(Table1[[#All],[Amount]])";
+    const comma = input.indexOf(",");
+    expect(comma).toBeGreaterThan(0);
+
+    const { activeIndex: inside } = extractFormulaReferences(input, comma + 1, comma + 1, { tables });
+    expect(inside).toBe(0);
+
+    const { activeIndex: outside } = extractFormulaReferences(input, input.length, input.length, { tables });
+    expect(outside).toBe(null);
+  });
 });
 
 describe("assignFormulaReferenceColors", () => {
