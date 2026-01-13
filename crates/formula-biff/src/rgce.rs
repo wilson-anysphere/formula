@@ -1035,33 +1035,57 @@ fn decode_rgce_impl(
             }
             // PtgRefErr: [row: u32][col: u16]
             0x2A | 0x4A | 0x6A => {
-                if input.len() < 6 {
-                    return Err(DecodeRgceError::UnexpectedEof);
+                let needed = 6;
+                let remaining = rgce.len().saturating_sub(i);
+                if remaining < needed {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed,
+                        remaining,
+                    });
                 }
-                input = &input[6..];
+                i += needed;
                 stack.push(ExprFragment::new("#REF!".to_string()));
             }
             // PtgAreaErr: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
             0x2B | 0x4B | 0x6B => {
-                if input.len() < 12 {
-                    return Err(DecodeRgceError::UnexpectedEof);
+                let needed = 12;
+                let remaining = rgce.len().saturating_sub(i);
+                if remaining < needed {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed,
+                        remaining,
+                    });
                 }
-                input = &input[12..];
+                i += needed;
                 stack.push(ExprFragment::new("#REF!".to_string()));
             }
             // PtgRefN: [row_off: i32][col_off: i16]
             0x2C | 0x4C | 0x6C => {
-                if input.len() < 6 {
-                    return Err(DecodeRgceError::UnexpectedEof);
+                let needed = 6;
+                let remaining = rgce.len().saturating_sub(i);
+                if remaining < needed {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed,
+                        remaining,
+                    });
                 }
                 let Some((base_row0, base_col0)) = base else {
-                    return Err(DecodeRgceError::UnsupportedToken { ptg });
+                    return Err(DecodeRgceError::UnsupportedToken {
+                        offset: ptg_offset,
+                        ptg,
+                    });
                 };
 
                 let row_off =
-                    i32::from_le_bytes([input[0], input[1], input[2], input[3]]) as i64;
-                let col_off = i16::from_le_bytes([input[4], input[5]]) as i64;
-                input = &input[6..];
+                    i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) as i64;
+                let col_off = i16::from_le_bytes([rgce[i + 4], rgce[i + 5]]) as i64;
+                i += 6;
 
                 const MAX_ROW0: i64 = 1_048_575;
                 const MAX_COL0: i64 = 0x3FFF;
@@ -1078,20 +1102,31 @@ fn decode_rgce_impl(
             }
             // PtgAreaN: [rowFirst_off: i32][rowLast_off: i32][colFirst_off: i16][colLast_off: i16]
             0x2D | 0x4D | 0x6D => {
-                if input.len() < 12 {
-                    return Err(DecodeRgceError::UnexpectedEof);
+                let needed = 12;
+                let remaining = rgce.len().saturating_sub(i);
+                if remaining < needed {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed,
+                        remaining,
+                    });
                 }
                 let Some((base_row0, base_col0)) = base else {
-                    return Err(DecodeRgceError::UnsupportedToken { ptg });
+                    return Err(DecodeRgceError::UnsupportedToken {
+                        offset: ptg_offset,
+                        ptg,
+                    });
                 };
 
                 let row1_off =
-                    i32::from_le_bytes([input[0], input[1], input[2], input[3]]) as i64;
+                    i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) as i64;
                 let row2_off =
-                    i32::from_le_bytes([input[4], input[5], input[6], input[7]]) as i64;
-                let col1_off = i16::from_le_bytes([input[8], input[9]]) as i64;
-                let col2_off = i16::from_le_bytes([input[10], input[11]]) as i64;
-                input = &input[12..];
+                    i32::from_le_bytes([rgce[i + 4], rgce[i + 5], rgce[i + 6], rgce[i + 7]])
+                        as i64;
+                let col1_off = i16::from_le_bytes([rgce[i + 8], rgce[i + 9]]) as i64;
+                let col2_off = i16::from_le_bytes([rgce[i + 10], rgce[i + 11]]) as i64;
+                i += 12;
 
                 const MAX_ROW0: i64 = 1_048_575;
                 const MAX_COL0: i64 = 0x3FFF;

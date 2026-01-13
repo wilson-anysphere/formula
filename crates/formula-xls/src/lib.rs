@@ -862,7 +862,7 @@ fn import_xls_path_with_biff_reader(
                             Ok(mut settings) => {
                                 warnings.extend(settings.warnings.drain(..).map(ImportWarning::new));
                                 let manual_page_breaks = settings.manual_page_breaks;
-                                let page_setup = settings.page_setup;
+                                let page_setup = settings.page_setup.unwrap_or_default();
  
                                 // Avoid storing a default `PageSetup` unless there is something
                                 // non-default worth preserving (page setup fields or manual page breaks).
