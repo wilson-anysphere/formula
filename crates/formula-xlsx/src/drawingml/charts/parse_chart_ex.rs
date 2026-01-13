@@ -62,18 +62,22 @@ pub fn parse_chart_ex(
     let legend = chart_node.and_then(|chart| parse_legend(chart, &mut diagnostics));
     let chart_data = parse_chart_data(&doc, &mut diagnostics);
 
-    let series = find_chart_type_node(&doc)
-        .map(|chart_type_node| {
-            chart_type_node
-                .descendants()
-                .filter(|n| {
-                    n.is_element()
-                        && (n.tag_name().name() == "ser" || n.tag_name().name() == "series")
-                })
-                .map(|n| parse_series(n, &chart_data, &mut diagnostics))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    // Collect series across all chart-type nodes. Real-world ChartEx parts can
+    // contain multiple `<cx:*Chart>` blocks; limiting to only the first drops
+    // series for combo-ish plot areas.
+    let mut series = Vec::new();
+    let chart_type_nodes = find_chart_type_nodes(&doc);
+    if !chart_type_nodes.is_empty() {
+        for chart_type_node in chart_type_nodes {
+            for series_node in chart_type_node.descendants().filter(is_series_node) {
+                series.push(parse_series(series_node, &chart_data, &mut diagnostics));
+            }
+        }
+    } else if let Some(chart_type_node) = find_chart_type_node(&doc) {
+        for series_node in chart_type_node.descendants().filter(is_series_node) {
+            series.push(parse_series(series_node, &chart_data, &mut diagnostics));
+        }
+    }
 
     Ok(ChartModel {
         chart_kind: ChartKind::Unknown {
@@ -267,6 +271,28 @@ fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {
         let lower = name.to_ascii_lowercase();
         lower.ends_with("chart") && lower != "chart" && lower != "chartspace"
     })
+}
+
+fn is_series_node(node: &Node<'_, '_>) -> bool {
+    node.is_element() && (node.tag_name().name() == "ser" || node.tag_name().name() == "series")
+}
+
+fn find_chart_type_nodes<'a>(doc: &'a Document<'a>) -> Vec<Node<'a, 'a>> {
+    // ChartEx parts sometimes include other `*Chart`-suffixed elements (e.g.
+    // style/theme) that can appear before the actual chart type. To avoid
+    // mistakenly treating those as chart types, only include `*Chart` nodes
+    // that actually contain series elements.
+    doc.descendants()
+        .filter(|n| {
+            if !n.is_element() {
+                return false;
+            }
+            let name = n.tag_name().name();
+            let lower = name.to_ascii_lowercase();
+            lower.ends_with("chart") && lower != "chart" && lower != "chartspace"
+        })
+        .filter(|n| n.descendants().any(|d| is_series_node(&d)))
+        .collect()
 }
 
 fn attribute_case_insensitive<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {

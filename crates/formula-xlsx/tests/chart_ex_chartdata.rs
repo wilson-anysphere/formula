@@ -240,3 +240,51 @@ fn chart_ex_fills_missing_formulas_from_chartdata_and_supports_nested_nodes() {
         other => panic!("expected y_values numeric series data, got {other:?}"),
     }
 }
+
+#[test]
+fn chart_ex_collects_series_from_multiple_chart_type_nodes() {
+    let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex">
+  <cx:chartData>
+    <cx:data id="0">
+      <cx:numDim type="val">
+        <cx:f>Sheet1!$A$2:$A$4</cx:f>
+      </cx:numDim>
+    </cx:data>
+    <cx:data id="1">
+      <cx:numDim type="val">
+        <cx:f>Sheet1!$B$2:$B$4</cx:f>
+      </cx:numDim>
+    </cx:data>
+  </cx:chartData>
+
+  <cx:chart>
+    <cx:plotArea>
+      <cx:histogramChart>
+        <cx:ser dataId="0" />
+      </cx:histogramChart>
+      <cx:waterfallChart>
+        <cx:ser dataId="1" />
+      </cx:waterfallChart>
+    </cx:plotArea>
+  </cx:chart>
+</cx:chartSpace>
+"#;
+
+    let model = parse_chart_ex(xml, "chartEx1.xml").expect("parse chartEx");
+    assert_eq!(model.series.len(), 2);
+    assert_eq!(
+        model.series[0]
+            .values
+            .as_ref()
+            .and_then(|d| d.formula.as_deref()),
+        Some("Sheet1!$A$2:$A$4")
+    );
+    assert_eq!(
+        model.series[1]
+            .values
+            .as_ref()
+            .and_then(|d| d.formula.as_deref()),
+        Some("Sheet1!$B$2:$B$4")
+    );
+}
