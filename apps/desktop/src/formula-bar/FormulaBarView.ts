@@ -1058,6 +1058,7 @@ export class FormulaBarView {
 
   beginRangeSelection(range: RangeAddress, sheetId?: string): void {
     if (this.#readOnly) return;
+    this.#functionAutocomplete.close();
     this.model.beginEdit();
     this.model.beginRangeSelection(range, sheetId);
     this.#selectedReferenceIndex = null;
@@ -1069,6 +1070,7 @@ export class FormulaBarView {
 
   updateRangeSelection(range: RangeAddress, sheetId?: string): void {
     if (this.#readOnly) return;
+    this.#functionAutocomplete.close();
     this.model.updateRangeSelection(range, sheetId);
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });

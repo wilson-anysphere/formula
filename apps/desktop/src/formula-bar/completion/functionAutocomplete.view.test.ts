@@ -145,6 +145,28 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     host.remove();
   });
 
+  it("closes when starting a range selection (to avoid stealing Tab/Enter)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+    expect(dropdown?.hasAttribute("hidden")).toBe(false);
+
+    view.beginRangeSelection({ start: { row: 0, col: 0 }, end: { row: 0, col: 0 } }, "Sheet1");
+
+    expect(dropdown?.hasAttribute("hidden")).toBe(true);
+
+    host.remove();
+  });
+
   it("closes the dropdown on Escape", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
