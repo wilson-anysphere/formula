@@ -1,5 +1,5 @@
 import { explainFormulaError, type ErrorExplanation } from "./errors.js";
-import { getFunctionHint, type FunctionHint } from "./highlight/functionContext.js";
+import { getFunctionCallContext, type FunctionHint } from "./highlight/functionContext.js";
 import { getFunctionSignature, signatureParts } from "./highlight/functionSignatures.js";
 import { highlightFormula, type HighlightSpan } from "./highlight/highlightFormula.js";
 import { tokenizeFormula } from "./highlight/tokenizeFormula.js";
@@ -58,6 +58,8 @@ export class FormulaBarModel {
   #coloredReferences: ColoredFormulaReference[] = [];
   #activeReferenceIndex: number | null = null;
   #engineHighlightSpans: HighlightSpan[] | null = null;
+  #engineLexTokens: EngineFormulaToken[] | null = null;
+  #engineHighlightErrorSpanKey: string | null = null;
   #engineFunctionContext: EngineFunctionContext | null = null;
   #engineSyntaxError: FormulaParseError | null = null;
   #engineToolingFormula: string | null = null;
@@ -191,12 +193,25 @@ export class FormulaBarModel {
   }
 
   updateDraft(draft: string, cursorStart: number, cursorEnd: number): void {
+    const nextCursorStart = Math.max(0, Math.min(cursorStart, draft.length));
+    const nextCursorEnd = Math.max(0, Math.min(cursorEnd, draft.length));
+    const draftChanged = draft !== this.#draft;
+    const cursorChanged = nextCursorStart !== this.#cursorStart || nextCursorEnd !== this.#cursorEnd;
+    if (this.#isEditing && !draftChanged && !cursorChanged) return;
+
     this.#isEditing = true;
     this.#draft = draft;
-    this.#cursorStart = Math.max(0, Math.min(cursorStart, draft.length));
-    this.#cursorEnd = Math.max(0, Math.min(cursorEnd, draft.length));
+    this.#cursorStart = nextCursorStart;
+    this.#cursorEnd = nextCursorEnd;
     this.#rangeInsertion = null;
-    this.#clearEditorTooling();
+    if (draftChanged) {
+      // Draft text changed; any cached engine tokens/spans are now stale.
+      this.#clearEditorTooling();
+    } else if (cursorChanged) {
+      // Cursor moved within the same draft; keep lex-based highlights/syntax errors but
+      // clear cursor-dependent parse context so hint rendering can refresh.
+      this.#engineFunctionContext = null;
+    }
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
     this.#updateReferenceHighlights();
@@ -248,12 +263,17 @@ export class FormulaBarModel {
   }
 
   functionHint(): FunctionHint | null {
-    if (this.#engineToolingFormula === this.#draft && this.#engineFunctionContext) {
+    const hasEngineLocaleForDraft = this.#engineToolingFormula === this.#draft;
+    const localeId = hasEngineLocaleForDraft
+      ? this.#engineToolingLocaleId
+      : (typeof document !== "undefined" ? document.documentElement?.lang : "")?.trim?.() || "en-US";
+    const argSeparator = inferArgSeparator(localeId);
+
+    if (hasEngineLocaleForDraft && this.#engineFunctionContext) {
       const ctx = this.#engineFunctionContext;
       const signature = getFunctionSignature(ctx.name);
       if (!signature) return null;
 
-      const argSeparator = inferArgSeparator(this.#engineToolingLocaleId);
       return {
         context: { name: ctx.name, argIndex: ctx.argIndex },
         signature,
@@ -261,30 +281,29 @@ export class FormulaBarModel {
       };
     }
 
-    let hint = getFunctionHint(this.#draft, this.#cursorStart);
+    let context = getFunctionCallContext(this.#draft, this.#cursorStart);
 
     // Excel UX: keep showing the innermost function hint when the caret is just
     // after a closing paren (e.g. "=ROUND(1,2)|"). The simple tokenizer-based
     // parser considers the call "closed" once it consumes ')', which would
     // otherwise clear the hint.
     if (
-      !hint &&
+      !context &&
       this.#cursorStart === this.#cursorEnd &&
       this.#cursorStart > 0 &&
       this.#draft[this.#cursorStart - 1] === ")"
     ) {
-      hint = getFunctionHint(this.#draft, this.#cursorStart - 1);
+      context = getFunctionCallContext(this.#draft, this.#cursorStart - 1);
     }
 
-    if (!hint) return null;
-
-    // Best-effort locale-aware separator in fallback mode (engine absent/unavailable).
-    // This uses the document language (set by the i18n layer) as a proxy for the
-    // formula locale, defaulting to en-US in non-DOM environments (tests).
-    const localeId = (typeof document !== "undefined" ? document.documentElement?.lang : "")?.trim?.() || "en-US";
-    const argSeparator = inferArgSeparator(localeId);
-    if (argSeparator === ", ") return hint;
-    return { ...hint, parts: signatureParts(hint.signature, hint.context.argIndex, { argSeparator }) };
+    if (!context) return null;
+    const signature = getFunctionSignature(context.name);
+    if (!signature) return null;
+    return {
+      context,
+      signature,
+      parts: signatureParts(signature, context.argIndex, { argSeparator }),
+    };
   }
 
   errorExplanation(): ErrorExplanation | null {
@@ -325,11 +344,25 @@ export class FormulaBarModel {
     const error = args.lexResult.error ?? args.parseResult.error;
     this.#engineSyntaxError = error;
 
-    const referenceTokens = tokenizeFormula(args.formula).filter((t) => t.type === "reference");
-    const engineSpans = highlightFromEngineTokens(args.formula, args.lexResult.tokens);
-    const withRefs = spliceReferenceSpans(args.formula, engineSpans, referenceTokens);
-    const withError = applyErrorSpan(args.formula, withRefs, error?.span ?? null);
-    this.#engineHighlightSpans = withError;
+    const errorSpan = error?.span ?? null;
+    const errorSpanKey =
+      errorSpan && errorSpan.end > errorSpan.start ? `${errorSpan.start}:${errorSpan.end}` : null;
+
+    const highlightStable =
+      this.#engineHighlightSpans != null &&
+      this.#engineToolingFormula === args.formula &&
+      this.#engineLexTokens === args.lexResult.tokens &&
+      this.#engineHighlightErrorSpanKey === errorSpanKey;
+
+    if (!highlightStable) {
+      const referenceTokens = tokenizeFormula(args.formula).filter((t) => t.type === "reference");
+      const engineSpans = highlightFromEngineTokens(args.formula, args.lexResult.tokens);
+      const withRefs = spliceReferenceSpans(args.formula, engineSpans, referenceTokens);
+      const withError = applyErrorSpan(args.formula, withRefs, errorSpan && errorSpan.end > errorSpan.start ? errorSpan : null);
+      this.#engineHighlightSpans = withError;
+      this.#engineLexTokens = args.lexResult.tokens;
+      this.#engineHighlightErrorSpanKey = errorSpanKey;
+    }
   }
 
   setHoveredReference(referenceText: string | null): void {
@@ -576,6 +609,8 @@ export class FormulaBarModel {
 
   #clearEditorTooling(): void {
     this.#engineHighlightSpans = null;
+    this.#engineLexTokens = null;
+    this.#engineHighlightErrorSpanKey = null;
     this.#engineFunctionContext = null;
     this.#engineSyntaxError = null;
     this.#engineToolingFormula = null;

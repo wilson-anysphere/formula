@@ -278,6 +278,14 @@ export class FormulaBarView {
     localeId: string;
     referenceStyle: NonNullable<FormulaParseOptions["referenceStyle"]>;
   } | null = null;
+  #toolingLexCache:
+    | {
+        draft: string;
+        localeId: string;
+        referenceStyle: NonNullable<FormulaParseOptions["referenceStyle"]>;
+        lexResult: Awaited<ReturnType<EngineClient["lexFormulaPartial"]>>;
+      }
+    | null = null;
   #nameBoxMenu: ContextMenu | null = null;
   #restoreNameBoxFocusOnMenuClose = false;
   #nameBoxMenuEscapeListener: ((e: KeyboardEvent) => void) | null = null;
@@ -1305,10 +1313,30 @@ export class FormulaBarView {
       this.#toolingAbort = abort;
       const rpcOptions = { signal: abort.signal };
 
+      const cached = this.#toolingLexCache;
+      const cacheHit =
+        cached != null &&
+        cached.draft === pending.draft &&
+        cached.localeId === pending.localeId &&
+        cached.referenceStyle === pending.referenceStyle;
+
+      const lexPromise = cacheHit
+        ? Promise.resolve(cached.lexResult)
+        : engine.lexFormulaPartial(pending.draft, options, rpcOptions);
+
       const [lexResult, parseResult] = await Promise.all([
-        engine.lexFormulaPartial(pending.draft, options, rpcOptions),
+        lexPromise,
         engine.parseFormulaPartial(pending.draft, pending.cursor, options, rpcOptions),
       ]);
+
+      if (!cacheHit) {
+        this.#toolingLexCache = {
+          draft: pending.draft,
+          localeId: pending.localeId,
+          referenceStyle: pending.referenceStyle,
+          lexResult,
+        };
+      }
 
       // Ignore stale/out-of-order results.
       if (pending.requestId !== this.#toolingRequestId) return;

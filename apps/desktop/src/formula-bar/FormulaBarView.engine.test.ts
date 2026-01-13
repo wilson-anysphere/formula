@@ -78,6 +78,61 @@ describe("FormulaBarView WASM editor tooling integration", () => {
     host.remove();
   });
 
+  it("reuses the cached lex result when only the cursor moves", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const draft = "=SUM(1, 2)";
+
+    const tokens: FormulaToken[] = [
+      { kind: "Eq", span: { start: 0, end: 1 } },
+      { kind: "Ident", span: { start: 1, end: 4 }, value: "SUM" },
+      { kind: "LParen", span: { start: 4, end: 5 } },
+      { kind: "Number", span: { start: 5, end: 6 }, value: "1" },
+      { kind: "ArgSep", span: { start: 6, end: 7 } },
+      { kind: "Whitespace", span: { start: 7, end: 8 }, value: " " },
+      { kind: "Number", span: { start: 8, end: 9 }, value: "2" },
+      { kind: "RParen", span: { start: 9, end: 10 } },
+      { kind: "Eof", span: { start: 10, end: 10 } },
+    ];
+
+    const lexResult: FormulaPartialLexResult = { tokens, error: null };
+
+    const engine = {
+      lexFormulaPartial: vi.fn(async () => lexResult),
+      parseFormulaPartial: vi.fn(async () => ({ ast: null, error: null, context: { function: { name: "SUM", argIndex: 0 } } })),
+    } as unknown as EngineClient;
+
+    const view = new FormulaBarView(
+      host,
+      { onCommit: () => {} },
+      { getWasmEngine: () => engine, getLocaleId: () => "en-US", referenceStyle: "A1" },
+    );
+
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+    view.textarea.value = draft;
+    view.textarea.setSelectionRange(draft.length, draft.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await flushTooling();
+
+    expect(engine.lexFormulaPartial).toHaveBeenCalledTimes(1);
+    expect(engine.parseFormulaPartial).toHaveBeenCalledTimes(1);
+
+    // Cursor move within the same draft should trigger a new parse call but reuse the cached lex result.
+    const cursorArg0 = draft.indexOf("1") + 1;
+    view.textarea.setSelectionRange(cursorArg0, cursorArg0);
+    view.textarea.dispatchEvent(new Event("select"));
+
+    await flushTooling();
+
+    expect(engine.lexFormulaPartial).toHaveBeenCalledTimes(1);
+    expect(engine.parseFormulaPartial).toHaveBeenCalledTimes(2);
+
+    host.remove();
+  });
+
   it("updates the function hint using engine parse context", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
