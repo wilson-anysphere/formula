@@ -1390,7 +1390,7 @@ export class SqliteVectorStore {
             if (invalidByteLengthStmt.step()) {
               const row = invalidByteLengthStmt.get();
               throw new Error(
-                `SqliteVectorStore dot() failed to decode arg0 vector blob: Invalid vector blob length: ${Number(row[1])}`
+                `SqliteVectorStore dot() failed to decode arg0 vector blob: Invalid vector blob length: ${Number(row[1])} (id=${JSON.stringify(row[0])})`
               );
             }
           } finally {
@@ -1409,7 +1409,7 @@ export class SqliteVectorStore {
               const row = invalidDimStmt.get();
               const gotDim = Math.floor(Number(row[1]) / 4);
               throw new Error(
-                `SqliteVectorStore dot() dimension mismatch: expected ${this._dimension}, got ${gotDim}`
+                `SqliteVectorStore dot() dimension mismatch: expected ${this._dimension}, got ${gotDim} (id=${JSON.stringify(row[0])})`
               );
             }
           } finally {
