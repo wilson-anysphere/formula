@@ -490,6 +490,23 @@ test("buildContext: attached range previews stream rows (avoid slicing full rang
   assert.match(out.promptContext, /… \(70 more rows\)/);
 });
 
+test("buildContext: attachment range previews preserve TSV formatting for ragged rows", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 10_000 });
+  const sheet = makeSheet([
+    ["a", "", "c"],
+    ["d"],
+  ]);
+
+  const out = await cm.buildContext({
+    sheet,
+    query: "anything",
+    sampleRows: 0,
+    attachments: [{ type: "range", reference: "Sheet1!A1:C2" }],
+  });
+
+  assert.match(out.promptContext, /Sheet1!A1:C2:\na\t\tc\nd/);
+});
+
 test("buildContext: splitRegions indexes multiple row windows for tall sheets", async () => {
   const cm = new ContextManager({ tokenBudgetTokens: 1_000 });
   const values = [];
