@@ -156,7 +156,10 @@ rpm_smoke_test_dir() {
       echo "Container OS:"; cat /etc/os-release
       echo "Mounted artifacts:"; ls -lah /mounted
       # Ensure metadata is available, then install the local RPM.
-      dnf -y install --setopt=install_weak_deps=False /mounted/*.rpm
+      # The Tauri updater `.sig` files are not RPM GPG signatures, and we generally do not GPG-sign
+      # the built RPM in CI. Use --nogpgcheck so the smoke test validates runtime deps rather than
+      # failing on signing policy.
+      dnf -y install --nogpgcheck --setopt=install_weak_deps=False /mounted/*.rpm
 
       test -x /usr/bin/formula-desktop
       set +e
