@@ -29,6 +29,7 @@
     "bench:gpu-kernels": "node packages/gpu-kernels/bench/bench.mjs",
     "benchmark": "node scripts/run-node-ts.mjs apps/desktop/tests/performance/run.ts",
     "test:perf": "pnpm benchmark",
+    "bench:tab-completion": "node packages/ai-completion/bench/tabCompletionEngine.bench.mjs",
     "extension:build": "node tools/extension-builder/src/cli.js build",
     "extension:check": "node tools/extension-builder/src/cli.js check",
     "extension:pack": "node scripts/extension.mjs pack",

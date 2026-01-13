@@ -259,6 +259,22 @@ jobs:
       - name: Run node:test suite
         run: pnpm test:node
 
+  tab-completion-latency-guard:
+    name: TabCompletionEngine latency guard
+    needs: conflict-marker-guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run TabCompletionEngine micro-benchmark
+        run: node packages/ai-completion/bench/tabCompletionEngine.bench.mjs --ci
+
   desktop-tauri-guardrails:
     name: Desktop (Tauri) frontend guardrail tests
     needs: conflict-marker-guard
