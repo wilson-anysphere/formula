@@ -11,6 +11,9 @@ There is a lightweight micro-benchmark to help catch accidental tab-completion l
 node packages/ai-completion/bench/tabCompletionEngine.bench.mjs
 
 # Or via pnpm:
+pnpm bench:tab-completion
+
+# Or scoped to the package:
 pnpm -C packages/ai-completion bench:tab-completion
 ```
 
@@ -25,4 +28,3 @@ You can tweak parameters:
 ```bash
 node packages/ai-completion/bench/tabCompletionEngine.bench.mjs --runs 200 --warmup 50 --budget-ms 100
 ```
-
