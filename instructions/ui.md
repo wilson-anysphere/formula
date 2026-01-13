@@ -163,6 +163,7 @@ FUNCTIONALITY (# of Excel buttons/features)
 | `Ctrl+D` | Fill down |
 | `Ctrl+;` | Insert date |
 | `Alt+=` | AutoSum |
+| `Ctrl/Cmd+1` | Format Cells dialog |
 | `Ctrl+C/V/X/Z/Y` | Standard clipboard/undo |
 | `Cmd/Ctrl+F` | Find |
 | `Cmd+Option+F` (macOS) / `Ctrl+H` (Windows/Linux) | Replace |
