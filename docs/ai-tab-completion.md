@@ -206,7 +206,9 @@ Range suggestions are implemented in `packages/ai-completion/src/rangeSuggester.
      - `A:A` is accepted as input (even if higher-confidence “contiguous block” suggestions may not always be pure-insertion extensions).
    - Empty argument (`currentArgText === ""`) is allowed: the suggester defaults to the **active cell’s column** so it can still propose ranges while remaining a pure insertion.
    - Still rejected/unsupported as inputs: multi-column prefixes like `A1:B` / `A1:B10`, structured refs like `Table1[Col]`, etc.
-   - The suggester does not “repair” references by inserting missing characters *before* the caret; it only proposes completions that preserve the exact user-typed prefix.
+   - The suggester avoids “repairs” that would require inserting characters *before* the caret (e.g. it won’t turn `A:` into `A1:A10`).
+     - For “partial” inputs (like `A`, `A1:`, `A1:A`), completions are designed to preserve the user-typed prefix so they can be rendered as a pure insertion in UIs that require it.
+     - For already-formed-but-ambiguous inputs (like `A:A`), it may still emit alternative ranges (e.g. a contiguous block) that are **not** guaranteed to be pure insertions; UI surfaces may filter these out.
 
 2. **Find a contiguous non-empty block in the typed column**
    - If the user provided a row (`A5`), treat that cell as the start and scan **down** until the first empty cell (`reason: contiguous_down_from_start`).
