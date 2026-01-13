@@ -141,6 +141,68 @@ test("JsonVectorStore serializes persistence writes to prevent lost updates", as
   assert.deepEqual(ids, ["a", "b"]);
 });
 
+test("JsonVectorStore serializes deleteWorkbook persistence writes to prevent lost updates", async () => {
+  const storage = new ControlledBinaryStorage();
+  const store = new JsonVectorStore({ storage, dimension: 2, autoSave: true });
+  await store.load();
+
+  // Pre-release the initial seed persist so we can focus on the overlapping
+  // persists triggered by deleteWorkbook + upsert below.
+  storage.release(1);
+  await store.upsert([
+    { id: "a", vector: [1, 0], metadata: { workbookId: "wb1" } },
+    { id: "b", vector: [0, 1], metadata: { workbookId: "wb2" } },
+  ]);
+
+  const p1 = store.deleteWorkbook("wb1");
+  const p2 = store.upsert([{ id: "c", vector: [1, 1], metadata: { workbookId: "wb2" } }]);
+
+  // Ensure the deleteWorkbook save is in-flight, then release the upsert save
+  // before it in buggy (non-serialized) implementations.
+  await storage.waitForSaves(2);
+  storage.release(3);
+  await Promise.resolve(); // allow upsert to enqueue its persist in buggy implementations
+  storage.release(2);
+
+  await Promise.all([p1, p2]);
+
+  assert.equal(storage.saveCount, 3);
+  const persisted = storage.data;
+  assert.ok(persisted, "Expected JsonVectorStore to persist bytes");
+  const parsed = JSON.parse(new TextDecoder().decode(persisted));
+  const ids = parsed.records.map((r) => r.id).sort();
+  assert.deepEqual(ids, ["b", "c"]);
+});
+
+test("JsonVectorStore serializes clear persistence writes to prevent lost updates", async () => {
+  const storage = new ControlledBinaryStorage();
+  const store = new JsonVectorStore({ storage, dimension: 2, autoSave: true });
+  await store.load();
+
+  storage.release(1);
+  await store.upsert([
+    { id: "a", vector: [1, 0], metadata: { workbookId: "wb1" } },
+    { id: "b", vector: [0, 1], metadata: { workbookId: "wb2" } },
+  ]);
+
+  const p1 = store.clear();
+  const p2 = store.upsert([{ id: "c", vector: [1, 1], metadata: { workbookId: "wb2" } }]);
+
+  await storage.waitForSaves(2);
+  storage.release(3);
+  await Promise.resolve();
+  storage.release(2);
+
+  await Promise.all([p1, p2]);
+
+  assert.equal(storage.saveCount, 3);
+  const persisted = storage.data;
+  assert.ok(persisted, "Expected JsonVectorStore to persist bytes");
+  const parsed = JSON.parse(new TextDecoder().decode(persisted));
+  const ids = parsed.records.map((r) => r.id).sort();
+  assert.deepEqual(ids, ["c"]);
+});
+
 let sqlJsAvailable = true;
 try {
   await import("sql.js");
