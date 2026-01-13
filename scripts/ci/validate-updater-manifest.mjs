@@ -5,6 +5,9 @@
  * - Ensures the manifest version matches the git tag.
  * - Ensures the manifest contains updater entries for all expected targets.
  * - Ensures each updater entry references an asset that exists on the GitHub Release.
+ * - Ensures each target references the correct *updatable* artifact type (macOS .app.tar.gz, Linux
+ *   .AppImage, Windows .msi/.exe).
+ * - Ensures all platform URLs are unique (no two targets colliding on the same asset URL).
  *
  * This catches "last writer wins" / merge regressions where one platform build overwrites latest.json
  * and ships an incomplete updater manifest.
@@ -31,6 +34,46 @@ function assetNameFromUrl(url) {
   const parsed = new URL(url);
   const last = parsed.pathname.split("/").filter(Boolean).pop() ?? "";
   return decodeURIComponent(last);
+}
+
+/**
+ * @param {string} target
+ * @returns {"macos" | "linux" | "windows" | null}
+ */
+function platformFamilyFromTarget(target) {
+  const lower = target.toLowerCase();
+  if (lower.includes("darwin") || lower.includes("apple-darwin") || lower.includes("macos")) {
+    return "macos";
+  }
+  if (lower.includes("linux")) return "linux";
+  if (lower.includes("windows") || lower.includes("pc-windows")) return "windows";
+  return null;
+}
+
+/**
+ * @param {{ target: string; assetName: string }[]} rows
+ */
+function formatTargetAssetTable(rows) {
+  const sorted = rows.slice().sort((a, b) => a.target.localeCompare(b.target));
+  const targetWidth = Math.max("target".length, ...sorted.map((r) => r.target.length));
+  const assetWidth = Math.max("asset".length, ...sorted.map((r) => r.assetName.length));
+  return [
+    `${"target".padEnd(targetWidth)}  ${"asset".padEnd(assetWidth)}`,
+    `${"-".repeat(targetWidth)}  ${"-".repeat(assetWidth)}`,
+    ...sorted.map((r) => `${r.target.padEnd(targetWidth)}  ${r.assetName.padEnd(assetWidth)}`),
+  ].join("\n");
+}
+
+/**
+ * @param {{ target: string; assetName: string }[]} rows
+ */
+function formatTargetAssetMarkdownTable(rows) {
+  const sorted = rows.slice().sort((a, b) => a.target.localeCompare(b.target));
+  return [
+    `| target | asset |`,
+    `| --- | --- |`,
+    ...sorted.map((r) => `| \`${r.target}\` | \`${r.assetName}\` |`),
+  ].join("\n");
 }
 
 /**
@@ -510,6 +553,103 @@ async function main() {
       });
     }
 
+    // Ensure platform URLs are unique (prevents collisions where multiple targets point at the same asset).
+    const urlToTargets = new Map();
+    for (const { target, url } of validatedTargets) {
+      const list = urlToTargets.get(url) ?? [];
+      list.push(target);
+      urlToTargets.set(url, list);
+    }
+
+    const duplicateUrls = [...urlToTargets.entries()].filter(([, targets]) => targets.length > 1);
+    if (duplicateUrls.length > 0) {
+      errors.push(
+        [
+          `Duplicate platform URLs in latest.json (target collision):`,
+          ...duplicateUrls
+            .slice()
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([url, targets]) => `  - ${targets.slice().sort().join(", ")} → ${url}`),
+        ].join("\n"),
+      );
+    }
+
+    // Ensure each platform points at a self-updatable artifact type.
+    /** @type {Array<{ target: string; url: string; expected: string }>} */
+    const invalidMac = [];
+    /** @type {Array<{ target: string; url: string; expected: string }>} */
+    const invalidLinux = [];
+    /** @type {Array<{ target: string; url: string; expected: string }>} */
+    const invalidWindows = [];
+
+    for (const { target, url } of validatedTargets) {
+      const family = platformFamilyFromTarget(target);
+      if (!family) continue;
+
+      if (family === "macos") {
+        if (!(url.endsWith(".app.tar.gz") || url.endsWith(".tar.gz"))) {
+          invalidMac.push({
+            target,
+            url,
+            expected: `ends with ".app.tar.gz" (preferred) or ".tar.gz"`,
+          });
+        }
+      } else if (family === "linux") {
+        if (!url.endsWith(".AppImage")) {
+          invalidLinux.push({
+            target,
+            url,
+            expected: `ends with ".AppImage" (Linux auto-update requires AppImage; .deb/.rpm are typically not self-updatable)`,
+          });
+        }
+      } else if (family === "windows") {
+        const lower = url.toLowerCase();
+        if (!(lower.endsWith(".msi") || lower.endsWith(".exe"))) {
+          invalidWindows.push({
+            target,
+            url,
+            expected: `ends with ".msi" or ".exe"`,
+          });
+        }
+      }
+    }
+
+    if (invalidMac.length > 0) {
+      errors.push(
+        [
+          `Invalid macOS updater URLs in latest.json (expected updater archive):`,
+          ...invalidMac
+            .slice()
+            .sort((a, b) => a.target.localeCompare(b.target))
+            .map((t) => `  - ${t.target}: ${t.url} (${t.expected})`),
+        ].join("\n"),
+      );
+    }
+
+    if (invalidLinux.length > 0) {
+      errors.push(
+        [
+          `Invalid Linux updater URLs in latest.json (expected .AppImage):`,
+          ...invalidLinux
+            .slice()
+            .sort((a, b) => a.target.localeCompare(b.target))
+            .map((t) => `  - ${t.target}: ${t.url} (${t.expected})`),
+        ].join("\n"),
+      );
+    }
+
+    if (invalidWindows.length > 0) {
+      errors.push(
+        [
+          `Invalid Windows updater URLs in latest.json (expected .msi or .exe):`,
+          ...invalidWindows
+            .slice()
+            .sort((a, b) => a.target.localeCompare(b.target))
+            .map((t) => `  - ${t.target}: ${t.url} (${t.expected})`),
+        ].join("\n"),
+      );
+    }
+
     const validatedByTarget = new Map(validatedTargets.map((t) => [t.target, t]));
 
     /** @type {Array<{ label: string; key: string; url: string; assetName: string }>} */
@@ -548,19 +688,12 @@ async function main() {
       invalidTargets.length === 0 &&
       missingAssets.length === 0
     ) {
-      const summaryLines = [
-        `Updater manifest validation passed for ${tag} (version ${expectedVersion}).`,
-        `Targets present (${summaryRows.length}):`,
-        ...summaryRows.map((row) => `  - ${row.key} → ${row.assetName}`),
-        ...(otherTargets.length > 0
-          ? [
-              `Other targets present (${otherTargets.length}):`,
-              ...otherTargets.map((t) => `  - ${t.target} → ${t.assetName}`),
-            ]
-          : []),
+      const allRows = [
+        ...summaryRows.map((row) => ({ target: row.key, assetName: row.assetName })),
+        ...otherTargets.map((t) => ({ target: t.target, assetName: t.assetName })),
       ];
-
-      console.log(summaryLines.join("\n"));
+      console.log(`Updater manifest validation passed for ${tag} (version ${expectedVersion}).`);
+      console.log(`\nUpdater manifest target → asset:\n${formatTargetAssetTable(allRows)}\n`);
 
       const stepSummaryPath = process.env.GITHUB_STEP_SUMMARY;
       if (stepSummaryPath) {
@@ -580,15 +713,7 @@ async function main() {
           ``,
           `### Targets`,
           ``,
-          ...summaryRows.map((row) => `- \`${row.key}\` → \`${row.assetName}\``),
-          ...(otherTargets.length > 0
-            ? [
-                ``,
-                `### Other targets`,
-                ``,
-                ...otherTargets.map((t) => `- \`${t.target}\` → \`${t.assetName}\``),
-              ]
-            : []),
+          formatTargetAssetMarkdownTable(allRows),
           ``,
         ].join("\n");
         // Overwrite the step summary rather than append (the job is dedicated to validation).
