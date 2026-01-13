@@ -4,7 +4,7 @@ use formula_model::charts::{
 };
 use formula_model::RichText;
 use roxmltree::{Document, Node};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChartExParseError {
@@ -47,20 +47,13 @@ pub fn parse_chart_ex(
     let root_name = root.tag_name().name();
     let root_ns = root.tag_name().namespace().unwrap_or("");
 
-    let kind = detect_chart_kind(&doc).unwrap_or_else(|| "unknown".to_string());
-    let chart_name = format!("ChartEx:{kind}");
-
     let mut diagnostics = vec![ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
         message: format!("ChartEx root <{root_name}> (ns={root_ns}) parsed as placeholder model"),
     }];
 
-    if kind == "unknown" {
-        diagnostics.push(ChartDiagnostic {
-            level: ChartDiagnosticLevel::Warning,
-            message: "ChartEx chart kind could not be inferred".to_string(),
-        });
-    }
+    let kind = detect_chart_kind(&doc, &mut diagnostics);
+    let chart_name = format!("ChartEx:{kind}");
 
     let chart_data = parse_chart_data(&doc, &mut diagnostics);
 
@@ -100,17 +93,89 @@ pub fn parse_chart_ex(
     })
 }
 
-fn detect_chart_kind(doc: &Document<'_>) -> Option<String> {
-    find_chart_type_node(doc).map(|node| {
+fn detect_chart_kind(doc: &Document<'_>, diagnostics: &mut Vec<ChartDiagnostic>) -> String {
+    // 1) Prefer explicit chart-type nodes like `<cx:waterfallChart>`.
+    if let Some(node) = find_chart_type_node(doc) {
         let raw = node.tag_name().name();
         let base = raw.strip_suffix("Chart").unwrap_or(raw);
-        lowercase_first(base)
-    })
+        return lowercase_first(base);
+    }
+
+    // 2) Some real-world ChartEx parts omit the `<*Chart>` node; in those cases the
+    // chart kind is surfaced via attributes like `layoutId="treemap"` on
+    // `<cx:series>`.
+    if let Some(layout_id) = doc
+        .descendants()
+        .filter(|n| n.is_element())
+        .filter(|n| {
+            let name = n.tag_name().name();
+            name.eq_ignore_ascii_case("series") || name.eq_ignore_ascii_case("ser")
+        })
+        .find_map(|series| attribute_case_insensitive(series, "layoutId"))
+        .and_then(normalize_chart_ex_kind_hint)
+    {
+        return layout_id;
+    }
+
+    // 3) Another common hint is an explicit `chartType` attribute (seen in some
+    // producer variations).
+    if let Some(chart_type) = doc
+        .descendants()
+        .filter(|n| n.is_element())
+        .find_map(|node| attribute_case_insensitive(node, "chartType"))
+        .and_then(normalize_chart_ex_kind_hint)
+    {
+        return chart_type;
+    }
+
+    // 4) Unknown: capture a richer diagnostic to make it easier to debug/extend
+    // detection for new ChartEx variants.
+    let root_ns = doc.root_element().tag_name().namespace().unwrap_or("");
+    let hints = collect_chart_ex_kind_hints(doc);
+    let hint_list = if hints.is_empty() {
+        "<none>".to_string()
+    } else {
+        hints.join(", ")
+    };
+    diagnostics.push(ChartDiagnostic {
+        level: ChartDiagnosticLevel::Warning,
+        message: format!(
+            "ChartEx chart kind could not be inferred (root ns={root_ns}); hints: {hint_list}"
+        ),
+    });
+
+    "unknown".to_string()
 }
 
 fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {
-    // Heuristic: the first element whose local name ends with "Chart" (case-insensitive)
-    // but isn't the generic `<chart>` container.
+    // Prefer explicit known chart-type nodes. Some ChartEx parts contain other
+    // `*Chart`-suffixed elements (e.g. style/theme) that can appear before the
+    // actual chart type.
+    const KNOWN_CHART_TYPES: &[&str] = &[
+        "waterfallChart",
+        "histogramChart",
+        "paretoChart",
+        "boxWhiskerChart",
+        "funnelChart",
+        "regionMapChart",
+        "treemapChart",
+        "sunburstChart",
+    ];
+
+    if let Some(node) = doc.descendants().find(|n| {
+        if !n.is_element() {
+            return false;
+        }
+        let name = n.tag_name().name();
+        KNOWN_CHART_TYPES
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(name))
+    }) {
+        return Some(node);
+    }
+
+    // Fallback heuristic: the first element whose local name ends with "Chart"
+    // (case-insensitive) but isn't the generic `<chart>` container.
     doc.descendants().find(|n| {
         if !n.is_element() {
             return false;
@@ -119,6 +184,65 @@ fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {
         let lower = name.to_ascii_lowercase();
         lower.ends_with("chart") && lower != "chart" && lower != "chartspace"
     })
+}
+
+fn attribute_case_insensitive<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
+    node.attribute(name).or_else(|| {
+        node.attributes()
+            .find(|attr| attr.name().eq_ignore_ascii_case(name))
+            .map(|attr| attr.value())
+    })
+}
+
+fn normalize_chart_ex_kind_hint(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    // Attributes may include a prefix (e.g. `cx:treemap`); keep only the local
+    // portion.
+    let raw = raw.split(':').last().unwrap_or(raw).trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    // Excel often uses camelCase identifiers, with some values sometimes ending
+    // in `Chart` (e.g. `treemapChart`).
+    let base = if raw.len() >= 5 && raw.to_ascii_lowercase().ends_with("chart") {
+        &raw[..raw.len() - 5]
+    } else {
+        raw
+    };
+
+    if base.is_empty() {
+        return None;
+    }
+
+    Some(lowercase_first(base))
+}
+
+fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
+    let mut hints = BTreeSet::new();
+
+    for node in doc.descendants().filter(|n| n.is_element()) {
+        let name = node.tag_name().name();
+        let lower = name.to_ascii_lowercase();
+        if lower.ends_with("chart") && lower != "chart" && lower != "chartspace" {
+            hints.insert(format!("node:{name}"));
+        }
+
+        for attr in node.attributes() {
+            let attr_name = attr.name();
+            if attr_name.eq_ignore_ascii_case("layoutId") {
+                hints.insert(format!("layoutId={}", attr.value()));
+            } else if attr_name.eq_ignore_ascii_case("chartType") {
+                hints.insert(format!("chartType={}", attr.value()));
+            }
+        }
+    }
+
+    hints.into_iter().collect()
 }
 
 #[derive(Debug, Clone, Default)]
