@@ -1,4 +1,5 @@
-import { serializeAuditEntries, type AIAuditEntry, type AuditExportFormat } from "@formula/ai-audit/browser";
+import type { AIAuditEntry } from "@formula/ai-audit/browser";
+import { serializeAuditEntries, type AuditExportFormat } from "@formula/ai-audit/export";
 
 export interface AuditLogExport {
   blob: Blob;
