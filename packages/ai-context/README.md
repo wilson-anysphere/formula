@@ -45,6 +45,7 @@ This package focuses on:
 import {
   // Schema / sampling
   extractSheetSchema,
+  extractWorkbookSchema,
   summarizeSheetSchema,
   summarizeRegion,
   randomSampleRows,
@@ -172,6 +173,30 @@ const prompt = [
 ```
 
 If you need compliance-grade guarantees, prefer **structured DLP policy enforcement** (see [DLP safety](#dlp-safety)).
+
+---
+
+## Example: extract workbook schema (tables + named ranges)
+
+When you have workbook metadata (sheet list, table rects, named ranges) but don’t want to run full RAG indexing,
+`extractWorkbookSchema()` produces a compact, deterministic summary:
+
+```js
+import { extractWorkbookSchema } from "./src/index.js";
+
+const workbook = {
+  id: "workbook-123",
+  sheets: [{ name: "Sheet1", cells: [["Product", "Sales"], ["Alpha", 10]] }],
+  tables: [{ name: "SalesTable", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 1 } }],
+  namedRanges: [{ name: "SalesData", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 1 } }],
+};
+
+const schema = extractWorkbookSchema(workbook, { maxAnalyzeRows: 50 });
+console.log(schema.tables[0].rangeA1); // "Sheet1!A1:B2"
+```
+
+Like `extractSheetSchema()`, this may include snippets of real cell content (headers). Apply redaction/policy checks
+before sending any serialized schema to a cloud model.
 
 ---
 

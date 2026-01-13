@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { extractWorkbookSchema } from "../src/workbookSchema.js";
+import { extractWorkbookSchema } from "../src/index.js";
 
 describe("extractWorkbookSchema", () => {
   it("infers headers, column types, and row/column counts for workbook tables", () => {
