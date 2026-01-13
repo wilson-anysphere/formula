@@ -63,6 +63,11 @@ test.describe("keybinding barriers", () => {
     await page.keyboard.press("Shift+F10");
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
+    // Ensure keyboard events originate from within the menu (some WebView environments
+    // may briefly keep focus on the grid right after opening via Shift+F10).
+    const firstItem = menu.locator(".context-menu__item:not(:disabled)").first();
+    await firstItem.focus();
+    await expect(firstItem).toBeFocused();
 
     const isMac = process.platform === "darwin";
     const dispatch = async (key: "PageUp" | "PageDown") => {
@@ -90,4 +95,3 @@ test.describe("keybinding barriers", () => {
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
   });
 });
-

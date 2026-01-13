@@ -289,8 +289,9 @@ describe("FormulaBarView tab completion (integration)", () => {
 
     await completion.flushTabCompletion();
 
-    // Still no sheets; completion should not materialize Sheet2 via reads.
-    expect(doc.getSheetIds()).toEqual([]);
+    // Completion may read from the active sheet for range inference, but should not
+    // materialize the suggested (non-existent) Sheet2 via reads.
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
     expect(view.model.aiSuggestion()).toBe("=SUM(Sheet2!A:A)");
 
     completion.destroy();

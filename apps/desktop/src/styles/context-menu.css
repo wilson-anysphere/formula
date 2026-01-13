@@ -32,12 +32,12 @@
   max-width: 360px;
   max-height: calc(100vh - 16px);
   overflow-y: auto;
-  padding: 6px;
-  border-radius: 10px;
+  padding: 4px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--dialog-bg);
   box-shadow: var(--dialog-shadow);
-  gap: 2px;
+  gap: 1px;
   /* Re-enable pointer events for the actual menu surface. */
   pointer-events: auto;
 }
@@ -53,7 +53,7 @@
 
 .context-menu__separator {
   height: 1px;
-  margin: 6px 6px;
+  margin: 4px 4px;
   background: var(--border);
 }
 
@@ -61,11 +61,11 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 16px;
+  gap: 12px;
   width: 100%;
   text-align: left;
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-primary);
@@ -90,6 +90,13 @@
   outline: none;
 }
 
+.context-menu__item:focus-visible .context-menu__shortcut,
+.context-menu__item--submenu-open .context-menu__shortcut,
+.context-menu__item:focus-visible .context-menu__submenu-arrow,
+.context-menu__item--submenu-open .context-menu__submenu-arrow {
+  color: currentColor;
+}
+
 .context-menu__item:disabled,
 .context-menu__item--disabled {
   color: var(--text-secondary);
@@ -102,7 +109,6 @@
 .context-menu__item--disabled:focus-visible {
   background: transparent;
   border-color: transparent;
-  color: var(--text-secondary);
 }
 
 .context-menu__label {
@@ -117,7 +123,7 @@
   flex: none;
   width: 14px;
   height: 14px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: transparent;
   overflow: hidden;
@@ -149,4 +155,45 @@
   flex: none;
   color: var(--text-secondary);
   font-size: 14px;
+}
+
+/*
+  High contrast:
+  - Ensure hover states remain visually distinct even when shadows and subtle
+    hover backgrounds are neutralized to system colors.
+  - Ensure "secondary" text (shortcuts/arrows) stays readable on selection/hover.
+*/
+
+:root[data-theme="high-contrast"] .context-menu__item:hover:not(:disabled) {
+  background: var(--selection-bg);
+  border-color: var(--selection-border);
+  color: var(--selection-text);
+}
+
+:root[data-theme="high-contrast"] .context-menu__item:hover:not(:disabled) .context-menu__shortcut,
+:root[data-theme="high-contrast"] .context-menu__item:hover:not(:disabled) .context-menu__submenu-arrow {
+  color: currentColor;
+}
+
+:root[data-theme="high-contrast"] .context-menu__item:disabled,
+:root[data-theme="high-contrast"] .context-menu__item--disabled {
+  color: GrayText;
+}
+
+@media (forced-colors: active), (prefers-contrast: more) {
+  .context-menu__item:hover:not(:disabled) {
+    background: var(--selection-bg);
+    border-color: var(--selection-border);
+    color: var(--selection-text);
+  }
+
+  .context-menu__item:hover:not(:disabled) .context-menu__shortcut,
+  .context-menu__item:hover:not(:disabled) .context-menu__submenu-arrow {
+    color: currentColor;
+  }
+
+  .context-menu__item:disabled,
+  .context-menu__item--disabled {
+    color: GrayText;
+  }
 }
