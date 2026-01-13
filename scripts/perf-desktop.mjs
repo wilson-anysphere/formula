@@ -103,17 +103,6 @@ function humanBytes(bytes) {
   return `${size.toFixed(1)} ${unit}`;
 }
 
-function dirSizeBytes(dir) {
-  let total = 0;
-  const entries = readdirSync(dir, { withFileTypes: true });
-  for (const ent of entries) {
-    const p = path.join(dir, ent.name);
-    if (ent.isDirectory()) total += dirSizeBytes(p);
-    else if (ent.isFile()) total += statSync(p).st_size;
-  }
-  return total;
-}
-
 function listLargestFiles(dir, limit = 10) {
   /** @type {{path: string, size: number}[]} */
   const files = [];
@@ -162,12 +151,41 @@ function findBundleDirs() {
   return [...new Set(out)];
 }
 
+function runPython(script, args, { env } = {}) {
+  // Prefer python3, fall back to python.
+  const python = process.env.PYTHON || "python3";
+  const proc = spawnSync(python, [script, ...args], {
+    cwd: repoRoot,
+    env,
+    stdio: "inherit",
+    encoding: "utf8",
+  });
+  if (proc.status === 0) return;
+
+  // Retry with `python` if python3 isn't available.
+  if (python === "python3" && proc.error) {
+    const retry = spawnSync("python", [script, ...args], {
+      cwd: repoRoot,
+      env,
+      stdio: "inherit",
+      encoding: "utf8",
+    });
+    if (retry.error) throw retry.error;
+    if (retry.status !== 0) process.exit(retry.status ?? 1);
+    return;
+  }
+
+  if (proc.error) throw proc.error;
+  process.exit(proc.status ?? 1);
+}
+
 function reportSize({ env }) {
+  // eslint-disable-next-line no-console
+  console.log("\n[desktop-size] Summary (binary + dist):\n");
+  runPython("scripts/desktop_size_report.py", [], { env });
+
   const distDir = path.join(repoRoot, "apps", "desktop", "dist");
   if (existsSync(distDir)) {
-    const total = dirSizeBytes(distDir);
-    // eslint-disable-next-line no-console
-    console.log(`\n[desktop-size] dist/ total: ${humanBytes(total)}  (${distDir})`);
     const largest = listLargestFiles(distDir, 10);
     if (largest.length > 0) {
       // eslint-disable-next-line no-console
@@ -178,23 +196,6 @@ function reportSize({ env }) {
         console.log(`  - ${humanBytes(f.size).padStart(10)}  ${rel}`);
       }
     }
-  } else {
-    // eslint-disable-next-line no-console
-    console.log(`\n[desktop-size] dist/ not found at ${distDir} (run: pnpm -C apps/desktop build)`);
-  }
-
-  const binPath = process.env.FORMULA_DESKTOP_BIN ? path.resolve(repoRoot, process.env.FORMULA_DESKTOP_BIN) : defaultDesktopBinPath();
-  if (binPath && existsSync(binPath)) {
-    const size = statSync(binPath).st_size;
-    // eslint-disable-next-line no-console
-    console.log(`\n[desktop-size] binary: ${humanBytes(size)}  (${path.relative(repoRoot, binPath)})`);
-  } else {
-    // eslint-disable-next-line no-console
-    console.log(
-      `\n[desktop-size] desktop binary not found (looked for target/**/formula-desktop).\n` +
-        `Build it via: bash scripts/cargo_agent.sh build -p formula-desktop-tauri --bin formula-desktop --release --features desktop\n` +
-        `Or set FORMULA_DESKTOP_BIN=/path/to/formula-desktop`,
-    );
   }
 
   const bundleDirs = findBundleDirs();
@@ -212,31 +213,7 @@ function reportSize({ env }) {
   // eslint-disable-next-line no-console
   console.log(`\n[desktop-size] Tauri bundle artifacts (override limit via FORMULA_BUNDLE_SIZE_LIMIT_MB):\n`);
 
-  // Prefer python3, fall back to python.
-  const python = process.env.PYTHON || "python3";
-  const proc = spawnSync(python, ["scripts/desktop_bundle_size_report.py"], {
-    cwd: repoRoot,
-    env,
-    stdio: "inherit",
-    encoding: "utf8",
-  });
-  if (proc.status === 0) return;
-
-  // Retry with `python` if python3 isn't available.
-  if (python === "python3" && proc.error) {
-    const retry = spawnSync("python", ["scripts/desktop_bundle_size_report.py"], {
-      cwd: repoRoot,
-      env,
-      stdio: "inherit",
-      encoding: "utf8",
-    });
-    if (retry.error) throw retry.error;
-    if (retry.status !== 0) process.exit(retry.status ?? 1);
-    return;
-  }
-
-  if (proc.error) throw proc.error;
-  process.exit(proc.status ?? 1);
+  runPython("scripts/desktop_bundle_size_report.py", [], { env });
 }
 
 function main() {
