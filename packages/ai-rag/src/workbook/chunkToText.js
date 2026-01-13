@@ -82,12 +82,23 @@ function inferColumnType(cells, col, headerRow) {
  */
 function inferHeaderRow(cells) {
   if (!cells.length) return null;
-  const row0 = cells[0] || [];
-  const nonEmpty = row0.filter((c) => c && c.v != null && String(c.v).trim() !== "").length;
-  if (nonEmpty === 0) return null;
-  const stringish = row0.filter((c) => c && typeof c.v === "string" && c.v.trim() !== "").length;
-  if (stringish / nonEmpty >= 0.6) return 0;
-  return null;
+  const maxRowsToCheck = Math.min(cells.length, 5);
+  let bestRow = null;
+  let bestStringish = 0;
+  let bestNonEmpty = 0;
+  for (let r = 0; r < maxRowsToCheck; r += 1) {
+    const row = cells[r] || [];
+    const nonEmpty = row.filter((c) => c && c.v != null && String(c.v).trim() !== "").length;
+    if (nonEmpty === 0) continue;
+    const stringish = row.filter((c) => c && typeof c.v === "string" && c.v.trim() !== "").length;
+    if (stringish / nonEmpty < 0.6) continue;
+    if (stringish > bestStringish || (stringish === bestStringish && nonEmpty > bestNonEmpty)) {
+      bestRow = r;
+      bestStringish = stringish;
+      bestNonEmpty = nonEmpty;
+    }
+  }
+  return bestRow;
 }
 
 function countFormulas(cells) {
@@ -134,22 +145,22 @@ export function chunkToText(chunk, opts) {
   const schemaColCount = Math.max(0, Math.min(sampledColCount, maxColumnsForSchema));
   const rowColCount = Math.max(0, Math.min(sampledColCount, maxColumnsForRows));
   const headerNames =
-    headerRow === 0
+    headerRow != null
       ? dedupeHeaders(
           Array.from({ length: Math.max(schemaColCount, rowColCount) }, (_, c) => {
-          const h = formatScalar(cells[0]?.[c]?.v);
+          const h = formatScalar(cells[headerRow]?.[c]?.v);
           return h || `Column${c + 1}`;
         })
         )
       : null;
 
   if (sampledColCount > 0) {
-    if (headerRow === 0) {
+    if (headerRow != null) {
       const headers = [];
       const types = [];
       for (let c = 0; c < schemaColCount; c += 1) {
         headers.push(headerNames?.[c] ?? `Column${c + 1}`);
-        types.push(inferColumnType(cells, c, 0));
+        types.push(inferColumnType(cells, c, headerRow));
       }
       const extra = formatExtraColumns(fullColCount, schemaColCount);
       if (extra) headers.push(extra);
@@ -163,6 +174,30 @@ export function chunkToText(chunk, opts) {
       const extra = formatExtraColumns(fullColCount, schemaColCount);
       if (extra) parts.push(extra);
       lines.push(`COLUMNS: ${parts.join(" | ")}`);
+    }
+  }
+
+  if (headerRow != null && headerRow > 0 && chunk.kind !== "formulaRegion") {
+    const preRows = [];
+    const maxPreRows = Math.min(headerRow, 2);
+    for (let r = 0; r < maxPreRows; r += 1) {
+      const values = [];
+      for (let c = 0; c < rowColCount; c += 1) {
+        const cell = cells[r]?.[c] || {};
+        if (cell.f) {
+          const formula = formatScalar(cell.f);
+          const value = formatScalar(cell.v);
+          values.push(value ? `${formula}=${value}` : formula);
+        } else {
+          values.push(formatScalar(cell.v));
+        }
+      }
+      const compact = values.filter((v) => v !== "").join(" | ");
+      if (compact) preRows.push(compact);
+    }
+    if (preRows.length) {
+      lines.push("PRE-HEADER ROWS:");
+      for (const row of preRows) lines.push(`  - ${row}`);
     }
   }
 
@@ -183,7 +218,7 @@ export function chunkToText(chunk, opts) {
     if (extraFormulas > 0) formulas.push(`… (+${extraFormulas} more formulas)`);
     if (formulas.length) lines.push(`FORMULAS: ${formulas.join(" | ")}`);
   } else {
-    const startRow = headerRow === 0 ? 1 : 0;
+    const startRow = headerRow != null ? headerRow + 1 : 0;
     const rows = [];
     for (let r = startRow; r < Math.min(sampledRowCount, startRow + sampleRows); r += 1) {
       const row = [];
