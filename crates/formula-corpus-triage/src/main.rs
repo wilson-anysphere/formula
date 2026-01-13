@@ -9,6 +9,7 @@ use clap::{Parser, ValueEnum};
 use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, Value as EngineValue};
 use formula_model::{CellRef, CellValue, DefinedNameScope, ErrorValue};
 use formula_xlsb::XlsbWorkbook;
+use globset::Glob;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -48,6 +49,23 @@ struct Args {
     /// Parts to ignore when diffing round-tripped output.
     #[arg(long = "ignore-part")]
     ignore_parts: Vec<String>,
+
+    /// Substring patterns to ignore within XML diff paths (repeatable).
+    ///
+    /// This is useful for suppressing known-noisy attributes (e.g. `dyDescent`,
+    /// `xr:uid`) without ignoring the entire part.
+    #[arg(long = "ignore-path")]
+    ignore_paths: Vec<String>,
+
+    /// Like `--ignore-path`, but scoped to parts matched by a glob.
+    ///
+    /// Format: `<part_glob>:<path_substring>`. Repeatable.
+    #[arg(long = "ignore-path-in")]
+    ignore_paths_in: Vec<String>,
+
+    /// Treat calcChain-related diffs as CRITICAL instead of downgrading them to WARNING.
+    #[arg(long = "strict-calc-chain")]
+    strict_calc_chain: bool,
 
     /// Maximum number of differences to emit (privacy-safe summary only).
     #[arg(long, default_value_t = 25)]
@@ -197,6 +215,8 @@ struct PartDiffSummary {
 #[derive(Debug, Serialize)]
 struct DiffDetails {
     ignore: Vec<String>,
+    ignore_paths: Vec<String>,
+    strict_calc_chain: bool,
     counts: DiffCounts,
     part_stats: DiffPartStats,
     equal: bool,
@@ -614,6 +634,58 @@ fn detect_workbook_format(input: &PathBuf, input_bytes: &[u8]) -> WorkbookFormat
     WorkbookFormat::Xlsx
 }
 
+fn normalize_ignore_pattern(input: &str) -> String {
+    let trimmed = input.trim();
+    let normalized = trimmed.replace('\\', "/");
+    normalized.trim_start_matches('/').to_string()
+}
+
+fn build_ignore_path_rules(args: &Args) -> Result<Vec<xlsx_diff::IgnorePathRule>> {
+    let mut rules = Vec::new();
+
+    for pattern in &args.ignore_paths {
+        let trimmed = pattern.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        rules.push(xlsx_diff::IgnorePathRule {
+            part: None,
+            path_substring: trimmed.replace('\\', "/"),
+            kind: None,
+        });
+    }
+
+    for scoped in &args.ignore_paths_in {
+        let trimmed = scoped.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Some((part_glob, substring)) = trimmed.split_once(':') else {
+            anyhow::bail!(
+                "invalid --ignore-path-in '{trimmed}' (expected format: <part_glob>:<path_substring>)"
+            );
+        };
+        let part_glob = normalize_ignore_pattern(part_glob);
+        let substring = substring.trim();
+        if part_glob.is_empty() || substring.is_empty() {
+            anyhow::bail!(
+                "invalid --ignore-path-in '{trimmed}' (expected non-empty <part_glob> and <path_substring>)"
+            );
+        }
+
+        // Validate the (normalized) glob syntax so callers get deterministic errors.
+        Glob::new(&part_glob)?;
+
+        rules.push(xlsx_diff::IgnorePathRule {
+            part: Some(part_glob),
+            path_substring: substring.replace('\\', "/"),
+            kind: None,
+        });
+    }
+
+    Ok(rules)
+}
+
 fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDetails> {
     let ignore: BTreeSet<String> = args
         .ignore_parts
@@ -623,6 +695,16 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
         .collect();
     let mut ignore_sorted: Vec<String> = ignore.iter().cloned().collect();
     ignore_sorted.sort();
+
+    let ignore_paths = build_ignore_path_rules(args)?;
+    let mut ignore_paths_sorted: Vec<String> = ignore_paths
+        .iter()
+        .map(|r| match &r.part {
+            Some(part) => format!("{part}:{}", r.path_substring),
+            None => r.path_substring.clone(),
+        })
+        .collect();
+    ignore_paths_sorted.sort();
 
     let expected_archive = xlsx_diff::WorkbookArchive::from_bytes(expected)?;
     let actual_archive = xlsx_diff::WorkbookArchive::from_bytes(actual)?;
@@ -640,14 +722,15 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
         .collect();
     let parts_total = expected_parts.union(&actual_parts).count();
 
+    let strict_calc_chain = args.strict_calc_chain;
     let report = xlsx_diff::diff_archives_with_options(
         &expected_archive,
         &actual_archive,
         &xlsx_diff::DiffOptions {
             ignore_parts: ignore,
             ignore_globs: Vec::new(),
-            ignore_paths: Vec::new(),
-            strict_calc_chain: false,
+            ignore_paths,
+            strict_calc_chain,
         },
     );
 
@@ -709,6 +792,8 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
 
     Ok(DiffDetails {
         ignore: ignore_sorted,
+        ignore_paths: ignore_paths_sorted,
+        strict_calc_chain,
         counts,
         part_stats: DiffPartStats {
             parts_total,
@@ -1257,6 +1342,9 @@ mod tests {
             input: PathBuf::from("dummy.xlsx"),
             format: WorkbookFormat::Xlsx,
             ignore_parts: vec!["docProps/app.xml".to_string()],
+            ignore_paths: Vec::new(),
+            ignore_paths_in: Vec::new(),
+            strict_calc_chain: false,
             diff_limit: 100,
             fail_on: RoundTripFailOn::Critical,
             recalc: false,
@@ -1451,6 +1539,9 @@ mod tests {
             input: PathBuf::new(),
             format: WorkbookFormat::Xlsx,
             ignore_parts: Vec::new(),
+            ignore_paths: Vec::new(),
+            ignore_paths_in: Vec::new(),
+            strict_calc_chain: false,
             diff_limit: 10,
             fail_on: RoundTripFailOn::Critical,
             recalc: false,
@@ -1512,5 +1603,55 @@ mod tests {
         assert!(RoundTripFailOn::Critical.round_trip_ok(&no_diffs));
         assert!(RoundTripFailOn::Warning.round_trip_ok(&no_diffs));
         assert!(RoundTripFailOn::Info.round_trip_ok(&no_diffs));
+    }
+
+    #[test]
+    fn diff_workbooks_respects_ignore_path_rules() {
+        fn zip_with_part(name: &str, bytes: &[u8]) -> Vec<u8> {
+            let cursor = std::io::Cursor::new(Vec::new());
+            let mut zip = ZipWriter::new(cursor);
+            let options = FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
+            zip.start_file(name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+            let cursor = zip.finish().unwrap();
+            cursor.into_inner()
+        }
+
+        let expected_xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" dyDescent="1"/>"#;
+        let actual_xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" dyDescent="2"/>"#;
+
+        let expected = zip_with_part("xl/workbook.xml", expected_xml);
+        let actual = zip_with_part("xl/workbook.xml", actual_xml);
+
+        let args = Args {
+            input: PathBuf::new(),
+            format: WorkbookFormat::Xlsx,
+            ignore_parts: Vec::new(),
+            ignore_paths: Vec::new(),
+            ignore_paths_in: Vec::new(),
+            strict_calc_chain: false,
+            diff_limit: 10,
+            fail_on: RoundTripFailOn::Critical,
+            recalc: false,
+            render_smoke: false,
+        };
+
+        let details = diff_workbooks(&expected, &actual, &args).unwrap();
+        assert!(
+            details.counts.total > 0,
+            "expected at least one diff without ignore-path"
+        );
+
+        let args = Args {
+            ignore_paths: vec!["dyDescent".to_string()],
+            ..args
+        };
+
+        let details = diff_workbooks(&expected, &actual, &args).unwrap();
+        assert_eq!(details.counts.total, 0, "diffs should be suppressed by ignore-path");
+        assert!(details.equal);
+        assert_eq!(details.ignore_paths, vec!["dyDescent".to_string()]);
     }
 }

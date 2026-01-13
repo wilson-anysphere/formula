@@ -2043,6 +2043,7 @@ dependencies = [
  "formula-model",
  "formula-xlsb",
  "formula-xlsx",
+ "globset",
  "serde",
  "serde_json",
  "sha2",

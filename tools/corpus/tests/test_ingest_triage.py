@@ -47,16 +47,22 @@ class IngestTriageInvocationTests(unittest.TestCase):
                 *,
                 workbook_name: str,
                 diff_ignore: set[str],
+                diff_ignore_path: tuple[str, ...] | list[str] = (),
+                diff_ignore_path_in: tuple[str, ...] | list[str] = (),
                 diff_limit: int,
                 recalc: bool,
                 render_smoke: bool,
+                strict_calc_chain: bool = False,
             ) -> dict:
                 observed["exe"] = exe
                 observed["workbook_name"] = workbook_name
                 observed["diff_ignore"] = diff_ignore
+                observed["diff_ignore_path"] = tuple(diff_ignore_path)
+                observed["diff_ignore_path_in"] = tuple(diff_ignore_path_in)
                 observed["diff_limit"] = diff_limit
                 observed["recalc"] = recalc
                 observed["render_smoke"] = render_smoke
+                observed["strict_calc_chain"] = strict_calc_chain
                 return {"steps": {}, "result": {"open_ok": True, "round_trip_ok": True}}
 
             triage_mod._run_rust_triage = _fake_run_rust_triage  # type: ignore[assignment]

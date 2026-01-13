@@ -174,6 +174,25 @@ python -m tools.corpus.triage \
   --no-default-diff-ignore
 ```
 
+#### Suppressing known-noise XML diffs (ignore-path)
+
+Some Excel writers emit volatile or non-semantic attributes that churn across round-trips (for example
+`x14ac:dyDescent` in DrawingML text runs, or `xr:uid` in rich-data extensions). To suppress these without
+ignoring the entire part, triage exposes `xlsx-diff`’s fine-grained XML ignore rules:
+
+```bash
+# Ignore any XML diff whose path contains the substring (repeatable).
+python -m tools.corpus.triage ... \
+  --diff-ignore-path dyDescent \
+  --diff-ignore-path xr:uid
+```
+
+```bash
+# Scope an ignore rule to matching parts (repeatable).
+python -m tools.corpus.triage ... \
+  --diff-ignore-path-in "xl/worksheets/*.xml:xr:uid"
+```
+
 #### calcChain (`xl/calcChain.xml`)
 
 Excel workbooks may include a **calculation chain** (`xl/calcChain.xml`) that records formula dependency order.
@@ -187,6 +206,12 @@ To locally hide calcChain noise (restoring the old triage behavior), run triage 
 
 ```bash
 python -m tools.corpus.triage ... --diff-ignore xl/calcChain.xml
+```
+
+To make calcChain diffs count as **CRITICAL** (strict round-trip preservation scoring), run triage with:
+
+```bash
+python -m tools.corpus.triage ... --strict-calc-chain
 ```
 
 ### Isolate round-trip diffs by part ("diff root cause isolator")

@@ -936,10 +936,13 @@ def _run_rust_triage(
     *,
     workbook_name: str,
     diff_ignore: set[str],
+    diff_ignore_path: tuple[str, ...] | list[str] = (),
+    diff_ignore_path_in: tuple[str, ...] | list[str] = (),
     diff_limit: int,
     round_trip_fail_on: str = "critical",
     recalc: bool,
     render_smoke: bool,
+    strict_calc_chain: bool = False,
 ) -> dict[str, Any]:
     """Invoke the Rust helper to run load/save/diff (+ optional recalc/render) on a workbook blob."""
 
@@ -973,6 +976,12 @@ def _run_rust_triage(
         ]
         for part in sorted(diff_ignore):
             cmd.extend(["--ignore-part", part])
+        for pattern in sorted({p.strip() for p in diff_ignore_path if p and p.strip()}):
+            cmd.extend(["--ignore-path", pattern])
+        for scoped in sorted({p.strip() for p in diff_ignore_path_in if p and p.strip()}):
+            cmd.extend(["--ignore-path-in", scoped])
+        if strict_calc_chain:
+            cmd.append("--strict-calc-chain")
         if recalc:
             cmd.append("--recalc")
         if render_smoke:
@@ -1001,10 +1010,13 @@ def triage_workbook(
     *,
     rust_exe: Path,
     diff_ignore: set[str],
+    diff_ignore_path: tuple[str, ...] | list[str] = (),
+    diff_ignore_path_in: tuple[str, ...] | list[str] = (),
     diff_limit: int,
     round_trip_fail_on: str = "critical",
     recalc: bool,
     render_smoke: bool,
+    strict_calc_chain: bool = False,
     privacy_mode: str = _PRIVACY_PUBLIC,
 ) -> dict[str, Any]:
     sha = sha256_hex(workbook.data)
@@ -1069,6 +1081,9 @@ def triage_workbook(
         optional_kwargs = {
             "workbook_name": workbook.display_name,
             "round_trip_fail_on": round_trip_fail_on,
+            "diff_ignore_path": diff_ignore_path,
+            "diff_ignore_path_in": diff_ignore_path_in,
+            "strict_calc_chain": strict_calc_chain,
         }
         try:
             sig = inspect.signature(_run_rust_triage)
@@ -1216,10 +1231,13 @@ def _triage_one_path(
     *,
     rust_exe: str,
     diff_ignore: tuple[str, ...],
+    diff_ignore_path: tuple[str, ...] = (),
+    diff_ignore_path_in: tuple[str, ...] = (),
     diff_limit: int,
     round_trip_fail_on: str = "critical",
     recalc: bool,
     render_smoke: bool,
+    strict_calc_chain: bool = False,
     leak_scan: bool,
     fernet_key: str | None,
     privacy_mode: str = _PRIVACY_PUBLIC,
@@ -1256,10 +1274,13 @@ def _triage_one_path(
             wb,
             rust_exe=Path(rust_exe),
             diff_ignore=set(diff_ignore),
+            diff_ignore_path=diff_ignore_path,
+            diff_ignore_path_in=diff_ignore_path_in,
             diff_limit=diff_limit,
             round_trip_fail_on=round_trip_fail_on,
             recalc=recalc,
             render_smoke=render_smoke,
+            strict_calc_chain=strict_calc_chain,
             privacy_mode=privacy_mode,
         )
     except Exception as e:  # noqa: BLE001
@@ -1321,10 +1342,13 @@ def _triage_paths(
     *,
     rust_exe: str,
     diff_ignore: set[str],
+    diff_ignore_path: tuple[str, ...] = (),
+    diff_ignore_path_in: tuple[str, ...] = (),
     diff_limit: int,
     round_trip_fail_on: str = "critical",
     recalc: bool,
     render_smoke: bool,
+    strict_calc_chain: bool = False,
     leak_scan: bool,
     fernet_key: str | None,
     jobs: int,
@@ -1343,6 +1367,10 @@ def _triage_paths(
 
     reports_by_index: list[dict[str, Any] | None] = [None] * len(paths)
     diff_ignore_tuple = tuple(sorted({p for p in diff_ignore if p}))
+    diff_ignore_path_tuple = tuple(sorted({p for p in diff_ignore_path if p and p.strip()}))
+    diff_ignore_path_in_tuple = tuple(
+        sorted({p for p in diff_ignore_path_in if p and p.strip()})
+    )
 
     if jobs == 1 or len(paths) <= 1:
         for idx, path in enumerate(paths):
@@ -1350,10 +1378,13 @@ def _triage_paths(
                 str(path),
                 rust_exe=rust_exe,
                 diff_ignore=diff_ignore_tuple,
+                diff_ignore_path=diff_ignore_path_tuple,
+                diff_ignore_path_in=diff_ignore_path_in_tuple,
                 diff_limit=diff_limit,
                 round_trip_fail_on=round_trip_fail_on,
                 recalc=recalc,
                 render_smoke=render_smoke,
+                strict_calc_chain=strict_calc_chain,
                 leak_scan=leak_scan,
                 fernet_key=fernet_key,
                 privacy_mode=privacy_mode,
@@ -1383,10 +1414,13 @@ def _triage_paths(
                 str(path),
                 rust_exe=rust_exe,
                 diff_ignore=diff_ignore_tuple,
+                diff_ignore_path=diff_ignore_path_tuple,
+                diff_ignore_path_in=diff_ignore_path_in_tuple,
                 diff_limit=diff_limit,
                 round_trip_fail_on=round_trip_fail_on,
                 recalc=recalc,
                 render_smoke=render_smoke,
+                strict_calc_chain=strict_calc_chain,
                 leak_scan=leak_scan,
                 fernet_key=fernet_key,
                 privacy_mode=privacy_mode,
@@ -1490,11 +1524,37 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Additional part path to ignore during diff (can be repeated).",
     )
     parser.add_argument(
+        "--diff-ignore-path",
+        action="append",
+        default=[],
+        help=(
+            "Substring pattern to ignore within XML diff paths (can be repeated). "
+            "Useful for suppressing noisy attributes like dyDescent or xr:uid."
+        ),
+    )
+    parser.add_argument(
+        "--diff-ignore-path-in",
+        action="append",
+        default=[],
+        help=(
+            "Like --diff-ignore-path, but scoped to parts matched by a glob (can be repeated). "
+            "Format: <part_glob>:<path_substring>."
+        ),
+    )
+    parser.add_argument(
         "--no-default-diff-ignore",
         action="store_true",
         help=(
             "Disable the built-in default ignore list (docProps/*). "
             "When set, only explicit --diff-ignore entries are ignored."
+        ),
+    )
+    parser.add_argument(
+        "--strict-calc-chain",
+        action="store_true",
+        help=(
+            "Treat calcChain-related diffs as CRITICAL instead of being downgraded to WARN "
+            "(useful for strict round-trip preservation scoring)."
         ),
     )
     parser.add_argument(
@@ -1550,10 +1610,13 @@ def main() -> int:
         paths,
         rust_exe=str(rust_exe),
         diff_ignore=diff_ignore,
+        diff_ignore_path=tuple(args.diff_ignore_path or []),
+        diff_ignore_path_in=tuple(args.diff_ignore_path_in or []),
         diff_limit=args.diff_limit,
         round_trip_fail_on=args.round_trip_fail_on,
         recalc=args.recalc,
         render_smoke=args.render_smoke,
+        strict_calc_chain=bool(args.strict_calc_chain),
         leak_scan=args.leak_scan,
         fernet_key=fernet_key,
         jobs=args.jobs,
