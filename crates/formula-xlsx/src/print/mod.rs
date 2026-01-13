@@ -1,7 +1,7 @@
 mod a1;
 mod page_breaks;
 mod pdf;
-mod xlsx;
+pub(crate) mod xlsx;
 
 pub use a1::{
     format_print_area_defined_name, format_print_titles_defined_name,

@@ -660,10 +660,14 @@ fn build_parts(
         .flat_map(|sheet| sheet.iter_cells().map(|(_, cell)| cell.style_id))
         .filter(|style_id| *style_id != 0);
     let style_to_xf = styles_editor.ensure_styles_for_style_ids(style_ids, &style_table)?;
-    parts.insert(
-        styles_part_name.clone(),
-        styles_editor.to_styles_xml_bytes(),
-    );
+    // Preserve workbooks that omit a `styles.xml` part: if the source package didn't have one and
+    // the model doesn't reference any non-default style IDs, keep the part absent on round-trip.
+    if is_new || !style_to_xf.is_empty() || parts.contains_key(&styles_part_name) {
+        parts.insert(
+            styles_part_name.clone(),
+            styles_editor.to_styles_xml_bytes(),
+        );
+    }
 
     // Ensure core relationship/content types metadata exists when we synthesize new
     // parts for existing packages. For existing relationships we preserve IDs by
@@ -903,9 +907,258 @@ fn build_parts(
         parts.insert(sheet_meta.path.clone(), sheet_xml.into_bytes());
     }
 
-    write_back_modified_comment_parts(doc, &sheet_plan.sheets, &sheet_plan.cell_meta_sheet_ids, &mut parts);
+    write_back_modified_comment_parts(
+        doc,
+        &sheet_plan.sheets,
+        &sheet_plan.cell_meta_sheet_ids,
+        &mut parts,
+    );
+    apply_print_settings_patches(doc, &sheet_plan.sheets, &mut parts)?;
 
     Ok(parts)
+}
+
+fn apply_print_settings_patches(
+    doc: &XlsxDocument,
+    sheets: &[SheetMeta],
+    parts: &mut BTreeMap<String, Vec<u8>>,
+) -> Result<(), WriteError> {
+    if doc.workbook.print_settings == doc.meta.print_settings_snapshot {
+        return Ok(());
+    }
+
+    fn to_write_error(err: crate::print::PrintError) -> WriteError {
+        match err {
+            crate::print::PrintError::Io(e) => WriteError::Io(e),
+            crate::print::PrintError::Zip(e) => WriteError::Zip(e),
+            crate::print::PrintError::Xml(e) => WriteError::Xml(e),
+            crate::print::PrintError::XmlAttr(e) => WriteError::XmlAttr(e),
+            crate::print::PrintError::Utf8(e) => {
+                WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            }
+            crate::print::PrintError::InvalidA1(e) => {
+                WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            }
+            crate::print::PrintError::MissingPart(part) => WriteError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("missing required xlsx part: {part}"),
+            )),
+        }
+    }
+
+    fn model_range_to_cell_range(range: formula_model::Range) -> crate::print::CellRange {
+        crate::print::CellRange {
+            start_row: range.start.row.saturating_add(1),
+            end_row: range.end.row.saturating_add(1),
+            start_col: range.start.col.saturating_add(1),
+            end_col: range.end.col.saturating_add(1),
+        }
+    }
+
+    fn model_titles_to_print_titles(
+        titles: formula_model::PrintTitles,
+    ) -> crate::print::PrintTitles {
+        crate::print::PrintTitles {
+            repeat_rows: titles.repeat_rows.map(|r| crate::print::RowRange {
+                start: r.start.saturating_add(1),
+                end: r.end.saturating_add(1),
+            }),
+            repeat_cols: titles.repeat_cols.map(|c| crate::print::ColRange {
+                start: c.start.saturating_add(1),
+                end: c.end.saturating_add(1),
+            }),
+        }
+    }
+
+    fn model_page_setup_to_print(setup: formula_model::PageSetup) -> crate::print::PageSetup {
+        crate::print::PageSetup {
+            orientation: match setup.orientation {
+                formula_model::Orientation::Portrait => crate::print::Orientation::Portrait,
+                formula_model::Orientation::Landscape => crate::print::Orientation::Landscape,
+            },
+            paper_size: crate::print::PaperSize {
+                code: setup.paper_size.code,
+            },
+            margins: crate::print::PageMargins {
+                left: setup.margins.left,
+                right: setup.margins.right,
+                top: setup.margins.top,
+                bottom: setup.margins.bottom,
+                header: setup.margins.header,
+                footer: setup.margins.footer,
+            },
+            scaling: match setup.scaling {
+                formula_model::Scaling::Percent(pct) => crate::print::Scaling::Percent(pct),
+                formula_model::Scaling::FitTo { width, height } => {
+                    crate::print::Scaling::FitTo { width, height }
+                }
+            },
+        }
+    }
+
+    fn model_breaks_to_print(
+        breaks: formula_model::ManualPageBreaks,
+    ) -> crate::print::ManualPageBreaks {
+        crate::print::ManualPageBreaks {
+            row_breaks_after: breaks
+                .row_breaks_after
+                .into_iter()
+                .map(|v| v.saturating_add(1))
+                .collect(),
+            col_breaks_after: breaks
+                .col_breaks_after
+                .into_iter()
+                .map(|v| v.saturating_add(1))
+                .collect(),
+        }
+    }
+
+    let mut sheet_name_to_meta: HashMap<String, (usize, String, String)> = HashMap::new();
+    for (idx, meta) in sheets.iter().enumerate() {
+        let Some(sheet) = doc.workbook.sheet(meta.worksheet_id) else {
+            continue;
+        };
+        sheet_name_to_meta.insert(
+            sheet.name.to_ascii_uppercase(),
+            (idx, meta.path.clone(), sheet.name.clone()),
+        );
+    }
+
+    // Track sheets with non-default print settings in either the original snapshot or the current model.
+    let mut affected_sheets: HashSet<String> = HashSet::new();
+    for sheet in &doc.workbook.print_settings.sheets {
+        affected_sheets.insert(sheet.sheet_name.to_ascii_uppercase());
+    }
+    for sheet in &doc.meta.print_settings_snapshot.sheets {
+        affected_sheets.insert(sheet.sheet_name.to_ascii_uppercase());
+    }
+
+    // Build per-sheet maps for diffing.
+    let mut current_by_sheet: HashMap<String, &formula_model::SheetPrintSettings> = HashMap::new();
+    for sheet in &doc.workbook.print_settings.sheets {
+        current_by_sheet.insert(sheet.sheet_name.to_ascii_uppercase(), sheet);
+    }
+    let mut snapshot_by_sheet: HashMap<String, &formula_model::SheetPrintSettings> = HashMap::new();
+    for sheet in &doc.meta.print_settings_snapshot.sheets {
+        snapshot_by_sheet.insert(sheet.sheet_name.to_ascii_uppercase(), sheet);
+    }
+
+    let mut defined_name_edits: HashMap<(String, usize), crate::print::xlsx::DefinedNameEdit> =
+        HashMap::new();
+
+    for sheet_key in &affected_sheets {
+        let Some((local_sheet_id, _path, sheet_name)) = sheet_name_to_meta.get(sheet_key) else {
+            continue;
+        };
+
+        let current = current_by_sheet.get(sheet_key).copied();
+        let snapshot = snapshot_by_sheet.get(sheet_key).copied();
+
+        // Defined names: print area.
+        let current_area = current.and_then(|s| s.print_area.as_deref());
+        let snapshot_area = snapshot.and_then(|s| s.print_area.as_deref());
+        if current_area != snapshot_area {
+            let edit = match current_area {
+                Some(ranges) => {
+                    let ranges_1 = ranges
+                        .iter()
+                        .copied()
+                        .map(model_range_to_cell_range)
+                        .collect::<Vec<_>>();
+                    let value = crate::print::format_print_area_defined_name(sheet_name, &ranges_1);
+                    crate::print::xlsx::DefinedNameEdit::Set(value)
+                }
+                None => crate::print::xlsx::DefinedNameEdit::Remove,
+            };
+            defined_name_edits.insert(
+                (formula_model::XLNM_PRINT_AREA.to_string(), *local_sheet_id),
+                edit,
+            );
+        }
+
+        // Defined names: print titles.
+        let current_titles = current.and_then(|s| s.print_titles);
+        let snapshot_titles = snapshot.and_then(|s| s.print_titles);
+        if current_titles != snapshot_titles {
+            let edit = match current_titles {
+                Some(titles) => {
+                    let titles_1 = model_titles_to_print_titles(titles);
+                    let value =
+                        crate::print::format_print_titles_defined_name(sheet_name, &titles_1);
+                    crate::print::xlsx::DefinedNameEdit::Set(value)
+                }
+                None => crate::print::xlsx::DefinedNameEdit::Remove,
+            };
+            defined_name_edits.insert(
+                (
+                    formula_model::XLNM_PRINT_TITLES.to_string(),
+                    *local_sheet_id,
+                ),
+                edit,
+            );
+        }
+    }
+
+    if !defined_name_edits.is_empty() {
+        let workbook_xml = parts.get("xl/workbook.xml").ok_or_else(|| {
+            WriteError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "missing xl/workbook.xml",
+            ))
+        })?;
+        let updated = crate::print::xlsx::update_workbook_xml(workbook_xml, &defined_name_edits)
+            .map_err(to_write_error)?;
+        parts.insert("xl/workbook.xml".to_string(), updated);
+    }
+
+    // Worksheet-level print settings (page setup/margins/scaling + manual breaks).
+    for sheet_key in affected_sheets {
+        let Some((_local_sheet_id, path, sheet_name)) = sheet_name_to_meta.get(&sheet_key) else {
+            continue;
+        };
+
+        let current = current_by_sheet.get(&sheet_key).copied();
+        let snapshot = snapshot_by_sheet.get(&sheet_key).copied();
+
+        let current_page_setup = current.map(|s| s.page_setup.clone()).unwrap_or_default();
+        let snapshot_page_setup = snapshot.map(|s| s.page_setup.clone()).unwrap_or_default();
+        let current_breaks = current
+            .map(|s| s.manual_page_breaks.clone())
+            .unwrap_or_default();
+        let snapshot_breaks = snapshot
+            .map(|s| s.manual_page_breaks.clone())
+            .unwrap_or_default();
+
+        if current_page_setup == snapshot_page_setup && current_breaks == snapshot_breaks {
+            continue;
+        }
+
+        let Some(sheet_xml) = parts.get(path).map(|b| b.as_slice()) else {
+            continue;
+        };
+
+        let settings = crate::print::SheetPrintSettings {
+            sheet_name: sheet_name.clone(),
+            print_area: current.and_then(|s| s.print_area.as_ref()).map(|ranges| {
+                ranges
+                    .iter()
+                    .copied()
+                    .map(model_range_to_cell_range)
+                    .collect()
+            }),
+            print_titles: current
+                .and_then(|s| s.print_titles)
+                .map(model_titles_to_print_titles),
+            page_setup: model_page_setup_to_print(current_page_setup),
+            manual_page_breaks: model_breaks_to_print(current_breaks),
+        };
+
+        let updated = crate::print::xlsx::update_worksheet_xml(sheet_xml, &settings)
+            .map_err(to_write_error)?;
+        parts.insert(path.clone(), updated);
+    }
+
+    Ok(())
 }
 
 fn normalize_merge_ranges(ranges: impl Iterator<Item = Range>) -> Vec<Range> {
@@ -1332,29 +1585,27 @@ fn update_sheet_protection_xml(
                 Event::Empty(_) => {}
                 _ => {}
             },
-            _ if sheet_calc_pr_depth > 0 => {
-                match event {
-                    Event::Start(ref e) => {
-                        sheet_calc_pr_depth = sheet_calc_pr_depth.saturating_add(1);
-                        writer.write_event(Event::Start(e.to_owned()))?;
-                    }
-                    Event::Empty(ref e) => {
-                        writer.write_event(Event::Empty(e.to_owned()))?;
-                    }
-                    Event::End(ref e) => {
-                        sheet_calc_pr_depth = sheet_calc_pr_depth.saturating_sub(1);
-                        writer.write_event(Event::End(e.to_owned()))?;
-                        if sheet_calc_pr_depth == 0 && !replaced && !inserted && !new_section.is_empty()
-                        {
-                            writer.get_mut().extend_from_slice(new_section.as_bytes());
-                            inserted = true;
-                        }
-                    }
-                    _ => {
-                        writer.write_event(event.to_owned())?;
+            _ if sheet_calc_pr_depth > 0 => match event {
+                Event::Start(ref e) => {
+                    sheet_calc_pr_depth = sheet_calc_pr_depth.saturating_add(1);
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                }
+                Event::Empty(ref e) => {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                }
+                Event::End(ref e) => {
+                    sheet_calc_pr_depth = sheet_calc_pr_depth.saturating_sub(1);
+                    writer.write_event(Event::End(e.to_owned()))?;
+                    if sheet_calc_pr_depth == 0 && !replaced && !inserted && !new_section.is_empty()
+                    {
+                        writer.get_mut().extend_from_slice(new_section.as_bytes());
+                        inserted = true;
                     }
                 }
-            }
+                _ => {
+                    writer.write_event(event.to_owned())?;
+                }
+            },
             Event::Start(ref e) if e.local_name().as_ref() == b"sheetProtection" => {
                 replaced = true;
                 pending_insert_after_sheet_data = false;
@@ -1385,7 +1636,10 @@ fn update_sheet_protection_xml(
                 }
             }
             Event::Start(ref e) if e.local_name().as_ref() == b"sheetCalcPr" => {
-                if pending_insert_after_sheet_data && !replaced && !inserted && !new_section.is_empty()
+                if pending_insert_after_sheet_data
+                    && !replaced
+                    && !inserted
+                    && !new_section.is_empty()
                 {
                     // Schema order is `sheetData`, `sheetCalcPr`, then `sheetProtection`.
                     // If `sheetCalcPr` exists, insert after it instead of immediately after
@@ -1397,7 +1651,10 @@ fn update_sheet_protection_xml(
             }
             Event::Empty(ref e) if e.local_name().as_ref() == b"sheetCalcPr" => {
                 writer.write_event(Event::Empty(e.to_owned()))?;
-                if pending_insert_after_sheet_data && !replaced && !inserted && !new_section.is_empty()
+                if pending_insert_after_sheet_data
+                    && !replaced
+                    && !inserted
+                    && !new_section.is_empty()
                 {
                     pending_insert_after_sheet_data = false;
                     writer.get_mut().extend_from_slice(new_section.as_bytes());
@@ -1427,7 +1684,10 @@ fn update_sheet_protection_xml(
                 writer.write_event(event.to_owned())?;
             }
             Event::End(ref e) if e.local_name().as_ref() == b"worksheet" => {
-                if pending_insert_after_sheet_data && !replaced && !inserted && !new_section.is_empty()
+                if pending_insert_after_sheet_data
+                    && !replaced
+                    && !inserted
+                    && !new_section.is_empty()
                 {
                     pending_insert_after_sheet_data = false;
                     writer.get_mut().extend_from_slice(new_section.as_bytes());
@@ -2388,7 +2648,9 @@ fn patch_workbook_xml(
                 // Always emit a `<workbookPr/>` so Excel considers the workbook structure valid.
                 let workbook_pr_tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookPr");
                 writer.get_mut().extend_from_slice(b"<");
-                writer.get_mut().extend_from_slice(workbook_pr_tag.as_bytes());
+                writer
+                    .get_mut()
+                    .extend_from_slice(workbook_pr_tag.as_bytes());
                 if doc.meta.date_system == DateSystem::V1904 {
                     writer.get_mut().extend_from_slice(br#" date1904="1""#);
                 }
@@ -2397,8 +2659,7 @@ fn patch_workbook_xml(
                 // If the document wants workbookProtection but the original workbook has no
                 // children at all, synthesize it (matching the new-workbook writer behavior).
                 if want_workbook_protection {
-                    let tag =
-                        prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookProtection");
+                    let tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookProtection");
                     write_new_workbook_protection(doc, &mut writer, tag.as_str())?;
                     inserted_workbook_protection = true;
                 }
@@ -2418,9 +2679,13 @@ fn patch_workbook_xml(
                     let workbook_view_tag =
                         prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookView");
                     writer.get_mut().extend_from_slice(b"<");
-                    writer.get_mut().extend_from_slice(book_views_tag.as_bytes());
+                    writer
+                        .get_mut()
+                        .extend_from_slice(book_views_tag.as_bytes());
                     writer.get_mut().extend_from_slice(b"><");
-                    writer.get_mut().extend_from_slice(workbook_view_tag.as_bytes());
+                    writer
+                        .get_mut()
+                        .extend_from_slice(workbook_view_tag.as_bytes());
                     if active_tab_idx != 0 {
                         writer.get_mut().extend_from_slice(b" activeTab=\"");
                         writer
@@ -2441,12 +2706,16 @@ fn patch_workbook_xml(
                         }
                         if let Some(width) = window.width {
                             writer.get_mut().extend_from_slice(b" windowWidth=\"");
-                            writer.get_mut().extend_from_slice(width.to_string().as_bytes());
+                            writer
+                                .get_mut()
+                                .extend_from_slice(width.to_string().as_bytes());
                             writer.get_mut().push(b'"');
                         }
                         if let Some(height) = window.height {
                             writer.get_mut().extend_from_slice(b" windowHeight=\"");
-                            writer.get_mut().extend_from_slice(height.to_string().as_bytes());
+                            writer
+                                .get_mut()
+                                .extend_from_slice(height.to_string().as_bytes());
                             writer.get_mut().push(b'"');
                         }
                         if let Some(state) = window.state {
@@ -2466,7 +2735,9 @@ fn patch_workbook_xml(
                         }
                     }
                     writer.get_mut().extend_from_slice(b"/></");
-                    writer.get_mut().extend_from_slice(book_views_tag.as_bytes());
+                    writer
+                        .get_mut()
+                        .extend_from_slice(book_views_tag.as_bytes());
                     writer.get_mut().extend_from_slice(b">");
                 }
 
@@ -2491,7 +2762,9 @@ fn patch_workbook_xml(
                 for sheet_meta in sheets {
                     let sheet = doc.workbook.sheet(sheet_meta.worksheet_id);
                     let name = sheet.map(|s| s.name.as_str()).unwrap_or("Sheet");
-                    let visibility = sheet.map(|s| s.visibility).unwrap_or(SheetVisibility::Visible);
+                    let visibility = sheet
+                        .map(|s| s.visibility)
+                        .unwrap_or(SheetVisibility::Visible);
                     writer.get_mut().extend_from_slice(b"<");
                     writer.get_mut().extend_from_slice(sheet_tag.as_bytes());
                     writer.get_mut().extend_from_slice(b" name=\"");
@@ -2507,9 +2780,9 @@ fn patch_workbook_xml(
                     writer.get_mut().push(b' ');
                     writer.get_mut().extend_from_slice(rel_id_attr.as_bytes());
                     writer.get_mut().extend_from_slice(b"=\"");
-                    writer.get_mut().extend_from_slice(
-                        escape_attr(&sheet_meta.relationship_id).as_bytes(),
-                    );
+                    writer
+                        .get_mut()
+                        .extend_from_slice(escape_attr(&sheet_meta.relationship_id).as_bytes());
                     writer.get_mut().push(b'"');
                     match visibility {
                         SheetVisibility::Visible => {}
@@ -2639,7 +2912,9 @@ fn patch_workbook_xml(
                     writer.get_mut().push(b'>');
 
                     writer.get_mut().extend_from_slice(b"<");
-                    writer.get_mut().extend_from_slice(workbook_view_tag.as_bytes());
+                    writer
+                        .get_mut()
+                        .extend_from_slice(workbook_view_tag.as_bytes());
                     if active_tab_idx != 0 {
                         writer.get_mut().extend_from_slice(b" activeTab=\"");
                         writer
@@ -2660,12 +2935,16 @@ fn patch_workbook_xml(
                         }
                         if let Some(width) = window.width {
                             writer.get_mut().extend_from_slice(b" windowWidth=\"");
-                            writer.get_mut().extend_from_slice(width.to_string().as_bytes());
+                            writer
+                                .get_mut()
+                                .extend_from_slice(width.to_string().as_bytes());
                             writer.get_mut().push(b'"');
                         }
                         if let Some(height) = window.height {
                             writer.get_mut().extend_from_slice(b" windowHeight=\"");
-                            writer.get_mut().extend_from_slice(height.to_string().as_bytes());
+                            writer
+                                .get_mut()
+                                .extend_from_slice(height.to_string().as_bytes());
                             writer.get_mut().push(b'"');
                         }
                         if let Some(state) = window.state {
@@ -2696,7 +2975,9 @@ fn patch_workbook_xml(
                     let workbook_view_tag =
                         prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookView");
                     writer.get_mut().extend_from_slice(b"<");
-                    writer.get_mut().extend_from_slice(workbook_view_tag.as_bytes());
+                    writer
+                        .get_mut()
+                        .extend_from_slice(workbook_view_tag.as_bytes());
                     if active_tab_idx != 0 {
                         writer.get_mut().extend_from_slice(b" activeTab=\"");
                         writer
@@ -2717,12 +2998,16 @@ fn patch_workbook_xml(
                         }
                         if let Some(width) = window.width {
                             writer.get_mut().extend_from_slice(b" windowWidth=\"");
-                            writer.get_mut().extend_from_slice(width.to_string().as_bytes());
+                            writer
+                                .get_mut()
+                                .extend_from_slice(width.to_string().as_bytes());
                             writer.get_mut().push(b'"');
                         }
                         if let Some(height) = window.height {
                             writer.get_mut().extend_from_slice(b" windowHeight=\"");
-                            writer.get_mut().extend_from_slice(height.to_string().as_bytes());
+                            writer
+                                .get_mut()
+                                .extend_from_slice(height.to_string().as_bytes());
                             writer.get_mut().push(b'"');
                         }
                         if let Some(state) = window.state {
@@ -2784,7 +3069,7 @@ fn patch_workbook_xml(
                                 attr.unescape_value()
                                     .map(|v| v.into_owned())
                                     .unwrap_or_default()
-                                })
+                            })
                         }
                         b"xWindow" => view_window
                             .and_then(|window| window.x)
@@ -2940,7 +3225,7 @@ fn patch_workbook_xml(
                                 attr.unescape_value()
                                     .map(|v| v.into_owned())
                                     .unwrap_or_default()
-                                })
+                            })
                         }
                         b"xWindow" => view_window
                             .and_then(|window| window.x)
@@ -3070,10 +3355,14 @@ fn patch_workbook_xml(
                     let workbook_view_tag =
                         prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookView");
                     writer.get_mut().extend_from_slice(b"<");
-                    writer.get_mut().extend_from_slice(book_views_tag.as_bytes());
+                    writer
+                        .get_mut()
+                        .extend_from_slice(book_views_tag.as_bytes());
                     writer.get_mut().push(b'>');
                     writer.get_mut().extend_from_slice(b"<");
-                    writer.get_mut().extend_from_slice(workbook_view_tag.as_bytes());
+                    writer
+                        .get_mut()
+                        .extend_from_slice(workbook_view_tag.as_bytes());
                     if active_tab_idx != 0 {
                         writer.get_mut().extend_from_slice(b" activeTab=\"");
                         writer
@@ -3094,12 +3383,16 @@ fn patch_workbook_xml(
                         }
                         if let Some(width) = window.width {
                             writer.get_mut().extend_from_slice(b" windowWidth=\"");
-                            writer.get_mut().extend_from_slice(width.to_string().as_bytes());
+                            writer
+                                .get_mut()
+                                .extend_from_slice(width.to_string().as_bytes());
                             writer.get_mut().push(b'"');
                         }
                         if let Some(height) = window.height {
                             writer.get_mut().extend_from_slice(b" windowHeight=\"");
-                            writer.get_mut().extend_from_slice(height.to_string().as_bytes());
+                            writer
+                                .get_mut()
+                                .extend_from_slice(height.to_string().as_bytes());
                             writer.get_mut().push(b'"');
                         }
                         if let Some(state) = window.state {
@@ -3116,7 +3409,9 @@ fn patch_workbook_xml(
                     }
                     writer.get_mut().extend_from_slice(b"/>");
                     writer.get_mut().extend_from_slice(b"</");
-                    writer.get_mut().extend_from_slice(book_views_tag.as_bytes());
+                    writer
+                        .get_mut()
+                        .extend_from_slice(book_views_tag.as_bytes());
                     writer.get_mut().push(b'>');
                     inserted_book_views = true;
                 }
@@ -3193,10 +3488,14 @@ fn patch_workbook_xml(
                     let workbook_view_tag =
                         prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookView");
                     writer.get_mut().extend_from_slice(b"<");
-                    writer.get_mut().extend_from_slice(book_views_tag.as_bytes());
+                    writer
+                        .get_mut()
+                        .extend_from_slice(book_views_tag.as_bytes());
                     writer.get_mut().push(b'>');
                     writer.get_mut().extend_from_slice(b"<");
-                    writer.get_mut().extend_from_slice(workbook_view_tag.as_bytes());
+                    writer
+                        .get_mut()
+                        .extend_from_slice(workbook_view_tag.as_bytes());
                     if active_tab_idx != 0 {
                         writer.get_mut().extend_from_slice(b" activeTab=\"");
                         writer
@@ -3217,12 +3516,16 @@ fn patch_workbook_xml(
                         }
                         if let Some(width) = window.width {
                             writer.get_mut().extend_from_slice(b" windowWidth=\"");
-                            writer.get_mut().extend_from_slice(width.to_string().as_bytes());
+                            writer
+                                .get_mut()
+                                .extend_from_slice(width.to_string().as_bytes());
                             writer.get_mut().push(b'"');
                         }
                         if let Some(height) = window.height {
                             writer.get_mut().extend_from_slice(b" windowHeight=\"");
-                            writer.get_mut().extend_from_slice(height.to_string().as_bytes());
+                            writer
+                                .get_mut()
+                                .extend_from_slice(height.to_string().as_bytes());
                             writer.get_mut().push(b'"');
                         }
                         if let Some(state) = window.state {
@@ -3239,7 +3542,9 @@ fn patch_workbook_xml(
                     }
                     writer.get_mut().extend_from_slice(b"/>");
                     writer.get_mut().extend_from_slice(b"</");
-                    writer.get_mut().extend_from_slice(book_views_tag.as_bytes());
+                    writer
+                        .get_mut()
+                        .extend_from_slice(book_views_tag.as_bytes());
                     writer.get_mut().push(b'>');
                     inserted_book_views = true;
                 }
@@ -4719,10 +5024,7 @@ fn append_cell_xml(
     //
     // Excel emits `vm`/`cm` attributes on `<c>` elements to reference value metadata and cell
     // metadata records (used for modern features like linked data types / rich values).
-    if let Some(vm) = meta
-        .and_then(|m| m.vm.as_deref())
-        .filter(|s| !s.is_empty())
-    {
+    if let Some(vm) = meta.and_then(|m| m.vm.as_deref()).filter(|s| !s.is_empty()) {
         // `vm="..."` is a SpreadsheetML value-metadata pointer (typically into `xl/metadata*.xml`).
         // If the cell's value changes and we can't update the corresponding metadata records,
         // drop `vm` to avoid leaving a dangling reference.
@@ -4747,10 +5049,7 @@ fn append_cell_xml(
             out.push_str(&format!(r#" vm="{}""#, escape_attr(vm)));
         }
     }
-    if let Some(cm) = meta
-        .and_then(|m| m.cm.as_deref())
-        .filter(|s| !s.is_empty())
-    {
+    if let Some(cm) = meta.and_then(|m| m.cm.as_deref()).filter(|s| !s.is_empty()) {
         out.push_str(&format!(r#" cm="{}""#, escape_attr(cm)));
     }
     out.push('>');
@@ -5023,9 +5322,7 @@ fn infer_value_kind(cell: &formula_model::Cell) -> CellValueKind {
         CellValue::String(_) => CellValueKind::SharedString { index: 0 },
         CellValue::RichText(_) => CellValueKind::SharedString { index: 0 },
         CellValue::Entity(_) | CellValue::Record(_) => CellValueKind::SharedString { index: 0 },
-        CellValue::Image(image)
-            if image.alt_text.as_deref().is_some_and(|s| !s.is_empty()) =>
-        {
+        CellValue::Image(image) if image.alt_text.as_deref().is_some_and(|s| !s.is_empty()) => {
             CellValueKind::SharedString { index: 0 }
         }
         CellValue::Empty => CellValueKind::Number,
@@ -5858,7 +6155,8 @@ fn ensure_workbook_rels_has_relationship(
                     for attr in e.attributes() {
                         let attr = attr?;
                         if attr.key.as_ref() == b"xmlns"
-                            && attr.value.as_ref() == crate::relationships::PACKAGE_REL_NS.as_bytes()
+                            && attr.value.as_ref()
+                                == crate::relationships::PACKAGE_REL_NS.as_bytes()
                         {
                             root_has_default_ns = true;
                             break;

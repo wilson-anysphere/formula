@@ -14,7 +14,7 @@ use zip::{ZipArchive, ZipWriter};
 use crate::zip_util::open_zip_part;
 
 #[derive(Debug, Clone)]
-enum DefinedNameEdit {
+pub(crate) enum DefinedNameEdit {
     Set(String),
     Remove,
 }
@@ -558,7 +558,7 @@ fn parse_break_id(e: &BytesStart<'_>) -> Result<Option<u32>, PrintError> {
     Ok(id)
 }
 
-fn update_workbook_xml(
+pub(crate) fn update_workbook_xml(
     workbook_xml: &[u8],
     edits: &HashMap<(String, usize), DefinedNameEdit>,
 ) -> Result<Vec<u8>, PrintError> {
@@ -811,7 +811,7 @@ fn write_defined_name(
     Ok(())
 }
 
-fn update_worksheet_xml(
+pub(crate) fn update_worksheet_xml(
     sheet_xml: &[u8],
     settings: &SheetPrintSettings,
 ) -> Result<Vec<u8>, PrintError> {

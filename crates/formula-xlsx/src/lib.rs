@@ -261,6 +261,14 @@ pub struct XlsxMeta {
     /// This is used to detect when comments have been edited in-memory so we can rewrite only the
     /// affected comment XML parts on save.
     pub comment_snapshot: HashMap<WorksheetId, Vec<Comment>>,
+    /// Snapshot of the workbook print settings as they were originally loaded into the
+    /// in-memory model.
+    ///
+    /// The writer uses this to detect no-op saves: when the model's
+    /// [`formula_model::Workbook::print_settings`] matches this snapshot, we avoid rewriting
+    /// `xl/workbook.xml` (print-related defined names) and `xl/worksheets/sheetN.xml`
+    /// (page setup/margins/breaks).
+    pub print_settings_snapshot: formula_model::WorkbookPrintSettings,
 }
 
 /// OPC part names for comment XML parts referenced from a worksheet's `.rels`.

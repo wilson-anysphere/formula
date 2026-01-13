@@ -1059,6 +1059,8 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     // underlying parts are preserved verbatim for round-trip.
     rich_values::apply_rich_values_to_workbook(&mut workbook, &rich_value_cells, &parts);
 
+    let print_settings_snapshot = workbook.print_settings.clone();
+
     Ok(XlsxDocument {
         workbook,
         parts,
@@ -1071,6 +1073,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             rich_value_cells,
             comment_part_names,
             comment_snapshot,
+            print_settings_snapshot,
         },
         calc_affecting_edits: false,
         workbook_kind,
