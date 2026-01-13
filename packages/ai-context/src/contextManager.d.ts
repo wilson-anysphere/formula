@@ -109,6 +109,12 @@ export interface SpreadsheetApiLike {
   [key: string]: unknown;
 }
 
+export interface SpreadsheetApiWithNonEmptyCells extends SpreadsheetApiLike {
+  listNonEmptyCells: (
+    sheet?: string,
+  ) => Array<{ address: { sheet: string; row: number; col: number }; cell: { value?: unknown; formula?: string } }>;
+}
+
 export interface SheetNameResolverLike {
   getSheetIdByName(name: string): string | null | undefined;
   getSheetNameById?: (id: string) => string | null | undefined;
@@ -285,6 +291,45 @@ export class ContextManager {
 
   buildWorkbookContextFromSpreadsheetApi(params: {
     spreadsheet: SpreadsheetApiLike;
+    workbookId: string;
+    query: string;
+    attachments?: Attachment[];
+    topK?: number;
+    /**
+     * Cheap path: caller manages indexing externally and does not provide DLP.
+     * `spreadsheet.listNonEmptyCells` is not required in this mode.
+     */
+    skipIndexing: true;
+    skipIndexingWithDlp?: boolean;
+    includePromptContext?: boolean;
+    signal?: AbortSignal;
+    dlp?: undefined;
+  }): Promise<BuildWorkbookContextResult>;
+
+  buildWorkbookContextFromSpreadsheetApi(params: {
+    spreadsheet: SpreadsheetApiLike;
+    workbookId: string;
+    query: string;
+    attachments?: Attachment[];
+    topK?: number;
+    /**
+     * Cheap path with DLP: caller provides an up-to-date DLP-safe index (already
+     * redacted before embedding), so ContextManager can skip workbook scans.
+     * `spreadsheet.listNonEmptyCells` is not required in this mode.
+     */
+    skipIndexing: true;
+    skipIndexingWithDlp: true;
+    includePromptContext?: boolean;
+    signal?: AbortSignal;
+    dlp: DlpOptions;
+  }): Promise<BuildWorkbookContextResult>;
+
+  buildWorkbookContextFromSpreadsheetApi(params: {
+    /**
+     * When ContextManager may need to scan workbook cells for indexing (default),
+     * callers must provide `listNonEmptyCells`.
+     */
+    spreadsheet: SpreadsheetApiWithNonEmptyCells;
     workbookId: string;
     query: string;
     attachments?: Attachment[];

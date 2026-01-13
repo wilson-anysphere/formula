@@ -24,6 +24,7 @@ import {
   type WorkbookIndexStats,
   type SheetNameResolverLike,
   type SpreadsheetApiLike,
+  type SpreadsheetApiWithNonEmptyCells,
   type WorkbookRagVectorStore,
   type WorkbookRagWorkbook,
 } from "./index.js";
@@ -50,6 +51,7 @@ type _ContextSheetNotAny = Assert<IsAny<ContextSheet> extends false ? true : fal
 type _DlpOptionsNotAny = Assert<IsAny<DlpOptions> extends false ? true : false>;
 type _SheetNameResolverNotAny = Assert<IsAny<SheetNameResolverLike> extends false ? true : false>;
 type _SpreadsheetNotAny = Assert<IsAny<SpreadsheetApiLike> extends false ? true : false>;
+type _SpreadsheetWithCellsNotAny = Assert<IsAny<SpreadsheetApiWithNonEmptyCells> extends false ? true : false>;
 type _VectorStoreNotAny = Assert<IsAny<WorkbookRagVectorStore> extends false ? true : false>;
 type _WorkbookNotAny = Assert<IsAny<WorkbookRagWorkbook> extends false ? true : false>;
 
@@ -86,7 +88,42 @@ await cm.buildWorkbookContextFromSpreadsheetApi({
   workbookId: "wb-1",
   query: "hi",
   skipIndexing: true,
+});
+
+// DLP + skipIndexing without skipIndexingWithDlp still requires listNonEmptyCells (indexing must run).
+// @ts-expect-error - spreadsheet.listNonEmptyCells is required when DLP indexing cannot be skipped.
+await cm.buildWorkbookContextFromSpreadsheetApi({
+  spreadsheet: { listSheets: () => [] },
+  workbookId: "wb-1",
+  query: "hi",
+  skipIndexing: true,
+  dlp: { documentId: "doc-1", policy: {} },
+});
+
+await cm.buildWorkbookContextFromSpreadsheetApi({
+  spreadsheet: { listSheets: () => [], listNonEmptyCells: () => [] },
+  workbookId: "wb-1",
+  query: "hi",
+  skipIndexing: true,
+  dlp: { documentId: "doc-1", policy: {} },
+});
+
+// DLP-safe cheap path: caller asserts the workbook is already indexed with DLP applied.
+await cm.buildWorkbookContextFromSpreadsheetApi({
+  spreadsheet: { listSheets: () => [] },
+  workbookId: "wb-1",
+  query: "hi",
+  skipIndexing: true,
   skipIndexingWithDlp: true,
+  dlp: { documentId: "doc-1", policy: {} },
+});
+
+// Default path requires listNonEmptyCells.
+// @ts-expect-error - spreadsheet.listNonEmptyCells is required when skipIndexing is not true.
+await cm.buildWorkbookContextFromSpreadsheetApi({
+  spreadsheet: { listSheets: () => [] },
+  workbookId: "wb-1",
+  query: "hi",
 });
 `;
 
