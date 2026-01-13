@@ -4,7 +4,6 @@ use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::{Mutex, Notify};
-use url::Url;
 
 use crate::ipc_origin;
 
@@ -227,12 +226,9 @@ async fn spawn_update_download(
 ///
 /// Intended to be called after the user approves a restart via `restartToInstallUpdate()`.
 #[tauri::command]
-pub async fn install_downloaded_update(
-    window: tauri::WebviewWindow,
-    _app: AppHandle,
-) -> Result<(), String> {
+pub async fn install_downloaded_update(window: tauri::WebviewWindow) -> Result<(), String> {
     ipc_origin::ensure_main_window(window.label(), "update installation", ipc_origin::Verb::Is)?;
-    let url: Url = window.url().map_err(|err| err.to_string())?;
+    let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_trusted_origin(&url, "update installation", ipc_origin::Verb::Is)?;
 
     loop {

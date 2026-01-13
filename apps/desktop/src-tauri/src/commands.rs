@@ -4837,13 +4837,13 @@ pub async fn fire_selection_change(
 #[tauri::command]
 pub fn check_for_updates(
     window: tauri::WebviewWindow,
-    app: tauri::AppHandle,
     source: crate::updater::UpdateCheckSource,
 ) -> Result<(), String> {
     ipc_origin::ensure_main_window(window.label(), "update checks", ipc_origin::Verb::Are)?;
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_trusted_origin(&url, "update checks", ipc_origin::Verb::Are)?;
 
+    let app = window.app_handle();
     crate::updater::spawn_update_check(&app, source);
     Ok(())
 }
@@ -4882,9 +4882,9 @@ pub async fn open_external_url(window: tauri::Window, url: String) -> Result<(),
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn quit_app(window: tauri::WebviewWindow) -> Result<(), String> {
-    ipc_origin::ensure_main_window(window.label(), "app quitting", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_main_window(window.label(), "app lifecycle", ipc_origin::Verb::Is)?;
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_trusted_origin(&url, "app quitting", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "app lifecycle", ipc_origin::Verb::Is)?;
 
     // We intentionally use a hard process exit here. The desktop shell already delegates
     // "should we quit?" decisions (event macros + unsaved prompts) to the frontend.
@@ -4895,11 +4895,12 @@ pub fn quit_app(window: tauri::WebviewWindow) -> Result<(), String> {
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub fn restart_app(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(), String> {
-    ipc_origin::ensure_main_window(window.label(), "app restart", ipc_origin::Verb::Is)?;
+pub fn restart_app(window: tauri::WebviewWindow) -> Result<(), String> {
+    ipc_origin::ensure_main_window(window.label(), "app lifecycle", ipc_origin::Verb::Is)?;
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_trusted_origin(&url, "app restart", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "app lifecycle", ipc_origin::Verb::Is)?;
 
+    let app = window.app_handle();
     // For update flows we need a graceful shutdown so Tauri and its plugins (notably
     // `tauri-plugin-updater`) can complete any pending work before the process exits.
     //
@@ -6178,6 +6179,6 @@ export default async function main(ctx) {
     fn restart_app_command_signature_compiles() {
         // We can't exercise a real restart in tests, but we can assert that the command
         // compiles with Tauri's supported restart API.
-        let _ = restart_app as fn(tauri::AppHandle);
+        let _ = restart_app as fn(tauri::WebviewWindow) -> Result<(), String>;
     }
 }

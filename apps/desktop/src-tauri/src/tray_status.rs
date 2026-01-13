@@ -106,9 +106,9 @@ pub fn set_tray_status(
     state: tauri::State<'_, TrayStatusState>,
     status: String,
 ) -> Result<(), String> {
-    ipc_origin::ensure_main_window(window.label(), "tray status updates", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(window.label(), "tray status", ipc_origin::Verb::Is)?;
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_trusted_origin(&url, "tray status updates", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "tray status", ipc_origin::Verb::Is)?;
 
     state.inner().update_status(&status)
 }
