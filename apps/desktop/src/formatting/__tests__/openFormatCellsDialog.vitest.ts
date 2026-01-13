@@ -150,4 +150,33 @@ describe("openFormatCellsDialog formatting performance guards", () => {
     const fontSize = dialog!.querySelector<HTMLInputElement>('[data-testid="format-cells-font-size"]');
     expect(fontSize?.value).toBe("12");
   });
+
+  it("applies a custom number format string when __custom__ is selected", () => {
+    const doc = new DocumentController();
+
+    openFormatCellsDialog({
+      isEditing: () => false,
+      getDocument: () => doc,
+      getSheetId: () => "Sheet1",
+      getActiveCell: () => ({ row: 0, col: 0 }),
+      getSelectionRanges: () => [],
+      focusGrid: () => {},
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>("dialog.format-cells-dialog");
+    expect(dialog).not.toBeNull();
+
+    const number = dialog!.querySelector<HTMLSelectElement>('[data-testid="format-cells-number"]');
+    expect(number).not.toBeNull();
+    number!.value = "__custom__";
+    number!.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const customInput = dialog!.querySelector<HTMLInputElement>('[data-testid="format-cells-number-custom"]');
+    expect(customInput).not.toBeNull();
+    customInput!.value = "#,##0.00";
+
+    dialog!.querySelector<HTMLButtonElement>('[data-testid="format-cells-apply"]')!.click();
+
+    expect(doc.getCellFormat("Sheet1", "A1").numberFormat).toBe("#,##0.00");
+  });
 });

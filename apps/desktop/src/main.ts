@@ -125,6 +125,7 @@ import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
 import { handleInsertPicturesRibbonCommand } from "./main.insertPicturesRibbonCommand.js";
 import { assertExtensionRangeWithinLimits } from "./extensions/rangeSizeGuard.js";
 import { createOpenFormatCells } from "./formatting/openFormatCellsCommand.js";
+import { promptAndApplyCustomNumberFormat } from "./formatting/promptCustomNumberFormat.js";
 import { handleCustomSortCommand } from "./sort-filter/openCustomSortDialog.js";
 import { parseCollabShareLink, serializeCollabShareLink } from "./sharing/collabLink.js";
 import { saveCollabConnectionForWorkbook, loadCollabConnectionForWorkbook } from "./sharing/collabConnectionStore.js";
@@ -8530,10 +8531,17 @@ function handleRibbonCommand(commandId: string): void {
       case "home.cells.format.columnWidth":
         void promptAndApplyAxisSizing(app, "colWidth", { isEditing: () => isSpreadsheetEditing() || app.isReadOnly() });
         return;
+      case "home.number.moreFormats.custom":
+        void promptAndApplyCustomNumberFormat({
+          isEditing: () => isSpreadsheetEditing() || app.isReadOnly(),
+          showInputBox,
+          getActiveCellNumberFormat: activeCellNumberFormat,
+          applyFormattingToSelection,
+        });
+        return;
       case "format.openFormatCells":
       case "home.number.formatCells": // legacy ribbon schema id
       case "home.number.moreFormats.formatCells": // legacy ribbon schema id
-      case "home.number.moreFormats.custom":
       case "home.cells.format.formatCells": // legacy ribbon schema id
         executeBuiltinCommand("format.openFormatCells");
         return;

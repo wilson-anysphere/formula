@@ -127,6 +127,28 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
   numberRow.appendChild(numberLabel);
   numberRow.appendChild(numberSelectWrap);
   numberSection.appendChild(numberRow);
+
+  const numberCustomRow = document.createElement("div");
+  numberCustomRow.className = "format-cells-dialog__row";
+  const numberCustomLabel = document.createElement("div");
+  numberCustomLabel.className = "format-cells-dialog__label";
+  numberCustomLabel.textContent = "Code";
+  const numberCustomWrap = document.createElement("div");
+  numberCustomWrap.className = "format-cells-dialog__control";
+  const numberCustomInput = document.createElement("input");
+  numberCustomInput.className = "format-cells-dialog__input";
+  numberCustomInput.type = "text";
+  numberCustomInput.placeholder = "General";
+  numberCustomInput.dataset.testid = "format-cells-number-custom";
+  numberCustomWrap.appendChild(numberCustomInput);
+  numberCustomRow.appendChild(numberCustomLabel);
+  numberCustomRow.appendChild(numberCustomWrap);
+  numberSection.appendChild(numberCustomRow);
+
+  const syncNumberCustomVisibility = () => {
+    numberCustomRow.style.display = numberSelect.value === "__custom__" ? "" : "none";
+  };
+  numberSelect.addEventListener("change", syncNumberCustomVisibility);
   content.appendChild(numberSection);
 
   // --- Font ------------------------------------------------------------------
@@ -340,11 +362,13 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
   // --- Initialize UI from active style --------------------------------------
 
   const activeNumberFormat = getStyleNumberFormat(activeStyle);
+  numberCustomInput.value = activeNumberFormat ?? "";
   const initialPreset =
     activeNumberFormat == null
       ? ""
       : Object.entries(NUMBER_FORMAT_CODE_BY_PRESET).find(([, code]) => code === activeNumberFormat)?.[0] ?? "__custom__";
   numberSelect.value = initialPreset;
+  syncNumberCustomVisibility();
 
   boldBtn.setAttribute("aria-pressed", Boolean(activeStyle?.font?.bold) ? "true" : "false");
   italicBtn.setAttribute("aria-pressed", Boolean(activeStyle?.font?.italic) ? "true" : "false");
@@ -384,12 +408,19 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
 
     // Number
     const preset = numberSelect.value;
-    if (preset !== "__custom__") {
-      const desiredNumberFormat = preset ? NUMBER_FORMAT_CODE_BY_PRESET[preset] ?? null : null;
-      const currentNumberFormat = getStyleNumberFormat(currentStyle);
-      if ((currentNumberFormat ?? null) !== (desiredNumberFormat ?? null)) {
-        changes.numberFormat = desiredNumberFormat;
+    const desiredNumberFormat = (() => {
+      if (preset === "__custom__") {
+        const raw = numberCustomInput.value;
+        const trimmed = raw.trim();
+        // Treat empty/"General" (Excel semantics) as clearing the number format.
+        if (!trimmed || trimmed.toLowerCase() === "general") return null;
+        return trimmed;
       }
+      return preset ? NUMBER_FORMAT_CODE_BY_PRESET[preset] ?? null : null;
+    })();
+    const currentNumberFormat = getStyleNumberFormat(currentStyle);
+    if ((currentNumberFormat ?? null) !== (desiredNumberFormat ?? null)) {
+      changes.numberFormat = desiredNumberFormat;
     }
 
     // Font
