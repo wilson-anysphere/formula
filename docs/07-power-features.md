@@ -13,6 +13,13 @@ Implementation ownership + cross-crate data flow is defined in
 The TypeScript shapes below are conceptual (product/UX-oriented) and are not the
 canonical persisted schema.
 
+Implementation (actual):
+- persisted schema + IDs: `formula-model`
+- worksheet/range pivots + cache building: `formula-engine`
+- Data Model pivots (measures/relationships): `formula-dax`
+- XLSX import/export of pivot parts: `formula-xlsx`
+- JS API surface: `formula-wasm`
+
 ### Architecture
 
 ```typescript

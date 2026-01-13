@@ -216,6 +216,10 @@ workbook.xlsx (ZIP archive)
 │   ├── pivotCache/
 │   │   ├── pivotCacheDefinition1.xml
 │   │   └── pivotCacheRecords1.xml
+│   ├── slicers/                 # (optional) slicer definitions (pivot UX)
+│   ├── slicerCaches/            # (optional) slicer cache definitions
+│   ├── timelines/               # (optional) timeline definitions (pivot UX)
+│   ├── timelineCaches/          # (optional) timeline cache definitions
 │   ├── queryTables/
 │   │   └── queryTable1.xml      # External data queries
 │   ├── connections.xml          # External data connections
