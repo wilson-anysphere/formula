@@ -4,6 +4,7 @@ use formula_model::charts::{
 };
 use formula_model::RichText;
 use roxmltree::{Document, Node};
+use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChartExParseError {
@@ -61,6 +62,8 @@ pub fn parse_chart_ex(
         });
     }
 
+    let chart_data = parse_chart_data(&doc, &mut diagnostics);
+
     let series = find_chart_type_node(&doc)
         .map(|chart_type_node| {
             chart_type_node
@@ -69,7 +72,7 @@ pub fn parse_chart_ex(
                     n.is_element()
                         && (n.tag_name().name() == "ser" || n.tag_name().name() == "series")
                 })
-                .map(|n| parse_series(n, &mut diagnostics))
+                .map(|n| parse_series(n, &chart_data, &mut diagnostics))
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -116,31 +119,176 @@ fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {
     })
 }
 
-fn parse_series(series_node: Node<'_, '_>, diagnostics: &mut Vec<ChartDiagnostic>) -> SeriesModel {
+#[derive(Debug, Clone, Default)]
+struct ChartExDataDefinition {
+    categories: Option<SeriesTextData>,
+    values: Option<SeriesNumberData>,
+    size: Option<SeriesNumberData>,
+    x_values: Option<SeriesData>,
+    y_values: Option<SeriesData>,
+}
+
+fn parse_chart_data<'a>(
+    doc: &'a Document<'a>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+) -> HashMap<String, ChartExDataDefinition> {
+    let Some(chart_data) = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "chartData")
+    else {
+        return HashMap::new();
+    };
+
+    let mut out: HashMap<String, ChartExDataDefinition> = HashMap::new();
+    for data in chart_data
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "data")
+    {
+        let Some(id) = data.attribute("id") else {
+            diagnostics.push(ChartDiagnostic {
+                level: ChartDiagnosticLevel::Warning,
+                message: "ChartEx <chartData> contains <data> without an id attribute".to_string(),
+            });
+            continue;
+        };
+
+        let mut def = ChartExDataDefinition::default();
+        for dim in data.descendants().filter(|n| n.is_element()) {
+            match dim.tag_name().name() {
+                "strDim" => {
+                    if dim.attribute("type") != Some("cat") {
+                        continue;
+                    }
+                    let Some(f) = descendant_text(dim, "f") else {
+                        continue;
+                    };
+                    if def.categories.is_none() {
+                        def.categories = Some(SeriesTextData {
+                            formula: Some(f.to_string()),
+                            cache: None,
+                            multi_cache: None,
+                        });
+                    }
+                }
+                "numDim" => {
+                    let Some(typ) = dim.attribute("type") else {
+                        continue;
+                    };
+                    let Some(f) = descendant_text(dim, "f") else {
+                        continue;
+                    };
+                    let num = SeriesNumberData {
+                        formula: Some(f.to_string()),
+                        cache: None,
+                        format_code: None,
+                    };
+                    match typ {
+                        "val" => {
+                            if def.values.is_none() {
+                                def.values = Some(num);
+                            }
+                        }
+                        "size" => {
+                            if def.size.is_none() {
+                                def.size = Some(num);
+                            }
+                        }
+                        "x" => {
+                            if def.x_values.is_none() {
+                                def.x_values = Some(SeriesData::Number(num));
+                            }
+                        }
+                        "y" => {
+                            if def.y_values.is_none() {
+                                def.y_values = Some(SeriesData::Number(num));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        out.insert(id.to_string(), def);
+    }
+
+    out
+}
+
+fn parse_series_data_id(series_node: Node<'_, '_>) -> Option<String> {
+    if let Some(id) = series_node.attribute("dataId") {
+        return Some(id.to_string());
+    }
+
+    series_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "dataId")
+        .and_then(|n| {
+            n.attribute("val")
+                .or_else(|| n.text())
+                .map(|v| v.to_string())
+        })
+}
+
+fn parse_series(
+    series_node: Node<'_, '_>,
+    chart_data: &HashMap<String, ChartExDataDefinition>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+) -> SeriesModel {
     let name = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "tx")
         .and_then(|tx| parse_text_from_tx(tx));
 
-    let categories = series_node
+    let mut categories = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "cat")
         .and_then(|cat| parse_series_text_data(cat, diagnostics));
 
-    let values = series_node
+    let mut values = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "val")
         .and_then(|val| parse_series_number_data(val, diagnostics));
 
-    let x_values = series_node
+    let mut x_values = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "xVal")
         .and_then(|x| parse_series_data(x, diagnostics));
 
-    let y_values = series_node
+    let mut y_values = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "yVal")
         .and_then(|y| parse_series_data(y, diagnostics));
+
+    if !chart_data.is_empty() {
+        if let Some(data_id) = parse_series_data_id(series_node) {
+            if let Some(def) = chart_data.get(&data_id) {
+                if categories.is_none() {
+                    categories = def.categories.clone();
+                }
+
+                if values.is_none() {
+                    values = def.values.clone().or_else(|| def.size.clone());
+                }
+
+                if x_values.is_none() {
+                    x_values = def.x_values.clone();
+                }
+
+                if y_values.is_none() {
+                    y_values = def.y_values.clone();
+                }
+            } else {
+                diagnostics.push(ChartDiagnostic {
+                    level: ChartDiagnosticLevel::Warning,
+                    message: format!(
+                        "ChartEx series references dataId={data_id}, but no matching <chartData>/<data> was found"
+                    ),
+                });
+            }
+        }
+    }
 
     SeriesModel {
         name,
