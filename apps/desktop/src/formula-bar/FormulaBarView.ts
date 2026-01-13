@@ -234,6 +234,7 @@ export class FormulaBarView {
   #nameBoxDropdownFilteredItems: NameBoxDropdownItem[] = [];
   #nameBoxDropdownOptionEls: HTMLElement[] = [];
   #nameBoxDropdownActiveIndex: number = -1;
+  #nameBoxDropdownRecentKeys: string[] = [];
   #nameBoxDropdownPointerDownListener: ((e: PointerEvent) => void) | null = null;
   #nameBoxDropdownScrollListener: ((e: Event) => void) | null = null;
   #nameBoxDropdownResizeListener: (() => void) | null = null;
@@ -2300,19 +2301,35 @@ export class FormulaBarView {
     this.#nameBoxDropdownOriginalAddressValue = this.#addressEl.value;
 
     const rawItems = this.#nameBoxDropdownProvider.getItems();
-    this.#nameBoxDropdownAllItems = Array.isArray(rawItems) ? rawItems.slice() : [];
+    const baseItems = Array.isArray(rawItems) ? rawItems.slice() : [];
+    const baseByKey = new Map(baseItems.map((item) => [item.key, item]));
+
+    const recentItems: NameBoxDropdownItem[] = [];
+    const recentKeySet = new Set<string>();
+    for (const key of this.#nameBoxDropdownRecentKeys) {
+      const item = baseByKey.get(key);
+      if (!item) continue;
+      recentKeySet.add(key);
+      recentItems.push({ ...item, kind: "recent" });
+    }
+    const nonRecentItems = baseItems.filter((item) => !recentKeySet.has(item.key));
+    this.#nameBoxDropdownAllItems = [...recentItems, ...nonRecentItems];
 
     // Default sort: keep groups stable, sort labels within each group.
     const kindOrder: Record<NameBoxDropdownItemKind, number> = {
-      namedRange: 0,
-      table: 1,
-      sheet: 2,
-      recent: 3,
+      recent: 0,
+      namedRange: 1,
+      table: 2,
+      sheet: 3,
     };
+    const recentRank = new Map(this.#nameBoxDropdownRecentKeys.map((key, index) => [key, index]));
     this.#nameBoxDropdownAllItems.sort((a, b) => {
       const ak = kindOrder[a.kind] ?? 99;
       const bk = kindOrder[b.kind] ?? 99;
       if (ak !== bk) return ak - bk;
+      if (a.kind === "recent" && b.kind === "recent") {
+        return (recentRank.get(a.key) ?? 99) - (recentRank.get(b.key) ?? 99);
+      }
       return a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
     });
 
@@ -2537,10 +2554,10 @@ export class FormulaBarView {
     };
 
     // Match the sort order used for `#nameBoxDropdownAllItems`.
+    renderGroup("recent", "Recent");
     renderGroup("namedRange", "Named ranges");
     renderGroup("table", "Tables");
     renderGroup("sheet", "Sheets");
-    renderGroup("recent", "Recent");
 
     if (this.#nameBoxDropdownOptionEls.length === 0) {
       const empty = document.createElement("div");
@@ -2587,6 +2604,14 @@ export class FormulaBarView {
     this.#setNameBoxDropdownActiveIndex(next);
   }
 
+  #recordNameBoxDropdownRecent(item: NameBoxDropdownItem): void {
+    const key = String(item.key ?? "").trim();
+    if (!key) return;
+
+    const deduped = [key, ...this.#nameBoxDropdownRecentKeys.filter((k) => k !== key)];
+    this.#nameBoxDropdownRecentKeys = deduped.slice(0, 8);
+  }
+
   #selectNameBoxDropdownItem(item: NameBoxDropdownItem): void {
     // Match Excel UX: selecting an item replaces the name box input text.
     this.#addressEl.value = item.label;
@@ -2630,6 +2655,7 @@ export class FormulaBarView {
       return;
     }
 
+    this.#recordNameBoxDropdownRecent(item);
     this.#clearNameBoxError();
     // Blur after navigating so follow-up renders can update the value.
     this.#addressEl.blur();

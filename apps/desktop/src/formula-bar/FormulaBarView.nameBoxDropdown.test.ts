@@ -165,4 +165,46 @@ describe("FormulaBarView name box dropdown", () => {
 
     host.remove();
   });
+
+  it("promotes the most recently selected item into a Recent section", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onGoTo = vi.fn(() => true);
+    const provider: NameBoxDropdownProvider = {
+      getItems: () => [
+        { kind: "namedRange", key: "namedRange:SalesData", label: "SalesData", reference: "SalesData" },
+        { kind: "namedRange", key: "namedRange:Costs", label: "Costs", reference: "Costs" },
+      ],
+    };
+
+    new FormulaBarView(host, { onCommit: () => {}, onGoTo }, { nameBoxDropdownProvider: provider });
+
+    const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]')!;
+    const dropdown = host.querySelector<HTMLButtonElement>('[data-testid="name-box-dropdown"]')!;
+    const popup = host.querySelector<HTMLDivElement>('[data-testid="formula-name-box-popup"]')!;
+    const list = host.querySelector<HTMLDivElement>('[data-testid="formula-name-box-list"]')!;
+
+    dropdown.click();
+    const initialActive = list.querySelector<HTMLElement>('[role="option"][aria-selected="true"]');
+    const initialLabel = (initialActive?.textContent ?? "").trim();
+    address.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(onGoTo).toHaveBeenCalledTimes(1);
+    const selectedRef = onGoTo.mock.calls[0]?.[0];
+    expect(typeof selectedRef).toBe("string");
+    expect(initialLabel).toContain(String(selectedRef));
+    expect(popup.hidden).toBe(true);
+
+    // Reopen: the most recently selected item should be surfaced under "Recent" at the top.
+    dropdown.click();
+    expect(popup.hidden).toBe(false);
+
+    const headings = Array.from(list.querySelectorAll<HTMLElement>(".formula-bar-name-box-group-label")).map((el) => el.textContent);
+    expect(headings[0]).toBe("Recent");
+
+    const active = list.querySelector<HTMLElement>('[role="option"][aria-selected="true"]');
+    expect(active?.textContent).toContain(String(selectedRef));
+
+    host.remove();
+  });
 });
