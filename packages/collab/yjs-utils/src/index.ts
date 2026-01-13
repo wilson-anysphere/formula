@@ -64,6 +64,10 @@ export function isYAbstractType(value: unknown): boolean {
 
 export function replaceForeignRootType<T>(params: { doc: Y.Doc; name: string; existing: any; create: () => T }): T {
   const { doc, name, existing, create } = params;
+  // If the whole doc was created by a different Yjs module instance (ESM vs CJS),
+  // we cannot safely insert local types into it. Callers should generally avoid
+  // invoking this helper in that situation.
+  if (!(doc instanceof Y.Doc)) return existing as T;
   const t: any = create();
 
   // Mirror Yjs' own Doc.get conversion logic for AbstractType placeholders, but
@@ -126,7 +130,10 @@ export function getMapRoot<T = unknown>(doc: Y.Doc, name: string): Y.Map<T> {
   }
 
   if (isYAbstractType(existing)) {
-    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() }) as any;
+    if (doc instanceof Y.Doc) {
+      return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() }) as any;
+    }
+    return doc.getMap<T>(name);
   }
 
   throw new Error(`Unsupported Yjs root type for "${name}": ${existing?.constructor?.name ?? typeof existing}`);
@@ -156,7 +163,10 @@ export function getArrayRoot<T = unknown>(doc: Y.Doc, name: string): Y.Array<T> 
   }
 
   if (isYAbstractType(existing)) {
-    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Array() }) as any;
+    if (doc instanceof Y.Doc) {
+      return replaceForeignRootType({ doc, name, existing, create: () => new Y.Array() }) as any;
+    }
+    return doc.getArray<T>(name);
   }
 
   throw new Error(`Unsupported Yjs root type for "${name}": ${existing?.constructor?.name ?? typeof existing}`);
