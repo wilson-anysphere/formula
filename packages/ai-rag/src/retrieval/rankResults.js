@@ -169,16 +169,23 @@ export function dedupeOverlappingResults(results, opts = {}) {
 
   /** @type {typeof decorated} */
   const kept = [];
+  /** @type {Set<string>} */
+  const seenIds = new Set();
 
   for (const cand of decorated) {
+    if (cand.id && seenIds.has(cand.id)) continue;
+    if (cand.id) seenIds.add(cand.id);
+
     const meta = cand.value?.metadata ?? {};
     const sheetName = meta.sheetName;
+    const workbookId = meta.workbookId;
     const rect = meta.rect;
 
     let isDup = false;
     if (typeof sheetName === "string" && sheetName && isValidRect(rect)) {
       for (const prev of kept) {
         const prevMeta = prev.value?.metadata ?? {};
+        if (prevMeta.workbookId !== workbookId) continue;
         if (prevMeta.sheetName !== sheetName) continue;
         const prevRect = prevMeta.rect;
         if (!isValidRect(prevRect)) continue;
@@ -197,4 +204,3 @@ export function dedupeOverlappingResults(results, opts = {}) {
 
   return kept.map((k) => k.value);
 }
-
