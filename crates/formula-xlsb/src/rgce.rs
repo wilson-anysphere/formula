@@ -2390,36 +2390,77 @@ mod encode_ast {
         rgce: &mut Vec<u8>,
         class: PtgClass,
     ) -> Result<(), EncodeError> {
-        if r.workbook.is_some() || r.sheet.is_some() {
+        if r.workbook.is_some() {
+            // BIFF12 structured references (`PtgList`) encode only a table id + column selectors.
+            // Cross-workbook structured references would require a different encoding that ties the
+            // table to an external workbook/sheet. Until the workbook context can resolve those,
+            // keep rejecting them.
             return Err(EncodeError::Unsupported(
-                "sheet-qualified structured references",
+                "workbook-qualified structured references",
             ));
         }
 
+        let sheet_qualifier = match r.sheet.as_ref() {
+            None => None,
+            Some(sheet_ref) => match sheet_ref.as_single_sheet() {
+                Some(name) => Some(name),
+                None => {
+                    return Err(EncodeError::Unsupported(
+                        "3D sheet-range structured references",
+                    ))
+                }
+            },
+        };
+
         let table_id = match r.table.as_deref() {
-            Some(table_name) => ctx
-                .table_id_by_name(table_name)
-                .ok_or_else(|| EncodeError::Parse(format!("unknown table: {table_name}")))?,
+            Some(table_name) => {
+                let table_id = ctx
+                    .table_id_by_name(table_name)
+                    .ok_or_else(|| EncodeError::Parse(format!("unknown table: {table_name}")))?;
+
+                if let Some(sheet_name) = sheet_qualifier {
+                    if let Some(false) = ctx.table_is_on_sheet(table_id, sheet_name) {
+                        return Err(EncodeError::Parse(format!(
+                            "structured reference table '{table_name}' is not on sheet '{sheet_name}'",
+                        )));
+                    }
+                }
+
+                table_id
+            }
             None => {
-                // Always prefer the "single table in workbook" heuristic when possible. This is
-                // the only inference path when we lack sheet+range information, and is consistent
-                // with Excel's `[@Col]` / `[@]` shorthand in workbooks where the target table is
-                // unambiguous.
-                if let Some(table_id) = ctx.single_table_id() {
-                    table_id
-                } else if let Some(sheet) = sheet {
-                    ctx.table_id_for_cell(sheet, base.row, base.col).ok_or_else(|| {
-                        EncodeError::Parse(format!(
-                            "cannot infer table for structured reference without an explicit table name at '{sheet}'!R{}C{} (cell must be inside exactly one table)",
-                            base.row.saturating_add(1),
-                            base.col.saturating_add(1)
-                        ))
-                    })?
+                if let Some(sheet_name) = sheet_qualifier {
+                    // `Sheet1![@Col]`-style references: use the explicit sheet qualifier along with
+                    // the origin cell to infer the containing table.
+                    ctx.table_id_for_cell(sheet_name, base.row, base.col)
+                        .ok_or_else(|| {
+                            EncodeError::Parse(format!(
+                                "cannot infer table for structured reference without an explicit table name at '{sheet_name}'!R{}C{} (cell must be inside exactly one table)",
+                                base.row.saturating_add(1),
+                                base.col.saturating_add(1)
+                            ))
+                        })?
                 } else {
-                    return Err(EncodeError::Parse(
-                        "structured references without an explicit table name are ambiguous; specify TableName[...]"
-                            .to_string(),
-                    ));
+                    // Always prefer the "single table in workbook" heuristic when possible. This
+                    // is the only inference path when we lack sheet+range information, and is
+                    // consistent with Excel's `[@Col]` / `[@]` shorthand in workbooks where the
+                    // target table is unambiguous.
+                    if let Some(table_id) = ctx.single_table_id() {
+                        table_id
+                    } else if let Some(sheet) = sheet {
+                        ctx.table_id_for_cell(sheet, base.row, base.col).ok_or_else(|| {
+                            EncodeError::Parse(format!(
+                                "cannot infer table for structured reference without an explicit table name at '{sheet}'!R{}C{} (cell must be inside exactly one table)",
+                                base.row.saturating_add(1),
+                                base.col.saturating_add(1)
+                            ))
+                        })?
+                    } else {
+                        return Err(EncodeError::Parse(
+                            "structured references without an explicit table name are ambiguous; specify TableName[...]"
+                                .to_string(),
+                        ));
+                    }
                 }
             }
         };

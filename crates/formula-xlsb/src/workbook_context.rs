@@ -627,6 +627,18 @@ impl WorkbookContext {
             None
         }
     }
+
+    /// Returns `Some(true)` when the workbook context knows the sheet containing `table_id` and it
+    /// matches `sheet` (case-insensitive, Excel-like normalization).
+    ///
+    /// Returns `None` when the table is unknown or the workbook context does not have a sheet
+    /// association for the table (i.e. the table range was not registered via
+    /// [`Self::add_table_range`]).
+    pub fn table_is_on_sheet(&self, table_id: u32, sheet: &str) -> Option<bool> {
+        let info = self.tables.get(&table_id)?;
+        let range = info.range.as_ref()?;
+        Some(range.sheet_key == normalize_key(sheet))
+    }
 }
 
 fn normalize_key(s: &str) -> String {
