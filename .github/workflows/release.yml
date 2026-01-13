@@ -726,7 +726,9 @@ jobs:
             echo "missing a stapled notarization ticket."
             echo
             echo "Troubleshooting:"
-            echo "  - Confirm APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID (and signing cert/identity) are configured."
+            echo "  - Confirm Apple signing + notarization secrets are configured:"
+            echo "    - APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY"
+            echo "    - APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID"
             echo "  - Check the tauri-action logs for notarization/stapling output."
             exit 1
           fi
