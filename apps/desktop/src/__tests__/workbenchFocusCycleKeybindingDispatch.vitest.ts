@@ -200,6 +200,46 @@ describe("F6 focus cycling keybinding dispatch", () => {
     expect(document.activeElement).toBe(elements.grid);
   });
 
+  it("matches the documented region order (ribbon → formula bar → grid → sheet tabs → status bar → ribbon)", async () => {
+    const { service, elements } = createHarness();
+
+    elements.ribbonTab.focus();
+    expect(document.activeElement).toBe(elements.ribbonTab);
+
+    // Forward through every region.
+    let res = await dispatchF6(service, document.activeElement);
+    expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(elements.formulaAddress);
+
+    res = await dispatchF6(service, document.activeElement);
+    expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(elements.grid);
+
+    res = await dispatchF6(service, document.activeElement);
+    expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(elements.sheetTab);
+
+    res = await dispatchF6(service, document.activeElement);
+    expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(elements.zoomControl);
+
+    // Wrap to ribbon.
+    res = await dispatchF6(service, document.activeElement);
+    expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(elements.ribbonTab);
+
+    // Reverse from ribbon wraps to status bar.
+    res = await dispatchF6(service, document.activeElement, { shiftKey: true });
+    expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(elements.zoomControl);
+  });
+
   it("wraps from unknown focus targets (outside known regions)", async () => {
     const { service, elements } = createHarness();
 
