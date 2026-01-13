@@ -138,6 +138,7 @@ function archMatchesAssetName(arch, assetName) {
   if (a === "x86_64" || a === "amd64") {
     return (
       name.includes("x86_64") ||
+      name.includes("x86-64") ||
       name.includes("amd64") ||
       // common Windows output naming
       name.includes("x64") ||
