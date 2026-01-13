@@ -232,6 +232,18 @@ test("buildContext: schema metadata updates (tables) do not force re-indexing", 
   assert.ok(out2.schema.tables.some((t) => t.name === "MyTable" && t.range === "Sheet1!A1:B3"));
 });
 
+test("buildContext: cyclic cell values do not crash signature hashing", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 1000 });
+
+  const obj = {};
+  obj.self = obj;
+  const sheet = makeSheet([["Value"], [obj]]);
+
+  const out = await cm.buildContext({ sheet, query: "value" });
+  assert.equal(out.schema.name, "Sheet1");
+  assert.equal(cm.ragIndex.store.size, 1);
+});
+
 test("buildContext: LRU cache eviction removes old sheet chunks from the in-memory store", async () => {
   const cm = new ContextManager({ tokenBudgetTokens: 1000, sheetIndexCacheLimit: 2 });
 

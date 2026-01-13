@@ -75,6 +75,7 @@ function sheetIndexCacheKey(sheet) {
 function stableHashValue(value, options = {}) {
   const signal = options.signal;
   throwIfAborted(signal);
+  const stack = new WeakSet();
 
   /**
    * @param {bigint} hash
@@ -106,50 +107,56 @@ function stableHashValue(value, options = {}) {
     if (typeof v === "function") return fnv1a64Update(hash, `fn:${v.name || "anonymous"}`);
     if (v instanceof Date) return fnv1a64Update(hash, `date:${v.toISOString()}`);
 
-    if (v instanceof Map) {
-      hash = fnv1a64Update(hash, "map{");
-      for (const [k, val] of v.entries()) {
-        hash = fnv1a64Update(hash, "k=");
-        hash = walk(hash, k);
-        hash = fnv1a64Update(hash, "v=");
-        hash = walk(hash, val);
-        hash = fnv1a64Update(hash, ";");
-      }
-      return fnv1a64Update(hash, "}");
-    }
+    if (v && typeof v === "object") {
+      if (stack.has(v)) return fnv1a64Update(hash, "[Circular]");
+      stack.add(v);
+      try {
+        if (v instanceof Map) {
+          hash = fnv1a64Update(hash, "map{");
+          for (const [k, val] of v.entries()) {
+            hash = fnv1a64Update(hash, "k=");
+            hash = walk(hash, k);
+            hash = fnv1a64Update(hash, "v=");
+            hash = walk(hash, val);
+            hash = fnv1a64Update(hash, ";");
+          }
+          return fnv1a64Update(hash, "}");
+        }
 
-    if (v instanceof Set) {
-      hash = fnv1a64Update(hash, "set[");
-      for (const val of v.values()) {
-        hash = walk(hash, val);
-        hash = fnv1a64Update(hash, ";");
-      }
-      return fnv1a64Update(hash, "]");
-    }
+        if (v instanceof Set) {
+          hash = fnv1a64Update(hash, "set[");
+          for (const val of v.values()) {
+            hash = walk(hash, val);
+            hash = fnv1a64Update(hash, ";");
+          }
+          return fnv1a64Update(hash, "]");
+        }
 
-    if (Array.isArray(v)) {
-      hash = fnv1a64Update(hash, "[");
-      hash = fnv1a64Update(hash, String(v.length));
-      hash = fnv1a64Update(hash, ":");
-      for (const item of v) {
-        hash = walk(hash, item);
-        hash = fnv1a64Update(hash, ",");
-      }
-      return fnv1a64Update(hash, "]");
-    }
+        if (Array.isArray(v)) {
+          hash = fnv1a64Update(hash, "[");
+          hash = fnv1a64Update(hash, String(v.length));
+          hash = fnv1a64Update(hash, ":");
+          for (const item of v) {
+            hash = walk(hash, item);
+            hash = fnv1a64Update(hash, ",");
+          }
+          return fnv1a64Update(hash, "]");
+        }
 
-    if (typeof v === "object") {
-      const obj = /** @type {Record<string, unknown>} */ (v);
-      const keys = Object.keys(obj).sort();
-      hash = fnv1a64Update(hash, "{");
-      for (const key of keys) {
-        hash = fnv1a64Update(hash, "k:");
-        hash = fnv1a64Update(hash, key);
-        hash = fnv1a64Update(hash, "v:");
-        hash = walk(hash, obj[key]);
-        hash = fnv1a64Update(hash, ";");
+        const obj = /** @type {Record<string, unknown>} */ (v);
+        const keys = Object.keys(obj).sort();
+        hash = fnv1a64Update(hash, "{");
+        for (const key of keys) {
+          hash = fnv1a64Update(hash, "k:");
+          hash = fnv1a64Update(hash, key);
+          hash = fnv1a64Update(hash, "v:");
+          hash = walk(hash, obj[key]);
+          hash = fnv1a64Update(hash, ";");
+        }
+        return fnv1a64Update(hash, "}");
+      } finally {
+        stack.delete(v);
       }
-      return fnv1a64Update(hash, "}");
     }
 
     return fnv1a64Update(hash, `other:${String(v)}`);
@@ -1024,7 +1031,7 @@ export class ContextManager {
         key: "samples",
         priority: 1,
         text: sampledOut.length
-          ? this.redactor(`Sample rows:\n${sampledOut.map((r) => JSON.stringify(r)).join("\n")}`)
+          ? this.redactor(`Sample rows:\n${sampledOut.map((r) => stableJsonStringify(r)).join("\n")}`)
           : "",
       },
       {
