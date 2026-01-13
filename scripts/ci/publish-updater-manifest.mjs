@@ -344,11 +344,19 @@ async function main() {
     }
   }
 
+  // Deterministic output: sort platform keys so the merged `latest.json` is stable even when
+  // the input manifests contain multiple targets or are discovered in different orders.
+  const sortedPlatforms = Object.fromEntries(
+    Object.keys(mergedPlatforms)
+      .sort((a, b) => a.localeCompare(b))
+      .map((key) => [key, mergedPlatforms[key]]),
+  );
+
   const combined = {
     version: expectedVersion,
     notes: `Automated build for ${tag}.`,
     pub_date: new Date().toISOString(),
-    platforms: mergedPlatforms,
+    platforms: sortedPlatforms,
   };
 
   const latestJsonText = `${JSON.stringify(combined, null, 2)}\n`;
