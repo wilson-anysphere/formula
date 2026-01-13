@@ -304,6 +304,7 @@ Set:
   to `/internal/sync/introspect`)
 - `SYNC_SERVER_INTROSPECTION_TOKEN` (sent as `x-internal-admin-token`)
 - Optional: `SYNC_SERVER_INTROSPECTION_CACHE_TTL_MS` (default: `15000`; set to `0` to disable caching)
+- Optional: `SYNC_SERVER_INTROSPECTION_MAX_CONCURRENT` (default: `50`; set to `0` to disable the limit)
 
 The request/response format is the same as the token introspection auth mode described below.
 
@@ -311,6 +312,25 @@ The sync-server forwards `clientIp` and `userAgent` to the introspection endpoin
 
 Note: This runs **in addition to** local JWT verification. A JWT that passes signature/claims checks
 can still be rejected if the introspection endpoint reports the session as inactive.
+
+Caching notes:
+
+- Introspection results are cached in-memory for `SYNC_SERVER_INTROSPECTION_CACHE_TTL_MS` (keyed by
+  `(token, docId, clientIp)`), so session revocations may take up to the TTL to take effect.
+
+Concurrency limiting / over-capacity behavior:
+
+- If `SYNC_SERVER_INTROSPECTION_MAX_CONCURRENT` is non-zero and the server already has that many
+  in-flight HTTP requests to the introspection endpoint, the websocket upgrade is rejected
+  immediately with HTTP `503` ("Introspection over capacity"). This is intended to fail-fast and
+  protect the API introspection endpoint during spikes.
+
+Metrics (for monitoring/alerting):
+
+- `sync_server_introspection_over_capacity_total` – count of websocket upgrades rejected due to the
+  max-concurrent limit.
+- `sync_server_introspection_requests_total{result=ok|inactive|error}` – count of introspection
+  calls by result (watch `result="error"`).
 
 ### Token introspection (auth mode)
 
@@ -479,6 +499,8 @@ Notable metrics (prefix `sync_server_`):
 - `sync_server_ws_messages_rate_limited_total`
 - `sync_server_ws_messages_too_large_total`
 - `sync_server_ws_closes_total{code=...}`
+- `sync_server_introspection_over_capacity_total`
+- `sync_server_introspection_requests_total{result=ok|inactive|error}`
 - `sync_server_retention_docs_purged_total{sweep=...}`
 - `sync_server_retention_sweep_errors_total{sweep=...}`
 - `sync_server_persistence_info{backend=...,encryption=...}`
