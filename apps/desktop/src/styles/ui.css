@@ -21,6 +21,7 @@
 }
 
 .formula-bar {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -73,6 +74,19 @@
   align-items: start;
   gap: 8px;
   min-width: 0;
+}
+
+.formula-function-picker {
+  position: absolute;
+  z-index: 200;
+  /* JS computes top/left based on the fx button. Provide a stable fallback. */
+  top: 36px;
+  left: 0;
+}
+
+.formula-function-picker .command-palette {
+  width: 420px;
+  max-width: calc(100vw - 24px);
 }
 
 .formula-bar-name-box {

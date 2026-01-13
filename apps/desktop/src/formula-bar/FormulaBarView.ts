@@ -2,6 +2,64 @@ import { FormulaBarModel, type FormulaBarAiSuggestion } from "./FormulaBarModel.
 import { type RangeAddress } from "../spreadsheet/a1.js";
 import { parseSheetQualifiedA1Range } from "./parseSheetQualifiedA1Range.js";
 import { toggleA1AbsoluteAtCursor, type FormulaReferenceRange } from "@formula/spreadsheet-frontend";
+import { searchFunctionResults } from "../command-palette/commandPaletteSearch.js";
+import FUNCTION_CATALOG from "../../../../shared/functionCatalog.mjs";
+import { getFunctionSignature, type FunctionSignature } from "./highlight/functionSignatures.js";
+
+type FunctionPickerItem = {
+  name: string;
+  signature?: string;
+  summary?: string;
+};
+
+type CatalogFunction = { name?: string | null };
+
+const ALL_FUNCTION_NAMES_SORTED: string[] = ((FUNCTION_CATALOG as { functions?: CatalogFunction[] } | null)?.functions ?? [])
+  .map((fn) => String(fn?.name ?? "").trim())
+  .filter((name) => name.length > 0)
+  .sort((a, b) => a.localeCompare(b));
+
+const COMMON_FUNCTION_NAMES = [
+  "SUM",
+  "AVERAGE",
+  "COUNT",
+  "MIN",
+  "MAX",
+  "IF",
+  "IFERROR",
+  "XLOOKUP",
+  "VLOOKUP",
+  "INDEX",
+  "MATCH",
+  "TODAY",
+  "NOW",
+  "ROUND",
+  "CONCAT",
+  "SEQUENCE",
+  "FILTER",
+  "TEXTSPLIT",
+];
+
+const DEFAULT_FUNCTION_NAMES: string[] = (() => {
+  const byName = new Map(ALL_FUNCTION_NAMES_SORTED.map((name) => [name.toUpperCase(), name]));
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const name of COMMON_FUNCTION_NAMES) {
+    const resolved = byName.get(name.toUpperCase());
+    if (!resolved) continue;
+    out.push(resolved);
+    seen.add(resolved.toUpperCase());
+  }
+  for (const name of ALL_FUNCTION_NAMES_SORTED) {
+    if (out.length >= 50) break;
+    const key = name.toUpperCase();
+    if (seen.has(key)) continue;
+    out.push(name);
+    seen.add(key);
+  }
+  return out;
+})();
 
 export interface FormulaBarViewCallbacks {
   onBeginEdit?: (activeCellAddress: string) => void;
@@ -33,6 +91,16 @@ export class FormulaBarView {
   #hoverOverride: RangeAddress | null = null;
   #selectedReferenceIndex: number | null = null;
   #callbacks: FormulaBarViewCallbacks;
+
+  #functionPickerEl: HTMLDivElement;
+  #functionPickerInputEl: HTMLInputElement;
+  #functionPickerListEl: HTMLUListElement;
+  #functionPickerOpen = false;
+  #functionPickerItems: FunctionPickerItem[] = [];
+  #functionPickerItemEls: HTMLLIElement[] = [];
+  #functionPickerSelectedIndex = 0;
+  #functionPickerAnchorSelection: { start: number; end: number } | null = null;
+  #functionPickerDocMouseDown = (e: MouseEvent) => this.#onFunctionPickerDocMouseDown(e);
 
   constructor(root: HTMLElement, callbacks: FormulaBarViewCallbacks) {
     this.root = root;
@@ -87,6 +155,7 @@ export class FormulaBarView {
     fxButton.textContent = "fx";
     fxButton.title = "Insert function";
     fxButton.setAttribute("aria-label", "Insert function");
+    fxButton.dataset.testid = "formula-fx-button";
 
     actions.appendChild(cancelButton);
     actions.appendChild(commitButton);
@@ -134,9 +203,38 @@ export class FormulaBarView {
     hint.className = "formula-bar-hint";
     hint.dataset.testid = "formula-hint";
 
+    const functionPicker = document.createElement("div");
+    functionPicker.className = "formula-function-picker";
+    functionPicker.dataset.testid = "formula-function-picker";
+    functionPicker.hidden = true;
+    functionPicker.setAttribute("role", "dialog");
+    functionPicker.setAttribute("aria-label", "Insert function");
+
+    const functionPickerPanel = document.createElement("div");
+    functionPickerPanel.className = "command-palette";
+    functionPickerPanel.dataset.testid = "formula-function-picker-panel";
+
+    const functionPickerInput = document.createElement("input");
+    functionPickerInput.className = "command-palette__input";
+    functionPickerInput.dataset.testid = "formula-function-picker-input";
+    functionPickerInput.placeholder = "Search functions";
+    functionPickerInput.setAttribute("aria-label", "Search functions");
+
+    const functionPickerList = document.createElement("ul");
+    functionPickerList.className = "command-palette__list";
+    functionPickerList.dataset.testid = "formula-function-picker-list";
+    functionPickerList.setAttribute("role", "listbox");
+    // Ensure there is at least one tabbable element besides the input so Tab doesn't escape.
+    functionPickerList.tabIndex = 0;
+
+    functionPickerPanel.appendChild(functionPickerInput);
+    functionPickerPanel.appendChild(functionPickerList);
+    functionPicker.appendChild(functionPickerPanel);
+
     root.appendChild(row);
     root.appendChild(hint);
     root.appendChild(errorPanel);
+    root.appendChild(functionPicker);
 
     this.textarea = textarea;
     this.#nameBoxDropdownEl = nameBoxDropdown;
@@ -148,6 +246,9 @@ export class FormulaBarView {
     this.#hintEl = hint;
     this.#errorButton = errorButton;
     this.#errorPanel = errorPanel;
+    this.#functionPickerEl = functionPicker;
+    this.#functionPickerInputEl = functionPickerInput;
+    this.#functionPickerListEl = functionPickerList;
 
     address.addEventListener("focus", () => {
       address.select();
@@ -201,6 +302,15 @@ export class FormulaBarView {
     cancelButton.addEventListener("click", () => this.#cancel());
     commitButton.addEventListener("click", () => this.#commit());
     fxButton.addEventListener("click", () => this.#focusFx());
+    fxButton.addEventListener("mousedown", (e) => {
+      // Preserve the caret/selection in the textarea when clicking the fx button.
+      e.preventDefault();
+    });
+
+    functionPickerInput.addEventListener("input", () => this.#onFunctionPickerInput());
+    const pickerKeyDown = (e: KeyboardEvent) => this.#onFunctionPickerKeyDown(e);
+    functionPickerInput.addEventListener("keydown", pickerKeyDown);
+    functionPickerList.addEventListener("keydown", pickerKeyDown);
 
     // Initial render.
     this.model.setActiveCell({ address: "A1", input: "", value: "" });
@@ -392,6 +502,7 @@ export class FormulaBarView {
 
   #cancel(): void {
     if (!this.model.isEditing) return;
+    this.#closeFunctionPicker({ restoreFocus: false });
     this.textarea.blur();
     this.model.cancel();
     this.#hoverOverride = null;
@@ -403,6 +514,7 @@ export class FormulaBarView {
 
   #commit(): void {
     if (!this.model.isEditing) return;
+    this.#closeFunctionPicker({ restoreFocus: false });
     this.textarea.blur();
     const committed = this.model.commit();
     this.#hoverOverride = null;
@@ -413,18 +525,272 @@ export class FormulaBarView {
   }
 
   #focusFx(): void {
+    // If the formula bar isn't mounted, avoid stealing focus (and avoid creating global pickers).
+    if (!this.root.isConnected) return;
+
     // Excel-style: clicking fx focuses the formula input and commonly starts a formula.
-    this.focus({ cursor: "end" });
+    if (this.model.isEditing) this.focus();
+    else this.focus({ cursor: "end" });
 
     if (!this.model.isEditing) return;
-    if (this.textarea.value.trim() !== "") return;
 
-    this.textarea.value = "=";
-    this.textarea.setSelectionRange(1, 1);
-    this.model.updateDraft(this.textarea.value, 1, 1);
+    if (this.textarea.value.trim() === "") {
+      this.textarea.value = "=";
+      this.textarea.setSelectionRange(1, 1);
+      this.model.updateDraft(this.textarea.value, 1, 1);
+      this.#selectedReferenceIndex = null;
+      this.#render({ preserveTextareaValue: true });
+      this.#emitOverlays();
+    }
+
+    this.#openFunctionPicker();
+  }
+
+  #openFunctionPicker(): void {
+    if (this.#functionPickerOpen) {
+      this.#functionPickerInputEl.focus();
+      this.#functionPickerInputEl.select();
+      return;
+    }
+    if (!this.root.isConnected) return;
+    if (!this.model.isEditing) return;
+
+    const start = this.textarea.selectionStart ?? this.textarea.value.length;
+    const end = this.textarea.selectionEnd ?? this.textarea.value.length;
+    this.#functionPickerAnchorSelection = { start, end };
+
+    this.#functionPickerOpen = true;
+    this.#functionPickerEl.hidden = false;
+    this.#functionPickerInputEl.value = "";
+    this.#functionPickerSelectedIndex = 0;
+
+    this.#positionFunctionPicker();
+    this.#renderFunctionPickerResults();
+
+    document.addEventListener("mousedown", this.#functionPickerDocMouseDown, true);
+
+    this.#functionPickerInputEl.focus();
+    this.#functionPickerInputEl.select();
+  }
+
+  #closeFunctionPicker(opts: { restoreFocus: boolean } = { restoreFocus: true }): void {
+    if (!this.#functionPickerOpen) return;
+    this.#functionPickerOpen = false;
+    this.#functionPickerEl.hidden = true;
+    this.#functionPickerItems = [];
+    this.#functionPickerItemEls = [];
+    this.#functionPickerSelectedIndex = 0;
+    const anchor = this.#functionPickerAnchorSelection;
+    this.#functionPickerAnchorSelection = null;
+
+    document.removeEventListener("mousedown", this.#functionPickerDocMouseDown, true);
+
+    if (!opts.restoreFocus) return;
+    if (!this.root.isConnected) return;
+
+    try {
+      this.textarea.focus({ preventScroll: true });
+    } catch {
+      this.textarea.focus();
+    }
+
+    if (anchor) {
+      this.textarea.setSelectionRange(anchor.start, anchor.end);
+      this.model.updateDraft(this.textarea.value, anchor.start, anchor.end);
+      this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(anchor.start, anchor.end);
+      this.#render({ preserveTextareaValue: true });
+      this.#emitOverlays();
+    }
+  }
+
+  #onFunctionPickerDocMouseDown(e: MouseEvent): void {
+    if (!this.#functionPickerOpen) return;
+    const target = e.target as Node | null;
+    if (!target) return;
+    if (this.#functionPickerEl.contains(target)) return;
+    if (this.#fxButtonEl.contains(target)) return;
+    // Clicking outside should close the popover without stealing focus from the clicked surface.
+    this.#closeFunctionPicker({ restoreFocus: false });
+  }
+
+  #positionFunctionPicker(): void {
+    // Anchor below the fx button by default.
+    const rootRect = this.root.getBoundingClientRect();
+    const fxRect = this.#fxButtonEl.getBoundingClientRect();
+    const top = fxRect.bottom - rootRect.top + 6;
+    const left = fxRect.left - rootRect.left;
+    this.#functionPickerEl.style.top = `${Math.max(0, Math.round(top))}px`;
+    this.#functionPickerEl.style.left = `${Math.max(0, Math.round(left))}px`;
+  }
+
+  #onFunctionPickerInput(): void {
+    if (!this.#functionPickerOpen) return;
+    this.#functionPickerSelectedIndex = 0;
+    this.#renderFunctionPickerResults();
+  }
+
+  #onFunctionPickerKeyDown(e: KeyboardEvent): void {
+    if (!this.#functionPickerOpen) return;
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.#closeFunctionPicker({ restoreFocus: true });
+      return;
+    }
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.#updateFunctionPickerSelection(this.#functionPickerSelectedIndex + 1);
+      return;
+    }
+
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.#updateFunctionPickerSelection(this.#functionPickerSelectedIndex - 1);
+      return;
+    }
+
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.#selectFunctionPickerItem(this.#functionPickerSelectedIndex);
+    }
+  }
+
+  #updateFunctionPickerSelection(nextIndex: number): void {
+    if (this.#functionPickerItems.length === 0) {
+      this.#functionPickerSelectedIndex = 0;
+      return;
+    }
+
+    const clamped = Math.max(0, Math.min(nextIndex, this.#functionPickerItems.length - 1));
+    const prev = this.#functionPickerSelectedIndex;
+    this.#functionPickerSelectedIndex = clamped;
+
+    const prevEl = this.#functionPickerItemEls[prev];
+    if (prevEl) prevEl.setAttribute("aria-selected", "false");
+
+    const nextEl = this.#functionPickerItemEls[clamped];
+    if (nextEl) {
+      nextEl.setAttribute("aria-selected", "true");
+      if (typeof nextEl.scrollIntoView === "function") nextEl.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  #selectFunctionPickerItem(index: number): void {
+    const item = this.#functionPickerItems[index];
+    if (!item) return;
+    const anchor = this.#functionPickerAnchorSelection;
+    if (!anchor) return;
+
+    this.#closeFunctionPicker({ restoreFocus: false });
+    this.#insertFunctionAtSelection(item.name, anchor);
+  }
+
+  #insertFunctionAtSelection(name: string, selection: { start: number; end: number }): void {
+    if (!this.root.isConnected) return;
+    if (!this.model.isEditing) return;
+
+    const prevText = this.textarea.value;
+    const start = Math.max(0, Math.min(selection.start, prevText.length));
+    const end = Math.max(0, Math.min(selection.end, prevText.length));
+
+    const insert = `${name}(`;
+    const nextText = prevText.slice(0, start) + insert + prevText.slice(end);
+    const cursor = start + insert.length;
+
+    this.textarea.value = nextText;
+    try {
+      this.textarea.focus({ preventScroll: true });
+    } catch {
+      this.textarea.focus();
+    }
+    this.textarea.setSelectionRange(cursor, cursor);
+    this.model.updateDraft(nextText, cursor, cursor);
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: true });
     this.#emitOverlays();
+  }
+
+  #renderFunctionPickerResults(): void {
+    const query = this.#functionPickerInputEl.value;
+    const limit = 50;
+
+    const items: FunctionPickerItem[] = query.trim()
+      ? searchFunctionResults(query, { limit }).map((res) => ({
+          name: res.name,
+          signature: res.signature,
+          summary: res.summary,
+        }))
+      : DEFAULT_FUNCTION_NAMES.slice(0, limit).map((name) => functionPickerItemFromName(name));
+
+    this.#functionPickerItems = items;
+    this.#functionPickerItemEls = [];
+    this.#functionPickerListEl.innerHTML = "";
+
+    if (items.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "command-palette__empty";
+      empty.textContent = query.trim() ? "No matching functions" : "Type to search functions";
+      empty.setAttribute("role", "presentation");
+      this.#functionPickerListEl.appendChild(empty);
+      return;
+    }
+
+    for (let i = 0; i < items.length; i += 1) {
+      const fn = items[i]!;
+      const li = document.createElement("li");
+      li.className = "command-palette__item";
+      li.setAttribute("role", "option");
+      li.setAttribute("aria-selected", i === this.#functionPickerSelectedIndex ? "true" : "false");
+
+      const icon = document.createElement("div");
+      icon.className = "command-palette__item-icon command-palette__item-icon--function";
+      icon.textContent = "fx";
+
+      const main = document.createElement("div");
+      main.className = "command-palette__item-main";
+
+      const label = document.createElement("div");
+      label.className = "command-palette__item-label";
+      label.textContent = fn.name;
+
+      main.appendChild(label);
+
+      const signatureOrSummary = (() => {
+        const summary = fn.summary?.trim?.() ?? "";
+        const signature = fn.signature?.trim?.() ?? "";
+        if (signature && summary) return `${signature} — ${summary}`;
+        if (signature) return signature;
+        if (summary) return summary;
+        return "";
+      })();
+
+      if (signatureOrSummary) {
+        const desc = document.createElement("div");
+        desc.className = "command-palette__item-description command-palette__item-description--mono";
+        desc.textContent = signatureOrSummary;
+        main.appendChild(desc);
+      }
+
+      li.appendChild(icon);
+      li.appendChild(main);
+
+      li.addEventListener("mousedown", (e) => {
+        // Keep focus in the search input so we can handle selection consistently.
+        e.preventDefault();
+      });
+      li.addEventListener("click", () => this.#selectFunctionPickerItem(i));
+
+      this.#functionPickerListEl.appendChild(li);
+      this.#functionPickerItemEls.push(li);
+    }
+
+    // Ensure selection is valid after query changes.
+    this.#updateFunctionPickerSelection(this.#functionPickerSelectedIndex);
   }
 
   #render(opts: { preserveTextareaValue: boolean }): void {
@@ -654,4 +1020,16 @@ function formatPreview(value: unknown): string {
   if (value == null) return "";
   if (typeof value === "string") return ` ${value}`;
   return ` ${String(value)}`;
+}
+
+function functionPickerItemFromName(name: string): FunctionPickerItem {
+  const sig = getFunctionSignature(name);
+  const signature = sig ? formatSignature(sig) : undefined;
+  const summary = sig?.summary?.trim?.() ? sig.summary.trim() : undefined;
+  return { name, signature, summary };
+}
+
+function formatSignature(sig: FunctionSignature): string {
+  const params = sig.params.map((param) => (param.optional ? `[${param.name}]` : param.name)).join(", ");
+  return `${sig.name}(${params})`;
 }
