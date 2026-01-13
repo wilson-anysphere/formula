@@ -85,6 +85,26 @@ describe("evaluateFormula (AI provenance)", () => {
     expect((rangeArg as any).__totalCells).toBe(500);
   });
 
+  it("samples direct AI range arguments deterministically (same inputs -> same sampled addresses)", () => {
+    const ai = { evaluateAiFunction: () => "ok" };
+
+    const evalOnce = () => {
+      const readAddrs: string[] = [];
+      const getCellValue = (addr: string) => {
+        readAddrs.push(addr);
+        return 1;
+      };
+      const result = evaluateFormula('=AI("summarize", A1:A500)', getCellValue, { ai, cellAddress: "Sheet1!B1" });
+      expect(result).toBe("ok");
+      expect(readAddrs).toHaveLength(200);
+      return readAddrs;
+    };
+
+    const first = evalOnce();
+    const second = evalOnce();
+    expect(second).toEqual(first);
+  });
+
   it("uses the AI evaluator's rangeSampleLimit when provided", () => {
     const calls: any[] = [];
     const ai = {
