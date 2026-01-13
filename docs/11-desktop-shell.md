@@ -383,10 +383,12 @@ download/downgrade instructions.
 
 **Platform notes**
 
-- **Windows (NSIS/MSI):**
+- **Windows (x64 + ARM64, NSIS/MSI):**
+  - Download the installer that matches your machine (**x64** vs **ARM64**).
   - Running an older installer may be blocked if a newer version is installed.
   - If that happens, uninstall Formula from *Apps & Features* and then run the older installer.
-- **macOS (.dmg):**
+- **macOS (universal `.dmg`):**
+  - The macOS build is universal, so the same `.dmg` works on Intel and Apple Silicon.
   - Download the `.dmg`, open it, then drag `Formula.app` into `/Applications`.
   - macOS will prompt to **Replace** the existing app; confirm to downgrade.
 - **Linux (.AppImage / .deb / .rpm):**

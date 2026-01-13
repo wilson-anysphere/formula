@@ -4,6 +4,15 @@ This repository ships the desktop app via GitHub Releases and Tauri's built-in u
 Tagged pushes (`vX.Y.Z`) trigger a GitHub Actions workflow that builds installers/bundles for
 macOS/Windows/Linux and uploads them to a **draft** GitHub Release.
 
+Platform/architecture expectations for a release:
+
+- **macOS:** built as a **universal** binary (Intel + Apple Silicon).
+- **Windows:** assets for **x64** and **ARM64**.
+- **Linux:** `.AppImage` + `.deb` + `.rpm`.
+
+The workflow also uploads updater metadata (`latest.json` + `latest.json.sig`) used by the Tauri
+updater.
+
 ## Preflight validations (CI enforced)
 
 The release workflow runs a couple of lightweight preflight scripts before it spends time building
@@ -235,6 +244,41 @@ If you don't want clients to fetch update metadata from GitHub directly, you can
 assets (including `latest.json` + `latest.json.sig`) to your own host and update
 `plugins.updater.endpoints` accordingly.
 
+### Updater targets (`{{target}}`) and `latest.json`
+
+Tauri’s updater chooses which file to download by matching the running app’s **target string**
+(`{{target}}` in templated endpoints) against the keys under `platforms` in `latest.json`.
+
+When using GitHub Releases, `tauri-action` generates `latest.json` and uploads it to the release
+alongside the installers. The file is structured roughly like:
+
+```jsonc
+{
+  "version": "0.1.0",
+  "notes": "...",
+  "pub_date": "2026-01-01T00:00:00Z",
+  "platforms": {
+    "darwin-aarch64": { "url": "…", "signature": "…" },
+    "darwin-x86_64": { "url": "…", "signature": "…" },
+    "windows-x86_64": { "url": "…", "signature": "…" },
+    "windows-aarch64": { "url": "…", "signature": "…" },
+    "linux-x86_64": { "url": "…", "signature": "…" }
+  }
+}
+```
+
+Expected `{{target}}` values for this repo’s release matrix:
+
+- **macOS (universal):** `darwin-aarch64` and `darwin-x86_64` (both should be present; they may point
+  at the same universal updater payload, typically an `.app.tar.gz`).
+- **Windows:** `windows-x86_64` and `windows-aarch64` (one entry per architecture; points at the
+  Windows installer used by the updater, typically `.msi` or `.exe`).
+- **Linux:** `linux-x86_64` (points at the updater payload, typically the `.AppImage`).
+
+Note: `.deb` and `.rpm` are shipped for manual install/downgrade, but are not typically used by the
+Tauri updater on Linux. If a target entry is missing from `latest.json`, auto-update for that
+platform/arch will not work even if the GitHub Release has other assets attached.
+
 ## Linux: `.deb` runtime dependencies (WebView + tray)
 
 The Linux desktop shell is built on **GTK3 + WebKitGTK** (Tauri/Wry) and uses the **AppIndicator**
@@ -288,9 +332,6 @@ docker run --rm -it \
   '
 ```
 
-Note: showing a tray icon also requires a desktop environment with **StatusNotifier/AppIndicator**
-support (e.g. the GNOME Shell “AppIndicator and KStatusNotifierItem Support” extension).
-
 ## Linux: `.rpm` runtime dependencies (Fedora/RHEL)
 
 For RPM-based distros (Fedora/RHEL/CentOS derivatives), the same GTK3/WebKitGTK/AppIndicator stack
@@ -334,17 +375,34 @@ docker run --rm -it \
   '
 ```
 
+Note: showing a tray icon also requires a desktop environment with **StatusNotifier/AppIndicator**
+support (e.g. the GNOME Shell “AppIndicator and KStatusNotifierItem Support” extension).
+
 ## 5) Verifying a release
 
 After the workflow completes:
 
 1. Open the GitHub Release (draft) and confirm:
-   - macOS: `.dmg` (and/or `.app.tar.gz`)
-   - Windows: installer (NSIS `.exe` and/or `.msi`)
-   - Linux: `.AppImage`, `.deb`, and `.rpm`
-2. Download/install on each platform.
-3. Publish the release to make it visible to users and (if your updater endpoint references
-   GitHub) available for auto-update.
+   - Updater metadata: `latest.json` and `latest.json.sig`
+   - macOS (**universal**): `.dmg` and `.app.tar.gz`
+   - Windows **x64**: installer (NSIS `.exe` and/or `.msi`)
+   - Windows **ARM64**: installer (NSIS `.exe` and/or `.msi`)
+   - Linux: `.AppImage` + `.deb` + `.rpm`
+
+   For each updater payload (`.app.tar.gz`, Windows installer, `.AppImage`), expect a corresponding
+   `.sig` signature file uploaded alongside the artifact.
+
+   If an expected platform/arch is missing entirely, start with the GitHub Actions run for that tag
+   and check the build job for the relevant platform/target (and whether the Tauri bundler step
+   failed before uploading assets).
+2. Download `latest.json` and confirm `platforms` includes entries for:
+   - `darwin-aarch64` and `darwin-x86_64` (macOS universal updater payload)
+   - `windows-x86_64` (Windows x64)
+   - `windows-aarch64` (Windows ARM64)
+   - `linux-x86_64` (Linux)
+3. Download/install on each platform (matching the architecture).
+4. Publish the release to make it visible to users and (if your updater endpoint references
+     GitHub) available for auto-update.
 
 Also verify **cross-origin isolation** is enabled in the packaged app (required for `SharedArrayBuffer` and the Pyodide Worker backend):
 
@@ -355,7 +413,7 @@ Also verify **cross-origin isolation** is enabled in the packaged app (required 
 ## 6) Bundle size reporting + (optional) size gate
 
 The release workflow reports the size of each generated installer/bundle (DMG / MSI / EXE /
-AppImage / DEB / etc) in the GitHub Actions **step summary**.
+AppImage / DEB / RPM / etc) in the GitHub Actions **step summary**.
 
 There is also an optional size gate (off by default):
 
