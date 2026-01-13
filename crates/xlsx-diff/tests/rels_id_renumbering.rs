@@ -18,6 +18,24 @@ fn zip_bytes(parts: &[(&str, &[u8])]) -> Vec<u8> {
     writer.finish().unwrap().into_inner()
 }
 
+fn utf16le_with_bom(text: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(2 + text.len() * 2);
+    out.extend_from_slice(&[0xFF, 0xFE]);
+    for unit in text.encode_utf16() {
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+    out
+}
+
+fn utf16be_with_bom(text: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(2 + text.len() * 2);
+    out.extend_from_slice(&[0xFE, 0xFF]);
+    for unit in text.encode_utf16() {
+        out.extend_from_slice(&unit.to_be_bytes());
+    }
+    out
+}
+
 #[test]
 fn rels_id_renumbering_is_reported_as_single_actionable_diff() {
     let expected_zip = zip_bytes(&[(
@@ -63,6 +81,74 @@ fn rels_id_renumbering_is_reported_as_single_actionable_diff() {
         "expected path to include resolved target, got {}",
         diff.path
     );
+}
+
+#[test]
+fn rels_id_renumbering_works_for_utf16le_rels() {
+    let expected_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+    let actual_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+    let expected_rels = utf16le_with_bom(expected_xml);
+    let actual_rels = utf16le_with_bom(actual_xml);
+
+    let expected_zip = zip_bytes(&[("xl/_rels/workbook.xml.rels", expected_rels.as_slice())]);
+    let actual_zip = zip_bytes(&[("xl/_rels/workbook.xml.rels", actual_rels.as_slice())]);
+
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let report = xlsx_diff::diff_archives(&expected, &actual);
+    assert_eq!(
+        report.differences.len(),
+        1,
+        "expected exactly one synthesized diff, got {:#?}",
+        report.differences
+    );
+
+    let diff = &report.differences[0];
+    assert_eq!(diff.kind, "relationship_id_changed");
+    assert_eq!(diff.expected.as_deref(), Some("rId1"));
+    assert_eq!(diff.actual.as_deref(), Some("rId5"));
+}
+
+#[test]
+fn rels_id_renumbering_works_for_utf16be_rels() {
+    let expected_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+    let actual_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+    let expected_rels = utf16be_with_bom(expected_xml);
+    let actual_rels = utf16be_with_bom(actual_xml);
+
+    let expected_zip = zip_bytes(&[("xl/_rels/workbook.xml.rels", expected_rels.as_slice())]);
+    let actual_zip = zip_bytes(&[("xl/_rels/workbook.xml.rels", actual_rels.as_slice())]);
+
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let report = xlsx_diff::diff_archives(&expected, &actual);
+    assert_eq!(
+        report.differences.len(),
+        1,
+        "expected exactly one synthesized diff, got {:#?}",
+        report.differences
+    );
+
+    let diff = &report.differences[0];
+    assert_eq!(diff.kind, "relationship_id_changed");
+    assert_eq!(diff.expected.as_deref(), Some("rId1"));
+    assert_eq!(diff.actual.as_deref(), Some("rId5"));
 }
 
 #[test]
