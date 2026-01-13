@@ -5507,7 +5507,7 @@ export class SpreadsheetApp {
       return;
     }
     if (this.isEditing()) return;
-    this.applyFillShortcut("down");
+    this.applyFillShortcut("down", "formulas");
   }
 
   fillUp(): void {
@@ -5519,7 +5519,7 @@ export class SpreadsheetApp {
       return;
     }
     if (this.isEditing()) return;
-    this.applyFillShortcut("up");
+    this.applyFillShortcut("up", "formulas");
   }
 
   fillRight(): void {
@@ -5531,7 +5531,7 @@ export class SpreadsheetApp {
       return;
     }
     if (this.isEditing()) return;
-    this.applyFillShortcut("right");
+    this.applyFillShortcut("right", "formulas");
   }
 
   fillLeft(): void {
@@ -5543,7 +5543,19 @@ export class SpreadsheetApp {
       return;
     }
     if (this.isEditing()) return;
-    this.applyFillShortcut("left");
+    this.applyFillShortcut("left", "formulas");
+  }
+
+  fillSeries(direction: "down" | "right" | "up" | "left"): void {
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
+    if (this.isEditing()) return;
+    this.applyFillShortcut(direction, "series");
   }
 
   selectCurrentRegion(): void {
@@ -11171,7 +11183,7 @@ export class SpreadsheetApp {
     return true;
   }
 
-  private applyFillShortcut(direction: "down" | "right" | "up" | "left"): void {
+  private applyFillShortcut(direction: "down" | "right" | "up" | "left", mode: Exclude<FillHandleMode, "copy">): void {
     const clampInt = (value: number, min: number, max: number): number => {
       const n = Math.trunc(value);
       return Math.min(max, Math.max(min, n));
@@ -11190,89 +11202,62 @@ export class SpreadsheetApp {
       const startCol = clampInt(Math.min(range.startCol, range.endCol), 0, maxColInclusive);
       const endCol = clampInt(Math.max(range.startCol, range.endCol), 0, maxColInclusive);
 
-      if (direction === "down") {
-        if (endRow <= startRow) continue; // height === 1
+      const height = Math.max(0, endRow - startRow + 1);
+      const width = Math.max(0, endCol - startCol + 1);
+
+      const seedSpan = mode === "series" ? 2 : 1;
+
+      if (direction === "down" || direction === "up") {
+        const seedRows = Math.min(seedSpan, height);
+        if (height <= seedRows) continue;
+
+        const sourceStartRow = direction === "down" ? startRow : endRow - seedRows + 1;
+        const sourceEndRow = direction === "down" ? sourceStartRow + seedRows : endRow + 1;
+        const targetStartRow = direction === "down" ? sourceStartRow + seedRows : startRow;
+        const targetEndRow = direction === "down" ? endRow + 1 : sourceStartRow;
 
         const sourceRange: FillEngineRange = {
-          startRow,
-          endRow: Math.min(startRow + 1, maxRowExclusive),
+          startRow: clampInt(sourceStartRow, 0, maxRowInclusive),
+          endRow: clampInt(sourceEndRow, 0, maxRowExclusive),
           startCol,
           endCol: Math.min(endCol + 1, maxColExclusive)
         };
         const targetRange: FillEngineRange = {
-          startRow: Math.min(startRow + 1, maxRowExclusive),
-          endRow: Math.min(endRow + 1, maxRowExclusive),
+          startRow: clampInt(targetStartRow, 0, maxRowExclusive),
+          endRow: clampInt(targetEndRow, 0, maxRowExclusive),
           startCol,
           endCol: Math.min(endCol + 1, maxColExclusive)
         };
 
         if (targetRange.endRow <= targetRange.startRow) continue;
-        if (sourceRange.endCol <= sourceRange.startCol) continue;
-        operations.push({ sourceRange, targetRange });
-        continue;
-      }
-
-      if (direction === "up") {
-        if (endRow <= startRow) continue; // height === 1
-
-        const sourceRange: FillEngineRange = {
-          startRow: endRow,
-          endRow: Math.min(endRow + 1, maxRowExclusive),
-          startCol,
-          endCol: Math.min(endCol + 1, maxColExclusive)
-        };
-        const targetRange: FillEngineRange = {
-          startRow,
-          endRow: Math.min(endRow, maxRowExclusive),
-          startCol,
-          endCol: Math.min(endCol + 1, maxColExclusive)
-        };
-
-        if (targetRange.endRow <= targetRange.startRow) continue;
-        if (sourceRange.endCol <= sourceRange.startCol) continue;
-        operations.push({ sourceRange, targetRange });
-        continue;
-      }
-
-      if (direction === "right") {
-        if (endCol <= startCol) continue; // width === 1
-
-        const sourceRange: FillEngineRange = {
-          startRow,
-          endRow: Math.min(endRow + 1, maxRowExclusive),
-          startCol,
-          endCol: Math.min(startCol + 1, maxColExclusive)
-        };
-        const targetRange: FillEngineRange = {
-          startRow,
-          endRow: Math.min(endRow + 1, maxRowExclusive),
-          startCol: Math.min(startCol + 1, maxColExclusive),
-          endCol: Math.min(endCol + 1, maxColExclusive)
-        };
-
-        if (targetRange.endCol <= targetRange.startCol) continue;
         if (sourceRange.endRow <= sourceRange.startRow) continue;
+        if (sourceRange.endCol <= sourceRange.startCol) continue;
         operations.push({ sourceRange, targetRange });
         continue;
       }
+      const seedCols = Math.min(seedSpan, width);
+      if (width <= seedCols) continue;
 
-      // direction === "left"
-      if (endCol <= startCol) continue; // width === 1
+      const sourceStartCol = direction === "right" ? startCol : endCol - seedCols + 1;
+      const sourceEndCol = direction === "right" ? sourceStartCol + seedCols : endCol + 1;
+      const targetStartCol = direction === "right" ? sourceStartCol + seedCols : startCol;
+      const targetEndCol = direction === "right" ? endCol + 1 : sourceStartCol;
 
       const sourceRange: FillEngineRange = {
         startRow,
         endRow: Math.min(endRow + 1, maxRowExclusive),
-        startCol: endCol,
-        endCol: Math.min(endCol + 1, maxColExclusive)
+        startCol: clampInt(sourceStartCol, 0, maxColInclusive),
+        endCol: clampInt(sourceEndCol, 0, maxColExclusive)
       };
       const targetRange: FillEngineRange = {
         startRow,
         endRow: Math.min(endRow + 1, maxRowExclusive),
-        startCol,
-        endCol: Math.min(endCol, maxColExclusive)
+        startCol: clampInt(targetStartCol, 0, maxColExclusive),
+        endCol: clampInt(targetEndCol, 0, maxColExclusive)
       };
 
       if (targetRange.endCol <= targetRange.startCol) continue;
+      if (sourceRange.endCol <= sourceRange.startCol) continue;
       if (sourceRange.endRow <= sourceRange.startRow) continue;
       operations.push({ sourceRange, targetRange });
     }
@@ -11300,6 +11285,19 @@ export class SpreadsheetApp {
     }
 
     const label = (() => {
+      if (mode === "series") {
+        switch (direction) {
+          case "down":
+            return "Series Down";
+          case "right":
+            return "Series Right";
+          case "up":
+            return "Series Up";
+          case "left":
+            return "Series Left";
+        }
+      }
+
       switch (direction) {
         case "down":
           return t("command.edit.fillDown");
@@ -11332,7 +11330,7 @@ export class SpreadsheetApp {
         sheetId: this.sheetId,
         sourceRange: op.sourceRange,
         targetRange: op.targetRange,
-        mode: "formulas",
+        mode,
         getCellComputedValue,
         rewriteFormulasForCopyDelta: (requests) => wasm.rewriteFormulasForCopyDelta(requests),
         label,
@@ -11346,7 +11344,7 @@ export class SpreadsheetApp {
               sheetId: this.sheetId,
               sourceRange: op.sourceRange,
               targetRange: op.targetRange,
-              mode: "formulas",
+              mode,
               getCellComputedValue,
             });
           } finally {
@@ -11372,7 +11370,7 @@ export class SpreadsheetApp {
             sheetId: this.sheetId,
             sourceRange: op.sourceRange,
             targetRange: op.targetRange,
-            mode: "formulas",
+            mode,
             getCellComputedValue,
             rewriteFormulasForCopyDelta: (requests) => wasm.rewriteFormulasForCopyDelta(requests),
           });
@@ -11404,7 +11402,7 @@ export class SpreadsheetApp {
                 sheetId: this.sheetId,
                 sourceRange: op.sourceRange,
                 targetRange: op.targetRange,
-                mode: "formulas",
+                mode,
                 getCellComputedValue,
               });
             }
@@ -11428,7 +11426,7 @@ export class SpreadsheetApp {
           sheetId: this.sheetId,
           sourceRange: op.sourceRange,
           targetRange: op.targetRange,
-          mode: "formulas",
+          mode,
           getCellComputedValue
         });
       }

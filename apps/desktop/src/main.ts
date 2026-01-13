@@ -8606,6 +8606,57 @@ function handleRibbonCommand(commandId: string): void {
         app.fillLeft();
         app.focus();
         return;
+      case "home.editing.fill.series":
+        void (async () => {
+          if (isSpreadsheetEditing()) {
+            app.focus();
+            return;
+          }
+
+          const selectionRanges = app.getSelectionRanges();
+          if (!Array.isArray(selectionRanges) || selectionRanges.length === 0) {
+            app.focus();
+            return;
+          }
+
+          let minRow = Number.POSITIVE_INFINITY;
+          let maxRow = Number.NEGATIVE_INFINITY;
+          let minCol = Number.POSITIVE_INFINITY;
+          let maxCol = Number.NEGATIVE_INFINITY;
+          for (const range of selectionRanges) {
+            const startRow = Math.min(range.startRow, range.endRow);
+            const endRow = Math.max(range.startRow, range.endRow);
+            const startCol = Math.min(range.startCol, range.endCol);
+            const endCol = Math.max(range.startCol, range.endCol);
+            minRow = Math.min(minRow, startRow);
+            maxRow = Math.max(maxRow, endRow);
+            minCol = Math.min(minCol, startCol);
+            maxCol = Math.max(maxCol, endCol);
+          }
+
+          const height = Number.isFinite(minRow) && Number.isFinite(maxRow) ? Math.max(0, maxRow - minRow + 1) : 0;
+          const width = Number.isFinite(minCol) && Number.isFinite(maxCol) ? Math.max(0, maxCol - minCol + 1) : 0;
+          const suggestVertical = height > width;
+
+          type FillDirection = "down" | "right" | "up" | "left";
+          const ordered: FillDirection[] = suggestVertical
+            ? ["down", "up", "right", "left"]
+            : ["right", "left", "down", "up"];
+
+          const picked = await showQuickPick(
+            ordered.map((dir) => ({ label: `Series ${dir[0]!.toUpperCase()}${dir.slice(1)}`, value: dir })),
+            { placeHolder: "Series direction" }
+          );
+
+          if (!picked) {
+            app.focus();
+            return;
+          }
+
+          app.fillSeries(picked);
+          app.focus();
+        })();
+        return;
       case "edit.find":
         executeBuiltinCommand("edit.find");
         return;
