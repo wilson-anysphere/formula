@@ -59,10 +59,17 @@ pub fn parse_chart(chart_xml: &[u8], part_name: &str) -> Result<Option<ParsedCha
 
     let chart_type = map_chart_type(primary_chart.tag_name().name());
 
-    let series = primary_chart
-        .children()
-        .filter(|n| n.is_element() && n.tag_name().name() == "ser")
-        .map(parse_series)
+    // Some Excel charts (combo charts) contain multiple chart type nodes (e.g.
+    // `<c:barChart>` + `<c:lineChart>`) within the same plotArea. When present,
+    // preserve series from all chart nodes, in document order.
+    let series = chart_elems
+        .iter()
+        .flat_map(|chart| {
+            chart
+                .children()
+                .filter(|n| n.is_element() && n.tag_name().name() == "ser")
+                .map(parse_series)
+        })
         .collect();
 
     Ok(Some(ParsedChart {
