@@ -25,6 +25,11 @@ const ENCRYPTION_TYPE_RC4: u16 = 0x0001;
 // FILEPASS.wEncryptionSubType values for `wEncryptionType == 0x0001`.
 const ENCRYPTION_SUBTYPE_STANDARD: u16 = 0x0001;
 const ENCRYPTION_SUBTYPE_CRYPTOAPI: u16 = 0x0002;
+// Some BIFF8 RC4 CryptoAPI workbooks use an older FILEPASS layout where the second field is
+// `wEncryptionInfo == 0x0004` and the CryptoAPI EncryptionHeader/EncryptionVerifier structures are
+// embedded directly in the FILEPASS payload (rather than using a length-prefixed EncryptionInfo
+// blob).
+const ENCRYPTION_INFO_CRYPTOAPI_LEGACY: u16 = 0x0004;
 
 // CryptoAPI algorithm identifiers [MS-OFFCRYPTO] / WinCrypt.h.
 const CALG_RC4: u32 = 0x0000_6801;
@@ -86,13 +91,16 @@ pub(crate) fn decrypt_biff_workbook_stream(
     })?;
 
     if encryption_type == ENCRYPTION_TYPE_RC4 {
-        let sub_type = read_u16_le(filepass_payload, 2).ok_or_else(|| {
-            DecryptError::InvalidFormat("FILEPASS missing wEncryptionSubType".to_string())
+        // For BIFF8 RC4, the second u16 is either:
+        // - `wEncryptionSubType` (0x0001=Standard, 0x0002=CryptoAPI), or
+        // - legacy `wEncryptionInfo` (0x0004) for older CryptoAPI RC4 layouts.
+        let second_field = read_u16_le(filepass_payload, 2).ok_or_else(|| {
+            DecryptError::InvalidFormat("FILEPASS missing subtype/encryption info".to_string())
         })?;
-        if sub_type == ENCRYPTION_SUBTYPE_CRYPTOAPI {
+        if matches!(second_field, ENCRYPTION_SUBTYPE_CRYPTOAPI | ENCRYPTION_INFO_CRYPTOAPI_LEGACY) {
             return decrypt_biff8_workbook_stream_rc4_cryptoapi(workbook_stream, password);
         }
-        if sub_type != ENCRYPTION_SUBTYPE_STANDARD {
+        if second_field != ENCRYPTION_SUBTYPE_STANDARD {
             return Err(DecryptError::UnsupportedEncryption);
         }
     } else if encryption_type != ENCRYPTION_TYPE_XOR {
@@ -157,6 +165,20 @@ fn sha1_bytes(chunks: &[&[u8]]) -> [u8; 20] {
     let mut out = [0u8; 20];
     out.copy_from_slice(&digest);
     out
+}
+
+fn derive_key_material_legacy(password: &str, salt: &[u8]) -> Result<[u8; 20], DecryptError> {
+    // Legacy BIFF8 RC4 CryptoAPI key derivation (FILEPASS wEncryptionInfo=0x0004):
+    //
+    //   key_material = SHA1(salt + password_utf16le)
+    //
+    // This intentionally does *not* apply the 50,000-iteration hashing step used by other
+    // CryptoAPI encodings.
+    if salt.len() != 16 {
+        return Err(DecryptError::UnsupportedEncryption);
+    }
+    let pw_bytes = utf16le_bytes(password);
+    Ok(sha1_bytes(&[salt, &pw_bytes]))
 }
 
 fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, DecryptError> {
@@ -283,6 +305,62 @@ fn parse_encryption_verifier(bytes: &[u8]) -> Result<EncryptionVerifier, Decrypt
     })
 }
 
+fn parse_cryptoapi_encryption_info_legacy_filepass(
+    payload: &[u8],
+) -> Result<CryptoApiEncryptionInfo, DecryptError> {
+    // Legacy BIFF8 FILEPASS layout for RC4 CryptoAPI:
+    // - u16 wEncryptionType (0x0001)
+    // - u16 wEncryptionInfo (0x0004)
+    // - u16 vMajor
+    // - u16 vMinor
+    // - u16 reserved (0)
+    // - u32 headerSize
+    // - EncryptionHeader (headerSize bytes, includes CSPName)
+    // - EncryptionVerifier (remaining bytes)
+    if payload.len() < 14 {
+        return Err(DecryptError::InvalidFormat(format!(
+            "FILEPASS payload truncated (len={})",
+            payload.len()
+        )));
+    }
+
+    let encryption_type =
+        read_u16_le(payload, 0).ok_or_else(|| {
+            DecryptError::InvalidFormat("FILEPASS missing wEncryptionType".to_string())
+        })?;
+    if encryption_type != ENCRYPTION_TYPE_RC4 {
+        return Err(DecryptError::UnsupportedEncryption);
+    }
+
+    let encryption_info =
+        read_u16_le(payload, 2).ok_or_else(|| {
+            DecryptError::InvalidFormat("FILEPASS missing wEncryptionInfo".to_string())
+        })?;
+    if encryption_info != ENCRYPTION_INFO_CRYPTOAPI_LEGACY {
+        return Err(DecryptError::UnsupportedEncryption);
+    }
+
+    let header_size =
+        read_u32_le(payload, 10).ok_or_else(|| {
+            DecryptError::InvalidFormat("FILEPASS missing headerSize".to_string())
+        })? as usize;
+
+    let header_start = 14usize;
+    let header_end = header_start
+        .checked_add(header_size)
+        .ok_or_else(|| DecryptError::InvalidFormat("headerSize overflow".to_string()))?;
+    if header_end > payload.len() {
+        return Err(DecryptError::InvalidFormat(format!(
+            "FILEPASS header out of bounds (payload_len={}, header_end={header_end})",
+            payload.len()
+        )));
+    }
+
+    let header = parse_encryption_header(&payload[header_start..header_end])?;
+    let verifier = parse_encryption_verifier(&payload[header_end..])?;
+    Ok(CryptoApiEncryptionInfo { header, verifier })
+}
+
 fn parse_cryptoapi_encryption_info(bytes: &[u8]) -> Result<CryptoApiEncryptionInfo, DecryptError> {
     // EncryptionInfo [MS-OFFCRYPTO] 2.3.1:
     //   EncryptionVersionInfo (Major, Minor) 4 bytes
@@ -351,6 +429,39 @@ fn derive_block_key(key_material: &[u8; 20], block: u32, key_len: usize) -> Vec<
     } else {
         digest[..key_len].to_vec()
     }
+}
+
+fn decrypt_range_by_offset(
+    bytes: &mut [u8],
+    start_offset: usize,
+    key_material: &[u8; 20],
+    key_len: usize,
+) {
+    let mut stream_pos = start_offset;
+    let mut remaining = bytes.len();
+    let mut pos = 0usize;
+    while remaining > 0 {
+        let block = (stream_pos / PAYLOAD_BLOCK_SIZE) as u32;
+        let in_block = stream_pos % PAYLOAD_BLOCK_SIZE;
+        let take = remaining.min(PAYLOAD_BLOCK_SIZE - in_block);
+
+        let key = derive_block_key(key_material, block, key_len);
+        let mut rc4 = Rc4::new(&key);
+        rc4.discard(in_block);
+        rc4.apply_keystream(&mut bytes[pos..pos + take]);
+
+        stream_pos += take;
+        pos += take;
+        remaining -= take;
+    }
+}
+
+fn is_never_encrypted_record(record_id: u16) -> bool {
+    // Mirror Apache POI's BIFF8 RC4 CryptoAPI behaviour:
+    // - BOF
+    // - FILEPASS
+    // - INTERFACEHDR (0x00E1)
+    matches!(record_id, 0x0809 | 0x0009 | RECORD_FILEPASS | 0x00E1)
 }
 
 #[cfg(test)]
@@ -681,6 +792,18 @@ impl Rc4 {
             *b ^= k;
         }
     }
+
+    fn discard(&mut self, mut n: usize) {
+        // Advance the internal RC4 state without caring about the output bytes. This is used by
+        // the absolute-offset BIFF8 CryptoAPI RC4 variant to jump to `pos_in_block` within a
+        // 1024-byte rekey segment.
+        let mut scratch = [0u8; 64];
+        while n > 0 {
+            let take = n.min(scratch.len());
+            self.apply_keystream(&mut scratch[..take]);
+            n -= take;
+        }
+    }
 }
 
 struct PayloadRc4 {
@@ -766,6 +889,52 @@ fn verify_password(info: &CryptoApiEncryptionInfo, password: &str) -> Result<[u8
         )));
     }
     if !ct_eq(&verifier_hash[..verifier_hash_size], &expected[..verifier_hash_size]) {
+        return Err(DecryptError::WrongPassword);
+    }
+
+    Ok(key_material)
+}
+
+fn verify_password_legacy(
+    info: &CryptoApiEncryptionInfo,
+    password: &str,
+) -> Result<[u8; 20], DecryptError> {
+    if info.header.alg_id != CALG_RC4 || info.header.alg_id_hash != CALG_SHA1 {
+        return Err(DecryptError::UnsupportedEncryption);
+    }
+
+    let key_size_bits = info.header.key_size_bits;
+    if key_size_bits % 8 != 0 {
+        return Err(DecryptError::UnsupportedEncryption);
+    }
+    let key_len = (key_size_bits / 8) as usize;
+    if !matches!(key_len, 5 | 7 | 16) {
+        return Err(DecryptError::UnsupportedEncryption);
+    }
+
+    let verifier_hash_size = info.verifier.verifier_hash_size as usize;
+    if verifier_hash_size != 20 {
+        return Err(DecryptError::UnsupportedEncryption);
+    }
+
+    let key_material = derive_key_material_legacy(password, &info.verifier.salt)?;
+    let key0 = derive_block_key(&key_material, 0, key_len);
+    let mut rc4 = Rc4::new(&key0);
+
+    let mut verifier = info.verifier.encrypted_verifier;
+    rc4.apply_keystream(&mut verifier);
+
+    let mut verifier_hash = info.verifier.encrypted_verifier_hash.clone();
+    rc4.apply_keystream(&mut verifier_hash);
+
+    let expected = sha1_bytes(&[&verifier]);
+    if verifier_hash.len() < verifier_hash_size {
+        return Err(DecryptError::InvalidFormat(format!(
+            "EncryptedVerifierHash length {} shorter than VerifierHashSize {verifier_hash_size}",
+            verifier_hash.len()
+        )));
+    }
+    if verifier_hash[..verifier_hash_size] != expected[..verifier_hash_size] {
         return Err(DecryptError::WrongPassword);
     }
 
@@ -863,8 +1032,11 @@ fn find_filepass_record_offset(workbook_stream: &[u8]) -> Result<(usize, usize),
     ))
 }
 
-/// Decrypt an in-memory BIFF8 workbook stream encrypted with RC4 CryptoAPI (`FILEPASS` subtype
-/// 0x0002).
+/// Decrypt an in-memory BIFF8 workbook stream encrypted with RC4 CryptoAPI.
+///
+/// Supports:
+/// - `FILEPASS` `wEncryptionSubType = 0x0002` (length-prefixed CryptoAPI `EncryptionInfo`)
+/// - legacy `FILEPASS` `wEncryptionInfo = 0x0004` (embedded `EncryptionHeader` + `EncryptionVerifier`)
 ///
 /// The returned workbook stream has the `FILEPASS` record *masked* (record id replaced with
 /// `0xFFFF`) so downstream parsers that do not implement BIFF encryption treat the stream as
@@ -884,49 +1056,152 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
             DecryptError::InvalidFormat("FILEPASS payload out of bounds".to_string())
         })?;
 
-    let info = parse_filepass_record_payload(filepass_payload)?;
-    let key_material = verify_password(&info, password)?;
-
-    let key_size_bits = info.header.key_size_bits;
-    let key_len = (key_size_bits / 8) as usize;
-
-    let mut out = workbook_stream.to_vec();
-    out[filepass_offset..filepass_offset + 2].copy_from_slice(&RECORD_MASKED.to_le_bytes());
-
-    // Decrypt all subsequent record payloads in-place using the record-payload-only stream model.
-    let mut cipher = PayloadRc4::new(key_material, key_len);
-
-    let mut offset = filepass_data_end;
-    while offset < out.len() {
-        let remaining = out.len().saturating_sub(offset);
-        if remaining < 4 {
-            // Some writers may include trailing padding bytes after the final EOF record. Those
-            // bytes are not part of any record payload and should be ignored rather than treated
-            // as a truncated record header.
-            break;
-        }
-
-        if offset + 4 > out.len() {
-            return Err(DecryptError::InvalidFormat(
-                "truncated BIFF record header".to_string(),
-            ));
-        }
-
-        let len = u16::from_le_bytes([out[offset + 2], out[offset + 3]]) as usize;
-        let data_start = offset + 4;
-        let data_end = data_start.checked_add(len).ok_or_else(|| {
-            DecryptError::InvalidFormat("BIFF record length overflow".to_string())
-        })?;
-        if data_end > out.len() {
-            return Err(DecryptError::InvalidFormat(format!(
-                "BIFF record at offset {offset} extends past end of stream (len={}, end={data_end})",
-                out.len()
-            )));
-        }
-
-        cipher.apply_keystream(&mut out[data_start..data_end]);
-        offset = data_end;
+    let encryption_type = read_u16_le(filepass_payload, 0).ok_or_else(|| {
+        DecryptError::InvalidFormat("FILEPASS missing wEncryptionType".to_string())
+    })?;
+    if encryption_type != ENCRYPTION_TYPE_RC4 {
+        return Err(DecryptError::UnsupportedEncryption);
     }
+    let second_field = read_u16_le(filepass_payload, 2).ok_or_else(|| {
+        DecryptError::InvalidFormat("FILEPASS missing subtype/encryption info".to_string())
+    })?;
 
-    Ok(out)
+    match second_field {
+        // Modern BIFF8 RC4 CryptoAPI FILEPASS layout: `wEncryptionSubType == 0x0002` followed by a
+        // length-prefixed EncryptionInfo blob.
+        ENCRYPTION_SUBTYPE_CRYPTOAPI => {
+            let info = parse_filepass_record_payload(filepass_payload)?;
+            let key_material = verify_password(&info, password)?;
+
+            let key_size_bits = info.header.key_size_bits;
+            let key_len = (key_size_bits / 8) as usize;
+
+            let mut out = workbook_stream.to_vec();
+            out[filepass_offset..filepass_offset + 2].copy_from_slice(&RECORD_MASKED.to_le_bytes());
+
+            // Decrypt all subsequent record payloads in-place using the record-payload-only stream
+            // model.
+            let mut cipher = PayloadRc4::new(key_material, key_len);
+
+            let mut offset = filepass_data_end;
+            while offset < out.len() {
+                let remaining = out.len().saturating_sub(offset);
+                if remaining < 4 {
+                    // Some writers may include trailing padding bytes after the final EOF record.
+                    // Those bytes are not part of any record payload and should be ignored rather
+                    // than treated as a truncated record header.
+                    break;
+                }
+
+                if offset + 4 > out.len() {
+                    return Err(DecryptError::InvalidFormat(
+                        "truncated BIFF record header".to_string(),
+                    ));
+                }
+
+                let len = u16::from_le_bytes([out[offset + 2], out[offset + 3]]) as usize;
+                let data_start = offset + 4;
+                let data_end = data_start.checked_add(len).ok_or_else(|| {
+                    DecryptError::InvalidFormat("BIFF record length overflow".to_string())
+                })?;
+                if data_end > out.len() {
+                    return Err(DecryptError::InvalidFormat(format!(
+                        "BIFF record at offset {offset} extends past end of stream (len={}, end={data_end})",
+                        out.len()
+                    )));
+                }
+
+                cipher.apply_keystream(&mut out[data_start..data_end]);
+                offset = data_end;
+            }
+
+            Ok(out)
+        }
+        // Legacy BIFF8 RC4 CryptoAPI FILEPASS layout (`wEncryptionInfo == 0x0004`): no
+        // length-prefixed EncryptionInfo blob; the EncryptionHeader + Verifier are embedded
+        // directly in the FILEPASS payload.
+        //
+        // Excel derives per-1024-byte block keys based on an absolute stream position that includes
+        // record headers and unencrypted bytes.
+        ENCRYPTION_INFO_CRYPTOAPI_LEGACY => {
+            const RECORD_BOUNDSHEET8: u16 = 0x0085;
+
+            let info = parse_cryptoapi_encryption_info_legacy_filepass(filepass_payload)?;
+            let key_material = verify_password_legacy(&info, password)?;
+
+            let key_size_bits = info.header.key_size_bits;
+            let key_len = (key_size_bits / 8) as usize;
+
+            let mut out = workbook_stream.to_vec();
+            out[filepass_offset..filepass_offset + 2].copy_from_slice(&RECORD_MASKED.to_le_bytes());
+
+            let mut offset = filepass_data_end;
+            // "Encryption stream position" is keyed by the *absolute* offset within the workbook
+            // stream. Encryption begins after FILEPASS, but the block counter (and keystream
+            // discard) still incorporate the preceding plaintext bytes.
+            let mut stream_pos: usize = filepass_data_end;
+
+            while offset < out.len() {
+                let remaining = out.len().saturating_sub(offset);
+                if remaining < 4 {
+                    break;
+                }
+
+                let record_id = u16::from_le_bytes([out[offset], out[offset + 1]]);
+                let len = u16::from_le_bytes([out[offset + 2], out[offset + 3]]) as usize;
+                let data_start = offset + 4;
+                let data_end = data_start.checked_add(len).ok_or_else(|| {
+                    DecryptError::InvalidFormat("BIFF record length overflow".to_string())
+                })?;
+                if data_end > out.len() {
+                    return Err(DecryptError::InvalidFormat(format!(
+                        "BIFF record 0x{record_id:04X} at offset {offset} extends past end of stream (len={}, end={data_end})",
+                        out.len()
+                    )));
+                }
+
+                // Record headers are not encrypted but still advance the CryptoAPI RC4 stream
+                // position (Apache POI / Excel behaviour).
+                stream_pos = stream_pos.checked_add(4).ok_or_else(|| {
+                    DecryptError::InvalidFormat("stream position overflow".to_string())
+                })?;
+
+                if !is_never_encrypted_record(record_id) {
+                    match record_id {
+                        // BoundSheet8.lbPlyPos (first 4 bytes) must remain plaintext so sheet
+                        // offsets remain valid after we mask FILEPASS. The remaining fields are
+                        // encrypted.
+                        RECORD_BOUNDSHEET8 => {
+                            if len > 4 {
+                                let decrypt_start = stream_pos.checked_add(4).ok_or_else(|| {
+                                    DecryptError::InvalidFormat("stream position overflow".to_string())
+                                })?;
+                                decrypt_range_by_offset(
+                                    &mut out[data_start + 4..data_end],
+                                    decrypt_start,
+                                    &key_material,
+                                    key_len,
+                                );
+                            }
+                        }
+                        _ => decrypt_range_by_offset(
+                            &mut out[data_start..data_end],
+                            stream_pos,
+                            &key_material,
+                            key_len,
+                        ),
+                    }
+                }
+
+                // Advance past the record payload, regardless of whether we decrypted it.
+                stream_pos = stream_pos.checked_add(len).ok_or_else(|| {
+                    DecryptError::InvalidFormat("stream position overflow".to_string())
+                })?;
+                offset = data_end;
+            }
+
+            Ok(out)
+        }
+        _ => Err(DecryptError::UnsupportedEncryption),
+    }
 }
