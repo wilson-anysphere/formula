@@ -1954,6 +1954,15 @@ const CLSID_FILE_MONIKER: [u8; 16] = [
     0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
 ];
 
+// Hardening: cap the number of decoded hyperlinks per worksheet.
+//
+// XLS files can contain a large number of HLINK records. Without a limit, a crafted file can cause
+// large allocations (Vec growth + per-link allocations) and slow imports.
+#[cfg(not(test))]
+const MAX_HYPERLINKS_PER_SHEET: usize = 50_000;
+#[cfg(test)]
+const MAX_HYPERLINKS_PER_SHEET: usize = 100;
+
 /// Scan a worksheet BIFF substream for hyperlink records (HLINK, id 0x01B8).
 ///
 /// This is a best-effort parser: malformed records are skipped and surfaced as warnings rather
@@ -1991,7 +2000,15 @@ pub(crate) fn parse_biff_sheet_hyperlinks(
 
         match record.record_id {
             RECORD_HLINK => match decode_hlink_record(record.data.as_ref(), codepage) {
-                Ok(Some(link)) => out.hyperlinks.push(link),
+                Ok(Some(link)) => {
+                    if out.hyperlinks.len() >= MAX_HYPERLINKS_PER_SHEET {
+                        out.warnings.push(
+                            "too many hyperlinks; additional HLINK records skipped".to_string(),
+                        );
+                        break;
+                    }
+                    out.hyperlinks.push(link)
+                }
                 Ok(None) => {}
                 Err(err) => push_warning_bounded(
                     &mut out.warnings,
@@ -3304,6 +3321,62 @@ mod tests {
                 .any(|w| w.contains("truncated TOPMARGIN record")),
             "expected truncated-TOPMARGIN warning, got {:?}",
             parsed.warnings
+        );
+    }
+
+    #[test]
+    fn sheet_hyperlink_scan_caps_output_and_stops_early() {
+        fn internal_hlink_payload(location: &str) -> Vec<u8> {
+            let mut data = Vec::new();
+
+            // ref8 anchor: A1 (0-based row/col).
+            data.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+            data.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+            data.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+            data.extend_from_slice(&0u16.to_le_bytes()); // colLast
+
+            // guid (ignored).
+            data.extend_from_slice(&[0u8; 16]);
+
+            // streamVersion + linkOpts.
+            data.extend_from_slice(&2u32.to_le_bytes());
+            data.extend_from_slice(&HLINK_FLAG_HAS_LOCATION.to_le_bytes());
+
+            // HyperlinkString (u32 char count + UTF-16LE bytes).
+            let u16s: Vec<u16> = location.encode_utf16().collect();
+            data.extend_from_slice(&(u16s.len() as u32).to_le_bytes());
+            for ch in u16s {
+                data.extend_from_slice(&ch.to_le_bytes());
+            }
+
+            data
+        }
+
+        let mut parts: Vec<Vec<u8>> = Vec::new();
+        parts.push(record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // Emit more HLINK records than the hard cap; the parser should stop at the cap and emit a
+        // truncation warning.
+        for _ in 0..(MAX_HYPERLINKS_PER_SHEET + 1) {
+            let payload = internal_hlink_payload("Sheet1!A1");
+            parts.push(record(RECORD_HLINK, &payload));
+        }
+
+        // Malformed record after the extra hyperlink; should be ignored because the scanner stops
+        // early once the cap is reached.
+        let mut truncated = Vec::new();
+        truncated.extend_from_slice(&0x0001u16.to_le_bytes());
+        truncated.extend_from_slice(&4u16.to_le_bytes());
+        truncated.extend_from_slice(&[1, 2]); // missing 2 bytes
+        parts.push(truncated);
+
+        let stream = parts.concat();
+        let parsed = parse_biff_sheet_hyperlinks(&stream, 0, 1252).expect("parse");
+
+        assert_eq!(parsed.hyperlinks.len(), MAX_HYPERLINKS_PER_SHEET);
+        assert_eq!(
+            parsed.warnings,
+            vec!["too many hyperlinks; additional HLINK records skipped".to_string()]
         );
     }
 }
