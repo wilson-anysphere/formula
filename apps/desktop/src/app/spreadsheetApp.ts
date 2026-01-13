@@ -6509,7 +6509,12 @@ export class SpreadsheetApp {
     let offsetY = 0;
     let width = 0;
     let height = 0;
-    const { frozenRows, frozenCols } = this.getFrozen();
+    let frozenRows = 0;
+    let frozenCols = 0;
+    let frozenWidthPx: number | undefined;
+    let frozenHeightPx: number | undefined;
+
+    const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
     if (this.sharedGrid) {
       const viewport = sharedViewport ?? this.sharedGrid.renderer.scroll.getViewportState();
@@ -6521,11 +6526,25 @@ export class SpreadsheetApp {
       offsetY = Math.min(headerHeight, viewport.height);
       width = Math.max(0, viewport.width - offsetX);
       height = Math.max(0, viewport.height - offsetY);
+
+      // Shared-grid viewport state includes frozen header rows/cols; drawings use sheet-space
+      // indices (excluding headers), so read the sheet-level frozen counts from the document.
+      ({ frozenRows, frozenCols } = this.getFrozen());
+
+      // Convert the shared-grid frozen extents (which include header sizes) into the drawing
+      // canvas coordinate system (which already excludes headers via `offsetX/offsetY`).
+      frozenWidthPx = clamp(viewport.frozenWidth - offsetX, 0, width);
+      frozenHeightPx = clamp(viewport.frozenHeight - offsetY, 0, height);
     } else {
       offsetX = this.rowHeaderWidth;
       offsetY = this.colHeaderHeight;
       width = Math.max(0, this.width - offsetX);
       height = Math.max(0, this.height - offsetY);
+
+      frozenRows = this.frozenRows;
+      frozenCols = this.frozenCols;
+      frozenWidthPx = this.frozenWidth;
+      frozenHeightPx = this.frozenHeight;
     }
 
     this.drawingCanvas.style.left = `${offsetX}px`;
@@ -6540,7 +6559,17 @@ export class SpreadsheetApp {
       memo.offsetY = offsetY;
     }
 
-    return { scrollX: this.scrollX, scrollY: this.scrollY, width, height, dpr: this.dpr, frozenRows, frozenCols };
+    return {
+      scrollX: this.scrollX,
+      scrollY: this.scrollY,
+      width,
+      height,
+      dpr: this.dpr,
+      frozenRows,
+      frozenCols,
+      frozenWidthPx,
+      frozenHeightPx,
+    };
   }
 
   private listDrawingObjectsForSheet(): DrawingObject[] {

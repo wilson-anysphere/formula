@@ -81,6 +81,32 @@ describe("DrawingOverlay frozen panes", () => {
     expect(stroke?.args).toEqual([0, 0, 5, 5]);
   });
 
+  it("keeps frozen objects pinned across renders when the scroll position changes", async () => {
+    const { ctx, calls } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+    const base: Omit<Viewport, "scrollX" | "scrollY"> = {
+      width: 200,
+      height: 200,
+      dpr: 1,
+      frozenRows: 1,
+      frozenCols: 1,
+      frozenWidthPx: CELL,
+      frozenHeightPx: CELL,
+    };
+
+    const objects = [createOneCellShapeObject({ id: 1, row: 0, col: 0, widthPx: 5, heightPx: 5 })];
+
+    await overlay.render(objects, { ...base, scrollX: 0, scrollY: 0 });
+    await overlay.render(objects, { ...base, scrollX: 50, scrollY: 100 });
+
+    const strokes = calls.filter((c) => c.method === "strokeRect");
+    expect(strokes).toHaveLength(2);
+    expect(strokes[0]?.args).toEqual([0, 0, 5, 5]);
+    expect(strokes[1]?.args).toEqual([0, 0, 5, 5]);
+  });
+
   it("scrolls objects in the top-right pane horizontally but not vertically", async () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
@@ -134,4 +160,3 @@ describe("DrawingOverlay frozen panes", () => {
     expect(strokeIndex).toBeGreaterThan(clipIndex);
   });
 });
-

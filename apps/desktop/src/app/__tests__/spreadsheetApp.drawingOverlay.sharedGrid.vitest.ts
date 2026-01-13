@@ -152,4 +152,59 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("passes frozen pane metadata to the drawing overlay viewport so drawings pin + clip correctly", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render");
+
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+
+      const doc = app.getDocument();
+      doc.setFrozen(app.getCurrentSheetId(), 1, 1, { label: "Freeze" });
+
+      renderSpy.mockClear();
+      const sharedGrid = (app as any).sharedGrid;
+      sharedGrid.scrollTo(50, 100);
+
+      expect(renderSpy).toHaveBeenCalled();
+      const lastCall = renderSpy.mock.calls.at(-1);
+      const viewport = lastCall?.[1] as any;
+
+      expect(viewport).toEqual(
+        expect.objectContaining({
+          frozenRows: 1,
+          frozenCols: 1,
+        }),
+      );
+
+      const gridViewport = sharedGrid.renderer.scroll.getViewportState();
+      const headerWidth = sharedGrid.renderer.scroll.cols.totalSize(1);
+      const headerHeight = sharedGrid.renderer.scroll.rows.totalSize(1);
+      const offsetX = Math.min(headerWidth, gridViewport.width);
+      const offsetY = Math.min(headerHeight, gridViewport.height);
+      const cellAreaWidth = Math.max(0, gridViewport.width - offsetX);
+      const cellAreaHeight = Math.max(0, gridViewport.height - offsetY);
+
+      const expectedFrozenWidthPx = Math.min(cellAreaWidth, Math.max(0, gridViewport.frozenWidth - offsetX));
+      const expectedFrozenHeightPx = Math.min(cellAreaHeight, Math.max(0, gridViewport.frozenHeight - offsetY));
+
+      expect(viewport.frozenWidthPx).toBe(expectedFrozenWidthPx);
+      expect(viewport.frozenHeightPx).toBe(expectedFrozenHeightPx);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });
