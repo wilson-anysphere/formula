@@ -38,6 +38,10 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.92.0
 
+      - name: Install Rust target (wasm32)
+        # Required for wasm-pack builds (desktop renderer / engine WASM).
+        run: rustup target add wasm32-unknown-unknown
+
       # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
       # CARGO_HOME so cargo installs/builds share the same cache.
