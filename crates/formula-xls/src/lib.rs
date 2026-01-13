@@ -482,9 +482,6 @@ fn import_xls_path_with_biff_reader(
     let mut sheet_tab_colors: Option<Vec<Option<TabColor>>> = None;
     let mut workbook_active_tab: Option<u16> = None;
     let mut biff_sheets: Option<Vec<biff::BoundSheetInfo>> = None;
-    // Cache workbook-global EXTERNSHEET entries so worksheet formula fallbacks can decode 3D refs
-    // even after the larger BIFF globals cache is dropped.
-    let mut biff_externsheet_entries: Vec<biff::externsheet::ExternSheetEntry> = Vec::new();
     let mut row_col_props: Option<Vec<biff::SheetRowColProperties>> = None;
     let mut cell_xf_indices: Option<Vec<HashMap<CellRef, u16>>> = None;
     let mut cell_xf_parse_failed: Option<Vec<bool>> = None;
@@ -549,7 +546,6 @@ fn import_xls_path_with_biff_reader(
                 push_import_warning(&mut warnings, warning, &mut warnings_suppressed);
             }
             sheet_tab_colors = Some(std::mem::take(&mut globals.sheet_tab_colors));
-            biff_externsheet_entries = std::mem::take(&mut globals.extern_sheets);
 
             let interesting = globals.xf_is_interesting_mask();
             xf_style_ids = Some(vec![0; interesting.len()]);
@@ -782,7 +778,7 @@ fn import_xls_path_with_biff_reader(
     let mut biff_rgce_sheet_names: Vec<String> = Vec::new();
     let mut biff_rgce_externsheet: Vec<biff::externsheet::ExternSheetEntry> = Vec::new();
     let mut biff_rgce_supbooks: Vec<biff::supbook::SupBookInfo> = Vec::new();
-    let biff_rgce_defined_names: Vec<biff::rgce::DefinedNameMeta> = Vec::new();
+    let mut biff_rgce_defined_names: Vec<biff::rgce::DefinedNameMeta> = Vec::new();
 
     if let (Some(workbook_stream), Some(biff_version), Some(codepage)) =
         (workbook_stream.as_deref(), biff_version, biff_codepage)
@@ -806,6 +802,14 @@ fn import_xls_path_with_biff_reader(
 
             let supbook_table = biff::supbook::parse_biff8_supbook_table(workbook_stream, codepage);
             biff_rgce_supbooks = supbook_table.supbooks;
+
+            let (metas, _) = biff::defined_names::parse_biff_defined_name_metas(
+                workbook_stream,
+                biff_version,
+                codepage,
+                &biff_rgce_sheet_names,
+            );
+            biff_rgce_defined_names = metas;
         }
     }
     for (sheet_idx, sheet_meta) in sheets.iter().enumerate() {
@@ -1629,7 +1633,7 @@ fn import_xls_path_with_biff_reader(
                         let ctx = biff::rgce::RgceDecodeContext {
                             codepage,
                             sheet_names: &sheet_names_by_biff_idx,
-                            externsheet: &biff_externsheet_entries,
+                            externsheet: &biff_rgce_externsheet,
                             supbooks,
                             defined_names,
                         };
@@ -1727,21 +1731,12 @@ fn import_xls_path_with_biff_reader(
         ) {
             if biff_version == biff::BiffVersion::Biff8 {
                 if let Some(sheet_info) = biff_sheets.get(biff_idx) {
-                    // Build an rgce decode context for BIFF8 worksheet formulas.
-                    //
-                    // Note: we parse SUPBOOK/EXTERNSHEET directly from the workbook stream rather
-                    // than relying on `biff_globals`: we drop the workbook globals cache after
-                    // constructing the XF/style mapping to save memory.
-                    let sheet_names_by_biff_idx: Vec<String> =
-                        biff_sheets.iter().map(|s| s.name.clone()).collect();
-                    let supbooks: &[biff::supbook::SupBookInfo] = &[];
-                    let defined_names: &[biff::rgce::DefinedNameMeta] = &[];
                     let ctx = biff::rgce::RgceDecodeContext {
                         codepage,
-                        sheet_names: &sheet_names_by_biff_idx,
-                        externsheet: &biff_externsheet_entries,
-                        supbooks,
-                        defined_names,
+                        sheet_names: &biff_rgce_sheet_names,
+                        externsheet: &biff_rgce_externsheet,
+                        supbooks: &biff_rgce_supbooks,
+                        defined_names: &biff_rgce_defined_names,
                     };
                     let mut apply_recovered_formulas =
                         |mut recovered: biff::formulas::PtgExpFallbackResult,

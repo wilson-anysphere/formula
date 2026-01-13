@@ -486,7 +486,25 @@ pub fn build_array_formula_fixture_xls() -> Vec<u8> {
 /// relative flags for the second endpoint (or drops the flags entirely).
 pub fn build_shared_formula_area3d_mixed_flags_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_shared_formula_area3d_mixed_flags_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
 
+/// Build a BIFF8 `.xls` fixture containing shared formulas (`SHRFMLA` + `PtgExp`) whose shared
+/// `rgce` references an external workbook (`SUPBOOK`/`EXTERNSHEET`) and an external name
+/// (`PtgNameX`).
+///
+/// This is used to validate that our BIFF shared-formula decode path preserves external reference
+/// fidelity, matching non-shared formulas.
+pub fn build_shared_formula_external_refs_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_external_refs_workbook_stream();
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
     {
@@ -7627,6 +7645,72 @@ fn build_defined_names_external_workbook_refs_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_shared_formula_external_refs_workbook_stream() -> Vec<u8> {
+    // This workbook contains:
+    // - One internal sheet (`Shared`)
+    // - SUPBOOK[0]: internal workbook marker
+    // - SUPBOOK[1]: external workbook `Book1.xlsx` with sheet `ExtSheet`
+    // - EXTERNNAME entries for `PtgNameX` references
+    // - EXTERNSHEET[0] pointing at SUPBOOK[1] / ExtSheet
+    // - Worksheet `Shared` containing two shared formula ranges:
+    //   - B1:B2: `'[Book1.xlsx]ExtSheet'!$A$1+1` via `PtgRef3d`
+    //   - C1:C2: `'[Book1.xlsx]ExtSheet'!ExtDefined+1` via `PtgNameX`
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table (style XFs + one cell XF).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Shared");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // External reference tables.
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(1)); // internal workbook marker
+    push_record(
+        &mut globals,
+        RECORD_SUPBOOK,
+        &supbook_external("Book1.xlsx", &["ExtSheet"]),
+    );
+    // External name #1 for PtgNameX.
+    push_record(
+        &mut globals,
+        RECORD_EXTERNNAME,
+        &externname_record("ExtDefined"),
+    );
+    // EXTERNSHEET entry 0 => [Book1.xlsx]ExtSheet
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record_with_supbook(&[(1, 0, 0)]),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_shared_formula_external_refs_sheet_stream(xf_cell);
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+
+    globals
+}
+
 fn build_defined_name_calamine_workbook_stream() -> Vec<u8> {
     build_defined_name_calamine_workbook_stream_with_sheet_name("Sheet1")
 }
@@ -9836,6 +9920,71 @@ fn build_shared_formula_2d_sheet_stream(xf_cell: u16) -> Vec<u8> {
         RECORD_FORMULA,
         &formula_cell(1, 2, xf_cell, 0.0, &ptgexp),
     ); // C2
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_formula_external_refs_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 3) => A1:C2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide a value cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 0.0));
+
+    // Shared formula range #1: B1:B2.
+    // Base cell B1 stores PtgExp -> (B1) and SHRFMLA stores the shared rgce.
+    let exp_b1 = ptg_exp(0, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(0, 1, xf_cell, 0.0, &exp_b1),
+    );
+    let shrf_rgce = [ptg_ref3d(0, 0, 0), vec![0x1E, 0x01, 0x00], vec![0x03]].concat(); // ExtSheet!$A$1 + 1
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 1, 1, 1, &shrf_rgce),
+    );
+    // Follower cell B2 stores PtgExp -> (B1).
+    let exp_b2 = ptg_exp(0, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 1, xf_cell, 0.0, &exp_b2),
+    );
+
+    // Shared formula range #2: C1:C2 using PtgNameX.
+    let exp_c1 = ptg_exp(0, 2);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(0, 2, xf_cell, 0.0, &exp_c1),
+    );
+    let namex_rgce = [ptg_namex(0, 1), vec![0x1E, 0x01, 0x00], vec![0x03]].concat(); // ExtDefined + 1
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 1, 2, 2, &namex_rgce),
+    );
+    let exp_c2 = ptg_exp(0, 2);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 2, xf_cell, 0.0, &exp_c2),
+    );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet

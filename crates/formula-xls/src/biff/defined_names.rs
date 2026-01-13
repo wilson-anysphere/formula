@@ -139,6 +139,71 @@ pub(crate) fn parse_biff_defined_names(
     Ok(out)
 }
 
+/// Parse the workbook `NAME` table into a metadata vector suitable for resolving `PtgName` tokens
+/// in worksheet formulas.
+///
+/// BIFF8 `PtgName` stores a 1-based index into the workbook-global `NAME` record order. To preserve
+/// those indices even when individual `NAME` records are malformed, this helper inserts a
+/// placeholder `#NAME?` entry for any `NAME` record that fails to parse.
+///
+/// The returned vector is indexed by `iname-1` and can be passed directly as
+/// [`rgce::RgceDecodeContext::defined_names`].
+///
+/// Best-effort semantics:
+/// - Only BIFF8 is currently supported; BIFF5 yields an empty table.
+/// - Stops scanning at `EOF` or the next `BOF` record (start of the next substream).
+/// - Malformed records produce warnings but do not hard-fail.
+pub(crate) fn parse_biff_defined_name_metas(
+    workbook_stream: &[u8],
+    biff: BiffVersion,
+    codepage: u16,
+    sheet_names: &[String],
+) -> (Vec<rgce::DefinedNameMeta>, Vec<String>) {
+    let mut warnings: Vec<String> = Vec::new();
+    let mut metas: Vec<rgce::DefinedNameMeta> = Vec::new();
+
+    if biff != BiffVersion::Biff8 {
+        return (metas, warnings);
+    }
+
+    let allows_continuation = |id: u16| id == RECORD_NAME;
+    let iter = records::LogicalBiffRecordIter::new(workbook_stream, allows_continuation);
+
+    for record in iter {
+        let record = match record {
+            Ok(record) => record,
+            Err(err) => {
+                warnings.push(format!("malformed BIFF record: {err}"));
+                break;
+            }
+        };
+
+        if record.offset != 0 && records::is_bof_record(record.record_id) {
+            break;
+        }
+
+        match record.record_id {
+            RECORD_NAME => match parse_biff8_name_record(&record, codepage, sheet_names) {
+                Ok(raw) => metas.push(rgce::DefinedNameMeta {
+                    name: raw.name,
+                    scope_sheet: raw.scope_sheet,
+                }),
+                Err(err) => {
+                    warnings.push(format!("failed to parse NAME record: {err}"));
+                    metas.push(rgce::DefinedNameMeta {
+                        name: "#NAME?".to_string(),
+                        scope_sheet: None,
+                    });
+                }
+            },
+            records::RECORD_EOF => break,
+            _ => {}
+        }
+    }
+
+    (metas, warnings)
+}
+
 pub(super) fn parse_biff8_name_record(
     record: &records::LogicalBiffRecord<'_>,
     codepage: u16,
