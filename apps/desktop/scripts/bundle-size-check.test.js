@@ -61,6 +61,21 @@ test("reports sizes and exits 0 with no budgets", () => {
   assert.match(proc.stdout, /assets\/entry\.js/);
 });
 
+test("fails when index.html has no entry script tags", () => {
+  const { root, distDir } = writeFixture({
+    indexHtml: `<!doctype html><html><head></head><body>No scripts</body></html>`,
+    files: {
+      "assets/entry.js": "console.log('unused');\n",
+    },
+  });
+
+  const proc = run(distDir);
+  fs.rmSync(root, { recursive: true, force: true });
+
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /No JS <script src/);
+});
+
 test("fails when budgets are exceeded", () => {
   const { root, distDir } = writeFixture({
     indexHtml: `<!doctype html><html><head><script type="module" src="/assets/entry.js"></script></head></html>`,

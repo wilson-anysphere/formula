@@ -233,6 +233,15 @@ async function main() {
   const entryRelPaths = extractScriptSrcs(indexHtml);
   const preloadRelPaths = extractModulePreloadHrefs(indexHtml);
 
+  if (entryRelPaths.length === 0) {
+    throw new Error(
+      [
+        `No JS <script src="..."> tags found in ${indexHtmlPath}.`,
+        "Unable to identify the initial entry chunk; ensure this is a Vite production build output.",
+      ].join("\n"),
+    );
+  }
+
   /** @type {Map<string, { relPath: string; bytes: number; gzipBytes: number | null }>} */
   const byRelPath = new Map();
   for (const f of jsFiles) byRelPath.set(f.relPath, f);
