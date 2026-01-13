@@ -711,6 +711,7 @@ The backend buffers early redirects in memory (`OauthRedirectState` in `apps/des
 - **Using `localhost` but the redirect never reaches the listener:** try `127.0.0.1` (force IPv4) or `[::1]` (force IPv6) explicitly. Some environments resolve `localhost` to only one address family, and binding can also fail for one family if the port is already in use.
 - **Provider uses port `0` (dynamic port selection):** not supported — the redirect URI must include an explicit, non-zero port.
 - **Redirect is received but auth doesn’t complete:** ensure the redirect URI used in the auth request matches exactly (scheme + host + port + path). The frontend matcher is strict about `pathname` and other endpoint parts (e.g. `/callback` vs `/callback/`, or `127.0.0.1` vs `localhost`).
+- **Redirect is received but the OAuth flow still errors on `state`:** make sure you’re using the latest auth attempt (PKCE `state` is per-attempt). Stale redirects (e.g. from an old browser tab) may be ignored or rejected by the OAuth manager.
 - **Using implicit flow (`#access_token` fragments):** loopback capture can only see query parameters; use auth-code + PKCE (code in the query string).
 
 ##### Quick manual smoke tests
