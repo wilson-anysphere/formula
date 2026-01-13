@@ -17,6 +17,14 @@ describe("evaluateFormula operators", () => {
     expect(evaluateFormula('="a"&1+1', () => null)).toBe("a2");
   });
 
+  it("supports logical functions (AND/OR/NOT/IFERROR)", () => {
+    expect(evaluateFormula("=AND(1>0, 2>0)", () => null)).toBe(true);
+    expect(evaluateFormula("=AND(1>0, 2<0)", () => null)).toBe(false);
+    expect(evaluateFormula("=OR(1>0, 2<0)", () => null)).toBe(true);
+    expect(evaluateFormula("=NOT(1>0)", () => null)).toBe(false);
+    expect(evaluateFormula('=IFERROR(#REF!, "fallback")', () => null)).toBe("fallback");
+  });
+
   it("treats missing operands / trailing tokens as #VALUE!", () => {
     expect(evaluateFormula("=1+", () => null)).toBe("#VALUE!");
     expect(evaluateFormula("=1> ", () => null)).toBe("#VALUE!");
@@ -28,4 +36,3 @@ describe("evaluateFormula operators", () => {
     expect(evaluateFormula("=IF(1>0; TRUE; FALSE)", () => null)).toBe(true);
   });
 });
-

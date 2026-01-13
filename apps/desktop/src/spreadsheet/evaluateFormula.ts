@@ -292,6 +292,36 @@ function evalFunction(
       ? options.ai.evaluateAiFunction({ name: upper, args, cellAddress: options.cellAddress, argProvenance })
       : "#NAME?";
   }
+
+  if (upper === "AND" || upper === "OR") {
+    const refs: string[] = [];
+    const isAnd = upper === "AND";
+    for (const arg of args) {
+      const scalar = unwrapProvenance(arg);
+      if (isErrorCode(scalar)) return scalar;
+      if (Array.isArray(scalar)) return "#VALUE!";
+      const num = toNumber(scalar);
+      const truthy = num !== null ? num !== 0 : Boolean(scalar);
+      if (context.preserveReferenceProvenance) refs.push(...provenanceRefs(arg));
+      if (isAnd && !truthy) return context.preserveReferenceProvenance ? wrapWithProvenance(false, refs) : false;
+      if (!isAnd && truthy) return context.preserveReferenceProvenance ? wrapWithProvenance(true, refs) : true;
+    }
+    const value = isAnd;
+    return context.preserveReferenceProvenance ? wrapWithProvenance(value, refs) : value;
+  }
+
+  if (upper === "NOT") {
+    const arg = args[0] ?? null;
+    const scalar = unwrapProvenance(arg);
+    if (isErrorCode(scalar)) return scalar;
+    if (Array.isArray(scalar)) return "#VALUE!";
+    const num = toNumber(scalar);
+    const truthy = num !== null ? num !== 0 : Boolean(scalar);
+    const value = !truthy;
+    if (!context.preserveReferenceProvenance) return value;
+    return wrapWithProvenance(value, provenanceRefs(arg));
+  }
+
   if (upper === "SUM") {
     const nums: number[] = [];
     const err = flattenNumbers(args, nums);
@@ -326,6 +356,30 @@ function evalFunction(
     if (!context.preserveReferenceProvenance) return chosenScalar;
     const refs = [...provenanceRefs(cond), ...provenanceRefs(chosenScalar)];
     return wrapWithProvenance(chosenUnwrapped as SpreadsheetValue, refs);
+  }
+
+  if (upper === "IFERROR") {
+    const first = args[0] ?? null;
+    const firstScalar = unwrapProvenance(first);
+    const refs: string[] = [];
+    if (context.preserveReferenceProvenance) refs.push(...provenanceRefs(first));
+
+    if (!isErrorCode(firstScalar)) {
+      if (!context.preserveReferenceProvenance) return first;
+      // Preserve provenance: unwrap scalar and wrap with any referenced cells.
+      const scalar = Array.isArray(first) ? ((first[0] ?? null) as CellValue) : first;
+      const unwrapped = unwrapProvenance(scalar);
+      if (isErrorCode(unwrapped)) return unwrapped;
+      return wrapWithProvenance(unwrapped as SpreadsheetValue, refs);
+    }
+
+    const fallback = args[1] ?? null;
+    if (context.preserveReferenceProvenance) refs.push(...provenanceRefs(fallback));
+    const scalar = Array.isArray(fallback) ? ((fallback[0] ?? null) as CellValue) : fallback;
+    const unwrapped = unwrapProvenance(scalar);
+    if (isErrorCode(unwrapped)) return unwrapped;
+    if (!context.preserveReferenceProvenance) return scalar;
+    return wrapWithProvenance(unwrapped as SpreadsheetValue, refs);
   }
 
   if (upper === "VLOOKUP") {
