@@ -58,15 +58,17 @@ function resolveMaxChars(params) {
  */
 function serializeReadRange(params) {
   const base = normalizeToolExecutionEnvelope(params.toolCall, params.result);
+  const tool = String(typeof base.tool === "string" && base.tool.trim() ? base.tool : String(params.toolCall?.name ?? "read_range"));
   const data = base.data && typeof base.data === "object" ? base.data : null;
   const values = /** @type {unknown} */ (data?.values);
   const formulas = /** @type {unknown} */ (data?.formulas);
   const range = typeof data?.range === "string" ? data.range : safeRangeFromCall(params.toolCall);
- 
+  const toolTruncated = typeof data?.truncated === "boolean" ? data.truncated : false;
+  
   if (!Array.isArray(values)) {
     return serializeGeneric(params);
   }
- 
+  
   const rows = values.length;
   const cols = Array.isArray(values[0]) ? values[0].length : 0;
  
@@ -85,11 +87,12 @@ function serializeReadRange(params) {
     const previewFormulas = Array.isArray(formulas)
       ? sliceMatrix(formulas, previewRows, previewCols, attempt.cellStringChars)
       : undefined;
- 
-    const truncated = rows > previewRows || cols > previewCols;
- 
+  
+    const truncated = toolTruncated || rows > previewRows || cols > previewCols;
+  
     const payload = {
       ...base,
+      tool,
       data: {
         range,
         shape: { rows, cols },
@@ -104,17 +107,18 @@ function serializeReadRange(params) {
     const json = safeJsonStringify(payload);
     if (json.length <= params.maxChars) return json;
   }
- 
+  
   // Fallback: minimal summary that always fits.
   return finalizeJson(
-    safeJsonStringify({
-      tool: base.tool,
+    safeJsonStringify({ ...base, tool, data: { range, shape: { rows, cols }, truncated: true } }),
+    params.maxChars,
+    {
+      tool,
       ok: base.ok,
+      ...(base.timing ? { timing: base.timing } : {}),
       ...(base.error ? { error: base.error } : {}),
       data: { range, shape: { rows, cols }, truncated: true }
-    }),
-    params.maxChars,
-    { tool: base.tool, ok: base.ok, truncated: true }
+    }
   );
 }
  
@@ -124,6 +128,7 @@ function serializeReadRange(params) {
  */
 function serializeFilterRange(params) {
   const base = normalizeToolExecutionEnvelope(params.toolCall, params.result);
+  const tool = String(typeof base.tool === "string" && base.tool.trim() ? base.tool : String(params.toolCall?.name ?? "filter_range"));
   const data = base.data && typeof base.data === "object" ? base.data : null;
   const range = typeof data?.range === "string" ? data.range : safeRangeFromCall(params.toolCall);
   const rows = Array.isArray(data?.matching_rows) ? data.matching_rows : null;
@@ -141,6 +146,7 @@ function serializeFilterRange(params) {
   
     const payload = {
       ...base,
+      tool,
       data: {
         ...(range ? { range } : {}),
         ...(typeof count === "number" ? { count } : {}),
@@ -154,13 +160,18 @@ function serializeFilterRange(params) {
   
   return finalizeJson(
     safeJsonStringify({
-      tool: base.tool,
-      ok: base.ok,
-      ...(base.error ? { error: base.error } : {}),
+      ...base,
+      tool,
       data: { ...(range ? { range } : {}), ...(typeof count === "number" ? { count } : {}), truncated: true }
     }),
     params.maxChars,
-    { tool: base.tool, ok: base.ok, truncated: true }
+    {
+      tool,
+      ok: base.ok,
+      ...(base.timing ? { timing: base.timing } : {}),
+      ...(base.error ? { error: base.error } : {}),
+      data: { ...(range ? { range } : {}), ...(typeof count === "number" ? { count } : {}), truncated: true }
+    }
   );
 }
 
@@ -261,6 +272,7 @@ function serializeDetectAnomalies(params) {
     {
       tool,
       ok: base.ok,
+      ...(base.timing ? { timing: base.timing } : {}),
       ...(base.error ? { error: base.error } : {}),
       data: {
         ...(range ? { range } : {}),

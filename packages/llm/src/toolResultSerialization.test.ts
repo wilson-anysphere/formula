@@ -78,6 +78,47 @@ describe("serializeToolResultForModel", () => {
     expect(payload.data.formulas).toBeDefined();
   });
 
+  it("read_range can fall back to a minimal summary when the tool envelope is too large", () => {
+    const toolCall = {
+      id: "call-1c",
+      name: "read_range",
+      arguments: { range: "Sheet1!A1:B2", include_formulas: true }
+    };
+
+    const result = {
+      tool: "read_range",
+      ok: true,
+      timing: { started_at_ms: 0, duration_ms: 1 },
+      warnings: ["x".repeat(5_000)],
+      data: {
+        values: [
+          [1, 2],
+          [3, 4]
+        ],
+        formulas: [
+          ["=1", "=2"],
+          [null, null]
+        ]
+      }
+    };
+
+    const maxChars = 350;
+    const serialized = serializeToolResultForModel({ toolCall: toolCall as any, result, maxChars });
+    expect(serialized.length).toBeLessThanOrEqual(maxChars);
+
+    const payload = JSON.parse(serialized);
+    expect(payload.tool).toBe("read_range");
+    expect(payload.ok).toBe(true);
+    // Fallback drops huge envelope fields like warnings.
+    expect(payload.warnings).toBeUndefined();
+    expect(payload.timing).toEqual({ started_at_ms: 0, duration_ms: 1 });
+    expect(payload.data).toEqual({
+      range: "Sheet1!A1:B2",
+      shape: { rows: 2, cols: 2 },
+      truncated: true
+    });
+  });
+
   it("filter_range truncates matching_rows while preserving count within budget", () => {
     const matchingRows = Array.from({ length: 2_000 }, (_, i) => i + 1);
 
@@ -134,6 +175,40 @@ describe("serializeToolResultForModel", () => {
     expect(payload.tool).toBe("filter_range");
     expect(payload.data.range).toBe("Sheet1!A1:D10");
     expect(payload.data.count).toBe(3);
+  });
+
+  it("filter_range can fall back to a minimal summary when the tool envelope is too large", () => {
+    const toolCall = {
+      id: "call-2d",
+      name: "filter_range",
+      arguments: { range: "Sheet1!A1:D10" }
+    };
+
+    const result = {
+      tool: "filter_range",
+      ok: true,
+      timing: { started_at_ms: 0, duration_ms: 1 },
+      warnings: ["x".repeat(5_000)],
+      data: {
+        matching_rows: [2, 4, 6],
+        count: 3
+      }
+    };
+
+    const maxChars = 350;
+    const serialized = serializeToolResultForModel({ toolCall: toolCall as any, result, maxChars });
+    expect(serialized.length).toBeLessThanOrEqual(maxChars);
+
+    const payload = JSON.parse(serialized);
+    expect(payload.tool).toBe("filter_range");
+    expect(payload.ok).toBe(true);
+    expect(payload.warnings).toBeUndefined();
+    expect(payload.timing).toEqual({ started_at_ms: 0, duration_ms: 1 });
+    expect(payload.data).toEqual({
+      range: "Sheet1!A1:D10",
+      count: 3,
+      truncated: true
+    });
   });
 
   it("filter_range preserves tool-provided truncated flag even when matching_rows fits preview limit", () => {
@@ -269,6 +344,7 @@ describe("serializeToolResultForModel", () => {
     expect(payload.ok).toBe(true);
     // The fallback path drops huge envelope fields like warnings to fit the budget.
     expect(payload.warnings).toBeUndefined();
+    expect(payload.timing).toEqual({ started_at_ms: 0, duration_ms: 1 });
     expect(payload.data).toEqual({
       range: "Sheet1!A1:A10",
       method: "zscore",
