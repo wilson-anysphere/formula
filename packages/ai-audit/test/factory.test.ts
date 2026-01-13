@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createDefaultAIAuditStore } from "../src/factory.js";
+import { createDefaultAIAuditStore as createDefaultAIAuditStoreNode } from "../src/factory.node.js";
 import { BoundedAIAuditStore } from "../src/bounded-store.js";
 import { IndexedDbAIAuditStore } from "../src/indexeddb-store.js";
 import { LocalStorageAIAuditStore } from "../src/local-storage-store.js";
@@ -190,6 +191,34 @@ describe("createDefaultAIAuditStore", () => {
     delete (globalThis as any).window;
 
     const store = await createDefaultAIAuditStore({ bounded: false });
+    expect(store).toBeInstanceOf(MemoryAIAuditStore);
+  });
+
+  it('node entrypoint: prefer "indexeddb" falls back to LocalStorageAIAuditStore when localStorage is available', async () => {
+    const storage = new MemoryLocalStorage();
+    Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true });
+    // Even if IndexedDB globals are present in Node (e.g. via fake-indexeddb),
+    // the Node entrypoint should *not* attempt to use IndexedDB.
+    (globalThis as any).indexedDB = indexedDB;
+    (globalThis as any).IDBKeyRange = IDBKeyRange;
+
+    const store = await createDefaultAIAuditStoreNode({ prefer: "indexeddb", max_entries: 7, bounded: false });
+    expect(store).toBeInstanceOf(LocalStorageAIAuditStore);
+    expect((store as LocalStorageAIAuditStore).maxEntries).toBe(7);
+  });
+
+  it('node entrypoint: prefer "indexeddb" falls back to MemoryAIAuditStore when localStorage access throws', async () => {
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("no localStorage");
+      }
+    });
+    // Ensure IndexedDB globals are present so this test catches accidental IndexedDB usage.
+    (globalThis as any).indexedDB = indexedDB;
+    (globalThis as any).IDBKeyRange = IDBKeyRange;
+
+    const store = await createDefaultAIAuditStoreNode({ prefer: "indexeddb", bounded: false });
     expect(store).toBeInstanceOf(MemoryAIAuditStore);
   });
 });
