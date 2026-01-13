@@ -192,7 +192,34 @@ class PromotePublicCLITests(unittest.TestCase):
             finally:
                 promote_mod._run_public_triage = original_run_public_triage  # type: ignore[assignment]
 
+    def test_main_rejects_name_with_path_separators(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="promote-public-cli-test-") as td:
+            tmp = Path(td)
+            public_dir = tmp / "public"
+            triage_out = tmp / "triage"
+            input_path = tmp / "input.xlsx"
+            input_path.write_bytes(_make_minimal_xlsx())
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                with unittest.mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "promote_public.py",
+                        "--input",
+                        str(input_path),
+                        "--name",
+                        "bad/name",
+                        "--public-dir",
+                        str(public_dir),
+                        "--triage-out",
+                        str(triage_out),
+                    ],
+                ):
+                    rc = promote_mod.main()
+            self.assertEqual(rc, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
-

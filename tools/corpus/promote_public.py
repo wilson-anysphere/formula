@@ -238,11 +238,20 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    wb_in = read_workbook_input(args.input)
-    default_ext = Path(wb_in.display_name).suffix
-    if default_ext not in {".xlsx", ".xlsm"}:
-        default_ext = ".xlsx"
-    display_name = _coerce_display_name(args.name or wb_in.display_name, default_ext=default_ext)
+    try:
+        wb_in = read_workbook_input(args.input)
+    except Exception as e:  # noqa: BLE001
+        print(f"Failed to read input workbook: {e}")
+        return 1
+
+    try:
+        default_ext = Path(wb_in.display_name).suffix
+        if default_ext not in {".xlsx", ".xlsm"}:
+            default_ext = ".xlsx"
+        display_name = _coerce_display_name(args.name or wb_in.display_name, default_ext=default_ext)
+    except ValueError as e:
+        print(str(e))
+        return 1
 
     # Note: `WorkbookInput` must not contain local paths; use `display_name`.
     workbook_bytes = wb_in.data
@@ -257,7 +266,11 @@ def main() -> int:
             scrub_metadata=not args.no_scrub_metadata,
             rename_sheets=args.rename_sheets,
         )
-        workbook_bytes, _summary = sanitize_xlsx_bytes(workbook_bytes, options=options)
+        try:
+            workbook_bytes, _summary = sanitize_xlsx_bytes(workbook_bytes, options=options)
+        except Exception as e:  # noqa: BLE001
+            print(f"Sanitization failed: {e}")
+            return 1
 
     if not args.confirm_sanitized:
         scan = scan_xlsx_bytes_for_leaks(workbook_bytes, plaintext_strings=args.leak_scan_string)
