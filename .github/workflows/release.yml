@@ -1003,7 +1003,17 @@ jobs:
           fi
           if [[ -z "$app_path" ]]; then
             app_path="$(
+              find apps/desktop/target/universal-apple-darwin -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
+            )"
+          fi
+          if [[ -z "$app_path" ]]; then
+            app_path="$(
               find apps/desktop/src-tauri/target -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
+            )"
+          fi
+          if [[ -z "$app_path" ]]; then
+            app_path="$(
+              find apps/desktop/target -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
             )"
           fi
           if [[ -z "$app_path" ]]; then
@@ -1016,6 +1026,9 @@ jobs:
             echo "::error::No .app bundle found under apps/desktop/src-tauri/target/**/release/bundle/** or target/**/release/bundle/**" >&2
             echo "apps/desktop/src-tauri/target *.app bundles:"
             find apps/desktop/src-tauri/target -type d -name '*.app' -print 2>/dev/null || true
+            echo
+            echo "apps/desktop/target *.app bundles:"
+            find apps/desktop/target -type d -name '*.app' -print 2>/dev/null || true
             echo
             echo "target *.app bundles:"
             find target -type d -name '*.app' -print 2>/dev/null || true
