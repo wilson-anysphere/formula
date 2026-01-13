@@ -189,7 +189,7 @@ function normalizeSheetVisibility(rawVisibility) {
  *
  * Snapshot producers vary:
  * - BranchService uses a string `"AARRGGBB"` or `null`
- * - DocumentController snapshots can store `{ rgb: "AARRGGBB" }`
+ * - DocumentController snapshots can store `{ rgb: "AARRGGBB" }` or `{ argb: "AARRGGBB" }`
  *
  * @param {any} raw
  * @returns {string | null}
@@ -198,12 +198,15 @@ function normalizeTabColor(raw) {
   if (raw === null) return null;
   if (raw === undefined) return null;
 
-  const json = yjsValueToJson(raw);
-  /** @type {string | null} */
-  let rgb = null;
-  if (typeof json === "string") rgb = json;
-  else if (json && typeof json === "object" && typeof json.rgb === "string") rgb = json.rgb;
-  if (rgb == null) return null;
+   const json = yjsValueToJson(raw);
+   /** @type {string | null} */
+   let rgb = null;
+   if (typeof json === "string") rgb = json;
+   else if (json && typeof json === "object") {
+     if (typeof json.rgb === "string") rgb = json.rgb;
+     else if (typeof json.argb === "string") rgb = json.argb;
+   }
+   if (rgb == null) return null;
 
   let str = rgb.trim();
   if (!str) return null;

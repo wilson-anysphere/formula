@@ -211,6 +211,28 @@ test("diffYjsWorkbookSnapshots canonicalizes tabColor to 8-digit ARGB", () => {
   assert.deepEqual(diff.sheets.metaChanged, [{ id: "sheet1", field: "tabColor", before: "FF00FF00", after: null }]);
 });
 
+test("diffYjsWorkbookSnapshots accepts tabColor.argb and canonicalizes to 8-digit ARGB", () => {
+  const doc = new Y.Doc();
+  const sheets = doc.getArray("sheets");
+
+  const sheet1 = new Y.Map();
+  sheet1.set("id", "sheet1");
+  sheet1.set("name", "Sheet1");
+  // Some snapshot producers use `{ argb: "..." }` objects (ExcelJS-style).
+  sheet1.set("tabColor", { argb: "#00FF00" });
+  sheets.push([sheet1]);
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  doc.transact(() => {
+    sheet1.set("tabColor", null);
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  assert.deepEqual(diff.sheets.metaChanged, [{ id: "sheet1", field: "tabColor", before: "FF00FF00", after: null }]);
+});
+
 test("diffYjsWorkbookSnapshots reports formatOnly edits when column default formats change (layered formats)", () => {
   const doc = new Y.Doc();
   const sheets = doc.getArray("sheets");
