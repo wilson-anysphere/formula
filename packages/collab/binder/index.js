@@ -282,6 +282,7 @@ function normalizeFormula(value) {
  *   formula: string | null,
  *   format: any | undefined,
  *   formatKey: string | undefined,
+ *   maskedForEncryption?: boolean,
  * }} ParsedYjsCell
  */
 
@@ -298,6 +299,7 @@ function normalizeFormula(value) {
 async function readCellFromYjs(cell, cellRef, encryption, docIdForEncryption, maskFn = defaultMaskCellValue) {
   let value;
   let formula;
+  let maskedForEncryption = false;
 
   // If `enc` is present, treat the cell as encrypted even if the payload is malformed.
   // This avoids accidentally falling back to plaintext fields.
@@ -338,6 +340,7 @@ async function readCellFromYjs(cell, cellRef, encryption, docIdForEncryption, ma
       // otherwise return the input value unchanged.
       value = maskFn(MASKED_CELL_VALUE, cellRef);
       formula = null;
+      maskedForEncryption = true;
     }
   } else {
     formula = normalizeFormula(cell.get("formula") ?? null);
@@ -356,9 +359,9 @@ async function readCellFromYjs(cell, cellRef, encryption, docIdForEncryption, ma
     formatKey = stableStringify(format);
   }
   if (formula) {
-    return { value: null, formula, format, formatKey };
+    return { value: null, formula, format, formatKey, maskedForEncryption };
   }
-  return { value, formula: null, format, formatKey };
+  return { value, formula: null, format, formatKey, maskedForEncryption };
 }
 
 function sameNormalizedCell(a, b) {
@@ -397,6 +400,17 @@ function sameNormalizedCell(a, b) {
  *     | ((cell: { sheetId: string, row: number, col: number }) => { canRead: boolean, canEdit: boolean })
  *     | { role: string, restrictions?: any[], userId?: string | null },
  *   maskCellValue?: (value: unknown, cell?: { sheetId: string, row: number, col: number }) => unknown,
+ *   /**
+ *    * When true, suppress per-cell formatting for masked cells (unreadable due to
+ *    * permissions, or encrypted without an available key).
+ *    *
+ *    * This avoids leaking sensitive information via formatting (e.g. number/date
+ *    * formats, fills, conditional styling) and makes masked cells visually appear
+ *    * "masked".
+ *    *
+ *    * Defaults to false to preserve existing formatting semantics.
+ *    *\/
+ *   maskCellFormat?: boolean,
  *   onEditRejected?: (deltas: any[]) => void,
  *   /**
  *    * Enables Yjs write semantics that are compatible with `FormulaConflictMonitor`'s
@@ -432,6 +446,7 @@ export function bindYjsToDocumentController(options) {
     canEditCell = null,
     permissions = null,
     maskCellValue = defaultMaskCellValue,
+    maskCellFormat = false,
     onEditRejected = null,
     formulaConflictsMode: formulaConflictsModeRaw = "off",
   } = options ?? {};
@@ -762,14 +777,21 @@ export function bindYjsToDocumentController(options) {
       const shouldMask = !canRead && (currValue != null || currFormula != null);
       const displayValue = shouldMask ? maskFn(currFormula ?? currValue ?? null, parsed) : currValue;
       const displayFormula = shouldMask ? null : currFormula;
+      const shouldMaskFormat = Boolean(
+        maskCellFormat && (shouldMask || (curr && curr.maskedForEncryption === true))
+      );
 
       let styleId = before.styleId;
-      if (curr?.formatKey !== undefined) {
-        const format = curr.format ?? null;
-        styleId = format == null ? 0 : documentController.styleTable.intern(format);
-      } else if (prev?.formatKey !== undefined) {
-        // `format` key removed. Treat as explicit clear even though the key is now absent.
+      if (shouldMaskFormat) {
         styleId = 0;
+      } else {
+        if (curr?.formatKey !== undefined) {
+          const format = curr.format ?? null;
+          styleId = format == null ? 0 : documentController.styleTable.intern(format);
+        } else if (prev?.formatKey !== undefined) {
+          // `format` key removed. Treat as explicit clear even though the key is now absent.
+          styleId = 0;
+        }
       }
 
       const next =

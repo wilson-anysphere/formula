@@ -77,31 +77,50 @@ test("CollabSession↔DocumentController binder masks unreadable remote values/f
   const dcB = new DocumentController();
 
   const binderA = await bindCollabSessionToDocumentController({ session: sessionA, documentController: dcA });
-  const binderB = await bindCollabSessionToDocumentController({ session: sessionB, documentController: dcB });
+  const binderB = await bindCollabSessionToDocumentController({
+    session: sessionB,
+    documentController: dcB,
+    maskCellFormat: true,
+  });
 
   // Perform edits via DocumentController (typical UI path) so we exercise
   // DocumentController→Yjs propagation as well.
   dcA.setCellValue("Sheet1", "A1", "super secret");
+  dcA.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
   dcA.setCellFormula("Sheet1", "B1", "=TOP_SECRET()");
+  dcA.setRangeFormat("Sheet1", "B1", { fill: { color: "#ff0000" } });
+
+  await waitForCondition(() => {
+    const a1 = sessionB.cells.get("Sheet1:0:0");
+    const b1 = sessionB.cells.get("Sheet1:0:1");
+    return (
+      a1 &&
+      typeof a1.get === "function" &&
+      a1.get("format") != null &&
+      b1 &&
+      typeof b1.get === "function" &&
+      b1.get("format") != null
+    );
+  });
 
   await waitForCondition(() => {
     const cellA = dcA.getCell("Sheet1", "A1");
-    return cellA.value === "super secret" && cellA.formula == null;
+    return cellA.value === "super secret" && cellA.formula == null && cellA.styleId !== 0;
   });
 
   await waitForCondition(() => {
     const cellB = dcB.getCell("Sheet1", "A1");
-    return cellB.value === "###" && cellB.formula == null;
+    return cellB.value === "###" && cellB.formula == null && cellB.styleId === 0;
   });
 
   await waitForCondition(() => {
     const cellA = dcA.getCell("Sheet1", "B1");
-    return cellA.formula === "=TOP_SECRET()" && cellA.value == null;
+    return cellA.formula === "=TOP_SECRET()" && cellA.value == null && cellA.styleId !== 0;
   });
 
   await waitForCondition(() => {
     const cellB = dcB.getCell("Sheet1", "B1");
-    return cellB.value === "###" && cellB.formula == null;
+    return cellB.value === "###" && cellB.formula == null && cellB.styleId === 0;
   });
 
   binderA.destroy();
@@ -192,19 +211,36 @@ test("CollabSession↔DocumentController binder encrypts protected cells and dec
   const dcB = new DocumentController();
 
   const binderA = await bindCollabSessionToDocumentController({ session: sessionA, documentController: dcA });
-  let binderB = await bindCollabSessionToDocumentController({ session: sessionB, documentController: dcB });
+  let binderB = await bindCollabSessionToDocumentController({
+    session: sessionB,
+    documentController: dcB,
+    maskCellFormat: true,
+  });
 
   // Edit through the DocumentController path so binder is responsible for encryption.
   dcA.setCellValue("Sheet1", "A1", "top-secret");
+  dcA.setRangeFormat("Sheet1", "A1", { font: { italic: true } });
 
   await waitForCondition(() => {
     const cellA = dcA.getCell("Sheet1", "A1");
-    return cellA.value === "top-secret" && cellA.formula == null;
+    return cellA.value === "top-secret" && cellA.formula == null && cellA.styleId !== 0;
+  });
+
+  // Ensure formatting has propagated into B's underlying Yjs doc before asserting
+  // the UI-level styleId is suppressed.
+  await waitForCondition(() => {
+    const cellMapB = sessionB.cells.get("Sheet1:0:0");
+    return (
+      cellMapB &&
+      typeof cellMapB.get === "function" &&
+      cellMapB.get("enc") != null &&
+      cellMapB.get("format") != null
+    );
   });
 
   await waitForCondition(() => {
     const cellB = dcB.getCell("Sheet1", "A1");
-    return cellB.value === "###" && cellB.formula == null;
+    return cellB.value === "###" && cellB.formula == null && cellB.styleId === 0;
   });
 
   await waitForCondition(() => {
@@ -218,15 +254,23 @@ test("CollabSession↔DocumentController binder encrypts protected cells and dec
   assert.equal(cellMap.get("value"), undefined);
   assert.equal(cellMap.get("formula"), undefined);
   assert.ok(cellMap.get("enc"), "expected encrypted payload under `enc`");
+  assert.ok(cellMap.get("format"), "expected plaintext `format` alongside encrypted payload");
   assert.equal(JSON.stringify(cellMap.toJSON()).includes("top-secret"), false);
 
   // Now "grant" the key on B by recreating the session and re-binding.
   binderB.destroy();
   sessionB.destroy();
   const sessionBWithKey = createCollabSession({ doc: docB, encryption: { keyForCell: keyForA1 } });
-  binderB = await bindCollabSessionToDocumentController({ session: sessionBWithKey, documentController: dcB });
+  binderB = await bindCollabSessionToDocumentController({
+    session: sessionBWithKey,
+    documentController: dcB,
+    maskCellFormat: true,
+  });
 
-  await waitForCondition(() => dcB.getCell("Sheet1", "A1").value === "top-secret");
+  await waitForCondition(() => {
+    const cell = dcB.getCell("Sheet1", "A1");
+    return cell.value === "top-secret" && cell.styleId !== 0;
+  });
 
   binderA.destroy();
   binderB.destroy();

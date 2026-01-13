@@ -2585,13 +2585,19 @@ export async function bindCollabSessionToDocumentController(options: {
   defaultSheetId?: string;
   userId?: string | null;
   /**
+   * When true, suppress per-cell formatting for masked cells (unreadable due to
+   * permissions, or encrypted without an available key). Defaults to false to
+   * preserve existing formatting semantics.
+   */
+  maskCellFormat?: boolean;
+  /**
    * Opt-in binder write semantics needed for `FormulaConflictMonitor` to reliably
    * detect true offline/concurrent conflicts when edits flow through the desktop
    * UI path (DocumentController → binder → Yjs).
    */
   formulaConflictsMode?: "off" | "formula" | "formula+value";
 }): Promise<DocumentControllerBinder> {
-  const { session, documentController, undoService, defaultSheetId, userId, formulaConflictsMode } = options ?? ({} as any);
+  const { session, documentController, undoService, defaultSheetId, userId, maskCellFormat, formulaConflictsMode } = options ?? ({} as any);
   if (!session) throw new Error("bindCollabSessionToDocumentController requires { session }");
   if (!documentController)
     throw new Error("bindCollabSessionToDocumentController requires { documentController }");
@@ -2638,6 +2644,7 @@ export async function bindCollabSessionToDocumentController(options: {
     // Use the standard enterprise mask. The binder also uses this hook for
     // encrypted cells that cannot be decrypted.
     maskCellValue: (value) => maskCellValue(value),
+    maskCellFormat,
     formulaConflictsMode,
   }) as DocumentControllerBinder;
 }
