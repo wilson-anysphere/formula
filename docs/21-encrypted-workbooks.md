@@ -217,6 +217,8 @@ Useful entrypoints when working on encrypted workbook support:
         `Error::UnsupportedOoxmlEncryption`
       - legacy `.xls` `FILEPASS`: `Error::EncryptedWorkbook` (until password plumbing is added)
 - **Standard (CryptoAPI) helpers:**
+  - End-to-end decrypt (OLE wrapper → decrypted ZIP bytes; Agile + Standard):
+    `crates/formula-office-crypto`
   - Parse `EncryptionInfo`, derive/verify password key:
     `crates/formula-offcrypto`
   - Decrypt `EncryptedPackage` (given a derived key + verifier salt):
