@@ -33,36 +33,41 @@ test("Ribbon schema includes Data → Queries & Connections controls", () => {
   }
 });
 
-test("Desktop main.ts wires Data → Queries & Connections controls to the panel + refresh", () => {
-  const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+test("Data → Queries & Connections ribbon commands are registered in CommandRegistry (not wired only in main.ts)", () => {
+  const commandsPath = path.join(__dirname, "..", "src", "commands", "registerDataQueriesCommands.ts");
+  const commands = fs.readFileSync(commandsPath, "utf8");
 
-  // Toggle opens/closes the DATA_QUERIES panel via ribbon toggle overrides.
-  assert.match(main, /\btoggleOverrides:\s*\{[\s\S]*?["']data\.queriesConnections\.queriesConnections["']\s*:/m);
-  assert.match(main, /\bPanelIds\.DATA_QUERIES\b/);
-  assert.match(main, /\bopenPanel\(PanelIds\.DATA_QUERIES\)/);
-  assert.match(main, /\bclosePanel\(PanelIds\.DATA_QUERIES\)/);
-
-  // Pressed state syncs from layout placement.
-  assert.match(
-    main,
-    /"data\.queriesConnections\.queriesConnections":\s*isPanelOpen\(\s*PanelIds\.DATA_QUERIES\s*\)/,
-    "Expected ribbon pressed state to reflect whether the Data Queries panel is open",
-  );
-
-  // Refresh All wires to powerQueryService.refreshAll().
-  const refreshCommandIds = [
+  // Ensure all ribbon ids have corresponding built-in command registrations.
+  const commandIds = [
+    "data.queriesConnections.queriesConnections",
     "data.queriesConnections.refreshAll",
     "data.queriesConnections.refreshAll.refresh",
     "data.queriesConnections.refreshAll.refreshAllConnections",
     "data.queriesConnections.refreshAll.refreshAllQueries",
   ];
-  for (const id of refreshCommandIds) {
+  for (const id of commandIds) {
     assert.match(
-      main,
-      new RegExp(`\\bcommandId\\s*===\\s*["']${escapeRegExp(id)}["']`),
-      `Expected main.ts to handle refresh command id ${id}`,
+      commands,
+      new RegExp(`["']${escapeRegExp(id)}["']`),
+      `Expected registerDataQueriesCommands.ts to reference command id ${id}`,
     );
   }
-  assert.match(main, /\brefreshAll\(\)/);
+  assert.match(commands, /\bregisterBuiltinCommand\(/);
+
+  const mainPath = path.join(__dirname, "..", "src", "main.ts");
+  const main = fs.readFileSync(mainPath, "utf8");
+
+  // main.ts should register the commands and avoid ribbon-only wiring.
+  assert.match(main, /\bregisterDataQueriesCommands\(/);
+  assert.doesNotMatch(main, /\btoggleOverrides:\s*\{[\s\S]*?["']data\.queriesConnections\.queriesConnections["']\s*:/m);
+  for (const id of commandIds.slice(1)) {
+    assert.doesNotMatch(
+      main,
+      new RegExp(`\\bcommandId\\s*===\\s*["']${escapeRegExp(id)}["']`),
+      `Did not expect main.ts to special-case refresh command id ${id}`,
+    );
+  }
+
+  // Pressed state sync should still reflect whether the Data Queries panel is open.
+  assert.match(main, /"data\.queriesConnections\.queriesConnections":\s*isPanelOpen\(\s*PanelIds\.DATA_QUERIES\s*\)/);
 });

@@ -135,6 +135,7 @@ import { registerDesktopCommands } from "./commands/registerDesktopCommands.js";
 import { registerFormatFontDropdownCommands } from "./commands/registerFormatFontDropdownCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
 import { FORMAT_PAINTER_COMMAND_ID, registerFormatPainterCommand } from "./commands/formatPainterCommand.js";
+import { registerDataQueriesCommands } from "./commands/registerDataQueriesCommands.js";
 import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
 import type { GridLimits, Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
@@ -7474,6 +7475,13 @@ registerFormatPainterCommand({
   },
 });
 
+registerDataQueriesCommands({
+  commandRegistry,
+  layoutController: ribbonLayoutController,
+  getPowerQueryService: () => powerQueryService,
+  showToast,
+  notify,
+});
 // Home → Font dropdown actions are registered as canonical `format.*` commands so
 // ribbon actions and the command palette share a single command surface.
 registerFormatFontDropdownCommands({
@@ -8072,18 +8080,14 @@ const ribbonActions = createRibbonActionsFromCommands({
       });
       app.focus();
     },
-    "data.queriesConnections.queriesConnections": (pressed) => {
-      const layoutController = ribbonLayoutController;
-      if (!layoutController) {
-        showToast("Queries panel is not available (layout controller missing).", "error");
-        // Ensure the ribbon toggle state reflects the actual panel placement.
-        scheduleRibbonSelectionFormatStateUpdate();
-        app.focus();
-        return;
+    "view.toggleShowFormulas": (pressed) => {
+      // Route all ribbon "Show Formulas" toggles through the canonical command so
+      // ribbon, command palette, and keybindings share the same logic/guards.
+      if (app.getShowFormulas() !== pressed) {
+        void commandRegistry.executeCommand("view.toggleShowFormulas").catch((err) => {
+          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+        });
       }
-
-      if (pressed) layoutController.openPanel(PanelIds.DATA_QUERIES);
-      else layoutController.closePanel(PanelIds.DATA_QUERIES);
       app.focus();
     },
     "view.togglePerformanceStats": (pressed) => {
@@ -8200,72 +8204,6 @@ function handleRibbonCommand(commandId: string): void {
     const cmd = commandRegistry.getCommand(commandId);
     if (cmd?.source.kind === "builtin") {
       executeBuiltinCommand(commandId);
-      return;
-    }
-
-    if (
-      commandId === "data.queriesConnections.refreshAll" ||
-      commandId === "data.queriesConnections.refreshAll.refresh" ||
-      commandId === "data.queriesConnections.refreshAll.refreshAllConnections" ||
-      commandId === "data.queriesConnections.refreshAll.refreshAllQueries"
-    ) {
-      void (async () => {
-        const service = powerQueryService;
-        if (!service) {
-          showToast("Queries service not available");
-          return;
-        }
-
-        try {
-          await service.ready;
-        } catch (err) {
-          console.error("Power Query service failed to initialize:", err);
-          showToast("Queries service not available", "error");
-          return;
-        }
-
-        const queries = service.getQueries();
-        if (!queries.length) {
-          showToast("No queries to refresh");
-          return;
-        }
-
-        const startedAtMs = Date.now();
-        const queryCount = queries.length;
-
-        const shouldNotifyInBackground = (): boolean => {
-          try {
-            if (typeof document === "undefined") return false;
-            // Only notify when the app is not focused / not visible (user likely switched away).
-            if ((document as any).hidden) return true;
-            if (typeof document.hasFocus === "function") return !document.hasFocus();
-            return false;
-          } catch {
-            return false;
-          }
-        };
-
-        try {
-          const handle = service.refreshAll();
-          await handle.promise;
-          const elapsedMs = Date.now() - startedAtMs;
-          // Avoid spamming notifications for extremely fast refreshes; only notify when the
-          // user likely switched away or when the refresh took long enough to be meaningful.
-          if (shouldNotifyInBackground() || elapsedMs >= 5_000) {
-            const noun = queryCount === 1 ? "query" : "queries";
-            void notify({ title: "Power Query refresh complete", body: `Refreshed ${queryCount} ${noun}.` });
-          }
-        } catch (err) {
-          console.error("Failed to refresh all queries:", err);
-          showToast(`Failed to refresh queries: ${String(err)}`, "error");
-          if (shouldNotifyInBackground()) {
-            void notify({ title: "Power Query refresh failed", body: "One or more queries failed to refresh." });
-          }
-        }
-      })();
-      // Don't wait for the refresh to complete; return focus immediately so long-running
-      // refresh jobs don't steal focus later when their promise settles.
-      app.focus();
       return;
     }
 
