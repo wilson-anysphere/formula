@@ -9,7 +9,8 @@ export class CursorTabCompletionClient {
    * @param {{
    *   baseUrl?: string,
    *   fetchImpl?: typeof fetch,
-   *   timeoutMs?: number
+   *   timeoutMs?: number,
+   *   getAuthHeaders?: () => (Record<string,string> | Promise<Record<string,string>>)
    * }} [options]
    */
   constructor(options = {}) {
@@ -19,10 +20,11 @@ export class CursorTabCompletionClient {
     this.fetchImpl = options.fetchImpl ?? fetch;
     // Tab completion has a strict latency budget.
     this.timeoutMs = options.timeoutMs ?? 100;
+    this.getAuthHeaders = options.getAuthHeaders;
   }
 
   /**
-   * @param {{ input: string; cursorPosition: number; cellA1: string }} req
+   * @param {{ input: string; cursorPosition: number; cellA1: string; signal?: AbortSignal }} req
    * @returns {Promise<string>}
    */
   async completeTabCompletion(req) {
@@ -30,15 +32,44 @@ export class CursorTabCompletionClient {
     const cursorPosition = Number.isInteger(req?.cursorPosition) ? req.cursorPosition : input.length;
     const cellA1 = (req?.cellA1 ?? "").toString();
 
+    /** @type {AbortSignal | undefined} */
+    const externalSignal = req?.signal;
+    if (externalSignal?.aborted) return "";
+
     const controller = new AbortController();
     const timeoutMs = this.timeoutMs;
     const timeout =
       Number.isFinite(timeoutMs) && timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
 
+    const onExternalAbort = externalSignal
+      ? () => {
+          controller.abort(externalSignal.reason);
+        }
+      : null;
+
+    if (externalSignal && onExternalAbort) {
+      // Use a separate AbortController so we can combine caller cancellation with
+      // the internal latency budget timeout.
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+      // In case the signal aborted between the early check above and registering
+      // the event listener.
+      if (externalSignal.aborted) onExternalAbort();
+    }
+
     try {
+      if (controller.signal.aborted) return "";
+
+      const authHeaders =
+        typeof this.getAuthHeaders === "function"
+          ? await this.getAuthHeaders()
+          : null;
+      if (controller.signal.aborted) return "";
+
+      const headers = { ...(authHeaders ?? {}), "Content-Type": "application/json" };
+
       const res = await this.fetchImpl(this.endpointUrl, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers,
         // Cursor authentication is handled by the session (cookies). When the
         // backend is cross-origin, this requires CORS support + credentials.
         credentials: "include",
@@ -59,6 +90,7 @@ export class CursorTabCompletionClient {
       return "";
     } finally {
       if (timeout) clearTimeout(timeout);
+      if (externalSignal && onExternalAbort) externalSignal.removeEventListener("abort", onExternalAbort);
     }
   }
 }

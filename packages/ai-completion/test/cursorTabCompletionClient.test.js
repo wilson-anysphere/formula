@@ -28,7 +28,10 @@ test("CursorTabCompletionClient sends a structured request body", async () => {
 
   assert.equal(seen?.url, "http://example.test/api/ai/tab-completion");
   assert.equal(seen?.init?.method, "POST");
-  assert.equal(seen?.init?.headers?.["content-type"], "application/json");
+  assert.equal(
+    seen?.init?.headers?.["Content-Type"] ?? seen?.init?.headers?.["content-type"],
+    "application/json",
+  );
   assert.equal(seen?.init?.credentials, "include");
   assert.equal(typeof seen?.init?.signal?.aborted, "boolean");
 
@@ -85,6 +88,70 @@ test("CursorTabCompletionClient aborts the request when the timeout budget is ex
   });
 
   const completion = await client.completeTabCompletion({ input: "=1+", cursorPosition: 3, cellA1: "A1" });
+  assert.equal(completion, "");
+  assert.equal(sawAbort, true);
+});
+
+test("CursorTabCompletionClient merges headers from getAuthHeaders", async () => {
+  /** @type {Record<string, string> | null} */
+  let headersSeen = null;
+
+  const fetchImpl = async (_url, init) => {
+    headersSeen = init.headers;
+    return {
+      ok: true,
+      async json() {
+        return { completion: "ok" };
+      },
+    };
+  };
+
+  const client = new CursorTabCompletionClient({
+    baseUrl: "http://example.test",
+    fetchImpl,
+    timeoutMs: 500,
+    getAuthHeaders() {
+      return { "x-cursor-test-auth": "yes" };
+    },
+  });
+
+  const completion = await client.completeTabCompletion({ input: "=", cursorPosition: 1, cellA1: "A1" });
+  assert.equal(completion, "ok");
+  assert.equal(headersSeen?.["x-cursor-test-auth"], "yes");
+  assert.equal(headersSeen?.["Content-Type"] ?? headersSeen?.["content-type"], "application/json");
+});
+
+test("CursorTabCompletionClient resolves to empty string when an external AbortSignal is aborted", async () => {
+  let sawAbort = false;
+
+  const fetchImpl = async (_url, init) => {
+    return await new Promise((_resolve, reject) => {
+      init.signal.addEventListener("abort", () => {
+        sawAbort = true;
+        const err = new Error("aborted");
+        err.name = "AbortError";
+        reject(err);
+      });
+    });
+  };
+
+  const client = new CursorTabCompletionClient({
+    baseUrl: "http://example.test",
+    fetchImpl,
+    timeoutMs: 500,
+  });
+
+  const controller = new AbortController();
+  const promise = client.completeTabCompletion({
+    input: "=1+",
+    cursorPosition: 3,
+    cellA1: "A1",
+    signal: controller.signal,
+  });
+
+  controller.abort();
+
+  const completion = await promise;
   assert.equal(completion, "");
   assert.equal(sawAbort, true);
 });
