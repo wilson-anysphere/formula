@@ -36,6 +36,7 @@ pub struct ChartModel {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plot_area_layout: Option<ManualLayoutModel>,
     pub axes: Vec<AxisModel>,
+    #[serde(deserialize_with = "deserialize_series_vec")]
     pub series: Vec<SeriesModel>,
     /// Built-in chart style index (`c:chartSpace/c:style/@val`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -75,6 +76,25 @@ pub struct ChartModel {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_data_auto_update: Option<bool>,
     pub diagnostics: Vec<ChartDiagnostic>,
+}
+
+fn deserialize_series_vec<'de, D>(deserializer: D) -> Result<Vec<SeriesModel>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let mut series = Vec::<SeriesModel>::deserialize(deserializer)?;
+    // Older serialized models (including fixtures) predate `SeriesModel::{idx, order}`.
+    // When absent, Excel implies a default `idx`/`order` matching the series' position.
+    for (pos, ser) in series.iter_mut().enumerate() {
+        let pos_u32 = pos as u32;
+        if ser.idx.is_none() {
+            ser.idx = Some(pos_u32);
+        }
+        if ser.order.is_none() {
+            ser.order = Some(pos_u32);
+        }
+    }
+    Ok(series)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -324,6 +344,16 @@ pub struct DataLabelsModel {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SeriesModel {
+    /// Series index (`c:ser/c:idx/@val`, `cx:ser/cx:idx/@val`).
+    ///
+    /// Excel uses this value as a stable identity for a series, independent of display order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idx: Option<u32>,
+    /// Series order (`c:ser/c:order/@val`, `cx:ser/cx:order/@val`).
+    ///
+    /// This generally matches the series' visual ordering.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<u32>,
     pub name: Option<TextModel>,
     pub categories: Option<SeriesTextData>,
     pub values: Option<SeriesNumberData>,

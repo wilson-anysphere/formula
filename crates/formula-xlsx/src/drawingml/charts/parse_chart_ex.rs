@@ -435,6 +435,17 @@ fn parse_series(
     chart_data: &HashMap<String, ChartExDataDefinition>,
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> SeriesModel {
+    let idx = series_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "idx")
+        .and_then(|n| n.attribute("val"))
+        .and_then(|v| v.parse::<u32>().ok());
+
+    let order = series_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "order")
+        .and_then(|n| n.attribute("val"))
+        .and_then(|v| v.parse::<u32>().ok());
     let name = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "tx")
@@ -496,6 +507,8 @@ fn parse_series(
     }
 
     SeriesModel {
+        idx,
+        order,
         name,
         categories,
         values,

@@ -320,6 +320,17 @@ fn parse_series(
     diagnostics: &mut Vec<ChartDiagnostic>,
     plot_index: Option<usize>,
 ) -> SeriesModel {
+    let idx = series_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "idx")
+        .and_then(|n| n.attribute("val"))
+        .and_then(|v| v.parse::<u32>().ok());
+
+    let order = series_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "order")
+        .and_then(|n| n.attribute("val"))
+        .and_then(|v| v.parse::<u32>().ok());
     let name = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "tx")
@@ -371,6 +382,8 @@ fn parse_series(
         child_attr(series_node, "invertIfNegative", "val").map(parse_ooxml_bool);
 
     SeriesModel {
+        idx,
+        order,
         name,
         categories,
         values,
