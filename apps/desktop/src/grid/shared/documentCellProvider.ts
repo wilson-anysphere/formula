@@ -86,9 +86,19 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function looksLikeExternalHyperlink(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  // Avoid interpreting arbitrary "foo:bar" values as URLs; require either a
+  // scheme separator (`://`) or a `mailto:` prefix.
+  if (/^mailto:/i.test(trimmed)) return true;
+  return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed);
+}
+
 export class DocumentCellProvider implements CellProvider {
   private readonly headerStyle: CellStyle = { fontWeight: "600", textAlign: "center" };
   private readonly rowHeaderStyle: CellStyle = { fontWeight: "600", textAlign: "end" };
+  private resolvedLinkColor: string | null = null;
   private readonly options: {
     document: DocumentController;
     /**
@@ -682,11 +692,22 @@ export class DocumentCellProvider implements CellProvider {
     return undefined;
   }
 
+  private resolveLinkColor(): string {
+    if (this.resolvedLinkColor != null) return this.resolvedLinkColor;
+    // Canvas renderers cannot consume raw `var(--token)` values, so resolve the
+    // computed color now. We intentionally use a system color fallback so unit
+    // tests / non-DOM environments remain readable.
+    const resolved = resolveCssVar("--formula-grid-link", { fallback: "LinkText" });
+    this.resolvedLinkColor = resolved;
+    return resolved;
+  }
+
   invalidateAll(): void {
     this.sheetCaches.clear();
     this.lastSheetId = null;
     this.lastSheetCache = null;
     this.resolvedFormatCache.clear();
+    this.resolvedLinkColor = null;
     for (const listener of this.listeners) listener({ type: "invalidateAll" });
   }
 
@@ -880,6 +901,30 @@ export class DocumentCellProvider implements CellProvider {
             this.numericAlignmentStyleCache.set(resolvedStyle, aligned);
           }
           resolvedStyle = aligned;
+        }
+      }
+    }
+
+    // Apply default hyperlink styling for URL-like values so users can visually
+    // identify Ctrl/Cmd+clickable links.
+    //
+    // This is intentionally theme-token driven (`--link` / `--formula-grid-link`)
+    // so links remain readable across light/dark/high-contrast themes.
+    if (richText == null && typeof value === "string" && looksLikeExternalHyperlink(value)) {
+      const needsUnderline = resolvedStyle?.underline === undefined;
+      const needsColor = resolvedStyle?.color === undefined;
+      if (needsUnderline || needsColor) {
+        const linkColor = needsColor ? this.resolveLinkColor() : null;
+        if (!resolvedStyle) {
+          const style: any = {};
+          if (needsColor && linkColor) style.color = linkColor;
+          if (needsUnderline) style.underline = true;
+          resolvedStyle = style as CellStyle;
+        } else {
+          const next: any = { ...resolvedStyle };
+          if (needsColor && linkColor) next.color = linkColor;
+          if (needsUnderline) next.underline = true;
+          resolvedStyle = next as CellStyle;
         }
       }
     }

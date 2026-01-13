@@ -1,6 +1,6 @@
-// Prefer a design token instead of hardcoding hex colors; downstream themes can
-// map `--accent` appropriately.
-export const DEFAULT_HYPERLINK_COLOR = "var(--accent)";
+// Prefer a dedicated design token instead of hardcoding hex colors so hyperlinks
+// remain legible across light/dark/high-contrast themes.
+export const DEFAULT_HYPERLINK_COLOR = "var(--link)";
 
 /**
  * Return a CSS style object for rendering hyperlink text.

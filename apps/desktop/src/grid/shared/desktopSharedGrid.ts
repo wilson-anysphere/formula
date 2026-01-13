@@ -551,6 +551,10 @@ export class DesktopSharedGrid {
     // we want shared-grid theme updates (via MutationObserver / matchMedia) to be
     // reflected immediately.
     if (this.renderer.getTheme() !== before) {
+      // Some cell providers (e.g. DocumentCellProvider) resolve CSS variables into
+      // concrete canvas colors for per-cell styling (hyperlinks, default borders,
+      // etc.). When the theme changes, those cached styles need to be recomputed.
+      (this.provider as any)?.invalidateAll?.();
       this.renderer.renderImmediately();
     }
   }

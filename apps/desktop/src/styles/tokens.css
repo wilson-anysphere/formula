@@ -52,6 +52,8 @@
   --accent-light: #e6f0ff;
   --accent-bg: var(--accent-light);
   --accent-border: var(--accent);
+  /* Hyperlinks */
+  --link: #0969da;
 
   /* Semantic */
   --error: #d32f2f;
@@ -87,6 +89,7 @@
   --formula-grid-header-bg: var(--grid-header-bg);
   --formula-grid-header-text: var(--grid-header-text);
   --formula-grid-cell-text: var(--text-primary);
+  --formula-grid-link: var(--link);
   --formula-grid-error-text: var(--error);
   --formula-grid-selection-fill: var(--selection-fill);
   --formula-grid-selection-border: var(--selection-border);
@@ -202,6 +205,7 @@
   --accent-hover: #51aeff;
   --accent-active: #499ef2;
   --accent-light: #1a3a5c;
+  --link: #4da6ff;
 
   --error: #f44336;
   --warning: #ff9800;
@@ -254,6 +258,7 @@
   --accent-light: Highlight;
   --accent-bg: Highlight;
   --accent-border: Highlight;
+  --link: LinkText;
 
   --error: CanvasText;
   --warning: CanvasText;
@@ -358,6 +363,7 @@
     --accent-light: Highlight;
     --accent-bg: Highlight;
     --accent-border: Highlight;
+    --link: LinkText;
 
     --error: CanvasText;
     --warning: CanvasText;
