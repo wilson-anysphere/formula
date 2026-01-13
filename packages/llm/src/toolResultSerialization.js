@@ -24,7 +24,7 @@ const CHARS_PER_TOKEN_APPROX = 4;
 export function serializeToolResultForModel(params) {
   const maxChars = resolveMaxChars(params);
   const toolName = String(params?.toolCall?.name ?? "");
- 
+
   // Prefer deterministic, per-tool summaries for high-volume tools.
   if (toolName === "read_range") {
     return serializeReadRange({ toolCall: params.toolCall, result: params.result, maxChars });
@@ -32,7 +32,10 @@ export function serializeToolResultForModel(params) {
   if (toolName === "filter_range") {
     return serializeFilterRange({ toolCall: params.toolCall, result: params.result, maxChars });
   }
- 
+  if (toolName === "detect_anomalies") {
+    return serializeDetectAnomalies({ toolCall: params.toolCall, result: params.result, maxChars });
+  }
+
   return serializeGeneric({ toolCall: params.toolCall, result: params.result, maxChars });
 }
  
@@ -155,7 +158,97 @@ function serializeFilterRange(params) {
     { tool: base.tool, ok: base.ok, truncated: true }
   );
 }
- 
+
+/**
+ * @param {{ toolCall: ToolCall, result: unknown, maxChars: number }} params
+ * @returns {string}
+ */
+function serializeDetectAnomalies(params) {
+  const base = normalizeToolExecutionEnvelope(params.toolCall, params.result);
+  const data = base.data && typeof base.data === "object" ? base.data : null;
+  const range = typeof data?.range === "string" ? data.range : safeRangeFromCall(params.toolCall);
+  const method =
+    typeof data?.method === "string"
+      ? data.method
+      : (() => {
+          const args = params.toolCall?.arguments;
+          if (args && typeof args === "object" && !Array.isArray(args) && typeof args.method === "string") return args.method;
+          return undefined;
+        })();
+
+  const anomalies = Array.isArray(data?.anomalies) ? data.anomalies : null;
+
+  // Prefer explicit total_anomalies when the tool has already truncated the list.
+  const totalAnomalies =
+    typeof data?.total_anomalies === "number"
+      ? data.total_anomalies
+      : typeof data?.count === "number"
+        ? data.count
+        : anomalies
+          ? anomalies.length
+          : undefined;
+
+  const attempts = [200, 100, 50, 20, 10, 5];
+  for (const limit of attempts) {
+    const preview = anomalies
+      ? anomalies.slice(0, limit).map((entry) => {
+          if (!entry || typeof entry !== "object") return entry;
+          const record = /** @type {any} */ (entry);
+          const out = {
+            ...(typeof record.cell === "string" ? { cell: record.cell } : {}),
+            ...("value" in record ? { value: record.value ?? null } : {}),
+            ...("score" in record ? { score: record.score ?? null } : {})
+          };
+          // If we couldn't extract known fields, fall back to a truncated string representation.
+          if (!("cell" in out) && !("value" in out) && !("score" in out)) {
+            return truncatePrimitive(record, 200);
+          }
+          return out;
+        })
+      : undefined;
+
+    const truncated = typeof totalAnomalies === "number" ? totalAnomalies > (preview ? preview.length : 0) : false;
+
+    const payload = {
+      ...base,
+      data: {
+        ...(range ? { range } : {}),
+        ...(method ? { method } : {}),
+        ...(typeof totalAnomalies === "number"
+          ? typeof data?.total_anomalies === "number"
+            ? { total_anomalies: totalAnomalies }
+            : { count: totalAnomalies }
+          : {}),
+        ...(preview ? { anomalies: preview } : {}),
+        ...(anomalies ? { truncated } : {})
+      }
+    };
+
+    const json = safeJsonStringify(payload);
+    if (json.length <= params.maxChars) return json;
+  }
+
+  return finalizeJson(
+    safeJsonStringify({
+      tool: base.tool,
+      ok: base.ok,
+      ...(base.error ? { error: base.error } : {}),
+      data: {
+        ...(range ? { range } : {}),
+        ...(method ? { method } : {}),
+        ...(typeof totalAnomalies === "number"
+          ? typeof data?.total_anomalies === "number"
+            ? { total_anomalies: totalAnomalies }
+            : { count: totalAnomalies }
+          : {}),
+        truncated: true
+      }
+    }),
+    params.maxChars,
+    { tool: base.tool, ok: base.ok, truncated: true }
+  );
+}
+
 /**
  * Generic fallback: deep truncation of arbitrary results.
  *
