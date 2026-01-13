@@ -22,6 +22,25 @@ const SMARTART_GRAPHIC_FRAME_XML = `<xdr:graphicFrame macro="">
       </a:graphic>
     </xdr:graphicFrame>`;
 
+// Full anchor payload for the same object (also from `drawing1.xml`). The model
+// can preserve either the `graphicFrame` subtree or the containing anchor.
+const SMARTART_TWO_CELL_ANCHOR_XML = `<xdr:twoCellAnchor>
+    <xdr:from>
+      <xdr:col>1</xdr:col>
+      <xdr:colOff>0</xdr:colOff>
+      <xdr:row>1</xdr:row>
+      <xdr:rowOff>0</xdr:rowOff>
+    </xdr:from>
+    <xdr:to>
+      <xdr:col>6</xdr:col>
+      <xdr:colOff>0</xdr:colOff>
+      <xdr:row>10</xdr:row>
+      <xdr:rowOff>0</xdr:rowOff>
+    </xdr:to>
+    ${SMARTART_GRAPHIC_FRAME_XML}
+    <xdr:clientData/>
+  </xdr:twoCellAnchor>`;
+
 function createStubCanvasContext(): {
   ctx: CanvasRenderingContext2D;
   calls: Array<{ method: string; args: unknown[] }>;
@@ -91,6 +110,11 @@ describe("DrawingML graphicFrame detection", () => {
   it("detects xdr:graphicFrame in SmartArt drawing XML", () => {
     expect(isGraphicFrame(SMARTART_GRAPHIC_FRAME_XML)).toBe(true);
     expect(graphicFramePlaceholderLabel(SMARTART_GRAPHIC_FRAME_XML)).toBe("SmartArt");
+  });
+
+  it("detects xdr:graphicFrame when preserved as a full anchor subtree", () => {
+    expect(isGraphicFrame(SMARTART_TWO_CELL_ANCHOR_XML)).toBe(true);
+    expect(graphicFramePlaceholderLabel(SMARTART_TWO_CELL_ANCHOR_XML)).toBe("SmartArt");
   });
 });
 
