@@ -3,15 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
-const entitlementsPath = path.join(
-  repoRoot,
-  "apps",
-  "desktop",
-  "src-tauri",
-  "entitlements.plist"
-);
-const relativeEntitlementsPath = path.relative(repoRoot, entitlementsPath);
+const defaultRepoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 /**
  * @param {string} message
@@ -48,7 +40,77 @@ function hasTrueEntitlement(xml, key) {
   return /<true\s*\/>/.test(block);
 }
 
+/**
+ * @param {string[]} argv
+ * @returns {{ repoRoot: string; entitlementsPath: string }}
+ */
+function parseArgs(argv) {
+  let repoRoot = defaultRepoRoot;
+  /** @type {string | undefined} */
+  let entitlementsPath;
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--help" || arg === "-h") {
+      console.log(
+        [
+          "Validate macOS hardened-runtime entitlements required by WKWebView/JavaScriptCore.",
+          "",
+          "Usage:",
+          "  node scripts/check-macos-entitlements.mjs",
+          "  node scripts/check-macos-entitlements.mjs --root <repoRoot>",
+          "  node scripts/check-macos-entitlements.mjs --path <entitlements.plist>",
+          "",
+          "Defaults:",
+          "  --root defaults to the repository root (derived from this script's location).",
+          "  --path defaults to apps/desktop/src-tauri/entitlements.plist under --root.",
+          "",
+        ].join("\n"),
+      );
+      process.exit(0);
+    }
+
+    if (arg === "--root") {
+      const value = argv[i + 1];
+      if (!value) {
+        errBlock("macOS entitlements preflight failed", [`Missing value for --root.`]);
+        return { repoRoot, entitlementsPath: entitlementsPath ?? "" };
+      }
+      repoRoot = path.resolve(value);
+      i += 1;
+      continue;
+    }
+
+    if (arg === "--path") {
+      const value = argv[i + 1];
+      if (!value) {
+        errBlock("macOS entitlements preflight failed", [`Missing value for --path.`]);
+        return { repoRoot, entitlementsPath: entitlementsPath ?? "" };
+      }
+      entitlementsPath = value;
+      i += 1;
+      continue;
+    }
+  }
+
+  const resolvedEntitlementsPath = entitlementsPath
+    ? path.isAbsolute(entitlementsPath)
+      ? entitlementsPath
+      : path.resolve(repoRoot, entitlementsPath)
+    : path.join(repoRoot, "apps", "desktop", "src-tauri", "entitlements.plist");
+
+  return { repoRoot, entitlementsPath: resolvedEntitlementsPath };
+}
+
 function main() {
+  const { repoRoot, entitlementsPath } = parseArgs(process.argv.slice(2));
+  if (!entitlementsPath) {
+    // Argument parsing already reported an error.
+    return;
+  }
+
+  const relativeEntitlementsPath = path.relative(repoRoot, entitlementsPath);
+
   let xml;
   try {
     xml = readFileSync(entitlementsPath, "utf8");
@@ -88,4 +150,3 @@ function main() {
 }
 
 main();
-
