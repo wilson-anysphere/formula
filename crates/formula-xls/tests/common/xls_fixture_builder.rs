@@ -101,6 +101,34 @@ const SETUP_GRBIT_F_NOORIENT: u16 = 0x0040;
 
 // WSBOOL options.
 const WSBOOL_OPTION_FIT_TO_PAGE: u16 = 0x0100;
+// ---------------------------------------------------------------------------
+// BIFF8 AutoFilter helpers (AUTOFILTER record payload)
+// ---------------------------------------------------------------------------
+//
+// These helpers cover the minimal subset of [MS-XLS] AUTOFILTER/DOPER needed by
+// our importer tests:
+// - a single custom-filter criterion against a string or number
+// - no advanced filters (Top10, dynamic, etc)
+//
+// The importer’s real decoder (`biff/autofilter_criteria.rs`) expects the BIFF8
+// layout:
+//   [iEntry:u16][grbit:u16][DOPER1:8][DOPER2:8][XLUnicodeString...]
+// where string operand text is stored *after* the fixed-size DOPER payloads.
+//
+// Operator codes follow `AutoFilterOp::from_biff_code` in `autofilter_criteria.rs`.
+const AUTOFILTER_OP_NONE: u8 = 0;
+const AUTOFILTER_OP_EQUAL: u8 = 3;
+const AUTOFILTER_OP_GREATER_THAN: u8 = 5;
+
+// DOPER "vt" values are not exhaustively specified here; we pick values that the
+// importer’s best-effort decoder treats as the intended type.
+const AUTOFILTER_VT_EMPTY: u8 = 0;
+const AUTOFILTER_VT_STRING: u8 = 4;
+// Any vt not explicitly handled as empty/bool/string is treated as a number.
+const AUTOFILTER_VT_NUMBER: u8 = 0x1F;
+
+// AUTOFILTER.grbit flag: combine DOPER1/DOPER2 with AND when set, else OR.
+const AUTOFILTER_GRBIT_AND: u16 = 0x0001;
 
 const BOF_VERSION_BIFF8: u16 = 0x0600;
 const BOF_DT_WORKBOOK_GLOBALS: u16 = 0x0005;
@@ -1712,9 +1740,10 @@ fn build_page_setup_fixture_sheet_stream(xf_cell: u16, mode: PageSetupScalingMod
     push_record(&mut sheet, RECORD_BOTTOMMARGIN, &0.8f64.to_le_bytes());
 
     // Manual page breaks.
-    // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.
-    // Our fixture helpers accept the model’s “after which break occurs” form (0-based), so break
-    // after row 4 and after column 2.
+    //
+    // BIFF8 page breaks store the 0-based index of the first row/col *after* the break, while the
+    // model stores the 0-based row/col index after which the break occurs. The record helpers below
+    // take the model form (`breaks_after`) and encode BIFF values by adding 1.
     push_record(&mut sheet, RECORD_HPAGEBREAKS, &hpagebreaks_record(&[4]));
     push_record(&mut sheet, RECORD_VPAGEBREAKS, &vpagebreaks_record(&[2]));
 
@@ -2103,9 +2132,10 @@ fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
     push_record(&mut sheet, RECORD_WSBOOL, &0x0D01u16.to_le_bytes());
 
     // Manual page breaks.
-    // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.
-    // Our fixture helpers accept the model’s “after which break occurs” form (0-based).
-    // Breaks after row 2 and row 4, and after column 1 (i.e. between B and C).
+    //
+    // BIFF8 page breaks store the 0-based index of the first row/col *after* the break, while the
+    // model stores the 0-based row/col index after which the break occurs. The record helpers below
+    // take the model form (`breaks_after`) and encode BIFF values by adding 1.
     push_record(&mut sheet, RECORD_HPAGEBREAKS, &hpagebreaks_record(&[2, 4]));
     push_record(&mut sheet, RECORD_VPAGEBREAKS, &vpagebreaks_record(&[1]));
 
@@ -3660,7 +3690,8 @@ fn build_autofilter_filtermode_hidden_rows_sheet_stream(xf_cell: u16) -> Vec<u8>
     push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
 
     // Mark row 2 (1-based) as hidden via the ROW record.
-    // When FILTERMODE is present, the importer should *not* preserve this as a user-hidden row.
+    // When FILTERMODE is present, the importer should treat this as a filter-hidden row (not a
+    // user-hidden row).
     push_record(&mut sheet, RECORD_ROW, &row_record(1, true, 0, false));
 
     // Provide at least one cell so calamine returns a non-empty range.
@@ -3668,6 +3699,13 @@ fn build_autofilter_filtermode_hidden_rows_sheet_stream(xf_cell: u16) -> Vec<u8>
 
     // AUTOFILTERINFO: 2 columns (A..B).
     push_record(&mut sheet, RECORD_AUTOFILTERINFO, &2u16.to_le_bytes());
+    // AUTOFILTER: filter criteria for column 0 (`colId=0` in A1:B3).
+    //
+    // Criterion: column value equals "X".
+    let doper1 = autofilter_doper_string(AUTOFILTER_OP_EQUAL, "X");
+    let doper2 = autofilter_doper_none();
+    let autofilter = autofilter_record(0, false, &doper1, &doper2);
+    push_record(&mut sheet, RECORD_AUTOFILTER, &autofilter);
     // FILTERMODE indicates an active filter state (filtered rows).
     push_record(&mut sheet, RECORD_FILTERMODE, &[]);
 
@@ -14934,6 +14972,91 @@ fn colinfo_record(
     }
     out[8..10].copy_from_slice(&options.to_le_bytes());
     out
+}
+
+#[derive(Debug, Clone)]
+struct AutoFilterDoper {
+    bytes: [u8; 8],
+    trailing_string: Option<String>,
+}
+
+fn autofilter_record(
+    col: u16,
+    join_all: bool,
+    doper1: &AutoFilterDoper,
+    doper2: &AutoFilterDoper,
+) -> Vec<u8> {
+    // AUTOFILTER record payload [MS-XLS 2.4.31], minimal encoding compatible with
+    // `biff/autofilter_criteria.rs`:
+    // - iEntry (u16): 0-based column index in the sheet (not offset within the filter range)
+    // - grbit (u16): flags (bit 0 indicates AND)
+    // - DOPER1, DOPER2: 8 bytes each
+    // - optional trailing XLUnicodeString payloads for string DOPER values
+    let mut out = Vec::new();
+    out.extend_from_slice(&col.to_le_bytes());
+    let mut grbit = 0u16;
+    if join_all {
+        grbit |= AUTOFILTER_GRBIT_AND;
+    }
+    out.extend_from_slice(&grbit.to_le_bytes());
+    out.extend_from_slice(&doper1.bytes);
+    out.extend_from_slice(&doper2.bytes);
+    if let Some(s) = doper1.trailing_string.as_ref() {
+        write_unicode_string(&mut out, s);
+    }
+    if let Some(s) = doper2.trailing_string.as_ref() {
+        write_unicode_string(&mut out, s);
+    }
+    out
+}
+
+fn autofilter_doper_none() -> AutoFilterDoper {
+    // DOPER with op=None (no criterion).
+    let mut bytes = [0u8; 8];
+    bytes[0] = AUTOFILTER_VT_EMPTY;
+    bytes[1] = AUTOFILTER_OP_NONE;
+    AutoFilterDoper {
+        bytes,
+        trailing_string: None,
+    }
+}
+
+fn autofilter_doper_number(operator: u8, value: f64) -> AutoFilterDoper {
+    let mut bytes = [0u8; 8];
+    bytes[0] = AUTOFILTER_VT_NUMBER;
+    bytes[1] = operator;
+    bytes[4..8].copy_from_slice(&rk_number(value).to_le_bytes());
+    AutoFilterDoper {
+        bytes,
+        trailing_string: None,
+    }
+}
+
+fn autofilter_doper_string(operator: u8, value: &str) -> AutoFilterDoper {
+    let mut bytes = [0u8; 8];
+    bytes[0] = AUTOFILTER_VT_STRING;
+    bytes[1] = operator;
+    AutoFilterDoper {
+        bytes,
+        trailing_string: Some(value.to_string()),
+    }
+}
+
+fn rk_number(value: f64) -> u32 {
+    // Best-effort RK encoding used by BIFF DOPER values.
+    //
+    // For integers in the signed 30-bit range, use the integer RK form. Otherwise, store the high
+    // 30 bits of the f64 and drop the remaining bits (matching the lossy RK float form).
+    if value.fract() == 0.0 && value.is_finite() {
+        let i = value as i32;
+        if i >= -0x2000_0000 && i <= 0x1FFF_FFFF {
+            return ((i as u32) << 2) | 0x02;
+        }
+    }
+
+    let bits = value.to_bits();
+    let high30 = (bits >> 34) as u32;
+    high30 << 2
 }
 
 fn write_short_unicode_string(out: &mut Vec<u8>, s: &str) {

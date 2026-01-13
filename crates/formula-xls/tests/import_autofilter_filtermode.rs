@@ -1,5 +1,6 @@
 use std::io::Write;
 
+use formula_model::autofilter::{FilterCriterion, FilterValue};
 use formula_model::Range;
 use formula_model::{DefinedNameScope, XLNM_FILTER_DATABASE};
 
@@ -57,6 +58,17 @@ fn filtermode_preserves_filtered_rows_as_filter_hidden() {
         .as_ref()
         .expect("expected sheet.auto_filter to be set");
     assert_eq!(af.range, Range::from_a1("A1:B3").expect("valid range"));
+
+    assert!(
+        !af.filter_columns.is_empty(),
+        "expected filter criteria to be imported; auto_filter={af:?}; warnings={:?}",
+        result.warnings
+    );
+    assert_eq!(af.filter_columns[0].col_id, 0);
+    assert_eq!(
+        af.filter_columns[0].criteria,
+        vec![FilterCriterion::Equals(FilterValue::Text("X".to_string()))]
+    );
 
     // Row 2 (1-based) is hidden in the BIFF row metadata, but when FILTERMODE is present we do not
     // preserve filtered-row visibility as user-hidden rows. Instead it is mapped to
