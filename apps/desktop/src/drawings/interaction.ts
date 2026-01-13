@@ -1,4 +1,4 @@
-import type { AnchorPoint, DrawingObject } from "./types";
+import type { AnchorPoint, DrawingObject, Rect } from "./types";
 import type { GridGeometry, Viewport } from "./overlay";
 import { anchorToRectPx, emuToPx, pxToEmu } from "./overlay";
 import { buildHitTestIndex, hitTestDrawings, hitTestDrawingsObject, type HitTestIndex } from "./hitTest";
@@ -16,6 +16,7 @@ export interface DrawingInteractionCallbacks {
  * Minimal MVP interactions: click-to-select and drag to move.
  */
 export class DrawingInteractionController {
+  private readonly scratchRect: Rect = { x: 0, y: 0, width: 0, height: 0 };
   private hitTestIndex: HitTestIndex | null = null;
   private hitTestIndexObjects: readonly DrawingObject[] | null = null;
   private dragging:
@@ -67,7 +68,13 @@ export class DrawingInteractionController {
     if (selectedObject && !inHeader) {
       const objectPane = resolveAnchorPane(selectedObject.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
       if (objectPane.inFrozenCols === pointInFrozenCols && objectPane.inFrozenRows === pointInFrozenRows) {
-        const selectedBounds = objectToScreenRect(selectedObject, viewport, this.geom, index.bounds[selectedIndex!]);
+        const selectedBounds = objectToScreenRect(
+          selectedObject,
+          viewport,
+          this.geom,
+          index.bounds[selectedIndex!],
+          this.scratchRect,
+        );
         const handle = hitTestResizeHandle(selectedBounds, e.offsetX, e.offsetY);
         if (handle) {
           this.canvas.setPointerCapture(e.pointerId);
@@ -213,7 +220,7 @@ export class DrawingInteractionController {
           selectedPane.inFrozenCols === pointInFrozenCols &&
           selectedPane.inFrozenRows === pointInFrozenRows
         ) {
-          const bounds = objectToScreenRect(selected, viewport, this.geom, index.bounds[selectedIndex]);
+          const bounds = objectToScreenRect(selected, viewport, this.geom, index.bounds[selectedIndex], this.scratchRect);
           const handle = hitTestResizeHandle(bounds, x, y);
           if (handle) {
             this.canvas.style.cursor = cursorForResizeHandle(handle);
@@ -534,8 +541,9 @@ function objectToScreenRect(
   obj: DrawingObject,
   viewport: Viewport,
   geom: GridGeometry,
-  sheetRect?: { x: number; y: number; width: number; height: number },
-) {
+  sheetRect?: Rect,
+  out?: Rect,
+): Rect {
   const rect = sheetRect ?? anchorToRectPx(obj.anchor, geom);
   const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
   const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
@@ -545,12 +553,12 @@ function objectToScreenRect(
   const pane = resolveAnchorPane(obj.anchor, frozenRows, frozenCols);
   const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
   const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
-  return {
-    x: rect.x - scrollX + headerOffsetX,
-    y: rect.y - scrollY + headerOffsetY,
-    width: rect.width,
-    height: rect.height,
-  };
+  const target = out ?? { x: 0, y: 0, width: 0, height: 0 };
+  target.x = rect.x - scrollX + headerOffsetX;
+  target.y = rect.y - scrollY + headerOffsetY;
+  target.width = rect.width;
+  target.height = rect.height;
+  return target;
 }
 
 function pointInRect(
