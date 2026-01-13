@@ -392,6 +392,20 @@ export type CollabSessionProvider = {
   synced?: boolean;
 };
 
+export type CollabSessionSyncState = { connected: boolean; synced: boolean };
+
+export type CollabSessionUpdateStats = {
+  lastUpdateBytes: number;
+  maxRecentBytes: number;
+  avgRecentBytes: number;
+};
+
+export type CollabSessionPersistenceState = {
+  enabled: boolean;
+  loaded: boolean;
+  lastFlushedAt: number | null;
+};
+
 export interface CollabSessionOptions {
   /**
    * Stable identifier for this document. Required when `persistence` is enabled
@@ -630,6 +644,8 @@ function getYMapCell(cellData: unknown): Y.Map<unknown> | null {
   return maybe as Y.Map<unknown>;
 }
 
+const RECENT_OUTGOING_UPDATE_BYTES_LIMIT = 20;
+
 export class CollabSession {
   readonly doc: Y.Doc;
   readonly cells: Y.Map<unknown>;
@@ -712,6 +728,17 @@ export class CollabSession {
   private readonly formulaConflictsIncludeValueConflicts: boolean;
   private isDestroyed = false;
   private providerConnectScheduled = false;
+
+  private syncState: CollabSessionSyncState = { connected: false, synced: false };
+  private readonly statusListeners = new Set<(state: CollabSessionSyncState) => void>();
+  private providerStatusListener: ((event: any) => void) | null = null;
+  private providerSyncListener: ((isSynced: boolean) => void) | null = null;
+
+  private readonly recentOutgoingUpdateBytes: number[] = [];
+  private docUpdateListener: ((update: Uint8Array, origin: any) => void) | null = null;
+
+  private localPersistenceLoadedFlag = false;
+  private lastLocalPersistenceFlushAt: number | null = null;
 
   private ensureLocalCellMapForWrite(cellKey: string): void {
     const existingCell = getYMapCell(this.cells.get(cellKey));
@@ -1094,6 +1121,89 @@ export class CollabSession {
     } else {
       this.presence = null;
     }
+
+    // --- Observability hooks ---
+    // Sync state: track connected/synced transitions from the provider.
+    const providerAny = this.provider as any;
+    this.syncState = {
+      connected:
+        typeof providerAny?.wsconnected === "boolean"
+          ? providerAny.wsconnected
+          : typeof providerAny?.connected === "boolean"
+            ? providerAny.connected
+            : false,
+      synced: Boolean(providerAny?.synced),
+    };
+
+    if (this.provider && typeof this.provider.on === "function") {
+      const handleStatus = (event: any) => {
+        const prev = this.syncState;
+        let connected: boolean | null = null;
+        const status = typeof event === "string" ? event : event?.status;
+        if (status === "connected") connected = true;
+        else if (status === "disconnected") connected = false;
+        else if (typeof event?.connected === "boolean") connected = event.connected;
+
+        if (connected === null) return;
+        const next: CollabSessionSyncState = connected
+          ? { connected: true, synced: Boolean((this.provider as any)?.synced) }
+          : { connected: false, synced: false };
+        if (prev.connected === next.connected && prev.synced === next.synced) return;
+        this.syncState = next;
+        this.emitStatusChange();
+      };
+      const handleSync = (isSynced: boolean) => {
+        const next: CollabSessionSyncState = {
+          connected: isSynced ? true : this.syncState.connected,
+          synced: Boolean(isSynced),
+        };
+        if (!next.connected) next.synced = false;
+        if (this.syncState.connected === next.connected && this.syncState.synced === next.synced) return;
+        this.syncState = next;
+        this.emitStatusChange();
+      };
+
+      // Not all providers implement all events (or accept arbitrary event names).
+      // Observability should be best-effort and never prevent session startup.
+      try {
+        this.provider.on("status", handleStatus);
+        this.providerStatusListener = handleStatus;
+      } catch {
+        // ignore
+      }
+      try {
+        this.provider.on("sync", handleSync);
+        this.providerSyncListener = handleSync;
+      } catch {
+        // ignore
+      }
+    }
+
+    // Update size tracking: record sizes for local-origin updates only.
+    const handleDocUpdate = (update: Uint8Array, origin: any) => {
+      if (!this.localOrigins.has(origin)) return;
+      const bytes = typeof (update as any)?.length === "number" ? (update as any).length : 0;
+      if (bytes <= 0) return;
+      this.recentOutgoingUpdateBytes.push(bytes);
+      if (this.recentOutgoingUpdateBytes.length > RECENT_OUTGOING_UPDATE_BYTES_LIMIT) {
+        this.recentOutgoingUpdateBytes.splice(
+          0,
+          this.recentOutgoingUpdateBytes.length - RECENT_OUTGOING_UPDATE_BYTES_LIMIT
+        );
+      }
+    };
+    this.docUpdateListener = handleDocUpdate;
+    this.doc.on("update", handleDocUpdate);
+
+    void this.localPersistenceLoaded.then(
+      () => {
+        this.localPersistenceLoadedFlag = true;
+      },
+      () => {
+        // If persistence fails to load, keep the loaded flag false so callers can
+        // treat it as an unhealthy persistence state.
+      }
+    );
   }
 
   private startLocalPersistence(): void {
@@ -1382,6 +1492,19 @@ export class CollabSession {
     });
   }
 
+  private emitStatusChange(): void {
+    if (this.isDestroyed) return;
+    if (this.statusListeners.size === 0) return;
+    const state = this.getSyncState();
+    for (const cb of Array.from(this.statusListeners)) {
+      try {
+        cb({ ...state });
+      } catch {
+        // Ignore observer errors so one listener cannot break the session.
+      }
+    }
+  }
+
   destroy(): void {
     if (this.isDestroyed) return;
     this.isDestroyed = true;
@@ -1393,6 +1516,21 @@ export class CollabSession {
       this.provider.off("sync", this.schemaSyncHandler);
       this.schemaSyncHandler = null;
     }
+    if (this.docUpdateListener) {
+      this.doc.off("update", this.docUpdateListener);
+      this.docUpdateListener = null;
+    }
+    if (this.provider && typeof this.provider.off === "function") {
+      if (this.providerStatusListener) {
+        this.provider.off("status", this.providerStatusListener);
+        this.providerStatusListener = null;
+      }
+      if (this.providerSyncListener) {
+        this.provider.off("sync", this.providerSyncListener);
+        this.providerSyncListener = null;
+      }
+    }
+    this.statusListeners.clear();
     this.formulaConflictMonitor?.dispose();
     this.cellConflictMonitor?.dispose();
     this.cellValueConflictMonitor?.dispose();
@@ -1450,6 +1588,57 @@ export class CollabSession {
     this.provider?.disconnect?.();
   }
 
+  getSyncState(): CollabSessionSyncState {
+    const providerAny = this.provider as any;
+    const connected =
+      typeof providerAny?.wsconnected === "boolean"
+        ? providerAny.wsconnected
+        : typeof providerAny?.connected === "boolean"
+          ? providerAny.connected
+          : this.syncState.connected;
+    // Prefer the value we derive from provider events (sync/status) so callers
+    // can use lightweight provider mocks that don't update `.synced` eagerly.
+    // Fall back to `.synced` only when no listener is installed.
+    const synced =
+      this.providerSyncListener != null
+        ? this.syncState.synced
+        : typeof providerAny?.synced === "boolean"
+          ? providerAny.synced
+          : this.syncState.synced;
+    return connected ? { connected: true, synced: Boolean(synced) } : { connected: false, synced: false };
+  }
+
+  onStatusChange(cb: (state: CollabSessionSyncState) => void): () => void {
+    if (this.isDestroyed) return () => {};
+    this.statusListeners.add(cb);
+    return () => {
+      this.statusListeners.delete(cb);
+    };
+  }
+
+  getUpdateStats(): CollabSessionUpdateStats {
+    if (this.recentOutgoingUpdateBytes.length === 0) {
+      return { lastUpdateBytes: 0, maxRecentBytes: 0, avgRecentBytes: 0 };
+    }
+
+    let max = 0;
+    let sum = 0;
+    for (const bytes of this.recentOutgoingUpdateBytes) {
+      sum += bytes;
+      if (bytes > max) max = bytes;
+    }
+    const last = this.recentOutgoingUpdateBytes[this.recentOutgoingUpdateBytes.length - 1] ?? 0;
+    return { lastUpdateBytes: last, maxRecentBytes: max, avgRecentBytes: sum / this.recentOutgoingUpdateBytes.length };
+  }
+
+  getLocalPersistenceState(): CollabSessionPersistenceState {
+    return {
+      enabled: this.hasLocalPersistence,
+      loaded: this.hasLocalPersistence ? this.localPersistenceLoadedFlag : false,
+      lastFlushedAt: this.lastLocalPersistenceFlushAt,
+    };
+  }
+
   whenLocalPersistenceLoaded(): Promise<void> {
     this.startLocalPersistence();
     return this.localPersistenceLoaded;
@@ -1466,6 +1655,7 @@ export class CollabSession {
     const persistence = this.persistence;
     if (!persistence || typeof persistence.flush !== "function") return;
     await persistence.flush(docId);
+    this.lastLocalPersistenceFlushAt = Date.now();
   }
 
   whenSynced(timeoutMs: number = 10_000): Promise<void> {

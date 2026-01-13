@@ -185,15 +185,23 @@ test("CollabSession schema.defaultSheetId is used when normalizing cell keys wit
 
 test("CollabSession schema init waits for provider sync even if provider.synced is unset", async () => {
   const doc = new Y.Doc();
-  /** @type {Map<string, any>} */
+  /** @type {Map<string, Set<(...args: any[]) => void>>} */
   const events = new Map();
 
   const provider = {
     on(event, cb) {
-      events.set(event, cb);
+      let listeners = events.get(event);
+      if (!listeners) {
+        listeners = new Set();
+        events.set(event, listeners);
+      }
+      listeners.add(cb);
     },
     off(event, cb) {
-      if (events.get(event) === cb) events.delete(event);
+      const listeners = events.get(event);
+      if (!listeners) return;
+      listeners.delete(cb);
+      if (listeners.size === 0) events.delete(event);
     },
     destroy() {},
   };
@@ -204,9 +212,10 @@ test("CollabSession schema init waits for provider sync even if provider.synced 
   });
 
   assert.equal(session.sheets.length, 0);
-  const sync = events.get("sync");
-  assert.equal(typeof sync, "function");
-  sync(true);
+  const syncListeners = events.get("sync");
+  assert.equal(syncListeners instanceof Set, true);
+  assert.equal(syncListeners?.size ? syncListeners.size > 0 : false, true);
+  for (const cb of syncListeners ?? []) cb(true);
   assert.equal(session.sheets.length, 1);
   assert.equal(session.sheets.get(0)?.get("id"), "Sheet1");
 
