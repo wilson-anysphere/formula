@@ -35,6 +35,13 @@ export interface RibbonButtonProps {
    * invalidating `React.memo(...)` on every ribbon UI state update.
    */
   menuItemDisabledOverrides?: ReadonlyArray<boolean | undefined>;
+  /**
+   * Per-menu-item label overrides, aligned with `button.menuItems`.
+   *
+   * This is passed as an array (instead of the full `labelById` record) to avoid
+   * invalidating `React.memo(...)` on every ribbon UI state update.
+   */
+  menuItemLabelOverrides?: ReadonlyArray<string | undefined>;
   onActivate?: (button: RibbonButtonDefinition) => void;
 }
 
@@ -95,6 +102,7 @@ export const RibbonButton = React.memo(function RibbonButton({
   ariaKeyShortcutsOverride,
   ariaKeyShortcutsById,
   menuItemDisabledOverrides,
+  menuItemLabelOverrides,
   onActivate,
 }: RibbonButtonProps) {
   const kind = button.kind ?? "button";
@@ -303,6 +311,8 @@ export const RibbonButton = React.memo(function RibbonButton({
           }}
         >
           {button.menuItems?.map((item, idx) => {
+            const menuItemLabelOverride = menuItemLabelOverrides?.[idx];
+            const menuItemLabel = menuItemLabelOverride ?? item.label;
             const menuItemDisabledOverride = menuItemDisabledOverrides?.[idx];
             const menuItemDisabled =
               typeof menuItemDisabledOverride === "boolean" ? menuItemDisabledOverride : Boolean(item.disabled);
@@ -328,7 +338,7 @@ export const RibbonButton = React.memo(function RibbonButton({
                   closeMenu();
                   onActivate?.({
                     id: item.id,
-                    label: item.label,
+                    label: menuItemLabel,
                     ariaLabel: item.ariaLabel,
                     iconId: item.iconId,
                     kind: "button",
@@ -345,9 +355,9 @@ export const RibbonButton = React.memo(function RibbonButton({
                     <span className="ribbon-dropdown__icon" aria-hidden="true">
                       {menuIconNode}
                     </span>
-                  ) : null;
-                })()}
-                <span className="ribbon-dropdown__label">{item.label}</span>
+                    ) : null;
+                  })()}
+                <span className="ribbon-dropdown__label">{menuItemLabel}</span>
               </button>
             );
           })}
@@ -367,14 +377,19 @@ function areRibbonButtonPropsEqual(prev, next) {
   if (prev.ariaKeyShortcutsById !== next.ariaKeyShortcutsById) return false;
   if (prev.onActivate !== next.onActivate) return false;
 
-  const prevOverrides = prev.menuItemDisabledOverrides;
-  const nextOverrides = next.menuItemDisabledOverrides;
-  if (prevOverrides === nextOverrides) return true;
-  if (!prevOverrides || !nextOverrides) return false;
-  if (prevOverrides.length !== nextOverrides.length) return false;
-  for (let i = 0; i < prevOverrides.length; i += 1) {
-    if (prevOverrides[i] !== nextOverrides[i]) return false;
-  }
+  const arraysShallowEqual = <T,>(a?: ReadonlyArray<T>, b?: ReadonlyArray<T>): boolean => {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  };
+
+  if (!arraysShallowEqual(prev.menuItemDisabledOverrides, next.menuItemDisabledOverrides)) return false;
+  if (!arraysShallowEqual(prev.menuItemLabelOverrides, next.menuItemLabelOverrides)) return false;
+
   return true;
 });
 

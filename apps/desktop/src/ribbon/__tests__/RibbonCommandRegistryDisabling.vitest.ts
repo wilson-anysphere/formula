@@ -60,7 +60,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     document.body.appendChild(container);
     const root = createRoot(container);
     act(() => {
-      root.render(<Ribbon actions={{}} schema={schema} />);
+      root.render(React.createElement(Ribbon, { actions: {}, schema }));
     });
 
     const button = container.querySelector<HTMLButtonElement>('[data-command-id="unknown.command"]');
