@@ -770,6 +770,53 @@ fn ignore_path_suppresses_specific_xml_attribute_diffs() {
 }
 
 #[test]
+fn ignore_path_with_invalid_part_glob_does_not_match_all_parts() {
+    let expected_zip = zip_bytes(&[(
+        "xl/worksheets/sheet1.xml",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>
+</worksheet>"#,
+    )]);
+    let actual_zip = zip_bytes(&[(
+        "xl/worksheets/sheet1.xml",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.30"/>
+</worksheet>"#,
+    )]);
+
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    // The part selector is an invalid glob (`[` is not closed). Invalid part globs should be
+    // ignored (rule dropped), not treated as "match any part".
+    let options = DiffOptions {
+        ignore_parts: Default::default(),
+        ignore_globs: Vec::new(),
+        ignore_paths: vec![IgnorePathRule {
+            part: Some("xl/worksheets/*[".to_string()),
+            path_substring: "dyDescent".to_string(),
+            kind: None,
+        }],
+    };
+
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|d| d.part == "xl/worksheets/sheet1.xml"
+                && d.kind == "attribute_changed"
+                && d.path.contains("dyDescent")),
+        "expected dyDescent diff to remain (invalid part glob ignored), got {:#?}",
+        report.differences
+    );
+}
+
+#[test]
 fn cli_ignore_path_flag_suppresses_specific_xml_attribute_diffs() {
     let expected_zip = zip_bytes(&[(
         "xl/worksheets/sheet1.xml",

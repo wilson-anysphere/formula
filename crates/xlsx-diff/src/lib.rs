@@ -757,25 +757,28 @@ impl IgnorePathMatcher {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
 
-            let part = rule.part.as_ref().and_then(|pattern| {
+            let mut part = None;
+            if let Some(pattern) = rule.part.as_ref() {
                 let normalized = pattern.trim().replace('\\', "/");
                 let normalized = normalized.trim_start_matches('/');
                 if normalized.is_empty() {
-                    return None;
-                }
-
-                // Treat patterns without glob metacharacters as exact matches. This allows exact
-                // part names like `[Content_Types].xml` without requiring escaping glob syntax.
-                if !normalized.contains('*') && !normalized.contains('?') {
-                    return Some(IgnorePathPartMatcher::Exact(normalize_opc_part_name(
+                    part = None;
+                } else if !normalized.contains('*') && !normalized.contains('?') {
+                    // Treat patterns without glob metacharacters as exact matches. This allows
+                    // exact part names like `[Content_Types].xml` without requiring escaping glob
+                    // syntax.
+                    part = Some(IgnorePathPartMatcher::Exact(normalize_opc_part_name(
                         normalized,
                     )));
+                } else if let Ok(glob) = Glob::new(normalized) {
+                    part = Some(IgnorePathPartMatcher::Glob(glob.compile_matcher()));
+                } else {
+                    // Like `ignore_globs`, invalid glob patterns are ignored. Crucially, do not
+                    // fall back to "match any part" when the part selector is invalid, as that
+                    // could unexpectedly suppress diffs across the entire workbook.
+                    continue;
                 }
-
-                Glob::new(normalized)
-                    .ok()
-                    .map(|g| IgnorePathPartMatcher::Glob(g.compile_matcher()))
-            });
+            }
 
             rules.push(IgnorePathRuleMatcher {
                 part,
