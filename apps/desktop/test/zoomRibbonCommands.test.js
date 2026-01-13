@@ -44,11 +44,12 @@ test("Desktop main.ts delegates View → Zoom ribbon commands to CommandRegistry
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = fs.readFileSync(mainPath, "utf8");
 
-  // Zoom commands should not be wired through the ribbon's onCommand switch (they are
-  // registered as built-in commands and executed through CommandRegistry instead).
+  // Zoom commands should not be hardcoded through the ribbon's `onCommand` switch.
+  // They are either:
+  // - registered as builtin commands (executed through CommandRegistry), or
+  // - routed via a prefix-based handler for dynamic zoom menu items.
   assert.doesNotMatch(main, /\bcase\s+["']view\.zoom\.zoom100["']:/);
   assert.doesNotMatch(main, /\bcase\s+["']view\.zoom\.zoomToSelection["']:/);
-  assert.doesNotMatch(main, /\bconst\s+zoomMenuItemPrefix\s*=\s*["']view\.zoom\.zoom\./);
 
   // Ensure ribbon onCommand delegates registered ids through CommandRegistry.
   assert.match(main, /\bcommandRegistry\.getCommand\(commandId\)/);

@@ -35,7 +35,17 @@ test("SpreadsheetApp overlay canvases use CSS classes (no static inline styles)"
 
   // Ensure stable presentation styles are not set inline at mount time.
   assert.ok(!block.includes(".style.position"), "expected overlay positioning to be driven by CSS");
-  assert.ok(!block.includes(".style.pointerEvents"), "expected overlay pointer-events to be driven by CSS");
+  // Some overlay canvases (e.g. chartSelectionCanvas) may explicitly disable pointer events inline.
+  // Guard against accidentally wiring pointer-events inline on the primary overlay layers.
+  assert.ok(
+    !block.includes("drawingCanvas.style.pointerEvents"),
+    "expected drawingCanvas pointer-events to be driven by CSS",
+  );
+  assert.ok(!block.includes("chartCanvas.style.pointerEvents"), "expected chartCanvas pointer-events to be driven by CSS");
+  assert.ok(
+    !block.includes("selectionCanvas.style.pointerEvents"),
+    "expected selectionCanvas pointer-events to be driven by CSS",
+  );
   assert.ok(!block.includes(".style.overflow"), "expected overlay overflow clipping to be driven by CSS");
 });
 

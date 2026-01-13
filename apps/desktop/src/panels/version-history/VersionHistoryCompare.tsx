@@ -4,6 +4,9 @@ import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
 import { formatA1 } from "../../document/coords.js";
 
+import { diffYjsWorkbookVersionAgainstCurrent } from "../../versioning/index.js";
+import { FormulaDiffView } from "../../versioning/ui/FormulaDiffView.js";
+
 type VersionManagerLike = {
   doc: { encodeState(): Uint8Array };
   getVersion(versionId: string): Promise<{ snapshot: Uint8Array } | null>;
@@ -89,46 +92,6 @@ function formatSheetMetaField(field: string): string {
   if (field === "view.frozenCols") return "Frozen columns";
   return field;
 }
-
-function FormulaDiffView({
-  oldFormula,
-  newFormula,
-  diffFormula,
-}: {
-  oldFormula: string | null | undefined;
-  newFormula: string | null | undefined;
-  diffFormula: ((oldFormula: string | null, newFormula: string | null, opts?: any) => any) | null;
-}) {
-  const diff = useMemo(() => {
-    if (!diffFormula) return null;
-    return diffFormula(oldFormula ?? null, newFormula ?? null);
-  }, [diffFormula, newFormula, oldFormula]);
-
-  if (!diff || diff.equal) return null;
-
-  return (
-    <div className="collab-version-history__formula-diff" aria-label="Formula diff">
-      {diff.ops.map((op: any, opIdx: number) => {
-        const cls =
-          op.type === "insert"
-            ? "collab-version-history__formula-op collab-version-history__formula-op--insert"
-            : op.type === "delete"
-              ? "collab-version-history__formula-op collab-version-history__formula-op--delete"
-              : "collab-version-history__formula-op";
-        return (
-          <span key={opIdx} className={cls}>
-            {op.tokens.map((token: any, tokenIdx: number) => (
-              <span key={`${opIdx}-${tokenIdx}`} className="collab-version-history__formula-token">
-                {token.value}
-              </span>
-            ))}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
 function sheetDisplayName(sheetId: string, fallbackName: string | null, sheetNameResolver: SheetNameResolver | null): string {
   return sheetNameResolver?.getSheetNameById(sheetId) ?? fallbackName ?? sheetId;
 }
@@ -160,9 +123,6 @@ export function VersionHistoryCompareSection({
   const [diffError, setDiffError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedSheetId, setSelectedSheetId] = useState<string | null>(null);
-  const [diffFormula, setDiffFormula] = useState<((oldFormula: string | null, newFormula: string | null, opts?: any) => any) | null>(
-    null,
-  );
 
   useEffect(() => {
     if (!versionId || !versionManager) {
@@ -181,15 +141,7 @@ export function VersionHistoryCompareSection({
       try {
         // Let React paint a "Computing diff…" indicator before doing the heavy work.
         await nextPaint();
-
-        const mod = await import("../../versioning/index.js");
-        if (cancelled) return;
-        setDiffFormula(() => (mod as any).diffFormula);
-
-        const nextDiff = (await (mod as any).diffYjsWorkbookVersionAgainstCurrent({
-          versionManager,
-          versionId,
-        })) as WorkbookDiff;
+        const nextDiff = (await diffYjsWorkbookVersionAgainstCurrent({ versionManager, versionId })) as WorkbookDiff;
         if (cancelled) return;
         setDiff(nextDiff);
       } catch (e) {
@@ -530,13 +482,11 @@ export function VersionHistoryCompareSection({
                                                 <span className="collab-version-history__diff-row-label">After:</span>{" "}
                                                 <span className="collab-version-history__diff-value">{newSummary}</span>
                                               </div>
-                                            </div>
+                                             </div>
                                             {formulaChanged ? (
-                                              <FormulaDiffView
-                                                oldFormula={change.oldFormula ?? null}
-                                                newFormula={change.newFormula ?? null}
-                                                diffFormula={diffFormula}
-                                              />
+                                              <div className="collab-version-history__formula-diff" aria-label="Formula diff">
+                                                <FormulaDiffView before={change.oldFormula ?? null} after={change.newFormula ?? null} />
+                                              </div>
                                             ) : null}
                                           </>
                                         ) : g.key === "added" ? (

@@ -742,20 +742,6 @@
   border-radius: var(--radius-sm);
   background: var(--bg-primary);
   overflow-x: auto;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 16px;
-}
-
-.collab-version-history__formula-op--insert {
-  background: var(--success-bg);
-  color: var(--success);
-}
-
-.collab-version-history__formula-op--delete {
-  background: var(--error-bg);
-  color: var(--error);
-  text-decoration: line-through;
 }
 
 .collab-version-history__sheet-diff-empty {

@@ -39,7 +39,7 @@ test("Ribbon schema aligns Home → Editing AutoSum/Fill ids with CommandRegistr
     assert.doesNotMatch(
       schema,
       new RegExp(`\\bid:\\s*["']${escapeRegExp(id)}["']`),
-      `Expected ribbonSchema.ts to not include legacy id ${id}`,
+      `Expected homeTab.ts to not include legacy id ${id}`,
     );
   }
 });
