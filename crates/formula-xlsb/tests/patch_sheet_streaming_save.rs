@@ -33,6 +33,7 @@ fn save_with_cell_edits_streaming_matches_in_memory_patch_path() {
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
+        clear_formula: false,
     }];
 
     let tmpdir = tempfile::tempdir().expect("create temp dir");
@@ -73,6 +74,7 @@ fn save_with_cell_edits_streaming_can_insert_missing_cells() {
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
+        clear_formula: false,
     }];
 
     let in_memory_path = tmpdir.path().join("patched_in_memory_insert.xlsb");
@@ -107,6 +109,7 @@ fn save_with_cell_edits_streaming_is_lossless_for_noop_edit() {
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
+        clear_formula: false,
     }];
 
     let tmpdir = tempfile::tempdir().expect("create temp dir");
@@ -166,6 +169,7 @@ fn save_with_cell_edits_streaming_can_patch_formula_rgcb_bytes() {
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
+        clear_formula: false,
     }];
 
     let in_memory_path = tmpdir.path().join("patched_in_memory_rgcb.xlsb");
@@ -227,6 +231,7 @@ fn save_with_cell_edits_streaming_can_insert_formula_rgcb_bytes() {
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
+        clear_formula: false,
     }];
 
     let in_memory_path = tmpdir.path().join("patched_in_memory_rgcb_insert.xlsb");

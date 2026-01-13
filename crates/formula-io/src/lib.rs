@@ -2224,6 +2224,7 @@ mod tests {
                 new_formula_flags: None,
                 shared_string_index: None,
                 new_style: None,
+                clear_formula: false,
             });
 
             // Formula that evaluates to the error literal as a constant (PtgErr).
@@ -2236,6 +2237,7 @@ mod tests {
                 new_formula_flags: None,
                 shared_string_index: None,
                 new_style: None,
+                clear_formula: false,
             });
 
             // Validate after conversion.

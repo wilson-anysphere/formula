@@ -483,6 +483,7 @@ impl XlsbWorkbook {
                 new_formula: None,
                 shared_string_index: None,
                 new_style: None,
+                clear_formula: false,
                 new_rgcb: None,
                 new_formula_flags: None,
             }],
@@ -586,8 +587,10 @@ impl XlsbWorkbook {
             let coord = (edit.row, edit.col);
             let record = cell_records.get(&coord);
             let record_id = record.map(|r| r.id);
-            if record_id.is_some_and(is_formula_cell_record) {
-                // Formula records store cached strings inline. Do not treat them as SST references.
+            if record_id.is_some_and(is_formula_cell_record) && !edit.clear_formula {
+                // Formula records store cached strings inline. Do not treat them as SST references
+                // unless this edit explicitly clears the formula (turning the cell into a plain
+                // value cell).
                 continue;
             }
 
@@ -636,11 +639,16 @@ impl XlsbWorkbook {
                 let old_id = cell_records.get(&coord).map(|r| r.id);
                 let old_uses_sst = matches!(old_id, Some(biff12::STRING));
                 let old_is_formula = old_id.is_some_and(is_formula_cell_record);
+                let new_is_formula = if old_is_formula {
+                    // Existing formula cell: it stays a formula unless explicitly cleared.
+                    !edit.clear_formula
+                } else {
+                    // New/ non-formula cell: it's only a formula when the edit sets formula bytes.
+                    edit.new_formula.is_some() || edit.new_rgcb.is_some()
+                };
                 let new_uses_sst = matches!(edit.new_value, CellValue::Text(_))
                     && edit.shared_string_index.is_some()
-                    && edit.new_formula.is_none()
-                    && edit.new_rgcb.is_none()
-                    && !old_is_formula;
+                    && !new_is_formula;
                 match (old_uses_sst, new_uses_sst) {
                     (false, true) => 1,
                     (true, false) => -1,
@@ -758,7 +766,7 @@ impl XlsbWorkbook {
             let coord = (edit.row, edit.col);
             let record = cell_records.get(&coord);
             let record_id = record.map(|r| r.id);
-            if record_id.is_some_and(is_formula_cell_record) {
+            if record_id.is_some_and(is_formula_cell_record) && !edit.clear_formula {
                 continue;
             }
 
@@ -816,11 +824,14 @@ impl XlsbWorkbook {
                 let old_id = cell_records.get(&coord).map(|r| r.id);
                 let old_uses_sst = matches!(old_id, Some(biff12::STRING));
                 let old_is_formula = old_id.is_some_and(is_formula_cell_record);
+                let new_is_formula = if old_is_formula {
+                    !edit.clear_formula
+                } else {
+                    edit.new_formula.is_some() || edit.new_rgcb.is_some()
+                };
                 let new_uses_sst = matches!(edit.new_value, CellValue::Text(_))
                     && edit.shared_string_index.is_some()
-                    && edit.new_formula.is_none()
-                    && edit.new_rgcb.is_none()
-                    && !old_is_formula;
+                    && !new_is_formula;
                 match (old_uses_sst, new_uses_sst) {
                     (false, true) => 1,
                     (true, false) => -1,
@@ -1003,7 +1014,7 @@ impl XlsbWorkbook {
                 let coord = (edit.row, edit.col);
                 let record = cell_records.get(&coord);
                 let record_id = record.map(|r| r.id);
-                if record_id.is_some_and(is_formula_cell_record) {
+                if record_id.is_some_and(is_formula_cell_record) && !edit.clear_formula {
                     continue;
                 }
 
@@ -1060,11 +1071,14 @@ impl XlsbWorkbook {
                     let old_id = cell_records.get(&coord).map(|r| r.id);
                     let old_uses_sst = matches!(old_id, Some(biff12::STRING));
                     let old_is_formula = old_id.is_some_and(is_formula_cell_record);
+                    let new_is_formula = if old_is_formula {
+                        !edit.clear_formula
+                    } else {
+                        edit.new_formula.is_some() || edit.new_rgcb.is_some()
+                    };
                     let new_uses_sst = matches!(edit.new_value, CellValue::Text(_))
                         && edit.shared_string_index.is_some()
-                        && edit.new_formula.is_none()
-                        && edit.new_rgcb.is_none()
-                        && !old_is_formula;
+                        && !new_is_formula;
                     match (old_uses_sst, new_uses_sst) {
                         (false, true) => 1,
                         (true, false) => -1,

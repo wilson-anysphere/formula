@@ -164,6 +164,7 @@ fn patch_sheet_bin_can_insert_into_missing_row_and_expand_dimension() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("patch sheet bin");
@@ -237,6 +238,7 @@ fn patch_sheet_bin_can_insert_formula_with_rgcb_and_expand_dimension() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("patch sheet bin");
@@ -347,6 +349,7 @@ fn patch_sheet_bin_can_insert_into_existing_row_in_column_order() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("patch sheet bin");
@@ -404,6 +407,7 @@ fn patch_sheet_bin_can_expand_dimension_when_brtwsdim_is_after_sheetdata() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("patch sheet bin");
@@ -437,6 +441,7 @@ fn patch_sheet_bin_does_not_materialize_missing_blank_cells() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("patch sheet bin");
@@ -470,6 +475,7 @@ fn patch_sheet_bin_can_patch_style_without_changing_value() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: Some(7),
+            clear_formula: false,
         }],
     )
     .expect("patch sheet bin");
@@ -518,6 +524,7 @@ fn patch_sheet_bin_can_insert_cell_with_style_override() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: Some(5),
+            clear_formula: false,
         }],
     )
     .expect("patch sheet bin");

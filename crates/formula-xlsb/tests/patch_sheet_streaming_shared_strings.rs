@@ -199,6 +199,7 @@ fn streaming_shared_strings_does_not_touch_sst_for_inserted_formula_string_cells
             // should not affect the shared string table counts.
             shared_string_index: Some(0),
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -222,6 +223,77 @@ fn streaming_shared_strings_does_not_touch_sst_for_inserted_formula_string_cells
     assert_eq!(stats.unique_count, Some(1));
     assert_eq!(stats.si_count, 1);
     assert!(!stats.strings.contains(&"New".to_string()));
+}
+
+#[test]
+fn streaming_shared_strings_converts_formula_string_cell_to_shared_string_value_cell() {
+    // Regression test: when an edit clears an existing *formula* string cell to a plain text
+    // value, the resulting value cell should be stored as `BrtCellIsst` and must bump
+    // `BrtSST.totalCount` (+1).
+
+    fn ptg_str(s: &str) -> Vec<u8> {
+        // PtgStr (0x17): [cch:u16][utf16 chars...]
+        let mut out = vec![0x17];
+        let units: Vec<u16> = s.encode_utf16().collect();
+        out.extend_from_slice(&(units.len() as u16).to_le_bytes());
+        for unit in units {
+            out.extend_from_slice(&unit.to_le_bytes());
+        }
+        out
+    }
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.add_shared_string("Hello");
+    builder.set_cell_formula_str(0, 0, "Hello", ptg_str("Hello"));
+    let input_bytes = builder.build_bytes();
+
+    let tmpdir = tempfile::tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    std::fs::write(&input_path, &input_bytes).expect("write input workbook");
+    let wb = XlsbWorkbook::open(&input_path).expect("open workbook");
+    let out_path = tmpdir.path().join("out.xlsb");
+
+    wb.save_with_cell_edits_streaming_shared_strings(
+        &out_path,
+        0,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Text("Hello".to_string()),
+            new_formula: None,
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+            new_style: None,
+            clear_formula: true,
+        }],
+    )
+    .expect("save_with_cell_edits_streaming_shared_strings");
+
+    let patched = XlsbWorkbook::open(&out_path).expect("re-open patched workbook");
+    let sheet = patched.read_sheet(0).expect("read sheet");
+    let a1 = sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("A1 exists");
+    assert_eq!(a1.value, CellValue::Text("Hello".to_string()));
+    assert!(a1.formula.is_none(), "expected cleared formula");
+
+    let sheet_bin = read_zip_part(&out_path, "xl/worksheets/sheet1.bin");
+    let (id, payload) = find_cell_record(&sheet_bin, 0, 0).expect("find A1 record");
+    assert_eq!(id, 0x0007, "expected BrtCellIsst");
+    assert_eq!(
+        u32::from_le_bytes(payload[8..12].try_into().unwrap()),
+        0,
+        "expected A1 to reference existing isst=0 ('Hello')"
+    );
+
+    let shared_strings_bin = read_zip_part(&out_path, "xl/sharedStrings.bin");
+    let stats = read_shared_strings_stats(&shared_strings_bin);
+    assert_eq!(stats.total_count, Some(1));
+    assert_eq!(stats.unique_count, Some(1));
+    assert_eq!(stats.si_count, 1);
 }
 
 fn with_corrupt_sst_unique_count(input: &[u8], bad_unique_count: u32) -> Vec<u8> {
@@ -289,6 +361,7 @@ fn streaming_shared_string_edit_updates_isst_and_preserves_counts() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -329,6 +402,7 @@ fn streaming_shared_string_edit_appends_new_si_and_updates_unique_count() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -371,6 +445,7 @@ fn streaming_shared_string_noop_is_lossless() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -426,6 +501,7 @@ fn streaming_shared_string_noop_rich_sst_is_lossless() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -470,6 +546,7 @@ fn streaming_shared_string_noop_inline_string_does_not_touch_shared_strings() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -518,6 +595,7 @@ fn streaming_shared_strings_repairs_unique_count_when_header_is_incorrect() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -549,6 +627,7 @@ fn streaming_shared_string_total_count_updates_when_cell_leaves_sst() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -585,6 +664,7 @@ fn streaming_shared_string_total_count_updates_when_cell_enters_sst() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");

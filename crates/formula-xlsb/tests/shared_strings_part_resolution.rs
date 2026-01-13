@@ -326,6 +326,7 @@ fn save_with_cell_edits_shared_strings_updates_nonstandard_shared_strings_part()
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
@@ -374,6 +375,7 @@ fn save_with_cell_edits_shared_strings_updates_content_types_resolved_shared_str
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
@@ -408,6 +410,7 @@ fn save_with_cell_edits_streaming_shared_strings_updates_nonstandard_shared_stri
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");

@@ -156,6 +156,7 @@ fn patcher_preserves_flagged_inline_string_record_for_noop_edits() {
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
+        clear_formula: false,
     };
 
     let patched = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
@@ -176,6 +177,7 @@ fn patcher_updates_formula_rgce_without_losing_rich_or_phonetic_cached_bytes() {
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
+        clear_formula: false,
     };
     let patched_rich = patch_sheet_bin(&sheet_bin, &[edit_rich]).expect("patch rich formula");
 
@@ -207,6 +209,7 @@ fn patcher_updates_formula_rgce_without_losing_rich_or_phonetic_cached_bytes() {
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
+        clear_formula: false,
     };
     let patched_pho = patch_sheet_bin(&sheet_bin, &[edit_pho]).expect("patch phonetic formula");
 
@@ -242,6 +245,7 @@ fn patcher_clears_rich_phonetic_flags_when_rewriting_cached_string_value() {
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
+        clear_formula: false,
     };
     let patched = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch cached string");
 

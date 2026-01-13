@@ -392,6 +392,7 @@ fn save_with_cell_edits_streaming_multi_shared_strings_updates_sheets_and_sst() 
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     );
     edits_by_sheet.insert(
@@ -405,6 +406,7 @@ fn save_with_cell_edits_streaming_multi_shared_strings_updates_sheets_and_sst() 
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     );
 

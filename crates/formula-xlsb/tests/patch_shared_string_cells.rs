@@ -177,6 +177,7 @@ fn shared_strings_save_does_not_touch_sst_for_inserted_formula_string_cells() {
             // should not affect the shared string table counts.
             shared_string_index: Some(0),
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
@@ -199,6 +200,80 @@ fn shared_strings_save_does_not_touch_sst_for_inserted_formula_string_cells() {
     assert_eq!(info.total_count, Some(0));
     assert_eq!(info.unique_count, Some(1));
     assert!(!info.strings.contains(&"New".to_string()));
+}
+
+#[test]
+fn shared_strings_save_converts_formula_string_cell_to_shared_string_value_cell() {
+    // Regression test: when an edit clears an existing *formula* string cell to a plain text value,
+    // the resulting value cell should be eligible for shared-string storage (`BrtCellIsst`) and
+    // must bump `BrtSST.cstTotal` (+1). Formula cached strings are inline and do not count toward
+    // `cstTotal`.
+
+    fn ptg_str(s: &str) -> Vec<u8> {
+        // PtgStr (0x17): [cch:u16][utf16 chars...]
+        let mut out = vec![0x17];
+        let units: Vec<u16> = s.encode_utf16().collect();
+        out.extend_from_slice(&(units.len() as u16).to_le_bytes());
+        for unit in units {
+            out.extend_from_slice(&unit.to_le_bytes());
+        }
+        out
+    }
+
+    let mut builder = XlsbFixtureBuilder::new();
+    // Workbook has an SST, but no cells that reference it yet (totalCount=0).
+    builder.add_shared_string("Hello");
+    // A1 is a formula string cell with cached value "Hello" (stored inline, not via SST).
+    builder.set_cell_formula_str(0, 0, "Hello", ptg_str("Hello"));
+    let bytes = builder.build_bytes();
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    let output_path = tmpdir.path().join("output.xlsb");
+    std::fs::write(&input_path, &bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open input workbook");
+    wb.save_with_cell_edits_shared_strings(
+        &output_path,
+        0,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            // Paste-values style: clear the formula, keep the cached string value.
+            new_value: CellValue::Text("Hello".to_string()),
+            new_formula: None,
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+            new_style: None,
+            clear_formula: true,
+        }],
+    )
+    .expect("save_with_cell_edits_shared_strings");
+
+    let wb2 = XlsbWorkbook::open(&output_path).expect("open output workbook");
+    let sheet = wb2.read_sheet(0).expect("read sheet");
+    let a1 = sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("A1 exists");
+    assert_eq!(a1.value, CellValue::Text("Hello".to_string()));
+    assert!(a1.formula.is_none(), "expected cleared formula");
+
+    let sheet_bin = read_zip_part(output_path.to_str().unwrap(), "xl/worksheets/sheet1.bin");
+    let (id, payload) = find_cell_record(&sheet_bin, 0, 0).expect("find A1 record");
+    assert_eq!(id, 0x0007, "expected BrtCellIsst/STRING record id");
+    assert_eq!(
+        u32::from_le_bytes(payload[8..12].try_into().unwrap()),
+        0,
+        "expected A1 to reference existing shared string index 0"
+    );
+
+    let shared_strings_bin = read_zip_part(output_path.to_str().unwrap(), "xl/sharedStrings.bin");
+    let info = read_shared_strings_info(&shared_strings_bin);
+    assert_eq!(info.total_count, Some(1), "expected cstTotal to increment (+1)");
+    assert_eq!(info.unique_count, Some(1), "expected no new unique strings");
 }
 
 #[test]
@@ -228,6 +303,7 @@ fn patching_shared_string_cell_keeps_it_as_string_record() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
@@ -283,6 +359,7 @@ fn patching_shared_string_cell_appends_to_shared_strings_bin() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
@@ -343,6 +420,7 @@ fn inserting_new_text_cell_uses_shared_string_record_and_updates_shared_strings_
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
@@ -401,6 +479,7 @@ fn patching_existing_numeric_cell_to_text_uses_shared_string_record_and_updates_
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
@@ -456,6 +535,7 @@ fn patching_inline_string_noop_is_lossless_and_does_not_touch_shared_strings() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
@@ -504,6 +584,7 @@ fn patching_rich_shared_string_noop_is_lossless() {
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");

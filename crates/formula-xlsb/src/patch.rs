@@ -79,6 +79,15 @@ pub struct CellEdit {
     /// - When inserting a new cell record, `None` uses style index `0` (the default / "Normal"
     ///   style), matching historical behavior.
     pub new_style: Option<u32>,
+    /// If true, clears any existing formula record for this cell and writes a plain value cell
+    /// instead.
+    ///
+    /// This enables "paste values"-style edits where callers want to keep only the cached value
+    /// of an existing formula cell but remove the formula itself.
+    ///
+    /// When false (the default), formula cells keep their formula unless [`Self::new_formula`] is
+    /// set to replace it. Non-formula cells ignore this flag.
+    pub clear_formula: bool,
     /// If set, replaces the raw formula token stream (`rgce`) for formula cells.
     pub new_formula: Option<Vec<u8>>,
     /// If set, replaces the trailing BIFF12 `rgcb` payload (a.k.a. `Formula.extra`) that appears
@@ -142,6 +151,7 @@ impl CellEdit {
             col,
             new_value,
             new_style: None,
+            clear_formula: false,
             new_formula: Some(encoded.rgce),
             new_rgcb: Some(encoded.rgcb),
             new_formula_flags: None,
@@ -184,6 +194,7 @@ impl CellEdit {
             col,
             new_value,
             new_style: None,
+            clear_formula: false,
             new_formula: Some(encoded.rgce),
             new_rgcb: Some(encoded.rgcb),
             new_formula_flags: None,
@@ -271,6 +282,7 @@ impl CellEdit {
             col,
             new_value,
             new_style: None,
+            clear_formula: false,
             new_formula_flags: None,
             new_formula: Some(encoded.rgce),
             new_rgcb: Some(encoded.rgcb),
@@ -1588,6 +1600,9 @@ fn convert_value_record_to_formula<W: io::Write>(
 }
 
 fn formula_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    if edit.clear_formula {
+        return Ok(false);
+    }
     if let Some(desired_style) = edit.new_style {
         let existing_style = read_u32(payload, 4)?;
         if existing_style != desired_style {
@@ -1621,6 +1636,9 @@ fn formula_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> 
 }
 
 fn formula_string_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    if edit.clear_formula {
+        return Ok(false);
+    }
     if let Some(desired_style) = edit.new_style {
         let existing_style = read_u32(payload, 4)?;
         if existing_style != desired_style {
@@ -1669,6 +1687,9 @@ fn formula_string_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, 
 }
 
 fn formula_bool_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    if edit.clear_formula {
+        return Ok(false);
+    }
     if let Some(desired_style) = edit.new_style {
         let existing_style = read_u32(payload, 4)?;
         if existing_style != desired_style {
@@ -1699,6 +1720,9 @@ fn formula_bool_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Er
 }
 
 fn formula_error_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    if edit.clear_formula {
+        return Ok(false);
+    }
     if let Some(desired_style) = edit.new_style {
         let existing_style = read_u32(payload, 4)?;
         if existing_style != desired_style {
@@ -1976,6 +2000,9 @@ fn patch_fmla_num<W: io::Write>(
     edit: &CellEdit,
     existing: Option<ExistingRecordHeader<'_>>,
 ) -> Result<(), Error> {
+    if edit.clear_formula {
+        return patch_value_cell(writer, col, style, edit, existing);
+    }
     if matches!(edit.new_value, CellValue::Blank) && edit.new_formula.is_none() {
         // Allow clearing formula cells by rewriting the record as a plain blank cell while
         // preserving the original `style` index.
@@ -2066,6 +2093,9 @@ fn patch_fmla_bool<W: io::Write>(
     edit: &CellEdit,
     existing: Option<ExistingRecordHeader<'_>>,
 ) -> Result<(), Error> {
+    if edit.clear_formula {
+        return patch_value_cell(writer, col, style, edit, existing);
+    }
     if matches!(edit.new_value, CellValue::Blank) && edit.new_formula.is_none() {
         return patch_value_cell(writer, col, style, edit, existing);
     }
@@ -2155,6 +2185,9 @@ fn patch_fmla_error<W: io::Write>(
     edit: &CellEdit,
     existing: Option<ExistingRecordHeader<'_>>,
 ) -> Result<(), Error> {
+    if edit.clear_formula {
+        return patch_value_cell(writer, col, style, edit, existing);
+    }
     if matches!(edit.new_value, CellValue::Blank) && edit.new_formula.is_none() {
         return patch_value_cell(writer, col, style, edit, existing);
     }
@@ -2244,6 +2277,9 @@ fn patch_fmla_string<W: io::Write>(
     edit: &CellEdit,
     existing: Option<ExistingRecordHeader<'_>>,
 ) -> Result<(), Error> {
+    if edit.clear_formula {
+        return patch_value_cell(writer, col, style, edit, existing);
+    }
     if matches!(edit.new_value, CellValue::Blank) && edit.new_formula.is_none() {
         return patch_value_cell(writer, col, style, edit, existing);
     }
