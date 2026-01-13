@@ -208,4 +208,36 @@ describe("defaultRibbonSchema", () => {
       "Expected Fill dropdown not to include legacy home.editing.fill.right",
     ).toBe(false);
   });
+
+  it("aligns Home → Find & Select ids with builtin command ids", () => {
+    const homeTab = defaultRibbonSchema.tabs.find((tab) => tab.id === "home");
+    expect(homeTab, "Expected Home tab to exist").toBeTruthy();
+    if (!homeTab) return;
+
+    const findGroup = homeTab.groups.find((group) => group.id === "home.find");
+    expect(findGroup, "Expected Home → Find group to exist").toBeTruthy();
+    if (!findGroup) return;
+
+    const findSelect = findGroup.buttons.find((button) => button.id === "home.editing.findSelect");
+    expect(findSelect, "Expected Find & Select dropdown to exist").toBeTruthy();
+    expect(findSelect?.kind).toBe("dropdown");
+    expect(findSelect?.menuItems?.map((item) => item.id)).toEqual(["edit.find", "edit.replace", "navigation.goTo"]);
+
+    expect(findSelect?.menuItems?.find((item) => item.id === "edit.find")?.testId).toBe("ribbon-find");
+    expect(findSelect?.menuItems?.find((item) => item.id === "edit.replace")?.testId).toBe("ribbon-replace");
+    expect(findSelect?.menuItems?.find((item) => item.id === "navigation.goTo")?.testId).toBe("ribbon-goto");
+
+    expect(
+      findSelect?.menuItems?.some((item) => item.id === "home.editing.findSelect.find"),
+      "Expected Find & Select dropdown not to include legacy home.editing.findSelect.find",
+    ).toBe(false);
+    expect(
+      findSelect?.menuItems?.some((item) => item.id === "home.editing.findSelect.replace"),
+      "Expected Find & Select dropdown not to include legacy home.editing.findSelect.replace",
+    ).toBe(false);
+    expect(
+      findSelect?.menuItems?.some((item) => item.id === "home.editing.findSelect.goTo"),
+      "Expected Find & Select dropdown not to include legacy home.editing.findSelect.goTo",
+    ).toBe(false);
+  });
 });
