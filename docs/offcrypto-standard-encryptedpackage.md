@@ -1,8 +1,12 @@
 # MS-OFFCRYPTO Standard/CryptoAPI AES: `EncryptedPackage` decryption notes
 
-This repo currently detects password-protected / encrypted OOXML workbooks as an OLE/CFB container
-with `EncryptionInfo` + `EncryptedPackage` streams and returns a user-facing
-`Error::EncryptedWorkbook`.
+This repo detects password-protected / encrypted OOXML workbooks as an OLE/CFB container with
+`EncryptionInfo` + `EncryptedPackage` streams.
+
+In `formula-io`, attempting to open these files without a password will surface `Error::PasswordRequired`.
+The password-aware helpers (`open_workbook_with_password` / `open_workbook_model_with_password`) can
+surface `Error::InvalidPassword`. (End-to-end decryption is still being wired; see
+[`docs/21-encrypted-workbooks.md`](./21-encrypted-workbooks.md) for current behavior and entrypoints.)
 
 If/when we add **Standard Encryption (CryptoAPI AES)** decryption support, the most common
 interoperability bugs are in the `EncryptedPackage` stream framing (the `u64` size prefix), **0x1000
@@ -118,4 +122,3 @@ These checks catch most corruption / truncation issues early:
     (Excel padding edge case).
 * After decryption, if produced plaintext is `< orig_size`, treat as truncated/corrupt; otherwise
   truncate to `orig_size` and continue.
-

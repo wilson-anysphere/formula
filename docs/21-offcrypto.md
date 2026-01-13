@@ -4,8 +4,11 @@ Excel “Encrypt with Password” for `.xlsx` / `.xlsm` files is **not** ZIP-lev
 Excel wraps the real OOXML ZIP package inside an **OLE Compound File Binary Format (CFB)** container
 and stores the encryption metadata + ciphertext in two well-known streams.
 
-This document explains what those files look like on disk, what we currently support, and how to
-debug user reports about “password-protected workbooks”.
+This document explains what those files look like on disk and how to debug user reports about
+“password-protected workbooks”.
+
+Note: the more complete, up-to-date overview lives in
+[`docs/21-encrypted-workbooks.md`](./21-encrypted-workbooks.md) (covers both OOXML + legacy `.xls`).
 
 Relevant specs:
 
@@ -63,36 +66,61 @@ MS-OFFCRYPTO defines multiple encryption “containers” for OOXML packages:
 - **Standard** encryption (binary headers; CryptoAPI) — `EncryptionInfo` version **3.2**
 - **Agile** encryption (XML descriptor) — `EncryptionInfo` version **4.4**
 
-Current support in this repo:
+Current state in this repo (important nuance):
 
-- ✅ **Standard (CryptoAPI / AES)**: supported
-- ❌ **Agile**: detected and currently **unsupported**
-
-If you encounter a password-protected workbook from modern Excel, it is very commonly **Agile**
-encryption. In that case we will return an “unsupported encryption” error (see below).
+- Low-level decryption primitives exist:
+  - Standard/CryptoAPI parsing + password key derivation: `crates/formula-offcrypto`
+  - Agile (4.4) parsing + decryption + `dataIntegrity` HMAC verification: `crates/formula-xlsx::offcrypto`
+- The high-level `formula-io` open path does **not** yet decrypt OOXML workbooks end-to-end; it
+  primarily provides **detection + error classification** so callers can prompt for a password and
+  route errors correctly.
 
 ## Public API usage
 
-Use the password-aware helpers (in `crates/formula-io`) when opening encrypted OOXML files:
+Use the password-aware helpers (in `crates/formula-io`) when handling encrypted OOXML files:
 
 ```rust
-use formula_io::open_workbook_with_password;
+use formula_io::{open_workbook_with_password, Error};
 
-let workbook = open_workbook_with_password(
-    "encrypted.xlsx",
-    Some("correct horse battery staple"),
-)?;
+let path = "book.xlsx"; // may be encrypted
+
+match open_workbook_with_password(path, None) {
+    Ok(workbook) => {
+        // Unencrypted workbook opened normally.
+        let _ = workbook;
+    }
+    Err(Error::PasswordRequired { .. }) => {
+        // Encrypted OOXML container detected; prompt user for password and retry:
+        let password = "correct horse battery staple";
+        match open_workbook_with_password(path, Some(password)) {
+            Ok(workbook) => {
+                // Once OOXML decryption is wired end-to-end in `formula-io`, this will return `Ok(...)`.
+                let _ = workbook;
+            }
+            Err(Error::InvalidPassword { .. }) => {
+                // Wrong password (or decryption not implemented yet).
+            }
+            Err(other) => return Err(other),
+        }
+    }
+    Err(other) => return Err(other),
+}
 ```
 
 If you want a `formula_model::Workbook` directly (streaming, lower-memory):
 
 ```rust
-use formula_io::open_workbook_model_with_password;
+use formula_io::{open_workbook_model_with_password, Error};
 
-let model = open_workbook_model_with_password(
-    "encrypted.xlsx",
-    Some("correct horse battery staple"),
-)?;
+match open_workbook_model_with_password("book.xlsx", Some("...")) {
+    Ok(model) => {
+        let _ = model;
+    }
+    Err(Error::PasswordRequired { .. }) => {
+        // Prompt user for password and retry.
+    }
+    Err(other) => return Err(other),
+}
 ```
 
 Behavior notes:
@@ -101,6 +129,9 @@ Behavior notes:
   `PasswordRequired` error (because those APIs do not prompt for passwords).
 - The `_with_password` variants are intended to work for both encrypted and unencrypted inputs; for
   unencrypted workbooks they behave like the non-password variants.
+- Until OOXML decryption is wired end-to-end in `formula-io`, the `_with_password` variants will not
+  successfully open encrypted OOXML workbooks (they currently surface `InvalidPassword` when a
+  password is provided).
 
 ## Error mapping (debugging + user-facing messaging)
 
@@ -109,15 +140,15 @@ When handling user reports, these error variants map cleanly to “what happened
 | Error | Meaning | Typical remediation |
 |------|---------|---------------------|
 | `PasswordRequired` | The file is encrypted/password-protected, but no password was provided. | Retry with `open_workbook_with_password(.., Some(password))` / `open_workbook_model_with_password(.., Some(password))`, or ask the user to remove encryption in Excel. |
-| `InvalidPassword` | The workbook uses a supported encryption scheme, but the password does not decrypt the package. | Ask the user to re-enter the password; confirm it opens in Excel with the same password. |
-| `UnsupportedOoxmlEncryption` | We identified the OOXML encryption *container*, but it is not implemented (most commonly **Agile 4.4**). | Ask the user to remove encryption (open in Excel → remove password → re-save), or provide an unencrypted copy. |
+| `InvalidPassword` | Password was provided but the workbook could not be decrypted/verified. | Ask the user to re-enter the password; confirm it opens in Excel with the same password. If Formula still cannot open it, ask the user to remove encryption and re-save. |
+| `UnsupportedOoxmlEncryption` | We identified an encrypted OOXML container, but the `EncryptionInfo` version is not recognized/implemented (i.e. not Standard `3.2` / Agile `4.4`). | Ask the user to remove encryption (open in Excel → remove password → re-save), or provide an unencrypted copy. |
 | `EncryptedWorkbook` | Legacy `.xls` BIFF encryption was detected (BIFF `FILEPASS`). | Ask the user to remove encryption in Excel, or convert the workbook to an unencrypted format. |
 
 If you need to distinguish **Agile vs Standard** for triage, include the `EncryptionInfo` version
 from the snippet above in the bug report:
 
-- `3.2` → Standard (supported)
-- `4.4` → Agile (unsupported)
+- `3.2` → Standard (CryptoAPI)
+- `4.4` → Agile
 
 ## Test fixtures and attribution
 
