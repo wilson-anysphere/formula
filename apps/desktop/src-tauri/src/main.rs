@@ -126,6 +126,7 @@ struct StartupMetrics {
     /// from frontend bootstrap timing. In particular, it does **not** include any JS execution
     /// time, event listener installation, or "time-to-interactive" work in the renderer.
     webview_loaded_ms: Option<u64>,
+    webview_loaded_recorded_from_page_load: bool,
     tti_ms: Option<u64>,
     logged: bool,
 }
@@ -136,6 +137,7 @@ impl StartupMetrics {
             start,
             window_visible_ms: None,
             webview_loaded_ms: None,
+            webview_loaded_recorded_from_page_load: false,
             tti_ms: None,
             logged: false,
         }
@@ -160,6 +162,17 @@ impl StartupMetrics {
         }
         let ms = self.elapsed_ms();
         self.webview_loaded_ms = Some(ms);
+        self.webview_loaded_recorded_from_page_load = false;
+        ms
+    }
+
+    fn record_webview_loaded_from_page_load(&mut self) -> u64 {
+        if self.webview_loaded_recorded_from_page_load {
+            return self.webview_loaded_ms.unwrap_or_else(|| self.elapsed_ms());
+        }
+        let ms = self.elapsed_ms();
+        self.webview_loaded_ms = Some(ms);
+        self.webview_loaded_recorded_from_page_load = true;
         ms
     }
 
@@ -241,6 +254,11 @@ fn report_startup_webview_loaded(app: tauri::AppHandle, state: State<'_, SharedS
     // events aren't dropped). The primary `webview_loaded_ms` measurement is recorded from Rust
     // via `Builder::on_page_load` when the main webview finishes its initial navigation; this
     // command is idempotent and will not overwrite an earlier host-recorded timestamp.
+    //
+    // Note: some frontend code may call this extremely early (before the page-load finished
+    // callback fires). In that case we may temporarily record a provisional timestamp here, but
+    // the page-load callback will still overwrite it with the authoritative
+    // `PageLoadEvent::Finished` mark.
     let shared = state.inner().clone();
     let (window_visible_ms, webview_loaded_ms, snapshot, first_window_visible) = {
         let mut metrics = shared.lock().unwrap();
@@ -1041,11 +1059,11 @@ fn main() {
                     Err(poisoned) => poisoned.into_inner(),
                 };
 
-                if metrics.webview_loaded_ms.is_some() {
+                if metrics.webview_loaded_recorded_from_page_load {
                     return;
                 }
 
-                let webview_loaded_ms = metrics.record_webview_loaded();
+                let webview_loaded_ms = metrics.record_webview_loaded_from_page_load();
                 let snapshot = metrics.snapshot();
                 (webview_loaded_ms, snapshot)
             };

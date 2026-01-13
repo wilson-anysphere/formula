@@ -2,15 +2,9 @@ import { installStartupTimingsListeners, reportStartupWebviewLoaded } from "./st
 
 // Startup performance instrumentation (no-op for web builds).
 //
-// Call `reportStartupWebviewLoaded()` at the earliest point in the module graph so the
-// host-side `webview_loaded_ms` measurement does not include startup JS work (including
-// listener-install IPC overhead). Once the listeners are installed, call it again
-// (idempotent) to re-emit the timing events for the now-ready listeners.
-try {
-  reportStartupWebviewLoaded();
-} catch {
-  // Best-effort; instrumentation should never block startup.
-}
+// `webviewLoadedMs` is recorded natively by the Rust host when the main WebView finishes its
+// initial navigation. Tauri does not guarantee events are queued before listeners are installed,
+// so we install listeners early and then ask the host to (re-)emit the cached timings once ready.
 
 void installStartupTimingsListeners()
   .catch(() => {
@@ -23,4 +17,3 @@ void installStartupTimingsListeners()
       // Best-effort; instrumentation should never block startup.
     }
   });
-
