@@ -27,6 +27,7 @@ import {
   const encryption: EncryptionConfig = {
     keyForCell: (_cell) => ({ keyId: "k1", keyBytes: new Uint8Array([1, 2, 3]) }),
     shouldEncryptCell: () => true,
+    encryptFormat: true,
   };
 
   const permissionsFn: PermissionsResolver = (cell: CellAddress) => {

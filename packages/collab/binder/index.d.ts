@@ -44,6 +44,13 @@ export interface EncryptionConfig {
    */
   keyForCell: (cell: CellAddress) => CellEncryptionKey | null;
   /**
+   * Opt-in: when true, per-cell formatting (`format`) is stored inside the
+   * encrypted payload (`enc`) instead of being written in plaintext.
+   *
+   * Defaults to false for backwards compatibility.
+   */
+  encryptFormat?: boolean;
+  /**
    * Determines whether the binder should write encrypted payloads into Yjs for
    * this cell.
    *
