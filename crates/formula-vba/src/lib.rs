@@ -16,6 +16,7 @@ mod offcrypto;
 mod ole;
 mod project_normalized_data;
 mod project_digest;
+mod rc4_cryptoapi;
 mod signature;
 
 pub use authenticode::{
