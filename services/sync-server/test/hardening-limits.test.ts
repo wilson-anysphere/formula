@@ -111,6 +111,80 @@ test("closes websocket on oversized binary message", async (t) => {
   );
 });
 
+function extractMetricValue(metricsText: string, name: string): number | null {
+  const match = metricsText.match(
+    new RegExp(`^${name}(?:\\{[^}]*\\})?\\s+([0-9.e+-]+)$`, "m")
+  );
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+test("exports websocket message byte metrics", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-ws-bytes-"));
+
+  const maxMessageBytes = 128;
+  const server = await startSyncServer({
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_MAX_MESSAGE_BYTES: String(maxMessageBytes),
+    },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const ws = new WebSocket(`${server.wsUrl}/ws-bytes-doc?token=test-token`);
+  t.after(() => ws.terminate());
+
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", () => resolve());
+    ws.once("error", (err) => reject(err));
+  });
+
+  const accepted1 = buildAwarenessMessage([
+    { clientID: 123, clock: 1, stateJSON: JSON.stringify({ ok: true }) },
+  ]);
+  const accepted2 = buildAwarenessMessage([
+    { clientID: 123, clock: 2, stateJSON: JSON.stringify({ ok: false }) },
+  ]);
+  const expectedAcceptedBytes = accepted1.byteLength + accepted2.byteLength;
+
+  ws.send(accepted1);
+  ws.send(accepted2);
+
+  const rejected = Buffer.alloc(maxMessageBytes + 1, 1);
+  const expectedRejectedBytes = rejected.byteLength;
+
+  const close = new Promise<number>((resolve) => {
+    ws.once("close", (code) => resolve(code));
+  });
+  ws.send(rejected);
+  assert.equal(await close, 1009);
+
+  await waitForCondition(
+    async () => {
+      const res = await fetch(`${server.httpUrl}/metrics`);
+      if (!res.ok) return false;
+      const body = await res.text();
+
+      const acceptedBytes = extractMetricValue(body, "sync_server_ws_message_bytes_total");
+      const rejectedBytes = extractMetricValue(
+        body,
+        "sync_server_ws_message_bytes_rejected_total"
+      );
+      if (acceptedBytes === null || rejectedBytes === null) return false;
+      return acceptedBytes >= expectedAcceptedBytes && rejectedBytes >= expectedRejectedBytes;
+    },
+    5_000,
+    100
+  );
+});
+
 test("drops oversized awareness JSON without closing connection", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-awareness-"));
 

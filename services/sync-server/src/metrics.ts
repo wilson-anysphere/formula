@@ -11,7 +11,7 @@ import { createRequire } from "node:module";
  */
 
 type Counter<Labels extends string = string> = {
-  inc: (labels?: Record<Labels, string>, value?: number) => void;
+  inc: (labelsOrValue?: Record<Labels, string> | number, value?: number) => void;
 };
 
 type Gauge<Labels extends string = string> = {
@@ -134,11 +134,19 @@ function createFallbackMetrics(): SyncServerMetrics {
       metric.samples.set("", { labels: {}, value: 0 });
     }
 
-    const inc: Counter<Labels>["inc"] = (labels, value) => {
-      const delta = typeof value === "number" ? value : 1;
+    const inc: Counter<Labels>["inc"] = (labelsOrValue, value) => {
+      const delta =
+        typeof labelsOrValue === "number"
+          ? labelsOrValue
+          : typeof value === "number"
+            ? value
+            : 1;
 
       const normalizedLabels: Record<string, string> = {};
-      const raw = (labels ?? {}) as Record<string, string>;
+      const raw =
+        typeof labelsOrValue === "number"
+          ? ({} as Record<string, string>)
+          : ((labelsOrValue ?? {}) as Record<string, string>);
       for (const labelName of labelNames) {
         const labelValue = raw[labelName];
         if (typeof labelValue !== "string" || labelValue.length === 0) {
@@ -256,6 +264,16 @@ function createFallbackMetrics(): SyncServerMetrics {
   const wsMessagesTooLargeTotal = createCounter({
     name: "sync_server_ws_messages_too_large_total",
     help: "Total WebSocket messages rejected due to message size limits.",
+  });
+
+  const wsMessageBytesTotal = createCounter({
+    name: "sync_server_ws_message_bytes_total",
+    help: "Total bytes of accepted WebSocket messages.",
+  });
+
+  const wsMessageBytesRejectedTotal = createCounter({
+    name: "sync_server_ws_message_bytes_rejected_total",
+    help: "Total bytes of WebSocket messages rejected due to configured limits.",
   });
 
   const wsMessageHandlerErrorsTotal = createCounter<"stage">({
@@ -412,6 +430,8 @@ function createFallbackMetrics(): SyncServerMetrics {
     wsClosesTotal,
     wsMessagesRateLimitedTotal,
     wsMessagesTooLargeTotal,
+    wsMessageBytesTotal,
+    wsMessageBytesRejectedTotal,
     wsMessageHandlerErrorsTotal,
     wsAwarenessSpoofAttemptsTotal,
     wsAwarenessClientIdCollisionsTotal,
@@ -464,6 +484,8 @@ export type SyncServerMetrics = {
 
   wsMessagesRateLimitedTotal: Counter<string>;
   wsMessagesTooLargeTotal: Counter<string>;
+  wsMessageBytesTotal: Counter<string>;
+  wsMessageBytesRejectedTotal: Counter<string>;
   wsMessageHandlerErrorsTotal: Counter<"stage">;
   wsAwarenessSpoofAttemptsTotal: Counter<string>;
   wsAwarenessClientIdCollisionsTotal: Counter<string>;
@@ -567,6 +589,18 @@ export function createSyncServerMetrics(): SyncServerMetrics {
   const wsMessagesTooLargeTotal = new promClient.Counter({
     name: "sync_server_ws_messages_too_large_total",
     help: "Total WebSocket messages rejected due to message size limits.",
+    registers: [registry],
+  });
+
+  const wsMessageBytesTotal = new promClient.Counter({
+    name: "sync_server_ws_message_bytes_total",
+    help: "Total bytes of accepted WebSocket messages.",
+    registers: [registry],
+  });
+
+  const wsMessageBytesRejectedTotal = new promClient.Counter({
+    name: "sync_server_ws_message_bytes_rejected_total",
+    help: "Total bytes of WebSocket messages rejected due to configured limits.",
     registers: [registry],
   });
 
@@ -745,6 +779,8 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     wsClosesTotal,
     wsMessagesRateLimitedTotal,
     wsMessagesTooLargeTotal,
+    wsMessageBytesTotal,
+    wsMessageBytesRejectedTotal,
     wsMessageHandlerErrorsTotal,
     wsAwarenessSpoofAttemptsTotal,
     wsAwarenessClientIdCollisionsTotal,

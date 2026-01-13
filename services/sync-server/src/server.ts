@@ -1469,6 +1469,7 @@ export function createSyncServer(
     let messagesInWindow = 0;
     let messageWindowStartedAtMs = Date.now();
     let oversizeMessageCounted = false;
+    let oversizeMessageBytesCounted = false;
     const messageWindowMs = config.limits.messageWindowMs;
     const maxMessagesPerWindow = config.limits.maxMessagesPerWindow;
 
@@ -1488,6 +1489,8 @@ export function createSyncServer(
           },
           "ws_message_too_large"
         );
+        metrics.wsMessageBytesRejectedTotal.inc(messageBytes);
+        oversizeMessageBytesCounted = true;
         ws.close(1009, "Message too big");
         return;
       }
@@ -1495,6 +1498,7 @@ export function createSyncServer(
       const nowMs = Date.now();
 
       if (!ipMessageLimiter.consume(ip, nowMs)) {
+        metrics.wsMessageBytesRejectedTotal.inc(messageBytes);
         metrics.wsMessagesRateLimitedTotal.inc();
         logger.warn(
           { ip, docName, userId: authCtx?.userId },
@@ -1512,6 +1516,7 @@ export function createSyncServer(
 
         messagesInWindow += 1;
         if (messagesInWindow > maxMessagesPerWindow) {
+          metrics.wsMessageBytesRejectedTotal.inc(messageBytes);
           metrics.wsMessagesRateLimitedTotal.inc();
           logger.warn(
             { ip, docName, userId: authCtx?.userId },
@@ -1523,6 +1528,7 @@ export function createSyncServer(
       }
 
       if (!docMessageLimiter.consume(docName, nowMs)) {
+        metrics.wsMessageBytesRejectedTotal.inc(messageBytes);
         metrics.wsMessagesRateLimitedTotal.inc();
         logger.warn(
           { ip, docName, userId: authCtx?.userId },
@@ -1531,6 +1537,8 @@ export function createSyncServer(
         ws.close(1013, "Rate limit exceeded");
         return;
       }
+
+      metrics.wsMessageBytesTotal.inc(messageBytes);
     });
 
     // Treat an active websocket session as document activity. y-websocket sends
@@ -1549,6 +1557,13 @@ export function createSyncServer(
         if (!oversizeMessageCounted) {
           oversizeMessageCounted = true;
           metrics.wsMessagesTooLargeTotal.inc();
+        }
+        if (!oversizeMessageBytesCounted) {
+          const limit = config.limits.maxMessageBytes;
+          if (limit > 0) {
+            metrics.wsMessageBytesRejectedTotal.inc(limit + 1);
+            oversizeMessageBytesCounted = true;
+          }
         }
       }
       connectionTracker.unregister(ip);
@@ -1584,6 +1599,26 @@ export function createSyncServer(
         if (!oversizeMessageCounted) {
           oversizeMessageCounted = true;
           metrics.wsMessagesTooLargeTotal.inc();
+        }
+        if (!oversizeMessageBytesCounted) {
+          let rejectedBytes: number | null = null;
+          try {
+            const receiver = (ws as any)._receiver as { _totalPayloadLength?: unknown } | undefined;
+            const totalPayloadLength = receiver?._totalPayloadLength;
+            if (typeof totalPayloadLength === "number" && Number.isFinite(totalPayloadLength)) {
+              rejectedBytes = totalPayloadLength;
+            }
+          } catch {
+            // ignore
+          }
+          if (!rejectedBytes || rejectedBytes <= 0) {
+            const limit = config.limits.maxMessageBytes;
+            if (limit > 0) rejectedBytes = limit + 1;
+          }
+          if (rejectedBytes && rejectedBytes > 0) {
+            metrics.wsMessageBytesRejectedTotal.inc(rejectedBytes);
+            oversizeMessageBytesCounted = true;
+          }
         }
       }
       logger.warn({ err, ip, docName }, "ws_connection_error");
