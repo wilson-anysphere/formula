@@ -359,7 +359,7 @@
 .collab-version-history__actions {
   display: flex;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   flex-wrap: wrap;
 }
 
@@ -399,8 +399,8 @@
 }
 
 .collab-version-history__create {
-  margin-bottom: 12px;
-  padding-bottom: 12px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -521,8 +521,8 @@
 }
 
 .collab-version-history__details {
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: 8px;
+  padding-top: 8px;
   border-top: 1px solid var(--border);
 }
 
@@ -543,8 +543,8 @@
 }
 
 .collab-version-history__compare {
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: 8px;
+  padding-top: 8px;
   border-top: 1px solid var(--border);
 }
 
@@ -665,7 +665,7 @@
 }
 
 .collab-version-history__diff-group {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .collab-version-history__diff-group-title {
@@ -783,7 +783,7 @@
 .branch-manager__new-branch {
   display: flex;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .branch-manager__new-branch input {
@@ -860,7 +860,7 @@
   justify-content: space-between;
   padding: 6px 0;
   border-bottom: 1px solid var(--border);
-  gap: 12px;
+  gap: 8px;
 }
 
 .branch-manager__item-content {
@@ -987,7 +987,7 @@
 .branch-merge__footer-actions {
   display: flex;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 8px;
   flex-wrap: wrap;
 }
 
@@ -1136,7 +1136,7 @@
 .macros-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   padding: 8px;
   overflow: auto;
 }
@@ -1145,7 +1145,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-bottom: 12px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--panel-border);
 }
 
