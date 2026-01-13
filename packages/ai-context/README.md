@@ -619,12 +619,19 @@ await cm.buildWorkbookContextFromSpreadsheetApi({
 For single-sheet context (`buildContext()`), the default section priorities are:
 
 1. `dlp` (if present) — priority 5
-2. `retrieved` — priority 4
-3. `schema` — priority 3
-4. `attachments` — priority 2
-5. `samples` — priority 1
+2. `attachment_data` (if present) — priority 4.5
+3. `retrieved` — priority 4
+4. `schema_summary` — priority 3.5
+5. `schema` — priority 3
+6. `attachments` — priority 2
+7. `samples` — priority 1
 
-This means that when budgets shrink, **samples drop first**, then attachments, then schema, etc.
+Notes:
+
+- `schema_summary` is a compact, deterministic, schema-first text summary (headers/types/counts) intended to survive tight budgets.
+- `schema` is compact JSON intended for additional detail, but it excludes per-column sample values.
+
+This means that when budgets shrink, **samples drop first**, then attachments, then schema JSON, etc.
 
 ### Example: pack your own sections into a prompt budget
 
