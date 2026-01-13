@@ -209,7 +209,7 @@ fn parse_legend(
 
 fn detect_chart_kind(
     doc: &Document<'_>,
-    root_ns: &str,
+    _root_ns: &str,
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> String {
     // 1) Prefer explicit chart-type nodes like `<cx:waterfallChart>`.
@@ -249,9 +249,7 @@ fn detect_chart_kind(
     // 4) Unknown. Keep the diagnostic stable since it's used by chart fixture tests.
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
-        message: format!(
-            "ChartEx chart kind could not be inferred (root ns={root_ns}); hints: <none>"
-        ),
+        message: "ChartEx chart kind could not be inferred".to_string(),
     });
 
     "unknown".to_string()
