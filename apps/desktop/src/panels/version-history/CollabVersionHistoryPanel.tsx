@@ -175,13 +175,13 @@ export function CollabVersionHistoryPanel({ session }: { session: CollabSession 
           </label>
 
           <label className="collab-version-history__field">
-            <div className="collab-version-history__label">Annotations (optional)</div>
+            <div className="collab-version-history__label">{t("versionHistory.prompt.annotationsOptional")}</div>
             <textarea
               className="collab-version-history__textarea"
               rows={3}
               value={checkpointAnnotations}
               onChange={(e) => setCheckpointAnnotations(e.target.value)}
-              placeholder="Notes about this checkpoint…"
+              placeholder={t("versionHistory.prompt.annotationsPlaceholder")}
               disabled={busy || mutationsDisabled}
             />
           </label>
@@ -193,7 +193,7 @@ export function CollabVersionHistoryPanel({ session }: { session: CollabSession 
               onChange={(e) => setCheckpointLocked(e.target.checked)}
               disabled={busy || mutationsDisabled}
             />
-            Locked
+            {t("versionHistory.meta.locked")}
           </label>
 
           <div className="collab-version-history__create-actions">
@@ -203,7 +203,7 @@ export function CollabVersionHistoryPanel({ session }: { session: CollabSession 
                 if (mutationsDisabled) return;
                 const name = checkpointName.trim();
                 if (!name) {
-                  setError("Checkpoint name is required.");
+                  setError(t("versionHistory.errors.checkpointNameRequired"));
                   return;
                 }
                 try {
@@ -285,7 +285,7 @@ export function CollabVersionHistoryPanel({ session }: { session: CollabSession 
             if (mutationsDisabled) return;
             const id = selectedId;
             if (!id) return;
-            const ok = await nativeDialogs.confirm("Delete this version? This cannot be undone.");
+            const ok = await nativeDialogs.confirm(t("versionHistory.confirm.deleteIrreversible"));
             if (!ok) return;
             try {
               setBusy(true);
@@ -299,7 +299,7 @@ export function CollabVersionHistoryPanel({ session }: { session: CollabSession 
             }
           }}
         >
-          {t("versionHistory.actions.delete")} selected
+          {t("versionHistory.actions.deleteSelected")}
         </button>
 
         <button disabled={busy} onClick={() => void refresh()}>
@@ -308,7 +308,7 @@ export function CollabVersionHistoryPanel({ session }: { session: CollabSession 
       </div>
 
       {selectedIsCheckpoint && selectedLocked ? (
-        <div className="collab-version-history__hint">Locked checkpoints must be unlocked before deleting.</div>
+        <div className="collab-version-history__hint">{t("versionHistory.hint.unlockToDelete")}</div>
       ) : null}
 
       {items.length === 0 ? (

@@ -491,15 +491,21 @@ export const enUS = {
   "versionHistory.panel.noSession": "Version history will appear here.",
   "versionHistory.panel.empty": "No versions yet.",
   "versionHistory.prompt.checkpointName": "Checkpoint name?",
+  "versionHistory.prompt.annotationsOptional": "Annotations (optional)",
+  "versionHistory.prompt.annotationsPlaceholder": "Notes about this checkpoint…",
+  "versionHistory.errors.checkpointNameRequired": "Checkpoint name is required.",
   "versionHistory.confirm.restoreOverwrite": "Restore this version? This will overwrite the current collaborative document state.",
+  "versionHistory.confirm.deleteIrreversible": "Delete this version? This cannot be undone.",
   "versionHistory.actions.createCheckpoint": "Create checkpoint",
   "versionHistory.actions.restoreSelected": "Restore selected",
   "versionHistory.actions.refresh": "Refresh",
   "versionHistory.actions.lock": "Lock",
   "versionHistory.actions.unlock": "Unlock",
   "versionHistory.actions.delete": "Delete",
+  "versionHistory.actions.deleteSelected": "Delete selected",
   "versionHistory.actions.diff": "Diff",
   "versionHistory.diff.current": "Current",
   "versionHistory.diff.selected": "Selected",
-  "versionHistory.meta.locked": "locked"
+  "versionHistory.meta.locked": "Locked",
+  "versionHistory.hint.unlockToDelete": "Locked checkpoints must be unlocked before deleting."
 };
