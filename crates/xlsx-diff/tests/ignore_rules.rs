@@ -134,9 +134,12 @@ fn calcchain_related_rels_and_content_types_remain_critical_when_strict_enabled(
 
     let report = diff_archives_with_options(&expected, &actual, &options);
     assert!(
-        report.differences.iter().any(|d| d.part == "xl/calcChain.xml"
-            && d.kind == "missing_part"
-            && d.severity == Severity::Critical),
+        report
+            .differences
+            .iter()
+            .any(|d| d.part == "xl/calcChain.xml"
+                && d.kind == "missing_part"
+                && d.severity == Severity::Critical),
         "expected missing xl/calcChain.xml to be CRITICAL, got {:#?}",
         report.differences
     );
@@ -909,7 +912,11 @@ fn ignore_glob_suppresses_rels_targets_with_xl_prefix_without_leading_slash() {
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);
-    assert!(report.is_empty(), "expected no diffs, got {:#?}", report.differences);
+    assert!(
+        report.is_empty(),
+        "expected no diffs, got {:#?}",
+        report.differences
+    );
 }
 
 #[test]

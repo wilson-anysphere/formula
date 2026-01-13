@@ -45,6 +45,9 @@ fn cli_json_output_is_parseable_and_contains_expected_fields() {
         .arg("foo/bar.xml")
         .arg("--ignore-glob")
         .arg("docProps/*")
+        .arg("--ignore-path")
+        .arg("some-noisy-path")
+        .arg("--strict-calc-chain")
         .output()
         .unwrap();
 
@@ -67,6 +70,11 @@ fn cli_json_output_is_parseable_and_contains_expected_fields() {
     );
     assert_eq!(json["ignore_parts"], serde_json::json!(["foo/bar.xml"]));
     assert_eq!(json["ignore_globs"], serde_json::json!(["docProps/*"]));
+    assert_eq!(
+        json["ignore_paths"],
+        serde_json::json!([{ "part": serde_json::Value::Null, "path_substring": "some-noisy-path", "kind": serde_json::Value::Null }])
+    );
+    assert_eq!(json["strict_calc_chain"], true);
 
     assert_eq!(json["counts"]["critical"].as_u64().unwrap(), 0);
     assert_eq!(json["counts"]["warning"].as_u64().unwrap(), 2);

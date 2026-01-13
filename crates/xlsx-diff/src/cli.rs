@@ -88,8 +88,17 @@ struct JsonReport<'a> {
     modified: &'a str,
     ignore_parts: Vec<&'a str>,
     ignore_globs: Vec<&'a str>,
+    ignore_paths: Vec<JsonIgnorePathRule<'a>>,
+    strict_calc_chain: bool,
     counts: JsonCounts,
     diffs: Vec<JsonDiff<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+struct JsonIgnorePathRule<'a> {
+    part: Option<&'a str>,
+    path_substring: &'a str,
+    kind: Option<&'a str>,
 }
 
 pub fn run() -> Result<()> {
@@ -230,10 +239,24 @@ pub fn run_with_args(args: Args) -> Result<()> {
             let original = args.original.to_string_lossy().into_owned();
             let modified = args.modified.to_string_lossy().into_owned();
 
-            let mut ignore_parts: Vec<&str> = options.ignore_parts.iter().map(|s| s.as_str()).collect();
+            let mut ignore_parts: Vec<&str> =
+                options.ignore_parts.iter().map(|s| s.as_str()).collect();
             ignore_parts.sort();
-            let mut ignore_globs: Vec<&str> = options.ignore_globs.iter().map(|s| s.as_str()).collect();
+            let mut ignore_globs: Vec<&str> =
+                options.ignore_globs.iter().map(|s| s.as_str()).collect();
             ignore_globs.sort();
+            let mut ignore_paths: Vec<JsonIgnorePathRule<'_>> = options
+                .ignore_paths
+                .iter()
+                .map(|rule| JsonIgnorePathRule {
+                    part: rule.part.as_deref(),
+                    path_substring: rule.path_substring.as_str(),
+                    kind: rule.kind.as_deref(),
+                })
+                .collect();
+            ignore_paths.sort_by(|a, b| {
+                (a.part, a.kind, a.path_substring).cmp(&(b.part, b.kind, b.path_substring))
+            });
 
             let counts = JsonCounts {
                 critical: report.count(Severity::Critical),
@@ -261,6 +284,8 @@ pub fn run_with_args(args: Args) -> Result<()> {
                 modified: &modified,
                 ignore_parts,
                 ignore_globs,
+                ignore_paths,
+                strict_calc_chain: options.strict_calc_chain,
                 counts,
                 diffs,
             };
