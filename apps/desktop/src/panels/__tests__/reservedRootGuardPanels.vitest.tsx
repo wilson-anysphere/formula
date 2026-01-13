@@ -73,6 +73,29 @@ class FakeProvider {
   }
 }
 
+class FakeNodeWs {
+  private readonly listeners = new Map<string, Set<(...args: any[]) => void>>();
+
+  on(event: string, cb: (...args: any[]) => void) {
+    let set = this.listeners.get(event);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(event, set);
+    }
+    set.add(cb);
+  }
+
+  off(event: string, cb: (...args: any[]) => void) {
+    this.listeners.get(event)?.delete(cb);
+  }
+
+  emitClose(code: number, reason: any) {
+    for (const cb of Array.from(this.listeners.get("close") ?? [])) {
+      cb(code, reason);
+    }
+  }
+}
+
 afterEach(() => {
   document.body.innerHTML = "";
 });
@@ -190,6 +213,72 @@ describe("sync-server reserved root guard disconnect UX", () => {
     });
     await act(async () => {
       root2.unmount();
+    });
+  });
+
+  it("detects provider 'connection-close' events (no ws)", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const provider = new FakeProvider(undefined);
+    const session = { doc: new Y.Doc({ guid: "doc-3" }), provider, presence: null } as any;
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<CollabVersionHistoryPanel session={session} />);
+    });
+
+    await act(async () => {
+      await waitFor(() => container.querySelector(".collab-version-history__input") instanceof HTMLInputElement);
+    });
+
+    await act(async () => {
+      provider.emit("connection-close", { code: 1008, reason: "reserved root mutation" });
+      await flushPromises();
+    });
+
+    await act(async () => {
+      await waitFor(() => container.textContent?.includes("SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED") ?? false);
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("detects Node/ws close events (ws.on('close', ...))", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const ws = new FakeNodeWs();
+    const provider = new FakeProvider(ws);
+    const session = { doc: new Y.Doc({ guid: "doc-4" }), provider, presence: null } as any;
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<CollabBranchManagerPanel session={session} sheetNameResolver={null} />);
+    });
+
+    await act(async () => {
+      await waitFor(() => container.querySelector("input") instanceof HTMLInputElement);
+    });
+
+    await act(async () => {
+      const reason = typeof Buffer !== "undefined" ? Buffer.from("reserved root mutation") : new TextEncoder().encode("reserved root mutation");
+      ws.emitClose(1008, reason);
+      await flushPromises();
+    });
+
+    await act(async () => {
+      await waitFor(() => container.textContent?.includes("SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED") ?? false);
+    });
+
+    await act(async () => {
+      root.unmount();
     });
   });
 });
