@@ -5,9 +5,10 @@ use crate::ConditionalFormattingDxfAggregation;
 use formula_columnar::{ColumnType as ColumnarType, Value as ColumnarValue};
 use formula_model::{
     normalize_formula_text, Cell, CellIsOperator, CellRef, CellValue, CfRule, CfRuleKind,
-    DateSystem, DefinedNameScope, Hyperlink, HyperlinkTarget, ManualPageBreaks, Outline,
-    PageMargins, PageSetup, Range, Scaling, SheetPrintSettings, SheetVisibility, Workbook,
-    WorkbookWindowState, Worksheet,
+    DataValidationErrorStyle, DataValidationKind, DataValidationOperator, DateSystem,
+    DefinedNameScope, Hyperlink, HyperlinkTarget, ManualPageBreaks, Outline, PageMargins,
+    PageSetup, Range, Scaling, SheetPrintSettings, SheetVisibility, Workbook, WorkbookWindowState,
+    Worksheet,
 };
 use formula_fs::{atomic_write_with_path, AtomicWriteError};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -1131,6 +1132,7 @@ fn sheet_xml(
     let conditional_formatting_xml = render_conditional_formatting(sheet, local_to_global_dxf);
 
     let sheet_protection_xml = sheet_protection_xml(sheet);
+    let data_validations_xml = sheet_data_validations_xml(sheet);
 
     let mut page_margins_xml = String::new();
     let mut page_setup_xml = String::new();
@@ -1218,6 +1220,11 @@ fn sheet_xml(
     if !conditional_formatting_xml.is_empty() {
         xml.push_str("  ");
         xml.push_str(&conditional_formatting_xml.replace('\n', "\n  "));
+        xml.push('\n');
+    }
+    if !data_validations_xml.is_empty() {
+        xml.push_str("  ");
+        xml.push_str(&data_validations_xml);
         xml.push('\n');
     }
     if !page_margins_xml.is_empty() {
@@ -1376,6 +1383,136 @@ fn render_col_breaks_xml(breaks: &ManualPageBreaks) -> String {
         out.push_str(&format!(r#"<brk id="{id}" max="1048575" man="1"/>"#));
     }
     out.push_str("</colBreaks>");
+    out
+}
+
+fn sheet_data_validation_kind_attr(kind: DataValidationKind) -> &'static str {
+    match kind {
+        DataValidationKind::Whole => "whole",
+        DataValidationKind::Decimal => "decimal",
+        DataValidationKind::List => "list",
+        DataValidationKind::Date => "date",
+        DataValidationKind::Time => "time",
+        DataValidationKind::TextLength => "textLength",
+        DataValidationKind::Custom => "custom",
+    }
+}
+
+fn sheet_data_validation_operator_attr(op: DataValidationOperator) -> &'static str {
+    match op {
+        DataValidationOperator::Between => "between",
+        DataValidationOperator::NotBetween => "notBetween",
+        DataValidationOperator::Equal => "equal",
+        DataValidationOperator::NotEqual => "notEqual",
+        DataValidationOperator::GreaterThan => "greaterThan",
+        DataValidationOperator::GreaterThanOrEqual => "greaterThanOrEqual",
+        DataValidationOperator::LessThan => "lessThan",
+        DataValidationOperator::LessThanOrEqual => "lessThanOrEqual",
+    }
+}
+
+fn sheet_data_validation_error_style_attr(style: DataValidationErrorStyle) -> &'static str {
+    match style {
+        DataValidationErrorStyle::Stop => "stop",
+        DataValidationErrorStyle::Warning => "warning",
+        DataValidationErrorStyle::Information => "information",
+    }
+}
+
+fn sheet_data_validations_xml(sheet: &Worksheet) -> String {
+    if sheet.data_validations.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        r#"<dataValidations count="{}">"#,
+        sheet.data_validations.len()
+    ));
+
+    for assignment in &sheet.data_validations {
+        let dv = &assignment.validation;
+
+        let sqref = assignment
+            .ranges
+            .iter()
+            .map(|r| r.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let mut attrs = String::new();
+        attrs.push_str(&format!(
+            r#" type="{}""#,
+            sheet_data_validation_kind_attr(dv.kind)
+        ));
+        if let Some(op) = dv.operator {
+            attrs.push_str(&format!(
+                r#" operator="{}""#,
+                sheet_data_validation_operator_attr(op)
+            ));
+        }
+        if dv.allow_blank {
+            attrs.push_str(r#" allowBlank="1""#);
+        }
+        if dv.show_input_message {
+            attrs.push_str(r#" showInputMessage="1""#);
+        }
+        if dv.show_error_message {
+            attrs.push_str(r#" showErrorMessage="1""#);
+        }
+        if dv.show_drop_down {
+            attrs.push_str(r#" showDropDown="1""#);
+        }
+
+        if let Some(msg) = dv.input_message.as_ref() {
+            if let Some(title) = msg.title.as_deref().filter(|s| !s.is_empty()) {
+                attrs.push_str(&format!(r#" promptTitle="{}""#, escape_xml(title)));
+            }
+            if let Some(body) = msg.body.as_deref().filter(|s| !s.is_empty()) {
+                attrs.push_str(&format!(r#" prompt="{}""#, escape_xml(body)));
+            }
+        }
+
+        if let Some(alert) = dv.error_alert.as_ref() {
+            attrs.push_str(&format!(
+                r#" errorStyle="{}""#,
+                sheet_data_validation_error_style_attr(alert.style)
+            ));
+            if let Some(title) = alert.title.as_deref().filter(|s| !s.is_empty()) {
+                attrs.push_str(&format!(r#" errorTitle="{}""#, escape_xml(title)));
+            }
+            if let Some(body) = alert.body.as_deref().filter(|s| !s.is_empty()) {
+                attrs.push_str(&format!(r#" error="{}""#, escape_xml(body)));
+            }
+        }
+
+        attrs.push_str(&format!(r#" sqref="{}""#, escape_xml(&sqref)));
+
+        out.push_str(&format!(r#"<dataValidation{attrs}>"#));
+
+        if let Some(formula1) = normalize_formula_text(&dv.formula1) {
+            let file_formula = crate::formula_text::add_xlfn_prefixes(&formula1);
+            out.push_str(&format!(
+                r#"<formula1>{}</formula1>"#,
+                escape_xml(&file_formula)
+            ));
+        }
+        if let Some(formula2) = dv
+            .formula2
+            .as_deref()
+            .and_then(|s| normalize_formula_text(s))
+        {
+            let file_formula = crate::formula_text::add_xlfn_prefixes(&formula2);
+            out.push_str(&format!(
+                r#"<formula2>{}</formula2>"#,
+                escape_xml(&file_formula)
+            ));
+        }
+
+        out.push_str("</dataValidation>");
+    }
+
+    out.push_str("</dataValidations>");
     out
 }
 
