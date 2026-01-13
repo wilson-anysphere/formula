@@ -2165,6 +2165,7 @@ dependencies = [
  "formula-xls",
  "formula-xlsb",
  "formula-xlsx",
+ "roxmltree",
  "sha1",
  "tempfile",
  "thiserror 1.0.69",

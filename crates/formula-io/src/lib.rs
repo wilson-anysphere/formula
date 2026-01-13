@@ -13,6 +13,8 @@ pub use formula_xlsb as xlsb;
 pub use formula_xlsx as xlsx;
 
 pub mod offcrypto;
+mod encryption_info;
+pub use encryption_info::{extract_agile_encryption_info_xml, EncryptionInfoXmlError};
 
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 const PARQUET_MAGIC: [u8; 4] = *b"PAR1";

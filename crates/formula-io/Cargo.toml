@@ -28,6 +28,7 @@ formula-model = { path = "../formula-model" }
 formula-xlsx = { path = "../formula-xlsx", default-features = false }
 formula-xls = { path = "../formula-xls" }
 formula-xlsb = { path = "../formula-xlsb" }
+roxmltree = "0.20"
 tempfile = "3.10"
 thiserror = "1.0"
 sha1 = "0.10"
