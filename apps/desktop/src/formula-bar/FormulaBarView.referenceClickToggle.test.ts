@@ -93,4 +93,52 @@ describe("FormulaBarView reference token click selection toggle", () => {
 
     host.remove();
   });
+
+  it("supports the same click-to-select / click-again-to-edit toggle for structured references", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+
+    // Enable structured reference extraction via table metadata.
+    view.model.setExtractFormulaReferencesOptions({
+      tables: [
+        {
+          name: "Table1",
+          columns: ["Amount"],
+          sheet: "Sheet1",
+          startRow: 0,
+          startCol: 0,
+          endRow: 10,
+          endCol: 0,
+        },
+      ],
+    });
+
+    const refText = "Table1[Amount]";
+    view.textarea.value = `=${refText}+B1`;
+
+    const refStart = view.textarea.value.indexOf(refText);
+    const refEnd = refStart + refText.length;
+    const caret = refStart + 3;
+
+    view.textarea.setSelectionRange(caret, caret);
+    view.textarea.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    view.textarea.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(view.textarea.selectionStart).toBe(refStart);
+    expect(view.textarea.selectionEnd).toBe(refEnd);
+
+    view.textarea.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    view.textarea.setSelectionRange(caret, caret);
+    view.textarea.dispatchEvent(new Event("select"));
+    view.textarea.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(view.textarea.selectionStart).toBe(caret);
+    expect(view.textarea.selectionEnd).toBe(caret);
+
+    host.remove();
+  });
 });
