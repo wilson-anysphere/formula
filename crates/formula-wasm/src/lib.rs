@@ -709,6 +709,144 @@ fn pivot_value_to_json(value: pivot_engine::PivotValue) -> JsonValue {
     }
 }
 
+fn pivot_key_part_model_to_engine(part: &formula_model::pivots::PivotKeyPart) -> pivot_engine::PivotKeyPart {
+    match part {
+        formula_model::pivots::PivotKeyPart::Blank => pivot_engine::PivotKeyPart::Blank,
+        formula_model::pivots::PivotKeyPart::Number(bits) => pivot_engine::PivotKeyPart::Number(*bits),
+        formula_model::pivots::PivotKeyPart::Date(d) => pivot_engine::PivotKeyPart::Date(*d),
+        formula_model::pivots::PivotKeyPart::Text(s) => pivot_engine::PivotKeyPart::Text(s.clone()),
+        formula_model::pivots::PivotKeyPart::Bool(b) => pivot_engine::PivotKeyPart::Bool(*b),
+    }
+}
+
+fn pivot_sort_order_model_to_engine(
+    order: formula_model::pivots::SortOrder,
+) -> pivot_engine::SortOrder {
+    match order {
+        formula_model::pivots::SortOrder::Ascending => pivot_engine::SortOrder::Ascending,
+        formula_model::pivots::SortOrder::Descending => pivot_engine::SortOrder::Descending,
+        formula_model::pivots::SortOrder::Manual => pivot_engine::SortOrder::Manual,
+    }
+}
+
+fn pivot_field_model_to_engine(field: &formula_model::pivots::PivotField) -> pivot_engine::PivotField {
+    pivot_engine::PivotField {
+        source_field: field.source_field.clone(),
+        sort_order: pivot_sort_order_model_to_engine(field.sort_order),
+        manual_sort: field
+            .manual_sort
+            .as_ref()
+            .map(|items| items.iter().map(pivot_key_part_model_to_engine).collect()),
+    }
+}
+
+fn pivot_aggregation_model_to_engine(
+    agg: formula_model::pivots::AggregationType,
+) -> pivot_engine::AggregationType {
+    match agg {
+        formula_model::pivots::AggregationType::Sum => pivot_engine::AggregationType::Sum,
+        formula_model::pivots::AggregationType::Count => pivot_engine::AggregationType::Count,
+        formula_model::pivots::AggregationType::Average => pivot_engine::AggregationType::Average,
+        formula_model::pivots::AggregationType::Max => pivot_engine::AggregationType::Max,
+        formula_model::pivots::AggregationType::Min => pivot_engine::AggregationType::Min,
+        formula_model::pivots::AggregationType::Product => pivot_engine::AggregationType::Product,
+        formula_model::pivots::AggregationType::CountNumbers => {
+            pivot_engine::AggregationType::CountNumbers
+        }
+        formula_model::pivots::AggregationType::StdDev => pivot_engine::AggregationType::StdDev,
+        formula_model::pivots::AggregationType::StdDevP => pivot_engine::AggregationType::StdDevP,
+        formula_model::pivots::AggregationType::Var => pivot_engine::AggregationType::Var,
+        formula_model::pivots::AggregationType::VarP => pivot_engine::AggregationType::VarP,
+    }
+}
+
+fn pivot_value_field_model_to_engine(field: &formula_model::pivots::ValueField) -> pivot_engine::ValueField {
+    pivot_engine::ValueField {
+        source_field: field.source_field.clone(),
+        name: field.name.clone(),
+        aggregation: pivot_aggregation_model_to_engine(field.aggregation),
+        show_as: field.show_as,
+        base_field: field.base_field.clone(),
+        base_item: field.base_item.clone(),
+    }
+}
+
+fn pivot_filter_field_model_to_engine(field: &formula_model::pivots::FilterField) -> pivot_engine::FilterField {
+    pivot_engine::FilterField {
+        source_field: field.source_field.clone(),
+        allowed: field.allowed.as_ref().map(|allowed| {
+            allowed
+                .iter()
+                .map(pivot_key_part_model_to_engine)
+                .collect::<std::collections::HashSet<_>>()
+        }),
+    }
+}
+
+fn pivot_layout_model_to_engine(layout: formula_model::pivots::Layout) -> pivot_engine::Layout {
+    match layout {
+        formula_model::pivots::Layout::Compact => pivot_engine::Layout::Compact,
+        // `Outline` is not yet supported by the pivot engine; treat it as tabular output.
+        formula_model::pivots::Layout::Outline | formula_model::pivots::Layout::Tabular => {
+            pivot_engine::Layout::Tabular
+        }
+    }
+}
+
+fn pivot_subtotals_model_to_engine(
+    position: formula_model::pivots::SubtotalPosition,
+) -> pivot_engine::SubtotalPosition {
+    match position {
+        formula_model::pivots::SubtotalPosition::Top => pivot_engine::SubtotalPosition::Top,
+        formula_model::pivots::SubtotalPosition::Bottom => pivot_engine::SubtotalPosition::Bottom,
+        formula_model::pivots::SubtotalPosition::None => pivot_engine::SubtotalPosition::None,
+    }
+}
+
+fn pivot_config_model_to_engine(cfg: &formula_model::pivots::PivotConfig) -> pivot_engine::PivotConfig {
+    pivot_engine::PivotConfig {
+        row_fields: cfg.row_fields.iter().map(pivot_field_model_to_engine).collect(),
+        column_fields: cfg
+            .column_fields
+            .iter()
+            .map(pivot_field_model_to_engine)
+            .collect(),
+        value_fields: cfg
+            .value_fields
+            .iter()
+            .map(pivot_value_field_model_to_engine)
+            .collect(),
+        filter_fields: cfg
+            .filter_fields
+            .iter()
+            .map(pivot_filter_field_model_to_engine)
+            .collect(),
+        calculated_fields: cfg
+            .calculated_fields
+            .iter()
+            .map(|f| pivot_engine::CalculatedField {
+                name: f.name.clone(),
+                formula: f.formula.clone(),
+            })
+            .collect(),
+        calculated_items: cfg
+            .calculated_items
+            .iter()
+            .map(|it| pivot_engine::CalculatedItem {
+                field: it.field.clone(),
+                name: it.name.clone(),
+                formula: it.formula.clone(),
+            })
+            .collect(),
+        layout: pivot_layout_model_to_engine(cfg.layout),
+        subtotals: pivot_subtotals_model_to_engine(cfg.subtotals),
+        grand_totals: pivot_engine::GrandTotals {
+            rows: cfg.grand_totals.rows,
+            columns: cfg.grand_totals.columns,
+        },
+    }
+}
+
 /// Convert an engine value into a scalar workbook `input` representation.
 ///
 /// This differs from [`engine_value_to_json`] for text values: workbook inputs must preserve
@@ -3045,13 +3183,14 @@ impl WasmWorkbook {
         config: JsValue,
     ) -> Result<JsValue, JsValue> {
         ensure_rust_constructors_run();
-        let config: pivot_engine::PivotConfig =
+        let config: formula_model::pivots::PivotConfig =
             serde_wasm_bindgen::from_value(config).map_err(|err| js_err(err.to_string()))?;
+        let engine_config = pivot_config_model_to_engine(&config);
         let writes = self.inner.calculate_pivot_writes_internal(
             &sheet,
             &source_range_a1,
             &destination_top_left_a1,
-            &config,
+            &engine_config,
         )?;
 
         #[derive(Serialize)]
@@ -4853,13 +4992,14 @@ mod tests {
         // values.
         wb.recalculate_internal(None).unwrap();
 
-        let config = pivot_engine::PivotConfig {
-            row_fields: vec![pivot_engine::PivotField::new("Category")],
+        let config = formula_model::pivots::PivotConfig {
+            row_fields: vec![formula_model::pivots::PivotField::new("Category")],
             column_fields: vec![],
-            value_fields: vec![pivot_engine::ValueField {
+            value_fields: vec![formula_model::pivots::ValueField {
                 source_field: "Amount".to_string(),
                 name: "Sum of Amount".to_string(),
-                aggregation: pivot_engine::AggregationType::Sum,
+                aggregation: formula_model::pivots::AggregationType::Sum,
+                number_format: None,
                 show_as: None,
                 base_field: None,
                 base_item: None,
@@ -4867,17 +5007,18 @@ mod tests {
             filter_fields: vec![],
             calculated_fields: vec![],
             calculated_items: vec![],
-            layout: pivot_engine::Layout::Tabular,
-            subtotals: pivot_engine::SubtotalPosition::None,
+            layout: formula_model::pivots::Layout::Tabular,
+            subtotals: formula_model::pivots::SubtotalPosition::None,
             // Match Excel: no "Grand Total" column when there are no column fields.
-            grand_totals: pivot_engine::GrandTotals {
+            grand_totals: formula_model::pivots::GrandTotals {
                 rows: true,
                 columns: false,
             },
         };
 
+        let engine_config = pivot_config_model_to_engine(&config);
         let writes = wb
-            .calculate_pivot_writes_internal(DEFAULT_SHEET, "A1:B4", "D1", &config)
+            .calculate_pivot_writes_internal(DEFAULT_SHEET, "A1:B4", "D1", &engine_config)
             .unwrap();
 
         let expected = vec![
