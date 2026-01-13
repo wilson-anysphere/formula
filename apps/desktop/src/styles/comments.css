@@ -297,7 +297,7 @@
   padding: 6px 8px;
   background: var(--tooltip-bg);
   color: var(--tooltip-text);
-  border: 1px solid var(--border);
+  border: 1px solid var(--formula-grid-line, var(--border));
   font-size: 12px;
   line-height: 1.4;
   border-radius: var(--radius);
