@@ -163,4 +163,32 @@ describe("summarizeSheetSchema", () => {
     expect(summary).not.toContain("N2 [NR2]");
     expect(summary).toContain("N…+1");
   });
+
+  it("can exclude named ranges from the sheet summary", () => {
+    const schema = extractSheetSchema({
+      name: "Sheet1",
+      values: [["A", "B"]],
+      namedRanges: [{ name: "NR", range: "Sheet1!A1" }],
+    });
+
+    const summary = summarizeSheetSchema(schema, { includeNamedRanges: false });
+    expect(summary).toContain("named=1");
+    expect(summary).not.toContain("\nN1 ");
+  });
+
+  it("supports maxNamedRanges=0 (only emits a truncation marker)", () => {
+    const schema = extractSheetSchema({
+      name: "Sheet1",
+      values: [["A", "B"]],
+      namedRanges: [
+        { name: "NR1", range: "Sheet1!A1" },
+        { name: "NR2", range: "Sheet1!B1" },
+      ],
+    });
+
+    const summary = summarizeSheetSchema(schema, { maxTables: 0, maxRegions: 0, maxNamedRanges: 0 });
+    expect(summary).toContain("named=2");
+    expect(summary).not.toContain("\nN1 ");
+    expect(summary).toContain("N…+2");
+  });
 });

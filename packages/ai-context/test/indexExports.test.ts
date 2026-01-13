@@ -33,6 +33,7 @@ describe("ai-context TS entrypoint", () => {
         "",
         "const summary = summarizeSheetSchema(schema);",
         "summary satisfies string;",
+        "summarizeSheetSchema(schema, { maxNamedRanges: 1, includeNamedRanges: false });",
         "const regionSummary = summarizeRegion(schema.tables[0]!);",
         "regionSummary satisfies string;",
         "",
