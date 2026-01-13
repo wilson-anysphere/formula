@@ -571,68 +571,65 @@ pub(crate) fn decrypt_agile_encrypted_package(
         })?;
         let package_key: Zeroizing<Vec<u8>> = Zeroizing::new(package_key_bytes.to_vec());
 
-        // Decrypt the HMAC key/value (dataIntegrity), if present.
+        // Decrypt the HMAC key/value (dataIntegrity) when present.
         //
         // The HMAC key/value are encrypted using the package key, with IVs derived from the keyData
         // salt and fixed block keys.
-        //
-        // Some real-world producers omit the `<dataIntegrity>` element. In that case we can still
-        // decrypt the package but cannot validate integrity.
-        let mut hash_size: usize = 0;
-        let mut hmac_key_len: usize = 0;
-        let (hmac_key_plain, expected_hmac) = if let Some(data_integrity) = &info.data_integrity {
-            hash_size = info.key_data.hash_size;
-            if hash_size == 0 {
-                return Err(OfficeCryptoError::InvalidFormat(
-                    "keyData hashSize must be non-zero".to_string(),
-                ));
-            }
-            let digest_len = info.key_data.hash_algorithm.digest_len();
-            if hash_size > digest_len {
-                return Err(OfficeCryptoError::InvalidFormat(format!(
-                    "keyData hashSize {hash_size} exceeds {} digest length {digest_len}",
-                    info.key_data.hash_algorithm.as_ooxml_name()
-                )));
-            }
+        let integrity: Option<(usize, Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>)> =
+            if let Some(data_integrity) = &info.data_integrity {
+                let hash_size = info.key_data.hash_size;
+                if hash_size == 0 {
+                    return Err(OfficeCryptoError::InvalidFormat(
+                        "keyData hashSize must be non-zero".to_string(),
+                    ));
+                }
+                let digest_len = info.key_data.hash_algorithm.digest_len();
+                if hash_size > digest_len {
+                    return Err(OfficeCryptoError::InvalidFormat(format!(
+                        "keyData hashSize {hash_size} exceeds {} digest length {digest_len}",
+                        info.key_data.hash_algorithm.as_ooxml_name()
+                    )));
+                }
+                let iv_hmac_key = derive_iv(
+                    info.key_data.hash_algorithm,
+                    &info.key_data.salt,
+                    BLOCK_KEY_INTEGRITY_HMAC_KEY,
+                    info.key_data.block_size,
+                );
+                let hmac_key_plain_full: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
+                    &package_key,
+                    &iv_hmac_key,
+                    &data_integrity.encrypted_hmac_key,
+                )?);
+                let hmac_key_len = std::cmp::min(hash_size, hmac_key_plain_full.len());
+                if hmac_key_len == 0 {
+                    return Err(OfficeCryptoError::InvalidFormat(
+                        "decrypted encryptedHmacKey is empty".to_string(),
+                    ));
+                }
+                let hmac_key_plain =
+                    Zeroizing::new(hmac_key_plain_full[..hmac_key_len].to_vec());
 
-            let iv_hmac_key = derive_iv(
-                info.key_data.hash_algorithm,
-                &info.key_data.salt,
-                BLOCK_KEY_INTEGRITY_HMAC_KEY,
-                info.key_data.block_size,
-            );
-            let hmac_key_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
-                &package_key,
-                &iv_hmac_key,
-                &data_integrity.encrypted_hmac_key,
-            )?);
-            hmac_key_len = std::cmp::min(hash_size, hmac_key_plain.len());
-            if hmac_key_len == 0 {
-                return Err(OfficeCryptoError::InvalidFormat(
-                    "decrypted encryptedHmacKey is empty".to_string(),
-                ));
-            }
-
-            let iv_hmac_val = derive_iv(
-                info.key_data.hash_algorithm,
-                &info.key_data.salt,
-                BLOCK_KEY_INTEGRITY_HMAC_VALUE,
-                info.key_data.block_size,
-            );
-            let hmac_value_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
-                &package_key,
-                &iv_hmac_val,
-                &data_integrity.encrypted_hmac_value,
-            )?);
-            let expected_hmac = hmac_value_plain.get(..hash_size).ok_or_else(|| {
-                OfficeCryptoError::InvalidFormat(
-                    "decrypted encryptedHmacValue shorter than hash output".to_string(),
-                )
-            })?;
-            (Some(hmac_key_plain), Some(expected_hmac.to_vec()))
-        } else {
-            (None, None)
-        };
+                let iv_hmac_val = derive_iv(
+                    info.key_data.hash_algorithm,
+                    &info.key_data.salt,
+                    BLOCK_KEY_INTEGRITY_HMAC_VALUE,
+                    info.key_data.block_size,
+                );
+                let hmac_value_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
+                    &package_key,
+                    &iv_hmac_val,
+                    &data_integrity.encrypted_hmac_value,
+                )?);
+                let expected_hmac = hmac_value_plain.get(..hash_size).ok_or_else(|| {
+                    OfficeCryptoError::InvalidFormat(
+                        "decrypted encryptedHmacValue shorter than hash output".to_string(),
+                    )
+                })?;
+                 Some((hash_size, hmac_key_plain, Zeroizing::new(expected_hmac.to_vec())))
+             } else {
+                 None
+             };
 
         // Decrypt the package data in 4096-byte segments. We only decrypt the ciphertext needed for
         // the declared `originalSize` to avoid attacker-controlled ciphertext lengths forcing huge
@@ -679,28 +676,29 @@ pub(crate) fn decrypt_agile_encrypted_package(
             })?;
         }
 
-        // Validate data integrity (HMAC) when `<dataIntegrity>` is present.
-        //
-        // MS-OFFCRYPTO describes `dataIntegrity` as an HMAC over the **EncryptedPackage stream bytes**
-        // (length prefix + ciphertext). This matches Excel and the `ms-offcrypto-writer` crate.
-        //
-        // However, in the wild there are at least three compatibility variants:
-        // - HMAC over the ciphertext bytes only (excluding the 8-byte size prefix)
-        // - HMAC over the decrypted package bytes (plaintext ZIP)
-        // - HMAC over header + plaintext (8-byte size prefix + plaintext ZIP bytes)
-        //
-        // For robustness, accept any of these targets, preferring the spec'd EncryptedPackage stream.
-        if let (Some(hmac_key_plain), Some(expected_hmac)) = (&hmac_key_plain, &expected_hmac) {
-            let hmac_key_plain = &hmac_key_plain[..hmac_key_len];
+        if let Some((hash_size, hmac_key_plain, expected_hmac)) = integrity.as_ref() {
+            let expected_hmac = expected_hmac.as_slice();
+            let hmac_key_plain = hmac_key_plain.as_slice();
+            let hash_size = *hash_size;
 
+            // Validate data integrity (HMAC).
+            //
+            // MS-OFFCRYPTO describes `dataIntegrity` as an HMAC over the **EncryptedPackage stream
+            // bytes** (length prefix + ciphertext). This matches Excel and the `ms-offcrypto-writer`
+            // crate.
+            //
+            // However, in the wild there are at least three compatibility variants:
+            // - HMAC over the ciphertext bytes only (excluding the 8-byte size prefix)
+            // - HMAC over the decrypted package bytes (plaintext ZIP)
+            // - HMAC over (8-byte size prefix + plaintext ZIP)
+            //
+            // For robustness, accept any of these targets, preferring the spec'd EncryptedPackage
+            // stream.
             let computed_hmac_stream_full =
                 compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, encrypted_package)?;
-            let computed_hmac_stream =
-                computed_hmac_stream_full.get(..hash_size).ok_or_else(|| {
-                    OfficeCryptoError::InvalidFormat(
-                        "HMAC output shorter than hashSize".to_string(),
-                    )
-                })?;
+            let computed_hmac_stream = computed_hmac_stream_full.get(..hash_size).ok_or_else(|| {
+                OfficeCryptoError::InvalidFormat("HMAC output shorter than hashSize".to_string())
+            })?;
 
             let computed_hmac_ciphertext_full =
                 compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, ciphertext)?;
@@ -716,12 +714,14 @@ pub(crate) fn decrypt_agile_encrypted_package(
             if !integrity_ok {
                 let computed_hmac_plaintext_full =
                     compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, &out)?;
-                let computed_hmac_plaintext =
-                    computed_hmac_plaintext_full.get(..hash_size).ok_or_else(|| {
+                let computed_hmac_plaintext = computed_hmac_plaintext_full
+                    .get(..hash_size)
+                    .ok_or_else(|| {
                         OfficeCryptoError::InvalidFormat(
                             "HMAC output shorter than hashSize".to_string(),
                         )
                     })?;
+
                 let computed_hmac_plaintext_with_size_full = compute_hmac_two(
                     info.key_data.hash_algorithm,
                     hmac_key_plain,

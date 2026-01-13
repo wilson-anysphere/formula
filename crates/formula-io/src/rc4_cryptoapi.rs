@@ -80,8 +80,9 @@ pub enum Rc4CryptoApiEncryptedPackageError {
 ///
 /// `key_material_b = Hash(H || LE32(b))[0..key_len]`
 ///
-/// CryptoAPI quirk: for **40-bit RC4** (`key_len == 5`, i.e. `keySize == 0`/`40`), CryptoAPI/Office
-/// represent the RC4 key as a 16-byte key blob where the remaining 11 bytes are zero:
+/// CryptoAPI quirk: for **40-bit RC4** (`key_len == 5`, i.e. `keySize == 0`/`40`) when
+/// `algIdHash = CALG_SHA1`, some CryptoAPI/Office implementations treat the RC4 key as a 16-byte
+/// key blob where the remaining 11 bytes are zero:
 /// `rc4_key_b = key_material_b || 0x00 * 11`.
 ///
 /// where:
@@ -338,11 +339,12 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
             }
         };
 
-        // CryptoAPI quirk: "40-bit RC4" keys are represented as a 16-byte RC4 key where the high 88
-        // bits are zero. RC4's keystream depends on both the key bytes and the key length, so using
-        // the raw 5-byte key material directly produces a different keystream than CryptoAPI/Office.
+        // CryptoAPI quirk: for SHA1 + 40-bit RC4, some CryptoAPI/Office implementations treat the
+        // key as a 16-byte blob with the high 88 bits zero. RC4's keystream depends on both the key
+        // bytes *and* the key length, so this is not equivalent to using the raw 5-byte key
+        // material.
         let mut padded_key = [0u8; 16];
-        let key = if self.key_len == 5 {
+        let key = if self.key_len == 5 && self.hash_alg == HashAlg::Sha1 {
             padded_key[..5].copy_from_slice(&digest[..5]);
             padded_key.as_slice()
         } else {
@@ -573,10 +575,10 @@ mod tests {
                     hasher.finalize().to_vec()
                 }
             };
-            // CryptoAPI quirk: 40-bit keys are represented as 16-byte RC4 keys with the high 88 bits
-            // zero.
+            // CryptoAPI quirk: for SHA1 + 40-bit RC4, some implementations treat the key as a
+            // 16-byte blob with the high 88 bits zero.
             let mut padded_key = [0u8; 16];
-            let key = if key_len == 5 {
+            let key = if key_len == 5 && hash_alg == HashAlg::Sha1 {
                 padded_key[..5].copy_from_slice(&digest[..5]);
                 padded_key.as_slice()
             } else {

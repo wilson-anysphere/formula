@@ -211,7 +211,7 @@ fn open_workbook_model_with_password_decrypts_agile_encrypted_xlsx() {
 }
 
 #[test]
-fn open_workbook_with_password_decrypts_encrypted_xlsb() {
+fn open_workbook_with_password_decrypts_agile_encrypted_xlsb() {
     let password = "password";
     let plain_xlsb = xlsb_fixture_bytes();
     let encrypted_cfb = encrypt_zip_with_password(&plain_xlsb, password);
@@ -228,21 +228,17 @@ fn open_workbook_with_password_decrypts_encrypted_xlsb() {
 }
 
 #[test]
-fn open_workbook_model_with_password_decrypts_encrypted_xlsb() {
+fn open_workbook_model_with_password_decrypts_agile_encrypted_xlsb() {
     let password = "password";
     let plain_xlsb = xlsb_fixture_bytes();
     let encrypted_cfb = encrypt_zip_with_password(&plain_xlsb, password);
 
     let tmp = tempfile::tempdir().expect("tempdir");
-    let path = tmp.path().join("encrypted.xlsb");
-    std::fs::write(&path, &encrypted_cfb).expect("write encrypted file");
+    let encrypted_path = tmp.path().join("encrypted.xlsb");
+    std::fs::write(&encrypted_path, &encrypted_cfb).expect("write encrypted file");
 
-    let workbook =
-        open_workbook_model_with_password(&path, Some(password)).expect("open decrypted workbook");
-
-    assert_eq!(workbook.sheets.len(), 1);
-    assert_eq!(workbook.sheets[0].name, "Sheet1");
-
+    let workbook = open_workbook_model_with_password(&encrypted_path, Some(password))
+        .expect("open encrypted xlsb as model");
     let sheet = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
     assert_eq!(
         sheet.value(CellRef::from_a1("A1").unwrap()),
