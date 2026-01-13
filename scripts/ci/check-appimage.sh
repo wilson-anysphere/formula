@@ -5,6 +5,28 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
+usage() {
+  cat <<'EOF'
+usage: scripts/ci/check-appimage.sh [AppImage...]
+
+If no arguments are provided, this script searches for AppImages under the usual
+Cargo/Tauri output directories (e.g. target/**/release/bundle/appimage/*.AppImage).
+
+Environment overrides:
+  FORMULA_APPIMAGE_MAIN_BINARY
+    Expected basename of the main binary under squashfs-root/usr/bin/.
+    Defaults to `apps/desktop/src-tauri/tauri.conf.json` mainBinaryName when available.
+
+  FORMULA_EXPECTED_ELF_MACHINE_SUBSTRING
+    Expected substring from `readelf -h` "Machine:" line (defaults based on uname -m).
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
 # Optional overrides for CI/debugging.
 # - FORMULA_APPIMAGE_MAIN_BINARY: expected basename of the main binary under `squashfs-root/usr/bin/`
 # - FORMULA_EXPECTED_ELF_MACHINE_SUBSTRING: expected substring from `readelf -h` "Machine:" line
@@ -302,10 +324,37 @@ main() {
   require_cmd ldd
   require_cmd realpath
 
-  mapfile -t appimages < <(find_appimages)
+  local -a appimages=()
+
+  if [[ $# -gt 0 ]]; then
+    # Accept explicit AppImage paths (or directories containing them) for local debugging.
+    local arg
+    for arg in "$@"; do
+      if [[ -d "$arg" ]]; then
+        while IFS= read -r -d '' f; do
+          appimages+=("$f")
+        done < <(find "$arg" -type f -name '*.AppImage' -print0)
+      else
+        appimages+=("$arg")
+      fi
+    done
+  else
+    mapfile -t appimages < <(find_appimages)
+  fi
+
+  # De-dupe and validate.
+  if [[ "${#appimages[@]}" -gt 0 ]]; then
+    mapfile -t appimages < <(printf '%s\n' "${appimages[@]}" | sort -u)
+  fi
   if [ "${#appimages[@]}" -eq 0 ]; then
     die "no AppImage artifacts found (expected something like target/**/release/bundle/appimage/*.AppImage)"
   fi
+  local f
+  for f in "${appimages[@]}"; do
+    if [[ ! -f "$f" ]]; then
+      die "AppImage path does not exist or is not a file: $f"
+    fi
+  done
 
   local expected_machine_substring
   expected_machine_substring="$(expected_readelf_machine_substring)"
