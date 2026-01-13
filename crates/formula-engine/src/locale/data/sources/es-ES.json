@@ -1,0 +1,16 @@
+{
+  "source": "Microsoft Excel function translation tables (es-ES).",
+  "translations": {
+    "AVERAGE": "PROMEDIO",
+    "CUBEKPIMEMBER": "MIEMBROKPI.CUBO",
+    "CUBEMEMBER": "MIEMBRO.CUBO",
+    "CUBEMEMBERPROPERTY": "PROPIEDAD.MIEMBRO.CUBO",
+    "CUBERANKEDMEMBER": "MIEMBRO.RANGO.CUBO",
+    "CUBESET": "CONJUNTO.CUBO",
+    "CUBESETCOUNT": "CONTAR.CONJUNTO.CUBO",
+    "CUBEVALUE": "VALOR.CUBO",
+    "IF": "SI",
+    "SEQUENCE": "SECUENCIA",
+    "SUM": "SUMA"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "source": "Microsoft Excel function translation tables (fr-FR).",
+  "translations": {
+    "AVERAGE": "MOYENNE",
+    "CUBEKPIMEMBER": "MEMBREKPI.CUBE",
+    "CUBEMEMBER": "MEMBRE.CUBE",
+    "CUBEMEMBERPROPERTY": "PROPRIETE.MEMBRE.CUBE",
+    "CUBERANKEDMEMBER": "MEMBRE.RANG.CUBE",
+    "CUBESET": "ENSEMBLE.CUBE",
+    "CUBESETCOUNT": "NB.ENSEMBLE.CUBE",
+    "CUBEVALUE": "VALEUR.CUBE",
+    "IF": "SI",
+    "SUM": "SOMME"
+  }
+}

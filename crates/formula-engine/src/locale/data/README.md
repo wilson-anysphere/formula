@@ -31,6 +31,16 @@ This is important because:
   breaks round-tripping and localized editing;
 - keeping the TSVs complete lets us catch regressions any time a function is added/renamed.
 
+### Function translation sources (`sources/<locale>.json`)
+
+The `*.tsv` files in this directory are **generated artifacts**.
+
+Locale-specific function translations are sourced from deterministic JSON files under:
+
+- `crates/formula-engine/src/locale/data/sources/*.json`
+
+Missing entries are treated as identity mappings (canonical == localized).
+
 ### Error translations (`<locale>.errors.tsv`)
 
 Error literal translations are maintained in the locale registry (`src/locale/registry.rs`), but we
@@ -91,11 +101,14 @@ TSVs are maintained by small generator tools so we can enforce:
 Run these from the repo root:
 
 ```bash
+# If the engine function catalog changed:
+node scripts/generate-function-catalog.js
+
 # Regenerate function TSVs (writes files in-place)
-cargo run -p formula-engine --bin generate_locale_function_tsv
+node scripts/generate-locale-function-tsv.js
 
 # Verify function TSVs are up to date (CI mode)
-cargo run -p formula-engine --bin generate_locale_function_tsv -- --check
+node scripts/generate-locale-function-tsv.js --check
 
 # Regenerate error TSVs from committed upstream mapping sources
 node scripts/generate-locale-error-tsvs.mjs
@@ -104,19 +117,47 @@ node scripts/generate-locale-error-tsvs.mjs
 node scripts/generate-locale-error-tsvs.mjs --check
 ```
 
+The function TSV generator uses `SOURCE_DATE_EPOCH` (seconds since Unix epoch) to produce a stable
+generation date in the TSV header. If it is not set, it defaults to `0` for reproducible output.
+
 The error TSV generator derives the canonical error literal list from
 `formula_engine::value::ErrorKind::as_code` (scraped from `crates/formula-engine/src/value/mod.rs`)
 so new error kinds automatically flow through the generator.
 
 `--check` exits non-zero if any files would change.
 
+## External-data worksheet functions / errors
+
+These locales include explicit coverage for Excel external-data worksheet functions:
+
+- `RTD`
+- `CUBEVALUE`
+- `CUBEMEMBER`
+- `CUBEMEMBERPROPERTY`
+- `CUBERANKEDMEMBER`
+- `CUBESET`
+- `CUBESETCOUNT`
+- `CUBEKPIMEMBER`
+
+And for the external-data loading error literal:
+
+- `#GETTING_DATA`
+
+The newer external-data errors (`#CONNECT!`, `#FIELD!`, `#BLOCKED!`, `#UNKNOWN!`) are currently
+treated as canonical (English) for all supported locales, until we have a verified Excel
+localization list for them. Tests assert they round-trip unchanged.
+
 ## Adding a new locale
 
-1. **Create the TSV(s):**
-   - Add `crates/formula-engine/src/locale/data/<locale>.tsv` for function names.
-   - Add `crates/formula-engine/src/locale/data/upstream/errors/<locale>.tsv` and run the error TSV
-     generator to produce `crates/formula-engine/src/locale/data/<locale>.errors.tsv`.
-2. **Register the locale in code:**
+1. **Create the sources:**
+   - Add `crates/formula-engine/src/locale/data/sources/<locale>.json` for function name translations.
+   - Add `crates/formula-engine/src/locale/data/upstream/errors/<locale>.tsv` for error literals.
+2. **Run generators:**
+   - Run `node scripts/generate-locale-function-tsv.js` to produce/update
+     `crates/formula-engine/src/locale/data/<locale>.tsv`.
+   - Run `node scripts/generate-locale-error-tsvs.mjs` to produce/update
+     `crates/formula-engine/src/locale/data/<locale>.errors.tsv`.
+3. **Register the locale in code:**
    - Add a `static <LOCALE>_FUNCTIONS: FunctionTranslations = ...include_str!("data/<locale>.tsv")`
      in `crates/formula-engine/src/locale/registry.rs`.
    - Add a `pub static <LOCALE>: FormulaLocale = ...` entry with separators + boolean literals +
@@ -124,7 +165,6 @@ so new error kinds automatically flow through the generator.
    - Add the locale to `get_locale()` in `registry.rs`.
    - Re-export the new constant from `crates/formula-engine/src/locale/mod.rs` if it should be
      accessible as `locale::<LOCALE>`.
-3. **Add tests:** extend `crates/formula-engine/tests/locale_parsing.rs` with basic round-trip tests
+4. **Add tests:** extend `crates/formula-engine/tests/locale_parsing.rs` with basic round-trip tests
    for separators, a couple of translated functions, and at least one localized error literal.
-4. **Run generators in `--check` mode** to ensure TSVs stay in sync with the engine catalog.
-
+5. **Run generators in `--check` mode** to ensure TSVs stay in sync with the engine catalog.

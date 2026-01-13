@@ -1,0 +1,16 @@
+{
+  "source": "Microsoft Excel function translation tables (de-DE).",
+  "translations": {
+    "AVERAGE": "MITTELWERT",
+    "CUBEKPIMEMBER": "CUBEKPIMITGLIED",
+    "CUBEMEMBER": "CUBEMITGLIED",
+    "CUBEMEMBERPROPERTY": "CUBEMITGLIEDSEIGENSCHAFT",
+    "CUBERANKEDMEMBER": "CUBERANGMITGLIED",
+    "CUBESET": "CUBEMENGE",
+    "CUBESETCOUNT": "CUBEMENGENANZAHL",
+    "CUBEVALUE": "CUBEWERT",
+    "IF": "WENN",
+    "SEQUENCE": "SEQUENZ",
+    "SUM": "SUMME"
+  }
+}
