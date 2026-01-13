@@ -96,4 +96,28 @@ describe("createLocaleAwarePartialFormulaParser", () => {
     expect(calls).toBe(1);
     expect(result).toEqual(expected);
   });
+
+  it("caches unsupported localeIds to avoid repeated engine RPC failures", async () => {
+    setLocale("ar");
+
+    let calls = 0;
+    const engine = {
+      parseFormulaPartial: async () => {
+        calls += 1;
+        throw new Error("unknown localeId: ar");
+      },
+    };
+
+    const parser = createLocaleAwarePartialFormulaParser({
+      getEngineClient: () => engine,
+      timeoutMs: 1000,
+    });
+    const fnRegistry = new FunctionRegistry();
+
+    const input = "=SUM(A1,";
+    await parser(input, input.length, fnRegistry);
+    await parser(input, input.length, fnRegistry);
+
+    expect(calls).toBe(1);
+  });
 });
