@@ -43,6 +43,30 @@ describe("ToolExecutor compute_statistics (streaming + distribution measures)", 
     expect(stats.q3).toBeCloseTo(2, 12);
   });
 
+  it("preserves mode tie-breaking semantics when median/quartiles are also requested", async () => {
+    // Tie case: 1 and 2 both appear twice. Legacy `mode()` resolves ties by first occurrence
+    // in scan order (Map insertion order), so this should be 2 (not 1).
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    // Scan order is A1->D1: [2,1,1,2].
+    await executor.execute({
+      name: "set_range",
+      parameters: { range: "Sheet1!A1:D1", values: [[2, 1, 1, 2]] },
+    });
+
+    const result = await executor.execute({
+      name: "compute_statistics",
+      parameters: { range: "Sheet1!A1:D1", measures: ["mode", "median", "quartiles"] },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.tool !== "compute_statistics") throw new Error("Unexpected tool result");
+    expect(result.data?.statistics.mode).toBe(2);
+    expect(result.data?.statistics.median).toBeCloseTo(1.5, 12);
+    expect(result.data?.statistics.q2).toBeCloseTo(1.5, 12);
+  });
+
   it("matches legacy semantics for small-N variance/stdev (n=1 -> 0, n=0 -> null)", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 5 });
@@ -104,4 +128,3 @@ describe("ToolExecutor compute_statistics (streaming + distribution measures)", 
     expect(result.data?.statistics.correlation).toBeCloseTo(1, 12);
   });
 });
-

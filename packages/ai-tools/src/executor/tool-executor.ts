@@ -1482,6 +1482,11 @@ export class ToolExecutor {
       }
     }
 
+    const wantsMode = requested.has("mode");
+    // `mode()` tie-breaking depends on original scan order (Map insertion order). If we need to sort
+    // values for median/quartiles, compute mode first.
+    const modeValue = wantsMode && values && values.length ? mode(values) : null;
+
     if (values && values.length > 1 && (requested.has("median") || requested.has("quartiles"))) {
       // Sort once in-place so median/quartiles don't need to allocate extra copies.
       values.sort((a, b) => a - b);
@@ -1503,7 +1508,7 @@ export class ToolExecutor {
           stats.median = values && values.length ? quantileSorted(values, 0.5) : null;
           break;
         case "mode":
-          stats.mode = values && values.length ? mode(values) : null;
+          stats.mode = modeValue;
           break;
         case "stdev":
           if (!count) {
