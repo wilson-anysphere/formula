@@ -5,6 +5,7 @@ on:
     paths:
       - "tools/corpus/**"
       - "docs/compatibility-corpus.md"
+      - "rust-toolchain.toml"
       # Run the corpus harness when the XLSX stack changes so we catch compatibility
       # regressions in load/save/diff behavior.
       - "crates/formula-corpus-triage/**"
@@ -18,6 +19,7 @@ on:
     paths:
       - "tools/corpus/**"
       - "docs/compatibility-corpus.md"
+      - "rust-toolchain.toml"
       - "crates/formula-corpus-triage/**"
       - "crates/formula-xlsb/**"
       - "crates/formula-xlsx/**"
