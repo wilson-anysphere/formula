@@ -66,7 +66,13 @@ function parseMinisignKeyFileBody(text) {
   if (!binary) return null;
   if (binary.length < 2 || binary[0] !== 0x45 || binary[1] !== 0x64) return null; // "Ed"
   if (binary.length < 10) return null;
-  const keyIdHex = binary.subarray(2, 10).toString("hex").toUpperCase();
+  // minisign prints key IDs in the "untrusted comment" header as a big-endian hex string. The key
+  // ID bytes in the binary payload are little-endian, so reverse them for display to match what
+  // contributors see in `tauri.conf.json` and `cargo tauri signer generate` output.
+  const keyIdHex = Buffer.from(binary.subarray(2, 10))
+    .reverse()
+    .toString("hex")
+    .toUpperCase();
   return { payloadLine, binary, keyIdHex };
 }
 
@@ -118,7 +124,10 @@ function analyzeMinisignKey(value) {
 
   // base64-encoded minisign binary key (payload line itself).
   if (decoded.length >= 10 && decoded[0] === 0x45 && decoded[1] === 0x64) {
-    const keyIdHex = decoded.subarray(2, 10).toString("hex").toUpperCase();
+    const keyIdHex = Buffer.from(decoded.subarray(2, 10))
+      .reverse()
+      .toString("hex")
+      .toUpperCase();
     if (decoded.length === MINISIGN_PUBLIC_KEY_BYTES) return { kind: "public", keyIdHex };
     const encrypted = decoded.length > MINISIGN_UNENCRYPTED_SECRET_KEY_MAX_BYTES;
     return { kind: "secret", encrypted, keyIdHex };

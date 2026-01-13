@@ -64,7 +64,8 @@ function fakeMinisignSecretKey({ encrypted, keyId = updaterKeyId }) {
   const secretPayload = Buffer.alloc(encrypted ? 140 : 64, 0x22);
   const binary = Buffer.concat([header, keyId, secretPayload]);
   const payloadLine = binary.toString("base64").replace(/=+$/, "");
-  const keyIdHex = Buffer.from(keyId).toString("hex").toUpperCase();
+  // Match minisign's displayed key ID format (big-endian hex).
+  const keyIdHex = Buffer.from(keyId).reverse().toString("hex").toUpperCase();
   const keyFile = `untrusted comment: minisign secret key: ${keyIdHex}\n${payloadLine}\n`;
 
   // `cargo tauri signer generate` prints base64 strings that decode to minisign key files.
