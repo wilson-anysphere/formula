@@ -45,6 +45,11 @@ export function CollabVersionHistoryPanel({
         type="button"
         disabled={busy}
         onClick={() => {
+          try {
+            collabVersioning?.destroy?.();
+          } catch {
+            // ignore
+          }
           clearReservedRootGuardError((session as any)?.provider ?? null);
           setError(null);
           setLoadError(null);
