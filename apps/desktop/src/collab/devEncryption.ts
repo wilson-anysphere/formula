@@ -112,11 +112,13 @@ export function createDevEncryptionConfig(opts: {
   const key = deriveDevEncryptionKey(opts.docId);
   const range = opts.range;
   return {
-    // Key is doc-scoped (dev-only). We return it for *all* cells so clients can
-    // still decrypt previously-encrypted cells even if the demo range changes.
+    // Only provide the key for the configured demo range.
     //
-    // Encryption is restricted to the demo range via `shouldEncryptCell`.
-    keyForCell: () => key,
+    // This keeps the dev toggle from accidentally granting edit access to cells that
+    // were encrypted with a different key id (e.g. production-managed encryption),
+    // since CollabSession treats any non-null key as sufficient to overwrite an
+    // encrypted cell.
+    keyForCell: (cell: CellAddress) => (cellInRange(cell, range) ? key : null),
     shouldEncryptCell: (cell: CellAddress) => cellInRange(cell, range),
   };
 }

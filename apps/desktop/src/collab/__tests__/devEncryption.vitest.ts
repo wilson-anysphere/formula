@@ -77,8 +77,8 @@ describe("dev collab encryption toggle", () => {
     expect(outsideRange?.value).toBe("public");
     expect(outsideRange?.formula).toBeNull();
 
-    // The dev helper should remain able to *decrypt* already-encrypted cells even if the
-    // demo encryption range is later changed (writes are range-restricted via shouldEncryptCell).
+    // Changing the configured dev demo range should not implicitly grant access to
+    // previously-encrypted cells outside the new range.
     const encryptionDifferentRange = resolveDevCollabEncryptionFromSearch({
       search: "?collabEncrypt=1&collabEncryptRange=Sheet1!B1:B1",
       docId,
@@ -89,11 +89,14 @@ describe("dev collab encryption toggle", () => {
     const sessionDifferentRange = createCollabSession({ docId, doc, encryption: encryptionDifferentRange! });
     const decrypted = await sessionDifferentRange.getCell(a1);
     expect(decrypted).not.toBeNull();
-    expect(decrypted?.value).toBe("secret");
+    expect(decrypted?.value).toBe("###");
+    expect(decrypted?.encrypted).toBe(true);
 
     const decryptedFormula = await sessionDifferentRange.getCell(a2);
     expect(decryptedFormula).not.toBeNull();
-    expect(decryptedFormula?.formula).toBe("=SUM(1,2)");
+    expect(decryptedFormula?.value).toBe("###");
+    expect(decryptedFormula?.formula).toBeNull();
+    expect(decryptedFormula?.encrypted).toBe(true);
   });
 
   it("can resolve a sheet display name to a stable sheet id when provided a resolver", async () => {
