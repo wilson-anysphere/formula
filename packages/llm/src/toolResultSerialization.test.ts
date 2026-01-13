@@ -154,6 +154,44 @@ describe("serializeToolResultForModel", () => {
     expect(payload.data.truncated).toBe(true);
   });
 
+  it("detect_anomalies falls back to a minimal summary when the envelope would exceed maxChars", () => {
+    const toolCall = {
+      id: "call-3c",
+      name: "detect_anomalies",
+      arguments: { range: "Sheet1!A1:A10", method: "zscore" }
+    };
+
+    const result = {
+      tool: "detect_anomalies",
+      ok: true,
+      timing: { started_at_ms: 0, duration_ms: 1 },
+      warnings: ["x".repeat(5_000)],
+      data: {
+        range: "Sheet1!A1:A10",
+        method: "zscore",
+        anomalies: [{ cell: "Sheet1!A1", value: 1, score: 4 }],
+        truncated: true,
+        total_anomalies: 123
+      }
+    };
+
+    const maxChars = 400;
+    const serialized = serializeToolResultForModel({ toolCall: toolCall as any, result, maxChars });
+    expect(serialized.length).toBeLessThanOrEqual(maxChars);
+
+    const payload = JSON.parse(serialized);
+    expect(payload.tool).toBe("detect_anomalies");
+    expect(payload.ok).toBe(true);
+    // The fallback path drops huge envelope fields like warnings to fit the budget.
+    expect(payload.warnings).toBeUndefined();
+    expect(payload.data).toEqual({
+      range: "Sheet1!A1:A10",
+      method: "zscore",
+      total_anomalies: 123,
+      truncated: true
+    });
+  });
+
   it("generic serializer handles circular references + huge strings without throwing", () => {
     const huge = "x".repeat(100_000);
     const circular: any = { tool: "some_tool", ok: true, data: { huge } };

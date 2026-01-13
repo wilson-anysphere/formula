@@ -165,6 +165,9 @@ function serializeFilterRange(params) {
  */
 function serializeDetectAnomalies(params) {
   const base = normalizeToolExecutionEnvelope(params.toolCall, params.result);
+  const tool = String(
+    typeof base.tool === "string" && base.tool.trim() ? base.tool : String(params.toolCall?.name ?? "detect_anomalies")
+  );
   const data = base.data && typeof base.data === "object" ? base.data : null;
   const range = typeof data?.range === "string" ? data.range : safeRangeFromCall(params.toolCall);
   const method =
@@ -216,6 +219,7 @@ function serializeDetectAnomalies(params) {
 
     const payload = {
       ...base,
+      tool,
       data: {
         ...(range ? { range } : {}),
         ...(method ? { method } : {}),
@@ -236,6 +240,7 @@ function serializeDetectAnomalies(params) {
   return finalizeJson(
     safeJsonStringify({
       ...base,
+      tool,
       data: {
         ...(range ? { range } : {}),
         ...(method ? { method } : {}),
@@ -248,7 +253,21 @@ function serializeDetectAnomalies(params) {
       }
     }),
     params.maxChars,
-    { tool: base.tool, ok: base.ok, truncated: true }
+    {
+      tool,
+      ok: base.ok,
+      ...(base.error ? { error: base.error } : {}),
+      data: {
+        ...(range ? { range } : {}),
+        ...(method ? { method } : {}),
+        ...(typeof totalAnomalies === "number"
+          ? typeof data?.total_anomalies === "number"
+            ? { total_anomalies: totalAnomalies }
+            : { count: totalAnomalies }
+          : {}),
+        truncated: true
+      }
+    }
   );
 }
 
