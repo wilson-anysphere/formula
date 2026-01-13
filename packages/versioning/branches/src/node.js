@@ -1,8 +1,10 @@
-// Node-only entrypoint for branch/versioning helpers that depend on Node built-ins.
+// Node-only entrypoint for branching helpers that depend on Node built-ins.
 //
-// The main `packages/versioning/branches/src/index.js` entrypoint is safe to import in
-// browser/Vite runtimes (desktop app + Playwright). Node-specific stores should be
-// imported from this module instead.
+// Browser/Vite runtimes should import from `packages/versioning/branches/src/browser.js`
+// (a browser-safe subset that excludes Node-only stores like `SQLiteBranchStore`).
+//
+// This module re-exports the full browser-safe surface from `./index.js` and adds
+// Node-only stores on top.
 
 export * from "./index.js";
 
