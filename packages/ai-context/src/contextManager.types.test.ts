@@ -22,6 +22,7 @@ import {
   type DlpOptions,
   type RetrievedSheetChunk,
   type RetrievedWorkbookChunk,
+  type WorkbookChunkMetadata,
   type WorkbookIndexStats,
   type SheetNameResolverLike,
   type SpreadsheetApiLike,
@@ -46,6 +47,7 @@ type _WorkbookRetrievedNotAny = Assert<IsAny<BuildWorkbookContextResult["retriev
 type _WorkbookRetrievedShape = Assert<
   BuildWorkbookContextResult["retrieved"][number] extends RetrievedWorkbookChunk ? true : false
 >;
+type _WorkbookChunkMetadataNotAny = Assert<IsAny<WorkbookChunkMetadata> extends false ? true : false>;
 type _WorkbookIndexStatsNotAny = Assert<IsAny<BuildWorkbookContextResult["indexStats"]> extends false ? true : false>;
 type _WorkbookIndexStatsShape = Assert<
   BuildWorkbookContextResult["indexStats"] extends WorkbookIndexStats | null ? true : false

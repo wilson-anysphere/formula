@@ -133,10 +133,19 @@ export interface WorkbookChunkDlpInfo {
   findings: DlpFinding[];
 }
 
+export interface WorkbookChunkMetadata {
+  workbookId?: string;
+  sheetName?: string;
+  kind?: string;
+  title?: string;
+  rect?: WorkbookRagRect;
+  [key: string]: unknown;
+}
+
 export interface RetrievedWorkbookChunk {
   id: string;
   score: number;
-  metadata: Record<string, unknown>;
+  metadata: WorkbookChunkMetadata;
   text: string;
   dlp: WorkbookChunkDlpInfo;
 }
