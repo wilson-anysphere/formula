@@ -230,6 +230,60 @@ test(
     assert.ok(records.length > 0);
     for (const r of records) {
       assert.equal(r.metadata.tag, "v2");
+      assert.equal(r.metadata.embedder, embedder.name);
+    }
+
+    // Ensure metadata_json only contains *extra* keys (and does not include standard fields)
+    // after a metadata-only update path.
+    const sampleId = records[0].id;
+    const stmt = store2._db.prepare(
+      `
+        SELECT
+          workbook_id,
+          sheet_name,
+          kind,
+          title,
+          r0,
+          c0,
+          r1,
+          c1,
+          content_hash,
+          metadata_hash,
+          token_count,
+          text,
+          metadata_json
+        FROM vectors
+        WHERE id = ?
+        LIMIT 1;
+      `
+    );
+    stmt.bind([sampleId]);
+    assert.ok(stmt.step());
+    const row = stmt.get();
+    stmt.free();
+
+    assert.equal(row[0], workbook.id);
+    // Structured fields should be populated (not stored redundantly in metadata_json).
+    assert.ok(typeof row[8] === "string" && row[8].length > 0);
+    assert.ok(typeof row[9] === "string" && row[9].length > 0);
+    assert.ok(Number.isFinite(row[10]) && row[10] > 0);
+    assert.ok(typeof row[11] === "string" && row[11].length > 0);
+
+    const extra = JSON.parse(row[12]);
+    assert.equal(extra.tag, "v2");
+    assert.equal(extra.embedder, embedder.name);
+    for (const key of [
+      "workbookId",
+      "sheetName",
+      "kind",
+      "title",
+      "rect",
+      "text",
+      "contentHash",
+      "metadataHash",
+      "tokenCount",
+    ]) {
+      assert.equal(Object.prototype.hasOwnProperty.call(extra, key), false, `metadata_json should not include ${key}`);
     }
     await store2.close();
   }
