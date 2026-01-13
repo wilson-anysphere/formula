@@ -246,6 +246,18 @@ jobs:
       # Fail fast (before any platform builds start) if maintainers require code signing or if
       # signing secrets are partially configured. This avoids wasting build time and uploading
       # a partial set of GitHub Release assets.
+      - name: "Preflight: require APPLE_SIGNING_IDENTITY when macOS certificate is configured"
+        if: secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_SIGNING_IDENTITY == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "" >&2
+          echo "::error::APPLE_CERTIFICATE is configured but APPLE_SIGNING_IDENTITY is missing." >&2
+          echo "This repo requires an explicit signing identity to avoid ambiguous certificate selection." >&2
+          echo "Set APPLE_SIGNING_IDENTITY (e.g. \"Developer ID Application: Your Company (TEAMID)\") or remove APPLE_CERTIFICATE to build unsigned." >&2
+          echo "See docs/release.md (\"Code signing\")." >&2
+          exit 1
+
       - name: "Preflight: verify macOS code signing secrets (base64 + PKCS#12)"
         if: secrets.APPLE_CERTIFICATE != '' || vars.FORMULA_REQUIRE_CODESIGN == '1'
         shell: bash
