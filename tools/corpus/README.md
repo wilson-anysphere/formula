@@ -43,3 +43,6 @@ For private dashboards, run `tools.corpus.dashboard` with `--privacy-mode privat
 supports the same flag (`tools.corpus.minimize --privacy-mode private`) for sharing privacy-safe summaries.
 
 For full docs, see: `docs/compatibility-corpus.md`.
+
+CI note: the scheduled private corpus workflow uploads a stable `corpus-private-trend` artifact
+containing `tools/corpus/out/private/trend.json` for easy consumption.

@@ -323,6 +323,11 @@ The scheduled private corpus workflow (`.github/workflows/corpus.yml`) restores/
 `trend.json` file via GitHub Actions cache so it grows over time, and uploads it as part of the
 private corpus artifact.
 
+For convenience, CI also uploads a small stable-named artifact containing just the latest trend
+file:
+
+- `corpus-private-trend` → `tools/corpus/out/private/trend.json`
+
 ### Promote a workbook into the public subset
 
 To add a new public, non-sensitive regression fixture (base64 + expectations) in one step:
