@@ -23,6 +23,9 @@ fn offset_in_bounds(buf: &[u8]) -> usize {
 proptest! {
     #![proptest_config(ProptestConfig {
         cases: 256,
+        // Keep these fuzz-style tests deterministic in CI so failures are reproducible and don't
+        // depend on a random per-run seed.
+        rng_seed: proptest::test_runner::RngSeed::Fixed(0),
         .. ProptestConfig::default()
     })]
 
@@ -34,8 +37,26 @@ proptest! {
         prop_assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut iter = records::BiffRecordIter::from_offset(&buf, start).expect("offset derived to be in-bounds");
-                while let Some(_next) = iter.next() {
-                    // Intentionally discard output; the property is "never panic".
+                let mut prev_end = start;
+                while let Some(next) = iter.next() {
+                    match next {
+                        Ok(record) => {
+                            // Basic iterator invariants: records are contiguous, in-bounds slices.
+                            assert!(record.offset >= prev_end, "record offsets should be monotonic");
+                            let end = record
+                                .offset
+                                .checked_add(4)
+                                .and_then(|v| v.checked_add(record.data.len()))
+                                .expect("overflow computing record end");
+                            assert!(end <= buf.len(), "record extends past end of input");
+                            prev_end = end;
+                        }
+                        Err(_) => {
+                            // An error terminates iteration.
+                            assert!(iter.next().is_none());
+                            break;
+                        }
+                    }
                 }
             }))
             .is_ok(),
@@ -48,8 +69,27 @@ proptest! {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut iter = records::LogicalBiffRecordIter::from_offset(&buf, start, allows_continuation)
                     .expect("offset derived to be in-bounds");
-                while let Some(_next) = iter.next() {
-                    // Discard.
+                while let Some(next) = iter.next() {
+                    match next {
+                        Ok(record) => {
+                            // Fragment boundaries must be consistent with the combined payload.
+                            let total: usize = record.fragment_sizes.iter().copied().sum();
+                            assert_eq!(total, record.data.len(), "fragment sizes must sum to combined data length");
+
+                            let frag_lens: Vec<usize> = record.fragments().map(|f| f.len()).collect();
+                            assert_eq!(frag_lens, record.fragment_sizes, "fragment iterator must match fragment_sizes");
+
+                            if record.fragment_sizes.len() <= 1 {
+                                assert!(!record.is_continued());
+                            } else {
+                                assert!(record.is_continued());
+                            }
+                        }
+                        Err(_) => {
+                            // Malformed physical record terminates the logical iterator too.
+                            break;
+                        }
+                    }
                 }
             }))
             .is_ok(),
@@ -78,7 +118,16 @@ proptest! {
         let sheet_names: &[String] = &[];
         prop_assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = defined_names::parse_biff_defined_names(&buf, BiffVersion::Biff8, CODEPAGE_1252, sheet_names);
+                let parsed =
+                    defined_names::parse_biff_defined_names(&buf, BiffVersion::Biff8, CODEPAGE_1252, sheet_names)
+                        .expect("defined name parsing is best-effort and should not hard-fail");
+                for name in parsed.names {
+                    assert!(!name.name.is_empty(), "defined name should not be empty");
+                    assert!(!name.name.contains('\0'), "defined name should have embedded NULs stripped");
+                    if let Some(comment) = name.comment {
+                        assert!(!comment.contains('\0'), "defined name comment should have embedded NULs stripped");
+                    }
+                }
             }))
             .is_ok(),
             "defined_names::parse_biff_defined_names panicked"
@@ -95,6 +144,10 @@ proptest! {
                     "warnings should be bounded (len={})",
                     parsed.warnings.len()
                 );
+                for note in parsed.notes {
+                    assert!(!note.author.contains('\0'), "NOTE author should have embedded NULs stripped");
+                    assert!(!note.text.contains('\0'), "NOTE text should have embedded NULs stripped");
+                }
             }))
             .is_ok(),
             "comments::parse_biff_sheet_notes panicked"
@@ -103,8 +156,12 @@ proptest! {
         // Worksheet HLINK parser.
         prop_assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = sheet::parse_biff_sheet_hyperlinks(&buf, 0, CODEPAGE_1252)
+                let parsed = sheet::parse_biff_sheet_hyperlinks(&buf, 0, CODEPAGE_1252)
                     .expect("offset 0 should always be in-bounds");
+                for link in parsed.hyperlinks {
+                    assert!(link.range.start.row <= link.range.end.row);
+                    assert!(link.range.start.col <= link.range.end.col);
+                }
             }))
             .is_ok(),
             "sheet::parse_biff_sheet_hyperlinks panicked"
@@ -113,11 +170,16 @@ proptest! {
         // AutoFilter `_FilterDatabase` NAME parser.
         prop_assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = autofilter::parse_biff_filter_database_ranges(&buf, BiffVersion::Biff8, CODEPAGE_1252, None);
+                let parsed =
+                    autofilter::parse_biff_filter_database_ranges(&buf, BiffVersion::Biff8, CODEPAGE_1252, None)
+                        .expect("autofilter parsing is best-effort and should not hard-fail");
+                for (_sheet_idx, range) in parsed.by_sheet {
+                    assert!(range.start.row <= range.end.row);
+                    assert!(range.start.col <= range.end.col);
+                }
             }))
             .is_ok(),
             "autofilter::parse_biff_filter_database_ranges panicked"
         );
     }
 }
-
