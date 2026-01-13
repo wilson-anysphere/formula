@@ -48,6 +48,19 @@ describe("dev collab encryption toggle", () => {
     expect(masked?.value).toBe("###");
     expect(masked?.formula).toBeNull();
     expect(masked?.encrypted).toBe(true);
+
+    // The dev helper should remain able to *decrypt* already-encrypted cells even if the
+    // demo encryption range is later changed (writes are range-restricted via shouldEncryptCell).
+    const encryptionDifferentRange = resolveDevCollabEncryptionFromSearch({
+      search: "?collabEncrypt=1&collabEncryptRange=Sheet1!B1:B1",
+      docId,
+      defaultSheetId: "Sheet1",
+    });
+    expect(encryptionDifferentRange).not.toBeNull();
+
+    const sessionDifferentRange = createCollabSession({ docId, doc, encryption: encryptionDifferentRange! });
+    const decrypted = await sessionDifferentRange.getCell(a1);
+    expect(decrypted).not.toBeNull();
+    expect(decrypted?.value).toBe("secret");
   });
 });
-
