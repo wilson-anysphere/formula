@@ -146,6 +146,10 @@ test("CollabVersioning restoreVersion supports caller-provided excludeRoots (cus
   assert.equal(snapshotDoc.share.has("myBranching:branches"), false);
   assert.equal(snapshotDoc.share.has("myBranching:commits"), false);
   assert.equal(snapshotDoc.share.has("myBranching:meta"), false);
+  // When using the default YjsVersionStore, CollabVersioning must also exclude
+  // the in-doc version history roots to avoid recursive snapshots/restores.
+  assert.equal(snapshotDoc.share.has("versions"), false);
+  assert.equal(snapshotDoc.share.has("versionsMeta"), false);
 
   // And that the snapshot contains the expected workbook state.
   assert.equal(snapshotDoc.getMap("metadata").get("title"), "Before");
