@@ -58,6 +58,12 @@ Note: `upload=true` runs the same version validation as a tagged release (the ta
 match `apps/desktop/src-tauri/tauri.conf.json`), so for ad-hoc pipeline tests without bumping the
 app version, prefer `upload=false`.
 
+## Toolchain versions (keep local + CI in sync)
+
+The release workflow pins its Node.js major via `NODE_VERSION` in `.github/workflows/release.yml`
+(currently Node 22). If you run the preflight scripts or build release bundles locally, use the same
+Node version to avoid subtle differences between local and CI artifacts (see `.nvmrc` / `mise.toml`).
+
 ## Preflight validations (CI enforced)
 
 The release workflow runs a couple of lightweight preflight scripts before it spends time building
