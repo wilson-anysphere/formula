@@ -152,10 +152,7 @@ export class CellStructuralConflictMonitor {
     /**
      * Optional age-based pruning window (in milliseconds) for records in the shared
      * `cellStructuralOps` log. When set, records older than `Date.now() - maxOpRecordAgeMs`
-     * may be deleted by any client (best-effort).
-     *
-     * Note: The monitor does not age-prune its own records (they remain bounded by
-     * `maxOpRecordsPerUser`). Defaults to null/disabled.
+     * may be deleted by any client (best-effort). Defaults to null/disabled.
      */
     maxOpRecordAgeMs?: number | null;
   });

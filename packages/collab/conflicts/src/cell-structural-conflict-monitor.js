@@ -58,9 +58,7 @@ export class CellStructuralConflictMonitor {
    *   window for records in the shared `cellStructuralOps` log. When enabled,
    *   records older than `Date.now() - maxOpRecordAgeMs` may be deleted by any
    *   client (best-effort).
-   *
-   *   Note: The monitor does not age-prune its *own* records (they remain bounded
-   *   by `maxOpRecordsPerUser`). Defaults to null (disabled).
+   *   Defaults to null (disabled).
    */
   constructor(opts) {
     this._maxOpRecordsPerUser = opts.maxOpRecordsPerUser ?? 2000;
@@ -432,12 +430,6 @@ export class CellStructuralConflictMonitor {
       if (!record || typeof record !== "object") return;
       const createdAt = Number(record.createdAt);
       if (!Number.isFinite(createdAt)) return;
-      // Conservative policy: never age-prune our own records. The per-user
-      // `maxOpRecordsPerUser` cap already bounds local growth, and keeping local
-      // records avoids deleting ops that might still be needed to compare
-      // against late-arriving remote operations (best-effort under offline /
-      // clock-skew scenarios).
-      if (record.userId === this.localUserId) return;
       if (createdAt < cutoff) {
         toDelete.push(String(id));
       }
