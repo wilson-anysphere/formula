@@ -63,6 +63,7 @@ pub use agile_decrypt::decrypt_agile_encrypted_package;
 pub use crypto::{
     derive_iv, derive_key, hash_password, CryptoError, HashAlgorithm, HMAC_KEY_BLOCK,
     HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
+    derive_segment_iv, segment_block_key,
 };
 pub use error::{OffCryptoError, Result};
 

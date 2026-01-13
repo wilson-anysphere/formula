@@ -22,7 +22,13 @@ impl HashAlgorithm {
     ///
     /// Names are case-insensitive (e.g. `SHA1`, `sha256`).
     pub fn parse_offcrypto_name(name: &str) -> Result<Self, CryptoError> {
-        match name.trim().to_ascii_lowercase().as_str() {
+        // MS-OFFCRYPTO XML typically uses `SHA1`/`SHA256` etc, but tolerate minor variations
+        // (e.g. `SHA-256` / `sha_256`) seen in other tooling.
+        let normalized = name
+            .trim()
+            .to_ascii_lowercase()
+            .replace(['-', '_'], "");
+        match normalized.as_str() {
             "sha1" => Ok(Self::Sha1),
             "sha256" => Ok(Self::Sha256),
             "sha384" => Ok(Self::Sha384),
@@ -180,6 +186,28 @@ pub fn derive_iv(
     Ok(out)
 }
 
+/// Block key for `EncryptedPackage` segment IV derivation.
+///
+/// MS-OFFCRYPTO Agile uses a per-segment block key equal to `LE32(segment_index)`.
+#[inline]
+pub fn segment_block_key(segment_index: u32) -> [u8; 4] {
+    segment_index.to_le_bytes()
+}
+
+/// Derive an IV for a specific `EncryptedPackage` segment.
+///
+/// This is a convenience wrapper for:
+/// `derive_iv(salt, &LE32(segment_index), iv_len, hash_alg)`.
+pub fn derive_segment_iv(
+    salt: &[u8],
+    segment_index: u32,
+    iv_len: usize,
+    hash_alg: HashAlgorithm,
+) -> Result<Vec<u8>, CryptoError> {
+    let block_key = segment_block_key(segment_index);
+    derive_iv(salt, &block_key, iv_len, hash_alg)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,7 +287,26 @@ mod tests {
             HashAlgorithm::parse_offcrypto_name("sha512").unwrap(),
             HashAlgorithm::Sha512
         );
+        assert_eq!(
+            HashAlgorithm::parse_offcrypto_name("SHA-256").unwrap(),
+            HashAlgorithm::Sha256
+        );
         let err = HashAlgorithm::parse_offcrypto_name("md5").unwrap_err();
         assert!(matches!(err, CryptoError::UnsupportedHashAlgorithm(_)));
+    }
+
+    #[test]
+    fn segment_block_key_is_le32() {
+        assert_eq!(segment_block_key(0), [0, 0, 0, 0]);
+        assert_eq!(segment_block_key(0x1122_3344), [0x44, 0x33, 0x22, 0x11]);
+    }
+
+    #[test]
+    fn derive_segment_iv_matches_generic_derive_iv() {
+        let salt = [0x44u8; 16];
+        let idx = 7u32;
+        let a = derive_segment_iv(&salt, idx, 16, HashAlgorithm::Sha1).unwrap();
+        let b = derive_iv(&salt, &idx.to_le_bytes(), 16, HashAlgorithm::Sha1).unwrap();
+        assert_eq!(a, b);
     }
 }
