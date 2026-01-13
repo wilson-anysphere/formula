@@ -18,6 +18,49 @@ function skipStringLiteral(source: string, start: number): number {
   return source.length;
 }
 
+function stripComments(source: string): string {
+  // Remove JS comments without accidentally stripping `https://...` inside string literals.
+  // This is intentionally lightweight: it's not a full parser, but is sufficient for guardrail
+  // matching in `main.ts` and avoids treating commented-out wiring as valid.
+  let out = "";
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+
+    if (ch === "'" || ch === '"' || ch === "`") {
+      const end = skipStringLiteral(source, i);
+      out += source.slice(i, end);
+      i = end - 1;
+      continue;
+    }
+
+    if (ch === "/" && source[i + 1] === "/") {
+      // Line comment.
+      i += 2;
+      while (i < source.length && source[i] !== "\n") i += 1;
+      if (i < source.length) out += "\n";
+      continue;
+    }
+
+    if (ch === "/" && source[i + 1] === "*") {
+      // Block comment (preserve newlines so we don't accidentally join tokens across lines).
+      i += 2;
+      while (i < source.length) {
+        const next = source[i];
+        if (next === "\n") out += "\n";
+        if (next === "*" && source[i + 1] === "/") {
+          i += 1;
+          break;
+        }
+        i += 1;
+      }
+      continue;
+    }
+
+    out += ch;
+  }
+  return out;
+}
+
 function findMatchingDelimiter(source: string, openIndex: number, openChar: string, closeChar: string): number | null {
   let depth = 0;
   for (let i = openIndex; i < source.length; i += 1) {
@@ -73,15 +116,8 @@ describe("oauthRedirectIpc wiring", () => {
     // (lightly) that it wires the OAuth redirect listener and emits `oauth-redirect-ready`
     // *after* the listener is registered. The Rust host queues `oauth-redirect` URLs until this
     // handshake occurs; breaking it can drop deep-link redirects on cold start.
-    const source = readFileSync(new URL("../../main.ts", import.meta.url), "utf8");
-    const code = source
-      // Strip block comments so commented-out wiring can't satisfy the guardrail.
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      // Strip full-line `// ...` comments; we intentionally do *not* attempt to remove
-      // inline `//` comments because `main.ts` contains many `https://...` strings.
-      .split(/\r?\n/)
-      .filter((line) => !line.trimStart().startsWith("//"))
-      .join("\n");
+    const source = readFileSync(new URL("../../main.ts", import.meta.url), "utf8").replace(/\r\n?/g, "\n");
+    const code = stripComments(source);
 
     // 1) Ensure we listen for Rust -> JS oauth redirect events.
     expect(code).toMatch(/\blisten\s*\(\s*["']oauth-redirect["']/);
