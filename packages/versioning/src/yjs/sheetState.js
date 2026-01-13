@@ -589,29 +589,6 @@ export function applyLayeredFormatsToCells(cells, layers) {
 }
 
 /**
- * Build a map from sheet id -> sheet entry, picking the last matching entry by
- * array index (mirrors binder behavior).
- *
- * This uses strict equality semantics for the `id` field (via `yjsValueToJson`)
- * to match `findSheetEntryById`: only string ids are included.
- *
- * @param {Y.Doc} doc
- * @returns {Map<string, any>}
- */
-export function sheetEntriesByIdFromYjsDoc(doc) {
-  const sheets = getArrayRoot(doc, "sheets");
-  /** @type {Map<string, any>} */
-  const out = new Map();
-  for (let i = 0; i < sheets.length; i++) {
-    const entry = sheets.get(i);
-    const id = yjsValueToJson(readSheetEntryField(entry, "id"));
-    if (typeof id !== "string" || !id) continue;
-    out.set(id, entry);
-  }
-  return out;
-}
-
-/**
  * Convert a Yjs doc into a per-sheet state suitable for semantic diff.
  *
  * @param {Y.Doc} doc
