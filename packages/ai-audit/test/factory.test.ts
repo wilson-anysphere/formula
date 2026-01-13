@@ -221,4 +221,10 @@ describe("createDefaultAIAuditStore", () => {
     const store = await createDefaultAIAuditStoreNode({ prefer: "indexeddb", bounded: false });
     expect(store).toBeInstanceOf(MemoryAIAuditStore);
   });
+
+  it('throws when prefer: "sqlite" is used in the browser/default entrypoint', async () => {
+    await expect(createDefaultAIAuditStore({ prefer: "sqlite" })).rejects.toThrow(
+      'createDefaultAIAuditStore(prefer: "sqlite") is not available in the default/browser entrypoint. Import SqliteAIAuditStore from "@formula/ai-audit/sqlite" instead.'
+    );
+  });
 });
