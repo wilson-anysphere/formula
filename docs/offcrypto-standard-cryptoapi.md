@@ -27,15 +27,19 @@ To detect **Standard (CryptoAPI)** encryption:
 
 1. Open the file as an OLE compound file.
 2. Read the `EncryptionInfo` stream.
-3. Parse its first 4 bytes as:
+3. Parse its first 8 bytes as:
    * `major: u16le`
    * `minor: u16le`
+   * `flags: u32le`
 4. Standard encryption is identified by:
 
 ```text
 major = 3
 minor = 2
 ```
+
+The `flags` field is part of the `EncryptionInfo` header (and must be consumed to keep offsets correct),
+but it is not needed for the scheme dispatch.
 
 If the version is not `3.2`, the file is *not* Standard encryption (it may be Agile, Extensible, etc.).
 
@@ -49,26 +53,27 @@ At a high level:
 
 ```text
 EncryptionInfoStream =
-  VersionInfo (4 bytes)
-  HeaderSize  (4 bytes)   // u32le
-  EncryptionHeader        // HeaderSize bytes
-  EncryptionVerifier      // remainder of stream
+  EncryptionVersionInfo (8 bytes)  // major + minor + flags
+  HeaderSize            (4 bytes)  // u32le
+  EncryptionHeader              // HeaderSize bytes
+  EncryptionVerifier            // remainder of stream
 ```
 
-### 2.1) `VersionInfo` (4 bytes)
+### 2.1) `EncryptionVersionInfo` (8 bytes)
 
 | Offset | Size | Type   | Name  | Meaning |
 |-------:|-----:|--------|-------|---------|
 | 0x00   | 2    | u16le  | Major | 3 for Standard |
 | 0x02   | 2    | u16le  | Minor | 2 for Standard |
+| 0x04   | 4    | u32le  | Flags | Header flags (not required for decryption; consume for correct parsing) |
 
 ### 2.2) `HeaderSize` (4 bytes)
 
 | Offset | Size | Type  | Name       | Meaning |
 |-------:|-----:|-------|------------|---------|
-| 0x04   | 4    | u32le | HeaderSize | Byte length of `EncryptionHeader` that follows |
+| 0x08   | 4    | u32le | HeaderSize | Byte length of `EncryptionHeader` that follows |
 
-`HeaderSize` **does not include** the 8 bytes of `VersionInfo + HeaderSize` itself.
+`HeaderSize` **does not include** the 12 bytes of `EncryptionVersionInfo + HeaderSize` itself.
 
 ### 2.3) `EncryptionHeader` (variable length, `HeaderSize` bytes)
 
@@ -113,9 +118,9 @@ Important parsing detail:
 
 * There is **no explicit length field** for `EncryptedVerifierHash`.
   Treat it as: “whatever bytes remain in the `EncryptionInfo` stream after the fields above”.
-* For AES, `EncryptedVerifierHash` is commonly **block padded** (e.g. SHA1=20 bytes stored as 32 bytes).
-  You must keep the whole ciphertext when decrypting, but only the first `VerifierHashSize` plaintext bytes
-  are compared during verification.
+* For AES, the *plaintext* verifier hash is `VerifierHashSize` bytes, but the *ciphertext* is commonly
+  **padded to a 16-byte AES block boundary** (e.g. SHA‑1 is 20 bytes plaintext but 32 bytes of ciphertext).
+  Keep the whole ciphertext when decrypting, then compare only the first `VerifierHashSize` bytes.
 
 ---
 
@@ -201,9 +206,9 @@ Standard encryption derives keys from the password hash and a per-block 32-bit i
 
 Terminology used below:
 
-* `block` – a 32-bit unsigned block index (`u32`), encoded as `LE32(block)`.
-  * For password verification, use `block = 0`.
-  * For decrypting `EncryptedPackage`, use `block = 0, 1, 2, ...` per 512-byte segment (see §7).
+* `block` – a 32-bit unsigned “block key” (`u32`), encoded as `LE32(block)`.
+  * For Standard encryption, the block key used for password→AES key derivation is fixed as `block = 0`
+    (i.e. `LE32(0)` is appended once after the spinCount loop).
 
 ### 5.1) Per-block hash input (key material)
 
@@ -265,22 +270,20 @@ function CryptDeriveKey(Hash, H_block, keyLen):
 This is sufficient for Standard encryption because Office only requests up to 32 bytes of key material
 (AES-256), and `SHA1(inner||outer)` yields 40 bytes.
 
-### 5.3) IV derivation (AES only)
+### 5.3) Cipher mode note (AES)
 
-RC4 is a stream cipher and has no IV.
+In **Standard (CryptoAPI) encryption**, AES is used in a way that does **not** require an IV for the
+verifier and package decryption steps described in this document (i.e. it behaves like AES-ECB over
+16-byte blocks).
 
-For AES (CBC mode), derive a per-block IV from the verifier salt:
-
-```text
-IV_full = Hash( Salt || LE32(block) )
-IV = IV_full[0:16]   // AES block size
-```
+Do not copy the Agile-encryption AES-CBC “per-segment IV” scheme into Standard unless you have a
+producer that requires it; Standard and Agile are different formats.
 
 ---
 
 ## 6) Password verifier validation (critical correctness details)
 
-Once you can derive `(key, iv)` for `block = 0`, you can check whether the password is correct.
+Once you can derive `key` for `block = 0`, you can check whether the password is correct.
 
 Inputs from `EncryptionVerifier`:
 
@@ -289,13 +292,12 @@ Inputs from `EncryptionVerifier`:
 * `VerifierHashSize` (16 or 20)
 * `EncryptedVerifierHash` (remaining bytes; AES may include padding)
 
-### 6.1) Derive block-0 key (and IV for AES)
+### 6.1) Derive block-0 key
 
 ```text
 H_final  = hash_password(password, Salt, spinCount=50000)         // §4
 H_block0 = Hash( H_final || LE32(0) )                             // §5.1
 key      = CryptDeriveKey(Hash, H_block0, keyLen=KeySize/8)       // §5.2
-iv       = Hash(Salt || LE32(0))[0:16]    // AES only              // §5.3
 ```
 
 ### 6.2) Decrypt verifier + verifier-hash as a *single* stream
@@ -303,12 +305,6 @@ iv       = Hash(Salt || LE32(0))[0:16]    // AES only              // §5.3
 This is the most common implementation bug:
 
 > **Decrypt `EncryptedVerifier` and `EncryptedVerifierHash` together as one ciphertext stream.**
-
-Why:
-
-* For **AES-CBC**, the second portion’s first plaintext block depends on the previous ciphertext block.
-  If you decrypt them separately and reset IV for each part, verification will always fail.
-* For RC4 it’s also conceptually correct to treat it as a single stream (one keystream).
 
 Steps:
 
@@ -318,7 +314,9 @@ Steps:
    C = EncryptedVerifier || EncryptedVerifierHash
    ```
 
-2. Decrypt `C` with `(key, iv)` (AES-CBC) or `key` (RC4) to get plaintext `P`.
+2. Decrypt `C` with the cipher indicated by `EncryptionHeader.AlgID` using the derived `key`
+   (AES in Standard mode is block-based and does not require an IV; RC4 is a stream cipher), to get
+   plaintext `P`.
 
 3. Split plaintext:
 
@@ -368,18 +366,17 @@ After decryption, truncate the plaintext to exactly `OriginalPackageSize` bytes 
 
 ### 7.2) Segment encryption model
 
-Standard encryption processes the package in **512-byte segments**:
+In practice, Office decryptors process `EncryptedPackage` in **4096-byte plaintext segments**:
 
 ```text
-segmentSize = 0x200   // 512
+segmentSize = 0x1000   // 4096
 ```
 
-For segment index `block = 0, 1, 2, ...`:
+For segment index `i = 0, 1, 2, ...`:
 
-1. Derive `H_block = Hash(H_final || LE32(block))`.
-2. Derive `key = CryptDeriveKey(Hash, H_block, KeySize/8)`.
-3. If AES: derive `iv = Hash(Salt || LE32(block))[0:16]`.
-4. Decrypt that segment with a fresh cipher instance (do not carry state across segments).
+1. Use the **same derived key** (`block = 0`) from §6.1 for all segments.
+2. The ciphertext for each segment is padded to a 16-byte AES block boundary.
+3. Decrypt the segment ciphertext in 16-byte blocks (AES).
 
 Concatenate all decrypted segments and truncate to `OriginalPackageSize`.
 
@@ -396,7 +393,7 @@ Parameters:
 * Cipher: AES-256 (`CALG_AES_256`, `0x00006610`)
 * KeySize: 256 bits → 32 bytes
 * spinCount: 50,000
-* `block = 0` (verifier)
+* `block = 0` (Standard uses a fixed `LE32(0)` block key)
 
 Inputs:
 
@@ -418,9 +415,6 @@ H_block0 = 6ad7dedf2da3514b1d85eabee069d47dd058967f
 key (32 bytes, CryptDeriveKey expansion) =
   de5451b9dc3fcb383792cbeec80b6bc3
   0795c2705e075039407199f7d299b6e4
-
-iv (AES, 16 bytes) =
-  719ea750a65a93d80e1e0ba33a2ba0e7
 ```
 
 If your implementation produces different bytes for this example, the most likely causes are:
@@ -429,4 +423,3 @@ If your implementation produces different bytes for this example, the most likel
 * Incorrect UTF‑16LE password encoding (BOM or NUL terminator accidentally included).
 * Reversed concatenation order (`Hash(block || H)` vs `Hash(H || block)`).
 * Incorrect `CryptDeriveKey` expansion (ipad/opad must use bytes `0x36` and `0x5c`).
-
