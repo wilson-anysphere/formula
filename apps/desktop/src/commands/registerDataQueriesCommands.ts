@@ -28,11 +28,32 @@ export function registerDataQueriesCommands(params: {
   showToast: ToastFn;
   notify: NotifyFn;
   /**
+   * Optional hook to keep ribbon UI-state (pressed toggles) in sync when a command
+   * cannot execute (e.g. missing layout controller in non-desktop builds).
+   */
+  refreshRibbonUiState?: (() => void) | null;
+  /**
+   * Optional focus restoration hook (typically `SpreadsheetApp.focus()`).
+   *
+   * Some ribbon commands historically restored focus immediately so long-running async
+   * work (like Power Query refresh) doesn't leave the ribbon as the focused surface.
+   */
+  focusAfterExecute?: (() => void) | null;
+  /**
    * Optional time source (for tests).
    */
   now?: () => number;
 }): void {
-  const { commandRegistry, layoutController, getPowerQueryService, showToast, notify, now = () => Date.now() } = params;
+  const {
+    commandRegistry,
+    layoutController,
+    getPowerQueryService,
+    showToast,
+    notify,
+    refreshRibbonUiState = null,
+    focusAfterExecute = null,
+    now = () => Date.now(),
+  } = params;
 
   commandRegistry.registerBuiltinCommand(
     DATA_QUERIES_RIBBON_COMMANDS.toggleQueriesConnections,
@@ -42,6 +63,9 @@ export function registerDataQueriesCommands(params: {
     (next?: boolean) => {
       if (!layoutController) {
         showToast("Queries panel is not available (layout controller missing).", "error");
+        // Ensure the ribbon toggle state reflects the actual panel placement.
+        refreshRibbonUiState?.();
+        focusAfterExecute?.();
         return;
       }
 
@@ -52,12 +76,15 @@ export function registerDataQueriesCommands(params: {
       if (typeof next === "boolean") {
         if (next) open();
         else close();
+        focusAfterExecute?.();
         return;
       }
 
       // Toggle when no explicit state was provided (command palette / programmatic use).
       if (placement.kind === "closed") open();
       else close();
+
+      focusAfterExecute?.();
     },
     {
       category: t("commandCategory.data"),
@@ -121,19 +148,24 @@ export function registerDataQueriesCommands(params: {
         }
       }
     })();
+
+    // Don't wait for the refresh to complete; restore focus immediately so long-running
+    // refresh jobs don't steal focus later when their promise settles.
+    focusAfterExecute?.();
   };
 
-  const refreshCommandIds: string[] = [
-    DATA_QUERIES_RIBBON_COMMANDS.refreshAll,
-    DATA_QUERIES_RIBBON_COMMANDS.refreshAllRefresh,
-    DATA_QUERIES_RIBBON_COMMANDS.refreshAllConnections,
-    DATA_QUERIES_RIBBON_COMMANDS.refreshAllQueries,
+  const refreshCommands: Array<{ id: string; title: string }> = [
+    { id: DATA_QUERIES_RIBBON_COMMANDS.refreshAll, title: "Refresh All" },
+    { id: DATA_QUERIES_RIBBON_COMMANDS.refreshAllRefresh, title: "Refresh" },
+    { id: DATA_QUERIES_RIBBON_COMMANDS.refreshAllConnections, title: "Refresh All Connections" },
+    { id: DATA_QUERIES_RIBBON_COMMANDS.refreshAllQueries, title: "Refresh All Queries" },
   ];
 
-  for (const commandId of refreshCommandIds) {
-    commandRegistry.registerBuiltinCommand(commandId, "Refresh All Queries", refreshAll, {
+  for (const { id, title } of refreshCommands) {
+    commandRegistry.registerBuiltinCommand(id, title, refreshAll, {
       category: t("commandCategory.data"),
       icon: null,
+      description: "Refresh all Power Query queries and connections",
       keywords: ["refresh", "power query", "queries", "connections"],
     });
   }

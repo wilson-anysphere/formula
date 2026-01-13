@@ -7538,6 +7538,8 @@ registerDataQueriesCommands({
   getPowerQueryService: () => powerQueryService,
   showToast,
   notify,
+  refreshRibbonUiState: scheduleRibbonSelectionFormatStateUpdate,
+  focusAfterExecute: () => app.focus(),
 });
 // Home → Font dropdown actions are registered as canonical `format.*` commands so
 // ribbon actions and the command palette share a single command surface.
