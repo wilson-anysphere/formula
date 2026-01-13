@@ -6,15 +6,15 @@
  *
  * This is intentionally **opt-in** (skipped by default) so CI stays fast.
  *
- * How to run (recommended):
- *   FORMULA_RUN_COLLAB_BINDER_PERF=1 \
- *     node --expose-gc --test --test-concurrency=1 \
- *     packages/collab/binder/test/perf/binder-perf.test.js
- *
- * Using the repo helper:
+ * How to run (recommended; uses the repo's TS-aware node:test harness):
  *   FORMULA_RUN_COLLAB_BINDER_PERF=1 \
  *     FORMULA_NODE_TEST_CONCURRENCY=1 \
  *     pnpm test:node binder-perf
+ *
+ * Direct (works on Node versions/configs that can execute workspace TypeScript imports):
+ *   FORMULA_RUN_COLLAB_BINDER_PERF=1 \
+ *     node --expose-gc --test --test-concurrency=1 \
+ *     packages/collab/binder/test/perf/binder-perf.test.js
  *
  * Knobs:
  *   PERF_CELL_UPDATES=50000   # total updates to apply (default: 50000)
