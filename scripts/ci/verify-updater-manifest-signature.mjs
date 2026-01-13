@@ -20,7 +20,12 @@ import { createPublicKey, verify } from "node:crypto";
 import process from "node:process";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
-const configPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
+const defaultConfigPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
+// Test/debug hook: allow overriding the Tauri config path so unit tests can operate on a temp copy
+// instead of mutating the real repo config.
+const configPath = process.env.FORMULA_TAURI_CONF_PATH
+  ? path.resolve(repoRoot, process.env.FORMULA_TAURI_CONF_PATH)
+  : defaultConfigPath;
 const relativeConfigPath = path.relative(repoRoot, configPath);
 
 const PLACEHOLDER_PUBKEY = "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY";
@@ -39,6 +44,39 @@ function fail(message) {
  */
 function failBlock(heading, details) {
   fail(`\n${heading}\n${details.map((d) => `  - ${d}`).join("\n")}\n`);
+}
+
+/**
+ * Strict base64 decoder with support for unpadded base64 and base64url.
+ *
+ * Node's `Buffer.from(str, "base64")` is permissive and will silently ignore invalid characters.
+ * For CI/security checks, we'd rather fail fast with a clear error.
+ *
+ * @param {string} label
+ * @param {string} value
+ */
+function decodeBase64Strict(label, value) {
+  const normalized = value.trim().replace(/\s+/g, "");
+  if (normalized.length === 0) {
+    throw new Error(`${label} is empty.`);
+  }
+
+  // Support base64url by normalizing to standard base64.
+  let base64 = normalized.replace(/-/g, "+").replace(/_/g, "/");
+
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) {
+    throw new Error(`${label} is not valid base64.`);
+  }
+
+  const mod = base64.length % 4;
+  if (mod === 1) {
+    throw new Error(`${label} has invalid base64 padding.`);
+  }
+  if (mod !== 0) {
+    base64 += "=".repeat(4 - mod);
+  }
+
+  return Buffer.from(base64, "base64");
 }
 
 /**
@@ -62,7 +100,7 @@ function parseTauriUpdaterPubkey(pubkeyBase64) {
   /** @type {Buffer} */
   let decoded;
   try {
-    decoded = Buffer.from(pubkeyBase64.trim(), "base64");
+    decoded = decodeBase64Strict("Updater pubkey", pubkeyBase64);
   } catch (err) {
     throw new Error(
       `Updater pubkey is not valid base64 (${err instanceof Error ? err.message : String(err)}).`,
