@@ -227,7 +227,6 @@ export class JsonVectorStore extends InMemoryVectorStore {
 
   async clear() {
     await this.load();
-    if (this._records.size === 0) return;
     await super.clear();
     this._dirty = true;
     this._mutationVersion += 1;

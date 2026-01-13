@@ -59,3 +59,24 @@ test("JsonVectorStore.deleteWorkbook + clear (autoSave persists)", async () => {
   await store2.close();
   await store3.close();
 });
+
+test("JsonVectorStore.clear persists even when existing payload can't be loaded (dimension mismatch)", async () => {
+  const storage = new InMemoryBinaryStorage();
+
+  const store1 = new JsonVectorStore({ storage, dimension: 3, autoSave: true });
+  await store1.upsert([{ id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb" } }]);
+
+  // Create a store with a different dimension but opt out of automatic reset so the
+  // old payload remains present. `clear()` should still overwrite the persisted bytes.
+  const store2 = new JsonVectorStore({ storage, dimension: 4, autoSave: true, resetOnCorrupt: false });
+  await store2.clear();
+
+  const bytes = await storage.load();
+  assert.ok(bytes);
+  const parsed = JSON.parse(new TextDecoder().decode(bytes));
+  assert.equal(parsed.dimension, 4);
+  assert.deepEqual(parsed.records, []);
+
+  await store1.close();
+  await store2.close();
+});
