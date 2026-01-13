@@ -452,6 +452,9 @@ corpus inputs were aggressively sanitized (e.g. redacting cell values), cached f
 removed, which will cause the calculate step to show `SKIP` with `0 attempted` workbooks. In that case,
 run triage against inputs that still contain cached values (commonly the encrypted `originals/` corpus).
 
+In CI, the scheduled private corpus workflow will automatically prefer `--input-scope originals` when
+`recalc` is enabled and an `originals/` directory is present.
+
 These inputs apply to both the public and private corpus jobs; the private job will still skip if the
 required secrets/corpus archive are not configured.
 

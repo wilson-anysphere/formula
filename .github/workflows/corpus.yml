@@ -206,10 +206,20 @@ jobs:
           if [ "${CORPUS_RUN_RENDER_SMOKE}" = "true" ]; then
             EXTRA_FLAGS+=(--render-smoke)
           fi
+          INPUT_SCOPE="sanitized"
+          # Calculate (recalc) requires original inputs + cached formula results, which are often
+          # stripped from sanitized corpora. Prefer encrypted originals when available.
+          if [ "${CORPUS_RUN_RECALC}" = "true" ] && [ -d tools/corpus/private/originals ]; then
+            if [ -z "${CORPUS_ENCRYPTION_KEY}" ]; then
+              echo "CORPUS_ENCRYPTION_KEY missing; cannot triage originals. Falling back to input-scope=${INPUT_SCOPE}."
+            else
+              INPUT_SCOPE="originals"
+            fi
+          fi
           JOBS="$(python -c 'import os; cpu = os.cpu_count() or 1; print(min(4, cpu))')"
           python -m tools.corpus.triage \
             --corpus-dir tools/corpus/private \
-            --input-scope sanitized \
+            --input-scope "$INPUT_SCOPE" \
             --out-dir tools/corpus/out/private \
             --privacy-mode private \
             --jobs "$JOBS" \
