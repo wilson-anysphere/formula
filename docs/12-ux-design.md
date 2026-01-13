@@ -611,6 +611,7 @@ Theme preference is persisted (desktop: `localStorage` key `formula.settings.app
   --border: #d4d4d4;
   --accent: #0066cc;
   --accent-light: #e6f0ff;
+  --link: #0969da;
   --error: #d32f2f;
   --warning: #ed6c02;
   --success: #2e7d32;
@@ -629,6 +630,7 @@ Theme preference is persisted (desktop: `localStorage` key `formula.settings.app
   --border: #404040;
   --accent: #4da6ff;
   --accent-light: #1a3a5c;
+  --link: #4da6ff;
   --error: #f44336;
   --warning: #ff9800;
   --success: #4caf50;

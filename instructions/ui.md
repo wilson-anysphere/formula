@@ -131,7 +131,8 @@ FUNCTIONALITY (# of Excel buttons/features)
 --border-strong: #d0d0d0;
 
 /* Accent */
---accent: #0969da;
+--accent: #0066cc;
+--link: #0969da;
 
 /* Grid */
 --row-height: 22px;
