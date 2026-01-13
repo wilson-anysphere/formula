@@ -14,6 +14,11 @@ describe("registerDesktopCommands", () => {
     const openGoTo = vi.fn();
     const openFormatCells = vi.fn();
     const applyFormattingToSelection = vi.fn();
+
+    const formatPainterArm = vi.fn();
+    const formatPainterDisarm = vi.fn();
+    const formatPainterIsArmed = vi.fn(() => false);
+
     const pageLayoutHandlers = {
       openPageSetupDialog: vi.fn(),
       updatePageSetup: vi.fn(),
@@ -45,6 +50,12 @@ describe("registerDesktopCommands", () => {
       openFormatCells,
       showQuickPick: async () => null,
       findReplace: { openFind, openReplace, openGoTo },
+      formatPainter: {
+        isArmed: formatPainterIsArmed,
+        arm: formatPainterArm,
+        disarm: formatPainterDisarm,
+        onCancel: null,
+      },
       pageLayoutHandlers,
       workbenchFileHandlers: handlers,
       openCommandPalette,
@@ -55,6 +66,8 @@ describe("registerDesktopCommands", () => {
     // From inline registrations moved out of main.ts
     expect(commandRegistry.getCommand("format.toggleBold")).toBeTruthy();
     expect(commandRegistry.getCommand("format.numberFormat.increaseDecimal")).toBeTruthy();
+    expect(commandRegistry.getCommand("format.clearFormats")).toBeTruthy();
+    expect(commandRegistry.getCommand("format.toggleFormatPainter")).toBeTruthy();
     expect(commandRegistry.getCommand("edit.find")).toBeTruthy();
     // From registerWorkbenchFileCommands(...)
     expect(commandRegistry.getCommand("workbench.saveWorkbook")).toBeTruthy();
@@ -93,5 +106,8 @@ describe("registerDesktopCommands", () => {
 
     await commandRegistry.executeCommand("format.toggleStrikethrough", true);
     expect(applyFormattingToSelection).toHaveBeenCalled();
+
+    await commandRegistry.executeCommand("format.toggleFormatPainter");
+    expect(formatPainterArm).toHaveBeenCalledTimes(1);
   });
 });

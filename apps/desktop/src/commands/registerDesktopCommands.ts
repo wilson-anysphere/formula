@@ -6,18 +6,13 @@ import type { LayoutController } from "../layout/layoutController.js";
 import { t } from "../i18n/index.js";
 import type { ThemeController } from "../theme/themeController.js";
 
-import {
-  NUMBER_FORMATS,
-  toggleStrikethrough,
-  toggleSubscript,
-  toggleSuperscript,
-  type CellRange,
-} from "../formatting/toolbar.js";
+import { NUMBER_FORMATS, toggleStrikethrough, toggleSubscript, toggleSuperscript, type CellRange } from "../formatting/toolbar.js";
 
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
 import { registerBuiltinFormatFontCommands } from "./registerBuiltinFormatFontCommands.js";
 import { registerFormatAlignmentCommands } from "./registerFormatAlignmentCommands.js";
 import { registerFormatFontDropdownCommands } from "./registerFormatFontDropdownCommands.js";
+import { registerFormatPainterCommand } from "./formatPainterCommand.js";
 import { registerNumberFormatCommands } from "./registerNumberFormatCommands.js";
 import { registerPageLayoutCommands, type PageLayoutCommandHandlers } from "./registerPageLayoutCommands.js";
 import { registerWorkbenchFileCommands, type WorkbenchFileCommandHandlers } from "./registerWorkbenchFileCommands.js";
@@ -32,6 +27,13 @@ export type FindReplaceCommandHandlers = {
   openFind: () => void;
   openReplace: () => void;
   openGoTo: () => void;
+};
+
+export type FormatPainterCommandHandlers = {
+  isArmed: () => boolean;
+  arm: () => void;
+  disarm: () => void;
+  onCancel?: (() => void) | null;
 };
 
 export function registerDesktopCommands(params: {
@@ -51,6 +53,7 @@ export function registerDesktopCommands(params: {
   showQuickPick: <T>(items: QuickPickItem<T>[], options?: { placeHolder?: string }) => Promise<T | null>;
   findReplace: FindReplaceCommandHandlers;
   workbenchFileHandlers: WorkbenchFileCommandHandlers;
+  formatPainter?: FormatPainterCommandHandlers | null;
   pageLayoutHandlers?: PageLayoutCommandHandlers | null;
   /**
    * Optional command palette opener. When provided, `workbench.showCommandPalette` will be
@@ -75,6 +78,7 @@ export function registerDesktopCommands(params: {
     showQuickPick,
     findReplace,
     workbenchFileHandlers,
+    formatPainter = null,
     pageLayoutHandlers = null,
     openCommandPalette = null,
   } = params;
@@ -151,6 +155,10 @@ export function registerDesktopCommands(params: {
 
   registerWorkbenchFileCommands({ commandRegistry, handlers: workbenchFileHandlers });
 
+  if (formatPainter) {
+    registerFormatPainterCommand({ commandRegistry, ...formatPainter });
+  }
+
   registerBuiltinFormatFontCommands({
     commandRegistry,
     app,
@@ -191,6 +199,8 @@ export function registerDesktopCommands(params: {
   if (pageLayoutHandlers) {
     registerPageLayoutCommands({ commandRegistry, handlers: pageLayoutHandlers });
   }
+
+  // Override the builtin quick-pick implementation to open the full Format Cells UI.
   commandRegistry.registerBuiltinCommand("format.openFormatCells", t("command.format.openFormatCells"), () => openFormatCells(), {
     category: commandCategoryFormat,
     icon: null,
@@ -246,17 +256,12 @@ export function registerDesktopCommands(params: {
     keywords: ["replace", "find"],
   });
 
-  commandRegistry.registerBuiltinCommand(
-    "navigation.goTo",
-    t("command.navigation.goTo"),
-    () => findReplace.openGoTo(),
-    {
-      category: t("commandCategory.navigation"),
-      icon: null,
-      description: t("commandDescription.navigation.goTo"),
-      keywords: ["go to", "goto", "reference", "name box"],
-    },
-  );
+  commandRegistry.registerBuiltinCommand("navigation.goTo", t("command.navigation.goTo"), () => findReplace.openGoTo(), {
+    category: t("commandCategory.navigation"),
+    icon: null,
+    description: t("commandDescription.navigation.goTo"),
+    keywords: ["go to", "goto", "reference", "name box"],
+  });
 
   if (layoutController && openCommandPalette) {
     // `registerBuiltinCommands(...)` wires this as a no-op so the desktop shell can own

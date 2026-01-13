@@ -149,7 +149,7 @@ import { createCommandPalette, installCommandPaletteRecentsTracking } from "./co
 import { registerDesktopCommands } from "./commands/registerDesktopCommands.js";
 import { PAGE_LAYOUT_COMMANDS } from "./commands/registerPageLayoutCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
-import { FORMAT_PAINTER_COMMAND_ID, registerFormatPainterCommand } from "./commands/formatPainterCommand.js";
+import { FORMAT_PAINTER_COMMAND_ID } from "./commands/formatPainterCommand.js";
 import { registerDataQueriesCommands } from "./commands/registerDataQueriesCommands.js";
 import { isRibbonMacroCommandId, registerRibbonMacroCommands } from "./commands/registerRibbonMacroCommands.js";
 import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
@@ -7279,6 +7279,18 @@ registerDesktopCommands({
     openReplace: () => showExclusiveFindReplaceDialog(replaceDialog as any),
     openGoTo: () => showExclusiveFindReplaceDialog(goToDialog as any),
   },
+  formatPainter: {
+    isArmed: () => Boolean(formatPainterState),
+    arm: () => armFormatPainter(),
+    disarm: () => disarmFormatPainter(),
+    onCancel: () => {
+      try {
+        showToast("Format Painter cancelled");
+      } catch {
+        // ignore (toast root missing in non-UI test environments)
+      }
+    },
+  },
   pageLayoutHandlers: {
     openPageSetupDialog: () => handleRibbonPageSetup(),
     updatePageSetup: (patch) => handleRibbonUpdatePageSetup(patch),
@@ -7423,19 +7435,6 @@ registerRibbonMacroCommands({
   },
 });
 
-registerFormatPainterCommand({
-  commandRegistry,
-  isArmed: () => Boolean(formatPainterState),
-  arm: () => armFormatPainter(),
-  disarm: () => disarmFormatPainter(),
-  onCancel: () => {
-    try {
-      showToast("Format Painter cancelled");
-    } catch {
-      // ignore (toast root missing in non-UI test environments)
-    }
-  },
-});
 registerDataQueriesCommands({
   commandRegistry,
   layoutController: ribbonLayoutController,

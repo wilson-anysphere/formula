@@ -4,7 +4,6 @@ import { CommandRegistry } from "../../extensions/commandRegistry.js";
 import { createDefaultLayout, openPanel, closePanel } from "../../layout/layoutState.js";
 import { panelRegistry } from "../../panels/panelRegistry.js";
 import { registerDesktopCommands } from "../../commands/registerDesktopCommands.js";
-import { registerFormatPainterCommand } from "../../commands/formatPainterCommand.js";
 import { RIBBON_MACRO_COMMAND_IDS, registerRibbonMacroCommands } from "../../commands/registerRibbonMacroCommands.js";
 
 import { defaultRibbonSchema } from "../ribbonSchema";
@@ -111,6 +110,7 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       staleExemptions,
       `Exemptions contain ids that are no longer present in the ribbon schema:\n${staleExemptions.map((id) => `- ${id}`).join("\n")}`,
     ).toEqual([]);
+
     const nonCanonicalExemptions = [...INTENTIONALLY_UNIMPLEMENTED_RIBBON_COMMAND_IDS]
       .filter((id) => !CANONICAL_RIBBON_COMMAND_RE.test(id))
       .sort();
@@ -170,6 +170,8 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       getActiveCellIndentLevel: () => 0,
       openFormatCells: () => {},
       showQuickPick: async () => null,
+      findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
+      formatPainter: { isArmed: () => false, arm: () => {}, disarm: () => {}, onCancel: null },
       pageLayoutHandlers: {
         openPageSetupDialog: () => {},
         updatePageSetup: () => {},
@@ -178,7 +180,6 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
         addToPrintArea: () => {},
         exportPdf: () => {},
       },
-      findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
       workbenchFileHandlers: {
         newWorkbook: () => {},
         openWorkbook: () => {},
@@ -206,13 +207,6 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       },
     });
 
-    registerFormatPainterCommand({
-      commandRegistry,
-      isArmed: () => false,
-      arm: () => {},
-      disarm: () => {},
-    });
-
     const implementedExemptions = [...INTENTIONALLY_UNIMPLEMENTED_RIBBON_COMMAND_IDS]
       .filter((id) => commandRegistry.getCommand(id) != null)
       .sort();
@@ -223,6 +217,7 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
         ...implementedExemptions.map((id) => `- ${id}`),
       ].join("\n"),
     ).toEqual([]);
+
     const missing = idsToCheck.filter((id) => commandRegistry.getCommand(id) == null);
 
     expect(
