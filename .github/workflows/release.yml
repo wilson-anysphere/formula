@@ -405,6 +405,9 @@ jobs:
           key: cargo-target-desktop-release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-${{ matrix.cache_features }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             cargo-target-desktop-release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-${{ matrix.cache_features }}-
+            # Backwards-compat: allow restoring caches created before we started keying
+            # on the Tauri feature set (so the first run after a workflow update isn't cold).
+            cargo-target-desktop-release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
