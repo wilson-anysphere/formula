@@ -1,4 +1,6 @@
-use formula_model::charts::{AxisKind, AxisPosition, ChartKind, LegendPosition, SeriesData};
+use formula_model::charts::{
+    AxisKind, AxisPosition, ChartKind, LegendPosition, PlotAreaModel, SeriesData,
+};
 use formula_xlsx::drawingml::charts::parse_chart_space;
 use formula_xlsx::XlsxPackage;
 
@@ -7,6 +9,8 @@ const FIXTURE_LINE: &[u8] = include_bytes!("../../../fixtures/charts/xlsx/line.x
 const FIXTURE_PIE: &[u8] = include_bytes!("../../../fixtures/charts/xlsx/pie.xlsx");
 const FIXTURE_SCATTER: &[u8] = include_bytes!("../../../fixtures/charts/xlsx/scatter.xlsx");
 const FIXTURE_BASIC_CHART: &[u8] = include_bytes!("../../../fixtures/charts/xlsx/basic-chart.xlsx");
+const FIXTURE_COMBO_BAR_LINE: &[u8] =
+    include_bytes!("../../../fixtures/charts/xlsx/combo-bar-line.xlsx");
 
 fn parse_fixture(bytes: &[u8]) -> formula_model::charts::ChartModel {
     let pkg = XlsxPackage::from_bytes(bytes).expect("open xlsx fixture");
@@ -134,4 +138,20 @@ fn parses_basic_chart_fixture_without_caches() {
         .and_then(|c| c.cache.as_ref())
         .is_none());
     assert!(ser.values.as_ref().and_then(|c| c.cache.as_ref()).is_none());
+}
+
+#[test]
+fn parses_combo_bar_line_fixture() {
+    let model = parse_fixture(FIXTURE_COMBO_BAR_LINE);
+    assert_eq!(model.chart_kind, ChartKind::Bar);
+    assert_eq!(model.series.len(), 2);
+
+    let PlotAreaModel::Combo(combo) = &model.plot_area else {
+        panic!("expected combo plot area, got {:?}", model.plot_area);
+    };
+    assert_eq!(combo.charts.len(), 2);
+
+    // Series should be tagged with their owning subplot index.
+    assert_eq!(model.series[0].plot_index, Some(0));
+    assert_eq!(model.series[1].plot_index, Some(1));
 }
