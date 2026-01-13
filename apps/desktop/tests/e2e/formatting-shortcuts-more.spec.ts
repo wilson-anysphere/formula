@@ -28,6 +28,37 @@ test.describe("formatting shortcuts (more)", () => {
   const GRID_MODES = ["shared", "legacy"] as const;
 
   for (const mode of GRID_MODES) {
+    test(`Ctrl/Cmd+1 opens the Format Cells dialog (${mode})`, async ({ page }) => {
+      await gotoDesktop(page, `/?grid=${mode}`);
+      await waitForIdle(page);
+
+      // Ensure the grid is focused (keyboard shortcuts are routed globally, but focus helps mimic real usage).
+      await page.locator("#grid").focus();
+
+      // Dispatch directly to avoid browser tab-switch shortcuts interfering with Ctrl/Cmd+1.
+      await page.evaluate((isMac) => {
+        const target = (document.activeElement as HTMLElement | null) ?? window;
+        target.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "1",
+            code: "Digit1",
+            metaKey: isMac,
+            ctrlKey: !isMac,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }, process.platform === "darwin");
+
+      const dialog = page.getByTestId("format-cells-dialog");
+      await expect(dialog).toBeVisible();
+
+      // Close and ensure focus returns to the grid (Excel-like behavior).
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeHidden();
+      await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.id)).toBe("grid");
+    });
+
     test(`Ctrl/Cmd+U toggles underline on the selection (${mode})`, async ({ page }) => {
       await gotoDesktop(page, `/?grid=${mode}`);
 
@@ -80,4 +111,3 @@ test.describe("formatting shortcuts (more)", () => {
     }
   }
 });
-
