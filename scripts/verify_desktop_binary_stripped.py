@@ -27,6 +27,18 @@ class CandidateBinary:
     mtime: float
 
 
+def _human_bytes(size_bytes: int) -> str:
+    size = float(size_bytes)
+    units = ["B", "KB", "MB", "GB", "TB"]
+    for unit in units:
+        if size < 1000 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1000
+    return f"{size_bytes} B"
+
+
 def _repo_root() -> Path:
     # scripts/verify_desktop_binary_stripped.py -> repo root
     return Path(__file__).resolve().parents[1]
@@ -235,6 +247,7 @@ def main() -> None:
     binary = _find_desktop_binary(repo_root)
     runner_os = os.environ.get("RUNNER_OS") or platform.system()
     binary_display = binary.relative_to(repo_root) if binary.is_relative_to(repo_root) else binary
+    binary_size = _human_bytes(binary.stat().st_size)
 
     print(f"[strip-check] Runner: {runner_os}")
     print(f"[strip-check] Checking binary: {binary_display}")
@@ -252,6 +265,7 @@ def main() -> None:
                     "",
                     f"- Platform: **Windows**",
                     f"- Binary: `{binary_display}`",
+                    f"- Binary size: **{binary_size}**",
                     "- Check: no `.pdb`/`.dSYM`/`.dwp` sidecars in `**/release/bundle/**`",
                     "",
                 ]
@@ -271,6 +285,7 @@ def main() -> None:
                     "",
                     f"- Platform: **Linux**",
                     f"- Binary: `{binary_display}`",
+                    f"- Binary size: **{binary_size}**",
                     "- Checks: `file` (stripped), `readelf -S` (no `.debug_*`), no symbol sidecars in `**/release/bundle/**`",
                     "",
                 ]
@@ -289,6 +304,7 @@ def main() -> None:
                     "",
                     f"- Platform: **macOS**",
                     f"- Binary: `{binary_display}`",
+                    f"- Binary size: **{binary_size}**",
                     "- Checks: `file` (stripped), `otool -l` (no `__DWARF`), no symbol sidecars in `**/release/bundle/**`",
                     "",
                 ]
