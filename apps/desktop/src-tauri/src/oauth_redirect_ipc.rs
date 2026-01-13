@@ -5,14 +5,18 @@
 /// redirect URLs until the frontend signals readiness via an `oauth-redirect-ready` event.
 ///
 /// The pending queue is intentionally bounded to avoid unbounded memory growth if the OS delivers
-/// many redirects before the frontend installs its event listeners. When the cap is exceeded, we
-/// drop the **oldest** URLs and keep the most recent ones so the latest user action wins.
-const MAX_PENDING_URLS: usize = 64;
+/// many redirects before the frontend installs its event listeners (or a malicious sender provides
+/// a huge argv / single-instance payload). When the cap is exceeded, we drop the **oldest** URLs
+/// and keep the most recent ones so the latest user action wins.
+const MAX_PENDING_URLS: usize = 50;
+const MAX_PENDING_BYTES: usize = 128 * 1024;
 
 #[derive(Debug, Default)]
 pub struct OauthRedirectState {
-    pub ready: bool,
+    ready: bool,
     pending_urls: Vec<String>,
+    pending_bytes: usize,
+    overflow_warned: bool,
 }
 
 impl OauthRedirectState {
@@ -32,12 +36,11 @@ impl OauthRedirectState {
         if self.ready {
             Some(urls)
         } else {
-            self.pending_urls.extend(urls);
-            if self.pending_urls.len() > MAX_PENDING_URLS {
-                let overflow = self.pending_urls.len() - MAX_PENDING_URLS;
-                // Drop oldest URLs first, keeping the most recent ones.
-                self.pending_urls.drain(0..overflow);
+            for url in urls {
+                self.pending_bytes = self.pending_bytes.saturating_add(url.len());
+                self.pending_urls.push(url);
             }
+            self.enforce_pending_limits();
             None
         }
     }
@@ -50,7 +53,50 @@ impl OauthRedirectState {
             Vec::new()
         } else {
             self.ready = true;
+            self.pending_bytes = 0;
             std::mem::take(&mut self.pending_urls)
+        }
+    }
+
+    fn enforce_pending_limits(&mut self) {
+        let mut dropped_any = false;
+
+        if self.pending_urls.len() > MAX_PENDING_URLS {
+            let overflow = self.pending_urls.len() - MAX_PENDING_URLS;
+            for removed in self.pending_urls.drain(0..overflow) {
+                self.pending_bytes = self.pending_bytes.saturating_sub(removed.len());
+            }
+            dropped_any = true;
+        }
+
+        if self.pending_bytes > MAX_PENDING_BYTES {
+            let mut bytes = self.pending_bytes;
+            let mut drop_count = 0;
+            for s in &self.pending_urls {
+                if bytes <= MAX_PENDING_BYTES {
+                    break;
+                }
+                bytes = bytes.saturating_sub(s.len());
+                drop_count += 1;
+            }
+
+            if drop_count > 0 {
+                for removed in self.pending_urls.drain(0..drop_count) {
+                    self.pending_bytes = self.pending_bytes.saturating_sub(removed.len());
+                }
+                dropped_any = true;
+            }
+
+            if self.pending_urls.is_empty() {
+                self.pending_bytes = 0;
+            }
+        }
+
+        if dropped_any && !self.overflow_warned {
+            self.overflow_warned = true;
+            eprintln!(
+                "[oauth-redirect-ipc] pending oauth-redirect queue exceeded limit (max_urls={MAX_PENDING_URLS}, max_bytes={MAX_PENDING_BYTES}); dropping oldest entries"
+            );
         }
     }
 }
@@ -75,10 +121,7 @@ mod tests {
 
         let flushed = state.mark_ready_and_drain();
         assert!(state.is_ready());
-        assert_eq!(
-            flushed,
-            vec!["formula://a", "formula://b", "formula://c"]
-        );
+        assert_eq!(flushed, vec!["formula://a", "formula://b", "formula://c"]);
         assert_eq!(state.pending_len(), 0);
 
         // The flush should happen exactly once.
@@ -166,5 +209,37 @@ mod tests {
             ready_calls_in_listener, 1,
             "expected exactly one mark_ready_and_drain call inside OAUTH_REDIRECT_READY_EVENT listener, found {ready_calls_in_listener}"
         );
+    }
+
+    #[test]
+    fn caps_pending_urls_by_total_bytes_dropping_oldest_deterministically() {
+        let mut state = OauthRedirectState::default();
+
+        // Use fixed-size strings so the expected trim point is deterministic.
+        let entry_len = 4096;
+        let payload = "x".repeat(entry_len - 4); // leave room for "{i:03}-"
+        let urls: Vec<String> = (0..MAX_PENDING_URLS)
+            .map(|i| format!("{i:03}-{payload}"))
+            .collect();
+
+        assert_eq!(urls.len(), MAX_PENDING_URLS);
+        assert_eq!(urls[0].len(), entry_len);
+
+        assert!(state.queue_or_emit(urls.clone()).is_none());
+
+        let expected_len = MAX_PENDING_BYTES / entry_len;
+        assert_eq!(state.pending_len(), expected_len);
+
+        let drained = state.mark_ready_and_drain();
+        assert_eq!(drained.len(), expected_len);
+
+        let total_bytes: usize = drained.iter().map(|u| u.len()).sum();
+        assert!(
+            total_bytes <= MAX_PENDING_BYTES,
+            "drained bytes {total_bytes} exceeded cap {MAX_PENDING_BYTES}"
+        );
+
+        let expected = urls[MAX_PENDING_URLS - expected_len..].to_vec();
+        assert_eq!(drained, expected);
     }
 }

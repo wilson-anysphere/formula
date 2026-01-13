@@ -46,6 +46,9 @@ fn verify_ed25519_signature_command_has_ipc_origin_checks() {
         has_main_window_check,
         "expected verify_ed25519_signature to enforce main-window checks"
     );
+
+    // Prefer stable-origin enforcement for privileged IPC. Accept either the combined helper or the
+    // lower-level call sites so this guardrail doesn't break on refactors.
     assert!(
         has_origin_check,
         "expected verify_ed25519_signature to enforce origin checks"

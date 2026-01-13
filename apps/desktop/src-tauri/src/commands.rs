@@ -1091,6 +1091,13 @@ impl<'de, const MAX_BYTES: usize> Deserialize<'de> for LimitedScriptCode<MAX_BYT
     }
 }
 
+/// Alias used in Tauri IPC command signatures for script code.
+///
+/// The source-level IPC origin guardrail tests locate function bodies by the first `{` after the
+/// `pub fn ...` signature. Keeping the const generic expression behind a type alias avoids
+/// confusing that heuristic.
+pub type IpcScriptCode = LimitedScriptCode<{ crate::ipc_limits::MAX_SCRIPT_CODE_BYTES }>;
+
 /// IPC-only cell value type that only accepts scalar JSON values.
 ///
 /// This rejects arrays/objects immediately during deserialization to avoid allocating or
@@ -1535,7 +1542,6 @@ impl<'de> Deserialize<'de> for IpcPivotFieldRef {
                 Ok(IpcPivotFieldRef::Text(LimitedString(value.to_owned())))
             }
         }
-
         impl<'de> de::Visitor<'de> for PivotFieldRefVisitor {
             type Value = IpcPivotFieldRef;
 

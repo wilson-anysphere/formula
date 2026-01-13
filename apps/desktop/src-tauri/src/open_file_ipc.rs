@@ -5,15 +5,18 @@
 /// `open-file` requests until the frontend signals readiness via an `open-file-ready` event.
 ///
 /// The pending queue is intentionally bounded to avoid unbounded memory growth if the OS delivers
-/// many open-file events before the frontend installs its event listeners. When the cap is
-/// exceeded, we drop the **oldest** paths and keep the most recent ones so the latest user action
-/// wins.
-const MAX_PENDING_PATHS: usize = 64;
+/// many open-file events before the frontend installs its event listeners (or a malicious sender
+/// provides a huge argv / single-instance payload). When the cap is exceeded, we drop the
+/// **oldest** paths and keep the most recent ones so the latest user action wins.
+const MAX_PENDING_PATHS: usize = 100;
+const MAX_PENDING_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Default)]
 pub struct OpenFileState {
     ready: bool,
     pending_paths: Vec<String>,
+    pending_bytes: usize,
+    overflow_warned: bool,
 }
 
 impl OpenFileState {
@@ -33,12 +36,11 @@ impl OpenFileState {
         if self.ready {
             Some(paths)
         } else {
-            self.pending_paths.extend(paths);
-            if self.pending_paths.len() > MAX_PENDING_PATHS {
-                let overflow = self.pending_paths.len() - MAX_PENDING_PATHS;
-                // Drop oldest paths first, keeping the most recent ones.
-                self.pending_paths.drain(0..overflow);
+            for path in paths {
+                self.pending_bytes = self.pending_bytes.saturating_add(path.len());
+                self.pending_paths.push(path);
             }
+            self.enforce_pending_limits();
             None
         }
     }
@@ -51,7 +53,50 @@ impl OpenFileState {
             Vec::new()
         } else {
             self.ready = true;
+            self.pending_bytes = 0;
             std::mem::take(&mut self.pending_paths)
+        }
+    }
+
+    fn enforce_pending_limits(&mut self) {
+        let mut dropped_any = false;
+
+        if self.pending_paths.len() > MAX_PENDING_PATHS {
+            let overflow = self.pending_paths.len() - MAX_PENDING_PATHS;
+            for removed in self.pending_paths.drain(0..overflow) {
+                self.pending_bytes = self.pending_bytes.saturating_sub(removed.len());
+            }
+            dropped_any = true;
+        }
+
+        if self.pending_bytes > MAX_PENDING_BYTES {
+            let mut bytes = self.pending_bytes;
+            let mut drop_count = 0;
+            for s in &self.pending_paths {
+                if bytes <= MAX_PENDING_BYTES {
+                    break;
+                }
+                bytes = bytes.saturating_sub(s.len());
+                drop_count += 1;
+            }
+
+            if drop_count > 0 {
+                for removed in self.pending_paths.drain(0..drop_count) {
+                    self.pending_bytes = self.pending_bytes.saturating_sub(removed.len());
+                }
+                dropped_any = true;
+            }
+
+            if self.pending_paths.is_empty() {
+                self.pending_bytes = 0;
+            }
+        }
+
+        if dropped_any && !self.overflow_warned {
+            self.overflow_warned = true;
+            eprintln!(
+                "[open-file-ipc] pending open-file queue exceeded limit (max_paths={MAX_PENDING_PATHS}, max_bytes={MAX_PENDING_BYTES}); dropping oldest entries"
+            );
         }
     }
 }
@@ -205,5 +250,37 @@ mod tests {
             !close_body.contains("timeout_ms: None"),
             "CloseRequested handler must not run Workbook_BeforeClose with an unbounded timeout_ms=None"
         );
+    }
+
+    #[test]
+    fn caps_pending_paths_by_total_bytes_dropping_oldest_deterministically() {
+        let mut state = OpenFileState::default();
+
+        // Use fixed-size strings so the expected trim point is deterministic.
+        let entry_len = 8192;
+        let payload = "x".repeat(entry_len - 4); // leave room for "{i:03}-"
+        let paths: Vec<String> = (0..MAX_PENDING_PATHS)
+            .map(|i| format!("{i:03}-{payload}"))
+            .collect();
+
+        assert_eq!(paths.len(), MAX_PENDING_PATHS);
+        assert_eq!(paths[0].len(), entry_len);
+
+        assert!(state.queue_or_emit(paths.clone()).is_none());
+
+        let expected_len = MAX_PENDING_BYTES / entry_len;
+        assert_eq!(state.pending_len(), expected_len);
+
+        let drained = state.mark_ready_and_drain();
+        assert_eq!(drained.len(), expected_len);
+
+        let total_bytes: usize = drained.iter().map(|p| p.len()).sum();
+        assert!(
+            total_bytes <= MAX_PENDING_BYTES,
+            "drained bytes {total_bytes} exceeded cap {MAX_PENDING_BYTES}"
+        );
+
+        let expected = paths[MAX_PENDING_PATHS - expected_len..].to_vec();
+        assert_eq!(drained, expected);
     }
 }
