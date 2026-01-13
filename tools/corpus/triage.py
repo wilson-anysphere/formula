@@ -1049,9 +1049,19 @@ def _triage_paths(
 
     executor_cls = executor_cls or concurrent.futures.ProcessPoolExecutor
     done = 0
+    # Large private corpora can contain thousands of workbooks. Submitting one Future per workbook
+    # up-front creates unnecessary memory overhead. Instead, keep a bounded number of tasks
+    # in-flight and feed the executor as work completes.
+    prefetch = max(jobs * 2, 1)
     with executor_cls(max_workers=jobs) as executor:
-        future_to_index: dict[concurrent.futures.Future[dict[str, Any] | LeakScanFailure], int] = {}
-        for idx, path in enumerate(paths):
+        pending: dict[concurrent.futures.Future[dict[str, Any] | LeakScanFailure], int] = {}
+        path_iter = iter(enumerate(paths))
+
+        def _submit_next() -> None:
+            try:
+                idx, path = next(path_iter)
+            except StopIteration:
+                return
             fut = executor.submit(
                 _triage_one_path,
                 str(path),
@@ -1064,17 +1074,33 @@ def _triage_paths(
                 fernet_key=fernet_key,
                 privacy_mode=privacy_mode,
             )
-            future_to_index[fut] = idx
+            pending[fut] = idx
 
-        for fut in concurrent.futures.as_completed(future_to_index):
-            idx = future_to_index[fut]
-            res = fut.result()
-            if isinstance(res, LeakScanFailure):
-                return res
-            reports_by_index[idx] = res
-            done += 1
-            # Keep logs readable: one progress line per workbook (printed by parent only).
-            print(f"[{done}/{len(paths)}] triaged {res.get('display_name', paths[idx].name)}")
+        for _ in range(min(prefetch, len(paths))):
+            _submit_next()
+
+        while pending:
+            finished, _ = concurrent.futures.wait(
+                pending, return_when=concurrent.futures.FIRST_COMPLETED
+            )
+            for fut in finished:
+                idx = pending.pop(fut)
+                res = fut.result()
+                if isinstance(res, LeakScanFailure):
+                    # Best-effort fail-fast: cancel any work we haven't started yet. We intentionally
+                    # keep this conservative (no process killing) to avoid leaving behind corrupted
+                    # state. With bounded prefetch, the worst-case wait is a small multiple of
+                    # `jobs` instead of `len(paths)`.
+                    for other in pending:
+                        other.cancel()
+                    return res
+                reports_by_index[idx] = res
+                done += 1
+                # Keep logs readable: one progress line per workbook (printed by parent only).
+                print(
+                    f"[{done}/{len(paths)}] triaged {res.get('display_name', paths[idx].name)}"
+                )
+                _submit_next()
 
     return [r for r in reports_by_index if r is not None]
 
@@ -1170,6 +1196,11 @@ def main() -> int:
     if args.jobs < 1:
         parser.error("--jobs must be >= 1")
 
+    # When running multiple Rust helpers in parallel, cap Rayon parallelism per-process to avoid
+    # accidental CPU oversubscription (each helper would otherwise default to all cores).
+    if args.jobs > 1 and not os.environ.get("RAYON_NUM_THREADS"):
+        cpu = os.cpu_count() or 1
+        os.environ["RAYON_NUM_THREADS"] = str(max(1, cpu // args.jobs))
     diff_ignore = _compute_diff_ignore(
         diff_ignore=args.diff_ignore, use_default=not args.no_default_diff_ignore
     )
