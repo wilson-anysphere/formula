@@ -109,6 +109,65 @@ pnpm benchmark
 This executes `apps/desktop/tests/performance/run.ts`, which contains both JS/TS microbenchmarks and
 Rust engine benchmarks (`formula-engine/src/bin/perf_bench.rs`).
 
+### Desktop perf commands (startup, memory, size)
+
+For contributor-friendly **desktop shell** measurements (Tauri binary + real WebView), use the
+following commands from the repo root:
+
+```bash
+# Builds the desktop frontend + binary, then measures cold-start timings (p50/p95).
+pnpm perf:desktop-startup
+
+# Builds the desktop frontend + binary, then measures idle memory (RSS) after TTI.
+pnpm perf:desktop-memory
+
+# Reports size of apps/desktop/dist, the desktop binary, and (if present) Tauri bundle artifacts.
+pnpm perf:desktop-size
+```
+
+These scripts are designed to be safe to run locally:
+
+- they use a repo-local HOME directory (`target/perf-home`) so they don't touch your real user config/caches
+- you can override it with `FORMULA_PERF_HOME=/path/to/dir`
+- set `FORMULA_PERF_PRESERVE_HOME=1` to avoid clearing the perf HOME between runs
+
+#### What the metrics mean
+
+- **`window_visible_ms`**: time from native process start until the main window is shown.
+- **`tti_ms`**: time-to-interactive (first input accepted); includes webview + frontend init.
+- **`idleRssMb`**: resident set size (RSS) of the desktop process *plus child processes*, sampled
+  after TTI + a "settle" delay. (Useful for regression tracking; RSS can double-count shared pages.)
+- **Size**:
+  - `apps/desktop/dist` is the Vite-built frontend asset directory embedded/served by Tauri.
+  - `target/**/formula-desktop` is the built desktop executable.
+  - `target/**/release/bundle` contains installer artifacts when you run `cargo tauri build`.
+
+#### CI gating / overrides
+
+Startup benchmark (runner defaults shown):
+
+- `FORMULA_DESKTOP_STARTUP_RUNS=20`
+- `FORMULA_DESKTOP_STARTUP_TIMEOUT_MS=15000`
+- `FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS=500`
+- `FORMULA_DESKTOP_TTI_TARGET_MS=1000`
+- `FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=1` to fail when p95 exceeds targets
+- `FORMULA_RUN_DESKTOP_STARTUP_BENCH=1` to allow running the runner in CI (it skips by default)
+
+Memory benchmark:
+
+- `FORMULA_DESKTOP_MEMORY_RUNS=10`
+- `FORMULA_DESKTOP_MEMORY_SETTLE_MS=5000`
+- `FORMULA_DESKTOP_MEMORY_TIMEOUT_MS=30000`
+- `FORMULA_DESKTOP_MEMORY_TARGET_MB=<budget>`
+- `FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1` to fail when p95 exceeds the budget
+- `FORMULA_RUN_DESKTOP_MEMORY_BENCH=1` to allow running the runner in CI (it skips by default)
+
+Bundle size gating (used by the desktop release workflow):
+
+- `FORMULA_BUNDLE_SIZE_LIMIT_MB=50` (default: 50MB per artifact)
+- `FORMULA_ENFORCE_BUNDLE_SIZE=1` to fail when any artifact exceeds the limit
+  (reported by `scripts/desktop_bundle_size_report.py`)
+
 #### Renderer guardrails (Node/JSDOM)
 
 For rendering, we also run the real `@formula/grid` canvas renderer under Node (via JSDOM + a mocked

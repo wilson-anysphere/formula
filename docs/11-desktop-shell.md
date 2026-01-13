@@ -57,11 +57,49 @@ The frontend installs listeners in `apps/desktop/src/tauri/startupMetrics.ts` an
   ```
 - **Release builds**: set `FORMULA_STARTUP_METRICS=1` to enable the same log line.
 - **Frontend access**: inspect `globalThis.__FORMULA_STARTUP_TIMINGS__` in DevTools.
-- **Optional multi-run benchmark**: `apps/desktop/tests/performance/desktop-startup-runner.ts` can launch a built desktop binary multiple times and compute p50/p95 for window-visible + TTI.
-  - Example:
-    ```bash
-    node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-startup-runner.ts --bin target/release/formula-desktop --runs 20
-    ```
+- **Multi-run benchmark (recommended)**: from the repo root, use:
+  ```bash
+  pnpm perf:desktop-startup
+  ```
+  This command:
+  - builds `apps/desktop/dist` (Vite)
+  - builds `target/release/formula-desktop` (Rust, `--features desktop`)
+  - runs `apps/desktop/tests/performance/desktop-startup-runner.ts`
+  - uses a repo-local HOME (`target/perf-home`) so runs don't touch your real `~/.config` / `~/Library`
+
+  Tuning knobs:
+  - `FORMULA_DESKTOP_STARTUP_RUNS` (default: 20)
+  - `FORMULA_DESKTOP_STARTUP_TIMEOUT_MS` (default: 15000)
+  - `FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS` (default: 500)
+  - `FORMULA_DESKTOP_TTI_TARGET_MS` (default: 1000)
+  - `FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=1` to fail the command when p95 exceeds the targets (useful for CI gating)
+  - `FORMULA_RUN_DESKTOP_STARTUP_BENCH=1` to allow running in CI (the runner skips in CI by default)
+  - `FORMULA_DESKTOP_BIN=/path/to/formula-desktop` to benchmark a custom binary
+
+  You can also invoke the runner directly:
+  ```bash
+  node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-startup-runner.ts --bin target/release/formula-desktop --runs 20
+  ```
+
+### Idle memory benchmark (desktop process RSS)
+
+To measure idle memory for the desktop app (after TTI, with an empty workbook), run:
+
+```bash
+pnpm perf:desktop-memory
+```
+
+This reports `idleRssMb`, which is the **resident set size (RSS)** of the desktop process *plus its child processes*,
+sampled after the app becomes interactive and a short "settle" delay.
+
+Tuning knobs:
+
+- `FORMULA_DESKTOP_MEMORY_RUNS` (default: 10)
+- `FORMULA_DESKTOP_MEMORY_SETTLE_MS` (default: 5000)
+- `FORMULA_DESKTOP_MEMORY_TIMEOUT_MS` (default: 30000)
+- `FORMULA_DESKTOP_MEMORY_TARGET_MB` to set a budget
+- `FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1` (or `--enforce`) to fail the command when p95 exceeds the budget
+- `FORMULA_RUN_DESKTOP_MEMORY_BENCH=1` to allow running in CI (the runner skips in CI by default)
 
 ---
 
