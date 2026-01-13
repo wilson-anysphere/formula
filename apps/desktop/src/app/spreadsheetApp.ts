@@ -1,6 +1,12 @@
 import { CellEditorOverlay } from "../editor/cellEditorOverlay";
 import { FormulaBarTabCompletionController } from "../ai/completion/formulaBarTabCompletion.js";
-import { FormulaBarView, type FormulaBarCommit, type NameBoxMenuItem } from "../formula-bar/FormulaBarView";
+import {
+  FormulaBarView,
+  type FormulaBarCommit,
+  type NameBoxDropdownItem,
+  type NameBoxDropdownProvider,
+  type NameBoxMenuItem,
+} from "../formula-bar/FormulaBarView";
 import type { RangeAddress as A1RangeAddress } from "../spreadsheet/a1.js";
 import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js";
 import { parseA1Range } from "../charts/a1.js";
@@ -2021,6 +2027,85 @@ export class SpreadsheetApp {
     }
 
     if (opts.formulaBar) {
+      const nameBoxDropdownProvider: NameBoxDropdownProvider = {
+        getItems: () => {
+          const items: NameBoxDropdownItem[] = [];
+          const seen = new Set<string>();
+          const push = (item: NameBoxDropdownItem): void => {
+            if (seen.has(item.key)) return;
+            seen.add(item.key);
+            items.push(item);
+          };
+
+          const formatSheetPrefix = (token: string): string => {
+            const formatted = formatSheetNameForA1(token);
+            return formatted ? `${formatted}!` : "";
+          };
+
+          for (const entry of this.searchWorkbook.names.values()) {
+            const e: any = entry as any;
+            const name = typeof e?.name === "string" ? String(e.name).trim() : "";
+            if (!name) continue;
+            const sheetName = typeof e?.sheetName === "string" ? String(e.sheetName) : "";
+            const range = e?.range;
+            const description = sheetName && range ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}` : undefined;
+            push({
+              kind: "namedRange",
+              key: `namedRange:${name}`,
+              label: name,
+              reference: name,
+              description,
+            });
+          }
+
+          for (const tableEntry of this.searchWorkbook.tables.values()) {
+            const t: any = tableEntry as any;
+            const name = typeof t?.name === "string" ? String(t.name).trim() : "";
+            if (!name) continue;
+            const sheetName = typeof t?.sheetName === "string" ? String(t.sheetName) : "";
+            const hasRange =
+              typeof t?.startRow === "number" &&
+              typeof t?.startCol === "number" &&
+              typeof t?.endRow === "number" &&
+              typeof t?.endCol === "number";
+            const description =
+              sheetName && hasRange
+                ? `${formatSheetPrefix(sheetName)}${rangeToA1({
+                    startRow: t.startRow,
+                    startCol: t.startCol,
+                    endRow: t.endRow,
+                    endCol: t.endCol,
+                  })}`
+                : undefined;
+
+            // `parseGoTo` only understands structured references for tables.
+            push({
+              kind: "table",
+              key: `table:${name}`,
+              label: name,
+              reference: `${name}[#All]`,
+              description,
+            });
+          }
+
+          for (const sheet of this.searchWorkbook.sheets ?? []) {
+            const s: any = sheet as any;
+            const label = typeof s?.name === "string" ? String(s.name).trim() : "";
+            if (!label) continue;
+            const token = formatSheetNameForA1(label);
+            const ref = token ? `${token}!A1` : `${label}!A1`;
+            const sheetId = typeof s?.sheetId === "string" ? String(s.sheetId) : label;
+            push({
+              kind: "sheet",
+              key: `sheet:${sheetId}`,
+              label,
+              reference: ref,
+            });
+          }
+
+          return items;
+        },
+      };
       this.formulaBar = new FormulaBarView(
         opts.formulaBar,
         {
@@ -2138,8 +2223,9 @@ export class SpreadsheetApp {
             }
           }
         }
-        },
+      },
         {
+          nameBoxDropdownProvider,
           getWasmEngine: () => this.wasmEngine,
           // SpreadsheetApp does not currently expose an explicit "engine locale" getter.
           // Use the document language (set by the i18n layer) as a best-effort proxy.

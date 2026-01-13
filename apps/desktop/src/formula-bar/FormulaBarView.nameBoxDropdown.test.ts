@@ -1,0 +1,108 @@
+/**
+ * @vitest-environment jsdom
+ */
+
+import { describe, expect, it, vi } from "vitest";
+
+import { FormulaBarView, type NameBoxDropdownProvider } from "./FormulaBarView.js";
+
+describe("FormulaBarView name box dropdown", () => {
+  it("opens dropdown and keyboard-selects an item", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onGoTo = vi.fn();
+    const provider: NameBoxDropdownProvider = {
+      getItems: () => [
+        {
+          kind: "namedRange",
+          key: "namedRange:SalesData",
+          label: "SalesData",
+          reference: "SalesData",
+          description: "Sheet1!A1:B2",
+        },
+        {
+          kind: "table",
+          key: "table:Table1",
+          label: "Table1",
+          reference: "Table1[#All]",
+          description: "Sheet1!A1:D10",
+        },
+      ],
+    };
+
+    new FormulaBarView(host, { onCommit: () => {}, onGoTo }, { nameBoxDropdownProvider: provider });
+
+    const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
+    const dropdown = host.querySelector<HTMLButtonElement>('[data-testid="name-box-dropdown"]');
+    const popup = host.querySelector<HTMLDivElement>('[data-testid="formula-name-box-popup"]');
+    const list = host.querySelector<HTMLDivElement>('[data-testid="formula-name-box-list"]');
+
+    expect(address).toBeTruthy();
+    expect(dropdown).toBeTruthy();
+    expect(popup).toBeTruthy();
+    expect(list).toBeTruthy();
+
+    dropdown!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(popup!.hidden).toBe(false);
+    expect(address!.getAttribute("aria-expanded")).toBe("true");
+    expect(address!.getAttribute("aria-controls")).toBe(list!.id);
+
+    // Default selection should be the first item.
+    let active = list!.querySelector<HTMLElement>('[role="option"][aria-selected="true"]');
+    expect(active?.textContent).toContain("SalesData");
+
+    address!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    active = list!.querySelector<HTMLElement>('[role="option"][aria-selected="true"]');
+    expect(active?.textContent).toContain("Table1");
+
+    address!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+
+    expect(onGoTo).toHaveBeenCalledTimes(1);
+    expect(onGoTo).toHaveBeenCalledWith("Table1[#All]");
+    expect(address!.value).toBe("Table1");
+    expect(popup!.hidden).toBe(true);
+    expect(address!.getAttribute("aria-expanded")).toBe("false");
+
+    host.remove();
+  });
+
+  it("filters items by typing and Escape restores the previous value", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onGoTo = vi.fn();
+    const provider: NameBoxDropdownProvider = {
+      getItems: () => [
+        { kind: "namedRange", key: "namedRange:SalesData", label: "SalesData", reference: "SalesData" },
+        { kind: "namedRange", key: "namedRange:Costs", label: "Costs", reference: "Costs" },
+      ],
+    };
+
+    new FormulaBarView(host, { onCommit: () => {}, onGoTo }, { nameBoxDropdownProvider: provider });
+
+    const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]')!;
+    const dropdown = host.querySelector<HTMLButtonElement>('[data-testid="name-box-dropdown"]')!;
+    const popup = host.querySelector<HTMLDivElement>('[data-testid="formula-name-box-popup"]')!;
+    const list = host.querySelector<HTMLDivElement>('[data-testid="formula-name-box-list"]')!;
+
+    address.value = "A1";
+    dropdown.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(popup.hidden).toBe(false);
+
+    // Type a prefix to filter down to a single item.
+    address.value = "Sal";
+    address.dispatchEvent(new Event("input", { bubbles: true }));
+    const options = list.querySelectorAll<HTMLElement>('[role="option"]');
+    expect(options.length).toBe(1);
+    expect(options[0]?.textContent).toContain("SalesData");
+
+    // Escape should cancel the dropdown and restore the original address.
+    address.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(popup.hidden).toBe(true);
+    expect(address.value).toBe("A1");
+
+    host.remove();
+  });
+});

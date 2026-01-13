@@ -93,6 +93,38 @@ function storeFormulaBarExpandedState(expanded: boolean): void {
   formulaBarExpandedFallback = expanded;
 }
 
+export type NameBoxDropdownItemKind = "namedRange" | "table" | "sheet" | "recent";
+
+export type NameBoxDropdownItem = {
+  /**
+   * Stable key used for ARIA ids + testing.
+   */
+  key: string;
+  kind: NameBoxDropdownItemKind;
+  /**
+   * User-facing label shown in the dropdown and written into the name box on selection.
+   */
+  label: string;
+  /**
+   * Reference string passed to `onGoTo`.
+   *
+   * This may differ from `label` (e.g. tables use `Table1[#All]`).
+   */
+  reference: string;
+  /**
+   * Optional secondary text (e.g. the resolved A1 range).
+   */
+  description?: string;
+};
+
+export interface NameBoxDropdownProvider {
+  getItems(): NameBoxDropdownItem[];
+}
+
+export type FormulaBarViewOptions = FormulaBarViewToolingOptions & {
+  nameBoxDropdownProvider?: NameBoxDropdownProvider;
+};
+
 export interface FormulaBarViewCallbacks {
   onBeginEdit?: (activeCellAddress: string) => void;
   onCommit: (text: string, commit: FormulaBarCommit) => void;
@@ -171,7 +203,21 @@ export class FormulaBarView {
   #argumentPreviewRequestId = 0;
 
   #functionAutocomplete: FormulaBarFunctionAutocompleteController;
+  #nameBoxEl: HTMLDivElement;
   #nameBoxDropdownEl: HTMLButtonElement;
+  #nameBoxDropdownPopupEl: HTMLDivElement;
+  #nameBoxDropdownListEl: HTMLDivElement;
+  #nameBoxDropdownProvider: NameBoxDropdownProvider | null = null;
+  #isNameBoxDropdownOpen = false;
+  #nameBoxDropdownOriginalAddressValue: string | null = null;
+  #nameBoxDropdownAllItems: NameBoxDropdownItem[] = [];
+  #nameBoxDropdownFilteredItems: NameBoxDropdownItem[] = [];
+  #nameBoxDropdownOptionEls: HTMLElement[] = [];
+  #nameBoxDropdownActiveIndex: number = -1;
+  #nameBoxDropdownPointerDownListener: ((e: PointerEvent) => void) | null = null;
+  #nameBoxDropdownScrollListener: ((e: Event) => void) | null = null;
+  #nameBoxDropdownResizeListener: (() => void) | null = null;
+  #nameBoxDropdownBlurListener: (() => void) | null = null;
   #cancelButtonEl: HTMLButtonElement;
   #commitButtonEl: HTMLButtonElement;
   #fxButtonEl: HTMLButtonElement;
@@ -223,10 +269,14 @@ export class FormulaBarView {
   #functionPickerAnchorSelection: { start: number; end: number } | null = null;
   #functionPickerDocMouseDown = (e: MouseEvent) => this.#onFunctionPickerDocMouseDown(e);
 
-  constructor(root: HTMLElement, callbacks: FormulaBarViewCallbacks, tooling?: FormulaBarViewToolingOptions) {
+  constructor(root: HTMLElement, callbacks: FormulaBarViewCallbacks, opts: FormulaBarViewOptions = {}) {
     this.root = root;
     this.#callbacks = callbacks;
-    this.#tooling = tooling ?? null;
+    this.#nameBoxDropdownProvider = opts.nameBoxDropdownProvider ?? null;
+    this.#tooling =
+      typeof opts.getWasmEngine === "function" || typeof opts.getLocaleId === "function" || opts.referenceStyle != null
+        ? opts
+        : null;
 
     root.classList.add("formula-bar");
     this.#isExpanded = loadFormulaBarExpandedState();
@@ -239,6 +289,8 @@ export class FormulaBarView {
     address.className = "formula-bar-address";
     address.dataset.testid = "formula-address";
     address.setAttribute("aria-label", "Name box");
+    address.setAttribute("aria-haspopup", "listbox");
+    address.setAttribute("aria-expanded", "false");
     address.autocomplete = "off";
     address.spellcheck = false;
     address.value = "A1";
@@ -430,13 +482,30 @@ export class FormulaBarView {
     functionPickerPanel.appendChild(functionPickerList);
     functionPicker.appendChild(functionPickerPanel);
 
+    const nameBoxDropdownPopup = document.createElement("div");
+    nameBoxDropdownPopup.className = "formula-bar-name-box-popup";
+    nameBoxDropdownPopup.hidden = true;
+    nameBoxDropdownPopup.dataset.testid = "formula-name-box-popup";
+
+    const nameBoxDropdownList = document.createElement("div");
+    nameBoxDropdownList.className = "formula-bar-name-box-popup-list";
+    nameBoxDropdownList.dataset.testid = "formula-name-box-list";
+    nameBoxDropdownList.id = `formula-name-box-list-${Math.random().toString(36).slice(2)}`;
+    nameBoxDropdownList.setAttribute("role", "listbox");
+    nameBoxDropdownList.setAttribute("aria-label", "Name box menu");
+    nameBoxDropdownPopup.appendChild(nameBoxDropdownList);
+
     root.appendChild(row);
     root.appendChild(hint);
     root.appendChild(errorPanel);
     root.appendChild(functionPicker);
+    root.appendChild(nameBoxDropdownPopup);
 
     this.textarea = textarea;
+    this.#nameBoxEl = nameBox;
     this.#nameBoxDropdownEl = nameBoxDropdown;
+    this.#nameBoxDropdownPopupEl = nameBoxDropdownPopup;
+    this.#nameBoxDropdownListEl = nameBoxDropdownList;
     this.#cancelButtonEl = cancelButton;
     this.#commitButtonEl = commitButton;
     this.#fxButtonEl = fxButton;
@@ -461,6 +530,21 @@ export class FormulaBarView {
     });
 
     nameBoxDropdown.addEventListener("click", () => {
+      if (this.#nameBoxDropdownProvider) {
+        if (this.#isNameBoxDropdownOpen) {
+          this.#closeNameBoxDropdown({ restoreAddress: true, reason: "toggle" });
+          try {
+            this.#addressEl.focus({ preventScroll: true });
+          } catch {
+            this.#addressEl.focus();
+          }
+          this.#addressEl.select();
+        } else {
+          this.#openNameBoxDropdown();
+        }
+        return;
+      }
+
       if (this.#callbacks.getNameBoxMenuItems) {
         this.#toggleNameBoxMenu();
         return;
@@ -478,16 +562,62 @@ export class FormulaBarView {
     });
 
     address.addEventListener("keydown", (e) => {
-      // Excel-style name box dropdown affordance.
-      if (
+      const wantsMenuKey =
         (e.key === "ArrowDown" && e.altKey && !e.ctrlKey && !e.metaKey) ||
-        (e.key === "F4" && !e.altKey && !e.ctrlKey && !e.metaKey)
-      ) {
+        (e.key === "F4" && !e.altKey && !e.ctrlKey && !e.metaKey);
+
+      if (this.#nameBoxDropdownProvider) {
+        if (this.#isNameBoxDropdownOpen) {
+          if (wantsMenuKey) {
+            e.preventDefault();
+            this.#closeNameBoxDropdown({ restoreAddress: true, reason: "toggle" });
+            return;
+          }
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            this.#moveNameBoxDropdownSelection(1);
+            return;
+          }
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            this.#moveNameBoxDropdownSelection(-1);
+            return;
+          }
+          if (e.key === "Enter") {
+            e.preventDefault();
+            const active = this.#nameBoxDropdownFilteredItems[this.#nameBoxDropdownActiveIndex] ?? null;
+            if (active) {
+              this.#selectNameBoxDropdownItem(active);
+              return;
+            }
+            // Fall back to the standard Go To behavior if filtering produced no matches.
+            this.#closeNameBoxDropdown({ restoreAddress: false, reason: "commit" });
+            const ref = address.value;
+            address.blur();
+            this.#callbacks.onGoTo?.(ref);
+            return;
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            this.#closeNameBoxDropdown({ restoreAddress: true, reason: "escape" });
+            return;
+          }
+        }
+
+        if (wantsMenuKey) {
+          e.preventDefault();
+          this.#openNameBoxDropdown();
+          return;
+        }
+      } else if (wantsMenuKey) {
+        // Excel-style name box dropdown affordance.
         e.preventDefault();
         if (this.#callbacks.getNameBoxMenuItems) {
           this.#toggleNameBoxMenu();
         } else if (this.#callbacks.onOpenNameBoxMenu) {
-          void this.#callbacks.onOpenNameBoxMenu();
+          Promise.resolve(this.#callbacks.onOpenNameBoxMenu()).catch((err) => {
+            console.error("Failed to open name box menu:", err);
+          });
         } else {
           this.#toggleNameBoxMenu();
         }
@@ -508,6 +638,11 @@ export class FormulaBarView {
         address.value = this.#nameBoxValue;
         address.blur();
       }
+    });
+
+    address.addEventListener("input", () => {
+      if (!this.#isNameBoxDropdownOpen) return;
+      this.#updateNameBoxDropdownFilter(address.value);
     });
 
     textarea.addEventListener("focus", () => this.#beginEditFromFocus());
@@ -1935,6 +2070,314 @@ export class FormulaBarView {
     } catch {
       next.focus();
     }
+  }
+  #openNameBoxDropdown(): void {
+    if (this.#isNameBoxDropdownOpen) return;
+    if (!this.#nameBoxDropdownProvider) {
+      // Still focus the address input so keyboard "Go To" still feels natural.
+      this.#addressEl.focus();
+      return;
+    }
+
+    this.#isNameBoxDropdownOpen = true;
+    this.#nameBoxDropdownOriginalAddressValue = this.#addressEl.value;
+
+    const rawItems = this.#nameBoxDropdownProvider.getItems();
+    this.#nameBoxDropdownAllItems = Array.isArray(rawItems) ? rawItems.slice() : [];
+
+    // Default sort: keep groups stable, sort labels within each group.
+    const kindOrder: Record<NameBoxDropdownItemKind, number> = {
+      namedRange: 0,
+      table: 1,
+      sheet: 2,
+      recent: 3,
+    };
+    this.#nameBoxDropdownAllItems.sort((a, b) => {
+      const ak = kindOrder[a.kind] ?? 99;
+      const bk = kindOrder[b.kind] ?? 99;
+      if (ak !== bk) return ak - bk;
+      return a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
+    });
+
+    this.#nameBoxDropdownPopupEl.hidden = false;
+    this.#addressEl.setAttribute("aria-expanded", "true");
+    this.#addressEl.setAttribute("aria-controls", this.#nameBoxDropdownListEl.id);
+
+    this.#updateNameBoxDropdownFilter("");
+    this.#positionNameBoxDropdown();
+    this.#attachNameBoxDropdownGlobalListeners();
+
+    try {
+      this.#addressEl.focus({ preventScroll: true });
+    } catch {
+      this.#addressEl.focus();
+    }
+    this.#addressEl.select();
+  }
+
+  #positionNameBoxDropdown(): void {
+    const anchor = this.#nameBoxEl.getBoundingClientRect();
+    const margin = 8;
+    const gap = 4;
+
+    // Seed position/width so we can measure the popup.
+    this.#nameBoxDropdownPopupEl.style.left = `${anchor.left}px`;
+    this.#nameBoxDropdownPopupEl.style.top = `${anchor.bottom + gap}px`;
+    if (anchor.width > 0) {
+      this.#nameBoxDropdownPopupEl.style.minWidth = `${anchor.width}px`;
+    }
+
+    const rect = this.#nameBoxDropdownPopupEl.getBoundingClientRect();
+
+    let left = anchor.left;
+    let top = anchor.bottom + gap;
+
+    // Prefer opening downward, but flip upward if we would overflow.
+    if (top + rect.height + margin > window.innerHeight && anchor.top - rect.height - gap > margin) {
+      top = anchor.top - rect.height - gap;
+    }
+
+    // Clamp horizontally.
+    if (left + rect.width + margin > window.innerWidth) {
+      left = window.innerWidth - rect.width - margin;
+    }
+
+    left = Math.max(margin, left);
+    top = Math.max(margin, top);
+
+    this.#nameBoxDropdownPopupEl.style.left = `${left}px`;
+    this.#nameBoxDropdownPopupEl.style.top = `${top}px`;
+  }
+
+  #closeNameBoxDropdown(opts: { restoreAddress: boolean; reason: "escape" | "toggle" | "outside" | "resize" | "scroll" | "commit" }): void {
+    if (!this.#isNameBoxDropdownOpen) return;
+    this.#isNameBoxDropdownOpen = false;
+
+    if (opts.restoreAddress && this.#nameBoxDropdownOriginalAddressValue != null) {
+      this.#addressEl.value = this.#nameBoxDropdownOriginalAddressValue;
+    }
+
+    this.#nameBoxDropdownOriginalAddressValue = null;
+    this.#nameBoxDropdownActiveIndex = -1;
+    this.#nameBoxDropdownFilteredItems = [];
+    this.#nameBoxDropdownOptionEls = [];
+    this.#nameBoxDropdownPopupEl.hidden = true;
+    this.#nameBoxDropdownListEl.replaceChildren();
+
+    this.#addressEl.setAttribute("aria-expanded", "false");
+    this.#addressEl.removeAttribute("aria-controls");
+    this.#addressEl.removeAttribute("aria-activedescendant");
+
+    this.#detachNameBoxDropdownGlobalListeners();
+  }
+
+  #attachNameBoxDropdownGlobalListeners(): void {
+    this.#detachNameBoxDropdownGlobalListeners();
+
+    this.#nameBoxDropdownPointerDownListener = (e: PointerEvent) => {
+      if (!this.#isNameBoxDropdownOpen) return;
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (this.#nameBoxDropdownPopupEl.contains(target)) return;
+      if (this.#nameBoxEl.contains(target)) return;
+      this.#closeNameBoxDropdown({ restoreAddress: true, reason: "outside" });
+    };
+    window.addEventListener("pointerdown", this.#nameBoxDropdownPointerDownListener, true);
+
+    this.#nameBoxDropdownScrollListener = (e: Event) => {
+      if (!this.#isNameBoxDropdownOpen) return;
+      const target = e.target as Node | null;
+      if (target && this.#nameBoxDropdownPopupEl.contains(target)) return;
+      this.#closeNameBoxDropdown({ restoreAddress: true, reason: "scroll" });
+    };
+    window.addEventListener("scroll", this.#nameBoxDropdownScrollListener, true);
+
+    this.#nameBoxDropdownResizeListener = () => {
+      if (!this.#isNameBoxDropdownOpen) return;
+      this.#closeNameBoxDropdown({ restoreAddress: true, reason: "resize" });
+    };
+    window.addEventListener("resize", this.#nameBoxDropdownResizeListener);
+
+    this.#nameBoxDropdownBlurListener = () => {
+      if (!this.#isNameBoxDropdownOpen) return;
+      this.#closeNameBoxDropdown({ restoreAddress: true, reason: "outside" });
+    };
+    window.addEventListener("blur", this.#nameBoxDropdownBlurListener);
+  }
+
+  #detachNameBoxDropdownGlobalListeners(): void {
+    if (this.#nameBoxDropdownPointerDownListener) {
+      window.removeEventListener("pointerdown", this.#nameBoxDropdownPointerDownListener, true);
+      this.#nameBoxDropdownPointerDownListener = null;
+    }
+    if (this.#nameBoxDropdownScrollListener) {
+      window.removeEventListener("scroll", this.#nameBoxDropdownScrollListener, true);
+      this.#nameBoxDropdownScrollListener = null;
+    }
+    if (this.#nameBoxDropdownResizeListener) {
+      window.removeEventListener("resize", this.#nameBoxDropdownResizeListener);
+      this.#nameBoxDropdownResizeListener = null;
+    }
+    if (this.#nameBoxDropdownBlurListener) {
+      window.removeEventListener("blur", this.#nameBoxDropdownBlurListener);
+      this.#nameBoxDropdownBlurListener = null;
+    }
+  }
+
+  #updateNameBoxDropdownFilter(rawQuery: string): void {
+    const query = String(rawQuery ?? "").trim().toLowerCase();
+    const all = this.#nameBoxDropdownAllItems;
+    const filtered =
+      query === ""
+        ? all.slice()
+        : all.filter((item) => {
+            const label = String(item.label ?? "").toLowerCase();
+            const ref = String(item.reference ?? "").toLowerCase();
+            return label.startsWith(query) || ref.startsWith(query) || label.includes(query);
+          });
+
+    this.#nameBoxDropdownFilteredItems = filtered;
+    this.#renderNameBoxDropdownList();
+  }
+
+  #renderNameBoxDropdownList(): void {
+    const list = this.#nameBoxDropdownListEl;
+    list.replaceChildren();
+    this.#nameBoxDropdownOptionEls = [];
+
+    const groups = new Map<NameBoxDropdownItemKind, NameBoxDropdownItem[]>();
+    for (const item of this.#nameBoxDropdownFilteredItems) {
+      const arr = groups.get(item.kind) ?? [];
+      arr.push(item);
+      groups.set(item.kind, arr);
+    }
+
+    const renderGroup = (kind: NameBoxDropdownItemKind, label: string): void => {
+      const items = groups.get(kind) ?? [];
+      if (items.length === 0) return;
+
+      const group = document.createElement("div");
+      group.className = "formula-bar-name-box-group";
+      group.setAttribute("role", "group");
+
+      const heading = document.createElement("div");
+      heading.className = "formula-bar-name-box-group-label";
+      heading.textContent = label;
+      heading.id = `${list.id}-group-${kind}`;
+      group.setAttribute("aria-labelledby", heading.id);
+      group.appendChild(heading);
+
+      for (const item of items) {
+        const option = document.createElement("div");
+        option.className = "formula-bar-name-box-option";
+        option.setAttribute("role", "option");
+        option.id = this.#nameBoxDropdownOptionId(item);
+        option.dataset.key = item.key;
+
+        const main = document.createElement("div");
+        main.className = "formula-bar-name-box-option-main";
+
+        const labelEl = document.createElement("div");
+        labelEl.className = "formula-bar-name-box-option-label";
+        labelEl.textContent = item.label;
+        main.appendChild(labelEl);
+
+        if (item.description) {
+          const descEl = document.createElement("div");
+          descEl.className = "formula-bar-name-box-option-description";
+          descEl.textContent = item.description;
+          main.appendChild(descEl);
+        }
+
+        option.appendChild(main);
+
+        const index = this.#nameBoxDropdownOptionEls.length;
+        this.#nameBoxDropdownOptionEls.push(option);
+
+        option.addEventListener("mousemove", () => {
+          this.#setNameBoxDropdownActiveIndex(index);
+        });
+        option.addEventListener("mousedown", (e) => {
+          // Avoid selecting the underlying input text.
+          e.preventDefault();
+        });
+        option.addEventListener("click", () => {
+          const chosen = this.#nameBoxDropdownFilteredItems[index] ?? null;
+          if (!chosen) return;
+          this.#selectNameBoxDropdownItem(chosen);
+        });
+
+        group.appendChild(option);
+      }
+
+      list.appendChild(group);
+    };
+
+    // Match the sort order used for `#nameBoxDropdownAllItems`.
+    renderGroup("namedRange", "Named ranges");
+    renderGroup("table", "Tables");
+    renderGroup("sheet", "Sheets");
+    renderGroup("recent", "Recent");
+
+    if (this.#nameBoxDropdownOptionEls.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "formula-bar-name-box-empty";
+      empty.textContent = "No matches";
+      list.appendChild(empty);
+      this.#setNameBoxDropdownActiveIndex(-1);
+      return;
+    }
+
+    const nextActive = Math.min(Math.max(this.#nameBoxDropdownActiveIndex, 0), this.#nameBoxDropdownOptionEls.length - 1);
+    this.#setNameBoxDropdownActiveIndex(nextActive);
+  }
+
+  #setNameBoxDropdownActiveIndex(index: number): void {
+    this.#nameBoxDropdownActiveIndex = index;
+    for (let i = 0; i < this.#nameBoxDropdownOptionEls.length; i += 1) {
+      const el = this.#nameBoxDropdownOptionEls[i]!;
+      const active = i === index;
+      el.setAttribute("aria-selected", active ? "true" : "false");
+      el.classList.toggle("formula-bar-name-box-option--active", active);
+      if (active) {
+        this.#addressEl.setAttribute("aria-activedescendant", el.id);
+        try {
+          el.scrollIntoView({ block: "nearest" });
+        } catch {
+          // ignore (older browsers / jsdom)
+        }
+      }
+    }
+
+    if (index < 0) {
+      this.#addressEl.removeAttribute("aria-activedescendant");
+    }
+  }
+
+  #moveNameBoxDropdownSelection(delta: 1 | -1): void {
+    const count = this.#nameBoxDropdownOptionEls.length;
+    if (count === 0) return;
+    const current = this.#nameBoxDropdownActiveIndex;
+    const base = current < 0 ? (delta > 0 ? 0 : count - 1) : current;
+    const next = (base + delta + count) % count;
+    this.#setNameBoxDropdownActiveIndex(next);
+  }
+
+  #selectNameBoxDropdownItem(item: NameBoxDropdownItem): void {
+    // Match Excel UX: selecting an item replaces the name box input text.
+    this.#addressEl.value = item.label;
+    this.#closeNameBoxDropdown({ restoreAddress: false, reason: "commit" });
+
+    // Blur before navigating so subsequent renders can update the value.
+    this.#addressEl.blur();
+    this.#callbacks.onGoTo?.(item.reference);
+  }
+
+  #nameBoxDropdownOptionId(item: NameBoxDropdownItem): string {
+    const safeKey = String(item.key ?? "")
+      .trim()
+      .replaceAll(/[^a-zA-Z0-9_-]/g, "_");
+    return `${this.#nameBoxDropdownListEl.id}-option-${safeKey}`;
   }
 }
 

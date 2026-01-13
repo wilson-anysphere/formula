@@ -23,12 +23,12 @@ test.describe("formula bar name box dropdown", () => {
 
     await page.getByTestId("name-box-dropdown").click();
 
-    const menu = page.getByTestId("name-box-menu");
-    await expect(menu).toBeVisible();
-    await expect(menu).toContainText("E2E_NameBoxRange");
+    const dropdown = page.getByTestId("formula-name-box-popup");
+    await expect(dropdown).toBeVisible();
+    await expect(dropdown).toContainText("E2E_NameBoxRange");
 
-    await menu.getByRole("button", { name: "E2E_NameBoxRange", exact: true }).click();
-    await expect(menu).toBeHidden();
+    await dropdown.getByRole("option", { name: /E2E_NameBoxRange/ }).click();
+    await expect(dropdown).toBeHidden();
 
     await expect(page.getByTestId("active-cell")).toHaveText("B2");
     await expect(page.getByTestId("selection-range")).toHaveText("B2:C3");
@@ -66,12 +66,12 @@ test.describe("formula bar name box dropdown", () => {
 
     await page.getByTestId("name-box-dropdown").click();
 
-    const menu = page.getByTestId("name-box-menu");
-    await expect(menu).toBeVisible();
-    await expect(menu).toContainText("E2E_NameBoxTable");
+    const dropdown = page.getByTestId("formula-name-box-popup");
+    await expect(dropdown).toBeVisible();
+    await expect(dropdown).toContainText("E2E_NameBoxTable");
 
-    await menu.getByRole("button", { name: "E2E_NameBoxTable", exact: true }).click();
-    await expect(menu).toBeHidden();
+    await dropdown.getByRole("option", { name: /E2E_NameBoxTable/ }).click();
+    await expect(dropdown).toBeHidden();
 
     await expect(page.getByTestId("active-cell")).toHaveText("A5");
     await expect(page.getByTestId("selection-range")).toHaveText("A5:B6");
@@ -103,18 +103,17 @@ test.describe("formula bar name box dropdown", () => {
 
     await page.getByTestId("name-box-dropdown").click();
 
-    const menu = page.getByTestId("name-box-menu");
-    await expect(menu).toBeVisible();
+    const dropdown = page.getByTestId("formula-name-box-popup");
+    await expect(dropdown).toBeVisible();
 
-    const first = menu.getByRole("button", { name: "E2E_Dropdown_A", exact: true });
-    const second = menu.getByRole("button", { name: "E2E_Dropdown_B", exact: true });
+    const selected = dropdown.locator('[role="option"][aria-selected="true"]');
+    await expect(selected).toContainText("E2E_Dropdown_A");
 
-    await expect(first).toBeFocused();
     await page.keyboard.press("ArrowDown");
-    await expect(second).toBeFocused();
+    await expect(selected).toContainText("E2E_Dropdown_B");
 
     await page.keyboard.press("Enter");
-    await expect(menu).toBeHidden();
+    await expect(dropdown).toBeHidden();
 
     await expect(page.getByTestId("active-cell")).toHaveText("D5");
     await expect(page.getByTestId("selection-range")).toHaveText("D5:E6");
@@ -144,10 +143,10 @@ test.describe("formula bar name box dropdown", () => {
 
     await page.getByTestId("name-box-dropdown").click();
 
-    const menu = page.getByTestId("name-box-menu");
-    await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "E2E_CrossSheetRange", exact: true }).click();
-    await expect(menu).toBeHidden();
+    const dropdown = page.getByTestId("formula-name-box-popup");
+    await expect(dropdown).toBeVisible();
+    await dropdown.getByRole("option", { name: /E2E_CrossSheetRange/ }).click();
+    await expect(dropdown).toBeHidden();
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
     await expect(page.getByTestId("active-cell")).toHaveText("A10");
@@ -176,11 +175,11 @@ test.describe("formula bar name box dropdown", () => {
 
     await page.getByTestId("name-box-dropdown").click();
 
-    const menu = page.getByTestId("name-box-menu");
-    await expect(menu).toBeVisible();
+    const dropdown = page.getByTestId("formula-name-box-popup");
+    await expect(dropdown).toBeVisible();
 
     await page.keyboard.press("Escape");
-    await expect(menu).toBeHidden();
+    await expect(dropdown).toBeHidden();
 
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
     await expect(page.getByTestId("selection-range")).toHaveText("A1");
