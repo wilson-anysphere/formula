@@ -424,11 +424,13 @@ export class VersionManager extends SimpleEventEmitter {
   }
 
   async _applyRetention() {
+    if (this._destroyed) return;
     const retention = this.retention;
     if (!retention) return;
     if (retention.maxSnapshots == null && retention.maxAgeMs == null) return;
 
     const versions = await this.store.listVersions();
+    if (this._destroyed) return;
     // Preserve the store's ordering as a stable tie-breaker when timestamps are equal.
     // (Some stores maintain an insertion index; re-sorting purely by timestamp can
     // lead to unstable pruning when snapshots are created within the same ms.)
@@ -482,6 +484,7 @@ export class VersionManager extends SimpleEventEmitter {
 
     const deletedIds = ordered.filter((v) => deleteIds.has(v.id)).map((v) => v.id);
     for (const id of deletedIds) {
+      if (this._destroyed) return;
       await this.store.deleteVersion(id);
     }
     this.emit("versionsPruned", { deletedIds });

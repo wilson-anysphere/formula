@@ -222,3 +222,63 @@ test("VersionManager.destroy cleans up an in-flight autosnapshot save", async ()
   const versions = await store.listVersions();
   assert.equal(versions.length, 0);
 });
+
+test("VersionManager.destroy prevents in-flight retention pruning from mutating the store", async () => {
+  const doc = new FakeDoc();
+
+  class DeferredListStore extends InMemoryVersionStore {
+    constructor() {
+      super();
+      this.listStarted = false;
+      this.deleteCalls = 0;
+      this._deferred = null;
+    }
+
+    deferList() {
+      /** @type {{ promise: Promise<void>, resolve: () => void }} */
+      const deferred = {};
+      deferred.promise = new Promise((resolve) => {
+        deferred.resolve = () => resolve();
+      });
+      // @ts-expect-error - assigned above
+      this._deferred = deferred;
+      return deferred;
+    }
+
+    async listVersions() {
+      this.listStarted = true;
+      if (this._deferred) await this._deferred.promise;
+      return await super.listVersions();
+    }
+
+    async deleteVersion(versionId) {
+      this.deleteCalls += 1;
+      return await super.deleteVersion(versionId);
+    }
+  }
+
+  const store = new DeferredListStore();
+  const deferred = store.deferList();
+
+  const vm = new VersionManager({
+    doc,
+    store,
+    autoStart: false,
+    // Ensure retention would try to delete the newly-created snapshot.
+    retention: { maxSnapshots: 0 },
+  });
+
+  doc.setCell("r0c0", { value: 1 });
+
+  const createPromise = vm.createSnapshot();
+
+  while (!store.listStarted) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  vm.destroy();
+  deferred.resolve();
+  await createPromise;
+
+  assert.equal(store.deleteCalls, 0);
+});
