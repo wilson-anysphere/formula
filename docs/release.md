@@ -546,13 +546,13 @@ are attached:
 
    Check the machine type of the installed/bundled executable using `dumpbin` (Visual Studio tools):
 
-   ```bat
-   REM From a "Developer Command Prompt for VS"
-   dumpbin /headers path\to\Formula.exe | findstr /i machine
+    ```bat
+    REM From a "Developer Command Prompt for VS"
+    dumpbin /headers path\to\formula-desktop.exe | findstr /i machine
 
-   REM x64  => machine (8664)
-   REM arm64 => machine (AA64)
-   ```
+    REM x64  => machine (8664)
+    REM arm64 => machine (AA64)
+    ```
 
    If Authenticode signing is enabled, verify signatures:
 
