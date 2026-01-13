@@ -66,6 +66,17 @@
   }
 }
 
+:root[data-theme="high-contrast"] .grid-scrollbar-track {
+  opacity: 1;
+}
+
+:root[data-theme="high-contrast"] .grid-scrollbar-thumb:hover,
+:root[data-theme="high-contrast"] .grid-scrollbar-thumb:active {
+  box-shadow: none;
+  outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
+  outline-offset: 1px;
+}
+
 :root[data-reduced-motion="true"] .grid-scrollbar-thumb {
   transition: none;
 }
