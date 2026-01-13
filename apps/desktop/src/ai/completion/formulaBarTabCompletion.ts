@@ -210,6 +210,12 @@ export class FormulaBarTabCompletionController {
         : [];
     const hasCurrentSheet = knownSheets.some((id) => id.toLowerCase() === sheetId.toLowerCase());
 
+    const isKnownSheet = (id: string): boolean => {
+      const candidate = String(id ?? "").trim();
+      if (!candidate) return false;
+      return knownSheets.some((known) => known.toLowerCase() === candidate.toLowerCase());
+    };
+
     const resolveSheetId = (name: string): string | null => {
       const trimmed = normalizeSheetNameToken(name);
       if (!trimmed) return null;
@@ -222,7 +228,6 @@ export class FormulaBarTabCompletionController {
       // don't perform any document reads during completion.
       if (candidate.toLowerCase() === sheetId.toLowerCase()) return hasCurrentSheet ? sheetId : null;
       if (knownSheets.length === 0) return null;
-
       return knownSheets.find((id) => id.toLowerCase() === candidate.toLowerCase()) ?? null;
     };
 
@@ -237,10 +242,13 @@ export class FormulaBarTabCompletionController {
         // Avoid creating phantom sheets during completion: `DocumentController.getCell()` lazily
         // materializes sheets on read. Prefer `peekCell()` which returns an empty cell state when
         // the sheet doesn't exist yet.
-        const state =
-          typeof (this.#document as any).peekCell === "function"
-            ? ((this.#document as any).peekCell(targetSheet, { row, col }) as { value: unknown; formula: string | null })
-            : (this.#document.getCell(targetSheet, { row, col }) as { value: unknown; formula: string | null });
+        let state: { value: unknown; formula: string | null };
+        if (typeof (this.#document as any).peekCell === "function") {
+          state = (this.#document as any).peekCell(targetSheet, { row, col }) as { value: unknown; formula: string | null };
+        } else {
+          if (!isKnownSheet(targetSheet)) return null;
+          state = this.#document.getCell(targetSheet, { row, col }) as { value: unknown; formula: string | null };
+        }
         if (state?.value != null) return state.value;
         if (typeof state?.formula === "string" && state.formula.length > 0) return state.formula;
         return null;
@@ -433,7 +441,6 @@ function createPreviewEvaluator(params: {
       typeof document.getSheetIds === "function"
         ? (document.getSheetIds() as string[]).filter((s) => typeof s === "string" && s.length > 0)
         : [];
-    const hasCurrentSheet = knownSheets.some((id) => id.toLowerCase() === sheetId.toLowerCase());
 
     const resolveSheetId = (name: string): string | null => {
       const trimmed = normalizeSheetNameToken(name);
@@ -443,8 +450,8 @@ function createPreviewEvaluator(params: {
       const candidate = resolved ?? trimmed;
       // Avoid creating phantom sheets during preview evaluation (DocumentController
       // lazily materializes sheets on read). If we don't have any known sheets
-      // yet, don't perform any document reads during preview evaluation.
-      if (candidate.toLowerCase() === sheetId.toLowerCase()) return hasCurrentSheet ? sheetId : null;
+      // yet, only allow reads against the current sheet id.
+      if (candidate.toLowerCase() === sheetId.toLowerCase()) return sheetId;
       if (knownSheets.length === 0) return null;
 
       return knownSheets.find((id) => id.toLowerCase() === candidate.toLowerCase()) ?? null;
@@ -470,8 +477,6 @@ function createPreviewEvaluator(params: {
         if (!resolved) return "#REF!";
         targetSheet = resolved;
         addr = trimmed.slice(bang + 1);
-      } else if (!hasCurrentSheet) {
-        return "#REF!";
       }
 
       const normalized = addr.replaceAll("$", "").toUpperCase();

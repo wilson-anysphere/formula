@@ -1,6 +1,6 @@
 import FUNCTION_CATALOG from "../../../../../shared/functionCatalog.mjs";
 
-export type FunctionParam = { name: string; optional?: boolean };
+type FunctionParam = { name: string; optional?: boolean };
 
 export type FunctionSignature = {
   name: string;
@@ -20,7 +20,7 @@ for (const fn of (FUNCTION_CATALOG as { functions?: CatalogFunction[] } | null)?
   if (fn?.name) CATALOG_BY_NAME.set(fn.name.toUpperCase(), fn);
 }
 
-export const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
+const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
   DATE: {
     name: "DATE",
     params: [{ name: "year" }, { name: "month" }, { name: "day" }],
