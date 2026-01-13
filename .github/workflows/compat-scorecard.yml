@@ -66,6 +66,7 @@ jobs:
             core.setOutput("sha", sha);
             core.setOutput("corpus_run_id", corpusRunId || "");
             core.setOutput("excel_run_id", excelRunId || "");
+            core.setOutput("ready", corpusRunId && excelRunId ? "true" : "false");
 
             if (!corpusRunId || !excelRunId) {
               core.notice(
@@ -74,7 +75,7 @@ jobs:
             }
 
       - name: Download corpus summary artifact
-        if: ${{ steps.runs.outputs.corpus_run_id != '' }}
+        if: ${{ steps.runs.outputs.ready == 'true' }}
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
@@ -84,7 +85,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Download excel-oracle artifacts
-        if: ${{ steps.runs.outputs.excel_run_id != '' }}
+        if: ${{ steps.runs.outputs.ready == 'true' }}
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
@@ -94,7 +95,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Generate unified scorecard
-        if: ${{ always() }}
+        if: ${{ steps.runs.outputs.ready == 'true' }}
         env:
           # Prefer rendering the commit we are summarizing, not the workflow_run runner checkout SHA.
           GITHUB_SHA: ${{ steps.runs.outputs.sha }}
@@ -111,7 +112,7 @@ jobs:
           fi
 
       - name: Upload unified scorecard
-        if: ${{ always() }}
+        if: ${{ steps.runs.outputs.ready == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: compat-scorecard
