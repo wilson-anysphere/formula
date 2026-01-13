@@ -216,6 +216,21 @@ python -m tools.corpus.dashboard --triage-dir tools/corpus/out/public
 cat tools/corpus/out/public/summary.md
 ```
 
+### Append a trend time series entry (machine-readable)
+
+Each corpus dashboard run can also append a compact JSON entry (rates, diff totals, etc.) to a
+time-series file:
+
+```bash
+python -m tools.corpus.dashboard \
+  --triage-dir tools/corpus/out/private \
+  --append-trend tools/corpus/out/private/trend.json
+```
+
+The scheduled private corpus workflow (`.github/workflows/corpus.yml`) restores/saves this
+`trend.json` file via GitHub Actions cache so it grows over time, and uploads it as part of the
+private corpus artifact.
+
 ### Promote a workbook into the public subset
 
 To add a new public, non-sensitive regression fixture (base64 + expectations) in one step:

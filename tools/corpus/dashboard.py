@@ -200,7 +200,8 @@ def _append_trend_file(
     prev: dict[str, Any] | None = None
     entries: list[dict[str, Any]] = []
     if trend_path.exists():
-        raw = json.loads(trend_path.read_text(encoding="utf-8") or "[]")
+        raw_text = trend_path.read_text(encoding="utf-8").strip()
+        raw = json.loads(raw_text or "[]")
         if not isinstance(raw, list):
             raise ValueError(f"trend file must be a JSON list: {trend_path}")
         entries = [e for e in raw if isinstance(e, dict)]
