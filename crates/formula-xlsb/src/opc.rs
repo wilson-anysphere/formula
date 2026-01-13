@@ -141,6 +141,20 @@ pub struct XlsbWorkbook {
     decode_formulas: bool,
 }
 
+/// A single formula edit expressed as Excel formula text.
+///
+/// This is a higher-level companion to [`crate::CellEdit`], intended for use with save APIs that
+/// need to (re-)encode formulas.
+#[cfg(feature = "write")]
+#[derive(Debug, Clone, PartialEq)]
+pub struct FormulaTextCellEdit {
+    pub row: u32,
+    pub col: u32,
+    pub new_value: CellValue,
+    /// Excel formula text, with or without a leading `=`.
+    pub formula: String,
+}
+
 impl XlsbWorkbook {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, ParseError> {
         Self::open_with_options(path, OpenOptions::default())
@@ -518,6 +532,238 @@ impl XlsbWorkbook {
 
         let patched = patch_sheet_bin(&sheet_bytes, edits)?;
         self.save_with_part_overrides(dest, &HashMap::from([(sheet_part, patched)]))
+    }
+
+    /// Save the workbook with a set of formula edits for a single worksheet, expressed as Excel
+    /// formula text.
+    ///
+    /// This is similar to [`XlsbWorkbook::save_with_cell_edits`], but:
+    /// - accepts formula text instead of raw `rgce` bytes
+    /// - when encountering forward-compatible / future functions (typically `_xlfn.*`) that map
+    ///   to the BIFF UDF sentinel (255), automatically patches `xl/workbook.bin` to intern a
+    ///   missing `ExternName` entry so the rgce encoder can emit a valid `PtgNameX` reference.
+    #[cfg(feature = "write")]
+    pub fn save_with_cell_formula_text_edits(
+        &self,
+        dest: impl AsRef<Path>,
+        sheet_index: usize,
+        edits: &[FormulaTextCellEdit],
+    ) -> Result<(), ParseError> {
+        use crate::ftab::{function_id_from_name, FTAB_USER_DEFINED};
+        use crate::rgce::{encode_rgce_with_context_ast_in_sheet, CellCoord, EncodeError};
+        use crate::workbook_context::{ExternName, SupBook, SupBookKind};
+        use crate::workbook_bin_patch::patch_workbook_bin_intern_namex_functions;
+        use formula_engine as fe;
+
+        if edits.is_empty() {
+            return self.save_as(dest);
+        }
+
+        let meta = self
+            .sheets
+            .get(sheet_index)
+            .ok_or(ParseError::SheetIndexOutOfBounds(sheet_index))?;
+        let sheet_part = meta.part_path.clone();
+        let sheet_name = meta.name.clone();
+
+        // Load worksheet bytes (in-memory patcher).
+        let sheet_bytes = if let Some(bytes) = self.preserved_parts.get(&sheet_part) {
+            bytes.clone()
+        } else {
+            let mut zip = self.open_zip()?;
+            let mut entry = zip.by_name(&sheet_part)?;
+            let mut bytes = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut bytes)?;
+            bytes
+        };
+
+        // Load workbook.bin so we can patch it if we need to intern new NameX function entries.
+        let workbook_bin = if let Some(bytes) = self.preserved_parts.get(&self.workbook_part) {
+            bytes.clone()
+        } else {
+            let mut zip = self.open_zip()?;
+            let mut entry = zip.by_name(&self.workbook_part)?;
+            let mut bytes = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut bytes)?;
+            bytes
+        };
+
+        let mut ctx = self.workbook_context.clone();
+
+        // Collect any forward-compat / future functions (iftab=255) that are missing from the
+        // workbook's NameX tables.
+        let mut wanted: BTreeMap<String, String> = BTreeMap::new();
+        for edit in edits {
+            let ast = fe::parse_formula(&edit.formula, fe::ParseOptions::default()).map_err(|e| {
+                ParseError::UnsupportedFormulaText(format!(
+                    "{} (span {}..{})",
+                    e.message, e.span.start, e.span.end
+                ))
+            })?;
+
+            fn walk(expr: &fe::Expr, wanted: &mut BTreeMap<String, String>) {
+                match expr {
+                    fe::Expr::FunctionCall(call) => {
+                        // Normalize `_xlfn.` prefix for stable ordering/dedup, but preserve the
+                        // original name for the inserted ExternName so decoding round-trips.
+                        let mut key = call.name.original.to_ascii_uppercase();
+                        if let Some(stripped) = key.strip_prefix("_XLFN.") {
+                            key = stripped.to_string();
+                        }
+
+                        wanted
+                            .entry(key)
+                            .and_modify(|existing| {
+                                // Prefer a `_xlfn.`-prefixed spelling when the caller provided
+                                // one, matching Excel's forward-compat namespace.
+                                let existing_has_prefix =
+                                    existing.to_ascii_uppercase().starts_with("_XLFN.");
+                                let new_has_prefix = call
+                                    .name
+                                    .original
+                                    .to_ascii_uppercase()
+                                    .starts_with("_XLFN.");
+                                if !existing_has_prefix && new_has_prefix {
+                                    *existing = call.name.original.clone();
+                                }
+                            })
+                            .or_insert_with(|| call.name.original.clone());
+
+                        for arg in &call.args {
+                            walk(arg, wanted);
+                        }
+                    }
+                    fe::Expr::Call(call) => {
+                        walk(&call.callee, wanted);
+                        for arg in &call.args {
+                            walk(arg, wanted);
+                        }
+                    }
+                    fe::Expr::FieldAccess(access) => walk(&access.base, wanted),
+                    fe::Expr::Array(arr) => {
+                        for row in &arr.rows {
+                            for el in row {
+                                walk(el, wanted);
+                            }
+                        }
+                    }
+                    fe::Expr::Unary(u) => walk(&u.expr, wanted),
+                    fe::Expr::Postfix(p) => walk(&p.expr, wanted),
+                    fe::Expr::Binary(b) => {
+                        walk(&b.left, wanted);
+                        walk(&b.right, wanted);
+                    }
+                    _ => {}
+                }
+            }
+
+            walk(&ast.expr, &mut wanted);
+        }
+
+        let mut missing: Vec<String> = Vec::new();
+        for (_key, original) in wanted {
+            if function_id_from_name(&original) != Some(FTAB_USER_DEFINED) {
+                continue;
+            }
+            // `namex_function_ref` handles `_xlfn.` prefix normalization.
+            if ctx.namex_function_ref(&original).is_some() {
+                continue;
+            }
+            missing.push(original);
+        }
+        missing.sort_by(|a, b| a.to_ascii_uppercase().cmp(&b.to_ascii_uppercase()));
+        missing.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+
+        let patched_workbook_bin = if missing.is_empty() {
+            None
+        } else {
+            let patch = match patch_workbook_bin_intern_namex_functions(&workbook_bin, &missing)? {
+                Some(patch) => patch,
+                None => {
+                    return Err(ParseError::Io(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "failed to patch workbook.bin for forward-compatible functions",
+                    )));
+                }
+            };
+
+            // Update the in-memory workbook context so formula encoding can reference the newly
+            // inserted NameX entries.
+            if patch.created_supbook {
+                debug_assert!(
+                    ctx.addin_supbook_index().is_none(),
+                    "workbook.bin patch created an AddIn SupBook, but the context already had one"
+                );
+                let supbook_index = patch
+                    .inserted
+                    .first()
+                    .map(|e| e.supbook_index)
+                    .unwrap_or(0);
+
+                // The patcher always appends the new AddIn SupBook.
+                let created = ctx.push_namex_supbook(
+                    SupBook {
+                        raw_name: "\u{0001}".to_string(),
+                        kind: SupBookKind::AddIn,
+                    },
+                    Vec::new(),
+                );
+                if created != supbook_index {
+                    return Err(ParseError::Io(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "workbook.bin patch produced unexpected supbook index: context={created}, patch={supbook_index}"
+                        ),
+                    )));
+                }
+            }
+
+            for entry in &patch.inserted {
+                ctx.insert_namex_extern_name(
+                    entry.supbook_index,
+                    entry.name_index,
+                    ExternName {
+                        name: entry.name.clone(),
+                        is_function: true,
+                        scope_sheet: None,
+                    },
+                );
+            }
+
+            Some(patch.workbook_bin)
+        };
+
+        // Encode the formula token streams with the updated context.
+        let mut binary_edits: Vec<CellEdit> = Vec::with_capacity(edits.len());
+        for edit in edits {
+            let base = CellCoord::new(edit.row, edit.col);
+            let encoded = encode_rgce_with_context_ast_in_sheet(&edit.formula, &ctx, &sheet_name, base)
+                .map_err(|e| match e {
+                    EncodeError::Parse(msg) => ParseError::UnsupportedFormulaText(msg),
+                    other => ParseError::UnsupportedFormulaText(other.to_string()),
+                })?;
+
+            binary_edits.push(CellEdit {
+                row: edit.row,
+                col: edit.col,
+                new_value: edit.new_value.clone(),
+                new_style: None,
+                new_formula: Some(encoded.rgce),
+                new_rgcb: Some(encoded.rgcb),
+                new_formula_flags: None,
+                shared_string_index: None,
+            });
+        }
+
+        let patched_sheet = patch_sheet_bin(&sheet_bytes, &binary_edits)?;
+
+        let mut overrides: HashMap<String, Vec<u8>> = HashMap::new();
+        overrides.insert(sheet_part, patched_sheet);
+        if let Some(wb) = patched_workbook_bin {
+            overrides.insert(self.workbook_part.clone(), wb);
+        }
+
+        self.save_with_part_overrides(dest, &overrides)
     }
 
     /// Save the workbook with a set of edits for a single worksheet, updating the shared strings

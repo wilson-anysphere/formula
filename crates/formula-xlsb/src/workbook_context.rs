@@ -441,7 +441,16 @@ impl WorkbookContext {
     }
 
     pub(crate) fn namex_function_ref(&self, name: &str) -> Option<(u16, u16)> {
-        let normalized = normalize_key(name);
+        // Excel uses `_xlfn.` as a forward-compat namespace for newer functions.
+        //
+        // - In XLSX formula text, callers may specify either `XLOOKUP(...)` or `_xlfn.XLOOKUP(...)`.
+        // - In BIFF token streams, these functions are encoded via a NameX extern-function entry
+        //   paired with the UDF sentinel (`iftab=255`).
+        //
+        // Some producers store the extern-function name with the `_xlfn.` prefix, while others
+        // store the base name only. Normalize both sides by stripping `_xlfn.` so lookups are
+        // robust across writers and across `formula-engine` (which strips `_xlfn.` in its AST).
+        let normalized = normalize_function_key(name);
 
         // HashMap iteration order is nondeterministic; pick the lowest `(supbook, name_index)`
         // match so encoding is stable.
@@ -450,7 +459,7 @@ impl WorkbookContext {
             if !extern_name.is_function {
                 continue;
             }
-            if normalize_key(&extern_name.name) != normalized {
+            if normalize_function_key(&extern_name.name) != normalized {
                 continue;
             }
             match best {
@@ -708,12 +717,47 @@ impl WorkbookContext {
         let range = info.range.as_ref()?;
         Some(range.sheet_key == normalize_key(sheet))
     }
+
+    /// Returns the index of the first AddIn `SupBook` (when present).
+    #[cfg(feature = "write")]
+    pub(crate) fn addin_supbook_index(&self) -> Option<u16> {
+        self.namex_supbooks
+            .iter()
+            .enumerate()
+            .find_map(|(idx, sb)| (sb.kind == SupBookKind::AddIn).then_some(idx as u16))
+    }
+
+    /// Append a new `SupBook` + sheet table entry to the NameX context, returning its index.
+    #[cfg(feature = "write")]
+    pub(crate) fn push_namex_supbook(&mut self, supbook: SupBook, sheets: Vec<String>) -> u16 {
+        let idx = u16::try_from(self.namex_supbooks.len()).unwrap_or(u16::MAX);
+        self.namex_supbooks.push(supbook);
+        self.namex_supbook_sheets.push(sheets);
+        idx
+    }
+
+    /// Inserts/overwrites an extern-name entry in the NameX table.
+    #[cfg(feature = "write")]
+    pub(crate) fn insert_namex_extern_name(
+        &mut self,
+        supbook_index: u16,
+        name_index: u16,
+        extern_name: ExternName,
+    ) {
+        self.namex_extern_names
+            .insert((supbook_index, name_index), extern_name);
+    }
 }
 
 fn normalize_key(s: &str) -> String {
     // Must match Excel's case-insensitive name matching. We follow the same strategy as
     // `formula_model::sheet_name_eq_case_insensitive`: Unicode NFKC + Unicode uppercasing.
     s.nfkc().flat_map(|c| c.to_uppercase()).collect()
+}
+
+fn normalize_function_key(s: &str) -> String {
+    let key = normalize_key(s);
+    key.strip_prefix("_XLFN.").unwrap_or(&key).to_string()
 }
 
 pub(crate) fn display_supbook_name(raw: &str) -> String {

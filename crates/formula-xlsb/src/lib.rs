@@ -15,10 +15,14 @@ mod shared_strings;
 mod shared_strings_write;
 mod strings;
 mod styles;
+#[cfg(feature = "write")]
+mod workbook_bin_patch;
 pub mod workbook_context;
 mod writer;
 
 pub use opc::{OpenOptions, XlsbWorkbook};
+#[cfg(feature = "write")]
+pub use opc::FormulaTextCellEdit;
 pub use parser::{
     CalcMode, Cell, CellValue, DefinedName, Dimension, Error, Formula, SheetData, SheetMeta,
     SheetVisibility, WorkbookProperties,
