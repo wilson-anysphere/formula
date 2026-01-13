@@ -30,6 +30,7 @@ members = [
 #
 # These defaults are tuned to help keep desktop bundles/installer artifacts under
 # the 50 MB budget by avoiding accidental debug/symbol data in release binaries.
+# See `docs/11-desktop-shell.md` ("Bundle size tuning") for the rationale/tradeoffs.
 [profile.release]
 # Strip symbol/debug info from release binaries.
 strip = "symbols"

@@ -1176,10 +1176,10 @@ backend library can still compile (and be tested) without linking Tauri or syste
 
 ---
 
-## Rust release profile (desktop binary size)
+## Bundle size tuning
 
-The packaged desktop app ships a native Rust binary (`formula-desktop`). To keep installer/bundle sizes down (and improve cold-start),
-release builds enable size-focused settings:
+The platform goal is **<50MB** per packaged artifact (installer/AppImage/etc). The packaged desktop app ships a native Rust binary
+(`formula-desktop`) and it’s a large contributor, so release builds enable size-focused settings:
 
 - Source of truth: `Cargo.toml` (workspace root)
   - `[profile.release]` (workspace-wide release defaults for shipped artifacts):
@@ -1188,6 +1188,14 @@ release builds enable size-focused settings:
     - `codegen-units = 1`
   - `[profile.release.package.formula-desktop-tauri]` (desktop shell crate only):
     - `opt-level = "z"` (the compute-heavy `formula-engine` stays on Cargo’s default `opt-level=3`)
+
+Notes / tradeoffs:
+
+- `strip = "symbols"` is a big size win, but removes symbols which makes native crash reports / backtraces less useful.
+- `lto = "thin"` often reduces size (and can improve runtime perf), but increases link times.
+- `codegen-units = 1` can further reduce size, but slows down compilation.
+- We intentionally do **not** set `panic = "abort"`: parts of the desktop code use `catch_unwind` defensively (for example around
+  GTK clipboard operations on Linux). With `panic = "abort"`, those would become hard process aborts instead of recoverable errors.
 
 Note: Cargo does not support `lto` / `panic = "abort"` as *per-package* overrides, so those must be configured profile-wide.
 
@@ -1201,6 +1209,15 @@ cargo build --profile release-desktop-debug -p formula-desktop-tauri --bin formu
 ```
 
 Or build a normal debug binary (no `--release`) when you don't need full optimization.
+
+### Inspecting bundle sizes
+
+After building a packaged desktop app (so that `target/**/release/bundle/**` exists), you can generate a local size report via:
+
+```bash
+(cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)
+python scripts/desktop_bundle_size_report.py
+```
 
 ---
 
