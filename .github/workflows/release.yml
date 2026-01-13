@@ -702,11 +702,36 @@ jobs:
         if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != ''
         run: |
           set -euo pipefail
-          app="$(find apps/desktop/src-tauri/target -maxdepth 8 -type d -path '*/release/bundle/macos/*.app' | head -n 1 || true)"
-          if [ -z "${app:-}" ]; then
-            echo "No .app bundle found under apps/desktop/src-tauri/target/**/release/bundle/macos."
-            echo "Available .app directories under src-tauri/target (first 20):"
-            find apps/desktop/src-tauri/target -maxdepth 10 -type d -name '*.app' | head -n 20 || true
+          # Cargo workspaces typically emit bundle outputs under `<repo>/target/**`, but standalone
+          # Tauri projects use `<src-tauri>/target/**`. Support both so signed-release validation
+          # doesn't fail when the build output layout changes.
+          search_roots=(
+            apps/desktop/src-tauri/target/universal-apple-darwin
+            target/universal-apple-darwin
+            apps/desktop/src-tauri/target
+            target
+          )
+
+          app=""
+          for root in "${search_roots[@]}"; do
+            if [[ -d "$root" ]]; then
+              candidate="$(find "$root" -maxdepth 12 -type d -path '*/release/bundle/macos/*.app' -print 2>/dev/null | head -n 1 || true)"
+              if [[ -n "$candidate" ]]; then
+                app="$candidate"
+                break
+              fi
+            fi
+          done
+
+          if [[ -z "${app:-}" ]]; then
+            echo "::error::No .app bundle found under expected release bundle roots." >&2
+            echo "Searched: ${search_roots[*]}" >&2
+            for root in "${search_roots[@]}"; do
+              if [[ -d "$root" ]]; then
+                echo "Available .app directories under $root (first 20):" >&2
+                find "$root" -maxdepth 12 -type d -name '*.app' -print 2>/dev/null | head -n 20 || true
+              fi
+            done
             exit 1
           fi
           echo "Verifying entitlements embedded in: $app"
@@ -817,10 +842,14 @@ jobs:
             throw "windows-bundle: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
           }
 
-          $bundleDir = "apps/desktop/src-tauri/target/$target/release/bundle"
-
-          if (-not (Test-Path $bundleDir)) {
-            throw "windows-bundle: ERROR expected Tauri bundle dir not found: $bundleDir"
+          $bundleCandidates = @(
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle")
+          )
+          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $bundleDir) {
+            $candidatesJoined = $bundleCandidates -join "`n"
+            throw "windows-bundle: ERROR expected Tauri bundle dir not found. Looked in:`n$candidatesJoined"
           }
 
           # Wrap in @() so `.Count` behaves consistently even when 0 or 1 files match.
