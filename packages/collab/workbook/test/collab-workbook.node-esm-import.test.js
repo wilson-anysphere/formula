@@ -12,6 +12,9 @@ test("collab-workbook is importable under Node ESM when executing TS sources dir
 
   assert.equal(typeof mod.ensureWorkbookSchema, "function");
   assert.equal(typeof mod.getWorkbookRoots, "function");
+  assert.equal(typeof mod.createSheetManagerForSessionWithPermissions, "function");
+  assert.equal(typeof mod.createMetadataManagerForSessionWithPermissions, "function");
+  assert.equal(typeof mod.createNamedRangeManagerForSessionWithPermissions, "function");
   assert.equal(typeof ensureFromTs, "function");
 
   const doc = new Y.Doc();
