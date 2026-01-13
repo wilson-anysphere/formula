@@ -95,7 +95,6 @@ import type {
 import { resolveDesktopGridMode, type DesktopGridMode } from "../grid/shared/desktopGridMode.js";
 import { DocumentCellProvider } from "../grid/shared/documentCellProvider.js";
 import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../grid/shared/desktopSharedGrid.js";
-import { DesktopImageStore } from "../images/imageStore.js";
 import { openExternalHyperlink } from "../hyperlinks/openExternal.js";
 import * as nativeDialogs from "../tauri/nativeDialogs.js";
 import { shellOpen } from "../tauri/shellOpen.js";
@@ -653,8 +652,7 @@ export class SpreadsheetApp {
     (changes) => this.applyComputedChanges(changes)
   );
   private readonly document = new DocumentController({ engine: this.engine });
-  private readonly imageStore = new DesktopImageStore();
-  private readonly sharedGridImageResolver: CanvasGridImageResolver = async (imageId) => this.imageStore.getImageBlob(imageId);
+  private readonly sharedGridImageResolver: CanvasGridImageResolver = async (imageId) => this.document.getImageBlob(imageId);
   /**
    * In collaborative mode, keyboard undo/redo must use Yjs UndoManager semantics
    * (see `@formula/collab-undo`) so we never overwrite newer remote edits.
@@ -3783,11 +3781,11 @@ export class SpreadsheetApp {
     const blueId = "demo-image-blue";
 
     // 1×1 PNGs (red + blue) as base64 to avoid depending on runtime asset loading.
-    this.imageStore.set(redId, {
+    this.document.setImage(redId, {
       mimeType: "image/png",
       bytes: decodeBase64ToBytes("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQAY+l0AAAAASUVORK5CYII="),
     });
-    this.imageStore.set(blueId, {
+    this.document.setImage(blueId, {
       mimeType: "image/png",
       bytes: decodeBase64ToBytes("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYPgPAAEDAQAIicLsAAAAAElFTkSuQmCC"),
     });

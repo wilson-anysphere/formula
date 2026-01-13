@@ -4,7 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DesktopImageStore } from "../../images/imageStore.js";
+import { DocumentController } from "../../document/documentController.js";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 let priorGridMode: string | undefined;
@@ -115,7 +115,7 @@ describe("SpreadsheetApp shared grid (in-cell images)", () => {
   });
 
   it("attempts to resolve image blobs for in-cell image values", () => {
-    const resolverSpy = vi.spyOn(DesktopImageStore.prototype, "getImageBlob");
+    const resolverSpy = vi.spyOn(DocumentController.prototype as any, "getImageBlob");
 
     const root = createRoot();
     const status = {
@@ -134,4 +134,3 @@ describe("SpreadsheetApp shared grid (in-cell images)", () => {
     root.remove();
   });
 });
-

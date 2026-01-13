@@ -2470,6 +2470,28 @@ export class DocumentController {
   }
 
   /**
+   * Convenience helper for UI layers: get a browser `Blob` for an image store entry.
+   *
+   * This avoids every caller re-implementing byte → Blob conversion and lets render layers
+   * treat the controller as the single source of truth for workbook media.
+   *
+   * @param {string} imageId
+   * @returns {Blob | null}
+   */
+  getImageBlob(imageId) {
+    const id = String(imageId ?? "").trim();
+    if (!id) return null;
+    const entry = this.images.get(id);
+    if (!entry) return null;
+    if (typeof Blob === "undefined") return null;
+    try {
+      return new Blob([entry.bytes], { type: entry.mimeType || "application/octet-stream" });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Set an image entry in the workbook-scoped image store.
    *
    * This is undoable and persisted in `encodeState()` snapshots.
