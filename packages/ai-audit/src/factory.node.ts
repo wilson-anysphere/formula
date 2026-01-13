@@ -1,4 +1,5 @@
 import type { AIAuditStore } from "./store.ts";
+import { BoundedAIAuditStore, type BoundedAIAuditStoreOptions } from "./bounded-store.ts";
 import { LocalStorageAIAuditStore } from "./local-storage-store.ts";
 import { MemoryAIAuditStore } from "./memory-store.ts";
 import type { CreateDefaultAIAuditStoreOptions } from "./factory.ts";
@@ -13,9 +14,25 @@ import type { CreateDefaultAIAuditStoreOptions } from "./factory.ts";
 export async function createDefaultAIAuditStore(options: CreateDefaultAIAuditStoreOptions = {}): Promise<AIAuditStore> {
   const retention = options.retention ?? {};
   const prefer = options.prefer ?? "memory";
+  const bounded = options.bounded;
+
+  const wrap = (store: AIAuditStore): AIAuditStore => {
+    if (bounded === false) return store;
+    const boundedOptions: BoundedAIAuditStoreOptions | undefined = typeof bounded === "object" && bounded ? bounded : undefined;
+    return new BoundedAIAuditStore(store, boundedOptions);
+  };
 
   if (prefer === "memory") {
-    return new MemoryAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms });
+    return wrap(new MemoryAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms }));
+  }
+
+  if (prefer === "indexeddb") {
+    // Node runtimes do not have IndexedDB. Treat as unsupported and fall back to
+    // localStorage if explicitly available, otherwise memory.
+    if (isLocalStorageAvailable()) {
+      return wrap(new LocalStorageAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms }));
+    }
+    return wrap(new MemoryAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms }));
   }
 
   if (prefer === "localstorage") {
@@ -23,17 +40,18 @@ export async function createDefaultAIAuditStore(options: CreateDefaultAIAuditSto
     // (e.g. jsdom / experimental webstorage). If localStorage is unavailable,
     // fall back to memory.
     if (!isLocalStorageAvailable()) {
-      return new MemoryAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms });
+      return wrap(new MemoryAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms }));
     }
-    return new LocalStorageAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms });
+    return wrap(new LocalStorageAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms }));
   }
 
   // `prefer: "sqlite"` is explicit opt-in.
   const { SqliteAIAuditStore } = await import("./sqlite-store.ts");
-  return SqliteAIAuditStore.create({
+  const sqlite = await SqliteAIAuditStore.create({
     storage: options.sqlite_storage,
     retention
   });
+  return wrap(sqlite);
 }
 
 function isLocalStorageAvailable(): boolean {

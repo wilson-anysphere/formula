@@ -1,4 +1,6 @@
 import type { AIAuditStore } from "./store.ts";
+import { BoundedAIAuditStore, type BoundedAIAuditStoreOptions } from "./bounded-store.ts";
+import { IndexedDbAIAuditStore } from "./indexeddb-store.ts";
 import { LocalStorageAIAuditStore } from "./local-storage-store.ts";
 import { MemoryAIAuditStore } from "./memory-store.ts";
 import type { SqliteBinaryStorage } from "./storage.ts";
@@ -13,7 +15,14 @@ export interface CreateDefaultAIAuditStoreOptions {
    * Prefer a specific backing store. When unset, a reasonable default is selected
    * based on the runtime (browser vs Node).
    */
-  prefer?: "sqlite" | "localstorage" | "memory";
+  prefer?: "sqlite" | "indexeddb" | "localstorage" | "memory";
+  /**
+   * Wrap the chosen store in `BoundedAIAuditStore` (defense-in-depth against
+   * oversized entries / quota overruns).
+   *
+   * Defaults to enabled.
+   */
+  bounded?: boolean | BoundedAIAuditStoreOptions;
   /**
    * Retention options forwarded to the underlying store when supported.
    */
@@ -28,25 +37,68 @@ export interface CreateDefaultAIAuditStoreOptions {
 /**
  * Create an audit store with sensible defaults for the current runtime.
  *
- * Browser-like runtimes prefer `LocalStorageAIAuditStore` (fast + simple),
- * falling back to `MemoryAIAuditStore` when localStorage is unavailable.
+ * Browser-like runtimes prefer `IndexedDbAIAuditStore` when available, falling
+ * back to `LocalStorageAIAuditStore` and finally `MemoryAIAuditStore`.
  *
  * Node runtimes default to `MemoryAIAuditStore` to avoid pulling in sql.js unless
  * explicitly requested.
  */
 export async function createDefaultAIAuditStore(options: CreateDefaultAIAuditStoreOptions = {}): Promise<AIAuditStore> {
   const retention = options.retention ?? {};
-  const prefer = options.prefer ?? (isBrowserRuntime() ? "localstorage" : "memory");
+  const prefer = options.prefer;
+  const bounded = options.bounded;
+
+  const wrap = (store: AIAuditStore): AIAuditStore => {
+    if (bounded === false) return store;
+    const boundedOptions = typeof bounded === "object" && bounded ? bounded : undefined;
+    return new BoundedAIAuditStore(store, boundedOptions);
+  };
+
+  const createMemory = (): AIAuditStore =>
+    new MemoryAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms });
+
+  const createLocalStorage = (): AIAuditStore =>
+    new LocalStorageAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms });
+
+  const createIndexedDb = async (): Promise<AIAuditStore | null> => {
+    if (!isIndexedDbAvailable()) return null;
+    try {
+      const store = new IndexedDbAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms });
+      // Probe once so we fail fast (blocked/denied IndexedDB) and can fall back.
+      await store.listEntries({ limit: 0 });
+      return store;
+    } catch {
+      return null;
+    }
+  };
 
   if (prefer === "memory") {
-    return new MemoryAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms });
+    return wrap(createMemory());
   }
 
   if (prefer === "localstorage") {
     if (!isLocalStorageAvailable()) {
-      return new MemoryAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms });
+      return wrap(createMemory());
     }
-    return new LocalStorageAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms });
+    return wrap(createLocalStorage());
+  }
+
+  if (prefer === "indexeddb") {
+    const indexed = await createIndexedDb();
+    if (indexed) return wrap(indexed);
+    if (isLocalStorageAvailable()) return wrap(createLocalStorage());
+    return wrap(createMemory());
+  }
+
+  if (prefer === undefined) {
+    if (isBrowserRuntime()) {
+      const indexed = await createIndexedDb();
+      if (indexed) return wrap(indexed);
+      if (isLocalStorageAvailable()) return wrap(createLocalStorage());
+      return wrap(createMemory());
+    }
+
+    return wrap(createMemory());
   }
 
   // Keep the browser-safe entrypoint free of sql.js. Consumers that want sqlite
@@ -78,6 +130,17 @@ function isLocalStorageAvailable(): boolean {
     if (existing === null) storage.removeItem(key);
     else storage.setItem(key, existing);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+function isIndexedDbAvailable(): boolean {
+  try {
+    if (typeof globalThis === "undefined") return false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const idb = (globalThis as any).indexedDB as IDBFactory | undefined;
+    return !!idb && typeof idb.open === "function";
   } catch {
     return false;
   }
