@@ -243,6 +243,16 @@ function createFallbackMetrics(): SyncServerMetrics {
     help: "Total WebSocket messages rejected due to message size limits.",
   });
 
+  const wsAwarenessSpoofAttemptsTotal = createCounter({
+    name: "sync_server_ws_awareness_spoof_attempts_total",
+    help: "Total awareness update spoof attempts filtered by the server.",
+  });
+
+  const wsAwarenessClientIdCollisionsTotal = createCounter({
+    name: "sync_server_ws_awareness_client_id_collisions_total",
+    help: "Total awareness clientID collisions rejected by the server.",
+  });
+
   const wsReservedRootQuotaViolationsTotal = createCounter<"kind">({
     name: "sync_server_ws_reserved_root_quota_violations_total",
     help:
@@ -326,6 +336,8 @@ function createFallbackMetrics(): SyncServerMetrics {
     wsClosesTotal,
     wsMessagesRateLimitedTotal,
     wsMessagesTooLargeTotal,
+    wsAwarenessSpoofAttemptsTotal,
+    wsAwarenessClientIdCollisionsTotal,
     wsReservedRootQuotaViolationsTotal,
     retentionSweepsTotal,
     retentionDocsPurgedTotal,
@@ -361,6 +373,8 @@ export type SyncServerMetrics = {
 
   wsMessagesRateLimitedTotal: Counter<string>;
   wsMessagesTooLargeTotal: Counter<string>;
+  wsAwarenessSpoofAttemptsTotal: Counter<string>;
+  wsAwarenessClientIdCollisionsTotal: Counter<string>;
   wsReservedRootQuotaViolationsTotal: Counter<"kind">;
 
   retentionSweepsTotal: Counter<"sweep">;
@@ -436,6 +450,18 @@ export function createSyncServerMetrics(): SyncServerMetrics {
   const wsMessagesTooLargeTotal = new promClient.Counter({
     name: "sync_server_ws_messages_too_large_total",
     help: "Total WebSocket messages rejected due to message size limits.",
+    registers: [registry],
+  });
+
+  const wsAwarenessSpoofAttemptsTotal = new promClient.Counter({
+    name: "sync_server_ws_awareness_spoof_attempts_total",
+    help: "Total awareness update spoof attempts filtered by the server.",
+    registers: [registry],
+  });
+
+  const wsAwarenessClientIdCollisionsTotal = new promClient.Counter({
+    name: "sync_server_ws_awareness_client_id_collisions_total",
+    help: "Total awareness clientID collisions rejected by the server.",
     registers: [registry],
   });
 
@@ -534,6 +560,8 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     wsClosesTotal,
     wsMessagesRateLimitedTotal,
     wsMessagesTooLargeTotal,
+    wsAwarenessSpoofAttemptsTotal,
+    wsAwarenessClientIdCollisionsTotal,
     wsReservedRootQuotaViolationsTotal,
     retentionSweepsTotal,
     retentionDocsPurgedTotal,

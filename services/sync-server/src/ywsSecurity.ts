@@ -460,7 +460,12 @@ export function installYwsSecurity(
     auth: AuthContext | undefined;
     logger: Logger;
     ydoc: any;
-    metrics?: Pick<SyncServerMetrics, "wsReservedRootQuotaViolationsTotal">;
+    metrics?: Pick<
+      SyncServerMetrics,
+      | "wsReservedRootQuotaViolationsTotal"
+      | "wsAwarenessSpoofAttemptsTotal"
+      | "wsAwarenessClientIdCollisionsTotal"
+    >;
     limits: {
       maxMessageBytes: number;
       maxAwarenessStateBytes: number;
@@ -606,6 +611,11 @@ export function installYwsSecurity(
         existingOwner.readyState === WebSocket.CLOSED ||
         existingOwner.readyState === WebSocket.CLOSING;
       if (!isStale) {
+        try {
+          metrics?.wsAwarenessClientIdCollisionsTotal.inc();
+        } catch {
+          // ignore
+        }
         logger.warn(
           { docName, clientId, userId, role },
           "awareness_client_id_collision"
@@ -1121,6 +1131,11 @@ export function installYwsSecurity(
 
     if (sawOtherClientIds && !loggedAwarenessSpoofAttempt) {
       loggedAwarenessSpoofAttempt = true;
+      try {
+        metrics?.wsAwarenessSpoofAttemptsTotal.inc();
+      } catch {
+        // ignore
+      }
       logger.warn(
         { docName, userId, role, allowedId },
         "awareness_spoof_attempt_filtered"
