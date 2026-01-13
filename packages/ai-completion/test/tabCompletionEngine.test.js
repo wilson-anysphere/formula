@@ -1158,6 +1158,38 @@ test("Typing =DSUM(A suggests a range but does not auto-close parens (needs more
   );
 });
 
+test("Typing =DSUM(A suggests a 2D table range when adjacent columns form a table", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  // Header row.
+  values["A1"] = "Key";
+  values["B1"] = "Value1";
+  values["C1"] = "Value2";
+  values["D1"] = "Value3";
+  // Data rows 2..10.
+  for (let r = 2; r <= 10; r++) {
+    values[`A${r}`] = `K${r}`;
+    values[`B${r}`] = r * 10;
+    values[`C${r}`] = r * 100;
+    values[`D${r}`] = r * 1000;
+  }
+
+  const currentInput = "=DSUM(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=DSUM(A1:D10"),
+    `Expected a DSUM table range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =FORECAST.ETS(1, A suggests a range but does not auto-close parens (needs timeline)", async () => {
   const engine = new TabCompletionEngine();
 

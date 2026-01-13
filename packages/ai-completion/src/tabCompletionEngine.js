@@ -397,7 +397,7 @@ export class TabCompletionEngine {
     // a 2D rectangular range when the surrounding data forms a table. When we
     // have both a 1D and 2D candidate, slightly bias toward the 2D option so
     // tab completion defaults to the more useful table-shaped range.
-    const prefersTableRange = argSpecName === "table_array" || argSpecName === "array";
+    const prefersTableRange = argSpecName === "table_array" || argSpecName === "array" || argSpecName === "database";
     const hasTableCandidate = rangeCandidates.some(
       (c) => typeof c?.reason === "string" && c.reason.startsWith("contiguous_table")
     );
