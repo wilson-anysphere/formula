@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
@@ -11,6 +11,7 @@ import {
   shouldUseXvfb,
   type StartupMetrics,
 } from "./desktopStartupRunnerShared.ts";
+import { terminateProcessTree, type TerminateProcessTreeMode } from "./processTree.ts";
 
 type Summary = {
   runs: number;
@@ -92,55 +93,6 @@ function closeReadline(rl: Interface | null): void {
   if (!rl) return;
   try {
     rl.close();
-  } catch {
-    // ignore
-  }
-}
-
-function forceKill(child: ChildProcess): void {
-  if (!child.pid) return;
-  if (process.platform === "win32") {
-    try {
-      spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
-      return;
-    } catch {
-      // Fall through to best-effort `child.kill()`.
-    }
-  }
-
-  try {
-    if (process.platform !== "win32") {
-      // We spawn with `detached: true`, so the child is the process group leader.
-      process.kill(-child.pid, "SIGKILL");
-      return;
-    }
-  } catch {
-    // ignore
-  }
-
-  try {
-    child.kill("SIGKILL");
-  } catch {
-    try {
-      child.kill();
-    } catch {
-      // ignore
-    }
-  }
-}
-
-function terminate(child: ChildProcess): void {
-  if (!child.pid) return;
-  if (process.platform !== "win32") {
-    try {
-      process.kill(-child.pid, "SIGTERM");
-      return;
-    } catch {
-      // ignore
-    }
-  }
-  try {
-    child.kill();
   } catch {
     // ignore
   }
@@ -309,7 +261,6 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
     let settleTimer: NodeJS.Timeout | null = null;
     let forceKillTimer: NodeJS.Timeout | null = null;
     let exitDeadline: NodeJS.Timeout | null = null;
-
     let timedOutWaitingForMetrics = false;
 
     const cleanup = () => {
@@ -332,10 +283,31 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
     const beginShutdown = (reason: "sampled" | "timeout") => {
       if (exitDeadline) return;
 
-      terminate(child);
-      forceKillTimer = setTimeout(() => forceKill(child), 2000);
+      const initialMode: TerminateProcessTreeMode =
+        process.platform === "win32" || reason === "timeout" ? "force" : "graceful";
+
+      terminateProcessTree(child, initialMode);
+      forceKillTimer = setTimeout(() => terminateProcessTree(child, "force"), 2000);
       exitDeadline = setTimeout(() => {
-        forceKill(child);
+        terminateProcessTree(child, "force");
+
+        // Extremely defensive: don't hang the parent process even if kill fails.
+        try {
+          child.unref();
+        } catch {
+          // ignore
+        }
+        try {
+          child.stdout?.destroy();
+        } catch {
+          // ignore
+        }
+        try {
+          child.stderr?.destroy();
+        } catch {
+          // ignore
+        }
+
         const msg =
           reason === "sampled"
             ? "Timed out waiting for desktop process to exit after sampling memory"
@@ -371,8 +343,19 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
           }
           sampledRssMb = processTreeRssKb(rootPid) / 1024;
         } catch (err) {
+          terminateProcessTree(child, "force");
           try {
-            forceKill(child);
+            child.unref();
+          } catch {
+            // ignore
+          }
+          try {
+            child.stdout?.destroy();
+          } catch {
+            // ignore
+          }
+          try {
+            child.stderr?.destroy();
           } catch {
             // ignore
           }
