@@ -207,8 +207,9 @@ Standard encryption derives keys from the password hash and a per-block 32-bit i
 Terminology used below:
 
 * `block` – a 32-bit unsigned “block key” (`u32`), encoded as `LE32(block)`.
-  * For Standard encryption, the block key used for password→AES key derivation is fixed as `block = 0`
-    (i.e. `LE32(0)` is appended once after the spinCount loop).
+  * `block = 0` is used for the **password verifier** key.
+  * Some producers also derive per-segment keys for `EncryptedPackage` using `block = segmentIndex`
+    (e.g. `block = 0, 1, 2, ...` for successive segments).
 
 ### 5.1) Per-block hash input (key material)
 
@@ -270,14 +271,22 @@ function CryptDeriveKey(Hash, H_block, keyLen):
 This is sufficient for Standard encryption because Office only requests up to 32 bytes of key material
 (AES-256), and `SHA1(inner||outer)` yields 40 bytes.
 
-### 5.3) Cipher mode note (AES)
+### 5.3) IV derivation (AES-CBC)
 
-In **Standard (CryptoAPI) encryption**, AES is used in a way that does **not** require an IV for the
-verifier and package decryption steps described in this document (i.e. it behaves like AES-ECB over
-16-byte blocks).
+RC4 is a stream cipher and has no IV.
 
-Do not copy the Agile-encryption AES-CBC “per-segment IV” scheme into Standard unless you have a
-producer that requires it; Standard and Agile are different formats.
+For AES-based Standard encryption, data is commonly encrypted in **independent AES-CBC segments**.
+Each segment `block` uses an IV derived from the verifier `Salt`:
+
+```text
+IV_full = Hash( Salt || LE32(block) )
+IV = IV_full[0:16]   // AES block size
+```
+
+This IV formula is used both for:
+
+* the verifier (`block = 0`), and
+* `EncryptedPackage` segments (`block = 0, 1, 2, ...`) when using per-segment IVs.
 
 ---
 
@@ -290,14 +299,15 @@ Inputs from `EncryptionVerifier`:
 * `Salt`
 * `EncryptedVerifier` (16 bytes)
 * `VerifierHashSize` (16 or 20)
-* `EncryptedVerifierHash` (remaining bytes; AES may include padding)
+* `EncryptedVerifierHash` (remaining bytes; AES ciphertext may include padding)
 
-### 6.1) Derive block-0 key
+### 6.1) Derive block-0 key (+ IV for AES)
 
 ```text
 H_final  = hash_password(password, Salt, spinCount=50000)         // §4
 H_block0 = Hash( H_final || LE32(0) )                             // §5.1
 key      = CryptDeriveKey(Hash, H_block0, keyLen=KeySize/8)       // §5.2
+iv       = Hash(Salt || LE32(0))[0:16]    // AES only              // §5.3
 ```
 
 ### 6.2) Decrypt verifier + verifier-hash as a *single* stream
@@ -314,9 +324,13 @@ Steps:
    C = EncryptedVerifier || EncryptedVerifierHash
    ```
 
-2. Decrypt `C` with the cipher indicated by `EncryptionHeader.AlgID` using the derived `key`
-   (AES in Standard mode is block-based and does not require an IV; RC4 is a stream cipher), to get
-   plaintext `P`.
+2. Decrypt `C` with the cipher indicated by `EncryptionHeader.AlgID` using the derived `key`:
+
+   * **AES**: AES-CBC with `iv` from §6.1 (and `NoPadding` at the crypto layer; padding/truncation
+     is handled by sizes in the container).
+   * **RC4**: RC4 stream cipher with the derived key.
+
+   This produces plaintext `P`.
 
 3. Split plaintext:
 
@@ -375,10 +389,11 @@ segmentSize = 0x1000   // 4096
 For segment index `i = 0, 1, 2, ...`:
 
 1. Use the **same derived key** (`block = 0`) from §6.1 for all segments.
-2. The ciphertext for each segment is padded to a 16-byte AES block boundary.
-3. Decrypt the segment ciphertext in 16-byte blocks (AES).
+2. Derive `iv_i = Hash(Salt || LE32(i))[0:16]` (same derivation as §5.3 / §6.1, but with `block=i`).
+3. Decrypt the segment ciphertext with AES-CBC(key, iv_i).
+4. Append the decrypted bytes and continue until you have at least `OriginalPackageSize` bytes.
 
-Concatenate all decrypted segments and truncate to `OriginalPackageSize`.
+Finally, **truncate** the concatenated plaintext to `OriginalPackageSize` bytes.
 
 ---
 
@@ -415,6 +430,9 @@ H_block0 = 6ad7dedf2da3514b1d85eabee069d47dd058967f
 key (32 bytes, CryptDeriveKey expansion) =
   de5451b9dc3fcb383792cbeec80b6bc3
   0795c2705e075039407199f7d299b6e4
+
+iv0 (AES-CBC, 16 bytes; block=0) =
+  719ea750a65a93d80e1e0ba33a2ba0e7
 ```
 
 If your implementation produces different bytes for this example, the most likely causes are:
