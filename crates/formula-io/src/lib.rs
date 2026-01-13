@@ -943,11 +943,15 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
     }
 }
 
-/// Open a spreadsheet workbook from disk directly into a [`formula_model::Workbook`], providing a
-/// password for encrypted OOXML workbooks when needed.
+/// Open a spreadsheet workbook from disk directly into a [`formula_model::Workbook`], optionally
+/// providing a password for encrypted workbooks.
 ///
-/// This behaves like [`open_workbook_model`], but can surface an [`Error::InvalidPassword`] when a
-/// password is provided but incorrect.
+/// - For password-protected legacy `.xls` workbooks (BIFF `FILEPASS`), this will attempt to decrypt
+///   the workbook stream using `formula-xls` when `password` is provided.
+/// - For Office-encrypted OOXML workbooks stored in an OLE container (`EncryptionInfo` +
+///   `EncryptedPackage`), decryption is not yet supported; this function returns
+///   [`Error::PasswordRequired`] when `password` is `None` and [`Error::InvalidPassword`] when
+///   `password` is `Some`.
 pub fn open_workbook_model_with_password(
     path: impl AsRef<Path>,
     password: Option<&str>,
@@ -1043,6 +1047,11 @@ pub fn open_workbook_model_with_password(
                     path: path.to_path_buf(),
                 })
             }
+            Err(xls::ImportError::Decrypt(xls::DecryptError::UnsupportedEncryption)) => {
+                Err(Error::EncryptedWorkbook {
+                    path: path.to_path_buf(),
+                })
+            }
             Err(source) => Err(Error::OpenXls {
                 path: path.to_path_buf(),
                 source,
@@ -1103,11 +1112,15 @@ pub fn open_workbook_model_with_password(
     }
 }
 
-/// Open a spreadsheet workbook from disk, providing a password for encrypted OOXML workbooks when
-/// needed.
+/// Open a spreadsheet workbook from disk, optionally providing a password for encrypted
+/// workbooks.
 ///
-/// This behaves like [`open_workbook`], but can surface an [`Error::InvalidPassword`] when a
-/// password is provided but incorrect.
+/// - For password-protected legacy `.xls` workbooks (BIFF `FILEPASS`), this will attempt to decrypt
+///   the workbook stream using `formula-xls` when `password` is provided.
+/// - For Office-encrypted OOXML workbooks stored in an OLE container (`EncryptionInfo` +
+///   `EncryptedPackage`), decryption is not yet supported; this function returns
+///   [`Error::PasswordRequired`] when `password` is `None` and [`Error::InvalidPassword`] when
+///   `password` is `Some`.
 pub fn open_workbook_with_password(
     path: impl AsRef<Path>,
     password: Option<&str>,
@@ -1193,6 +1206,11 @@ pub fn open_workbook_with_password(
             }),
             Err(xls::ImportError::Decrypt(xls::DecryptError::WrongPassword)) => {
                 Err(Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                })
+            }
+            Err(xls::ImportError::Decrypt(xls::DecryptError::UnsupportedEncryption)) => {
+                Err(Error::EncryptedWorkbook {
                     path: path.to_path_buf(),
                 })
             }
