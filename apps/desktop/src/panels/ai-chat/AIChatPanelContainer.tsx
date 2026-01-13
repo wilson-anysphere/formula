@@ -95,7 +95,20 @@ export interface AIChatPanelContainerProps {
    * workbook context, so prompts like "summarize this selection" work without an
    * explicit attachment.
    */
-  getSelection?: () => { sheetId: string; range: { startRow: number; startCol: number; endRow: number; endCol: number } } | null;
+  getSelection?: () =>
+    | {
+        sheetId: string;
+        range: { startRow: number; startCol: number; endRow: number; endCol: number };
+        /**
+         * Optional active cell within the selection (0-based).
+         *
+         * When provided, formula attachments should prefer this cell over
+         * `range.startRow/startCol`.
+         */
+        activeRow?: number;
+        activeCol?: number;
+      }
+    | null;
   /**
    * Optional workbook metadata provider (defined names / tables) used by other
    * desktop features like the name box and formula tab completion.
@@ -285,8 +298,8 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
     const range = selection.range;
     if (!sheetId || !range) return null;
 
-    const row = Number(range.startRow);
-    const col = Number(range.startCol);
+    const row = Number(selection.activeRow ?? range.startRow);
+    const col = Number(selection.activeCol ?? range.startCol);
     if (!Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) return null;
 
     try {

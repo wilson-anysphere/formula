@@ -6364,6 +6364,8 @@ if (
           endRow: selection.endRow,
           endCol: selection.endCol,
         },
+        activeRow: selection.activeRow,
+        activeCol: selection.activeCol,
       };
     },
     workbookId,
