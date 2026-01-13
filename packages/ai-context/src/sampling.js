@@ -15,7 +15,9 @@ export function createSeededRng(seed) {
 }
 
 /**
- * Reservoir sampling indices without replacement.
+ * Sample indices without replacement.
+ *
+ * Uses Floyd's algorithm for small samples and reservoir sampling for large samples.
  * @param {number} total
  * @param {number} sampleSize
  * @param {() => number} rng
@@ -28,6 +30,12 @@ export function randomSampleIndices(total, sampleSize, rng) {
 
   if (sampleSize === 0 || total === 0) return [];
   if (sampleSize >= total) return Array.from({ length: total }, (_, i) => i);
+
+  // If we're sampling a small fraction of the population, Floyd sampling is O(sampleSize)
+  // and avoids iterating over `total` elements.
+  if (sampleSize <= total - sampleSize) {
+    return sampleIndicesFloyd(total, sampleSize, rng);
+  }
 
   const reservoir = Array.from({ length: sampleSize }, (_, i) => i);
   for (let i = sampleSize; i < total; i++) {
