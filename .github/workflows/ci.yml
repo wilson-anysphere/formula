@@ -20,7 +20,7 @@ jobs:
     name: "Guard: no merge conflict markers"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Fail if merge conflict markers are present
         run: bash scripts/ci/check-merge-conflict-markers.sh
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
@@ -41,8 +41,8 @@ jobs:
     needs: conflict-marker-guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
       - name: Run xlsx-diff tests (includes fixture harness)
         run: cargo test -p xlsx-diff --locked
       - name: Run formula-xlsx tests
@@ -55,8 +55,8 @@ jobs:
     needs: conflict-marker-guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
       # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
       # CARGO_HOME so cargo installs and builds share the same cache.
@@ -81,14 +81,14 @@ jobs:
     needs: conflict-marker-guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
       # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
       # CARGO_HOME so cargo installs and builds share the same cache.
       - name: Use shared Cargo home for CI caching
         run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
       - name: Run excel-oracle python unit tests
@@ -105,7 +105,7 @@ jobs:
           fi
       - name: Upload excel-oracle artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: excel-oracle-compat
           path: |
@@ -119,27 +119,27 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@c5ba7f7862a0f64c1b1a05fbac13e0b8e86ba08c # v4
         with:
           version: 9.0.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
       
       - name: Setup Rust toolchain (wasm32)
-        uses: dtolnay/rust-toolchain@1.92.0
+        uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
         with:
           targets: wasm32-unknown-unknown
 
@@ -166,7 +166,7 @@ jobs:
 
       - name: Cache wasm-pack binary
         id: wasm-pack-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cargo/bin/wasm-pack
           # Include the pinned Rust toolchain hash so Rust upgrades force a fresh wasm-pack install
@@ -231,7 +231,7 @@ jobs:
 
       - name: Restore Pyodide asset cache
         id: pyodide-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
@@ -241,7 +241,7 @@ jobs:
 
       - name: Save Pyodide asset cache
         if: steps.pyodide-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
@@ -303,7 +303,7 @@ jobs:
 
       - name: Upload desktop size report (JSON)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: desktop-size-report
           path: desktop-size-report.json
@@ -314,10 +314,10 @@ jobs:
     needs: conflict-marker-guard
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
       - name: Setup Node (for Tauri permission validation script)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Check pinned Tauri CLI version matches Tauri crates
@@ -339,7 +339,7 @@ jobs:
             patchelf
       - name: Cache cargo-tauri binary
         id: cargo-tauri-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cargo/bin/cargo-tauri
           key: cargo-tauri-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
@@ -361,7 +361,7 @@ jobs:
           fi
       - name: Cache Tauri permission list (cargo tauri permission ls)
         id: tauri-permission-list-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: target/ci/tauri-permission-ls.txt
           key: tauri-permission-ls-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}-${{ hashFiles('Cargo.lock', 'apps/desktop/src-tauri/Cargo.toml', 'apps/desktop/src-tauri/tauri.conf.json') }}
@@ -387,8 +387,8 @@ jobs:
     needs: conflict-marker-guard
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
       # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
       # CARGO_HOME so cargo installs/builds share the same cache.
@@ -409,14 +409,14 @@ jobs:
     needs: conflict-marker-guard
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup Node (for static preflight scripts)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Validate macOS entitlements (hardened runtime)
         run: node scripts/check-macos-entitlements.mjs
-      - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
       # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
       # CARGO_HOME so cargo installs/builds share the same cache.
@@ -436,15 +436,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@c5ba7f7862a0f64c1b1a05fbac13e0b8e86ba08c # v4
         with:
           version: 9.0.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -472,10 +472,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -488,15 +488,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@c5ba7f7862a0f64c1b1a05fbac13e0b8e86ba08c # v4
         with:
           version: 9.0.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -529,10 +529,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Node (for JSON parsing in smoke tests)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 

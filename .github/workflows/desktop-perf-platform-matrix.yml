@@ -35,19 +35,19 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
         shell: bash
         run: bash scripts/ci/check-rust-toolchain-pins.sh
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@c5ba7f7862a0f64c1b1a05fbac13e0b8e86ba08c # v4
         with:
           version: 9.0.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -57,7 +57,7 @@ jobs:
         run: node scripts/ci/check-windows-timestamp-url.mjs
 
       - name: Setup Rust toolchain (pinned + wasm32)
-        uses: dtolnay/rust-toolchain@1.92.0
+        uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
         with:
           targets: wasm32-unknown-unknown
 
@@ -76,7 +76,7 @@ jobs:
         run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db # v2
 
       - name: Install Linux dependencies (Tauri/WebView + headless display)
         if: matrix.os == 'ubuntu-24.04'
@@ -107,7 +107,7 @@ jobs:
 
       - name: Restore Pyodide asset cache
         id: pyodide-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
@@ -118,7 +118,7 @@ jobs:
 
       - name: Save Pyodide asset cache
         if: steps.pyodide-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
@@ -256,7 +256,7 @@ jobs:
 
       - name: Upload desktop perf artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: desktop-perf-${{ matrix.os }}
           if-no-files-found: warn

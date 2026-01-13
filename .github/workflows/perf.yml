@@ -26,7 +26,7 @@ jobs:
     name: "Guard: no merge conflict markers"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Fail if merge conflict markers are present
         run: bash scripts/ci/check-merge-conflict-markers.sh
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
@@ -45,21 +45,21 @@ jobs:
       # the measurement stabilizes in CI. Override via repo variable when tightening.
       FORMULA_DESKTOP_IDLE_RSS_TARGET_MB: ${{ vars.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB || '250' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@c5ba7f7862a0f64c1b1a05fbac13e0b8e86ba08c # v4
         with:
           # Pin pnpm patch version for deterministic builds (keep in sync with package.json).
           version: 9.0.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
-      - uses: dtolnay/rust-toolchain@1.92.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
+      - uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db # v2
 
       # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
@@ -118,7 +118,7 @@ jobs:
       - name: Cache wasm-pack binary
         if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
         id: wasm-pack-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cargo/bin/wasm-pack
           key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-v${{ env.WASM_PACK_VERSION }}
@@ -154,7 +154,7 @@ jobs:
       - name: Restore Pyodide asset cache
         if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
         id: pyodide-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
@@ -165,7 +165,7 @@ jobs:
 
       - name: Save Pyodide asset cache
         if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full' && steps.pyodide-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
@@ -196,7 +196,7 @@ jobs:
       - name: Cache cargo-bloat binary
         if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
         id: cargo-bloat-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cargo/bin/cargo-bloat
           key: cargo-bloat-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-locked
@@ -243,7 +243,7 @@ jobs:
 
       - name: Publish benchmark results
         if: always()
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@4bdcce38c94cec68da58d012ac24b7b1155efe8b # v1
         with:
           tool: customSmallerIsBetter
           output-file-path: benchmark-results.json

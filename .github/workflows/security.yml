@@ -17,7 +17,7 @@ jobs:
     name: "Guard: no merge conflict markers"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Fail if merge conflict markers are present
         run: bash scripts/ci/check-merge-conflict-markers.sh
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
@@ -30,14 +30,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # Secret scanning is configured to scan the working tree (not git history),
           # but we still fetch full history to support future extensions.
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           # Keep security scans on the same Node.js major as CI/release builds to reduce drift.
           node-version: 22
@@ -51,7 +51,7 @@ jobs:
           corepack prepare pnpm@9.0.0 --activate
 
       - name: Setup Rust (pinned + clippy)
-        uses: dtolnay/rust-toolchain@1.92.0
+        uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
         with:
           components: clippy
 
@@ -86,7 +86,7 @@ jobs:
 
       - name: Upload consolidated security report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: security-report
           path: security-report
