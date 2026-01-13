@@ -206,6 +206,15 @@ jobs:
       - name: Build web
         run: pnpm build:web
 
+      - name: Report frontend asset download size (web)
+        env:
+          # Optional: define these as GitHub Actions "Variables" to enable gating without
+          # changing the workflow.
+          FORMULA_ENFORCE_FRONTEND_ASSET_SIZE: ${{ vars.FORMULA_ENFORCE_FRONTEND_ASSET_SIZE }}
+          FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB: ${{ vars.FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB }}
+          FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION: ${{ vars.FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION }}
+        run: node scripts/frontend_asset_size_report.mjs --dist apps/web/dist
+
       - name: Build desktop (Vite)
         run: pnpm build:desktop
 
@@ -216,6 +225,13 @@ jobs:
           # changing the workflow. Leaving them unset (or empty) keeps the report informational.
           FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB }}
           FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB }}
+
+      - name: Report frontend asset download size (desktop)
+        env:
+          FORMULA_ENFORCE_FRONTEND_ASSET_SIZE: ${{ vars.FORMULA_ENFORCE_FRONTEND_ASSET_SIZE }}
+          FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB: ${{ vars.FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB }}
+          FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION: ${{ vars.FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION }}
+        run: node scripts/frontend_asset_size_report.mjs --dist apps/desktop/dist
 
       - name: Check desktop bundle size budgets
         run: pnpm -C apps/desktop check:bundle-size

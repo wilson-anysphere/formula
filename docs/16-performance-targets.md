@@ -15,7 +15,7 @@ Performance is a feature. Users should never wait, never see jank, never hit lim
 | Cold start to interactive | <1.0s | Time from launch to first input accepted |
 | Warm start | <0.5s | Time from launch with cached data |
 | Time to first render | <0.3s | Time from launch to grid visible |
-| Frontend asset download size (compressed JS/CSS/WASM) | <10MB | Measured as `apps/desktop/dist` tar.gz size (download approximation) in `python scripts/desktop_size_report.py`; guardrailed in CI via `pnpm -C apps/desktop check:bundle-size` (gzip JS budgets) |
+| Frontend asset download size (compressed JS/CSS/WASM) | <10MB | Brotli/gzip-compressed total of `dist/assets/**/*.{js,css,wasm}` (see `node scripts/frontend_asset_size_report.mjs`) |
 | Desktop installer artifact size (DMG/MSI/EXE/AppImage) | <50MB per artifact | `python scripts/desktop_bundle_size_report.py` on Tauri build output (`target/**/release/bundle`) |
 
 ### File Operations
@@ -173,6 +173,12 @@ Lightweight PR size gating (desktop binary + `apps/desktop/dist`; disabled by de
 - `FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB=<budget>`
 - `FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB=<budget>`
   (enforced by `scripts/desktop_size_report.py` when set; CI passes these via GitHub Actions Variables)
+Frontend asset download size gating (web/desktop Vite `dist/assets`):
+
+- `FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB=10` (default: 10MB total)
+- `FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION=brotli|gzip` (default: brotli)
+- `FORMULA_ENFORCE_FRONTEND_ASSET_SIZE=1` to fail when the total exceeds the limit
+  (reported by `scripts/frontend_asset_size_report.mjs`)
 
 #### Renderer guardrails (Node/JSDOM)
 

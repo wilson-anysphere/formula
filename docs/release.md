@@ -978,8 +978,8 @@ AppImage / DEB / RPM / etc) in the GitHub Actions **step summary**, and **fails 
 any artifact exceeds the per-artifact size budget (default: **50 MB**).
 
 Note: this is an **installer artifact** budget (DMG/MSI/AppImage/etc), not the **frontend asset
-download size** budget (compressed JS/CSS/WASM; see `pnpm -C apps/desktop check:bundle-size` and
-`python scripts/desktop_size_report.py`).
+download size** budget (compressed JS/CSS/WASM; see `node scripts/frontend_asset_size_report.mjs`
+and `pnpm -C apps/desktop check:bundle-size`).
 
 ### Rust binary size controls (Cargo release profile)
 
