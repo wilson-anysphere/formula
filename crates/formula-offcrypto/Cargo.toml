@@ -2,7 +2,9 @@
 name = "formula-offcrypto"
 version = "0.1.0"
 edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Microsoft Office encryption (MS-OFFCRYPTO) helpers for Formula."
 
 [dependencies]
-
-[dev-dependencies]
+base64 = "0.22"
+quick-xml = "0.37"
