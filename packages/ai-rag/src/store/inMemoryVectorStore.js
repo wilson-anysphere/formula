@@ -57,6 +57,29 @@ export class InMemoryVectorStore {
   }
 
   /**
+   * Delete all records associated with a workbook.
+   *
+   * @param {string} workbookId
+   * @returns {Promise<number>} number of deleted records
+   */
+  async deleteWorkbook(workbookId) {
+    let deleted = 0;
+    for (const [id, rec] of this._records) {
+      if (rec.metadata?.workbookId !== workbookId) continue;
+      this._records.delete(id);
+      deleted += 1;
+    }
+    return deleted;
+  }
+
+  /**
+   * Remove all records from the store.
+   */
+  async clear() {
+    this._records.clear();
+  }
+
+  /**
    * @param {string} id
    */
   async get(id) {

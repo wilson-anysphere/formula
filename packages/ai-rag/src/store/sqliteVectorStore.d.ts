@@ -10,6 +10,8 @@ export class SqliteVectorStore {
 
   upsert(records: Array<{ id: string; vector: ArrayLike<number>; metadata: any }>): Promise<void>;
   delete(ids: string[]): Promise<void>;
+  deleteWorkbook(workbookId: string): Promise<number>;
+  clear(): Promise<void>;
   compact(): Promise<void>;
   vacuum(): Promise<void>;
   get(id: string): Promise<{ id: string; vector: Float32Array; metadata: any } | null>;

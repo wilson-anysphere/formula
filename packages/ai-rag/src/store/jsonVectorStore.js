@@ -139,6 +139,21 @@ export class JsonVectorStore extends InMemoryVectorStore {
     if (this._autoSave) await this._enqueuePersist();
   }
 
+  async deleteWorkbook(workbookId) {
+    await this.load();
+    const deleted = await super.deleteWorkbook(workbookId);
+    this._dirty = true;
+    if (this._autoSave) await this._persist();
+    return deleted;
+  }
+
+  async clear() {
+    await this.load();
+    await super.clear();
+    this._dirty = true;
+    if (this._autoSave) await this._persist();
+  }
+
   async get(id) {
     await this.load();
     return super.get(id);

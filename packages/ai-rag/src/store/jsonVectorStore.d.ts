@@ -6,6 +6,8 @@ export class JsonVectorStore extends InMemoryVectorStore {
 
   upsert(records: VectorRecord[]): Promise<void>;
   delete(ids: string[]): Promise<void>;
+  deleteWorkbook(workbookId: string): Promise<number>;
+  clear(): Promise<void>;
   get(id: string): Promise<{ id: string; vector: Float32Array; metadata: any } | null>;
   list(opts?: {
     filter?: (metadata: any, id: string) => boolean;

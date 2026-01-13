@@ -648,6 +648,55 @@ export class SqliteVectorStore {
   }
 
   /**
+   * Delete all records associated with a workbook.
+   *
+   * @param {string} workbookId
+   * @returns {Promise<number>} number of deleted records
+   */
+  async deleteWorkbook(workbookId) {
+    const countStmt = this._db.prepare("SELECT COUNT(*) FROM vectors WHERE workbook_id = ?;");
+    countStmt.bind([workbookId]);
+    const deleted = countStmt.step() ? Number(countStmt.get()[0]) : 0;
+    countStmt.free();
+    if (deleted === 0) return 0;
+
+    const stmt = this._db.prepare("DELETE FROM vectors WHERE workbook_id = ?;");
+    this._db.run("BEGIN;");
+    try {
+      stmt.run([workbookId]);
+      this._db.run("COMMIT;");
+      this._dirty = true;
+    } catch (err) {
+      this._db.run("ROLLBACK;");
+      throw err;
+    } finally {
+      stmt.free();
+    }
+
+    if (this._autoSave) await this._enqueuePersist();
+    return deleted;
+  }
+
+  /**
+   * Remove all records from the store.
+   */
+  async clear() {
+    const stmt = this._db.prepare("DELETE FROM vectors;");
+    this._db.run("BEGIN;");
+    try {
+      stmt.run();
+      this._db.run("COMMIT;");
+      this._dirty = true;
+    } catch (err) {
+      this._db.run("ROLLBACK;");
+      throw err;
+    } finally {
+      stmt.free();
+    }
+    if (this._autoSave) await this._enqueuePersist();
+  }
+
+  /**
    * @param {string} id
    */
   async get(id) {
