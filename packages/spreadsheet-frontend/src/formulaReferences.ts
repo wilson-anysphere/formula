@@ -315,10 +315,22 @@ function resolveStructuredReference(refText: string, opts: ExtractFormulaReferen
   if (col < baseStartCol || col > baseEndCol) return null;
 
   let refStartRow = baseStartRow;
-  const refEndRow = baseEndRow;
-  if (!parsed.includeHeader && refEndRow > refStartRow) {
-    // Exclude header row when the table has at least one data row.
-    refStartRow = refStartRow + 1;
+  let refEndRow = baseEndRow;
+
+  const selector = parsed.selector?.toLowerCase() ?? null;
+  if (selector === "#headers") {
+    refEndRow = refStartRow;
+  } else if (selector === "#totals") {
+    // Best-effort: treat totals as the last row of the table range.
+    refStartRow = baseEndRow;
+    refEndRow = baseEndRow;
+  } else if (selector === "#all") {
+    // Keep the full range, including headers.
+  } else {
+    // Default / #Data: exclude header row when the table has at least one data row.
+    if (refEndRow > refStartRow) {
+      refStartRow = refStartRow + 1;
+    }
   }
 
   return {

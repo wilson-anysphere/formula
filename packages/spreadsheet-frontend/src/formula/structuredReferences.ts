@@ -1,7 +1,12 @@
 export type ParsedStructuredReference = {
   tableName: string;
   columnName: string;
-  includeHeader: boolean;
+  /**
+   * Optional structured reference selector (e.g. `#All`, `#Data`, `#Headers`).
+   *
+   * When present, this corresponds to `Table1[[#Selector],[Column]]`-style references.
+   */
+  selector: string | null;
 };
 
 export function parseStructuredReferenceText(text: string): ParsedStructuredReference | null {
@@ -13,17 +18,19 @@ export function parseStructuredReferenceText(text: string): ParsedStructuredRefe
 
   // Supported patterns:
   //   TableName[ColumnName]
+  //   TableName[#All]
   //   TableName[[#All],[ColumnName]]
-  const allMatch = /^\[\[\s*#all\s*\]\s*,\s*\[\s*([^\]]+?)\s*\]\]$/i.exec(suffix);
-  if (allMatch) {
-    return { tableName, columnName: allMatch[1]!, includeHeader: true };
+  //   TableName[[#Data],[ColumnName]]
+  //   TableName[[#Headers],[ColumnName]]
+  const qualifiedMatch = /^\[\[\s*(#[A-Za-z]+)\s*\]\s*,\s*\[\s*([^\]]+?)\s*\]\]$/i.exec(suffix);
+  if (qualifiedMatch) {
+    return { tableName, selector: qualifiedMatch[1]!, columnName: qualifiedMatch[2]! };
   }
 
   const simpleMatch = /^\[\s*([^\[\]]+?)\s*\]$/.exec(suffix);
   if (simpleMatch) {
-    return { tableName, columnName: simpleMatch[1]!, includeHeader: false };
+    return { tableName, selector: null, columnName: simpleMatch[1]! };
   }
 
   return null;
 }
-

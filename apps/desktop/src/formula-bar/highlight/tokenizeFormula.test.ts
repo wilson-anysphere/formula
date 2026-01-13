@@ -117,4 +117,16 @@ describe("tokenizeFormula", () => {
       end: input.indexOf("Table1") + "Table1[[#All],[Amount]]".length,
     });
   });
+
+  it("tokenizes structured references with selectors (#Headers/#Data) as single tokens", () => {
+    const headers = "=SUM(Table1[[#Headers],[Amount]])";
+    const headerTokens = tokenizeFormula(headers);
+    const headerRefs = headerTokens.filter((t) => t.type === "reference");
+    expect(headerRefs.map((t) => t.text)).toEqual(["Table1[[#Headers],[Amount]]"]);
+
+    const data = "=SUM(Table1[[#Data],[Amount]])";
+    const dataTokens = tokenizeFormula(data);
+    const dataRefs = dataTokens.filter((t) => t.type === "reference");
+    expect(dataRefs.map((t) => t.text)).toEqual(["Table1[[#Data],[Amount]]"]);
+  });
 });

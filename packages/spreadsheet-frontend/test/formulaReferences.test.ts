@@ -212,6 +212,41 @@ describe("extractFormulaReferences", () => {
     });
   });
 
+  it("extracts structured table references with explicit selectors (#Headers/#Data)", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          // Full table range (including header row) is A1:B4 in Excel terms.
+          startRow: 0,
+          startCol: 0,
+          endRow: 3,
+          endCol: 1,
+          columns: ["Item", "Amount"]
+        }
+      ]
+    ]);
+
+    const headersInput = "=SUM(Table1[[#Headers],[Amount]])";
+    const { references: headersRefs } = extractFormulaReferences(headersInput, 0, 0, { tables });
+    expect(headersRefs).toHaveLength(1);
+    expect(headersRefs[0]).toEqual({
+      text: "Table1[[#Headers],[Amount]]",
+      range: { sheet: "Sheet1", startRow: 0, startCol: 1, endRow: 0, endCol: 1 },
+      index: 0,
+      start: headersInput.indexOf("Table1"),
+      end: headersInput.indexOf("Table1") + "Table1[[#Headers],[Amount]]".length
+    });
+
+    const dataInput = "=SUM(Table1[[#Data],[Amount]])";
+    const { references: dataRefs } = extractFormulaReferences(dataInput, 0, 0, { tables });
+    expect(dataRefs).toHaveLength(1);
+    expect(dataRefs[0]?.text).toBe("Table1[[#Data],[Amount]]");
+    expect(dataRefs[0]?.range).toEqual({ sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 3, endCol: 1 });
+  });
+
   it("extracts structured table specifiers like #All/#Headers/#Data", () => {
     const tables = new Map([
       [
