@@ -913,6 +913,57 @@ fn ignore_path_scoped_to_part_only_suppresses_matching_part() {
 }
 
 #[test]
+fn ignore_path_kind_filter_only_suppresses_matching_kind() {
+    let expected_zip = zip_bytes(&[(
+        "xl/worksheets/sheet1.xml",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>
+</worksheet>"#,
+    )]);
+    let actual_zip = zip_bytes(&[(
+        "xl/worksheets/sheet1.xml",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.30" foo="bar"/>
+</worksheet>"#,
+    )]);
+
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    // Only suppress the dyDescent attribute_changed diff; leave other diff kinds intact.
+    let options = DiffOptions {
+        ignore_parts: Default::default(),
+        ignore_globs: Vec::new(),
+        ignore_paths: vec![IgnorePathRule {
+            part: None,
+            path_substring: "dyDescent".to_string(),
+            kind: Some("attribute_changed".to_string()),
+        }],
+        strict_calc_chain: false,
+    };
+
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert_eq!(
+        report.differences.len(),
+        1,
+        "expected only the foo attribute_added diff to remain, got {:#?}",
+        report.differences
+    );
+    let diff = &report.differences[0];
+    assert_eq!(diff.part, "xl/worksheets/sheet1.xml");
+    assert_eq!(diff.kind, "attribute_added");
+    assert!(
+        diff.path.contains("@foo"),
+        "expected diff path to include '@foo', got {}",
+        diff.path
+    );
+}
+
+#[test]
 fn ignore_path_with_invalid_part_glob_does_not_match_all_parts() {
     let expected_zip = zip_bytes(&[(
         "xl/worksheets/sheet1.xml",
