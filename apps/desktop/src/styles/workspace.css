@@ -136,6 +136,8 @@
 .dock-panel__title {
   flex: 1;
   min-width: 0;
+  font-size: 12px;
+  line-height: 16px;
   font-weight: 600;
   color: var(--text-primary);
   overflow: hidden;
