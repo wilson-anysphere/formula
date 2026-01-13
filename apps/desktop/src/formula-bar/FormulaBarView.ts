@@ -997,6 +997,7 @@ export class FormulaBarView {
     if (next && this.model.isEditing) {
       this.model.cancel();
       this.#hoverOverride = null;
+      this.#mouseDownSelectedReferenceIndex = null;
       this.#selectedReferenceIndex = null;
     }
 
@@ -1087,6 +1088,7 @@ export class FormulaBarView {
     this.model.setActiveCell(activeCell);
     this.#hoverOverride = null;
     this.#hoverOverrideText = null;
+    this.#mouseDownSelectedReferenceIndex = null;
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
   }
@@ -1112,6 +1114,7 @@ export class FormulaBarView {
     this.#functionAutocomplete.close();
     this.model.beginEdit();
     this.model.beginRangeSelection(range, sheetId);
+    this.#mouseDownSelectedReferenceIndex = null;
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
     this.#setTextareaSelectionFromModel();
@@ -1123,6 +1126,7 @@ export class FormulaBarView {
     if (this.#readOnly) return;
     this.#functionAutocomplete.close();
     this.model.updateRangeSelection(range, sheetId);
+    this.#mouseDownSelectedReferenceIndex = null;
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
     this.#setTextareaSelectionFromModel();
@@ -1143,6 +1147,7 @@ export class FormulaBarView {
     // Hover overrides are a view-mode affordance and should not leak into editing behavior.
     this.#hoverOverride = null;
     this.#hoverOverrideText = null;
+    this.#mouseDownSelectedReferenceIndex = null;
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: true });
     this.#emitOverlays();
