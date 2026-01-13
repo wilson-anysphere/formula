@@ -79,6 +79,25 @@ function run(command, args, { cwd = repoRoot, env = process.env } = {}) {
   if (proc.status !== 0) process.exit(proc.status ?? 1);
 }
 
+function runOptional(command, args, { cwd = repoRoot, env = process.env, label } = {}) {
+  const proc = spawnSync(command, args, {
+    cwd,
+    env,
+    stdio: "inherit",
+    encoding: "utf8",
+  });
+  if (proc.error) {
+    // eslint-disable-next-line no-console
+    console.warn(`[perf-desktop] WARN ${label ?? command}: ${proc.error.message}`);
+    return proc.status ?? 1;
+  }
+  if (proc.status && proc.status !== 0) {
+    // eslint-disable-next-line no-console
+    console.warn(`[perf-desktop] WARN ${label ?? command} exited with status ${proc.status}`);
+  }
+  return proc.status ?? 0;
+}
+
 function buildDesktop({ env }) {
   // eslint-disable-next-line no-console
   console.log("[perf-desktop] Building frontend (apps/desktop/dist)...");
@@ -200,13 +219,12 @@ function reportSize({ env }) {
 
   // Approximate the *network download cost* of the frontend by summing per-asset Brotli/gzip sizes.
   // This is intentionally separate from installer artifact size budgets.
-  try {
-    // eslint-disable-next-line no-console
-    console.log("\n[desktop-size] frontend asset download size (compressed JS/CSS/WASM):\n");
-    run(process.execPath, ["scripts/frontend_asset_size_report.mjs", "--dist", "apps/desktop/dist"], { env });
-  } catch {
-    // Best-effort: this is a convenience report for local runs.
-  }
+  // eslint-disable-next-line no-console
+  console.log("\n[desktop-size] frontend asset download size (compressed JS/CSS/WASM):\n");
+  runOptional(process.execPath, ["scripts/frontend_asset_size_report.mjs", "--dist", "apps/desktop/dist"], {
+    env,
+    label: "frontend_asset_size_report",
+  });
 
   const bundleDirs = findBundleDirs();
   if (bundleDirs.length === 0) {
