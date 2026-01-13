@@ -174,6 +174,7 @@ export class SqliteVectorStore {
     const storage = opts.storage ?? new InMemoryBinaryStorage();
     const SQL = await getSqlJs(opts.locateFile);
     const existing = await storage.load();
+    const hadExisting = Boolean(existing);
 
     const db = existing ? new SQL.Database(existing) : new SQL.Database();
     const store = new SqliteVectorStore(db, {
@@ -184,6 +185,10 @@ export class SqliteVectorStore {
 
     store._ensureMeta(opts.dimension);
     store._ensureSchemaVersion();
+    // If we migrated an existing database and autoSave is enabled, persist the
+    // migrated schema immediately so subsequent opens don't re-run the migration
+    // work (and so incremental indexing benefits right away).
+    if (store._autoSave && hadExisting) await store._persist();
     return store;
   }
 
@@ -289,12 +294,15 @@ export class SqliteVectorStore {
       ["text", "TEXT"],
     ];
 
+    let altered = false;
     for (const [name, type] of desired) {
       if (cols.has(name)) continue;
       // SQLite has no "ADD COLUMN IF NOT EXISTS" in older versions; probe via
       // PRAGMA table_info to keep migrations idempotent.
       this._db.run(`ALTER TABLE vectors ADD COLUMN ${name} ${type};`);
+      altered = true;
     }
+    if (altered) this._dirty = true;
   }
 
   _migrateVectorsToV2() {
@@ -439,6 +447,9 @@ export class SqliteVectorStore {
 
       this._setMetaValue("schema_version", String(SCHEMA_VERSION));
       this._db.run("COMMIT;");
+      // Migration changes must be persisted even if the caller performs no other
+      // writes (e.g. incremental indexing run with 0 changes).
+      this._dirty = true;
     } catch (err) {
       this._db.run("ROLLBACK;");
       throw err;
