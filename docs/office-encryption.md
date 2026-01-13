@@ -91,8 +91,8 @@ Standard encryption is available only for compatibility testing / fixture genera
 Both Standard and Agile `EncryptionInfo` start with:
 
 ```text
-u16 versionMinor
 u16 versionMajor
+u16 versionMinor
 u32 flags
 ... scheme-specific payload
 ```
@@ -286,4 +286,3 @@ Useful entry points / keywords inside MS-OFFCRYPTO:
 * “Standard Encryption” (`EncryptionHeader`, `EncryptionVerifier`)
 * “Agile Encryption” (XML descriptor, password key encryptor, `EncryptedPackage` segmenting)
 * “Data Integrity” (`encryptedHmacKey`, `encryptedHmacValue`)
-
