@@ -546,12 +546,14 @@ jobs:
           # Keep these caches isolated per Rust target triple + runner arch so cross-compile jobs
           # (e.g. Windows aarch64) don't thrash/overwrite caches or restore host build-script
           # binaries from an incompatible runner architecture.
-          key: cargo-target-desktop-release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-${{ matrix.cache_features }}-${{ hashFiles('Cargo.lock') }}
+          # Include the Rust toolchain pin so caches don't leak across rustc upgrades.
+          # (Similar to Swatinem/rust-cache's default behavior.)
+          key: cargo-target-desktop-release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-${{ matrix.cache_features }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            cargo-target-desktop-release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-${{ matrix.cache_features }}-
+            cargo-target-desktop-release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-${{ matrix.cache_features }}-${{ hashFiles('rust-toolchain.toml') }}-
             # Backwards-compat: allow restoring caches created before we started keying
             # on the Tauri feature set (so the first run after a workflow update isn't cold).
-            cargo-target-desktop-release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-
+            cargo-target-desktop-release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
