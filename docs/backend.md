@@ -237,7 +237,7 @@ policy violation (`1008`) and logs `permission_violation`.
 Opaque token auth (`SYNC_SERVER_AUTH_TOKEN`) cannot carry range restrictions (JWT and
 `SYNC_SERVER_AUTH_MODE=introspect` can).
 
-The claim shape matches `packages/collab/permissions.normalizeRestriction`:
+The `rangeRestrictions` shape matches `packages/collab/permissions.normalizeRestriction`:
 
 ```json
 {

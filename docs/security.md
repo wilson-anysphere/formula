@@ -145,7 +145,7 @@ were affected.
 Audit hardening: for touched cells, the server rewrites `modifiedBy` to the authenticated `userId` so clients cannot
 spoof edit attribution.
 
-Example JWT claim:
+Example `rangeRestrictions` value (JWT claim or token introspection response field):
 
 ```json
 {
