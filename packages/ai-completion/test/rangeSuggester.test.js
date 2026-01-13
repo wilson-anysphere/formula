@@ -245,3 +245,13 @@ test("suggestRanges does not suggest a 2D table range when only one column is po
     `Expected no multi-column A1 range suggestions, got: ${suggestions.map((s) => s.range).join(", ")}`
   );
 });
+
+test("suggestRanges returns no suggestions for columns beyond Excel max (XFD)", () => {
+  const suggestions = suggestRanges({
+    currentArgText: "ZZZ",
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createGridContext([]),
+  });
+
+  assert.deepEqual(suggestions, []);
+});
