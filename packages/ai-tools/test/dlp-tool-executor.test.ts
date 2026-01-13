@@ -884,4 +884,71 @@ describe("ToolExecutor DLP enforcement", () => {
     });
     expect(event.decision?.decision).toBe("redact");
   });
+
+  it("filter_range does not treat disallowed criterion cells as matching the DLP redaction placeholder under REDACT policy", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Value" });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { value: "Secret" });
+    // Literal placeholder-like values should still be filterable when the cell is allowed.
+    workbook.setCell(parseA1Cell("Sheet1!A3"), { value: "[REDACTED]" });
+    workbook.setCell(parseA1Cell("Sheet1!A4"), { value: "FRED" });
+
+    const executor = new ToolExecutor(workbook, {
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true
+            }
+          }
+        },
+        classification_records: [
+          {
+            selector: {
+              scope: CLASSIFICATION_SCOPE.CELL,
+              documentId: "doc-1",
+              sheetId: "Sheet1",
+              row: 1,
+              col: 0
+            },
+            classification: { level: "Restricted", labels: [] }
+          }
+        ]
+      }
+    });
+
+    // If we evaluated disallowed cells against a placeholder, row 2 would incorrectly match.
+    const equalsResult = await executor.execute({
+      name: "filter_range",
+      parameters: {
+        range: "Sheet1!A1:A4",
+        has_header: true,
+        criteria: [{ column: "A", operator: "equals", value: "[REDACTED]" }]
+      }
+    });
+    expect(equalsResult.ok).toBe(true);
+    expect(equalsResult.tool).toBe("filter_range");
+    if (!equalsResult.ok || equalsResult.tool !== "filter_range") throw new Error("Unexpected tool result");
+    expect(equalsResult.data?.matching_rows).toEqual([3]);
+    expect(equalsResult.data?.count).toBe(1);
+
+    const containsResult = await executor.execute({
+      name: "filter_range",
+      parameters: {
+        range: "Sheet1!A1:A4",
+        has_header: true,
+        criteria: [{ column: "A", operator: "contains", value: "RED" }]
+      }
+    });
+    expect(containsResult.ok).toBe(true);
+    expect(containsResult.tool).toBe("filter_range");
+    if (!containsResult.ok || containsResult.tool !== "filter_range") throw new Error("Unexpected tool result");
+    expect(containsResult.data?.matching_rows).toEqual([3, 4]);
+    expect(containsResult.data?.count).toBe(2);
+  });
 });

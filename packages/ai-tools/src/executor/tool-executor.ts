@@ -1018,7 +1018,11 @@ export class ToolExecutor {
           const rowIndex = range.startRow + i;
           const colIndex = range.startCol + criterion.offset;
           if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
-            return matchesCriterion({ value: DLP_REDACTION_PLACEHOLDER }, criterion, { includeFormulaValues: false });
+            // If the criterion cell is disallowed under DLP REDACT, treat the criterion as not satisfied.
+            //
+            // IMPORTANT: do not evaluate against a redaction placeholder. Otherwise, criteria like
+            // `equals:"[REDACTED]"` / `contains:"RED"` could incorrectly match and leak row membership.
+            return false;
           }
         }
         return matchesCriterion(cell, criterion, { includeFormulaValues });
