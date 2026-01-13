@@ -17,7 +17,7 @@ use crate::model::{
 use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::value::Value;
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 pub type DaxResult<T> = Result<T, DaxError>;
 
@@ -2625,129 +2625,66 @@ impl DaxEngine {
                     })
                 }
                 "SUMMARIZECOLUMNS" => {
-                    if args.is_empty() {
+                    // MVP: only support grouping columns and (optionally) CALCULATE-style filter
+                    // arguments. Name/expression pairs ("Name", expr) are not supported yet.
+                    let mut group_cols: Vec<(String, String)> = Vec::new();
+                    let mut group_tables: HashSet<String> = HashSet::new();
+                    let mut arg_idx = 0usize;
+                    while arg_idx < args.len() {
+                        match &args[arg_idx] {
+                            Expr::ColumnRef { table, column } => {
+                                group_tables.insert(table.clone());
+                                group_cols.push((table.clone(), column.clone()));
+                                arg_idx += 1;
+                            }
+                            _ => break,
+                        }
+                    }
+
+                    if group_cols.is_empty() {
                         return Err(DaxError::Eval(
-                            "SUMMARIZECOLUMNS expects at least 1 argument".into(),
+                            "SUMMARIZECOLUMNS expects at least 1 grouping column".into(),
                         ));
                     }
 
-                    // MVP: only support grouping columns (no name/expression pairs and no filter
-                    // table arguments).
-                    let mut group_cols: Vec<(String, String)> = Vec::with_capacity(args.len());
-                    let mut group_tables: HashSet<String> = HashSet::new();
-                    for expr in args {
-                        let Expr::ColumnRef { table, column } = expr else {
-                            return Err(DaxError::Type(
-                                "SUMMARIZECOLUMNS currently only supports grouping by columns"
-                                    .into(),
-                            ));
-                        };
-                        group_tables.insert(table.clone());
-                        group_cols.push((table.clone(), column.clone()));
+                    let filter_args = &args[arg_idx..];
+                    if filter_args.iter().any(|arg| matches!(arg, Expr::Text(_))) {
+                        return Err(DaxError::Eval(
+                            "SUMMARIZECOLUMNS name/expression pairs are not supported yet".into(),
+                        ));
                     }
 
+                    let summarize_filter = if filter_args.is_empty() {
+                        filter.clone()
+                    } else {
+                        self.build_calculate_filter(model, filter, row_ctx, filter_args)?
+                    };
+
                     let mut override_pairs: HashSet<(&str, &str)> = HashSet::new();
-                    for &idx in &filter.active_relationship_overrides {
+                    for &idx in &summarize_filter.active_relationship_overrides {
                         if let Some(rel) = model.relationships().get(idx) {
                             override_pairs
                                 .insert((rel.rel.from_table.as_str(), rel.rel.to_table.as_str()));
                         }
                     }
 
-                    let is_relationship_active =
-                        |idx: usize, rel: &RelationshipInfo, overrides: &HashSet<(&str, &str)>| {
-                            let pair = (rel.rel.from_table.as_str(), rel.rel.to_table.as_str());
-                            if overrides.contains(&pair) {
-                                filter.active_relationship_overrides.contains(&idx)
-                            } else {
-                                rel.rel.is_active
-                            }
+                    let is_relationship_active = |idx: usize,
+                                                 rel: &RelationshipInfo,
+                                                 overrides: &HashSet<(&str, &str)>| {
+                        let pair = (rel.rel.from_table.as_str(), rel.rel.to_table.as_str());
+                        let is_active = if overrides.contains(&pair) {
+                            summarize_filter.active_relationship_overrides.contains(&idx)
+                        } else {
+                            rel.rel.is_active
                         };
-
-                    // Build a directed graph of active relationships (from_table -> to_table).
-                    // The "from" side is the many-side (fact) and the "to" side is the one-side
-                    // (dimension).
-                    let mut edges: HashMap<String, Vec<(String, usize)>> = HashMap::new();
-                    for (idx, rel) in model.relationships().iter().enumerate() {
-                        if !is_relationship_active(idx, rel, &override_pairs) {
-                            continue;
+                        if !is_active {
+                            return false;
                         }
-                        edges
-                            .entry(rel.rel.from_table.clone())
-                            .or_default()
-                            .push((rel.rel.to_table.clone(), idx));
-                    }
-
-                    fn reachable_tables(
-                        edges: &HashMap<String, Vec<(String, usize)>>,
-                        start: &str,
-                    ) -> HashSet<String> {
-                        let mut seen: HashSet<String> = HashSet::new();
-                        let mut queue: VecDeque<String> = VecDeque::new();
-                        queue.push_back(start.to_string());
-                        while let Some(table) = queue.pop_front() {
-                            if !seen.insert(table.clone()) {
-                                continue;
-                            }
-                            if let Some(nexts) = edges.get(&table) {
-                                for (next, _) in nexts {
-                                    if !seen.contains(next) {
-                                        queue.push_back(next.clone());
-                                    }
-                                }
-                            }
-                        }
-                        seen
-                    }
-
-                    fn find_relationship_path(
-                        edges: &HashMap<String, Vec<(String, usize)>>,
-                        start: &str,
-                        target: &str,
-                    ) -> Option<Vec<usize>> {
-                        if start == target {
-                            return Some(Vec::new());
-                        }
-
-                        let mut visited: HashSet<String> = HashSet::new();
-                        let mut queue: VecDeque<String> = VecDeque::new();
-                        // Map: table -> (previous table, relationship idx)
-                        let mut prev: HashMap<String, (String, usize)> = HashMap::new();
-
-                        visited.insert(start.to_string());
-                        queue.push_back(start.to_string());
-
-                        while let Some(table) = queue.pop_front() {
-                            let Some(nexts) = edges.get(&table) else {
-                                continue;
-                            };
-                            for (next_table, rel_idx) in nexts {
-                                if !visited.insert(next_table.clone()) {
-                                    continue;
-                                }
-                                prev.insert(next_table.clone(), (table.clone(), *rel_idx));
-                                if next_table == target {
-                                    queue.clear();
-                                    break;
-                                }
-                                queue.push_back(next_table.clone());
-                            }
-                        }
-
-                        if !visited.contains(target) {
-                            return None;
-                        }
-
-                        let mut path: Vec<usize> = Vec::new();
-                        let mut cur = target.to_string();
-                        while cur != start {
-                            let (p, rel_idx) = prev.get(&cur)?.clone();
-                            path.push(rel_idx);
-                            cur = p;
-                        }
-                        path.reverse();
-                        Some(path)
-                    }
+                        !matches!(
+                            summarize_filter.cross_filter_overrides.get(&idx).copied(),
+                            Some(RelationshipOverride::Disabled)
+                        )
+                    };
 
                     // Determine the base table to scan for groups.
                     let base_table = if group_tables.len() == 1 {
@@ -2766,9 +2703,32 @@ impl DaxEngine {
                             .join(", ");
 
                         let mut candidates: Vec<String> = Vec::new();
+                        let mut ambiguous_path_error: Option<DaxError> = None;
                         for table in model.tables.keys() {
-                            let reachable = reachable_tables(&edges, table);
-                            if group_tables.iter().all(|t| reachable.contains(t)) {
+                            let mut ok = true;
+                            for target in &group_tables {
+                                if target == table {
+                                    continue;
+                                }
+                                match model.find_unique_active_relationship_path(
+                                    table,
+                                    target,
+                                    RelationshipPathDirection::ManyToOne,
+                                    |idx, rel| is_relationship_active(idx, rel, &override_pairs),
+                                ) {
+                                    Ok(Some(_)) => {}
+                                    Ok(None) => {
+                                        ok = false;
+                                        break;
+                                    }
+                                    Err(err) => {
+                                        ambiguous_path_error = Some(err);
+                                        ok = false;
+                                        break;
+                                    }
+                                }
+                            }
+                            if ok {
                                 candidates.push(table.clone());
                             }
                         }
@@ -2777,6 +2737,9 @@ impl DaxEngine {
                         match candidates.len() {
                             1 => candidates[0].clone(),
                             0 => {
+                                if let Some(err) = ambiguous_path_error {
+                                    return Err(err);
+                                }
                                 return Err(DaxError::Eval(format!(
                                     "SUMMARIZECOLUMNS columns ({groups_list}) are not reachable from a single base table via active relationships"
                                 )));
@@ -2821,35 +2784,33 @@ impl DaxEngine {
                             continue;
                         }
 
-                        let path = find_relationship_path(&edges, &base_table, table).ok_or_else(
-                            || {
-                                DaxError::Eval(format!(
-                                    "SUMMARIZECOLUMNS grouping column {table}[{column}] is not reachable from {base_table}"
-                                ))
-                            },
-                        )?;
+                        let Some(path) = model.find_unique_active_relationship_path(
+                            &base_table,
+                            table,
+                            RelationshipPathDirection::ManyToOne,
+                            |idx, rel| is_relationship_active(idx, rel, &override_pairs),
+                        )?
+                        else {
+                            return Err(DaxError::Eval(format!(
+                                "SUMMARIZECOLUMNS grouping column {table}[{column}] is not reachable from {base_table}"
+                            )));
+                        };
 
                         let mut hops: Vec<Hop> = Vec::with_capacity(path.len());
-                        let mut current_table = base_table.clone();
                         for rel_idx in path {
                             let rel_info = model
                                 .relationships()
                                 .get(rel_idx)
-                                .expect("path contains valid relationship index");
-                            if rel_info.rel.from_table != current_table {
-                                return Err(DaxError::Eval(format!(
-                                    "SUMMARIZECOLUMNS relationship path is invalid: expected from_table {current_table}, got {}",
-                                    rel_info.rel.from_table
-                                )));
-                            }
+                                .expect("relationship index from path");
 
-                            let current_ref = model
-                                .table(&current_table)
-                                .ok_or_else(|| DaxError::UnknownTable(current_table.clone()))?;
+                            let from_table_ref =
+                                model.table(&rel_info.rel.from_table).ok_or_else(|| {
+                                    DaxError::UnknownTable(rel_info.rel.from_table.clone())
+                                })?;
                             let from_idx =
-                                current_ref.column_idx(&rel_info.rel.from_column).ok_or_else(
+                                from_table_ref.column_idx(&rel_info.rel.from_column).ok_or_else(
                                     || DaxError::UnknownColumn {
-                                        table: current_table.clone(),
+                                        table: rel_info.rel.from_table.clone(),
                                         column: rel_info.rel.from_column.clone(),
                                     },
                                 )?;
@@ -2858,13 +2819,6 @@ impl DaxEngine {
                                 relationship_idx: rel_idx,
                                 from_idx,
                             });
-                            current_table = rel_info.rel.to_table.clone();
-                        }
-
-                        if current_table != *table {
-                            return Err(DaxError::Eval(format!(
-                                "SUMMARIZECOLUMNS relationship path ended at {current_table}, expected {table}"
-                            )));
                         }
 
                         let target_ref = model
@@ -2883,10 +2837,10 @@ impl DaxEngine {
                         });
                     }
 
-                    let mut base_rows = resolve_table_rows(model, filter, &base_table)?;
+                    let mut base_rows = resolve_table_rows(model, &summarize_filter, &base_table)?;
                     if group_tables.len() == 1
-                        && blank_row_allowed(filter, &base_table)
-                        && virtual_blank_row_exists(model, filter, &base_table)?
+                        && blank_row_allowed(&summarize_filter, &base_table)
+                        && virtual_blank_row_exists(model, &summarize_filter, &base_table)?
                     {
                         base_rows.push(base_table_ref.row_count());
                     }

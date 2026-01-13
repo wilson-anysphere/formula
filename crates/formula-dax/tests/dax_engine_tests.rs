@@ -1298,7 +1298,22 @@ fn summarizecolumns_supports_basic_grouping() {
 }
 
 #[test]
-fn summarizecolumns_star_schema_groups_by_multiple_dimensions() {
+fn summarizecolumns_supports_filter_table_arguments() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(SUMMARIZECOLUMNS(Customers[Region], FILTER(Customers, Customers[Region] = \"East\")))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 1.into());
+}
+
+fn build_summarizecolumns_star_schema_model() -> DataModel {
     let mut model = DataModel::new();
 
     let mut customers = Table::new("Customers", vec!["CustomerId", "Region"]);
@@ -1356,6 +1371,13 @@ fn summarizecolumns_star_schema_groups_by_multiple_dimensions() {
         })
         .unwrap();
 
+    model
+}
+
+#[test]
+fn summarizecolumns_star_schema_groups_by_multiple_dimensions() {
+    let model = build_summarizecolumns_star_schema_model();
+
     let engine = DaxEngine::new();
     let groups = engine
         .evaluate(
@@ -1369,6 +1391,22 @@ fn summarizecolumns_star_schema_groups_by_multiple_dimensions() {
     // Distinct combinations in Sales are:
     //   (East, A), (East, B), (West, A), (West, B)
     assert_eq!(groups, 4.into());
+}
+
+#[test]
+fn summarizecolumns_star_schema_respects_filter_table_arguments() {
+    let model = build_summarizecolumns_star_schema_model();
+    let engine = DaxEngine::new();
+
+    let groups = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(SUMMARIZECOLUMNS(Customers[Region], Products[Category], FILTER(Customers, Customers[Region] = \"East\")))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(groups, 2.into());
 }
 
 #[test]
