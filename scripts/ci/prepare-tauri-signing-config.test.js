@@ -166,3 +166,20 @@ test("exports Windows signing secrets when configured", () => {
   assert.match(githubEnv, /\bWINDOWS_CERTIFICATE<</);
   assert.match(githubEnv, /\bWINDOWS_CERTIFICATE_PASSWORD<</);
 });
+
+test("fails fast when FORMULA_REQUIRE_CODESIGN=1 on Windows and required secrets are missing", () => {
+  const cfg = { bundle: { windows: { certificateThumbprint: "ABCDEF" } } };
+  const { proc, config } = runWithConfig(
+    {
+      RUNNER_OS: "Windows",
+      FORMULA_REQUIRE_CODESIGN: "1",
+      WINDOWS_CERTIFICATE: "",
+      WINDOWS_CERTIFICATE_PASSWORD: "",
+    },
+    cfg,
+  );
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /Code signing is required/i);
+  // In enforcement mode we should fail before mutating the config.
+  assert.equal(config.bundle.windows.certificateThumbprint, "ABCDEF");
+});
