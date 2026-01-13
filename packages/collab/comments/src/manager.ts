@@ -290,6 +290,11 @@ export class CommentManager {
   }
 
   listAll(): Comment[] {
+    // Pre-hydration safety: avoid instantiating the comments root when it doesn't
+    // exist yet. Older documents may still use a legacy Array-backed schema; if
+    // we create a Map root too early, the legacy array content can become
+    // inaccessible once remote updates arrive.
+    if (!this.doc.share.get("comments")) return [];
     const root = getCommentsRoot(this.doc);
     const entries = this.getAllYComments(root);
     const comments = entries.map(({ yComment, mapKey }) => yCommentToComment(yComment, mapKey));
