@@ -21,6 +21,10 @@ fn dax_function_golden_suite() {
         ("COUNTROWS(SUMMARIZE(Orders, Orders[CustomerId]))", 3.into()),
         ("COUNTROWS(SUMMARIZECOLUMNS(Customers[Region]))", 2.into()),
         (
+            "COUNTROWS(SUMMARIZECOLUMNS(Customers[Region], \"X\", 1))",
+            2.into(),
+        ),
+        (
             "COUNTROWS(SUMMARIZECOLUMNS(Customers[Region], FILTER(Customers, Customers[Region] = \"East\")))",
             1.into(),
         ),

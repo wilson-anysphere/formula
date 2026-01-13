@@ -1433,6 +1433,25 @@ fn summarizecolumns_supports_filter_table_arguments() {
     assert_eq!(value, 1.into());
 }
 
+#[test]
+fn summarizecolumns_allows_name_expression_pairs_but_does_not_materialize_them_yet() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    // Client tools commonly emit SUMMARIZECOLUMNS with "Name", expr pairs for measures.
+    // The current engine only uses SUMMARIZECOLUMNS for group construction (row set), so the
+    // named columns are accepted but not returned as part of the table representation.
+    let value = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(SUMMARIZECOLUMNS(Customers[Region], FILTER(Customers, Customers[Region] = \"East\"), \"X\", 1))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 1.into());
+}
+
 fn build_summarizecolumns_star_schema_model() -> DataModel {
     let mut model = DataModel::new();
 

@@ -3071,7 +3071,9 @@ impl DaxEngine {
                 }
                 "SUMMARIZECOLUMNS" => {
                     // MVP: only support grouping columns and (optionally) CALCULATE-style filter
-                    // arguments. Name/expression pairs ("Name", expr) are not supported yet.
+                    // arguments. Name/expression pairs ("Name", expr) are parsed/validated but are
+                    // not currently materialized in the resulting table (the engine returns a row
+                    // set of the chosen base table).
                     let mut group_cols: Vec<(String, String)> = Vec::new();
                     let mut group_tables: HashSet<String> = HashSet::new();
                     let mut arg_idx = 0usize;
@@ -3092,11 +3094,40 @@ impl DaxEngine {
                         ));
                     }
 
-                    let filter_args = &args[arg_idx..];
-                    if filter_args.iter().any(|arg| matches!(arg, Expr::Text(_))) {
-                        return Err(DaxError::Eval(
-                            "SUMMARIZECOLUMNS name/expression pairs are not supported yet".into(),
-                        ));
+                    // After grouping columns, SUMMARIZECOLUMNS accepts:
+                    //   - zero or more filter table arguments (table expressions)
+                    //   - zero or more name/expression pairs ("Name", expr)
+                    // We detect the transition to name/expression pairs by finding the first
+                    // string literal argument.
+                    let mut name_start = args.len();
+                    for (idx, arg) in args.iter().enumerate().skip(arg_idx) {
+                        if matches!(arg, Expr::Text(_)) {
+                            name_start = idx;
+                            break;
+                        }
+                    }
+
+                    let filter_args = &args[arg_idx..name_start];
+                    let name_expr_args = &args[name_start..];
+                    if !name_expr_args.is_empty() {
+                        if name_expr_args.len() % 2 != 0 {
+                            return Err(DaxError::Eval(
+                                "SUMMARIZECOLUMNS name/expression pairs must come in (\"Name\", expr) pairs".into(),
+                            ));
+                        }
+                        for pair in name_expr_args.chunks(2) {
+                            match &pair[0] {
+                                Expr::Text(_) => {}
+                                other => {
+                                    return Err(DaxError::Type(format!(
+                                        "SUMMARIZECOLUMNS expected a string literal for the name/expression pair name, got {other:?}"
+                                    )))
+                                }
+                            }
+                            // `pair[1]` is a scalar expression; we intentionally don't evaluate it
+                            // yet because the current table representation can't materialize the
+                            // resulting column.
+                        }
                     }
 
                     let summarize_filter = if filter_args.is_empty() {
