@@ -183,6 +183,7 @@ Desktop dev/testing toggle:
 - The desktop app supports a **dev-only** URL param toggle to exercise encrypted cell payloads end-to-end:
   - `?collabEncrypt=1` enables deterministic encryption for a demo range
   - `?collabEncryptRange=Sheet1!A1:C10` overrides the encrypted range (default `Sheet1!A1:C10`)
+    - The sheet qualifier uses formula-style sheet names; desktop resolves these to stable sheet ids when possible.
 - This is implemented in `apps/desktop/src/collab/devEncryption.ts` and is intended for manual verification (two clients: one with the key, one without).
 
 Notes:
