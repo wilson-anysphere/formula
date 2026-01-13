@@ -198,7 +198,6 @@ async function smoke() {
 
   await searchWorkbookRag({
     queryText: "hello",
-    workbookId: "wb",
     topK: 3,
     vectorStore: store,
     embedder,
