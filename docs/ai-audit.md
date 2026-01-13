@@ -93,8 +93,23 @@ export interface AIAuditStore {
 }
 ```
 
-`listEntries(...)` supports filtering by `session_id`, `workbook_id`, `mode` (single or array), and `limit`.
-Stores return entries ordered newest-first.
+### `AuditListFilters` (`listEntries(...)`)
+
+`listEntries(...)` supports:
+
+- `session_id?: string`
+- `workbook_id?: string`
+- `mode?: AIMode | AIMode[]`
+- `after_timestamp_ms?: number` – inclusive lower bound on `timestamp_ms` (≥)
+- `before_timestamp_ms?: number` – exclusive upper bound on `timestamp_ms` (<)
+- `cursor?: { before_timestamp_ms: number; before_id?: string }` – **stable pagination cursor**
+  - Results are ordered newest-first.
+  - When provided, stores return entries strictly **older** than the cursor:
+    - older timestamp, or
+    - same timestamp + `id < before_id` (when `before_id` is provided)
+- `limit?: number`
+
+Stores return entries ordered newest-first (`timestamp_ms` desc, then `id` desc as a tiebreaker when applicable).
 
 ### Defense-in-depth: `BoundedAIAuditStore` (per-entry size cap)
 
@@ -129,17 +144,35 @@ persistence.
 
 - Class: `MemoryAIAuditStore`
 - Persistence: none (in-process only)
-- Retention: unbounded (until process exit)
+- Retention knobs:
+  - `max_entries?: number` (newest retained)
+  - `max_age_ms?: number` (entries older than `now - max_age_ms` dropped at write-time)
 - Intended for: tests, short-lived runs, debugging.
 
 ### JSON LocalStorage store (simple browser persistence)
 
 - Class: `LocalStorageAIAuditStore`
 - Persistence: `window.localStorage` as a JSON array under a key (default: `formula_ai_audit_log_entries`)
-- Retention knob: `max_entries` (default: `1000`); oldest entries are dropped.
+- Retention knobs:
+  - `max_entries?: number` (default: `1000`); oldest entries are dropped.
+  - `max_age_ms?: number`; entries older than `now - max_age_ms` are dropped at write-time and opportunistically on reads.
 - Notes:
   - LocalStorage can be unavailable or throw (private mode, quota exceeded, some Node “webstorage” environments); this store falls back to an in-memory buffer in those cases.
   - LocalStorage is **not** encrypted and is readable by any JS running in the origin. Treat it as user-accessible storage.
+
+### IndexedDB store (browser persistence + indexing)
+
+- Class: `IndexedDbAIAuditStore`
+- Persistence: `indexedDB` (one entry per record)
+  - Database name default: `formula_ai_audit`
+  - Object store default: `ai_audit_log`
+- Filtering: designed for efficient filtering/indexing by `timestamp_ms`, `session_id`, `workbook_id`, and `mode`.
+- Retention knobs:
+  - `max_entries?: number` (newest retained)
+  - `max_age_ms?: number` (entries older than `now - max_age_ms` deleted)
+- Notes:
+  - Requires IndexedDB support; some environments (private mode, locked-down webviews) may block or clear IndexedDB.
+  - Retention is **best-effort**: browsers can still evict/clear data, and quota behavior varies by platform.
 
 ### SQLite store (sql.js)
 
@@ -167,6 +200,16 @@ Operationally, this means:
 
 - access control inherits from filesystem permissions (choose the path and permissions carefully)
 - backups/retention are your responsibility (in addition to in-DB retention limits)
+
+### Store wrappers (optional)
+
+These are useful integrations when composing more complex setups:
+
+- `BoundedAIAuditStore` – wraps another store and enforces an upper bound on the serialized size of each entry
+  (defaults to `200_000` characters). Oversized entries are compacted by truncating `input`/tool payloads and dropping
+  full tool `result` blobs. Helpful for LocalStorage/IndexedDB environments where quota failures are common.
+- `CompositeAIAuditStore` – fans out `logEntry(...)` writes to multiple stores (mode `"best_effort"` by default, or `"all"`),
+  while delegating reads to the first configured store.
 
 ---
 
@@ -275,6 +318,20 @@ import { LocalStorageAIAuditStore } from "@formula/ai-audit/browser";
 const store = new LocalStorageAIAuditStore({
   key: "formula_ai_audit_log_entries",
   max_entries: 1000,
+  max_age_ms: 30 * 24 * 60 * 60 * 1000, // 30 days
+});
+```
+
+IndexedDB-backed persistence (larger quota + incremental writes):
+
+```ts
+import { IndexedDbAIAuditStore } from "@formula/ai-audit/browser";
+
+const store = new IndexedDbAIAuditStore({
+  db_name: "formula_ai_audit",
+  store_name: "ai_audit_log",
+  max_entries: 10_000,
+  max_age_ms: 30 * 24 * 60 * 60 * 1000, // 30 days
 });
 ```
 
