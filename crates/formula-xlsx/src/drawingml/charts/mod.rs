@@ -14,6 +14,7 @@ pub use parse_chart_color_style::{parse_chart_color_style, ChartColorStyleParseE
 pub use parse_chart_ex::{parse_chart_ex, ChartExParseError};
 pub use parse_chart_space::{parse_chart_space, ChartSpaceParseError};
 pub use parse_chart_style::{parse_chart_style, ChartStyleParseError};
+pub use formula_model::charts::{ChartDiagnostic, ChartDiagnosticLevel};
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
@@ -58,21 +59,6 @@ pub struct ChartObject {
     /// Parsed chart model (optional; set when a parser is available).
     pub model: Option<ChartModel>,
     pub diagnostics: Vec<ChartDiagnostic>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChartDiagnostic {
-    pub severity: ChartDiagnosticSeverity,
-    pub message: String,
-    pub part: Option<String>,
-    pub xpath: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChartDiagnosticSeverity {
-    Info,
-    Warning,
-    Error,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

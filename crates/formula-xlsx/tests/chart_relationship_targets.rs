@@ -1,4 +1,4 @@
-use formula_xlsx::drawingml::charts::ChartDiagnosticSeverity;
+use formula_xlsx::drawingml::charts::ChartDiagnosticLevel;
 use formula_xlsx::XlsxPackage;
 use rust_xlsxwriter::{Chart, ChartType as XlsxChartType, Workbook};
 
@@ -180,7 +180,7 @@ fn chart_object_extraction_strips_fragments_and_ignores_external_chart_relations
         chart_object
             .diagnostics
             .iter()
-            .all(|d| d.severity != ChartDiagnosticSeverity::Error),
+            .all(|d| d.level != ChartDiagnosticLevel::Error),
         "expected no error diagnostics, got: {:#?}",
         chart_object.diagnostics
     );
@@ -243,4 +243,3 @@ fn chart_object_extraction_normalizes_backslashes_in_chart_relationship_targets(
     assert_eq!(chart_ex.path, "xl/charts/chartEx1.xml");
     assert_eq!(chart_ex.bytes, chart_ex_xml);
 }
-

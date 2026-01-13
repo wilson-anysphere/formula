@@ -214,6 +214,8 @@ fn warn(diagnostics: &mut Vec<ChartDiagnostic>, message: impl Into<String>) {
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
         message: message.into(),
+        part: None,
+        xpath: None,
     });
 }
 

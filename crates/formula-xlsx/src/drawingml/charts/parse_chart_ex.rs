@@ -75,7 +75,11 @@ pub fn parse_chart_ex(
 
     let mut diagnostics = vec![ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
-        message: format!("ChartEx root <{root_name}> (ns={root_ns}) parsed as placeholder model"),
+        message: format!(
+            "ChartEx root <{root_name}> (ns={root_ns}) parsed as placeholder model"
+        ),
+        part: None,
+        xpath: None,
     }];
 
     let kind = detect_chart_kind(&doc, &mut diagnostics);
@@ -130,6 +134,7 @@ pub fn parse_chart_ex(
         }
     }
 
+    attach_part(&mut diagnostics, part_name);
     Ok(ChartModel {
         chart_kind: ChartKind::Unknown {
             name: chart_name.clone(),
@@ -298,6 +303,8 @@ fn detect_chart_kind(
         message: format!(
             "ChartEx chart kind could not be inferred (root ns={root_ns_display}); hints: {hint_list}"
         ),
+        part: None,
+        xpath: None,
     });
 
     "unknown".to_string()
@@ -500,6 +507,8 @@ fn parse_chart_data<'a>(
             diagnostics.push(ChartDiagnostic {
                 level: ChartDiagnosticLevel::Warning,
                 message: "ChartEx <chartData> contains <data> without an id attribute".to_string(),
+                part: None,
+                xpath: None,
             });
             continue;
         };
@@ -611,6 +620,8 @@ fn parse_series_u32_child(
             diagnostics.push(ChartDiagnostic {
                 level: ChartDiagnosticLevel::Warning,
                 message: format!("ChartEx series {child_name} is not a valid u32: {raw:?}"),
+                part: None,
+                xpath: None,
             });
             None
         }
@@ -698,6 +709,8 @@ fn parse_series(
                     message: format!(
                         "ChartEx series references dataId={data_id}, but no matching <chartData>/<data> was found"
                     ),
+                    part: None,
+                    xpath: None,
                 });
             }
         }
@@ -1085,6 +1098,8 @@ fn parse_legend_position(value: &str, diagnostics: &mut Vec<ChartDiagnostic>) ->
             diagnostics.push(ChartDiagnostic {
                 level: ChartDiagnosticLevel::Warning,
                 message: format!("unsupported legend position legendPos={other:?}"),
+                part: None,
+                xpath: None,
             });
             LegendPosition::Unknown
         }
@@ -1101,6 +1116,15 @@ fn lowercase_first(s: &str) -> String {
         return String::new();
     };
     first.to_lowercase().collect::<String>() + chars.as_str()
+}
+
+fn attach_part(diagnostics: &mut [ChartDiagnostic], part_name: &str) {
+    let part = part_name.to_string();
+    for diag in diagnostics {
+        if diag.part.is_none() {
+            diag.part = Some(part.clone());
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1120,7 +1144,7 @@ mod tests {
       <cx:histogramChart/>
     </cx:plotArea>
   </cx:chart>
-</cx:chartSpace>
+ </cx:chartSpace>
 "#;
 
         let model = parse_chart_ex(xml.as_bytes(), "unit-test").expect("parse");

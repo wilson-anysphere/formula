@@ -132,7 +132,8 @@
     "diagnostics": [
       {
         "level": "warning",
-        "message": "unsupported chart type boxWhiskerChart; rendering may be incomplete"
+        "message": "unsupported chart type boxWhiskerChart; rendering may be incomplete",
+        "part": "xl/charts/chart1.xml"
       }
     ]
   },
@@ -158,11 +159,13 @@
     "diagnostics": [
       {
         "level": "warning",
-        "message": "ChartEx root <chartSpace> (ns=http://schemas.microsoft.com/office/drawing/2014/chartex) parsed as placeholder model"
+        "message": "ChartEx root <chartSpace> (ns=http://schemas.microsoft.com/office/drawing/2014/chartex) parsed as placeholder model",
+        "part": "xl/charts/chartEx1.xml"
       },
       {
         "level": "warning",
-        "message": "ChartEx chart kind could not be inferred (root ns=http://schemas.microsoft.com/office/drawing/2014/chartex); hints: <none>"
+        "message": "ChartEx chart kind could not be inferred (root ns=http://schemas.microsoft.com/office/drawing/2014/chartex); hints: <none>",
+        "part": "xl/charts/chartEx1.xml"
       }
     ]
   }

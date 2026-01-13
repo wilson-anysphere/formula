@@ -10,7 +10,7 @@ use roxmltree::{Document, Node};
 use crate::charts::legacy_parsed_chart_from_model;
 use crate::drawingml::charts::{
     extract_chart_object_refs, parse_chart_color_style, parse_chart_ex, parse_chart_space,
-    parse_chart_style, ChartColorStyleParseError, ChartDiagnostic, ChartDiagnosticSeverity,
+    parse_chart_style, ChartColorStyleParseError, ChartDiagnostic, ChartDiagnosticLevel,
     ChartExParseError, ChartObject, ChartParts, ChartSpaceParseError, ChartStyleParseError,
     OpcPart,
 };
@@ -133,7 +133,7 @@ impl XlsxPackage {
                     }
                     None => {
                         diagnostics.push(ChartDiagnostic {
-                            severity: ChartDiagnosticSeverity::Error,
+                            level: ChartDiagnosticLevel::Error,
                             message: format!(
                                 "missing drawing relationship for chart reference {}",
                                 drawing_ref.rel_id
@@ -152,7 +152,7 @@ impl XlsxPackage {
                         Some(bytes) => bytes.to_vec(),
                         None => {
                             diagnostics.push(ChartDiagnostic {
-                                severity: ChartDiagnosticSeverity::Error,
+                                level: ChartDiagnosticLevel::Error,
                                 message: format!("missing chart part: {chart_part_path}"),
                                 part: Some(chart_part_path.clone()),
                                 xpath: None,
@@ -240,7 +240,7 @@ impl XlsxPackage {
                     }
                     None => {
                         diagnostics.push(ChartDiagnostic {
-                            severity: ChartDiagnosticSeverity::Warning,
+                            level: ChartDiagnosticLevel::Warning,
                             message: format!("missing chartEx part: {path}"),
                             part: Some(path),
                             xpath: None,
@@ -258,7 +258,7 @@ impl XlsxPackage {
                     }),
                     None => {
                         diagnostics.push(ChartDiagnostic {
-                            severity: ChartDiagnosticSeverity::Warning,
+                            level: ChartDiagnosticLevel::Warning,
                             message: format!("missing chart style part: {path}"),
                             part: Some(path),
                             xpath: None,
@@ -276,7 +276,7 @@ impl XlsxPackage {
                     }),
                     None => {
                         diagnostics.push(ChartDiagnostic {
-                            severity: ChartDiagnosticSeverity::Warning,
+                            level: ChartDiagnosticLevel::Warning,
                             message: format!("missing chart colors part: {path}"),
                             part: Some(path),
                             xpath: None,
@@ -298,7 +298,7 @@ impl XlsxPackage {
                     }
                     None => {
                         diagnostics.push(ChartDiagnostic {
-                            severity: ChartDiagnosticSeverity::Warning,
+                            level: ChartDiagnosticLevel::Warning,
                             message: format!("missing chart userShapes part: {path}"),
                             part: Some(path),
                             xpath: None,
@@ -314,7 +314,7 @@ impl XlsxPackage {
                         Ok(model) => Some(model),
                         Err(err) => {
                             diagnostics.push(ChartDiagnostic {
-                                severity: ChartDiagnosticSeverity::Warning,
+                                level: ChartDiagnosticLevel::Warning,
                                 message: format!(
                                     "failed to parse chartSpace part {}: {}",
                                     chart.path,
@@ -335,7 +335,7 @@ impl XlsxPackage {
                                 if let Some(kind) = name.strip_prefix("ChartEx:") {
                                     if kind.trim().is_empty() || kind == "unknown" {
                                         diagnostics.push(ChartDiagnostic {
-                                            severity: ChartDiagnosticSeverity::Warning,
+                                            level: ChartDiagnosticLevel::Warning,
                                             message: "chartEx part detected but chart kind could not be inferred"
                                                 .to_string(),
                                             part: Some(chart_ex_part.path.clone()),
@@ -348,7 +348,7 @@ impl XlsxPackage {
                         }
                         Err(err) => {
                             diagnostics.push(ChartDiagnostic {
-                                severity: ChartDiagnosticSeverity::Warning,
+                                level: ChartDiagnosticLevel::Warning,
                                 message: format!(
                                     "failed to parse ChartEx part {}: {}",
                                     chart_ex_part.path,
@@ -385,7 +385,7 @@ impl XlsxPackage {
                         match parse_chart_style(&style_part.bytes, &style_part.path) {
                             Ok(style_model) => model.style_part = Some(style_model),
                             Err(err) => diagnostics.push(ChartDiagnostic {
-                                severity: ChartDiagnosticSeverity::Warning,
+                                level: ChartDiagnosticLevel::Warning,
                                 message: format!(
                                     "failed to parse chartStyle part {}: {}",
                                     style_part.path,
@@ -409,7 +409,7 @@ impl XlsxPackage {
                         match parse_chart_color_style(&colors_part.bytes, &colors_part.path) {
                             Ok(colors_model) => model.colors_part = Some(colors_model),
                             Err(err) => diagnostics.push(ChartDiagnostic {
-                                severity: ChartDiagnosticSeverity::Warning,
+                                level: ChartDiagnosticLevel::Warning,
                                 message: format!(
                                     "failed to parse chartColorStyle part {}: {}",
                                     colors_part.path,
@@ -636,7 +636,7 @@ fn merge_chart_models(
     let mut merged = chart_ex;
 
     diagnostics.push(ChartDiagnostic {
-        severity: ChartDiagnosticSeverity::Info,
+        level: ChartDiagnosticLevel::Info,
         message: format!(
             "model.chart_kind: using ChartEx {chart_ex_kind:?} (chartSpace was {chart_space_kind:?})",
             chart_ex_kind = &merged.chart_kind,
@@ -654,7 +654,7 @@ fn merge_chart_models(
     // Series / axes: only fall back to chartSpace when ChartEx is missing them entirely.
     if merged.series.is_empty() && !chart_space.series.is_empty() {
         diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
+            level: ChartDiagnosticLevel::Info,
             message: format!(
                 "model.series: using chartSpace (ChartEx empty, chartSpace={chart_space_series_len})",
             ),
@@ -664,7 +664,7 @@ fn merge_chart_models(
         merged.series = std::mem::take(&mut chart_space.series);
     } else {
         diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
+            level: ChartDiagnosticLevel::Info,
             message: format!(
                 "model.series: using ChartEx (ChartEx={chart_ex_series_len}, chartSpace={chart_space_series_len})",
             ),
@@ -675,7 +675,7 @@ fn merge_chart_models(
 
     if merged.axes.is_empty() && !chart_space.axes.is_empty() {
         diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
+            level: ChartDiagnosticLevel::Info,
             message: format!(
                 "model.axes: using chartSpace (ChartEx empty, chartSpace={chart_space_axes_len})",
             ),
@@ -685,7 +685,7 @@ fn merge_chart_models(
         merged.axes = std::mem::take(&mut chart_space.axes);
     } else {
         diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
+            level: ChartDiagnosticLevel::Info,
             message: format!(
                 "model.axes: using ChartEx (ChartEx={chart_ex_axes_len}, chartSpace={chart_space_axes_len})",
             ),
@@ -697,7 +697,7 @@ fn merge_chart_models(
     // Title / legend: fall back to chartSpace when ChartEx is missing.
     if merged.title.is_none() && chart_space.title.is_some() {
         diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
+            level: ChartDiagnosticLevel::Info,
             message: "model.title: using chartSpace".to_string(),
             part: Some(chart_space_part.to_string()),
             xpath: None,
@@ -705,7 +705,7 @@ fn merge_chart_models(
         merged.title = chart_space.title.take();
     } else {
         diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
+            level: ChartDiagnosticLevel::Info,
             message: "model.title: using ChartEx".to_string(),
             part: Some(chart_ex_part.to_string()),
             xpath: None,
@@ -724,7 +724,7 @@ fn merge_chart_models(
 
     if merged.legend.is_none() && chart_space.legend.is_some() {
         diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
+            level: ChartDiagnosticLevel::Info,
             message: "model.legend: using chartSpace".to_string(),
             part: Some(chart_space_part.to_string()),
             xpath: None,
@@ -732,7 +732,7 @@ fn merge_chart_models(
         merged.legend = chart_space.legend.take();
     } else {
         diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
+            level: ChartDiagnosticLevel::Info,
             message: "model.legend: using ChartEx".to_string(),
             part: Some(chart_ex_part.to_string()),
             xpath: None,
@@ -756,7 +756,7 @@ fn merge_chart_models(
 
     if matches!(merged.plot_area, PlotAreaModel::Unknown { .. }) && chart_space_plot_area_present {
         diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
+            level: ChartDiagnosticLevel::Info,
             message: "model.plot_area: using chartSpace".to_string(),
             part: Some(chart_space_part.to_string()),
             xpath: None,
@@ -769,7 +769,7 @@ fn merge_chart_models(
         );
     } else {
         diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
+            level: ChartDiagnosticLevel::Info,
             message: "model.plot_area: using ChartEx".to_string(),
             part: Some(chart_ex_part.to_string()),
             xpath: None,
@@ -827,7 +827,7 @@ fn merge_chart_models(
     ) {
         (Some(chart_space_rid), None) => {
             diagnostics.push(ChartDiagnostic {
-                severity: ChartDiagnosticSeverity::Info,
+                level: ChartDiagnosticLevel::Info,
                 message: format!(
                     "model.external_data_rel_id: using chartSpace {chart_space_rid:?} (ChartEx was None)",
                 ),
@@ -838,7 +838,7 @@ fn merge_chart_models(
         }
         (Some(chart_space_rid), Some(chart_ex_rid)) if chart_space_rid != chart_ex_rid => {
             diagnostics.push(ChartDiagnostic {
-                severity: ChartDiagnosticSeverity::Warning,
+                level: ChartDiagnosticLevel::Warning,
                 message: format!(
                     "model.external_data_rel_id: chartSpace {chart_space_rid:?} differs from ChartEx {chart_ex_rid:?}; using chartSpace",
                 ),
@@ -854,7 +854,7 @@ fn merge_chart_models(
         if let Some(chart_ex_auto) = merged.external_data_auto_update {
             if chart_space_auto != chart_ex_auto {
                 diagnostics.push(ChartDiagnostic {
-                    severity: ChartDiagnosticSeverity::Warning,
+                    level: ChartDiagnosticLevel::Warning,
                     message: format!(
                         "model.external_data_auto_update: chartSpace {chart_space_auto:?} differs from ChartEx {chart_ex_auto:?}; using chartSpace",
                     ),
@@ -874,7 +874,7 @@ fn merge_chart_models(
         };
         if !rel_ids_match {
             diagnostics.push(ChartDiagnostic {
-                severity: ChartDiagnosticSeverity::Warning,
+                level: ChartDiagnosticLevel::Warning,
                 message: "model.external_data_auto_update: ignoring ChartEx autoUpdate due to externalData rel id mismatch".to_string(),
                 part: Some(chart_ex_part.to_string()),
                 xpath: None,

@@ -551,10 +551,18 @@ pub enum SeriesData {
 pub struct ChartDiagnostic {
     pub level: ChartDiagnosticLevel,
     pub message: String,
+    /// Optional part path this diagnostic refers to (e.g. `xl/charts/chart1.xml`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part: Option<String>,
+    /// Optional XPath/location hint within `part`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub xpath: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ChartDiagnosticLevel {
+    Info,
     Warning,
+    Error,
 }

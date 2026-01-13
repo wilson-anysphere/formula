@@ -146,6 +146,7 @@ pub fn parse_chart_space(
         .find(|n| n.tag_name().name() == "plotArea")
     else {
         warn(&mut diagnostics, "missing c:plotArea");
+        attach_part(&mut diagnostics, part_name);
         return Ok(ChartModel {
             chart_kind: ChartKind::Unknown {
                 name: "missingPlotArea".to_string(),
@@ -195,6 +196,7 @@ pub fn parse_chart_space(
     let axes = parse_axes(plot_area_node, xml, &mut diagnostics);
     warn_on_numeric_categories_with_non_numeric_axis(plot_area_node, &series, &mut diagnostics);
 
+    attach_part(&mut diagnostics, part_name);
     Ok(ChartModel {
         chart_kind,
         title,
@@ -1532,7 +1534,18 @@ fn warn(diagnostics: &mut Vec<ChartDiagnostic>, message: impl Into<String>) {
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
         message: message.into(),
+        part: None,
+        xpath: None,
     });
+}
+
+fn attach_part(diagnostics: &mut [ChartDiagnostic], part_name: &str) {
+    let part = part_name.to_string();
+    for diag in diagnostics {
+        if diag.part.is_none() {
+            diag.part = Some(part.clone());
+        }
+    }
 }
 
 fn child_attr<'a>(node: Node<'a, 'a>, child: &str, attr: &str) -> Option<&'a str> {
