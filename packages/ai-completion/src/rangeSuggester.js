@@ -127,10 +127,11 @@ export function suggestRanges(params) {
       const endLetters = applyColumnCase(columnIndexToLetter(endCol), colToken);
       const startCell = `${colPrefix}${colToken}${rowPrefix}${tableStartRow + 1}`;
       const endCell = `${colPrefix}${endLetters}${rowPrefix}${tableEndRow + 1}`;
+      const tableReason = toTableReason(contiguousReason);
       tableSuggestion = {
         range: `${startCell}:${endCell}`,
         confidence,
-        reason: explicitRow ? "contiguous_table_down_from_start" : "contiguous_table_above_current_cell",
+        reason: tableReason,
       };
     }
   }
@@ -321,6 +322,18 @@ function applyColumnCase(letters, typedColToken) {
   if (typedColToken.toUpperCase() === typedColToken) return letters.toUpperCase();
   if (typedColToken.toLowerCase() === typedColToken) return letters.toLowerCase();
   return letters;
+}
+
+function toTableReason(contiguousReason) {
+  switch (contiguousReason) {
+    case "contiguous_down_from_start":
+      return "contiguous_table_down_from_start";
+    case "contiguous_below_current_cell":
+      return "contiguous_table_below_current_cell";
+    case "contiguous_above_current_cell":
+    default:
+      return "contiguous_table_above_current_cell";
+  }
 }
 
 /**
