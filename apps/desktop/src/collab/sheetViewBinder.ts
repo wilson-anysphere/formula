@@ -9,6 +9,7 @@ export type SheetViewState = {
   frozenCols: number;
   colWidths?: Record<string, number>;
   rowHeights?: Record<string, number>;
+  mergedRanges?: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }>;
   drawings?: any[];
 };
 
@@ -20,7 +21,17 @@ export type SheetViewDelta = {
 
 export type SheetViewBinder = { destroy: () => void };
 
-const VIEW_KEYS = new Set(["view", "frozenRows", "frozenCols", "colWidths", "rowHeights", "drawings"]);
+const VIEW_KEYS = new Set([
+  "view",
+  "frozenRows",
+  "frozenCols",
+  "colWidths",
+  "rowHeights",
+  "mergedRanges",
+  // Backwards compatibility with older clients.
+  "mergedCells",
+  "drawings",
+]);
 
 function isRecord(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -175,6 +186,24 @@ function deepEquals(a: any, b: any): boolean {
   }
 }
 
+function mergedRangesEquals(
+  left?: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }>,
+  right?: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }>,
+): boolean {
+  if (left === right) return true;
+  const aRanges = Array.isArray(left) ? left : [];
+  const bRanges = Array.isArray(right) ? right : [];
+  if (aRanges.length !== bRanges.length) return false;
+  if (aRanges.length === 0) return true;
+  const keys = new Set(aRanges.map((r) => `${r.startRow},${r.endRow},${r.startCol},${r.endCol}`));
+  if (keys.size !== aRanges.length) return false;
+  for (const r of bRanges) {
+    const key = `${r.startRow},${r.endRow},${r.startCol},${r.endCol}`;
+    if (!keys.has(key)) return false;
+  }
+  return true;
+}
+
 function sheetViewEquals(a: SheetViewState, b: SheetViewState): boolean {
   if (a === b) return true;
 
@@ -200,11 +229,64 @@ function sheetViewEquals(a: SheetViewState, b: SheetViewState): boolean {
     a.frozenCols === b.frozenCols &&
     axisEquals(a.colWidths, b.colWidths) &&
     axisEquals(a.rowHeights, b.rowHeights) &&
-    deepEquals(
-      Array.isArray(a.drawings) && a.drawings.length > 0 ? a.drawings : null,
-      Array.isArray(b.drawings) && b.drawings.length > 0 ? b.drawings : null,
-    )
+    mergedRangesEquals(a.mergedRanges, b.mergedRanges)
   );
+}
+
+function readMergedRanges(raw: unknown): Array<{ startRow: number; endRow: number; startCol: number; endCol: number }> | undefined {
+  if (!raw) return undefined;
+  // Support Y.Array (or duck-typed equivalents) by converting to a JS array.
+  const maybeArray = (raw as any)?.toArray;
+  if (!Array.isArray(raw) && typeof maybeArray === "function") {
+    try {
+      raw = maybeArray.call(raw);
+    } catch {
+      // ignore
+    }
+  }
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+
+  const overlaps = (a: any, b: any) =>
+    a.startRow <= b.endRow && a.endRow >= b.startRow && a.startCol <= b.endCol && a.endCol >= b.startCol;
+
+  const out: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }> = [];
+  for (const entry of raw) {
+    const sr = Number((entry as any)?.startRow);
+    const er = Number((entry as any)?.endRow);
+    const sc = Number((entry as any)?.startCol);
+    const ec = Number((entry as any)?.endCol);
+    if (!Number.isInteger(sr) || sr < 0) continue;
+    if (!Number.isInteger(er) || er < 0) continue;
+    if (!Number.isInteger(sc) || sc < 0) continue;
+    if (!Number.isInteger(ec) || ec < 0) continue;
+
+    const startRow = Math.min(sr, er);
+    const endRow = Math.max(sr, er);
+    const startCol = Math.min(sc, ec);
+    const endCol = Math.max(sc, ec);
+    if (startRow === endRow && startCol === endCol) continue;
+
+    const candidate = { startRow, endRow, startCol, endCol };
+    for (let i = out.length - 1; i >= 0; i--) {
+      if (overlaps(out[i], candidate)) out.splice(i, 1);
+    }
+    out.push(candidate);
+  }
+
+  if (out.length === 0) return undefined;
+  out.sort((a, b) => a.startRow - b.startRow || a.startCol - b.startCol || a.endRow - b.endRow || a.endCol - b.endCol);
+
+  // Deduplicate after sorting.
+  const deduped: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }> = [];
+  let lastKey: string | null = null;
+  for (const r of out) {
+    const key = `${r.startRow},${r.endRow},${r.startCol},${r.endCol}`;
+    if (key === lastKey) continue;
+    lastKey = key;
+    deduped.push(r);
+  }
+
+  return deduped.length > 0 ? deduped : undefined;
 }
 
 function getSheetIdFromSheetMap(sheet: any): string | null {
@@ -223,6 +305,10 @@ function readSheetViewFromSheetMap(sheet: any): SheetViewState {
     viewRaw !== undefined ? readAxisOverrides(readYMapOrObject(viewRaw, "colWidths")) : readAxisOverrides(sheet?.get?.("colWidths"));
   const rowHeights =
     viewRaw !== undefined ? readAxisOverrides(readYMapOrObject(viewRaw, "rowHeights")) : readAxisOverrides(sheet?.get?.("rowHeights"));
+  const mergedRanges =
+    viewRaw !== undefined
+      ? readMergedRanges(readYMapOrObject(viewRaw, "mergedRanges") ?? readYMapOrObject(viewRaw, "mergedCells"))
+      : readMergedRanges(sheet?.get?.("mergedRanges") ?? sheet?.get?.("mergedCells"));
 
   let drawingsRaw: unknown = undefined;
   if (viewRaw !== undefined) drawingsRaw = readYMapOrObject(viewRaw, "drawings");
@@ -232,6 +318,7 @@ function readSheetViewFromSheetMap(sheet: any): SheetViewState {
   const out: SheetViewState = { frozenRows, frozenCols };
   if (colWidths) out.colWidths = colWidths;
   if (rowHeights) out.rowHeights = rowHeights;
+  if (mergedRanges) out.mergedRanges = mergedRanges;
   if (drawings) out.drawings = drawings;
   return out;
 }
@@ -323,12 +410,16 @@ export function bindSheetViewToCollabSession(options: {
         frozenCols: beforeRaw.frozenCols,
         ...(beforeRaw.colWidths ? { colWidths: beforeRaw.colWidths } : {}),
         ...(beforeRaw.rowHeights ? { rowHeights: beforeRaw.rowHeights } : {}),
+        ...(Array.isArray(beforeRaw.mergedRanges) && beforeRaw.mergedRanges.length > 0
+          ? { mergedRanges: beforeRaw.mergedRanges }
+          : {}),
       };
       const afterView: SheetViewState = {
         frozenRows: after.frozenRows,
         frozenCols: after.frozenCols,
         ...(after.colWidths ? { colWidths: after.colWidths } : {}),
         ...(after.rowHeights ? { rowHeights: after.rowHeights } : {}),
+        ...(Array.isArray(after.mergedRanges) && after.mergedRanges.length > 0 ? { mergedRanges: after.mergedRanges } : {}),
       };
 
       if (!sheetViewEquals(beforeView, afterView)) {
@@ -420,6 +511,34 @@ export function bindSheetViewToCollabSession(options: {
 
           applyAxisDelta(colWidthsMap, before?.colWidths, after.colWidths);
           applyAxisDelta(rowHeightsMap, before?.rowHeights, after.rowHeights);
+
+          const nextMergedRanges =
+            Array.isArray(after.mergedRanges) && after.mergedRanges.length > 0 ? after.mergedRanges : undefined;
+          const prevMergedRanges =
+            Array.isArray(before?.mergedRanges) && before.mergedRanges.length > 0 ? before.mergedRanges : undefined;
+
+          if (!nextMergedRanges) {
+            if (prevMergedRanges) {
+              viewMap.delete("mergedRanges");
+              sheet.delete("mergedRanges");
+              // Backwards compatibility cleanup.
+              viewMap.delete("mergedCells");
+              sheet.delete("mergedCells");
+            }
+          } else if (!mergedRangesEquals(prevMergedRanges, nextMergedRanges)) {
+            const cloned = nextMergedRanges.map((r) => ({
+              startRow: r.startRow,
+              endRow: r.endRow,
+              startCol: r.startCol,
+              endCol: r.endCol,
+            }));
+            // Store on both the nested view map (preferred) and the top-level for backwards compatibility.
+            viewMap.set("mergedRanges", cloned);
+            sheet.set("mergedRanges", cloned);
+            // Also write the legacy key so older clients can still render merged regions.
+            viewMap.set("mergedCells", cloned);
+            sheet.set("mergedCells", cloned);
+          }
 
           const drawingsBefore = Array.isArray(before?.drawings) && before.drawings.length > 0 ? before.drawings : null;
           const drawingsAfter = Array.isArray(after.drawings) && after.drawings.length > 0 ? after.drawings : null;

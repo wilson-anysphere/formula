@@ -1019,7 +1019,9 @@ function normalizeSheetViewState(view) {
 
     /** @type {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }>} */
     const out = [];
-    const seen = new Set();
+
+    const overlaps = (a, b) =>
+      a.startRow <= b.endRow && a.endRow >= b.startRow && a.startCol <= b.endCol && a.endCol >= b.startCol;
 
     for (const entry of entries) {
       if (!entry) continue;
@@ -1041,14 +1043,32 @@ function normalizeSheetViewState(view) {
       // Ignore single-cell merges (no-op).
       if (startRow === endRow && startCol === endCol) continue;
 
-      const key = `${startRow},${startCol},${endRow},${endCol}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ startRow, endRow, startCol, endCol });
+      const candidate = { startRow, endRow, startCol, endCol };
+
+      // Prevent overlaps. If the input contains overlapping merges, resolve conflicts by
+      // treating later entries as authoritative (later wins).
+      for (let i = out.length - 1; i >= 0; i--) {
+        if (overlaps(out[i], candidate)) out.splice(i, 1);
+      }
+      out.push(candidate);
     }
 
-    out.sort((a, b) => (a.startRow - b.startRow === 0 ? a.startCol - b.startCol : a.startRow - b.startRow));
-    return out.length === 0 ? null : out;
+    if (out.length === 0) return null;
+
+    out.sort((a, b) => a.startRow - b.startRow || a.startCol - b.startCol || a.endRow - b.endRow || a.endCol - b.endCol);
+
+    // Deduplicate after sorting.
+    /** @type {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }>} */
+    const deduped = [];
+    let lastKey = null;
+    for (const r of out) {
+      const key = `${r.startRow},${r.endRow},${r.startCol},${r.endCol}`;
+      if (key === lastKey) continue;
+      lastKey = key;
+      deduped.push(r);
+    }
+
+    return deduped.length === 0 ? null : deduped;
   };
 
   const normalizeAxisOverrides = (raw) => {
@@ -1083,7 +1103,13 @@ function normalizeSheetViewState(view) {
   const colWidths = normalizeAxisOverrides(view?.colWidths);
   const rowHeights = normalizeAxisOverrides(view?.rowHeights);
   const mergedRanges = normalizeMergedRanges(
-    view?.mergedRanges ?? view?.merged_ranges ?? view?.mergedRegions ?? view?.merged_regions,
+    view?.mergedRanges ??
+      view?.merged_ranges ??
+      view?.mergedRegions ??
+      view?.merged_regions ??
+      // Backwards compatibility with older encodings.
+      view?.mergedCells ??
+      view?.merged_cells,
   );
 
   return {
@@ -4689,6 +4715,31 @@ export class DocumentController {
   }
 
   /**
+   * Find the merged-cell region (if any) that contains a given cell.
+   *
+   * Ranges use inclusive end coordinates (`endRow`/`endCol` are inclusive).
+   *
+   * @param {string} sheetId
+   * @param {number} row
+   * @param {number} col
+   * @returns {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
+   */
+  getMergedRangeAt(sheetId, row, col) {
+    const rowNum = Number(row);
+    const colNum = Number(col);
+    if (!Number.isInteger(rowNum) || rowNum < 0) return null;
+    if (!Number.isInteger(colNum) || colNum < 0) return null;
+
+    const ranges = this.getMergedRanges(sheetId);
+    for (const r of ranges) {
+      if (rowNum < r.startRow || rowNum > r.endRow) continue;
+      if (colNum < r.startCol || colNum > r.endCol) continue;
+      return r;
+    }
+    return null;
+  }
+
+  /**
    * Resolve a cell inside a merged region to its anchor cell (top-left).
    *
    * @param {string} sheetId
@@ -4697,13 +4748,8 @@ export class DocumentController {
    */
   getMergedMasterCell(sheetId, coord) {
     const c = typeof coord === "string" ? parseA1(coord) : coord;
-    const ranges = this.getMergedRanges(sheetId);
-    for (const r of ranges) {
-      if (c.row < r.startRow || c.row > r.endRow) continue;
-      if (c.col < r.startCol || c.col > r.endCol) continue;
-      return { row: r.startRow, col: r.startCol };
-    }
-    return null;
+    const r = this.getMergedRangeAt(sheetId, c.row, c.col);
+    return r ? { row: r.startRow, col: r.startCol } : null;
   }
 
   /**
@@ -4730,6 +4776,143 @@ export class DocumentController {
     const normalized = normalizeSheetViewState(after);
     if (sheetViewStateEquals(before, normalized)) return;
     this.#applyUserSheetViewDeltas([{ sheetId, before, after: normalized }], options);
+  }
+
+  /**
+   * Merge cells in a rectangular range (Excel-style).
+   *
+   * Semantics:
+   * - Only rectangular regions are supported.
+   * - The merged-cell anchor is the top-left cell (`startRow`/`startCol`).
+   * - All non-anchor cells in the region have their *contents* cleared (value/formula),
+   *   while preserving formatting.
+   * - Overlaps with existing merges are resolved automatically by removing any
+   *   overlapping merges (new merge wins).
+   *
+   * Ranges use inclusive end coordinates (`endRow`/`endCol` are inclusive).
+   *
+   * @param {string} sheetId
+   * @param {{ startRow: number, endRow: number, startCol: number, endCol: number }} range
+   * @param {{ label?: string, mergeKey?: string }} [options]
+   */
+  mergeCells(sheetId, range, options = {}) {
+    const sr = Number(range?.startRow);
+    const er = Number(range?.endRow);
+    const sc = Number(range?.startCol);
+    const ec = Number(range?.endCol);
+    if (!Number.isInteger(sr) || sr < 0) return;
+    if (!Number.isInteger(er) || er < 0) return;
+    if (!Number.isInteger(sc) || sc < 0) return;
+    if (!Number.isInteger(ec) || ec < 0) return;
+
+    const startRow = Math.min(sr, er);
+    const endRow = Math.max(sr, er);
+    const startCol = Math.min(sc, ec);
+    const endCol = Math.max(sc, ec);
+
+    // Ignore single-cell merges (no-op).
+    if (startRow === endRow && startCol === endCol) return;
+
+    if (this.canEditCell && !this.canEditCell({ sheetId, row: startRow, col: startCol })) return;
+
+    const overlaps = (a, b) =>
+      a.startRow <= b.endRow && a.endRow >= b.startRow && a.startCol <= b.endCol && a.endCol >= b.startCol;
+
+    const beforeView = this.model.getSheetView(sheetId);
+    const existing = Array.isArray(beforeView?.mergedRanges) ? beforeView.mergedRanges : [];
+    const nextMergedRanges = existing
+      .filter((r) => r && !overlaps(r, { startRow, endRow, startCol, endCol }))
+      .map((r) => ({ startRow: r.startRow, endRow: r.endRow, startCol: r.startCol, endCol: r.endCol }));
+    nextMergedRanges.push({ startRow, endRow, startCol, endCol });
+
+    const afterView = cloneSheetViewState(beforeView);
+    afterView.mergedRanges = nextMergedRanges;
+    const normalizedAfterView = normalizeSheetViewState(afterView);
+
+    /** @type {CellDelta[]} */
+    const cellDeltas = [];
+    let blockedByPermissions = false;
+
+    // Clear contents of non-anchor cells in the merge region, preserving formatting.
+    // Iterate only stored cells (sparse map) to avoid O(area) work for huge ranges.
+    this.forEachCellInSheet(sheetId, ({ row, col, cell }) => {
+      if (blockedByPermissions) return;
+      if (row < startRow || row > endRow) return;
+      if (col < startCol || col > endCol) return;
+      if (row === startRow && col === startCol) return;
+      if (cell.value == null && cell.formula == null) return;
+
+      if (this.canEditCell && !this.canEditCell({ sheetId, row, col })) {
+        // If we can't clear an interior cell that has content, abort the merge to avoid
+        // leaving non-anchor content hidden inside a merged region.
+        blockedByPermissions = true;
+        return;
+      }
+
+      const before = cloneCellState(cell);
+      const after = { value: null, formula: null, styleId: before.styleId };
+      if (cellStateEquals(before, after)) return;
+      cellDeltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
+    });
+
+    if (blockedByPermissions) return;
+
+    /** @type {SheetViewDelta[]} */
+    const sheetViewDeltas = sheetViewStateEquals(beforeView, normalizedAfterView)
+      ? []
+      : [{ sheetId, before: beforeView, after: normalizedAfterView }];
+
+    if (cellDeltas.length === 0 && sheetViewDeltas.length === 0) return;
+
+    // Apply as a single undo step / change event so merge metadata + content clearing stay in sync.
+    this.#applyUserWorkbookEdits({ cellDeltas, sheetViewDeltas }, options);
+  }
+
+  /**
+   * Remove merged-cell regions intersecting a target cell or range.
+   *
+   * @param {string} sheetId
+   * @param {{ row: number, col: number } | { startRow: number, endRow: number, startCol: number, endCol: number }} target
+   * @param {{ label?: string, mergeKey?: string }} [options]
+   */
+  unmergeCells(sheetId, target, options = {}) {
+    const ranges = this.getMergedRanges(sheetId);
+    if (ranges.length === 0) return;
+
+    const isCell = target && typeof target === "object" && "row" in target && "col" in target;
+
+    /** @type {{ startRow: number, endRow: number, startCol: number, endCol: number } | null} */
+    let rect = null;
+    if (isCell) {
+      const row = Number(target?.row);
+      const col = Number(target?.col);
+      if (!Number.isInteger(row) || row < 0) return;
+      if (!Number.isInteger(col) || col < 0) return;
+      rect = { startRow: row, endRow: row, startCol: col, endCol: col };
+    } else {
+      const sr = Number(target?.startRow);
+      const er = Number(target?.endRow);
+      const sc = Number(target?.startCol);
+      const ec = Number(target?.endCol);
+      if (!Number.isInteger(sr) || sr < 0) return;
+      if (!Number.isInteger(er) || er < 0) return;
+      if (!Number.isInteger(sc) || sc < 0) return;
+      if (!Number.isInteger(ec) || ec < 0) return;
+      rect = {
+        startRow: Math.min(sr, er),
+        endRow: Math.max(sr, er),
+        startCol: Math.min(sc, ec),
+        endCol: Math.max(sc, ec),
+      };
+    }
+
+    const intersects = (a, b) =>
+      a.startRow <= b.endRow && a.endRow >= b.startRow && a.startCol <= b.endCol && a.endCol >= b.startCol;
+
+    const next = ranges.filter((r) => !intersects(r, rect));
+    if (next.length === ranges.length) return;
+
+    this.setMergedRanges(sheetId, next, options);
   }
 
   /**
@@ -5231,7 +5414,14 @@ export class DocumentController {
         frozenCols: sheet?.frozenCols,
         colWidths: sheet?.colWidths,
         rowHeights: sheet?.rowHeights,
-        mergedRanges: sheet?.mergedRanges ?? sheet?.merged_ranges ?? sheet?.mergedRegions ?? sheet?.merged_regions,
+        mergedRanges:
+          sheet?.mergedRanges ??
+          sheet?.merged_ranges ??
+          sheet?.mergedRegions ??
+          sheet?.merged_regions ??
+          // Backwards compatibility with earlier snapshots.
+          sheet?.mergedCells ??
+          sheet?.merged_cells,
       });
       /** @type {Map<string, CellState>} */
       const cellMap = new Map();

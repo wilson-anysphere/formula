@@ -808,6 +808,87 @@ export class DocumentCellProvider implements CellProvider {
     // rendering.
   }
 
+  getMergedRangeAt(row: number, col: number): CellRange | null {
+    const { rowCount, colCount, headerRows, headerCols } = this.options;
+    if (row < 0 || col < 0 || row >= rowCount || col >= colCount) return null;
+    // Never treat header cells as merged.
+    if (row < headerRows || col < headerCols) return null;
+
+    const docRow = row - headerRows;
+    const docCol = col - headerCols;
+    if (docRow < 0 || docCol < 0) return null;
+
+    const controller: any = this.options.document as any;
+    if (typeof controller.getMergedRangeAt !== "function") return null;
+
+    const sheetId = this.options.getSheetId();
+    const merged = controller.getMergedRangeAt(sheetId, docRow, docCol) as
+      | { startRow: number; endRow: number; startCol: number; endCol: number }
+      | null;
+    if (!merged) return null;
+
+    // DocumentController stores inclusive ends; grid expects exclusive ends.
+    return {
+      startRow: merged.startRow + headerRows,
+      endRow: merged.endRow + headerRows + 1,
+      startCol: merged.startCol + headerCols,
+      endCol: merged.endCol + headerCols + 1
+    };
+  }
+
+  getMergedRangesInRange(range: CellRange): CellRange[] {
+    const { headerRows, headerCols } = this.options;
+    const controller: any = this.options.document as any;
+    if (typeof controller.getMergedRanges !== "function") return [];
+
+    const sheetId = this.options.getSheetId();
+    const merged = controller.getMergedRanges(sheetId) as Array<{
+      startRow: number;
+      endRow: number;
+      startCol: number;
+      endCol: number;
+    }>;
+    if (!Array.isArray(merged) || merged.length === 0) return [];
+
+    // Convert query range from grid coords to document coords (exclusive ends).
+    const qStartRow = range.startRow - headerRows;
+    const qEndRow = range.endRow - headerRows;
+    const qStartCol = range.startCol - headerCols;
+    const qEndCol = range.endCol - headerCols;
+
+    // If the query range lies entirely in the header region, there can be no merges.
+    if (qEndRow <= 0 || qEndCol <= 0) return [];
+
+    const startRow = Math.max(0, qStartRow);
+    const endRow = Math.max(0, qEndRow);
+    const startCol = Math.max(0, qStartCol);
+    const endCol = Math.max(0, qEndCol);
+    if (endRow <= startRow || endCol <= startCol) return [];
+
+    const out: CellRange[] = [];
+    for (const r of merged) {
+      if (!r) continue;
+      const mrStartRow = Number(r.startRow);
+      const mrEndRowExclusive = Number(r.endRow) + 1;
+      const mrStartCol = Number(r.startCol);
+      const mrEndColExclusive = Number(r.endCol) + 1;
+      if (!Number.isFinite(mrStartRow) || !Number.isFinite(mrEndRowExclusive)) continue;
+      if (!Number.isFinite(mrStartCol) || !Number.isFinite(mrEndColExclusive)) continue;
+
+      const intersects =
+        mrStartRow < endRow && mrEndRowExclusive > startRow && mrStartCol < endCol && mrEndColExclusive > startCol;
+      if (!intersects) continue;
+
+      out.push({
+        startRow: mrStartRow + headerRows,
+        endRow: mrEndRowExclusive + headerRows,
+        startCol: mrStartCol + headerCols,
+        endCol: mrEndColExclusive + headerCols
+      });
+    }
+    return out;
+  }
+
   getCell(row: number, col: number): CellData | null {
     const { rowCount, colCount, headerRows, headerCols } = this.options;
     if (row < 0 || col < 0 || row >= rowCount || col >= colCount) return null;
@@ -1121,8 +1202,8 @@ export class DocumentCellProvider implements CellProvider {
             // Some callers emit legacy sheetView delta shapes (e.g. `{ sheetId, frozenRows }`).
             // Only treat deltas that have explicit before/after objects as eligible for merged-range updates.
             if (!before || !after) continue;
-            const beforeRanges = (before as any)?.mergedRanges;
-            const afterRanges = (after as any)?.mergedRanges;
+            const beforeRanges = (before as any)?.mergedRanges ?? (before as any)?.mergedCells;
+            const afterRanges = (after as any)?.mergedRanges ?? (after as any)?.mergedCells;
             if (this.mergedRangesEqual(beforeRanges, afterRanges)) continue;
             this.bumpMergedEpoch(id);
             if (id === sheetId) mergedRangesChangedForVisibleSheet = true;
@@ -1145,6 +1226,79 @@ export class DocumentCellProvider implements CellProvider {
           sheetStyleDeltas.length > 0 ||
           formatDeltas.length > 0 ||
           rangeRunDeltas.length > 0;
+
+        const mergedRangesDirtyRange = (() => {
+          if (sheetViewDeltas.length === 0) return null;
+          let minRow = Infinity;
+          let maxRow = -Infinity;
+          let minCol = Infinity;
+          let maxCol = -Infinity;
+
+          const add = (range: any) => {
+            const startRow = Number(range?.startRow);
+            const endRow = Number(range?.endRow);
+            const startCol = Number(range?.startCol);
+            const endCol = Number(range?.endCol);
+            if (!Number.isInteger(startRow) || startRow < 0) return;
+            if (!Number.isInteger(endRow) || endRow < startRow) return;
+            if (!Number.isInteger(startCol) || startCol < 0) return;
+            if (!Number.isInteger(endCol) || endCol < startCol) return;
+            minRow = Math.min(minRow, startRow);
+            maxRow = Math.max(maxRow, endRow);
+            minCol = Math.min(minCol, startCol);
+            maxCol = Math.max(maxCol, endCol);
+          };
+
+          const buildMap = (raw: any) => {
+            const map = new Map<string, any>();
+            if (!Array.isArray(raw)) return map;
+            for (const r of raw) {
+              const startRow = Number(r?.startRow);
+              const endRow = Number(r?.endRow);
+              const startCol = Number(r?.startCol);
+              const endCol = Number(r?.endCol);
+              if (!Number.isInteger(startRow) || startRow < 0) continue;
+              if (!Number.isInteger(endRow) || endRow < startRow) continue;
+              if (!Number.isInteger(startCol) || startCol < 0) continue;
+              if (!Number.isInteger(endCol) || endCol < startCol) continue;
+              const key = `${startRow},${endRow},${startCol},${endCol}`;
+              map.set(key, { startRow, endRow, startCol, endCol });
+            }
+            return map;
+          };
+
+          for (const delta of sheetViewDeltas) {
+            if (!delta) continue;
+            if (String(delta.sheetId ?? "") !== sheetId) continue;
+            const beforeView: any = (delta as any).before;
+            const afterView: any = (delta as any).after;
+            const beforeMap = buildMap(beforeView?.mergedRanges ?? beforeView?.mergedCells);
+            const afterMap = buildMap(afterView?.mergedRanges ?? afterView?.mergedCells);
+
+            if (beforeMap.size === afterMap.size && beforeMap.size > 0) {
+              let same = true;
+              for (const key of beforeMap.keys()) {
+                if (!afterMap.has(key)) {
+                  same = false;
+                  break;
+                }
+              }
+              if (same) continue;
+            } else if (beforeMap.size === 0 && afterMap.size === 0) {
+              continue;
+            }
+
+            for (const [key, r] of beforeMap) {
+              if (!afterMap.has(key)) add(r);
+            }
+            for (const [key, r] of afterMap) {
+              if (!beforeMap.has(key)) add(r);
+            }
+          }
+
+          if (minRow === Infinity || minCol === Infinity) return null;
+          return { startRow: minRow, endRow: maxRow + 1, startCol: minCol, endCol: maxCol + 1 };
+        })();
 
         // No cell deltas + no formatting deltas: preserve the sheet-view optimization.
         if (deltas.length === 0 && !hasFormatLayerDeltas) {
@@ -1359,6 +1513,15 @@ export class DocumentCellProvider implements CellProvider {
             endRow: clampInt(maxRow + 1, 0, docRowCount),
             startCol: clampInt(minCol, 0, docColCount),
             endCol: clampInt(maxCol + 1, 0, docColCount)
+          });
+        }
+
+        if (mergedRangesDirtyRange) {
+          invalidateRanges.push({
+            startRow: clampInt(mergedRangesDirtyRange.startRow, 0, docRowCount),
+            endRow: clampInt(mergedRangesDirtyRange.endRow, 0, docRowCount),
+            startCol: clampInt(mergedRangesDirtyRange.startCol, 0, docColCount),
+            endCol: clampInt(mergedRangesDirtyRange.endCol, 0, docColCount)
           });
         }
 
