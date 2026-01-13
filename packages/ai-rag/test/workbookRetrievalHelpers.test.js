@@ -73,27 +73,26 @@ test("dedupeOverlappingResults removes near-duplicate overlapping chunks (keeps 
     {
       id: "low",
       score: 0.8,
-      metadata: { sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 9, c1: 9 } },
+      metadata: { workbookId: "wb", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 9, c1: 9 } },
     },
     {
       id: "high",
       score: 0.9,
-      metadata: { sheetName: "Sheet1", rect: { r0: 1, c0: 1, r1: 8, c1: 8 } },
+      metadata: { workbookId: "wb", sheetName: "Sheet1", rect: { r0: 1, c0: 1, r1: 8, c1: 8 } },
     },
     {
       id: "other",
       score: 0.85,
-      metadata: { sheetName: "Sheet1", rect: { r0: 20, c0: 0, r1: 21, c1: 2 } },
+      metadata: { workbookId: "wb", sheetName: "Sheet1", rect: { r0: 20, c0: 0, r1: 21, c1: 2 } },
     },
     // Same rect but different sheet -> should not dedupe with Sheet1 chunks.
     {
       id: "sheet2",
       score: 0.95,
-      metadata: { sheetName: "Sheet2", rect: { r0: 1, c0: 1, r1: 8, c1: 8 } },
+      metadata: { workbookId: "wb", sheetName: "Sheet2", rect: { r0: 1, c0: 1, r1: 8, c1: 8 } },
     },
   ];
 
   const deduped = dedupeOverlappingResults(results);
   assert.deepEqual(deduped.map((r) => r.id), ["sheet2", "high", "other"]);
 });
-
