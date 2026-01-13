@@ -233,12 +233,38 @@ PY
               if not isinstance(a, int) or not isinstance(b, int):
                   return "n/a"
               return f"{b - a:+d}"
-          
+
+          def ms(v):
+              if v is None:
+                  return "n/a"
+              try:
+                  v = float(v)
+              except Exception:
+                  return "n/a"
+              if abs(v - round(v)) < 1e-9:
+                  return f"{int(round(v))}ms"
+              return f"{v:.1f}ms"
+
+          def delta_ms(a, b):
+              if a is None or b is None:
+                  return "n/a"
+              try:
+                  a = float(a)
+                  b = float(b)
+              except Exception:
+                  return "n/a"
+              d = b - a
+              if abs(d - round(d)) < 1e-9:
+                  return f"{int(round(d)):+d}ms"
+              return f"{d:+.1f}ms"
+           
           lines = []
           lines.append("## Trend delta (vs previous private run)")
           lines.append("")
           lines.append(f"- Open rate: **{pct(cur.get('open_rate'))}** ({delta_pct(prev.get('open_rate'), cur.get('open_rate'))})")
           lines.append(f"- Round-trip rate: **{pct(cur.get('round_trip_rate'))}** ({delta_pct(prev.get('round_trip_rate'), cur.get('round_trip_rate'))})")
+          lines.append(f"- Load p90: **{ms(cur.get('load_p90_ms'))}** ({delta_ms(prev.get('load_p90_ms'), cur.get('load_p90_ms'))})")
+          lines.append(f"- Round-trip p90: **{ms(cur.get('round_trip_p90_ms'))}** ({delta_ms(prev.get('round_trip_p90_ms'), cur.get('round_trip_p90_ms'))})")
           lines.append(f"- Calc rate (attempted): **{pct(cur.get('calc_rate'))}** ({delta_pct(prev.get('calc_rate'), cur.get('calc_rate'))}); attempted {cur.get('calc_attempted', 0)}")
           lines.append(f"- Render rate (attempted): **{pct(cur.get('render_rate'))}** ({delta_pct(prev.get('render_rate'), cur.get('render_rate'))}); attempted {cur.get('render_attempted', 0)}")
           

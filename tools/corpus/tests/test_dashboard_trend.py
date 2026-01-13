@@ -28,6 +28,16 @@ class DashboardTrendTests(unittest.TestCase):
             "failures_by_category": {"round_trip_diff": 1},
             # Size ratios: [110/100=1.1, 180/200=0.9]
             "round_trip_size_overhead": {"count": 2, "mean": 1.0, "p50": 1.0, "p90": 1.08},
+            "timings": {
+                "load": {"count": 3, "p50_ms": 10, "p90_ms": 20, "mean_ms": 12.0, "max_ms": 30},
+                "round_trip": {
+                    "count": 3,
+                    "p50_ms": 40,
+                    "p90_ms": 50,
+                    "mean_ms": 41.0,
+                    "max_ms": 60,
+                },
+            },
         }
 
         entry = _trend_entry(summary)
@@ -52,6 +62,11 @@ class DashboardTrendTests(unittest.TestCase):
         self.assertAlmostEqual(entry["size_overhead_mean"], 1.0)
         self.assertAlmostEqual(entry["size_overhead_p50"], 1.0)
         self.assertAlmostEqual(entry["size_overhead_p90"], 1.08)
+
+        self.assertAlmostEqual(entry["load_p50_ms"], 10.0)
+        self.assertAlmostEqual(entry["load_p90_ms"], 20.0)
+        self.assertAlmostEqual(entry["round_trip_p50_ms"], 40.0)
+        self.assertAlmostEqual(entry["round_trip_p90_ms"], 50.0)
 
         self.assertEqual(entry["diff_totals"]["critical"], 1)
         self.assertEqual(entry["diff_totals"]["warning"], 2)

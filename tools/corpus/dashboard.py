@@ -156,6 +156,21 @@ def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(overhead, dict):
         overhead = {}
 
+    timings = summary.get("timings") or {}
+    if not isinstance(timings, dict):
+        timings = {}
+
+    def _timing_val(step: str, key: str) -> float | None:
+        row = timings.get(step) if isinstance(timings, dict) else None
+        if not isinstance(row, dict):
+            return None
+        val = row.get(key)
+        if isinstance(val, bool):
+            return None
+        if isinstance(val, (int, float)):
+            return float(val)
+        return None
+
     entry: dict[str, Any] = {
         "timestamp": summary.get("timestamp"),
         "commit": summary.get("commit"),
@@ -180,6 +195,17 @@ def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
         "size_overhead_p90": overhead.get("p90"),
         "size_overhead_samples": int(overhead.get("count") or 0),
     }
+
+    # Perf trend signals (optional; only present when dashboard has timings data).
+    for key, step, stat_key in [
+        ("load_p50_ms", "load", "p50_ms"),
+        ("load_p90_ms", "load", "p90_ms"),
+        ("round_trip_p50_ms", "round_trip", "p50_ms"),
+        ("round_trip_p90_ms", "round_trip", "p90_ms"),
+    ]:
+        v = _timing_val(step, stat_key)
+        if v is not None:
+            entry[key] = v
 
     # Keep entries compact by eliding empty metadata keys.
     if not entry.get("commit"):
