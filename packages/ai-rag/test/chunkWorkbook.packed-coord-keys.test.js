@@ -100,3 +100,30 @@ test("chunkWorkbook: detectRegions connects across BigInt/string coord key bound
   assert.equal(dataRegions[0].cells[0][0].v, "A");
   assert.equal(dataRegions[0].cells[0][1].v, "B");
 });
+
+test("chunkWorkbook: detectRegions connects across Number/BigInt row packing boundary", () => {
+  // This crosses the row packing boundary where `packCoordKey` switches from Number
+  // keys to BigInt keys (row*2^20 must stay within MAX_SAFE_INTEGER).
+  const rowNum = 8_589_934; // MAX_SAFE_PACKED_ROW
+  const rowBig = rowNum + 1;
+  const col = 0;
+
+  const cells = new Map();
+  // Insert the BigInt-represented coordinate first to avoid relying on insertion order.
+  cells.set(`${rowBig},${col}`, { value: "B" });
+  cells.set(`${rowNum},${col}`, { value: "A" });
+
+  const workbook = {
+    id: "wb-packed-keys-row-boundary",
+    sheets: [{ name: "Sheet1", cells }],
+    tables: [],
+    namedRanges: [],
+  };
+
+  const chunks = chunkWorkbook(workbook);
+  const dataRegions = chunks.filter((c) => c.kind === "dataRegion");
+  assert.equal(dataRegions.length, 1);
+  assert.deepEqual(dataRegions[0].rect, { r0: rowNum, c0: col, r1: rowBig, c1: col });
+  assert.equal(dataRegions[0].cells[0][0].v, "A");
+  assert.equal(dataRegions[0].cells[1][0].v, "B");
+});
