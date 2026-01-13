@@ -181,6 +181,62 @@ fn calculate_overrides_existing_column_filters() {
 }
 
 #[test]
+fn calculate_keepfilters_intersects_with_existing_column_filters() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+    model
+        .add_measure(
+            "Override",
+            "CALCULATE([Total Sales], Customers[Region] = \"West\")",
+        )
+        .unwrap();
+    model
+        .add_measure(
+            "Keep",
+            "CALCULATE([Total Sales], KEEPFILTERS(Customers[Region] = \"West\"))",
+        )
+        .unwrap();
+
+    let east_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
+
+    // Default CALCULATE filter arguments replace existing filters on the same column.
+    assert_eq!(
+        model.evaluate_measure("Override", &east_filter).unwrap(),
+        5.0.into()
+    );
+
+    // KEEPFILTERS forces intersection with the existing filter context.
+    assert_eq!(
+        model.evaluate_measure("Keep", &east_filter).unwrap(),
+        Value::Blank
+    );
+}
+
+#[test]
+fn calculate_keepfilters_on_different_column_applies_both_filters() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+    model
+        .add_measure(
+            "Keep Alice",
+            "CALCULATE([Total Sales], KEEPFILTERS(Customers[Name] = \"Alice\"))",
+        )
+        .unwrap();
+
+    let east_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
+    assert_eq!(
+        model.evaluate_measure("Keep Alice", &east_filter).unwrap(),
+        30.0.into()
+    );
+}
+
+#[test]
 fn calculate_treatas_can_simulate_relationships() {
     let model = build_model_without_relationship();
     let filter = FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
@@ -200,7 +256,8 @@ fn calculate_treatas_can_simulate_relationships() {
 #[test]
 fn calculate_treatas_with_empty_source_values_filters_to_empty_set() {
     let model = build_model_without_relationship();
-    let filter = FilterContext::empty().with_column_equals("Customers", "Region", "Nowhere".into());
+    let filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "Nowhere".into());
 
     let engine = DaxEngine::new();
     let sum_value = engine

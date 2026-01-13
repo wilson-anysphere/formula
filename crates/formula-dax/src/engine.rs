@@ -1245,6 +1245,22 @@ impl DaxEngine {
         let mut column_filters: Vec<((String, String), HashSet<Value>)> = Vec::new();
 
         for arg in filter_args {
+            // `KEEPFILTERS` wraps a normal filter argument, but changes its semantics from
+            // replacement (clear existing filters on the target table/column) to intersection.
+            // We implement that by evaluating the inner argument as usual, but skipping any
+            // additions to `clear_tables` / `clear_columns`.
+            let (arg, keep_filters) = match arg {
+                Expr::Call { name, args } if name.eq_ignore_ascii_case("KEEPFILTERS") => {
+                    let [inner] = args.as_slice() else {
+                        return Err(DaxError::Eval(
+                            "KEEPFILTERS expects exactly 1 argument".into(),
+                        ));
+                    };
+                    (inner, true)
+                }
+                _ => (arg, false),
+            };
+
             match arg {
                 Expr::Call { name, .. } if name.eq_ignore_ascii_case("USERELATIONSHIP") => {}
                 Expr::Call { name, args }
@@ -1266,10 +1282,14 @@ impl DaxEngine {
                     };
                     match inner {
                         Expr::TableName(table) => {
-                            clear_tables.insert(table.clone());
+                            if !keep_filters {
+                                clear_tables.insert(table.clone());
+                            }
                         }
                         Expr::ColumnRef { table, column } => {
-                            clear_columns.insert((table.clone(), column.clone()));
+                            if !keep_filters {
+                                clear_columns.insert((table.clone(), column.clone()));
+                            }
                         }
                         other => {
                             return Err(DaxError::Type(format!(
@@ -1287,7 +1307,9 @@ impl DaxEngine {
 
                     let rhs = self.eval_scalar(model, right, &eval_filter, row_ctx)?;
                     let key = (table.clone(), column.clone());
-                    clear_columns.insert(key.clone());
+                    if !keep_filters {
+                        clear_columns.insert(key.clone());
+                    }
 
                     match op {
                         BinaryOp::Equals => {
@@ -1386,13 +1408,17 @@ impl DaxEngine {
                         unreachable!("checked above");
                     };
                     let key = (table.clone(), column.clone());
-                    clear_columns.insert(key.clone());
+                    if !keep_filters {
+                        clear_columns.insert(key.clone());
+                    }
                     let values = self.distinct_column_values(model, &args[0], &eval_filter)?;
                     column_filters.push((key, values));
                 }
                 Expr::Call { .. } | Expr::TableName(_) => {
                     let table_filter = self.eval_table(model, arg, &eval_filter, row_ctx)?;
-                    clear_tables.insert(table_filter.table.clone());
+                    if !keep_filters {
+                        clear_tables.insert(table_filter.table.clone());
+                    }
                     row_filters.push((table_filter.table, table_filter.rows.into_iter().collect()));
                 }
                 other => {
