@@ -1898,12 +1898,12 @@ impl MutableFloatColumn {
                     if let Some(validity) = &c.validity {
                         for (idx, v) in c.values.iter().enumerate() {
                             if validity.get(idx) {
-                                counter.insert_i64(v.to_bits() as i64);
+                                counter.insert_i64(canonical_f64_bits(*v) as i64);
                             }
                         }
                     } else {
                         for v in &c.values {
-                            counter.insert_i64(v.to_bits() as i64);
+                            counter.insert_i64(canonical_f64_bits(*v) as i64);
                         }
                     }
                 }
@@ -1984,7 +1984,7 @@ impl MutableFloatColumn {
             Value::Number(v) => {
                 self.current.push(*v);
                 self.validity.push(true);
-                self.distinct.insert_i64(v.to_bits() as i64);
+                self.distinct.insert_i64(canonical_f64_bits(*v) as i64);
                 self.sum += *v;
                 self.min = Some(self.min.map(|m| m.min(*v)).unwrap_or(*v));
                 self.max = Some(self.max.map(|m| m.max(*v)).unwrap_or(*v));
@@ -2043,7 +2043,7 @@ impl MutableFloatColumn {
             (None, Some(v)) => {
                 self.null_count = self.null_count.saturating_sub(1);
                 self.sum += v;
-                self.distinct.insert_i64(v.to_bits() as i64);
+                self.distinct.insert_i64(canonical_f64_bits(v) as i64);
                 self.min = Some(self.min.map(|m| m.min(v)).unwrap_or(v));
                 self.max = Some(self.max.map(|m| m.max(v)).unwrap_or(v));
                 false
@@ -2055,7 +2055,7 @@ impl MutableFloatColumn {
             }
             (Some(old_v), Some(new_v)) => {
                 self.sum += new_v - old_v;
-                self.distinct.insert_i64(new_v.to_bits() as i64);
+                self.distinct.insert_i64(canonical_f64_bits(new_v) as i64);
                 self.min = Some(self.min.map(|m| m.min(new_v)).unwrap_or(new_v));
                 self.max = Some(self.max.map(|m| m.max(new_v)).unwrap_or(new_v));
                 (self.min == Some(old_v) && new_v != old_v) || (self.max == Some(old_v) && new_v != old_v)
@@ -3582,7 +3582,7 @@ impl FloatBuilder {
             Value::Number(v) => {
                 self.current.push(*v);
                 self.validity.push(true);
-                self.distinct.insert_i64(v.to_bits() as i64);
+                self.distinct.insert_i64(canonical_f64_bits(*v) as i64);
                 self.sum += *v;
                 self.min = Some(self.min.map(|m| m.min(*v)).unwrap_or(*v));
                 self.max = Some(self.max.map(|m| m.max(*v)).unwrap_or(*v));

@@ -282,6 +282,37 @@ fn distinct_count_after_from_encoded_and_append() {
 }
 
 #[test]
+fn distinct_count_stats_canonicalizes_negative_zero_and_nans() {
+    let schema = vec![ColumnSchema {
+        name: "x".to_owned(),
+        column_type: ColumnType::Number,
+    }];
+    let options = TableOptions {
+        page_size_rows: 4,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+
+    let mut builder = ColumnarTableBuilder::new(schema, options);
+    builder.append_row(&[Value::Number(0.0)]);
+    builder.append_row(&[Value::Number(-0.0)]);
+    builder.append_row(&[Value::Number(f64::NAN)]);
+    builder.append_row(&[Value::Number(f64::from_bits(0x7ff8_0000_0000_0001))]);
+    builder.append_row(&[Value::Number(1.0)]);
+    builder.append_row(&[Value::Null]);
+    let table = builder.finalize();
+
+    let stats = table.scan().stats(0).unwrap();
+    assert_eq!(stats.null_count, 1);
+    assert_eq!(stats.distinct_count, 3);
+
+    // Ensure the mutable overlay keeps using the same canonicalization.
+    let mut mutable = table.into_mutable();
+    mutable.append_row(&[Value::Number(-0.0)]);
+    mutable.append_row(&[Value::Number(f64::from_bits(0x7ff8_0000_0000_0010))]);
+    assert_eq!(mutable.column_stats(0).unwrap().distinct_count, 3);
+}
+
+#[test]
 fn append_after_into_mutable_from_partial_last_page() {
     let schema = vec![ColumnSchema {
         name: "x".to_owned(),
