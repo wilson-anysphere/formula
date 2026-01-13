@@ -323,7 +323,111 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         );
     }
 
+    // Import Excel print settings (print area + print titles) from the canonical XLSX encoding:
+    // workbook-scoped defined names with a `localSheetId` pointing at the sheet index.
+    //
+    // Best-effort: ignore malformed references so workbook load does not fail.
+    populate_workbook_print_settings_from_xlsx_defined_names(&mut workbook);
+
     Ok(workbook)
+}
+
+fn populate_workbook_print_settings_from_xlsx_defined_names(workbook: &mut Workbook) {
+    // Snapshot relevant defined names up-front so we can mutably update print settings while
+    // iterating.
+    let builtins: Vec<(u32, String, String)> = workbook
+        .defined_names
+        .iter()
+        .filter(|n| {
+            n.name.eq_ignore_ascii_case(formula_model::XLNM_PRINT_AREA)
+                || n.name.eq_ignore_ascii_case(formula_model::XLNM_PRINT_TITLES)
+        })
+        .filter_map(|n| {
+            n.xlsx_local_sheet_id
+                .map(|idx| (idx, n.name.clone(), n.refers_to.clone()))
+        })
+        .collect();
+
+    for (sheet_index, name, refers_to) in builtins {
+        let Some(sheet_name) = workbook
+            .sheets
+            .get(sheet_index as usize)
+            .map(|s| s.name.clone())
+        else {
+            continue;
+        };
+
+        if name.eq_ignore_ascii_case(formula_model::XLNM_PRINT_AREA) {
+            if workbook
+                .sheet_print_settings_by_name(&sheet_name)
+                .print_area
+                .is_some()
+            {
+                continue;
+            }
+            let Ok(ranges) = crate::print::parse_print_area_defined_name(&sheet_name, &refers_to)
+            else {
+                continue;
+            };
+            let converted: Vec<Range> = ranges
+                .into_iter()
+                .filter_map(xlsx_cell_range_to_model_range)
+                .collect();
+            if !converted.is_empty() {
+                workbook.set_sheet_print_area_by_name(&sheet_name, Some(converted));
+            }
+        } else if name.eq_ignore_ascii_case(formula_model::XLNM_PRINT_TITLES) {
+            if workbook
+                .sheet_print_settings_by_name(&sheet_name)
+                .print_titles
+                .is_some()
+            {
+                continue;
+            }
+            let Ok(titles) =
+                crate::print::parse_print_titles_defined_name(&sheet_name, &refers_to)
+            else {
+                continue;
+            };
+            let Some(converted) = xlsx_print_titles_to_model_titles(titles) else {
+                continue;
+            };
+            workbook.set_sheet_print_titles_by_name(&sheet_name, Some(converted));
+        }
+    }
+}
+
+fn xlsx_cell_range_to_model_range(range: crate::print::CellRange) -> Option<Range> {
+    let start_row = range.start_row.checked_sub(1)?;
+    let end_row = range.end_row.checked_sub(1)?;
+    let start_col = range.start_col.checked_sub(1)?;
+    let end_col = range.end_col.checked_sub(1)?;
+    Some(Range::new(
+        CellRef::new(start_row, start_col),
+        CellRef::new(end_row, end_col),
+    ))
+}
+
+fn xlsx_print_titles_to_model_titles(
+    titles: crate::print::PrintTitles,
+) -> Option<formula_model::PrintTitles> {
+    let repeat_rows = titles.repeat_rows.and_then(|r| {
+        Some(formula_model::RowRange {
+            start: r.start.checked_sub(1)?,
+            end: r.end.checked_sub(1)?,
+        })
+    });
+    let repeat_cols = titles.repeat_cols.and_then(|c| {
+        Some(formula_model::ColRange {
+            start: c.start.checked_sub(1)?,
+            end: c.end.checked_sub(1)?,
+        })
+    });
+
+    (repeat_rows.is_some() || repeat_cols.is_some()).then_some(formula_model::PrintTitles {
+        repeat_rows,
+        repeat_cols,
+    })
 }
 
 fn attach_tables_from_parts<R: Read + Seek>(
@@ -839,6 +943,9 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             defined.local_sheet_id,
         );
     }
+
+    // Import Excel print settings (print area + print titles) from workbook defined names.
+    populate_workbook_print_settings_from_xlsx_defined_names(&mut workbook);
 
     // Best-effort in-cell image loader (`xl/cellimages*.xml`). Missing parts or media should not
     // prevent the workbook from loading.
