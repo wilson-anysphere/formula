@@ -1175,6 +1175,75 @@ fn import_xls_path_with_biff_reader(
             ))),
         }
 
+        // BIFF8 shared-formula fallback: recover follower-cell formulas whose `FORMULA.rgce` is
+        // `PtgExp` but the expected `SHRFMLA/ARRAY` definition record is missing/corrupt.
+        //
+        // Calamine can only resolve `PtgExp` via SHRFMLA/ARRAY; some non-standard producers omit
+        // those records but still store a usable full `FORMULA.rgce` in the base cell. Recover
+        // those formulas by materializing from the base cell's rgce across the row/col delta.
+        if let (
+            Some(workbook_stream),
+            Some(codepage),
+            Some(biff_idx),
+            Some(biff_version),
+            Some(biff_sheets),
+        ) = (
+            workbook_stream.as_deref(),
+            biff_codepage,
+            biff_idx,
+            biff_version,
+            biff_sheets.as_ref(),
+        ) {
+            if biff_version == biff::BiffVersion::Biff8 {
+                if let Some(sheet_info) = biff_sheets.get(biff_idx) {
+                    // Build a minimal rgce decode context. We provide sheet names (BoundSheet
+                    // order) and EXTERNSHEET entries so 3D references can be rendered; SUPBOOK and
+                    // defined-name metadata are left empty for best-effort decoding.
+                    let sheet_names_by_biff_idx: Vec<String> =
+                        biff_sheets.iter().map(|s| s.name.clone()).collect();
+                    let externsheet_entries = biff_globals
+                        .as_ref()
+                        .map(|g| g.extern_sheets.as_slice())
+                        .unwrap_or(&[]);
+                    let supbooks: &[biff::supbook::SupBookInfo] = &[];
+                    let defined_names: &[biff::rgce::DefinedNameMeta] = &[];
+                    let ctx = biff::rgce::RgceDecodeContext {
+                        codepage,
+                        sheet_names: &sheet_names_by_biff_idx,
+                        externsheet: externsheet_entries,
+                        supbooks,
+                        defined_names,
+                    };
+
+                    match biff::formulas::recover_ptgexp_formulas_from_base_cell(
+                        workbook_stream,
+                        sheet_info.offset,
+                        &ctx,
+                    ) {
+                        Ok(mut recovered) => {
+                            warnings.extend(recovered.warnings.drain(..).map(ImportWarning::new));
+                            for (cell_ref, formula_text) in recovered.formulas {
+                                let anchor = sheet.merged_regions.resolve_cell(cell_ref);
+                                if let Some(normalized) = normalize_formula_text(&formula_text) {
+                                    sheet.set_formula(anchor, Some(normalized));
+                                }
+                                if let Some(resolved) = style_id_for_cell_xf(
+                                    xf_style_ids.as_deref(),
+                                    sheet_cell_xfs,
+                                    anchor,
+                                ) {
+                                    sheet.set_style_id(anchor, resolved);
+                                }
+                            }
+                        }
+                        Err(err) => warnings.push(ImportWarning::new(format!(
+                            "failed to recover shared formulas for sheet `{sheet_name}`: {err}"
+                        ))),
+                    }
+                }
+            }
+        }
+
         // `calamine` does not surface `BLANK` records via `used_cells()`, but Excel
         // allows formatting empty cells. Apply any XF-derived number formats to
         // the sheet even when the value is empty so those cells round-trip.
@@ -1703,13 +1772,10 @@ fn import_xls_path_with_biff_reader(
             let biff_version = biff::detect_biff_version(workbook_stream_bytes);
             let codepage = biff::parse_biff_codepage(workbook_stream_bytes);
 
-            let biff_bound_sheets = biff::parse_biff_bound_sheets(
-                workbook_stream_bytes,
-                biff_version,
-                codepage,
-            )
-            .ok()
-            .unwrap_or_default();
+            let biff_bound_sheets =
+                biff::parse_biff_bound_sheets(workbook_stream_bytes, biff_version, codepage)
+                    .ok()
+                    .unwrap_or_default();
 
             let (sheet_names_by_biff_idx, sheet_offsets_by_biff_idx): (Vec<String>, Vec<usize>) =
                 if biff_bound_sheets.is_empty() {
@@ -1720,7 +1786,10 @@ fn import_xls_path_with_biff_reader(
                             .iter()
                             .map(|s| s.name.clone())
                             .collect::<Vec<_>>(),
-                        biff_bound_sheets.iter().map(|s| s.offset).collect::<Vec<_>>(),
+                        biff_bound_sheets
+                            .iter()
+                            .map(|s| s.offset)
+                            .collect::<Vec<_>>(),
                     )
                 };
 
@@ -1745,45 +1814,45 @@ fn import_xls_path_with_biff_reader(
             // specify a sheet (e.g. `=$A$1:$B$3`).
             //
             // We only use this heuristic when exactly one sheet has AutoFilter records.
-            let biff_sheet_idx_with_sheet_stream_autofilter = if sheet_offsets_by_biff_idx.is_empty()
-            {
-                None
-            } else {
-                const RECORD_AUTOFILTERINFO: u16 = 0x009D;
-                const RECORD_FILTERMODE: u16 = 0x009B;
+            let biff_sheet_idx_with_sheet_stream_autofilter =
+                if sheet_offsets_by_biff_idx.is_empty() {
+                    None
+                } else {
+                    const RECORD_AUTOFILTERINFO: u16 = 0x009D;
+                    const RECORD_FILTERMODE: u16 = 0x009B;
 
-                let mut matches = Vec::<usize>::new();
-                for (idx, &offset) in sheet_offsets_by_biff_idx.iter().enumerate() {
-                    if matches.len() > 1 {
-                        break;
-                    }
-                    if offset >= workbook_stream_bytes.len() {
-                        continue;
-                    }
-                    let Ok(iter) = biff::records::BestEffortSubstreamIter::from_offset(
-                        workbook_stream_bytes,
-                        offset,
-                    ) else {
-                        continue;
-                    };
-                    for record in iter {
-                        match record.record_id {
-                            RECORD_AUTOFILTERINFO | RECORD_FILTERMODE => {
-                                matches.push(idx);
-                                break;
+                    let mut matches = Vec::<usize>::new();
+                    for (idx, &offset) in sheet_offsets_by_biff_idx.iter().enumerate() {
+                        if matches.len() > 1 {
+                            break;
+                        }
+                        if offset >= workbook_stream_bytes.len() {
+                            continue;
+                        }
+                        let Ok(iter) = biff::records::BestEffortSubstreamIter::from_offset(
+                            workbook_stream_bytes,
+                            offset,
+                        ) else {
+                            continue;
+                        };
+                        for record in iter {
+                            match record.record_id {
+                                RECORD_AUTOFILTERINFO | RECORD_FILTERMODE => {
+                                    matches.push(idx);
+                                    break;
+                                }
+                                biff::records::RECORD_EOF => break,
+                                _ => {}
                             }
-                            biff::records::RECORD_EOF => break,
-                            _ => {}
                         }
                     }
-                }
 
-                if matches.len() == 1 {
-                    Some(matches[0])
-                } else {
-                    None
-                }
-            };
+                    if matches.len() == 1 {
+                        Some(matches[0])
+                    } else {
+                        None
+                    }
+                };
 
             // Attempt to recover AutoFilter ranges even when `_FilterDatabase` is workbook-scoped.
             //
@@ -1835,7 +1904,8 @@ fn import_xls_path_with_biff_reader(
                         if !is_filter_database_defined_name(&name.name) {
                             continue;
                         }
-                        let range = match parse_autofilter_range_from_defined_name(&name.refers_to) {
+                        let range = match parse_autofilter_range_from_defined_name(&name.refers_to)
+                        {
                             Ok(range) => range,
                             Err(err) => {
                                 warnings.push(ImportWarning::new(format!(
@@ -1894,7 +1964,8 @@ fn import_xls_path_with_biff_reader(
                                     if warnings.len() != warnings_before_infer {
                                         return None;
                                     }
-                                    let biff_sheet_idx = biff_sheet_idx_with_sheet_stream_autofilter?;
+                                    let biff_sheet_idx =
+                                        biff_sheet_idx_with_sheet_stream_autofilter?;
                                     resolve_sheet_id_for_biff_idx(biff_sheet_idx)
                                 });
 
@@ -3680,7 +3751,11 @@ mod tests {
         dims.extend_from_slice(&0u16.to_le_bytes());
         push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
         push_record(&mut sheet, RECORD_WINDOW2, &window2());
-        push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_general, 0.0));
+        push_record(
+            &mut sheet,
+            RECORD_NUMBER,
+            &number_cell(0, 0, xf_general, 0.0),
+        );
         push_record(&mut sheet, RECORD_EOF, &[]);
 
         // Patch BoundSheet offset.
@@ -3836,7 +3911,9 @@ mod tests {
 
         let names = calamine_defined_name_names(&sanitized).expect("expected calamine open");
         assert!(
-            names.iter().any(|n| normalize_calamine_defined_name_name(n) == "ABCDE"),
+            names
+                .iter()
+                .any(|n| normalize_calamine_defined_name_name(n) == "ABCDE"),
             "expected calamine to surface full name string; names={names:?}"
         );
     }
@@ -4078,14 +4155,9 @@ mod tests {
 
     #[test]
     fn parse_autofilter_range_rejects_union_even_when_wrapped_in_parentheses() {
-        let err = parse_autofilter_range_from_defined_name(
-            "=(Sheet1!$A$1:$A$2,Sheet1!$C$1:$C$2)",
-        )
-        .expect_err("expected union formula to be rejected");
-        assert!(
-            err.contains("union"),
-            "expected union error, got {err:?}"
-        );
+        let err = parse_autofilter_range_from_defined_name("=(Sheet1!$A$1:$A$2,Sheet1!$C$1:$C$2)")
+            .expect_err("expected union formula to be rejected");
+        assert!(err.contains("union"), "expected union error, got {err:?}");
     }
 
     #[test]
@@ -4096,10 +4168,7 @@ mod tests {
             r#"=('My"Sheet'!$A$1:$A$2,'My"Sheet'!$C$1:$C$2)"#,
         )
         .expect_err("expected union formula to be rejected");
-        assert!(
-            err.contains("union"),
-            "expected union error, got {err:?}"
-        );
+        assert!(err.contains("union"), "expected union error, got {err:?}");
     }
 
     #[test]
