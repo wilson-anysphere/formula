@@ -1912,6 +1912,16 @@ export function createSyncServer(
           }
         }
 
+        // Drain mode can begin while an upgrade is in-flight (e.g. during async
+        // auth/introspection). Re-check before we allocate connection slots or
+        // start persistence hydration so we stop accepting new websockets as soon
+        // as draining starts.
+        if (draining) {
+          recordUpgradeRejection("draining");
+          sendUpgradeRejection(socket, 503, "draining");
+          return;
+        }
+
         const maxConnectionsPerDoc = config.limits.maxConnectionsPerDoc ?? 0;
         if (maxConnectionsPerDoc > 0) {
           const activeForDoc = activeSocketsByDoc.get(docName);
@@ -1962,6 +1972,21 @@ export function createSyncServer(
             "ws_connection_rejected_persistence_load_failed"
           );
           sendUpgradeRejection(socket, 503, "Persistence unavailable");
+          return;
+        }
+
+        // Drain mode may have begun while we were waiting for persistence
+        // hydration. If so, release the allocated connection slot and reject the
+        // upgrade before completing the websocket handshake.
+        if (draining) {
+          cleanupOrphanedYwsDoc(docName);
+          connectionTracker.unregister(ip);
+          docConnectionTracker.unregister(persistedName);
+          if (leveldbDocNameHashingEnabled) {
+            docConnectionTracker.unregister(docName);
+          }
+          recordUpgradeRejection("draining");
+          sendUpgradeRejection(socket, 503, "draining");
           return;
         }
 
