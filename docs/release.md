@@ -971,8 +971,14 @@ Expected behavior when downgrading **manually** from the GitHub Releases page:
 - **NSIS `.exe` installer:** detects the newer installed version and shows a maintenance screen.
   For the cleanest rollback, choose **“Uninstall before installing”**, then proceed with the
   install.
-- **WiX `.msi` installer:** running an older MSI will remove the installed Formula version and
-  then install the selected version (major upgrade flow with downgrades enabled).
+- **WiX `.msi` installer:** if your currently installed Formula version was installed via **MSI**
+  (including installs performed by the in-app auto-updater), running an older MSI will remove the
+  installed MSI version and then install the selected version (major upgrade flow with downgrades
+  enabled).
+
+Tip: prefer using the **same installer format** you originally installed with (`.exe` ↔ `.exe`, or
+`.msi` ↔ `.msi`). Switching formats can result in a second installation; if in doubt, uninstall the
+current version first.
 
 If an installer refuses to proceed (e.g. “a newer version is already installed”), uninstall the
 newer version first from **Settings → Apps → Installed apps**, then install the older `.msi`/`.exe`.

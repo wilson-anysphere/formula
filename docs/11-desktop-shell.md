@@ -455,7 +455,9 @@ download/downgrade instructions.
   - Formula's Windows installers are configured to **allow downgrades** (`bundle.windows.allowDowngrades: true`).
   - **NSIS `.exe`**: when downgrading, the installer will show a maintenance screen; for the cleanest rollback choose
     **“Uninstall before installing”**, then proceed.
-  - **WiX `.msi`**: running an older MSI will remove the currently installed Formula version and then install the selected version.
+  - **WiX `.msi`**: if your currently installed Formula version was installed via **MSI** (including installs performed by
+    the in-app auto-updater), running an older MSI will remove the installed MSI version and then install the selected version.
+  - Tip: prefer using the **same installer format** you originally installed with (`.exe` ↔ `.exe`, or `.msi` ↔ `.msi`).
   - If an installer still refuses to proceed (e.g. “a newer version is already installed”), uninstall Formula from
     *Apps & Features* and then run the older installer.
 - **macOS (universal `.dmg`):**

@@ -68,6 +68,11 @@ describe("tauri.conf.json security guardrails", () => {
     ).not.toBe("skip");
   });
 
+  it("allows manual Windows downgrades (rollback via Releases page)", () => {
+    const config = loadTauriConfig();
+    expect(config?.bundle?.windows?.allowDowngrades).toBe(true);
+  });
+
   it("enables COOP/COEP headers for cross-origin isolation (SharedArrayBuffer)", () => {
     const config = loadTauriConfig();
     const headers = config?.app?.security?.headers as unknown;
