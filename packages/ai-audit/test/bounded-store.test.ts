@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BoundedAIAuditStore, MemoryAIAuditStore } from "../src/index.js";
+import { BoundedAIAuditStore, LocalStorageAIAuditStore, MemoryAIAuditStore } from "../src/index.js";
 import type { AIAuditEntry } from "../src/types.js";
 
 describe("BoundedAIAuditStore", () => {
@@ -133,5 +133,84 @@ describe("BoundedAIAuditStore", () => {
 
     expect(byId.get("entry-derive-1")!.workbook_id).toBe("workbook-from-input");
     expect(byId.get("entry-derive-2")!.workbook_id).toBe("workbook-from-session");
+  });
+
+  it("prevents LocalStorageAIAuditStore persistence fallback by keeping entries under a quota", async () => {
+    class QuotaLocalStorage implements Storage {
+      #data = new Map<string, string>();
+      constructor(private readonly maxChars: number) {}
+
+      get length(): number {
+        return this.#data.size;
+      }
+
+      clear(): void {
+        this.#data.clear();
+      }
+
+      getItem(key: string): string | null {
+        return this.#data.get(key) ?? null;
+      }
+
+      key(index: number): string | null {
+        return Array.from(this.#data.keys())[index] ?? null;
+      }
+
+      removeItem(key: string): void {
+        this.#data.delete(key);
+      }
+
+      setItem(key: string, value: string): void {
+        if (value.length > this.maxChars) {
+          throw new Error("QuotaExceededError");
+        }
+        this.#data.set(key, value);
+      }
+    }
+
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", { value: new QuotaLocalStorage(3_000), configurable: true });
+
+    try {
+      const huge = "x".repeat(50_000);
+      const entry: AIAuditEntry = {
+        id: "entry-quota-1",
+        timestamp_ms: Date.now(),
+        session_id: "session-quota-1",
+        workbook_id: "workbook-quota-1",
+        mode: "chat",
+        input: { prompt: huge },
+        model: "unit-test-model",
+        tool_calls: [{ name: "tool", parameters: { payload: huge }, result: { ok: true, payload: huge } }]
+      };
+
+      // Without the bounded wrapper, LocalStorageAIAuditStore will hit the quota and
+      // fall back to in-memory storage (no persisted localStorage value).
+      const rawStore = new LocalStorageAIAuditStore({ key: "audit_quota_raw" });
+      await rawStore.logEntry(entry);
+      expect(globalThis.localStorage.getItem("audit_quota_raw")).toBeNull();
+
+      // With the bounded wrapper, the entry is compacted so the underlying store can persist it.
+      const bounded = new BoundedAIAuditStore(new LocalStorageAIAuditStore({ key: "audit_quota_bounded" }), {
+        max_entry_chars: 1_500
+      });
+      await bounded.logEntry(entry);
+
+      const persisted = globalThis.localStorage.getItem("audit_quota_bounded");
+      expect(persisted).toBeTypeOf("string");
+      expect((persisted as string).length).toBeLessThanOrEqual(3_000);
+
+      const parsed = JSON.parse(persisted as string) as AIAuditEntry[];
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0]!.tool_calls[0]!.result).toBeUndefined();
+      expect((parsed[0]!.input as any)?.audit_truncated).toBe(true);
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, "localStorage", originalDescriptor);
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).localStorage;
+      }
+    }
   });
 });
