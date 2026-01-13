@@ -51,6 +51,7 @@ def _candidate_target_dirs(repo_root: Path) -> list[Path]:
 
     - Workspace default: `<repo>/target`
     - Standalone src-tauri build: `apps/desktop/src-tauri/target`
+    - Builds from `apps/desktop`: `apps/desktop/target`
     - Custom: `CARGO_TARGET_DIR=...`
     """
 
@@ -67,6 +68,7 @@ def _candidate_target_dirs(repo_root: Path) -> list[Path]:
     for p in (
         repo_root / "target",
         repo_root / "apps" / "desktop" / "src-tauri" / "target",
+        repo_root / "apps" / "desktop" / "target",
     ):
         if p.is_dir():
             candidates.append(p)
