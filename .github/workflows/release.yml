@@ -354,11 +354,8 @@ jobs:
             throw "MSVC toolset directory not found under $msvcRoot"
           }
           $arm64LibDir = Join-Path $msvcVersionDir.FullName "lib\arm64"
-          if (Test-Path $arm64LibDir) {
-            Write-Host "MSVC ARM64 libs already present at $arm64LibDir"
-            exit 0
-          }
-          Write-Host "MSVC ARM64 libs not found; installing Visual Studio component Microsoft.VisualStudio.Component.VC.Tools.ARM64"
+          if (!(Test-Path $arm64LibDir)) {
+            Write-Host "MSVC ARM64 libs not found; installing Visual Studio component Microsoft.VisualStudio.Component.VC.Tools.ARM64"
           $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
           if (!(Test-Path $vsInstaller)) {
             throw "Visual Studio installer not found at $vsInstaller"
@@ -374,6 +371,40 @@ jobs:
           if (!(Test-Path $arm64LibDir)) {
             throw "MSVC ARM64 libraries were not found after installation. Windows ARM64 builds require the MSVC ARM64 toolchain to be present on the runner."
           }
+          }
+
+          # Additional sanity checks so ARM64 builds fail with a clear error *before* hitting cryptic
+          # linker failures (or accidentally building for the host architecture).
+          $arm64LinkExe = Join-Path $msvcVersionDir.FullName "bin\Hostx64\arm64\link.exe"
+          if (!(Test-Path $arm64LinkExe)) {
+            throw "MSVC ARM64 linker not found at $arm64LinkExe. The runner image is missing the ARM64 MSVC toolchain required for aarch64-pc-windows-msvc."
+          }
+
+          $sdkLibRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\Lib"
+          if (!(Test-Path $sdkLibRoot)) {
+            throw "Windows SDK lib root not found at $sdkLibRoot. Windows ARM64 builds require the Windows 10/11 SDK with ARM64 libraries."
+          }
+
+          $sdkVersionDir = Get-ChildItem -Path $sdkLibRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+          if (!$sdkVersionDir) {
+            throw "No Windows SDK lib versions found under $sdkLibRoot. Windows ARM64 builds require a Windows SDK installation with ARM64 libraries."
+          }
+
+          $sdkUmArm64 = Join-Path $sdkVersionDir.FullName "um\arm64"
+          $sdkUcrtArm64 = Join-Path $sdkVersionDir.FullName "ucrt\arm64"
+          if (!(Test-Path $sdkUmArm64)) {
+            throw "Windows SDK ARM64 UM libraries not found at $sdkUmArm64. The runner image may be missing the Windows SDK ARM64 components."
+          }
+          if (!(Test-Path $sdkUcrtArm64)) {
+            throw "Windows SDK ARM64 UCRT libraries not found at $sdkUcrtArm64. The runner image may be missing the Windows SDK ARM64 components."
+          }
+
+          Write-Host "windows-arm64-toolchain: OK"
+          Write-Host " - MSVC: $($msvcVersionDir.FullName)"
+          Write-Host " - link.exe: $arm64LinkExe"
+          Write-Host " - MSVC lib: $arm64LibDir"
+          Write-Host " - SDK um/arm64: $sdkUmArm64"
+          Write-Host " - SDK ucrt/arm64: $sdkUcrtArm64"
 
       - name: Setup MSVC cross-compilation environment (amd64 → arm64)
         if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
