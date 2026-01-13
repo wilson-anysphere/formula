@@ -262,6 +262,66 @@ fn var_is_visible_in_iterator_body() {
 }
 
 #[test]
+fn table_vars_can_be_used_as_calculate_filter_arguments() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "VAR t = FILTER(Orders, Orders[Amount] > 10) RETURN CALCULATE([Total Sales], t)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 20.0.into());
+}
+
+#[test]
+fn table_vars_can_be_used_as_iterator_table_arguments() {
+    let model = build_model();
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "VAR t = FILTER(Orders, Orders[Amount] > 10) RETURN SUMX(t, Orders[Amount])",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 20.0.into());
+}
+
+#[test]
+fn vars_shadow_table_names_in_scalar_context() {
+    let model = build_model();
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "VAR Orders = 3 RETURN Orders + 1",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 4.0.into());
+}
+
+#[test]
+fn vars_shadow_table_names_in_table_context() {
+    let model = build_model();
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "VAR Orders = FILTER(Orders, Orders[Amount] > 10) RETURN COUNTROWS(Orders)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 1.into());
+}
+
+#[test]
 fn calculate_overrides_existing_column_filters() {
     let mut model = build_model();
     model
