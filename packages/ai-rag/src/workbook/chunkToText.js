@@ -83,19 +83,67 @@ function inferColumnType(cells, col, headerRow) {
 function inferHeaderRow(cells) {
   if (!cells.length) return null;
   const maxRowsToCheck = Math.min(cells.length, 5);
+  let maxColCount = 0;
+  for (let r = 0; r < maxRowsToCheck; r += 1) {
+    const row = cells[r] || [];
+    if (Array.isArray(row) && row.length > maxColCount) maxColCount = row.length;
+  }
+
+  /**
+   * @param {number} rowIndex
+   */
+  function rowStats(rowIndex) {
+    const row = cells[rowIndex] || [];
+    let nonEmpty = 0;
+    let stringish = 0;
+    let firstString = null;
+    for (const cell of row) {
+      const v = cell?.v;
+      if (v == null) continue;
+      const trimmed = String(v).trim();
+      if (!trimmed) continue;
+      nonEmpty += 1;
+      if (typeof v === "string") {
+        stringish += 1;
+        if (firstString == null) firstString = trimmed;
+      }
+    }
+    return { row, nonEmpty, stringish, firstString };
+  }
+
+  /**
+   * @param {{ nonEmpty: number, stringish: number }} stats
+   */
+  function isHeaderCandidate(stats) {
+    if (stats.nonEmpty === 0) return false;
+    return stats.stringish / stats.nonEmpty >= 0.6;
+  }
+
+  const row0 = rowStats(0);
+  const row0IsCandidate = isHeaderCandidate(row0);
+  if (row0IsCandidate) {
+    // Special-case "title rows": a single long-ish multi-word string in the first
+    // row of an otherwise multi-column range often indicates a caption above the
+    // actual header row (e.g. "Revenue Summary").
+    const titleLike =
+      row0.nonEmpty === 1 &&
+      maxColCount > 1 &&
+      typeof row0.firstString === "string" &&
+      row0.firstString.length >= 12 &&
+      /\s/.test(row0.firstString);
+    if (!titleLike) return 0;
+  }
+
   let bestRow = null;
   let bestStringish = 0;
   let bestNonEmpty = 0;
-  for (let r = 0; r < maxRowsToCheck; r += 1) {
-    const row = cells[r] || [];
-    const nonEmpty = row.filter((c) => c && c.v != null && String(c.v).trim() !== "").length;
-    if (nonEmpty === 0) continue;
-    const stringish = row.filter((c) => c && typeof c.v === "string" && c.v.trim() !== "").length;
-    if (stringish / nonEmpty < 0.6) continue;
-    if (stringish > bestStringish || (stringish === bestStringish && nonEmpty > bestNonEmpty)) {
+  for (let r = row0IsCandidate ? 1 : 0; r < maxRowsToCheck; r += 1) {
+    const stats = rowStats(r);
+    if (!isHeaderCandidate(stats)) continue;
+    if (stats.stringish > bestStringish || (stats.stringish === bestStringish && stats.nonEmpty > bestNonEmpty)) {
       bestRow = r;
-      bestStringish = stringish;
-      bestNonEmpty = nonEmpty;
+      bestStringish = stats.stringish;
+      bestNonEmpty = stats.nonEmpty;
     }
   }
   return bestRow;

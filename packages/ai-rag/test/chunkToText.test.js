@@ -43,6 +43,23 @@ test("chunkToText detects header rows below a title row and preserves the title 
   assert.match(text, /Units=10/);
 });
 
+test("chunkToText treats a sparse header row with blank columns as a header (not as data)", () => {
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 1 },
+    cells: [
+      [{ v: "Name" }, { v: "" }],
+      [{ v: "Alice" }, { v: "Seattle" }],
+    ],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /Name=Alice/);
+  assert.match(text, /Column2=Seattle/);
+});
+
 test("chunkToText includes column truncation indicator in PRE-HEADER ROWS when table is wide", () => {
   const colCount = 25;
   const titleRow = [{ v: "Revenue Summary" }, ...Array.from({ length: colCount - 1 }, () => ({}))];
