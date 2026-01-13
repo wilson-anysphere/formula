@@ -1977,13 +1977,8 @@ const buildTitlebarProps = () => ({
       label: "Save",
       ariaLabel: "Save document",
       onClick: () => {
-        if (typeof (globalThis as any).__TAURI__?.core?.invoke !== "function") {
-          showToast("Save is only available in the desktop app.");
-          return;
-        }
-        void handleSave().catch((err) => {
-          console.error("Failed to save workbook:", err);
-          showToast(`Failed to save workbook: ${String(err)}`, "error");
+        void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbook).catch((err) => {
+          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
         });
       },
     },
