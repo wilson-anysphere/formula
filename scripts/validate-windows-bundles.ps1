@@ -95,6 +95,98 @@ function Get-RepoRoot {
   return $root.Path
 }
 
+function Get-ExpectedTauriVersion {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRoot
+  )
+
+  $tauriConfPath = Join-Path $RepoRoot "apps/desktop/src-tauri/tauri.conf.json"
+  if (-not (Test-Path -LiteralPath $tauriConfPath)) {
+    throw "Missing Tauri config: $tauriConfPath"
+  }
+
+  $conf = Get-Content -Raw -LiteralPath $tauriConfPath | ConvertFrom-Json
+  $v = [string]$conf.version
+  if ([string]::IsNullOrWhiteSpace($v)) {
+    throw "Expected apps/desktop/src-tauri/tauri.conf.json to contain a non-empty `"version`" field."
+  }
+  return $v.Trim()
+}
+
+function Normalize-Version {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Version
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Version)) {
+    return ""
+  }
+
+  # Extract the first numeric dotted version prefix (e.g. 1.2.3 or 1.2.3.4) from
+  # strings like "1.2.3.0 (some text)".
+  $m = [regex]::Match($Version, "\d+(?:\.\d+){1,3}")
+  if (-not $m.Success) {
+    return ""
+  }
+
+  $parts = $m.Value.Split(".")
+  # Windows file versions sometimes include a trailing ".0" (4-part version).
+  while ($parts.Length -gt 3 -and $parts[$parts.Length - 1] -eq "0") {
+    $parts = $parts[0..($parts.Length - 2)]
+  }
+  return ($parts -join ".")
+}
+
+function Assert-VersionMatch {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ArtifactPath,
+    [Parameter(Mandatory = $true)]
+    [string]$FoundVersion,
+    [Parameter(Mandatory = $true)]
+    [string]$ExpectedVersion,
+    [Parameter(Mandatory = $true)]
+    [string]$Context
+  )
+
+  $expectedNorm = Normalize-Version -Version $ExpectedVersion
+  $foundNorm = Normalize-Version -Version $FoundVersion
+
+  if ([string]::IsNullOrWhiteSpace($expectedNorm) -or [string]::IsNullOrWhiteSpace($foundNorm)) {
+    throw "Unable to parse version for $Context.`n- Artifact: $ArtifactPath`n- Expected: $ExpectedVersion`n- Found: $FoundVersion"
+  }
+
+  if ($expectedNorm -ne $foundNorm) {
+    throw "Windows bundle version mismatch detected ($Context).`n- Artifact: $ArtifactPath`n- Expected (tauri.conf.json version): $ExpectedVersion`n- Found: $FoundVersion"
+  }
+}
+
+function Get-MsiProperty {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$MsiPath,
+    [Parameter(Mandatory = $true)]
+    [string]$PropertyName
+  )
+
+  try {
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $database = $installer.OpenDatabase($MsiPath, 0)
+    $query = "SELECT `Value` FROM `Property` WHERE `Property`='$PropertyName'"
+    $view = $database.OpenView($query)
+    $view.Execute()
+    $record = $view.Fetch()
+    if ($null -eq $record) {
+      return $null
+    }
+    return $record.StringData(1)
+  } catch {
+    return $null
+  }
+}
+
 function Expand-FileInputs {
   param(
     [Parameter(Mandatory = $true)]
@@ -646,6 +738,40 @@ try {
           throw "$msg Without an MSI, we cannot reliably confirm Windows file associations are present."
         }
       }
+    }
+  }
+
+  $expectedVersion = Get-ExpectedTauriVersion -RepoRoot $repoRoot
+  Write-Host ("Expected desktop version (tauri.conf.json): {0}" -f $expectedVersion)
+  Write-Host ""
+
+  foreach ($installer in $exeInstallers) {
+    $vi = (Get-Item -LiteralPath $installer.FullName).VersionInfo
+    $fileVersion = [string]$vi.FileVersion
+    $productVersion = [string]$vi.ProductVersion
+
+    # Accept if either FileVersion or ProductVersion matches (tooling varies by installer type).
+    $ok = $false
+    try {
+      Assert-VersionMatch -ArtifactPath $installer.FullName -FoundVersion $fileVersion -ExpectedVersion $expectedVersion -Context "NSIS .exe FileVersion"
+      $ok = $true
+    } catch {
+      # Ignore and try ProductVersion next.
+    }
+    if (-not $ok) {
+      Assert-VersionMatch -ArtifactPath $installer.FullName -FoundVersion $productVersion -ExpectedVersion $expectedVersion -Context "NSIS .exe ProductVersion"
+    }
+
+    Write-Host ("version: OK (.exe) {0}" -f $installer.FullName)
+  }
+
+  foreach ($installer in $msiInstallers) {
+    $msiVersion = Get-MsiProperty -MsiPath $installer.FullName -PropertyName "ProductVersion"
+    if ($null -ne $msiVersion -and -not [string]::IsNullOrWhiteSpace([string]$msiVersion)) {
+      Assert-VersionMatch -ArtifactPath $installer.FullName -FoundVersion ([string]$msiVersion) -ExpectedVersion $expectedVersion -Context "MSI ProductVersion"
+      Write-Host ("version: OK (.msi) {0}" -f $installer.FullName)
+    } else {
+      Write-Warning ("TODO: Unable to read MSI ProductVersion for {0}. Skipping MSI version check because Windows Installer COM query failed. Consider installing lessmsi/msiinfo or enabling COM access in this environment." -f $installer.FullName)
     }
   }
 

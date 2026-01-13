@@ -109,6 +109,30 @@ PY
   : "${EXPECTED_MAIN_BINARY:=formula-desktop}"
 fi
 
+# Expected desktop app version (from tauri.conf.json).
+EXPECTED_VERSION=""
+TAURI_CONF_PATH="$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json"
+if [ -f "$TAURI_CONF_PATH" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    EXPECTED_VERSION="$(
+      python3 - "$TAURI_CONF_PATH" <<'PY' 2>/dev/null || true
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    conf = json.load(f)
+print((conf.get("version") or "").strip())
+PY
+    )"
+  fi
+  if [ -z "$EXPECTED_VERSION" ]; then
+    # Best-effort fallback when python/json parsing isn't available.
+    EXPECTED_VERSION="$(sed -nE 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*$/\1/p' "$TAURI_CONF_PATH" | head -n 1)"
+  fi
+fi
+if [ -z "$EXPECTED_VERSION" ]; then
+  die "Unable to determine expected desktop version from $TAURI_CONF_PATH"
+fi
+
 discover_appimages() {
   local base="$1"
   if [ ! -d "$base" ]; then
@@ -412,6 +436,44 @@ validate_appimage() {
 
   if [ "$has_xlsx_mime" -ne 1 ]; then
     info "warn: No .desktop file explicitly listed xlsx MIME '${required_xlsx_mime}'. Spreadsheet MIME types were present, but .xlsx double-click integration may be incomplete."
+  fi
+
+  # 5) Validate version metadata matches tauri.conf.json. Prefer the AppImage-specific
+  # X-AppImage-Version desktop entry key; otherwise accept a semver-looking Version=
+  # field. If no application version marker is present, fall back to validating the
+  # artifact filename includes the expected version (best-effort).
+  local found_version_marker=0
+  local found_value=""
+  for desktop_file in "${desktop_files[@]}"; do
+    found_value="$(grep -E '^X-AppImage-Version=' "$desktop_file" | head -n 1 | sed 's/^X-AppImage-Version=//' | tr -d '\r')"
+    if [ -n "$found_value" ]; then
+      found_version_marker=1
+      if [ "$found_value" != "$EXPECTED_VERSION" ]; then
+        die "AppImage version mismatch (X-AppImage-Version) in ${desktop_file#$appdir/}: expected ${EXPECTED_VERSION}, found ${found_value}"
+      fi
+    fi
+  done
+
+  if [ "$found_version_marker" -eq 0 ]; then
+    for desktop_file in "${desktop_files[@]}"; do
+      found_value="$(grep -E '^Version=' "$desktop_file" | head -n 1 | sed 's/^Version=//' | tr -d '\r')"
+      # Note: Desktop Entry "Version" is often the spec version (commonly 1.0), not
+      # the application version. Only treat semver-like values as an app version.
+      if [[ -n "$found_value" && "$found_value" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$ ]]; then
+        found_version_marker=1
+        if [ "$found_value" != "$EXPECTED_VERSION" ]; then
+          die "AppImage version mismatch (Version=) in ${desktop_file#$appdir/}: expected ${EXPECTED_VERSION}, found ${found_value}"
+        fi
+      fi
+    done
+  fi
+
+  if [ "$found_version_marker" -eq 0 ]; then
+    local appimage_filename
+    appimage_filename="$(basename "$appimage_path")"
+    if [[ "$appimage_filename" != *"$EXPECTED_VERSION"* ]]; then
+      die "AppImage did not expose X-AppImage-Version/Version in its desktop entry, and filename did not contain expected version ${EXPECTED_VERSION}: ${appimage_filename}"
+    fi
   fi
 
   # Cleanup this AppImage extraction dir early (otherwise only happens on EXIT).

@@ -141,6 +141,53 @@ PY
 APP_NAME="$(get_product_name)"
 EXPECTED_APP_BUNDLE="${APP_NAME}.app"
 
+get_tauri_conf_value() {
+  local key="$1"
+  local tauri_conf="$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json"
+  [ -f "$tauri_conf" ] || return 1
+
+  local value
+  set +e
+  value="$(
+    python3 - "$tauri_conf" "$key" <<'PY'
+import json, sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+key = sys.argv[2]
+val = data.get(key, "")
+if isinstance(val, str):
+    print(val.strip())
+PY
+  )"
+  local status=$?
+  set -e
+
+  if [ "$status" -eq 0 ] && [ -n "$value" ]; then
+    echo "$value"
+    return 0
+  fi
+
+  # Best-effort fallback when python/json parsing fails.
+  value="$(sed -nE "s/^[[:space:]]*\"${key}\"[[:space:]]*:[[:space:]]*\"([^\"]+)\".*$/\\1/p" "$tauri_conf" | head -n 1)"
+  if [ -n "$value" ]; then
+    echo "$value"
+    return 0
+  fi
+
+  return 1
+}
+
+EXPECTED_BUNDLE_IDENTIFIER="$(get_tauri_conf_value identifier || true)"
+EXPECTED_DESKTOP_VERSION="$(get_tauri_conf_value version || true)"
+if [ -z "$EXPECTED_BUNDLE_IDENTIFIER" ]; then
+  die "Expected apps/desktop/src-tauri/tauri.conf.json to contain a non-empty \"identifier\" field."
+fi
+if [ -z "$EXPECTED_DESKTOP_VERSION" ]; then
+  die "Expected apps/desktop/src-tauri/tauri.conf.json to contain a non-empty \"version\" field."
+fi
+
 get_expected_url_schemes() {
   # Keep this in sync with apps/desktop/src-tauri/Info.plist, which is merged into the generated
   # app bundle Info.plist during packaging.
@@ -250,6 +297,55 @@ PY
       found_one_line="(none)"
     fi
     die "Info.plist does not declare expected URL scheme(s): ${missing[*]}. Found: ${found_one_line}. (Check apps/desktop/src-tauri/Info.plist)"
+  fi
+}
+
+validate_plist_identity_metadata() {
+  local plist_path="$1"
+  local expected_identifier="$2"
+  local expected_version="$3"
+
+  [ -f "$plist_path" ] || die "missing Info.plist at $plist_path"
+
+  local found
+  set +e
+  found="$(
+    python3 - "$plist_path" "$expected_identifier" "$expected_version" <<'PY'
+import plistlib
+import sys
+
+plist_path = sys.argv[1]
+expected_id = sys.argv[2]
+expected_version = sys.argv[3]
+try:
+    with open(plist_path, "rb") as f:
+        data = plistlib.load(f)
+except Exception as e:
+    print(str(e))
+    raise SystemExit(2)
+
+bundle_id = str(data.get("CFBundleIdentifier") or "").strip()
+short_version = str(data.get("CFBundleShortVersionString") or "").strip()
+
+errors = []
+if bundle_id != expected_id:
+    errors.append(f"CFBundleIdentifier={bundle_id!r}")
+if short_version != expected_version:
+    errors.append(f"CFBundleShortVersionString={short_version!r}")
+
+if errors:
+    print("; ".join(errors))
+    raise SystemExit(1)
+raise SystemExit(0)
+PY
+  )"
+  local status=$?
+  set -e
+
+  if [ "$status" -eq 2 ]; then
+    die "failed to parse Info.plist at ${plist_path}: ${found}"
+  elif [ "$status" -ne 0 ]; then
+    die "Info.plist identity metadata mismatch. Expected identifier='${expected_identifier}', version='${expected_version}'. Found: ${found}"
   fi
 }
 
@@ -406,6 +502,9 @@ validate_app_bundle() {
 
   validate_plist_url_scheme "$plist_path" "${EXPECTED_URL_SCHEMES[@]}"
   echo "bundle: Info.plist OK (URL scheme(s) '${EXPECTED_URL_SCHEMES[*]}')"
+
+  validate_plist_identity_metadata "$plist_path" "$EXPECTED_BUNDLE_IDENTIFIER" "$EXPECTED_DESKTOP_VERSION"
+  echo "bundle: Info.plist OK (identifier '${EXPECTED_BUNDLE_IDENTIFIER}', version '${EXPECTED_DESKTOP_VERSION}')"
 
   validate_plist_file_associations "$plist_path" "xlsx" "xls" "csv"
   echo "bundle: Info.plist OK (file associations include .xlsx)"

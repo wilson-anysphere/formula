@@ -111,6 +111,40 @@ detect_docker_platform() {
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-$(detect_docker_platform)}"
 
 require_cmd rpm
+require_cmd python3
+
+TAURI_CONF="$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json"
+if [[ ! -f "$TAURI_CONF" ]]; then
+  die "Missing Tauri config: $TAURI_CONF"
+fi
+
+read_tauri_conf_value() {
+  local key="$1"
+  python3 - "$TAURI_CONF" "$key" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+key = sys.argv[2]
+with open(path, "r", encoding="utf-8") as f:
+    conf = json.load(f)
+val = conf.get(key, "")
+if isinstance(val, str):
+    print(val.strip())
+PY
+}
+
+EXPECTED_VERSION="$(read_tauri_conf_value version)"
+if [[ -z "$EXPECTED_VERSION" ]]; then
+  die "Expected $TAURI_CONF to contain a non-empty \"version\" field."
+fi
+
+# RPM %{NAME} (package name) should match our decided package name. By default we
+# keep this in sync with tauri.conf.json mainBinaryName.
+EXPECTED_RPM_NAME="${FORMULA_RPM_NAME_OVERRIDE:-$(read_tauri_conf_value mainBinaryName)}"
+if [[ -z "$EXPECTED_RPM_NAME" ]]; then
+  EXPECTED_RPM_NAME="formula-desktop"
+fi
 
 rel_path() {
   local p="$1"
@@ -244,6 +278,24 @@ validate_static() {
   note "Static validation: ${rpm_path}"
 
   rpm -qp --info "${rpm_path}" >/dev/null || die "rpm --info query failed for: ${rpm_path}"
+
+  local rpm_version
+  rpm_version="$(rpm -qp --queryformat '%{VERSION}\n' "${rpm_path}" 2>/dev/null | head -n 1 | tr -d '\r')"
+  if [[ -z "$rpm_version" ]]; then
+    die "Failed to read RPM %{VERSION} from: ${rpm_path}"
+  fi
+  if [[ "$rpm_version" != "$EXPECTED_VERSION" ]]; then
+    die "RPM version mismatch for ${rpm_path}: expected ${EXPECTED_VERSION}, found ${rpm_version}"
+  fi
+
+  local rpm_name
+  rpm_name="$(rpm -qp --queryformat '%{NAME}\n' "${rpm_path}" 2>/dev/null | head -n 1 | tr -d '\r')"
+  if [[ -z "$rpm_name" ]]; then
+    die "Failed to read RPM %{NAME} from: ${rpm_path}"
+  fi
+  if [[ "$rpm_name" != "$EXPECTED_RPM_NAME" ]]; then
+    die "RPM name mismatch for ${rpm_path}: expected ${EXPECTED_RPM_NAME}, found ${rpm_name}"
+  fi
 
   local file_list
   file_list="$(rpm -qp --list "${rpm_path}")" || die "rpm --list query failed for: ${rpm_path}"
