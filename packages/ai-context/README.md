@@ -355,6 +355,7 @@ Most LLM APIs enforce a *single* context window limit for:
 `trimMessagesToBudget()` helps keep the **message list** within a budget by:
 
 - preserving non-generated system messages
+- preserving tool-call coherence (assistant messages with `toolCalls` + their `role: "tool"` results)
 - keeping the most recent N messages
 - replacing older history with a single summary message (optional)
 
@@ -379,6 +380,10 @@ const trimmed = await trimMessagesToBudget({
   // Optional knobs:
   keepLastMessages: 40,
   summaryMaxTokens: 256,
+  // Tool-call coherence options:
+  // - preserveToolCallPairs: true (default) prevents orphan tool messages / tool calls.
+  // - dropToolMessagesFirst: false (default) can be set true to prefer summarizing completed
+  //   tool-call groups (assistant(toolCalls)+tool*) before dropping other history.
   // summarize: async (msgsToSummarize) => "(your model summary here)",
 });
 
