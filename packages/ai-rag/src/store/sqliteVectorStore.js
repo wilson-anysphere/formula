@@ -44,6 +44,9 @@ function blobToFloat32(blob) {
   if (!(blob instanceof Uint8Array)) {
     throw new Error("Expected SQLite BLOB to be Uint8Array");
   }
+  if (blob.byteOffset % 4 !== 0) {
+    throw new Error(`Invalid vector blob alignment: byteOffset ${blob.byteOffset}`);
+  }
   if (blob.byteLength % 4 !== 0) {
     throw new Error(`Invalid vector blob length: ${blob.byteLength}`);
   }

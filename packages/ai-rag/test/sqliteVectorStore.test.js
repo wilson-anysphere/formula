@@ -372,3 +372,31 @@ test("SqliteVectorStore.get throws when stored vector blob has wrong length", { 
     await store.close();
   }
 });
+
+test("SqliteVectorStore.list throws when stored vector blob has wrong length", { skip: !sqlJsAvailable }, async () => {
+  const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
+  try {
+    const badBlob = new Uint8Array(new Float32Array([1, 0]).buffer);
+    const stmt = store._db.prepare("INSERT INTO vectors (id, workbook_id, vector, metadata_json) VALUES (?, ?, ?, ?);");
+    stmt.run(["bad", null, badBlob, "{}"]);
+    stmt.free();
+
+    await assert.rejects(store.list(), /expected 3/);
+  } finally {
+    await store.close();
+  }
+});
+
+test("SqliteVectorStore.query throws when stored vector blob has wrong length (dot() validation)", { skip: !sqlJsAvailable }, async () => {
+  const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
+  try {
+    const badBlob = new Uint8Array(new Float32Array([1, 0]).buffer);
+    const stmt = store._db.prepare("INSERT INTO vectors (id, workbook_id, vector, metadata_json) VALUES (?, ?, ?, ?);");
+    stmt.run(["bad", null, badBlob, "{}"]);
+    stmt.free();
+
+    await assert.rejects(store.query([1, 0, 0], 1), /expected 3/);
+  } finally {
+    await store.close();
+  }
+});
