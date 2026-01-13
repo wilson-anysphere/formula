@@ -48,3 +48,10 @@ Optional heavier triage checks:
 ```bash
 python -m tools.corpus.promote_public --input ... --recalc --render-smoke
 ```
+
+Refreshing an existing fixture:
+
+```bash
+# Re-run triage and update the expectations entry if the current engine behavior changed.
+python -m tools.corpus.promote_public --input tools/corpus/public/simple.xlsx.b64 --force
+```

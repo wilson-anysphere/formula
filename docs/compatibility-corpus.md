@@ -289,6 +289,7 @@ Optional knobs:
 
 - reduce report size: `--diff-limit 10`
 - enable heavier checks (slower): `--recalc --render-smoke`
+- refresh expectations for an existing fixture: run with `--force`
 
 ### Generate a unified compatibility scorecard (corpus + Excel-oracle)
 
