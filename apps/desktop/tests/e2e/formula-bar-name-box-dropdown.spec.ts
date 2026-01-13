@@ -117,4 +117,38 @@ test.describe("formula bar name box dropdown", () => {
     await expect(page.getByTestId("active-cell")).toHaveText("D5");
     await expect(page.getByTestId("selection-range")).toHaveText("D5:E6");
   });
+
+  test("selecting a named range on another sheet switches sheets and selects the range", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      const workbook = app.getSearchWorkbook?.();
+      if (!workbook) throw new Error("Missing search workbook adapter");
+
+      workbook.clearSchema?.();
+
+      // Materialize Sheet2 so navigation can activate it.
+      app.getDocument().setCellValue("Sheet2", "A10", "CrossSheet");
+
+      workbook.defineName("E2E_CrossSheetRange", {
+        sheetName: "Sheet2",
+        range: { startRow: 9, startCol: 0, endRow: 10, endCol: 1 }, // A10:B11
+      });
+    });
+
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    await page.getByTestId("name-box-dropdown").click();
+
+    const quickPick = page.getByTestId("quick-pick");
+    await expect(quickPick).toBeVisible();
+    await quickPick.getByRole("button", { name: /E2E_CrossSheetRange/ }).click();
+    await expect(quickPick).toBeHidden();
+
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
+    await expect(page.getByTestId("active-cell")).toHaveText("A10");
+    await expect(page.getByTestId("selection-range")).toHaveText("A10:B11");
+  });
 });
