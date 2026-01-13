@@ -111,6 +111,9 @@ Add the following repository secrets:
 
 The release workflow passes these to `tauri-apps/tauri-action`, which signs the update artifacts.
 
+CI note: forks/dry-runs without these secrets will still build and upload release artifacts, but
+they will not include updater signature files (`*.sig`) and auto-update will not work.
+
 ## 3) Code signing (optional but recommended)
 
 The release workflow is wired for code signing if the following secrets are present.

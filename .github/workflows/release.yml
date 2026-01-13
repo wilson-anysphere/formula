@@ -332,6 +332,11 @@ jobs:
       - name: Verify Linux release artifacts (AppImage + deb + rpm + signatures)
         if: matrix.platform == 'ubuntu-24.04'
         shell: bash
+        env:
+          # Updater signature files (`*.sig`) are only generated when the updater private key is
+          # configured. Forks/dry-runs often have no secrets, so we skip `.sig` validation there
+          # while still ensuring the bundle artifacts themselves were produced.
+          FORMULA_HAS_TAURI_UPDATER_KEY: ${{ secrets.TAURI_PRIVATE_KEY != '' }}
         run: |
           set -euo pipefail
 
@@ -365,13 +370,17 @@ jobs:
             exit 1
           fi
 
-          # Ensure updater signature files exist for each bundle type.
-          for artifact in "${appimages[@]}" "${debs[@]}" "${rpms[@]}"; do
-            if [[ ! -f "${artifact}.sig" ]]; then
-              echo "Missing signature file for ${artifact} (expected ${artifact}.sig)" >&2
-              exit 1
-            fi
-          done
+          if [[ "${FORMULA_HAS_TAURI_UPDATER_KEY}" == "true" ]]; then
+            # Ensure updater signature files exist for each bundle type.
+            for artifact in "${appimages[@]}" "${debs[@]}" "${rpms[@]}"; do
+              if [[ ! -f "${artifact}.sig" ]]; then
+                echo "Missing signature file for ${artifact} (expected ${artifact}.sig)" >&2
+                exit 1
+              fi
+            done
+          else
+            echo "TAURI_PRIVATE_KEY not configured; skipping updater signature (*.sig) verification."
+          fi
 
       - name: Verify Linux package dependency metadata (deb + rpm)
         if: matrix.platform == 'ubuntu-24.04'
