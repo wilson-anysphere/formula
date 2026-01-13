@@ -44,7 +44,7 @@ export class ContextManager {
   });
 
   buildContext(params: {
-    sheet: { name: string; values: unknown[][]; namedRanges?: any[] };
+    sheet: { name: string; values: unknown[][]; origin?: { row: number; col: number }; namedRanges?: any[] };
     query: string;
     attachments?: Attachment[];
     sampleRows?: number;

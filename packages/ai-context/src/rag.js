@@ -190,11 +190,27 @@ export function chunkSheetByRegionsWithSchema(sheet, options = {}) {
   throwIfAborted(signal);
   const schema = extractSheetSchema(sheet, { signal });
   const maxChunkRows = options.maxChunkRows ?? 30;
+  const origin =
+    sheet && typeof sheet === "object" && sheet.origin && typeof sheet.origin === "object"
+      ? {
+          row: Number.isInteger(sheet.origin.row) && sheet.origin.row >= 0 ? sheet.origin.row : 0,
+          col: Number.isInteger(sheet.origin.col) && sheet.origin.col >= 0 ? sheet.origin.col : 0,
+        }
+      : { row: 0, col: 0 };
 
   const chunks = schema.dataRegions.map((region, index) => {
     throwIfAborted(signal);
     const parsed = parseRangeFromSchemaRange(region.range);
-    const matrix = slice2D(sheet.values, parsed);
+    const localRange =
+      origin.row === 0 && origin.col === 0
+        ? parsed
+        : normalizeRange({
+            startRow: parsed.startRow - origin.row,
+            endRow: parsed.endRow - origin.row,
+            startCol: parsed.startCol - origin.col,
+            endCol: parsed.endCol - origin.col,
+          });
+    const matrix = slice2D(sheet.values, localRange);
     const text = matrixToTsv(matrix, { maxRows: maxChunkRows });
     return {
       id: `${sheet.name}-region-${index + 1}`,
@@ -289,7 +305,23 @@ export class RagIndex {
  */
 export function rangeToChunk(sheet, range, options = {}) {
   const normalized = normalizeRange(range);
-  const matrix = slice2D(sheet.values, normalized);
+  const origin =
+    sheet && typeof sheet === "object" && sheet.origin && typeof sheet.origin === "object"
+      ? {
+          row: Number.isInteger(sheet.origin.row) && sheet.origin.row >= 0 ? sheet.origin.row : 0,
+          col: Number.isInteger(sheet.origin.col) && sheet.origin.col >= 0 ? sheet.origin.col : 0,
+        }
+      : { row: 0, col: 0 };
+  const localRange =
+    origin.row === 0 && origin.col === 0
+      ? normalized
+      : normalizeRange({
+          startRow: normalized.startRow - origin.row,
+          endRow: normalized.endRow - origin.row,
+          startCol: normalized.startCol - origin.col,
+          endCol: normalized.endCol - origin.col,
+        });
+  const matrix = slice2D(sheet.values, localRange);
   const maxRows = options.maxRows ?? 30;
   return {
     id: `${sheet.name}-${rangeToA1({ ...normalized, sheetName: sheet.name })}`,

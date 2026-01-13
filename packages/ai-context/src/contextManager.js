@@ -118,11 +118,20 @@ export class ContextManager {
       if (!Array.isArray(row) || safeColCap === 0) return [];
       return row.length <= safeColCap ? row.slice() : row.slice(0, safeColCap);
     });
+    const origin =
+      rawSheet && typeof rawSheet === "object" && rawSheet.origin && typeof rawSheet.origin === "object"
+        ? {
+            row: Number.isInteger(rawSheet.origin.row) && rawSheet.origin.row >= 0 ? rawSheet.origin.row : 0,
+            col: Number.isInteger(rawSheet.origin.col) && rawSheet.origin.col >= 0 ? rawSheet.origin.col : 0,
+          }
+        : { row: 0, col: 0 };
     let sheetForContext = { ...rawSheet, values: valuesForContext };
 
     let dlpRedactedCells = 0;
     let dlpSelectionClassification = null;
     let dlpDecision = null;
+    let dlpHeuristic = null;
+    let dlpHeuristicApplied = false;
     let dlpAuditDocumentId = null;
     let dlpAuditSheetId = null;
 
@@ -162,38 +171,44 @@ export class ContextManager {
         documentId,
         sheetId,
         range: {
-          start: { row: 0, col: 0 },
-          end: { row: Math.max(valuesForContext.length - 1, 0), col: Math.max(maxCols - 1, 0) },
+          start: { row: origin.row, col: origin.col },
+          end: {
+            row: origin.row + Math.max(valuesForContext.length - 1, 0),
+            col: origin.col + Math.max(maxCols - 1, 0),
+          },
         },
       };
 
       const normalizedRange = normalizeRange(rangeRef.range);
-      dlpSelectionClassification = effectiveRangeClassification({ ...rangeRef, range: normalizedRange }, records);
-      dlpDecision = evaluatePolicy({
+      const structuredSelectionClassification = effectiveRangeClassification({ ...rangeRef, range: normalizedRange }, records);
+      dlpSelectionClassification = structuredSelectionClassification;
+      let structuredDecision = evaluatePolicy({
         action: DLP_ACTION.AI_CLOUD_PROCESSING,
-        classification: dlpSelectionClassification,
+        classification: structuredSelectionClassification,
         policy: dlp.policy,
         options: { includeRestrictedContent },
       });
+      dlpDecision = structuredDecision;
 
-      if (dlpDecision.decision === DLP_DECISION.BLOCK) {
+      if (structuredDecision.decision === DLP_DECISION.BLOCK) {
         dlp.auditLogger?.log({
           type: "ai.context",
           documentId,
           sheetId,
           sheetName: rawSheet.name,
-          decision: dlpDecision,
-          selectionClassification: dlpSelectionClassification,
+          decision: structuredDecision,
+          selectionClassification: structuredSelectionClassification,
           redactedCellCount: 0,
         });
-        throw new DlpViolationError(dlpDecision);
+        throw new DlpViolationError(structuredDecision);
       }
 
       // Only do per-cell enforcement under REDACT decisions; in ALLOW cases the range max
       // classification is within the threshold so every in-range cell must be allowed.
       let nextValues;
-      if (dlpDecision.decision === DLP_DECISION.REDACT) {
-        const maxAllowedRank = dlpDecision.maxAllowed === null ? null : classificationRank(dlpDecision.maxAllowed);
+      if (structuredDecision.decision === DLP_DECISION.REDACT) {
+        const maxAllowedRank =
+          structuredDecision.maxAllowed === null ? null : classificationRank(structuredDecision.maxAllowed);
         const index = buildDlpRangeIndex({ documentId, sheetId, range: normalizedRange }, records, {
           maxAllowedRank: maxAllowedRank ?? DEFAULT_CLASSIFICATION_RANK,
           signal,
@@ -203,13 +218,15 @@ export class ContextManager {
 
         // Redact at cell level (deterministic placeholder).
         nextValues = [];
+        const originRow = origin.row;
+        const originCol = origin.col;
         for (let r = 0; r < valuesForContext.length; r++) {
           throwIfAborted(signal);
           const row = valuesForContext[r] ?? [];
           const nextRow = [];
           for (let c = 0; c < row.length; c++) {
             throwIfAborted(signal);
-            if (isDlpCellAllowedFromIndex(cellCheck, r, c)) {
+            if (isDlpCellAllowedFromIndex(cellCheck, originRow + r, originCol + c)) {
               nextRow.push(row[c]);
               continue;
             }
@@ -224,6 +241,49 @@ export class ContextManager {
       }
 
       sheetForContext = { ...rawSheet, values: nextValues };
+
+      // Workbook DLP enforcement treats heuristic sensitive patterns as Restricted when evaluating
+      // AI cloud processing policies. Mirror that behavior in the single-sheet context path so
+      // callers can't accidentally leak sensitive content when no structured selectors are present.
+      if (structuredDecision.decision === DLP_DECISION.ALLOW) {
+        dlpHeuristic = classifyValuesForDlp(nextValues, { signal });
+        const heuristicPolicyClassification = heuristicToPolicyClassification(dlpHeuristic);
+        const combinedClassification = maxClassification(structuredSelectionClassification, heuristicPolicyClassification);
+        // Preserve the structured classification for audit/debug, but evaluate policy on the max.
+        if (heuristicPolicyClassification.level !== CLASSIFICATION_LEVEL.PUBLIC) {
+          dlpHeuristicApplied = true;
+          dlpSelectionClassification = combinedClassification;
+          dlpDecision = evaluatePolicy({
+            action: DLP_ACTION.AI_CLOUD_PROCESSING,
+            classification: combinedClassification,
+            policy: dlp.policy,
+            options: { includeRestrictedContent },
+          });
+        }
+      }
+
+      if (dlpDecision.decision === DLP_DECISION.BLOCK) {
+        dlp.auditLogger?.log({
+          type: "ai.context",
+          documentId,
+          sheetId,
+          sheetName: rawSheet.name,
+          decision: dlpDecision,
+          selectionClassification: dlpSelectionClassification,
+          redactedCellCount: 0,
+        });
+        throw new DlpViolationError(dlpDecision);
+      }
+
+      // Under REDACT decisions, defensively apply heuristic redaction to the context sheet so:
+      //  - schema / sampling / retrieval don't contain raw sensitive strings in structured outputs
+      //  - in-memory RAG text doesn't retain sensitive patterns (defense-in-depth)
+      if (dlpDecision.decision === DLP_DECISION.REDACT) {
+        sheetForContext = {
+          ...sheetForContext,
+          values: redactValuesForDlp(sheetForContext.values, this.redactor, { signal }),
+        };
+      }
     }
 
     throwIfAborted(signal);
@@ -262,20 +322,32 @@ export class ContextManager {
       }
     }
 
+    const shouldReturnRedactedStructured = Boolean(dlp) && dlpDecision?.decision === DLP_DECISION.REDACT;
+    const schemaOut = shouldReturnRedactedStructured ? redactStructuredValue(schema, this.redactor, { signal }) : schema;
+    const sampledOut = shouldReturnRedactedStructured
+      ? redactStructuredValue(sampled, this.redactor, { signal })
+      : sampled;
+    const retrievedOut = shouldReturnRedactedStructured
+      ? redactStructuredValue(retrieved, this.redactor, { signal })
+      : retrieved;
+
     const sections = [
-      ...(dlpRedactedCells > 0
-        ? [
-            {
-              key: "dlp",
-              priority: 5,
-              text: `DLP: ${dlpRedactedCells} cells were redacted due to policy.`,
-            },
-          ]
-        : []),
+      ...((dlpRedactedCells > 0 || (dlpDecision?.decision === DLP_DECISION.REDACT && dlpHeuristicApplied))
+         ? [
+             {
+               key: "dlp",
+               priority: 5,
+               text:
+                 dlpRedactedCells > 0
+                   ? `DLP: ${dlpRedactedCells} cells were redacted due to policy.`
+                   : `DLP: sensitive patterns were redacted due to policy.`,
+             },
+           ]
+         : []),
       {
         key: "schema",
         priority: 3,
-        text: this.redactor(`Sheet schema (schema-first):\n${stableJsonStringify(schema)}`),
+        text: this.redactor(`Sheet schema (schema-first):\n${stableJsonStringify(schemaOut)}`),
       },
       {
         key: "attachments",
@@ -287,14 +359,14 @@ export class ContextManager {
       {
         key: "samples",
         priority: 1,
-        text: sampled.length
-          ? this.redactor(`Sample rows:\n${sampled.map((r) => JSON.stringify(r)).join("\n")}`)
+        text: sampledOut.length
+          ? this.redactor(`Sample rows:\n${sampledOut.map((r) => JSON.stringify(r)).join("\n")}`)
           : "",
       },
       {
         key: "retrieved",
         priority: 4,
-        text: retrieved.length ? this.redactor(`Retrieved context:\n${stableJsonStringify(retrieved)}`) : "",
+        text: retrievedOut.length ? this.redactor(`Retrieved context:\n${stableJsonStringify(retrievedOut)}`) : "",
       },
     ].filter((s) => s.text);
 
@@ -315,9 +387,9 @@ export class ContextManager {
     }
 
     return {
-      schema,
-      retrieved,
-      sampledRows: sampled,
+      schema: schemaOut,
+      retrieved: retrievedOut,
+      sampledRows: sampledOut,
       promptContext: packed.map((s) => `## ${s.key}\n${s.text}`).join("\n\n"),
     };
   }
@@ -873,6 +945,111 @@ export class ContextManager {
       signal,
     });
   }
+}
+
+/**
+ * @param {unknown[][]} values
+ * @param {{ signal?: AbortSignal }} [options]
+ * @returns {ReturnType<typeof classifyText>}
+ */
+function classifyValuesForDlp(values, options = {}) {
+  const signal = options.signal;
+  /** @type {Set<string>} */
+  const findings = new Set();
+  for (const row of values || []) {
+    throwIfAborted(signal);
+    for (const cell of row || []) {
+      throwIfAborted(signal);
+      if (cell === null || cell === undefined) continue;
+      const heuristic = classifyText(String(cell));
+      if (heuristic.level !== "sensitive") continue;
+      for (const f of heuristic.findings || []) findings.add(String(f));
+      // Early exit once we've found at least one sensitive pattern; policy evaluation only
+      // needs the max classification, not exhaustive findings.
+      if (findings.size > 0) {
+        return { level: "sensitive", findings: [...findings] };
+      }
+    }
+  }
+  return { level: "public", findings: [] };
+}
+
+/**
+ * @param {{level: string, findings: string[]}} heuristic
+ */
+function heuristicToPolicyClassification(heuristic) {
+  if (heuristic?.level === "sensitive") {
+    const labels = (heuristic.findings || []).map((f) => `heuristic:${f}`);
+    return { level: CLASSIFICATION_LEVEL.RESTRICTED, labels };
+  }
+  return { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+}
+
+/**
+ * Apply a redactor to every string cell in a sheet values matrix.
+ * @param {unknown[][]} values
+ * @param {(text: string) => string} redactor
+ * @param {{ signal?: AbortSignal }} [options]
+ * @returns {unknown[][]}
+ */
+function redactValuesForDlp(values, redactor, options = {}) {
+  const signal = options.signal;
+  /** @type {unknown[][]} */
+  const out = [];
+  for (const row of values || []) {
+    throwIfAborted(signal);
+    if (!Array.isArray(row)) {
+      out.push([]);
+      continue;
+    }
+    const nextRow = [];
+    for (const cell of row) {
+      throwIfAborted(signal);
+      nextRow.push(typeof cell === "string" ? redactor(cell) : cell);
+    }
+    out.push(nextRow);
+  }
+  return out;
+}
+
+/**
+ * Deeply apply a redactor to string fields inside structured output objects.
+ *
+ * This is used to ensure `buildContext()` does not leak sensitive values through its
+ * structured return payload when DLP requires redaction.
+ *
+ * @template T
+ * @param {T} value
+ * @param {(text: string) => string} redactor
+ * @param {{ signal?: AbortSignal }} [options]
+ * @returns {T}
+ */
+function redactStructuredValue(value, redactor, options = {}) {
+  const signal = options.signal;
+  throwIfAborted(signal);
+
+  if (typeof value === "string") return /** @type {T} */ (redactor(value));
+  if (value === null || value === undefined) return value;
+  if (typeof value !== "object") return value;
+  if (value instanceof Date) return value;
+
+  if (Array.isArray(value)) {
+    return /** @type {T} */ (value.map((v) => redactStructuredValue(v, redactor, { signal })));
+  }
+
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) {
+    // Avoid walking exotic objects (Map, Set, class instances).
+    return value;
+  }
+
+  /** @type {any} */
+  const out = {};
+  for (const [key, v] of Object.entries(value)) {
+    throwIfAborted(signal);
+    out[key] = redactStructuredValue(v, redactor, { signal });
+  }
+  return out;
 }
 
 function cellInNormalizedRange(cell, range) {
