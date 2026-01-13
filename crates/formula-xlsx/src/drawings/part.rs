@@ -78,6 +78,7 @@ impl DrawingPart {
             }
 
             let anchor = parse_anchor(&anchor_node)?;
+            let anchor_preserved = parse_anchor_preserved(&anchor_node, drawing_xml);
 
             if let Some(pic) = anchor_node
                 .children()
@@ -85,7 +86,7 @@ impl DrawingPart {
             {
                 let (id, pic_xml, embed) = parse_pic(&pic, drawing_xml)?;
                 let image_id = resolve_image_id(&relationships, &embed, path, parts, workbook)?;
-                let mut preserved = std::collections::HashMap::new();
+                let mut preserved = anchor_preserved.clone();
                 preserved.insert("xlsx.embed_rel_id".to_string(), embed.clone());
                 preserved.insert("xlsx.pic_xml".to_string(), pic_xml);
 
@@ -114,7 +115,7 @@ impl DrawingPart {
                     anchor,
                     z_order: z as i32,
                     size,
-                    preserved: Default::default(),
+                    preserved: anchor_preserved.clone(),
                 });
                 continue;
             }
@@ -140,7 +141,7 @@ impl DrawingPart {
                     anchor,
                     z_order: z as i32,
                     size,
-                    preserved: Default::default(),
+                    preserved: anchor_preserved.clone(),
                 });
                 continue;
             }
@@ -155,7 +156,7 @@ impl DrawingPart {
                 anchor,
                 z_order: z as i32,
                 size: None,
-                preserved: Default::default(),
+                preserved: anchor_preserved,
             });
         }
 
@@ -249,14 +250,26 @@ impl DrawingPart {
                         .get("xlsx.pic_xml")
                         .cloned()
                         .unwrap_or_else(|| build_pic_xml(object.id.0, "rId1", object.size));
-                    xml.push_str(&build_anchor_xml(&object.anchor, &pic_xml));
+                    xml.push_str(&build_anchor_xml(
+                        &object.anchor,
+                        &pic_xml,
+                        &object.preserved,
+                    ));
                 }
                 DrawingObjectKind::Shape { raw_xml } => {
-                    xml.push_str(&build_anchor_xml(&object.anchor, raw_xml));
+                    xml.push_str(&build_anchor_xml(
+                        &object.anchor,
+                        raw_xml,
+                        &object.preserved,
+                    ));
                 }
                 DrawingObjectKind::ChartPlaceholder { raw_xml, rel_id: _ } => {
                     // Keep chart relationships as they existed in the source file.
-                    xml.push_str(&build_anchor_xml(&object.anchor, raw_xml));
+                    xml.push_str(&build_anchor_xml(
+                        &object.anchor,
+                        raw_xml,
+                        &object.preserved,
+                    ));
                 }
             }
         }
@@ -553,22 +566,34 @@ fn resolve_image_id(
     Ok(image_id)
 }
 
-fn build_anchor_xml(anchor: &Anchor, inner_xml: &str) -> String {
+fn build_anchor_xml(
+    anchor: &Anchor,
+    inner_xml: &str,
+    preserved: &std::collections::HashMap<String, String>,
+) -> String {
     let mut out = String::new();
+
+    let anchor_attrs = preserved_anchor_attrs(preserved);
 
     match anchor {
         Anchor::OneCell { from, ext } => {
-            out.push_str("<xdr:oneCellAnchor>");
+            out.push_str("<xdr:oneCellAnchor");
+            out.push_str(&anchor_attrs);
+            out.push('>');
             out.push_str(&build_from_to_xml("from", from));
             out.push_str(&format!(r#"<xdr:ext cx="{}" cy="{}"/>"#, ext.cx, ext.cy));
         }
         Anchor::TwoCell { from, to } => {
-            out.push_str("<xdr:twoCellAnchor>");
+            out.push_str("<xdr:twoCellAnchor");
+            out.push_str(&anchor_attrs);
+            out.push('>');
             out.push_str(&build_from_to_xml("from", from));
             out.push_str(&build_from_to_xml("to", to));
         }
         Anchor::Absolute { pos, ext } => {
-            out.push_str("<xdr:absoluteAnchor>");
+            out.push_str("<xdr:absoluteAnchor");
+            out.push_str(&anchor_attrs);
+            out.push('>');
             out.push_str(&format!(
                 r#"<xdr:pos x="{}" y="{}"/>"#,
                 pos.x_emu, pos.y_emu
@@ -578,7 +603,7 @@ fn build_anchor_xml(anchor: &Anchor, inner_xml: &str) -> String {
     }
 
     out.push_str(inner_xml);
-    out.push_str("<xdr:clientData/>");
+    out.push_str(&preserved_client_data_xml(preserved));
 
     match anchor {
         Anchor::OneCell { .. } => out.push_str("</xdr:oneCellAnchor>"),
@@ -602,4 +627,125 @@ fn build_pic_xml(object_id: u32, embed_rel_id: &str, size: Option<EmuSize>) -> S
     format!(
         r#"<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="{object_id}" name="Picture {object_id}"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="{embed_rel_id}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>"#
     )
+}
+
+fn parse_anchor_preserved(
+    anchor_node: &roxmltree::Node<'_, '_>,
+    doc_xml: &str,
+) -> std::collections::HashMap<String, String> {
+    let mut preserved = std::collections::HashMap::new();
+
+    let mut attrs: BTreeMap<String, String> = BTreeMap::new();
+    for attr in anchor_node.attributes() {
+        // Skip namespace declarations since the drawing serializer always emits the worksheet
+        // drawing namespaces on `<xdr:wsDr>`.
+        if attr.name() == "xmlns"
+            || attr
+                .namespace()
+                .is_some_and(|ns| ns == "http://www.w3.org/2000/xmlns/")
+        {
+            continue;
+        }
+        attrs.insert(attr.name().to_string(), attr.value().to_string());
+    }
+
+    if let Some(edit_as) = anchor_node.attribute("editAs") {
+        preserved.insert("xlsx.anchor_edit_as".to_string(), edit_as.to_string());
+    }
+    if !attrs.is_empty() {
+        if let Ok(json) = serde_json::to_string(&attrs) {
+            preserved.insert("xlsx.anchor_attrs".to_string(), json);
+        }
+    }
+
+    if let Some(client_data) = anchor_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "clientData")
+        .and_then(|n| slice_node_xml(&n, doc_xml))
+    {
+        preserved.insert("xlsx.client_data_xml".to_string(), client_data);
+    }
+
+    preserved
+}
+
+fn preserved_anchor_attrs(preserved: &std::collections::HashMap<String, String>) -> String {
+    // Best-effort attribute preservation: if present, we store a JSON map of attribute key/value
+    // pairs from the original `<xdr:*Anchor>` element.
+    let Some(attrs_json) = preserved.get("xlsx.anchor_attrs") else {
+        // Back-compat: emit at least `editAs` if it was captured separately.
+        if let Some(edit_as) = preserved.get("xlsx.anchor_edit_as") {
+            return format!(r#" editAs="{}""#, escape_attr_value(edit_as));
+        }
+        return String::new();
+    };
+
+    let Ok(attrs) = serde_json::from_str::<BTreeMap<String, String>>(attrs_json) else {
+        return String::new();
+    };
+
+    let mut out = String::new();
+    for (k, v) in attrs {
+        out.push(' ');
+        out.push_str(&k);
+        out.push_str(r#"=""#);
+        out.push_str(&escape_attr_value(&v));
+        out.push('"');
+    }
+    out
+}
+
+fn preserved_client_data_xml(preserved: &std::collections::HashMap<String, String>) -> String {
+    match preserved.get("xlsx.client_data_xml") {
+        Some(xml) => client_data_with_xdr_prefix(xml),
+        None => "<xdr:clientData/>".to_string(),
+    }
+}
+
+fn client_data_with_xdr_prefix(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "<xdr:clientData/>".to_string();
+    }
+
+    if trimmed.starts_with("<xdr:clientData") {
+        return trimmed.to_string();
+    }
+
+    // Some producers use the spreadsheetDrawing namespace as a default namespace (no prefix),
+    // resulting in `<clientData .../>`. Our drawing writer always emits `xdr:` prefixed tags, so
+    // rewrite to match.
+    if trimmed.starts_with("<clientData")
+        || trimmed.starts_with("<x:clientData")
+        || trimmed.starts_with("<d:clientData")
+    {
+        // Best-effort: rewrite both start and end tags if present.
+        // This is safe for the empty-element form (`<clientData .../>`) which is the common case.
+        let mut out = trimmed.to_string();
+        out = out.replacen("<clientData", "<xdr:clientData", 1);
+        out = out.replacen("<x:clientData", "<xdr:clientData", 1);
+        out = out.replacen("<d:clientData", "<xdr:clientData", 1);
+        out = out.replace("</clientData>", "</xdr:clientData>");
+        out = out.replace("</x:clientData>", "</xdr:clientData>");
+        out = out.replace("</d:clientData>", "</xdr:clientData>");
+        return out;
+    }
+
+    // Fall back to the raw fragment.
+    trimmed.to_string()
+}
+
+fn escape_attr_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
