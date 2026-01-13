@@ -2736,6 +2736,23 @@ pub fn sanitize_sheet_name(
     unreachable!("suffix loop should always return a unique sheet name");
 }
 
+/// Mask the BIFF `FILEPASS` record id (0x002F) in the workbook globals substream.
+///
+/// This is intended for callers that have already decrypted an encrypted `.xls` workbook stream:
+/// decrypted BIFF streams still contain the `FILEPASS` record header, but downstream BIFF parsers
+/// (and `calamine`) treat `FILEPASS` as an encryption terminator and stop scanning.
+///
+/// Masking `FILEPASS` to a reserved/unknown record id allows parsers to skip it and continue.
+///
+/// Returns the number of record headers that were masked (normally 0 or 1).
+///
+/// This helper is part of the public API only so it can be exercised from integration tests in
+/// `crates/formula-xls/tests/` and used by higher-level decryption plumbing.
+#[doc(hidden)]
+pub fn mask_biff_filepass_record_id(workbook_stream: &mut [u8]) -> usize {
+    biff::records::mask_workbook_globals_filepass_record_id_in_place(workbook_stream)
+}
+
 /// Parse worksheet merged regions from BIFF `MERGEDCELLS` records.
 ///
 /// This helper is part of the public API only so it can be exercised from integration tests in

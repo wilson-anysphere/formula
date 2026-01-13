@@ -88,7 +88,7 @@ const COLOR_AUTOMATIC: u16 = 0x7FFF;
 /// The goal is not to be a complete `.xls` writer; it's just enough BIFF8 + CFB
 /// to exercise our importer with targeted style payloads (FORMAT/XF + BLANK).
 pub fn build_number_format_fixture_xls(date_1904: bool) -> Vec<u8> {
-    let workbook_stream = build_workbook_stream(date_1904);
+    let workbook_stream = build_workbook_stream(date_1904, false);
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -99,6 +99,15 @@ pub fn build_number_format_fixture_xls(date_1904: bool) -> Vec<u8> {
             .expect("write Workbook stream");
     }
     ole.into_inner().into_inner()
+}
+
+/// Build the BIFF workbook stream bytes for [`build_number_format_fixture_xls`] while injecting a
+/// `FILEPASS` record into the workbook globals substream.
+///
+/// This is useful for testing post-decryption parsing: encrypted workbooks retain the `FILEPASS`
+/// record header even after decrypting the remaining stream bytes.
+pub fn build_number_format_workbook_stream_with_filepass(date_1904: bool) -> Vec<u8> {
+    build_workbook_stream(date_1904, true)
 }
 
 /// Build a minimal BIFF8 `.xls` fixture whose workbook globals include a `FILEPASS` record.
@@ -2580,11 +2589,19 @@ fn build_sheet_visibility_workbook_stream() -> Vec<u8> {
     globals
 }
 
-fn build_workbook_stream(date_1904: bool) -> Vec<u8> {
+fn build_workbook_stream(date_1904: bool, include_filepass: bool) -> Vec<u8> {
     // -- Globals -----------------------------------------------------------------
     let mut globals = Vec::<u8>::new();
 
     push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    if include_filepass {
+        // FILEPASS indicates the workbook stream is encrypted/password-protected.
+        //
+        // In real encrypted workbooks, bytes after this record are encrypted. In our fixtures we
+        // keep the stream plaintext to simulate a post-decryption buffer that still contains the
+        // FILEPASS header.
+        push_record(&mut globals, RECORD_FILEPASS, &[]);
+    }
     push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
     push_record(
         &mut globals,

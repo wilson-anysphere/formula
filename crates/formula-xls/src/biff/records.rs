@@ -11,6 +11,11 @@ pub(crate) const RECORD_EOF: u16 = 0x000A;
 /// the importer uses this as a preflight check to surface a clear error instead
 /// of confusing BIFF parse failures from downstream libraries.
 pub(crate) const RECORD_FILEPASS: u16 = 0x002F;
+/// BIFF record id reserved for "unknown" sanitization.
+///
+/// Any value that downstream BIFF parsers treat as an unknown record is fine; we use `0xFFFF`
+/// because it is not a defined BIFF record id.
+pub(crate) const RECORD_MASKED_UNKNOWN: u16 = 0xFFFF;
 /// BIFF8 `BOF` record id.
 pub(crate) const RECORD_BOF_BIFF8: u16 = 0x0809;
 /// BIFF5 `BOF` record id.
@@ -49,6 +54,78 @@ pub(crate) fn workbook_globals_has_filepass_record(workbook_stream: &[u8]) -> bo
     }
 
     false
+}
+
+/// Mask the `FILEPASS` record id (0x002F) in the workbook globals substream.
+///
+/// When an `.xls` workbook stream is encrypted, bytes *after* `FILEPASS` are typically encrypted
+/// but the `FILEPASS` header itself remains in plaintext. After successfully decrypting the stream
+/// in-memory, the bytes after `FILEPASS` become plaintext again, but the `FILEPASS` record header
+/// is still present.
+///
+/// Many BIFF parsers (including this crate) treat `FILEPASS` as a hard terminator and stop scanning
+/// workbook-global metadata when it appears. To allow parsing of already-decrypted streams,
+/// callers should mask the record id to an unknown/reserved id so downstream parsers skip it and
+/// continue.
+///
+/// Returns the number of `FILEPASS` record headers that were masked (normally 0 or 1).
+///
+/// This is best-effort: malformed/truncated streams simply return 0 without modifying the buffer.
+pub(crate) fn mask_workbook_globals_filepass_record_id_in_place(
+    workbook_stream: &mut [u8],
+) -> usize {
+    // BIFF workbook streams always start with a `BOF` record at offset 0. Guard on that before
+    // scanning so we don't corrupt arbitrary/non-Excel streams named `Workbook` as decrypted just
+    // because the byte pattern happens to match `FILEPASS`.
+    let Some((record_id, _)) = read_biff_record(workbook_stream, 0) else {
+        return 0;
+    };
+    if !is_bof_record(record_id) {
+        return 0;
+    }
+
+    let mut masked = 0usize;
+    let mut offset: usize = 0;
+    while offset + 4 <= workbook_stream.len() {
+        let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
+        let len = u16::from_le_bytes([
+            workbook_stream[offset + 2],
+            workbook_stream[offset + 3],
+        ]) as usize;
+
+        let data_start = match offset.checked_add(4) {
+            Some(v) => v,
+            None => break,
+        };
+        let next = match data_start.checked_add(len) {
+            Some(v) => v,
+            None => break,
+        };
+        if next > workbook_stream.len() {
+            break;
+        }
+
+        // BOF indicates the start of a new substream; the workbook globals contain a single BOF at
+        // offset 0, so a second BOF means we're past the globals section (even if the EOF record is
+        // missing).
+        if offset != 0 && is_bof_record(record_id) {
+            break;
+        }
+
+        if record_id == RECORD_FILEPASS {
+            workbook_stream[offset..offset + 2]
+                .copy_from_slice(&RECORD_MASKED_UNKNOWN.to_le_bytes());
+            masked = masked.saturating_add(1);
+        }
+
+        if record_id == RECORD_EOF {
+            break;
+        }
+
+        offset = next;
+    }
+
+    masked
 }
 
 /// Read a single physical BIFF record at `offset`.
@@ -416,6 +493,46 @@ mod tests {
         .concat();
 
         assert!(workbook_globals_has_filepass_record(&stream));
+    }
+
+    #[test]
+    fn masks_filepass_record_id_in_place_and_preserves_structure() {
+        let payload = [0xAA, 0xBB, 0xCC];
+        let original_stream = [
+            record(RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_FILEPASS, &payload),
+            record(0x0042, &[0xE4, 0x04]), // CODEPAGE = 1252
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let mut stream = original_stream.clone();
+        let masked = mask_workbook_globals_filepass_record_id_in_place(&mut stream);
+        assert_eq!(masked, 1);
+
+        // Verify record iteration and offsets still work after masking.
+        let mut iter = BiffRecordIter::from_offset(&stream, 0).expect("iter");
+        let first = iter.next().unwrap().unwrap();
+        assert_eq!(first.record_id, RECORD_BOF_BIFF8);
+        let second = iter.next().unwrap().unwrap();
+        assert_eq!(second.record_id, RECORD_MASKED_UNKNOWN);
+        assert_eq!(second.data, payload);
+        let third = iter.next().unwrap().unwrap();
+        assert_eq!(third.record_id, 0x0042);
+        let fourth = iter.next().unwrap().unwrap();
+        assert_eq!(fourth.record_id, RECORD_EOF);
+        assert!(iter.next().is_none());
+
+        // The only byte changes should be the FILEPASS record id (first two bytes of its header).
+        let filepass_offset = 4 + 16; // BOF header+payload
+        assert_eq!(
+            &stream[filepass_offset..filepass_offset + 2],
+            &RECORD_MASKED_UNKNOWN.to_le_bytes()
+        );
+        assert_eq!(
+            &stream[filepass_offset + 2..filepass_offset + 4],
+            &((payload.len() as u16).to_le_bytes())
+        );
     }
 
     #[test]
