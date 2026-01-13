@@ -107,6 +107,9 @@ fn commands_rs_privileged_commands_enforce_origin_guards() {
         "read_binary_file_range",
         "stat_file",
         "list_dir",
+        // Clipboard (command wrappers in commands.rs; `clipboard/mod.rs` has its own coverage).
+        "read_clipboard",
+        "write_clipboard",
         // External integration / network.
         "open_external_url",
         "network_fetch",
@@ -122,6 +125,13 @@ fn commands_rs_privileged_commands_enforce_origin_guards() {
         "power_query_credential_set",
         "power_query_credential_delete",
         "power_query_credential_list",
+        "power_query_refresh_state_get",
+        "power_query_refresh_state_set",
+        "power_query_state_get",
+        "power_query_state_set",
+        // SQL queries can reach local databases and must remain origin-scoped.
+        "sql_query",
+        "sql_get_schema",
     ];
 
     for cmd in privileged_commands {
@@ -148,4 +158,3 @@ fn clipboard_mod_privileged_commands_enforce_origin_guards() {
         assert_ipc_origin_checks(&clipboard_mod, file, cmd);
     }
 }
-
