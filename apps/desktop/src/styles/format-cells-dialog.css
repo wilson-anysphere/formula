@@ -9,7 +9,7 @@ dialog.format-cells-dialog {
   width: min(720px, 92vw);
   max-height: min(720px, 86vh);
   border: 1px solid var(--dialog-border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 0;
   background: var(--dialog-bg);
   color: var(--text-primary);
@@ -21,7 +21,7 @@ dialog.format-cells-dialog::backdrop {
 }
 
 .format-cells-dialog__header {
-  padding: 12px 14px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -32,10 +32,10 @@ dialog.format-cells-dialog::backdrop {
 }
 
 .format-cells-dialog__content {
-  padding: 12px 14px;
+  padding: 10px 12px;
   display: grid;
   grid-template-columns: 1fr;
-  gap: 12px;
+  gap: 10px;
   overflow: auto;
 }
 
@@ -47,13 +47,13 @@ dialog.format-cells-dialog::backdrop {
 
 .format-cells-dialog__section {
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px;
+  border-radius: var(--radius);
+  padding: 8px;
   background: var(--bg-secondary);
 }
 
 .format-cells-dialog__section-title {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   font-size: 12px;
   font-weight: 700;
   color: var(--text-secondary);
@@ -65,8 +65,8 @@ dialog.format-cells-dialog::backdrop {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 8px;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
 .format-cells-dialog__row:last-child {
@@ -87,8 +87,8 @@ dialog.format-cells-dialog::backdrop {
 .format-cells-dialog__select,
 .format-cells-dialog__input {
   width: 100%;
-  padding: 6px 8px;
-  border-radius: 8px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -96,18 +96,18 @@ dialog.format-cells-dialog::backdrop {
 
 .format-cells-dialog__toggles {
   display: flex;
-  gap: 6px;
+  gap: 4px;
 }
 
 .format-cells-dialog__toggle {
   border: 1px solid var(--border);
   background: var(--bg-primary);
   color: var(--text-primary);
-  border-radius: 8px;
-  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
   font-weight: 700;
   cursor: pointer;
-  min-width: 32px;
+  min-width: 28px;
 }
 
 .format-cells-dialog__toggle[aria-pressed="true"] {
@@ -126,17 +126,19 @@ dialog.format-cells-dialog::backdrop {
 .format-cells-dialog__swatches {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .format-cells-dialog__swatch {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   cursor: pointer;
   padding: 0;
   background: var(--bg-primary);
+  position: relative;
+  overflow: hidden;
 }
 
 .format-cells-dialog__swatch[data-color="none"] {
@@ -169,17 +171,17 @@ dialog.format-cells-dialog::backdrop {
 }
 
 .format-cells-dialog__actions {
-  padding: 12px 14px;
+  padding: 10px 12px;
   border-top: 1px solid var(--border);
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
 }
 
 .format-cells-dialog__actions button {
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 8px 12px;
+  border-radius: var(--radius);
+  padding: 6px 10px;
   background: var(--bg-primary);
   color: var(--text-primary);
   cursor: pointer;
@@ -188,4 +190,47 @@ dialog.format-cells-dialog::backdrop {
 .format-cells-dialog__actions button[data-primary="true"] {
   border-color: var(--selection-border);
   background: var(--selection-bg);
+}
+
+@media (forced-colors: active) {
+  .format-cells-dialog__swatch[data-color="none"],
+  .format-cells-dialog__swatch[data-color="custom"] {
+    background: var(--bg-primary);
+  }
+
+  .format-cells-dialog__swatch[data-color="none"]::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: -25%;
+    right: -25%;
+    height: 2px;
+    background: var(--text-primary);
+    transform: rotate(45deg);
+    pointer-events: none;
+  }
+
+  .format-cells-dialog__swatch[data-color="custom"] {
+    border-style: dashed;
+  }
+
+  .format-cells-dialog__swatch[data-color="custom"]::after {
+    content: "C";
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    pointer-events: none;
+  }
+
+  .format-cells-dialog__swatch[data-selected="true"] {
+    box-shadow: none;
+    outline: 2px solid var(--selection-border);
+    outline-offset: 1px;
+  }
 }
