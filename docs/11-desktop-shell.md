@@ -613,7 +613,7 @@ Formula Desktop supports two redirect-capture strategies for OAuth (typically PK
 
 Deep-link scheme config/registration:
 
-- Config: `apps/desktop/src-tauri/tauri.conf.json` → `plugins.deep-link.desktop.schemes: ["formula"]`
+- Config: `apps/desktop/src-tauri/tauri.conf.json` → `plugins["deep-link"].desktop.schemes: ["formula"]`
 - Runtime: `apps/desktop/src-tauri/src/main.rs` attempts best-effort OS registration via `app.handle().deep_link().register("formula")`.
 
 **How the frontend chooses:** `DesktopOAuthBroker.openAuthUrl(...)` (`apps/desktop/src/power-query/oauthBroker.ts`) inspects the auth URL’s `redirect_uri` query param. If it is a supported loopback URI, it invokes `oauth_loopback_listen` **before** opening the system browser; otherwise it relies on `formula://…` deep-link delivery.
