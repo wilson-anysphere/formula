@@ -12,6 +12,25 @@ use formula_xlsb::XlsbWorkbook;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum RoundTripFailOn {
+    #[default]
+    Critical,
+    Warning,
+    Info,
+}
+
+impl RoundTripFailOn {
+    fn round_trip_ok(self, counts: &DiffCounts) -> bool {
+        match self {
+            RoundTripFailOn::Critical => counts.critical == 0,
+            RoundTripFailOn::Warning => counts.critical == 0 && counts.warning == 0,
+            RoundTripFailOn::Info => counts.total == 0,
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(about = "Compatibility triage helper used by tools/corpus/triage.py")]
 struct Args {
@@ -33,6 +52,10 @@ struct Args {
     /// Maximum number of differences to emit (privacy-safe summary only).
     #[arg(long, default_value_t = 25)]
     diff_limit: usize,
+
+    /// Round-trip diff severity threshold considered a failure.
+    #[arg(long = "fail-on", value_enum, default_value_t = RoundTripFailOn::Critical)]
+    fail_on: RoundTripFailOn,
 
     /// Run a best-effort recalculation check against cached workbook values.
     #[arg(long)]
@@ -108,6 +131,7 @@ impl StepResult {
 struct TriageResult {
     open_ok: bool,
     round_trip_ok: bool,
+    round_trip_fail_on: RoundTripFailOn,
     diff_critical_count: usize,
     diff_warning_count: usize,
     diff_info_count: usize,
@@ -215,6 +239,7 @@ fn main() -> Result<()> {
         steps: BTreeMap::new(),
         result: TriageResult::default(),
     };
+    output.result.round_trip_fail_on = args.fail_on;
 
     let input_bytes = {
         let start = Instant::now();
@@ -333,12 +358,12 @@ fn main() -> Result<()> {
             output.result.diff_warning_count = diff_details.counts.warning;
             output.result.diff_info_count = diff_details.counts.info;
             output.result.diff_total_count = diff_details.counts.total;
-            output.result.round_trip_ok = diff_details.counts.critical == 0;
+            output.result.round_trip_ok = args.fail_on.round_trip_ok(&diff_details.counts);
 
             output
                 .steps
                 .insert("diff".to_string(), StepResult::ok(start, &diff_details));
-
+ 
             // Step: recalc (optional)
             if !args.recalc {
                 output.steps.insert(
@@ -374,7 +399,7 @@ fn main() -> Result<()> {
                     }
                 }
             }
-
+ 
             // Step: render smoke (optional)
             if !args.render_smoke {
                 output.steps.insert(
@@ -505,7 +530,7 @@ fn main() -> Result<()> {
             output.result.diff_warning_count = diff_details.counts.warning;
             output.result.diff_info_count = diff_details.counts.info;
             output.result.diff_total_count = diff_details.counts.total;
-            output.result.round_trip_ok = diff_details.counts.critical == 0;
+            output.result.round_trip_ok = args.fail_on.round_trip_ok(&diff_details.counts);
 
             output
                 .steps
@@ -1335,6 +1360,7 @@ mod tests {
             format: WorkbookFormat::Xlsx,
             ignore_parts: Vec::new(),
             diff_limit: 10,
+            fail_on: RoundTripFailOn::Critical,
             recalc: false,
             render_smoke: false,
         };
@@ -1351,5 +1377,48 @@ mod tests {
             diff_entry_fingerprint(&entry.severity, &entry.part, &entry.path, &entry.kind)
         );
         assert_eq!(entry.fingerprint.len(), 64);
+    }
+
+    #[test]
+    fn round_trip_fail_on_thresholds_match_expected_semantics() {
+        let warning_only = DiffCounts {
+            critical: 0,
+            warning: 1,
+            info: 0,
+            total: 1,
+        };
+        assert!(RoundTripFailOn::Critical.round_trip_ok(&warning_only));
+        assert!(!RoundTripFailOn::Warning.round_trip_ok(&warning_only));
+        assert!(!RoundTripFailOn::Info.round_trip_ok(&warning_only));
+
+        let info_only = DiffCounts {
+            critical: 0,
+            warning: 0,
+            info: 1,
+            total: 1,
+        };
+        assert!(RoundTripFailOn::Critical.round_trip_ok(&info_only));
+        assert!(RoundTripFailOn::Warning.round_trip_ok(&info_only));
+        assert!(!RoundTripFailOn::Info.round_trip_ok(&info_only));
+
+        let critical_present = DiffCounts {
+            critical: 1,
+            warning: 0,
+            info: 0,
+            total: 1,
+        };
+        assert!(!RoundTripFailOn::Critical.round_trip_ok(&critical_present));
+        assert!(!RoundTripFailOn::Warning.round_trip_ok(&critical_present));
+        assert!(!RoundTripFailOn::Info.round_trip_ok(&critical_present));
+
+        let no_diffs = DiffCounts {
+            critical: 0,
+            warning: 0,
+            info: 0,
+            total: 0,
+        };
+        assert!(RoundTripFailOn::Critical.round_trip_ok(&no_diffs));
+        assert!(RoundTripFailOn::Warning.round_trip_ok(&no_diffs));
+        assert!(RoundTripFailOn::Info.round_trip_ok(&no_diffs));
     }
 }

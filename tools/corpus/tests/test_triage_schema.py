@@ -6,9 +6,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tools.corpus.dashboard import _markdown_summary
-from tools.corpus.triage import _compare_expectations
+from tools.corpus.triage import _compare_expectations, triage_workbook
+from tools.corpus.util import WorkbookInput
 
 
 class TriageSchemaTests(unittest.TestCase):
@@ -46,6 +48,7 @@ class TriageSchemaTests(unittest.TestCase):
     def test_dashboard_markdown_includes_diff_and_render_columns(self) -> None:
         summary = {
             "timestamp": "2026-01-01T00:00:00Z",
+            "round_trip_fail_on": "critical",
             "counts": {
                 "total": 1,
                 "open_ok": 1,
@@ -75,9 +78,64 @@ class TriageSchemaTests(unittest.TestCase):
         md = _markdown_summary(summary, reports)
         self.assertIn("Diff (C/W/I)", md)
         self.assertIn("0/1/0", md)
+        self.assertIn("Round-trip fail-on", md)
         # Calculate/render should not be reported as "0.0%" when triage skipped those steps.
         self.assertIn("Calculate: **0 / 0** (SKIP", md)
         self.assertIn("Render: **0 / 0** (SKIP", md)
+
+    def test_triage_passes_round_trip_fail_on_to_rust_and_surfaces_in_dashboard(self) -> None:
+        import subprocess
+
+        def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+            # Ensure the Python wrapper forwards the configured threshold.
+            self.assertIn("--fail-on", cmd)
+            idx = cmd.index("--fail-on")
+            self.assertEqual(cmd[idx + 1], "warning")
+
+            payload = {
+                "steps": {},
+                "result": {
+                    "open_ok": True,
+                    "round_trip_ok": False,
+                    "round_trip_fail_on": "warning",
+                    "diff_critical_count": 0,
+                    "diff_warning_count": 1,
+                    "diff_info_count": 0,
+                    "diff_total_count": 1,
+                },
+            }
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=json.dumps(payload), stderr=""
+            )
+
+        with mock.patch("tools.corpus.triage.subprocess.run", side_effect=fake_run):
+            report = triage_workbook(
+                WorkbookInput(display_name="book.xlsx", data=b"not-a-zip"),
+                rust_exe=Path("noop"),
+                diff_ignore=set(),
+                diff_limit=25,
+                round_trip_fail_on="warning",
+                recalc=False,
+                render_smoke=False,
+            )
+
+        self.assertEqual(report["result"]["round_trip_fail_on"], "warning")
+        self.assertFalse(report["result"]["round_trip_ok"])
+
+        summary = {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "round_trip_fail_on": "warning",
+            "counts": {
+                "total": 1,
+                "open_ok": 1,
+                "calculate_ok": 0,
+                "render_ok": 0,
+                "round_trip_ok": 0,
+            },
+            "rates": {"open": 1.0, "calculate": 0.0, "render": 0.0, "round_trip": 0.0},
+        }
+        md = _markdown_summary(summary, [report])
+        self.assertIn("Round-trip fail-on: `warning`", md)
 
     def test_dashboard_markdown_includes_style_stats_when_present(self) -> None:
         summary = {

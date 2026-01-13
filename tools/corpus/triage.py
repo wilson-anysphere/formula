@@ -6,6 +6,7 @@ import argparse
 import concurrent.futures
 import hashlib
 import io
+import inspect
 import json
 import os
 import shutil
@@ -671,6 +672,7 @@ def _run_rust_triage(
     workbook_name: str,
     diff_ignore: set[str],
     diff_limit: int,
+    round_trip_fail_on: str = "critical",
     recalc: bool,
     render_smoke: bool,
 ) -> dict[str, Any]:
@@ -701,6 +703,8 @@ def _run_rust_triage(
             fmt,
             "--diff-limit",
             str(diff_limit),
+            "--fail-on",
+            round_trip_fail_on,
         ]
         for part in sorted(diff_ignore):
             cmd.extend(["--ignore-part", part])
@@ -733,6 +737,7 @@ def triage_workbook(
     rust_exe: Path,
     diff_ignore: set[str],
     diff_limit: int,
+    round_trip_fail_on: str = "critical",
     recalc: bool,
     render_smoke: bool,
     privacy_mode: str = _PRIVACY_PUBLIC,
@@ -787,20 +792,40 @@ def triage_workbook(
 
     # Core triage (Rust): load → optional recalc/render → round-trip save → structural diff.
     try:
-        rust_out = _run_rust_triage(
-            rust_exe,
-            workbook.data,
-            workbook_name=workbook.display_name,
-            diff_ignore=diff_ignore,
-            diff_limit=diff_limit,
-            recalc=recalc,
-            render_smoke=render_smoke,
-        )
+        rust_kwargs: dict[str, Any] = {
+            "diff_ignore": diff_ignore,
+            "diff_limit": diff_limit,
+            "recalc": recalc,
+            "render_smoke": render_smoke,
+        }
+
+        # Some unit tests patch `_run_rust_triage` with a legacy signature. Only forward optional
+        # params when the target callable can accept them.
+        optional_kwargs = {
+            "workbook_name": workbook.display_name,
+            "round_trip_fail_on": round_trip_fail_on,
+        }
+        try:
+            sig = inspect.signature(_run_rust_triage)
+            supports_kwargs = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+            )
+            for k, v in optional_kwargs.items():
+                if k in sig.parameters or supports_kwargs:
+                    rust_kwargs[k] = v
+        except (TypeError, ValueError):
+            rust_kwargs.update(optional_kwargs)
+
+        rust_out = _run_rust_triage(rust_exe, workbook.data, **rust_kwargs)
         report["steps"] = rust_out.get("steps") or {}
         report["result"] = rust_out.get("result") or {}
     except Exception as e:  # noqa: BLE001
         report["steps"] = {"load": asdict(_step_failed(_now_ms(), e))}
-        report["result"] = {"open_ok": False, "round_trip_ok": False}
+        report["result"] = {
+            "open_ok": False,
+            "round_trip_ok": False,
+            "round_trip_fail_on": round_trip_fail_on,
+        }
         report["failure_category"] = "triage_error"
         return report
 
@@ -908,6 +933,7 @@ def _triage_one_path(
     rust_exe: str,
     diff_ignore: tuple[str, ...],
     diff_limit: int,
+    round_trip_fail_on: str = "critical",
     recalc: bool,
     render_smoke: bool,
     leak_scan: bool,
@@ -947,6 +973,7 @@ def _triage_one_path(
             rust_exe=Path(rust_exe),
             diff_ignore=set(diff_ignore),
             diff_limit=diff_limit,
+            round_trip_fail_on=round_trip_fail_on,
             recalc=recalc,
             render_smoke=render_smoke,
             privacy_mode=privacy_mode,
@@ -1008,6 +1035,7 @@ def _triage_paths(
     rust_exe: str,
     diff_ignore: set[str],
     diff_limit: int,
+    round_trip_fail_on: str = "critical",
     recalc: bool,
     render_smoke: bool,
     leak_scan: bool,
@@ -1036,6 +1064,7 @@ def _triage_paths(
                 rust_exe=rust_exe,
                 diff_ignore=diff_ignore_tuple,
                 diff_limit=diff_limit,
+                round_trip_fail_on=round_trip_fail_on,
                 recalc=recalc,
                 render_smoke=render_smoke,
                 leak_scan=leak_scan,
@@ -1068,6 +1097,7 @@ def _triage_paths(
                 rust_exe=rust_exe,
                 diff_ignore=diff_ignore_tuple,
                 diff_limit=diff_limit,
+                round_trip_fail_on=round_trip_fail_on,
                 recalc=recalc,
                 render_smoke=render_smoke,
                 leak_scan=leak_scan,
@@ -1186,6 +1216,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=25,
         help="Maximum number of diff entries to include in reports (privacy-safe).",
     )
+    parser.add_argument(
+        "--round-trip-fail-on",
+        default="critical",
+        choices=["critical", "warning", "info"],
+        help="Round-trip diff severity threshold that should fail `round_trip_ok`.",
+    )
     return parser
 
 
@@ -1228,6 +1264,7 @@ def main() -> int:
         rust_exe=str(rust_exe),
         diff_ignore=diff_ignore,
         diff_limit=args.diff_limit,
+        round_trip_fail_on=args.round_trip_fail_on,
         recalc=args.recalc,
         render_smoke=args.render_smoke,
         leak_scan=args.leak_scan,

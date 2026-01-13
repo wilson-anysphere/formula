@@ -272,6 +272,13 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
         lines.append(f"- Commit: `{summary['commit']}`")
     if summary.get("run_url"):
         lines.append(f"- Run: {summary['run_url']}")
+    if summary.get("round_trip_fail_on"):
+        fail_on = summary["round_trip_fail_on"]
+        if isinstance(fail_on, list):
+            fail_on_str = ", ".join(str(v) for v in fail_on)
+        else:
+            fail_on_str = str(fail_on)
+        lines.append(f"- Round-trip fail-on: `{fail_on_str}`")
     lines.append("")
     lines.append("## Overall")
     lines.append("")
@@ -587,9 +594,13 @@ def main() -> int:
     passing_cellxfs: list[int] = []
     failing_cellxfs: list[int] = []
     failing_cellxfs_by_workbook: list[tuple[int, str]] = []
+    round_trip_fail_on_values: set[str] = set()
 
     for r in reports:
         res = r.get("result", {})
+        rt_fail_on = res.get("round_trip_fail_on")
+        if isinstance(rt_fail_on, str) and rt_fail_on:
+            round_trip_fail_on_values.add(rt_fail_on)
         failed = any(
             res.get(k) is False
             for k in ("open_ok", "calculate_ok", "render_ok", "round_trip_ok")
@@ -733,6 +744,13 @@ def main() -> int:
         "timestamp": utc_now_iso(),
         "commit": github_commit_sha(),
         "run_url": github_run_url(),
+        "round_trip_fail_on": (
+            sorted(round_trip_fail_on_values)[0]
+            if len(round_trip_fail_on_values) == 1
+            else sorted(round_trip_fail_on_values)
+            if round_trip_fail_on_values
+            else None
+        ),
         "counts": {
             "total": total,
             "open_ok": open_ok,
