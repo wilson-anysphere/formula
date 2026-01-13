@@ -55,6 +55,8 @@ export const deDE = {
   "versionHistory.autoSave": "Auto-Speichern",
   "versionHistory.restore": "Wiederhergestellt",
   "collab.retry": "Erneut versuchen",
+  "collab.reservedRootGuard.message":
+    "Der Sync-Server hat die Kollaborationsverbindung geschlossen, weil der reserved root guard auf dem Sync-Server aktiviert ist (SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED). In-Doc-Versionierungs-/Branching-Stores (YjsVersionStore/YjsBranchStore) funktionieren dann nicht, daher sind Aktionen in Versionsverlauf und Branch Manager deaktiviert. Um diese Funktionen zu nutzen, deaktivieren Sie SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED auf dem Sync-Server oder konfigurieren Sie einen Store außerhalb des Dokuments (ApiVersionStore/SQLite).",
   "panels.versionHistory.title": "Versionsverlauf",
   "versionHistory.panel.loading": "Versionsverlauf wird geladen…",
   "versionHistory.panel.unavailableWithMessage": "Versionsverlauf ist nicht verfügbar: {message}",

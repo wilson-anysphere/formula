@@ -120,6 +120,8 @@ export const enUS = {
   "print.pageSetup.margins.bottom": "Bottom",
   "print.pageSetup.close": "Close",
   "collab.retry": "Retry",
+  "collab.reservedRootGuard.message":
+    "The sync server closed the collaboration connection because the reserved root guard is enabled on the sync server (SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED). In-doc versioning/branching stores (YjsVersionStore/YjsBranchStore) won't work, so Version History and Branch Manager actions are disabled. To use these features, disable SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED on the sync server or configure an out-of-doc store (ApiVersionStore/SQLite).",
   "branchManager.title": "Branches",
   "branchManager.current": "Current",
   "branchManager.compressionFallbackWarning":

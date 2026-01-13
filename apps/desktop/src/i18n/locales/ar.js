@@ -55,6 +55,8 @@ export const ar = {
   "versionHistory.autoSave": "حفظ تلقائي",
   "versionHistory.restore": "تمت الاستعادة",
   "collab.retry": "إعادة المحاولة",
+  "collab.reservedRootGuard.message":
+    "قام خادم المزامنة بإغلاق اتصال التعاون لأن reserved root guard مفعّل على خادم المزامنة (SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED). لن تعمل مخازن الإصدارات/الفروع داخل المستند (YjsVersionStore/YjsBranchStore)، لذلك تم تعطيل إجراءات سجل الإصدارات ومدير الفروع. لاستخدام هذه الميزات، عطّل SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED على خادم المزامنة أو قم بتهيئة مخزن خارج المستند (ApiVersionStore/SQLite).",
   "panels.versionHistory.title": "سجل الإصدارات",
   "versionHistory.panel.loading": "جارٍ تحميل سجل الإصدارات…",
   "versionHistory.panel.unavailableWithMessage": "سجل الإصدارات غير متاح: {message}",

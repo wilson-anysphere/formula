@@ -1,14 +1,26 @@
 import { useEffect, useState } from "react";
 
+import { t } from "../i18n/index.js";
+
 export type ProviderCloseInfo = { code: number; reason: string };
 
 export const RESERVED_ROOT_GUARD_CLOSE_CODE = 1008;
 const RESERVED_ROOT_GUARD_REASON_FRAGMENT = "reserved root mutation";
 
-export const RESERVED_ROOT_GUARD_UI_MESSAGE =
-  "The sync server closed the collaboration connection because the reserved root guard is enabled on the sync server (SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED). " +
-  "In-doc versioning/branching stores (YjsVersionStore/YjsBranchStore) won't work, so Version History and Branch Manager actions are disabled. " +
-  "To use these features, disable SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED on the sync server or configure an out-of-doc store (ApiVersionStore/SQLite).";
+export const RESERVED_ROOT_GUARD_UI_MESSAGE_KEY = "collab.reservedRootGuard.message";
+
+export function reservedRootGuardUiMessage(): string {
+  const out = t(RESERVED_ROOT_GUARD_UI_MESSAGE_KEY);
+  // Fallback to a reasonably actionable message if i18n keys are missing.
+  if (out === RESERVED_ROOT_GUARD_UI_MESSAGE_KEY) {
+    return (
+      "The sync server closed the collaboration connection because the reserved root guard is enabled on the sync server (SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED). " +
+      "In-doc versioning/branching stores (YjsVersionStore/YjsBranchStore) won't work, so Version History and Branch Manager actions are disabled. " +
+      "To use these features, disable SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED on the sync server or configure an out-of-doc store (ApiVersionStore/SQLite)."
+    );
+  }
+  return out;
+}
 
 // Preserve the detected error per provider instance so panels can show the banner
 // even if they are opened after the close event occurred (or are re-opened).
@@ -238,10 +250,11 @@ export function useReservedRootGuardError(provider: any | null): string | null {
       // error even when panels are not mounted.
       listenForProviderCloseEvents(provider, (info) => {
         if (!isReservedRootGuardDisconnect(info)) return;
-        providerReservedRootGuardError.set(key, RESERVED_ROOT_GUARD_UI_MESSAGE);
+        const message = reservedRootGuardUiMessage();
+        providerReservedRootGuardError.set(key, message);
         for (const cb of Array.from(monitor!.subscribers)) {
           try {
-            cb(RESERVED_ROOT_GUARD_UI_MESSAGE);
+            cb(message);
           } catch {
             // ignore
           }
