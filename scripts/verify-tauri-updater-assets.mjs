@@ -607,7 +607,13 @@ async function main() {
 
   // Print a concise per-platform summary.
   for (const entry of updaterEntries) {
-    const sigStatus = entry.inlineSig ? "inline" : entry.sigAssetPresent ? entry.sigAssetName : "MISSING";
+    const sigStatus = entry.sigAssetPresent
+      ? entry.inlineSig
+        ? `${entry.sigAssetName} + inline`
+        : entry.sigAssetName
+      : entry.inlineSig
+        ? "inline (no .sig asset)"
+        : "MISSING";
     console.log(`  - ${entry.platform}: ${entry.assetName} (sig: ${sigStatus})`);
   }
 
@@ -675,6 +681,33 @@ async function main() {
       if (debForArch.length === 0) missing.push(`Missing Linux .deb bundle for arch ${arch}`);
       if (rpmForArch.length === 0) missing.push(`Missing Linux .rpm bundle for arch ${arch}`);
     }
+  }
+
+  // Signature assets: when updater signing is enabled we expect `.sig` assets to be uploaded
+  // alongside all installer/update artifacts (see docs/release.md).
+  const requireArtifactSigAssets = wantsManifestSig;
+  if (requireArtifactSigAssets) {
+    const signedKinds = [
+      { label: "macOS installer (.dmg)", matches: (name) => name.toLowerCase().endsWith(".dmg") },
+      { label: "macOS updater archive (.app.tar.gz)", matches: (name) => name.toLowerCase().endsWith(".app.tar.gz") },
+      { label: "Windows installer (.msi)", matches: (name) => name.toLowerCase().endsWith(".msi") },
+      { label: "Windows installer (.exe)", matches: (name) => name.toLowerCase().endsWith(".exe") },
+      { label: "Linux bundle (.AppImage)", matches: (name) => name.toLowerCase().endsWith(".appimage") },
+      { label: "Linux package (.deb)", matches: (name) => name.toLowerCase().endsWith(".deb") },
+      { label: "Linux package (.rpm)", matches: (name) => name.toLowerCase().endsWith(".rpm") },
+    ];
+
+    /** @type {string[]} */
+    const missingSigAssets = [];
+    for (const name of assetNames) {
+      const kind = signedKinds.find((k) => k.matches(name));
+      if (!kind) continue;
+      const sigName = `${name}.sig`;
+      if (!assetByName.has(sigName)) {
+        missingSigAssets.push(`Missing signature asset for ${kind.label}: ${sigName}`);
+      }
+    }
+    missing.push(...missingSigAssets);
   }
 
   if (missing.length > 0) {
