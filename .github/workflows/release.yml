@@ -772,28 +772,12 @@ jobs:
           fi
           echo "Verifying entitlements embedded in: $app"
           codesign --verify --deep --strict --verbose=2 "$app"
-          entitlements="$(codesign -d --entitlements :- "$app" 2>&1)"
-          echo "$entitlements" | grep -q "com.apple.security.cs.allow-jit"
-          echo "$entitlements" | grep -q "com.apple.security.cs.allow-unsigned-executable-memory"
-          echo "$entitlements" | grep -q "com.apple.security.network.client"
-
-          # Keep the Developer ID hardened-runtime entitlement surface minimal.
-          if echo "$entitlements" | grep -q "com.apple.security.get-task-allow"; then
-            echo "::error::Disallowed entitlement present in signed app: com.apple.security.get-task-allow" >&2
-            exit 1
-          fi
-          if echo "$entitlements" | grep -q "com.apple.security.cs.disable-library-validation"; then
-            echo "::error::Disallowed entitlement present in signed app: com.apple.security.cs.disable-library-validation" >&2
-            exit 1
-          fi
-          if echo "$entitlements" | grep -q "com.apple.security.cs.disable-executable-page-protection"; then
-            echo "::error::Disallowed entitlement present in signed app: com.apple.security.cs.disable-executable-page-protection" >&2
-            exit 1
-          fi
-          if echo "$entitlements" | grep -q "com.apple.security.cs.allow-dyld-environment-variables"; then
-            echo "::error::Disallowed entitlement present in signed app: com.apple.security.cs.allow-dyld-environment-variables" >&2
-            exit 1
-          fi
+          tmp_entitlements="$(mktemp -t formula-entitlements.XXXXXX)"
+          # `codesign -d` may print non-XML metadata (e.g. "Executable=...") alongside the entitlements.
+          # Extract just the plist so we can lint + validate it using the same guardrail script.
+          codesign -d --entitlements :- "$app" 2>&1 \
+            | sed -n '/^<\\?xml/,/^[[:space:]]*<\\/plist>/p' > "$tmp_entitlements"
+          node scripts/check-macos-entitlements.mjs --path "$tmp_entitlements"
 
       - name: Build and upload release assets
         if: runner.os != 'macOS' && needs.validate-version.outputs.upload == 'true'
