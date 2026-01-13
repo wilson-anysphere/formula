@@ -126,6 +126,9 @@ copy that:
 - truncates tool `parameters` and `audit_result_summary` similarly
 - drops full tool `result` payloads
 
+In extreme cases (very large inputs / tool logs), the compaction step may also drop some tool calls
+and optional fields to fit under the cap.
+
 Example:
 
 ```ts
@@ -320,6 +323,10 @@ await recorder.finalize();
 
 It also wraps the chosen store in `BoundedAIAuditStore` by default (pass `bounded: false` to disable).
 
+Note: the browser entrypoint intentionally does **not** support `prefer: "sqlite"` (to avoid pulling `sql.js` into default web bundles).
+If you want sqlite-backed persistence in browser/webview contexts, import `SqliteAIAuditStore` from `@formula/ai-audit/sqlite` and
+construct it directly.
+
 Browser example:
 
 ```ts
@@ -455,6 +462,8 @@ await migrateLocalStorageAuditEntriesToSqlite({
 ```ts
 import { serializeAuditEntries } from "@formula/ai-audit";
 ```
+
+This helper is also available via the lightweight entrypoint `@formula/ai-audit/export` if you only need export functionality.
 
 It takes an array of `AIAuditEntry` and returns a string:
 
