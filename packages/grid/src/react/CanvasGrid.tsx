@@ -985,9 +985,9 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const pageHeight = Math.max(0, viewport.height - viewport.frozenHeight);
 
       // On most browsers, trackpad pinch-to-zoom is surfaced as a ctrl+wheel event.
-      // Treat it as a zoom gesture (like common spreadsheet apps) instead of scrolling
+      // Treat ctrl/meta+wheel as a zoom gesture (like common spreadsheet apps) instead of scrolling
       // the page or the grid.
-      if (event.ctrlKey) {
+      if (event.ctrlKey || event.metaKey) {
         const delta = wheelDeltaToPixels(event.deltaY, event.deltaMode, { lineHeight, pageSize: viewport.height });
         if (delta === 0) return;
 

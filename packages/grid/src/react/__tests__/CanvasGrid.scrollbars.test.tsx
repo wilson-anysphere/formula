@@ -255,6 +255,44 @@ describe("CanvasGrid scrollbars", () => {
     host.remove();
   });
 
+  it("uses meta+wheel to zoom the grid", async () => {
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect200);
+
+    const apiRef = React.createRef<GridApi>();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<CanvasGrid provider={{ getCell: () => null }} rowCount={100} colCount={10} defaultRowHeight={10} defaultColWidth={10} apiRef={apiRef} />);
+    });
+
+    const container = host.querySelector('[data-testid="canvas-grid"]') as HTMLDivElement;
+    expect(apiRef.current?.getZoom()).toBe(1);
+
+    // Initial mount/resize may read layout; we only care about the meta+wheel zoom path.
+    rectSpy.mockClear();
+
+    await act(async () => {
+      container.dispatchEvent(
+        new WheelEvent("wheel", { deltaY: -100, metaKey: true, clientX: 100, clientY: 100, bubbles: true, cancelable: true })
+      );
+    });
+
+    expect(rectSpy).not.toHaveBeenCalled();
+
+    const zoom = apiRef.current?.getZoom() ?? 0;
+    expect(zoom).toBeGreaterThan(1);
+    expect(zoom).toBeCloseTo(Math.exp(0.1), 3);
+    expect(apiRef.current?.getColWidth(0)).toBeCloseTo(10 * zoom, 3);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
   it("dragging the vertical scrollbar thumb respects zoom-scaled minimum thumb size", async () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect200);
 
