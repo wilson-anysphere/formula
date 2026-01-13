@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 
 DEFAULT_LIMIT_MB = 50
@@ -224,6 +225,68 @@ def _append_step_summary(markdown: str) -> None:
         f.write("\n")
 
 
+def _report_path_str(path: Path, repo_root: Path) -> str:
+    """
+    Return a repo-relative path string when possible (for stable CI output).
+    """
+    try:
+        resolved = path.resolve()
+    except FileNotFoundError:
+        resolved = path
+    try:
+        return resolved.relative_to(repo_root.resolve()).as_posix()
+    except (ValueError, FileNotFoundError):
+        try:
+            return path.relative_to(repo_root).as_posix()
+        except ValueError:
+            return path.as_posix()
+
+
+def _build_json_report(artifacts: list[Artifact], limit_mb: int, enforce: bool, repo_root: Path) -> dict[str, Any]:
+    limit_bytes = limit_mb * 1000 * 1000
+    runner_os = os.environ.get("RUNNER_OS", "").strip()
+
+    over_limit_count = 0
+    artifact_rows: list[dict[str, Any]] = []
+    for art in artifacts:
+        over = art.size_bytes > limit_bytes
+        if over:
+            over_limit_count += 1
+        artifact_rows.append(
+            {
+                "path": _report_path_str(art.path, repo_root=repo_root),
+                "size_bytes": art.size_bytes,
+                "size_mb": round(art.size_bytes / 1_000_000, 3),
+                "over_limit": over,
+            }
+        )
+
+    report: dict[str, Any] = {
+        "limit_mb": limit_mb,
+        "enforce": enforce,
+        "artifacts": artifact_rows,
+        "total_artifacts": len(artifacts),
+        "over_limit_count": over_limit_count,
+    }
+    if runner_os:
+        report["runner_os"] = runner_os
+    return report
+
+
+def _write_json_report(json_path: Path | None, report: dict[str, Any]) -> bool:
+    if json_path is None:
+        return True
+    try:
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(json_path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        return True
+    except OSError as exc:
+        print(f"bundle-size: ERROR Failed to write JSON report to {json_path}: {exc}", file=sys.stderr)
+        return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Report (and optionally enforce) desktop Tauri bundle sizes after a release build."
@@ -248,10 +311,22 @@ def main() -> int:
         default=False,
         help="Fail if any artifact exceeds the limit (also enabled by env FORMULA_ENFORCE_BUNDLE_SIZE=1).",
     )
+    parser.add_argument(
+        "--json",
+        type=Path,
+        default=None,
+        help="Write a machine-readable JSON report to the given path "
+        "(also via env FORMULA_BUNDLE_SIZE_JSON_PATH).",
+    )
     args = parser.parse_args()
 
     repo_root = Path.cwd()
     enforce = args.enforce or _is_truthy_env(os.environ.get("FORMULA_ENFORCE_BUNDLE_SIZE"))
+    json_path = args.json
+    if json_path is None:
+        raw_json_path = os.environ.get("FORMULA_BUNDLE_SIZE_JSON_PATH", "").strip()
+        if raw_json_path:
+            json_path = Path(raw_json_path)
     try:
         limit_mb = args.limit_mb if args.limit_mb is not None else _parse_limit_mb(os.environ.get("FORMULA_BUNDLE_SIZE_LIMIT_MB"))
     except ValueError as exc:
@@ -264,6 +339,10 @@ def main() -> int:
         missing = [str(d) for d in args.bundle_dir if not d.is_dir()]
         if missing:
             print(f"bundle-size: ERROR --bundle-dir not found: {', '.join(missing)}", file=sys.stderr)
+            _write_json_report(
+                json_path,
+                _build_json_report([], limit_mb=limit_mb, enforce=enforce, repo_root=repo_root),
+            )
             return 2
     else:
         target_dirs = _candidate_target_dirs(repo_root)
@@ -293,6 +372,10 @@ def main() -> int:
         # Still write a summary so CI logs show something useful.
         md = _render_markdown([], limit_mb=limit_mb, enforce=enforce, repo_root=repo_root)
         _append_step_summary(md)
+        _write_json_report(
+            json_path,
+            _build_json_report([], limit_mb=limit_mb, enforce=enforce, repo_root=repo_root),
+        )
         return 1
 
     artifacts = _gather_artifacts(bundle_dirs)
@@ -301,6 +384,11 @@ def main() -> int:
     print(md)
     sys.stdout.flush()
     _append_step_summary(md)
+    if not _write_json_report(
+        json_path,
+        _build_json_report(artifacts, limit_mb=limit_mb, enforce=enforce, repo_root=repo_root),
+    ):
+        return 2
 
     if not enforce:
         return 0
