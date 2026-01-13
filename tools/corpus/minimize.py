@@ -865,6 +865,7 @@ def main() -> int:
     print(f"{summary['display_name']} sha256={workbook_id} diff critical_parts={len(summary['critical_parts'])}")
     for part in summary["critical_parts"]:
         counts = summary["part_counts"].get(part, {})
+        group = (summary.get("part_groups") or {}).get(part) if isinstance(summary.get("part_groups"), dict) else None
         part_meta = (summary.get("critical_part_hashes") or {}).get(part) or {}
         sha = part_meta.get("sha256")
         sha_short = sha[:16] if isinstance(sha, str) else None
@@ -874,11 +875,21 @@ def main() -> int:
             suffix += f" sha256={sha_short}"
         if isinstance(size, int):
             suffix += f" size={size}"
-        print(f"  {part}: {_format_counts(counts)}{suffix}")
+        group_prefix = f"[{group}] " if isinstance(group, str) and group else ""
+        print(f"  {group_prefix}{part}: {_format_counts(counts)}{suffix}")
         if part.endswith(".rels"):
             ids = summary["rels_critical_ids"].get(part) or []
             if ids:
                 print(f"    rel_ids: {', '.join(ids)}")
+
+    if summary.get("diff_entries_truncated") is True:
+        emitted = summary.get("diff_entries_emitted")
+        total = summary.get("diff_entries_total")
+        print(f"NOTE: diff entries truncated (emitted={emitted} total={total}).")
+        if summary.get("rels_critical_ids_complete") is False:
+            print(
+                f"NOTE: rels_critical_ids may be incomplete (rerun is capped at {MAX_DIFF_ENTRIES_AUTO_RERUN} diffs)."
+            )
 
     print(f"Wrote summary: {out_path}")
     if out_xlsx is not None:

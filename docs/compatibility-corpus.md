@@ -258,6 +258,7 @@ This produces a privacy-safe summary:
 - `part_counts`: per-part diff counts (C/W/I/total)
 - `rels_critical_ids`: for `.rels` parts, the relationship Ids (`rId...`) involved in critical diffs
 - `critical_part_hashes`: sha256 + size of each critical part (helps correlate failures without leaking content)
+- `parts_with_diffs`: stable list of all parts with diffs, including a coarse group label (rels/styles/media/etc)
 
 The tool always writes a JSON summary file (default: `tools/corpus/out/minimize/<sha16>.json`).
 
