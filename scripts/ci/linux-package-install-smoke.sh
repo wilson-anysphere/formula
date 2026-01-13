@@ -15,6 +15,7 @@ This is intended for CI/release workflows to catch:
   - missing shared libraries (ldd "not found")
 
 Environment variables:
+  CARGO_TARGET_DIR         Optional Cargo target directory override (also used for artifact discovery)
   FORMULA_DEB_SMOKE_IMAGE  Ubuntu image to use (default: ubuntu:24.04)
   FORMULA_RPM_SMOKE_IMAGE  Fedora image to use (default: fedora:40)
 EOF
