@@ -67,9 +67,35 @@ describe("BoundedAIAuditStore", () => {
 
     expect(JSON.stringify(storedEntry).length).toBeLessThanOrEqual(maxEntryChars);
 
-    expect(storedEntry.tool_calls[0]!.result).toBeUndefined();
+    // Filter-critical fields are preserved.
+    expect(storedEntry.id).toBe(entry.id);
+    expect(storedEntry.timestamp_ms).toBe(entry.timestamp_ms);
+    expect(storedEntry.session_id).toBe(entry.session_id);
+    expect(storedEntry.workbook_id).toBe(entry.workbook_id);
+    expect(storedEntry.mode).toBe(entry.mode);
+    expect(storedEntry.model).toBe(entry.model);
+
+    const toolCall = storedEntry.tool_calls[0]!;
+    expect(toolCall.name).toBe("huge_tool");
+    expect(toolCall.result).toBeUndefined();
+    expect(toolCall.result_truncated).toBe(true);
 
     const input = storedEntry.input as any;
     expect(input?.audit_truncated).toBe(true);
+    expect(typeof input?.audit_json).toBe("string");
+    expect(typeof input?.audit_original_chars).toBe("number");
+    expect(input.audit_original_chars).toBeGreaterThan((input.audit_json as string).length);
+
+    const params = toolCall.parameters as any;
+    expect(params?.audit_truncated).toBe(true);
+    expect(typeof params?.audit_json).toBe("string");
+    expect(typeof params?.audit_original_chars).toBe("number");
+    expect(params.audit_original_chars).toBeGreaterThan((params.audit_json as string).length);
+
+    const summary = toolCall.audit_result_summary as any;
+    expect(summary?.audit_truncated).toBe(true);
+    expect(typeof summary?.audit_json).toBe("string");
+    expect(typeof summary?.audit_original_chars).toBe("number");
+    expect(summary.audit_original_chars).toBeGreaterThan((summary.audit_json as string).length);
   });
 });
