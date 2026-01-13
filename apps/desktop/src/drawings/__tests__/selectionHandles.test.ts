@@ -24,6 +24,16 @@ describe("drawings selection handles", () => {
     expect(hitTestResizeHandle(bounds, 140, 220)).toBeNull();
   });
 
+  it("hitTestResizeHandle detects handles for rotated objects", () => {
+    const bounds = { x: 100, y: 200, width: 80, height: 40 };
+    const transform: DrawingTransform = { rotationDeg: 90, flipH: false, flipV: false };
+
+    const centers = getResizeHandleCenters(bounds, transform);
+    for (const c of centers) {
+      expect(hitTestResizeHandle(bounds, c.x, c.y, transform)).toBe(c.handle);
+    }
+  });
+
   it("cursorForResizeHandle matches expected CSS cursors", () => {
     const expected: Record<ResizeHandle, string> = {
       nw: "nwse-resize",
