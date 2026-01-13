@@ -211,7 +211,6 @@ describe("defaultRibbonSchema", () => {
       "Expected Fill dropdown not to include legacy home.editing.fill.right",
     ).toBe(false);
   });
-
   it("aligns Home → Find & Select ids with builtin command ids", () => {
     const homeTab = defaultRibbonSchema.tabs.find((tab) => tab.id === "home");
     expect(homeTab, "Expected Home tab to exist").toBeTruthy();
@@ -242,5 +241,32 @@ describe("defaultRibbonSchema", () => {
       findSelect?.menuItems?.some((item) => item.id === "home.editing.findSelect.goTo"),
       "Expected Find & Select dropdown not to include legacy home.editing.findSelect.goTo",
     ).toBe(false);
+  });
+
+  it("aligns View → Window → Freeze Panes menu ids with builtin command ids", () => {
+    const viewTab = defaultRibbonSchema.tabs.find((tab) => tab.id === "view");
+    expect(viewTab, "Expected View tab to exist").toBeTruthy();
+    if (!viewTab) return;
+
+    const windowGroup = viewTab.groups.find((group) => group.id === "view.window");
+    expect(windowGroup, "Expected View → Window group to exist").toBeTruthy();
+    if (!windowGroup) return;
+
+    const freezePanes = windowGroup.buttons.find((button) => button.id === "view.window.freezePanes");
+    expect(freezePanes, "Expected Freeze Panes dropdown to exist").toBeTruthy();
+    if (!freezePanes) return;
+
+    expect(freezePanes.kind).toBe("dropdown");
+    const ids = freezePanes.menuItems?.map((item) => item.id) ?? [];
+
+    expect(ids).toEqual(
+      expect.arrayContaining(["view.freezePanes", "view.freezeTopRow", "view.freezeFirstColumn", "view.unfreezePanes"]),
+    );
+
+    // Ensure we don't regress to the old hierarchical ids.
+    expect(ids).not.toContain("view.window.freezePanes.freezePanes");
+    expect(ids).not.toContain("view.window.freezePanes.freezeTopRow");
+    expect(ids).not.toContain("view.window.freezePanes.freezeFirstColumn");
+    expect(ids).not.toContain("view.window.freezePanes.unfreeze");
   });
 });
