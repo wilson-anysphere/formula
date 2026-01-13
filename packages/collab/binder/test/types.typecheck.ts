@@ -62,6 +62,8 @@ import {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     canEditCell: (_cell) => true,
     maskCellValue: (value, _cell) => value,
+    canWriteSharedState: () => true,
+    maskCellFormat: true,
     onEditRejected: (_deltas) => {},
     formulaConflictsMode: "formula+value",
   };
@@ -99,4 +101,3 @@ import {
   const badEnc: EncryptionConfig = { keyForCell: () => ({ keyId: "k", keyBytes: "nope" }) };
   void badEnc;
 }
-

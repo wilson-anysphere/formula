@@ -156,6 +156,26 @@ export interface BindYjsToDocumentControllerOptions {
   maskCellValue?: ((value: unknown, cell?: CellAddress) => unknown) | null;
 
   /**
+   * Controls whether DocumentController-driven shared-state writes (sheet view
+   * state, sheet-level formatting defaults, range-run formatting metadata, etc)
+   * are allowed to be persisted into the shared Yjs document.
+   *
+   * When false, those deltas are ignored so the UI can still support local-only
+   * interactions (useful for read-only collaboration roles).
+   *
+   * Defaults to `true`.
+   */
+  canWriteSharedState?: boolean | (() => boolean);
+
+  /**
+   * When true, the binder will also mask **formatting** (styleId/format objects)
+   * for unreadable/encrypted cells, not just their values.
+   *
+   * Defaults to false.
+   */
+  maskCellFormat?: boolean;
+
+  /**
    * Called when the binder rejects a DocumentController-driven edit (e.g. due to
    * insufficient permissions).
    */
