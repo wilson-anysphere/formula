@@ -9,6 +9,7 @@ use super::aes_cbc::decrypt_aes_cbc_no_padding;
 use super::crypto::{
     derive_iv, derive_key, hash_password, HashAlgorithm, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK,
     KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
+    segment_block_key,
 };
 use super::error::{OffCryptoError, Result};
 
@@ -186,7 +187,7 @@ pub fn decrypt_agile_encrypted_package(
 
     let mut plaintext = Vec::with_capacity(ciphertext.len());
     for (idx, chunk) in ciphertext.chunks(SEGMENT_SIZE).enumerate() {
-        let block_key = (idx as u32).to_le_bytes();
+        let block_key = segment_block_key(idx as u32);
         let iv = derive_iv_or_err(
             &info.key_data.salt_value,
             &block_key,
