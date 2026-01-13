@@ -69,17 +69,37 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
         <div className="what-if-grid">
           <label className="what-if__field">
             <span className="what-if__label">{t("whatIf.goalSeek.setCell")}</span>
-            <input className="what-if__input" value={targetCell} onChange={(e) => setTargetCell(e.target.value)} disabled={running} />
+            <input
+              className="what-if__input what-if__input--mono"
+              value={targetCell}
+              onChange={(e) => setTargetCell(e.target.value)}
+              disabled={running}
+              spellCheck={false}
+              autoCapitalize="off"
+            />
           </label>
 
           <label className="what-if__field">
             <span className="what-if__label">{t("whatIf.goalSeek.toValue")}</span>
-            <input className="what-if__input" value={targetValue} onChange={(e) => setTargetValue(e.target.value)} disabled={running} />
+            <input
+              className="what-if__input"
+              value={targetValue}
+              onChange={(e) => setTargetValue(e.target.value)}
+              disabled={running}
+              inputMode="decimal"
+            />
           </label>
 
           <label className="what-if__field">
             <span className="what-if__label">{t("whatIf.goalSeek.byChangingCell")}</span>
-            <input className="what-if__input" value={changingCell} onChange={(e) => setChangingCell(e.target.value)} disabled={running} />
+            <input
+              className="what-if__input what-if__input--mono"
+              value={changingCell}
+              onChange={(e) => setChangingCell(e.target.value)}
+              disabled={running}
+              spellCheck={false}
+              autoCapitalize="off"
+            />
           </label>
 
           <div className="what-if__actions">

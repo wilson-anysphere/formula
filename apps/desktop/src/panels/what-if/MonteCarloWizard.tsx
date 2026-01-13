@@ -91,17 +91,30 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
       <div className="what-if-grid what-if-grid--fit">
         <label className="what-if__field">
           <span className="what-if__label">{t("whatIf.monteCarlo.iterations")}</span>
-          <input className="what-if__input" value={iterations} onChange={(e) => setIterations(e.target.value)} disabled={running} />
+          <input
+            className="what-if__input"
+            value={iterations}
+            onChange={(e) => setIterations(e.target.value)}
+            disabled={running}
+            inputMode="numeric"
+          />
         </label>
 
         <label className="what-if__field">
           <span className="what-if__label">{t("whatIf.monteCarlo.seed")}</span>
-          <input className="what-if__input" value={seed} onChange={(e) => setSeed(e.target.value)} disabled={running} />
+          <input className="what-if__input" value={seed} onChange={(e) => setSeed(e.target.value)} disabled={running} inputMode="numeric" />
         </label>
 
         <label className="what-if__field">
           <span className="what-if__label">{t("whatIf.monteCarlo.outputCells")}</span>
-          <input className="what-if__input" value={outputCells} onChange={(e) => setOutputCells(e.target.value)} disabled={running} />
+          <input
+            className="what-if__input what-if__input--mono"
+            value={outputCells}
+            onChange={(e) => setOutputCells(e.target.value)}
+            disabled={running}
+            spellCheck={false}
+            autoCapitalize="off"
+          />
         </label>
       </div>
 
@@ -112,12 +125,14 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
             <div key={idx} className="what-if-monte-carlo__input-row" data-testid={`monte-carlo-input-${idx}`}>
               <div className="what-if-monte-carlo__input-cell">
                 <input
-                  className="what-if__input"
+                  className="what-if__input what-if__input--mono"
                   value={input.cell}
                   onChange={(e) => updateInput(idx, { cell: e.target.value })}
                   disabled={running}
                   placeholder="A1"
                   aria-label={t("whatIf.monteCarlo.inputs.cellAriaLabel")}
+                  spellCheck={false}
+                  autoCapitalize="off"
                 />
               </div>
 

@@ -150,7 +150,13 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
 
       <label className="what-if__field">
         <span className="what-if__label">{t("whatIf.scenario.resultCellsLabel")}</span>
-        <input className="what-if__input" value={resultCells} onChange={(e) => setResultCells(e.target.value)} />
+        <input
+          className="what-if__input what-if__input--mono"
+          value={resultCells}
+          onChange={(e) => setResultCells(e.target.value)}
+          spellCheck={false}
+          autoCapitalize="off"
+        />
       </label>
 
       {report ? (
