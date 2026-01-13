@@ -8200,6 +8200,25 @@ function handleRibbonCommand(commandId: string): void {
       });
     };
 
+    switch (commandId) {
+      case "formulas.formulaAuditing.tracePrecedents":
+        app.clearAuditing();
+        app.toggleAuditingPrecedents();
+        app.focus();
+        return;
+      case "formulas.formulaAuditing.traceDependents":
+        app.clearAuditing();
+        app.toggleAuditingDependents();
+        app.focus();
+        return;
+      case "formulas.formulaAuditing.removeArrows":
+        app.clearAuditing();
+        app.focus();
+        return;
+      default:
+        break;
+    }
+
     if (commandId === "format.toggleBold" || commandId === "format.toggleItalic" || commandId === "format.toggleUnderline") {
       executeBuiltinCommand(commandId);
       return;
