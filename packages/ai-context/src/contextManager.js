@@ -1081,6 +1081,7 @@ export class ContextManager {
     const includePromptContext = params.includePromptContext ?? true;
     const dlp = normalizeDlpOptions(params.dlp);
     const includeRestrictedContent = dlp?.includeRestrictedContent ?? false;
+    const policyAllowsRestrictedContent = Boolean(dlp?.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.allowRestrictedContent);
     const classificationRecords =
       dlp?.classificationRecords ?? dlp?.classificationStore?.list?.(dlp.documentId) ?? [];
 
@@ -1451,6 +1452,14 @@ export class ContextManager {
 
     let promptContext = "";
     if (includePromptContext) {
+      const shouldRedactPromptStruct = Boolean(dlp) && overallDecision?.decision === DLP_DECISION.REDACT;
+      const attachmentsForPrompt = shouldRedactPromptStruct
+        ? redactStructuredValue(params.attachments ?? [], this.redactor, {
+            signal,
+            includeRestrictedContent,
+            policyAllowsRestrictedContent,
+          })
+        : params.attachments;
       const schemaLines = [];
       const maxTables = 25;
       const maxColumns = 25;
@@ -1685,8 +1694,8 @@ export class ContextManager {
         {
           key: "attachments",
           priority: 2,
-          text: params.attachments?.length
-            ? this.redactor(`User-provided attachments:\n${stableJsonStringify(params.attachments)}`)
+          text: attachmentsForPrompt?.length
+            ? this.redactor(`User-provided attachments:\n${stableJsonStringify(attachmentsForPrompt)}`)
             : "",
         },
         {

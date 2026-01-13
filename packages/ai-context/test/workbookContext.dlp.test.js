@@ -212,6 +212,32 @@ test("buildWorkbookContext: workbook_schema redacts sensitive header strings whe
   assert.match(schemaSection, /\[REDACTED_SSN\]/);
 });
 
+test("buildWorkbookContext: attachments are redacted under DLP REDACT even when redactor is a no-op", async () => {
+  const workbook = makeSensitiveWorkbook();
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "contacts",
+    attachments: [{ type: "chart", reference: "Chart1", data: { note: "987-65-4321" } }],
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ redactDisallowed: true }),
+    },
+  });
+
+  assert.match(out.promptContext, /## attachments/i);
+  assert.doesNotMatch(out.promptContext, /987-65-4321/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
+
 test("buildWorkbookContext: does not send raw sensitive workbook text to embedder when blocked", async () => {
   const workbook = makeSensitiveWorkbook();
   const embedder = new CapturingEmbedder({ dimension: 64 });
