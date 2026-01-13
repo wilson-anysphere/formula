@@ -27,6 +27,20 @@ test('HashEmbedder tokenization: "RevenueByRegion" matches "revenue by region"',
   );
 });
 
+test("HashEmbedder treats underscores like token separators", async () => {
+  const embedder = new HashEmbedder({ dimension: 512 });
+  const [spaced, snake, unrelated] = await embedder.embedTexts(["user id", "user_id", "unrelated"]);
+
+  const simSnake = cosineSimilarity(spaced, snake);
+  const simUnrelated = cosineSimilarity(spaced, unrelated);
+
+  // "user id" and "user_id" should tokenize the same, so their vectors should be
+  // nearly identical and closer than an unrelated token.
+  assert.ok(simSnake > simUnrelated);
+  assert.ok(simSnake > 0.99, `expected high similarity for snake_case, got ${simSnake}`);
+  assert.ok(simUnrelated < 0.8, `expected low similarity for unrelated token, got ${simUnrelated}`);
+});
+
 test("HashEmbedder tokenization changes remain deterministic", async () => {
   const embedder = new HashEmbedder({ dimension: 128 });
   const [a, b] = await embedder.embedTexts(["RevenueByRegion2024", "RevenueByRegion2024"]);

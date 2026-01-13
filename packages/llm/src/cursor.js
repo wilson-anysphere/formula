@@ -477,7 +477,7 @@ export class CursorLLMClient {
        */
       function parseSseJsonData(data) {
         const first = data[0];
-        // Cursor (and most OpenAI-compatible backends) only stream JSON objects.
+        // Cursor (and most API-compatible backends) only stream JSON objects.
         // Ignore keep-alive/heartbeat frames like `data: ping`.
         if (first !== "{" && first !== "[") return null;
         try {
