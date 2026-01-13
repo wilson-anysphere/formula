@@ -11,3 +11,6 @@ These fixtures live outside `fixtures/xlsx/` so they are not picked up by
 
 If you add a real encrypted workbook fixture, document the expected password in the adjacent README
 (or encode it in the filename) so tests can open it deterministically.
+
+See `docs/21-encrypted-workbooks.md` for details on OOXML encryption containers (`EncryptionInfo` /
+`EncryptedPackage`).

@@ -27,3 +27,5 @@ Note: Some encryption tests build minimal encrypted containers programmatically 
 in binary files (see `crates/formula-io/tests/encrypted_ooxml.rs` and
 `crates/formula-io/tests/encrypted_xls.rs`). If/when we add real Excel-saved encrypted workbooks to
 the repo, they should live under `fixtures/encrypted/`.
+
+For background on Excel encryption formats and terminology, see `docs/21-encrypted-workbooks.md`.
