@@ -224,6 +224,16 @@ pub struct NumberFormatModel {
     pub source_linked: Option<bool>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DataLabelsModel {
+    pub show_val: Option<bool>,
+    pub show_cat_name: Option<bool>,
+    pub show_ser_name: Option<bool>,
+    pub position: Option<String>,
+    pub num_fmt: Option<NumberFormatModel>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SeriesModel {
@@ -238,6 +248,9 @@ pub struct SeriesModel {
     /// Series marker properties (`c:ser/c:marker`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub marker: Option<MarkerStyle>,
+    /// Series data label properties (`c:ser/c:dLbls`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_labels: Option<DataLabelsModel>,
     /// Per-point overrides (`c:ser/c:dPt`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub points: Vec<SeriesPointStyle>,

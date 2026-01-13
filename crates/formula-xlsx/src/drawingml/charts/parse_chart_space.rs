@@ -1,9 +1,9 @@
 use formula_model::charts::{
     AxisKind, AxisModel, AxisPosition, AxisScalingModel, BarChartModel, ChartDiagnostic,
-    ChartDiagnosticLevel, ChartKind, ChartModel, ComboChartEntry, ComboPlotAreaModel,
+    ChartDiagnosticLevel, ChartKind, ChartModel, ComboChartEntry, ComboPlotAreaModel, DataLabelsModel,
     LegendModel, LegendPosition, LineChartModel, NumberFormatModel, PieChartModel, PlotAreaModel,
-    ScatterChartModel, SeriesData, SeriesIndexRange, SeriesModel, SeriesNumberData,
-    SeriesPointStyle, SeriesTextData, TextModel,
+    ScatterChartModel, SeriesData, SeriesIndexRange, SeriesModel, SeriesNumberData, SeriesPointStyle,
+    SeriesTextData, TextModel,
 };
 use formula_model::RichText;
 use roxmltree::{Document, Node};
@@ -298,6 +298,11 @@ fn parse_series(
         .find(|n| n.is_element() && n.tag_name().name() == "marker")
         .and_then(parse_marker);
 
+    let data_labels = series_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "dLbls")
+        .map(|n| parse_data_labels(n, diagnostics));
+
     let points = series_node
         .children()
         .filter(|n| n.is_element() && n.tag_name().name() == "dPt")
@@ -312,8 +317,32 @@ fn parse_series(
         y_values,
         style,
         marker,
+        data_labels,
         points,
         plot_index,
+    }
+}
+
+fn parse_data_labels(
+    data_labels_node: Node<'_, '_>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+) -> DataLabelsModel {
+    let show_val = child_attr(data_labels_node, "showVal", "val").map(parse_ooxml_bool);
+    let show_cat_name = child_attr(data_labels_node, "showCatName", "val").map(parse_ooxml_bool);
+    let show_ser_name = child_attr(data_labels_node, "showSerName", "val").map(parse_ooxml_bool);
+    let position = child_attr(data_labels_node, "dLblPos", "val").map(str::to_string);
+
+    let num_fmt = data_labels_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "numFmt")
+        .and_then(|n| parse_number_format(n, diagnostics));
+
+    DataLabelsModel {
+        show_val,
+        show_cat_name,
+        show_ser_name,
+        position,
+        num_fmt,
     }
 }
 
@@ -406,7 +435,7 @@ fn parse_axis(
     let num_fmt = axis_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "numFmt")
-        .and_then(|n| parse_axis_number_format(n, diagnostics));
+        .and_then(|n| parse_number_format(n, diagnostics));
 
     let tick_label_position = axis_node
         .children()
@@ -514,7 +543,7 @@ fn parse_axis_scaling(
     }
 }
 
-fn parse_axis_number_format(
+fn parse_number_format(
     num_fmt_node: Node<'_, '_>,
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> Option<NumberFormatModel> {
