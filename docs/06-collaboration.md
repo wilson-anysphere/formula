@@ -38,7 +38,7 @@ If you are editing collaboration code, start here and keep this doc in sync with
 - Branching glue: [`packages/collab/branching/index.js`](../packages/collab/branching/index.js) (`CollabBranchingWorkflow`)
 - Branch graph store kept *inside the Y.Doc*: [`packages/versioning/branches/src/store/YjsBranchStore.js`](../packages/versioning/branches/src/store/YjsBranchStore.js) (`YjsBranchStore`)
 - Branch graph store backed by local SQLite (Node/desktop): [`packages/versioning/branches/src/store/SQLiteBranchStore.js`](../packages/versioning/branches/src/store/SQLiteBranchStore.js) (`SQLiteBranchStore`)
-- BranchService + snapshot adapter: [`packages/versioning/branches/src/`](../packages/versioning/branches/src/) (`BranchService`, `yjsDocToDocumentState`, `applyDocumentStateToYjsDoc`)
+- BranchService + browser-safe entrypoint: [`packages/versioning/branches/src/browser.js`](../packages/versioning/branches/src/browser.js) (`BranchService`, `YjsBranchStore`, `yjsDocToDocumentState`, `applyDocumentStateToYjsDoc`)
 
 ---
 

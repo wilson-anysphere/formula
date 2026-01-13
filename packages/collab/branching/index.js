@@ -1,7 +1,7 @@
 import {
   applyDocumentStateToYjsDoc,
   yjsDocToDocumentState,
-} from "../../versioning/branches/src/yjs/index.js";
+} from "../../versioning/branches/src/browser.js";
 import * as Y from "yjs";
 
 function getYMap(value) {
