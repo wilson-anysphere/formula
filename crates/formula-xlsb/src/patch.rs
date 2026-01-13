@@ -79,14 +79,17 @@ pub struct CellEdit {
     /// - When inserting a new cell record, `None` uses style index `0` (the default / "Normal"
     ///   style), matching historical behavior.
     pub new_style: Option<u32>,
-    /// If true, clears any existing formula record for this cell and writes a plain value cell
-    /// instead.
+    /// If true, drop any existing formula payload and write this cell as a plain value cell.
     ///
-    /// This enables "paste values"-style edits where callers want to keep only the cached value
-    /// of an existing formula cell but remove the formula itself.
+    /// This is the "paste values" operation for formula cells: the output worksheet stream will
+    /// contain `BrtCell*`/`BrtBlank` records instead of `BrtFmla*`, so re-reading the workbook will
+    /// yield `cell.formula == None`.
     ///
     /// When false (the default), formula cells keep their formula unless [`Self::new_formula`] is
     /// set to replace it. Non-formula cells ignore this flag.
+    ///
+    /// When `clear_formula` is true, [`Self::new_formula`], [`Self::new_rgcb`], and
+    /// [`Self::new_formula_flags`] must all be `None`.
     pub clear_formula: bool,
     /// If set, replaces the raw formula token stream (`rgce`) for formula cells.
     pub new_formula: Option<Vec<u8>>,
@@ -232,6 +235,7 @@ impl CellEdit {
         };
         self.new_formula = Some(encoded.rgce);
         self.new_rgcb = Some(encoded.rgcb);
+        self.clear_formula = false;
         Ok(())
     }
 
@@ -261,6 +265,7 @@ impl CellEdit {
         };
         self.new_formula = Some(encoded.rgce);
         self.new_rgcb = Some(encoded.rgcb);
+        self.clear_formula = false;
         Ok(())
     }
 }
@@ -295,6 +300,7 @@ impl CellEdit {
         let encoded = formula_biff::encode_rgce_with_rgcb(formula)?;
         self.new_formula = Some(encoded.rgce);
         self.new_rgcb = Some(encoded.rgcb);
+        self.clear_formula = false;
         Ok(())
     }
 }
@@ -314,6 +320,19 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
 
     let mut edits_by_coord: HashMap<(u32, u32), usize> = HashMap::with_capacity(edits.len());
     for (idx, edit) in edits.iter().enumerate() {
+        if edit.clear_formula
+            && (edit.new_formula.is_some()
+                || edit.new_rgcb.is_some()
+                || edit.new_formula_flags.is_some())
+        {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "cell edit for ({}, {}) cannot set new_formula/new_rgcb/new_formula_flags when clear_formula=true",
+                    edit.row, edit.col
+                ),
+            )));
+        }
         if edits_by_coord.insert((edit.row, edit.col), idx).is_some() {
             return Err(Error::Io(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -1611,7 +1630,6 @@ fn formula_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> 
             return Ok(false);
         }
     }
-
     let existing_cached = read_f64(payload, 8)?;
     let existing_flags = read_u16(payload, 16)?;
     let desired_flags = edit.new_formula_flags.unwrap_or(existing_flags);
@@ -1647,7 +1665,6 @@ fn formula_string_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, 
             return Ok(false);
         }
     }
-
     let desired_cached = match &edit.new_value {
         CellValue::Text(s) => s,
         _ => return Ok(false),
@@ -1698,7 +1715,6 @@ fn formula_bool_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Er
             return Ok(false);
         }
     }
-
     let desired_cached = match &edit.new_value {
         CellValue::Bool(v) => *v,
         _ => return Ok(false),
@@ -1731,7 +1747,6 @@ fn formula_error_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, E
             return Ok(false);
         }
     }
-
     let desired_cached = match &edit.new_value {
         CellValue::Error(v) => *v,
         _ => return Ok(false),
@@ -2003,6 +2018,7 @@ fn patch_fmla_num<W: io::Write>(
     existing: Option<ExistingRecordHeader<'_>>,
 ) -> Result<(), Error> {
     if edit.clear_formula {
+        // Convert an existing formula cell into a plain value cell ("paste values").
         return patch_value_cell(writer, col, style, edit, existing);
     }
     if matches!(edit.new_value, CellValue::Blank) && edit.new_formula.is_none() {

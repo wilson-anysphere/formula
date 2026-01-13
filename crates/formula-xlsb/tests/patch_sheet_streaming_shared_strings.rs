@@ -192,6 +192,7 @@ fn streaming_shared_strings_does_not_touch_sst_for_inserted_formula_string_cells
             row: 0,
             col: 1,
             new_value: CellValue::Text("New".to_string()),
+            clear_formula: false,
             new_formula: Some(ptg_str("New")),
             new_rgcb: None,
             new_formula_flags: None,
@@ -199,7 +200,6 @@ fn streaming_shared_strings_does_not_touch_sst_for_inserted_formula_string_cells
             // should not affect the shared string table counts.
             shared_string_index: Some(0),
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -356,12 +356,12 @@ fn streaming_shared_string_edit_updates_isst_and_preserves_counts() {
             row: 0,
             col: 0,
             new_value: CellValue::Text("World".to_string()),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -397,12 +397,12 @@ fn streaming_shared_string_edit_appends_new_si_and_updates_unique_count() {
             row: 0,
             col: 0,
             new_value: CellValue::Text("New".to_string()),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -440,12 +440,12 @@ fn streaming_shared_string_noop_is_lossless() {
             row: 0,
             col: 0,
             new_value: CellValue::Text("Hello".to_string()),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -496,12 +496,12 @@ fn streaming_shared_string_noop_rich_sst_is_lossless() {
             row: 0,
             col: 0,
             new_value: CellValue::Text("Hello Bold".to_string()),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -541,12 +541,12 @@ fn streaming_shared_string_noop_inline_string_does_not_touch_shared_strings() {
             row: 0,
             col: 1,
             new_value: CellValue::Text("Hello".to_string()),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -590,12 +590,12 @@ fn streaming_shared_strings_repairs_unique_count_when_header_is_incorrect() {
             row: 0,
             col: 0,
             new_value: CellValue::Text("New".to_string()),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -622,12 +622,12 @@ fn streaming_shared_string_total_count_updates_when_cell_leaves_sst() {
             row: 0,
             col: 0,
             new_value: CellValue::Number(123.0),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");
@@ -659,12 +659,12 @@ fn streaming_shared_string_total_count_updates_when_cell_enters_sst() {
             row: 0,
             col: 1,
             new_value: CellValue::Text("World".to_string()),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_streaming_shared_strings");

@@ -28,12 +28,12 @@ fn save_with_cell_edits_streaming_matches_in_memory_patch_path() {
         row: 0,
         col: 1,
         new_value: CellValue::Number(123.0),
+        clear_formula: false,
         new_formula: None,
         new_rgcb: None,
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
-        clear_formula: false,
     }];
 
     let tmpdir = tempfile::tempdir().expect("create temp dir");
@@ -69,12 +69,12 @@ fn save_with_cell_edits_streaming_can_insert_missing_cells() {
         row: 5,
         col: 3,
         new_value: CellValue::Number(123.0),
+        clear_formula: false,
         new_formula: None,
         new_rgcb: None,
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
-        clear_formula: false,
     }];
 
     let in_memory_path = tmpdir.path().join("patched_in_memory_insert.xlsb");
@@ -104,12 +104,12 @@ fn save_with_cell_edits_streaming_is_lossless_for_noop_edit() {
         row: 0,
         col: 1,
         new_value: CellValue::Number(42.5),
+        clear_formula: false,
         new_formula: None,
         new_rgcb: None,
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
-        clear_formula: false,
     }];
 
     let tmpdir = tempfile::tempdir().expect("create temp dir");
@@ -123,6 +123,58 @@ fn save_with_cell_edits_streaming_is_lossless_for_noop_edit() {
         report.is_empty(),
         "expected no OPC part diffs for no-op streaming edit, got:\n{}",
         format_report(&report)
+    );
+}
+
+#[test]
+fn save_with_cell_edits_streaming_can_clear_formula_to_plain_value_cell() {
+    let fixture_path = fixture_path();
+    let wb = XlsbWorkbook::open(&fixture_path).expect("open xlsb fixture");
+
+    let original_sheet = wb.read_sheet(0).expect("read original sheet");
+    let original_c1 = original_sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 2)
+        .expect("C1 exists");
+    assert!(
+        original_c1.formula.is_some(),
+        "expected C1 to be a formula cell"
+    );
+    let cached = match original_c1.value {
+        CellValue::Number(v) => v,
+        ref other => panic!("expected numeric cached value in C1, got {other:?}"),
+    };
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 2,
+        new_value: CellValue::Number(cached),
+        clear_formula: true,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+        new_style: None,
+    }];
+
+    let tmpdir = tempfile::tempdir().expect("create temp dir");
+    let out_path = tmpdir.path().join("paste-values-streaming.xlsb");
+
+    wb.save_with_cell_edits_streaming(&out_path, 0, &edits)
+        .expect("save_with_cell_edits_streaming");
+
+    let patched = XlsbWorkbook::open(&out_path).expect("open patched workbook");
+    let patched_sheet = patched.read_sheet(0).expect("read patched sheet");
+    let patched_c1 = patched_sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 2)
+        .expect("patched C1 exists");
+    assert_eq!(patched_c1.value, CellValue::Number(cached));
+    assert!(
+        patched_c1.formula.is_none(),
+        "expected formula metadata to be removed when clear_formula=true"
     );
 }
 
@@ -164,12 +216,12 @@ fn save_with_cell_edits_streaming_can_patch_formula_rgcb_bytes() {
         row: 0,
         col: 0,
         new_value: CellValue::Number(9.0),
+        clear_formula: false,
         new_formula: None,
         new_rgcb: Some(encoded_45.rgcb.clone()),
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
-        clear_formula: false,
     }];
 
     let in_memory_path = tmpdir.path().join("patched_in_memory_rgcb.xlsb");
@@ -226,12 +278,12 @@ fn save_with_cell_edits_streaming_can_insert_formula_rgcb_bytes() {
         row: 5,
         col: 3,
         new_value: CellValue::Number(9.0),
+        clear_formula: false,
         new_formula: Some(encoded.rgce.clone()),
         new_rgcb: Some(encoded.rgcb.clone()),
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
-        clear_formula: false,
     }];
 
     let in_memory_path = tmpdir.path().join("patched_in_memory_rgcb_insert.xlsb");

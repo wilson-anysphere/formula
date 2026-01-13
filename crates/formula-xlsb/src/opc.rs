@@ -582,12 +582,12 @@ impl XlsbWorkbook {
                 row,
                 col,
                 new_value: CellValue::Number(value),
-                new_formula: None,
-                shared_string_index: None,
                 new_style: None,
                 clear_formula: false,
+                new_formula: None,
                 new_rgcb: None,
                 new_formula_flags: None,
+                shared_string_index: None,
             }],
         )
     }

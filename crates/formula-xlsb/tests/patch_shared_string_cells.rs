@@ -170,6 +170,7 @@ fn shared_strings_save_does_not_touch_sst_for_inserted_formula_string_cells() {
             row: 0,
             col: 1,
             new_value: CellValue::Text("New".to_string()),
+            clear_formula: false,
             new_formula: Some(ptg_str("New")),
             new_rgcb: None,
             new_formula_flags: None,
@@ -177,7 +178,6 @@ fn shared_strings_save_does_not_touch_sst_for_inserted_formula_string_cells() {
             // should not affect the shared string table counts.
             shared_string_index: Some(0),
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
@@ -298,12 +298,12 @@ fn patching_shared_string_cell_keeps_it_as_string_record() {
             row: 0,
             col: 0,
             new_value: CellValue::Text("World".to_string()),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
@@ -354,12 +354,12 @@ fn patching_shared_string_cell_appends_to_shared_strings_bin() {
             row: 0,
             col: 0,
             new_value: CellValue::Text("New".to_string()),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
@@ -415,12 +415,12 @@ fn inserting_new_text_cell_uses_shared_string_record_and_updates_shared_strings_
             row: 0,
             col: 1,
             new_value: CellValue::Text("New".to_string()),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
@@ -474,12 +474,12 @@ fn patching_existing_numeric_cell_to_text_uses_shared_string_record_and_updates_
             row: 0,
             col: 1,
             new_value: CellValue::Text("World".to_string()),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
@@ -530,12 +530,12 @@ fn patching_inline_string_noop_is_lossless_and_does_not_touch_shared_strings() {
             row: 0,
             col: 1,
             new_value: CellValue::Text("Hello".to_string()),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
@@ -579,12 +579,12 @@ fn patching_rich_shared_string_noop_is_lossless() {
             row: 0,
             col: 0,
             new_value: CellValue::Text("Hello Bold".to_string()),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save_with_cell_edits_shared_strings");

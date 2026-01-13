@@ -151,12 +151,12 @@ fn patcher_preserves_flagged_inline_string_record_for_noop_edits() {
         row: 0,
         col: 0,
         new_value: CellValue::Text(inline_text),
+        clear_formula: false,
         new_formula: None,
         new_rgcb: None,
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
-        clear_formula: false,
     };
 
     let patched = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
@@ -172,12 +172,12 @@ fn patcher_updates_formula_rgce_without_losing_rich_or_phonetic_cached_bytes() {
         row: 0,
         col: 1,
         new_value: CellValue::Text(rich_text.clone()),
+        clear_formula: false,
         new_formula: Some(new_rgce.clone()),
         new_rgcb: None,
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
-        clear_formula: false,
     };
     let patched_rich = patch_sheet_bin(&sheet_bin, &[edit_rich]).expect("patch rich formula");
 
@@ -204,12 +204,12 @@ fn patcher_updates_formula_rgce_without_losing_rich_or_phonetic_cached_bytes() {
         row: 0,
         col: 2,
         new_value: CellValue::Text(pho_text.clone()),
+        clear_formula: false,
         new_formula: Some(new_rgce.clone()),
         new_rgcb: None,
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
-        clear_formula: false,
     };
     let patched_pho = patch_sheet_bin(&sheet_bin, &[edit_pho]).expect("patch phonetic formula");
 
@@ -240,12 +240,12 @@ fn patcher_clears_rich_phonetic_flags_when_rewriting_cached_string_value() {
         row: 0,
         col: 1,
         new_value: CellValue::Text("New".to_string()),
+        clear_formula: false,
         new_formula: None,
         new_rgcb: None,
         new_formula_flags: None,
         shared_string_index: None,
         new_style: None,
-        clear_formula: false,
     };
     let patched = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch cached string");
 
@@ -269,4 +269,36 @@ fn patcher_clears_rich_phonetic_flags_when_rewriting_cached_string_value() {
     assert_eq!(cell.formula.as_ref().unwrap().rgce, vec![0x1D, 0x01]);
     // sanity: original cached text was different.
     assert_ne!(rich_text, "New");
+}
+
+#[test]
+fn patcher_can_convert_formula_string_cell_to_plain_text_cell() {
+    let (sheet_bin, _inline_text, _rich_runs, rich_text, _pho_bytes, _pho_text, _new_rgce) =
+        build_sheet_bin();
+
+    let edit = CellEdit {
+        row: 0,
+        col: 1,
+        new_value: CellValue::Text(rich_text.clone()),
+        clear_formula: true,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+        new_style: None,
+    };
+    let patched = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
+
+    let parsed =
+        formula_xlsb::parse_sheet_bin(&mut Cursor::new(&patched), &[]).expect("parse sheet");
+    let cell = parsed
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 1)
+        .expect("find patched cell");
+    assert_eq!(cell.value, CellValue::Text(rich_text));
+    assert!(
+        cell.formula.is_none(),
+        "expected formula metadata to be removed when clear_formula=true"
+    );
 }

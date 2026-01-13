@@ -244,12 +244,12 @@ fn xlsb_export_preserves_defined_names_and_ptgname_formulas() {
             row: 0,
             col: 3,
             new_value: formula_xlsb::CellValue::Number(0.0),
+            clear_formula: false,
             new_formula: Some(rgce),
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("patch sheet");

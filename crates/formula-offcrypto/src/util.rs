@@ -7,6 +7,8 @@ use std::cell::Cell;
 // the counter don't race each other.
 #[cfg(test)]
 thread_local! {
+    // Keep test instrumentation thread-local to avoid cross-test interference when the test runner
+    // executes unit tests in parallel.
     static CT_EQ_CALLS: Cell<usize> = Cell::new(0);
 }
 

@@ -159,12 +159,12 @@ fn patch_sheet_bin_can_insert_into_missing_row_and_expand_dimension() {
             row: 5,
             col: 3,
             new_value: CellValue::Number(99.0),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("patch sheet bin");
@@ -233,12 +233,12 @@ fn patch_sheet_bin_can_insert_formula_with_rgcb_and_expand_dimension() {
             row: 5,
             col: 3,
             new_value: CellValue::Number(9.0),
+            clear_formula: false,
             new_formula: Some(encoded.rgce.clone()),
             new_rgcb: Some(encoded.rgcb.clone()),
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("patch sheet bin");
@@ -345,12 +345,12 @@ fn patch_sheet_bin_can_insert_into_existing_row_in_column_order() {
             row: 0,
             col: 10,
             new_value: CellValue::Number(42.0),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("patch sheet bin");
@@ -403,12 +403,12 @@ fn patch_sheet_bin_can_expand_dimension_when_brtwsdim_is_after_sheetdata() {
             row: 5,
             col: 3,
             new_value: CellValue::Number(99.0),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("patch sheet bin");
@@ -437,12 +437,12 @@ fn patch_sheet_bin_does_not_materialize_missing_blank_cells() {
             row: 5,
             col: 3,
             new_value: CellValue::Blank,
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("patch sheet bin");
@@ -471,12 +471,12 @@ fn patch_sheet_bin_can_patch_style_without_changing_value() {
             row: 0,
             col: 0,
             new_value: CellValue::Number(1.0),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: Some(7),
-            clear_formula: false,
         }],
     )
     .expect("patch sheet bin");
@@ -520,12 +520,12 @@ fn patch_sheet_bin_can_insert_cell_with_style_override() {
             row: 1,
             col: 1,
             new_value: CellValue::Number(2.0),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: Some(5),
-            clear_formula: false,
         }],
     )
     .expect("patch sheet bin");

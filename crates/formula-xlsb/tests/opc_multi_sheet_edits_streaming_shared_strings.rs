@@ -387,12 +387,12 @@ fn save_with_cell_edits_streaming_multi_shared_strings_updates_sheets_and_sst() 
             row: 0,
             col: 0,
             new_value: CellValue::Text("Hello".to_string()),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     );
     edits_by_sheet.insert(
@@ -401,12 +401,12 @@ fn save_with_cell_edits_streaming_multi_shared_strings_updates_sheets_and_sst() 
             row: 0,
             col: 0,
             new_value: CellValue::Text("New".to_string()),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     );
 

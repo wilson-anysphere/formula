@@ -254,12 +254,12 @@ fn save_with_cell_edits_multi_changes_only_edited_sheet_parts() {
             row: 0,
             col: 1,
             new_value: CellValue::Number(123.0),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     );
     edits_by_sheet.insert(
@@ -268,12 +268,12 @@ fn save_with_cell_edits_multi_changes_only_edited_sheet_parts() {
             row: 0,
             col: 1,
             new_value: CellValue::Number(456.0),
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     );
 

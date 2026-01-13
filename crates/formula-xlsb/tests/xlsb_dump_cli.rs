@@ -36,12 +36,12 @@ fn xlsb_dump_prints_known_error_literals() {
             row: 0,
             col: 0,
             new_value: formula_xlsb::CellValue::Error(0x2C), // #SPILL!
+            clear_formula: false,
             new_formula: None,
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
             new_style: None,
-            clear_formula: false,
         }],
     )
     .expect("save patched xlsb");

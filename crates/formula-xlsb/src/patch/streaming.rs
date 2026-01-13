@@ -39,6 +39,19 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
 
     let mut edits_by_coord: HashMap<(u32, u32), usize> = HashMap::with_capacity(edits.len());
     for (idx, edit) in edits.iter().enumerate() {
+        if edit.clear_formula
+            && (edit.new_formula.is_some()
+                || edit.new_rgcb.is_some()
+                || edit.new_formula_flags.is_some())
+        {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "cell edit for ({}, {}) cannot set new_formula/new_rgcb/new_formula_flags when clear_formula=true",
+                    edit.row, edit.col
+                ),
+            )));
+        }
         if edits_by_coord.insert((edit.row, edit.col), idx).is_some() {
             return Err(Error::Io(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -215,9 +228,7 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                     return Err(Error::UnexpectedEof);
                 }
                 let mut prefix = [0u8; 8];
-                input
-                    .read_exact(&mut prefix)
-                    .map_err(super::map_io_error)?;
+                input.read_exact(&mut prefix).map_err(super::map_io_error)?;
                 let row = current_row.unwrap_or(0);
                 let col = u32::from_le_bytes(prefix[0..4].try_into().expect("col bytes"));
                 let style = u32::from_le_bytes(prefix[4..8].try_into().expect("style bytes"));
@@ -685,7 +696,10 @@ fn read_record_len_raw<R: Read>(r: &mut R) -> Result<(u32, Vec<u8>), Error> {
     )))
 }
 
-fn write_raw_header<W: Write>(writer: &mut Biff12Writer<W>, header: &RawRecordHeader) -> io::Result<()> {
+fn write_raw_header<W: Write>(
+    writer: &mut Biff12Writer<W>,
+    header: &RawRecordHeader,
+) -> io::Result<()> {
     writer.write_raw(&header.id_raw)?;
     writer.write_raw(&header.len_raw)?;
     Ok(())
@@ -714,7 +728,10 @@ fn copy_exact<R: Read, W: Write>(
     Ok(())
 }
 
-fn copy_remaining<R: Read, W: Write>(input: &mut R, writer: &mut Biff12Writer<W>) -> Result<(), Error> {
+fn copy_remaining<R: Read, W: Write>(
+    input: &mut R,
+    writer: &mut Biff12Writer<W>,
+) -> Result<(), Error> {
     let mut buf = [0u8; 16 * 1024];
     loop {
         let n = input.read(&mut buf).map_err(super::map_io_error)?;
