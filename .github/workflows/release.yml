@@ -123,6 +123,45 @@ jobs:
         if: matrix.platform != 'windows-latest'
         run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
 
+      - name: Install WiX Toolset (required for MSI builds)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # Tauri's MSI bundler requires WiX (candle.exe/light.exe) to be on PATH.
+          # GitHub runners don't consistently have it available, and Tauri may skip
+          # MSI generation without failing. Install WiX deterministically.
+          $candle = Get-Command candle.exe -ErrorAction SilentlyContinue
+          $light = Get-Command light.exe -ErrorAction SilentlyContinue
+          if (-not $candle -or -not $light) {
+            choco install wixtoolset --yes --no-progress
+
+            # Ensure the newly-installed tools are visible in the current step.
+            # (Chocolatey may update PATH via the registry; refreshenv reloads it.)
+            if (Test-Path "$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1") {
+              Import-Module "$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1"
+              refreshenv
+            }
+          }
+
+          # Add common WiX install locations to PATH for subsequent steps.
+          $wixRoots = Get-ChildItem -Path (Join-Path ${env:ProgramFiles(x86)} "WiX Toolset v*") -Directory -ErrorAction SilentlyContinue
+          foreach ($root in $wixRoots) {
+            $bin = Join-Path $root.FullName "bin"
+            if (Test-Path $bin) {
+              $env:PATH = "$bin;$env:PATH"
+              $bin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+            }
+          }
+
+          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
+            throw "WiX Toolset installation failed: candle.exe not found on PATH."
+          }
+          if (-not (Get-Command light.exe -ErrorAction SilentlyContinue)) {
+            throw "WiX Toolset installation failed: light.exe not found on PATH."
+          }
+
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-24.04'
         run: |
@@ -212,6 +251,70 @@ jobs:
             See the assets below for the installers/bundles.
           releaseDraft: true
           prerelease: false
+
+      - name: Verify Windows installer assets (MSI + NSIS + signatures)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $bundleDir = "apps/desktop/src-tauri/target/release/bundle"
+          if ("${{ matrix.rust_target }}" -ne "") {
+            $bundleDir = "apps/desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle"
+          }
+
+          if (-not (Test-Path $bundleDir)) {
+            throw "windows-release-assets: ERROR expected Tauri bundle dir not found: $bundleDir"
+          }
+
+          $msiDir = Join-Path $bundleDir "msi"
+          $expectedNsisDirs = @(
+            (Join-Path $bundleDir "nsis"),
+            (Join-Path $bundleDir "nsis-web")
+          )
+          $nsisDirs = $expectedNsisDirs | Where-Object { Test-Path $_ }
+
+          $msis = @()
+          if (Test-Path $msiDir) {
+            $msis = Get-ChildItem -Path $msiDir -Recurse -File -Filter "*.msi"
+          }
+
+          $nsisExes = @()
+          foreach ($d in $nsisDirs) {
+            $nsisExes += Get-ChildItem -Path $d -Recurse -File -Filter "*.exe"
+          }
+
+          if (-not $msis -or $msis.Count -eq 0) {
+            throw "windows-release-assets: ERROR missing MSI installer (*.msi). Looked under: $msiDir"
+          }
+          if (-not $nsisExes -or $nsisExes.Count -eq 0) {
+            throw "windows-release-assets: ERROR missing NSIS installer (*.exe). Looked under: $($expectedNsisDirs -join ', ')"
+          }
+
+          $missingSigs = @()
+          foreach ($msi in $msis) {
+            $sig = "$($msi.FullName).sig"
+            if (-not (Test-Path $sig)) {
+              $missingSigs += $sig
+            }
+          }
+          foreach ($exe in $nsisExes) {
+            $sig = "$($exe.FullName).sig"
+            if (-not (Test-Path $sig)) {
+              $missingSigs += $sig
+            }
+          }
+
+          if ($missingSigs.Count -gt 0) {
+            $missingJoined = $missingSigs -join "`n"
+            throw "windows-release-assets: ERROR missing signature file(s) for installer artifacts:`n$missingJoined"
+          }
+
+          Write-Host "windows-release-assets: OK"
+          Write-Host "MSI installers:"
+          $msis | ForEach-Object { Write-Host " - $($_.FullName)" }
+          Write-Host "NSIS installers:"
+          $nsisExes | ForEach-Object { Write-Host " - $($_.FullName)" }
 
       - name: Verify Linux release artifacts (AppImage + deb + rpm + signatures)
         if: matrix.platform == 'ubuntu-24.04'
