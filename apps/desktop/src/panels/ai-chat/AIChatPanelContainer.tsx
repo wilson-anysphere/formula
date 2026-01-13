@@ -14,7 +14,7 @@ import { getDesktopAIAuditStore } from "../../ai/audit/auditStore.js";
 import { getDesktopLLMClient, getDesktopModel, purgeLegacyDesktopLLMSettings } from "../../ai/llm/desktopLLMClient.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
 import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
-import { rangeToA1 as rangeToA1Selection } from "../../selection/a1.js";
+import { cellToA1, rangeToA1 as rangeToA1Selection } from "../../selection/a1.js";
 import type { Range } from "../../selection/types.js";
 import { DEFAULT_EXTENSION_RANGE_CELL_LIMIT, getExtensionRangeSize, normalizeExtensionRange } from "../../extensions/rangeSizeGuard.js";
 
@@ -278,6 +278,29 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
     return { type: "range", reference } as const;
   }, [props.getSelection, sheetNameResolver]);
 
+  const getFormulaAttachment = useCallback(() => {
+    const selection = props.getSelection?.();
+    if (!selection) return null;
+    const sheetId = selection.sheetId;
+    const range = selection.range;
+    if (!sheetId || !range) return null;
+
+    const row = Number(range.startRow);
+    const col = Number(range.startCol);
+    if (!Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) return null;
+
+    try {
+      const cell = (documentController as any)?.getCell?.(sheetId, { row, col });
+      const formula = cell?.formula;
+      if (typeof formula !== "string" || formula.trim() === "") return null;
+      const displayName = sheetNameResolver?.getSheetNameById(sheetId) ?? sheetId;
+      const reference = `${formatSheetNameForA1(displayName)}!${cellToA1({ row, col })}`;
+      return { type: "formula", reference, data: { formula } } as const;
+    } catch {
+      return null;
+    }
+  }, [props.getSelection, sheetNameResolver, documentController]);
+
   const getTableOptions = useCallback((): AIChatPanelTableOption[] => {
     const tables = schemaProvider?.getTables?.() ?? [];
     if (!tables.length) return [];
@@ -410,7 +433,12 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
       </div>
       <div className="ai-chat-runtime__content">
         {tab === "chat" ? (
-          <AIChatPanel sendMessage={sendMessage} getSelectionAttachment={getSelectionAttachment} getTableOptions={getTableOptions} />
+          <AIChatPanel
+            sendMessage={sendMessage}
+            getSelectionAttachment={getSelectionAttachment}
+            getFormulaAttachment={getFormulaAttachment}
+            getTableOptions={getTableOptions}
+          />
         ) : (
           <div className="ai-chat-agent">
             <div className="ai-chat-agent__section">

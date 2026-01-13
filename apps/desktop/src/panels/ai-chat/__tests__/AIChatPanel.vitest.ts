@@ -484,4 +484,67 @@ describe("AIChatPanel attachments UI", () => {
       root.unmount();
     });
   });
+
+  it("can attach a formula and includes it on the user message", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const sendMessage = vi.fn(async () => {
+      return { messages: [], final: "Ok" };
+    });
+
+    const formulaAttachment = {
+      type: "formula" as const,
+      reference: "Sheet1!A1",
+      data: { formula: "=SUM(A1:A3)" },
+    };
+    const getFormulaAttachment = vi.fn(() => formulaAttachment);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          systemPrompt: "system",
+          sendMessage,
+          getFormulaAttachment,
+        }),
+      );
+    });
+
+    const attachFormulaBtn = container.querySelector('[data-testid="ai-chat-attach-formula"]') as HTMLButtonElement | null;
+    expect(attachFormulaBtn).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      attachFormulaBtn!.click();
+    });
+
+    const chip = container.querySelector('[data-testid="ai-chat-attachment-chip-0"]');
+    expect(chip?.textContent).toContain("formula: Sheet1!A1");
+
+    const input = container.querySelector("input") as HTMLInputElement | null;
+    const sendButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Send") as HTMLButtonElement | undefined;
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    expect(sendButton).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      setNativeInputValue(input!, "Hello");
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
+      input!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await act(async () => {
+      sendButton!.click();
+      await waitFor(() => sendMessage.mock.calls.length === 1);
+    });
+
+    const callArgs = sendMessage.mock.calls[0]?.[0] as any;
+    expect(callArgs.attachments).toEqual([formulaAttachment]);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });
