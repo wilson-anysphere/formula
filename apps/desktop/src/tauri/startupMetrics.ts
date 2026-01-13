@@ -77,8 +77,14 @@ async function nextFrame(): Promise<void> {
 type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
 
 function getTauriInvoke(): TauriInvoke | null {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  return typeof invoke === "function" ? invoke : null;
+  try {
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+    return typeof invoke === "function" ? invoke : null;
+  } catch {
+    // Some hardened host environments (or tests) may define `__TAURI__` with a throwing getter.
+    // Treat that as "unavailable" so best-effort callsites can fall back cleanly.
+    return null;
+  }
 }
 
 function getTauriListen(): TauriListen | null {

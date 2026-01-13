@@ -9,7 +9,7 @@ import {
 } from "./startupMetrics";
 
 describe("startupMetrics", () => {
-  const originalTauri = (globalThis as any).__TAURI__;
+  const originalTauriDescriptor = Object.getOwnPropertyDescriptor(globalThis, "__TAURI__");
   const originalTimings = (globalThis as any).__FORMULA_STARTUP_TIMINGS__;
   const originalListenersInstalled = (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__;
   const originalFirstRenderReported = (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__;
@@ -17,14 +17,27 @@ describe("startupMetrics", () => {
   beforeEach(() => {
     const invoke = vi.fn().mockResolvedValue(null);
     const listen = vi.fn().mockResolvedValue(() => {});
-    (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+    Object.defineProperty(globalThis, "__TAURI__", {
+      configurable: true,
+      writable: true,
+      value: { core: { invoke }, event: { listen } },
+    });
     (globalThis as any).__FORMULA_STARTUP_TIMINGS__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = undefined;
   });
 
   afterEach(() => {
-    (globalThis as any).__TAURI__ = originalTauri;
+    if (originalTauriDescriptor) {
+      Object.defineProperty(globalThis, "__TAURI__", originalTauriDescriptor);
+    } else {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).__TAURI__;
+      } catch {
+        // ignore
+      }
+    }
     (globalThis as any).__FORMULA_STARTUP_TIMINGS__ = originalTimings;
     (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = originalListenersInstalled;
     (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = originalFirstRenderReported;
@@ -122,5 +135,20 @@ describe("startupMetrics", () => {
     // The second report should happen after listeners are registered.
     expect(invoke.mock.invocationCallOrder[0]).toBeLessThan(listen.mock.invocationCallOrder[0]);
     expect(listen.mock.invocationCallOrder.at(-1)!).toBeLessThan(invoke.mock.invocationCallOrder[1]);
+  });
+
+  it("treats a throwing __TAURI__ getter as \"missing\" (best-effort hardening)", async () => {
+    Object.defineProperty(globalThis, "__TAURI__", {
+      configurable: true,
+      get() {
+        throw new Error("Blocked __TAURI__ access");
+      },
+    });
+
+    // Should never throw, even if the host environment blocks access.
+    expect(() => reportStartupWebviewLoaded()).not.toThrow();
+    await expect(installStartupTimingsListeners()).resolves.toBeUndefined();
+    await expect(markStartupFirstRender()).resolves.toEqual(expect.any(Object));
+    await expect(markStartupTimeToInteractive({ whenIdle: Promise.resolve() })).resolves.toEqual(expect.any(Object));
   });
 });
