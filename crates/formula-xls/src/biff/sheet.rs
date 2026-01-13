@@ -4077,6 +4077,7 @@ mod tests {
                 RECORD_SETUP,
                 &setup_payload(9, 80, 1, 1, grbit, 0.4, 0.5), // values ignored except header/footer
             ),
+            record(RECORD_WSBOOL, &0u16.to_le_bytes()), // fFitToPage=0
             record(records::RECORD_EOF, &[]),
         ]
         .concat();

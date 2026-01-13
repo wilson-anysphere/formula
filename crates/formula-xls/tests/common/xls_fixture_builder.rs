@@ -3274,6 +3274,32 @@ pub fn build_page_break_edge_cases_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture that exercises `SETUP.grbit.fNoPls` handling for page setup import.
+///
+/// The worksheet contains:
+/// - `WSBOOL.fFitToPage=1`
+/// - `SETUP.fNoPls=1` with:
+///   - `iFitWidth=2`, `iFitHeight=3`
+///   - `numHdr=0.9`, `numFtr=1.1`
+///   - but also non-default `iScale=80`, `iPaperSize=9` (A4), and a landscape orientation bit
+///
+/// Expected import behavior:
+/// - Fit-to scaling + header/footer margins are imported
+/// - Paper size / orientation / percent scaling are ignored due to `fNoPls`
+pub fn build_setup_fnopls_fit_to_page_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_setup_fnopls_fit_to_page_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture that includes a non-default workbook window geometry/state in the
 /// workbook-global `WINDOW1` record.
 pub fn build_workbook_window_fixture_xls() -> Vec<u8> {
@@ -11674,6 +11700,61 @@ fn build_view_state_workbook_stream() -> Vec<u8> {
     globals.extend_from_slice(&sheet2);
 
     globals
+}
+
+fn build_setup_fnopls_fit_to_page_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream(
+        "Sheet1",
+        &build_setup_fnopls_fit_to_page_sheet_stream(),
+        1252,
+    )
+}
+
+fn build_setup_fnopls_fit_to_page_sheet_stream() -> Vec<u8> {
+    // The workbook globals built by `build_single_sheet_workbook_stream` contain 16 style XFs + 1
+    // cell XF (General), so the first usable cell XF index is 16.
+    const XF_GENERAL_CELL: u16 = 16;
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1), cols [0, 1) => A1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // WSBOOL: enable FitToPage.
+    let wsbool = 0x0C01u16 | WSBOOL_OPTION_FIT_TO_PAGE;
+    push_record(&mut sheet, RECORD_WSBOOL, &wsbool.to_le_bytes());
+
+    // SETUP record: fNoPls=1 but fit-to width/height and header/footer margins should still apply.
+    let mut setup = Vec::<u8>::new();
+    setup.extend_from_slice(&9u16.to_le_bytes()); // iPaperSize (A4) => should be ignored
+    setup.extend_from_slice(&80u16.to_le_bytes()); // iScale => should be ignored
+    setup.extend_from_slice(&0i16.to_le_bytes()); // iPageStart (ignored)
+    setup.extend_from_slice(&2u16.to_le_bytes()); // iFitWidth
+    setup.extend_from_slice(&3u16.to_le_bytes()); // iFitHeight
+    // grbit: fNoPls=1 and fPortrait=0 (landscape). Paper size / percent scale / orientation should
+    // be ignored due to fNoPls, but FitTo + numHdr/numFtr should still be imported.
+    setup.extend_from_slice(&0x0004u16.to_le_bytes());
+    setup.extend_from_slice(&0u16.to_le_bytes()); // iRes (ignored)
+    setup.extend_from_slice(&0u16.to_le_bytes()); // iVRes (ignored)
+    setup.extend_from_slice(&0.9f64.to_le_bytes()); // numHdr
+    setup.extend_from_slice(&1.1f64.to_le_bytes()); // numFtr
+    setup.extend_from_slice(&1u16.to_le_bytes()); // iCopies (ignored)
+    push_record(&mut sheet, RECORD_SETUP, &setup);
+
+    // Provide at least one cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, XF_GENERAL_CELL, 1.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
 }
 
 fn build_workbook_window_workbook_stream() -> Vec<u8> {
