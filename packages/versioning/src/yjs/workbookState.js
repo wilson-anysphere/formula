@@ -1,6 +1,12 @@
 import * as Y from "yjs";
-import { cellKey } from "../diff/semanticDiff.js";
-import { parseSpreadsheetCellKey } from "./sheetState.js";
+import {
+  applyLayeredFormatsToCells,
+  mergeCellDataIntoSheetCells,
+  parseSpreadsheetCellKey,
+  sheetEntriesByIdFromYjsDoc,
+  sheetFormatLayersFromSheetEntry,
+  sheetHasLayeredFormats,
+} from "./sheetState.js";
 
 /**
  * Excel-style worksheet visibility.
@@ -683,8 +689,6 @@ export function workbookStateFromYjsDoc(doc) {
   const sheets = [];
   /** @type {string[]} */
   const sheetOrder = [];
-  /** @type {Map<string, any>} */
-  const sheetEntriesById = new Map();
   for (const entry of sheetsArray.toArray()) {
     const id = coerceString(readYMapOrObject(entry, "id"));
     if (!id) continue;
@@ -697,74 +701,41 @@ export function workbookStateFromYjsDoc(doc) {
       view: sheetViewMetaFromSheetEntry(entry),
     });
     sheetOrder.push(id);
-    // Deterministic choice: pick the last matching entry by index (mirrors binder behavior).
-    sheetEntriesById.set(id, entry);
   }
   sheets.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
+  // Complexity note:
+  // `sheetStateFromYjsDoc` scans the full Yjs `cells` map. Calling it once per sheet makes
+  // workbook extraction O(#sheets * #cells) for large workbooks. Instead we scan `cells`
+  // exactly once, group entries by sheet, then apply layered formats per sheet using only
+  // the already-grouped cell maps (total ~O(#cells + #sheets)).
   const sheetIds = new Set(sheets.map((s) => s.id));
   const cellsMap = getMapRoot(doc, "cells");
 
   /** @type {Map<string, Map<string, any>>} */
-  const rawCellsBySheet = new Map();
+  const groupedCells = new Map();
   cellsMap.forEach((cellData, rawKey) => {
     const parsed = parseSpreadsheetCellKey(rawKey);
     if (!parsed?.sheetId) return;
     sheetIds.add(parsed.sheetId);
-
-    let sheetCells = rawCellsBySheet.get(parsed.sheetId);
-    if (!sheetCells) {
-      sheetCells = new Map();
-      rawCellsBySheet.set(parsed.sheetId, sheetCells);
+    let cells = groupedCells.get(parsed.sheetId);
+    if (!cells) {
+      cells = new Map();
+      groupedCells.set(parsed.sheetId, cells);
     }
-
-    const key = cellKey(parsed.row, parsed.col);
-    const cell = extractCell(cellData);
-    const existing = sheetCells.get(key);
-
-    // If any representation of this coordinate is encrypted (e.g. stored under a
-    // legacy key encoding), treat the cell as encrypted and do not allow plaintext
-    // duplicates to overwrite the ciphertext.
-    const isCanonical = rawKey === `${parsed.sheetId}:${parsed.row}:${parsed.col}`;
-
-    const enc = cell?.enc;
-    const isEncrypted = enc !== null && enc !== undefined;
-    const existingEnc = existing?.enc;
-    const existingIsEncrypted = existingEnc !== null && existingEnc !== undefined;
-
-    if (isEncrypted) {
-      if (!existing || !existingIsEncrypted || isCanonical) {
-        // Preserve any existing format metadata if the preferred encrypted record
-        // lacks it (e.g. canonical key created during encryption while a legacy
-        // key still carries the existing format).
-        if (existing?.format != null && cell.format == null) {
-          sheetCells.set(key, { ...cell, format: existing.format });
-        } else {
-          sheetCells.set(key, cell);
-        }
-      } else if (existing.format == null && cell.format != null) {
-        sheetCells.set(key, { ...existing, format: cell.format });
-      }
-      return;
-    }
-
-    if (existingIsEncrypted) {
-      // Preserve ciphertext, but allow plaintext duplicates to contribute format
-      // metadata when the encrypted record lacks it.
-      if (existing.format == null && cell.format != null) {
-        sheetCells.set(key, { ...existing, format: cell.format });
-      }
-      return;
-    }
-
-    sheetCells.set(key, cell);
+    mergeCellDataIntoSheetCells(cells, parsed, rawKey, cellData);
   });
+
+  const sheetEntriesById = sheetEntriesByIdFromYjsDoc(doc);
 
   /** @type {Map<string, { cells: Map<string, any> }>} */
   const cellsBySheet = new Map();
   for (const sheetId of Array.from(sheetIds).sort()) {
-    const cells = rawCellsBySheet.get(sheetId) ?? new Map();
-    applyLayeredFormattingToCells(doc, sheetId, sheetEntriesById.get(sheetId) ?? null, cells);
+    const cells = groupedCells.get(sheetId) ?? new Map();
+    const layers = sheetFormatLayersFromSheetEntry(sheetEntriesById.get(sheetId) ?? null);
+    if (sheetHasLayeredFormats(layers)) {
+      applyLayeredFormatsToCells(cells, layers);
+    }
     cellsBySheet.set(sheetId, { cells });
   }
 

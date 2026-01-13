@@ -435,23 +435,73 @@ function extractCell(cellData) {
 }
 
 /**
- * Convert a Yjs doc into a per-sheet state suitable for semantic diff.
+ * Merge a single cell record into a sheet-local `cells` map using the same rules as
+ * `sheetStateFromYjsDoc`.
  *
- * @param {Y.Doc} doc
- * @param {{ sheetId?: string | null }} [opts]
+ * This is extracted so workbook snapshot extraction can group cells by sheet in a
+ * single pass over the Yjs `cells` map while preserving the exact per-cell merge
+ * behavior (encrypted precedence, canonical key preference, and format metadata
+ * layering across duplicates).
+ *
+ * @param {Map<string, any>} cells
+ * @param {{ sheetId: string, row: number, col: number }} parsed
+ * @param {string} rawKey
+ * @param {any} cellData
  */
-export function sheetStateFromYjsDoc(doc, opts = {}) {
-  const targetSheetId = opts.sheetId ?? null;
-  const cellsMap = getMapRoot(doc, "cells");
+export function mergeCellDataIntoSheetCells(cells, parsed, rawKey, cellData) {
+  const key = cellKey(parsed.row, parsed.col);
+  const cell = extractCell(cellData);
+  const existing = cells.get(key);
 
-  // Layered formatting defaults (Task 44): sheet/row/col formats can be stored on the
-  // `sheets` metadata root. We only compute effective formats for the requested sheet.
-  const sheetEntry = targetSheetId != null ? findSheetEntryById(doc, targetSheetId) : null;
+  // If any representation of this coordinate is encrypted (e.g. stored under a
+  // legacy key encoding), treat the cell as encrypted and do not allow plaintext
+  // duplicates to overwrite the ciphertext.
+  const isCanonical = rawKey === `${parsed.sheetId}:${parsed.row}:${parsed.col}`;
+
+  const enc = cell?.enc;
+  const isEncrypted = enc !== null && enc !== undefined;
+  const existingEnc = existing?.enc;
+  const existingIsEncrypted = existingEnc !== null && existingEnc !== undefined;
+
+  if (isEncrypted) {
+    if (!existing || !existingIsEncrypted || isCanonical) {
+      // Preserve any existing format metadata if the preferred encrypted record
+      // lacks it (e.g. canonical key created during encryption while a legacy
+      // key still carries the existing format).
+      if (existing?.format != null && cell.format == null) {
+        cells.set(key, { ...cell, format: existing.format });
+      } else {
+        cells.set(key, cell);
+      }
+    } else if (existing.format == null && cell.format != null) {
+      cells.set(key, { ...existing, format: cell.format });
+    }
+    return;
+  }
+
+  if (existingIsEncrypted) {
+    // Preserve ciphertext, but allow plaintext duplicates to contribute format
+    // metadata when the encrypted record lacks it.
+    if (existing.format == null && cell.format != null) {
+      cells.set(key, { ...existing, format: cell.format });
+    }
+    return;
+  }
+
+  cells.set(key, cell);
+}
+
+/**
+ * Extract layered sheet/row/col/range-run formatting metadata from a `sheets` array
+ * entry.
+ *
+ * @param {any | null} sheetEntry
+ */
+export function sheetFormatLayersFromSheetEntry(sheetEntry) {
   const view = sheetEntry ? readSheetEntryField(sheetEntry, "view") : null;
   const viewJson = view != null ? yjsValueToJson(view) : null;
 
-  const rawDefaultFormat =
-    sheetEntry != null ? readSheetEntryField(sheetEntry, "defaultFormat") : undefined;
+  const rawDefaultFormat = sheetEntry != null ? readSheetEntryField(sheetEntry, "defaultFormat") : undefined;
   const rawRowFormats = sheetEntry != null ? readSheetEntryField(sheetEntry, "rowFormats") : undefined;
   const rawColFormats = sheetEntry != null ? readSheetEntryField(sheetEntry, "colFormats") : undefined;
   const rawFormatRunsByCol = sheetEntry != null ? readSheetEntryField(sheetEntry, "formatRunsByCol") : undefined;
@@ -465,102 +515,128 @@ export function sheetStateFromYjsDoc(doc, opts = {}) {
     rawFormatRunsByCol !== undefined ? rawFormatRunsByCol : viewJson?.formatRunsByCol,
   );
 
+  return { sheetDefaultFormat, rowFormats, colFormats, formatRunsByCol };
+}
+
+/**
+ * @param {{ sheetDefaultFormat: any | null, rowFormats: Map<any, any>, colFormats: Map<any, any>, formatRunsByCol: Map<any, any> }} layers
+ */
+export function sheetHasLayeredFormats(layers) {
+  return Boolean(
+    layers.sheetDefaultFormat ||
+      layers.rowFormats.size > 0 ||
+      layers.colFormats.size > 0 ||
+      layers.formatRunsByCol.size > 0,
+  );
+}
+
+/**
+ * Apply layered formatting defaults to all cells in a sheet.
+ *
+ * Matches `sheetStateFromYjsDoc` semantics exactly: only call this when the sheet
+ * has any layered formats configured (`sheetHasLayeredFormats` is true).
+ *
+ * @param {Map<string, any>} cells
+ * @param {{ sheetDefaultFormat: any | null, rowFormats: Map<number, Record<string, any>>, colFormats: Map<number, Record<string, any>>, formatRunsByCol: Map<number, Array<{ startRow: number, endRowExclusive: number, format: Record<string, any> }>> }} layers
+ */
+export function applyLayeredFormatsToCells(cells, layers) {
+  /**
+   * Find the run containing `row` (half-open interval `[startRow, endRowExclusive)`).
+   *
+   * DocumentController guarantees these runs are sorted + non-overlapping, which lets us
+   * do a binary search.
+   *
+   * @param {Array<{ startRow: number, endRowExclusive: number, format: Record<string, any> }>} runs
+   * @param {number} row
+   */
+  const findRunForRow = (runs, row) => {
+    let lo = 0;
+    let hi = runs.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const run = runs[mid];
+      if (row < run.startRow) {
+        hi = mid - 1;
+      } else if (row >= run.endRowExclusive) {
+        lo = mid + 1;
+      } else {
+        return run;
+      }
+    }
+    return null;
+  };
+
+  for (const [key, cell] of cells.entries()) {
+    const m = String(key).match(/^r(\d+)c(\d+)$/);
+    if (!m) continue;
+    const row = Number(m[1]);
+    const col = Number(m[2]);
+    if (!Number.isInteger(row) || !Number.isInteger(col)) continue;
+
+    const cellFormat = extractStyleObject(yjsValueToJson(cell?.format ?? cell?.style));
+    let merged = deepMerge(
+      deepMerge(layers.sheetDefaultFormat ?? {}, layers.colFormats.get(col) ?? null),
+      layers.rowFormats.get(row) ?? null,
+    );
+    const runs = layers.formatRunsByCol.get(col);
+    if (runs && runs.length > 0) {
+      const run = findRunForRow(runs, row);
+      if (run) merged = deepMerge(merged, run.format);
+    }
+    merged = deepMerge(merged, cellFormat);
+    cell.format = normalizeFormat(merged);
+  }
+}
+
+/**
+ * Build a map from sheet id -> sheet entry, picking the last matching entry by
+ * array index (mirrors binder behavior).
+ *
+ * This uses strict equality semantics for the `id` field (via `yjsValueToJson`)
+ * to match `findSheetEntryById`: only string ids are included.
+ *
+ * @param {Y.Doc} doc
+ * @returns {Map<string, any>}
+ */
+export function sheetEntriesByIdFromYjsDoc(doc) {
+  const sheets = getArrayRoot(doc, "sheets");
+  /** @type {Map<string, any>} */
+  const out = new Map();
+  for (let i = 0; i < sheets.length; i++) {
+    const entry = sheets.get(i);
+    const id = yjsValueToJson(readSheetEntryField(entry, "id"));
+    if (typeof id !== "string" || !id) continue;
+    out.set(id, entry);
+  }
+  return out;
+}
+
+/**
+ * Convert a Yjs doc into a per-sheet state suitable for semantic diff.
+ *
+ * @param {Y.Doc} doc
+ * @param {{ sheetId?: string | null }} [opts]
+ */
+export function sheetStateFromYjsDoc(doc, opts = {}) {
+  const targetSheetId = opts.sheetId ?? null;
+  const cellsMap = getMapRoot(doc, "cells");
+
+  // Layered formatting defaults (Task 44): sheet/row/col formats can be stored on the
+  // `sheets` metadata root. We only compute effective formats for the requested sheet.
+  const sheetEntry = targetSheetId != null ? findSheetEntryById(doc, targetSheetId) : null;
+  const formatLayers = sheetFormatLayersFromSheetEntry(sheetEntry);
+
   /** @type {Map<string, any>} */
   const cells = new Map();
   cellsMap.forEach((cellData, rawKey) => {
     const parsed = parseSpreadsheetCellKey(rawKey);
     if (!parsed) return;
     if (targetSheetId != null && parsed.sheetId !== targetSheetId) return;
-
-    const key = cellKey(parsed.row, parsed.col);
-    const cell = extractCell(cellData);
-    const existing = cells.get(key);
-
-    // If any representation of this coordinate is encrypted (e.g. stored under a
-    // legacy key encoding), treat the cell as encrypted and do not allow plaintext
-    // duplicates to overwrite the ciphertext.
-    const isCanonical = rawKey === `${parsed.sheetId}:${parsed.row}:${parsed.col}`;
-
-    const enc = cell?.enc;
-    const isEncrypted = enc !== null && enc !== undefined;
-    const existingEnc = existing?.enc;
-    const existingIsEncrypted = existingEnc !== null && existingEnc !== undefined;
-
-    if (isEncrypted) {
-      if (!existing || !existingIsEncrypted || isCanonical) {
-        // Preserve any existing format metadata if the preferred encrypted record
-        // lacks it (e.g. canonical key created during encryption while a legacy
-        // key still carries the existing format).
-        if (existing?.format != null && cell.format == null) {
-          cells.set(key, { ...cell, format: existing.format });
-        } else {
-          cells.set(key, cell);
-        }
-      } else if (existing.format == null && cell.format != null) {
-        cells.set(key, { ...existing, format: cell.format });
-      }
-      return;
-    }
-
-    if (existingIsEncrypted) {
-      // Preserve ciphertext, but allow plaintext duplicates to contribute format
-      // metadata when the encrypted record lacks it.
-      if (existing.format == null && cell.format != null) {
-        cells.set(key, { ...existing, format: cell.format });
-      }
-      return;
-    }
-
-    cells.set(key, cell);
+    mergeCellDataIntoSheetCells(cells, parsed, rawKey, cellData);
   });
 
-  if (
-    targetSheetId != null &&
-    (sheetDefaultFormat || rowFormats.size > 0 || colFormats.size > 0 || formatRunsByCol.size > 0)
-  ) {
-    /**
-     * Find the run containing `row` (half-open interval `[startRow, endRowExclusive)`).
-     *
-     * DocumentController guarantees these runs are sorted + non-overlapping, which lets us
-     * do a binary search.
-     *
-     * @param {Array<{ startRow: number, endRowExclusive: number, format: Record<string, any> }>} runs
-     * @param {number} row
-     */
-    const findRunForRow = (runs, row) => {
-      let lo = 0;
-      let hi = runs.length - 1;
-      while (lo <= hi) {
-        const mid = (lo + hi) >> 1;
-        const run = runs[mid];
-        if (row < run.startRow) {
-          hi = mid - 1;
-        } else if (row >= run.endRowExclusive) {
-          lo = mid + 1;
-        } else {
-          return run;
-        }
-      }
-      return null;
-    };
-
-    for (const [key, cell] of cells.entries()) {
-      const m = String(key).match(/^r(\d+)c(\d+)$/);
-      if (!m) continue;
-      const row = Number(m[1]);
-      const col = Number(m[2]);
-      if (!Number.isInteger(row) || !Number.isInteger(col)) continue;
-
-      const cellFormat = extractStyleObject(yjsValueToJson(cell?.format ?? cell?.style));
-      let merged = deepMerge(deepMerge(sheetDefaultFormat ?? {}, colFormats.get(col) ?? null), rowFormats.get(row) ?? null);
-      const runs = formatRunsByCol.get(col);
-      if (runs && runs.length > 0) {
-        const run = findRunForRow(runs, row);
-        if (run) merged = deepMerge(merged, run.format);
-      }
-      merged = deepMerge(merged, cellFormat);
-      cell.format = normalizeFormat(merged);
-    }
+  if (targetSheetId != null && sheetHasLayeredFormats(formatLayers)) {
+    applyLayeredFormatsToCells(cells, formatLayers);
   }
 
   return { cells };
