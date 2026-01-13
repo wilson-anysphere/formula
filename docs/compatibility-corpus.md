@@ -126,6 +126,13 @@ python -m tools.corpus.triage \
 Note: triage invokes a small Rust helper (built via `cargo`) to run the `formula-xlsx` round-trip and `xlsx-diff`
 structural comparison, so a Rust toolchain must be available.
 
+Triage output layout (`--out-dir`):
+
+- `index.json` – run metadata + an ordered list of reports (`id`, `display_name`, `file`)
+- `reports/*.json` – one per workbook; filenames are deterministic and non-colliding:
+  `"<sha256[:16]>-<path_hash>.json"` where `path_hash` is a stable hash of the workbook's path
+  relative to `--corpus-dir`. This ensures `--jobs 1` and `--jobs N` produce the same report file set.
+
 For large private corpora, you can speed up triage by running workbooks in parallel:
 
 ```bash
