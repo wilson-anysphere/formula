@@ -651,6 +651,8 @@ Recommended redirect URIs (used by the desktop Power Query UI; see `apps/desktop
 - Deep link: `formula://oauth/callback`
 - Loopback example (choose an unused port): `http://127.0.0.1:4242/oauth/callback`
 
+Note: the desktop OAuth broker matches redirects strictly by **scheme + host + port + path** (see `matchesRedirectUri(...)` in `apps/desktop/src/power-query/oauthBroker.ts`). For deep links, this means `formula://oauth/callback` is not the same endpoint as `formula:/oauth/callback` or `formula://oauth/callback/`.
+
 ##### Supported loopback redirect URIs
 
 The loopback listener implementation (`oauth_loopback_listen` in `apps/desktop/src-tauri/src/main.rs`, parser in
@@ -700,6 +702,9 @@ The backend buffers early redirects in memory (`OauthRedirectState` in `apps/des
   ```
   Then visit `http://127.0.0.1:4242/oauth/callback?code=test&state=dev` in your browser. You should see the “Sign-in complete” HTML response and the desktop app should receive an `oauth-redirect` event.
 - **Deep link capture:** open a URL like `formula://oauth/callback?code=test&state=dev` via your OS URL opener. The app should be activated and receive an `oauth-redirect` event.
+  - macOS: `open "formula://oauth/callback?code=test&state=dev"`
+  - Linux: `xdg-open "formula://oauth/callback?code=test&state=dev"`
+  - Windows (cmd): `start "" "formula://oauth/callback?code=test&state=dev"`
 
 #### Tray + app menu + global shortcuts
 
