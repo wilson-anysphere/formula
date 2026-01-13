@@ -74,6 +74,7 @@ export class SqliteVectorStore {
     this._storage = opts.storage;
     this._dimension = opts.dimension;
     this._autoSave = opts.autoSave;
+    this._dirty = false;
 
     this._ensureSchema();
     this._registerFunctions();
@@ -165,11 +166,26 @@ export class SqliteVectorStore {
   }
 
   async _persist() {
-    const data = this._db.export();
-    // sql.js drops custom scalar functions (like our `dot`) after `export()`. Re-register
-    // them so subsequent queries can still prepare statements that reference `dot(...)`.
-    this._registerFunctions();
-    await this._storage.save(data);
+    if (!this._dirty) return;
+    // Mark clean optimistically so concurrent writes during export/save can
+    // re-dirty the store. If persistence fails, flip back to dirty.
+    this._dirty = false;
+    try {
+      const data = this._db.export();
+      // sql.js drops custom scalar functions (like our `dot`) after `export()`. Re-register
+      // them so subsequent queries can still prepare statements that reference `dot(...)`.
+      this._registerFunctions();
+      await this._storage.save(data);
+    } catch (err) {
+      this._dirty = true;
+      // In case `export()` dropped custom functions before throwing or before `save()` failed.
+      try {
+        this._registerFunctions();
+      } catch {
+        // ignore
+      }
+      throw err;
+    }
   }
 
   /**
@@ -203,6 +219,7 @@ export class SqliteVectorStore {
         stmt.run([r.id, workbookId, blob, JSON.stringify(meta)]);
       }
       this._db.run("COMMIT;");
+      this._dirty = true;
     } catch (err) {
       this._db.run("ROLLBACK;");
       throw err;
@@ -223,6 +240,7 @@ export class SqliteVectorStore {
     try {
       for (const id of ids) stmt.run([id]);
       this._db.run("COMMIT;");
+      this._dirty = true;
     } catch (err) {
       this._db.run("ROLLBACK;");
       throw err;
@@ -254,6 +272,7 @@ export class SqliteVectorStore {
     // Re-register custom SQL functions just in case SQLite/sql.js resets them.
     // (sql.js definitely drops them after `export()`; VACUUM may or may not.)
     this._registerFunctions();
+    this._dirty = true;
     if (this._autoSave) await this._persist();
   }
 
@@ -402,7 +421,7 @@ export class SqliteVectorStore {
   }
 
   async close() {
-    await this._persist();
+    if (this._dirty) await this._persist();
     this._db.close();
   }
 }

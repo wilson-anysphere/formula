@@ -142,3 +142,33 @@ maybeTest("SqliteVectorStore.compact() VACUUMs and persists a smaller DB", async
   expect(hits2.length).toBeGreaterThan(0);
   await store2.close();
 });
+
+class CountingBinaryStorage {
+  saveCalls = 0;
+  #data: Uint8Array | null = null;
+
+  async load(): Promise<Uint8Array | null> {
+    return this.#data ? new Uint8Array(this.#data) : null;
+  }
+
+  async save(data: Uint8Array): Promise<void> {
+    this.saveCalls += 1;
+    this.#data = new Uint8Array(data);
+  }
+}
+
+maybeTest("SqliteVectorStore does not persist on close when nothing changed", async () => {
+  const storage = new CountingBinaryStorage();
+  const store = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: true });
+  await store.close();
+  expect(storage.saveCalls).toBe(0);
+});
+
+maybeTest("SqliteVectorStore avoids double-persist on close after autoSave upsert", async () => {
+  const storage = new CountingBinaryStorage();
+  const store = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: true });
+  await store.upsert([{ id: "a", vector: [1, 0, 0], metadata: {} }]);
+  expect(storage.saveCalls).toBe(1);
+  await store.close();
+  expect(storage.saveCalls).toBe(1);
+});
