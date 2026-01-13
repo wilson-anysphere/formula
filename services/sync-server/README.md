@@ -108,9 +108,16 @@ Otherwise clients can spoof `X-Forwarded-For` to bypass per-IP limits. See the i
   - proxy/network-layer allowlisting.
 - **Internal admin endpoints:** set `SYNC_SERVER_INTERNAL_ADMIN_TOKEN` to enable `/internal/*`.
   Treat this as a production secret; avoid exposing these endpoints to the public internet.
-- **Origin allowlist:** the sync-server does not currently enforce an `Origin` allowlist for WebSocket
-  upgrades. If you need to restrict cross-site WebSocket connections, enforce an allowlist at your
-  reverse proxy/ingress.
+- **WebSocket `Origin` allowlist:** set `SYNC_SERVER_ALLOWED_ORIGINS` to a comma-separated list of
+  allowed `Origin` header values (e.g. `https://app.example.com,https://staging.example.com`).
+  - If `SYNC_SERVER_ALLOWED_ORIGINS` is set and an `Origin` header is present on the websocket
+    upgrade request, it must exactly match one of the allowlisted origins (after trimming
+    whitespace).
+  - If the `Origin` header is missing, the connection is allowed (to support non-browser clients).
+  - Rejections use HTTP `403` with body `Origin not allowed` and increment
+    `sync_server_ws_connections_rejected_total{reason="origin_not_allowed"}`.
+  - If you need to restrict *all* websocket clients (including those without an `Origin` header),
+    enforce allowlisting at your reverse proxy/ingress or network layer in addition to auth.
 
 ### Kubernetes probes (`/healthz`, `/readyz`)
 
