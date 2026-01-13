@@ -599,6 +599,27 @@ fn calculate_all_can_remove_column_filters() {
 }
 
 #[test]
+fn calculate_removefilters_can_remove_column_filters() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+    model
+        .add_measure(
+            "All Region Sales 2",
+            "CALCULATE([Total Sales], REMOVEFILTERS(Customers[Region]))",
+        )
+        .unwrap();
+
+    let east_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
+    let value = model
+        .evaluate_measure("All Region Sales 2", &east_filter)
+        .unwrap();
+    assert_eq!(value, 43.0.into());
+}
+
+#[test]
 fn calculate_all_removes_row_context_filters_for_measures() {
     let mut model = build_model();
     model

@@ -1013,9 +1013,22 @@ impl DaxEngine {
         for arg in filter_args {
             match arg {
                 Expr::Call { name, .. } if name.eq_ignore_ascii_case("USERELATIONSHIP") => {}
-                Expr::Call { name, args } if name.eq_ignore_ascii_case("ALL") => {
+                Expr::Call { name, args }
+                    if name.eq_ignore_ascii_case("ALL")
+                        || name.eq_ignore_ascii_case("REMOVEFILTERS") =>
+                {
+                    // `REMOVEFILTERS` is an alias for the `ALL` filter modifier semantics:
+                    // clear filters for the referenced table/column.
+                    let function_name = if name.eq_ignore_ascii_case("ALL") {
+                        "ALL"
+                    } else {
+                        "REMOVEFILTERS"
+                    };
+
                     let [inner] = args.as_slice() else {
-                        return Err(DaxError::Eval("ALL expects 1 argument".into()));
+                        return Err(DaxError::Eval(format!(
+                            "{function_name} expects 1 argument"
+                        )));
                     };
                     match inner {
                         Expr::TableName(table) => {
@@ -1026,7 +1039,7 @@ impl DaxEngine {
                         }
                         other => {
                             return Err(DaxError::Type(format!(
-                                "ALL expects a table name or column reference, got {other:?}"
+                                "{function_name} expects a table name or column reference, got {other:?}"
                             )))
                         }
                     }
