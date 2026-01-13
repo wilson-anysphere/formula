@@ -309,6 +309,49 @@ def main() -> int:
     fixture_path = public_dir / f"{display_name}.b64"
     expectations_path = public_dir / "expectations.json"
 
+    # Fast path: if the input is already the canonical public fixture and the expectations entry
+    # is present, skip re-running Rust triage unless the user explicitly requested a refresh.
+    #
+    # This keeps `promote_public` idempotent and cheap when invoked on an existing fixture like:
+    #   python -m tools.corpus.promote_public --input tools/corpus/public/simple.xlsx.b64
+    #
+    # To regenerate expectations with the current engine, re-run with `--force`.
+    if (
+        not args.force
+        and not args.sanitize
+        and args.input.suffix == ".b64"
+        and args.diff_limit == 25
+        and not args.recalc
+        and not args.render_smoke
+    ):
+        try:
+            if args.input.resolve() == fixture_path.resolve() and expectations_path.exists():
+                expectations = load_json(expectations_path)
+                exp = expectations.get(display_name) if isinstance(expectations, dict) else None
+                if (
+                    isinstance(exp, dict)
+                    and exp.get("open_ok") is True
+                    and isinstance(exp.get("round_trip_ok"), bool)
+                    and isinstance(exp.get("diff_critical_count"), int)
+                ):
+                    print(
+                        json.dumps(
+                            {
+                                "fixture": str(fixture_path),
+                                "expectations": str(expectations_path),
+                                "expectations_changed": False,
+                                "triage_report": None,
+                                "skipped": "already_promoted",
+                            },
+                            indent=2,
+                        )
+                    )
+                    return 0
+        except Exception:
+            # If anything about the fast path looks suspicious (bad JSON, path resolution failure),
+            # fall back to the full triage+update flow.
+            pass
+
     # 1) Run triage against the exact bytes we intend to publish.
     try:
         report = _run_public_triage(

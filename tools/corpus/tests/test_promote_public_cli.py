@@ -35,6 +35,58 @@ def _make_minimal_xlsx() -> bytes:
 
 
 class PromotePublicCLITests(unittest.TestCase):
+    def test_main_skips_triage_for_existing_public_fixture(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="promote-public-cli-test-") as td:
+            tmp = Path(td)
+            public_dir = tmp / "public"
+            triage_out = tmp / "triage"
+            public_dir.mkdir(parents=True, exist_ok=True)
+
+            xlsx_bytes = _make_minimal_xlsx()
+            fixture_path = public_dir / "case.xlsx.b64"
+            fixture_path.write_bytes(__import__("base64").encodebytes(xlsx_bytes))
+
+            (public_dir / "expectations.json").write_text(
+                json.dumps(
+                    {"case.xlsx": {"open_ok": True, "round_trip_ok": True, "diff_critical_count": 0}},
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            called = {"triage": 0}
+            original_run_public_triage = promote_mod._run_public_triage
+            try:
+                def _triage_should_not_run(*args, **kwargs):  # type: ignore[no-untyped-def]
+                    called["triage"] += 1
+                    raise RuntimeError("triage should not run")
+
+                promote_mod._run_public_triage = _triage_should_not_run  # type: ignore[assignment]
+
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    with unittest.mock.patch.object(
+                        sys,
+                        "argv",
+                        [
+                            "promote_public.py",
+                            "--input",
+                            str(fixture_path),
+                            "--public-dir",
+                            str(public_dir),
+                            "--triage-out",
+                            str(triage_out),
+                        ],
+                    ):
+                        rc = promote_mod.main()
+                self.assertEqual(rc, 0)
+                self.assertEqual(called["triage"], 0)
+                self.assertIn("already_promoted", stdout.getvalue())
+            finally:
+                promote_mod._run_public_triage = original_run_public_triage  # type: ignore[assignment]
+
     def test_main_idempotent_for_existing_fixture_without_rust(self) -> None:
         with tempfile.TemporaryDirectory(prefix="promote-public-cli-test-") as td:
             tmp = Path(td)
