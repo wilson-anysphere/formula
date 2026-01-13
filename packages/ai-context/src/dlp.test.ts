@@ -48,6 +48,12 @@ describe("dlp heuristic", () => {
     expect(classifyText(text).findings).toContain("api_key");
   });
 
+  it("detects and redacts private key blocks", () => {
+    const key = `-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----`;
+    expect(classifyText(key).findings).toContain("private_key");
+    expect(redactText(key)).toBe("[REDACTED_PRIVATE_KEY]");
+  });
+
   it("detects and validates IBANs (mod 97)", () => {
     const valid = "GB82 WEST 1234 5698 7654 32";
     const invalid = "GB82 WEST 1234 5698 7654 33";

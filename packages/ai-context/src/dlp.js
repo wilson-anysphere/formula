@@ -5,6 +5,11 @@
 
 const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const SSN_RE = /\b\d{3}-\d{2}-\d{4}\b/g;
+// Multi-line private key blocks (PEM/OpenSSH/PGP). Low-false-positive detector.
+const PRIVATE_KEY_BLOCK_RE =
+  /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----/g;
+const PGP_PRIVATE_KEY_BLOCK_RE =
+  /-----BEGIN PGP PRIVATE KEY BLOCK-----[\s\S]*?-----END PGP PRIVATE KEY BLOCK-----/g;
 // Candidate detector only. Use Luhn validation before classifying/redacting.
 //
 // Keep the historical 13-16 digit range to avoid matching long numeric ids, while still
@@ -236,6 +241,7 @@ function hasValidIban(text) {
  */
 export function classifyText(text) {
   const findings = [];
+  if (hasMatch(PRIVATE_KEY_BLOCK_RE, text) || hasMatch(PGP_PRIVATE_KEY_BLOCK_RE, text)) findings.push("private_key");
   if (hasMatch(EMAIL_RE, text)) findings.push("email");
   if (hasMatch(SSN_RE, text)) findings.push("ssn");
   if (hasValidCreditCard(text)) findings.push("credit_card");
@@ -251,6 +257,8 @@ export function classifyText(text) {
  */
 export function redactText(text) {
   return String(text)
+    .replace(PRIVATE_KEY_BLOCK_RE, "[REDACTED_PRIVATE_KEY]")
+    .replace(PGP_PRIVATE_KEY_BLOCK_RE, "[REDACTED_PRIVATE_KEY]")
     .replace(API_KEY_RE, "[REDACTED_API_KEY]")
     .replace(EMAIL_RE, "[REDACTED_EMAIL]")
     .replace(SSN_RE, "[REDACTED_SSN]")
