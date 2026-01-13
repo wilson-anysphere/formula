@@ -9,7 +9,6 @@
  * This catches "last writer wins" / merge regressions where one platform build overwrites latest.json
  * and ships an incomplete updater manifest.
  */
-import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, statSync } from "node:fs";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -22,25 +21,6 @@ import crypto from "node:crypto";
 function fatal(message) {
   console.error(message);
   process.exit(1);
-}
-
-/**
- * @param {string[]} args
- * @returns {string}
- */
-function gh(args) {
-  const res = spawnSync("gh", args, {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  if (res.error) {
-    throw res.error;
-  }
-  if (res.status !== 0) {
-    const cmd = ["gh", ...args].join(" ");
-    throw new Error(`${cmd} failed (exit ${res.status}).\n${res.stderr}`.trim());
-  }
-  return res.stdout;
 }
 
 /**
@@ -111,6 +91,35 @@ async function fetchAllReleaseAssets({ repo, releaseId, token }) {
     page += 1;
   }
   return assets;
+}
+
+/**
+ * Download a GitHub Release asset via the GitHub API (supports draft releases).
+ *
+ * @param {{ asset: any; fileName: string; token: string }}
+ */
+async function downloadReleaseAsset({ asset, fileName, token }) {
+  const assetUrl = typeof asset.url === "string" ? asset.url : "";
+  if (!assetUrl) {
+    throw new Error(`Release asset ${fileName} missing API url; cannot download.`);
+  }
+
+  const res = await fetch(assetUrl, {
+    headers: {
+      Accept: "application/octet-stream",
+      Authorization: `Bearer ${token}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+    redirect: "follow",
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Failed to download ${fileName} (${res.status}): ${text}`);
+  }
+
+  const bytes = Buffer.from(await res.arrayBuffer());
+  writeFileSync(fileName, bytes);
 }
 
 /**
@@ -375,13 +384,7 @@ async function main() {
     [latestAsset, "latest.json"],
     [latestSigAsset, "latest.json.sig"],
   ]) {
-    const assetUrl = typeof asset.url === "string" ? asset.url : "";
-    if (!assetUrl) {
-      fatal(`Release asset ${fileName} missing API url; cannot download.`);
-    }
-
-    const apiPath = new URL(assetUrl).pathname.replace(/^\/+/, "");
-    gh(["api", "-H", "Accept: application/octet-stream", apiPath, "--output", fileName]);
+    await downloadReleaseAsset({ asset, fileName, token });
 
     try {
       const stats = statSync(fileName);

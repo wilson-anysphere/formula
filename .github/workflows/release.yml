@@ -780,8 +780,8 @@ jobs:
 
       - name: Validate updater manifest assets + targets
         env:
-          # gh respects GH_TOKEN (recommended) and GITHUB_TOKEN. We set both so the validator can
-          # use the GitHub API directly and via gh for downloading draft release assets.
+          # The validator uses the GitHub API to read/download assets from the draft release.
+          # Set both token env vars so it works whether it looks for GH_TOKEN or GITHUB_TOKEN.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/ci/validate-updater-manifest.mjs "${{ github.ref_name }}"
