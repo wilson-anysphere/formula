@@ -1076,7 +1076,19 @@ export class SpreadsheetApp {
           },
         },
       });
-
+      if (devEncryption && typeof window !== "undefined") {
+        try {
+          const params = new URL(window.location.href).searchParams;
+          const range = params.get("collabEncryptRange") ?? "Sheet1!A1:C10";
+          showToast(
+            `Dev: collab cell encryption enabled (${range}). Open a second client without collabEncrypt to verify masked reads (###).`,
+            "info",
+            { timeoutMs: 10_000 }
+          );
+        } catch {
+          // Best-effort; `showToast` requires a DOM #toast-root and should never block startup.
+        }
+      }
       encryptionMetadata = this.collabSession.metadata;
 
       // Track permissions changes so the desktop UI can immediately reflect read-only mode
