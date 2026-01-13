@@ -875,7 +875,7 @@ export class ContextManager {
       }
     }
 
-    const attachmentData = buildRangeAttachmentSectionText(
+    const attachmentDataRaw = buildRangeAttachmentSectionText(
       { sheet: sheetForContext, attachments: params.attachments },
       { maxRows: 30, maxAttachments: 3 },
     );
@@ -917,6 +917,13 @@ export class ContextManager {
       maxNamedRanges: 10,
       maxColumns: 25,
     });
+    const attachmentData = shouldReturnRedactedStructured
+      ? redactStructuredValue(attachmentDataRaw, this.redactor, {
+          signal,
+          includeRestrictedContent: includeRestrictedContentForStructured,
+          policyAllowsRestrictedContent,
+        })
+      : attachmentDataRaw;
 
     const sections = [
       ...((dlpRedactedCells > 0 || (dlpDecision?.decision === DLP_DECISION.REDACT && dlpHeuristicApplied))

@@ -129,3 +129,30 @@ test("buildContext: DLP REDACT also prevents attachments from leaking heuristic-
   assert.doesNotMatch(out.promptContext, /123-45-6789/);
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
+
+test("buildContext: DLP REDACT also prevents attachment_data range previews from leaking heuristic-sensitive strings (even with a no-op redactor)", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [["Email"], ["alice@example.com"]],
+    },
+    query: "anything",
+    // Force the range preview section to include the sensitive cell.
+    attachments: [{ type: "range", reference: "A1:A2" }],
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: makePolicy(),
+      classificationRecords: [],
+    },
+  });
+
+  assert.match(out.promptContext, /## attachment_data/i);
+  assert.doesNotMatch(out.promptContext, /alice@example\.com/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
