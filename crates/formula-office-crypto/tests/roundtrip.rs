@@ -270,13 +270,11 @@ fn encrypt_agile_ooxml_ole(plaintext: &[u8], password: &str) -> Vec<u8> {
     let version_major = 4u16;
     let version_minor = 4u16;
     let flags = 0x0000_0040u32;
-    let xml_len = xml.as_bytes().len() as u32;
 
     let mut encryption_info = Vec::new();
     encryption_info.extend_from_slice(&version_major.to_le_bytes());
     encryption_info.extend_from_slice(&version_minor.to_le_bytes());
     encryption_info.extend_from_slice(&flags.to_le_bytes());
-    encryption_info.extend_from_slice(&xml_len.to_le_bytes());
     encryption_info.extend_from_slice(xml.as_bytes());
 
     // Write the OLE/CFB wrapper.
@@ -366,8 +364,7 @@ fn agile_encrypt_with_block_key(
     plaintext: &[u8],
 ) -> Vec<u8> {
     let key = agile_derive_key_sha512(salt, password_utf16le, spin_count, key_bits, block_key);
-    let iv_full = sha512_digest(&[salt, block_key].concat());
-    let iv = &iv_full[..block_size];
+    let iv = &salt[..block_size];
 
     // plaintext must be multiple of 16 for NoPadding.
     assert!(plaintext.len() % 16 == 0);

@@ -139,6 +139,25 @@ pub(crate) fn decrypt_agile_encrypted_package(
 
     let pw_utf16 = password_to_utf16le(password);
 
+    // In Agile encryption, the password key encryptor uses the `saltValue` directly as the AES-CBC
+    // IV when decrypting verifier and key blobs. (The per-purpose block keys are only for key
+    // derivation.)
+    let password_block_size = info.password_key_encryptor.block_size;
+    if password_block_size != 16 {
+        return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "unsupported password blockSize {password_block_size}"
+        )));
+    }
+    let password_iv = info
+        .password_key_encryptor
+        .salt
+        .get(..password_block_size)
+        .ok_or_else(|| {
+            OfficeCryptoError::InvalidFormat(format!(
+                "password saltValue shorter than blockSize ({password_block_size})"
+            ))
+        })?;
+
     // Password verification.
     let verifier_input_key = derive_agile_key(
         info.password_key_encryptor.hash_algorithm,
@@ -148,15 +167,9 @@ pub(crate) fn decrypt_agile_encrypted_package(
         info.password_key_encryptor.key_bits / 8,
         BLOCK_KEY_VERIFIER_HASH_INPUT,
     );
-    let verifier_input_iv = derive_iv(
-        info.password_key_encryptor.hash_algorithm,
-        &info.password_key_encryptor.salt,
-        BLOCK_KEY_VERIFIER_HASH_INPUT,
-        info.password_key_encryptor.block_size,
-    );
     let verifier_hash_input_plain = aes_cbc_decrypt(
         &verifier_input_key,
-        &verifier_input_iv,
+        password_iv,
         &info.password_key_encryptor.encrypted_verifier_hash_input,
     )?;
     let verifier_hash_input_plain = verifier_hash_input_plain
@@ -181,15 +194,9 @@ pub(crate) fn decrypt_agile_encrypted_package(
         info.password_key_encryptor.key_bits / 8,
         BLOCK_KEY_VERIFIER_HASH_VALUE,
     );
-    let verifier_value_iv = derive_iv(
-        info.password_key_encryptor.hash_algorithm,
-        &info.password_key_encryptor.salt,
-        BLOCK_KEY_VERIFIER_HASH_VALUE,
-        info.password_key_encryptor.block_size,
-    );
     let verifier_hash_value_plain = aes_cbc_decrypt(
         &verifier_value_key,
-        &verifier_value_iv,
+        password_iv,
         &info.password_key_encryptor.encrypted_verifier_hash_value,
     )?;
     let expected_hash_slice = verifier_hash_value_plain
@@ -213,15 +220,9 @@ pub(crate) fn decrypt_agile_encrypted_package(
         info.password_key_encryptor.key_bits / 8,
         BLOCK_KEY_ENCRYPTED_KEY_VALUE,
     );
-    let key_value_iv = derive_iv(
-        info.password_key_encryptor.hash_algorithm,
-        &info.password_key_encryptor.salt,
-        BLOCK_KEY_ENCRYPTED_KEY_VALUE,
-        info.password_key_encryptor.block_size,
-    );
     let key_value_plain = aes_cbc_decrypt(
         &key_value_key,
-        &key_value_iv,
+        password_iv,
         &info.password_key_encryptor.encrypted_key_value,
     )?;
     let key_len = info.key_data.key_bits / 8;
@@ -312,13 +313,7 @@ pub(crate) fn encrypt_agile_encrypted_package(
         key_bytes,
         BLOCK_KEY_VERIFIER_HASH_INPUT,
     );
-    let iv_vhi = derive_iv(
-        hash_alg,
-        &salt_key_encryptor,
-        BLOCK_KEY_VERIFIER_HASH_INPUT,
-        block_size,
-    );
-    let enc_vhi = aes_cbc_encrypt(&key_vhi, &iv_vhi, &verifier_hash_input_plain)?;
+    let enc_vhi = aes_cbc_encrypt(&key_vhi, &salt_key_encryptor, &verifier_hash_input_plain)?;
 
     // Encrypt verifierHashValue.
     let key_vhv = derive_agile_key(
@@ -329,13 +324,7 @@ pub(crate) fn encrypt_agile_encrypted_package(
         key_bytes,
         BLOCK_KEY_VERIFIER_HASH_VALUE,
     );
-    let iv_vhv = derive_iv(
-        hash_alg,
-        &salt_key_encryptor,
-        BLOCK_KEY_VERIFIER_HASH_VALUE,
-        block_size,
-    );
-    let enc_vhv = aes_cbc_encrypt(&key_vhv, &iv_vhv, &verifier_hash_value_plain)?;
+    let enc_vhv = aes_cbc_encrypt(&key_vhv, &salt_key_encryptor, &verifier_hash_value_plain)?;
 
     // Encrypt package key (encryptedKeyValue).
     let key_kv = derive_agile_key(
@@ -346,13 +335,7 @@ pub(crate) fn encrypt_agile_encrypted_package(
         key_bytes,
         BLOCK_KEY_ENCRYPTED_KEY_VALUE,
     );
-    let iv_kv = derive_iv(
-        hash_alg,
-        &salt_key_encryptor,
-        BLOCK_KEY_ENCRYPTED_KEY_VALUE,
-        block_size,
-    );
-    let enc_kv = aes_cbc_encrypt(&key_kv, &iv_kv, &package_key_plain)?;
+    let enc_kv = aes_cbc_encrypt(&key_kv, &salt_key_encryptor, &package_key_plain)?;
 
     // Encrypt package bytes.
     let encrypted_package = encrypt_encrypted_package_stream(
@@ -428,14 +411,12 @@ pub(crate) fn encrypt_agile_encrypted_package(
         enc_hmac_value_b64 = enc_hmac_value_b64,
     );
 
-    // Build EncryptionInfo stream: version header + xml length + xml bytes.
+    // Build EncryptionInfo stream: version header + XML bytes.
     let flags: u32 = 0x0000_0040;
-    let xml_len = xml.as_bytes().len() as u32;
     let mut encryption_info = Vec::new();
     encryption_info.extend_from_slice(&4u16.to_le_bytes());
     encryption_info.extend_from_slice(&4u16.to_le_bytes());
     encryption_info.extend_from_slice(&flags.to_le_bytes());
-    encryption_info.extend_from_slice(&xml_len.to_le_bytes());
     encryption_info.extend_from_slice(xml.as_bytes());
 
     Ok((encryption_info, encrypted_package))
@@ -516,10 +497,14 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
     reader.trim_text(true);
     let mut buf = Vec::new();
 
+    const PASSWORD_KEY_ENCRYPTOR_URI: &str =
+        "http://schemas.microsoft.com/office/2006/keyEncryptor/password";
+
     let mut key_data: Option<AgileKeyData> = None;
     let mut data_integrity: Option<AgileDataIntegrity> = None;
     let mut password_key_encryptor: Option<AgilePasswordKeyEncryptor> = None;
 
+    let mut in_password_key_encryptor = false;
     let mut in_encrypted_key = false;
     let mut capture: Option<CaptureKind> = None;
 
@@ -535,6 +520,25 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
                 let qname = e.name();
                 let name = local_name(qname.as_ref());
                 match name {
+                    b"keyEncryptor" => {
+                        // Only consider the password key encryptor.
+                        for attr in e.attributes() {
+                            let attr = attr.map_err(|_| {
+                                OfficeCryptoError::InvalidFormat("invalid XML attribute".to_string())
+                            })?;
+                            if local_name(attr.key.as_ref()) != b"uri" {
+                                continue;
+                            }
+                            let value = attr.unescape_value().map_err(|_| {
+                                OfficeCryptoError::InvalidFormat(
+                                    "invalid XML attribute encoding".to_string(),
+                                )
+                            })?;
+                            if value.as_ref() == PASSWORD_KEY_ENCRYPTOR_URI {
+                                in_password_key_encryptor = true;
+                            }
+                        }
+                    }
                     b"keyData" => {
                         let kd = parse_key_data_attrs(&e)?;
                         key_data = Some(kd);
@@ -543,7 +547,7 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
                         let di = parse_data_integrity_attrs(&e)?;
                         data_integrity = Some(di);
                     }
-                    b"encryptedKey" => {
+                    b"encryptedKey" if in_password_key_encryptor => {
                         in_encrypted_key = true;
                         tmp_password_attrs = Some(parse_password_key_encryptor_attrs(&e)?);
                     }
@@ -571,13 +575,51 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
                         let di = parse_data_integrity_attrs(&e)?;
                         data_integrity = Some(di);
                     }
+                    b"encryptedKey" if in_password_key_encryptor => {
+                        // Some producers emit `<p:encryptedKey .../>` as an empty element with the
+                        // encrypted blobs stored as attributes.
+                        let attrs = parse_password_key_encryptor_attrs(&e)?;
+                        let encrypted_verifier_hash_input =
+                            attrs.encrypted_verifier_hash_input.ok_or_else(|| {
+                                OfficeCryptoError::InvalidFormat(
+                                    "missing encryptedVerifierHashInput".to_string(),
+                                )
+                            })?;
+                        let encrypted_verifier_hash_value =
+                            attrs.encrypted_verifier_hash_value.ok_or_else(|| {
+                                OfficeCryptoError::InvalidFormat(
+                                    "missing encryptedVerifierHashValue".to_string(),
+                                )
+                            })?;
+                        let encrypted_key_value =
+                            attrs.encrypted_key_value.ok_or_else(|| {
+                                OfficeCryptoError::InvalidFormat(
+                                    "missing encryptedKeyValue".to_string(),
+                                )
+                            })?;
+                        password_key_encryptor = Some(AgilePasswordKeyEncryptor {
+                            salt: attrs.salt,
+                            block_size: attrs.block_size,
+                            key_bits: attrs.key_bits,
+                            spin_count: attrs.spin_count,
+                            hash_algorithm: attrs.hash_algorithm,
+                            cipher_algorithm: attrs.cipher_algorithm,
+                            cipher_chaining: attrs.cipher_chaining,
+                            encrypted_verifier_hash_input,
+                            encrypted_verifier_hash_value,
+                            encrypted_key_value,
+                        });
+                    }
                     _ => {}
                 }
             }
             Ok(Event::End(e)) => {
                 let qname = e.name();
                 let name = local_name(qname.as_ref());
-                if name == b"encryptedKey" {
+                if name == b"keyEncryptor" {
+                    in_password_key_encryptor = false;
+                }
+                if name == b"encryptedKey" && in_encrypted_key {
                     in_encrypted_key = false;
                     capture = None;
                     let attrs = tmp_password_attrs.take().ok_or_else(|| {
@@ -585,21 +627,28 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
                             "encryptedKey missing required attributes".to_string(),
                         )
                     })?;
-                    let encrypted_verifier_hash_input =
-                        tmp_encrypted_verifier_hash_input.take().ok_or_else(|| {
+                    let encrypted_verifier_hash_input = tmp_encrypted_verifier_hash_input
+                        .take()
+                        .or(attrs.encrypted_verifier_hash_input)
+                        .ok_or_else(|| {
                             OfficeCryptoError::InvalidFormat(
                                 "missing encryptedVerifierHashInput".to_string(),
                             )
                         })?;
-                    let encrypted_verifier_hash_value =
-                        tmp_encrypted_verifier_hash_value.take().ok_or_else(|| {
+                    let encrypted_verifier_hash_value = tmp_encrypted_verifier_hash_value
+                        .take()
+                        .or(attrs.encrypted_verifier_hash_value)
+                        .ok_or_else(|| {
                             OfficeCryptoError::InvalidFormat(
                                 "missing encryptedVerifierHashValue".to_string(),
                             )
                         })?;
-                    let encrypted_key_value = tmp_encrypted_key_value.take().ok_or_else(|| {
-                        OfficeCryptoError::InvalidFormat("missing encryptedKeyValue".to_string())
-                    })?;
+                    let encrypted_key_value = tmp_encrypted_key_value
+                        .take()
+                        .or(attrs.encrypted_key_value)
+                        .ok_or_else(|| {
+                            OfficeCryptoError::InvalidFormat("missing encryptedKeyValue".to_string())
+                        })?;
                     password_key_encryptor = Some(AgilePasswordKeyEncryptor {
                         salt: attrs.salt,
                         block_size: attrs.block_size,
@@ -803,6 +852,9 @@ struct AgilePasswordAttrs {
     hash_algorithm: HashAlgorithm,
     cipher_algorithm: String,
     cipher_chaining: String,
+    encrypted_verifier_hash_input: Option<Vec<u8>>,
+    encrypted_verifier_hash_value: Option<Vec<u8>>,
+    encrypted_key_value: Option<Vec<u8>>,
 }
 
 fn parse_password_key_encryptor_attrs(
@@ -815,6 +867,9 @@ fn parse_password_key_encryptor_attrs(
     let mut hash_algorithm: Option<HashAlgorithm> = None;
     let mut cipher_algorithm: Option<String> = None;
     let mut cipher_chaining: Option<String> = None;
+    let mut encrypted_verifier_hash_input: Option<Vec<u8>> = None;
+    let mut encrypted_verifier_hash_value: Option<Vec<u8>> = None;
+    let mut encrypted_key_value: Option<Vec<u8>> = None;
 
     for attr in e.attributes() {
         let attr = attr
@@ -853,6 +908,25 @@ fn parse_password_key_encryptor_attrs(
             b"cipherChaining" => {
                 cipher_chaining = Some(value.to_string());
             }
+            b"encryptedVerifierHashInput" => {
+                encrypted_verifier_hash_input = Some(decode_b64_attr(value.as_ref()).map_err(|_| {
+                    OfficeCryptoError::InvalidFormat(
+                        "invalid base64 encryptedVerifierHashInput".to_string(),
+                    )
+                })?);
+            }
+            b"encryptedVerifierHashValue" => {
+                encrypted_verifier_hash_value = Some(decode_b64_attr(value.as_ref()).map_err(|_| {
+                    OfficeCryptoError::InvalidFormat(
+                        "invalid base64 encryptedVerifierHashValue".to_string(),
+                    )
+                })?);
+            }
+            b"encryptedKeyValue" => {
+                encrypted_key_value = Some(decode_b64_attr(value.as_ref()).map_err(|_| {
+                    OfficeCryptoError::InvalidFormat("invalid base64 encryptedKeyValue".to_string())
+                })?);
+            }
             _ => {}
         }
     }
@@ -879,6 +953,9 @@ fn parse_password_key_encryptor_attrs(
         cipher_chaining: cipher_chaining.ok_or_else(|| {
             OfficeCryptoError::InvalidFormat("encryptedKey missing cipherChaining".to_string())
         })?,
+        encrypted_verifier_hash_input,
+        encrypted_verifier_hash_value,
+        encrypted_key_value,
     })
 }
 
@@ -911,7 +988,7 @@ fn decode_b64_attr(value: &str) -> Result<Vec<u8>, base64::DecodeError> {
 pub(crate) mod tests {
     use super::*;
     use crate::crypto::{
-        aes_cbc_encrypt, derive_agile_key, derive_iv, password_to_utf16le, HashAlgorithm,
+        aes_cbc_encrypt, derive_agile_key, password_to_utf16le, HashAlgorithm,
     };
     use crate::util::parse_encryption_info_header;
 
@@ -921,13 +998,11 @@ pub(crate) mod tests {
         let version_major = 4u16;
         let version_minor = 4u16;
         let flags = 0x0000_0040u32;
-        let xml_len = xml.as_bytes().len() as u32;
 
         let mut out = Vec::new();
         out.extend_from_slice(&version_major.to_le_bytes());
         out.extend_from_slice(&version_minor.to_le_bytes());
         out.extend_from_slice(&flags.to_le_bytes());
-        out.extend_from_slice(&xml_len.to_le_bytes());
         out.extend_from_slice(xml.as_bytes());
 
         let hdr = parse_encryption_info_header(&out).expect("header");
@@ -942,7 +1017,6 @@ pub(crate) mod tests {
         let hash_alg = HashAlgorithm::Sha512;
         let spin_count = 100_000u32;
         let key_bits = 256usize;
-        let block_size = 16usize;
 
         let salt_key_encryptor: [u8; 16] = [
             0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD,
@@ -965,14 +1039,9 @@ pub(crate) mod tests {
             key_bits / 8,
             BLOCK_KEY_VERIFIER_HASH_INPUT,
         );
-        let iv_vhi = derive_iv(
-            hash_alg,
-            &salt_key_encryptor,
-            BLOCK_KEY_VERIFIER_HASH_INPUT,
-            block_size,
-        );
         let enc_vhi =
-            aes_cbc_encrypt(&key_vhi, &iv_vhi, &verifier_hash_input_plain).expect("enc vhi");
+            aes_cbc_encrypt(&key_vhi, &salt_key_encryptor, &verifier_hash_input_plain)
+                .expect("enc vhi");
 
         let key_vhv = derive_agile_key(
             hash_alg,
@@ -982,14 +1051,9 @@ pub(crate) mod tests {
             key_bits / 8,
             BLOCK_KEY_VERIFIER_HASH_VALUE,
         );
-        let iv_vhv = derive_iv(
-            hash_alg,
-            &salt_key_encryptor,
-            BLOCK_KEY_VERIFIER_HASH_VALUE,
-            block_size,
-        );
         let enc_vhv =
-            aes_cbc_encrypt(&key_vhv, &iv_vhv, &verifier_hash_value_plain).expect("enc vhv");
+            aes_cbc_encrypt(&key_vhv, &salt_key_encryptor, &verifier_hash_value_plain)
+                .expect("enc vhv");
 
         let key_kv = derive_agile_key(
             hash_alg,
@@ -999,13 +1063,8 @@ pub(crate) mod tests {
             key_bits / 8,
             BLOCK_KEY_ENCRYPTED_KEY_VALUE,
         );
-        let iv_kv = derive_iv(
-            hash_alg,
-            &salt_key_encryptor,
-            BLOCK_KEY_ENCRYPTED_KEY_VALUE,
-            block_size,
-        );
-        let enc_kv = aes_cbc_encrypt(&key_kv, &iv_kv, &package_key_plain).expect("enc key");
+        let enc_kv =
+            aes_cbc_encrypt(&key_kv, &salt_key_encryptor, &package_key_plain).expect("enc key");
 
         let b64 = base64::engine::general_purpose::STANDARD;
         let salt_key_encryptor_b64 = b64.encode(salt_key_encryptor);

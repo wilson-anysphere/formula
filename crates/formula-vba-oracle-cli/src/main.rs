@@ -4,6 +4,7 @@ use std::io::{Read, Seek};
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use formula_office_crypto::{decrypt_encrypted_package_ole, is_encrypted_ooxml_ole};
 use formula_vba_runtime::{
     parse_program, row_col_to_a1, ExecutionResult, Spreadsheet, VbaError, VbaRuntime, VbaValue,
 };
@@ -677,25 +678,8 @@ fn read_all_input(input: &Option<PathBuf>) -> Result<Vec<u8>, String> {
     }
 }
 
-const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
-
-fn ole_stream_exists<R: Read + Seek>(ole: &mut cfb::CompoundFile<R>, name: &str) -> bool {
-    if ole.open_stream(name).is_ok() {
-        return true;
-    }
-    let with_leading_slash = format!("/{name}");
-    ole.open_stream(&with_leading_slash).is_ok()
-}
-
 fn is_ole_encrypted_ooxml(bytes: &[u8]) -> bool {
-    if !bytes.starts_with(&OLE_MAGIC) {
-        return false;
-    }
-    let cursor = std::io::Cursor::new(bytes);
-    let Ok(mut ole) = cfb::CompoundFile::open(cursor) else {
-        return false;
-    };
-    ole_stream_exists(&mut ole, "EncryptionInfo") && ole_stream_exists(&mut ole, "EncryptedPackage")
+    is_encrypted_ooxml_ole(bytes)
 }
 
 fn maybe_decrypt_encrypted_xlsm<'a>(
@@ -708,89 +692,9 @@ fn maybe_decrypt_encrypted_xlsm<'a>(
 
     let password =
         password.ok_or_else(|| "password required for encrypted workbook".to_string())?;
-
-    // `office-crypto` currently assumes the decrypted package size is at least one full
-    // 4096-byte segment when decrypting OOXML (`EncryptedPackage`). Some tiny XLSM fixtures are
-    // smaller than that, which can trigger a panic inside the dependency.
-    //
-    // Work around this by:
-    // - parsing the real decrypted package size from the first 8 bytes of the `EncryptedPackage`
-    //   stream (u64 LE, per MS-OFFCRYPTO),
-    // - patching the first 4 bytes (u32 LE) to be at least 4096 so the dependency's segment loop
-    //   doesn't underflow,
-    // - decrypting, then truncating back to the real size.
-    //
-    // This keeps the decrypted bytes in-memory and avoids writing anything to disk.
-    const SEGMENT_LENGTH: usize = 4096;
-
-    fn read_encrypted_package_size(bytes: &[u8]) -> Result<usize, String> {
-        let cursor = std::io::Cursor::new(bytes);
-        let mut ole =
-            cfb::CompoundFile::open(cursor).map_err(|e| format!("Invalid OLE container: {e}"))?;
-        let mut stream = ole
-            .open_stream("EncryptedPackage")
-            .or_else(|_| ole.open_stream("/EncryptedPackage"))
-            .map_err(|e| format!("Missing EncryptedPackage stream: {e}"))?;
-        let mut hdr = [0u8; 8];
-        stream
-            .read_exact(&mut hdr)
-            .map_err(|e| format!("Failed to read EncryptedPackage header: {e}"))?;
-        let size = u64::from_le_bytes(hdr);
-        usize::try_from(size).map_err(|_| "EncryptedPackage size too large".to_string())
-    }
-
-    fn patch_encrypted_package_size(bytes: &[u8], patched_size: u32) -> Result<Vec<u8>, String> {
-        use std::io::{Seek as _, SeekFrom, Write as _};
-
-        let cursor = std::io::Cursor::new(bytes.to_vec());
-        let mut ole =
-            cfb::CompoundFile::open(cursor).map_err(|e| format!("Invalid OLE container: {e}"))?;
-        {
-            let mut stream = ole
-                .open_stream("EncryptedPackage")
-                .or_else(|_| ole.open_stream("/EncryptedPackage"))
-                .map_err(|e| format!("Missing EncryptedPackage stream: {e}"))?;
-            stream
-                .seek(SeekFrom::Start(0))
-                .map_err(|e| format!("Failed to seek EncryptedPackage stream: {e}"))?;
-            stream
-                .write_all(&patched_size.to_le_bytes())
-                .map_err(|e| format!("Failed to patch EncryptedPackage header: {e}"))?;
-        }
-        ole.flush()
-            .map_err(|e| format!("Failed to flush OLE container: {e}"))?;
-        Ok(ole.into_inner().into_inner())
-    }
-
-    fn decrypt_with_office_crypto(bytes: Vec<u8>, password: &str) -> Result<Vec<u8>, String> {
-        let res = std::panic::catch_unwind(|| office_crypto::decrypt_from_bytes(bytes, password));
-        match res {
-            Ok(Ok(v)) => Ok(v),
-            Ok(Err(e)) => Err(format!("Failed to decrypt workbook: {e}")),
-            Err(panic) => {
-                let msg = panic
-                    .downcast_ref::<&str>()
-                    .map(|s| (*s).to_string())
-                    .or_else(|| panic.downcast_ref::<String>().cloned())
-                    .unwrap_or_else(|| "unknown panic".to_string());
-                Err(format!("Failed to decrypt workbook (panic): {msg}"))
-            }
-        }
-    }
-
-    let real_size = read_encrypted_package_size(bytes)?;
-    let input = if real_size < SEGMENT_LENGTH {
-        patch_encrypted_package_size(bytes, SEGMENT_LENGTH as u32)?
-    } else {
-        bytes.to_vec()
-    };
-
-    let mut decrypted = decrypt_with_office_crypto(input, password)?;
-    if decrypted.len() > real_size {
-        decrypted.truncate(real_size);
-    }
-
-    Ok(Cow::Owned(decrypted))
+    decrypt_encrypted_package_ole(bytes, password)
+        .map(Cow::Owned)
+        .map_err(|e| format!("Failed to decrypt workbook: {e}"))
 }
 
 fn detect_format(bytes: &[u8], hint: &str) -> Result<InputFormat, String> {

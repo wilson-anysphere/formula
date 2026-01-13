@@ -2308,12 +2308,11 @@ dependencies = [
 name = "formula-vba-oracle-cli"
 version = "0.1.0"
 dependencies = [
- "cfb 0.10.0",
  "clap",
+ "formula-office-crypto",
  "formula-vba",
  "formula-vba-runtime",
  "ms-offcrypto-writer",
- "office-crypto",
  "quick-xml 0.37.5",
  "rand 0.9.2",
  "serde",
