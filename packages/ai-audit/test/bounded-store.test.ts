@@ -213,4 +213,49 @@ describe("BoundedAIAuditStore", () => {
       }
     }
   });
+
+  it("delegates listEntries() to the underlying store", async () => {
+    const underlying = new MemoryAIAuditStore();
+    const store = new BoundedAIAuditStore(underlying, { max_entry_chars: 1_000 });
+
+    const entry: AIAuditEntry = {
+      id: "entry-list-1",
+      timestamp_ms: 1,
+      session_id: "session-list",
+      mode: "chat",
+      input: { prompt: "hi" },
+      model: "unit-test-model",
+      tool_calls: []
+    };
+
+    await underlying.logEntry(entry);
+    const listed = await store.listEntries({ session_id: "session-list" });
+    expect(listed.map((e) => e.id)).toEqual(["entry-list-1"]);
+  });
+
+  it("handles non-serializable (circular) entries by compacting instead of throwing", async () => {
+    const underlying = new MemoryAIAuditStore();
+    const store = new BoundedAIAuditStore(underlying, { max_entry_chars: 2_000 });
+
+    const circular: any = {};
+    circular.self = circular;
+
+    const entry: AIAuditEntry = {
+      id: "entry-circular-1",
+      timestamp_ms: Date.now(),
+      session_id: "session-circular-1",
+      mode: "chat",
+      input: circular,
+      model: "unit-test-model",
+      tool_calls: []
+    };
+
+    await expect(store.logEntry(entry)).resolves.toBeUndefined();
+
+    const stored = await underlying.listEntries({ session_id: "session-circular-1" });
+    expect(stored).toHaveLength(1);
+    const storedInput = stored[0]!.input as any;
+    expect(storedInput?.audit_truncated).toBe(true);
+    expect(typeof storedInput?.audit_json).toBe("string");
+  });
 });
