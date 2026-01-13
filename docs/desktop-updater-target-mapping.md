@@ -27,14 +27,15 @@ If Tauri changes these identifiers in a future upgrade, our CI guardrail
 expected to fail (or require adding a new alias) with a clear “expected vs actual” diff, and this
 document should be updated alongside the validator.
 
-### Accepted aliases (local verification)
+### Common equivalents (not accepted by tagged-release CI)
 
 The release workflow's CI validator (`scripts/ci/validate-updater-manifest.mjs`) is intentionally
 **strict** about `latest.json.platforms` keys for tagged releases so toolchain changes fail loudly.
 
-For convenience when inspecting manifests from **local builds** or ad-hoc tooling, the standalone
-checker (`scripts/verify-tauri-latest-json.mjs --manifest ...`) canonicalizes a few common
-equivalents:
+When inspecting manifests from **local builds** or ad-hoc tooling, you may see alternate platform
+key spellings (often Rust target triples). Treat these as equivalent to the canonical keys above
+for debugging, but note that tagged-release CI is intentionally strict and expects the canonical
+keys.
 
 - `universal-apple-darwin` → `darwin-universal`
 - `x86_64-pc-windows-msvc` → `windows-x86_64`

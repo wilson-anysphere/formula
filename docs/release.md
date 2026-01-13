@@ -139,10 +139,10 @@ jq '.platforms | keys' latest.json
 ```
 
 Note: `scripts/verify-tauri-latest-json.mjs` delegates to the lower-level validator
-`scripts/ci/validate-updater-manifest.mjs` when run in `<tag>` mode, which downloads
-`latest.json` / `latest.json.sig` from the draft release and checks targets, signatures, and
-referenced assets. The `--manifest/--sig` mode is a lightweight offline check (platform keys +
-presence of the signature file).
+`scripts/ci/validate-updater-manifest.mjs` when run in `<tag>` mode. It downloads `latest.json` /
+`latest.json.sig` from the draft release and checks targets, signatures, and referenced assets.
+For offline checks, use `node scripts/ci/verify-updater-manifest-signature.mjs latest.json latest.json.sig`
+and inspect platform keys with `jq` (see above).
 
 ## Updater restart semantics (important)
 
@@ -604,10 +604,11 @@ enforced; see `docs/desktop-updater-target-mapping.md`):
 - **Windows ARM64:** `windows-aarch64` → updater installer (currently the **`.msi`**).
 - **Linux x86_64:** `linux-x86_64` → updater payload (typically the `.AppImage`).
 
-Local-note: when inspecting manifests from local builds or older tooling you may see alternate key
+Local note: when inspecting manifests from local builds or older tooling you may see alternate key
 spellings (for example Rust target triples like `x86_64-pc-windows-msvc` / `aarch64-pc-windows-msvc`
-or `universal-apple-darwin`). The local manifest checker (`node scripts/verify-tauri-latest-json.mjs --manifest ...`)
-canonicalizes common aliases, but tagged-release CI is intentionally strict about the canonical keys above.
+or `universal-apple-darwin`). Tagged-release CI is intentionally strict about the canonical keys
+above; if a release ever ships with different platform identifiers, update the validator + docs
+together.
 
 Note: `apps/desktop/src-tauri/tauri.conf.json` sets `bundle.targets: "all"`, which enables all
 supported bundlers for the current platform (including **MSI/WiX** + **NSIS** on Windows). CI still
