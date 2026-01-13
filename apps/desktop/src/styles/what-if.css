@@ -128,6 +128,18 @@
 }
 
 /* Inputs should always show a focus ring (mouse + keyboard), matching other desktop form controls. */
+.what-if__input[aria-invalid="true"],
+.what-if__select[aria-invalid="true"] {
+  border-color: var(--error);
+  box-shadow: 0 0 0 2px var(--error-bg);
+}
+
+.what-if__input[aria-invalid="true"]:focus,
+.what-if__select[aria-invalid="true"]:focus {
+  border-color: var(--error);
+  box-shadow: 0 0 0 2px var(--error-bg);
+}
+
 .what-if__input:disabled,
 .what-if__select:disabled {
   opacity: 0.6;
