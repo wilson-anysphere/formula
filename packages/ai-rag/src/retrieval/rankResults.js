@@ -148,10 +148,15 @@ function isValidRect(rect) {
 }
 
 /**
- * Drop overlapping workbook chunks (same sheet) that are near-duplicates.
+ * Drop overlapping workbook chunks (same workbook + sheet) that are near-duplicates.
  *
  * This is intended to run after `rerankWorkbookResults` so `result.score` reflects
  * the adjusted score, but it will work with any numeric `score` field.
+ *
+ * Notes:
+ * - Near-duplicate detection uses rect intersection / min-area overlap ratio.
+ * - Deduping is scoped to (workbookId, sheetName) when workbook ids are present.
+ * - Duplicate ids are always dropped (highest score wins).
  *
  * @template {{ id: string, score: number, metadata?: any }} T
  * @param {T[]} results
