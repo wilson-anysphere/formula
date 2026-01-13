@@ -812,6 +812,66 @@ fn concat_operator_ampersand_concatenates_strings_and_coerces_blank() {
 }
 
 #[test]
+fn isblank_returns_true_only_for_blank() {
+    let model = DataModel::new();
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "ISBLANK(BLANK())",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        Value::from(true)
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "ISBLANK(0)",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        Value::from(false)
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "ISBLANK(\"\")",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        Value::from(false)
+    );
+}
+
+#[test]
+fn isblank_is_true_for_blank_measures() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    let empty_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "Nowhere".into());
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "ISBLANK([Total Sales])",
+            &empty_filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(true));
+}
+
+#[test]
 fn selectedvalue_and_hasonevalue_use_filter_context() {
     let mut model = build_model();
     model

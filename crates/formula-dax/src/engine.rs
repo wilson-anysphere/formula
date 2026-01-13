@@ -371,6 +371,13 @@ impl DaxEngine {
             "TRUE" => Ok(Value::Boolean(true)),
             "FALSE" => Ok(Value::Boolean(false)),
             "BLANK" => Ok(Value::Blank),
+            "ISBLANK" => {
+                let [arg] = args else {
+                    return Err(DaxError::Eval("ISBLANK expects 1 argument".into()));
+                };
+                let value = self.eval_scalar(model, arg, filter, row_ctx)?;
+                Ok(Value::Boolean(value.is_blank()))
+            }
             "IF" => {
                 if args.len() < 2 || args.len() > 3 {
                     return Err(DaxError::Eval("IF expects 2 or 3 arguments".into()));

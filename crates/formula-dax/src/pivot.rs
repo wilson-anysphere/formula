@@ -2,6 +2,7 @@ use crate::backend::{AggregationKind, AggregationSpec, TableBackend};
 use crate::engine::{DaxError, DaxResult, FilterContext, RowContext};
 use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::{DaxEngine, DataModel, Value};
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
@@ -269,6 +270,18 @@ fn coerce_number_planned(value: &Value) -> Option<f64> {
     }
 }
 
+fn coerce_text_planned(value: &Value) -> Cow<'_, str> {
+    match value {
+        Value::Text(s) => Cow::Borrowed(s.as_ref()),
+        // DAX has nuanced formatting semantics. For now we use Rust's default formatting.
+        Value::Number(n) => Cow::Owned(n.0.to_string()),
+        // In DAX, BLANK coerces to the empty string for text operations like concatenation.
+        Value::Blank => Cow::Borrowed(""),
+        // DAX displays boolean values as TRUE/FALSE.
+        Value::Boolean(b) => Cow::Borrowed(if *b { "TRUE" } else { "FALSE" }),
+    }
+}
+
 fn compare_values_planned(op: &BinaryOp, left: &Value, right: &Value) -> Option<bool> {
     let cmp = match (left, right) {
         // Text comparisons (BLANK coerces to empty string).
@@ -324,6 +337,14 @@ fn eval_planned(expr: &PlannedExpr, agg_values: &[Value]) -> Value {
                         BinaryOp::Divide => l / r,
                         _ => unreachable!(),
                     };
+                    Value::from(out)
+                }
+                BinaryOp::Concat => {
+                    let l = coerce_text_planned(&l);
+                    let r = coerce_text_planned(&r);
+                    let mut out = String::with_capacity(l.len() + r.len());
+                    out.push_str(&l);
+                    out.push_str(&r);
                     Value::from(out)
                 }
                 BinaryOp::Equals
@@ -476,6 +497,7 @@ fn plan_pivot_expr(
             | BinaryOp::Subtract
             | BinaryOp::Multiply
             | BinaryOp::Divide
+            | BinaryOp::Concat
             | BinaryOp::Equals
             | BinaryOp::NotEquals
             | BinaryOp::Less
