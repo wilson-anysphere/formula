@@ -97,6 +97,16 @@ fn detects_chart_ex_parts_and_parses_kind() {
         );
         let series = &model.series[0];
         assert_eq!(
+            series.idx,
+            Some(0),
+            "expected series idx to be parsed for {name}.xlsx"
+        );
+        assert_eq!(
+            series.order,
+            Some(0),
+            "expected series order to be parsed for {name}.xlsx"
+        );
+        assert_eq!(
             series
                 .name
                 .as_ref()
@@ -150,6 +160,11 @@ fn detects_chart_ex_parts_and_parses_kind() {
             values.formula.as_deref(),
             Some("Sheet1!$B$2:$B$4"),
             "expected values formula to match fixture for {name}.xlsx"
+        );
+        assert_eq!(
+            values.format_code.as_deref(),
+            Some("General"),
+            "expected values formatCode to match fixture for {name}.xlsx"
         );
         assert_eq!(
             values.cache.as_deref(),
