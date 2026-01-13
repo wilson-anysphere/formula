@@ -195,6 +195,7 @@
 
 .query-editor__title {
   margin-top: 0;
+  overflow-wrap: anywhere;
 }
 
 .query-editor__sidebar-actions {
