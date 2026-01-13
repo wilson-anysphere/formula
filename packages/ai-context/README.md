@@ -26,6 +26,10 @@ import {
   randomSampleRows,
   stratifiedSampleRows,
 
+  // Query-aware selection
+  scoreRegionForQuery,
+  pickBestRegionForQuery,
+
   // Context builders
   ContextManager,
 
