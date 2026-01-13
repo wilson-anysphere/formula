@@ -113,4 +113,72 @@ describe("AIAuditPanel", () => {
     expect(filteredEntries).toHaveLength(1);
     expect(container.textContent).toContain("model-other-workbook");
   });
+
+  it("supports basic pagination via limit + cursor (Load more)", async () => {
+    const require = createRequire(import.meta.url);
+    const locateFile = (file: string) => require.resolve(`sql.js/dist/${file}`);
+
+    const store = await SqliteAIAuditStore.create({ storage: new InMemoryBinaryStorage(), locateFile });
+
+    await store.logEntry({
+      id: "entry-a",
+      timestamp_ms: 1700000000000,
+      session_id: "session-1",
+      workbook_id: "workbook-1",
+      mode: "chat",
+      input: { message: "a" },
+      model: "model-a",
+      tool_calls: []
+    });
+    await store.logEntry({
+      id: "entry-b",
+      timestamp_ms: 1700000001000,
+      session_id: "session-1",
+      workbook_id: "workbook-1",
+      mode: "chat",
+      input: { message: "b" },
+      model: "model-b",
+      tool_calls: []
+    });
+    await store.logEntry({
+      id: "entry-c",
+      timestamp_ms: 1700000002000,
+      session_id: "session-1",
+      workbook_id: "workbook-1",
+      mode: "chat",
+      input: { message: "c" },
+      model: "model-c",
+      tool_calls: []
+    });
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const panel = createAIAuditPanel({ container, store, initialWorkbookId: "workbook-1" });
+    await panel.ready;
+
+    const pageSizeInput = container.querySelector<HTMLInputElement>('[data-testid="ai-audit-filter-page-size"]');
+    expect(pageSizeInput).toBeTruthy();
+    if (!pageSizeInput) return;
+
+    pageSizeInput.value = "1";
+    await panel.refresh();
+
+    // First page: only the newest entry.
+    let entries = container.querySelectorAll('[data-testid="ai-audit-entry"]');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.textContent).toContain("model-c");
+
+    // Next page should append older entries.
+    await panel.loadMore();
+    entries = container.querySelectorAll('[data-testid="ai-audit-entry"]');
+    expect(entries).toHaveLength(2);
+    expect(entries[0]?.textContent).toContain("model-c");
+    expect(entries[1]?.textContent).toContain("model-b");
+
+    await panel.loadMore();
+    entries = container.querySelectorAll('[data-testid="ai-audit-entry"]');
+    expect(entries).toHaveLength(3);
+    expect(entries[2]?.textContent).toContain("model-a");
+  });
 });

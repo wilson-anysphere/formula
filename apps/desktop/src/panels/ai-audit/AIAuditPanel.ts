@@ -168,6 +168,35 @@ export interface CreateAIAuditPanelOptions {
 export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
   const store = options.store ?? getDesktopAIAuditStore();
 
+  const timeRangeSelect = el(
+    "select",
+    {
+      "data-testid": "ai-audit-filter-time-range",
+      style: "min-width: 140px;",
+      title: "Filter entries by recency",
+    },
+    [
+      el("option", { value: "all" }, ["All time"]),
+      el("option", { value: "1h" }, ["Last 1h"]),
+      el("option", { value: "24h" }, ["Last 24h"]),
+      el("option", { value: "7d" }, ["Last 7d"]),
+      el("option", { value: "30d" }, ["Last 30d"]),
+    ],
+  );
+  (timeRangeSelect as HTMLSelectElement).value = "all";
+
+  const pageSizeInput = el("input", {
+    type: "number",
+    min: "1",
+    max: "1000",
+    step: "1",
+    value: "200",
+    placeholder: "page size",
+    "data-testid": "ai-audit-filter-page-size",
+    style: "width: 100px;",
+    title: "How many entries to load per page",
+  });
+
   const sessionInput = el("input", {
     type: "text",
     placeholder: "session_id (optional)",
@@ -194,93 +223,177 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
   });
 
   let currentEntries: AIAuditEntry[] = [];
-
-  function renderEntries(entries: AIAuditEntry[]) {
-    list.replaceChildren();
-    if (entries.length === 0) {
-      list.append(el("div", { style: "font-size: 12px; opacity: 0.8;" }, ["No audit entries found."]));
-      return;
-    }
-
-    for (const entry of entries) {
-      const toolCalls = entry.tool_calls ?? [];
-      const tokenUsage = formatTokenUsage(entry);
-      const latency = formatLatency(entry);
-      const stats = [tokenUsage, latency].filter(Boolean).join(" • ");
-      const verificationNode = renderVerification(entry);
-      const workbookId = extractWorkbookId(entry);
-
-      const toolsNode =
-        toolCalls.length === 0
-          ? el("div", { style: "font-size: 12px; opacity: 0.8;" }, ["Tools: none"])
-          : el(
-              "div",
-              { style: "display: flex; flex-direction: column; gap: 4px; font-size: 12px;" },
-              toolCalls.map((call) => el("div", { "data-testid": "ai-audit-tool-call" }, [formatToolCall(call)])),
-            );
-
-      const entryNode = el(
-        "div",
-        {
-          "data-testid": "ai-audit-entry",
-          style: "border: 1px solid var(--border); border-radius: 8px; padding: 10px; color: var(--text-primary);",
-        },
-        [
-          el("div", { style: "font-size: 12px; opacity: 0.75; margin-bottom: 4px;" }, [
-            `${formatTimestamp(entry.timestamp_ms)} • ${entry.mode} • ${entry.model}`,
-          ]),
-          el("div", { style: "font-size: 12px; opacity: 0.8; margin-bottom: 6px;" }, [`session_id: ${entry.session_id}`]),
-          el("div", { style: "font-size: 12px; opacity: 0.8; margin-bottom: 6px;" }, [
-            `workbook_id: ${workbookId ?? "—"}`,
-          ]),
-          ...(stats ? [el("div", { style: "font-size: 12px; opacity: 0.85; margin-bottom: 6px;" }, [stats])] : []),
-          ...(verificationNode ? [verificationNode] : []),
-          toolsNode,
-        ],
-      );
-
-      list.append(entryNode);
-    }
-  }
-
-  let refreshInFlight = false;
-  let refreshQueued = false;
-
-  async function refresh() {
-    if (refreshInFlight) {
-      refreshQueued = true;
-      return;
-    }
-
-    refreshInFlight = true;
-    entriesMeta.textContent = "Loading…";
-    const session_id = sessionInput.value.trim() || undefined;
-    const workbookId = workbookInput.value.trim() || undefined;
-
-    try {
-      const entries = await store.listEntries({ session_id, workbook_id: workbookId });
-      currentEntries = entries;
-      entriesMeta.textContent = `Showing ${entries.length} entr${entries.length === 1 ? "y" : "ies"}.`;
-      renderEntries(entries);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      currentEntries = [];
-      entriesMeta.textContent = "Failed to load audit log.";
-      list.replaceChildren(el("div", { style: "font-size: 12px; opacity: 0.8;" }, [`Error: ${message}`]));
-    } finally {
-      refreshInFlight = false;
-      if (refreshQueued) {
-        refreshQueued = false;
-        void refresh();
-      }
-    }
-  }
+  let hasMore: boolean = false;
 
   const refreshButton = el(
     "button",
     { type: "button", "data-testid": "ai-audit-refresh", onClick: () => void refresh() },
     ["Refresh"],
   );
+
+  const loadMoreButton = el(
+    "button",
+    {
+      type: "button",
+      "data-testid": "ai-audit-load-more",
+      onClick: () => void loadMore(),
+      disabled: true,
+      title: "Load older entries",
+    },
+    ["Load more"],
+  );
+
+  function renderEntry(entry: AIAuditEntry): HTMLElement {
+    const toolCalls = entry.tool_calls ?? [];
+    const tokenUsage = formatTokenUsage(entry);
+    const latency = formatLatency(entry);
+    const stats = [tokenUsage, latency].filter(Boolean).join(" • ");
+    const verificationNode = renderVerification(entry);
+    const workbookId = extractWorkbookId(entry);
+
+    const toolsNode =
+      toolCalls.length === 0
+        ? el("div", { style: "font-size: 12px; opacity: 0.8;" }, ["Tools: none"])
+        : el(
+            "div",
+            { style: "display: flex; flex-direction: column; gap: 4px; font-size: 12px;" },
+            toolCalls.map((call) => el("div", { "data-testid": "ai-audit-tool-call" }, [formatToolCall(call)])),
+          );
+
+    return el(
+      "div",
+      {
+        "data-testid": "ai-audit-entry",
+        style: "border: 1px solid var(--border); border-radius: 8px; padding: 10px; color: var(--text-primary);",
+      },
+      [
+        el("div", { style: "font-size: 12px; opacity: 0.75; margin-bottom: 4px;" }, [
+          `${formatTimestamp(entry.timestamp_ms)} • ${entry.mode} • ${entry.model}`,
+        ]),
+        el("div", { style: "font-size: 12px; opacity: 0.8; margin-bottom: 6px;" }, [`session_id: ${entry.session_id}`]),
+        el("div", { style: "font-size: 12px; opacity: 0.8; margin-bottom: 6px;" }, [`workbook_id: ${workbookId ?? "—"}`]),
+        ...(stats ? [el("div", { style: "font-size: 12px; opacity: 0.85; margin-bottom: 6px;" }, [stats])] : []),
+        ...(verificationNode ? [verificationNode] : []),
+        toolsNode,
+      ],
+    );
+  }
+
+  function replaceEntries(entries: AIAuditEntry[]) {
+    list.replaceChildren();
+    if (entries.length === 0) {
+      list.append(el("div", { style: "font-size: 12px; opacity: 0.8;" }, ["No audit entries found."]));
+      return;
+    }
+    for (const entry of entries) list.append(renderEntry(entry));
+  }
+
+  function appendEntries(entries: AIAuditEntry[]) {
+    if (entries.length === 0) return;
+    // If we were previously showing the empty placeholder, replace it.
+    if (currentEntries.length === 0) {
+      replaceEntries(entries);
+      return;
+    }
+    for (const entry of entries) list.append(renderEntry(entry));
+  }
+
+  function parsePageSize(): number {
+    const raw = pageSizeInput.value.trim();
+    const value = Number.parseInt(raw, 10);
+    if (!Number.isFinite(value)) return 200;
+    if (value <= 0) return 200;
+    return Math.min(1000, Math.max(1, value));
+  }
+
+  function computeAfterTimestampMs(nowMs: number): number | undefined {
+    const value = (timeRangeSelect as HTMLSelectElement).value;
+    if (value === "1h") return nowMs - 60 * 60 * 1000;
+    if (value === "24h") return nowMs - 24 * 60 * 60 * 1000;
+    if (value === "7d") return nowMs - 7 * 24 * 60 * 60 * 1000;
+    if (value === "30d") return nowMs - 30 * 24 * 60 * 60 * 1000;
+    return undefined;
+  }
+
+  function updateMeta() {
+    const count = currentEntries.length;
+    const more = hasMore ? " (more available)" : "";
+    entriesMeta.textContent = `Showing ${count} entr${count === 1 ? "y" : "ies"}${more}.`;
+  }
+
+  type PendingOperation = "refresh" | "load_more";
+  let operationInFlight = false;
+  let queuedOperation: PendingOperation | null = null;
+
+  async function runOperation(op: PendingOperation) {
+    if (operationInFlight) {
+      // Refresh always wins over load_more (since it resets cursor state).
+      if (op === "refresh" || queuedOperation !== "refresh") {
+        queuedOperation = op;
+      }
+      return;
+    }
+
+    operationInFlight = true;
+    entriesMeta.textContent = "Loading…";
+    loadMoreButton.disabled = true;
+
+    const session_id = sessionInput.value.trim() || undefined;
+    const workbookId = workbookInput.value.trim() || undefined;
+    const pageSize = parsePageSize();
+    const nowMs = Date.now();
+    const after_timestamp_ms = computeAfterTimestampMs(nowMs);
+
+    try {
+      if (op === "refresh") {
+        const entries = await store.listEntries({ session_id, workbook_id: workbookId, after_timestamp_ms, limit: pageSize });
+        currentEntries = entries;
+        hasMore = entries.length >= pageSize;
+        replaceEntries(entries);
+        updateMeta();
+      } else {
+        const last = currentEntries[currentEntries.length - 1];
+        if (!last) {
+          hasMore = false;
+          updateMeta();
+          return;
+        }
+        const older = await store.listEntries({
+          session_id,
+          workbook_id: workbookId,
+          after_timestamp_ms,
+          limit: pageSize,
+          cursor: { before_timestamp_ms: last.timestamp_ms, before_id: last.id },
+        });
+        const existingIds = new Set(currentEntries.map((e) => e.id));
+        const deduped = older.filter((e) => !existingIds.has(e.id));
+        currentEntries = currentEntries.concat(deduped);
+        hasMore = older.length >= pageSize && deduped.length > 0;
+        appendEntries(deduped);
+        updateMeta();
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      currentEntries = [];
+      hasMore = false;
+      entriesMeta.textContent = "Failed to load audit log.";
+      list.replaceChildren(el("div", { style: "font-size: 12px; opacity: 0.8;" }, [`Error: ${message}`]));
+    } finally {
+      operationInFlight = false;
+      const next = queuedOperation;
+      queuedOperation = null;
+      if (next) void runOperation(next);
+      else loadMoreButton.disabled = !hasMore;
+    }
+  }
+
+  async function refresh() {
+    await runOperation("refresh");
+  }
+
+  async function loadMore(): Promise<void> {
+    await runOperation("load_more");
+  }
 
   const exportButton = el(
     "button",
@@ -311,6 +424,9 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
 
   sessionInput.addEventListener("keydown", onFilterKeyDown);
   workbookInput.addEventListener("keydown", onFilterKeyDown);
+  pageSizeInput.addEventListener("keydown", onFilterKeyDown);
+  timeRangeSelect.addEventListener("change", () => void refresh());
+  pageSizeInput.addEventListener("change", () => void refresh());
 
   const controls = el(
     "div",
@@ -321,7 +437,10 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
     [
       sessionInput,
       workbookInput,
+      timeRangeSelect,
+      pageSizeInput,
       refreshButton,
+      loadMoreButton,
       exportButton,
       el("div", { style: "flex-basis: 100%; height: 0;" }),
       entriesMeta,
@@ -353,6 +472,7 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
   return {
     ready,
     refresh,
+    loadMore,
     getEntries() {
       return currentEntries.slice();
     },
