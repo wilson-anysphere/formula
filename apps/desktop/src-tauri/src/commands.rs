@@ -3266,9 +3266,9 @@ pub async fn get_macro_security_status(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroSecurityStatus, String> {
-    ipc_origin::ensure_main_window(window.label(), "macros", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(window.label(), "macro trust", ipc_origin::Verb::Is)?;
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_trusted_origin(&url, "macros", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "macro trust", ipc_origin::Verb::Is)?;
 
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
@@ -3293,9 +3293,9 @@ pub async fn set_macro_trust(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroSecurityStatus, String> {
-    ipc_origin::ensure_main_window(window.label(), "macros", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(window.label(), "macro trust", ipc_origin::Verb::Is)?;
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_trusted_origin(&url, "macros", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "macro trust", ipc_origin::Verb::Is)?;
 
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
@@ -3325,9 +3325,9 @@ pub fn get_vba_project(
     workbook_id: Option<String>,
     state: State<'_, SharedAppState>,
 ) -> Result<Option<VbaProjectSummary>, String> {
-    ipc_origin::ensure_main_window(window.label(), "macros", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_trusted_origin(&url, "macros", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
 
     let _ = workbook_id;
     let mut state = state.inner().lock().unwrap();
@@ -3368,9 +3368,9 @@ pub fn list_macros(
     workbook_id: Option<String>,
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<MacroInfo>, String> {
-    ipc_origin::ensure_main_window(window.label(), "macros", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_trusted_origin(&url, "macros", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
 
     let _ = workbook_id;
 
@@ -3389,9 +3389,9 @@ pub fn set_macro_ui_context(
     selection: Option<MacroSelectionRect>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
-    ipc_origin::ensure_main_window(window.label(), "macros", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_trusted_origin(&url, "macros", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
 
     let _ = workbook_id;
     let mut state = state.inner().lock().unwrap();
@@ -3463,14 +3463,11 @@ pub async fn run_python_script(
     context: Option<PythonRunContext>,
     state: State<'_, SharedAppState>,
 ) -> Result<PythonRunResult, String> {
-    let _ = workbook_id;
-    ipc_origin::ensure_main_window(
-        window.label(),
-        "python script execution",
-        ipc_origin::Verb::Is,
-    )?;
+    ipc_origin::ensure_main_window(window.label(), "python execution", ipc_origin::Verb::Is)?;
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_trusted_origin(&url, "python script execution", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "python execution", ipc_origin::Verb::Is)?;
+
+    let _ = workbook_id;
 
     crate::ipc_limits::enforce_script_code_size(&code)?;
     let shared = state.inner().clone();
@@ -4514,13 +4511,9 @@ pub async fn validate_vba_migration(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MigrationValidationReport, String> {
-    ipc_origin::ensure_main_window(window.label(), "macro migration validation", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_trusted_origin(
-        &url,
-        "macro migration validation",
-        ipc_origin::Verb::Is,
-    )?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
 
     crate::ipc_limits::enforce_script_code_size(&code)?;
     let workbook_id_str = workbook_id.clone();
