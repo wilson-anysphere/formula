@@ -52,8 +52,8 @@ The table below documents what each platform key should point to in `latest.json
 | OS / Arch | Build target (Tauri `--target`) | `latest.json` platform key | Updater asset type (`platforms[key].url`) |
 | --- | --- | --- | --- |
 | macOS universal (Intel + Apple Silicon) | `universal-apple-darwin` | `darwin-universal` | `*.app.tar.gz` (preferred) or `*.tar.gz` (updater archive; **not** the `.dmg`) |
-| Windows x64 | `x86_64-pc-windows-msvc` | `windows-x86_64` | `*.msi` (Windows Installer; updater runs this) |
-| Windows ARM64 | `aarch64-pc-windows-msvc` | `windows-aarch64` | `*.msi` (Windows Installer; updater runs this) |
+| Windows x64 | `x86_64-pc-windows-msvc` | `windows-x86_64` | `*.msi` (preferred) or `*.exe` |
+| Windows ARM64 | `aarch64-pc-windows-msvc` | `windows-aarch64` | `*.msi` (preferred) or `*.exe` |
 | Linux x86_64 | `x86_64-unknown-linux-gnu` | `linux-x86_64` | `*.AppImage` (self-updatable; **not** `.deb`/`.rpm`) |
 
 ### Notes
@@ -62,7 +62,8 @@ The table below documents what each platform key should point to in `latest.json
   as stable for CI verification.
 - Formula still publishes **additional** artifacts (DMG, NSIS `.exe`, `.deb`, `.rpm`) for user
   convenience; the updater keys above intentionally validate the *updatable* artifact.
-- Windows distribution requirement: even though the updater uses the `.msi` for self-update, tagged
+- Windows distribution requirement: even though the updater typically uses the `.msi` for self-update
+  (and CI currently accepts either `.msi` or `.exe` in `latest.json`), tagged
   releases must also ship a corresponding **NSIS `.exe` installer** for both `windows-x86_64` and
   `windows-aarch64`. The release workflow enforces that both `.msi` and `.exe` assets exist per
   architecture.
