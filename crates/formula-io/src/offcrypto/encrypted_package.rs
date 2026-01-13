@@ -431,8 +431,12 @@ mod tests {
         iv
     }
 
+    fn fixed_key(len: usize) -> Vec<u8> {
+        (0..len).map(|i| i as u8).collect()
+    }
+
     fn fixed_key_16() -> Vec<u8> {
-        (0u8..=0x0F).collect()
+        fixed_key(16)
     }
 
     fn fixed_salt_16() -> Vec<u8> {
@@ -540,23 +544,25 @@ mod tests {
     }
 
     #[test]
-    fn round_trip_decrypts_various_sizes() {
-        let key = fixed_key_16();
+    fn round_trip_decrypts_aes_128_192_256() {
         let salt = fixed_salt_16();
 
-        for size in [0usize, 1, 15, 16, 17, 4095, 4096, 4097, 8192 + 123] {
-            let plaintext = make_plaintext(size);
-            let encrypted =
-                encrypt_encrypted_package_stream_standard_cryptoapi(&key, &salt, &plaintext);
-            let decrypted =
-                decrypt_standard_encrypted_package_stream(&encrypted, &key, &salt).unwrap();
-            assert_eq!(decrypted, plaintext, "failed for size={size}");
+        for key_len in [16usize, 24, 32] {
+            let key = fixed_key(key_len);
+            for size in [0usize, 1, 15, 16, 17, 4095, 4096, 4097, 8192 + 123] {
+                let plaintext = make_plaintext(size);
+                let encrypted =
+                    encrypt_encrypted_package_stream_standard_cryptoapi(&key, &salt, &plaintext);
+                let decrypted =
+                    decrypt_standard_encrypted_package_stream(&encrypted, &key, &salt).unwrap();
+                assert_eq!(decrypted, plaintext, "failed for key_len={key_len} size={size}");
+            }
         }
     }
 
     #[test]
     fn decrypt_truncates_to_orig_size_even_with_trailing_bytes() {
-        let key = fixed_key_16();
+        let key = fixed_key(16);
         let salt = fixed_salt_16();
 
         // Use a size that ends on a segment boundary (4096) so callers can stop after decrypting
@@ -575,7 +581,7 @@ mod tests {
 
     #[test]
     fn decrypt_empty_ciphertext_and_zero_size_is_ok() {
-        let key = fixed_key_16();
+        let key = fixed_key(16);
         let salt = fixed_salt_16();
 
         let encrypted = 0u64.to_le_bytes().to_vec();
@@ -585,7 +591,7 @@ mod tests {
 
     #[test]
     fn errors_on_short_stream() {
-        let key = fixed_key_16();
+        let key = fixed_key(16);
         let salt = fixed_salt_16();
 
         let err = decrypt_standard_encrypted_package_stream(&[0u8; 7], &key, &salt).unwrap_err();
@@ -594,7 +600,7 @@ mod tests {
 
     #[test]
     fn errors_on_non_block_aligned_ciphertext() {
-        let key = fixed_key_16();
+        let key = fixed_key(16);
         let salt = fixed_salt_16();
 
         let mut encrypted = Vec::new();
@@ -610,7 +616,7 @@ mod tests {
 
     #[test]
     fn errors_when_length_header_exceeds_ciphertext() {
-        let key = fixed_key_16();
+        let key = fixed_key(16);
         let salt = fixed_salt_16();
 
         // orig_size claims 32 bytes, but we only have 16 bytes of ciphertext.
@@ -908,6 +914,25 @@ mod tests {
                 plaintext,
                 "round-trip failed for salt len={}",
                 salt.len()
+            );
+        }
+    }
+
+    #[test]
+    fn errors_on_invalid_key_lengths() {
+        let salt = fixed_salt_16();
+        let plaintext = make_plaintext(ENCRYPTED_PACKAGE_SEGMENT_LEN + 123);
+        let encrypted =
+            encrypt_encrypted_package_stream_standard_cryptoapi(&fixed_key(16), &salt, &plaintext);
+
+        for bad_len in [0usize, 1, 15, 17, 23, 25, 31, 33] {
+            let bad_key = vec![0u8; bad_len];
+            let err =
+                decrypt_standard_encrypted_package_stream(&encrypted, &bad_key, &salt).unwrap_err();
+            assert_eq!(
+                err,
+                EncryptedPackageError::InvalidAesKeyLength { key_len: bad_len },
+                "bad_len={bad_len}"
             );
         }
     }
