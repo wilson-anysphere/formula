@@ -287,6 +287,7 @@ export class SqliteVectorStore {
       });
       store._ensureMeta(opts.dimension);
       store._ensureSchemaVersion();
+      store._ensureIndexes();
       return store;
     }
 
@@ -445,6 +446,31 @@ export class SqliteVectorStore {
     }
     stmt.free();
     return cols;
+  }
+
+  _getTableIndexes(table) {
+    const stmt = this._db.prepare(`PRAGMA index_list(${table});`);
+    /** @type {Set<string>} */
+    const indexes = new Set();
+    while (stmt.step()) {
+      const row = stmt.get();
+      // PRAGMA index_list: [seq, name, unique, origin, partial]
+      indexes.add(String(row[1]));
+    }
+    stmt.free();
+    return indexes;
+  }
+
+  _ensureIndexes() {
+    const indexes = this._getTableIndexes("vectors");
+    // Covering index for incremental indexing state scans (id + hashes) without
+    // touching the main table payload (vector/text/metadata_json).
+    if (!indexes.has("idx_vectors_workbook_hashes")) {
+      this._db.run(
+        "CREATE INDEX IF NOT EXISTS idx_vectors_workbook_hashes ON vectors(workbook_id, id, content_hash, metadata_hash);"
+      );
+      this._dirty = true;
+    }
   }
 
   _ensureVectorsColumnsV2() {
