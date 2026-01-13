@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ArrowTableAdapter, DataTable, Query, QueryOperation } from "@formula/power-query";
 import { t } from "../../../i18n/index.js";
@@ -15,6 +15,7 @@ export function AddStepMenu(props: {
   const [aiError, setAiError] = useState<string | null>(null);
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRootRef = useRef<HTMLDivElement | null>(null);
 
   const schema = props.aiContext.preview?.columns ?? [];
   const columnNames = useMemo(() => schema.map((col) => col.name).filter((name) => name.trim().length > 0), [schema]);
@@ -112,9 +113,34 @@ export function AddStepMenu(props: {
     ];
   }, [firstColumnName, schemaReady, schemaRequiredReason, secondColumnName]);
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    if (typeof document === "undefined") return;
+
+    const onMouseDown = (evt: MouseEvent) => {
+      const target = evt.target as Node | null;
+      if (!target) return;
+      const root = menuRootRef.current;
+      if (!root) return;
+      if (root.contains(target)) return;
+      setMenuOpen(false);
+    };
+
+    const onKeyDown = (evt: KeyboardEvent) => {
+      if (evt.key === "Escape") setMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuOpen]);
+
   return (
     <div className="query-editor-add-step">
-      <div className="query-editor-add-step__menu">
+      <div ref={menuRootRef} className="query-editor-add-step__menu">
         <button
           type="button"
           className="query-editor-add-step__menu-trigger"
