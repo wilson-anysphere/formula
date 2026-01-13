@@ -1004,6 +1004,16 @@ Tip: prefer using the **same installer format** you originally installed with (`
 `.msi` ↔ `.msi`). Switching formats can result in a second installation; if in doubt, uninstall the
 current version first.
 
+**Maintainer verification checklist (Windows)**
+
+Before publishing a release, sanity-check the rollback path on a Windows machine/VM:
+
+1. Install a newer build (e.g. `vX.Y.Z`) using either the `.exe` or `.msi`.
+2. Run the **older** installer (e.g. `vX.Y.(Z-1)`) of the **same format**:
+   - `.exe` downgrade: installer should show the maintenance screen; choose **“Uninstall before installing”**.
+   - `.msi` downgrade: installer should proceed and end with the older version installed.
+3. Launch the app and confirm the reported version matches the older build.
+
 If an installer refuses to proceed (e.g. “a newer version is already installed”), uninstall the
 newer version first from **Settings → Apps → Installed apps**, then install the older `.msi`/`.exe`.
 
