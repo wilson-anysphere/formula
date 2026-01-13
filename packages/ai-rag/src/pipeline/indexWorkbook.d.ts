@@ -19,6 +19,8 @@ export function indexWorkbook(params: {
    * Defaults to {@link approximateTokenCount}.
    */
   tokenCount?: (text: string) => number;
+  embedBatchSize?: number;
+  onProgress?: (info: { phase: "chunk" | "hash" | "embed" | "upsert" | "delete"; processed: number; total?: number }) => void;
   transform?: (
     record: { id: string; text: string; metadata: any }
   ) => { text?: string; metadata?: any } | null | Promise<{ text?: string; metadata?: any } | null>;

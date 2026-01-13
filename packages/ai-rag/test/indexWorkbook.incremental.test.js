@@ -249,3 +249,35 @@ test("indexWorkbook does not early-abort while awaiting vectorStore persistence"
   upsertDone.resolve();
   await assert.rejects(indexPromise, { name: "AbortError" });
 });
+
+test("indexWorkbook batches embedding requests (embedBatchSize=1)", async () => {
+  const workbook = makeWorkbookTwoTables();
+  const store = new InMemoryVectorStore({ dimension: 128 });
+
+  /** @type {string[][]} */
+  const embedBatches = [];
+  const embedder = {
+    async embedTexts(texts) {
+      embedBatches.push(texts);
+      return texts.map(() => new Float32Array(128));
+    },
+  };
+
+  const result = await indexWorkbook({
+    workbook,
+    vectorStore: store,
+    embedder,
+    embedBatchSize: 1,
+  });
+
+  assert.equal(result.totalChunks, 2);
+  assert.equal(result.upserted, 2);
+  assert.equal(embedBatches.length, 2);
+  assert.deepEqual(
+    embedBatches.map((b) => b.length),
+    [1, 1]
+  );
+
+  const stored = await store.list({ workbookId: workbook.id, includeVector: false });
+  assert.equal(stored.length, 2);
+});

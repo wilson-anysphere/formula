@@ -67,12 +67,19 @@ export function approximateTokenCount(text) {
  *   embedder: { embedTexts(texts: string[], options?: { signal?: AbortSignal }): Promise<ArrayLike<number>[]> },
  *   sampleRows?: number,
  *   tokenCount?: (text: string) => number,
+ *   embedBatchSize?: number,
+ *   onProgress?: (info: { phase: 'chunk'|'hash'|'embed'|'upsert'|'delete', processed: number, total?: number }) => void,
  *   transform?: (record: { id: string, text: string, metadata: any }) => ({ text?: string, metadata?: any } | null | Promise<{ text?: string, metadata?: any } | null>)
  *   signal?: AbortSignal,
  * }} params
  */
 export async function indexWorkbook(params) {
   const signal = params.signal;
+  const onProgress = typeof params.onProgress === "function" ? params.onProgress : undefined;
+  const embedBatchSize =
+    typeof params.embedBatchSize === "number" && params.embedBatchSize > 0
+      ? params.embedBatchSize
+      : Infinity;
   throwIfAborted(signal);
   const { workbook, vectorStore, embedder } = params;
   const rawEmbedderName = embedder?.name;
@@ -84,6 +91,7 @@ export async function indexWorkbook(params) {
   const tokenCount = params.tokenCount ?? approximateTokenCount;
   const chunks = chunkWorkbook(workbook, { signal });
   throwIfAborted(signal);
+  onProgress?.({ phase: "chunk", processed: 0, total: chunks.length });
 
   const existingForWorkbook = await awaitWithAbort(
     vectorStore.list({
@@ -102,6 +110,7 @@ export async function indexWorkbook(params) {
   /** @type {{ id: string, text: string, metadata: any }[]} */
   const toUpsert = [];
 
+  let processedChunks = 0;
   for (const chunk of chunks) {
     throwIfAborted(signal);
     const originalText = chunkToText(chunk, { sampleRows });
@@ -125,7 +134,11 @@ export async function indexWorkbook(params) {
       throwIfAborted(signal);
       const transformed = await awaitWithAbort(params.transform(record), signal);
       throwIfAborted(signal);
-      if (!transformed) continue;
+      if (!transformed) {
+        processedChunks += 1;
+        onProgress?.({ phase: "chunk", processed: processedChunks, total: chunks.length });
+        continue;
+      }
 
       if (Object.prototype.hasOwnProperty.call(transformed, "text")) {
         record.text = transformed.text ?? "";
@@ -148,6 +161,9 @@ export async function indexWorkbook(params) {
     throwIfAborted(signal);
     const chunkHash = await awaitWithAbort(contentHash(`${embedderName}\n${record.text}`), signal);
     throwIfAborted(signal);
+    processedChunks += 1;
+    onProgress?.({ phase: "hash", processed: processedChunks, total: chunks.length });
+    onProgress?.({ phase: "chunk", processed: processedChunks, total: chunks.length });
     currentIds.add(record.id);
 
     if (existingHashes.get(record.id) === chunkHash) continue;
@@ -169,17 +185,47 @@ export async function indexWorkbook(params) {
   }
 
   throwIfAborted(signal);
-  const vectors =
-    toUpsert.length > 0
-      ? await awaitWithAbort(embedder.embedTexts(toUpsert.map((r) => r.text), { signal }), signal)
-      : [];
+  /** @type {ArrayLike<number>[]} */
+  let vectors = [];
+  if (toUpsert.length > 0) {
+    const texts = toUpsert.map((r) => r.text);
+    onProgress?.({ phase: "embed", processed: 0, total: texts.length });
+
+    if (texts.length > embedBatchSize) {
+      for (let i = 0; i < texts.length; i += embedBatchSize) {
+        throwIfAborted(signal);
+        const batchTexts = texts.slice(i, i + embedBatchSize);
+        const batchVectors = await awaitWithAbort(
+          embedder.embedTexts(batchTexts, { signal }),
+          signal
+        );
+        vectors.push(...batchVectors);
+        onProgress?.({
+          phase: "embed",
+          processed: Math.min(i + batchTexts.length, texts.length),
+          total: texts.length,
+        });
+      }
+    } else {
+      vectors = await awaitWithAbort(embedder.embedTexts(texts, { signal }), signal);
+      onProgress?.({ phase: "embed", processed: texts.length, total: texts.length });
+    }
+  } else {
+    onProgress?.({ phase: "embed", processed: 0, total: 0 });
+  }
   throwIfAborted(signal);
 
   if (toUpsert.length) {
+    if (vectors.length !== toUpsert.length) {
+      throw new Error(
+        `Embedding count mismatch: got ${vectors.length} vector(s) for ${toUpsert.length} text(s)`
+      );
+    }
     // Avoid aborting while awaiting persistence. Upserts are stateful; if we were to
     // reject early here, callers could start a new indexing run while the underlying
     // store is still writing.
     throwIfAborted(signal);
+    onProgress?.({ phase: "upsert", processed: 0, total: toUpsert.length });
     await vectorStore.upsert(
       toUpsert.map((r, i) => ({
         id: r.id,
@@ -187,6 +233,7 @@ export async function indexWorkbook(params) {
         metadata: r.metadata,
       }))
     );
+    onProgress?.({ phase: "upsert", processed: toUpsert.length, total: toUpsert.length });
   }
   throwIfAborted(signal);
 
@@ -199,7 +246,9 @@ export async function indexWorkbook(params) {
     // reject early here, callers could start a new indexing run while the underlying
     // store is still writing.
     throwIfAborted(signal);
+    onProgress?.({ phase: "delete", processed: 0, total: staleIds.length });
     await vectorStore.delete(staleIds);
+    onProgress?.({ phase: "delete", processed: staleIds.length, total: staleIds.length });
   }
   throwIfAborted(signal);
 
