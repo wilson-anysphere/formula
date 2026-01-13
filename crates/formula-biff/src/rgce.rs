@@ -77,15 +77,142 @@ fn op_str(ptg: u8) -> Option<&'static str> {
     }
 }
 
+/// Decode a BIFF12 array constant from the `rgcb` payload stream.
+///
+/// BIFF12 stores array constant values in a separate trailing `rgcb` data stream, referenced by
+/// `PtgArray` tokens in the main `rgce` token stream.
+///
+/// Layout (MS-XLSB 2.5.198.8 PtgArray):
+/// `[cols_minus1:u16][rows_minus1:u16][values...]`
+///
+/// Values are stored row-major and each starts with a type byte:
+/// - `0x00` = empty
+/// - `0x01` = number (`f64`)
+/// - `0x02` = string (`[cch:u16][utf16 chars...]`)
+/// - `0x04` = bool (`[b:u8]`)
+/// - `0x10` = error (`[code:u8]`)
+fn decode_array_constant(rgcb: &[u8], pos: &mut usize) -> Result<String, DecodeRgceError> {
+    let mut i = *pos;
+    if rgcb.len().saturating_sub(i) < 4 {
+        return Err(DecodeRgceError::UnexpectedEof);
+    }
+
+    let cols_minus1 = u16::from_le_bytes([rgcb[i], rgcb[i + 1]]) as usize;
+    let rows_minus1 = u16::from_le_bytes([rgcb[i + 2], rgcb[i + 3]]) as usize;
+    i += 4;
+
+    let cols = cols_minus1 + 1;
+    let rows = rows_minus1 + 1;
+
+    let mut row_texts = Vec::with_capacity(rows);
+    for _ in 0..rows {
+        let mut col_texts = Vec::with_capacity(cols);
+        for _ in 0..cols {
+            if i >= rgcb.len() {
+                return Err(DecodeRgceError::UnexpectedEof);
+            }
+            let ty = rgcb[i];
+            i += 1;
+            match ty {
+                0x00 => col_texts.push(String::new()),
+                0x01 => {
+                    if rgcb.len().saturating_sub(i) < 8 {
+                        return Err(DecodeRgceError::UnexpectedEof);
+                    }
+                    let mut bytes = [0u8; 8];
+                    bytes.copy_from_slice(&rgcb[i..i + 8]);
+                    i += 8;
+                    col_texts.push(f64::from_le_bytes(bytes).to_string());
+                }
+                0x02 => {
+                    if rgcb.len().saturating_sub(i) < 2 {
+                        return Err(DecodeRgceError::UnexpectedEof);
+                    }
+                    let cch = u16::from_le_bytes([rgcb[i], rgcb[i + 1]]) as usize;
+                    i += 2;
+                    let byte_len = cch.checked_mul(2).ok_or(DecodeRgceError::UnexpectedEof)?;
+                    if rgcb.len().saturating_sub(i) < byte_len {
+                        return Err(DecodeRgceError::UnexpectedEof);
+                    }
+                    let raw = &rgcb[i..i + byte_len];
+                    i += byte_len;
+
+                    let mut units = Vec::with_capacity(cch);
+                    for chunk in raw.chunks_exact(2) {
+                        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+                    }
+                    let s = String::from_utf16(&units).map_err(|_| DecodeRgceError::InvalidUtf16)?;
+                    let escaped = s.replace('"', "\"\"");
+                    col_texts.push(format!("\"{escaped}\""));
+                }
+                0x04 => {
+                    if rgcb.len().saturating_sub(i) < 1 {
+                        return Err(DecodeRgceError::UnexpectedEof);
+                    }
+                    let b = rgcb[i];
+                    i += 1;
+                    col_texts.push(if b == 0 { "FALSE" } else { "TRUE" }.to_string());
+                }
+                0x10 => {
+                    if rgcb.len().saturating_sub(i) < 1 {
+                        return Err(DecodeRgceError::UnexpectedEof);
+                    }
+                    let code = rgcb[i];
+                    i += 1;
+                    let text = match code {
+                        0x00 => "#NULL!",
+                        0x07 => "#DIV/0!",
+                        0x0F => "#VALUE!",
+                        0x17 => "#REF!",
+                        0x1D => "#NAME?",
+                        0x24 => "#NUM!",
+                        0x2A => "#N/A",
+                        0x2B => "#GETTING_DATA",
+                        0x2C => "#SPILL!",
+                        0x2D => "#CALC!",
+                        0x2E => "#FIELD!",
+                        0x2F => "#CONNECT!",
+                        0x30 => "#BLOCKED!",
+                        0x31 => "#UNKNOWN!",
+                        _ => "#UNKNOWN!",
+                    };
+                    col_texts.push(text.to_string());
+                }
+                _ => {
+                    // Unknown array constant element type.
+                    return Err(DecodeRgceError::UnsupportedToken { ptg: 0x20 });
+                }
+            }
+        }
+        row_texts.push(col_texts.join(","));
+    }
+
+    *pos = i;
+    Ok(format!("{{{}}}", row_texts.join(";")))
+}
+
 /// Best-effort decode of a BIFF12 `rgce` token stream into formula text.
 ///
 /// The returned string does **not** include a leading `=`.
 pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
+    decode_rgce_impl(rgce, None)
+}
+
+/// Best-effort decode of a BIFF12 `rgce` token stream into formula text, using a trailing `rgcb`
+/// payload stream to decode array constants (`PtgArray`).
+///
+/// The returned string does **not** include a leading `=`.
+pub fn decode_rgce_with_rgcb(rgce: &[u8], rgcb: &[u8]) -> Result<String, DecodeRgceError> {
+    decode_rgce_impl(rgce, Some(rgcb))
+}
+
+fn decode_rgce_impl(rgce: &[u8], rgcb: Option<&[u8]>) -> Result<String, DecodeRgceError> {
     if rgce.is_empty() {
         return Ok(String::new());
     }
 
     let mut input = rgce;
+    let mut rgcb_pos = 0usize;
     let mut stack: Vec<ExprFragment> = Vec::new();
 
     while !input.is_empty() {
@@ -365,6 +492,20 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
                 bytes.copy_from_slice(&input[..8]);
                 input = &input[8..];
                 stack.push(ExprFragment::new(f64::from_le_bytes(bytes).to_string()));
+            }
+            // PtgArray: [unused: 7 bytes] + serialized array constant stored in rgcb.
+            0x20 | 0x40 | 0x60 => {
+                let Some(rgcb) = rgcb else {
+                    // Keep `decode_rgce` behavior unchanged: without rgcb, PtgArray is unsupported.
+                    return Err(DecodeRgceError::UnsupportedToken { ptg });
+                };
+                if input.len() < 7 {
+                    return Err(DecodeRgceError::UnexpectedEof);
+                }
+                input = &input[7..];
+
+                let arr = decode_array_constant(rgcb, &mut rgcb_pos)?;
+                stack.push(ExprFragment::new(arr));
             }
             // PtgFunc
             0x21 | 0x41 | 0x61 => {
