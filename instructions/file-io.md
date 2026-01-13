@@ -130,6 +130,7 @@ Note: `xlsb-diff` is a deprecated compatibility wrapper. Prefer `xlsx-diff` for 
 ```bash
 fixtures/xlsx/           # Test xlsx files
 fixtures/charts/         # Chart-specific test files
+fixtures/encrypted/      # Password-protected/encrypted workbooks (OLE/CFB wrapper; not part of the ZIP/OPC round-trip corpus)
 tools/excel-oracle/      # Excel comparison oracle
 tools/corpus/            # Real-world file corpus tools
 ```
