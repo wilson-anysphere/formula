@@ -198,7 +198,11 @@ importers:
         specifier: ^0.27.2
         version: 0.27.2
 
-  packages/ai-completion: {}
+  packages/ai-completion:
+    devDependencies:
+      esbuild:
+        specifier: ^0.27.2
+        version: 0.27.2
 
   packages/ai-tools:
     dependencies:

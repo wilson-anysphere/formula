@@ -5,8 +5,18 @@
   "type": "module",
   "main": "./src/index.js",
   "types": "./src/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    }
+  },
   "scripts": {
     "test": "node --test test/*.test.js",
     "bench:tab-completion": "node bench/tabCompletionEngine.bench.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.2"
   }
 }
