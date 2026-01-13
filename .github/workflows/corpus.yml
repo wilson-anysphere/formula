@@ -144,6 +144,7 @@ jobs:
           fi
           python -m tools.corpus.triage \
             --corpus-dir tools/corpus/private \
+            --input-scope sanitized \
             --out-dir tools/corpus/out/private \
             --privacy-mode private \
             "${EXTRA_FLAGS[@]}"

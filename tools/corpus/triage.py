@@ -862,6 +862,46 @@ def _compare_expectations(
     return regressions, improvements
 
 
+def _resolve_triage_input_dir(corpus_dir: Path, input_scope: str) -> Path:
+    """Resolve which directory should be searched for workbook inputs.
+
+    This supports the recommended private corpus layout described in
+    `docs/compatibility-corpus.md`:
+
+      tools/corpus/private/
+        originals/   # encrypted originals (*.enc)
+        sanitized/   # sanitized workbooks (plaintext)
+
+    When `--input-scope auto` (default), we prefer `sanitized/` if present to
+    avoid double-processing (and accidentally parsing unsanitized originals).
+    """
+
+    sanitized_dir = corpus_dir / "sanitized"
+    originals_dir = corpus_dir / "originals"
+
+    if input_scope == "all":
+        return corpus_dir
+
+    if input_scope == "auto":
+        return sanitized_dir if sanitized_dir.is_dir() else corpus_dir
+
+    if input_scope == "sanitized":
+        if not sanitized_dir.is_dir():
+            raise ValueError(
+                f"--input-scope sanitized requested, but directory does not exist: {sanitized_dir}"
+            )
+        return sanitized_dir
+
+    if input_scope == "originals":
+        if not originals_dir.is_dir():
+            raise ValueError(
+                f"--input-scope originals requested, but directory does not exist: {originals_dir}"
+            )
+        return originals_dir
+
+    raise ValueError(f"Unknown --input-scope value: {input_scope!r}")
+
+
 def _triage_one_path(
     path_str: str,
     *,
@@ -1075,6 +1115,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--input-scope",
+        choices=("auto", "sanitized", "originals", "all"),
+        default="auto",
+        help=(
+            "Select which corpus inputs to triage. "
+            "auto (default) prefers <corpus-dir>/sanitized if present, otherwise triages <corpus-dir>. "
+            "sanitized/originals triage only those subdirectories. "
+            "all triages the full <corpus-dir> tree (may double-count in private corpus layouts)."
+        ),
+    )
+    parser.add_argument(
         "--fernet-key-env",
         default="CORPUS_ENCRYPTION_KEY",
         help="Env var containing Fernet key used to decrypt *.enc corpus files.",
@@ -1119,17 +1170,28 @@ def main() -> int:
     if args.jobs < 1:
         parser.error("--jobs must be >= 1")
 
-    rust_exe = _build_rust_helper()
     diff_ignore = _compute_diff_ignore(
         diff_ignore=args.diff_ignore, use_default=not args.no_default_diff_ignore
     )
+
+    try:
+        input_dir = _resolve_triage_input_dir(args.corpus_dir, args.input_scope)
+    except ValueError as e:
+        parser.error(str(e))
 
     ensure_dir(args.out_dir)
     reports_dir = args.out_dir / "reports"
     ensure_dir(reports_dir)
 
     fernet_key = os.environ.get(args.fernet_key_env)
-    paths = list(iter_workbook_paths(args.corpus_dir, include_xlsb=args.include_xlsb))
+    if args.input_scope == "originals" and not fernet_key:
+        parser.error(
+            f"--input-scope originals requires decryption; set ${args.fernet_key_env} or pass --fernet-key-env"
+        )
+
+    rust_exe = _build_rust_helper()
+
+    paths = list(iter_workbook_paths(input_dir, include_xlsb=args.include_xlsb))
     triage_out = _triage_paths(
         paths,
         rust_exe=str(rust_exe),
@@ -1166,6 +1228,8 @@ def main() -> int:
         "commit": github_commit_sha(),
         "run_url": github_run_url(),
         "corpus_dir": str(args.corpus_dir),
+        "input_scope": args.input_scope,
+        "input_dir": str(input_dir),
         "report_count": len(reports),
         "reports": report_index_entries,
     }
@@ -1173,7 +1237,14 @@ def main() -> int:
 
     regressions: list[str] = []
     improvements: list[str] = []
-    if args.expectations and args.expectations.exists():
+    # Expectations gating is intended for the public corpus. When triaging a scoped
+    # subdirectory (e.g. private corpus `sanitized/`), skip expectations to avoid
+    # accidental regression gating on private/sensitive datasets.
+    if (
+        args.expectations
+        and args.expectations.exists()
+        and input_dir.resolve() == args.corpus_dir.resolve()
+    ):
         expectations = json.loads(args.expectations.read_text(encoding="utf-8"))
         regressions, improvements = _compare_expectations(reports, expectations)
         write_json(

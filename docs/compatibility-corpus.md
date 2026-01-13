@@ -126,7 +126,11 @@ Note: triage invokes a small Rust helper (built via `cargo`) to run the `formula
 structural comparison, so a Rust toolchain must be available.
 
 For the **private** corpus (or any environment where triage JSON is uploaded as an artifact), prefer
-`--privacy-mode private` to avoid leaking original filenames or custom URI domains:
+`--privacy-mode private` to avoid leaking original filenames or custom URI domains.
+
+When using the recommended `originals/` + `sanitized/` layout, triage defaults to preferring sanitized inputs to avoid
+double-processing (and to avoid accidentally parsing encrypted originals). Override with
+`--input-scope {auto,sanitized,originals,all}` as needed (note: `originals` requires `CORPUS_ENCRYPTION_KEY`).
 
 ```bash
 python -m tools.corpus.triage \
