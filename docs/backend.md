@@ -222,8 +222,9 @@ Roles: `owner | admin | editor | commenter | viewer`
 
 ### Range restrictions (optional)
 
-The API can optionally include a `rangeRestrictions` claim in sync JWTs. When enabled, the sync
-server enforces these restrictions **server-side** so a malicious client cannot bypass UI checks
+The API can optionally include `rangeRestrictions` in sync JWTs (and/or return a `rangeRestrictions`
+array in sync token introspection responses when using `SYNC_SERVER_AUTH_MODE=introspect`). When enabled,
+the sync server enforces these restrictions **server-side** so a malicious client cannot bypass UI checks
 by sending crafted Yjs updates.
 
 Enable enforcement:
@@ -233,7 +234,8 @@ Enable enforcement:
 If a client attempts to write to a protected cell, the sync server closes the connection with
 policy violation (`1008`) and logs `permission_violation`.
 
-Opaque token auth (`SYNC_SERVER_AUTH_TOKEN`) does not apply range restrictions.
+Opaque token auth (`SYNC_SERVER_AUTH_TOKEN`) cannot carry range restrictions (JWT and
+`SYNC_SERVER_AUTH_MODE=introspect` can).
 
 The claim shape matches `packages/collab/permissions.normalizeRestriction`:
 

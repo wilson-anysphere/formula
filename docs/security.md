@@ -120,16 +120,18 @@ Migration strictness:
 
 The collaboration client enforces document roles + range restrictions locally, but a malicious client can bypass
 UI checks by crafting raw Yjs updates. `services/sync-server` can enforce spreadsheet **cell/range edit
-restrictions server-side** when they are present in JWT sync tokens.
+restrictions server-side** when they are present in the auth context (via JWT claims or token introspection
+responses).
 
 Enable enforcement:
 
 - `SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS=1` (default: `true` in `NODE_ENV=production`, `false` otherwise)
 
-When enabled and the client is authenticated via JWT, the server reads:
+When enabled and `rangeRestrictions` are provided, the server reads:
 
 - `role` (document role)
-- optional `rangeRestrictions` claim (compatible with `packages/collab/permissions.normalizeRestriction`)
+- optional `rangeRestrictions` (JWT `rangeRestrictions` claim, or `rangeRestrictions` field from token
+  introspection responses; compatible with `packages/collab/permissions.normalizeRestriction`)
 
 If an incoming Yjs update attempts to modify a cell where `canEdit` is false, the server:
 
