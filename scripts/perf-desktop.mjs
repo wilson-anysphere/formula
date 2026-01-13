@@ -1,5 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -67,18 +74,11 @@ function ensureCleanPerfHome(perfHome) {
 
 function perfEnv(extra = {}) {
   const perfHome = resolvePerfHome();
-  // Keep XDG state alongside HOME so libraries don't write to the real user profile.
-  const xdgBase = perfHome;
   return {
     perfHome,
     env: {
       ...process.env,
       FORMULA_PERF_HOME: perfHome,
-      HOME: perfHome,
-      USERPROFILE: perfHome,
-      XDG_CACHE_HOME: path.join(xdgBase, ".cache"),
-      XDG_CONFIG_HOME: path.join(xdgBase, ".config"),
-      XDG_STATE_HOME: path.join(xdgBase, ".local", "state"),
       ...extra,
     },
   };
@@ -149,9 +149,21 @@ function buildDesktop({ env, buildFrontend = true } = {}) {
 
   // eslint-disable-next-line no-console
   console.log("[perf-desktop] Building desktop binary (target/release/formula-desktop)...");
-  run("bash", ["scripts/cargo_agent.sh", "build", "-p", "formula-desktop-tauri", "--bin", "formula-desktop", "--release", "--features", "desktop"], {
-    env,
-  });
+  run(
+    "bash",
+    [
+      "scripts/cargo_agent.sh",
+      "build",
+      "-p",
+      "formula-desktop-tauri",
+      "--bin",
+      "formula-desktop",
+      "--release",
+      "--features",
+      "desktop",
+    ],
+    { env },
+  );
 }
 
 function humanBytes(bytes) {
@@ -164,6 +176,37 @@ function humanBytes(bytes) {
   }
   if (unit === "B") return `${bytes} ${unit}`;
   return `${size.toFixed(1)} ${unit}`;
+}
+
+function bytesToMb(bytes) {
+  // Decimal MB, matching existing size budgets in CI.
+  return bytes / 1_000_000;
+}
+
+function formatMb(value) {
+  return `${value.toFixed(3)}MB`;
+}
+
+function parseOptionalTargetMb(name) {
+  const raw = process.env[name];
+  if (raw == null) return null;
+  if (String(raw).trim() === "") return null;
+  const val = Number(raw);
+  if (!Number.isFinite(val) || val <= 0) {
+    throw new Error(`Invalid ${name}=${JSON.stringify(raw)} (expected a number > 0)`);
+  }
+  return val;
+}
+
+function dirSizeBytes(dir) {
+  let total = 0;
+  const entries = readdirSync(dir, { withFileTypes: true });
+  for (const ent of entries) {
+    const p = path.join(dir, ent.name);
+    if (ent.isDirectory()) total += dirSizeBytes(p);
+    else if (ent.isFile()) total += statSync(p).st_size;
+  }
+  return total;
 }
 
 function listLargestFiles(dir, limit = 10) {
@@ -200,7 +243,10 @@ function defaultDesktopBinPath() {
 function findBundleDirs() {
   /** @type {string[]} */
   const out = [];
-  const roots = [path.join(repoRoot, "target"), path.join(repoRoot, "apps", "desktop", "src-tauri", "target")];
+  const roots = [
+    path.join(repoRoot, "target"),
+    path.join(repoRoot, "apps", "desktop", "src-tauri", "target"),
+  ];
   for (const root of roots) {
     if (!existsSync(root)) continue;
     const direct = path.join(root, "release", "bundle");
@@ -214,38 +260,101 @@ function findBundleDirs() {
   return [...new Set(out)];
 }
 
-function runPython(script, args, { env } = {}) {
-  // Prefer python3, fall back to python.
-  const python = process.env.PYTHON || "python3";
-  const proc = spawnSync(python, [script, ...args], {
-    cwd: repoRoot,
-    env,
-    stdio: "inherit",
-    encoding: "utf8",
-  });
-  if (proc.status === 0) return;
+function tryRunPython(args, { env } = {}) {
+  const candidates = [];
+  if (process.env.PYTHON && String(process.env.PYTHON).trim() !== "") {
+    candidates.push(String(process.env.PYTHON).trim());
+  }
+  candidates.push("python3", "python");
 
-  // Retry with `python` if python3 isn't available.
-  if (python === "python3" && proc.error) {
-    const retry = spawnSync("python", [script, ...args], {
+  for (const python of candidates) {
+    const proc = spawnSync(python, args, {
       cwd: repoRoot,
       env,
       stdio: "inherit",
       encoding: "utf8",
     });
-    if (retry.error) throw retry.error;
-    if (retry.status !== 0) process.exit(retry.status ?? 1);
-    return;
+    if (proc.error) {
+      // If the interpreter isn't present, try the next candidate.
+      if (proc.error.code === "ENOENT") continue;
+      throw proc.error;
+    }
+    return { ran: true, status: proc.status ?? 1 };
   }
 
-  if (proc.error) throw proc.error;
-  process.exit(proc.status ?? 1);
+  return { ran: false, status: null };
+}
+
+function tryCreateDistTarGzBytes(distDir) {
+  const outDir = path.join(repoRoot, "target", "perf-artifacts");
+  mkdirSync(outDir, { recursive: true });
+  const outFile = path.join(outDir, "desktop-dist.tar.gz");
+  rmSync(outFile, { force: true });
+
+  const proc = spawnSync("tar", ["-czf", outFile, "-C", distDir, "."], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  if (proc.error || proc.status !== 0) {
+    rmSync(outFile, { force: true });
+    return null;
+  }
+
+  try {
+    const bytes = statSync(outFile).st_size;
+    rmSync(outFile, { force: true });
+    return bytes;
+  } catch {
+    rmSync(outFile, { force: true });
+    return null;
+  }
+}
+
+function readJsonIfExists(p) {
+  try {
+    if (!existsSync(p)) return null;
+    return JSON.parse(readFileSync(p, "utf8"));
+  } catch {
+    return null;
+  }
 }
 
 function reportSize({ env }) {
+  let failed = false;
+
+  // NOTE: there are two "budget" knobs in the repo:
+  // - *_SIZE_LIMIT_MB: used by `scripts/desktop_size_report.py` (PR gating)
+  // - *_SIZE_TARGET_MB: used by `pnpm benchmark` size metrics (optional)
+  //
+  // `pnpm perf:desktop-size` supports both, preferring the *_TARGET_MB variants.
+  const binaryTargetMb =
+    parseOptionalTargetMb("FORMULA_DESKTOP_BINARY_SIZE_TARGET_MB") ??
+    parseOptionalTargetMb("FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB");
+  const distTargetMb =
+    parseOptionalTargetMb("FORMULA_DESKTOP_DIST_SIZE_TARGET_MB") ??
+    parseOptionalTargetMb("FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB");
+  const distGzipTargetMb = parseOptionalTargetMb("FORMULA_DESKTOP_DIST_GZIP_SIZE_TARGET_MB");
+
+  // If python is available, prefer the repo's canonical size report (also supports *_SIZE_LIMIT_MB gating).
+  // We still compute/check *_SIZE_TARGET_MB below because the python script doesn't know about those.
   // eslint-disable-next-line no-console
   console.log("\n[desktop-size] Summary (binary + dist):\n");
-  runPython("scripts/desktop_size_report.py", [], { env });
+
+  const artifactDir = path.join(repoRoot, "target", "perf-artifacts");
+  mkdirSync(artifactDir, { recursive: true });
+  const jsonOut = path.join(artifactDir, "desktop-size.json");
+  rmSync(jsonOut, { force: true });
+
+  const sizeReport = tryRunPython(["scripts/desktop_size_report.py", "--json-out", jsonOut], { env });
+  if (!sizeReport.ran) {
+    // eslint-disable-next-line no-console
+    console.log("[desktop-size] python not found; skipping scripts/desktop_size_report.py");
+  } else if (sizeReport.status !== 0) {
+    failed = true;
+  }
+
+  const sizeJson = readJsonIfExists(jsonOut);
 
   // Rust binary size breakdown (crates + symbols).
   //
@@ -261,6 +370,15 @@ function reportSize({ env }) {
 
   const distDir = path.join(repoRoot, "apps", "desktop", "dist");
   if (existsSync(distDir)) {
+    const total = dirSizeBytes(distDir);
+    const totalMb = bytesToMb(total);
+    const distStatus = distTargetMb == null || totalMb <= distTargetMb ? "PASS" : "FAIL";
+    if (distTargetMb != null && distStatus === "FAIL") failed = true;
+    // eslint-disable-next-line no-console
+    console.log(
+      `\n[desktop-size] dist/ total: ${humanBytes(total)} (${formatMb(totalMb)})  (${distDir})` +
+        (distTargetMb == null ? "" : `  ${distStatus} target=${formatMb(distTargetMb)}`),
+    );
     const largest = listLargestFiles(distDir, 10);
     if (largest.length > 0) {
       // eslint-disable-next-line no-console
@@ -271,6 +389,57 @@ function reportSize({ env }) {
         console.log(`  - ${humanBytes(f.size).padStart(10)}  ${rel}`);
       }
     }
+
+    let gzMb = null;
+    if (typeof sizeJson?.dist_tar_gz?.size_mb === "number" && Number.isFinite(sizeJson.dist_tar_gz.size_mb)) {
+      gzMb = sizeJson.dist_tar_gz.size_mb;
+      // eslint-disable-next-line no-console
+      console.log(`[desktop-size] dist.tar.gz: ${formatMb(gzMb)} (from desktop_size_report.py)`);
+    } else {
+      const gzBytes = tryCreateDistTarGzBytes(distDir);
+      if (gzBytes == null) {
+        // eslint-disable-next-line no-console
+        console.log("[desktop-size] dist.tar.gz: unavailable (tar failed/missing)");
+      } else {
+        gzMb = bytesToMb(gzBytes);
+        // eslint-disable-next-line no-console
+        console.log(`[desktop-size] dist.tar.gz: ${humanBytes(gzBytes)} (${formatMb(gzMb)})`);
+      }
+    }
+
+    if (distGzipTargetMb != null && gzMb != null) {
+      const gzStatus = gzMb <= distGzipTargetMb ? "PASS" : "FAIL";
+      if (gzStatus === "FAIL") failed = true;
+      // eslint-disable-next-line no-console
+      console.log(
+        `[desktop-size] dist.tar.gz budget: ${gzStatus} value=${formatMb(gzMb)} target=${formatMb(distGzipTargetMb)}`,
+      );
+    }
+  } else {
+    // eslint-disable-next-line no-console
+    console.log(`\n[desktop-size] dist/ not found at ${distDir} (run: pnpm -C apps/desktop build)`);
+  }
+
+  const binPath = process.env.FORMULA_DESKTOP_BIN
+    ? path.resolve(repoRoot, process.env.FORMULA_DESKTOP_BIN)
+    : defaultDesktopBinPath();
+  if (binPath && existsSync(binPath)) {
+    const size = statSync(binPath).st_size;
+    const sizeMb = bytesToMb(size);
+    const binStatus = binaryTargetMb == null || sizeMb <= binaryTargetMb ? "PASS" : "FAIL";
+    if (binaryTargetMb != null && binStatus === "FAIL") failed = true;
+    // eslint-disable-next-line no-console
+    console.log(
+      `\n[desktop-size] binary: ${humanBytes(size)} (${formatMb(sizeMb)})  (${path.relative(repoRoot, binPath)})` +
+        (binaryTargetMb == null ? "" : `  ${binStatus} target=${formatMb(binaryTargetMb)}`),
+    );
+  } else {
+    // eslint-disable-next-line no-console
+    console.log(
+      `\n[desktop-size] desktop binary not found (looked for target/**/formula-desktop).\n` +
+        `Build it via: bash scripts/cargo_agent.sh build -p formula-desktop-tauri --bin formula-desktop --release --features desktop\n` +
+        `Or set FORMULA_DESKTOP_BIN=/path/to/formula-desktop`,
+    );
   }
 
   // Approximate the *network download cost* of the frontend by summing per-asset Brotli/gzip sizes.
@@ -291,19 +460,29 @@ function reportSize({ env }) {
         `  (cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)\n` +
         `Then re-run: pnpm perf:desktop-size\n`,
     );
+    if (failed) process.exitCode = 1;
     return;
   }
 
   // eslint-disable-next-line no-console
   console.log(`\n[desktop-size] Installer artifacts (override limit via FORMULA_BUNDLE_SIZE_LIMIT_MB):\n`);
 
-  runPython("scripts/desktop_bundle_size_report.py", [], { env });
+  const bundleReport = tryRunPython(["scripts/desktop_bundle_size_report.py"], { env });
+  if (!bundleReport.ran) {
+    // eslint-disable-next-line no-console
+    console.log("[desktop-size] python not found; skipping bundle size report");
+  } else if (bundleReport.status !== 0) {
+    failed = true;
+  }
+
+  if (failed) process.exitCode = 1;
 }
 
 function main() {
   const cmd = process.argv[2];
   const passthroughIdx = process.argv.indexOf("--");
-  const forwardedArgs = passthroughIdx >= 0 ? process.argv.slice(passthroughIdx + 1) : process.argv.slice(3);
+  const forwardedArgs =
+    passthroughIdx >= 0 ? process.argv.slice(passthroughIdx + 1) : process.argv.slice(3);
 
   if (!cmd || cmd === "-h" || cmd === "--help") {
     usage();
@@ -314,7 +493,7 @@ function main() {
   ensureCleanPerfHome(perfHome);
 
   // eslint-disable-next-line no-console
-  console.log(`[perf-desktop] Using isolated HOME=${path.relative(repoRoot, perfHome)}`);
+  console.log(`[perf-desktop] Using isolated desktop HOME root=${path.relative(repoRoot, perfHome)}`);
   // eslint-disable-next-line no-console
   console.log(
     "[perf-desktop] Tip: set FORMULA_PERF_PRESERVE_HOME=1 to reuse caches between runs.\n" +

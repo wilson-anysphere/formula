@@ -19,11 +19,12 @@ type StartupBenchKind = "shell" | "full";
 type StartupMode = "cold" | "warm";
 
 type Summary = {
+  mode: StartupMode;
   runs: number;
   windowVisible: { p50: number; p95: number; targetMs: number };
   // `first_render_ms` is only meaningful for the full-app benchmark (the shell benchmark uses a
   // minimal page and exits before the app grid is rendered).
-  firstRender: { p50: number | null; p95: number | null };
+  firstRender: { p50: number | null; p95: number | null; targetMs: number | null };
   tti: { p50: number; p95: number; targetMs: number };
   enforce: boolean;
   webviewLoaded?: { p50: number; p95: number; targetMs: number };
@@ -44,6 +45,7 @@ function usage(): string {
     "  --startup-bench, --shell         Shell-only startup (default in CI)",
     "  --full                           Full app startup (default locally)",
     "  --window-target-ms <ms>          p95 target (overrides env targets)",
+    "  --first-render-target-ms <ms>    p95 target for first_render_ms (full only; overrides env targets)",
     "  --webview-loaded-target-ms <ms>  p95 target (env: FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS / FORMULA_DESKTOP_SHELL_WEBVIEW_LOADED_TARGET_MS)",
     "  --tti-target-ms <ms>             p95 target (overrides env targets)",
     "  --json, --json-path <path>       Write JSON output (samples + summary) to this path",
@@ -67,11 +69,12 @@ function parseBenchKindFromEnv(): StartupBenchKind | null {
 }
 
 function parseArgs(argv: string[]): {
+  mode: StartupMode;
   runs: number;
   timeoutMs: number;
   binPath: string | null;
-  mode: StartupMode;
   windowTargetMs: number;
+  firstRenderTargetMs: number;
   webviewLoadedTargetMs: number;
   ttiTargetMs: number;
   allowInCi: boolean;
@@ -102,16 +105,22 @@ function parseArgs(argv: string[]): {
         process.env.FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS ??
         "",
     ) || 500;
+  const fullColdFirstRenderTargetMs =
+    Number(
+      process.env.FORMULA_DESKTOP_COLD_FIRST_RENDER_TARGET_MS ??
+        process.env.FORMULA_DESKTOP_FIRST_RENDER_TARGET_MS ??
+        "",
+    ) || 500;
   const fullColdTtiTargetMs =
     Number(
-      process.env.FORMULA_DESKTOP_COLD_TTI_TARGET_MS ??
-        process.env.FORMULA_DESKTOP_TTI_TARGET_MS ??
-        "",
+      process.env.FORMULA_DESKTOP_COLD_TTI_TARGET_MS ?? process.env.FORMULA_DESKTOP_TTI_TARGET_MS ?? "",
     ) || 1000;
+
   const fullWarmWindowTargetMs =
     Number(process.env.FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS ?? "") || fullColdWindowTargetMs;
-  const fullWarmTtiTargetMs =
-    Number(process.env.FORMULA_DESKTOP_WARM_TTI_TARGET_MS ?? "") || fullColdTtiTargetMs;
+  const fullWarmFirstRenderTargetMs =
+    Number(process.env.FORMULA_DESKTOP_WARM_FIRST_RENDER_TARGET_MS ?? "") || fullColdFirstRenderTargetMs;
+  const fullWarmTtiTargetMs = Number(process.env.FORMULA_DESKTOP_WARM_TTI_TARGET_MS ?? "") || fullColdTtiTargetMs;
 
   const shellColdWindowTargetMs =
     Number(
@@ -121,9 +130,7 @@ function parseArgs(argv: string[]): {
     ) || fullColdWindowTargetMs;
   const shellColdTtiTargetMs =
     Number(
-      process.env.FORMULA_DESKTOP_SHELL_COLD_TTI_TARGET_MS ??
-        process.env.FORMULA_DESKTOP_SHELL_TTI_TARGET_MS ??
-        "",
+      process.env.FORMULA_DESKTOP_SHELL_COLD_TTI_TARGET_MS ?? process.env.FORMULA_DESKTOP_SHELL_TTI_TARGET_MS ?? "",
     ) || fullColdTtiTargetMs;
   const shellWarmWindowTargetMs =
     Number(
@@ -133,29 +140,30 @@ function parseArgs(argv: string[]): {
     ) || shellColdWindowTargetMs;
   const shellWarmTtiTargetMs =
     Number(
-      process.env.FORMULA_DESKTOP_SHELL_WARM_TTI_TARGET_MS ??
-        process.env.FORMULA_DESKTOP_SHELL_TTI_TARGET_MS ??
-        "",
+      process.env.FORMULA_DESKTOP_SHELL_WARM_TTI_TARGET_MS ?? process.env.FORMULA_DESKTOP_SHELL_TTI_TARGET_MS ?? "",
     ) || shellColdTtiTargetMs;
 
   const fullWebviewLoadedTargetMs = Number(process.env.FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS ?? "") || 800;
   const shellWebviewLoadedTargetMs =
     Number(process.env.FORMULA_DESKTOP_SHELL_WEBVIEW_LOADED_TARGET_MS ?? "") || fullWebviewLoadedTargetMs;
+
   const envEnforce = process.env.FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH === "1";
 
   const envKind = parseBenchKindFromEnv();
   const defaultKind: StartupBenchKind = envKind ?? (process.env.CI ? "shell" : "full");
 
   let windowTargetMsOverride: number | null = null;
+  let firstRenderTargetMsOverride: number | null = null;
   let webviewLoadedTargetMsOverride: number | null = null;
   let ttiTargetMsOverride: number | null = null;
 
   const out = {
+    mode,
     runs: Math.max(1, envRuns),
     timeoutMs: Math.max(1, envTimeoutMs),
     binPath: envBin as string | null,
-    mode,
     windowTargetMs: 0,
+    firstRenderTargetMs: 0,
     webviewLoadedTargetMs: 0,
     ttiTargetMs: 0,
     allowInCi: false,
@@ -180,10 +188,11 @@ function parseArgs(argv: string[]): {
     else if ((arg === "--bin" || arg === "--bin-path") && args[0]) out.binPath = args.shift()!;
     else if ((arg === "--window-target-ms" || arg === "--window-visible-target-ms") && args[0])
       windowTargetMsOverride = Math.max(1, Number(args.shift()) || 0);
+    else if (arg === "--first-render-target-ms" && args[0])
+      firstRenderTargetMsOverride = Math.max(1, Number(args.shift()) || 0);
     else if ((arg === "--webview-loaded-target-ms" || arg === "--webview-target-ms") && args[0])
       webviewLoadedTargetMsOverride = Math.max(1, Number(args.shift()) || 0);
-    else if (arg === "--tti-target-ms" && args[0])
-      ttiTargetMsOverride = Math.max(1, Number(args.shift()) || 0);
+    else if (arg === "--tti-target-ms" && args[0]) ttiTargetMsOverride = Math.max(1, Number(args.shift()) || 0);
     else if ((arg === "--json" || arg === "--json-path") && args[0]) out.jsonPath = args.shift()!;
     else if (arg === "--allow-ci") out.allowInCi = true;
     else if (arg === "--enforce") out.enforce = true;
@@ -207,10 +216,13 @@ function parseArgs(argv: string[]): {
       : mode === "warm"
         ? fullWarmTtiTargetMs
         : fullColdTtiTargetMs;
+  const resolveFirstRenderTarget = (): number =>
+    mode === "warm" ? fullWarmFirstRenderTargetMs : fullColdFirstRenderTargetMs;
   const resolveWebviewLoadedTarget = (kind: StartupBenchKind): number =>
     kind === "shell" ? shellWebviewLoadedTargetMs : fullWebviewLoadedTargetMs;
 
   out.windowTargetMs = windowTargetMsOverride ?? Math.max(1, resolveWindowTarget(out.benchKind));
+  out.firstRenderTargetMs = firstRenderTargetMsOverride ?? Math.max(1, resolveFirstRenderTarget());
   out.webviewLoadedTargetMs =
     webviewLoadedTargetMsOverride ?? Math.max(1, resolveWebviewLoadedTarget(out.benchKind));
   out.ttiTargetMs = ttiTargetMsOverride ?? Math.max(1, resolveTtiTarget(out.benchKind));
@@ -225,16 +237,29 @@ function formatMaybeMs(ms: number | null): string {
 
 function printSummary(summary: Summary, benchKind: StartupBenchKind): void {
   const windowStatus = summary.windowVisible.p95 <= summary.windowVisible.targetMs ? "PASS" : "FAIL";
+  const ttiStatus = summary.tti.p95 <= summary.tti.targetMs ? "PASS" : "FAIL";
+
+  const firstRenderPart =
+    summary.firstRender.p50 !== null &&
+    summary.firstRender.p95 !== null &&
+    summary.firstRender.targetMs !== null
+      ? (() => {
+          const status = summary.firstRender.p95 <= summary.firstRender.targetMs ? "PASS" : "FAIL";
+          return `firstRender(${status} p50=${summary.firstRender.p50}ms,p95=${summary.firstRender.p95}ms,target=${summary.firstRender.targetMs}ms)`;
+        })()
+      : `firstRender(p50=${formatMaybeMs(summary.firstRender.p50)},p95=${formatMaybeMs(summary.firstRender.p95)})`;
+
   const webviewLoadedStatus =
     summary.webviewLoaded && summary.webviewLoaded.p95 <= summary.webviewLoaded.targetMs ? "PASS" : "FAIL";
-  const ttiStatus = summary.tti.p95 <= summary.tti.targetMs ? "PASS" : "FAIL";
+
   // eslint-disable-next-line no-console
   console.log(
     [
       benchKind === "shell" ? "[desktop-shell-startup]" : "[desktop-startup]",
+      `mode=${summary.mode}`,
       `runs=${summary.runs}`,
       `windowVisible(${windowStatus} p50=${summary.windowVisible.p50}ms,p95=${summary.windowVisible.p95}ms,target=${summary.windowVisible.targetMs}ms)`,
-      `firstRender(p50=${formatMaybeMs(summary.firstRender.p50)},p95=${formatMaybeMs(summary.firstRender.p95)})`,
+      firstRenderPart,
       summary.webviewLoaded
         ? `webviewLoaded(${webviewLoadedStatus} p50=${summary.webviewLoaded.p50}ms,p95=${summary.webviewLoaded.p95}ms,target=${summary.webviewLoaded.targetMs}ms)`
         : "webviewLoaded(n/a)",
@@ -253,11 +278,12 @@ async function main(): Promise<void> {
   }
 
   const {
+    mode,
     runs,
     timeoutMs,
     binPath: argBin,
-    mode,
     windowTargetMs,
+    firstRenderTargetMs,
     webviewLoadedTargetMs,
     ttiTargetMs,
     allowInCi,
@@ -286,12 +312,13 @@ async function main(): Promise<void> {
   // eslint-disable-next-line no-console
   console.log(
     "[desktop-startup] measuring desktop startup timings (window-visible + first-render + TTI).\n" +
-      `- kind: ${benchKind} (set FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell|full or pass --startup-bench/--full)\n` +
+      `- kind: ${benchKind} (set FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell|full or pass --startup-bench/--shell/--full)\n` +
       `- mode: ${mode} (set FORMULA_DESKTOP_STARTUP_MODE=cold|warm or pass --mode)\n` +
       `- runs: ${runs} (override via --runs or FORMULA_DESKTOP_STARTUP_RUNS)\n` +
       `- timeout: ${timeoutMs}ms (override via --timeout-ms or FORMULA_DESKTOP_STARTUP_TIMEOUT_MS)\n` +
       `- window target: ${windowTargetMs}ms (override via --window-target-ms)\n` +
-      `- webviewLoaded target: ${webviewLoadedTargetMs}ms (override via --webview-loaded-target-ms or FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS)\n` +
+      `- first render target: ${firstRenderTargetMs}ms (only for kind=full; override via --first-render-target-ms)\n` +
+      `- webviewLoaded target: ${webviewLoadedTargetMs}ms (override via --webview-loaded-target-ms)\n` +
       `- tti target: ${ttiTargetMs}ms (override via --tti-target-ms)\n` +
       `- home: target/perf-home (repo-local; override with FORMULA_PERF_HOME)\n` +
       (enforce
@@ -299,7 +326,6 @@ async function main(): Promise<void> {
         : "- enforcement: disabled (set FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=1 or pass --enforce to fail on regression)\n"),
   );
 
-  const results: StartupMetrics[] = [];
   const envOverrides: NodeJS.ProcessEnv = { FORMULA_DISABLE_STARTUP_UPDATE_CHECK: "1" };
 
   const perfHome =
@@ -319,6 +345,7 @@ async function main(): Promise<void> {
     }
   };
 
+  const results: StartupMetrics[] = [];
   try {
     if (mode === "warm") {
       const profileDir = resolve(profileRoot, "profile");
@@ -330,9 +357,7 @@ async function main(): Promise<void> {
       setResetHome(undefined);
       for (let i = 0; i < runs; i += 1) {
         // eslint-disable-next-line no-console
-        console.log(
-          `[desktop-${benchKind}-startup] run ${i + 1}/${runs} (warm, profile=${profileDir})...`,
-        );
+        console.log(`[desktop-${benchKind}-startup] run ${i + 1}/${runs} (warm, profile=${profileDir})...`);
         results.push(await runOnce({ binPath, timeoutMs, argv, envOverrides, profileDir }));
       }
     } else {
@@ -340,9 +365,7 @@ async function main(): Promise<void> {
       for (let i = 0; i < runs; i += 1) {
         const profileDir = resolve(profileRoot, `run-${String(i + 1).padStart(2, "0")}`);
         // eslint-disable-next-line no-console
-        console.log(
-          `[desktop-${benchKind}-startup] run ${i + 1}/${runs} (cold, profile=${profileDir})...`,
-        );
+        console.log(`[desktop-${benchKind}-startup] run ${i + 1}/${runs} (cold, profile=${profileDir})...`);
         results.push(await runOnce({ binPath, timeoutMs, argv, envOverrides, profileDir }));
       }
     }
@@ -364,14 +387,32 @@ async function main(): Promise<void> {
     .sort((a, b) => a - b);
   const tti = results.map((r) => r.ttiMs).sort((a, b) => a - b);
 
+  if (benchKind === "full" && firstRenderValues.length !== results.length) {
+    throw new Error(
+      "Desktop did not report first_render_ms. Ensure the frontend calls `report_startup_first_render` when the grid becomes visible.",
+    );
+  }
+
   // `webview_loaded_ms` is recorded by the Rust host (via a native page-load callback) and should
   // generally be available for every run. Keep this best-effort skip policy anyway so the runner
-  // can still work against older binaries and so we don't compute p95 over a biased tiny sample
-  // if something regresses.
+  // can still work against older binaries and so we don't compute p95 over a biased tiny sample.
   const minWebviewLoadedFraction = 0.8;
   const minWebviewLoadedRuns = Math.ceil(results.length * minWebviewLoadedFraction);
 
+  if (webviewLoadedValues.length === 0) {
+    // eslint-disable-next-line no-console
+    console.log("[desktop-startup] webview_loaded_ms unavailable (0 runs reported it); skipping metric");
+  } else if (webviewLoadedValues.length < minWebviewLoadedRuns) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[desktop-startup] webview_loaded_ms only available for ${webviewLoadedValues.length}/${results.length} runs (<${Math.round(
+        minWebviewLoadedFraction * 100,
+      )}%); skipping metric`,
+    );
+  }
+
   const summary: Summary = {
+    mode,
     runs: results.length,
     windowVisible: {
       p50: percentile(windowVisible, 0.5),
@@ -383,8 +424,9 @@ async function main(): Promise<void> {
         ? {
             p50: percentile(firstRenderValues, 0.5),
             p95: percentile(firstRenderValues, 0.95),
+            targetMs: firstRenderTargetMs,
           }
-        : { p50: null, p95: null },
+        : { p50: null, p95: null, targetMs: null },
     ...(webviewLoadedValues.length >= minWebviewLoadedRuns
       ? {
           webviewLoaded: {
@@ -431,7 +473,10 @@ async function main(): Promise<void> {
     const failed =
       summary.windowVisible.p95 > summary.windowVisible.targetMs ||
       summary.tti.p95 > summary.tti.targetMs ||
-      (summary.webviewLoaded !== undefined && summary.webviewLoaded.p95 > summary.webviewLoaded.targetMs);
+      (summary.webviewLoaded !== undefined && summary.webviewLoaded.p95 > summary.webviewLoaded.targetMs) ||
+      (summary.firstRender.targetMs !== null &&
+        summary.firstRender.p95 !== null &&
+        summary.firstRender.p95 > summary.firstRender.targetMs);
     if (failed) process.exitCode = 1;
   }
 }

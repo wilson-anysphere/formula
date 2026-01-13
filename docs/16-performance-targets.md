@@ -161,12 +161,17 @@ These scripts are designed to be safe to run locally:
 Startup benchmark (runner defaults shown):
 
 - `FORMULA_DESKTOP_STARTUP_MODE=cold|warm` (default: `cold`)
+  - `cold`: resets the perf profile before **each** run (true cold-start).
+  - `warm`: does one warmup run, then reuses the profile so persisted caches are reflected in the results.
 - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell|full` (default: `full` locally, `shell` on CI)
+  - `shell`: runs the desktop binary with `--startup-bench` (does not require `apps/desktop/dist`)
+  - `full`: runs the full app (requires `apps/desktop/dist`)
 - `FORMULA_DESKTOP_STARTUP_RUNS=20`
 - `FORMULA_DESKTOP_STARTUP_TIMEOUT_MS=15000`
 - Cold-start targets (defaults shown; legacy unscoped vars are still accepted as fallbacks):
   - `FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS=500`
   - `FORMULA_DESKTOP_COLD_FIRST_RENDER_TARGET_MS=500`
+  - `FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS=800` (p95 budget for `webview_loaded_ms`)
   - `FORMULA_DESKTOP_COLD_TTI_TARGET_MS=1000`
 - Warm-start targets (optional; default to the cold targets if unset):
   - `FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS`
@@ -206,6 +211,11 @@ Rust desktop binary size breakdown (cargo-bloat; informational by default):
 - `FORMULA_ENFORCE_DESKTOP_BINARY_SIZE=1` (or `true`/`yes`/`on`) to make the size breakdown step fail when the binary exceeds the budget
   (reported by `scripts/desktop_binary_size_report.py`)
 
+Desktop binary/dist size budgets (optional; used by `pnpm benchmark` and `pnpm perf:desktop-size`):
+
+- `FORMULA_DESKTOP_BINARY_SIZE_TARGET_MB=<budget>` (decimal MB)
+- `FORMULA_DESKTOP_DIST_SIZE_TARGET_MB=<budget>` (decimal MB)
+- `FORMULA_DESKTOP_DIST_GZIP_SIZE_TARGET_MB=<budget>` (decimal MB; computed via `tar -czf`)
 Frontend asset download size gating (web/desktop Vite `dist/assets`):
 
 - `FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB=10` (default: 10MB total)

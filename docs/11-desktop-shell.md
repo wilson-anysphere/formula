@@ -88,6 +88,8 @@ Notes:
 
   Tuning knobs:
   - `FORMULA_DESKTOP_STARTUP_MODE=cold|warm` (default: `cold`)
+    - `cold`: resets the repo-local perf profile (`target/perf-home`) before **each** launch (true cold-start).
+    - `warm`: resets once, then reuses the profile so subsequent launches benefit from caches (the first launch is treated as warmup).
   - `FORMULA_DESKTOP_STARTUP_RUNS` (default: 20)
   - `FORMULA_DESKTOP_STARTUP_TIMEOUT_MS` (default: 15000)
   - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell|full` (what to measure)
@@ -189,6 +191,12 @@ Frontend asset download size gating knobs (compressed JS/CSS/WASM under `dist/as
 - `FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB` (default: 10MB total)
 - `FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION=brotli|gzip` (default: brotli)
 - `FORMULA_ENFORCE_FRONTEND_ASSET_SIZE=1` to fail when the total exceeds the limit
+
+Optional size budgets (also used by `pnpm benchmark` size metrics):
+
+- `FORMULA_DESKTOP_BINARY_SIZE_TARGET_MB` — max size (decimal MB) for `target/**/formula-desktop`
+- `FORMULA_DESKTOP_DIST_SIZE_TARGET_MB` — max size (decimal MB) for `apps/desktop/dist`
+- `FORMULA_DESKTOP_DIST_GZIP_SIZE_TARGET_MB` — max size (decimal MB) for a `tar.gz` of `apps/desktop/dist`
 
 ---
 
