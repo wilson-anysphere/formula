@@ -6,11 +6,156 @@
 //! - one or more `<keyEncryptor>` entries (password, certificate, ...)
 //! - optional integrity metadata
 //!
-//! Excel can emit *multiple* key encryptors (for example, both password and certificate entries).
-//! Formula currently supports only password-based key encryption, so this parser selects the first
-//! `<keyEncryptor>` whose `@uri` matches the password schema.
+//! This module provides:
+//! - a best-effort parser focused on selecting the password key encryptor (and surfacing actionable
+//!   errors when the file is certificate-encrypted), and
+//! - bounded helpers for extracting the XML payload and decoding base64 attributes safely to avoid
+//!   memory DoS on malicious/corrupt inputs.
+
+use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD};
+use base64::Engine as _;
 
 use super::{OffCryptoError, Result};
+
+/// Parsing limits for MS-OFFCRYPTO Agile `EncryptionInfo` XML descriptors.
+///
+/// These defaults are intentionally generous for real-world Office files while still bounding
+/// memory usage for malicious/corrupt inputs.
+#[derive(Debug, Clone, Copy)]
+pub struct ParseOptions {
+    /// Maximum length (in bytes) of the raw XML payload stored in the `EncryptionInfo` stream
+    /// **after** the 8-byte version header.
+    ///
+    /// This bounds:
+    /// - allocation when the stream is read into memory, and
+    /// - work performed by the XML parser.
+    pub max_encryption_info_xml_len: usize,
+
+    /// Maximum length (in bytes/chars) of a base64-encoded field **after whitespace stripping**.
+    ///
+    /// This bounds allocation for the intermediate stripped base64 buffer.
+    pub max_base64_field_len: usize,
+
+    /// Maximum length (in bytes) of a base64-decoded field.
+    ///
+    /// This bounds allocation for the decoded output buffer.
+    pub max_base64_decoded_len: usize,
+}
+
+impl Default for ParseOptions {
+    fn default() -> Self {
+        // 1 MiB defaults: generous for real-world descriptors, small enough to prevent memory DoS.
+        const ONE_MIB: usize = 1024 * 1024;
+        Self {
+            max_encryption_info_xml_len: ONE_MIB,
+            max_base64_field_len: ONE_MIB,
+            max_base64_decoded_len: ONE_MIB,
+        }
+    }
+}
+
+/// Extract the XML payload from an `EncryptionInfo` stream and enforce [`ParseOptions`] limits.
+///
+/// The `EncryptionInfo` stream begins with an 8-byte version header:
+/// `majorVersion (u16le)`, `minorVersion (u16le)`, `flags (u32le)`.
+///
+/// For Agile encryption (`4.4`), the remainder of the stream is an XML document.
+///
+/// This helper returns the raw XML bytes (without copying) and errors if the payload exceeds
+/// `max_encryption_info_xml_len`.
+pub fn extract_encryption_info_xml<'a>(
+    encryption_info_stream: &'a [u8],
+    opts: &ParseOptions,
+) -> Result<&'a [u8]> {
+    let xml = encryption_info_stream.get(8..).unwrap_or(&[]);
+    if xml.len() > opts.max_encryption_info_xml_len {
+        return Err(OffCryptoError::EncryptionInfoTooLarge {
+            len: xml.len(),
+            max: opts.max_encryption_info_xml_len,
+        });
+    }
+    Ok(xml)
+}
+
+fn count_non_ascii_whitespace_bytes(s: &str) -> usize {
+    s.as_bytes()
+        .iter()
+        .filter(|b| !b.is_ascii_whitespace())
+        .count()
+}
+
+fn base64_max_decoded_len(stripped_len: usize) -> usize {
+    // Base64 expands by 4/3; the decoded length is at most 3 bytes for every 4 input chars.
+    // Use a conservative upper bound so we can reject huge values before allocating the output.
+    ((stripped_len.saturating_add(3)) / 4).saturating_mul(3)
+}
+
+/// Decode a base64 field from an Agile `EncryptionInfo` XML descriptor, enforcing size limits.
+///
+/// This function:
+/// 1. Counts the field length after stripping ASCII whitespace (` \t\r\n...`) and rejects it if it
+///    exceeds `max_base64_field_len`.
+/// 2. Computes an upper bound for the decoded size and rejects it if it exceeds
+///    `max_base64_decoded_len`.
+/// 3. Allocates buffers sized to the bounded input/output and performs base64 decoding.
+///
+/// The `attr` name is included verbatim in [`OffCryptoError::FieldTooLarge`] for actionable error
+/// reporting.
+pub fn decode_base64_field_limited(
+    element: &str,
+    attr: &'static str,
+    value: &str,
+    opts: &ParseOptions,
+) -> Result<Vec<u8>> {
+    let bytes = value.as_bytes();
+    let stripped_len = count_non_ascii_whitespace_bytes(value);
+    if stripped_len > opts.max_base64_field_len {
+        return Err(OffCryptoError::FieldTooLarge {
+            field: attr,
+            len: stripped_len,
+            max: opts.max_base64_field_len,
+        });
+    }
+
+    let max_decoded = base64_max_decoded_len(stripped_len);
+    if max_decoded > opts.max_base64_decoded_len {
+        return Err(OffCryptoError::FieldTooLarge {
+            field: attr,
+            len: max_decoded,
+            max: opts.max_base64_decoded_len,
+        });
+    }
+
+    // Avoid allocating a stripped copy when the attribute value contains no ASCII whitespace.
+    let decoded = if stripped_len == bytes.len() {
+        STANDARD
+            .decode(bytes)
+            .or_else(|_| STANDARD_NO_PAD.decode(bytes))
+    } else {
+        let mut stripped = Vec::with_capacity(stripped_len);
+        stripped.extend(bytes.iter().copied().filter(|b| !b.is_ascii_whitespace()));
+        STANDARD
+            .decode(&stripped)
+            .or_else(|_| STANDARD_NO_PAD.decode(&stripped))
+    }
+    .map_err(|source| OffCryptoError::Base64Decode {
+        element: element.to_string(),
+        attr: attr.to_string(),
+        source,
+    })?;
+
+    // Defensive: should be redundant with `max_decoded` check, but keep to be safe if the base64
+    // engine behavior changes.
+    if decoded.len() > opts.max_base64_decoded_len {
+        return Err(OffCryptoError::FieldTooLarge {
+            field: attr,
+            len: decoded.len(),
+            max: opts.max_base64_decoded_len,
+        });
+    }
+
+    Ok(decoded)
+}
 
 /// Password key encryptor URI as used by MS-OFFCRYPTO Agile EncryptionInfo XML.
 pub const KEY_ENCRYPTOR_URI_PASSWORD: &str =
@@ -124,7 +269,9 @@ pub fn parse_agile_encryption_info_xml(xml: &[u8]) -> Result<AgileEncryptionInfo
         {
             msg.push_str(" This file appears to be certificate-encrypted (public/private key) rather than password-encrypted. Re-save the workbook in Excel using “Encrypt with Password”.");
         } else {
-            msg.push_str(" Re-save the workbook in Excel using “Encrypt with Password” (not certificate-based protection).");
+            msg.push_str(
+                " Re-save the workbook in Excel using “Encrypt with Password” (not certificate-based protection).",
+            );
         }
 
         return Err(OffCryptoError::UnsupportedKeyEncryptor {
@@ -213,9 +360,7 @@ mod tests {
         match &err {
             OffCryptoError::UnsupportedKeyEncryptor { available_uris, .. } => {
                 assert!(
-                    available_uris
-                        .iter()
-                        .any(|u| u == KEY_ENCRYPTOR_URI_CERTIFICATE),
+                    available_uris.iter().any(|u| u == KEY_ENCRYPTOR_URI_CERTIFICATE),
                     "expected certificate URI to be reported, got {available_uris:?}"
                 );
             }
@@ -300,5 +445,19 @@ mod tests {
             msg.contains("only") && msg.contains("ChainingModeCBC"),
             "expected message to mention only CBC is supported, got: {msg}"
         );
+    }
+
+    #[test]
+    fn base64_whitespace_is_stripped_before_counting() {
+        let opts = ParseOptions {
+            max_base64_field_len: 4,
+            max_base64_decoded_len: 1024,
+            ..ParseOptions::default()
+        };
+
+        // Base64 "AA==" (1 byte) but with whitespace.
+        let decoded =
+            decode_base64_field_limited("keyData", "saltValue", " A A = = ", &opts).unwrap();
+        assert_eq!(decoded, vec![0]);
     }
 }

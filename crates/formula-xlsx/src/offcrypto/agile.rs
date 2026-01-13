@@ -1,11 +1,14 @@
+#[cfg(test)]
 use base64::engine::general_purpose::STANDARD as BASE64;
+#[cfg(test)]
 use base64::Engine as _;
 use digest::Digest as _;
 
 use crate::offcrypto::{
     decrypt_aes_cbc_no_padding_in_place, derive_iv, derive_key, hash_password, AesCbcDecryptError,
-    HashAlgorithm, OffCryptoError, Result, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK,
-    VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK, AES_BLOCK_SIZE,
+    decode_base64_field_limited, extract_encryption_info_xml, HashAlgorithm, OffCryptoError,
+    ParseOptions, Result, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK,
+    VERIFIER_HASH_VALUE_BLOCK, AES_BLOCK_SIZE,
 };
 
 const OOXML_PASSWORD_KEY_ENCRYPTOR_URI: &str =
@@ -85,13 +88,14 @@ fn parse_u32_attr(element: &str, node: roxmltree::Node<'_, '_>, attr: &str) -> R
     })
 }
 
-fn decode_b64_attr(element: &str, node: roxmltree::Node<'_, '_>, attr: &str) -> Result<Vec<u8>> {
+fn decode_b64_attr(
+    element: &'static str,
+    node: roxmltree::Node<'_, '_>,
+    attr: &'static str,
+    opts: &ParseOptions,
+) -> Result<Vec<u8>> {
     let raw = parse_required_attr(element, node, attr)?;
-    BASE64.decode(raw.trim()).map_err(|source| OffCryptoError::Base64Decode {
-        element: element.to_string(),
-        attr: attr.to_string(),
-        source,
-    })
+    decode_base64_field_limited(element, attr, raw, opts)
 }
 
 fn parse_hash_algorithm_attr(
@@ -154,7 +158,17 @@ fn decode_agile_xml(bytes: &[u8]) -> Result<&str> {
 /// Parse an Agile Encryption `EncryptionInfo` stream (MS-OFFCRYPTO version 4.4).
 ///
 /// The caller must pass the full `EncryptionInfo` stream bytes (including the version header).
-pub fn parse_agile_encryption_info_stream(encryption_info_stream: &[u8]) -> Result<AgileEncryptionInfo> {
+pub fn parse_agile_encryption_info_stream(
+    encryption_info_stream: &[u8],
+) -> Result<AgileEncryptionInfo> {
+    parse_agile_encryption_info_stream_with_options(encryption_info_stream, &ParseOptions::default())
+}
+
+/// Parse an Agile Encryption `EncryptionInfo` stream with explicit parsing limits.
+pub fn parse_agile_encryption_info_stream_with_options(
+    encryption_info_stream: &[u8],
+    opts: &ParseOptions,
+) -> Result<AgileEncryptionInfo> {
     if encryption_info_stream.len() < 8 {
         return Err(OffCryptoError::MissingRequiredElement {
             element: "EncryptionInfoHeader".to_string(),
@@ -167,7 +181,8 @@ pub fn parse_agile_encryption_info_stream(encryption_info_stream: &[u8]) -> Resu
         return Err(OffCryptoError::UnsupportedEncryptionVersion { major, minor });
     }
 
-    let xml = decode_agile_xml(&encryption_info_stream[8..])?;
+    let xml_bytes = extract_encryption_info_xml(encryption_info_stream, opts)?;
+    let xml = decode_agile_xml(xml_bytes)?;
     let doc = roxmltree::Document::parse(xml)?;
 
     let key_data_node = doc
@@ -192,7 +207,7 @@ pub fn parse_agile_encryption_info_stream(encryption_info_stream: &[u8]) -> Resu
     )?;
 
     let key_data = AgileKeyData {
-        salt_value: decode_b64_attr("keyData", key_data_node, "saltValue")?,
+        salt_value: decode_b64_attr("keyData", key_data_node, "saltValue", opts)?,
         hash_algorithm: parse_hash_algorithm_attr("keyData", key_data_node, "hashAlgorithm")?,
         cipher_algorithm: key_data_cipher_algorithm,
         cipher_chaining: key_data_cipher_chaining,
@@ -206,8 +221,13 @@ pub fn parse_agile_encryption_info_stream(encryption_info_stream: &[u8]) -> Resu
         .find(|n| n.is_element() && n.tag_name().name() == "dataIntegrity")
         .map(|node| -> Result<AgileDataIntegrity> {
             Ok(AgileDataIntegrity {
-                encrypted_hmac_key: decode_b64_attr("dataIntegrity", node, "encryptedHmacKey")?,
-                encrypted_hmac_value: decode_b64_attr("dataIntegrity", node, "encryptedHmacValue")?,
+                encrypted_hmac_key: decode_b64_attr("dataIntegrity", node, "encryptedHmacKey", opts)?,
+                encrypted_hmac_value: decode_b64_attr(
+                    "dataIntegrity",
+                    node,
+                    "encryptedHmacValue",
+                    opts,
+                )?,
             })
         })
         .transpose()?;
@@ -247,7 +267,7 @@ pub fn parse_agile_encryption_info_stream(encryption_info_stream: &[u8]) -> Resu
     )?;
 
     let password_key_encryptor = AgilePasswordKeyEncryptor {
-        salt_value: decode_b64_attr("encryptedKey", encrypted_key_node, "saltValue")?,
+        salt_value: decode_b64_attr("encryptedKey", encrypted_key_node, "saltValue", opts)?,
         spin_count: parse_u32_attr("encryptedKey", encrypted_key_node, "spinCount")?,
         hash_algorithm: parse_hash_algorithm_attr("encryptedKey", encrypted_key_node, "hashAlgorithm")?,
         cipher_algorithm: key_encryptor_cipher_algorithm,
@@ -259,13 +279,15 @@ pub fn parse_agile_encryption_info_stream(encryption_info_stream: &[u8]) -> Resu
             "encryptedKey",
             encrypted_key_node,
             "encryptedVerifierHashInput",
+            opts,
         )?,
         encrypted_verifier_hash_value: decode_b64_attr(
             "encryptedKey",
             encrypted_key_node,
             "encryptedVerifierHashValue",
+            opts,
         )?,
-        encrypted_key_value: decode_b64_attr("encryptedKey", encrypted_key_node, "encryptedKeyValue")?,
+        encrypted_key_value: decode_b64_attr("encryptedKey", encrypted_key_node, "encryptedKeyValue", opts)?,
     };
 
     Ok(AgileEncryptionInfo {

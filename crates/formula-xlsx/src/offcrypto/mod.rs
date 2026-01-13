@@ -62,7 +62,8 @@ mod rc4;
 #[allow(unused_imports)]
 pub use agile::{
     decrypt_agile_encrypted_package_stream, decrypt_agile_encrypted_package_stream_with_key,
-    decrypt_agile_keys, parse_agile_encryption_info_stream, AgileDataIntegrity, AgileDecryptedKeys,
+    decrypt_agile_keys, parse_agile_encryption_info_stream,
+    parse_agile_encryption_info_stream_with_options, AgileDataIntegrity, AgileDecryptedKeys,
     AgileEncryptionInfo, AgileKeyData, AgilePasswordKeyEncryptor,
 };
 
@@ -83,7 +84,8 @@ pub use crypto::{
 
 #[allow(unused_imports)]
 pub use encryption_info::{
-    parse_agile_encryption_info_xml, AgileEncryptionInfoXml, EncryptionInfoWarning,
+    decode_base64_field_limited, extract_encryption_info_xml, parse_agile_encryption_info_xml,
+    AgileEncryptionInfoXml, EncryptionInfoWarning, ParseOptions,
     PasswordKeyEncryptor, KEY_ENCRYPTOR_URI_CERTIFICATE, KEY_ENCRYPTOR_URI_PASSWORD,
 };
 

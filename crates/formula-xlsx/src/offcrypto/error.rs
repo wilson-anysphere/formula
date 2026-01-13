@@ -44,6 +44,17 @@ pub enum OffCryptoError {
         source: std::io::Error,
     },
 
+    // --- Size / DoS limits --------------------------------------------------------------------
+    #[error("EncryptionInfo XML is too large ({len} bytes; max {max} bytes)")]
+    EncryptionInfoTooLarge { len: usize, max: usize },
+
+    #[error("EncryptionInfo field `{field}` is too large ({len} bytes; max {max} bytes)")]
+    FieldTooLarge {
+        field: &'static str,
+        len: usize,
+        max: usize,
+    },
+
     // --- EncryptionInfo XML parsing ------------------------------------------------------------
     #[error("EncryptionInfo XML is not valid UTF-8: {source}")]
     EncryptionInfoXmlNotUtf8 {

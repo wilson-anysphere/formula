@@ -1,9 +1,5 @@
 //! MS-OFFCRYPTO Agile decryption for OOXML `EncryptedPackage`.
 
-use base64::engine::general_purpose::{
-    STANDARD as BASE64_STANDARD, STANDARD_NO_PAD as BASE64_STANDARD_NO_PAD,
-};
-use base64::Engine as _;
 use digest::Digest as _;
 use hmac::{Hmac, Mac};
 
@@ -12,6 +8,7 @@ use super::crypto::{
     derive_iv, derive_key, hash_password, segment_block_key, HashAlgorithm, HMAC_KEY_BLOCK,
     HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
 };
+use super::encryption_info::{decode_base64_field_limited, extract_encryption_info_xml, ParseOptions};
 use super::error::{OffCryptoError, Result};
 
 const SEGMENT_SIZE: usize = 0x1000;
@@ -346,23 +343,20 @@ fn parse_encrypted_package_stream(encrypted_package: &[u8]) -> Result<(usize, &[
 }
 
 fn parse_agile_encryption_info(encryption_info: &[u8]) -> Result<AgileEncryptionInfo> {
-    let xml_start = encryption_info
-        .iter()
-        .position(|b| *b == b'<')
-        .ok_or_else(|| OffCryptoError::MissingRequiredElement {
-            element: "encryption".to_string(),
-        })?;
-
-    if encryption_info.len() < 4 {
-        return Err(OffCryptoError::UnsupportedEncryptionVersion { major: 0, minor: 0 });
+    let opts = ParseOptions::default();
+    if encryption_info.len() < 8 {
+        return Err(OffCryptoError::MissingRequiredElement {
+            element: "EncryptionInfoHeader".to_string(),
+        });
     }
+
     let major = u16::from_le_bytes([encryption_info[0], encryption_info[1]]);
     let minor = u16::from_le_bytes([encryption_info[2], encryption_info[3]]);
-    if major != 4 || minor != 4 {
+    if (major, minor) != (4, 4) {
         return Err(OffCryptoError::UnsupportedEncryptionVersion { major, minor });
     }
 
-    let xml_bytes = encryption_info.get(xml_start..).unwrap_or_default();
+    let xml_bytes = extract_encryption_info_xml(encryption_info, &opts)?;
     let xml = std::str::from_utf8(xml_bytes)?;
     let doc = roxmltree::Document::parse(xml)?;
 
@@ -397,9 +391,9 @@ fn parse_agile_encryption_info(encryption_info: &[u8]) -> Result<AgileEncryption
             element: "encryptedKey".to_string(),
         })?;
 
-    let key_data = parse_key_data(key_data_node)?;
-    let data_integrity = parse_data_integrity(data_integrity_node)?;
-    let password_key = parse_password_key_encryptor(encrypted_key_node)?;
+    let key_data = parse_key_data(key_data_node, &opts)?;
+    let data_integrity = parse_data_integrity(data_integrity_node, &opts)?;
+    let password_key = parse_password_key_encryptor(encrypted_key_node, &opts)?;
 
     Ok(AgileEncryptionInfo {
         key_data,
@@ -408,11 +402,11 @@ fn parse_agile_encryption_info(encryption_info: &[u8]) -> Result<AgileEncryption
     })
 }
 
-fn parse_key_data(node: roxmltree::Node<'_, '_>) -> Result<KeyData> {
+fn parse_key_data(node: roxmltree::Node<'_, '_>, opts: &ParseOptions) -> Result<KeyData> {
     validate_cipher_settings(node)?;
 
     Ok(KeyData {
-        salt_value: parse_base64_attr(node, "saltValue")?,
+        salt_value: parse_base64_attr(node, "saltValue", opts)?,
         hash_algorithm: parse_hash_algorithm(node, "hashAlgorithm")?,
         block_size: parse_usize_attr(node, "blockSize")?,
         key_bits: parse_usize_attr(node, "keyBits")?,
@@ -420,26 +414,29 @@ fn parse_key_data(node: roxmltree::Node<'_, '_>) -> Result<KeyData> {
     })
 }
 
-fn parse_data_integrity(node: roxmltree::Node<'_, '_>) -> Result<DataIntegrity> {
+fn parse_data_integrity(node: roxmltree::Node<'_, '_>, opts: &ParseOptions) -> Result<DataIntegrity> {
     Ok(DataIntegrity {
-        encrypted_hmac_key: parse_base64_attr(node, "encryptedHmacKey")?,
-        encrypted_hmac_value: parse_base64_attr(node, "encryptedHmacValue")?,
+        encrypted_hmac_key: parse_base64_attr(node, "encryptedHmacKey", opts)?,
+        encrypted_hmac_value: parse_base64_attr(node, "encryptedHmacValue", opts)?,
     })
 }
 
-fn parse_password_key_encryptor(node: roxmltree::Node<'_, '_>) -> Result<PasswordKeyEncryptor> {
+fn parse_password_key_encryptor(
+    node: roxmltree::Node<'_, '_>,
+    opts: &ParseOptions,
+) -> Result<PasswordKeyEncryptor> {
     validate_cipher_settings(node)?;
 
     Ok(PasswordKeyEncryptor {
-        salt_value: parse_base64_attr(node, "saltValue")?,
+        salt_value: parse_base64_attr(node, "saltValue", opts)?,
         hash_algorithm: parse_hash_algorithm(node, "hashAlgorithm")?,
         spin_count: parse_u32_attr(node, "spinCount")?,
         block_size: parse_usize_attr(node, "blockSize")?,
         key_bits: parse_usize_attr(node, "keyBits")?,
         hash_size: parse_usize_attr(node, "hashSize")?,
-        encrypted_verifier_hash_input: parse_base64_attr(node, "encryptedVerifierHashInput")?,
-        encrypted_verifier_hash_value: parse_base64_attr(node, "encryptedVerifierHashValue")?,
-        encrypted_key_value: parse_base64_attr(node, "encryptedKeyValue")?,
+        encrypted_verifier_hash_input: parse_base64_attr(node, "encryptedVerifierHashInput", opts)?,
+        encrypted_verifier_hash_value: parse_base64_attr(node, "encryptedVerifierHashValue", opts)?,
+        encrypted_key_value: parse_base64_attr(node, "encryptedKeyValue", opts)?,
     })
 }
 
@@ -568,40 +565,13 @@ fn parse_u32_attr(node: roxmltree::Node<'_, '_>, attr: &str) -> Result<u32> {
         })
 }
 
-fn parse_base64_attr(node: roxmltree::Node<'_, '_>, attr: &str) -> Result<Vec<u8>> {
+fn parse_base64_attr(
+    node: roxmltree::Node<'_, '_>,
+    attr: &'static str,
+    opts: &ParseOptions,
+) -> Result<Vec<u8>> {
     let val = required_attr(node, attr)?;
-    decode_b64_attr(val, node.tag_name().name(), attr)
-}
-
-fn decode_b64_attr(value: &str, element: &str, attr: &str) -> Result<Vec<u8>> {
-    let bytes = value.as_bytes();
-
-    // Most inputs are already compact; only allocate if we see whitespace.
-    let mut cleaned: Option<Vec<u8>> = None;
-    for (idx, &b) in bytes.iter().enumerate() {
-        if matches!(b, b'\r' | b'\n' | b'\t' | b' ') {
-            let mut out = Vec::with_capacity(bytes.len());
-            out.extend_from_slice(&bytes[..idx]);
-            for &b2 in &bytes[idx..] {
-                if !matches!(b2, b'\r' | b'\n' | b'\t' | b' ') {
-                    out.push(b2);
-                }
-            }
-            cleaned = Some(out);
-            break;
-        }
-    }
-
-    let input = cleaned.as_deref().unwrap_or(bytes);
-    let decoded = BASE64_STANDARD
-        .decode(input)
-        .or_else(|_| BASE64_STANDARD_NO_PAD.decode(input))
-        .map_err(|source| OffCryptoError::Base64Decode {
-            element: element.to_string(),
-            attr: attr.to_string(),
-            source,
-        })?;
-    Ok(decoded)
+    decode_base64_field_limited(node.tag_name().name(), attr, val, opts)
 }
 
 fn parse_hash_algorithm(node: roxmltree::Node<'_, '_>, attr: &str) -> Result<HashAlgorithm> {
