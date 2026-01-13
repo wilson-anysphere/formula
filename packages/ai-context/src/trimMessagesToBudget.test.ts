@@ -119,4 +119,170 @@ describe("trimMessagesToBudget", () => {
     abortController.abort();
     await expect(promise).rejects.toMatchObject({ name: "AbortError" });
   });
+
+  it("preserves tool-call coherence (no orphan tool messages) when trimming", async () => {
+    const estimator = createHeuristicTokenEstimator({ charsPerToken: 1, tokensPerMessageOverhead: 0 });
+
+    const messages = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "older-" + "x".repeat(200) },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "call-1", name: "lookup", arguments: { q: "foo" } }]
+      },
+      { role: "tool", toolCallId: "call-1", content: "tool-result" },
+      { role: "assistant", content: "used tool output" },
+      { role: "user", content: "latest question" }
+    ];
+
+    const trimmed = await trimMessagesToBudget({
+      messages,
+      maxTokens: 220,
+      reserveForOutputTokens: 0,
+      estimator,
+      keepLastMessages: 3,
+      summaryMaxTokens: 50
+    });
+
+    expect(trimmed.some((m) => m.role === "tool")).toBe(true);
+
+    // Any kept tool message must be preceded by an assistant toolCalls message.
+    for (let i = 0; i < trimmed.length; i += 1) {
+      const msg = trimmed[i];
+      if (msg.role !== "tool") continue;
+
+      let j = i - 1;
+      while (j >= 0 && trimmed[j]?.role === "tool") j -= 1;
+      expect(j).toBeGreaterThanOrEqual(0);
+      expect(trimmed[j]).toMatchObject({ role: "assistant" });
+      expect(Array.isArray(trimmed[j].toolCalls)).toBe(true);
+      expect(trimmed[j].toolCalls.map((c: any) => c.id)).toContain(msg.toolCallId);
+    }
+
+    // Any kept assistant toolCalls message should have its tool messages kept when present.
+    for (let i = 0; i < trimmed.length; i += 1) {
+      const msg = trimmed[i];
+      if (msg.role !== "assistant" || !Array.isArray(msg.toolCalls) || msg.toolCalls.length === 0) continue;
+      const expectedIds = new Set(msg.toolCalls.map((c: any) => c.id));
+      const seen = new Set<string>();
+      for (let j = i + 1; j < trimmed.length; j += 1) {
+        if (trimmed[j].role !== "tool") break;
+        seen.add(trimmed[j].toolCallId);
+      }
+      for (const id of expectedIds) expect(seen.has(id)).toBe(true);
+    }
+
+    expect(estimator.estimateMessagesTokens(trimmed)).toBeLessThanOrEqual(220);
+  });
+
+  it("can disable tool-call coherence (preserveToolCallPairs=false)", async () => {
+    const estimator = createHeuristicTokenEstimator({ charsPerToken: 1, tokensPerMessageOverhead: 0 });
+
+    const messages = [
+      { role: "system", content: "sys" },
+      {
+        role: "assistant",
+        content: "",
+        // Large tool call payload so it gets dropped before the tool message under tight budgets.
+        toolCalls: [{ id: "call-1", name: "lookup", arguments: { q: "x".repeat(200) } }]
+      },
+      { role: "tool", toolCallId: "call-1", content: "tool-result" },
+      { role: "assistant", content: "ok" },
+      { role: "user", content: "latest" }
+    ];
+
+    const trimmed = await trimMessagesToBudget({
+      messages,
+      maxTokens: 120,
+      reserveForOutputTokens: 0,
+      estimator,
+      keepLastMessages: 10,
+      summaryMaxTokens: 30,
+      preserveToolCallPairs: false
+    });
+
+    // With tool-call pairing disabled, we may keep a tool message even if its originating assistant
+    // toolCalls message was dropped into the summary.
+    const toolIdx = trimmed.findIndex((m) => m.role === "tool");
+    expect(toolIdx).toBeGreaterThanOrEqual(0);
+    const hasAssistantToolCalls = trimmed.some((m) => m.role === "assistant" && Array.isArray(m.toolCalls) && m.toolCalls.length > 0);
+    expect(hasAssistantToolCalls).toBe(false);
+  });
+
+  it("summarizes a dropped tool-call group instead of keeping a partial group under tight budgets", async () => {
+    const estimator = createHeuristicTokenEstimator({ charsPerToken: 1, tokensPerMessageOverhead: 0 });
+
+    const messages = [
+      { role: "system", content: "sys" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "call-1", name: "lookup", arguments: { q: "x".repeat(200) } }]
+      },
+      { role: "tool", toolCallId: "call-1", content: "tool-result" },
+      { role: "assistant", content: "after tool" },
+      { role: "user", content: "latest" }
+    ];
+
+    const trimmed = await trimMessagesToBudget({
+      messages,
+      maxTokens: 220,
+      reserveForOutputTokens: 0,
+      estimator,
+      keepLastMessages: 10,
+      summaryMaxTokens: 170
+    });
+
+    // Tool call group should be summarized away, not partially kept.
+    expect(trimmed.some((m) => m.role === "tool")).toBe(false);
+    expect(trimmed.some((m) => m.role === "assistant" && Array.isArray(m.toolCalls) && m.toolCalls.length > 0)).toBe(false);
+
+    const summary = trimmed.find((m) => m.role === "system" && typeof m.content === "string" && m.content.startsWith(CONTEXT_SUMMARY_MARKER));
+    expect(summary).toBeTruthy();
+    expect(String(summary?.content)).toContain("tool_calls");
+  });
+
+  it("dropToolMessagesFirst prefers dropping completed tool-call groups to keep more chat context", async () => {
+    const estimator = createHeuristicTokenEstimator({ charsPerToken: 1, tokensPerMessageOverhead: 0 });
+
+    const messages = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "u1" },
+      { role: "assistant", content: "a1" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "call-1", name: "lookup", arguments: { q: "x".repeat(250) } }]
+      },
+      { role: "tool", toolCallId: "call-1", content: "y".repeat(250) },
+      { role: "assistant", content: "a2" },
+      { role: "user", content: "u2" }
+    ];
+
+    const without = await trimMessagesToBudget({
+      messages,
+      maxTokens: 200,
+      reserveForOutputTokens: 0,
+      estimator,
+      keepLastMessages: 50,
+      summaryMaxTokens: 50
+    });
+
+    const withDropFirst = await trimMessagesToBudget({
+      messages,
+      maxTokens: 200,
+      reserveForOutputTokens: 0,
+      estimator,
+      keepLastMessages: 50,
+      summaryMaxTokens: 50,
+      dropToolMessagesFirst: true
+    });
+
+    // Without dropToolMessagesFirst, we should lose the early chat context due to the expensive tool messages.
+    expect(without.some((m) => m.role === "user" && m.content === "u1")).toBe(false);
+    // With dropToolMessagesFirst, tool call group should be summarized/dropped first, preserving early chat context.
+    expect(withDropFirst.some((m) => m.role === "user" && m.content === "u1")).toBe(true);
+    expect(withDropFirst.some((m) => m.role === "tool")).toBe(false);
+  });
 });

@@ -21,6 +21,90 @@ function isGeneratedSummaryMessage(message) {
 
 /**
  * @param {any} message
+ */
+function isAssistantToolCallMessage(message) {
+  return (
+    message &&
+    typeof message === "object" &&
+    message.role === "assistant" &&
+    Array.isArray(message.toolCalls) &&
+    message.toolCalls.length > 0
+  );
+}
+
+/**
+ * @param {any} message
+ */
+function isToolMessage(message) {
+  return message && typeof message === "object" && message.role === "tool";
+}
+
+/**
+ * Find the bounds of a tool-call group containing the message at `idx`.
+ *
+ * A group is:
+ * - An assistant message with `toolCalls`, followed by 0+ contiguous tool messages.
+ *
+ * Tool messages are assumed to immediately follow their originating assistant tool call.
+ *
+ * @param {any[]} messages
+ * @param {number} idx
+ * @returns {{ start: number, end: number } | null}
+ */
+function getToolCallGroupBounds(messages, idx) {
+  if (!Array.isArray(messages) || messages.length === 0) return null;
+  if (!Number.isInteger(idx) || idx < 0 || idx >= messages.length) return null;
+
+  const msg = messages[idx];
+  if (isAssistantToolCallMessage(msg)) {
+    let end = idx;
+    for (let i = idx + 1; i < messages.length; i += 1) {
+      const next = messages[i];
+      if (!isToolMessage(next)) break;
+      end = i;
+    }
+    return { start: idx, end };
+  }
+
+  if (isToolMessage(msg)) {
+    // Rewind to the start of the contiguous tool block.
+    let j = idx;
+    while (j - 1 >= 0 && isToolMessage(messages[j - 1])) j -= 1;
+    const assistantIdx = j - 1;
+    if (assistantIdx >= 0 && isAssistantToolCallMessage(messages[assistantIdx])) {
+      let end = j;
+      for (let i = j + 1; i < messages.length; i += 1) {
+        const next = messages[i];
+        if (!isToolMessage(next)) break;
+        end = i;
+      }
+      return { start: assistantIdx, end };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * If `startIdx` points into the middle of a tool-call group (i.e. at a tool message),
+ * rewind to the group start so we don't keep orphaned tool messages.
+ *
+ * @param {any[]} messages
+ * @param {number} startIdx
+ */
+function rewindStartIdxForToolCallPairs(messages, startIdx) {
+  if (!Array.isArray(messages) || messages.length === 0) return startIdx;
+  if (!Number.isInteger(startIdx) || startIdx <= 0 || startIdx >= messages.length) return startIdx;
+
+  const bounds = getToolCallGroupBounds(messages, startIdx);
+  if (!bounds) return startIdx;
+  // `startIdx` is in a tool message block; move it to the start of the group.
+  if (bounds.start < startIdx) return bounds.start;
+  return startIdx;
+}
+
+/**
+ * @param {any} message
  * @param {number} maxTokens
  * @param {import("./tokenBudget.js").TokenEstimator} estimator
  * @param {AbortSignal | undefined} signal
@@ -96,44 +180,115 @@ function defaultSummarize(messages, signal) {
  * @param {number} budgetTokens
  * @param {import("./tokenBudget.js").TokenEstimator} estimator
  * @param {AbortSignal | undefined} signal
+ * @param {{ preserveToolCallPairs?: boolean } | undefined} [options]
  * @returns {{ kept: any[], dropped: any[] }}
  */
-function takeTailWithinBudget(messages, budgetTokens, estimator, signal) {
+function takeTailWithinBudget(messages, budgetTokens, estimator, signal, options) {
   throwIfAborted(signal);
   if (!Array.isArray(messages) || messages.length === 0) return { kept: [], dropped: [] };
 
-  const last = messages[messages.length - 1];
   if (budgetTokens <= 0) {
     return { kept: [], dropped: messages.slice() };
   }
 
+  const preserveToolCallPairs = options?.preserveToolCallPairs !== false;
+
+  if (!preserveToolCallPairs) {
+    let remaining = budgetTokens;
+    /** @type {any[]} */
+    const keptReversed = [];
+
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      throwIfAborted(signal);
+      const msg = messages[i];
+      const tokens = estimator.estimateMessageTokens(msg);
+
+      if (tokens <= remaining) {
+        keptReversed.push(msg);
+        remaining -= tokens;
+        continue;
+      }
+
+      if (keptReversed.length === 0) {
+        // Always keep the most recent message, but trim its content to fit.
+        keptReversed.push(trimMessageToTokens(msg, remaining, estimator, signal));
+        remaining = 0;
+      }
+      break;
+    }
+
+    throwIfAborted(signal);
+    const kept = keptReversed.reverse();
+    const droppedCount = Math.max(0, messages.length - kept.length);
+    const dropped = droppedCount > 0 ? messages.slice(0, droppedCount) : [];
+    return { kept, dropped };
+  }
+
   let remaining = budgetTokens;
   /** @type {any[]} */
-  const keptReversed = [];
+  const keptSegmentsReversed = [];
 
+  let keptStartIdx = messages.length;
+
+  // Walk backwards, but treat assistant(toolCalls)+tool* as an atomic group.
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     throwIfAborted(signal);
-    const msg = messages[i];
-    const tokens = estimator.estimateMessageTokens(msg);
+    const group = getToolCallGroupBounds(messages, i);
+    const groupStart = group?.start ?? i;
+    const groupEnd = group?.end ?? i;
+    const slice = messages.slice(groupStart, groupEnd + 1);
+    const tokens = estimator.estimateMessagesTokens(slice);
 
     if (tokens <= remaining) {
-      keptReversed.push(msg);
+      keptSegmentsReversed.push(slice);
+      keptStartIdx = Math.min(keptStartIdx, groupStart);
       remaining -= tokens;
+      // Skip over the group we just consumed.
+      i = groupStart;
       continue;
     }
 
-    if (keptReversed.length === 0) {
-      // Always keep the most recent message, but trim its content to fit.
-      keptReversed.push(trimMessageToTokens(msg, remaining, estimator, signal));
-      remaining = 0;
+    if (keptSegmentsReversed.length === 0) {
+      // Always keep something. For tool-call groups, we try to keep the full group
+      // by aggressively trimming message *contents* (but not tool call metadata).
+      if (group) {
+        // Compute the minimum token cost of keeping the group structure with empty content.
+        const emptyContentGroup = slice.map((m) => (m && typeof m === "object" ? { ...m, content: "" } : m));
+        const minTokens = estimator.estimateMessagesTokens(emptyContentGroup);
+        if (minTokens <= remaining) {
+          const fullTokensPerMsg = slice.map((m) => estimator.estimateMessageTokens(m));
+          const minTokensPerMsg = emptyContentGroup.map((m) => estimator.estimateMessageTokens(m));
+          let extra = remaining - minTokens;
+          /** @type {number[]} */
+          const extraAlloc = new Array(slice.length).fill(0);
+          for (let j = slice.length - 1; j >= 0; j -= 1) {
+            throwIfAborted(signal);
+            const delta = Math.max(0, fullTokensPerMsg[j] - minTokensPerMsg[j]);
+            const take = Math.min(delta, extra);
+            extraAlloc[j] = take;
+            extra -= take;
+          }
+          const trimmedGroup = slice.map((m, idx) =>
+            trimMessageToTokens(m, minTokensPerMsg[idx] + extraAlloc[idx], estimator, signal)
+          );
+          keptSegmentsReversed.push(trimmedGroup);
+          keptStartIdx = groupStart;
+          remaining = 0;
+        }
+      } else {
+        keptSegmentsReversed.push([trimMessageToTokens(messages[i], remaining, estimator, signal)]);
+        keptStartIdx = i;
+        remaining = 0;
+      }
     }
     break;
   }
 
   throwIfAborted(signal);
-  const kept = keptReversed.reverse();
-  const droppedCount = Math.max(0, messages.length - kept.length);
-  const dropped = droppedCount > 0 ? messages.slice(0, droppedCount) : [];
+  const kept = keptSegmentsReversed
+    .reverse()
+    .flatMap((segment) => segment);
+  const dropped = keptStartIdx > 0 ? messages.slice(0, keptStartIdx) : [];
   return { kept, dropped };
 }
 
@@ -158,6 +313,20 @@ function takeTailWithinBudget(messages, budgetTokens, estimator, signal) {
  *   summaryMaxTokens?: number,
  *   summarize?: ((messagesToSummarize: any[]) => (string | any | null | undefined) | Promise<string | any | null | undefined>) | null,
  *   summaryRole?: "system" | "assistant"
+ *   /**
+ *    * When true (default), preserve tool-call coherence:
+ *    * - Never keep a `role: "tool"` message without also keeping the assistant message that
+ *    *   issued the matching tool call.
+ *    * - Never keep an assistant message with `toolCalls` without also keeping the subsequent
+ *    *   `role: "tool"` messages (when present).
+ *    *\/
+ *   preserveToolCallPairs?: boolean,
+ *   /**
+ *    * When true, prefer dropping completed tool-call groups (assistant(toolCalls)+tool*)
+ *    * before dropping other messages. This can help retain more conversational context when
+ *    * tool outputs are large.
+ *    *\/
+ *   dropToolMessagesFirst?: boolean,
  *   signal?: AbortSignal
  * }} params
  * @returns {Promise<any[]>}
@@ -172,6 +341,8 @@ export async function trimMessagesToBudget(params) {
   const keepLastMessages = Number.isFinite(params.keepLastMessages) ? params.keepLastMessages : DEFAULT_KEEP_LAST_MESSAGES;
   const summaryMaxTokens = Number.isFinite(params.summaryMaxTokens) ? params.summaryMaxTokens : DEFAULT_SUMMARY_MAX_TOKENS;
   const summaryRole = params.summaryRole ?? "system";
+  const preserveToolCallPairs = params.preserveToolCallPairs !== false;
+  const dropToolMessagesFirst = params.dropToolMessagesFirst === true;
   const summarize =
     params.summarize === null ? null : params.summarize ?? ((messagesToSummarize) => defaultSummarize(messagesToSummarize, signal));
 
@@ -218,9 +389,10 @@ export async function trimMessagesToBudget(params) {
 
   // Enforce a count cap on non-system messages (prevents unbounded growth even when
   // many short messages would still fit under the token budget).
-  const keepStart = Math.max(0, nonSummaryOtherMessages.length - Math.max(0, keepLastMessages));
+  let keepStart = Math.max(0, nonSummaryOtherMessages.length - Math.max(0, keepLastMessages));
+  if (preserveToolCallPairs) keepStart = rewindStartIdxForToolCallPairs(nonSummaryOtherMessages, keepStart);
   const olderByCount = nonSummaryOtherMessages.slice(0, keepStart);
-  const recentByCount = nonSummaryOtherMessages.slice(keepStart);
+  const recentByCountRaw = nonSummaryOtherMessages.slice(keepStart);
 
   let summaryBudget = summarize ? Math.min(summaryMaxTokens, otherBudget) : 0;
   let recentBudget = Math.max(0, otherBudget - summaryBudget);
@@ -231,8 +403,40 @@ export async function trimMessagesToBudget(params) {
     recentBudget = otherBudget;
   }
 
-  const { kept: recentKept, dropped: droppedFromRecent } = takeTailWithinBudget(recentByCount, recentBudget, estimator, signal);
-  const toSummarize = [...generatedSummaries, ...olderByCount, ...droppedFromRecent];
+  /** @type {any[]} */
+  let droppedToolGroups = [];
+  let recentByCount = recentByCountRaw;
+
+  if (preserveToolCallPairs && dropToolMessagesFirst && recentByCount.length > 0 && recentBudget > 0) {
+    // Prefer dropping completed tool-call groups (assistant(toolCalls)+tool*) before other messages.
+    // Only drop groups that are followed by at least one non-tool message, so we don't
+    // remove the tool output the model is about to respond to.
+    let recentTokens = estimator.estimateMessagesTokens(recentByCount);
+    while (recentTokens > recentBudget) {
+      throwIfAborted(signal);
+      let removed = false;
+      for (let i = 0; i < recentByCount.length; i += 1) {
+        throwIfAborted(signal);
+        if (!isAssistantToolCallMessage(recentByCount[i])) continue;
+        const group = getToolCallGroupBounds(recentByCount, i);
+        if (!group) continue;
+        // Skip groups that reach the end (likely in-progress tool call).
+        if (group.end >= recentByCount.length - 1) continue;
+        const groupMessages = recentByCount.slice(group.start, group.end + 1);
+        droppedToolGroups.push(...groupMessages);
+        recentByCount = [...recentByCount.slice(0, group.start), ...recentByCount.slice(group.end + 1)];
+        recentTokens = estimator.estimateMessagesTokens(recentByCount);
+        removed = true;
+        break;
+      }
+      if (!removed) break;
+    }
+  }
+
+  const { kept: recentKept, dropped: droppedFromRecent } = takeTailWithinBudget(recentByCount, recentBudget, estimator, signal, {
+    preserveToolCallPairs,
+  });
+  const toSummarize = [...generatedSummaries, ...olderByCount, ...droppedToolGroups, ...droppedFromRecent];
 
   /** @type {any[]} */
   const out = [...systemTrimmed];
@@ -259,7 +463,9 @@ export async function trimMessagesToBudget(params) {
   while (out.length > 0 && estimator.estimateMessagesTokens(out) > allowedPromptTokens) {
     throwIfAborted(signal);
     // Preserve all system messages; remove the first non-system if possible.
-    const firstNonSystemIdx = out.findIndex((m) => !(m && typeof m === "object" && m.role === "system" && !isGeneratedSummaryMessage(m)));
+    const firstNonSystemIdx = out.findIndex(
+      (m) => !(m && typeof m === "object" && m.role === "system" && !isGeneratedSummaryMessage(m))
+    );
     if (firstNonSystemIdx === -1) {
       // Only system messages remain; truncate the last one.
       const idx = out.length - 1;
@@ -271,12 +477,21 @@ export async function trimMessagesToBudget(params) {
       );
       break;
     }
+
+    if (preserveToolCallPairs) {
+      const bounds = getToolCallGroupBounds(out, firstNonSystemIdx);
+      if (bounds) {
+        out.splice(bounds.start, bounds.end - bounds.start + 1);
+        continue;
+      }
+    }
+
     out.splice(firstNonSystemIdx, 1);
   }
 
   // Ensure we never exceed the budget due to unexpected estimator behavior.
   if (estimator.estimateMessagesTokens(out) > allowedPromptTokens) {
-    return takeTailWithinBudget(out, allowedPromptTokens, estimator, signal).kept;
+    return takeTailWithinBudget(out, allowedPromptTokens, estimator, signal, { preserveToolCallPairs }).kept;
   }
 
   throwIfAborted(signal);
