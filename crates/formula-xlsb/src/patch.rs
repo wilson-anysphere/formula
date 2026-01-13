@@ -2266,98 +2266,256 @@ fn parse_fmla_string_cached_value_offsets(payload: &[u8]) -> Result<WideStringOf
     }
 }
 
-fn rgce_references_rgcb(rgce: &[u8]) -> bool {
-    // `rgcb` is a trailing data stream referenced by certain ptgs. Today we only *write* `rgcb`
-    // for `PtgArray` (array constants), so treat it as required when `PtgArray` is present.
-    //
-    // Note: this intentionally does a minimal parse so we don't accidentally match the `0x20`
-    // byte inside token payloads (e.g. row indices).
-    let mut i = 0usize;
-    while i < rgce.len() {
-        let ptg = rgce[i];
-        i += 1;
-        match ptg {
-            // PtgArray (any class)
-            0x20 | 0x40 | 0x60 => return true,
+/// Best-effort check for whether an `rgce` token stream references trailing `rgcb` bytes.
+///
+/// XLSB stores a primary formula token stream (`rgce`) and an optional trailing payload (`rgcb`).
+/// Some ptgs (notably `PtgArray`) reference data stored in `rgcb`.
+///
+/// This is used by the worksheet patcher as a minimal safety check: if a caller replaces `rgce`
+/// bytes and the formula references `rgcb`, they must supply the corresponding `rgcb` bytes.
+///
+/// Note: This intentionally does a minimal token-size parse so we don't accidentally match the
+/// `0x20` `PtgArray` opcode inside unrelated token payloads (e.g. row indices).
+#[doc(hidden)]
+pub fn rgce_references_rgcb(rgce: &[u8]) -> bool {
+    // Today we only *write* `rgcb` for `PtgArray` (array constants), so treat it as required when
+    // `PtgArray` is present.
 
-            // Binary operators and simple operators with no payload.
-            0x03..=0x16 | 0x2F => {}
+    fn has_remaining(buf: &[u8], i: usize, needed: usize) -> bool {
+        buf.len().saturating_sub(i) >= needed
+    }
 
-            // PtgStr: [cch: u16][utf16 chars...]
-            0x17 => {
-                if rgce.len().saturating_sub(i) < 2 {
-                    return false;
-                }
-                let cch = u16::from_le_bytes([rgce[i], rgce[i + 1]]) as usize;
-                i += 2;
-                let byte_len = match cch.checked_mul(2) {
-                    Some(v) => v,
-                    None => return false,
-                };
-                if rgce.len().saturating_sub(i) < byte_len {
-                    return false;
-                }
-                i += byte_len;
-            }
+    // Some ptgs (PtgMem*) embed a nested token stream of known length (`cce`). Scan those
+    // sub-streams as well so we can detect `PtgArray` even when it appears inside the mem payload.
+    let mut stack: Vec<(&[u8], usize)> = vec![(rgce, 0)];
 
-            // PtgAttr: [grbit: u8][wAttr: u16] + optional jump table for tAttrChoose.
-            0x19 => {
-                if rgce.len().saturating_sub(i) < 3 {
-                    return false;
-                }
-                let grbit = rgce[i];
-                let w_attr = u16::from_le_bytes([rgce[i + 1], rgce[i + 2]]) as usize;
-                i += 3;
+    while let Some((buf, mut i)) = stack.pop() {
+        while i < buf.len() {
+            let ptg = buf[i];
+            i += 1;
+            match ptg {
+                // PtgArray (any class)
+                0x20 | 0x40 | 0x60 => return true,
 
-                const T_ATTR_CHOOSE: u8 = 0x04;
-                if grbit & T_ATTR_CHOOSE != 0 {
-                    let needed = match w_attr.checked_mul(2) {
+                // Binary operators and simple operators with no payload.
+                0x03..=0x16 | 0x2F => {}
+
+                // PtgStr: [cch: u16][utf16 chars...]
+                0x17 => {
+                    if !has_remaining(buf, i, 2) {
+                        return false;
+                    }
+                    let cch = u16::from_le_bytes([buf[i], buf[i + 1]]) as usize;
+                    i += 2;
+                    let byte_len = match cch.checked_mul(2) {
                         Some(v) => v,
                         None => return false,
                     };
-                    if rgce.len().saturating_sub(i) < needed {
+                    if !has_remaining(buf, i, byte_len) {
                         return false;
                     }
-                    i += needed;
+                    i += byte_len;
                 }
+
+                // PtgExtend / PtgExtendV / PtgExtendA: [etpg: u8][payload...]
+                0x18 | 0x38 | 0x58 => {
+                    if !has_remaining(buf, i, 1) {
+                        return false;
+                    }
+                    let etpg = buf[i];
+                    i += 1;
+                    match etpg {
+                        // etpg=0x19 is the structured reference payload (PtgList).
+                        0x19 => {
+                            if !has_remaining(buf, i, 12) {
+                                return false;
+                            }
+                            i += 12;
+                        }
+                        // Unknown extend subtype: stop scanning to avoid desync/false positives.
+                        _ => return false,
+                    }
+                }
+
+                // PtgAttr: [grbit: u8][wAttr: u16] + optional jump table for tAttrChoose.
+                0x19 => {
+                    if !has_remaining(buf, i, 3) {
+                        return false;
+                    }
+                    let grbit = buf[i];
+                    let w_attr = u16::from_le_bytes([buf[i + 1], buf[i + 2]]) as usize;
+                    i += 3;
+
+                    const T_ATTR_CHOOSE: u8 = 0x04;
+                    if grbit & T_ATTR_CHOOSE != 0 {
+                        let needed = match w_attr.checked_mul(2) {
+                            Some(v) => v,
+                            None => return false,
+                        };
+                        if !has_remaining(buf, i, needed) {
+                            return false;
+                        }
+                        i += needed;
+                    }
+                }
+
+                // PtgErr: [code: u8]
+                0x1C => {
+                    if !has_remaining(buf, i, 1) {
+                        return false;
+                    }
+                    i += 1;
+                }
+                // PtgBool: [b: u8]
+                0x1D => {
+                    if !has_remaining(buf, i, 1) {
+                        return false;
+                    }
+                    i += 1;
+                }
+                // PtgInt: [u16]
+                0x1E => {
+                    if !has_remaining(buf, i, 2) {
+                        return false;
+                    }
+                    i += 2;
+                }
+                // PtgNum: [f64]
+                0x1F => {
+                    if !has_remaining(buf, i, 8) {
+                        return false;
+                    }
+                    i += 8;
+                }
+
+                // PtgFunc: [iftab: u16]
+                0x21 | 0x41 | 0x61 => {
+                    if !has_remaining(buf, i, 2) {
+                        return false;
+                    }
+                    i += 2;
+                }
+                // PtgFuncVar: [argc: u8][iftab: u16]
+                0x22 | 0x42 | 0x62 => {
+                    if !has_remaining(buf, i, 3) {
+                        return false;
+                    }
+                    i += 3;
+                }
+
+                // PtgName: [nameIndex: u32][unused: u16]
+                0x23 | 0x43 | 0x63 => {
+                    if !has_remaining(buf, i, 6) {
+                        return false;
+                    }
+                    i += 6;
+                }
+
+                // PtgRef: [row: u32][col: u16]
+                0x24 | 0x44 | 0x64 => {
+                    if !has_remaining(buf, i, 6) {
+                        return false;
+                    }
+                    i += 6;
+                }
+                // PtgArea: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
+                0x25 | 0x45 | 0x65 => {
+                    if !has_remaining(buf, i, 12) {
+                        return false;
+                    }
+                    i += 12;
+                }
+
+                // PtgMem* tokens: [cce: u16][subexpression bytes...]
+                0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49
+                | 0x69 | 0x2E | 0x4E | 0x6E => {
+                    if !has_remaining(buf, i, 2) {
+                        return false;
+                    }
+                    let cce = u16::from_le_bytes([buf[i], buf[i + 1]]) as usize;
+                    i += 2;
+                    if !has_remaining(buf, i, cce) {
+                        return false;
+                    }
+                    let subexpr = &buf[i..i + cce];
+                    i += cce;
+
+                    // Scan nested stream first, then resume after it.
+                    stack.push((buf, i));
+                    stack.push((subexpr, 0));
+                    break;
+                }
+
+                // PtgRefErr: [row: u32][col: u16]
+                0x2A | 0x4A | 0x6A => {
+                    if !has_remaining(buf, i, 6) {
+                        return false;
+                    }
+                    i += 6;
+                }
+                // PtgAreaErr: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
+                0x2B | 0x4B | 0x6B => {
+                    if !has_remaining(buf, i, 12) {
+                        return false;
+                    }
+                    i += 12;
+                }
+
+                // PtgRefN: [row_off: i32][col_off: i16]
+                0x2C | 0x4C | 0x6C => {
+                    if !has_remaining(buf, i, 6) {
+                        return false;
+                    }
+                    i += 6;
+                }
+                // PtgAreaN: [rowFirst_off: i32][rowLast_off: i32][colFirst_off: i16][colLast_off: i16]
+                0x2D | 0x4D | 0x6D => {
+                    if !has_remaining(buf, i, 12) {
+                        return false;
+                    }
+                    i += 12;
+                }
+
+                // PtgNameX: [ixti: u16][nameIndex: u16]
+                0x39 | 0x59 | 0x79 => {
+                    if !has_remaining(buf, i, 4) {
+                        return false;
+                    }
+                    i += 4;
+                }
+
+                // PtgRef3d: [ixti: u16][row: u32][col: u16]
+                0x3A | 0x5A | 0x7A => {
+                    if !has_remaining(buf, i, 8) {
+                        return false;
+                    }
+                    i += 8;
+                }
+                // PtgArea3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
+                0x3B | 0x5B | 0x7B => {
+                    if !has_remaining(buf, i, 14) {
+                        return false;
+                    }
+                    i += 14;
+                }
+                // PtgRefErr3d: [ixti: u16][row: u32][col: u16]
+                0x3C | 0x5C | 0x7C => {
+                    if !has_remaining(buf, i, 8) {
+                        return false;
+                    }
+                    i += 8;
+                }
+                // PtgAreaErr3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
+                0x3D | 0x5D | 0x7D => {
+                    if !has_remaining(buf, i, 14) {
+                        return false;
+                    }
+                    i += 14;
+                }
+
+                // Unknown ptg: stop scanning to avoid desync/false positives.
+                _ => return false,
             }
-
-            // PtgErr: [code: u8]
-            0x1C => i = i.saturating_add(1),
-            // PtgBool: [b: u8]
-            0x1D => i = i.saturating_add(1),
-            // PtgInt: [u16]
-            0x1E => i = i.saturating_add(2),
-            // PtgNum: [f64]
-            0x1F => i = i.saturating_add(8),
-
-            // PtgFunc: [iftab: u16]
-            0x21 | 0x41 | 0x61 => i = i.saturating_add(2),
-            // PtgFuncVar: [argc: u8][iftab: u16]
-            0x22 | 0x42 | 0x62 => i = i.saturating_add(3),
-
-            // PtgName: [nameIndex: u32][unused: u16]
-            0x23 | 0x43 | 0x63 => i = i.saturating_add(6),
-
-            // PtgRef: [row: u32][col: u16]
-            0x24 | 0x44 | 0x64 => i = i.saturating_add(6),
-            // PtgArea: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
-            0x25 | 0x45 | 0x65 => i = i.saturating_add(12),
-
-            // PtgNameX: [ixti: u16][nameIndex: u16]
-            0x39 | 0x59 | 0x79 => i = i.saturating_add(4),
-
-            // PtgRef3d: [ixti: u16][row: u32][col: u16]
-            0x3A | 0x5A | 0x7A => i = i.saturating_add(8),
-            // PtgArea3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
-            0x3B | 0x5B | 0x7B => i = i.saturating_add(14),
-
-            // Unknown ptg: stop scanning to avoid desync/false positives.
-            _ => return false,
-        }
-
-        if i > rgce.len() {
-            return false;
         }
     }
 

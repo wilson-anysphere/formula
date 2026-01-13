@@ -23,7 +23,7 @@ pub use parser::{
     CalcMode, Cell, CellValue, DefinedName, Dimension, Error, Formula, SheetData, SheetMeta,
     SheetVisibility, WorkbookProperties,
 };
-pub use patch::{patch_sheet_bin, patch_sheet_bin_streaming, CellEdit};
+pub use patch::{patch_sheet_bin, patch_sheet_bin_streaming, rgce_references_rgcb, CellEdit};
 pub use shared_strings::SharedString;
 pub use shared_strings_write::SharedStringsWriter;
 pub use strings::{OpaqueRichText, ParsedXlsbString};
