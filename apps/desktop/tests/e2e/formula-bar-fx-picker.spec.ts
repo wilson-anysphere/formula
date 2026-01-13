@@ -46,8 +46,8 @@ test.describe("formula bar - fx function picker", () => {
       // Picker should close.
       await expect(page.getByTestId("formula-function-picker")).toBeHidden();
 
-      // 4) Assert formula bar text becomes `=SUM()` with cursor inside parens.
-      await expect(formulaInput).toHaveValue("=SUM()");
+      // 4) Assert formula bar text becomes `=SUM(` with cursor after the opening paren.
+      await expect(formulaInput).toHaveValue("=SUM(");
       await expect(formulaInput).toBeFocused();
 
       const selection = await page.evaluate(() => {
@@ -56,7 +56,7 @@ test.describe("formula bar - fx function picker", () => {
       });
       expect(selection).toEqual({ start: 5, end: 5 });
 
-      await page.keyboard.type("1");
+      await page.keyboard.type("1)");
       await expect(formulaInput).toHaveValue("=SUM(1)");
     });
   }
