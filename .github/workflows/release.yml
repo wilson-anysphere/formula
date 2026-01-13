@@ -124,14 +124,6 @@ jobs:
       - name: Install Rust targets (WASM)
         run: rustup target add wasm32-unknown-unknown
 
-      - name: Install Rust targets (macOS universal)
-        if: matrix.platform == 'macos-latest'
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
-
-      - name: Install Rust targets (Windows arm64)
-        if: matrix.platform == 'windows-latest'
-        run: rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc
-
       - name: Install macOS Rust targets (universal build)
         if: runner.os == 'macOS'
         run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
@@ -445,68 +437,48 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob
 
-          # Prefer the universal target output when present (Tauri's universal build writes
-          # to `target/universal-apple-darwin/...`). Fall back to searching common Cargo
-          # target roots so we fail loudly with useful debugging output if layouts change.
+          # Locate the packaged `.app` under the Tauri bundle output directory and verify the
+          # main executable is a universal binary (x86_64 + arm64).
           #
-          # Note: this repo is a Cargo workspace, so building from `apps/desktop/src-tauri`
-          # typically writes to the workspace root `target/` directory (not `src-tauri/target`).
-          search_roots=(
-            target
-            apps/desktop/src-tauri/target
-          )
-          candidates=(
-            target/universal-apple-darwin/release/bundle/macos/Formula.app/Contents/MacOS/formula-desktop
-            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Formula.app/Contents/MacOS/formula-desktop
-          )
-
-          bin_path=""
-          for candidate in "${candidates[@]}"; do
-            if [[ -f "$candidate" ]]; then
-              bin_path="$candidate"
-              break
-            fi
-          done
-
-          if [[ -z "$bin_path" ]]; then
-            for root in "${search_roots[@]}"; do
-              if [[ -d "$root" ]]; then
-                bin_path="$(find "$root" -type f -path "*/universal-apple-darwin/*/Formula.app/Contents/MacOS/formula-desktop" | head -n 1 || true)"
-                if [[ -n "$bin_path" ]]; then
-                  break
-                fi
-              fi
-            done
+          # We look under `apps/desktop/src-tauri/target/**/release/bundle/**` first, but also
+          # fall back to the workspace root `target/` directory (Cargo workspaces often emit
+          # build artifacts there).
+          app_path="$(
+            find apps/desktop/src-tauri/target -type d -path '*/release/bundle/macos/*.app' -print 2>/dev/null | head -n 1 || true
+          )"
+          if [[ -z "$app_path" ]]; then
+            app_path="$(
+              find target -type d -path '*/release/bundle/macos/*.app' -print 2>/dev/null | head -n 1 || true
+            )"
           fi
 
-          if [[ -z "$bin_path" ]]; then
-            for root in "${search_roots[@]}"; do
-              if [[ -d "$root" ]]; then
-                bin_path="$(find "$root" -type f -path "*Formula.app/Contents/MacOS/formula-desktop" | head -n 1 || true)"
-                if [[ -n "$bin_path" ]]; then
-                  break
-                fi
-              fi
-            done
-          fi
-
-          if [[ -z "$bin_path" ]]; then
-            echo "::error::Could not find packaged macOS app binary (expected **/Formula.app/Contents/MacOS/formula-desktop)"
-            echo "Searched under: ${search_roots[*]}"
-            echo "Formula.app bundles found:"
-            for root in "${search_roots[@]}"; do
-              if [[ -d "$root" ]]; then
-                find "$root" -type d -name "Formula.app" -print || true
-              fi
-            done
+          if [[ -z "$app_path" ]]; then
+            echo "::error::No .app bundle found under apps/desktop/src-tauri/target/**/release/bundle/**" >&2
+            find apps/desktop/src-tauri/target -type d -name '*.app' -print 2>/dev/null || true
             exit 1
           fi
 
-          echo "Found packaged app binary: $bin_path"
-          info="$(lipo -info "$bin_path" | tee /dev/stderr)"
+          echo "Found app bundle: $app_path"
+          macos_dir="$app_path/Contents/MacOS"
+          if [[ ! -d "$macos_dir" ]]; then
+            echo "::error::Expected Contents/MacOS directory not found: $macos_dir" >&2
+            find "$app_path/Contents" -maxdepth 2 -print 2>/dev/null || true
+            exit 1
+          fi
 
+          bin_path="$macos_dir/formula-desktop"
+          if [[ ! -f "$bin_path" ]]; then
+            bin_path="$(find "$macos_dir" -maxdepth 1 -type f -print | head -n 1 || true)"
+          fi
+          if [[ -z "$bin_path" || ! -f "$bin_path" ]]; then
+            echo "::error::Could not find app executable under $macos_dir" >&2
+            ls -la "$macos_dir" || true
+            exit 1
+          fi
+
+          echo "Checking architectures for: $bin_path"
+          info="$(lipo -info "$bin_path" | tee /dev/stderr)"
           echo "$info" | grep -q "x86_64" || { echo "::error::macOS binary is missing x86_64 slice"; exit 1; }
           echo "$info" | grep -q "arm64" || { echo "::error::macOS binary is missing arm64 slice"; exit 1; }
 
