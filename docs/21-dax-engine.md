@@ -656,9 +656,10 @@ If a function is not listed here, it is currently unsupported and will evaluate 
 - `SUMMARIZE(tableExpr, Table[GroupCol1], Table[GroupCol2], ...)`  
   (limited: currently only grouping columns are supported; group columns may be on the base table or on
   related tables reachable via a unique active relationship path; it returns a row set of the base table)
-- `SUMMARIZECOLUMNS(Table[GroupCol1], Table[GroupCol2], ...)`  
-  (limited: currently only grouping columns are supported; the engine picks a base table that can reach
-  all grouped tables via active relationships; it returns a row set of that base table)
+- `SUMMARIZECOLUMNS(Table[GroupCol1], Table[GroupCol2], ..., [filterArgs...])`  
+  (limited: supports leading grouping columns plus optional `CALCULATE`-style filter arguments; the
+  engine picks a base table that can reach all grouped tables via active relationships; it returns a
+  row set of that base table; name/expression pairs are not supported yet)
 - `RELATEDTABLE(Table)` (requires row context)
 
 ### Filter modifiers inside `CALCULATE`
