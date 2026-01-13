@@ -222,4 +222,54 @@ describe("ImageBitmapCache", () => {
     expect((bitmapA as any).close).toHaveBeenCalledTimes(1);
     expect((bitmapC as any).close).toHaveBeenCalledTimes(1);
   });
+
+  it("supports disabling caching via maxEntries=0 (still dedupes concurrent requests)", async () => {
+    const bitmap1 = { close: vi.fn() } as unknown as ImageBitmap;
+    const bitmap2 = { close: vi.fn() } as unknown as ImageBitmap;
+
+    let resolve!: (value: ImageBitmap) => void;
+    const pending = new Promise<ImageBitmap>((res) => {
+      resolve = res;
+    });
+
+    const createImageBitmapMock = vi.fn()
+      .mockImplementationOnce(() => pending)
+      .mockImplementationOnce(() => Promise.resolve(bitmap2));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 0 });
+    const entry = createEntry("img_1");
+
+    const p1 = cache.get(entry);
+    const p2 = cache.get(entry);
+    expect(p1).toBe(p2);
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+
+    resolve(bitmap1);
+    await expect(p1).resolves.toBe(bitmap1);
+
+    // Not cached: should re-decode on subsequent get.
+    await expect(cache.get(entry)).resolves.toBe(bitmap2);
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
+
+    // When caching is disabled, the cache should not close bitmaps it doesn't retain.
+    expect((bitmap1 as any).close).not.toHaveBeenCalled();
+    expect((bitmap2 as any).close).not.toHaveBeenCalled();
+  });
+
+  it("allows retry after a failed decode", async () => {
+    const bitmap = { close: vi.fn() } as unknown as ImageBitmap;
+
+    const createImageBitmapMock = vi.fn()
+      .mockImplementationOnce(() => Promise.reject(new Error("decode failed")))
+      .mockImplementationOnce(() => Promise.resolve(bitmap));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 10 });
+    const entry = createEntry("img_1");
+
+    await expect(cache.get(entry)).rejects.toThrow("decode failed");
+    await expect(cache.get(entry)).resolves.toBe(bitmap);
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
+  });
 });
