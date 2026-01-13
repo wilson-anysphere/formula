@@ -68,6 +68,33 @@ test("chunkToText formats object cell values via JSON for stable output", () => 
   assert.match(text, /Meta=\{"foo":"bar"\}/);
 });
 
+test("chunkToText formats Error values with name + message", () => {
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 0 },
+    cells: [[{ v: "Result" }], [{ v: Object.assign(new Error("boom"), { name: "Div0" }) }]],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /Result=Div0: boom/);
+});
+
+test("chunkToText prefers object.text when present", () => {
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 0 },
+    cells: [[{ v: "Notes" }], [{ v: { text: "hello", runs: [{ text: "hello", bold: true }] } }]],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /Notes=hello/);
+  assert.doesNotMatch(text, /runs/);
+});
+
 test("chunkToText detects header rows below a title row and preserves the title as pre-header context", () => {
   const chunk = {
     kind: "dataRegion",
