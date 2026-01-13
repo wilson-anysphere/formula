@@ -18,6 +18,7 @@ import {
 import { PanelIds } from "../panelRegistry.js";
 
 import { QueryEditorPanel } from "./QueryEditorPanel.js";
+import { suggestQueryNextSteps } from "./aiSuggestNextSteps.js";
 
 type Props = {
   getDocumentController: () => any;
@@ -561,6 +562,7 @@ export function QueryEditorPanelContainer(props: Props) {
         onQueryChange={(next) => persistQuery(next)}
         onLoadToSheet={loadToSheet}
         onRefreshNow={refreshNow}
+        onAiSuggestNextSteps={suggestQueryNextSteps}
       />
     </div>
   );
