@@ -1357,7 +1357,13 @@ impl<'a> Lexer<'a> {
             }
 
             // Locale-specific grouping separators inside the integer portion of the literal.
-            if Some(ch) == self.locale.thousands_separator
+            // Note: Some locales (notably fr-FR) commonly use NBSP (U+00A0) as the grouping
+            // separator, but some spreadsheets may contain the narrow no-break space (U+202F)
+            // instead. When configured for either, accept both.
+            let is_thousands_sep = Some(ch) == self.locale.thousands_separator
+                || (self.locale.thousands_separator == Some('\u{00A0}') && ch == '\u{202F}')
+                || (self.locale.thousands_separator == Some('\u{202F}') && ch == '\u{00A0}');
+            if is_thousands_sep
                 && !out.is_empty()
                 && self.peek_next_is_digit()
             {

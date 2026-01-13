@@ -111,6 +111,23 @@ fn canonicalize_and_localize_round_trip_for_fr_fr_and_es_es() {
 }
 
 #[test]
+fn canonicalize_supports_nbsp_thousands_separator_in_fr_fr() {
+    // French Excel commonly uses NBSP (U+00A0) for thousands grouping.
+    let fr = "=SOMME(1\u{00A0}234,56;0,5)";
+    let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
+    assert_eq!(canon, "=SUM(1234.56,0.5)");
+}
+
+#[test]
+fn fr_fr_does_not_treat_ascii_spaces_as_thousands_separators() {
+    // ASCII spaces are still significant for Excel (whitespace / intersection operator) and must
+    // not be silently stripped out of numeric literals.
+    let fr = "=SOMME(1 234,56;0,5)";
+    let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
+    assert_eq!(canon, "=SUM(1 234.56,0.5)");
+}
+
+#[test]
 fn structured_reference_separators_are_not_translated() {
     let canonical = "=SUM(Table1[[#Headers],[Qty]],1)";
     let localized = locale::localize_formula(canonical, &locale::DE_DE).unwrap();

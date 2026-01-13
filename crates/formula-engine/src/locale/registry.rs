@@ -252,8 +252,11 @@ pub static FR_FR: FormulaLocale = FormulaLocale {
         arg_separator: ';',
         array_col_separator: '\\',
         array_row_separator: ';',
-        // Often a space (or non-breaking space) in the UI, but ambiguous in formulas.
-        thousands_separator: None,
+        // French Excel commonly uses a non-breaking space for thousands grouping (e.g. `1 234,56`).
+        //
+        // Unlike an ASCII space, NBSP does not collide with the range intersection operator
+        // (which is represented by a normal space in the formula language).
+        thousands_separator: Some('\u{00A0}'),
     },
     is_rtl: false,
     boolean_true: "VRAI",
