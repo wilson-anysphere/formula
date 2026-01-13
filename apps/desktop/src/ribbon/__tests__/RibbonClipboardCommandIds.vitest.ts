@@ -31,7 +31,10 @@ function renderRibbon(actions: RibbonActions = {}) {
 }
 
 function getMenuItems(container: HTMLElement): HTMLButtonElement[] {
-  const menu = container.querySelector<HTMLElement>(".ribbon-dropdown__menu");
+  // Multiple ribbon dropdowns can be open at once in jsdom because pointerdown
+  // listeners don't fire for `click()` the same way they do in the browser.
+  // Prefer the most recently opened menu (last in DOM order).
+  const menu = Array.from(container.querySelectorAll<HTMLElement>(".ribbon-dropdown__menu")).at(-1) ?? null;
   if (!menu) return [];
   return Array.from(menu.querySelectorAll<HTMLButtonElement>(".ribbon-dropdown__menuitem"));
 }
@@ -102,4 +105,3 @@ describe("Ribbon clipboard command ids", () => {
     act(() => root.unmount());
   });
 });
-
