@@ -40,6 +40,7 @@ import { SheetTabStrip } from "./sheets/SheetTabStrip";
 import { ThemeController } from "./theme/themeController.js";
 
 import { createRibbonActionsFromCommands, createRibbonFileActionsFromCommands, mountRibbon } from "./ribbon/index.js";
+import { executeCellsStructuralRibbonCommand } from "./ribbon/cellsStructuralCommands";
 
 import { computeSelectionFormatState } from "./ribbon/selectionFormatState.js";
 import { computeRibbonDisabledByIdFromCommandRegistry } from "./ribbon/ribbonCommandRegistryDisabling.js";
@@ -8544,6 +8545,12 @@ function handleRibbonCommand(commandId: string): void {
       case "home.number.moreFormats.formatCells": // legacy ribbon schema id
       case "home.cells.format.formatCells": // legacy ribbon schema id
         executeBuiltinCommand("format.openFormatCells");
+        return;
+      case "home.cells.insert.insertSheetRows":
+      case "home.cells.insert.insertSheetColumns":
+      case "home.cells.delete.deleteSheetRows":
+      case "home.cells.delete.deleteSheetColumns":
+        executeCellsStructuralRibbonCommand(app, commandId);
         return;
       case "home.cells.insert.insertSheet":
         if (isSpreadsheetEditing() || app.isReadOnly()) return;

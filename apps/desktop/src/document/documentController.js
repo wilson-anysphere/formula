@@ -3,7 +3,14 @@ import {
   cloneCellState,
   emptyCellState,
 } from "./cell.js";
-import { formatA1, normalizeRange, parseA1, parseRangeA1 } from "./coords.js";
+import {
+  columnIndexToName,
+  columnNameToIndex,
+  formatA1,
+  normalizeRange,
+  parseA1,
+  parseRangeA1,
+} from "./coords.js";
 import { applyStylePatch, StyleTable } from "../formatting/styleTable.js";
 import { getSheetNameValidationErrorMessage } from "../../../../packages/workbook-backend/src/sheetNameValidation.js";
 
@@ -319,6 +326,540 @@ function normalizeFormula(formula) {
   const stripped = strippedLeading.trim();
   if (stripped === "") return null;
   return `=${stripped}`;
+}
+
+/**
+ * Best-effort formula reference rewrite for structural edits (insert/delete rows/cols).
+ *
+ * This intentionally does not attempt to parse the full Excel grammar; it mirrors the lightweight
+ * approach used by `@formula/spreadsheet-frontend`'s `shiftA1References`, with additional handling
+ * for delete semantics so ranges like `A1:A10` rewrite to a valid range instead of `#REF!:A9`.
+ *
+ * Limitations:
+ * - Does not understand R1C1 references.
+ * - Does not understand structured references / tables.
+ * - May mis-identify named ranges that look like cell refs (we mitigate this by ignoring tokens
+ *   followed by `(` to avoid common function-name false positives).
+ *
+ * @param {string} formula
+ * @param {{
+ *   type: "insertRows" | "deleteRows" | "insertCols" | "deleteCols",
+ *   index0: number,
+ *   count: number,
+ *   /**
+ *    * When true, rewrite unqualified references (e.g. `A1`). This should be enabled for formulas
+ *    * that live in the structurally edited sheet; formulas on other sheets should only rewrite
+ *    * explicitly sheet-qualified references.
+ *    *\/
+ *   rewriteUnqualified: boolean,
+ *   /**
+ *    * Case-insensitive set of sheet names/ids that should be considered the structural edit target.
+ *    * These are compared using Excel-like semantics (Unicode NFKC + upper-case).
+ *    *\/
+ *   targetSheetNamesCi: Set<string>,
+ * }} params
+ * @returns {string}
+ */
+function rewriteFormulaForStructuralEdit(formula, params) {
+  if (typeof formula !== "string" || formula.length === 0) return String(formula ?? "");
+  const type = params?.type;
+  const index0 = Number(params?.index0);
+  const count = Number(params?.count);
+  if (
+    (type !== "insertRows" && type !== "deleteRows" && type !== "insertCols" && type !== "deleteCols") ||
+    !Number.isInteger(index0) ||
+    index0 < 0 ||
+    !Number.isInteger(count) ||
+    count <= 0
+  ) {
+    return formula;
+  }
+
+  const rewriteUnqualified = Boolean(params?.rewriteUnqualified);
+  const targetSheetNamesCi = params?.targetSheetNamesCi instanceof Set ? params.targetSheetNamesCi : new Set();
+
+  const axisInsert = (n0, start0, delta, maxExclusive) => {
+    const out = n0 >= start0 ? n0 + delta : n0;
+    if (out < 0 || out >= maxExclusive) return null;
+    return out;
+  };
+
+  const axisDeleteCell = (n0, start0, delta, maxExclusive) => {
+    const end0 = start0 + delta;
+    let out;
+    if (n0 < start0) out = n0;
+    else if (n0 >= end0) out = n0 - delta;
+    else return null;
+    if (out < 0 || out >= maxExclusive) return null;
+    return out;
+  };
+
+  /**
+   * Delete rewrite for an inclusive axis interval.
+   *
+   * @param {number} start
+   * @param {number} end
+   * @param {number} delStart
+   * @param {number} delCount
+   * @param {number} maxExclusive
+   * @returns {[number, number] | null}
+   */
+  const axisDeleteRange = (start, end, delStart, delCount, maxExclusive) => {
+    const lo = Math.min(start, end);
+    const hi = Math.max(start, end);
+    const delEnd = delStart + delCount;
+
+    // Entirely above.
+    if (hi < delStart) {
+      if (lo < 0 || hi >= maxExclusive) return null;
+      return [lo, hi];
+    }
+
+    // Entirely below.
+    if (lo >= delEnd) {
+      const nextLo = lo - delCount;
+      const nextHi = hi - delCount;
+      if (nextLo < 0 || nextHi >= maxExclusive) return null;
+      return [nextLo, nextHi];
+    }
+
+    // Overlap.
+    const nextLo = lo < delStart ? lo : delStart;
+    const nextHi = hi < delEnd ? delStart - 1 : hi - delCount;
+    if (nextHi < nextLo) return null;
+    if (nextLo < 0 || nextHi >= maxExclusive) return null;
+    return [nextLo, nextHi];
+  };
+
+  const sheetPrefixRe = "(?:(?:'(?:[^']|'')+'|[A-Za-z0-9_]+)!)?";
+  const tokenBoundaryPrefixRe = "(^|[^A-Za-z0-9_])";
+
+  const shouldRewriteSheetPrefix = (sheetPrefix) => {
+    if (sheetPrefix) {
+      // Strip trailing '!'.
+      let spec = sheetPrefix.endsWith("!") ? sheetPrefix.slice(0, -1) : sheetPrefix;
+      if (spec.startsWith("'") && spec.endsWith("'")) {
+        spec = spec.slice(1, -1).replace(/''/g, "'");
+      } else if (spec.startsWith("'")) {
+        spec = spec.slice(1).replace(/''/g, "'");
+      }
+      return targetSheetNamesCi.has(normalizeSheetNameForCaseInsensitiveCompare(spec));
+    }
+    return rewriteUnqualified;
+  };
+
+  const invalidate = (prefix) => `${prefix}#REF!`;
+
+  const applyCell = (col0, row0, sheetPrefix, prefix, colAbs, rowAbs) => {
+    let nextCol0 = col0;
+    let nextRow0 = row0;
+    if (type === "insertRows") {
+      const out = axisInsert(row0, index0, count, EXCEL_MAX_ROWS);
+      if (out == null) return invalidate(prefix);
+      nextRow0 = out;
+    } else if (type === "deleteRows") {
+      const out = axisDeleteCell(row0, index0, count, EXCEL_MAX_ROWS);
+      if (out == null) return invalidate(prefix);
+      nextRow0 = out;
+    } else if (type === "insertCols") {
+      const out = axisInsert(col0, index0, count, EXCEL_MAX_COLS);
+      if (out == null) return invalidate(prefix);
+      nextCol0 = out;
+    } else if (type === "deleteCols") {
+      const out = axisDeleteCell(col0, index0, count, EXCEL_MAX_COLS);
+      if (out == null) return invalidate(prefix);
+      nextCol0 = out;
+    }
+
+    // Sheet-qualified error literals are invalid; drop prefix when invalidation occurred.
+    const next = `${sheetPrefix}${colAbs}${columnIndexToName(nextCol0)}${rowAbs}${nextRow0 + 1}`;
+    return `${prefix}${next}`;
+  };
+
+  const applyColRange = (startCol0, endCol0, sheetPrefix, prefix, startAbs, endAbs) => {
+    if (type !== "insertCols" && type !== "deleteCols") {
+      return `${prefix}${sheetPrefix}${startAbs}${columnIndexToName(startCol0)}:${endAbs}${columnIndexToName(endCol0)}`;
+    }
+
+    if (type === "insertCols") {
+      const nextStart = axisInsert(startCol0, index0, count, EXCEL_MAX_COLS);
+      const nextEnd = axisInsert(endCol0, index0, count, EXCEL_MAX_COLS);
+      if (nextStart == null || nextEnd == null) return invalidate(prefix);
+      return `${prefix}${sheetPrefix}${startAbs}${columnIndexToName(nextStart)}:${endAbs}${columnIndexToName(nextEnd)}`;
+    }
+
+    const interval = axisDeleteRange(startCol0, endCol0, index0, count, EXCEL_MAX_COLS);
+    if (!interval) return invalidate(prefix);
+    const [nextLo, nextHi] = interval;
+    return `${prefix}${sheetPrefix}${startAbs}${columnIndexToName(nextLo)}:${endAbs}${columnIndexToName(nextHi)}`;
+  };
+
+  const applyRowRange = (startRow0, endRow0, sheetPrefix, prefix, startAbs, endAbs) => {
+    if (type !== "insertRows" && type !== "deleteRows") {
+      return `${prefix}${sheetPrefix}${startAbs}${startRow0 + 1}:${endAbs}${endRow0 + 1}`;
+    }
+
+    if (type === "insertRows") {
+      const nextStart = axisInsert(startRow0, index0, count, EXCEL_MAX_ROWS);
+      const nextEnd = axisInsert(endRow0, index0, count, EXCEL_MAX_ROWS);
+      if (nextStart == null || nextEnd == null) return invalidate(prefix);
+      return `${prefix}${sheetPrefix}${startAbs}${nextStart + 1}:${endAbs}${nextEnd + 1}`;
+    }
+
+    const interval = axisDeleteRange(startRow0, endRow0, index0, count, EXCEL_MAX_ROWS);
+    if (!interval) return invalidate(prefix);
+    const [nextLo, nextHi] = interval;
+    return `${prefix}${sheetPrefix}${startAbs}${nextLo + 1}:${endAbs}${nextHi + 1}`;
+  };
+
+  const rewriteSegment = (segment) => {
+    // Range rewrite placeholder map so we don't rewrite the endpoints again via the cell-ref regex.
+    /** @type {Map<string, string>} */
+    const placeholders = new Map();
+    let placeholderCounter = 0;
+    const placeholderFor = (replacement) => {
+      const token = `\u0000__RANGE_${placeholderCounter++}__\u0000`;
+      placeholders.set(token, replacement);
+      return token;
+    };
+
+    const cellRangeRegex = new RegExp(
+      `${tokenBoundaryPrefixRe}(${sheetPrefixRe})(\\$?)([A-Za-z]{1,3})(\\$?)([1-9]\\d*):(\\$?)([A-Za-z]{1,3})(\\$?)([1-9]\\d*)(?!\\d)(?!\\s*\\()`,
+      "g",
+    );
+
+    const withoutCellRanges = segment.replace(
+      cellRangeRegex,
+      (
+        match,
+        prefix,
+        sheetPrefix,
+        startColAbs,
+        startCol,
+        startRowAbs,
+        startRow,
+        endColAbs,
+        endCol,
+        endRowAbs,
+        endRow,
+      ) => {
+        if (!shouldRewriteSheetPrefix(sheetPrefix)) return match;
+
+        let startCol0;
+        let endCol0;
+        let startRow0;
+        let endRow0;
+        try {
+          startCol0 = columnNameToIndex(startCol);
+          endCol0 = columnNameToIndex(endCol);
+          startRow0 = Number.parseInt(startRow, 10) - 1;
+          endRow0 = Number.parseInt(endRow, 10) - 1;
+        } catch {
+          return match;
+        }
+
+        // Apply axis transforms.
+        let nextStartCol0 = startCol0;
+        let nextEndCol0 = endCol0;
+        let nextStartRow0 = startRow0;
+        let nextEndRow0 = endRow0;
+
+        if (type === "insertRows") {
+          const a = axisInsert(startRow0, index0, count, EXCEL_MAX_ROWS);
+          const b = axisInsert(endRow0, index0, count, EXCEL_MAX_ROWS);
+          if (a == null || b == null) return placeholderFor(invalidate(prefix));
+          nextStartRow0 = a;
+          nextEndRow0 = b;
+        } else if (type === "deleteRows") {
+          const interval = axisDeleteRange(startRow0, endRow0, index0, count, EXCEL_MAX_ROWS);
+          if (!interval) return placeholderFor(invalidate(prefix));
+          [nextStartRow0, nextEndRow0] = interval;
+        } else if (type === "insertCols") {
+          const a = axisInsert(startCol0, index0, count, EXCEL_MAX_COLS);
+          const b = axisInsert(endCol0, index0, count, EXCEL_MAX_COLS);
+          if (a == null || b == null) return placeholderFor(invalidate(prefix));
+          nextStartCol0 = a;
+          nextEndCol0 = b;
+        } else if (type === "deleteCols") {
+          const interval = axisDeleteRange(startCol0, endCol0, index0, count, EXCEL_MAX_COLS);
+          if (!interval) return placeholderFor(invalidate(prefix));
+          [nextStartCol0, nextEndCol0] = interval;
+        }
+
+        if (
+          nextStartCol0 < 0 ||
+          nextStartCol0 >= EXCEL_MAX_COLS ||
+          nextEndCol0 < 0 ||
+          nextEndCol0 >= EXCEL_MAX_COLS ||
+          nextStartRow0 < 0 ||
+          nextStartRow0 >= EXCEL_MAX_ROWS ||
+          nextEndRow0 < 0 ||
+          nextEndRow0 >= EXCEL_MAX_ROWS
+        ) {
+          return placeholderFor(invalidate(prefix));
+        }
+
+        const rewritten = `${prefix}${sheetPrefix}${startColAbs}${columnIndexToName(nextStartCol0)}${startRowAbs}${nextStartRow0 + 1}:${endColAbs}${columnIndexToName(nextEndCol0)}${endRowAbs}${nextEndRow0 + 1}`;
+        return placeholderFor(rewritten);
+      },
+    );
+
+    const colRangeRegex = new RegExp(
+      `${tokenBoundaryPrefixRe}(${sheetPrefixRe})(\\$?)([A-Za-z]{1,3}):(\\$?)([A-Za-z]{1,3})(?![A-Za-z0-9_])(?!\\s*\\()`,
+      "g",
+    );
+
+    const rowRangeRegex = new RegExp(
+      `${tokenBoundaryPrefixRe}(${sheetPrefixRe})(\\$?)([1-9]\\d*):(\\$?)([1-9]\\d*)(?!\\d)(?!\\s*\\()`,
+      "g",
+    );
+
+    const cellRefRegex = new RegExp(
+      `${tokenBoundaryPrefixRe}(${sheetPrefixRe})(\\$?)([A-Za-z]{1,3})(\\$?)([1-9]\\d*)(?!\\d)(?!\\s*\\()`,
+      "g",
+    );
+
+    const withColRanges = withoutCellRanges.replace(colRangeRegex, (match, prefix, sheetPrefix, startAbs, startCol, endAbs, endCol) => {
+      if (!shouldRewriteSheetPrefix(sheetPrefix)) return match;
+      let startCol0;
+      let endCol0;
+      try {
+        startCol0 = columnNameToIndex(startCol);
+        endCol0 = columnNameToIndex(endCol);
+      } catch {
+        return match;
+      }
+      return applyColRange(startCol0, endCol0, sheetPrefix, prefix, startAbs, endAbs);
+    });
+
+    const withRowRanges = withColRanges.replace(rowRangeRegex, (match, prefix, sheetPrefix, startAbs, startRow, endAbs, endRow) => {
+      if (!shouldRewriteSheetPrefix(sheetPrefix)) return match;
+      const startRow0 = Number.parseInt(startRow, 10) - 1;
+      const endRow0 = Number.parseInt(endRow, 10) - 1;
+      return applyRowRange(startRow0, endRow0, sheetPrefix, prefix, startAbs, endAbs);
+    });
+
+    const withCellRefs = withRowRanges.replace(cellRefRegex, (match, prefix, sheetPrefix, colAbs, col, rowAbs, row) => {
+      if (!shouldRewriteSheetPrefix(sheetPrefix)) return match;
+      let col0;
+      let row0;
+      try {
+        col0 = columnNameToIndex(col);
+        row0 = Number.parseInt(row, 10) - 1;
+      } catch {
+        return match;
+      }
+      return applyCell(col0, row0, sheetPrefix, prefix, colAbs, rowAbs);
+    });
+
+    let restored = withCellRefs;
+    for (const [token, replacement] of placeholders.entries()) {
+      restored = restored.split(token).join(replacement);
+    }
+
+    // Excel drops the spill-range operator (`#`) once the base reference becomes invalid.
+    return restored.replace(/#REF!#+/g, "#REF!");
+  };
+
+  // Only rewrite outside of double-quoted string literals.
+  let result = "";
+  let cursor = 0;
+  while (cursor < formula.length) {
+    const nextQuote = formula.indexOf('"', cursor);
+    const end = nextQuote === -1 ? formula.length : nextQuote;
+    result += rewriteSegment(formula.slice(cursor, end));
+    if (nextQuote === -1) break;
+
+    // Copy the string literal verbatim, handling Excel's `""` escape.
+    let i = nextQuote;
+    let literalEnd = i + 1;
+    while (literalEnd < formula.length) {
+      if (formula[literalEnd] !== '"') {
+        literalEnd += 1;
+        continue;
+      }
+
+      if (formula[literalEnd + 1] === '"') {
+        literalEnd += 2;
+        continue;
+      }
+
+      literalEnd += 1;
+      break;
+    }
+    result += formula.slice(i, literalEnd);
+    cursor = literalEnd;
+  }
+
+  return result;
+}
+
+/**
+ * Shift a sparse `{[index]: value}` object (SheetViewState rowHeights/colWidths).
+ *
+ * @param {Record<string, number> | null | undefined} overrides
+ * @param {number} index0
+ * @param {number} count
+ * @param {number} maxIndexInclusive
+ * @param {"insert" | "delete"} mode
+ * @returns {Record<string, number> | undefined}
+ */
+function shiftAxisOverrides(overrides, index0, count, maxIndexInclusive, mode) {
+  if (!overrides) return undefined;
+  const start = Number(index0);
+  const delta = Number(count);
+  if (!Number.isInteger(start) || start < 0) return overrides ? { ...overrides } : undefined;
+  if (!Number.isInteger(delta) || delta <= 0) return overrides ? { ...overrides } : undefined;
+
+  /** @type {Record<string, number>} */
+  const out = {};
+  for (const [key, value] of Object.entries(overrides)) {
+    const idx = Number(key);
+    if (!Number.isInteger(idx) || idx < 0) continue;
+    if (!Number.isFinite(value)) continue;
+
+    let next = idx;
+    if (mode === "insert") {
+      if (idx >= start) next = idx + delta;
+    } else {
+      // delete
+      if (idx < start) {
+        next = idx;
+      } else if (idx >= start + delta) {
+        next = idx - delta;
+      } else {
+        // inside deleted region: drop override
+        continue;
+      }
+    }
+
+    if (next < 0 || next > maxIndexInclusive) continue;
+    out[String(next)] = value;
+  }
+
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Shift a Map<number, number> (rowStyleIds/colStyleIds) for axis insert/delete.
+ *
+ * @param {Map<number, number>} map
+ * @param {number} index0
+ * @param {number} count
+ * @param {number} maxIndexInclusive
+ * @param {"insert" | "delete"} mode
+ * @returns {Map<number, number>}
+ */
+function shiftAxisStyleMap(map, index0, count, maxIndexInclusive, mode) {
+  const start = Number(index0);
+  const delta = Number(count);
+  if (!Number.isInteger(start) || start < 0) return new Map(map);
+  if (!Number.isInteger(delta) || delta <= 0) return new Map(map);
+
+  /** @type {Map<number, number>} */
+  const out = new Map();
+  for (const [idx, styleId] of map.entries()) {
+    if (!Number.isInteger(idx) || idx < 0) continue;
+    const beforeStyleId = Number(styleId);
+    if (!Number.isInteger(beforeStyleId) || beforeStyleId === 0) continue;
+
+    let next = idx;
+    if (mode === "insert") {
+      if (idx >= start) next = idx + delta;
+    } else {
+      if (idx < start) {
+        next = idx;
+      } else if (idx >= start + delta) {
+        next = idx - delta;
+      } else {
+        continue;
+      }
+    }
+
+    if (next < 0 || next > maxIndexInclusive) continue;
+    out.set(next, beforeStyleId);
+  }
+  return out;
+}
+
+/**
+ * Shift range-run formatting for row insert/delete.
+ *
+ * @param {FormatRun[] | null | undefined} runs
+ * @param {number} row0
+ * @param {number} count
+ * @param {"insert" | "delete"} mode
+ * @returns {FormatRun[]}
+ */
+function shiftFormatRunsForRowEdit(runs, row0, count, mode) {
+  const start = Number(row0);
+  const delta = Number(count);
+  if (!Number.isInteger(start) || start < 0) return Array.isArray(runs) ? runs.map(cloneFormatRun) : [];
+  if (!Number.isInteger(delta) || delta <= 0) return Array.isArray(runs) ? runs.map(cloneFormatRun) : [];
+
+  const input = Array.isArray(runs) ? runs : [];
+  /** @type {FormatRun[]} */
+  const out = [];
+
+  if (mode === "insert") {
+    for (const run of input) {
+      if (!run) continue;
+      if (run.endRowExclusive <= start) {
+        out.push(cloneFormatRun(run));
+        continue;
+      }
+      if (run.startRow >= start) {
+        const nextStart = run.startRow + delta;
+        const nextEnd = run.endRowExclusive + delta;
+        if (nextStart >= EXCEL_MAX_ROWS) continue;
+        out.push({
+          startRow: nextStart,
+          endRowExclusive: Math.min(EXCEL_MAX_ROWS, nextEnd),
+          styleId: run.styleId,
+        });
+        continue;
+      }
+      // Split run spanning insertion point.
+      out.push({ startRow: run.startRow, endRowExclusive: start, styleId: run.styleId });
+      const nextStart = start + delta;
+      const nextEnd = run.endRowExclusive + delta;
+      if (nextStart >= EXCEL_MAX_ROWS) continue;
+      out.push({ startRow: nextStart, endRowExclusive: Math.min(EXCEL_MAX_ROWS, nextEnd), styleId: run.styleId });
+    }
+    out.sort((a, b) => a.startRow - b.startRow);
+    return normalizeFormatRuns(out);
+  }
+
+  // delete
+  const end = start + delta;
+  for (const run of input) {
+    if (!run) continue;
+    if (run.endRowExclusive <= start) {
+      out.push(cloneFormatRun(run));
+      continue;
+    }
+    if (run.startRow >= end) {
+      out.push({
+        startRow: run.startRow - delta,
+        endRowExclusive: run.endRowExclusive - delta,
+        styleId: run.styleId,
+      });
+      continue;
+    }
+
+    // Overlap.
+    if (run.startRow < start) {
+      out.push({ startRow: run.startRow, endRowExclusive: Math.min(start, run.endRowExclusive), styleId: run.styleId });
+    }
+
+    if (run.endRowExclusive > end) {
+      const suffixStart = Math.max(run.startRow, end);
+      out.push({ startRow: suffixStart - delta, endRowExclusive: run.endRowExclusive - delta, styleId: run.styleId });
+    }
+  }
+
+  out.sort((a, b) => a.startRow - b.startRow);
+  return normalizeFormatRuns(out);
 }
 
 /**
@@ -3255,6 +3796,319 @@ export class DocumentController {
     });
 
     this.#applyUserDeltas(deltas, { label: options.label });
+  }
+
+  /**
+   * Insert sheet rows starting at `row0` (0-based).
+   *
+   * NOTE: This uses fixed Excel-like grid dimensions (1,048,576 rows). When insertion would move
+   * stored cells out of bounds at the bottom of the sheet, those cells are dropped (Excel-like).
+   *
+   * @param {string} sheetId
+   * @param {number} row0
+   * @param {number} count
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   */
+  insertRows(sheetId, row0, count, options = {}) {
+    this.#applyStructuralAxisEdit({ sheetId, axis: "row", mode: "insert", index0: row0, count }, {
+      ...options,
+      label: options.label ?? "Insert Rows",
+    });
+  }
+
+  /**
+   * Delete sheet rows starting at `row0` (0-based).
+   *
+   * @param {string} sheetId
+   * @param {number} row0
+   * @param {number} count
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   */
+  deleteRows(sheetId, row0, count, options = {}) {
+    this.#applyStructuralAxisEdit({ sheetId, axis: "row", mode: "delete", index0: row0, count }, {
+      ...options,
+      label: options.label ?? "Delete Rows",
+    });
+  }
+
+  /**
+   * Insert sheet columns starting at `col0` (0-based).
+   *
+   * NOTE: This uses fixed Excel-like grid dimensions (16,384 columns). When insertion would move
+   * stored cells out of bounds at the right edge of the sheet, those cells are dropped (Excel-like).
+   *
+   * @param {string} sheetId
+   * @param {number} col0
+   * @param {number} count
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   */
+  insertCols(sheetId, col0, count, options = {}) {
+    this.#applyStructuralAxisEdit({ sheetId, axis: "col", mode: "insert", index0: col0, count }, {
+      ...options,
+      label: options.label ?? "Insert Columns",
+    });
+  }
+
+  /**
+   * Delete sheet columns starting at `col0` (0-based).
+   *
+   * @param {string} sheetId
+   * @param {number} col0
+   * @param {number} count
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   */
+  deleteCols(sheetId, col0, count, options = {}) {
+    this.#applyStructuralAxisEdit({ sheetId, axis: "col", mode: "delete", index0: col0, count }, {
+      ...options,
+      label: options.label ?? "Delete Columns",
+    });
+  }
+
+  /**
+   * Core structural edit implementation (rows/cols insert/delete).
+   *
+   * @param {{ sheetId: string, axis: "row" | "col", mode: "insert" | "delete", index0: number, count: number }} edit
+   * @param {{ label?: string, mergeKey?: string, source?: string }} options
+   */
+  #applyStructuralAxisEdit(edit, options) {
+    const id = String(edit?.sheetId ?? "").trim();
+    if (!id) return;
+
+    const axis = edit?.axis === "col" ? "col" : "row";
+    const mode = edit?.mode === "delete" ? "delete" : "insert";
+    const index0 = Number(edit?.index0);
+    const count = Number(edit?.count);
+    if (!Number.isInteger(index0) || index0 < 0) return;
+    if (!Number.isInteger(count) || count <= 0) return;
+
+    // Ensure sheet exists so structural edits on empty sheets still participate in undo/redo.
+    this.model.getCell(id, 0, 0);
+    const sheet = this.model.sheets.get(id);
+    if (!sheet) return;
+
+    const maxRow = EXCEL_MAX_ROW;
+    const maxCol = EXCEL_MAX_COL;
+
+    /** @type {Map<string, CellState>} */
+    const afterCells = new Map();
+    if (sheet.cells && sheet.cells.size > 0) {
+      for (const [key, cell] of sheet.cells.entries()) {
+        if (!cell) continue;
+        const { row, col } = parseRowColKey(key);
+
+        let nextRow = row;
+        let nextCol = col;
+
+        if (axis === "row") {
+          if (mode === "insert") {
+            if (row >= index0) nextRow = row + count;
+          } else {
+            if (row < index0) {
+              nextRow = row;
+            } else if (row >= index0 + count) {
+              nextRow = row - count;
+            } else {
+              continue;
+            }
+          }
+        } else {
+          if (mode === "insert") {
+            if (col >= index0) nextCol = col + count;
+          } else {
+            if (col < index0) {
+              nextCol = col;
+            } else if (col >= index0 + count) {
+              nextCol = col - count;
+            } else {
+              continue;
+            }
+          }
+        }
+
+        if (nextRow < 0 || nextRow > maxRow) continue;
+        if (nextCol < 0 || nextCol > maxCol) continue;
+        afterCells.set(`${nextRow},${nextCol}`, cloneCellState(cell));
+      }
+    }
+
+    // Layered formatting.
+    const afterRowStyleIds =
+      axis === "row" ? shiftAxisStyleMap(sheet.rowStyleIds, index0, count, maxRow, mode) : new Map(sheet.rowStyleIds);
+    const afterColStyleIds =
+      axis === "col" ? shiftAxisStyleMap(sheet.colStyleIds, index0, count, maxCol, mode) : new Map(sheet.colStyleIds);
+
+    /** @type {Map<number, FormatRun[]>} */
+    const afterRunsByCol = new Map();
+    if (sheet.formatRunsByCol && sheet.formatRunsByCol.size > 0) {
+      for (const [col, runs] of sheet.formatRunsByCol.entries()) {
+        if (!Number.isInteger(col) || col < 0) continue;
+        if (axis === "row") {
+          const shifted = shiftFormatRunsForRowEdit(runs, index0, count, mode);
+          if (shifted.length > 0) afterRunsByCol.set(col, shifted);
+          continue;
+        }
+
+        // axis === "col": shift column keys, leaving run row bounds unchanged.
+        let nextCol = col;
+        if (mode === "insert") {
+          if (col >= index0) nextCol = col + count;
+        } else {
+          if (col < index0) nextCol = col;
+          else if (col >= index0 + count) nextCol = col - count;
+          else continue;
+        }
+        if (nextCol < 0 || nextCol > maxCol) continue;
+        const clonedRuns = Array.isArray(runs) ? runs.map(cloneFormatRun) : [];
+        if (clonedRuns.length > 0) afterRunsByCol.set(nextCol, normalizeFormatRuns(clonedRuns));
+      }
+    }
+
+    // Sheet view overrides (row heights / col widths).
+    const beforeView = this.model.getSheetView(id);
+    const afterView = cloneSheetViewState(beforeView);
+    if (axis === "row") {
+      const next = shiftAxisOverrides(afterView.rowHeights, index0, count, maxRow, mode);
+      if (next) afterView.rowHeights = next;
+      else delete afterView.rowHeights;
+    } else {
+      const next = shiftAxisOverrides(afterView.colWidths, index0, count, maxCol, mode);
+      if (next) afterView.colWidths = next;
+      else delete afterView.colWidths;
+    }
+    const normalizedView = normalizeSheetViewState(afterView);
+
+    // --- Formula rewrites (best-effort) ---------------------------------------
+    // Rewrite formulas across the workbook so references to the edited sheet update Excel-style.
+    const meta = this.getSheetMeta(id) ?? { name: id, visibility: "visible" };
+    const targetNamesCi = new Set([
+      normalizeSheetNameForCaseInsensitiveCompare(id),
+      normalizeSheetNameForCaseInsensitiveCompare(meta.name),
+    ]);
+
+    const rewriteType =
+      axis === "row" ? (mode === "insert" ? "insertRows" : "deleteRows") : mode === "insert" ? "insertCols" : "deleteCols";
+
+    // Apply formula rewrites to the shifted sheet state first (so diffs include the updated formula text).
+    for (const [key, cell] of afterCells.entries()) {
+      if (!cell || cell.formula == null) continue;
+      const rewritten = rewriteFormulaForStructuralEdit(cell.formula, {
+        type: rewriteType,
+        index0,
+        count,
+        rewriteUnqualified: true,
+        targetSheetNamesCi: targetNamesCi,
+      });
+      if (rewritten !== cell.formula) {
+        cell.formula = rewritten;
+      }
+    }
+
+    /** @type {CellDelta[]} */
+    const cellDeltas = [];
+    /** @type {FormatDelta[]} */
+    const formatDeltas = [];
+    /** @type {RangeRunDelta[]} */
+    const rangeRunDeltas = [];
+    /** @type {SheetViewDelta[]} */
+    const sheetViewDeltas = [];
+
+    // Cell deltas for the edited sheet (move/sparse delete + formula rewrites).
+    const allCellKeys = new Set();
+    for (const key of sheet.cells.keys()) allCellKeys.add(key);
+    for (const key of afterCells.keys()) allCellKeys.add(key);
+    for (const key of allCellKeys) {
+      const { row, col } = parseRowColKey(key);
+      const before = sheet.cells.get(key) ?? emptyCellState();
+      const after = afterCells.get(key) ?? emptyCellState();
+      if (cellStateEquals(before, after)) continue;
+      cellDeltas.push({ sheetId: id, row, col, before: cloneCellState(before), after: cloneCellState(after) });
+    }
+
+    // Formula rewrites in other sheets (only for explicitly sheet-qualified references).
+    for (const [otherId, otherSheet] of this.model.sheets.entries()) {
+      if (!otherSheet || otherId === id) continue;
+      if (!otherSheet.cells || otherSheet.cells.size === 0) continue;
+      for (const [key, cell] of otherSheet.cells.entries()) {
+        if (!cell || cell.formula == null) continue;
+        const rewritten = rewriteFormulaForStructuralEdit(cell.formula, {
+          type: rewriteType,
+          index0,
+          count,
+          rewriteUnqualified: false,
+          targetSheetNamesCi: targetNamesCi,
+        });
+        if (rewritten === cell.formula) continue;
+        const coord = parseRowColKey(key);
+        if (!coord) continue;
+        const before = cloneCellState(cell);
+        const after = { value: before.value, formula: rewritten, styleId: before.styleId };
+        if (cellStateEquals(before, after)) continue;
+        cellDeltas.push({ sheetId: otherId, row: coord.row, col: coord.col, before, after: cloneCellState(after) });
+      }
+    }
+
+    // Row/col layered formatting deltas.
+    if (axis === "row") {
+      const allRows = new Set();
+      for (const row of sheet.rowStyleIds.keys()) allRows.add(row);
+      for (const row of afterRowStyleIds.keys()) allRows.add(row);
+      for (const row of allRows) {
+        const beforeStyleId = sheet.rowStyleIds.get(row) ?? 0;
+        const afterStyleId = afterRowStyleIds.get(row) ?? 0;
+        if (beforeStyleId === afterStyleId) continue;
+        formatDeltas.push({ sheetId: id, layer: "row", index: row, beforeStyleId, afterStyleId });
+      }
+    } else {
+      const allCols = new Set();
+      for (const col of sheet.colStyleIds.keys()) allCols.add(col);
+      for (const col of afterColStyleIds.keys()) allCols.add(col);
+      for (const col of allCols) {
+        const beforeStyleId = sheet.colStyleIds.get(col) ?? 0;
+        const afterStyleId = afterColStyleIds.get(col) ?? 0;
+        if (beforeStyleId === afterStyleId) continue;
+        formatDeltas.push({ sheetId: id, layer: "col", index: col, beforeStyleId, afterStyleId });
+      }
+    }
+
+    // Range-run formatting deltas.
+    const allRunCols = new Set();
+    for (const col of sheet.formatRunsByCol.keys()) allRunCols.add(col);
+    for (const col of afterRunsByCol.keys()) allRunCols.add(col);
+    for (const col of allRunCols) {
+      const beforeRuns = sheet.formatRunsByCol.get(col) ?? [];
+      const afterRuns = afterRunsByCol.get(col) ?? [];
+      if (formatRunsEqual(beforeRuns, afterRuns)) continue;
+      let startRow = Infinity;
+      let endRowExclusive = -Infinity;
+      if (beforeRuns.length > 0) {
+        startRow = Math.min(startRow, beforeRuns[0].startRow);
+        endRowExclusive = Math.max(endRowExclusive, beforeRuns[beforeRuns.length - 1].endRowExclusive);
+      }
+      if (afterRuns.length > 0) {
+        startRow = Math.min(startRow, afterRuns[0].startRow);
+        endRowExclusive = Math.max(endRowExclusive, afterRuns[afterRuns.length - 1].endRowExclusive);
+      }
+      if (!Number.isFinite(startRow)) startRow = 0;
+      if (!Number.isFinite(endRowExclusive) || endRowExclusive < startRow) endRowExclusive = startRow;
+      rangeRunDeltas.push({
+        sheetId: id,
+        col,
+        startRow,
+        endRowExclusive,
+        beforeRuns: beforeRuns.map(cloneFormatRun),
+        afterRuns: afterRuns.map(cloneFormatRun),
+      });
+    }
+
+    // Sheet view delta.
+    if (!sheetViewStateEquals(beforeView, normalizedView)) {
+      sheetViewDeltas.push({ sheetId: id, before: beforeView, after: normalizedView });
+    }
+
+    this.#applyUserWorkbookEdits(
+      { cellDeltas, sheetViewDeltas, formatDeltas, rangeRunDeltas },
+      options,
+    );
   }
 
   /**
