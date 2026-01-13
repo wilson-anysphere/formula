@@ -9,13 +9,10 @@ import type { EngineClient, FormulaPartialLexResult, FormulaPartialParseResult, 
 import { FormulaBarView } from "./FormulaBarView.js";
 
 async function flushTooling(): Promise<void> {
-  const nextFrame = () =>
+  const nextFrame = (): Promise<void> =>
     new Promise<void>((resolve) => {
-      if (typeof requestAnimationFrame === "function") {
-        requestAnimationFrame(() => resolve());
-      } else {
-        setTimeout(resolve, 0);
-      }
+      if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
+      else setTimeout(resolve, 0);
     });
 
   // Frame 1: flush the scheduled render + scheduleEngineTooling tick.
@@ -253,5 +250,105 @@ describe("FormulaBarView WASM editor tooling integration", () => {
       document.documentElement.lang = prevLang;
       host.remove();
     }
+  });
+
+  it("ignores stale out-of-order engine tooling responses", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void; reject: (err: unknown) => void };
+    const defer = <T,>(): Deferred<T> => {
+      let resolve!: (value: T) => void;
+      let reject!: (err: unknown) => void;
+      const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    };
+
+    const lexCalls: Array<{ formula: string; deferred: Deferred<FormulaPartialLexResult> }> = [];
+    const parseCalls: Array<{ formula: string; deferred: Deferred<FormulaPartialParseResult> }> = [];
+
+    const engine = {
+      lexFormulaPartial: vi.fn((formula: string) => {
+        const deferred = defer<FormulaPartialLexResult>();
+        lexCalls.push({ formula, deferred });
+        return deferred.promise;
+      }),
+      parseFormulaPartial: vi.fn((formula: string) => {
+        const deferred = defer<FormulaPartialParseResult>();
+        parseCalls.push({ formula, deferred });
+        return deferred.promise;
+      }),
+    } as unknown as EngineClient;
+
+    const view = new FormulaBarView(host, { onCommit: () => {} }, { getWasmEngine: () => engine, getLocaleId: () => "en-US" });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+
+    const nextFrame = (): Promise<void> =>
+      new Promise<void>((resolve) => {
+        if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
+        else setTimeout(resolve, 0);
+      });
+
+    // Draft 1 -> schedule tooling and let the engine calls start (but keep them pending).
+    const draft1 = "=1+";
+    view.textarea.value = draft1;
+    view.textarea.setSelectionRange(draft1.length, draft1.length);
+    view.textarea.dispatchEvent(new Event("input"));
+    await nextFrame();
+    expect(lexCalls.length).toBe(1);
+    expect(parseCalls.length).toBe(1);
+    expect(lexCalls[0]?.formula).toBe(draft1);
+
+    // Draft 2 -> start a second tooling request (also pending).
+    const draft2 = "=1+2";
+    view.textarea.value = draft2;
+    view.textarea.setSelectionRange(draft2.length, draft2.length);
+    view.textarea.dispatchEvent(new Event("input"));
+    await nextFrame();
+    expect(lexCalls.length).toBe(2);
+    expect(parseCalls.length).toBe(2);
+    expect(lexCalls[1]?.formula).toBe(draft2);
+
+    // Resolve the *second* call first (valid formula, no syntax error).
+    lexCalls[1]!.deferred.resolve({
+      tokens: [
+        { kind: "Number", span: { start: 1, end: 2 }, value: "1" },
+        { kind: "Plus", span: { start: 2, end: 3 } },
+        { kind: "Number", span: { start: 3, end: 4 }, value: "2" },
+        { kind: "Eof", span: { start: 4, end: 4 } },
+      ],
+      error: null,
+    });
+    parseCalls[1]!.deferred.resolve({ ast: null, error: null, context: { function: null } });
+    await flushTooling();
+
+    const highlight = () => host.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    expect(highlight()?.textContent).toBe(draft2);
+    expect(highlight()?.querySelector(".formula-bar-token--error")).toBeNull();
+
+    // Now resolve the *first* call late (it has a syntax error). This must NOT override draft2.
+    lexCalls[0]!.deferred.resolve({
+      tokens: [
+        { kind: "Number", span: { start: 1, end: 2 }, value: "1" },
+        { kind: "Plus", span: { start: 2, end: 3 } },
+        { kind: "Eof", span: { start: 3, end: 3 } },
+      ],
+      error: null,
+    });
+    parseCalls[0]!.deferred.resolve({
+      ast: null,
+      error: { message: "Unexpected token", span: { start: 2, end: 3 } },
+      context: { function: null },
+    });
+    await flushTooling();
+
+    expect(highlight()?.textContent).toBe(draft2);
+    expect(highlight()?.querySelector(".formula-bar-token--error")).toBeNull();
+
+    host.remove();
   });
 });
