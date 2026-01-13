@@ -912,6 +912,38 @@ fn calculate_supports_compound_boolean_and_filters() {
 }
 
 #[test]
+fn calculate_compound_boolean_filters_respect_relationship_propagation() {
+    let mut model = build_model();
+    model
+        .add_measure(
+            "Range Sales",
+            "CALCULATE(SUM(Orders[Amount]), Orders[Amount] > 4 && Orders[Amount] < 20)",
+        )
+        .unwrap();
+
+    assert_eq!(
+        model
+            .evaluate_measure("Range Sales", &FilterContext::empty())
+            .unwrap(),
+        23.0.into()
+    );
+
+    let east_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
+    assert_eq!(
+        model.evaluate_measure("Range Sales", &east_filter).unwrap(),
+        18.0.into()
+    );
+
+    let west_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "West".into());
+    assert_eq!(
+        model.evaluate_measure("Range Sales", &west_filter).unwrap(),
+        5.0.into()
+    );
+}
+
+#[test]
 fn calculate_supports_compound_boolean_or_filters() {
     let mut model = build_model();
     model
