@@ -83,6 +83,13 @@ describe("Ribbon clipboard command ids", () => {
     expect(pasteValues).toBeInstanceOf(HTMLButtonElement);
     expect(pasteValues?.dataset.commandId).toBe("clipboard.pasteSpecial.values");
 
+    // Close the Paste dropdown before opening another one. In jsdom, `.click()` only dispatches
+    // a `click` event (not `pointerdown`), so the "click outside to close" behavior won't run.
+    await act(async () => {
+      paste?.click();
+      await Promise.resolve();
+    });
+
     // Paste Special dropdown includes a "Paste Special…" menu item wired to clipboard.pasteSpecial.
     const pasteSpecial = Array.from(container.querySelectorAll<HTMLButtonElement>("button.ribbon-button")).find(
       (btn) => btn.getAttribute("aria-label") === "Paste Special",

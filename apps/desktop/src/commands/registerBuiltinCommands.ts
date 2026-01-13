@@ -574,6 +574,22 @@ export function registerBuiltinCommands(params: {
     },
   );
 
+  // Ribbon's View → Window → Freeze Panes dropdown uses a stable trigger id in a canonical
+  // namespace (`view.window.freezePanes`). Register it as an alias so it can be executed via
+  // the CommandRegistry (e.g. command palette) and so Ribbon↔CommandRegistry coverage tests
+  // can enforce that canonical ribbon ids stay wired.
+  commandRegistry.registerBuiltinCommand(
+    "view.window.freezePanes",
+    t("command.view.freezePanes"),
+    () => commandRegistry.executeCommand("view.freezePanes"),
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.freezePanes"),
+      keywords: ["freeze", "panes"],
+    },
+  );
+
   const setZoomPercent = (percent: number): void => {
     if (!app.supportsZoom()) return;
     const value = typeof percent === "number" ? percent : Number(percent);
@@ -662,6 +678,21 @@ export function registerBuiltinCommands(params: {
       setZoomPercent(picked);
       app.focus();
     },
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.zoom.openPicker"),
+      keywords: ["zoom", "custom zoom", "view", "scale"],
+    },
+  );
+
+  // Ribbon's View → Zoom dropdown uses `view.zoom.zoom` as its stable trigger id.
+  // Provide it as an alias for the picker command so it can be executed directly and
+  // so Ribbon↔CommandRegistry coverage can treat the id as "real".
+  commandRegistry.registerBuiltinCommand(
+    "view.zoom.zoom",
+    zoomPickerTitle,
+    () => commandRegistry.executeCommand("view.zoom.openPicker"),
     {
       category: t("commandCategory.view"),
       icon: null,
@@ -1135,6 +1166,30 @@ export function registerBuiltinCommands(params: {
         icon: null,
         description: "Use the high contrast theme",
         keywords: ["theme", "appearance", "high contrast", "contrast", "accessibility", "a11y"],
+      },
+    );
+
+    commandRegistry.registerBuiltinCommand(
+      "view.appearance.theme",
+      "Theme…",
+      async () => {
+        const picked = await showQuickPick(
+          [
+            { label: "System", value: "view.appearance.theme.system" },
+            { label: "Light", value: "view.appearance.theme.light" },
+            { label: "Dark", value: "view.appearance.theme.dark" },
+            { label: "High Contrast", value: "view.appearance.theme.highContrast" },
+          ],
+          { placeHolder: "Theme" },
+        );
+        if (!picked) return;
+        await commandRegistry.executeCommand(picked);
+      },
+      {
+        category: categoryView,
+        icon: null,
+        description: "Choose an application theme",
+        keywords: ["theme", "appearance", "dark mode", "light mode"],
       },
     );
   }
