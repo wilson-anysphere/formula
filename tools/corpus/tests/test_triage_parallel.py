@@ -84,7 +84,76 @@ class TriageParallelSchedulingTests(unittest.TestCase):
             self.assertNotEqual(name_a_1, name_b)
             self.assertTrue(name_a_1.endswith(".json"))
 
+    def test_jobs_produce_same_report_filenames(self) -> None:
+        """`--jobs 1` and `--jobs > 1` should emit the same report file set.
+
+        This test exercises the scheduling layer only (no Rust) by mocking `triage_workbook`
+        and using a thread-based executor for the parallel branch.
+        """
+
+        import tools.corpus.triage as triage_mod
+
+        original_triage_workbook = triage_mod.triage_workbook
+        try:
+            triage_mod.triage_workbook = (  # type: ignore[assignment]
+                lambda wb, **_kwargs: {
+                    "display_name": wb.display_name,
+                    "sha256": sha256_hex(wb.data),
+                    "result": {"open_ok": True, "round_trip_ok": True},
+                }
+            )
+
+            with tempfile.TemporaryDirectory() as td:
+                corpus_dir = Path(td) / "corpus"
+                (corpus_dir / "nested").mkdir(parents=True)
+                (corpus_dir / "a.xlsx").write_bytes(b"same")
+                (corpus_dir / "nested" / "a.xlsx").write_bytes(b"same")
+                (corpus_dir / "b.xlsx").write_bytes(b"b")
+
+                paths = list(triage_mod.iter_workbook_paths(corpus_dir))
+
+                with redirect_stdout(io.StringIO()):
+                    out_serial = triage_mod._triage_paths(
+                        paths,
+                        rust_exe="noop",
+                        diff_ignore=set(),
+                        diff_limit=0,
+                        recalc=False,
+                        render_smoke=False,
+                        leak_scan=False,
+                        fernet_key=None,
+                        jobs=1,
+                    )
+                    out_parallel = triage_mod._triage_paths(
+                        paths,
+                        rust_exe="noop",
+                        diff_ignore=set(),
+                        diff_limit=0,
+                        recalc=False,
+                        render_smoke=False,
+                        leak_scan=False,
+                        fernet_key=None,
+                        jobs=3,
+                        executor_cls=ThreadPoolExecutor,
+                    )
+
+                self.assertIsInstance(out_serial, list)
+                self.assertIsInstance(out_parallel, list)
+
+                serial_files = [
+                    triage_mod._report_filename_for_path(r, path=p, corpus_dir=corpus_dir)
+                    for p, r in zip(paths, out_serial, strict=True)
+                ]
+                parallel_files = [
+                    triage_mod._report_filename_for_path(r, path=p, corpus_dir=corpus_dir)
+                    for p, r in zip(paths, out_parallel, strict=True)
+                ]
+
+                self.assertEqual(serial_files, parallel_files)
+                self.assertEqual(len(serial_files), len(set(serial_files)))
+        finally:
+            triage_mod.triage_workbook = original_triage_workbook  # type: ignore[assignment]
+
 
 if __name__ == "__main__":
     unittest.main()
-
