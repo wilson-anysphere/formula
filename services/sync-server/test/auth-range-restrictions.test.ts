@@ -16,7 +16,13 @@ function signJwt(payload: Record<string, unknown>): string {
   });
 }
 
-const auth: AuthMode = { mode: "jwt-hs256", secret: JWT_SECRET, audience: JWT_AUDIENCE };
+const auth: AuthMode = {
+  mode: "jwt-hs256",
+  secret: JWT_SECRET,
+  audience: JWT_AUDIENCE,
+  requireSub: false,
+  requireExp: false,
+};
 
 test("authenticateRequest accepts JWT rangeRestrictions claim", async () => {
   const docId = "doc-1";

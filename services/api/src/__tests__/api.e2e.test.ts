@@ -150,7 +150,10 @@ describe("API e2e: auth + RBAC + sync token", () => {
         auth: {
           mode: "jwt-hs256",
           secret: config.syncTokenSecret,
-          audience: "formula-sync"
+          audience: "formula-sync",
+          // Mirror the sync-server production defaults for JWT hardening.
+          requireSub: true,
+          requireExp: true
         },
         enforceRangeRestrictions: false,
         introspection: null,

@@ -13,6 +13,19 @@ export type AuthMode =
       secret: string;
       issuer?: string;
       audience?: string;
+      /**
+       * If true, require a non-empty `sub` claim in the JWT payload.
+       *
+       * This prevents "anonymous" JWTs from being treated as a shared user.
+       */
+      requireSub: boolean;
+      /**
+       * If true, require an `exp` claim in the JWT payload.
+       *
+       * Note: `jsonwebtoken` validates expiration *if present*; this flag enforces
+       * that the claim exists at all to prevent long-lived tokens.
+       */
+      requireExp: boolean;
     }
   | {
       mode: "introspect";
@@ -298,6 +311,10 @@ export function loadConfigFromEnv(): SyncServerConfig {
   const authModeEnv = process.env.SYNC_SERVER_AUTH_MODE?.trim();
   const opaqueToken = process.env.SYNC_SERVER_AUTH_TOKEN;
   const jwtSecret = process.env.SYNC_SERVER_JWT_SECRET;
+  const jwtRequireSubDefault = nodeEnv === "production";
+  const jwtRequireExpDefault = nodeEnv === "production";
+  const jwtRequireSub = envBool(process.env.SYNC_SERVER_JWT_REQUIRE_SUB, jwtRequireSubDefault);
+  const jwtRequireExp = envBool(process.env.SYNC_SERVER_JWT_REQUIRE_EXP, jwtRequireExpDefault);
   const introspectUrl = process.env.SYNC_SERVER_INTROSPECT_URL;
   const introspectToken = process.env.SYNC_SERVER_INTROSPECT_TOKEN;
   const introspectCacheMs = envInt(process.env.SYNC_SERVER_INTROSPECT_CACHE_MS, 30_000);
@@ -348,6 +365,8 @@ export function loadConfigFromEnv(): SyncServerConfig {
       secret: jwtSecret,
       issuer: process.env.SYNC_SERVER_JWT_ISSUER,
       audience: process.env.SYNC_SERVER_JWT_AUDIENCE ?? "formula-sync",
+      requireSub: jwtRequireSub,
+      requireExp: jwtRequireExp,
     };
   } else if (opaqueToken) {
     auth = { mode: "opaque", token: opaqueToken };
@@ -357,6 +376,8 @@ export function loadConfigFromEnv(): SyncServerConfig {
       secret: jwtSecret,
       issuer: process.env.SYNC_SERVER_JWT_ISSUER,
       audience: process.env.SYNC_SERVER_JWT_AUDIENCE ?? "formula-sync",
+      requireSub: jwtRequireSub,
+      requireExp: jwtRequireExp,
     };
   } else {
     if (nodeEnv === "production") {

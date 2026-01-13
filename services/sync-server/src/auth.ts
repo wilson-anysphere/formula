@@ -454,9 +454,26 @@ export async function authenticateRequest(
   }
 
   const payload = requireJwtPayloadObject(verifiedPayload);
+
+  // Optional hardening: require a JWT `exp` claim to prevent long-lived tokens.
+  //
+  // We treat missing `exp` as an authentication failure (401), similar to an
+  // invalid/expired token.
+  if (auth.requireExp) {
+    const exp = payload.exp;
+    if (exp === undefined) {
+      throw new AuthError('JWT "exp" claim is required', 401);
+    }
+  }
+
   const resolvedDocId = authorizeDocAccessFromJwtPayload(payload, docName);
 
   const sub = payload.sub;
+  if (auth.requireSub) {
+    if (typeof sub !== "string" || sub.length === 0) {
+      throw new AuthError('JWT "sub" claim is required', 403);
+    }
+  }
   const userId = typeof sub === "string" && sub.length > 0 ? sub : "jwt";
   const role = parseRoleFromJwtPayload(payload);
 
