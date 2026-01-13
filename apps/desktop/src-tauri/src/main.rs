@@ -128,6 +128,13 @@ struct StartupTimingsSnapshot {
 struct StartupMetrics {
     start: Instant,
     window_visible_ms: Option<u64>,
+    /// True once we've recorded `window_visible_ms` from a native window event (resize/move/focus).
+    ///
+    /// The frontend may call `report_startup_webview_loaded` very early (before the window is
+    /// actually visible), which can produce a provisional `window_visible_ms` timestamp. We keep
+    /// this flag so a later native window event can overwrite that provisional value with the
+    /// authoritative mark.
+    window_visible_recorded_from_window_event: bool,
     /// Monotonic ms since native process start when the *main webview finished its initial page
     /// load/navigation* (Tauri `PageLoadEvent::Finished`).
     ///
@@ -138,6 +145,11 @@ struct StartupMetrics {
     webview_loaded_recorded_from_page_load: bool,
     first_render_ms: Option<u64>,
     tti_ms: Option<u64>,
+    /// True once we've spawned the best-effort post-"window visible" initialization work.
+    ///
+    /// This is deliberately decoupled from whether `window_visible_ms` is populated because that
+    /// timestamp may be set provisionally by the frontend before we observe a native window event.
+    post_window_visible_init_spawned: bool,
     logged: bool,
 }
 
@@ -146,10 +158,12 @@ impl StartupMetrics {
         Self {
             start,
             window_visible_ms: None,
+            window_visible_recorded_from_window_event: false,
             webview_loaded_ms: None,
             webview_loaded_recorded_from_page_load: false,
             first_render_ms: None,
             tti_ms: None,
+            post_window_visible_init_spawned: false,
             logged: false,
         }
     }
@@ -164,6 +178,16 @@ impl StartupMetrics {
         }
         let ms = self.elapsed_ms();
         self.window_visible_ms = Some(ms);
+        ms
+    }
+
+    fn record_window_visible_from_window_event(&mut self) -> u64 {
+        if self.window_visible_recorded_from_window_event {
+            return self.window_visible_ms.unwrap_or_else(|| self.elapsed_ms());
+        }
+        let ms = self.elapsed_ms();
+        self.window_visible_ms = Some(ms);
+        self.window_visible_recorded_from_window_event = true;
         ms
     }
 
@@ -290,23 +314,13 @@ fn report_startup_webview_loaded(app: tauri::AppHandle, state: State<'_, SharedS
     // the page-load callback will still overwrite it with the authoritative
     // `PageLoadEvent::Finished` mark.
     let shared = state.inner().clone();
-    let (window_visible_ms, webview_loaded_ms, snapshot, first_window_visible) = {
+    let (window_visible_ms, webview_loaded_ms, snapshot) = {
         let mut metrics = shared.lock().unwrap();
-        let first_window_visible = metrics.window_visible_ms.is_none();
         let window_visible_ms = metrics.record_window_visible();
         let webview_loaded_ms = metrics.record_webview_loaded();
         let snapshot = metrics.snapshot();
-        (
-            window_visible_ms,
-            webview_loaded_ms,
-            snapshot,
-            first_window_visible,
-        )
+        (window_visible_ms, webview_loaded_ms, snapshot)
     };
-
-    if first_window_visible {
-        spawn_post_window_visible_init(&app);
-    }
 
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.emit("startup:window-visible", window_visible_ms);
@@ -337,20 +351,23 @@ fn report_startup_first_render(app: tauri::AppHandle, state: State<'_, SharedSta
 #[tauri::command]
 fn report_startup_tti(app: tauri::AppHandle, state: State<'_, SharedStartupMetrics>) {
     let shared = state.inner().clone();
-    let (tti_ms, snapshot, first_window_visible) = {
+    let (tti_ms, snapshot, should_spawn_post_window_visible_init) = {
         let mut metrics = shared.lock().unwrap();
-        let first_window_visible = metrics.window_visible_ms.is_none();
         // If we somehow never recorded a window-visible timestamp (e.g. the webview
         // never called `report_startup_webview_loaded`), fall back to "at least by
         // the time we became interactive the window was visible".
         metrics.record_window_visible();
+        let should_spawn_post_window_visible_init = !metrics.post_window_visible_init_spawned;
+        if should_spawn_post_window_visible_init {
+            metrics.post_window_visible_init_spawned = true;
+        }
         let tti_ms = metrics.record_tti();
         let snapshot = metrics.snapshot();
         metrics.maybe_log();
-        (tti_ms, snapshot, first_window_visible)
+        (tti_ms, snapshot, should_spawn_post_window_visible_init)
     };
 
-    if first_window_visible {
+    if should_spawn_post_window_visible_init {
         spawn_post_window_visible_init(&app);
     }
 
@@ -1297,13 +1314,19 @@ fn main() {
             | tauri::WindowEvent::Focused(true) => {
                 if window.label() == "main" {
                     let startup = window.state::<SharedStartupMetrics>().inner().clone();
-                    let first_window_visible = {
+                    let should_spawn_post_window_visible_init = {
                         let mut metrics = startup.lock().unwrap();
-                        let first = metrics.window_visible_ms.is_none();
-                        metrics.record_window_visible();
-                        first
+                        // This is the authoritative "window became visible" signal; overwrite any
+                        // provisional timestamp that might have been recorded by early frontend
+                        // startup reporting.
+                        metrics.record_window_visible_from_window_event();
+                        let should_spawn = !metrics.post_window_visible_init_spawned;
+                        if should_spawn {
+                            metrics.post_window_visible_init_spawned = true;
+                        }
+                        should_spawn
                     };
-                    if first_window_visible {
+                    if should_spawn_post_window_visible_init {
                         spawn_post_window_visible_init(window.app_handle());
                     }
                 }
