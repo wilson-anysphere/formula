@@ -1,4 +1,3 @@
-import { extractSheetSchema } from "./schema.js";
 import { RagIndex } from "./rag.js";
 import { DEFAULT_TOKEN_ESTIMATOR, packSectionsToTokenBudget, stableJsonStringify } from "./tokenBudget.js";
 import { randomSampleRows, stratifiedSampleRows } from "./sampling.js";
@@ -201,11 +200,11 @@ export class ContextManager {
     }
 
     throwIfAborted(signal);
-    const schema = extractSheetSchema(sheetForContext, { signal });
-
     // Index once per build for now; in the app this should be cached per sheet.
-    throwIfAborted(signal);
-    await this.ragIndex.indexSheet(sheetForContext, { signal });
+    //
+    // `indexSheet()` extracts the schema as part of chunking; reuse the returned schema so we
+    // don't run schema extraction twice (once for prompt schema output + once for RAG chunks).
+    const { schema } = await this.ragIndex.indexSheet(sheetForContext, { signal });
     throwIfAborted(signal);
     const retrieved = await this.ragIndex.search(params.query, 5, { signal });
     throwIfAborted(signal);

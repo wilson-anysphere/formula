@@ -174,12 +174,24 @@ function matrixToTsv(matrix, options) {
  * @param {{ maxChunkRows?: number, signal?: AbortSignal }} [options]
  */
 export function chunkSheetByRegions(sheet, options = {}) {
+  return chunkSheetByRegionsWithSchema(sheet, options).chunks;
+}
+
+/**
+ * Chunk a sheet by detected regions for a simple RAG pipeline, reusing a single
+ * schema extraction pass.
+ *
+ * @param {{ name: string, values: unknown[][] }} sheet
+ * @param {{ maxChunkRows?: number, signal?: AbortSignal }} [options]
+ * @returns {{ schema: ReturnType<typeof extractSheetSchema>, chunks: ReturnType<typeof chunkSheetByRegions> }}
+ */
+export function chunkSheetByRegionsWithSchema(sheet, options = {}) {
   const signal = options.signal;
   throwIfAborted(signal);
   const schema = extractSheetSchema(sheet, { signal });
   const maxChunkRows = options.maxChunkRows ?? 30;
 
-  return schema.dataRegions.map((region, index) => {
+  const chunks = schema.dataRegions.map((region, index) => {
     throwIfAborted(signal);
     const parsed = parseRangeFromSchemaRange(region.range);
     const matrix = slice2D(sheet.values, parsed);
@@ -191,6 +203,8 @@ export function chunkSheetByRegions(sheet, options = {}) {
       metadata: { type: "region", sheetName: sheet.name },
     };
   });
+
+  return { schema, chunks };
 }
 
 /**
@@ -227,7 +241,7 @@ export class RagIndex {
     }
 
     throwIfAborted(signal);
-    const chunks = chunkSheetByRegions(sheet, { signal });
+    const { schema, chunks } = chunkSheetByRegionsWithSchema(sheet, { signal });
     const items = [];
     for (const chunk of chunks) {
       throwIfAborted(signal);
@@ -242,6 +256,8 @@ export class RagIndex {
     }
     throwIfAborted(signal);
     await this.store.add(items, { signal });
+
+    return { schema, chunkCount: chunks.length };
   }
 
   /**
