@@ -444,8 +444,33 @@ export class TabCompletionEngine {
     return Promise.resolve()
       .then(() => this.suggestSchemaRanges(context, parsed))
       .then((schemaSuggestions) => {
-        const merged = rankAndDedupe([...suggestions, ...schemaSuggestions]).slice(0, this.maxSuggestions);
-        return merged;
+        /** @type {Suggestion[]} */
+        const merged = [...suggestions, ...schemaSuggestions];
+
+        // If we couldn't generate a range completion (e.g. the user already typed a full
+        // A1 range like "A1:A10"), still provide a useful pure-insertion suggestion by
+        // auto-closing parens when the function could be complete.
+        //
+        // This keeps the common "=SUM(A1:A10<tab>" workflow working even when the range
+        // suggester intentionally doesn't attempt to "re-suggest" already-complete ranges.
+        if (
+          merged.length === 0 &&
+          cursor === input.length &&
+          functionCouldBeComplete &&
+          looksLikeCompleteA1RangeArg(typedArgText)
+        ) {
+          const closed = closeUnbalancedParens(input);
+          if (closed !== input) {
+            merged.push({
+              text: closed,
+              displayText: closed,
+              type: "range",
+              confidence: 0.25,
+            });
+          }
+        }
+
+        return rankAndDedupe(merged).slice(0, this.maxSuggestions);
       });
   }
 
@@ -1305,6 +1330,15 @@ function completeIdentifier(name, typedPrefix) {
   const cased = applyIdentifierCase(name, typedPrefix);
   if (typedPrefix.length >= cased.length) return typedPrefix;
   return `${typedPrefix}${cased.slice(typedPrefix.length)}`;
+}
+
+function looksLikeCompleteA1RangeArg(text) {
+  if (typeof text !== "string") return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  // Only trigger for fully-specified 2-cell A1 ranges like A1:A10 (possibly with $ markers).
+  // This intentionally excludes sheet-qualified refs and structured references.
+  return /^(\$?[A-Za-z]{1,3})(\$?\d+):(\$?[A-Za-z]{1,3})(\$?\d+)$/.test(trimmed);
 }
 
 /**

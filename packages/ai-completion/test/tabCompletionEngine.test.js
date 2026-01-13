@@ -738,6 +738,45 @@ test("Typing =SUM($A suggests an absolute-column contiguous range above the curr
   );
 });
 
+test("Typing =SUM(A1:A10 suggests auto-closing parens when the range is already complete", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`A${r}`] = r;
+
+  const currentInput = "=SUM(A1:A10";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(A1:A10)"),
+    `Expected a pure paren-close suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Auto-closing parens is not suggested when the function needs more args (VLOOKUP)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`A${r}`] = r;
+
+  const currentInput = "=VLOOKUP(A1, A1:A10";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  // No range candidates (the range is already complete) and VLOOKUP still requires
+  // additional args, so don't suggest an auto-close.
+  assert.equal(suggestions.length, 0);
+});
+
 test("Range suggestions do not auto-close parens when the function needs more args (VLOOKUP)", async () => {
   const engine = new TabCompletionEngine();
 
