@@ -91,6 +91,11 @@ const COLINFO_OPTION_OUTLINE_LEVEL_MASK: u16 = 0x0700;
 const COLINFO_OPTION_OUTLINE_LEVEL_SHIFT: u16 = 8;
 const COLINFO_OPTION_COLLAPSED: u16 = 0x1000;
 
+/// Cap warnings collected by best-effort worksheet scans so a crafted file cannot allocate an
+/// unbounded number of warning strings.
+const MAX_WARNINGS_PER_SHEET: usize = 50;
+const WARNINGS_SUPPRESSED_MESSAGE: &str = "additional warnings suppressed";
+
 // WSBOOL (0x0081) is a bitfield of worksheet boolean properties.
 //
 // Note: In BIFF8, the outline-related flags use inverted semantics:
@@ -102,6 +107,17 @@ const COLINFO_OPTION_COLLAPSED: u16 = 0x1000;
 const WSBOOL_OPTION_ROW_SUMMARY_ABOVE: u16 = 0x0008;
 const WSBOOL_OPTION_COL_SUMMARY_LEFT: u16 = 0x0010;
 const WSBOOL_OPTION_HIDE_OUTLINE_SYMBOLS: u16 = 0x0040;
+
+fn push_warning_bounded(warnings: &mut Vec<String>, warning: impl Into<String>) {
+    if warnings.len() < MAX_WARNINGS_PER_SHEET {
+        warnings.push(warning.into());
+        return;
+    }
+    // Add a single terminal warning so callers have a hint that the import was noisy.
+    if warnings.len() == MAX_WARNINGS_PER_SHEET {
+        warnings.push(WARNINGS_SUPPRESSED_MESSAGE.to_string());
+    }
+}
 
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct SheetRowProperties {
@@ -760,9 +776,10 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
         let record = match next {
             Ok(record) => record,
             Err(err) => {
-                props
-                    .warnings
-                    .push(format!("malformed BIFF record in sheet stream: {err}"));
+                push_warning_bounded(
+                    &mut props.warnings,
+                    format!("malformed BIFF record in sheet stream: {err}"),
+                );
                 break;
             }
         };
@@ -817,11 +834,14 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
             RECORD_ROW => {
                 let data = record.data;
                 if data.len() < 16 {
-                    props.warnings.push(format!(
+                    push_warning_bounded(
+                        &mut props.warnings,
+                        format!(
                         "malformed ROW record at offset {}: expected >=16 bytes, got {}",
                         record.offset,
                         data.len()
-                    ));
+                    ),
+                    );
                     continue;
                 }
                 let row = u16::from_le_bytes([data[0], data[1]]) as u32;
@@ -857,11 +877,14 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
             RECORD_COLINFO => {
                 let data = record.data;
                 if data.len() < 12 {
-                    props.warnings.push(format!(
+                    push_warning_bounded(
+                        &mut props.warnings,
+                        format!(
                         "malformed COLINFO record at offset {}: expected >=12 bytes, got {}",
                         record.offset,
                         data.len()
-                    ));
+                    ),
+                    );
                     continue;
                 }
                 let first_col = u16::from_le_bytes([data[0], data[1]]) as u32;
@@ -878,10 +901,13 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
 
                 if hidden || width.is_some() || outline_level > 0 || collapsed {
                     if first_col > last_col {
-                        props.warnings.push(format!(
-                            "malformed COLINFO record at offset {}: first_col ({first_col}) > last_col ({last_col})",
-                            record.offset
-                        ));
+                        push_warning_bounded(
+                            &mut props.warnings,
+                            format!(
+                                "malformed COLINFO record at offset {}: first_col ({first_col}) > last_col ({last_col})",
+                                record.offset
+                            ),
+                        );
                         continue;
                     }
                     for col in first_col..=last_col {
@@ -905,11 +931,14 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
             RECORD_WSBOOL => {
                 let data = record.data;
                 if data.len() < 2 {
-                    props.warnings.push(format!(
+                    push_warning_bounded(
+                        &mut props.warnings,
+                        format!(
                         "malformed WSBOOL record at offset {}: expected >=2 bytes, got {}",
                         record.offset,
                         data.len()
-                    ));
+                    ),
+                    );
                     continue;
                 }
                 let options = u16::from_le_bytes([data[0], data[1]]);
@@ -971,9 +1000,10 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
     if !saw_eof {
         // Some `.xls` files in the wild omit worksheet EOF records. Treat this as best-effort and
         // return partial state.
-        props
-            .warnings
-            .push("unexpected end of worksheet stream (missing EOF)".to_string());
+        push_warning_bounded(
+            &mut props.warnings,
+            "unexpected end of worksheet stream (missing EOF)".to_string(),
+        );
     }
 
     Ok(props)
@@ -1282,7 +1312,7 @@ pub(crate) fn parse_biff_sheet_hyperlinks(
             Err(err) => {
                 // Best-effort: stop scanning on malformed record boundaries, but keep any
                 // successfully decoded hyperlinks and surface a warning.
-                out.warnings.push(format!("malformed BIFF record: {err}"));
+                push_warning_bounded(&mut out.warnings, format!("malformed BIFF record: {err}"));
                 break;
             }
         };
@@ -1297,10 +1327,13 @@ pub(crate) fn parse_biff_sheet_hyperlinks(
             RECORD_HLINK => match decode_hlink_record(record.data.as_ref(), codepage) {
                 Ok(Some(link)) => out.hyperlinks.push(link),
                 Ok(None) => {}
-                Err(err) => out.warnings.push(format!(
-                    "failed to decode HLINK record at offset {}: {err}",
-                    record.offset
-                )),
+                Err(err) => push_warning_bounded(
+                    &mut out.warnings,
+                    format!(
+                        "failed to decode HLINK record at offset {}: {err}",
+                        record.offset
+                    ),
+                ),
             },
             records::RECORD_EOF => break,
             _ => {}
@@ -1816,6 +1849,59 @@ mod tests {
         let stream = [sheet_bof, row_record, truncated].concat();
         let props = parse_biff_sheet_row_col_properties(&stream, 0).expect("parse");
         assert_eq!(props.rows.get(&1).and_then(|p| p.height), Some(20.0));
+    }
+
+    #[test]
+    fn sheet_row_col_warnings_are_bounded() {
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // Emit many malformed ROW records (payload < 16 bytes). Without bounding this would
+        // allocate unbounded warning strings.
+        for _ in 0..(MAX_WARNINGS_PER_SHEET + 100) {
+            stream.extend_from_slice(&record(RECORD_ROW, &[]));
+        }
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let props = parse_biff_sheet_row_col_properties(&stream, 0).expect("parse");
+        assert_eq!(props.warnings.len(), MAX_WARNINGS_PER_SHEET + 1);
+        assert_eq!(
+            props
+                .warnings
+                .iter()
+                .filter(|w| w.contains(WARNINGS_SUPPRESSED_MESSAGE))
+                .count(),
+            1,
+            "suppression warning should only be emitted once; warnings={:?}",
+            props.warnings
+        );
+    }
+
+    #[test]
+    fn sheet_hyperlink_warnings_are_bounded() {
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // Emit many malformed HLINK records (payload < 32 bytes). Each record should surface a
+        // warning, but the vector is capped.
+        for _ in 0..(MAX_WARNINGS_PER_SHEET + 100) {
+            stream.extend_from_slice(&record(RECORD_HLINK, &[]));
+        }
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let links = parse_biff_sheet_hyperlinks(&stream, 0, 1252).expect("parse");
+        assert!(links.hyperlinks.is_empty());
+        assert_eq!(links.warnings.len(), MAX_WARNINGS_PER_SHEET + 1);
+        assert_eq!(
+            links
+                .warnings
+                .iter()
+                .filter(|w| w.contains(WARNINGS_SUPPRESSED_MESSAGE))
+                .count(),
+            1,
+            "suppression warning should only be emitted once; warnings={:?}",
+            links.warnings
+        );
     }
 
     #[test]
