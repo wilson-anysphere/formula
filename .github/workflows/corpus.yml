@@ -283,9 +283,9 @@ jobs:
               except Exception:
                   return "n/a"
               d = b - a
-               if abs(d - round(d)) < 1e-9:
-                   return f"{int(round(d)):+d}ms"
-               return f"{d:+.1f}ms"
+              if abs(d - round(d)) < 1e-9:
+                  return f"{int(round(d)):+d}ms"
+              return f"{d:+.1f}ms"
 
           def ratio(v):
               return "n/a" if v is None else f"{float(v):.3f}"
