@@ -126,7 +126,8 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     view.setActiveCell({ address: "A1", input: "", value: null });
 
     view.focus({ cursor: "end" });
-    view.textarea.value = "=VLO";
+    // Use a prefix with multiple matches so ArrowDown can advance selection.
+    view.textarea.value = "=COU";
     view.textarea.setSelectionRange(4, 4);
     view.textarea.dispatchEvent(new Event("input"));
 
