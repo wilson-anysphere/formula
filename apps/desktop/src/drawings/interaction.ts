@@ -1,7 +1,7 @@
 import type { AnchorPoint, DrawingObject } from "./types";
 import type { GridGeometry, Viewport } from "./overlay";
 import { emuToPx, pxToEmu } from "./overlay";
-import { hitTestDrawings } from "./hitTest";
+import { buildHitTestIndex, hitTestDrawings, type HitTestIndex } from "./hitTest";
 
 export interface DrawingInteractionCallbacks {
   getViewport(): Viewport;
@@ -14,6 +14,8 @@ export interface DrawingInteractionCallbacks {
  * Minimal MVP interactions: click-to-select and drag to move.
  */
 export class DrawingInteractionController {
+  private hitTestIndex: HitTestIndex | null = null;
+  private hitTestIndexObjects: readonly DrawingObject[] | null = null;
   private dragging:
     | { id: number; startX: number; startY: number; startObjects: DrawingObject[] }
     | null = null;
@@ -49,7 +51,8 @@ export class DrawingInteractionController {
   private readonly onPointerDown = (e: PointerEvent) => {
     const viewport = this.callbacks.getViewport();
     const objects = this.callbacks.getObjects();
-    const hit = hitTestDrawings(objects, viewport, this.geom, e.offsetX, e.offsetY);
+    const index = this.getHitTestIndex(objects);
+    const hit = hitTestDrawings(index, viewport, e.offsetX, e.offsetY);
     this.selectedId = hit?.object.id ?? null;
     this.callbacks.onSelectionChange?.(this.selectedId);
     if (!hit) return;
@@ -110,6 +113,14 @@ export class DrawingInteractionController {
     this.resizing = null;
     this.canvas.releasePointerCapture(e.pointerId);
   };
+
+  private getHitTestIndex(objects: readonly DrawingObject[]): HitTestIndex {
+    if (this.hitTestIndex && this.hitTestIndexObjects === objects) return this.hitTestIndex;
+    const built = buildHitTestIndex(objects, this.geom);
+    this.hitTestIndex = built;
+    this.hitTestIndexObjects = objects;
+    return built;
+  }
 }
 
 export function shiftAnchor(
