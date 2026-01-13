@@ -272,6 +272,7 @@ export class TabCompletionEngine {
     const cellRef = normalizeCellRef(context.cellRef);
     const fnSpec = parsed.functionName ? this.functionRegistry.getFunction(parsed.functionName) : undefined;
     const argIndex = parsed.argIndex ?? 0;
+    const argSpecName = fnSpec?.args?.[argIndex]?.name;
     const functionCouldBeComplete = functionCouldBeCompleteAfterArg(fnSpec, argIndex);
 
     const rangeCandidates = suggestRanges({
@@ -280,10 +281,31 @@ export class TabCompletionEngine {
       surroundingCells: context.surroundingCells,
     });
 
+    // Some functions (VLOOKUP table_array, TAKE array, etc.) almost always want
+    // a 2D rectangular range when the surrounding data forms a table. When we
+    // have both a 1D and 2D candidate, slightly bias toward the 2D option so
+    // tab completion defaults to the more useful table-shaped range.
+    const prefersTableRange = argSpecName === "table_array" || argSpecName === "array";
+    const hasTableCandidate = rangeCandidates.some(
+      (c) => typeof c?.reason === "string" && c.reason.startsWith("contiguous_table")
+    );
+
     /** @type {Suggestion[]} */
     const suggestions = [];
 
     for (const candidate of rangeCandidates) {
+      let confidence = candidate.confidence;
+      if (prefersTableRange && hasTableCandidate) {
+        const isTable = typeof candidate?.reason === "string" && candidate.reason.startsWith("contiguous_table");
+        if (isTable) confidence = clamp01(confidence + 0.2);
+        if (
+          !isTable &&
+          (candidate.reason === "contiguous_above_current_cell" || candidate.reason === "contiguous_down_from_start")
+        ) {
+          confidence = clamp01(confidence - 0.1);
+        }
+      }
+
       let newText = replaceSpan(input, parsed.currentArg.start, parsed.currentArg.end, candidate.range);
 
       // If the user is at the end of input and we still have unbalanced parens,
@@ -298,7 +320,7 @@ export class TabCompletionEngine {
         text: newText,
         displayText: newText,
         type: "range",
-        confidence: candidate.confidence,
+        confidence,
       });
     }
 
