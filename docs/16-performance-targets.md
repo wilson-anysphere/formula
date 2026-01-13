@@ -168,6 +168,12 @@ Desktop installer artifact size gating (used by the desktop release workflow):
 - `FORMULA_ENFORCE_BUNDLE_SIZE=1` to fail when any artifact exceeds the limit
   (reported by `scripts/desktop_bundle_size_report.py`)
 
+Lightweight PR size gating (desktop binary + `apps/desktop/dist`; disabled by default):
+
+- `FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB=<budget>`
+- `FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB=<budget>`
+  (enforced by `scripts/desktop_size_report.py` when set; CI passes these via GitHub Actions Variables)
+
 #### Renderer guardrails (Node/JSDOM)
 
 For rendering, we also run the real `@formula/grid` canvas renderer under Node (via JSDOM + a mocked

@@ -255,6 +255,9 @@ The scope check uses canonicalization to normalize paths and prevent symlink-bas
 - **Frontend asset download size** (the WebView payload; built Vite `dist/`):
   - Guardrailed in CI via `pnpm -C apps/desktop check:bundle-size` (gzip JS budgets; see `apps/desktop/scripts/bundle-size-check.mjs`).
   - Measured/tracked via `python scripts/desktop_size_report.py` (`apps/desktop/dist` + tar.gz download approximation).
+  - Optional CI gating (disabled by default) via:
+    - `FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB`
+    - `FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB`
 
 ---
 
