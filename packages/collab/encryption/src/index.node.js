@@ -173,11 +173,79 @@ export function isEncryptedCellPayload(value) {
   );
 }
 
+// Cache imported `CryptoKey`s by keyId so repeated encrypt/decrypt operations don't
+// pay the cost of `subtle.importKey` each time.
+//
+// IMPORTANT: Imported CryptoKeys can retain sensitive key material. In enterprise
+// deployments with many documents (and therefore many keys), an unbounded cache can
+// grow without limit and keep keys alive longer than necessary.
+//
+// Use a small LRU cache with a configurable maximum size so memory usage remains
+// bounded and keys can be released after inactivity.
+//
+// Configuration:
+// - `globalThis.__FORMULA_ENCRYPTION_KEY_CACHE_MAX_SIZE__` (number)
+// - `process.env.FORMULA_ENCRYPTION_KEY_CACHE_MAX_SIZE` (number)
+//
+// Both config values are optional; invalid values fall back to the default.
+const DEFAULT_ENCRYPTION_KEY_CACHE_MAX_SIZE = 256;
+/** @type {Map<string, CryptoKey>} */
 const keyCache = new Map();
 
+function normalizeCacheMaxSize(value) {
+  const num = typeof value === "string" ? Number.parseInt(value, 10) : Number(value);
+  if (!Number.isFinite(num) || num < 0) return null;
+  return Math.trunc(num);
+}
+
+function getEncryptionKeyCacheMaxSize() {
+  const fromGlobal = normalizeCacheMaxSize(globalThis?.__FORMULA_ENCRYPTION_KEY_CACHE_MAX_SIZE__);
+  if (fromGlobal != null) return fromGlobal;
+
+  // eslint-disable-next-line no-undef
+  const env =
+    // eslint-disable-next-line no-undef
+    typeof process !== "undefined" && process?.env ? process.env.FORMULA_ENCRYPTION_KEY_CACHE_MAX_SIZE : undefined;
+  const fromEnv = normalizeCacheMaxSize(env);
+  if (fromEnv != null) return fromEnv;
+
+  return DEFAULT_ENCRYPTION_KEY_CACHE_MAX_SIZE;
+}
+
+function touchEncryptionKeyCacheEntry(keyId, cryptoKey) {
+  // Refresh LRU order (Map iterates in insertion order).
+  keyCache.delete(keyId);
+  keyCache.set(keyId, cryptoKey);
+}
+
+function enforceEncryptionKeyCacheLimit() {
+  const maxSize = getEncryptionKeyCacheMaxSize();
+
+  // Allow explicitly disabling caching by setting max size to 0.
+  if (maxSize === 0) {
+    keyCache.clear();
+    return;
+  }
+
+  while (keyCache.size > maxSize) {
+    const oldestKeyId = keyCache.keys().next().value;
+    if (oldestKeyId === undefined) return;
+    keyCache.delete(oldestKeyId);
+  }
+}
+
+export function clearEncryptionKeyCache() {
+  keyCache.clear();
+}
+
 async function importAesGcmKey(key) {
+  enforceEncryptionKeyCacheLimit();
+
   const cached = keyCache.get(key.keyId);
-  if (cached) return cached;
+  if (cached) {
+    touchEncryptionKeyCacheEntry(key.keyId, cached);
+    return cached;
+  }
 
   assertKeyBytes(key.keyBytes);
   const subtle = (await getWebCrypto()).subtle;
@@ -188,7 +256,14 @@ async function importAesGcmKey(key) {
     false,
     ["encrypt", "decrypt"]
   );
-  keyCache.set(key.keyId, cryptoKey);
+
+  // Avoid retaining key material when caching is disabled.
+  if (getEncryptionKeyCacheMaxSize() === 0) {
+    return cryptoKey;
+  }
+
+  touchEncryptionKeyCacheEntry(key.keyId, cryptoKey);
+  enforceEncryptionKeyCacheLimit();
   return cryptoKey;
 }
 
