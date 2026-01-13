@@ -22,7 +22,7 @@ fn open_workbook_enforces_fs_scope_and_uses_canonical_path_for_autosave_db() {
         "open_workbook must scope-check via fs_scope::canonicalize_in_allowed_roots"
     );
     assert!(
-        body.contains("read_workbook(resolved)"),
+        body.contains("read_workbook(resolved,"),
         "open_workbook must pass the canonicalized path into read_workbook"
     );
     assert!(
@@ -58,4 +58,3 @@ fn save_workbook_validates_destination_with_fs_scope_and_marks_saved_with_canoni
         "save_workbook must persist the validated (canonicalized) path via mark_saved"
     );
 }
-

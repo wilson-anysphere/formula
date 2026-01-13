@@ -10,6 +10,7 @@ use formula_model::{
     sanitize_sheet_name, CellValue as ModelCellValue, ColProperties as ModelColProperties,
     DateSystem as WorkbookDateSystem, SheetVisibility, TabColor, WorksheetId,
 };
+use formula_offcrypto::{decrypt_ooxml_from_ole_bytes, OffcryptoError};
 use formula_xlsb::{
     CellEdit as XlsbCellEdit, CellValue as XlsbCellValue, OpenOptions as XlsbOpenOptions,
     XlsbWorkbook,
@@ -39,6 +40,8 @@ impl<T: Read + std::io::Seek> ReadSeek for T {}
 
 const FORMULA_POWER_QUERY_PART: &str = "xl/formula/power-query.xml";
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+const PASSWORD_REQUIRED_PREFIX: &str = "PASSWORD_REQUIRED:";
+const INVALID_PASSWORD_PREFIX: &str = "INVALID_PASSWORD:";
 const XLSX_WORKBOOK_CONTENT_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml";
 const XLSM_WORKBOOK_CONTENT_TYPE: &str = "application/vnd.ms-excel.sheet.macroEnabled.main+xml";
@@ -454,11 +457,16 @@ pub async fn read_parquet(path: impl Into<PathBuf> + Send + 'static) -> anyhow::
 }
 
 #[cfg(feature = "desktop")]
-pub async fn read_workbook(path: impl Into<PathBuf> + Send + 'static) -> anyhow::Result<Workbook> {
+pub async fn read_workbook(
+    path: impl Into<PathBuf> + Send + 'static,
+    password: Option<String>,
+) -> anyhow::Result<Workbook> {
     let path = path.into();
-    tauri::async_runtime::spawn_blocking(move || read_workbook_blocking(&path))
-        .await
-        .map_err(|e| anyhow::anyhow!(e.to_string()))?
+    tauri::async_runtime::spawn_blocking(move || {
+        read_workbook_blocking_with_password(&path, password.as_deref())
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!(e.to_string()))?
 }
 
 fn cfb_stream_exists<R: std::io::Read + std::io::Write + std::io::Seek>(
@@ -501,6 +509,20 @@ fn open_stream_best_effort<R: std::io::Read + std::io::Write + std::io::Seek>(
 
     let found_path = found_path?;
     ole.open_stream(&found_path).ok()
+}
+
+fn cfb_open_stream<R: std::io::Read + std::io::Write + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+    name: &str,
+) -> std::io::Result<cfb::Stream<R>> {
+    match ole.open_stream(name) {
+        Ok(stream) => Ok(stream),
+        Err(err1) => {
+            let with_leading_slash = format!("/{name}");
+            ole.open_stream(&with_leading_slash)
+                .map_err(|err2| std::io::Error::new(err1.kind(), format!("{err1}; {err2}")))
+        }
+    }
 }
 
 fn is_encrypted_ooxml_workbook(path: &Path) -> std::io::Result<bool> {
@@ -660,8 +682,9 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
     // When `origin_xlsx_bytes` is retained this avoids touching the filesystem again; when it is
     // not retained we fall back to `File::open` so large workbooks don't require a full `read()`
     // into memory.
+    let origin_xlsx_bytes_for_reader = origin_xlsx_bytes.clone();
     let open_reader = || -> anyhow::Result<Box<dyn ReadSeek>> {
-        if let Some(bytes) = origin_xlsx_bytes.as_ref() {
+        if let Some(bytes) = origin_xlsx_bytes_for_reader.as_ref() {
             Ok(Box::new(Cursor::new(bytes.clone())))
         } else {
             Ok(Box::new(
@@ -670,6 +693,35 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
         }
     };
 
+    read_xlsx_or_xlsm_from_open_reader(path, origin_xlsx_bytes, open_reader)
+}
+
+fn read_xlsx_or_xlsm_from_bytes(
+    path: &Path,
+    package_bytes: Arc<[u8]>,
+) -> anyhow::Result<Workbook> {
+    let max_origin_bytes = crate::resource_limits::max_origin_xlsx_bytes();
+    let origin_xlsx_bytes = if package_bytes.len() <= max_origin_bytes {
+        Some(package_bytes.clone())
+    } else {
+        None
+    };
+
+    let open_reader = || -> anyhow::Result<Box<dyn ReadSeek>> {
+        Ok(Box::new(Cursor::new(package_bytes.clone())))
+    };
+
+    read_xlsx_or_xlsm_from_open_reader(path, origin_xlsx_bytes, open_reader)
+}
+
+fn read_xlsx_or_xlsm_from_open_reader<F>(
+    path: &Path,
+    origin_xlsx_bytes: Option<Arc<[u8]>>,
+    open_reader: F,
+) -> anyhow::Result<Workbook>
+where
+    F: Fn() -> anyhow::Result<Box<dyn ReadSeek>>,
+{
     let workbook_model = formula_xlsx::read_workbook_from_reader(open_reader()?)
         .with_context(|| format!("parse xlsx {:?}", path))?;
 
@@ -924,7 +976,41 @@ fn read_xls_blocking(path: &Path) -> anyhow::Result<Workbook> {
     Ok(out)
 }
 
+fn read_encrypted_ooxml_workbook_blocking(
+    path: &Path,
+    password: Option<&str>,
+) -> anyhow::Result<Workbook> {
+    let Some(password) = password else {
+        anyhow::bail!(
+            "{PASSWORD_REQUIRED_PREFIX} workbook `{}` is password-protected; supply a password to open it",
+            path.display()
+        );
+    };
+
+    let raw_ole = std::fs::read(path).with_context(|| format!("read workbook {:?}", path))?;
+
+    let decrypted_zip = match decrypt_ooxml_from_ole_bytes(raw_ole, password) {
+        Ok(bytes) => bytes,
+        Err(err) => match err {
+            OffcryptoError::InvalidPassword => anyhow::bail!("{INVALID_PASSWORD_PREFIX} {err}"),
+            other => {
+                anyhow::bail!("encrypted workbook not supported: {other}");
+            }
+        },
+    };
+
+    let origin_xlsx_bytes = Arc::<[u8]>::from(decrypted_zip);
+    read_xlsx_or_xlsm_from_bytes(path, origin_xlsx_bytes)
+}
+
 pub fn read_workbook_blocking(path: &Path) -> anyhow::Result<Workbook> {
+    read_workbook_blocking_with_password(path, None)
+}
+
+pub fn read_workbook_blocking_with_password(
+    path: &Path,
+    password: Option<&str>,
+) -> anyhow::Result<Workbook> {
     use std::io::Read;
 
     const TEXT_SNIFF_BYTES: usize = 4096;
@@ -971,13 +1057,10 @@ pub fn read_workbook_blocking(path: &Path) -> anyhow::Result<Workbook> {
         }
     }
 
-    // Encrypted OOXML workbooks live in an OLE container; ensure we surface a clear error instead
-    // of trying to route them through the legacy `.xls` importer.
+    // Encrypted OOXML workbooks live in an OLE container. Decrypt them when a password is provided,
+    // otherwise surface a password-required error that the frontend can prompt for.
     if let Ok(true) = is_encrypted_ooxml_workbook(path) {
-        anyhow::bail!(
-            "password required: workbook `{}` is password-protected/encrypted; provide the password to open it",
-            path.display()
-        );
+        return read_encrypted_ooxml_workbook_blocking(path, password);
     }
 
     if let Some(format) = sniff_workbook_format(path) {
@@ -1018,11 +1101,15 @@ pub fn read_workbook_blocking(path: &Path) -> anyhow::Result<Workbook> {
 }
 
 pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
+    read_xlsx_blocking_with_password(path, None)
+}
+
+pub fn read_xlsx_blocking_with_password(
+    path: &Path,
+    password: Option<&str>,
+) -> anyhow::Result<Workbook> {
     if let Ok(true) = is_encrypted_ooxml_workbook(path) {
-        anyhow::bail!(
-            "password required: workbook `{}` is password-protected/encrypted; provide the password to open it",
-            path.display()
-        );
+        return read_encrypted_ooxml_workbook_blocking(path, password);
     }
 
     let extension = path
@@ -3583,7 +3670,7 @@ mod tests {
     }
 
     #[test]
-    fn read_xlsx_blocking_errors_on_encrypted_ooxml_container() {
+    fn read_xlsx_blocking_requires_password_for_encrypted_ooxml_container() {
         let tmp = tempfile::tempdir().expect("temp dir");
 
         fn encrypted_ooxml_bytes(encryption_info: &str, encrypted_package: &str) -> Vec<u8> {
@@ -3608,10 +3695,10 @@ mod tests {
 
                 let err =
                     read_xlsx_blocking(&path).expect_err("expected encrypted workbook to error");
-                let msg = err.to_string().to_lowercase();
+                let msg = err.to_string();
                 assert!(
-                    msg.contains("encrypted") || msg.contains("password"),
-                    "expected error message to mention encryption/password protection, got: {msg}"
+                    msg.starts_with(PASSWORD_REQUIRED_PREFIX),
+                    "expected password-required error prefix, got: {msg}"
                 );
             }
         }
@@ -3667,6 +3754,63 @@ mod tests {
             !msg.contains("import_xls_path_with_password"),
             "desktop error should not mention internal Rust APIs, got: {msg}"
         );
+    }
+
+    #[test]
+    fn read_xlsx_blocking_opens_password_protected_ooxml_with_password() {
+        use ms_offcrypto_writer::Ecma376AgileWriter;
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/basic.xlsx"
+        );
+        let plain_path = std::path::Path::new(fixture);
+        let plain = std::fs::read(plain_path).expect("read basic.xlsx fixture bytes");
+
+        let cursor = Cursor::new(Vec::new());
+        let mut rng = StdRng::seed_from_u64(0);
+        let mut writer =
+            Ecma376AgileWriter::create(&mut rng, "password", cursor).expect("create writer");
+        writer.write_all(&plain).expect("write plaintext");
+        let cursor = writer.into_inner().expect("finalize");
+        let encrypted_ole = cursor.into_inner();
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let path = tmp.path().join("encrypted.xlsx");
+        std::fs::write(&path, &encrypted_ole).expect("write encrypted fixture");
+
+        let err = read_xlsx_blocking_with_password(&path, None)
+            .expect_err("expected missing password to error");
+        assert!(
+            err.to_string().starts_with(PASSWORD_REQUIRED_PREFIX),
+            "expected password-required error, got: {err}"
+        );
+
+        let err = read_xlsx_blocking_with_password(&path, Some("wrong-password"))
+            .expect_err("expected wrong password to error");
+        assert!(
+            err.to_string().starts_with(INVALID_PASSWORD_PREFIX),
+            "expected invalid-password prefix, got: {err}"
+        );
+
+        let workbook = read_xlsx_blocking_with_password(&path, Some("password"))
+            .expect("open encrypted workbook");
+        assert!(
+            workbook.origin_xlsx_bytes.is_some(),
+            "expected origin_xlsx_bytes to be populated with decrypted ZIP bytes"
+        );
+        let origin = workbook
+            .origin_xlsx_bytes
+            .as_ref()
+            .expect("origin_xlsx_bytes")
+            .as_ref();
+        assert!(
+            origin.starts_with(b"PK"),
+            "expected decrypted bytes to be a ZIP/OPC package"
+        );
+        assert!(!workbook.sheets.is_empty(), "expected sheets to be parsed");
     }
 
     fn find_xlsb_cell_record(

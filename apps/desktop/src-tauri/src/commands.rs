@@ -1650,6 +1650,7 @@ fn cell_update_from_state(update: CellUpdateData) -> CellUpdate {
 pub async fn open_workbook(
     window: tauri::WebviewWindow,
     path: LimitedString<MAX_IPC_PATH_BYTES>,
+    password: Option<String>,
     state: State<'_, SharedAppState>,
 ) -> Result<WorkbookInfo, String> {
     let url = window.url().map_err(|err| err.to_string())?;
@@ -1664,7 +1665,9 @@ pub async fn open_workbook(
             .map_err(|e| e.to_string())?;
     let resolved_str = resolved.to_string_lossy().to_string();
 
-    let workbook = read_workbook(resolved).await.map_err(|e| e.to_string())?;
+    let workbook = read_workbook(resolved, password)
+        .await
+        .map_err(|e| e.to_string())?;
     let location = autosave_db_path_for_workbook(&resolved_str)
         .map(WorkbookPersistenceLocation::OnDisk)
         .unwrap_or(WorkbookPersistenceLocation::InMemory);

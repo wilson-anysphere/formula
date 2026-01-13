@@ -3217,6 +3217,89 @@ pub fn decrypt_encrypted_package(
     Ok(decrypted)
 }
 
+/// Decrypt an Agile-encrypted OOXML package (OOXML password protection; MS-OFFCRYPTO 4.4).
+///
+/// Inputs are the raw bytes of the OLE streams:
+/// - `EncryptionInfo`
+/// - `EncryptedPackage`
+///
+/// Returns the decrypted OOXML package bytes (a ZIP/OPC container starting with `PK`).
+pub fn decrypt_agile_ooxml_from_streams(
+    encryption_info_stream: &[u8],
+    encrypted_package_stream: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, OffcryptoError> {
+    let info = match parse_encryption_info(encryption_info_stream)? {
+        EncryptionInfo::Agile { info, .. } => info,
+        EncryptionInfo::Standard { .. } => {
+            return Err(OffcryptoError::UnsupportedEncryption {
+                encryption_type: EncryptionType::Standard,
+            });
+        }
+        EncryptionInfo::Unsupported { version } => {
+            if version.minor == 3 && matches!(version.major, 3 | 4) {
+                return Err(OffcryptoError::UnsupportedEncryption {
+                    encryption_type: EncryptionType::Extensible,
+                });
+            }
+            return Err(OffcryptoError::UnsupportedVersion {
+                major: version.major,
+                minor: version.minor,
+            });
+        }
+    };
+
+    decrypt_agile_ooxml_encrypted_package(&info, encrypted_package_stream, password)
+}
+
+/// Decrypt an Office-encrypted OOXML OLE/CFB wrapper and return the decrypted raw ZIP bytes.
+///
+/// This supports:
+/// - Agile encryption (4.4)
+/// - Standard (CryptoAPI) encryption via [`decrypt_standard_ooxml_from_bytes`]
+pub fn decrypt_ooxml_from_ole_bytes(
+    raw_ole: Vec<u8>,
+    password: &str,
+) -> Result<Vec<u8>, OffcryptoError> {
+    let encryption_info = read_ole_stream(&raw_ole, "EncryptionInfo")?;
+    match parse_encryption_info(&encryption_info)? {
+        EncryptionInfo::Standard { .. } => decrypt_standard_ooxml_from_bytes(raw_ole, password),
+        EncryptionInfo::Agile { info, .. } => {
+            let encrypted_package = read_ole_stream(&raw_ole, "EncryptedPackage")?;
+            decrypt_agile_ooxml_encrypted_package(&info, &encrypted_package, password)
+        }
+        EncryptionInfo::Unsupported { version } => {
+            if version.minor == 3 && matches!(version.major, 3 | 4) {
+                Err(OffcryptoError::UnsupportedEncryption {
+                    encryption_type: EncryptionType::Extensible,
+                })
+            } else {
+                Err(OffcryptoError::UnsupportedVersion {
+                    major: version.major,
+                    minor: version.minor,
+                })
+            }
+        }
+    }
+}
+
+fn decrypt_agile_ooxml_encrypted_package(
+    info: &AgileEncryptionInfo,
+    encrypted_package_stream: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, OffcryptoError> {
+    let secret_key = agile_secret_key(info, password)?;
+    let decrypted = agile_decrypt_package(info, &secret_key, encrypted_package_stream)?;
+
+    if decrypted.len() < 2 || &decrypted[..2] != b"PK" {
+        return Err(OffcryptoError::InvalidStructure(
+            "decrypted package does not look like a ZIP (missing PK signature)".to_string(),
+        ));
+    }
+
+    Ok(decrypted)
+}
+
 /// Decrypt a Standard-encrypted OOXML package (e.g. `.docx`, `.xlsx`) from a raw OLE/CFB wrapper.
 ///
 /// This performs native MS-OFFCRYPTO Standard (CryptoAPI / AES) password verification and
