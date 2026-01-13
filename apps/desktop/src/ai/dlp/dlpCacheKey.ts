@@ -31,24 +31,46 @@ function fnv1a32(value: string): number {
   return hash >>> 0;
 }
 
+function fnv1a32Update(hash: number, value: string): number {
+  // Incremental 32-bit FNV-1a hash update.
+  let out = hash >>> 0;
+  for (let i = 0; i < value.length; i++) {
+    out ^= value.charCodeAt(i);
+    out = Math.imul(out, 0x01000193);
+  }
+  return out >>> 0;
+}
+
 function hashString(value: string): string {
   return fnv1a32(value).toString(16);
 }
 
-function normalizeClassificationRecordsForCacheKey(
-  records: unknown,
-): Array<{ selector: unknown; classification: unknown }> {
+function normalizedClassificationRecordKeysForCacheKey(records: unknown): string[] {
   const list = Array.isArray(records) ? records : [];
-  const normalized = list.map((record) => ({
-    selector: (record as any)?.selector ?? null,
-    classification: (record as any)?.classification ?? null,
-  }));
-
+  const keys = list.map((record) =>
+    safeStableJsonStringify({
+      selector: (record as any)?.selector ?? null,
+      classification: (record as any)?.classification ?? null,
+    }),
+  );
   // Ensure deterministic ordering even if the backing classification store does not
   // guarantee record order.
-  const keyed = normalized.map((r) => ({ key: safeStableJsonStringify(r), value: r }));
-  keyed.sort((a, b) => a.key.localeCompare(b.key));
-  return keyed.map((r) => r.value);
+  keys.sort((a, b) => a.localeCompare(b));
+  return keys;
+}
+
+function hashJsonArray(keys: string[]): { length: number; hash: string } {
+  // Hash the JSON array string `[k1,k2,...]` without materializing a potentially huge
+  // intermediate string.
+  const length = 2 + keys.reduce((acc, key) => acc + key.length, 0) + Math.max(0, keys.length - 1);
+  let hash = 0x811c9dc5;
+  hash = fnv1a32Update(hash, "[");
+  for (let i = 0; i < keys.length; i++) {
+    if (i > 0) hash = fnv1a32Update(hash, ",");
+    hash = fnv1a32Update(hash, keys[i]!);
+  }
+  hash = fnv1a32Update(hash, "]");
+  return { length, hash: (hash >>> 0).toString(16) };
 }
 
 /**
@@ -67,8 +89,10 @@ export function computeDlpCacheKey(dlp: any): string {
   // key) to avoid re-hashing large policies / record sets in hot paths.
   try {
     if (typeof dlp === "object" && dlp !== null) {
+      const hasExplicitRecords = Array.isArray((dlp as any).classificationRecords) || Array.isArray((dlp as any).classification_records);
+      const hasStore = Boolean((dlp as any).classificationStore || (dlp as any).classification_store);
       const existing = (dlp as any).cacheKey ?? (dlp as any).cache_key;
-      if (typeof existing === "string" && existing.trim()) return existing.trim();
+      if ((hasExplicitRecords || !hasStore) && typeof existing === "string" && existing.trim()) return existing.trim();
     }
   } catch {
     // ignore
@@ -107,9 +131,9 @@ export function computeDlpCacheKey(dlp: any): string {
   // Cache keys must be sensitive to selector/classification changes; relying only on
   // timestamps like `updatedAt` is unsafe in distributed systems (clock skew) and
   // for callers that omit timestamps entirely.
-  const normalized = normalizeClassificationRecordsForCacheKey(records);
-  const recordsJson = safeStableJsonStringify(normalized);
-  const recordsKey = `${recordsJson.length}:${hashString(recordsJson)}`;
+  const recordKeys = normalizedClassificationRecordKeysForCacheKey(records);
+  const hashed = hashJsonArray(recordKeys);
+  const recordsKey = `${hashed.length}:${hashed.hash}`;
 
   const key = `dlp:${includeRestrictedContent ? "incl" : "excl"}:${policyKey}:${recordsKey}`;
 
