@@ -467,7 +467,23 @@ iv0 (AES-CBC `EncryptedPackage` IV for segmentIndex=0) =
   719ea750a65a93d80e1e0ba33a2ba0e7
 ```
 
-### 8.1) Verifier check example (AES-ECB)
+### 8.1) RC4 per-block key example (128-bit)
+
+If the file uses **RC4** (`AlgID = CALG_RC4`) with a 128-bit key (`KeySize = 128` bits → 16 bytes),
+then (for SHA‑1) the per-block RC4 key is simply the first 16 bytes of `H_block`:
+
+```text
+rc4_key(block=0) = H_block0[0:16] =
+  6ad7dedf2da3514b1d85eabee069d47d
+
+H_block1 = SHA1(H_final || LE32(1)) =
+  2ed4e8825cd48aa4a47994cda7415b4a9687377d
+
+rc4_key(block=1) = H_block1[0:16] =
+  2ed4e8825cd48aa4a47994cda7415b4a
+```
+
+### 8.2) Verifier check example (AES-ECB)
 
 The following values are a *synthetic* verifier example that is consistent with the derivation above
 (AES-256 + SHA-1). It is useful as an end-to-end unit test for the verifier logic.
