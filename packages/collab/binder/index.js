@@ -1,5 +1,5 @@
 import * as Y from "yjs";
-import { getYMap, getYText, yjsValueToJson } from "../yjs-utils/src/index.ts";
+import { getYMap, getYText, yjsValueToJson } from "@formula/collab-yjs-utils";
 
 import { makeCellKey, normalizeCellKey, parseCellKey } from "../session/src/cell-key.js";
 import { getWorkbookRoots } from "../workbook/src/index.ts";

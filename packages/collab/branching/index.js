@@ -2,7 +2,7 @@ import {
   applyDocumentStateToYjsDoc,
   yjsDocToDocumentState,
 } from "../../versioning/branches/src/browser.js";
-import { getMapRoot } from "../yjs-utils/src/index.ts";
+import { getMapRoot } from "@formula/collab-yjs-utils";
 
 /**
  * @typedef {import("@formula/collab-session").CollabSession} CollabSession
