@@ -170,4 +170,33 @@ describe("FormulaBarView WASM editor tooling integration", () => {
 
     host.remove();
   });
+
+  it("uses locale-aware argument separators in fallback function hints", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "de-DE";
+
+    try {
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+      view.focus({ cursor: "end" });
+
+      const draft = "=SUM(1; 2)";
+      const cursorArg1 = draft.indexOf("2") + 1;
+      view.textarea.value = draft;
+      view.textarea.setSelectionRange(cursorArg1, cursorArg1);
+      view.textarea.dispatchEvent(new Event("input"));
+
+      await flushTooling();
+
+      const hintEl = host.querySelector<HTMLElement>('[data-testid="formula-hint"]');
+      const signatureText = hintEl?.querySelector<HTMLElement>(".formula-bar-hint-signature")?.textContent ?? "";
+      expect(signatureText).toContain("; ");
+    } finally {
+      document.documentElement.lang = prevLang;
+      host.remove();
+    }
+  });
 });
