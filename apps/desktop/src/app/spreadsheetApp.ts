@@ -1526,9 +1526,7 @@ export class SpreadsheetApp {
     };
 
     this.chartSelectionCanvas = document.createElement("canvas");
-    // Use the selection-layer z-index so chart handles sit above charts (and above the
-    // legacy selection canvas, where applicable).
-    this.chartSelectionCanvas.className = "grid-canvas grid-canvas--selection chart-selection-canvas";
+    this.chartSelectionCanvas.className = "grid-canvas chart-selection-canvas";
     this.chartSelectionCanvas.setAttribute("aria-hidden", "true");
     if (this.gridMode === "shared") {
       // Match the selection canvas z-index so chart handles are drawn above charts in shared mode.

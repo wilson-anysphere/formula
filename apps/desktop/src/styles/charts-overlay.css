@@ -9,8 +9,8 @@
   z-index: var(--grid-z-chart-overlay, 2);
 }
 
+/* Selection handles for charts are painted on a separate overlay canvas. */
 .chart-selection-canvas {
-  /* Selection handles for charts are painted on a separate overlay canvas. */
   pointer-events: none;
   /* Keep chart handles above charts/drawings (matches selection overlay ordering). */
   z-index: 4;

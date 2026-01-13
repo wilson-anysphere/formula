@@ -8208,25 +8208,6 @@ function handleRibbonCommand(commandId: string): void {
       });
     };
 
-    switch (commandId) {
-      case "formulas.formulaAuditing.tracePrecedents":
-        app.clearAuditing();
-        app.toggleAuditingPrecedents();
-        app.focus();
-        return;
-      case "formulas.formulaAuditing.traceDependents":
-        app.clearAuditing();
-        app.toggleAuditingDependents();
-        app.focus();
-        return;
-      case "formulas.formulaAuditing.removeArrows":
-        app.clearAuditing();
-        app.focus();
-        return;
-      default:
-        break;
-    }
-
     if (commandId === "format.toggleBold" || commandId === "format.toggleItalic" || commandId === "format.toggleUnderline") {
       executeBuiltinCommand(commandId);
       return;
@@ -8264,42 +8245,6 @@ function handleRibbonCommand(commandId: string): void {
       // is a no-op (e.g. selection size guard blocks).
       app.focus();
       return;
-    }
-
-    const openCustomZoomQuickPick = async (): Promise<void> => {
-      if (!app.supportsZoom()) return;
-      // Keep the custom zoom picker aligned with the shared-grid zoom clamp
-      // (currently 25%–400%, Excel-style).
-      const baseOptions = [25, 50, 75, 100, 125, 150, 200, 400];
-      const current = Math.round(app.getZoom() * 100);
-      const options = baseOptions.includes(current) ? baseOptions : [current, ...baseOptions];
-      const picked = await showQuickPick(
-        options.map((value) => ({ label: `${value}%`, value })),
-        { placeHolder: "Zoom" },
-      );
-      if (picked == null) return;
-      app.setZoom(picked / 100);
-      syncZoomControl();
-      app.focus();
-    };
-
-    const zoomMenuItemPrefix = "view.zoom.zoom.";
-    if (commandId.startsWith(zoomMenuItemPrefix)) {
-      const suffix = commandId.slice(zoomMenuItemPrefix.length);
-      if (suffix === "custom") {
-        void openCustomZoomQuickPick();
-        return;
-      }
-
-      const percent = Number(suffix);
-      if (Number.isFinite(percent) && Number.isInteger(percent) && percent > 0) {
-        if (!app.supportsZoom()) return;
-
-        app.setZoom(percent / 100);
-        syncZoomControl();
-        app.focus();
-        return;
-      }
     }
 
     const command = commandRegistry.getCommand(commandId);
@@ -8551,19 +8496,9 @@ function handleRibbonCommand(commandId: string): void {
         scheduleRibbonSelectionFormatStateUpdate();
         app.focus();
         return;
-      case "formulas.formulaAuditing.tracePrecedents":
-        app.clearAuditing();
-        app.toggleAuditingPrecedents();
-        app.focus();
-        return;
-      case "formulas.formulaAuditing.traceDependents":
-        app.clearAuditing();
-        app.toggleAuditingDependents();
-        app.focus();
-        return;
-      case "formulas.formulaAuditing.removeArrows":
-        app.clearAuditing();
-        app.focus();
+      case "insert.tables.pivotTable":
+        ribbonLayoutController?.openPanel(PanelIds.PIVOT_BUILDER);
+        window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
         return;
 
       case "insert.illustrations.pictures":
@@ -8573,7 +8508,6 @@ function handleRibbonCommand(commandId: string): void {
       case "insert.illustrations.onlinePictures":
         void handleInsertPicturesRibbonCommand(commandId, app);
         return;
-
       case "home.font.borders":
         // This command is a dropdown with menu items; the top-level command is not expected
         // to fire when the menu is present. Keep this as a fallback.
@@ -8723,17 +8657,8 @@ function handleRibbonCommand(commandId: string): void {
         executeBuiltinCommand(commandId);
         app.focus();
         return;
-      // Legacy ribbon schema ids (Home -> Editing -> Fill).
-      case "home.editing.fill.down":
-        executeBuiltinCommand("edit.fillDown");
-        app.focus();
-        return;
       case "edit.fillRight":
         executeBuiltinCommand(commandId);
-        app.focus();
-        return;
-      case "home.editing.fill.right":
-        executeBuiltinCommand("edit.fillRight");
         app.focus();
         return;
       case "edit.fillUp":

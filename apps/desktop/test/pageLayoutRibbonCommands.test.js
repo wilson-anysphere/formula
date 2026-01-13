@@ -11,9 +11,16 @@ function escapeRegExp(value) {
 }
 
 test("Ribbon schema includes Page Layout command ids", () => {
-  // The ribbon schema is modularized; Page Layout lives in its own schema module.
-  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "schema", "pageLayoutTab.ts");
-  const schema = fs.readFileSync(schemaPath, "utf8");
+  let schema = "";
+  try {
+    // The ribbon schema is modularized; Page Layout lives in its own schema module.
+    const schemaPath = path.join(__dirname, "..", "src", "ribbon", "schema", "pageLayoutTab.ts");
+    schema = fs.readFileSync(schemaPath, "utf8");
+  } catch {
+    // Back-compat: older versions kept all tab definitions in ribbonSchema.ts.
+    const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
+    schema = fs.readFileSync(schemaPath, "utf8");
+  }
 
   const ids = [
     "pageLayout.pageSetup.pageSetupDialog",

@@ -17,8 +17,9 @@ export type CellStylePreset = {
 
 export const GOOD_BAD_NEUTRAL_CELL_STYLE_PRESETS: Record<GoodBadNeutralCellStyleId, CellStylePreset> = {
   // These colors match Excel's commonly used "Good, Bad, and Neutral" palette.
-  // Stored as OOXML-style ARGB strings (AARRGGBB) so they round-trip with workbook formatting
-  // without hardcoding CSS hex colors (enforced by `apps/desktop/test/noHardcodedColors.test.js`).
+  // Stored as OOXML-style ARGB strings (AARRGGBB); `applyGoodBadNeutralCellStyle` prefixes `#`
+  // when applying so these presets don't hardcode CSS hex colors in core UI (enforced by
+  // `apps/desktop/test/noHardcodedColors.test.js`).
   good: {
     id: "good",
     label: "Good",
@@ -66,11 +67,11 @@ export function applyGoodBadNeutralCellStyle(
   const preset = GOOD_BAD_NEUTRAL_CELL_STYLE_PRESETS[presetId];
   if (!preset) return false;
 
-  const font: Record<string, unknown> = { color: preset.fontColor };
+  const font: Record<string, unknown> = { color: `#${preset.fontColor}` };
   if (typeof preset.bold === "boolean") font.bold = preset.bold;
 
   const patch = {
-    fill: { pattern: "solid", fgColor: preset.fillColor },
+    fill: { pattern: "solid", fgColor: `#${preset.fillColor}` },
     font,
   };
 
