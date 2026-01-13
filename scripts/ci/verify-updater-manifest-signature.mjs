@@ -4,7 +4,7 @@
  * apps/desktop/src-tauri/tauri.conf.json (plugins.updater.pubkey).
  *
  * Tauri's updater uses Ed25519 signatures. The updater public key in `tauri.conf.json` is a base64
- * string produced by `tauri signer generate`. Depending on the Tauri/minisign version, the base64
+ * string produced by `cargo tauri signer generate`. Depending on the Tauri/minisign version, the base64
  * may represent:
  *   - a minisign public key file (base64 of a text file containing a base64 payload line), or
  *   - the raw minisign payload ("Ed" + key id + raw Ed25519 public key), or
