@@ -109,6 +109,10 @@ describe("BoundedAIAuditStore", () => {
     expect(typeof summary?.audit_json).toBe("string");
     expect(typeof summary?.audit_original_chars).toBe("number");
     expect(summary.audit_original_chars).toBeGreaterThan((summary.audit_json as string).length);
+
+    // Compaction should not mutate the original entry object.
+    expect((entry.tool_calls[0] as any).result).toEqual({ ok: true, payload: huge });
+    expect((entry.input as any).prompt).toBe(huge);
   });
 
   it("derives workbook_id during compaction when missing/blank", async () => {
