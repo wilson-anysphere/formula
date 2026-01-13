@@ -239,10 +239,19 @@ function mergeCellValues(params: {
 }): Y.Map<unknown> {
   const { canonical, legacies, MapCtor } = params;
   const out = new MapCtor();
+  // Important: `out` is not integrated into the Y.Doc yet, so `out.get(key)`
+  // will always return `undefined` (Yjs stores prelim content separately). Track
+  // presence explicitly so "merge" can deterministically preserve canonical
+  // fields and only fill missing keys from legacy payloads.
+  const hasKey = new Set<string>();
   const canonicalMap = getYMapLike(canonical);
   if (canonicalMap) {
     canonicalMap.forEach((v, k) => {
       out.set(k, cloneYjsValue(v));
+      // Treat `undefined` as "missing" so legacy payloads can fill it (matches
+      // prior behavior where `out.get(k)` couldn't distinguish missing vs
+      // undefined anyway).
+      if (v !== undefined) hasKey.add(k);
     });
   }
 
@@ -252,7 +261,9 @@ function mergeCellValues(params: {
     legacyMap.forEach((v, k) => {
       // "merge" is intentionally conservative: keep canonical values when a field
       // exists, but salvage missing fields from legacy payloads.
-      if (out.get(k) === undefined) out.set(k, cloneYjsValue(v));
+      if (hasKey.has(k)) return;
+      out.set(k, cloneYjsValue(v));
+      if (v !== undefined) hasKey.add(k);
     });
   }
   return out;

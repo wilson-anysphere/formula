@@ -220,3 +220,61 @@ test("migrateLegacyCellKeys clones foreign (CJS) nested Yjs types to local const
   assert.ok(migratedFormat instanceof Y.Map);
   assert.equal(migratedFormat.get("bold"), true);
 });
+
+test("migrateLegacyCellKeys conflict=prefer-legacy overwrites canonical plaintext with legacy plaintext", () => {
+  const doc = new Y.Doc();
+  const cells = doc.getMap("cells");
+
+  cells.set("Sheet1:0:0", makePlainCell("canonical"));
+  cells.set("Sheet1:0,0", makePlainCell("legacy"));
+
+  const result = migrateLegacyCellKeys(doc, { conflict: "prefer-legacy" });
+  assert.deepEqual(result, { migrated: 1, removed: 1, collisions: 1 });
+
+  assert.equal(cells.has("Sheet1:0,0"), false);
+  const cell = /** @type {any} */ (cells.get("Sheet1:0:0"));
+  assert.equal(cell.get("value"), "legacy");
+});
+
+test("migrateLegacyCellKeys conflict=merge preserves canonical values and fills missing fields from legacy", () => {
+  const doc = new Y.Doc();
+  const cells = doc.getMap("cells");
+
+  const canonical = new Y.Map();
+  canonical.set("value", "canonical");
+  canonical.set("formula", null);
+  cells.set("Sheet1:0:0", canonical);
+
+  const legacy = new Y.Map();
+  legacy.set("value", "legacy");
+  legacy.set("formula", null);
+  legacy.set("modifiedBy", "u-legacy");
+  cells.set("Sheet1:0,0", legacy);
+
+  const result = migrateLegacyCellKeys(doc, { conflict: "merge" });
+  assert.deepEqual(result, { migrated: 1, removed: 1, collisions: 1 });
+
+  assert.equal(cells.has("Sheet1:0,0"), false);
+  const merged = /** @type {any} */ (cells.get("Sheet1:0:0"));
+  assert.ok(merged);
+  assert.equal(merged.get("value"), "canonical");
+  assert.equal(merged.get("modifiedBy"), "u-legacy");
+});
+
+test("migrateLegacyCellKeys resolves multiple legacy encodings for the same coordinate", () => {
+  const doc = new Y.Doc();
+  const cells = doc.getMap("cells");
+
+  cells.set("Sheet1:0,0", makePlainCell("from-colon-comma"));
+  cells.set("r0c0", makePlainCell("from-r0c0"));
+
+  const result = migrateLegacyCellKeys(doc, { defaultSheetId: "Sheet1" });
+  assert.deepEqual(result, { migrated: 1, removed: 2, collisions: 1 });
+
+  assert.equal(cells.has("Sheet1:0,0"), false);
+  assert.equal(cells.has("r0c0"), false);
+  const migrated = /** @type {any} */ (cells.get("Sheet1:0:0"));
+  assert.ok(migrated);
+  // Deterministic winner: lexicographic sort picks `Sheet1:0,0` over `r0c0`.
+  assert.equal(migrated.get("value"), "from-colon-comma");
+});
