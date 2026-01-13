@@ -2115,6 +2115,7 @@ impl DaxEngine {
             eval_filter: &FilterContext,
             row_ctx: &RowContext,
             keep_filters: bool,
+            env: &mut VarEnv,
             clear_columns: &mut HashSet<(String, String)>,
             row_filters: &mut Vec<(String, HashSet<usize>)>,
         ) -> DaxResult<()> {
@@ -2279,6 +2280,7 @@ impl DaxEngine {
                     &eval_filter,
                     row_ctx,
                     keep_filters,
+                    env,
                     &mut clear_columns,
                     &mut row_filters,
                 )?,
@@ -2294,6 +2296,7 @@ impl DaxEngine {
                         &eval_filter,
                         row_ctx,
                         keep_filters,
+                        env,
                         &mut clear_columns,
                         &mut row_filters,
                     )?
@@ -3708,6 +3711,13 @@ impl DaxEngine {
                             visible_cols: None,
                         });
                     }
+
+                    // Pre-compute the current filter row sets once so we can reuse them both for
+                    // intermediate blank-row checks and the final intersection with filter
+                    // context.
+                    let sets = (!filter.is_empty())
+                        .then(|| resolve_row_sets(model, filter))
+                        .transpose()?;
                     let mut current_rows: Vec<usize> = vec![current_row];
                     for rel_idx in path {
                         let rel_info = model
@@ -3749,6 +3759,27 @@ impl DaxEngine {
                                         next_rows.extend(candidates.iter().copied());
                                     }
                                 }
+
+                                // In snowflake schemas, the "blank row" can cascade: an unmatched
+                                // key in a lower-level fact table creates a virtual blank row in
+                                // an intermediate dimension table. That intermediate blank row
+                                // should in turn be considered a member of this relationship's
+                                // blank row. Include it as a candidate so subsequent hops can
+                                // discover unmatched rows further down the chain.
+                                if blank_row_allowed(filter, &rel_info.rel.from_table)
+                                    && virtual_blank_row_exists(
+                                        model,
+                                        filter,
+                                        &rel_info.rel.from_table,
+                                        sets.as_ref(),
+                                    )?
+                                {
+                                    let from_table_ref =
+                                        model.table(&rel_info.rel.from_table).ok_or_else(|| {
+                                            DaxError::UnknownTable(rel_info.rel.from_table.clone())
+                                        })?;
+                                    next_rows.push(from_table_ref.row_count());
+                                }
                             }
                         } else {
                             let from_table_ref = model.table(&rel_info.rel.from_table).ok_or_else(
@@ -3789,6 +3820,17 @@ impl DaxEngine {
                                         }
                                     }
                                 }
+
+                                if blank_row_allowed(filter, &rel_info.rel.from_table)
+                                    && virtual_blank_row_exists(
+                                        model,
+                                        filter,
+                                        &rel_info.rel.from_table,
+                                        sets.as_ref(),
+                                    )?
+                                {
+                                    next_rows.push(from_table_ref.row_count());
+                                }
                             }
                         }
 
@@ -3801,18 +3843,17 @@ impl DaxEngine {
                         current_rows = next_rows;
                     }
 
-                    // Apply current filter context (including relationship propagation).
-                    let sets = resolve_row_sets(model, filter)?;
-                    let allowed = sets
-                        .get(target_table)
-                        .ok_or_else(|| DaxError::UnknownTable(target_table.to_string()))?;
-
-                    let mut rows = Vec::new();
-                    for row in current_rows {
-                        if allowed.get(row).copied().unwrap_or(false) {
-                            rows.push(row);
-                        }
-                    }
+                    let rows = if let Some(sets) = sets {
+                        let allowed = sets
+                            .get(target_table)
+                            .ok_or_else(|| DaxError::UnknownTable(target_table.to_string()))?;
+                        current_rows
+                            .into_iter()
+                            .filter(|row| allowed.get(*row).copied().unwrap_or(false))
+                            .collect()
+                    } else {
+                        current_rows
+                    };
 
                     Ok(TableResult {
                         table: target_table.clone(),

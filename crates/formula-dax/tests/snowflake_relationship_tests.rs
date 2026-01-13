@@ -185,3 +185,71 @@ fn relatedtable_supports_multi_hop_snowflake_navigation() {
 
     assert_eq!(values, vec![15.0.into(), 7.0.into()]);
 }
+
+#[test]
+fn relatedtable_cascades_blank_rows_across_snowflake_hops() {
+    // Scenario:
+    // - Sales contains a ProductId with no matching Products row.
+    // - That creates a virtual blank row in Products.
+    // - That blank Products row should be treated as belonging to the blank Categories member,
+    //   so navigating Categories(blank) -> RELATEDTABLE(Sales) should include that sales row.
+    let mut model = DataModel::new();
+
+    let mut categories = Table::new("Categories", vec!["CategoryId", "CategoryName"]);
+    categories.push_row(vec![1.into(), Value::from("A")]).unwrap();
+    model.add_table(categories).unwrap();
+
+    let mut products = Table::new("Products", vec!["ProductId", "CategoryId"]);
+    products.push_row(vec![10.into(), 1.into()]).unwrap();
+    model.add_table(products).unwrap();
+
+    let mut sales = Table::new("Sales", vec!["SaleId", "ProductId", "Amount"]);
+    sales.push_row(vec![100.into(), 10.into(), 10.0.into()]).unwrap(); // A
+    sales
+        .push_row(vec![101.into(), 999.into(), 5.0.into()])
+        .unwrap(); // unknown product -> Products blank row -> Categories blank row
+    model.add_table(sales).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Products".into(),
+            from_table: "Sales".into(),
+            from_column: "ProductId".into(),
+            to_table: "Products".into(),
+            to_column: "ProductId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Products_Categories".into(),
+            from_table: "Products".into(),
+            from_column: "CategoryId".into(),
+            to_table: "Categories".into(),
+            to_column: "CategoryId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let mut row_ctx = RowContext::default();
+    let categories_blank_row = model.table("Categories").unwrap().row_count();
+    row_ctx.push("Categories", categories_blank_row);
+
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "SUMX(RELATEDTABLE(Sales), Sales[Amount])",
+            &FilterContext::empty(),
+            &row_ctx,
+        )
+        .unwrap();
+
+    assert_eq!(value, 5.0.into());
+}
