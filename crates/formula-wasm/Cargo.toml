@@ -7,12 +7,6 @@ description = "WASM bindings for the Formula spreadsheet engine."
 repository = "https://github.com/wilson-anysphere/formula"
 publish = false
 
-[package.metadata.wasm-pack.profile.release]
-# Rust emits wasm features like `memory.copy` (bulk memory) and `trunc_sat`
-# (non-trapping float-to-int) by default. Ensure Binaryen validation enables
-# those proposals when wasm-pack runs `wasm-opt` in release builds.
-wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
-
 [lib]
 crate-type = ["cdylib", "rlib"]
 
