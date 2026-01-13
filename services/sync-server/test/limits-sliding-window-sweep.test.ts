@@ -20,3 +20,19 @@ test("SlidingWindowRateLimiter sweeps stale keys to avoid unbounded growth", () 
   assert.equal((limiter as any).windows.size, 1);
 });
 
+test("SlidingWindowRateLimiter sweeps when key count exceeds the threshold", () => {
+  const limiter = new SlidingWindowRateLimiter(1, 1_000);
+
+  // Exceed the internal sweep threshold (10k) without advancing time past the
+  // 30s minimum sweep interval. The sweep should still run due to size.
+  for (let i = 0; i < 10_001; i += 1) {
+    limiter.consume(`ip-${i}`, 0);
+  }
+
+  assert.equal((limiter as any).windows.size, 10_001);
+
+  // Advance just past the 1s window so the old keys are fully stale.
+  limiter.consume("ip-trigger", 1_001);
+
+  assert.equal((limiter as any).windows.size, 1);
+});
