@@ -16,6 +16,10 @@ pub enum OfficeCryptoError {
     InvalidOptions(String),
     #[error("invalid format: {0}")]
     InvalidFormat(String),
+    #[error("{context} exceeds maximum allowed size ({limit} bytes)")]
+    SizeLimitExceeded { context: &'static str, limit: usize },
+    #[error("{context} exceeds maximum allowed size ({limit} bytes)")]
+    SizeLimitExceededU64 { context: &'static str, limit: u64 },
     #[error("encrypted package size {total_size} overflows supported allocations")]
     EncryptedPackageSizeOverflow { total_size: u64 },
     #[error("failed to allocate decrypted package buffer of size {total_size}: {source}")]

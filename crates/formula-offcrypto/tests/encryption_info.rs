@@ -41,7 +41,7 @@ fn build_standard_encryption_info_with_version(
     // EncryptionHeader (8 DWORDs + cspName)
     let mut header = Vec::new();
     header.extend_from_slice(&header_flags.to_le_bytes()); // flags
-    header.extend_from_slice(&0x22222222u32.to_le_bytes()); // sizeExtra
+    header.extend_from_slice(&(csp_name.len() as u32).to_le_bytes()); // sizeExtra
     header.extend_from_slice(&alg_id.to_le_bytes()); // algId
     header.extend_from_slice(&alg_id_hash.to_le_bytes()); // algIdHash
     header.extend_from_slice(&key_size_bits.to_le_bytes()); // keySize
@@ -121,7 +121,7 @@ fn parse_synthetic_standard_encryption_info() {
         header,
         StandardEncryptionHeader {
             flags: StandardEncryptionHeaderFlags::from_raw(header_flags),
-            size_extra: 0x22222222,
+            size_extra: csp_name.len() as u32,
             alg_id: CALG_AES_128,
             alg_id_hash: CALG_SHA1,
             key_size_bits: 128,
@@ -606,4 +606,50 @@ fn truncation_missing_encrypted_verifier_bytes() {
 
     let err = parse_encryption_info(&bytes).unwrap_err();
     assert!(matches!(err, OffcryptoError::Truncated { .. }));
+}
+
+#[test]
+fn errors_on_unsupported_version() {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&5u16.to_le_bytes());
+    bytes.extend_from_slice(&5u16.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    assert!(
+        matches!(
+            parse_encryption_info(&bytes).expect("parser is best-effort on unknown versions"),
+            EncryptionInfo::Unsupported { .. }
+        ),
+        "expected EncryptionInfo::Unsupported"
+    );
+}
+
+#[test]
+fn errors_on_agile_xml_too_large() {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&4u16.to_le_bytes());
+    bytes.extend_from_slice(&4u16.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend(std::iter::repeat(b'A').take(
+        formula_offcrypto::MAX_AGILE_ENCRYPTION_INFO_XML_BYTES + 1,
+    ));
+    let err = parse_encryption_info(&bytes).unwrap_err();
+    assert!(
+        matches!(err, OffcryptoError::SizeLimitExceeded { .. }),
+        "err={err:?}"
+    );
+}
+
+#[test]
+fn errors_on_standard_header_size_too_large() {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&3u16.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    // header_size way above the hard cap.
+    bytes.extend_from_slice(&1_000_000u32.to_le_bytes());
+    let err = parse_encryption_info(&bytes).unwrap_err();
+    assert!(
+        matches!(err, OffcryptoError::SizeLimitExceeded { .. }),
+        "err={err:?}"
+    );
 }

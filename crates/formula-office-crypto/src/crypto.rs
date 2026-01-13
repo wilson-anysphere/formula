@@ -11,6 +11,11 @@ use zeroize::Zeroizing;
 
 const MAX_DIGEST_LEN: usize = 64; // SHA-512
 const MAX_HASH_BLOCK_LEN: usize = 128; // SHA-384/SHA-512 block size
+/// Maximum number of bytes we will ever allocate for derived keys, regardless of untrusted input.
+///
+/// Office uses AES keys (16/24/32 bytes). This cap prevents attacker-controlled XML fields (e.g.
+/// `keyBits`) from forcing large allocations.
+const MAX_DERIVED_KEY_BYTES: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashAlgorithm {
@@ -236,6 +241,9 @@ pub(crate) fn derive_agile_key(
     key_bytes: usize,
     block_key: &[u8],
 ) -> Zeroizing<Vec<u8>> {
+    // Prevent untrusted XML from forcing unbounded allocations via absurd `keyBits` values.
+    let key_bytes = key_bytes.min(MAX_DERIVED_KEY_BYTES);
+
     let h = hash_password(hash_alg, salt, password_utf16le, spin_count);
 
     // Avoid allocating a temporary `H || blockKey` buffer: hash with two updates into a stack

@@ -83,6 +83,9 @@ fn map_biff_decrypt_error(err: crate::biff::encryption::DecryptError) -> Decrypt
         crate::biff::encryption::DecryptError::UnsupportedEncryption(scheme) => {
             DecryptError::UnsupportedEncryption(scheme)
         }
+        err @ crate::biff::encryption::DecryptError::SizeLimitExceeded { .. } => {
+            DecryptError::InvalidFormat(err.to_string())
+        }
         crate::biff::encryption::DecryptError::InvalidFilePass(message) => {
             DecryptError::InvalidFormat(message)
         }

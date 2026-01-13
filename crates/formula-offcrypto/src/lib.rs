@@ -72,7 +72,7 @@ impl Default for DecryptLimits {
     fn default() -> Self {
         Self {
             max_spin_count: Some(DEFAULT_MAX_SPIN_COUNT),
-            max_output_size: None,
+            max_output_size: Some(MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE),
         }
     }
 }
@@ -122,6 +122,22 @@ const CALG_AES_256: u32 = 0x0000_6610;
 const CALG_RC4: u32 = 0x0000_6801;
 const CALG_MD5: u32 = 0x0000_8003;
 const CALG_SHA1: u32 = 0x0000_8004;
+/// Maximum allowed size for the Agile `EncryptionInfo` XML payload (version 4.4).
+///
+/// The Agile XML is typically a few KB. This cap ensures we do not attempt to parse or decode
+/// arbitrarily large XML documents when `EncryptionInfo` is sourced from untrusted bytes.
+pub const MAX_AGILE_ENCRYPTION_INFO_XML_BYTES: usize = 1024 * 1024; // 1MiB
+
+/// Maximum allowed *declared* unencrypted size for the `EncryptedPackage` stream.
+///
+/// The `EncryptedPackage` stream starts with an 8-byte little-endian size prefix for the original
+/// OOXML ZIP package. This cap prevents adversarial inputs from advertising a huge size and
+/// triggering large allocations in downstream callers.
+pub const MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE: u64 = 512 * 1024 * 1024; // 512MiB
+
+// Conservative caps for Standard (CryptoAPI) `EncryptionInfo` parsing.
+const MAX_STANDARD_ENCRYPTION_HEADER_BYTES: usize = 16 * 1024; // header is usually << 1KiB
+const MAX_STANDARD_CSPNAME_BYTES: usize = 8 * 1024;
 
 /// Parsed `EncryptionVersionInfo` (MS-OFFCRYPTO).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -517,6 +533,12 @@ pub enum OffcryptoError {
     /// The encryption schema is known but not supported by the selected decryption mode.
     #[error("unsupported encryption type {encryption_type:?}")]
     UnsupportedEncryption { encryption_type: EncryptionType },
+    /// A size/length field exceeded a hard safety limit.
+    #[error("{context} exceeds maximum allowed size ({limit} bytes)")]
+    SizeLimitExceeded { context: &'static str, limit: usize },
+    /// A u64 size prefix exceeded a hard safety limit.
+    #[error("{context} exceeds maximum allowed size ({limit} bytes)")]
+    SizeLimitExceededU64 { context: &'static str, limit: u64 },
     /// Standard external encryption (`fExternal`) is not supported.
     #[error("unsupported external Standard encryption")]
     UnsupportedExternalEncryption,
@@ -645,6 +667,12 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
 
     if (major, minor) == (4, 4) {
         // Agile EncryptionInfo payload is an UTF-8 XML document beginning at byte offset 8.
+        if r.remaining().len() > MAX_AGILE_ENCRYPTION_INFO_XML_BYTES {
+            return Err(OffcryptoError::SizeLimitExceeded {
+                context: "agile EncryptionInfo XML",
+                limit: MAX_AGILE_ENCRYPTION_INFO_XML_BYTES,
+            });
+        }
         let info = parse_agile_encryption_info_xml(r.remaining())?;
         return Ok(EncryptionInfo::Agile { version, info });
     }
@@ -663,10 +691,15 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
     // Standard `EncryptionHeader` has a fixed 8-DWORD prefix (32 bytes). Reject header sizes that
     // are clearly invalid (as opposed to merely truncated inputs).
     const MIN_STANDARD_HEADER_SIZE: usize = 8 * 4;
-    const MAX_STANDARD_HEADER_SIZE: usize = 1024 * 1024; // 1MiB: far larger than any real CSP name.
-    if header_size < MIN_STANDARD_HEADER_SIZE || header_size > MAX_STANDARD_HEADER_SIZE {
+    if header_size < MIN_STANDARD_HEADER_SIZE {
         return Err(OffcryptoError::InvalidEncryptionInfo {
             context: "EncryptionInfo.header_size is out of bounds",
+        });
+    }
+    if header_size > MAX_STANDARD_ENCRYPTION_HEADER_BYTES {
+        return Err(OffcryptoError::SizeLimitExceeded {
+            context: "EncryptionInfo.header_size",
+            limit: MAX_STANDARD_ENCRYPTION_HEADER_BYTES,
         });
     }
 
@@ -697,16 +730,34 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
         });
     }
 
+    let alg_id_hash = hr.read_u32_le("EncryptionHeader.algIdHash")?;
+    let key_size_bits = hr.read_u32_le("EncryptionHeader.keySize")?;
+    let provider_type = hr.read_u32_le("EncryptionHeader.providerType")?;
+    let reserved1 = hr.read_u32_le("EncryptionHeader.reserved1")?;
+    let reserved2 = hr.read_u32_le("EncryptionHeader.reserved2")?;
+
+    if size_extra as usize > MAX_STANDARD_CSPNAME_BYTES {
+        return Err(OffcryptoError::SizeLimitExceeded {
+            context: "EncryptionHeader.sizeExtra",
+            limit: MAX_STANDARD_CSPNAME_BYTES,
+        });
+    }
+    if (size_extra as usize) > hr.remaining().len() {
+        return Err(OffcryptoError::Truncated {
+            context: "EncryptionHeader.cspName",
+        });
+    }
+    let csp_name_bytes = hr.take(size_extra as usize, "EncryptionHeader.cspName")?;
     let mut header = StandardEncryptionHeader {
         flags,
         size_extra,
         alg_id,
-        alg_id_hash: hr.read_u32_le("EncryptionHeader.algIdHash")?,
-        key_size_bits: hr.read_u32_le("EncryptionHeader.keySize")?,
-        provider_type: hr.read_u32_le("EncryptionHeader.providerType")?,
-        reserved1: hr.read_u32_le("EncryptionHeader.reserved1")?,
-        reserved2: hr.read_u32_le("EncryptionHeader.reserved2")?,
-        csp_name: decode_csp_name_utf16le(hr.remaining())?,
+        alg_id_hash,
+        key_size_bits,
+        provider_type,
+        reserved1,
+        reserved2,
+        csp_name: decode_csp_name_utf16le(csp_name_bytes)?,
     };
 
     // Algorithm/parameter validation.
@@ -1972,12 +2023,15 @@ pub fn parse_encrypted_package_header(
     // combined 64-bit value is not plausible for the available ciphertext, fall back to the low
     // DWORD for compatibility *only when it is non-zero* (so we don't misinterpret true 64-bit
     // sizes that are exact multiples of 2^32).
-    let original_size =
-        if len_lo != 0 && len_hi != 0 && original_size_u64 > ciphertext_len && len_lo <= ciphertext_len {
-            len_lo
-        } else {
-            original_size_u64
-        };
+    let original_size = if len_lo != 0
+        && len_hi != 0
+        && original_size_u64 > ciphertext_len
+        && len_lo <= ciphertext_len
+    {
+        len_lo
+    } else {
+        original_size_u64
+    };
     Ok(EncryptedPackageHeader { original_size })
 }
 

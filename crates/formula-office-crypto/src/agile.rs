@@ -20,6 +20,7 @@ use crate::util::{
     checked_vec_len, ct_eq, parse_encrypted_package_original_size, EncryptionInfoHeader,
 };
 use zeroize::Zeroizing;
+use zeroize::Zeroize;
 
 const BLOCK_KEY_VERIFIER_HASH_INPUT: &[u8; 8] = b"\xFE\xA7\xD2\x76\x3B\x4B\x9E\x79";
 const BLOCK_KEY_VERIFIER_HASH_VALUE: &[u8; 8] = b"\xD7\xAA\x0F\x6D\x30\x61\x34\x4E";
@@ -124,7 +125,18 @@ pub(crate) fn parse_agile_encryption_info(
     // We mirror the robustness of `formula_io::extract_agile_encryption_info_xml` by extracting
     // candidates from the post-version payload and attempting to parse the descriptor across those
     // variants.
-    let descriptor = parse_agile_descriptor_from_stream(bytes)?;
+    // Use the already-validated `EncryptionInfoHeader` size/offset to bound how many bytes we
+    // consider part of the XML descriptor. This prevents crafted inputs from appending arbitrarily
+    // large trailing data to the stream and forcing the XML parser to process unbounded input.
+    let end = header
+        .header_offset
+        .checked_add(header.header_size as usize)
+        .ok_or_else(|| OfficeCryptoError::InvalidFormat("EncryptionInfo XML size overflow".to_string()))?;
+    let bounded = bytes.get(..end).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("EncryptionInfo XML size out of range".to_string())
+    })?;
+
+    let descriptor = parse_agile_descriptor_from_stream(bounded)?;
 
     Ok(AgileEncryptionInfo {
         version_major: header.version_major,
@@ -326,6 +338,12 @@ pub(crate) fn decrypt_agile_encrypted_package(
     opts: &crate::DecryptOptions,
 ) -> Result<Vec<u8>, OfficeCryptoError> {
     let total_size = parse_encrypted_package_original_size(encrypted_package)?;
+    if total_size > crate::MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE {
+        return Err(OfficeCryptoError::SizeLimitExceededU64 {
+            context: "EncryptedPackage.originalSize",
+            limit: crate::MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE,
+        });
+    }
     let expected_len = checked_vec_len(total_size)?;
     let ciphertext = &encrypted_package[8..];
 
@@ -616,16 +634,30 @@ pub(crate) fn decrypt_agile_encrypted_package(
             (None, None)
         };
 
-        // Decrypt the package data in 4096-byte segments.
+        // Decrypt the package data in 4096-byte segments. We only decrypt the ciphertext needed for
+        // the declared `originalSize` to avoid attacker-controlled ciphertext lengths forcing huge
+        // allocations.
         let mut out = Vec::new();
-        out.try_reserve_exact(ciphertext_decrypt.len()).map_err(|source| {
+        out.try_reserve_exact(expected_len).map_err(|source| {
             OfficeCryptoError::EncryptedPackageAllocationFailed { total_size, source }
         })?;
+
+        let mut remaining = expected_len;
         let mut offset = 0usize;
         let mut block_index = 0u32;
-        while offset < ciphertext_decrypt.len() {
-            let seg_len = (ciphertext_decrypt.len() - offset).min(SEGMENT_LEN);
-            let seg = &ciphertext_decrypt[offset..offset + seg_len];
+        while remaining > 0 {
+            let plain_len = remaining.min(SEGMENT_LEN);
+            let cipher_len = padded_aes_len(plain_len)?;
+            let end = offset.checked_add(cipher_len).ok_or_else(|| {
+                OfficeCryptoError::InvalidFormat(
+                    "EncryptedPackage ciphertext offset overflow".to_string(),
+                )
+            })?;
+            let seg = ciphertext_decrypt.get(offset..end).ok_or_else(|| {
+                OfficeCryptoError::InvalidFormat(
+                    "EncryptedPackage ciphertext shorter than declared originalSize".to_string(),
+                )
+            })?;
             let iv = derive_iv(
                 info.key_data.hash_algorithm,
                 &info.key_data.salt,
@@ -633,20 +665,19 @@ pub(crate) fn decrypt_agile_encrypted_package(
                 info.key_data.block_size,
             );
             let mut plain = aes_cbc_decrypt(&package_key, &iv, seg)?;
-            out.append(&mut plain);
-            offset += seg_len;
+            if plain_len > plain.len() {
+                return Err(OfficeCryptoError::InvalidFormat(
+                    "decrypted segment shorter than expected".to_string(),
+                ));
+            }
+            out.extend_from_slice(&plain[..plain_len]);
+            plain.zeroize();
+            offset = end;
+            remaining -= plain_len;
             block_index = block_index.checked_add(1).ok_or_else(|| {
                 OfficeCryptoError::InvalidFormat("segment counter overflow".to_string())
             })?;
         }
-        if expected_len > out.len() {
-            return Err(OfficeCryptoError::InvalidFormat(format!(
-                "decrypted package length {} shorter than expected {}",
-                out.len(),
-                expected_len
-            )));
-        }
-        out.truncate(expected_len);
 
         // Validate data integrity (HMAC) when `<dataIntegrity>` is present.
         //
@@ -663,45 +694,56 @@ pub(crate) fn decrypt_agile_encrypted_package(
             let hmac_key_plain = &hmac_key_plain[..hmac_key_len];
 
             let computed_hmac_stream_full =
-                compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, encrypted_package);
-            let computed_hmac_stream = computed_hmac_stream_full.get(..hash_size).ok_or_else(|| {
-                OfficeCryptoError::InvalidFormat("HMAC output shorter than hashSize".to_string())
-            })?;
-            if !ct_eq(expected_hmac, computed_hmac_stream) {
-                let computed_hmac_ciphertext_full =
-                    compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, ciphertext);
-                let computed_hmac_ciphertext =
-                    computed_hmac_ciphertext_full.get(..hash_size).ok_or_else(|| {
-                        OfficeCryptoError::InvalidFormat("HMAC output shorter than hashSize".to_string())
+                compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, encrypted_package)?;
+            let computed_hmac_stream =
+                computed_hmac_stream_full.get(..hash_size).ok_or_else(|| {
+                    OfficeCryptoError::InvalidFormat(
+                        "HMAC output shorter than hashSize".to_string(),
+                    )
+                })?;
+
+            let computed_hmac_ciphertext_full =
+                compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, ciphertext)?;
+            let computed_hmac_ciphertext =
+                computed_hmac_ciphertext_full.get(..hash_size).ok_or_else(|| {
+                    OfficeCryptoError::InvalidFormat(
+                        "HMAC output shorter than hashSize".to_string(),
+                    )
+                })?;
+
+            let mut integrity_ok = ct_eq(expected_hmac, computed_hmac_stream)
+                || ct_eq(expected_hmac, computed_hmac_ciphertext);
+            if !integrity_ok {
+                let computed_hmac_plaintext_full =
+                    compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, &out)?;
+                let computed_hmac_plaintext =
+                    computed_hmac_plaintext_full.get(..hash_size).ok_or_else(|| {
+                        OfficeCryptoError::InvalidFormat(
+                            "HMAC output shorter than hashSize".to_string(),
+                        )
                     })?;
-                if !ct_eq(expected_hmac, computed_hmac_ciphertext) {
-                    let computed_hmac_plaintext_full =
-                        compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, &out);
-                    let computed_hmac_plaintext =
-                        computed_hmac_plaintext_full.get(..hash_size).ok_or_else(|| {
-                            OfficeCryptoError::InvalidFormat(
-                                "HMAC output shorter than hashSize".to_string(),
-                            )
-                        })?;
-                    if !ct_eq(expected_hmac, computed_hmac_plaintext) {
-                        let computed_hmac_header_plus_plaintext_full = compute_hmac_two(
-                            info.key_data.hash_algorithm,
-                            hmac_key_plain,
-                            &encrypted_package[..8],
-                            &out,
-                        );
-                        let computed_hmac_header_plus_plaintext =
-                            computed_hmac_header_plus_plaintext_full.get(..hash_size).ok_or_else(|| {
-                                OfficeCryptoError::InvalidFormat(
-                                    "HMAC output shorter than hashSize".to_string(),
-                                )
-                            })?;
-                        if !ct_eq(expected_hmac, computed_hmac_header_plus_plaintext) {
-                            last_err = Some(OfficeCryptoError::IntegrityCheckFailed);
-                            continue;
-                        }
-                    }
-                }
+                let computed_hmac_plaintext_with_size_full = compute_hmac_two(
+                    info.key_data.hash_algorithm,
+                    hmac_key_plain,
+                    encrypted_package.get(..8).ok_or_else(|| {
+                        OfficeCryptoError::InvalidFormat(
+                            "EncryptedPackage stream too short for size prefix".to_string(),
+                        )
+                    })?,
+                    &out,
+                )?;
+                let computed_hmac_plaintext_with_size =
+                    computed_hmac_plaintext_with_size_full.get(..hash_size).ok_or_else(|| {
+                        OfficeCryptoError::InvalidFormat(
+                            "HMAC output shorter than hashSize".to_string(),
+                        )
+                    })?;
+                integrity_ok = ct_eq(expected_hmac, computed_hmac_plaintext)
+                    || ct_eq(expected_hmac, computed_hmac_plaintext_with_size);
+            }
+            if !integrity_ok {
+                last_err = Some(OfficeCryptoError::IntegrityCheckFailed);
+                continue;
             }
         }
 
@@ -801,7 +843,7 @@ pub(crate) fn encrypt_agile_encrypted_package(
     let mut hmac_key_plain = vec![0u8; hash_alg.digest_len()];
     OsRng.fill_bytes(&mut hmac_key_plain);
     let hmac_key_plain: Zeroizing<Vec<u8>> = Zeroizing::new(hmac_key_plain);
-    let hmac_value_plain = compute_hmac(hash_alg, &hmac_key_plain, &encrypted_package);
+    let hmac_value_plain = compute_hmac(hash_alg, &hmac_key_plain, &encrypted_package)?;
     let hmac_value_plain = pad_zero(&hmac_value_plain, block_size);
 
     let iv_hmac_key = derive_iv(
@@ -913,77 +955,112 @@ fn pad_zero(data: &[u8], block_size: usize) -> Vec<u8> {
     out
 }
 
-fn compute_hmac(hash_alg: HashAlgorithm, key: &[u8], data: &[u8]) -> Vec<u8> {
+fn padded_aes_len(len: usize) -> Result<usize, OfficeCryptoError> {
+    let rem = len % 16;
+    if rem == 0 {
+        Ok(len)
+    } else {
+        len.checked_add(16 - rem).ok_or_else(|| {
+            OfficeCryptoError::InvalidFormat(
+                "length overflow while padding to AES block".to_string(),
+            )
+        })
+    }
+}
+
+fn compute_hmac(
+    hash_alg: HashAlgorithm,
+    key: &[u8],
+    data: &[u8],
+) -> Result<Vec<u8>, OfficeCryptoError> {
     match hash_alg {
         HashAlgorithm::Md5 => {
-            let mut mac: Hmac<Md5> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            let mut mac: Hmac<Md5> = Hmac::new_from_slice(key).map_err(|_| {
+                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
+            })?;
             mac.update(data);
-            mac.finalize().into_bytes().to_vec()
+            Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha1 => {
-            let mut mac: Hmac<Sha1> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            let mut mac: Hmac<Sha1> = Hmac::new_from_slice(key).map_err(|_| {
+                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
+            })?;
             mac.update(data);
-            mac.finalize().into_bytes().to_vec()
+            Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha256 => {
-            let mut mac: Hmac<Sha256> =
-                Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            let mut mac: Hmac<Sha256> = Hmac::new_from_slice(key).map_err(|_| {
+                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
+            })?;
             mac.update(data);
-            mac.finalize().into_bytes().to_vec()
+            Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha384 => {
-            let mut mac: Hmac<Sha384> =
-                Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            let mut mac: Hmac<Sha384> = Hmac::new_from_slice(key).map_err(|_| {
+                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
+            })?;
             mac.update(data);
-            mac.finalize().into_bytes().to_vec()
+            Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha512 => {
-            let mut mac: Hmac<Sha512> =
-                Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            let mut mac: Hmac<Sha512> = Hmac::new_from_slice(key).map_err(|_| {
+                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
+            })?;
             mac.update(data);
-            mac.finalize().into_bytes().to_vec()
+            Ok(mac.finalize().into_bytes().to_vec())
         }
     }
 }
 
-fn compute_hmac_two(hash_alg: HashAlgorithm, key: &[u8], a: &[u8], b: &[u8]) -> Vec<u8> {
+fn compute_hmac_two(
+    hash_alg: HashAlgorithm,
+    key: &[u8],
+    part1: &[u8],
+    part2: &[u8],
+) -> Result<Vec<u8>, OfficeCryptoError> {
     match hash_alg {
         HashAlgorithm::Md5 => {
-            let mut mac: Hmac<Md5> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
-            mac.update(a);
-            mac.update(b);
-            mac.finalize().into_bytes().to_vec()
+            let mut mac: Hmac<Md5> = Hmac::new_from_slice(key).map_err(|_| {
+                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
+            })?;
+            mac.update(part1);
+            mac.update(part2);
+            Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha1 => {
-            let mut mac: Hmac<Sha1> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
-            mac.update(a);
-            mac.update(b);
-            mac.finalize().into_bytes().to_vec()
+            let mut mac: Hmac<Sha1> = Hmac::new_from_slice(key).map_err(|_| {
+                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
+            })?;
+            mac.update(part1);
+            mac.update(part2);
+            Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha256 => {
-            let mut mac: Hmac<Sha256> =
-                Hmac::new_from_slice(key).expect("HMAC accepts any key size");
-            mac.update(a);
-            mac.update(b);
-            mac.finalize().into_bytes().to_vec()
+            let mut mac: Hmac<Sha256> = Hmac::new_from_slice(key).map_err(|_| {
+                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
+            })?;
+            mac.update(part1);
+            mac.update(part2);
+            Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha384 => {
-            let mut mac: Hmac<Sha384> =
-                Hmac::new_from_slice(key).expect("HMAC accepts any key size");
-            mac.update(a);
-            mac.update(b);
-            mac.finalize().into_bytes().to_vec()
+            let mut mac: Hmac<Sha384> = Hmac::new_from_slice(key).map_err(|_| {
+                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
+            })?;
+            mac.update(part1);
+            mac.update(part2);
+            Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha512 => {
-            let mut mac: Hmac<Sha512> =
-                Hmac::new_from_slice(key).expect("HMAC accepts any key size");
-            mac.update(a);
-            mac.update(b);
-            mac.finalize().into_bytes().to_vec()
+            let mut mac: Hmac<Sha512> = Hmac::new_from_slice(key).map_err(|_| {
+                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
+            })?;
+            mac.update(part1);
+            mac.update(part2);
+            Ok(mac.finalize().into_bytes().to_vec())
         }
     }
 }
-
 struct AgileDescriptor {
     key_data: AgileKeyData,
     data_integrity: Option<AgileDataIntegrity>,
@@ -1291,6 +1368,28 @@ fn parse_key_data_attrs<B: std::io::BufRead>(
         }
     }
 
+    if let Some(bits) = key_bits {
+        if bits > 512 {
+            return Err(OfficeCryptoError::SizeLimitExceeded {
+                context: "keyData.keyBits",
+                limit: 512,
+            });
+        }
+        if bits % 8 != 0 {
+            return Err(OfficeCryptoError::InvalidFormat(
+                "keyData.keyBits must be divisible by 8".to_string(),
+            ));
+        }
+    }
+    if let Some(bs) = block_size {
+        if bs > 1024 {
+            return Err(OfficeCryptoError::SizeLimitExceeded {
+                context: "keyData.blockSize",
+                limit: 1024,
+            });
+        }
+    }
+
     let hash_algorithm = hash_algorithm.ok_or_else(|| {
         OfficeCryptoError::InvalidFormat("keyData missing hashAlgorithm".to_string())
     })?;
@@ -1299,6 +1398,13 @@ fn parse_key_data_attrs<B: std::io::BufRead>(
         return Err(OfficeCryptoError::InvalidFormat(
             "keyData hashSize must be non-zero".to_string(),
         ));
+    }
+    let digest_len = hash_algorithm.digest_len();
+    if hash_size > digest_len {
+        return Err(OfficeCryptoError::InvalidFormat(format!(
+            "keyData hashSize {hash_size} exceeds {} digest length {digest_len}",
+            hash_algorithm.as_ooxml_name()
+        )));
     }
     Ok(AgileKeyData {
         salt: salt_value.ok_or_else(|| {
@@ -1479,6 +1585,28 @@ fn parse_password_key_encryptor_attrs<B: std::io::BufRead>(
         }
     }
 
+    if let Some(bits) = key_bits {
+        if bits > 512 {
+            return Err(OfficeCryptoError::SizeLimitExceeded {
+                context: "encryptedKey.keyBits",
+                limit: 512,
+            });
+        }
+        if bits % 8 != 0 {
+            return Err(OfficeCryptoError::InvalidFormat(
+                "encryptedKey.keyBits must be divisible by 8".to_string(),
+            ));
+        }
+    }
+    if let Some(bs) = block_size {
+        if bs > 1024 {
+            return Err(OfficeCryptoError::SizeLimitExceeded {
+                context: "encryptedKey.blockSize",
+                limit: 1024,
+            });
+        }
+    }
+
     let hash_algorithm = hash_algorithm.ok_or_else(|| {
         OfficeCryptoError::InvalidFormat("encryptedKey missing hashAlgorithm".to_string())
     })?;
@@ -1487,6 +1615,13 @@ fn parse_password_key_encryptor_attrs<B: std::io::BufRead>(
         return Err(OfficeCryptoError::InvalidFormat(
             "encryptedKey hashSize must be non-zero".to_string(),
         ));
+    }
+    let digest_len = hash_algorithm.digest_len();
+    if hash_size > digest_len {
+        return Err(OfficeCryptoError::InvalidFormat(format!(
+            "encryptedKey hashSize {hash_size} exceeds {} digest length {digest_len}",
+            hash_algorithm.as_ooxml_name()
+        )));
     }
     Ok(AgilePasswordAttrs {
         salt: salt_value.ok_or_else(|| {
@@ -1544,6 +1679,7 @@ pub(crate) mod tests {
         aes_cbc_encrypt, derive_agile_key, derive_iv, password_to_utf16le, HashAlgorithm,
     };
     use crate::util::parse_encryption_info_header;
+    use crate::OfficeCryptoError;
 
     #[test]
     fn default_max_spin_count_is_one_million() {
@@ -1755,7 +1891,8 @@ pub(crate) mod tests {
         // Data integrity: create a valid HMAC for this (empty) EncryptedPackage stream.
         let digest_len = hash_alg.digest_len();
         let hmac_key_plain = vec![0x22u8; digest_len];
-        let computed_hmac = compute_hmac(hash_alg, &hmac_key_plain, &encrypted_package);
+        let computed_hmac =
+            compute_hmac(hash_alg, &hmac_key_plain, &encrypted_package).expect("hmac");
 
         let iv_hmac_key = derive_iv(
             hash_alg,
@@ -1937,7 +2074,8 @@ pub(crate) mod tests {
 
         // HMAC key/value fields with non-zero trailing bytes.
         let hmac_key_plain = vec![0x22u8; digest_len];
-        let computed_hmac = compute_hmac(hash_alg, &hmac_key_plain, &encrypted_package);
+        let computed_hmac = compute_hmac(hash_alg, &hmac_key_plain, &encrypted_package)
+            .expect("compute hmac");
         assert_eq!(computed_hmac.len(), digest_len);
 
         let mut hmac_key_plain_padded = hmac_key_plain.clone();
@@ -2074,7 +2212,8 @@ pub(crate) mod tests {
         // Data integrity: create a valid HMAC for this EncryptedPackage stream.
         let digest_len = hash_alg.digest_len();
         let hmac_key_plain = vec![0x22u8; digest_len];
-        let computed_hmac = compute_hmac(hash_alg, &hmac_key_plain, &encrypted_package);
+        let computed_hmac =
+            compute_hmac(hash_alg, &hmac_key_plain, &encrypted_package).expect("compute hmac");
 
         let iv_hmac_key = derive_iv(
             hash_alg,
@@ -2224,12 +2363,17 @@ pub(crate) mod tests {
             "Password",
             &crate::DecryptOptions::default(),
         )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            OfficeCryptoError::EncryptedPackageSizeOverflow { total_size }
-                if total_size == u64::MAX
-        ));
+        .expect_err("expected size limit error");
+        assert!(
+            matches!(
+                err,
+                OfficeCryptoError::SizeLimitExceededU64 {
+                    context: "EncryptedPackage.originalSize",
+                    limit
+                } if limit == crate::MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE
+            ),
+            "err={err:?}"
+        );
     }
 
     #[test]
@@ -2248,5 +2392,33 @@ pub(crate) mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, OfficeCryptoError::InvalidFormat(_)));
+    }
+
+    #[test]
+    fn decrypt_rejects_oversized_encrypted_package_original_size() {
+        let info = parsed_info();
+
+        let mut encrypted_package = Vec::new();
+        encrypted_package.extend_from_slice(
+            &(crate::MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE + 1).to_le_bytes(),
+        );
+        let err = decrypt_agile_encrypted_package(
+            &info,
+            &encrypted_package,
+            "Password",
+            &crate::DecryptOptions::default(),
+        )
+        .expect_err("expected size limit error");
+
+        assert!(
+            matches!(
+                err,
+                OfficeCryptoError::SizeLimitExceededU64 {
+                    context: "EncryptedPackage.originalSize",
+                    limit
+                } if limit == crate::MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE
+            ),
+            "err={err:?}"
+        );
     }
 }

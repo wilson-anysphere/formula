@@ -13,12 +13,12 @@ use std::path::Path;
 
 pub(crate) mod autofilter;
 pub(crate) mod autofilter_criteria;
-pub(crate) mod encryption;
-pub(crate) mod globals;
 mod comments;
 pub(crate) mod defined_names;
+pub(crate) mod encryption;
 pub(crate) mod externsheet;
 pub(crate) mod formulas;
+pub(crate) mod globals;
 pub(crate) mod print_settings;
 pub(crate) mod workbook_context;
 pub(crate) mod rgce;
@@ -26,15 +26,15 @@ pub(crate) mod records;
 pub(crate) mod sheet;
 pub(crate) mod shared_formulas;
 pub(crate) mod sort;
-pub(crate) mod supbook;
 pub(crate) mod sst;
 pub(crate) mod strings;
+pub(crate) mod supbook;
 pub(crate) mod worksheet_formulas;
 
-pub(crate) use comments::parse_biff_sheet_notes;
-pub(crate) use defined_names::parse_biff_defined_names;
 pub(crate) use autofilter::{parse_biff_filter_database_ranges, ParsedFilterDatabaseRanges};
 pub(crate) use autofilter_criteria::parse_biff_sheet_autofilter_criteria;
+pub(crate) use comments::parse_biff_sheet_notes;
+pub(crate) use defined_names::parse_biff_defined_names;
 pub(crate) use globals::{
     parse_biff_bound_sheets, parse_biff_codepage, parse_biff_workbook_globals, BoundSheetInfo,
 };

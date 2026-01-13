@@ -599,11 +599,16 @@ mod tests {
         MAX_ALLOC.store(0, Ordering::Relaxed);
 
         let err = decrypt_encrypted_package(bytes.as_slice(), |_idx, _ct, _pt| Ok(()))
-            .expect_err("expected size overflow");
+            .expect_err("expected output too large");
 
         assert!(
-            matches!(err, OffcryptoError::EncryptedPackageSizeOverflow { total_size: got } if got == total_size),
-            "expected EncryptedPackageSizeOverflow({total_size}), got {err:?}"
+            matches!(
+                err,
+                OffcryptoError::OutputTooLarge { total_size: got, max }
+                    if got == total_size && max == crate::MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE
+            ),
+            "expected OutputTooLarge({total_size}, {}), got {err:?}",
+            crate::MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE
         );
 
         let max_alloc = MAX_ALLOC.load(Ordering::Relaxed);

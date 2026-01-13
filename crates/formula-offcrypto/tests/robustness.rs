@@ -84,10 +84,16 @@ fn bogus_standard_header_size_is_rejected() {
         // header_size is immediately after the 8-byte version+flags prefix.
         bytes[8..12].copy_from_slice(&header_size.to_le_bytes());
         let err = parse_encryption_info(&bytes).unwrap_err();
-        assert!(
-            matches!(&err, OffcryptoError::InvalidEncryptionInfo { .. }),
-            "header_size={header_size:#x} expected InvalidEncryptionInfo, got {err:?}"
-        );
+        match header_size {
+            0 | 1 => assert!(
+                matches!(err, OffcryptoError::InvalidEncryptionInfo { .. }),
+                "header_size={header_size:#x} expected InvalidEncryptionInfo, got {err:?}"
+            ),
+            _ => assert!(
+                matches!(err, OffcryptoError::SizeLimitExceeded { .. }),
+                "header_size={header_size:#x} expected SizeLimitExceeded, got {err:?}"
+            ),
+        }
     }
 }
 

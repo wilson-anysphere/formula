@@ -67,6 +67,13 @@ const RECORD_RRDHEAD: u16 = 0x0139;
 const RECORD_USREXCL: u16 = 0x0194;
 const RECORD_FILELOCK: u16 = 0x0195;
 
+/// Maximum allowed FILEPASS record payload size.
+///
+/// The BIFF record header stores the size in a `u16`, but the payload is typically well under a
+/// few hundred bytes. Capping the payload prevents unnecessary allocations when parsing untrusted
+/// workbook streams.
+pub(crate) const MAX_FILEPASS_PAYLOAD_BYTES: usize = 4 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BiffEncryption {
     /// BIFF5 XOR obfuscation. FILEPASS payload is `key` + `verifier`.
@@ -91,6 +98,8 @@ pub(crate) enum DecryptError {
     InvalidFilePass(String),
     #[error("unsupported encryption scheme: {0}")]
     UnsupportedEncryption(String),
+    #[error("{context} exceeds maximum allowed size ({limit} bytes)")]
+    SizeLimitExceeded { context: &'static str, limit: usize },
     #[error("password required")]
     PasswordRequired,
     #[error("wrong password")]
@@ -98,7 +107,12 @@ pub(crate) enum DecryptError {
 }
 
 fn read_u16(data: &[u8], offset: usize, ctx: &str) -> Result<u16, DecryptError> {
-    let bytes = data.get(offset..offset + 2).ok_or_else(|| {
+    let end = offset.checked_add(2).ok_or_else(|| {
+        DecryptError::InvalidFilePass(format!(
+            "offset overflow while reading {ctx} at offset {offset}"
+        ))
+    })?;
+    let bytes = data.get(offset..end).ok_or_else(|| {
         DecryptError::InvalidFilePass(format!(
             "truncated FILEPASS payload while reading {ctx} at offset {offset} (len={})",
             data.len()
@@ -114,6 +128,13 @@ pub(crate) fn parse_filepass_record(
     biff_version: BiffVersion,
     data: &[u8],
 ) -> Result<BiffEncryption, DecryptError> {
+    if data.len() > MAX_FILEPASS_PAYLOAD_BYTES {
+        return Err(DecryptError::SizeLimitExceeded {
+            context: "FILEPASS payload",
+            limit: MAX_FILEPASS_PAYLOAD_BYTES,
+        });
+    }
+
     match biff_version {
         BiffVersion::Biff5 => {
             // BIFF5 FILEPASS is typically XOR obfuscation: 4 bytes (key + verifier).
@@ -1614,6 +1635,13 @@ mod tests {
         let payload = [0x01, 0x00, 0x01];
         let err = parse_filepass_record(BiffVersion::Biff8, &payload).expect_err("expected err");
         assert!(matches!(err, DecryptError::InvalidFilePass(_)));
+    }
+
+    #[test]
+    fn errors_on_oversized_filepass_payload() {
+        let payload = vec![0u8; MAX_FILEPASS_PAYLOAD_BYTES + 1];
+        let err = parse_filepass_record(BiffVersion::Biff8, &payload).expect_err("expected err");
+        assert!(matches!(err, DecryptError::SizeLimitExceeded { .. }));
     }
 
     #[test]

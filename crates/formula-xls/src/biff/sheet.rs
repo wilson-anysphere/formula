@@ -462,7 +462,10 @@ pub(crate) fn parse_biff_sheet_protection(
                     Ok(None) => {}
                     Err(err) => push_sheet_metadata_warning(
                         &mut out.warnings,
-                        format!("failed to parse FEAT record at offset {}: {err}", record.offset),
+                        format!(
+                            "failed to parse FEAT record at offset {}: {err}",
+                            record.offset
+                        ),
                     ),
                 }
             }
@@ -1295,7 +1298,10 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                 Ok(None) => {}
                 Err(err) => push_warning_bounded(
                     &mut props.warnings,
-                    format!("failed to parse SORT record at offset {}: {err}", record.offset),
+                    format!(
+                        "failed to parse SORT record at offset {}: {err}",
+                        record.offset
+                    ),
                 ),
             },
             // AutoFilter12 / Sort12 / SortData12 (BIFF8 Future Record Type records).

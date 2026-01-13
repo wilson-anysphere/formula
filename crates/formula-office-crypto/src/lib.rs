@@ -28,6 +28,28 @@ const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 /// maliciously large values (Excel commonly uses 100,000).
 pub const DEFAULT_MAX_SPIN_COUNT: u32 = 1_000_000;
 
+/// Maximum allowed size for the Agile (XML) `EncryptionInfo` payload.
+///
+/// The XML descriptor is typically a few KB. This cap prevents parsing or base64-decoding
+/// arbitrarily large XML documents from untrusted files.
+pub const MAX_AGILE_ENCRYPTION_INFO_XML_BYTES: usize = 1024 * 1024; // 1MiB
+
+/// Maximum allowed size for the Standard (binary) `EncryptionHeader` section of `EncryptionInfo`.
+pub const MAX_STANDARD_ENCRYPTION_HEADER_BYTES: usize = 16 * 1024;
+
+/// Maximum allowed size for the Standard `EncryptionHeader.cspName` field.
+pub const MAX_STANDARD_CSPNAME_BYTES: usize = 8 * 1024;
+
+/// Maximum allowed verifier hash size in bytes for Standard encryption.
+///
+/// Supported hashes (SHA-1..SHA-512) are <= 64 bytes.
+pub const MAX_STANDARD_VERIFIER_HASH_SIZE_BYTES: usize = 64;
+
+/// Maximum allowed declared decrypted size for the `EncryptedPackage` stream.
+///
+/// This size prefix is untrusted; callers should reject absurd values before allocating output.
+pub const MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE: u64 = 512 * 1024 * 1024; // 512MiB
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum EncryptionScheme {
     Agile,
@@ -655,8 +677,14 @@ mod tests {
             standard::decrypt_standard_encrypted_package(&dummy_standard, &encrypted_package, "")
                 .expect_err("expected size overflow");
         assert!(
-            matches!(err, OfficeCryptoError::EncryptedPackageSizeOverflow { total_size: got } if got == total_size),
-            "expected EncryptedPackageSizeOverflow({total_size}), got {err:?}"
+            matches!(
+                err,
+                OfficeCryptoError::SizeLimitExceededU64 {
+                    context: "EncryptedPackage.originalSize",
+                    limit
+                } if limit == crate::MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE
+            ),
+            "expected SizeLimitExceededU64(EncryptedPackage.originalSize), got {err:?}"
         );
 
         let err = agile::decrypt_agile_encrypted_package(
@@ -667,8 +695,14 @@ mod tests {
         )
         .expect_err("expected size overflow");
         assert!(
-            matches!(err, OfficeCryptoError::EncryptedPackageSizeOverflow { total_size: got } if got == total_size),
-            "expected EncryptedPackageSizeOverflow({total_size}), got {err:?}"
+            matches!(
+                err,
+                OfficeCryptoError::SizeLimitExceededU64 {
+                    context: "EncryptedPackage.originalSize",
+                    limit
+                } if limit == crate::MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE
+            ),
+            "expected SizeLimitExceededU64(EncryptedPackage.originalSize), got {err:?}"
         );
 
         let max_alloc = MAX_ALLOC.load(Ordering::Relaxed);

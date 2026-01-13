@@ -8158,6 +8158,7 @@ fn bytecode_compile_diagnostics_compiles_indirect() {
         stats.fallback_reasons
     );
 
+    // Fallback reports only include formulas that could not be compiled to bytecode.
     let report = engine.bytecode_compile_report(10);
     assert!(
         report.is_empty(),

@@ -1,6 +1,8 @@
 use proptest::prelude::*;
 
-use super::{autofilter, comments, defined_names, globals, records, sheet, strings, BiffVersion};
+use super::{
+    autofilter, comments, defined_names, encryption, globals, records, sheet, strings, BiffVersion,
+};
 
 const MAX_INPUT_LEN: usize = 64 * 1024;
 const CODEPAGE_1252: u16 = 1252;
@@ -93,6 +95,26 @@ proptest! {
             }))
             .is_ok(),
             "records::workbook_globals_has_filepass_record panicked"
+        );
+
+        // FILEPASS parser (encryption classifier).
+        prop_assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let payload_len = buf.len().min(encryption::MAX_FILEPASS_PAYLOAD_BYTES);
+                let _ = encryption::parse_filepass_record(BiffVersion::Biff8, &buf[..payload_len]);
+            }))
+            .is_ok(),
+            "encryption::parse_filepass_record panicked"
+        );
+
+        // Workbook decrypt preflight helper (should fail gracefully on arbitrary inputs).
+        prop_assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut workbook = buf.clone();
+                let _ = encryption::decrypt_workbook_stream(&mut workbook, "pw");
+            }))
+            .is_ok(),
+            "encryption::decrypt_workbook_stream panicked"
         );
 
         // Logical BIFF record iteration (CONTINUE coalescing).
@@ -267,14 +289,15 @@ proptest! {
                 // Print settings helper (page setup + margins + manual page breaks).
                 let print = super::parse_biff_sheet_print_settings(&buf, 0)
                     .expect("offset 0 should always be in-bounds");
-                let page_setup = print.page_setup.unwrap_or_default();
-                let margins = &page_setup.margins;
-                assert!(margins.left.is_finite());
-                assert!(margins.right.is_finite());
-                assert!(margins.top.is_finite());
-                assert!(margins.bottom.is_finite());
-                assert!(margins.header.is_finite());
-                assert!(margins.footer.is_finite());
+                if let Some(page_setup) = print.page_setup.as_ref() {
+                    let margins = &page_setup.margins;
+                    assert!(margins.left.is_finite());
+                    assert!(margins.right.is_finite());
+                    assert!(margins.top.is_finite());
+                    assert!(margins.bottom.is_finite());
+                    assert!(margins.header.is_finite());
+                    assert!(margins.footer.is_finite());
+                }
 
                 let xfs = sheet::parse_biff_sheet_cell_xf_indices_filtered(&buf, 0, None)
                     .expect("offset 0 should always be in-bounds");

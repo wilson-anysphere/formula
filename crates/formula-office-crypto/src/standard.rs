@@ -110,10 +110,19 @@ pub(crate) fn parse_standard_encryption_info(
 ) -> Result<StandardEncryptionInfo, OfficeCryptoError> {
     let start = header.header_offset;
     let header_size = header.header_size as usize;
-    let header_bytes = bytes.get(start..start + header_size).ok_or_else(|| {
+    if header_size > crate::MAX_STANDARD_ENCRYPTION_HEADER_BYTES {
+        return Err(OfficeCryptoError::SizeLimitExceeded {
+            context: "EncryptionInfo.headerSize",
+            limit: crate::MAX_STANDARD_ENCRYPTION_HEADER_BYTES,
+        });
+    }
+    let header_end = start.checked_add(header_size).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("EncryptionInfo header size overflow".to_string())
+    })?;
+    let header_bytes = bytes.get(start..header_end).ok_or_else(|| {
         OfficeCryptoError::InvalidFormat("EncryptionInfo header size out of range".to_string())
     })?;
-    let verifier_bytes = bytes.get(start + header_size..).ok_or_else(|| {
+    let verifier_bytes = bytes.get(header_end..).ok_or_else(|| {
         OfficeCryptoError::InvalidFormat("EncryptionInfo missing verifier".to_string())
     })?;
 
@@ -199,16 +208,33 @@ fn parse_encryption_verifier(
         )));
     }
     let mut offset = 4usize;
-    let salt = bytes.get(offset..offset + salt_size).ok_or_else(|| {
+    let salt_end = offset.checked_add(salt_size).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("EncryptionVerifier salt size overflow".to_string())
+    })?;
+    let salt = bytes.get(offset..salt_end).ok_or_else(|| {
         OfficeCryptoError::InvalidFormat("EncryptionVerifier salt out of range".to_string())
     })?;
-    offset += salt_size;
-    let encrypted_verifier = bytes.get(offset..offset + 16).ok_or_else(|| {
+    offset = salt_end;
+
+    let verifier_end = offset.checked_add(16).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("EncryptionVerifier verifier offset overflow".to_string())
+    })?;
+    let encrypted_verifier = bytes.get(offset..verifier_end).ok_or_else(|| {
         OfficeCryptoError::InvalidFormat("EncryptionVerifier missing verifier".to_string())
     })?;
-    offset += 16;
+    offset = verifier_end;
+
     let verifier_hash_size = read_u32_le(bytes, offset)?;
-    offset += 4;
+    offset = offset.checked_add(4).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("EncryptionVerifier verifierHashSize offset overflow".to_string())
+    })?;
+    let hash_size = verifier_hash_size as usize;
+    if hash_size > crate::MAX_STANDARD_VERIFIER_HASH_SIZE_BYTES {
+        return Err(OfficeCryptoError::SizeLimitExceeded {
+            context: "EncryptionVerifier.verifierHashSize",
+            limit: crate::MAX_STANDARD_VERIFIER_HASH_SIZE_BYTES,
+        });
+    }
 
     if verifier_hash_size == 0 || verifier_hash_size > MAX_VERIFIER_HASH_SIZE {
         return Err(OfficeCryptoError::InvalidFormat(format!(
@@ -252,6 +278,17 @@ fn parse_encryption_verifier(
         verifier_hash_size,
         encrypted_verifier_hash: encrypted_verifier_hash.to_vec(),
     })
+}
+
+fn padded_aes_len(len: usize) -> Result<usize, OfficeCryptoError> {
+    let rem = len % 16;
+    if rem == 0 {
+        Ok(len)
+    } else {
+        len.checked_add(16 - rem).ok_or_else(|| {
+            OfficeCryptoError::InvalidFormat("length overflow while padding to AES block".to_string())
+        })
+    }
 }
 
 /// Verify an MS-OFFCRYPTO Standard password by decrypting the `EncryptionVerifier` fields.
@@ -525,6 +562,12 @@ pub(crate) fn decrypt_standard_encrypted_package(
     password: &str,
 ) -> Result<Vec<u8>, OfficeCryptoError> {
     let total_size = parse_encrypted_package_original_size(encrypted_package)?;
+    if total_size > crate::MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE {
+        return Err(OfficeCryptoError::SizeLimitExceededU64 {
+            context: "EncryptedPackage.originalSize",
+            limit: crate::MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE,
+        });
+    }
     let expected_len = checked_vec_len(total_size)?;
     let ciphertext = &encrypted_package[8..];
 
@@ -1118,6 +1161,24 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn decrypt_rejects_oversized_encrypted_package_original_size() {
+        let info_bytes = standard_encryption_info_fixture();
+        let hdr = parse_encryption_info_header(&info_bytes).expect("header");
+        let info = super::parse_standard_encryption_info(&info_bytes, &hdr).expect("parse standard");
+
+        let mut encrypted_package = Vec::new();
+        encrypted_package
+            .extend_from_slice(&(crate::MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE + 1).to_le_bytes());
+        let err = super::decrypt_standard_encrypted_package(&info, &encrypted_package, "Password")
+            .expect_err("expected size limit error");
+
+        assert!(
+            matches!(err, OfficeCryptoError::SizeLimitExceededU64 { .. }),
+            "err={err:?}"
+        );
+    }
+
     fn derive_key_ref(
         hash_alg: HashAlgorithm,
         key_bits: u32,
@@ -1368,12 +1429,17 @@ pub(crate) mod tests {
         let encrypted_package = u64::MAX.to_le_bytes().to_vec();
 
         let err = super::decrypt_standard_encrypted_package(&info, &encrypted_package, "Password")
-            .unwrap_err();
-        assert!(matches!(
-            err,
-            OfficeCryptoError::EncryptedPackageSizeOverflow { total_size }
-                if total_size == u64::MAX
-        ));
+            .expect_err("expected size limit error");
+        assert!(
+            matches!(
+                err,
+                OfficeCryptoError::SizeLimitExceededU64 {
+                    context: "EncryptedPackage.originalSize",
+                    limit
+                } if limit == crate::MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE
+            ),
+            "err={err:?}"
+        );
     }
 
     #[test]

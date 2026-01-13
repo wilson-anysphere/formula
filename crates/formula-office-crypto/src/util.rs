@@ -72,7 +72,7 @@ pub(crate) fn parse_encryption_info_header(
     // real-world files vary `versionMajor` across Office generations (2/3/4).
     //
     // "Extensible" encryption uses `versionMinor == 3` with `versionMajor` 3 or 4.
-    match (version_major, version_minor) {
+    let (kind, header_offset, header_size) = match (version_major, version_minor) {
         (4, 4) => {
             // Agile (XML) EncryptionInfo.
             //
@@ -90,15 +90,7 @@ pub(crate) fn parse_encryption_info_header(
             } else {
                 (8usize, bytes.len().saturating_sub(8) as u32)
             };
-
-            Ok(EncryptionInfoHeader {
-                version_major,
-                version_minor,
-                flags,
-                header_size,
-                kind: EncryptionInfoKind::Agile,
-                header_offset,
-            })
+            (EncryptionInfoKind::Agile, header_offset, header_size)
         }
         (major, 2) if (2..=4).contains(&major) => {
             if bytes.len() < 12 {
@@ -107,32 +99,71 @@ pub(crate) fn parse_encryption_info_header(
                 ));
             }
             let header_size = read_u32_le(bytes, 8)?;
-            Ok(EncryptionInfoHeader {
-                version_major,
-                version_minor,
-                flags,
-                header_size,
-                kind: EncryptionInfoKind::Standard,
-                header_offset: 12,
-            })
+            (EncryptionInfoKind::Standard, 12usize, header_size)
         }
-        _ => Err(OfficeCryptoError::UnsupportedEncryption(format!(
-            "unsupported EncryptionInfo version {version_major}.{version_minor} (flags={flags:#x})"
-        ))),
+        _ => {
+            return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+                "unsupported EncryptionInfo version {version_major}.{version_minor} (flags={flags:#x})"
+            )));
+        }
+    };
+
+    let header_size_usize = header_size as usize;
+    match kind {
+        EncryptionInfoKind::Agile => {
+            if header_size_usize > crate::MAX_AGILE_ENCRYPTION_INFO_XML_BYTES {
+                return Err(OfficeCryptoError::SizeLimitExceeded {
+                    context: "EncryptionInfo XML",
+                    limit: crate::MAX_AGILE_ENCRYPTION_INFO_XML_BYTES,
+                });
+            }
+        }
+        EncryptionInfoKind::Standard => {
+            if header_size_usize > crate::MAX_STANDARD_ENCRYPTION_HEADER_BYTES {
+                return Err(OfficeCryptoError::SizeLimitExceeded {
+                    context: "EncryptionInfo.headerSize",
+                    limit: crate::MAX_STANDARD_ENCRYPTION_HEADER_BYTES,
+                });
+            }
+        }
     }
+
+    let end = header_offset.checked_add(header_size_usize).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("EncryptionInfo header size overflow".to_string())
+    })?;
+    if end > bytes.len() {
+        return Err(OfficeCryptoError::InvalidFormat(
+            "EncryptionInfo header size out of range".to_string(),
+        ));
+    }
+
+    Ok(EncryptionInfoHeader {
+        version_major,
+        version_minor,
+        flags,
+        header_size,
+        kind,
+        header_offset,
+    })
 }
 
 pub(crate) fn read_u16_le(bytes: &[u8], offset: usize) -> Result<u16, OfficeCryptoError> {
-    let b = bytes
-        .get(offset..offset + 2)
-        .ok_or_else(|| OfficeCryptoError::InvalidFormat("unexpected EOF".to_string()))?;
+    let end = offset.checked_add(2).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("offset overflow".to_string())
+    })?;
+    let b = bytes.get(offset..end).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("unexpected EOF".to_string())
+    })?;
     Ok(u16::from_le_bytes([b[0], b[1]]))
 }
 
 pub(crate) fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, OfficeCryptoError> {
-    let b = bytes
-        .get(offset..offset + 4)
-        .ok_or_else(|| OfficeCryptoError::InvalidFormat("unexpected EOF".to_string()))?;
+    let end = offset.checked_add(4).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("offset overflow".to_string())
+    })?;
+    let b = bytes.get(offset..end).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("unexpected EOF".to_string())
+    })?;
     Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 
@@ -165,30 +196,20 @@ pub(crate) fn parse_encrypted_package_original_size(
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn encrypted_package_size_header_does_not_fall_back_when_low_dword_is_zero() {
-        // The header is specified as a `u64le`. Some producers treat it as `(u32 size, u32 reserved)`,
-        // but that heuristic must not misread sizes that are exact multiples of 2^32 (low DWORD = 0).
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&0u32.to_le_bytes()); // low DWORD
-        bytes.extend_from_slice(&1u32.to_le_bytes()); // high DWORD
-        let size = parse_encrypted_package_original_size(&bytes).expect("parse size");
-        assert_eq!(size, 1u64 << 32);
-    }
-}
-
 pub(crate) fn decode_utf16le_nul_terminated(bytes: &[u8]) -> Result<String, OfficeCryptoError> {
+    if bytes.len() > crate::MAX_STANDARD_CSPNAME_BYTES {
+        return Err(OfficeCryptoError::SizeLimitExceeded {
+            context: "EncryptionHeader.cspName",
+            limit: crate::MAX_STANDARD_CSPNAME_BYTES,
+        });
+    }
     if bytes.len() % 2 != 0 {
         return Err(OfficeCryptoError::InvalidFormat(
             "UTF-16LE string has odd length".to_string(),
         ));
     }
 
-    let mut code_units: Vec<u16> = Vec::new();
+    let mut code_units: Vec<u16> = Vec::with_capacity(bytes.len() / 2);
     for pair in bytes.chunks_exact(2) {
         let cu = u16::from_le_bytes([pair[0], pair[1]]);
         if cu == 0 {
@@ -212,6 +233,77 @@ pub(crate) fn checked_vec_len(total_size: u64) -> Result<usize, OfficeCryptoErro
     Ok(len)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{MAX_AGILE_ENCRYPTION_INFO_XML_BYTES, MAX_STANDARD_ENCRYPTION_HEADER_BYTES};
+
+    #[test]
+    fn encrypted_package_size_header_does_not_fall_back_when_low_dword_is_zero() {
+        // The header is specified as a `u64le`. Some producers treat it as `(u32 size, u32 reserved)`,
+        // but that heuristic must not misread sizes that are exact multiples of 2^32 (low DWORD = 0).
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // low DWORD
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // high DWORD
+        let size = parse_encrypted_package_original_size(&bytes).expect("parse size");
+        assert_eq!(size, 1u64 << 32);
+    }
+
+    #[test]
+    fn encryption_info_header_rejects_truncated() {
+        // Standard encryption requires a 4-byte headerSize field at offset 8.
+        // Provide a valid version header but truncate before that field.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&3u16.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&[0u8; 3]); // 11 bytes total (< 12)
+        let err = parse_encryption_info_header(&bytes).unwrap_err();
+        assert!(matches!(err, OfficeCryptoError::InvalidFormat(_)));
+    }
+
+    #[test]
+    fn encryption_info_header_rejects_unsupported_version() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&5u16.to_le_bytes());
+        bytes.extend_from_slice(&5u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        let err = parse_encryption_info_header(&bytes).unwrap_err();
+        assert!(matches!(err, OfficeCryptoError::UnsupportedEncryption(_)));
+    }
+
+    #[test]
+    fn encryption_info_header_rejects_agile_xml_too_large() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        // No-length-prefix form: XML begins directly after the 8-byte version header.
+        // Fill with a plausible XML start byte (`<`) to ensure the parser falls back to the
+        // no-prefix interpretation.
+        bytes.extend(std::iter::repeat(b'<').take(MAX_AGILE_ENCRYPTION_INFO_XML_BYTES + 1));
+        let err = parse_encryption_info_header(&bytes).unwrap_err();
+        assert!(
+            matches!(err, OfficeCryptoError::SizeLimitExceeded { .. }),
+            "err={err:?}"
+        );
+    }
+
+    #[test]
+    fn encryption_info_header_rejects_standard_header_too_large() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&3u16.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&((MAX_STANDARD_ENCRYPTION_HEADER_BYTES + 1) as u32).to_le_bytes());
+        let err = parse_encryption_info_header(&bytes).unwrap_err();
+        assert!(
+            matches!(err, OfficeCryptoError::SizeLimitExceeded { .. }),
+            "err={err:?}"
+        );
+    }
+}
 /// Very lightweight ZIP validator for decrypted OOXML packages.
 ///
 /// This is intentionally stricter than just checking the `PK` prefix: when decrypting with the
