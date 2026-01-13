@@ -29,6 +29,8 @@
   border-bottom: 1px solid var(--panel-border);
   border-bottom-color: var(--warning);
   background: var(--warning-bg);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .query-editor-container__toolbar {
@@ -166,6 +168,8 @@
   border-bottom: 1px solid var(--panel-border);
   border-bottom-color: var(--error);
   background: var(--error-bg);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .query-editor {
@@ -258,6 +262,8 @@
   border-radius: var(--radius);
   background: var(--error-bg);
   color: var(--error);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .query-editor__preview {
@@ -470,8 +476,14 @@
 
 .query-editor-add-step__ai-error {
   margin-top: 6px;
+  padding: 6px 8px;
   font-size: 12px;
+  border: 1px solid var(--error);
+  border-radius: var(--radius);
+  background: var(--error-bg);
   color: var(--error);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .query-editor-add-step__menu-trigger,
