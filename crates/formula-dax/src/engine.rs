@@ -3131,11 +3131,20 @@ impl DaxEngine {
                         }
                     }
 
-                    let summarize_filter = if filter_args.is_empty() {
-                        filter.clone()
-                    } else {
-                        self.build_calculate_filter(model, filter, row_ctx, filter_args, env)?
-                    };
+                    // Apply filter arguments with CALCULATE-style semantics, but do **not** perform
+                    // an implicit context transition from the current row context. This matches
+                    // DAX behavior: row context does not become filter context unless an explicit
+                    // `CALCULATE`/`CALCULATETABLE` is invoked (or a measure is evaluated).
+                    let mut summarize_filter = filter.clone();
+                    if !filter_args.is_empty() {
+                        self.apply_calculate_filter_args(
+                            model,
+                            &mut summarize_filter,
+                            row_ctx,
+                            filter_args,
+                            env,
+                        )?;
+                    }
 
                     let mut override_pairs: HashSet<(&str, &str)> = HashSet::new();
                     for &idx in &summarize_filter.active_relationship_overrides {

@@ -1507,6 +1507,27 @@ fn summarizecolumns_supports_filter_table_arguments() {
 }
 
 #[test]
+fn summarizecolumns_filter_args_do_not_perform_context_transition() {
+    // Row context should not automatically become filter context for SUMMARIZECOLUMNS.
+    // (Context transition is only performed by CALCULATE/CALCULATETABLE or measure evaluation.)
+    let mut model = build_model();
+    model
+        .add_calculated_column(
+            "Orders",
+            "Customer Groups via SUMMARIZECOLUMNS",
+            "COUNTROWS(SUMMARIZECOLUMNS(Orders[CustomerId], Orders[Amount] <> BLANK()))",
+        )
+        .unwrap();
+
+    let orders = model.table("Orders").unwrap();
+    let values: Vec<Value> = (0..orders.row_count())
+        .map(|row| orders.value(row, "Customer Groups via SUMMARIZECOLUMNS").unwrap())
+        .collect();
+
+    assert_eq!(values, vec![3.into(), 3.into(), 3.into(), 3.into()]);
+}
+
+#[test]
 fn summarizecolumns_allows_name_expression_pairs_but_does_not_materialize_them_yet() {
     let model = build_model();
     let engine = DaxEngine::new();
