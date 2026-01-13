@@ -63,26 +63,4 @@ export function describeCell(
   return `Active cell ${address}, value ${valueDescription}. Selection ${selectionDescription}.`;
 }
 
-export const SR_ONLY_STYLE = {
-  position: "absolute",
-  width: "1px",
-  height: "1px",
-  padding: "0",
-  margin: "-1px",
-  overflow: "hidden",
-  clip: "rect(0, 0, 0, 0)",
-  whiteSpace: "nowrap",
-  border: "0"
-} as const;
-
-export function applySrOnlyStyle(el: HTMLElement): void {
-  el.style.position = SR_ONLY_STYLE.position;
-  el.style.width = SR_ONLY_STYLE.width;
-  el.style.height = SR_ONLY_STYLE.height;
-  el.style.padding = SR_ONLY_STYLE.padding;
-  el.style.margin = SR_ONLY_STYLE.margin;
-  el.style.overflow = SR_ONLY_STYLE.overflow;
-  el.style.clip = SR_ONLY_STYLE.clip;
-  el.style.whiteSpace = SR_ONLY_STYLE.whiteSpace;
-  el.style.border = SR_ONLY_STYLE.border;
-}
+export { SR_ONLY_STYLE, applySrOnlyStyle } from "./srOnlyStyle";
