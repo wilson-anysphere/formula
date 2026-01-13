@@ -48,8 +48,8 @@ interface PivotTable {
   calculatedFields: CalculatedField[];
   calculatedItems: CalculatedItem[];
   
-  // Caching
-  cache: PivotCache;
+  // Caching (runtime-only; derived from the source). Do not treat this as persisted workbook state.
+  cache?: PivotCache;
 }
 
 interface PivotField {
