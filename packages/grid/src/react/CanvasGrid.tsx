@@ -3,7 +3,6 @@ import type { CellProvider, CellRange } from "../model/CellProvider";
 import type { GridPresence } from "../presence/types";
 import {
   CanvasGridRenderer,
-  formatCellDisplayText,
   type CanvasGridImageResolver,
   type GridPerfStats
 } from "../rendering/CanvasGridRenderer";
@@ -14,6 +13,7 @@ import type { FillMode } from "../interaction/fillHandle";
 import { computeScrollbarThumb } from "../virtualization/scrollbarMath";
 import type { GridViewportState } from "../virtualization/VirtualScrollManager";
 import { wheelDeltaToPixels } from "./wheelDeltaToPixels";
+import { describeCell, formatCellDisplayText, SR_ONLY_STYLE, toA1Address } from "../a11y/a11y";
 
 export type ScrollToCellAlign = "auto" | "start" | "center" | "end";
 
@@ -250,59 +250,6 @@ function clampZoom(zoom: number): number {
   return clamp(zoom, MIN_ZOOM, MAX_ZOOM);
 }
 
-function toColumnName(col0: number): string {
-  let value = col0 + 1;
-  let name = "";
-  while (value > 0) {
-    const rem = (value - 1) % 26;
-    name = String.fromCharCode(65 + rem) + name;
-    value = Math.floor((value - 1) / 26);
-  }
-  return name;
-}
-
-function toA1Address(row0: number, col0: number): string {
-  return `${toColumnName(col0)}${row0 + 1}`;
-}
-
-function describeCell(
-  selection: { row: number; col: number } | null,
-  range: CellRange | null,
-  provider: CellProvider,
-  headerRows: number,
-  headerCols: number
-): string {
-  if (!selection) return "No cell selected.";
-
-  const row0 = selection.row - headerRows;
-  const col0 = selection.col - headerCols;
-  const address =
-    row0 >= 0 && col0 >= 0
-      ? toA1Address(row0, col0)
-      : `row ${selection.row + 1}, column ${selection.col + 1}`;
-
-  const cell = provider.getCell(selection.row, selection.col);
-  const valueText = formatCellDisplayText(cell?.value ?? null);
-  const valueDescription = valueText.trim() === "" ? "blank" : valueText;
-
-  let selectionDescription = "none";
-  if (range) {
-    const startRow0 = range.startRow - headerRows;
-    const startCol0 = range.startCol - headerCols;
-    const endRow0 = range.endRow - headerRows - 1;
-    const endCol0 = range.endCol - headerCols - 1;
-    if (startRow0 >= 0 && startCol0 >= 0 && endRow0 >= 0 && endCol0 >= 0) {
-      const start = toA1Address(startRow0, startCol0);
-      const end = toA1Address(endRow0, endCol0);
-      selectionDescription = start === end ? start : `${start}:${end}`;
-    } else {
-      selectionDescription = `row ${range.startRow + 1}, column ${range.startCol + 1}`;
-    }
-  }
-
-  return `Active cell ${address}, value ${valueDescription}. Selection ${selectionDescription}.`;
-}
-
 function partialThemeEqual(a: Partial<GridTheme>, b: Partial<GridTheme>): boolean {
   const aKeys = Object.keys(a) as Array<keyof GridTheme>;
   const bKeys = Object.keys(b) as Array<keyof GridTheme>;
@@ -312,18 +259,6 @@ function partialThemeEqual(a: Partial<GridTheme>, b: Partial<GridTheme>): boolea
   }
   return true;
 }
-
-const SR_ONLY_STYLE: React.CSSProperties = {
-  position: "absolute",
-  width: 1,
-  height: 1,
-  padding: 0,
-  margin: -1,
-  overflow: "hidden",
-  clip: "rect(0, 0, 0, 0)",
-  whiteSpace: "nowrap",
-  border: 0
-};
 
 type ResizeHit = { kind: "col"; index: number } | { kind: "row"; index: number };
 

@@ -44,3 +44,12 @@ export { VirtualScrollManager } from "./virtualization/VirtualScrollManager";
 export type { GridViewportState } from "./virtualization/VirtualScrollManager";
 export { GridPlaceholder } from "./GridPlaceholder";
 export type { GridPlaceholderProps } from "./GridPlaceholder";
+
+export {
+  SR_ONLY_STYLE,
+  applySrOnlyStyle,
+  describeCell,
+  formatCellDisplayText,
+  toA1Address,
+  toColumnName
+} from "./a11y/a11y";

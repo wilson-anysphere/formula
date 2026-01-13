@@ -30,3 +30,12 @@ export { DEFAULT_GRID_THEME, resolveGridTheme } from "./theme/GridTheme.ts";
 
 export { VirtualScrollManager } from "./virtualization/VirtualScrollManager.ts";
 export type { GridViewportState } from "./virtualization/VirtualScrollManager.ts";
+
+export {
+  SR_ONLY_STYLE,
+  applySrOnlyStyle,
+  describeCell,
+  formatCellDisplayText,
+  toA1Address,
+  toColumnName
+} from "./a11y/a11y.ts";

@@ -9,7 +9,15 @@ import type {
   GridViewportState,
   ScrollToCellAlign
 } from "@formula/grid";
-import { CanvasGridRenderer, computeScrollbarThumb, resolveGridThemeFromCssVars } from "@formula/grid";
+import {
+  applySrOnlyStyle,
+  CanvasGridRenderer,
+  computeScrollbarThumb,
+  describeCell,
+  formatCellDisplayText,
+  resolveGridThemeFromCssVars,
+  toA1Address
+} from "@formula/grid";
 
 import { openExternalHyperlink } from "../../hyperlinks/openExternal.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
@@ -52,31 +60,10 @@ function clampIndex(value: number, min: number, max: number): number {
   return clamp(Math.trunc(value), min, max);
 }
 
-function toColumnName(col0: number): string {
-  let value = col0 + 1;
-  let name = "";
-  while (value > 0) {
-    const rem = (value - 1) % 26;
-    name = String.fromCharCode(65 + rem) + name;
-    value = Math.floor((value - 1) / 26);
-  }
-  return name;
-}
-
-function toA1Address(row0: number, col0: number): string {
-  return `${toColumnName(col0)}${row0 + 1}`;
-}
-
 function rangesEqual(a: CellRange | null, b: CellRange | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
   return a.startRow === b.startRow && a.endRow === b.endRow && a.startCol === b.startCol && a.endCol === b.endCol;
-}
-
-function formatCellDisplayText(value: string | number | boolean | null): string {
-  if (value === null) return "";
-  if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
-  return String(value);
 }
 
 function looksLikeExternalHyperlink(text: string): boolean {
@@ -88,54 +75,6 @@ function looksLikeExternalHyperlink(text: string): boolean {
   return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed);
 }
 
-function describeCell(
-  selection: { row: number; col: number } | null,
-  range: CellRange | null,
-  provider: CellProvider,
-  headerRows: number,
-  headerCols: number
-): string {
-  if (!selection) return "No cell selected.";
-
-  const row0 = selection.row - headerRows;
-  const col0 = selection.col - headerCols;
-  const address =
-    row0 >= 0 && col0 >= 0 ? toA1Address(row0, col0) : `row ${selection.row + 1}, column ${selection.col + 1}`;
-
-  const cell = provider.getCell(selection.row, selection.col);
-  const valueText = formatCellDisplayText(cell?.value ?? null);
-  const valueDescription = valueText.trim() === "" ? "blank" : valueText;
-
-  let selectionDescription = "none";
-  if (range) {
-    const startRow0 = range.startRow - headerRows;
-    const startCol0 = range.startCol - headerCols;
-    const endRow0 = range.endRow - headerRows - 1;
-    const endCol0 = range.endCol - headerCols - 1;
-    if (startRow0 >= 0 && startCol0 >= 0 && endRow0 >= 0 && endCol0 >= 0) {
-      const start = toA1Address(startRow0, startCol0);
-      const end = toA1Address(endRow0, endCol0);
-      selectionDescription = start === end ? start : `${start}:${end}`;
-    } else {
-      selectionDescription = `row ${range.startRow + 1}, column ${range.startCol + 1}`;
-    }
-  }
-
-  return `Active cell ${address}, value ${valueDescription}. Selection ${selectionDescription}.`;
-}
-
-function applySrOnlyStyle(el: HTMLElement): void {
-  // Keep in sync with packages/grid/src/react/CanvasGrid.tsx SR_ONLY_STYLE.
-  el.style.position = "absolute";
-  el.style.width = "1px";
-  el.style.height = "1px";
-  el.style.padding = "0";
-  el.style.margin = "-1px";
-  el.style.overflow = "hidden";
-  el.style.clip = "rect(0, 0, 0, 0)";
-  el.style.whiteSpace = "nowrap";
-  el.style.border = "0";
-}
 
 export class DesktopSharedGrid {
   readonly renderer: CanvasGridRenderer;
