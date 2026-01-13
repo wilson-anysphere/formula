@@ -71,6 +71,12 @@ The wrapper script:
 6. Uses a **repo-local CARGO_HOME** to avoid lock contention
 7. Preserves stdout/stderr streams (does not merge stderr into stdout), so commands that emit machine-readable output on stdout (e.g. JSON) can be safely wrapped
 
+### Rust toolchain is pinned
+
+This repo pins Rust via `rust-toolchain.toml` so CI and desktop release builds don't drift with
+new stable releases. In environments with `rustup`, `cargo` will automatically download/use the
+pinned version when run from the repo root.
+
 ### Environment Setup (Optional but Recommended)
 
 ```bash

@@ -66,6 +66,19 @@ The release workflow pins its Node.js major via `NODE_VERSION` in `.github/workf
 (currently Node 22). If you run the preflight scripts or build release bundles locally, use the same
 Node version to avoid subtle differences between local and CI artifacts (see `.nvmrc` / `mise.toml`).
 
+## Rust toolchain policy (pinned)
+
+Desktop release builds must be reproducible over time. To avoid “whatever stable is today” drift,
+this repo pins the Rust toolchain in `rust-toolchain.toml` (currently **Rust 1.92.0**).
+
+- Local builds: `cargo`/`rustc` will automatically use the pinned toolchain when run from the repo.
+- CI + releases: GitHub Actions workflows install the same pinned toolchain.
+
+When upgrading Rust, update **both**:
+
+1. `rust-toolchain.toml`
+2. Any workflow references in `.github/workflows/*.yml`
+
 ## Preflight validations (CI enforced)
 
 The release workflow runs a couple of lightweight preflight scripts before it spends time building
