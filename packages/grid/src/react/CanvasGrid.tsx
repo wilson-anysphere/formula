@@ -1,7 +1,12 @@
 import React, { useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CellProvider, CellRange } from "../model/CellProvider";
 import type { GridPresence } from "../presence/types";
-import { CanvasGridRenderer, formatCellDisplayText, type GridPerfStats } from "../rendering/CanvasGridRenderer";
+import {
+  CanvasGridRenderer,
+  formatCellDisplayText,
+  type CanvasGridImageResolver,
+  type GridPerfStats
+} from "../rendering/CanvasGridRenderer";
 import type { GridTheme } from "../theme/GridTheme";
 import { resolveGridTheme } from "../theme/GridTheme";
 import { resolveGridThemeFromCssVars } from "../theme/resolveThemeFromCssVars";
@@ -88,6 +93,13 @@ export interface CanvasGridProps {
   provider: CellProvider;
   rowCount: number;
   colCount: number;
+  /**
+   * Optional resolver for `CellData.image` payloads.
+   *
+   * When provided, the {@link CanvasGridRenderer} can draw in-cell images directly on the
+   * canvas content layer (no DOM overlays).
+   */
+  imageResolver?: CanvasGridImageResolver | null;
   /**
    * Number of header rows at the top of the grid.
    *
@@ -470,17 +482,19 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           defaultRowHeight: props.defaultRowHeight,
           defaultColWidth: props.defaultColWidth,
           prefetchOverscanRows,
-          prefetchOverscanCols
+          prefetchOverscanCols,
+          imageResolver: props.imageResolver ?? null
         }),
-    [
-      props.provider,
-      props.rowCount,
-      props.colCount,
-      props.defaultRowHeight,
-      props.defaultColWidth,
-      prefetchOverscanRows,
-      prefetchOverscanCols
-    ]
+      [
+        props.provider,
+        props.rowCount,
+        props.colCount,
+        props.defaultRowHeight,
+        props.defaultColWidth,
+        props.imageResolver,
+        prefetchOverscanRows,
+        prefetchOverscanCols
+      ]
   );
 
   const maybeEmitScroll = (scroll: { x: number; y: number }, viewport: GridViewportState) => {

@@ -113,6 +113,13 @@ export interface CellData {
   col: number;
   value: string | number | boolean | null;
   /**
+   * Optional in-cell image payload (Excel "image in cell" / `IMAGE()` values).
+   *
+   * The `imageId` is a stable identifier that can be resolved by host applications via
+   * the {@link CanvasGridRenderer} image resolver API.
+   */
+  image?: { imageId: string; altText?: string; width?: number; height?: number };
+  /**
    * Optional rich text payload for cell rendering.
    *
    * When present, `value` should typically be set to `richText.text` as a plain-text

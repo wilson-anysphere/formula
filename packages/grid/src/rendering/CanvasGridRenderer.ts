@@ -25,6 +25,24 @@ import {
 
 type Layer = "background" | "content" | "selection";
 
+export type CanvasGridImageSource =
+  | ImageBitmap
+  | Blob
+  | ArrayBuffer
+  | Uint8Array
+  | ImageData
+  | HTMLImageElement
+  | HTMLCanvasElement
+  | OffscreenCanvas;
+
+/**
+ * Resolves an `imageId` (from {@link CellData.image}) into bytes or a decoded image object.
+ *
+ * Returning `null` indicates the image is missing/unavailable and causes the renderer to draw
+ * a placeholder.
+ */
+export type CanvasGridImageResolver = (imageId: string) => Promise<CanvasGridImageSource | null>;
+
 export interface GridPerfStats {
   /** Toggle instrumentation updates. When disabled, stats remain frozen at their last values. */
   enabled: boolean;
@@ -408,6 +426,17 @@ export class CanvasGridRenderer {
   private readonly textWidthCache = new LruCache<string, number>(10_000);
   private textLayoutEngine?: TextLayoutEngine;
 
+  private readonly imageResolver: CanvasGridImageResolver | null;
+  private readonly imageBitmapCache = new Map<
+    string,
+    | { state: "pending"; promise: Promise<void>; bitmap: null }
+    | { state: "ready"; promise: null; bitmap: CanvasImageSource }
+    | { state: "missing"; promise: null; bitmap: null }
+    | { state: "error"; promise: null; bitmap: null; error: unknown }
+  >();
+  private imagePlaceholderPattern: { pattern: CanvasPattern; zoomKey: number } | null = null;
+  private destroyed = false;
+
   private presenceFont = "12px system-ui, sans-serif";
   private theme: GridTheme;
 
@@ -499,11 +528,13 @@ export class CanvasGridRenderer {
     prefetchOverscanRows?: number;
     prefetchOverscanCols?: number;
     theme?: Partial<GridTheme>;
+    imageResolver?: CanvasGridImageResolver | null;
   }) {
     this.provider = options.provider;
     this.prefetchOverscanRows = CanvasGridRenderer.sanitizeOverscan(options.prefetchOverscanRows);
     this.prefetchOverscanCols = CanvasGridRenderer.sanitizeOverscan(options.prefetchOverscanCols);
     this.theme = resolveGridTheme(options.theme);
+    this.imageResolver = options.imageResolver ?? null;
     this.baseDefaultRowHeight = options.defaultRowHeight ?? 21;
     this.baseDefaultColWidth = options.defaultColWidth ?? 100;
     this.scroll = new VirtualScrollManager({
@@ -716,10 +747,175 @@ export class CanvasGridRenderer {
   }
 
   destroy(): void {
+    this.destroyed = true;
     if (this.unsubscribeProvider) {
       this.unsubscribeProvider();
       this.unsubscribeProvider = undefined;
     }
+    this.clearImageCache();
+  }
+
+  invalidateImage(imageId: string): void {
+    if (typeof imageId !== "string" || imageId.trim() === "") return;
+    const existing = this.imageBitmapCache.get(imageId);
+    if (existing?.state === "ready") {
+      const bitmap = existing.bitmap as any;
+      if (bitmap && typeof bitmap.close === "function") {
+        try {
+          bitmap.close();
+        } catch {
+          // Ignore bitmap disposal failures (best-effort).
+        }
+      }
+    }
+    this.imageBitmapCache.delete(imageId);
+  }
+
+  clearImageCache(): void {
+    for (const [imageId] of this.imageBitmapCache) {
+      this.invalidateImage(imageId);
+    }
+    this.imageBitmapCache.clear();
+    this.imagePlaceholderPattern = null;
+  }
+
+  private markContentDirtyForImageUpdate(): void {
+    if (this.destroyed) return;
+    if (!this.contentCtx) return;
+    const viewport = this.scroll.getViewportState();
+    if (viewport.width <= 0 || viewport.height <= 0) return;
+    this.dirty.content.markDirty({ x: 0, y: 0, width: viewport.width, height: viewport.height });
+    this.requestRender();
+  }
+
+  private getOrRequestImageBitmap(imageId: string): CanvasImageSource | null {
+    if (typeof imageId !== "string" || imageId.trim() === "") return null;
+
+    const existing = this.imageBitmapCache.get(imageId);
+    if (existing?.state === "ready") return existing.bitmap;
+    if (existing) return null;
+
+    this.requestImageBitmap(imageId);
+    return null;
+  }
+
+  private requestImageBitmap(imageId: string): void {
+    if (this.imageBitmapCache.has(imageId)) return;
+
+    const resolver = this.imageResolver;
+    if (!resolver) {
+      this.imageBitmapCache.set(imageId, { state: "missing", promise: null, bitmap: null });
+      return;
+    }
+
+    const placeholder: { state: "pending"; promise: Promise<void>; bitmap: null } = {
+      state: "pending",
+      // Assigned below.
+      promise: Promise.resolve(),
+      bitmap: null
+    };
+    this.imageBitmapCache.set(imageId, placeholder);
+
+    const promise = (async () => {
+      try {
+        const source = await resolver(imageId);
+        if (this.destroyed) return;
+        if (this.imageBitmapCache.get(imageId) !== placeholder) return;
+
+        if (source == null) {
+          this.imageBitmapCache.set(imageId, { state: "missing", promise: null, bitmap: null });
+          return;
+        }
+
+        const decoded = await this.decodeImageSource(source);
+        if (this.destroyed) return;
+        if (this.imageBitmapCache.get(imageId) !== placeholder) return;
+
+        if (!decoded) {
+          this.imageBitmapCache.set(imageId, { state: "missing", promise: null, bitmap: null });
+          return;
+        }
+
+        this.imageBitmapCache.set(imageId, { state: "ready", promise: null, bitmap: decoded });
+      } catch (error) {
+        if (this.destroyed) return;
+        if (this.imageBitmapCache.get(imageId) !== placeholder) return;
+        this.imageBitmapCache.set(imageId, { state: "error", promise: null, bitmap: null, error });
+      } finally {
+        // Repaint visible placeholders once the image finishes resolving.
+        this.markContentDirtyForImageUpdate();
+      }
+    })();
+
+    placeholder.promise = promise;
+  }
+
+  private async decodeImageSource(source: CanvasGridImageSource): Promise<CanvasImageSource | null> {
+    if (typeof ImageBitmap !== "undefined" && source instanceof ImageBitmap) {
+      return source;
+    }
+
+    const create = (globalThis as any).createImageBitmap as ((src: any) => Promise<ImageBitmap>) | undefined;
+
+    if (source instanceof Blob) {
+      if (typeof create !== "function") return null;
+      return await create(source);
+    }
+
+    if (source instanceof ArrayBuffer) {
+      if (typeof create !== "function") return null;
+      return await create(new Blob([source]));
+    }
+
+    if (source instanceof Uint8Array) {
+      if (typeof create !== "function") return null;
+      // Copy into a standalone buffer to avoid retaining oversized backing stores.
+      const buffer = new ArrayBuffer(source.byteLength);
+      new Uint8Array(buffer).set(source);
+      return await create(new Blob([buffer]));
+    }
+
+    // For drawable sources, prefer `createImageBitmap` when available for performance.
+    if (typeof create === "function") {
+      try {
+        return await create(source as any);
+      } catch {
+        // Fall back to using the source directly when supported by `drawImage`.
+      }
+    }
+
+    if (source instanceof HTMLImageElement || source instanceof HTMLCanvasElement) return source;
+    if (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas) return source;
+
+    // ImageData cannot be drawn directly via `drawImage` without a bitmap conversion.
+    return null;
+  }
+
+  private getImagePlaceholderPattern(ctx: CanvasRenderingContext2D, zoom: number): CanvasPattern | null {
+    const createPattern = (ctx as any).createPattern as CanvasRenderingContext2D["createPattern"] | undefined;
+    if (typeof createPattern !== "function") return null;
+
+    const tile = Math.max(4, Math.round(6 * zoom));
+    const cached = this.imagePlaceholderPattern;
+    if (cached && cached.zoomKey === tile) return cached.pattern;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = tile * 2;
+    canvas.height = tile * 2;
+    const pctx = canvas.getContext("2d");
+    if (!pctx) return null;
+
+    pctx.fillStyle = "#d0d0d0";
+    pctx.fillRect(0, 0, canvas.width, canvas.height);
+    pctx.fillStyle = "#e6e6e6";
+    pctx.fillRect(0, 0, tile, tile);
+    pctx.fillRect(tile, tile, tile, tile);
+
+    const pattern = createPattern.call(ctx, canvas, "repeat");
+    if (!pattern) return null;
+
+    this.imagePlaceholderPattern = { pattern, zoomKey: tile };
+    return pattern;
   }
 
   resize(width: number, height: number, devicePixelRatio: number): void {
@@ -2606,7 +2802,9 @@ export class CanvasGridRenderer {
           const value = cell?.value ?? null;
           const richTextText = cell?.richText?.text;
           const blocked =
-            (value !== null && value !== "") || (typeof richTextText === "string" && richTextText !== "");
+            Boolean(cell?.image) ||
+            (value !== null && value !== "") ||
+            (typeof richTextText === "string" && richTextText !== "");
           this.frameBlockedCache.set(key, blocked);
           return blocked;
         }
@@ -2628,7 +2826,9 @@ export class CanvasGridRenderer {
           const value = cell?.value ?? null;
           const richTextText = cell?.richText?.text;
           const blocked =
-            (value !== null && value !== "") || (typeof richTextText === "string" && richTextText !== "");
+            Boolean(cell?.image) ||
+            (value !== null && value !== "") ||
+            (typeof richTextText === "string" && richTextText !== "");
           rowCache.set(col, blocked);
           return blocked;
         };
@@ -2658,6 +2858,97 @@ export class CanvasGridRenderer {
       const { cell, x, y, width, height, spanStartRow, spanEndRow, spanStartCol, spanEndCol, probeStartRow, probeEndRow, isHeader } =
         options;
       const style = cell.style;
+
+      const drawCommentIndicator = (): void => {
+        if (!cell.comment) return;
+        const resolved = cell.comment.resolved ?? false;
+        const maxSize = Math.min(width, height);
+        const size = Math.min(maxSize, Math.max(6, maxSize * 0.25));
+        if (size <= 0) return;
+        contentCtx.save();
+        contentCtx.beginPath();
+        contentCtx.moveTo(x + width, y);
+        contentCtx.lineTo(x + width - size, y);
+        contentCtx.lineTo(x + width, y + size);
+        contentCtx.closePath();
+        contentCtx.fillStyle = resolved ? commentIndicatorResolved : commentIndicator;
+        contentCtx.fill();
+        contentCtx.restore();
+      };
+
+      const image = cell.image;
+      if (image && typeof image.imageId === "string" && image.imageId.trim() !== "") {
+        const bitmap = this.getOrRequestImageBitmap(image.imageId);
+
+        const availableWidth = Math.max(0, width - paddingX * 2);
+        const availableHeight = Math.max(0, height - paddingY * 2);
+
+        const normalizeDim = (value: unknown): number | null => {
+          if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+          return value;
+        };
+
+        const bitmapWidth =
+          bitmap && typeof (bitmap as any).width === "number"
+            ? (bitmap as any).width
+            : bitmap && typeof (bitmap as any).naturalWidth === "number"
+              ? (bitmap as any).naturalWidth
+              : null;
+        const bitmapHeight =
+          bitmap && typeof (bitmap as any).height === "number"
+            ? (bitmap as any).height
+            : bitmap && typeof (bitmap as any).naturalHeight === "number"
+              ? (bitmap as any).naturalHeight
+              : null;
+
+        const srcW = normalizeDim(image.width) ?? normalizeDim(bitmapWidth) ?? null;
+        const srcH = normalizeDim(image.height) ?? normalizeDim(bitmapHeight) ?? null;
+
+        let destW = availableWidth;
+        let destH = availableHeight;
+        if (srcW && srcH && availableWidth > 0 && availableHeight > 0) {
+          const scale = Math.min(availableWidth / srcW, availableHeight / srcH);
+          destW = srcW * scale;
+          destH = srcH * scale;
+        }
+
+        const destX = x + paddingX + Math.max(0, (availableWidth - destW) / 2);
+        const destY = y + paddingY + Math.max(0, (availableHeight - destH) / 2);
+
+        contentCtx.save();
+        contentCtx.beginPath();
+        contentCtx.rect(x, y, width, height);
+        contentCtx.clip();
+
+        if (bitmap && destW > 0 && destH > 0) {
+          contentCtx.imageSmoothingEnabled = true;
+          contentCtx.drawImage(bitmap, destX, destY, destW, destH);
+        } else if (availableWidth > 0 && availableHeight > 0) {
+          // Placeholder: checkerboard + alt text.
+          const pattern = this.getImagePlaceholderPattern(contentCtx, zoom);
+          if (pattern) {
+            contentCtx.fillStyle = pattern;
+          } else {
+            contentCtx.fillStyle = "#d0d0d0";
+          }
+          contentCtx.fillRect(destX, destY, destW, destH);
+
+          const rawLabel = image.altText ?? (typeof cell.value === "string" ? cell.value : "");
+          const label = rawLabel && rawLabel.trim() !== "" ? rawLabel : "[Image]";
+          const fontSize = Math.max(10, Math.round(11 * zoom));
+          contentCtx.font = `${fontSize}px system-ui, sans-serif`;
+          contentCtx.fillStyle = "#333333";
+          contentCtx.textAlign = "center";
+          contentCtx.textBaseline = "middle";
+          contentCtx.fillText(label, destX + destW / 2, destY + destH / 2);
+          contentCtx.textAlign = "left";
+          contentCtx.textBaseline = "alphabetic";
+        }
+
+        contentCtx.restore();
+        drawCommentIndicator();
+        return;
+      }
 
       const richText = cell.richText;
       const richTextText = richText?.text ?? "";
@@ -3696,22 +3987,7 @@ export class CanvasGridRenderer {
         }
       }
 
-      if (cell.comment) {
-        const resolved = cell.comment.resolved ?? false;
-        const maxSize = Math.min(width, height);
-        const size = Math.min(maxSize, Math.max(6, maxSize * 0.25));
-        if (size > 0) {
-          contentCtx.save();
-          contentCtx.beginPath();
-          contentCtx.moveTo(x + width, y);
-          contentCtx.lineTo(x + width - size, y);
-          contentCtx.lineTo(x + width, y + size);
-          contentCtx.closePath();
-          contentCtx.fillStyle = resolved ? commentIndicatorResolved : commentIndicator;
-          contentCtx.fill();
-          contentCtx.restore();
-        }
-      }
+      drawCommentIndicator();
     };
 
     const diagonalEntries: Array<{ rect: Rect; up?: unknown; down?: unknown }> = [];

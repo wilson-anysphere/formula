@@ -46,6 +46,40 @@ function isRichTextValue(value: unknown): value is RichTextValue {
   return Array.isArray(v.runs);
 }
 
+function normalizePositiveNumber(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
+  return value;
+}
+
+function parseImageCellPayload(value: unknown): CellData["image"] | null {
+  if (!isPlainObject(value)) return null;
+  const obj: any = value;
+
+  let payload: any = null;
+
+  // formula-model `CellValue` envelope: `{ type: "image", value: {...} }`.
+  if (typeof obj.type === "string" && obj.type.toLowerCase() === "image") {
+    payload = isPlainObject(obj.value) ? obj.value : null;
+  } else if (typeof obj.type === "string") {
+    return null;
+  } else {
+    // Legacy / direct payload shapes.
+    payload = obj;
+  }
+
+  if (!payload) return null;
+  const imageId = payload.imageId ?? payload.image_id ?? payload.id;
+  if (typeof imageId !== "string" || imageId.trim() === "") return null;
+
+  const altTextRaw = payload.altText ?? payload.alt_text ?? payload.alt;
+  const altText = typeof altTextRaw === "string" && altTextRaw.trim() !== "" ? altTextRaw : undefined;
+
+  const width = normalizePositiveNumber(payload.width ?? payload.w);
+  const height = normalizePositiveNumber(payload.height ?? payload.h);
+
+  return { imageId, altText, width, height };
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -78,7 +112,7 @@ export class DocumentCellProvider implements CellProvider {
     rowCount: number;
     colCount: number;
     showFormulas: () => boolean;
-    getComputedValue: (cell: { row: number; col: number }) => string | number | boolean | null;
+    getComputedValue: (cell: { row: number; col: number }) => unknown;
     getCommentMeta?: (row: number, col: number) => { resolved: boolean } | null;
   };
 
@@ -127,7 +161,7 @@ export class DocumentCellProvider implements CellProvider {
     rowCount: number;
     colCount: number;
     showFormulas: () => boolean;
-    getComputedValue: (cell: { row: number; col: number }) => string | number | boolean | null;
+    getComputedValue: (cell: { row: number; col: number }) => unknown;
     getCommentMeta?: (row: number, col: number) => { resolved: boolean } | null;
   }) {
     this.options = options;
@@ -765,21 +799,45 @@ export class DocumentCellProvider implements CellProvider {
 
     let value: string | number | boolean | null = null;
     let richText: RichTextValue | undefined;
+    let image: CellData["image"] | undefined;
+
+    const applyScalarValue = (raw: unknown) => {
+      if (raw == null) {
+        value = null;
+        return;
+      }
+      if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") {
+        value = raw;
+        return;
+      }
+      value = String(raw);
+    };
+
+    const applyImageValue = (raw: unknown): boolean => {
+      const parsed = parseImageCellPayload(raw);
+      if (!parsed) return false;
+      image = parsed;
+      value = parsed.altText ?? "[Image]";
+      return true;
+    };
+
     if (state.formula != null) {
       if (this.options.showFormulas()) {
         value = state.formula;
       } else {
-        value = this.options.getComputedValue(coord);
+        const computed = this.options.getComputedValue(coord);
+        if (!applyImageValue(computed)) {
+          applyScalarValue(computed);
+        }
       }
     } else if (state.value != null) {
-      if (isRichTextValue(state.value)) {
+      if (applyImageValue(state.value)) {
+        // Image payloads are rendered via `cell.image` (scalar `value` is for accessibility).
+      } else if (isRichTextValue(state.value)) {
         richText = state.value;
         value = richText.text;
       } else {
-        value = state.value as any;
-      }
-      if (value !== null && typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
-        value = String(state.value);
+        applyScalarValue(state.value);
       }
     }
 
@@ -808,15 +866,12 @@ export class DocumentCellProvider implements CellProvider {
     const metaProvider = this.options.getCommentMeta;
     const meta = metaProvider ? metaProvider(docRow, docCol) : null;
 
-    // Only attach comment metadata when present to avoid per-cell allocations
+    // Only attach optional metadata when present to avoid per-cell allocations
     // and keep CellData objects lean for fast scrolling.
-    const cell: CellData = richText
-      ? meta
-        ? { row, col, value, richText, style: resolvedStyle, comment: meta }
-        : { row, col, value, richText, style: resolvedStyle }
-      : meta
-        ? { row, col, value, style: resolvedStyle, comment: meta }
-        : { row, col, value, style: resolvedStyle };
+    const cell: CellData = { row, col, value, style: resolvedStyle };
+    if (richText) cell.richText = richText;
+    if (image) cell.image = image;
+    if (meta) cell.comment = meta;
     cache.set(key, cell);
     return cell;
   }

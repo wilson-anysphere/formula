@@ -19,7 +19,7 @@ export type {
   CellDiagonalBorders
 } from "./model/CellProvider.ts";
 
-export type { GridPerfStats, ScrollToCellAlign } from "./rendering/CanvasGridRenderer.ts";
+export type { CanvasGridImageResolver, CanvasGridImageSource, GridPerfStats, ScrollToCellAlign } from "./rendering/CanvasGridRenderer.ts";
 export { CanvasGridRenderer } from "./rendering/CanvasGridRenderer.ts";
 export { DirtyRegionTracker } from "./rendering/DirtyRegionTracker.ts";
 export type { Rect } from "./rendering/DirtyRegionTracker.ts";
