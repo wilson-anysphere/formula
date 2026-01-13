@@ -10,7 +10,9 @@ fn bench_rows() -> usize {
     std::env::var("FORMULA_DAX_REL_BENCH_ROWS")
         .ok()
         .and_then(|v| v.replace('_', "").parse::<usize>().ok())
-        .filter(|&v| v >= 100_000)
+        // Keep the default benchmark model size within a range that's large enough to be meaningful,
+        // but bounded to avoid accidental "set it to 100M rows and OOM" mistakes.
+        .filter(|&v| v >= 100_000 && v <= 5_000_000)
         .unwrap_or(1_000_000)
 }
 
@@ -133,6 +135,9 @@ fn build_chain_model(rows: usize, bidirectional: bool) -> DataModel {
         .unwrap();
 
     model.add_measure("Total Sales", "SUM(Sales[Amount])").unwrap();
+    // COUNTROWS avoids scanning an additional value column, so it can act as a more direct proxy
+    // for resolve_row_sets + relationship propagation overhead.
+    model.add_measure("Sales Rows", "COUNTROWS(Sales)").unwrap();
 
     model
 }
@@ -170,8 +175,31 @@ fn bench_relationship_propagation(c: &mut Criterion) {
     });
 
     group.finish();
+
+    let single_rows = model_single.evaluate_measure("Sales Rows", &filter).unwrap();
+    let both_rows = model_both.evaluate_measure("Sales Rows", &filter).unwrap();
+    assert_eq!(single_rows, both_rows);
+
+    let mut rows_group = c.benchmark_group("relationship_propagation_countrows");
+    rows_group.sample_size(10);
+    rows_group.measurement_time(Duration::from_secs(5));
+
+    rows_group.bench_with_input(BenchmarkId::new("single_direction", rows), &rows, |b, _| {
+        b.iter(|| {
+            let value = model_single.evaluate_measure("Sales Rows", &filter).unwrap();
+            black_box(value);
+        })
+    });
+
+    rows_group.bench_with_input(BenchmarkId::new("bidirectional", rows), &rows, |b, _| {
+        b.iter(|| {
+            let value = model_both.evaluate_measure("Sales Rows", &filter).unwrap();
+            black_box(value);
+        })
+    });
+
+    rows_group.finish();
 }
 
 criterion_group!(benches, bench_relationship_propagation);
 criterion_main!(benches);
-
