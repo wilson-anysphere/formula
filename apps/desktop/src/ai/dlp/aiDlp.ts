@@ -44,6 +44,20 @@ export function resetAiDlpAuditLoggerForTests(): void {
   sharedAuditLogger = createAiDlpAuditLogger();
 }
 
+type AiCloudDlpCacheEntry = {
+  rawOrgPolicy: string | null;
+  rawDocPolicy: string | null;
+  rawClassifications: string | null;
+  storedOrgPolicy: any | null;
+  storedDocumentPolicy: any | null;
+  policy: any;
+  classificationRecords: Array<{ selector: any; classification: any }>;
+  classificationStore: LocalClassificationStore;
+  hasDlpConfig: boolean;
+};
+
+const aiCloudDlpCache = new Map<string, AiCloudDlpCacheEntry>();
+
 function safeStorage(storage: StorageLike): StorageLike {
   return {
     getItem(key) {
@@ -106,29 +120,89 @@ function loadActiveOrgId(storage: StorageLike): string {
   return "default";
 }
 
-function loadEffectivePolicy(params: { documentId: string; orgId?: string; storage: StorageLike }): any {
-  const policyStore = new LocalPolicyStore({ storage: params.storage });
-
-  const orgId = params.orgId ?? loadActiveOrgId(params.storage);
-
-  let orgPolicy: any = createDefaultOrgPolicy();
-  const storedOrg = policyStore.getOrgPolicy(orgId);
-  if (storedOrg) orgPolicy = storedOrg;
-
-  const documentPolicy = policyStore.getDocumentPolicy(params.documentId);
-
+function mergeEffectivePolicy(params: { orgPolicy: any; documentPolicy: any }): any {
   try {
-    return mergePolicies({ orgPolicy, documentPolicy }).policy;
+    return mergePolicies({ orgPolicy: params.orgPolicy, documentPolicy: params.documentPolicy }).policy;
   } catch {
     // Corrupt localStorage / invalid policies should never take down AI surfaces.
     // Prefer falling back to the org policy (if valid) before using the hard-coded default.
     try {
-      return mergePolicies({ orgPolicy, documentPolicy: undefined }).policy;
+      return mergePolicies({ orgPolicy: params.orgPolicy, documentPolicy: undefined }).policy;
     } catch {
       // Safe baseline.
       return createDefaultOrgPolicy();
     }
   }
+}
+
+function loadEffectivePolicy(params: { documentId: string; orgId?: string; storage: StorageLike }): any {
+  const policyStore = new LocalPolicyStore({ storage: params.storage });
+
+  const orgId = params.orgId ?? loadActiveOrgId(params.storage);
+
+  const storedOrgPolicy = policyStore.getOrgPolicy(orgId);
+  const storedDocumentPolicy = policyStore.getDocumentPolicy(params.documentId);
+
+  let orgPolicy: any = createDefaultOrgPolicy();
+  if (storedOrgPolicy) orgPolicy = storedOrgPolicy;
+
+  return mergeEffectivePolicy({ orgPolicy, documentPolicy: storedDocumentPolicy });
+}
+
+function memoizedDlpData(params: { storage: StorageLike; documentId: string; orgId: string }): AiCloudDlpCacheEntry {
+  const cacheKey = `${params.orgId}\u0000${params.documentId}`;
+
+  const rawOrgPolicy = params.storage.getItem(`dlp:orgPolicy:${params.orgId}`);
+  const rawDocPolicy = params.storage.getItem(`dlp:docPolicy:${params.documentId}`);
+  const rawClassifications = params.storage.getItem(`dlp:classifications:${params.documentId}`);
+
+  const cached = aiCloudDlpCache.get(cacheKey);
+  if (
+    cached &&
+    cached.rawOrgPolicy === rawOrgPolicy &&
+    cached.rawDocPolicy === rawDocPolicy &&
+    cached.rawClassifications === rawClassifications
+  ) {
+    return cached;
+  }
+
+  const classificationStore = cached?.classificationStore ?? new LocalClassificationStore({ storage: params.storage });
+
+  let storedOrgPolicy = cached?.storedOrgPolicy ?? null;
+  let storedDocumentPolicy = cached?.storedDocumentPolicy ?? null;
+  let policy: any = cached?.policy;
+
+  if (!cached || cached.rawOrgPolicy !== rawOrgPolicy || cached.rawDocPolicy !== rawDocPolicy) {
+    const policyStore = new LocalPolicyStore({ storage: params.storage });
+    storedOrgPolicy = policyStore.getOrgPolicy(params.orgId);
+    storedDocumentPolicy = policyStore.getDocumentPolicy(params.documentId);
+
+    let orgPolicy: any = createDefaultOrgPolicy();
+    if (storedOrgPolicy) orgPolicy = storedOrgPolicy;
+    policy = mergeEffectivePolicy({ orgPolicy, documentPolicy: storedDocumentPolicy });
+  }
+
+  let classificationRecords = cached?.classificationRecords ?? [];
+  if (!cached || cached.rawClassifications !== rawClassifications) {
+    classificationRecords = classificationStore.list(params.documentId);
+  }
+
+  const hasDlpConfig = Boolean(storedOrgPolicy || storedDocumentPolicy || classificationRecords.length > 0);
+
+  const next: AiCloudDlpCacheEntry = {
+    rawOrgPolicy,
+    rawDocPolicy,
+    rawClassifications,
+    storedOrgPolicy,
+    storedDocumentPolicy,
+    policy,
+    classificationRecords,
+    classificationStore,
+    hasDlpConfig,
+  };
+
+  aiCloudDlpCache.set(cacheKey, next);
+  return next;
 }
 
 export type AiCloudDlpOptions = {
@@ -149,16 +223,6 @@ export type AiCloudDlpOptions = {
   audit_logger: { log(event: any): void };
 };
 
-function hasDlpConfig(params: { storage: StorageLike; documentId: string; orgId?: string }): boolean {
-  const policyStore = new LocalPolicyStore({ storage: params.storage });
-  const orgId = params.orgId ?? loadActiveOrgId(params.storage);
-  const storedOrg = policyStore.getOrgPolicy(orgId);
-  const storedDoc = policyStore.getDocumentPolicy(params.documentId);
-  const classificationStore = new LocalClassificationStore({ storage: params.storage });
-  const classificationRecords = classificationStore.list(params.documentId);
-  return Boolean(storedOrg || storedDoc || classificationRecords.length > 0);
-}
-
 /**
  * Returns a DLP options object that can be passed to both:
  * - `ContextManager.buildWorkbookContextFromSpreadsheetApi({ dlp: ... })`
@@ -168,11 +232,21 @@ function hasDlpConfig(params: { storage: StorageLike; documentId: string; orgId?
  * classifications into desktop AI surfaces (chat/agent/inline-edit).
  */
 export function getAiCloudDlpOptions(params: { documentId: string; sheetId?: string; orgId?: string }): AiCloudDlpOptions {
-  const storage = getLocalStorageOrNull() ?? createMemoryStorage();
+  const localStorage = getLocalStorageOrNull();
+  const storage = localStorage ?? createMemoryStorage();
+  const orgId = params.orgId ?? loadActiveOrgId(storage);
 
-  const policy = loadEffectivePolicy({ documentId: params.documentId, orgId: params.orgId, storage });
-  const classificationStore = new LocalClassificationStore({ storage });
-  const classificationRecords = classificationStore.list(params.documentId);
+  let policy: any;
+  let classificationStore: LocalClassificationStore;
+  let classificationRecords: Array<{ selector: any; classification: any }>;
+
+  if (localStorage !== null) {
+    ({ policy, classificationRecords, classificationStore } = memoizedDlpData({ storage, documentId: params.documentId, orgId }));
+  } else {
+    policy = loadEffectivePolicy({ documentId: params.documentId, orgId, storage });
+    classificationStore = new LocalClassificationStore({ storage });
+    classificationRecords = classificationStore.list(params.documentId);
+  }
 
   const auditLogger = getAiDlpAuditLogger();
 
@@ -205,7 +279,29 @@ export function maybeGetAiCloudDlpOptions(params: {
   sheetId?: string;
   orgId?: string;
 }): AiCloudDlpOptions | null {
-  const storage = getLocalStorageOrNull() ?? createMemoryStorage();
-  if (!hasDlpConfig({ storage, documentId: params.documentId, orgId: params.orgId })) return null;
-  return getAiCloudDlpOptions(params);
+  const localStorage = getLocalStorageOrNull();
+  if (!localStorage) return null;
+
+  const storage = localStorage;
+  const orgId = params.orgId ?? loadActiveOrgId(storage);
+  const memoized = memoizedDlpData({ storage, documentId: params.documentId, orgId });
+  if (!memoized.hasDlpConfig) return null;
+
+  const auditLogger = getAiDlpAuditLogger();
+
+  return {
+    documentId: params.documentId,
+    sheetId: params.sheetId,
+    policy: memoized.policy,
+    classificationRecords: memoized.classificationRecords,
+    classificationStore: memoized.classificationStore,
+    includeRestrictedContent: false,
+    auditLogger,
+    document_id: params.documentId,
+    sheet_id: params.sheetId,
+    classification_records: memoized.classificationRecords,
+    classification_store: memoized.classificationStore,
+    include_restricted_content: false,
+    audit_logger: auditLogger
+  };
 }
