@@ -19,25 +19,14 @@ export function TableHeaderCell({
 
   // A tiny subset of Excel-style table styling: bold header + background.
   // Proper style mapping is out of scope here, but the rendering surface is.
-  const background =
-    style?.name.startsWith("TableStyle") ? "var(--grid-header-bg)" : "transparent";
+  const hasStyledHeader = Boolean(style?.name.startsWith("TableStyle"));
+  const className = hasStyledHeader
+    ? "formula-table-header-cell formula-table-header-cell--styled"
+    : "formula-table-header-cell";
 
   const hasFilter = !!table.autoFilter;
   return (
-    <div
-      className="formula-table-header-cell"
-      style={{
-        fontWeight: 600,
-        background,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 6,
-        padding: "0 6px",
-        height: "100%",
-        boxSizing: "border-box",
-      }}
-    >
+    <div className={className}>
       <span>{label}</span>
       {hasFilter ? (
         <button

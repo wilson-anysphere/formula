@@ -431,6 +431,64 @@
   outline-offset: -2px;
 }
 
+.formula-table-header-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 6px;
+  height: 100%;
+  font-weight: 600;
+  background: transparent;
+}
+
+.formula-table-header-cell--styled {
+  background: var(--grid-header-bg);
+}
+
+.formula-table-filter-button {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex: 0 0 auto;
+  user-select: none;
+  line-height: 1;
+  font-size: 10px;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease);
+}
+
+.formula-table-filter-button:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.formula-table-filter-button:active {
+  background: var(--bg-active);
+}
+
+.formula-table-filter-button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.formula-table-filter-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .panel {
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
