@@ -108,7 +108,7 @@ import { bindSheetViewToCollabSession, type SheetViewBinder } from "../collab/sh
 import { resolveDevCollabEncryptionFromSearch } from "../collab/devEncryption.js";
 import { CollabEncryptionKeyStore } from "../collab/encryptionKeyStore";
 import { EncryptedRangeManager } from "../collab/encryption-ui/encryptedRangeManager";
-import { loadCollabConnectionForWorkbook } from "../sharing/collabConnectionStore.js";
+import { loadCollabConnectionForWorkbook, saveCollabConnectionForWorkbook } from "../sharing/collabConnectionStore.js";
 import { loadCollabToken, storeCollabToken } from "../sharing/collabTokenStore.js";
 import { showCollabEditRejectedToast } from "../collab/editRejectionToast";
 import { ImageBitmapCache } from "../drawings/imageBitmapCache";
@@ -993,6 +993,17 @@ export class SpreadsheetApp {
     this.currentUser = collab ? { id: collab.user.id, name: collab.user.name } : { id: "local", name: t("chat.role.user") };
 
     if (collab) {
+      // Persist non-secret collab connection metadata so desktop startup can auto-reconnect
+      // after restart. Tokens are stored separately in the secure token store.
+      try {
+        const workbookKey = String(opts.workbookId ?? "").trim();
+        if (workbookKey) {
+          saveCollabConnectionForWorkbook({ workbookKey, wsUrl: collab.wsUrl, docId: collab.docId });
+        }
+      } catch {
+        // ignore storage failures
+      }
+
       const sessionPermissions = jwtPermissions
         ? {
             role: jwtPermissions.role,

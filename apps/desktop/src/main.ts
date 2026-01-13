@@ -1135,12 +1135,26 @@ const docId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docId
 const workbookId = docId ?? "local-workbook";
 
 // Best-effort: hydrate any persisted collaboration token from the desktop secure store
-// into session-scoped storage before SpreadsheetApp resolves its auto-reconnect options.
+// into session-scoped storage before SpreadsheetApp resolves its collab connection options.
+//
+// We preload for:
+// - collab URLs (`?collab=1&wsUrl=...&docId=...`) so reloading the same collab doc works after restart
+// - stored connections (localStorage metadata) so "open workbook → auto-reconnect" works after restart
 try {
+  const url = new URL(window.location.href);
+  const params = url.searchParams;
+  const collabEnabled = params.get("collab");
+  const fromUrl =
+    collabEnabled === "1" || collabEnabled === "true"
+      ? {
+          wsUrl: String(params.get("collabWsUrl") ?? params.get("wsUrl") ?? "").trim(),
+          docId: String(params.get("collabDocId") ?? params.get("docId") ?? "").trim(),
+        }
+      : null;
+
   const stored = loadCollabConnectionForWorkbook({ workbookKey: workbookId });
-  if (stored) {
-    await preloadCollabTokenFromKeychain({ wsUrl: stored.wsUrl, docId: stored.docId });
-  }
+  const target = fromUrl?.wsUrl && fromUrl.docId ? fromUrl : stored ? { wsUrl: stored.wsUrl, docId: stored.docId } : null;
+  if (target) await preloadCollabTokenFromKeychain(target);
 } catch {
   // ignore (storage disabled / Tauri invoke unavailable / etc)
 }
