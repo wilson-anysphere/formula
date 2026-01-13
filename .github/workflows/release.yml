@@ -546,26 +546,19 @@ jobs:
             echo "::endgroup::"
           }
 
-          for dmg in "${dmgs[@]}"; do
-            validate_dmg "$dmg"
-          done
-
-          for app in "${apps[@]}"; do
-            validate_app "$app"
-          done
-
-          # Some setups only publish a DMG; if no standalone .app bundle is present, validate the
-          # app inside the DMG as well.
-          if [[ ${#apps[@]} -eq 0 && ${#dmgs[@]} -gt 0 ]]; then
-            dmg="${dmgs[0]}"
+          validate_apps_inside_dmg() {
+            local dmg="$1"
+            local mount_dir
             mount_dir="$(mktemp -d)"
-            echo "::group::No standalone .app found; validating the .app inside DMG: $dmg"
+
+            echo "::group::Validate .app inside DMG: $dmg"
 
             if hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir" >/dev/null; then
               mounted_apps=()
               while IFS= read -r -d '' app; do
                 mounted_apps+=("$app")
-              done < <(find "$mount_dir" -type d -name "*.app" -prune -print0)
+              done < <(find "$mount_dir" -maxdepth 2 -type d -name "*.app" -prune -print0)
+
               if [[ ${#mounted_apps[@]} -eq 0 ]]; then
                 echo "::error::Mounted DMG but did not find a .app bundle inside: $dmg"
                 fail=1
@@ -574,6 +567,7 @@ jobs:
                   validate_app "$app"
                 done
               fi
+
               hdiutil detach "$mount_dir" >/dev/null || hdiutil detach "$mount_dir" -force >/dev/null || true
             else
               echo "::error::Failed to mount DMG for validation: $dmg"
@@ -582,7 +576,16 @@ jobs:
 
             rm -rf "$mount_dir" || true
             echo "::endgroup::"
-          fi
+          }
+
+          for dmg in "${dmgs[@]}"; do
+            validate_dmg "$dmg"
+            validate_apps_inside_dmg "$dmg"
+          done
+
+          for app in "${apps[@]}"; do
+            validate_app "$app"
+          done
 
           if [[ "$fail" -ne 0 ]]; then
             echo "::error::macOS notarization/stapling validation failed."
