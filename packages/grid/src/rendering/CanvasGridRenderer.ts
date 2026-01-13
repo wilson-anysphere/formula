@@ -769,6 +769,7 @@ export class CanvasGridRenderer {
       }
     }
     this.imageBitmapCache.delete(imageId);
+    this.markContentDirtyForImageUpdate();
   }
 
   clearImageCache(): void {
@@ -777,6 +778,7 @@ export class CanvasGridRenderer {
     }
     this.imageBitmapCache.clear();
     this.imagePlaceholderPattern = null;
+    this.markContentDirtyForImageUpdate();
   }
 
   private markContentDirtyForImageUpdate(): void {

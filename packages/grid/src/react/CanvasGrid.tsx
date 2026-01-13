@@ -23,6 +23,14 @@ export interface GridApi {
   getScroll(): { x: number; y: number };
   setZoom(zoom: number): void;
   getZoom(): number;
+  /**
+   * Invalidate a single decoded image in the renderer cache.
+   *
+   * The next paint for any visible cells referencing the image will re-resolve and decode it.
+   */
+  invalidateImage(imageId: string): void;
+  /** Clear all decoded images from the renderer cache. */
+  clearImageCache(): void;
   setFrozen(frozenRows: number, frozenCols: number): void;
   setRowHeight(row: number, height: number): void;
   setColWidth(col: number, width: number): void;
@@ -639,6 +647,12 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       getScroll: () => rendererRef.current?.scroll.getScroll() ?? { x: 0, y: 0 },
       setZoom: (nextZoom) => setZoomInternal(nextZoom),
       getZoom: () => zoomRef.current,
+      invalidateImage: (imageId) => {
+        rendererRef.current?.invalidateImage(imageId);
+      },
+      clearImageCache: () => {
+        rendererRef.current?.clearImageCache();
+      },
       setFrozen: (rows, cols) => {
         const renderer = rendererRef.current;
         if (!renderer) return;
