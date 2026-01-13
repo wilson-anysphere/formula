@@ -599,6 +599,12 @@ export class YjsVersionStore {
     const raw = this.versions.get(versionId);
     if (!isYMap(raw)) return null;
 
+    // Streaming writes may produce partially-written versions. Avoid surfacing
+    // these until the snapshot blob has been fully appended. Check this early so
+    // malformed/incomplete records don't throw during field validation.
+    const snapshotCompleteRaw = raw.get("snapshotComplete");
+    if (snapshotCompleteRaw === false) return null;
+
     const schemaVersion = raw.get("schemaVersion") ?? 1;
     if (schemaVersion !== 1) {
       throw new Error(
@@ -615,11 +621,6 @@ export class YjsVersionStore {
     if (typeof timestampMs !== "number") {
       throw new Error(`YjsVersionStore: invalid timestampMs for ${versionId}`);
     }
-
-    // Streaming writes may produce partially-written versions. Avoid surfacing
-    // these until the snapshot blob has been fully appended.
-    const snapshotCompleteRaw = raw.get("snapshotComplete");
-    if (snapshotCompleteRaw === false) return null;
 
     /** @type {SnapshotCompression} */
     const compression = raw.get("compression") ?? "none";

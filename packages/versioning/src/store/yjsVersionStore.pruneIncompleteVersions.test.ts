@@ -224,6 +224,7 @@ describe("YjsVersionStore: pruneIncompleteVersions()", () => {
       order.push(["broken"]);
     }, "test");
 
+    await expect(store.getVersion("broken")).resolves.toBeNull();
     await store.pruneIncompleteVersions({ olderThanMs: 0 });
     expect(doc.getMap("versions").get("broken")).toBeUndefined();
     expect((doc.getMap("versionsMeta").get("order") as any)?.toArray?.()).toEqual([]);
