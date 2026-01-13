@@ -43,8 +43,9 @@ Events emitted by the Rust host (to the `main` window):
 
 - `startup:window-visible` — `number` (milliseconds since native process start)
 - `startup:webview-loaded` — `number` (milliseconds since native process start)
+- `startup:first-render` — `number` (milliseconds since native process start; grid visible)
 - `startup:tti` — `number` (milliseconds since native process start; time-to-interactive)
-- `startup:metrics` — snapshot payload containing some/all of `{ window_visible_ms, webview_loaded_ms, tti_ms }`
+- `startup:metrics` — snapshot payload containing some/all of `{ window_visible_ms, webview_loaded_ms, first_render_ms, tti_ms }`
 
 The frontend installs listeners in `apps/desktop/src/tauri/startupMetrics.ts` and mirrors the latest snapshot into
 `globalThis.__FORMULA_STARTUP_TIMINGS__`.
@@ -53,7 +54,7 @@ The frontend installs listeners in `apps/desktop/src/tauri/startupMetrics.ts` an
 
 - **Dev builds**: the Rust host prints a single line to stdout once TTI is reported, e.g.
   ```
-  [startup] window_visible_ms=123 webview_loaded_ms=234 tti_ms=456
+  [startup] window_visible_ms=123 webview_loaded_ms=234 first_render_ms=345 tti_ms=456
   ```
 - **Release builds**: set `FORMULA_STARTUP_METRICS=1` to enable the same log line.
 - **Frontend access**: inspect `globalThis.__FORMULA_STARTUP_TIMINGS__` in DevTools.
@@ -71,6 +72,7 @@ The frontend installs listeners in `apps/desktop/src/tauri/startupMetrics.ts` an
   - `FORMULA_DESKTOP_STARTUP_RUNS` (default: 20)
   - `FORMULA_DESKTOP_STARTUP_TIMEOUT_MS` (default: 15000)
   - `FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS` (default: 500)
+  - `FORMULA_DESKTOP_FIRST_RENDER_TARGET_MS` (default: 500)
   - `FORMULA_DESKTOP_TTI_TARGET_MS` (default: 1000)
   - `FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=1` to fail the command when p95 exceeds the targets (useful for CI gating)
   - `FORMULA_RUN_DESKTOP_STARTUP_BENCH=1` to allow running in CI (the runner skips in CI by default)

@@ -177,7 +177,7 @@ import { DlpViolationError } from "../../../packages/security/dlp/src/errors.js"
 
 import sampleHelloManifest from "../../../extensions/sample-hello/package.json";
 import { purgeLegacyDesktopLLMSettings } from "./ai/llm/desktopLLMClient.js";
-import { markStartupTimeToInteractive } from "./tauri/startupMetrics.js";
+import { markStartupFirstRender, markStartupTimeToInteractive } from "./tauri/startupMetrics.js";
 import { openExternalHyperlink } from "./hyperlinks/openExternal.js";
 import {
   clampUsedRange,
@@ -1163,6 +1163,10 @@ const app = new SpreadsheetApp(
     limits: legacyGridLimits,
   },
 );
+
+// Startup performance instrumentation: "first meaningful render" / grid visible.
+// Best-effort, no-op for web builds.
+void markStartupFirstRender().catch(() => {});
 
 // Expose a small API for Playwright assertions early so e2e can still attach even if
 // optional desktop integrations (e.g. Tauri host wiring) fail during startup.

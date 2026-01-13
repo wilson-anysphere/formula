@@ -133,6 +133,9 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   }
 
   const windowVisible = metrics.map((m) => m.windowVisibleMs);
+  const firstRender = metrics
+    .map((m) => m.firstRenderMs)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
   const tti = metrics.map((m) => m.ttiMs);
   const webviewLoaded = metrics
     .map((m) => m.webviewLoadedMs)
@@ -142,6 +145,12 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
     Number(
       process.env.FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS ??
         process.env.FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS ??
+        '500',
+    ) || 500;
+  const coldFirstRenderTarget =
+    Number(
+      process.env.FORMULA_DESKTOP_COLD_FIRST_RENDER_TARGET_MS ??
+        process.env.FORMULA_DESKTOP_FIRST_RENDER_TARGET_MS ??
         '500',
     ) || 500;
   const coldTtiTarget =
@@ -154,20 +163,32 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   const warmWindowTarget =
     Number(process.env.FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS ?? String(coldWindowTarget)) ||
     coldWindowTarget;
+  const warmFirstRenderTarget =
+    Number(process.env.FORMULA_DESKTOP_WARM_FIRST_RENDER_TARGET_MS ?? String(coldFirstRenderTarget)) ||
+    coldFirstRenderTarget;
   const warmTtiTarget =
     Number(process.env.FORMULA_DESKTOP_WARM_TTI_TARGET_MS ?? String(coldTtiTarget)) || coldTtiTarget;
 
   const windowTarget = mode === 'warm' ? warmWindowTarget : coldWindowTarget;
+  const firstRenderTarget = mode === 'warm' ? warmFirstRenderTarget : coldFirstRenderTarget;
   const ttiTarget = mode === 'warm' ? warmTtiTarget : coldTtiTarget;
+
+  if (firstRender.length !== metrics.length) {
+    throw new Error(
+      'Desktop did not report first_render_ms. Ensure the frontend calls `report_startup_first_render` when the grid becomes visible.',
+    );
+  }
 
   const results: BenchmarkResult[] = [
     buildResult(`desktop.startup.${mode}.window_visible_ms.p95`, windowVisible, windowTarget),
+    buildResult(`desktop.startup.${mode}.first_render_ms.p95`, firstRender, firstRenderTarget),
     buildResult(`desktop.startup.${mode}.tti_ms.p95`, tti, ttiTarget),
   ];
 
   // Backwards compatibility: keep the legacy metric names aliased to cold-start mode.
   if (mode === 'cold') {
     results.push(buildResult('desktop.startup.window_visible_ms.p95', windowVisible, windowTarget));
+    results.push(buildResult('desktop.startup.first_render_ms.p95', firstRender, firstRenderTarget));
     results.push(buildResult('desktop.startup.tti_ms.p95', tti, ttiTarget));
 
     const webviewLoadedTarget = Number(process.env.FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS ?? '800') || 800;
@@ -200,4 +221,3 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
 
   return results;
 }
-

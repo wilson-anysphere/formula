@@ -68,6 +68,7 @@
           "refresh_pivot_table",
           "rename_sheet",
           "report_startup_tti",
+          "report_startup_first_render",
           "report_startup_webview_loaded",
           "restart_app",
           "run_macro",

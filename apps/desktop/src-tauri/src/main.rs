@@ -58,7 +58,7 @@ static CLOSE_REQUEST_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 // - menu-open, menu-new, menu-save, menu-save-as, menu-print, menu-print-preview, menu-export-pdf, menu-close-window, menu-quit,
 //   menu-undo, menu-redo, menu-cut, menu-copy, menu-paste, menu-paste-special, menu-select-all,
 //   menu-zoom-in, menu-zoom-out, menu-zoom-reset, menu-about, menu-check-updates, menu-open-release-page
-// - startup:window-visible, startup:webview-loaded, startup:tti, startup:metrics
+// - startup:window-visible, startup:webview-loaded, startup:first-render, startup:tti, startup:metrics
 // - update-check-started, update-check-already-running, update-not-available, update-check-error, update-available
 // - oauth-redirect
 //
@@ -111,6 +111,8 @@ struct StartupTimingsSnapshot {
     window_visible_ms: Option<u64>,
     #[serde(rename = "webview_loaded_ms")]
     webview_loaded_ms: Option<u64>,
+    #[serde(rename = "first_render_ms")]
+    first_render_ms: Option<u64>,
     #[serde(rename = "tti_ms")]
     tti_ms: Option<u64>,
 }
@@ -127,6 +129,7 @@ struct StartupMetrics {
     /// time, event listener installation, or "time-to-interactive" work in the renderer.
     webview_loaded_ms: Option<u64>,
     webview_loaded_recorded_from_page_load: bool,
+    first_render_ms: Option<u64>,
     tti_ms: Option<u64>,
     logged: bool,
 }
@@ -138,6 +141,7 @@ impl StartupMetrics {
             window_visible_ms: None,
             webview_loaded_ms: None,
             webview_loaded_recorded_from_page_load: false,
+            first_render_ms: None,
             tti_ms: None,
             logged: false,
         }
@@ -176,6 +180,15 @@ impl StartupMetrics {
         ms
     }
 
+    fn record_first_render(&mut self) -> u64 {
+        if let Some(ms) = self.first_render_ms {
+            return ms;
+        }
+        let ms = self.elapsed_ms();
+        self.first_render_ms = Some(ms);
+        ms
+    }
+
     fn record_tti(&mut self) -> u64 {
         if let Some(ms) = self.tti_ms {
             return ms;
@@ -189,6 +202,7 @@ impl StartupMetrics {
         StartupTimingsSnapshot {
             window_visible_ms: self.window_visible_ms,
             webview_loaded_ms: self.webview_loaded_ms,
+            first_render_ms: self.first_render_ms,
             tti_ms: self.tti_ms,
         }
     }
@@ -202,9 +216,13 @@ impl StartupMetrics {
         }
         if let (Some(window_visible), Some(tti)) = (self.window_visible_ms, self.tti_ms) {
             let webview_loaded = self.webview_loaded_ms;
+            let first_render = self.first_render_ms;
             println!(
-                "[startup] window_visible_ms={window_visible} webview_loaded_ms={} tti_ms={tti}",
+                "[startup] window_visible_ms={window_visible} webview_loaded_ms={} first_render_ms={} tti_ms={tti}",
                 webview_loaded
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "n/a".to_string()),
+                first_render
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "n/a".to_string())
             );
@@ -281,6 +299,25 @@ fn report_startup_webview_loaded(app: tauri::AppHandle, state: State<'_, SharedS
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.emit("startup:window-visible", window_visible_ms);
         let _ = window.emit("startup:webview-loaded", webview_loaded_ms);
+        let _ = window.emit("startup:metrics", snapshot);
+    }
+}
+
+#[tauri::command]
+fn report_startup_first_render(app: tauri::AppHandle, state: State<'_, SharedStartupMetrics>) {
+    let shared = state.inner().clone();
+    let (first_render_ms, snapshot) = {
+        let mut metrics = shared.lock().unwrap();
+        // If we somehow never recorded a window-visible timestamp (e.g. we missed the window
+        // event), fall back to "at least by first render the window was visible".
+        metrics.record_window_visible();
+        let first_render_ms = metrics.record_first_render();
+        let snapshot = metrics.snapshot();
+        (first_render_ms, snapshot)
+    };
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("startup:first-render", first_render_ms);
         let _ = window.emit("startup:metrics", snapshot);
     }
 }
@@ -1198,6 +1235,7 @@ fn main() {
             oauth_loopback_listen,
             updater::install_downloaded_update,
             report_startup_webview_loaded,
+            report_startup_first_render,
             report_startup_tti,
         ])
         .on_menu_event(|app, event| {

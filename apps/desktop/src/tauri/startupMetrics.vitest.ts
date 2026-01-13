@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getStartupTimings,
   installStartupTimingsListeners,
+  markStartupFirstRender,
   markStartupTimeToInteractive,
   reportStartupWebviewLoaded,
 } from "./startupMetrics";
@@ -11,6 +12,7 @@ describe("startupMetrics", () => {
   const originalTauri = (globalThis as any).__TAURI__;
   const originalTimings = (globalThis as any).__FORMULA_STARTUP_TIMINGS__;
   const originalListenersInstalled = (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__;
+  const originalFirstRenderReported = (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__;
 
   beforeEach(() => {
     const invoke = vi.fn().mockResolvedValue(null);
@@ -18,12 +20,14 @@ describe("startupMetrics", () => {
     (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
     (globalThis as any).__FORMULA_STARTUP_TIMINGS__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = undefined;
+    (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = undefined;
   });
 
   afterEach(() => {
     (globalThis as any).__TAURI__ = originalTauri;
     (globalThis as any).__FORMULA_STARTUP_TIMINGS__ = originalTimings;
     (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = originalListenersInstalled;
+    (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = originalFirstRenderReported;
     vi.restoreAllMocks();
   });
 
@@ -86,4 +90,16 @@ describe("startupMetrics", () => {
     expect(timings.windowVisibleMs).toBe(123);
     expect(timings.webviewLoadedMs).toBe(456);
   });
+
+  it("notifies the host when the grid becomes visible (first render)", async () => {
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
+
+    await markStartupFirstRender();
+    expect(invoke).toHaveBeenCalledWith("report_startup_first_render");
+
+    // Idempotent: should not report twice.
+    await markStartupFirstRender();
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
 });
+

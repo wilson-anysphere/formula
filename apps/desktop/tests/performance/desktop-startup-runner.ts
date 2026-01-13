@@ -17,6 +17,7 @@ import {
 type Summary = {
   runs: number;
   windowVisible: { p50: number; p95: number; targetMs: number };
+  firstRender: { p50: number; p95: number };
   tti: { p50: number; p95: number; targetMs: number };
   enforce: boolean;
 };
@@ -73,6 +74,7 @@ function printSummary(summary: Summary): void {
       "[desktop-startup]",
       `runs=${summary.runs}`,
       `windowVisible(${windowStatus} p50=${summary.windowVisible.p50}ms,p95=${summary.windowVisible.p95}ms,target=${summary.windowVisible.targetMs}ms)`,
+      `firstRender(p50=${summary.firstRender.p50}ms,p95=${summary.firstRender.p95}ms)`,
       `tti(${ttiStatus} p50=${summary.tti.p50}ms,p95=${summary.tti.p95}ms,target=${summary.tti.targetMs}ms)`,
       summary.enforce ? "enforced=1" : "enforced=0",
     ].join(" "),
@@ -126,6 +128,10 @@ async function main(): Promise<void> {
   }
 
   const windowVisible = results.map((r) => r.windowVisibleMs).sort((a, b) => a - b);
+  const firstRender = results
+    .map((r) => r.firstRenderMs)
+    .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
+    .sort((a, b) => a - b);
   const tti = results.map((r) => r.ttiMs).sort((a, b) => a - b);
 
   const summary: Summary = {
@@ -134,6 +140,10 @@ async function main(): Promise<void> {
       p50: percentile(windowVisible, 0.5),
       p95: percentile(windowVisible, 0.95),
       targetMs: windowTargetMs,
+    },
+    firstRender: {
+      p50: percentile(firstRender, 0.5),
+      p95: percentile(firstRender, 0.95),
     },
     tti: {
       p50: percentile(tti, 0.5),
@@ -152,4 +162,3 @@ async function main(): Promise<void> {
 }
 
 await main();
-

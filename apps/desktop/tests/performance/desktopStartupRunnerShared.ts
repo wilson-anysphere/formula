@@ -9,6 +9,7 @@ import { terminateProcessTree, type TerminateProcessTreeMode } from './processTr
 export type StartupMetrics = {
   windowVisibleMs: number;
   webviewLoadedMs: number | null;
+  firstRenderMs: number | null;
   ttiMs: number;
 };
 
@@ -80,7 +81,7 @@ export function stdDev(values: number[], avg: number): number {
 
 export function parseStartupLine(line: string): StartupMetrics | null {
   // Example:
-  // [startup] window_visible_ms=123 webview_loaded_ms=234 tti_ms=456
+  // [startup] window_visible_ms=123 webview_loaded_ms=234 first_render_ms=345 tti_ms=456
   const trimmed = line.trim();
   const idx = trimmed.indexOf('[startup]');
   if (idx === -1) return null;
@@ -112,7 +113,12 @@ export function parseStartupLine(line: string): StartupMetrics | null {
     !webviewLoadedRaw || webviewLoadedRaw === 'n/a' ? null : Number(webviewLoadedRaw);
   if (webviewLoadedMs !== null && !Number.isFinite(webviewLoadedMs)) return null;
 
-  return { windowVisibleMs, webviewLoadedMs, ttiMs };
+  const firstRenderRaw = kv['first_render_ms'];
+  const firstRenderMs =
+    !firstRenderRaw || firstRenderRaw === 'n/a' ? null : Number(firstRenderRaw);
+  if (firstRenderMs !== null && !Number.isFinite(firstRenderMs)) return null;
+
+  return { windowVisibleMs, webviewLoadedMs, firstRenderMs, ttiMs };
 }
 
 type RunOnceOptions = {

@@ -184,6 +184,7 @@ describe("tauri capability event permissions", () => {
       // Startup instrumentation
       "startup:window-visible",
       "startup:webview-loaded",
+      "startup:first-render",
       "startup:tti",
       "startup:metrics",
 
