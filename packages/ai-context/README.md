@@ -47,6 +47,7 @@ import {
   extractSheetSchema,
   extractWorkbookSchema,
   summarizeSheetSchema,
+  summarizeWorkbookSchema,
   summarizeRegion,
   randomSampleRows,
   stratifiedSampleRows,
@@ -195,7 +196,7 @@ When you have workbook metadata (sheet list, table rects, named ranges) but donâ
 `extractWorkbookSchema()` produces a compact, deterministic summary:
 
 ```js
-import { extractWorkbookSchema } from "./src/index.js";
+import { extractWorkbookSchema, summarizeWorkbookSchema } from "./src/index.js";
 
 const workbook = {
   id: "workbook-123",
@@ -206,6 +207,10 @@ const workbook = {
 
 const schema = extractWorkbookSchema(workbook, { maxAnalyzeRows: 50 });
 console.log(schema.tables[0].rangeA1); // "Sheet1!A1:B2"
+
+// For prompt-friendly context you can format it as a compact deterministic string:
+const summary = summarizeWorkbookSchema(schema);
+console.log(summary);
 ```
 
 Like `extractSheetSchema()`, this may include snippets of real cell content (headers). Apply redaction/policy checks

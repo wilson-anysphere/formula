@@ -10,10 +10,10 @@ describe("ai-context TS entrypoint", () => {
     const tmpFile = join(testDir, `.__index-types.${process.pid}.${Date.now()}.ts`);
 
     // Keep the file next to this test so `../src/index.js` matches real-world usage.
-    writeFileSync(
+      writeFileSync(
       tmpFile,
       [
-        'import { ContextManager, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, RagIndex, classifyText, chunkSheetByRegions, chunkSheetByRegionsWithSchema, extractSheetSchema, extractWorkbookSchema, isLikelyHeaderRow, parseA1Range, summarizeRegion, summarizeSheetSchema, trimMessagesToBudget } from "../src/index.js";',
+        'import { ContextManager, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, RagIndex, classifyText, chunkSheetByRegions, chunkSheetByRegionsWithSchema, extractSheetSchema, extractWorkbookSchema, isLikelyHeaderRow, parseA1Range, summarizeRegion, summarizeSheetSchema, summarizeWorkbookSchema, trimMessagesToBudget } from "../src/index.js";',
         'import { headSampleRows, randomSampleRows, stratifiedSampleRows, systematicSampleRows, tailSampleRows } from "../src/index.js";',
         "",
         "EXCEL_MAX_ROWS satisfies number;",
@@ -78,6 +78,8 @@ describe("ai-context TS entrypoint", () => {
         '  tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 0 } }],',
         "});",
         "workbookSchema.tables[0]!.rangeA1 satisfies string;",
+        "const workbookSummary = summarizeWorkbookSchema(workbookSchema);",
+        "workbookSummary satisfies string;",
         "",
         'const dlp = classifyText("test@example.com");',
         'dlp.level satisfies "public" | "sensitive";',

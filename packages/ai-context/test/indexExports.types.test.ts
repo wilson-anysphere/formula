@@ -11,15 +11,16 @@ test("index.js is fully typed for TS consumers", async () => {
   const entryFile = fileURLToPath(new URL("./.ai-context-index-typecheck.ts", import.meta.url));
 
   const source = `\
-import {
-  EXCEL_MAX_COLS,
-  EXCEL_MAX_ROWS,
-  classifyText,
-  extractWorkbookSchema,
-  parseA1Range,
-  RagIndex,
-  isLikelyHeaderRow,
-  headSampleRows,
+ import {
+   EXCEL_MAX_COLS,
+   EXCEL_MAX_ROWS,
+   classifyText,
+   extractWorkbookSchema,
+   summarizeWorkbookSchema,
+   parseA1Range,
+   RagIndex,
+   isLikelyHeaderRow,
+   headSampleRows,
   tailSampleRows,
   systematicSampleRows,
   randomSampleRows,
@@ -89,9 +90,10 @@ type _StratifiedSample_Shape = Assert<
 // --- Workbook schema extraction ---
 type WorkbookSchema = ReturnType<typeof extractWorkbookSchema>;
 type _WorkbookSchema_NotAny = Assert<IsAny<WorkbookSchema> extends false ? true : false>;
-type _WorkbookSchema_Shape = Assert<
-  WorkbookSchema extends { id: string; sheets: Array<{ name: string }>; tables: unknown[]; namedRanges: unknown[] } ? true : false
->;
+ type _WorkbookSchema_Shape = Assert<
+   WorkbookSchema extends { id: string; sheets: Array<{ name: string }>; tables: unknown[]; namedRanges: unknown[] } ? true : false
+ >;
+ type _SummarizeWorkbook_Return = Assert<ReturnType<typeof summarizeWorkbookSchema> extends string ? true : false>;
 
 // Basic runtime sanity checks (also ensures the compiler doesn't tree-shake the imports).
 void EXCEL_MAX_ROWS;
@@ -106,13 +108,14 @@ void tailSampleRows([1, 2, 3], 2);
 void systematicSampleRows([1, 2, 3, 4], 2, { seed: 1 });
 void randomSampleRows([1, 2, 3, 4], 2, { seed: 1 });
 void stratifiedSampleRows([{ k: "a" }, { k: "b" }], 1, { getStratum: (r) => r.k, seed: 1 });
-const wbSchema = extractWorkbookSchema({
-  id: "wb1",
-  sheets: [{ name: "Sheet1", cells: [[{ v: "Header" }], [{ v: 1 }]] }],
-  tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 0 } }],
-});
-wbSchema.tables[0]?.rangeA1;
-const schema: SheetSchema = { name: "Sheet1", tables: [], namedRanges: [], dataRegions: [] };
+ const wbSchema = extractWorkbookSchema({
+   id: "wb1",
+   sheets: [{ name: "Sheet1", cells: [[{ v: "Header" }], [{ v: 1 }]] }],
+   tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 0 } }],
+ });
+ wbSchema.tables[0]?.rangeA1;
+ void summarizeWorkbookSchema(wbSchema);
+ const schema: SheetSchema = { name: "Sheet1", tables: [], namedRanges: [], dataRegions: [] };
 const ref: RegionRef = { type: "table", index: 0 };
 scoreRegionForQuery(ref, schema, "revenue");
 pickBestRegionForQuery(schema, "revenue");
