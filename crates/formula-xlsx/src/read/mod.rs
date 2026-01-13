@@ -183,6 +183,25 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         .as_deref()
         .and_then(|bytes| MetadataPart::parse(bytes).ok());
 
+    // Best-effort threaded comment personId -> displayName mapping. Missing/invalid parts should
+    // not fail workbook load.
+    let person_part_names: Vec<String> = archive
+        .file_names()
+        .map(|name| name.strip_prefix('/').unwrap_or(name).to_string())
+        .filter(|name| name.starts_with("xl/persons/") && name.ends_with(".xml"))
+        .collect();
+    let persons = crate::comments::import::collect_persons(
+        WORKBOOK_PART,
+        &workbook_rels,
+        person_part_names,
+        |target| {
+            read_zip_part_optional(archive, target)
+                .ok()
+                .flatten()
+                .map(Cow::Owned)
+        },
+    );
+
     for sheet in sheets {
         let ws_id = workbook.add_sheet(sheet.name.clone())?;
         worksheet_ids_by_index.push(ws_id);
@@ -234,6 +253,20 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
             .and_then(|bytes| std::str::from_utf8(bytes).ok());
 
         ws.hyperlinks = parse_worksheet_hyperlinks(sheet_xml_str, rels_xml).unwrap_or_default();
+
+        // Best-effort: comments.
+        crate::comments::import::import_sheet_comments(
+            ws,
+            &sheet.path,
+            rels_xml_bytes.as_deref(),
+            &persons,
+            |target| {
+                read_zip_part_optional(archive, target)
+                    .ok()
+                    .flatten()
+                    .map(Cow::Owned)
+            },
+        );
 
         ws.auto_filter = parse_worksheet_autofilter(sheet_xml_str).ok().flatten();
 
@@ -622,6 +655,20 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     let mut cell_meta = std::collections::HashMap::new();
     let mut rich_value_cells = std::collections::HashMap::new();
 
+    // Best-effort threaded comment personId -> displayName mapping. Missing/invalid parts should
+    // not fail workbook load.
+    let person_part_names: Vec<String> = parts
+        .keys()
+        .filter(|name| name.starts_with("xl/persons/") && name.ends_with(".xml"))
+        .cloned()
+        .collect();
+    let persons = crate::comments::import::collect_persons(
+        WORKBOOK_PART,
+        workbook_rels,
+        person_part_names,
+        |target| parts.get(target).map(|bytes| Cow::Borrowed(bytes.as_slice())),
+    );
+
     let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> = Vec::new();
     for (sheet_index, sheet) in sheets.into_iter().enumerate() {
         let ws_id = workbook.add_sheet(sheet.name.clone())?;
@@ -683,6 +730,15 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             }
 
             ws.hyperlinks = parse_worksheet_hyperlinks(sheet_xml_str, rels_xml)?;
+
+            // Best-effort: comments.
+            crate::comments::import::import_sheet_comments(
+                ws,
+                &sheet.path,
+                rels_xml_bytes,
+                &persons,
+                |target| parts.get(target).map(|bytes| Cow::Borrowed(bytes.as_slice())),
+            );
 
             ws.auto_filter = parse_worksheet_autofilter(sheet_xml_str).map_err(|err| match err {
                 AutoFilterParseError::Xml(e) => ReadError::Xml(e),

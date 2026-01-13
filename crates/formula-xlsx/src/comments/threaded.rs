@@ -196,6 +196,14 @@ fn extract_all_tag_text(xml: &str, tag: &str) -> Vec<String> {
     let mut cursor = 0usize;
     while let Some(open_pos_rel) = xml[cursor..].find(&open_pat) {
         let open_pos = cursor + open_pos_rel;
+        // Ensure we match the full tag name, not a prefix (e.g. `<t>` vs `<text>`).
+        let Some(next) = xml.as_bytes().get(open_pos + open_pat.len()) else {
+            break;
+        };
+        if !matches!(*next, b'>' | b'/' | b' ' | b'\t' | b'\r' | b'\n') {
+            cursor = open_pos + open_pat.len();
+            continue;
+        }
         let open_end = match xml[open_pos..].find('>') {
             Some(end) => open_pos + end + 1,
             None => break,

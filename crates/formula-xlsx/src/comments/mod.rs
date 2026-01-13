@@ -5,6 +5,7 @@ use formula_model::Comment;
 use crate::XlsxPackage;
 
 mod legacy;
+pub(crate) mod import;
 mod persons;
 mod threaded;
 
