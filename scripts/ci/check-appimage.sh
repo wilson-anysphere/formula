@@ -158,6 +158,54 @@ find_main_binary() {
   return 1
 }
 
+build_appdir_ld_library_path() {
+  # Build an LD_LIBRARY_PATH that approximates what AppRun would set for an AppImage,
+  # so `ldd` resolves bundled libraries inside the extracted squashfs.
+  local squashfs_root="$1"
+  local -a dirs=()
+
+  for d in \
+    "$squashfs_root/usr/lib" \
+    "$squashfs_root/usr/lib64" \
+    "$squashfs_root/lib" \
+    "$squashfs_root/lib64"; do
+    if [ -d "$d" ]; then
+      dirs+=("$d")
+    fi
+  done
+
+  # Include common multiarch subdirectories when present.
+  for parent in "$squashfs_root/usr/lib" "$squashfs_root/lib"; do
+    if [ -d "$parent" ]; then
+      while IFS= read -r -d '' d; do
+        dirs+=("$d")
+      done < <(find "$parent" -maxdepth 1 -type d -name '*-linux-gnu' -print0 2>/dev/null || true)
+    fi
+  done
+
+  # De-duplicate while preserving order.
+  local -A seen=()
+  local -a uniq=()
+  local d
+  for d in "${dirs[@]}"; do
+    if [[ -z "${seen[$d]:-}" ]]; then
+      seen["$d"]=1
+      uniq+=("$d")
+    fi
+  done
+
+  local joined=""
+  for d in "${uniq[@]}"; do
+    if [ -z "$joined" ]; then
+      joined="$d"
+    else
+      joined="$joined:$d"
+    fi
+  done
+
+  echo "$joined"
+}
+
 main() {
   require_cmd file
   require_cmd readelf
@@ -181,7 +229,7 @@ main() {
 
     chmod +x "$appimage"
 
-    local appimage_abs tmp squashfs_root main_bin
+    local appimage_abs tmp squashfs_root main_bin appdir_ld_library_path
     appimage_abs="$(realpath "$appimage")"
     tmp="$(mktemp -d)"
     # shellcheck disable=SC2064
@@ -221,8 +269,13 @@ main() {
     fi
 
     # Shared library dependency check.
+    appdir_ld_library_path="$(build_appdir_ld_library_path "$squashfs_root")"
+    if [ -n "$appdir_ld_library_path" ]; then
+      echo "Using AppImage LD_LIBRARY_PATH for ldd: $appdir_ld_library_path"
+    fi
+
     set +e
-    ldd_out="$(ldd "$main_bin" 2>&1)"
+    ldd_out="$(LD_LIBRARY_PATH="${appdir_ld_library_path}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ldd "$main_bin" 2>&1)"
     ldd_status=$?
     set -e
 
