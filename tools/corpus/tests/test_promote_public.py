@@ -33,10 +33,14 @@ class PromotePublicExpectationsTests(unittest.TestCase):
 
     def test_coerce_display_name_appends_extension(self) -> None:
         self.assertEqual(_coerce_display_name("my-case", default_ext=".xlsx"), "my-case.xlsx")
+        self.assertEqual(_coerce_display_name("my-case", default_ext=".xlsb"), "my-case.xlsb")
 
     def test_coerce_display_name_strips_b64_suffix(self) -> None:
         self.assertEqual(
             _coerce_display_name("my-case.xlsx.b64", default_ext=".xlsx"), "my-case.xlsx"
+        )
+        self.assertEqual(
+            _coerce_display_name("my-case.xlsb.b64", default_ext=".xlsb"), "my-case.xlsb"
         )
 
     def test_coerce_display_name_rejects_path_separators(self) -> None:

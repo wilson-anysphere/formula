@@ -172,14 +172,14 @@ def _coerce_display_name(name: str, *, default_ext: str) -> str:
     if any(sep in name for sep in ("/", "\\", "\x00")) or name in {".", ".."}:
         raise ValueError("--name must be a filename (no path separators)")
 
-    if name.endswith((".xlsx", ".xlsm")):
+    if name.endswith((".xlsx", ".xlsm", ".xlsb")):
         return name
     if name.endswith(".b64"):
         # Be helpful if the user passes the fixture filename itself.
         name = name[: -len(".b64")]
-    if not name.endswith((".xlsx", ".xlsm")):
+    if not name.endswith((".xlsx", ".xlsm", ".xlsb")):
         default_ext = default_ext or ".xlsx"
-        if default_ext not in {".xlsx", ".xlsm"}:
+        if default_ext not in {".xlsx", ".xlsm", ".xlsb"}:
             default_ext = ".xlsx"
         name += default_ext
     if any(sep in name for sep in ("/", "\\", "\x00")) or name in {".", ".."}:
@@ -264,7 +264,7 @@ def main() -> int:
 
     try:
         default_ext = Path(wb_in.display_name).suffix
-        if default_ext not in {".xlsx", ".xlsm"}:
+        if default_ext not in {".xlsx", ".xlsm", ".xlsb"}:
             default_ext = ".xlsx"
         display_name = _coerce_display_name(args.name or wb_in.display_name, default_ext=default_ext)
     except ValueError as e:
@@ -275,6 +275,13 @@ def main() -> int:
     workbook_bytes = wb_in.data
 
     if args.sanitize:
+        if display_name.casefold().endswith(".xlsb"):
+            print(
+                "XLSB sanitization is not supported by --sanitize yet. "
+                "Provide an already-sanitized XLSB and pass --confirm-sanitized, "
+                "or promote an XLSX/XLSM fixture instead."
+            )
+            return 1
         options = SanitizeOptions(
             redact_cell_values=not args.no_redact_cell_values,
             hash_strings=args.hash_strings,
