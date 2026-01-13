@@ -37,6 +37,29 @@ Optional:
 - `FORMULA_DESKTOP_BUNDLE_SIZE_WARN_ONLY=1` – report budget violations but exit 0
 - `FORMULA_DESKTOP_BUNDLE_SIZE_SKIP_GZIP=1` – skip gzip computation (faster)
 
+## Dist asset breakdown (static assets)
+
+The desktop build includes large static assets (notably Pyodide under `public/pyodide/`), which can dominate the
+packaged app footprint even when JS bundle sizes are stable.
+
+To see which files contribute most to `apps/desktop/dist/`, run:
+
+```bash
+pnpm build:desktop
+node scripts/desktop_dist_asset_report.mjs
+```
+
+This prints a Markdown report of:
+
+- total `dist/` size
+- the **largest files** (top 25 by default; use `--top N`)
+- **grouped totals** by directory prefix (top-level by default; use `--group-depth N`)
+
+Optional budget enforcement (MB = 1,000,000 bytes):
+
+- `FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB` – fail if total `dist/` size exceeds this value
+- `FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB` – fail if any single file exceeds this value
+
 ## Rust binary size analysis (desktop shell)
 
 To inspect which Rust **crates/symbols** dominate the `formula-desktop` release binary (useful for bundle-size

@@ -167,7 +167,16 @@ async function scanDistDir(dir) {
   const stack = [dir];
   while (stack.length > 0) {
     const current = /** @type {string} */ (stack.pop());
-    const entries = await readdir(current, { withFileTypes: true });
+    let entries;
+    try {
+      entries = await readdir(current, { withFileTypes: true });
+    } catch (err) {
+      // The dist directory shouldn't change during a report, but some environments
+      // may clean build output concurrently. Skip vanished directories so the report
+      // remains best-effort instead of failing with ENOENT.
+      if (/** @type {any} */ (err)?.code === "ENOENT") continue;
+      throw err;
+    }
     for (const entry of entries) {
       const absPath = path.join(current, entry.name);
       if (entry.isDirectory()) {
@@ -176,7 +185,13 @@ async function scanDistDir(dir) {
       }
       if (!entry.isFile()) continue;
 
-      const stats = await stat(absPath);
+      let stats;
+      try {
+        stats = await stat(absPath);
+      } catch (err) {
+        if (/** @type {any} */ (err)?.code === "ENOENT") continue;
+        throw err;
+      }
       const sizeBytes = stats.size;
       totalBytes += sizeBytes;
 
