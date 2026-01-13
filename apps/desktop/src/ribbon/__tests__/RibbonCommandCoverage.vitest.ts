@@ -136,6 +136,7 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       },
     } as any;
 
+    // Register the same command catalog as the desktop shell (`apps/desktop/src/main.ts`).
     registerDesktopCommands({
       commandRegistry,
       app: {} as any,
@@ -146,7 +147,11 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       getActiveCellNumberFormat: () => null,
       openFormatCells: () => {},
       showQuickPick: async () => null,
-      findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
+      findReplace: {
+        openFind: () => {},
+        openReplace: () => {},
+        openGoTo: () => {},
+      },
       workbenchFileHandlers: {
         newWorkbook: () => {},
         openWorkbook: () => {},

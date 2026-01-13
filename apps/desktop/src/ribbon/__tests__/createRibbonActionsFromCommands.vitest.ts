@@ -6,8 +6,11 @@ import { createRibbonActionsFromCommands } from "../createRibbonActionsFromComma
 
 async function flushMicrotasks(): Promise<void> {
   // Allow any `queueMicrotask` / async IIFE work to run.
-  await Promise.resolve();
-  await Promise.resolve();
+  // Nested async boundaries (CommandRegistry -> createRibbonActionsFromCommands) can
+  // require multiple microtask turns in jsdom/vitest, so flush a small batch.
+  for (let i = 0; i < 8; i += 1) {
+    await Promise.resolve();
+  }
 }
 
 afterEach(() => {
