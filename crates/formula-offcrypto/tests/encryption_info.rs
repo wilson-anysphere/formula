@@ -269,3 +269,59 @@ fn rejects_truncated_encrypted_verifier_hash() {
     let err = parse_encryption_info(&bytes).unwrap_err();
     assert!(matches!(err, OffcryptoError::Truncated { .. }));
 }
+
+#[test]
+fn rejects_verifier_hash_size_mismatch() {
+    let bytes = build_standard_encryption_info(
+        &utf16le_bytes("CSP", true),
+        CALG_AES_128,
+        CALG_SHA1,
+        128,
+        16,
+        32, // not SHA1
+        32,
+    );
+    let err = parse_encryption_info(&bytes).unwrap_err();
+    assert_eq!(
+        err,
+        OffcryptoError::InvalidEncryptionInfo {
+            context:
+                "EncryptionVerifier.verifierHashSize must be 20 (SHA1) for Standard encryption"
+        }
+    );
+}
+
+#[test]
+fn rejects_unsupported_standard_alg_id() {
+    let bytes = build_standard_encryption_info(
+        &utf16le_bytes("CSP", true),
+        0xDEAD_BEEF,
+        CALG_SHA1,
+        128,
+        16,
+        20,
+        32,
+    );
+    let err = parse_encryption_info(&bytes).unwrap_err();
+    assert_eq!(err, OffcryptoError::UnsupportedAlgorithm(0xDEAD_BEEF));
+}
+
+#[test]
+fn truncation_missing_encrypted_verifier_bytes() {
+    let mut bytes = build_standard_encryption_info(
+        &utf16le_bytes("CSP", true),
+        CALG_AES_128,
+        CALG_SHA1,
+        128,
+        16,
+        20,
+        32,
+    );
+
+    // Truncate halfway through the encryptedVerifier field (16 bytes).
+    let encrypted_verifier_offset = bytes.len() - (16 + 4 + 32);
+    bytes.truncate(encrypted_verifier_offset + 8);
+
+    let err = parse_encryption_info(&bytes).unwrap_err();
+    assert!(matches!(err, OffcryptoError::Truncated { .. }));
+}
