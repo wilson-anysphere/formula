@@ -284,19 +284,10 @@ fn sheet_metadata_restores_from_on_disk_autosave_db() {
         workbook.add_sheet("Sheet1".to_string());
         workbook.add_sheet("Sheet2".to_string());
         workbook.add_sheet("Sheet3".to_string());
+
         // Simulate an imported tab color that the desktop UI/host APIs don't currently allow
         // setting directly (theme/tint-based colors can still be loaded and round-tripped).
         if let Some(sheet3) = workbook.sheet_mut("Sheet3") {
-            sheet3.tab_color = Some(TabColor {
-                theme: Some(1),
-                tint: Some(0.5),
-                ..Default::default()
-            });
-        }
-
-        // Simulate imported metadata that the UI doesn't set directly (theme-based tab colors).
-        // The desktop host API currently only accepts explicit ARGB `rgb` updates.
-        if let Some(sheet3) = workbook.sheets.iter_mut().find(|s| s.id == "Sheet3") {
             sheet3.tab_color = Some(TabColor {
                 theme: Some(1),
                 tint: Some(0.5),

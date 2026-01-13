@@ -432,6 +432,7 @@ If a signed/notarized build launches with a blank window or crashes immediately,
 3. macOS logs/crash reports:
    - Use **Console.app** → Crash Reports / log stream.
    - Look for `WebKit`, `JavaScriptCore`, or `EXC_BAD_ACCESS` crashes in a `WebContent` process.
+ 
 ### Windows (Authenticode)
 
 Secrets:

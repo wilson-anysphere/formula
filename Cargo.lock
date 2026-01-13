@@ -2101,6 +2101,7 @@ dependencies = [
  "objc2-foundation",
  "percent-encoding",
  "pkcs8",
+ "plist",
  "png 0.17.16",
  "rand_core 0.6.4",
  "reqwest",
