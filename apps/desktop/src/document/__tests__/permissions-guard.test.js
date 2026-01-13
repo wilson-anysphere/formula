@@ -82,6 +82,17 @@ test("DocumentController allows sheet view mutations even when cell edits are bl
   assert.equal(view.rowHeights?.["0"], 40);
 });
 
+test("DocumentController allows formatting defaults via setRangeFormat even when cell edits are blocked (full column)", () => {
+  const restrictions = [];
+  const viewerDoc = new DocumentController({
+    canEditCell: makeGuard({ role: "viewer", userId: "u-viewer", restrictions })
+  });
+
+  const ok = viewerDoc.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } });
+  assert.equal(ok, true);
+  assert.equal(viewerDoc.getCellFormat("Sheet1", "A1")?.font?.bold, true);
+});
+
 test("DocumentController allows sheet view mutations when at least some cells are editable (partial range restrictions)", () => {
   const restrictions = [
     {

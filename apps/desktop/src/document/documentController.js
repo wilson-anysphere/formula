@@ -3330,8 +3330,6 @@ export class DocumentController {
     };
 
     if (isFullSheet) {
-      if (this.canEditCell && !this.canEditCell({ sheetId, row: 0, col: 0 })) return false;
-
       // Patch sheet default.
       const beforeStyleId = sheet.defaultStyleId ?? 0;
       const afterStyleId = patchStyleId(beforeStyleId);
@@ -3380,8 +3378,6 @@ export class DocumentController {
     }
 
     if (isFullHeightCols) {
-      if (this.canEditCell && !this.canEditCell({ sheetId, row: 0, col: r.start.col })) return false;
-
       for (let col = r.start.col; col <= r.end.col; col++) {
         const beforeStyleId = sheet.colStyleIds.get(col) ?? 0;
         const afterStyleId = patchStyleId(beforeStyleId);
@@ -3420,8 +3416,6 @@ export class DocumentController {
     }
 
     if (isFullWidthRows) {
-      if (this.canEditCell && !this.canEditCell({ sheetId, row: r.start.row, col: 0 })) return false;
-
       // Formatting full-width row ranges requires enumerating each row to update the row formatting layer.
       // For huge selections this can freeze the UI and allocate enormous delta arrays; cap the work.
       if (rowCount > maxEnumeratedRows) {
