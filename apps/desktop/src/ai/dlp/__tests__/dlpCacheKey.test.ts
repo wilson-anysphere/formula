@@ -64,6 +64,64 @@ describe("computeDlpCacheKey", () => {
     expect(keyFalse).not.toEqual(keyTrue);
   });
 
+  it("is stable across classification label ordering", () => {
+    const base = {
+      documentId: "doc",
+      policy: { rules: { a: 1 } },
+      includeRestrictedContent: false,
+    };
+
+    const selector = { scope: "cell", documentId: "doc", sheetId: "Sheet1", row: 0, col: 0 };
+    const key1 = computeDlpCacheKey({
+      ...base,
+      classificationRecords: [{ selector, classification: { level: "Confidential", labels: ["b", "a", "a"] } }],
+    });
+    const key2 = computeDlpCacheKey({
+      ...base,
+      classificationRecords: [{ selector, classification: { level: "Confidential", labels: ["a", "b"] } }],
+    });
+    expect(key1).toEqual(key2);
+  });
+
+  it("is stable across range selector coordinate ordering (start/end swapped)", () => {
+    const base = {
+      documentId: "doc",
+      policy: { rules: { a: 1 } },
+      includeRestrictedContent: false,
+    };
+
+    const key1 = computeDlpCacheKey({
+      ...base,
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: "doc",
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 2, col: 3 } },
+          },
+          classification: { level: "Confidential", labels: [] },
+        },
+      ],
+    });
+    const key2 = computeDlpCacheKey({
+      ...base,
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: "doc",
+            sheetId: "Sheet1",
+            range: { start: { row: 2, col: 3 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Confidential", labels: [] },
+        },
+      ],
+    });
+
+    expect(key1).toEqual(key2);
+  });
+
   it("changes when classification changes", () => {
     const base = {
       documentId: "doc",

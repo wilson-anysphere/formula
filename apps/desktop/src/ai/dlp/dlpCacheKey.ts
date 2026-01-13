@@ -45,12 +45,120 @@ function hashString(value: string): string {
   return fnv1a32(value).toString(16);
 }
 
+function normalizeLabels(labelsRaw: unknown): string[] {
+  const labels = Array.isArray(labelsRaw) ? labelsRaw : [];
+  const normalized = labels
+    .map((l) => {
+      try {
+        return String(l);
+      } catch {
+        return "";
+      }
+    })
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return Array.from(new Set(normalized)).sort((a, b) => a.localeCompare(b));
+}
+
+function normalizeClassificationForCacheKey(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value ?? null;
+  const obj = value as any;
+  return {
+    level: typeof obj.level === "string" ? obj.level : null,
+    labels: normalizeLabels(obj.labels),
+  };
+}
+
+function normalizeNonNegativeInt(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  if (!Number.isInteger(value) || value < 0) return null;
+  return value;
+}
+
+function normalizeSelectorForCacheKey(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value ?? null;
+  const selector = value as any;
+  const scope = typeof selector.scope === "string" ? selector.scope : "";
+  const documentId = typeof selector.documentId === "string" ? selector.documentId : null;
+
+  // When we can't recognize the selector shape, fall back to a stable JSON form so
+  // the cache key remains sensitive to changes.
+  const fallback = () => safeStableJsonStringify(value);
+
+  switch (scope) {
+    case "document":
+      return { scope, documentId };
+    case "sheet":
+      return {
+        scope,
+        documentId,
+        sheetId: typeof selector.sheetId === "string" ? selector.sheetId : null,
+      };
+    case "column": {
+      const out: any = {
+        scope,
+        documentId,
+        sheetId: typeof selector.sheetId === "string" ? selector.sheetId : null,
+      };
+      const columnIndex = normalizeNonNegativeInt(selector.columnIndex);
+      if (columnIndex !== null) out.columnIndex = columnIndex;
+      if (typeof selector.columnId === "string") out.columnId = selector.columnId;
+      if (typeof selector.tableId === "string") out.tableId = selector.tableId;
+      return out;
+    }
+    case "cell": {
+      const row = normalizeNonNegativeInt(selector.row);
+      const col = normalizeNonNegativeInt(selector.col);
+      const out: any = {
+        scope,
+        documentId,
+        sheetId: typeof selector.sheetId === "string" ? selector.sheetId : null,
+        row,
+        col,
+      };
+      if (typeof selector.tableId === "string") out.tableId = selector.tableId;
+      if (typeof selector.columnId === "string") out.columnId = selector.columnId;
+      return out;
+    }
+    case "range": {
+      if (!selector.range || typeof selector.range !== "object") {
+        return {
+          scope,
+          documentId,
+          sheetId: typeof selector.sheetId === "string" ? selector.sheetId : null,
+          range: null,
+        };
+      }
+      const start = (selector.range as any).start;
+      const end = (selector.range as any).end;
+      if (!start || typeof start !== "object" || !end || typeof end !== "object") return fallback();
+      const startRow = normalizeNonNegativeInt((start as any).row);
+      const startCol = normalizeNonNegativeInt((start as any).col);
+      const endRow = normalizeNonNegativeInt((end as any).row);
+      const endCol = normalizeNonNegativeInt((end as any).col);
+      if ([startRow, startCol, endRow, endCol].some((n) => n === null)) return fallback();
+      const r0 = Math.min(startRow!, endRow!);
+      const r1 = Math.max(startRow!, endRow!);
+      const c0 = Math.min(startCol!, endCol!);
+      const c1 = Math.max(startCol!, endCol!);
+      return {
+        scope,
+        documentId,
+        sheetId: typeof selector.sheetId === "string" ? selector.sheetId : null,
+        range: { start: { row: r0, col: c0 }, end: { row: r1, col: c1 } },
+      };
+    }
+    default:
+      return fallback();
+  }
+}
+
 function normalizedClassificationRecordKeysForCacheKey(records: unknown): string[] {
   const list = Array.isArray(records) ? records : [];
   const keys = list.map((record) =>
     safeStableJsonStringify({
-      selector: (record as any)?.selector ?? null,
-      classification: (record as any)?.classification ?? null,
+      selector: normalizeSelectorForCacheKey((record as any)?.selector ?? null),
+      classification: normalizeClassificationForCacheKey((record as any)?.classification ?? null),
     }),
   );
   // Ensure deterministic ordering even if the backing classification store does not
