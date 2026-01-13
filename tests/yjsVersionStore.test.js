@@ -150,3 +150,17 @@ test("YjsVersionStore: listVersions is deterministic when timestamps are equal (
     "expected last inserted to be listed first when timestamps match",
   );
 });
+
+test("YjsVersionStore: rejects invalid chunkSize values", async () => {
+  const doc = new Y.Doc();
+  // @ts-expect-error - runtime validation
+  assert.throws(() => new YjsVersionStore({ doc, chunkSize: 0 }), /chunkSize/i);
+  // @ts-expect-error - runtime validation
+  assert.throws(() => new YjsVersionStore({ doc, chunkSize: -1 }), /chunkSize/i);
+  // @ts-expect-error - runtime validation
+  assert.throws(() => new YjsVersionStore({ doc, chunkSize: Number.NaN }), /chunkSize/i);
+  // @ts-expect-error - runtime validation
+  assert.throws(() => new YjsVersionStore({ doc, chunkSize: 1.5 }), /chunkSize/i);
+  // @ts-expect-error - runtime validation
+  assert.throws(() => new YjsVersionStore({ doc, chunkSize: Number.POSITIVE_INFINITY }), /chunkSize/i);
+});

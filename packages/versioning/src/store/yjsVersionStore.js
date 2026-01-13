@@ -331,7 +331,14 @@ export class YjsVersionStore {
     this.writeMode = opts.writeMode ?? "single";
     this.maxChunksPerTransaction = opts.maxChunksPerTransaction ?? null;
 
-    if (this.chunkSize <= 0) throw new Error("YjsVersionStore: chunkSize must be > 0");
+    if (
+      typeof this.chunkSize !== "number" ||
+      !Number.isFinite(this.chunkSize) ||
+      !Number.isSafeInteger(this.chunkSize) ||
+      this.chunkSize <= 0
+    ) {
+      throw new Error("YjsVersionStore: chunkSize must be a positive integer");
+    }
     if (this.compression !== "none" && this.compression !== "gzip") {
       throw new Error(`YjsVersionStore: invalid compression: ${this.compression}`);
     }
