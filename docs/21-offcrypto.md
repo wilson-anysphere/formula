@@ -68,7 +68,7 @@ MS-OFFCRYPTO defines multiple encryption “containers” for OOXML packages. Fo
 spreadsheets you will most commonly see:
 
 - **Standard** encryption (binary headers; CryptoAPI) — `EncryptionInfo` version **3.2** (or sometimes
-  `4.2` in the wild)
+  `2.2`/`4.2` in the wild; i.e. `versionMinor == 2` with `versionMajor ∈ {2,3,4}`)
 - **Agile** encryption (XML descriptor) — `EncryptionInfo` version **4.4**
 
 Current state in this repo (important nuance):
@@ -85,7 +85,10 @@ Current state in this repo (important nuance):
   route errors correctly.
 
 When triaging user reports, the most important thing is to capture the `EncryptionInfo` version
-(`3.2`/`4.2` vs `4.4`) because it determines which scheme you’re dealing with.
+because it determines which scheme you’re dealing with:
+
+- `4.4` ⇒ Agile
+- `minor == 2` with `major ∈ {2,3,4}` ⇒ Standard/CryptoAPI (often seen as `3.2` or `4.2`)
 
 ## Public API usage
 
@@ -153,14 +156,11 @@ When handling user reports, these error variants map cleanly to “what happened
 |------|---------|---------------------|
 | `PasswordRequired` | The file is encrypted/password-protected, but no password was provided. | Retry with `open_workbook_with_password(.., Some(password))` / `open_workbook_model_with_password(.., Some(password))`, or ask the user to remove encryption in Excel. |
 | `InvalidPassword` | Password was provided but the workbook could not be opened/decrypted. (This can mean “wrong password”; until decryption is wired end-to-end, it can also mean “not implemented yet”.) | Ask the user to re-enter the password; confirm it opens in Excel with the same password. If Formula still cannot open it, capture `EncryptionInfo` version + the exact error, then ask the user to remove encryption and re-save. |
-| `UnsupportedOoxmlEncryption` | We identified an encrypted OOXML container, but the `EncryptionInfo` version is not recognized/implemented (i.e. not Standard `3.2`/`4.2` or Agile `4.4`). | Ask the user to remove encryption (open in Excel → remove password → re-save), or provide an unencrypted copy. |
+| `UnsupportedOoxmlEncryption` | We identified an encrypted OOXML container, but the `EncryptionInfo` version is not recognized/implemented (i.e. not Standard/CryptoAPI `minor == 2` or Agile `4.4`). | Ask the user to remove encryption (open in Excel → remove password → re-save), or provide an unencrypted copy. |
 | `EncryptedWorkbook` | Legacy `.xls` BIFF encryption was detected (BIFF `FILEPASS`). | Ask the user to remove encryption in Excel, or convert the workbook to an unencrypted format. |
 
-If you need to distinguish **Agile vs Standard** for triage, include the `EncryptionInfo` version
-from the snippet above in the bug report:
-
-- `3.2` → Standard (CryptoAPI)
-- `4.4` → Agile
+If you need to distinguish **Agile vs Standard** for triage, include the `EncryptionInfo`
+`major.minor` pair in the bug report (or at least whether `minor == 2` vs `4.4`).
 
 ## Test fixtures and attribution
 
@@ -185,5 +185,6 @@ encrypted OOXML file’s `EncryptionInfo` header:
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- path/to/encrypted.xlsx
 ```
 
-This prints a string like `Agile (4.4) flags=0x...` or `Standard (3.2) flags=0x...`, which is often
-enough to route a bug report to the right implementation path.
+This prints a string like `Agile (4.4) flags=0x...` or `Standard (3.2) flags=0x...` (but the Standard
+major version can vary: `2.2`/`3.2`/`4.2`), which is often enough to route a bug report to the right
+implementation path.

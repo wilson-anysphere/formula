@@ -374,14 +374,30 @@ Agile’s file-provided `spinCount`.
 Primary:
 * **MS-OFFCRYPTO** (Office encryption container, Standard + Agile):
   https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/
+* **MS-CFB** (OLE/CFB container format used by the encrypted OOXML wrapper):
+  https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cfb/
 * **MS-XLS** (legacy BIFF / `FILEPASS` encryption marker):
   https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-xls/
 
-Useful entry points / keywords inside MS-OFFCRYPTO:
-* `EncryptionInfo` stream format (version dispatch, flags)
-* “Standard Encryption” (`EncryptionHeader`, `EncryptionVerifier`)
-* “Agile Encryption” (XML descriptor, password key encryptor, `EncryptedPackage` segmenting)
-* “Data Integrity” (`encryptedHmacKey`, `encryptedHmacValue`)
+### MS-OFFCRYPTO sections (most relevant)
+The MS-OFFCRYPTO spec is long; these are the sections we repeatedly refer to when implementing or
+debugging encryption:
+
+* **§2.3.4.4** — “`\\EncryptedPackage` Stream” (8-byte plaintext size prefix; ciphertext may be larger
+  due to block padding; truncate to the declared size after decrypting).
+* **§2.3.4.5** — “`\\EncryptionInfo` Stream (Standard Encryption)” (binary header layout:
+  version+flags+headerSize, `EncryptionHeader`, `EncryptionVerifier`).
+* **§2.3.4.7** — “ECMA-376 Document Encryption Key Generation (Standard Encryption)” (fixed 50,000
+  password-hash iterations; salt is `EncryptionVerifier.Salt`).
+* **§2.3.4.12** — “Initialization Vector Generation (Agile Encryption)” (segment index → IV hashing +
+  truncation).
+* **§2.3.4.15** — “Data Encryption (Agile Encryption)” (4096-byte segmenting and padding/truncation
+  behavior; in practice the same segment framing pattern is used by CryptoAPI AES `EncryptedPackage`).
+
+Other useful keywords inside MS-OFFCRYPTO:
+* `spinCount` (Agile password hashing loop)
+* `encryptedHmacKey` / `encryptedHmacValue` (“Data Integrity”; HMAC computed over the full
+  `EncryptedPackage` stream bytes, including the size prefix)
 
 Additional repo-specific references:
 - `docs/offcrypto-standard-encryptedpackage.md` (Standard `EncryptedPackage` segmenting/IV/padding)
