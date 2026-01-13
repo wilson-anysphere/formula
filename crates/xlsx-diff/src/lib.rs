@@ -10,6 +10,7 @@ mod xml;
 pub mod cli;
 mod rels;
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs::File;
@@ -565,6 +566,65 @@ fn looks_like_xml(bytes: &[u8]) -> bool {
     false
 }
 
+/// Decode raw bytes for an XML part into a Rust `&str`/`String`.
+///
+/// OOXML parts are commonly UTF-8, but the XML spec allows UTF-16 and Excel files
+/// in the wild sometimes use it. `roxmltree` expects an already-decoded `&str`,
+/// so we handle decoding here.
+///
+/// Supports:
+/// - UTF-8, with or without a BOM (BOM is stripped)
+/// - UTF-16LE/UTF-16BE via BOM (`FF FE` / `FE FF`)
+/// - UTF-16LE/UTF-16BE via leading `<\0` / `\0<` patterns
+pub(crate) fn decode_xml_bytes(bytes: &[u8]) -> Result<Cow<'_, str>> {
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        return Ok(Cow::Borrowed(std::str::from_utf8(&bytes[3..])?));
+    }
+
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        return decode_utf16(&bytes[2..], Utf16Endian::Little).map(Cow::Owned);
+    }
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        return decode_utf16(&bytes[2..], Utf16Endian::Big).map(Cow::Owned);
+    }
+
+    // Some UTF-16 encoded XML documents omit a BOM; XML typically starts with `<`.
+    // `<\0` suggests LE (`0x003C`), while `\0<` suggests BE.
+    if bytes.len() >= 2 {
+        if bytes[0] == b'<' && bytes[1] == 0x00 {
+            return decode_utf16(bytes, Utf16Endian::Little).map(Cow::Owned);
+        }
+        if bytes[0] == 0x00 && bytes[1] == b'<' {
+            return decode_utf16(bytes, Utf16Endian::Big).map(Cow::Owned);
+        }
+    }
+
+    Ok(Cow::Borrowed(std::str::from_utf8(bytes)?))
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Utf16Endian {
+    Little,
+    Big,
+}
+
+fn decode_utf16(bytes: &[u8], endian: Utf16Endian) -> Result<String> {
+    if bytes.len() % 2 != 0 {
+        return Err(anyhow!("invalid UTF-16 byte length: {}", bytes.len()));
+    }
+
+    let mut words = Vec::with_capacity(bytes.len() / 2);
+    for chunk in bytes.chunks_exact(2) {
+        let word = match endian {
+            Utf16Endian::Little => u16::from_le_bytes([chunk[0], chunk[1]]),
+            Utf16Endian::Big => u16::from_be_bytes([chunk[0], chunk[1]]),
+        };
+        words.push(word);
+    }
+
+    Ok(String::from_utf16(&words)?)
+}
+
 fn severity_for_part(part: &str, strict_calc_chain: bool) -> Severity {
     if part == "[Content_Types].xml" {
         return Severity::Critical;
@@ -817,9 +877,10 @@ fn relationship_target_ignore_map(
     bytes: &[u8],
     ignore: &IgnoreMatcher,
 ) -> Result<BTreeMap<String, bool>> {
-    let text = std::str::from_utf8(bytes)
-        .with_context(|| format!("part {rels_part} is not valid UTF-8"))?;
-    let doc = Document::parse(text).with_context(|| format!("parse xml for {rels_part}"))?;
+    let text =
+        decode_xml_bytes(bytes).with_context(|| format!("decode xml bytes for {rels_part}"))?;
+    let doc =
+        Document::parse(text.as_ref()).with_context(|| format!("parse xml for {rels_part}"))?;
 
     let mut ids = BTreeMap::new();
     for node in doc
@@ -1021,9 +1082,10 @@ fn relationship_id_from_path(path: &str) -> Option<&str> {
 }
 
 fn calc_chain_relationship_ids(part_name: &str, bytes: &[u8]) -> Result<BTreeSet<String>> {
-    let text = std::str::from_utf8(bytes)
-        .with_context(|| format!("part {part_name} is not valid UTF-8"))?;
-    let doc = Document::parse(text).with_context(|| format!("parse xml for {part_name}"))?;
+    let text =
+        decode_xml_bytes(bytes).with_context(|| format!("decode xml bytes for {part_name}"))?;
+    let doc =
+        Document::parse(text.as_ref()).with_context(|| format!("parse xml for {part_name}"))?;
 
     let mut ids = BTreeSet::new();
     for node in doc

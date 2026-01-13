@@ -46,9 +46,10 @@ impl fmt::Display for QName {
 
 impl NormalizedXml {
     pub fn parse(part_name: &str, bytes: &[u8]) -> Result<Self> {
-        let text = std::str::from_utf8(bytes)
-            .with_context(|| format!("part {part_name} is not valid UTF-8"))?;
-        let doc = Document::parse(text).with_context(|| format!("parse xml for {part_name}"))?;
+        let text = crate::decode_xml_bytes(bytes)
+            .with_context(|| format!("decode xml bytes for {part_name}"))?;
+        let doc =
+            Document::parse(text.as_ref()).with_context(|| format!("parse xml for {part_name}"))?;
         let root = doc.root_element();
         // `diff_archives` passes normalized OPC part names, but `NormalizedXml::parse` is public and
         // can be used directly by tests/consumers. Normalize here so our ordering rules are applied
