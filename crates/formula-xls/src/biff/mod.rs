@@ -22,6 +22,7 @@ pub(crate) mod records;
 pub(crate) mod sheet;
 pub(crate) mod supbook;
 pub(crate) mod strings;
+pub(crate) mod worksheet_formulas;
 
 pub(crate) use comments::parse_biff_sheet_notes;
 pub(crate) use autofilter::{parse_biff_filter_database_ranges, ParsedFilterDatabaseRanges};
