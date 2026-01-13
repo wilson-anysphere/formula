@@ -124,9 +124,10 @@ describe("ImageBitmapCache", () => {
     expect((bitmapB as any).close).toHaveBeenCalledTimes(1);
   });
 
-  it("evicts based on access time (not decode completion order)", async () => {
+  it("does not immediately evict a late-resolving decode before callers can use it", async () => {
     const bitmapA = { close: vi.fn() } as unknown as ImageBitmap;
     const bitmapB = { close: vi.fn() } as unknown as ImageBitmap;
+    const bitmapB2 = { close: vi.fn() } as unknown as ImageBitmap;
 
     let resolveA!: (value: ImageBitmap) => void;
     let resolveB!: (value: ImageBitmap) => void;
@@ -137,7 +138,10 @@ describe("ImageBitmapCache", () => {
       resolveB = res;
     });
 
-    const createImageBitmapMock = vi.fn().mockImplementationOnce(() => pA).mockImplementationOnce(() => pB);
+    const createImageBitmapMock = vi.fn()
+      .mockImplementationOnce(() => pA)
+      .mockImplementationOnce(() => pB)
+      .mockImplementationOnce(() => Promise.resolve(bitmapB2));
     vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
 
     const cache = new ImageBitmapCache({ maxEntries: 1 });
@@ -152,12 +156,18 @@ describe("ImageBitmapCache", () => {
     resolveA(bitmapA);
     await expect(promiseA).resolves.toBe(bitmapA);
 
-    // `a` was accessed before `b`, so `a` should be evicted even though it resolved later.
-    expect((bitmapA as any).close).toHaveBeenCalledTimes(1);
-    expect((bitmapB as any).close).not.toHaveBeenCalled();
+    // The cache should not evict+close the bitmap in the same microtask that
+    // resolves its promise (the internal `.then` handlers run before caller
+    // `await`/`.then` handlers attached later).
+    //
+    // With maxEntries=1, `b` should be the one evicted+closed once `a` also resolves.
+    expect((bitmapA as any).close).not.toHaveBeenCalled();
+    expect((bitmapB as any).close).toHaveBeenCalledTimes(1);
 
-    // Re-requesting `a` should require a new decode.
-    await cache.get(createEntry("a"));
+    // `a` should still be cached; `b` should require a new decode.
+    await expect(cache.get(createEntry("a"))).resolves.toBe(bitmapA);
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
+    await cache.get(createEntry("b"));
     expect(createImageBitmapMock).toHaveBeenCalledTimes(3);
   });
 

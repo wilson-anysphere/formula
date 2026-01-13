@@ -15,8 +15,12 @@ export class ImageBitmapCache {
    * - oldest entries are at the start
    *
    * Entries exist as soon as `get()` is called, even while the decode is still
-   * pending. This means LRU order reflects *access time*, not decode completion
-   * time (important when decodes resolve out-of-order).
+   * pending.
+   *
+   * Note: we also "touch" (move-to-end) entries when their decode finishes so a
+   * late-resolving request isn't immediately evicted+closed before its callers
+   * observe the resolved bitmap (our internal `.then` handlers run before any
+   * caller `await`/`.then` handlers attached later).
    */
   private readonly entries = new Map<
     string,
@@ -79,6 +83,12 @@ export class ImageBitmapCache {
           ImageBitmapCache.tryClose(record.bitmap);
           record.bitmap = bitmap;
         }
+
+        // Mark as most-recently-used. This avoids evicting+closing the bitmap in
+        // the same microtask that resolves the promise (which would make the
+        // resolved bitmap unusable for awaiting callers).
+        this.entries.delete(id);
+        this.entries.set(id, record);
 
         this.evictIfNeeded();
       },
