@@ -118,6 +118,17 @@ fn decode_text_for_target_lossy_utf8(target: &str, bytes: &[u8]) -> Option<Strin
     decode_text_for_target_impl(target, bytes, Utf8DecodeMode::Lossy)
 }
 
+/// Decode raw clipboard bytes as lossy UTF-8 and enforce a post-decode UTF-8 byte limit.
+///
+/// [`String::from_utf8_lossy`] can expand invalid input bytes into U+FFFD (3 UTF-8 bytes), so
+/// callers that cap the *input* byte length must still apply the cap *after* decoding to avoid
+/// oversized strings (and therefore oversized IPC payloads).
+fn bytes_to_utf8_within_limit(bytes: &[u8], max_bytes: usize) -> Option<String> {
+    // Use the existing UTF-8 decoding path (including NUL trimming) to keep behavior consistent.
+    let s = decode_text_for_target_lossy_utf8("UTF8_STRING", bytes)?;
+    super::string_within_limit(s, max_bytes)
+}
+
 fn target_prefers_utf8(target: &str) -> bool {
     let normalized = normalize_target_name(target);
     normalized == "utf8_string" || normalized.starts_with("text/")
@@ -195,10 +206,9 @@ mod gtk_backend {
         debug_clipboard_log, normalize_base64_str, string_within_limit, MAX_PNG_BYTES, MAX_TEXT_BYTES,
     };
     use super::{
-        choose_best_target, decode_text_for_target, decode_text_for_target_lossy_utf8,
-        decoded_pixbuf_len, target_prefers_utf8, ClipboardContent, ClipboardError,
-        ClipboardWritePayload, MAX_DECODED_IMAGE_BYTES,
-        latin1_encode_if_possible,
+        bytes_to_utf8_within_limit, choose_best_target, decode_text_for_target,
+        decoded_pixbuf_len, latin1_encode_if_possible, target_prefers_utf8, ClipboardContent,
+        ClipboardError, ClipboardWritePayload, MAX_DECODED_IMAGE_BYTES,
     };
     use crate::clipboard_fallback;
 
@@ -310,7 +320,7 @@ mod gtk_backend {
             }
         }
         lossy_utf8_fallback.and_then(|(target, bytes)| {
-            decode_text_for_target_lossy_utf8(target, &bytes).map(|s| (target, s))
+            bytes_to_utf8_within_limit(&bytes, max_bytes).map(|s| (target, s))
         })
     }
 
@@ -431,7 +441,6 @@ mod gtk_backend {
                     }),
                 }
                 .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
-
                 let rtf = match targets.as_deref() {
                     Some(targets) => {
                         let candidates = super::choose_targets_in_order(
@@ -465,7 +474,6 @@ mod gtk_backend {
                     }),
                 }
                 .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
-
                 let image_png_base64 = match targets.as_deref() {
                     Some(targets) => choose_best_target(targets, &["image/png"]).and_then(|t| {
                         wait_for_bytes_base64(clipboard, t, MAX_PNG_BYTES).map(|(b64, len)| {
@@ -748,8 +756,9 @@ pub fn write(_payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        choose_best_target, decode_text_for_target, decode_text_for_target_lossy_utf8,
-        decoded_pixbuf_len, normalize_target_name, target_prefers_utf8, MAX_DECODED_IMAGE_BYTES,
+        bytes_to_utf8_within_limit, choose_best_target, decode_text_for_target,
+        decode_text_for_target_lossy_utf8, decoded_pixbuf_len, normalize_target_name,
+        target_prefers_utf8, MAX_DECODED_IMAGE_BYTES,
     };
 
     #[test]
@@ -944,9 +953,28 @@ mod tests {
         let targets = vec!["STRING", "UTF8_STRING", "text/plain;charset=utf-8"];
         let candidates =
             super::choose_targets_in_order(&targets, &["text/plain", "utf8_string", "string", "text"]);
+        assert_eq!(candidates, vec!["text/plain;charset=utf-8", "UTF8_STRING", "STRING"]);
+    }
+
+    #[test]
+    fn bytes_to_utf8_within_limit_drops_strings_that_expand_over_limit() {
+        // Each invalid byte becomes U+FFFD (3 UTF-8 bytes) when decoded lossily.
+        let bytes = [0xFF, 0xFF, 0xFF];
+        assert_eq!(bytes_to_utf8_within_limit(&bytes, 3), None);
+    }
+
+    #[test]
+    fn bytes_to_utf8_within_limit_accepts_valid_utf8_html_and_rtf() {
+        let html = b"<p>Hello</p>";
         assert_eq!(
-            candidates,
-            vec!["text/plain;charset=utf-8", "UTF8_STRING", "STRING"]
+            bytes_to_utf8_within_limit(html, 64),
+            Some("<p>Hello</p>".to_string())
+        );
+
+        let rtf = b"{\\rtf1\\ansi Hello}";
+        assert_eq!(
+            bytes_to_utf8_within_limit(rtf, 64),
+            Some("{\\rtf1\\ansi Hello}".to_string())
         );
     }
 }
