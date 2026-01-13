@@ -54,6 +54,13 @@ describe("extractFormulaReferences", () => {
     expect(references[0]?.range).toEqual({ sheet: "𝔘", startRow: 0, startCol: 0, endRow: 0, endCol: 0 });
     expect(references[1]?.text).toBe("𐐷!B2");
     expect(references[1]?.range).toEqual({ sheet: "𐐷", startRow: 1, startCol: 1, endRow: 1, endCol: 1 });
+
+    // Ensure offsets are code-unit based (matches DOM selectionStart/selectionEnd semantics).
+    const input = "=𝔘!A1+𐐷!B2";
+    expect(references[0]?.start).toBe(input.indexOf("𝔘!A1"));
+    expect(references[0]?.end).toBe(input.indexOf("𝔘!A1") + "𝔘!A1".length);
+    expect(references[1]?.start).toBe(input.indexOf("𐐷!B2"));
+    expect(references[1]?.end).toBe(input.indexOf("𐐷!B2") + "𐐷!B2".length);
   });
 
   it("does not treat invalid unquoted sheet names with spaces as sheet-qualified references", () => {

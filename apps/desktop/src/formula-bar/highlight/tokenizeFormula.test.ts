@@ -38,6 +38,16 @@ describe("tokenizeFormula", () => {
     const tokens = tokenizeFormula("=SUM(𝔘!A1, 𐐷!B2)");
     const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
     expect(refs).toEqual(["𝔘!A1", "𐐷!B2"]);
+
+    const input = "=SUM(𝔘!A1, 𐐷!B2)";
+    const first = tokens.find((t) => t.type === "reference" && t.text === "𝔘!A1");
+    const second = tokens.find((t) => t.type === "reference" && t.text === "𐐷!B2");
+    expect(first).toBeTruthy();
+    expect(second).toBeTruthy();
+    expect(first?.start).toBe(input.indexOf("𝔘!A1"));
+    expect(first?.end).toBe(input.indexOf("𝔘!A1") + "𝔘!A1".length);
+    expect(second?.start).toBe(input.indexOf("𐐷!B2"));
+    expect(second?.end).toBe(input.indexOf("𐐷!B2") + "𐐷!B2".length);
   });
 
   it("does not treat unquoted sheet names containing spaces as sheet-qualified refs", () => {
