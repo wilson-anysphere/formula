@@ -120,26 +120,43 @@ class CorpusMinimizeTests(unittest.TestCase):
     def test_minimize_workbook_does_not_rerun_with_parts_with_diffs(self) -> None:
         calls: list[int] = []
 
-        def fake_run_rust_triage(*_args, diff_limit: int, **_kwargs):  # type: ignore[no-untyped-def]
+        def fake_run_rust_triage(  # type: ignore[no-untyped-def]
+            *_args, workbook_name: str, diff_limit: int, **_kwargs
+        ):
             calls.append(diff_limit)
+            self.assertEqual(workbook_name, "book.xlsx")
+            full = [
+                {
+                    "severity": "CRITICAL",
+                    "part": "xl/workbook.xml",
+                    "path": "/workbook@{ns}attr",
+                    "kind": "attribute_changed",
+                },
+                {
+                    "severity": "WARN",
+                    "part": "xl/theme/theme1.xml",
+                    "path": "/theme",
+                    "kind": "child_added",
+                },
+                {
+                    "severity": "WARN",
+                    "part": "xl/theme/theme1.xml",
+                    "path": "/theme",
+                    "kind": "child_added",
+                },
+            ]
+            emitted = full[:diff_limit]
             return {
                 "steps": {
                     "diff": {
                         "status": "ok",
                         "details": {
                             "ignore": [],
-                            "counts": {"critical": 1, "warning": 1, "info": 0, "total": 3},
-                            # Only emit 1 entry (simulate truncation).
-                            "top_differences": [
-                                {
-                                    "severity": "CRITICAL",
-                                    "part": "xl/workbook.xml",
-                                    "path": "/workbook",
-                                    "kind": "attribute_changed",
-                                }
-                            ],
+                            "counts": {"critical": 1, "warning": 2, "info": 0, "total": 3},
+                            "equal": False,
                             # Newer triage helpers include per-part summaries so callers don't
                             # need to request every diff entry.
+                            "critical_parts": ["xl/workbook.xml"],
                             "parts_with_diffs": [
                                 {
                                     "part": "xl/workbook.xml",
@@ -153,19 +170,19 @@ class CorpusMinimizeTests(unittest.TestCase):
                                     "part": "xl/theme/theme1.xml",
                                     "group": "other",
                                     "critical": 0,
-                                    "warning": 1,
+                                    "warning": 2,
                                     "info": 0,
                                     "total": 2,
                                 },
                             ],
-                            "critical_parts": ["xl/workbook.xml"],
+                            "top_differences": emitted,
                         },
                     }
                 },
                 "result": {"open_ok": True, "round_trip_ok": False},
             }
 
-        original = minimize_mod.triage_mod._run_rust_triage  # noqa: SLF001
+        original = minimize_mod.triage_mod._run_rust_triage  # noqa: SLF001 (test patch)
         try:
             minimize_mod.triage_mod._run_rust_triage = fake_run_rust_triage  # type: ignore[assignment]
             summary = minimize_mod.minimize_workbook(
@@ -180,8 +197,92 @@ class CorpusMinimizeTests(unittest.TestCase):
         # No rerun with `diff_limit=total` should occur.
         self.assertEqual(calls, [1])
         self.assertEqual(summary["critical_parts"], ["xl/workbook.xml"])
-        self.assertEqual(summary["part_counts"]["xl/theme/theme1.xml"]["warning"], 1)
-        self.assertTrue(any(p["part"] == "xl/theme/theme1.xml" for p in summary["parts_with_diffs"]))
+        self.assertEqual(summary["part_counts"]["xl/theme/theme1.xml"]["warning"], 2)
+        self.assertTrue(
+            any(p["part"] == "xl/theme/theme1.xml" for p in summary["parts_with_diffs"])
+        )
+
+    def test_minimize_workbook_reruns_only_for_all_critical_rels_diffs(self) -> None:
+        calls: list[int] = []
+
+        def fake_run_rust_triage(  # type: ignore[no-untyped-def]
+            *_args, workbook_name: str, diff_limit: int, **_kwargs
+        ):
+            calls.append(diff_limit)
+            self.assertEqual(workbook_name, "book.xlsx")
+            full = [
+                {
+                    "severity": "CRITICAL",
+                    "part": "xl/_rels/workbook.xml.rels",
+                    "path": '/Relationships/Relationship[@Id="rId1"]@Target',
+                    "kind": "attribute_changed",
+                },
+                {
+                    "severity": "CRITICAL",
+                    "part": "xl/_rels/workbook.xml.rels",
+                    "path": '/Relationships/Relationship[@Id="rId9"]@Target',
+                    "kind": "attribute_changed",
+                },
+                {
+                    "severity": "WARN",
+                    "part": "xl/theme/theme1.xml",
+                    "path": "/theme",
+                    "kind": "child_added",
+                },
+            ]
+            emitted = full[:diff_limit]
+            return {
+                "steps": {
+                    "diff": {
+                        "status": "ok",
+                        "details": {
+                            "ignore": [],
+                            "counts": {"critical": 2, "warning": 1, "info": 0, "total": 3},
+                            "equal": False,
+                            "critical_parts": ["xl/_rels/workbook.xml.rels"],
+                            "parts_with_diffs": [
+                                {
+                                    "part": "xl/_rels/workbook.xml.rels",
+                                    "group": "rels",
+                                    "critical": 2,
+                                    "warning": 0,
+                                    "info": 0,
+                                    "total": 2,
+                                },
+                                {
+                                    "part": "xl/theme/theme1.xml",
+                                    "group": "other",
+                                    "critical": 0,
+                                    "warning": 1,
+                                    "info": 0,
+                                    "total": 1,
+                                },
+                            ],
+                            "top_differences": emitted,
+                        },
+                    }
+                },
+                "result": {"open_ok": True, "round_trip_ok": False},
+            }
+
+        original = minimize_mod.triage_mod._run_rust_triage  # noqa: SLF001 (test patch)
+        try:
+            minimize_mod.triage_mod._run_rust_triage = fake_run_rust_triage  # type: ignore[assignment]
+            summary = minimize_mod.minimize_workbook(
+                WorkbookInput(display_name="book.xlsx", data=b"dummy"),
+                rust_exe=Path("noop"),
+                diff_ignore=set(),
+                diff_limit=1,
+            )
+        finally:
+            minimize_mod.triage_mod._run_rust_triage = original  # type: ignore[assignment]
+
+        # First run truncated (diff_limit=1). We only need CRITICAL diffs to extract rIds, so
+        # rerun with diff_limit=critical (=2), not total (=3).
+        self.assertEqual(calls, [1, 2])
+        self.assertEqual(
+            summary["rels_critical_ids"], {"xl/_rels/workbook.xml.rels": ["rId1", "rId9"]}
+        )
 
     def test_minimize_workbook_includes_critical_part_hashes(self) -> None:
         buf = io.BytesIO()
