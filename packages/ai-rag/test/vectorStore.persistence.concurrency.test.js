@@ -245,13 +245,26 @@ try {
   sqlJsAvailable = false;
 }
 
+/** @type {Promise<any> | null} */
+let sqliteVectorStorePromise = null;
+
+async function getSqliteVectorStore() {
+  if (!sqliteVectorStorePromise) {
+    // Avoid a literal specifier in a dynamic import for sqliteVectorStore so
+    // `scripts/run-node-tests.mjs` (regex-based import detection) doesn't treat this
+    // file as requiring external deps when `node_modules/` is missing.
+    const modulePath = "../src/store/" + "sqliteVectorStore.js";
+    sqliteVectorStorePromise = import(modulePath).then((mod) => mod.SqliteVectorStore);
+  }
+  return sqliteVectorStorePromise;
+}
+
 test(
   "SqliteVectorStore serializes persistence writes to prevent lost updates",
   { skip: !sqlJsAvailable },
   async () => {
     const storage = new ControlledBinaryStorage();
-    const modulePath = "../src/store/" + "sqliteVectorStore.js";
-    const { SqliteVectorStore } = await import(modulePath);
+    const SqliteVectorStore = await getSqliteVectorStore();
     const store = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: true });
 
     const p1 = store.upsert([{ id: "a", vector: [1, 0], metadata: { label: "A" } }]);
@@ -290,8 +303,7 @@ test(
   { skip: !sqlJsAvailable },
   async () => {
     const storage = new ControlledBinaryStorage();
-    const modulePath = "../src/store/" + "sqliteVectorStore.js";
-    const { SqliteVectorStore } = await import(modulePath);
+    const SqliteVectorStore = await getSqliteVectorStore();
     const store = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: true });
 
     // Seed one record. Pre-release the initial save so it completes immediately.
@@ -328,8 +340,7 @@ test(
   { skip: !sqlJsAvailable },
   async () => {
     const storage = new ControlledBinaryStorage();
-    const modulePath = "../src/store/" + "sqliteVectorStore.js";
-    const { SqliteVectorStore } = await import(modulePath);
+    const SqliteVectorStore = await getSqliteVectorStore();
     const store = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: true });
 
     // Seed two workbooks.
@@ -367,8 +378,7 @@ test(
   { skip: !sqlJsAvailable },
   async () => {
     const storage = new ControlledBinaryStorage();
-    const modulePath = "../src/store/" + "sqliteVectorStore.js";
-    const { SqliteVectorStore } = await import(modulePath);
+    const SqliteVectorStore = await getSqliteVectorStore();
     const store = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: true });
 
     const seed = store.upsert([
