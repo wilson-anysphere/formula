@@ -124,7 +124,8 @@ describe("SpreadsheetApp shared-grid outline compatibility", () => {
       const app = new SpreadsheetApp(root, status);
       expect(app.getGridMode()).toBe("shared");
 
-      const outline = (app as any).outline as any;
+      const sheetId = (app as any).sheetId as string;
+      const outline = (app as any).getOutlineForSheet(sheetId) as any;
       // Shared-grid mode should not seed demo outline groups.
       expect(outline.rows.entries.size).toBe(0);
       expect(outline.cols.entries.size).toBe(0);
@@ -148,7 +149,6 @@ describe("SpreadsheetApp shared-grid outline compatibility", () => {
       // Ensure Ctrl+Arrow (jump-to-edge) logic doesn't skip outline-hidden indices either.
       // Make row 2 (0-based row 1) non-empty and row 3 empty so Ctrl+ArrowDown should land on row 2.
       const documentController = (app as any).document;
-      const sheetId = (app as any).sheetId;
       documentController.setCellValue(sheetId, { row: 1, col: 0 }, "X");
       documentController.setCellValue(sheetId, { row: 2, col: 0 }, null);
 

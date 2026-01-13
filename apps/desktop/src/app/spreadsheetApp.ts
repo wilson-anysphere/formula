@@ -727,7 +727,17 @@ export class SpreadsheetApp {
   private auditingWasRendered = false;
   private auditingNeedsClear = false;
 
-  private outline = new Outline();
+  private readonly outlinesBySheet = new Map<string, Outline>();
+  private getOutlineForSheet(sheetId: string): Outline {
+    const key = String(sheetId ?? "");
+    let outline = this.outlinesBySheet.get(key);
+    if (!outline) {
+      outline = new Outline();
+      this.outlinesBySheet.set(key, outline);
+    }
+    return outline;
+  }
+
   private outlineLayer: HTMLDivElement;
   private readonly outlineButtons = new Map<string, HTMLButtonElement>();
 
@@ -1334,12 +1344,13 @@ export class SpreadsheetApp {
     }
 
     if (this.gridMode === "legacy") {
+      const outline = this.getOutlineForSheet(this.sheetId);
       // Seed a simple outline group: rows 2-4 with a summary row at 5 (Excel 1-based indices).
-      this.outline.groupRows(2, 4);
-      this.outline.recomputeOutlineHiddenRows();
+      outline.groupRows(2, 4);
+      outline.recomputeOutlineHiddenRows();
       // And columns 2-4 with a summary column at 5.
-      this.outline.groupCols(2, 4);
-      this.outline.recomputeOutlineHiddenCols();
+      outline.groupCols(2, 4);
+      outline.recomputeOutlineHiddenCols();
     }
 
     if (!collabEnabled) {
@@ -2053,6 +2064,25 @@ export class SpreadsheetApp {
     }
 
     this.auditingUnsubscribe = this.document.on("change", (payload: any) => {
+      // Outline state (row/col grouping + hidden flags) is tracked locally per sheet.
+      // Ensure we don't retain outline state for sheets that have been deleted from the document.
+      const sheetMetaDeltas = Array.isArray(payload?.sheetMetaDeltas) ? payload.sheetMetaDeltas : [];
+      for (const delta of sheetMetaDeltas) {
+        const sheetId = delta?.sheetId;
+        if (typeof sheetId !== "string" || sheetId === "") continue;
+        if (delta?.after == null) {
+          this.outlinesBySheet.delete(sheetId);
+        }
+      }
+      if (payload?.source === "applyState") {
+        // `DocumentController.applyState` can delete sheets without emitting sheetMetaDeltas.
+        // Reconcile the outline map against the current sheet ids to avoid leaking stale state.
+        const existing = new Set(this.document.getSheetIds());
+        for (const key of this.outlinesBySheet.keys()) {
+          if (!existing.has(key)) this.outlinesBySheet.delete(key);
+        }
+      }
+
       this.auditingCache.clear();
       this.auditingLastCellKey = null;
       if (this.auditingMode !== "off") {
@@ -3737,9 +3767,11 @@ export class SpreadsheetApp {
       await this.wasmSyncPromise;
       this.clearComputedValuesByCoord();
       this.document.applyState(snapshot);
+      let sheetChanged = false;
       const sheetIds = this.document.getSheetIds();
       if (sheetIds.length > 0 && !sheetIds.includes(this.sheetId)) {
         this.sheetId = sheetIds[0];
+        sheetChanged = true;
         this.reindexCommentCells();
         this.chartStore.setDefaultSheet(this.sheetId);
       }
@@ -3753,6 +3785,11 @@ export class SpreadsheetApp {
       this.referencePreview = null;
       this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
       if (this.sharedGrid) this.syncSharedGridReferenceHighlights();
+      if (sheetChanged) {
+        // Row/col visibility (outline hidden rows/cols) is sheet-local in the legacy renderer.
+        // If a restore changed the active sheet id, rebuild the visibility caches before any redraw.
+        this.rebuildAxisVisibilityCache();
+      }
       this.syncFrozenPanes();
       if (this.wasmEngine) {
         await this.enqueueWasmSync(async (engine) => {
@@ -3941,10 +3978,9 @@ export class SpreadsheetApp {
       this.syncSharedGridAxisSizesFromDocument();
       this.sharedGrid.scrollTo(this.scrollX, this.scrollY);
     } else {
-      const didClamp = this.clampScroll();
-      if (didClamp) this.hideCommentTooltip();
-      this.syncScrollbars();
-      if (didClamp) this.notifyScrollListeners();
+      // Row/col visibility is sheet-local; when switching sheets in the legacy renderer,
+      // rebuild the visibility caches for the newly active sheet.
+      this.rebuildAxisVisibilityCache();
     }
     this.renderGrid();
     this.renderDrawings();
@@ -3986,10 +4022,7 @@ export class SpreadsheetApp {
         this.syncSharedGridAxisSizesFromDocument();
         this.sharedGrid.scrollTo(this.scrollX, this.scrollY);
       } else {
-        const didClamp = this.clampScroll();
-        if (didClamp) this.hideCommentTooltip();
-        this.syncScrollbars();
-        if (didClamp) this.notifyScrollListeners();
+        this.rebuildAxisVisibilityCache();
       }
       this.renderGrid();
       this.renderCharts(true);
@@ -4047,10 +4080,7 @@ export class SpreadsheetApp {
         this.sharedGrid.renderer.setFrozen(headerRows + frozenRows, headerCols + frozenCols);
         this.sharedGrid.scrollTo(this.scrollX, this.scrollY);
       } else {
-        const didClamp = this.clampScroll();
-        if (didClamp) this.hideCommentTooltip();
-        this.syncScrollbars();
-        if (didClamp) this.notifyScrollListeners();
+        this.rebuildAxisVisibilityCache();
       }
       this.renderGrid();
       this.renderCharts(true);
@@ -4194,12 +4224,13 @@ export class SpreadsheetApp {
     }
     if (!Array.isArray(rows) || rows.length === 0) return;
 
+    const outline = this.getOutlineForSheet(this.sheetId);
     let changed = false;
     for (const raw of rows) {
       if (!Number.isFinite(raw)) continue;
       const row = Math.trunc(raw);
       if (row < 0 || row >= this.limits.maxRows) continue;
-      const entry = this.outline.rows.entryMut(row + 1);
+      const entry = outline.rows.entryMut(row + 1);
       if (entry.hidden.user !== hidden) {
         entry.hidden.user = hidden;
         changed = true;
@@ -4224,12 +4255,13 @@ export class SpreadsheetApp {
     }
     if (!Array.isArray(cols) || cols.length === 0) return;
 
+    const outline = this.getOutlineForSheet(this.sheetId);
     let changed = false;
     for (const raw of cols) {
       if (!Number.isFinite(raw)) continue;
       const col = Math.trunc(raw);
       if (col < 0 || col >= this.limits.maxCols) continue;
-      const entry = this.outline.cols.entryMut(col + 1);
+      const entry = outline.cols.entryMut(col + 1);
       if (entry.hidden.user !== hidden) {
         entry.hidden.user = hidden;
         changed = true;
@@ -7721,13 +7753,13 @@ export class SpreadsheetApp {
 
   private isRowHidden(row: number): boolean {
     if (this.gridMode !== "legacy") return false;
-    const entry = this.outline.rows.entry(row + 1);
+    const entry = this.getOutlineForSheet(this.sheetId).rows.entry(row + 1);
     return isHidden(entry.hidden);
   }
 
   private isColHidden(col: number): boolean {
     if (this.gridMode !== "legacy") return false;
-    const entry = this.outline.cols.entry(col + 1);
+    const entry = this.getOutlineForSheet(this.sheetId).cols.entry(col + 1);
     return isHidden(entry.hidden);
   }
 
@@ -8364,7 +8396,14 @@ export class SpreadsheetApp {
   private renderOutlineControls(): void {
     // Outline controls rely on the legacy renderer's row/col visibility caches.
     // Shared-grid mode does not support hidden rows/cols yet, so keep the controls disabled.
-    if (this.sharedGrid || !this.outline.pr.showOutlineSymbols) {
+    if (this.sharedGrid) {
+      for (const button of this.outlineButtons.values()) button.remove();
+      this.outlineButtons.clear();
+      return;
+    }
+
+    const outline = this.getOutlineForSheet(this.sheetId);
+    if (!outline.pr.showOutlineSymbols) {
       for (const button of this.outlineButtons.values()) button.remove();
       this.outlineButtons.clear();
       return;
@@ -8380,8 +8419,8 @@ export class SpreadsheetApp {
     for (let visualRow = 0; visualRow < this.visibleRows.length; visualRow++) {
       const rowIndex = this.visibleRows[visualRow]!;
       const summaryIndex = rowIndex + 1; // 1-based
-      const entry = this.outline.rows.entry(summaryIndex);
-      const details = groupDetailRange(this.outline.rows, summaryIndex, entry.level, this.outline.pr.summaryBelow);
+      const entry = outline.rows.entry(summaryIndex);
+      const details = groupDetailRange(outline.rows, summaryIndex, entry.level, outline.pr.summaryBelow);
       if (!details) continue;
 
       const key = `row:${summaryIndex}`;
@@ -8395,7 +8434,7 @@ export class SpreadsheetApp {
         button.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
-          this.outline.toggleRowGroup(summaryIndex);
+          this.getOutlineForSheet(this.sheetId).toggleRowGroup(summaryIndex);
           this.onOutlineUpdated();
         });
         button.addEventListener("pointerdown", (e) => {
@@ -8418,8 +8457,8 @@ export class SpreadsheetApp {
     for (let visualCol = 0; visualCol < this.visibleCols.length; visualCol++) {
       const colIndex = this.visibleCols[visualCol]!;
       const summaryIndex = colIndex + 1; // 1-based
-      const entry = this.outline.cols.entry(summaryIndex);
-      const details = groupDetailRange(this.outline.cols, summaryIndex, entry.level, this.outline.pr.summaryRight);
+      const entry = outline.cols.entry(summaryIndex);
+      const details = groupDetailRange(outline.cols, summaryIndex, entry.level, outline.pr.summaryRight);
       if (!details) continue;
 
       const key = `col:${summaryIndex}`;
@@ -8433,7 +8472,7 @@ export class SpreadsheetApp {
         button.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
-          this.outline.toggleColGroup(summaryIndex);
+          this.getOutlineForSheet(this.sheetId).toggleColGroup(summaryIndex);
           this.onOutlineUpdated();
         });
         button.addEventListener("pointerdown", (e) => {
@@ -9885,19 +9924,20 @@ export class SpreadsheetApp {
       const startCol = range.startCol + 1;
       const endCol = range.endCol + 1;
 
+      const outline = this.getOutlineForSheet(this.sheetId);
       if (e.key === "ArrowRight") {
         if (this.selection.type === "column") {
-          this.outline.groupCols(startCol, endCol);
-          this.outline.recomputeOutlineHiddenCols();
+          outline.groupCols(startCol, endCol);
+          outline.recomputeOutlineHiddenCols();
         } else {
-          this.outline.groupRows(startRow, endRow);
-          this.outline.recomputeOutlineHiddenRows();
+          outline.groupRows(startRow, endRow);
+          outline.recomputeOutlineHiddenRows();
         }
       } else {
         if (this.selection.type === "column") {
-          this.outline.ungroupCols(startCol, endCol);
+          outline.ungroupCols(startCol, endCol);
         } else {
-          this.outline.ungroupRows(startRow, endRow);
+          outline.ungroupRows(startRow, endRow);
         }
       }
 
