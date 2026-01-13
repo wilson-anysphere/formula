@@ -13,7 +13,8 @@ pub struct ProcessMetricsSnapshot {
 pub fn snapshot_self() -> Result<ProcessMetricsSnapshot> {
     let pid = sysinfo::get_current_pid().map_err(|err| anyhow!(err))?;
     let mut system = System::new();
-    system.refresh_processes();
+    // Refresh only the current process to keep this cheap when called frequently.
+    system.refresh_process(pid);
 
     let process = system
         .process(pid)
@@ -45,5 +46,16 @@ pub fn log_process_metrics() {
             // Keep the stdout format stable for log parsers even on failure.
             println!("[metrics] rss_mb=0 pid={pid}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_self_reports_current_pid() {
+        let snapshot = snapshot_self().expect("snapshot_self");
+        assert_eq!(snapshot.pid, std::process::id());
     }
 }
