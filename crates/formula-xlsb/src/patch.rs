@@ -265,24 +265,24 @@ impl CellEdit {
         new_value: CellValue,
         formula: &str,
     ) -> Result<Self, formula_biff::EncodeRgceError> {
-        let rgce = formula_biff::encode_rgce(formula)?;
+        let encoded = formula_biff::encode_rgce_with_rgcb(formula)?;
         Ok(Self {
             row,
             col,
             new_value,
             new_style: None,
-            new_formula: Some(rgce),
-            new_rgcb: None,
             new_formula_flags: None,
+            new_formula: Some(encoded.rgce),
+            new_rgcb: Some(encoded.rgcb),
             shared_string_index: None,
         })
     }
 
     /// Replace `new_formula` by encoding the provided formula text.
     pub fn set_formula_text(&mut self, formula: &str) -> Result<(), formula_biff::EncodeRgceError> {
-        self.new_formula = Some(formula_biff::encode_rgce(formula)?);
-        // `formula_biff` only encodes `rgce`, so drop any previously specified `rgcb` bytes.
-        self.new_rgcb = None;
+        let encoded = formula_biff::encode_rgce_with_rgcb(formula)?;
+        self.new_formula = Some(encoded.rgce);
+        self.new_rgcb = Some(encoded.rgcb);
         Ok(())
     }
 }

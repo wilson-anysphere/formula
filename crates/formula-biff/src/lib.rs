@@ -25,4 +25,4 @@ pub use function_ids::{function_id_to_name, function_name_to_id, function_spec_f
 pub use rgce::{decode_rgce, decode_rgce_with_base, decode_rgce_with_rgcb, DecodeRgceError};
 
 #[cfg(feature = "encode")]
-pub use rgce::{encode_rgce, EncodeRgceError};
+pub use rgce::{encode_rgce, encode_rgce_with_rgcb, EncodedRgce, EncodeRgceError};

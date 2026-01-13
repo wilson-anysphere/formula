@@ -1698,7 +1698,14 @@ pub enum EncodeRgceError {
 }
 
 #[cfg(feature = "encode")]
-pub fn encode_rgce(formula: &str) -> Result<Vec<u8>, EncodeRgceError> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EncodedRgce {
+    pub rgce: Vec<u8>,
+    pub rgcb: Vec<u8>,
+}
+
+#[cfg(feature = "encode")]
+pub fn encode_rgce_with_rgcb(formula: &str) -> Result<EncodedRgce, EncodeRgceError> {
     use formula_engine::{parse_formula, ParseOptions};
 
     let ast =
@@ -1707,13 +1714,27 @@ pub fn encode_rgce(formula: &str) -> Result<Vec<u8>, EncodeRgceError> {
             start: e.span.start,
             end: e.span.end,
         })?;
-    let mut out = Vec::new();
-    encode_expr(&ast.expr, &mut out)?;
-    Ok(out)
+    let mut rgce = Vec::new();
+    let mut rgcb = Vec::new();
+    encode_expr(&ast.expr, &mut rgce, &mut rgcb)?;
+    Ok(EncodedRgce { rgce, rgcb })
 }
 
 #[cfg(feature = "encode")]
-fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), EncodeRgceError> {
+pub fn encode_rgce(formula: &str) -> Result<Vec<u8>, EncodeRgceError> {
+    let encoded = encode_rgce_with_rgcb(formula)?;
+    if !encoded.rgcb.is_empty() {
+        return Err(EncodeRgceError::Unsupported("array literals"));
+    }
+    Ok(encoded.rgce)
+}
+
+#[cfg(feature = "encode")]
+fn encode_expr(
+    expr: &formula_engine::Expr,
+    rgce: &mut Vec<u8>,
+    rgcb: &mut Vec<u8>,
+) -> Result<(), EncodeRgceError> {
     use formula_engine::{BinaryOp, Coord, Expr, PostfixOp, UnaryOp};
 
     match expr {
@@ -1722,28 +1743,28 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                 .parse()
                 .map_err(|_| EncodeRgceError::InvalidNumber(raw.clone()))?;
             if n.fract() == 0.0 && n >= 0.0 && n <= u16::MAX as f64 {
-                out.push(0x1E); // PtgInt
-                out.extend_from_slice(&(n as u16).to_le_bytes());
+                rgce.push(0x1E); // PtgInt
+                rgce.extend_from_slice(&(n as u16).to_le_bytes());
             } else {
-                out.push(0x1F); // PtgNum
-                out.extend_from_slice(&n.to_le_bytes());
+                rgce.push(0x1F); // PtgNum
+                rgce.extend_from_slice(&n.to_le_bytes());
             }
         }
         Expr::String(s) => {
-            out.push(0x17); // PtgStr
+            rgce.push(0x17); // PtgStr
             let units: Vec<u16> = s.encode_utf16().collect();
             let cch: u16 = units
                 .len()
                 .try_into()
                 .map_err(|_| EncodeRgceError::Unsupported("string literal too long"))?;
-            out.extend_from_slice(&cch.to_le_bytes());
+            rgce.extend_from_slice(&cch.to_le_bytes());
             for u in units {
-                out.extend_from_slice(&u.to_le_bytes());
+                rgce.extend_from_slice(&u.to_le_bytes());
             }
         }
         Expr::Boolean(b) => {
-            out.push(0x1D); // PtgBool
-            out.push(if *b { 1 } else { 0 });
+            rgce.push(0x1D); // PtgBool
+            rgce.push(if *b { 1 } else { 0 });
         }
         Expr::Error(raw) => {
             let code = match raw.to_ascii_uppercase().as_str() {
@@ -1763,8 +1784,8 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                 "#UNKNOWN!" => 0x31,
                 _ => return Err(EncodeRgceError::InvalidErrorLiteral(raw.clone())),
             };
-            out.push(0x1C); // PtgErr
-            out.push(code);
+            rgce.push(0x1C); // PtgErr
+            rgce.push(code);
         }
         Expr::CellRef(r) => {
             if r.workbook.is_some() || r.sheet.is_some() {
@@ -1780,9 +1801,9 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                 Coord::A1 { index, abs } => (*index, *abs),
                 Coord::Offset(_) => return Err(EncodeRgceError::Unsupported("relative offsets")),
             };
-            out.push(0x24); // PtgRef
-            out.extend_from_slice(&row.to_le_bytes());
-            out.extend_from_slice(&encode_col_with_flags(col, col_abs, row_abs));
+            rgce.push(0x24); // PtgRef
+            rgce.extend_from_slice(&row.to_le_bytes());
+            rgce.extend_from_slice(&encode_col_with_flags(col, col_abs, row_abs));
         }
         Expr::Binary(b) if b.op == BinaryOp::Range => {
             // Prefer encoding simple A1:A2 areas as PtgArea for Excel-compatible rgce.
@@ -1798,11 +1819,11 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                         if let (Some((c2, c2_abs)), Some((r2, r2_abs))) =
                             (coord_to_a1(&bref.col), coord_to_a1(&bref.row))
                         {
-                            out.push(0x25); // PtgArea
-                            out.extend_from_slice(&r1.to_le_bytes());
-                            out.extend_from_slice(&r2.to_le_bytes());
-                            out.extend_from_slice(&encode_col_with_flags(c1, c1_abs, r1_abs));
-                            out.extend_from_slice(&encode_col_with_flags(c2, c2_abs, r2_abs));
+                            rgce.push(0x25); // PtgArea
+                            rgce.extend_from_slice(&r1.to_le_bytes());
+                            rgce.extend_from_slice(&r2.to_le_bytes());
+                            rgce.extend_from_slice(&encode_col_with_flags(c1, c1_abs, r1_abs));
+                            rgce.extend_from_slice(&encode_col_with_flags(c2, c2_abs, r2_abs));
                             return Ok(());
                         }
                     }
@@ -1810,13 +1831,13 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
             }
 
             // Fallback: encode as operator.
-            encode_expr(&b.left, out)?;
-            encode_expr(&b.right, out)?;
-            out.push(0x11); // PtgRange
+            encode_expr(&b.left, rgce, rgcb)?;
+            encode_expr(&b.right, rgce, rgcb)?;
+            rgce.push(0x11); // PtgRange
         }
         Expr::Binary(b) => {
-            encode_expr(&b.left, out)?;
-            encode_expr(&b.right, out)?;
+            encode_expr(&b.left, rgce, rgcb)?;
+            encode_expr(&b.right, rgce, rgcb)?;
             let ptg = match b.op {
                 BinaryOp::Add => 0x03,
                 BinaryOp::Sub => 0x04,
@@ -1834,7 +1855,7 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                 BinaryOp::Union => 0x10,
                 BinaryOp::Range => 0x11,
             };
-            out.push(ptg);
+            rgce.push(ptg);
         }
         Expr::Unary(u) if u.op == UnaryOp::ImplicitIntersection => {
             match &*u.expr {
@@ -1859,9 +1880,9 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
 
                     // Encode `@A1` by emitting a value-class reference token (PtgRefV). Excel
                     // uses this representation for legacy implicit intersection.
-                    out.push(0x44); // PtgRefV
-                    out.extend_from_slice(&row.to_le_bytes());
-                    out.extend_from_slice(&encode_col_with_flags(col, col_abs, row_abs));
+                    rgce.push(0x44); // PtgRefV
+                    rgce.extend_from_slice(&row.to_le_bytes());
+                    rgce.extend_from_slice(&encode_col_with_flags(col, col_abs, row_abs));
                 }
                 Expr::StructuredRef(_) => {
                     return Err(EncodeRgceError::Unsupported(
@@ -1882,13 +1903,13 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                                 if let (Some((c2, c2_abs)), Some((r2, r2_abs))) =
                                     (coord_to_a1(&bref.col), coord_to_a1(&bref.row))
                                 {
-                                    out.push(0x45); // PtgAreaV
-                                    out.extend_from_slice(&r1.to_le_bytes());
-                                    out.extend_from_slice(&r2.to_le_bytes());
-                                    out.extend_from_slice(&encode_col_with_flags(
+                                    rgce.push(0x45); // PtgAreaV
+                                    rgce.extend_from_slice(&r1.to_le_bytes());
+                                    rgce.extend_from_slice(&r2.to_le_bytes());
+                                    rgce.extend_from_slice(&encode_col_with_flags(
                                         c1, c1_abs, r1_abs,
                                     ));
-                                    out.extend_from_slice(&encode_col_with_flags(
+                                    rgce.extend_from_slice(&encode_col_with_flags(
                                         c2, c2_abs, r2_abs,
                                     ));
                                     return Ok(());
@@ -1909,20 +1930,20 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
             }
         }
         Expr::Unary(u) => {
-            encode_expr(&u.expr, out)?;
+            encode_expr(&u.expr, rgce, rgcb)?;
             match u.op {
-                UnaryOp::Plus => out.push(0x12),
-                UnaryOp::Minus => out.push(0x13),
+                UnaryOp::Plus => rgce.push(0x12),
+                UnaryOp::Minus => rgce.push(0x13),
                 UnaryOp::ImplicitIntersection => {
                     return Err(EncodeRgceError::Unsupported("implicit intersection (@)"));
                 }
             }
         }
         Expr::Postfix(p) => {
-            encode_expr(&p.expr, out)?;
+            encode_expr(&p.expr, rgce, rgcb)?;
             match p.op {
-                PostfixOp::Percent => out.push(0x14),
-                PostfixOp::SpillRange => out.push(0x2F),
+                PostfixOp::Percent => rgce.push(0x14),
+                PostfixOp::SpillRange => rgce.push(0x2F),
             }
         }
         Expr::FunctionCall(call) => {
@@ -1944,9 +1965,9 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
             // Encode args.
             for arg in &call.args {
                 if matches!(arg, Expr::Missing) {
-                    out.push(0x16); // PtgMissArg
+                    rgce.push(0x16); // PtgMissArg
                 } else {
-                    encode_expr(arg, out)?;
+                    encode_expr(arg, rgce, rgcb)?;
                 }
             }
 
@@ -1961,24 +1982,24 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                     });
                 }
                 // Fixed arity -> PtgFunc
-                out.push(0x21);
-                out.extend_from_slice(&func.id.to_le_bytes());
+                rgce.push(0x21);
+                rgce.extend_from_slice(&func.id.to_le_bytes());
             } else {
                 // Variable arity -> PtgFuncVar
-                out.push(0x22);
+                rgce.push(0x22);
                 let argc: u8 = call
                     .args
                     .len()
                     .try_into()
                     .map_err(|_| EncodeRgceError::Unsupported("too many function args"))?;
-                out.push(argc);
-                out.extend_from_slice(&func.id.to_le_bytes());
+                rgce.push(argc);
+                rgce.extend_from_slice(&func.id.to_le_bytes());
             }
         }
         Expr::Call(_) => return Err(EncodeRgceError::Unsupported("call expressions")),
         Expr::FieldAccess(_) => return Err(EncodeRgceError::Unsupported("field access")),
         Expr::Missing => {
-            out.push(0x16); // PtgMissArg
+            rgce.push(0x16); // PtgMissArg
         }
         Expr::NameRef(_) => return Err(EncodeRgceError::Unsupported("named references")),
         Expr::ColRef(_) => return Err(EncodeRgceError::Unsupported("column references")),
@@ -1988,7 +2009,118 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                 "structured references require workbook table-id context",
             ))
         }
-        Expr::Array(_) => return Err(EncodeRgceError::Unsupported("array literals")),
+        Expr::Array(arr) => {
+            // MS-XLSB 2.5.198.8 PtgArray: [unused: 7 bytes] + serialized array constant stored in
+            // trailing `rgcb`.
+            rgce.push(0x20); // PtgArray
+            rgce.extend_from_slice(&[0u8; 7]); // unused
+            encode_array_constant(arr, rgcb)?;
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "encode")]
+fn encode_array_constant(
+    arr: &formula_engine::ArrayLiteral,
+    rgcb: &mut Vec<u8>,
+) -> Result<(), EncodeRgceError> {
+    use formula_engine::{Expr, UnaryOp};
+
+    let rows = arr.rows.len();
+    let cols = arr.rows.first().map(|r| r.len()).unwrap_or(0);
+    if rows == 0 || cols == 0 {
+        return Err(EncodeRgceError::Unsupported("array literal cannot be empty"));
+    }
+    if arr.rows.iter().any(|r| r.len() != cols) {
+        return Err(EncodeRgceError::Unsupported(
+            "array literal rows must have the same number of columns",
+        ));
+    }
+
+    let cols_minus1: u16 = (cols - 1)
+        .try_into()
+        .map_err(|_| EncodeRgceError::Unsupported("array literal is too wide"))?;
+    let rows_minus1: u16 = (rows - 1)
+        .try_into()
+        .map_err(|_| EncodeRgceError::Unsupported("array literal is too tall"))?;
+    rgcb.extend_from_slice(&cols_minus1.to_le_bytes());
+    rgcb.extend_from_slice(&rows_minus1.to_le_bytes());
+
+    for row in &arr.rows {
+        for el in row {
+            match el {
+                Expr::Missing => {
+                    // Empty cell in the array constant.
+                    rgcb.push(0x00);
+                }
+                Expr::Number(raw) => {
+                    let n: f64 = raw
+                        .parse()
+                        .map_err(|_| EncodeRgceError::InvalidNumber(raw.clone()))?;
+                    rgcb.push(0x01);
+                    rgcb.extend_from_slice(&n.to_le_bytes());
+                }
+                Expr::Unary(u) if matches!(u.op, UnaryOp::Plus | UnaryOp::Minus) => {
+                    let Expr::Number(raw) = &*u.expr else {
+                        return Err(EncodeRgceError::Unsupported(
+                            "unary +/- in array literals is only supported on numeric literals",
+                        ));
+                    };
+                    let mut n: f64 = raw
+                        .parse()
+                        .map_err(|_| EncodeRgceError::InvalidNumber(raw.clone()))?;
+                    if u.op == UnaryOp::Minus {
+                        n = -n;
+                    }
+                    rgcb.push(0x01);
+                    rgcb.extend_from_slice(&n.to_le_bytes());
+                }
+                Expr::String(s) => {
+                    rgcb.push(0x02);
+                    let units: Vec<u16> = s.encode_utf16().collect();
+                    let cch: u16 = units
+                        .len()
+                        .try_into()
+                        .map_err(|_| EncodeRgceError::Unsupported("array string literal too long"))?;
+                    rgcb.extend_from_slice(&cch.to_le_bytes());
+                    for u in units {
+                        rgcb.extend_from_slice(&u.to_le_bytes());
+                    }
+                }
+                Expr::Boolean(b) => {
+                    rgcb.push(0x04);
+                    rgcb.push(if *b { 1 } else { 0 });
+                }
+                Expr::Error(raw) => {
+                    let code = match raw.to_ascii_uppercase().as_str() {
+                        "#NULL!" => 0x00,
+                        "#DIV/0!" => 0x07,
+                        "#VALUE!" => 0x0F,
+                        "#REF!" => 0x17,
+                        "#NAME?" => 0x1D,
+                        "#NUM!" => 0x24,
+                        "#N/A" => 0x2A,
+                        "#GETTING_DATA" => 0x2B,
+                        "#SPILL!" => 0x2C,
+                        "#CALC!" => 0x2D,
+                        "#FIELD!" => 0x2E,
+                        "#CONNECT!" => 0x2F,
+                        "#BLOCKED!" => 0x30,
+                        "#UNKNOWN!" => 0x31,
+                        _ => return Err(EncodeRgceError::InvalidErrorLiteral(raw.clone())),
+                    };
+                    rgcb.push(0x10);
+                    rgcb.push(code);
+                }
+                _ => {
+                    return Err(EncodeRgceError::Unsupported(
+                        "only literal values are supported inside array literals",
+                    ))
+                }
+            }
+        }
     }
 
     Ok(())
