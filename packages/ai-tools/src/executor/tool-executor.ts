@@ -2689,7 +2689,47 @@ function ensureExternalUrlAllowed(url: URL, allowedHosts: string[]): void {
       "fetch_external_data requires an explicit host allowlist (allowed_external_hosts)."
     );
   }
-  if (!allowedHosts.includes(url.host)) {
+
+  type AllowedHostEntry = { hostname: string; port?: string };
+  const parseAllowedHostEntry = (value: string): AllowedHostEntry | null => {
+    const trimmed = String(value ?? "")
+      .trim()
+      .toLowerCase();
+    if (!trimmed) return null;
+
+    // IPv6 hosts use brackets when combined with ports (e.g. "[::1]:443").
+    const ipv6Match = trimmed.match(/^\[(?<hostname>[^\]]+)\](?::(?<port>\d+))?$/);
+    if (ipv6Match?.groups?.hostname) {
+      const hostname = ipv6Match.groups.hostname.trim().toLowerCase();
+      const port = ipv6Match.groups.port?.trim();
+      return port ? { hostname, port } : { hostname };
+    }
+
+    // Hostnames with optional explicit port (e.g. "api.example.com:8443").
+    const hostPortMatch = trimmed.match(/^(?<hostname>[^:]+)(?::(?<port>\d+))?$/);
+    if (hostPortMatch?.groups?.hostname) {
+      const hostname = hostPortMatch.groups.hostname.trim().toLowerCase();
+      const port = hostPortMatch.groups.port?.trim();
+      return port ? { hostname, port } : { hostname };
+    }
+
+    // Fall back to the full value as a hostname-only entry. This preserves previous strictness:
+    // malformed allowlist entries won't accidentally match a broader set of URLs.
+    return { hostname: trimmed };
+  };
+
+  const urlHostname = url.hostname.toLowerCase();
+  const urlPort = url.port;
+
+  const allowlist = allowedHosts.map(parseAllowedHostEntry).filter((entry): entry is AllowedHostEntry => entry !== null);
+  const isAllowed = allowlist.some((entry) => {
+    if (entry.port != null) {
+      return entry.hostname === urlHostname && entry.port === urlPort;
+    }
+    return entry.hostname === urlHostname;
+  });
+
+  if (!isAllowed) {
     throw toolError("permission_denied", `External host "${url.host}" is not in the allowlist for fetch_external_data.`);
   }
 }

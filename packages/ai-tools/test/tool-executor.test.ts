@@ -954,6 +954,69 @@ describe("ToolExecutor", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("fetch_external_data allowlist matches hostname entries even when the URL includes an explicit port", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["api.example.com"] });
+
+    const fetchMock = vi.fn(async (_url: string, _init?: any) => {
+      return new Response(JSON.stringify([{ ok: true }]), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://api.example.com:443/data",
+        destination: "Sheet1!A1"
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(true);
+  });
+
+  it("fetch_external_data allowlist entries with ports require an exact host:port match", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["api.example.com:8443"] });
+
+    const fetchMock = vi.fn(async (_url: string, _init?: any) => {
+      return new Response(JSON.stringify([{ ok: true }]), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const allowed = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://api.example.com:8443/data",
+        destination: "Sheet1!A1"
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(allowed.ok).toBe(true);
+
+    const denied = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://api.example.com:443/data",
+        destination: "Sheet1!A3"
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(denied.ok).toBe(false);
+    expect(denied.error?.code).toBe("permission_denied");
+  });
+
   it("fetch_external_data is disabled by default (requires allow_external_data)", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);
