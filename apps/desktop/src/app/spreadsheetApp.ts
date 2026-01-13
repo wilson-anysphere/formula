@@ -2320,21 +2320,6 @@ export class SpreadsheetApp {
             });
           }
 
-          for (const sheet of this.searchWorkbook.sheets ?? []) {
-            const s: any = sheet as any;
-            const label = typeof s?.name === "string" ? String(s.name).trim() : "";
-            if (!label) continue;
-            const token = formatSheetNameForA1(label);
-            const ref = token ? `${token}!A1` : `${label}!A1`;
-            const sheetId = typeof s?.sheetId === "string" ? String(s.sheetId) : label;
-            push({
-              kind: "sheet",
-              key: `sheet:${sheetId}`,
-              label,
-              reference: ref,
-            });
-          }
-
           return items;
         },
       };

@@ -230,6 +230,7 @@ export class FormulaBarView {
   #isNameBoxDropdownOpen = false;
   #nameBoxDropdownOriginalAddressValue: string | null = null;
   #nameBoxDropdownAllItems: NameBoxDropdownItem[] = [];
+  #nameBoxDropdownQuery = "";
   #nameBoxDropdownFilteredItems: NameBoxDropdownItem[] = [];
   #nameBoxDropdownOptionEls: HTMLElement[] = [];
   #nameBoxDropdownActiveIndex: number = -1;
@@ -2336,6 +2337,7 @@ export class FormulaBarView {
 
     this.#nameBoxDropdownOriginalAddressValue = null;
     this.#nameBoxDropdownActiveIndex = -1;
+    this.#nameBoxDropdownQuery = "";
     this.#nameBoxDropdownFilteredItems = [];
     this.#nameBoxDropdownOptionEls = [];
     this.#nameBoxDropdownPopupEl.hidden = true;
@@ -2405,6 +2407,7 @@ export class FormulaBarView {
 
   #updateNameBoxDropdownFilter(rawQuery: string): void {
     const query = String(rawQuery ?? "").trim().toLowerCase();
+    this.#nameBoxDropdownQuery = query;
     const all = this.#nameBoxDropdownAllItems;
     const filtered =
       query === ""
@@ -2501,7 +2504,8 @@ export class FormulaBarView {
     if (this.#nameBoxDropdownOptionEls.length === 0) {
       const empty = document.createElement("div");
       empty.className = "formula-bar-name-box-empty";
-      empty.textContent = "No matches";
+      empty.textContent =
+        this.#nameBoxDropdownAllItems.length === 0 && this.#nameBoxDropdownQuery === "" ? "No named ranges" : "No matches";
       list.appendChild(empty);
       this.#setNameBoxDropdownActiveIndex(-1);
       return;
