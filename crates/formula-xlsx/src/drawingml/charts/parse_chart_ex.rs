@@ -73,7 +73,7 @@ pub fn parse_chart_ex(
         message: format!("ChartEx root <{root_name}> (ns={root_ns}) parsed as placeholder model"),
     }];
 
-    let kind = detect_chart_kind(&doc, &mut diagnostics);
+    let kind = detect_chart_kind(&doc, root_ns, &mut diagnostics);
     let chart_name = format!("ChartEx:{kind}");
 
     let chart_node = doc
@@ -207,7 +207,11 @@ fn parse_legend(
     })
 }
 
-fn detect_chart_kind(doc: &Document<'_>, diagnostics: &mut Vec<ChartDiagnostic>) -> String {
+fn detect_chart_kind(
+    doc: &Document<'_>,
+    root_ns: &str,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+) -> String {
     // 1) Prefer explicit chart-type nodes like `<cx:waterfallChart>`.
     if let Some(node) = find_chart_type_node(doc) {
         let raw = node.tag_name().name();
@@ -245,7 +249,9 @@ fn detect_chart_kind(doc: &Document<'_>, diagnostics: &mut Vec<ChartDiagnostic>)
     // 4) Unknown. Keep the diagnostic stable since it's used by chart fixture tests.
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
-        message: "ChartEx chart kind could not be inferred".to_string(),
+        message: format!(
+            "ChartEx chart kind could not be inferred (root ns={root_ns}); hints: <none>"
+        ),
     });
 
     "unknown".to_string()
