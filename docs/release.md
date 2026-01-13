@@ -802,7 +802,32 @@ Also verify **cross-origin isolation** is enabled in the packaged app (required 
 
 - From source (recommended preflight): `pnpm -C apps/desktop check:coi`
 - Or in an installed build: ensure there is no startup toast complaining about missing cross-origin isolation, and (if you have DevTools)
-  confirm `globalThis.crossOriginIsolated === true`.
+   confirm `globalThis.crossOriginIsolated === true`.
+
+### File associations + deep link scheme (CI guardrailed)
+
+The release workflow also inspects the **built artifacts** to ensure OS
+integration metadata made it into the final bundles (not just `tauri.conf.json`):
+
+- macOS: `CFBundleDocumentTypes` includes `.xlsx`/`.csv`/`.parquet` (etc) and
+  `CFBundleURLTypes` includes the `formula` scheme.
+- Linux: the installed `.desktop` file advertises the expected `MimeType=` list
+  and has an `Exec=` placeholder so double-click open passes a path/URL.
+
+You can run the same checks locally after building:
+
+```bash
+# macOS
+app="$(find apps/desktop/src-tauri/target/release/bundle/macos -maxdepth 2 -name '*.app' -print -quit)"
+plutil -p "$app/Contents/Info.plist" | head -n 200
+python scripts/ci/verify_macos_bundle_associations.py --info-plist "$app/Contents/Info.plist"
+
+# Linux (.deb)
+deb="$(find apps/desktop/src-tauri/target/release/bundle/deb -maxdepth 1 -name '*.deb' -print -quit)"
+tmpdir="$(mktemp -d)"
+dpkg-deb -x "$deb" "$tmpdir"
+python scripts/ci/verify_linux_desktop_integration.py --deb-root "$tmpdir"
+```
 
 CI note: tagged releases run this check on macOS/Windows/Linux before uploading artifacts. If you need to temporarily skip the
 check on macOS/Windows (e.g. a hosted-runner regression makes it flaky), set the GitHub Actions variable

@@ -42,56 +42,67 @@
     "fileAssociations": [
       {
         "ext": ["xlsx"],
+        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "name": "Excel Spreadsheet",
         "role": "Editor"
       },
       {
         "ext": ["xls"],
+        "mimeType": "application/vnd.ms-excel",
         "name": "Excel 97-2003 Spreadsheet",
         "role": "Editor"
       },
       {
         "ext": ["xlt"],
+        "mimeType": "application/vnd.ms-excel",
         "name": "Excel 97-2003 Template",
         "role": "Editor"
       },
       {
         "ext": ["xla"],
+        "mimeType": "application/vnd.ms-excel",
         "name": "Excel 97-2003 Add-In",
         "role": "Editor"
       },
       {
         "ext": ["xlsm"],
+        "mimeType": "application/vnd.ms-excel.sheet.macroEnabled.12",
         "name": "Excel Macro-Enabled Spreadsheet",
         "role": "Editor"
       },
       {
         "ext": ["xltx"],
+        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
         "name": "Excel Template",
         "role": "Editor"
       },
       {
         "ext": ["xltm"],
+        "mimeType": "application/vnd.ms-excel.template.macroEnabled.12",
         "name": "Excel Macro-Enabled Template",
         "role": "Editor"
       },
       {
         "ext": ["xlam"],
+        "mimeType": "application/vnd.ms-excel.addin.macroEnabled.12",
         "name": "Excel Add-In",
         "role": "Editor"
       },
       {
         "ext": ["xlsb"],
+        "mimeType": "application/vnd.ms-excel.sheet.binary.macroEnabled.12",
         "name": "Excel Binary Spreadsheet",
         "role": "Editor"
       },
       {
         "ext": ["csv"],
+        "mimeType": "text/csv",
         "name": "CSV File",
         "role": "Editor"
       },
       {
         "ext": ["parquet"],
+        "mimeType": "application/vnd.apache.parquet",
         "name": "Parquet File",
         "role": "Editor"
       }

@@ -2,6 +2,119 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Excel Spreadsheet</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>xlsx</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Excel 97-2003 Spreadsheet</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>xls</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Excel 97-2003 Template</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>xlt</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Excel 97-2003 Add-In</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>xla</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Excel Macro-Enabled Spreadsheet</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>xlsm</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Excel Template</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>xltx</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Excel Macro-Enabled Template</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>xltm</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Excel Add-In</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>xlam</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Excel Binary Spreadsheet</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>xlsb</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>CSV File</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>csv</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Parquet File</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>parquet</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+    </dict>
+  </array>
   <key>CFBundleURLTypes</key>
   <array>
     <dict>
@@ -15,4 +128,3 @@
   </array>
 </dict>
 </plist>
-
