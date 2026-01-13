@@ -6,6 +6,11 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 import { type BenchmarkResult } from './benchmark.ts';
+import {
+  defaultDesktopBinPath,
+  parseStartupLine as parseStartupMetricsLine,
+  shouldUseXvfb,
+} from './desktopStartupRunnerShared.ts';
 
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
@@ -15,22 +20,6 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')
 //   background check/download on startup, which can add nondeterministic CPU/memory/network
 //   activity and skew idle-memory benchmarks.
 // - `FORMULA_STARTUP_METRICS=1` enables the Rust-side one-line startup metrics log we parse.
-
-type StartupMetrics = {
-  ttiMs: number;
-};
-
-export function parseStartupLine(line: string): StartupMetrics | null {
-  // Example:
-  // [startup] window_visible_ms=123 webview_loaded_ms=234 tti_ms=456
-  const match = line.match(
-    /^\[startup\]\s+window_visible_ms=(\d+)\s+webview_loaded_ms=(\d+|n\/a)\s+tti_ms=(\d+)\s*$/,
-  );
-  if (!match) return null;
-  const ttiMs = Number(match[3]);
-  if (!Number.isFinite(ttiMs)) return null;
-  return { ttiMs };
-}
 
 export function parseProcChildrenPids(content: string): number[] {
   const trimmed = content.trim();
@@ -226,8 +215,8 @@ async function killProcessTreeLinux(rootPid: number, timeoutMs: number): Promise
   }
 }
 
-async function waitForTti(child: ChildProcess, timeoutMs: number): Promise<StartupMetrics> {
-  return await new Promise<StartupMetrics>((resolvePromise, rejectPromise) => {
+async function waitForTti(child: ChildProcess, timeoutMs: number): Promise<number> {
+  return await new Promise<number>((resolvePromise, rejectPromise) => {
     let done = false;
 
     const deadline = setTimeout(() => {
@@ -239,11 +228,11 @@ async function waitForTti(child: ChildProcess, timeoutMs: number): Promise<Start
 
     const onLine = (line: string) => {
       if (done) return;
-      const parsed = parseStartupLine(line.trim());
+      const parsed = parseStartupMetricsLine(line);
       if (!parsed) return;
       done = true;
       cleanup();
-      resolvePromise(parsed);
+      resolvePromise(parsed.ttiMs);
     };
 
     const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
@@ -302,30 +291,11 @@ async function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void
   });
 }
 
-function defaultDesktopBinPath(): string | null {
-  const exe = process.platform === 'win32' ? 'formula-desktop.exe' : 'formula-desktop';
-  const candidates = [
-    resolve(repoRoot, 'target', 'release', exe),
-    resolve(repoRoot, 'target', 'debug', exe),
-    resolve(repoRoot, 'apps/desktop/src-tauri/target', 'release', exe),
-    resolve(repoRoot, 'apps/desktop/src-tauri/target', 'debug', exe),
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
-  }
-  return null;
-}
-
-function shouldUseXvfbRunSafe(): boolean {
-  if (process.platform !== 'linux') return false;
-  const xvfb = resolve(repoRoot, 'scripts/xvfb-run-safe.sh');
-  return existsSync(xvfb);
-}
-
 async function runOnce(binPath: string, timeoutMs: number): Promise<number> {
-  const useXvfb = shouldUseXvfbRunSafe();
-  const command = useXvfb ? resolve(repoRoot, 'scripts/xvfb-run-safe.sh') : binPath;
-  const args = useXvfb ? [binPath] : [];
+  const useXvfb = shouldUseXvfb();
+  const xvfbPath = resolve(repoRoot, 'scripts/xvfb-run-safe.sh');
+  const command = useXvfb ? 'bash' : binPath;
+  const args = useXvfb ? [xvfbPath, binPath] : [];
 
   const child = spawn(command, args, {
     cwd: repoRoot,
