@@ -223,8 +223,16 @@ python -m tools.corpus.dashboard --triage-dir tools/corpus/out/public
 cat tools/corpus/out/public/summary.md
 ```
 
-The generated `summary.md` includes a **Timings** section (per-step `duration_ms` stats like `p50`/`p90`),
-and the same data is emitted in `summary.json` under `timings` for machine-readable dashboards and CI gates.
+The dashboard is privacy-safe (no raw XML/value diffs) and includes:
+
+- overall pass rates (open/calc/render/round-trip)
+- aggregate diff totals (critical/warn/info)
+- top diff **parts** contributing to CRITICAL diffs and to diffs overall
+- top diff **part groups** (rels/content types/styles/worksheets/etc.) contributing to CRITICAL diffs and to diffs overall
+- a **Timings** section (per-step `duration_ms` stats like `p50`/`p90`)
+
+The machine-readable `summary.json` includes these breakdowns as `top_diff_parts_*` and
+`top_diff_part_groups_*`, and timings under `timings`, for metrics/dashboarding and CI gates.
 
 ### Append a trend time series entry (machine-readable)
 
