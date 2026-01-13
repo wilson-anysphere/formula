@@ -37,6 +37,23 @@ describe("extractVerifiableClaims", () => {
     ]);
   });
 
+  it("extracts claims for hyphenated, unquoted sheet names", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "The average of Q1-2025!a1:a3 is 2.",
+      userText: ""
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "mean",
+        reference: "Q1-2025!A1:A3",
+        expected: 2,
+        source: "average of Q1-2025!a1:a3 is 2"
+      }
+    ]);
+  });
+
   it("attaches the user question reference when the assistant omits the range", () => {
     const claims = extractVerifiableClaims({
       assistantText: "Average is 2.",

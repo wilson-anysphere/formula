@@ -39,7 +39,7 @@ export interface ExtractVerifiableClaimsParams {
   toolCalls?: Array<{ name: string; parameters?: unknown }>;
 }
 
-const SHEET_NAME_PATTERN = "(?:'(?:[^']|'')+'|[A-Za-z0-9_.]+)";
+const SHEET_NAME_PATTERN = "(?:'(?:[^']|'')+'|[A-Za-z0-9_.-]+)";
 const CELL_PATTERN = "\\$?[A-Za-z]{1,3}\\$?[1-9]\\d*";
 const A1_REFERENCE_PATTERN = `(?:(?:${SHEET_NAME_PATTERN})!\\s*)?${CELL_PATTERN}(?:\\s*:\\s*${CELL_PATTERN})?`;
 const A1_CELL_REFERENCE_PATTERN = `(?:(?:${SHEET_NAME_PATTERN})!\\s*)?${CELL_PATTERN}`;
