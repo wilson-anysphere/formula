@@ -25,7 +25,7 @@ import {
 } from "../drawings/overlay";
 import { hitTestResizeHandle, type ResizeHandle } from "../drawings/selectionHandles";
 import type { DrawingObject, ImageEntry, ImageStore } from "../drawings/types";
-import { convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
+import { convertDocumentSheetDrawingsToUiDrawingObjects, convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
 import {
@@ -255,12 +255,10 @@ function normalizeImageEntry(id: string, raw: unknown): ImageEntry | undefined {
   const record = raw as any;
   const bytes: unknown = record.bytes;
   if (!(bytes instanceof Uint8Array)) return undefined;
+  const entryId = typeof record.id === "string" && record.id.trim() !== "" ? record.id : id;
   const mimeTypeRaw: unknown = record.mimeType ?? record.contentType ?? record.content_type;
   const mimeType =
-    typeof mimeTypeRaw === "string" && mimeTypeRaw.trim() !== ""
-      ? mimeTypeRaw
-      : inferMimeTypeFromId(String(record.id ?? id), bytes);
-  const entryId = typeof record.id === "string" && record.id.trim() !== "" ? record.id : id;
+    typeof mimeTypeRaw === "string" && mimeTypeRaw.trim() !== "" ? mimeTypeRaw.trim() : inferMimeTypeFromId(entryId, bytes);
   return { id: entryId, bytes, mimeType };
 }
 
@@ -295,29 +293,19 @@ class DocumentImageStore implements ImageStore {
 
     const doc = this.document as any;
 
-    // Preferred (Task 148+): direct getter.
-    if (typeof doc.getImage === "function") {
-      try {
-        const entry = normalizeImageEntry(imageId, doc.getImage(imageId));
-        if (entry) return entry;
-      } catch {
-        // ignore
-      }
-    }
-
-    // Map-style getter.
-    if (typeof doc.getImages === "function") {
-      try {
-        const entry = lookupImageEntry(imageId, doc.getImages());
-        if (entry) return entry;
-      } catch {
-        // ignore
-      }
-    }
-
-    // Fallback to a public `images` field if present.
+    // Prefer the internal map to avoid cloning bytes on every read.
     const entry = lookupImageEntry(imageId, doc.images);
     if (entry) return entry;
+
+    // Fallback: direct getter (may clone bytes).
+    if (typeof doc.getImage === "function") {
+      try {
+        const direct = normalizeImageEntry(imageId, doc.getImage(imageId));
+        if (direct) return direct;
+      } catch {
+        // ignore
+      }
+    }
 
     return this.fallback.get(imageId);
   }
@@ -2342,6 +2330,19 @@ export class SpreadsheetApp {
         if (this.disposed) return;
         if (!this.uiReady) return;
         if (!this.documentChangeAffectsDrawings(payload)) return;
+        const source = typeof payload?.source === "string" ? payload.source : "";
+        if (source === "applyState") {
+          this.drawingOverlay.clearImageCache();
+        }
+        const imageDeltas: any[] = Array.isArray(payload?.imageDeltas)
+          ? payload.imageDeltas
+          : Array.isArray(payload?.imagesDeltas)
+            ? payload.imagesDeltas
+            : [];
+        for (const delta of imageDeltas) {
+          const imageId = typeof delta?.imageId === "string" ? delta.imageId : typeof delta?.id === "string" ? delta.id : null;
+          if (imageId) this.drawingOverlay.invalidateImage(imageId);
+        }
         invalidateAndRenderDrawings();
       }),
     );
@@ -2360,6 +2361,7 @@ export class SpreadsheetApp {
       this.document.on("images", () => {
         if (this.disposed) return;
         if (!this.uiReady) return;
+        this.drawingOverlay.clearImageCache();
         invalidateAndRenderDrawings();
       }),
     );
@@ -8497,8 +8499,8 @@ export class SpreadsheetApp {
       if (Array.isArray(raw)) {
         if (raw.length === 0) return [];
         if (raw.every(isUiDrawingObject)) return raw as DrawingObject[];
-        // Model objects as a raw array (best-effort).
-        return convertModelWorksheetDrawingsToUiDrawingObjects({ drawings: raw });
+        // DocumentController drawings (or model objects) as a raw array (best-effort).
+        return convertDocumentSheetDrawingsToUiDrawingObjects(raw);
       }
 
       if (isUiDrawingObject(raw)) return [raw];
@@ -8512,7 +8514,7 @@ export class SpreadsheetApp {
         if (Array.isArray(maybeWorksheet.objects)) {
           const list = maybeWorksheet.objects as unknown[];
           if (list.every(isUiDrawingObject)) return list as DrawingObject[];
-          return convertModelWorksheetDrawingsToUiDrawingObjects({ drawings: list });
+          return convertDocumentSheetDrawingsToUiDrawingObjects(list);
         }
       }
 

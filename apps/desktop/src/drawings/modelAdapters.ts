@@ -1,6 +1,7 @@
 import type { Anchor, AnchorPoint, CellOffset, DrawingObject, DrawingObjectKind, EmuSize, ImageEntry, ImageStore } from "./types";
 import { graphicFramePlaceholderLabel } from "./shapeRenderer";
 import { parseDrawingTransformFromRawXml } from "./transform";
+import { pxToEmu } from "../shared/emu.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -533,6 +534,174 @@ export function convertModelWorksheetDrawingsToUiDrawingObjects(modelWorksheetJs
       // ignore
     }
   }
+  return out;
+}
+
+function convertDocumentDrawingSizeToEmu(sizeJson: unknown): EmuSize | undefined {
+  if (!isRecord(sizeJson)) return undefined;
+
+  // Explicit EMU payloads (future-proof).
+  const cxEmu = readOptionalNumber(pick(sizeJson, ["cx", "cxEmu", "widthEmu", "width_emu", "wEmu"]));
+  const cyEmu = readOptionalNumber(pick(sizeJson, ["cy", "cyEmu", "heightEmu", "height_emu", "hEmu"]));
+  if (cxEmu != null && cyEmu != null) return { cx: cxEmu, cy: cyEmu };
+
+  // Pixel payloads (DocumentController schema).
+  const widthPx = readOptionalNumber(pick(sizeJson, ["width", "w", "widthPx", "width_px"]));
+  const heightPx = readOptionalNumber(pick(sizeJson, ["height", "h", "heightPx", "height_px"]));
+  if (widthPx != null && heightPx != null) {
+    return { cx: pxToEmu(widthPx), cy: pxToEmu(heightPx) };
+  }
+
+  return undefined;
+}
+
+function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSize | undefined): Anchor | null {
+  if (!isRecord(anchorJson)) return null;
+  const anchorType = readOptionalString(pick(anchorJson, ["type"])) ?? "";
+
+  const resolveOffsetEmu = (axis: "x" | "y"): number => {
+    const emuKeys =
+      axis === "x"
+        ? ["xEmu", "x_emu", "dxEmu", "offsetXEmu", "offset_x_emu"]
+        : ["yEmu", "y_emu", "dyEmu", "offsetYEmu", "offset_y_emu"];
+    const pxKeys = axis === "x" ? ["x", "dx", "offsetX", "offsetXPx", "offset_x"] : ["y", "dy", "offsetY", "offsetYPx", "offset_y"];
+
+    const directEmu = readOptionalNumber(pick(anchorJson, emuKeys));
+    if (directEmu != null) return directEmu;
+    const px = readOptionalNumber(pick(anchorJson, pxKeys));
+    return px != null ? pxToEmu(px) : 0;
+  };
+
+  const resolvedSize =
+    size ?? convertDocumentDrawingSizeToEmu(pick(anchorJson, ["size"])) ?? { cx: pxToEmu(100), cy: pxToEmu(100) };
+
+  switch (anchorType) {
+    case "cell": {
+      const row = readNumber(pick(anchorJson, ["row"]), "Drawing.anchor.row");
+      const col = readNumber(pick(anchorJson, ["col"]), "Drawing.anchor.col");
+      return {
+        type: "oneCell",
+        from: { cell: { row, col }, offset: { xEmu: resolveOffsetEmu("x"), yEmu: resolveOffsetEmu("y") } },
+        size: resolvedSize,
+      };
+    }
+    // Back-compat: accept UI-like anchors persisted in a DocumentController snapshot.
+    case "oneCell": {
+      const fromValue = pick(anchorJson, ["from"]);
+      if (!isRecord(fromValue)) return null;
+      const cellValue = pick(fromValue, ["cell"]);
+      if (!isRecord(cellValue)) return null;
+      const row = readNumber(pick(cellValue, ["row"]), "Drawing.anchor.from.cell.row");
+      const col = readNumber(pick(cellValue, ["col"]), "Drawing.anchor.from.cell.col");
+      const offsetValue = pick(fromValue, ["offset"]);
+      const offset: CellOffset = isRecord(offsetValue)
+        ? {
+            xEmu: readOptionalNumber(pick(offsetValue, ["xEmu", "x_emu"])) ?? resolveOffsetEmu("x"),
+            yEmu: readOptionalNumber(pick(offsetValue, ["yEmu", "y_emu"])) ?? resolveOffsetEmu("y"),
+          }
+        : { xEmu: resolveOffsetEmu("x"), yEmu: resolveOffsetEmu("y") };
+      return { type: "oneCell", from: { cell: { row, col }, offset }, size: resolvedSize };
+    }
+    case "absolute": {
+      const xEmu = resolveOffsetEmu("x");
+      const yEmu = resolveOffsetEmu("y");
+      return { type: "absolute", pos: { xEmu, yEmu }, size: resolvedSize };
+    }
+    case "twoCell": {
+      const fromValue = pick(anchorJson, ["from"]);
+      const toValue = pick(anchorJson, ["to"]);
+      if (!isRecord(fromValue) || !isRecord(toValue)) return null;
+
+      const parsePoint = (point: JsonRecord, context: string): AnchorPoint | null => {
+        const cellValue = pick(point, ["cell"]);
+        if (!isRecord(cellValue)) return null;
+        const row = readNumber(pick(cellValue, ["row"]), `${context}.cell.row`);
+        const col = readNumber(pick(cellValue, ["col"]), `${context}.cell.col`);
+        const offsetValue = pick(point, ["offset"]);
+        const offset: CellOffset = isRecord(offsetValue)
+          ? {
+              xEmu: readOptionalNumber(pick(offsetValue, ["xEmu", "x_emu"])) ?? 0,
+              yEmu: readOptionalNumber(pick(offsetValue, ["yEmu", "y_emu"])) ?? 0,
+            }
+          : { xEmu: 0, yEmu: 0 };
+        return { cell: { row, col }, offset };
+      };
+
+      const from = parsePoint(fromValue, "Drawing.anchor.from");
+      const to = parsePoint(toValue, "Drawing.anchor.to");
+      if (!from || !to) return null;
+      return { type: "twoCell", from, to };
+    }
+    default:
+      return null;
+  }
+}
+
+function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKind | null {
+  if (!isRecord(kindJson)) return null;
+  const type = readOptionalString(pick(kindJson, ["type"])) ?? "";
+  const rawXml = readOptionalString(pick(kindJson, ["rawXml", "raw_xml"]));
+  const label = readOptionalString(pick(kindJson, ["label"]));
+
+  switch (type) {
+    case "image": {
+      const imageId = readOptionalString(pick(kindJson, ["imageId", "image_id"]));
+      if (!imageId) return null;
+      return { type: "image", imageId };
+    }
+    case "shape":
+      return { type: "shape", ...(label ? { label } : {}), ...(rawXml ? { rawXml } : {}) };
+    case "chart": {
+      const chartId = readOptionalString(pick(kindJson, ["chartId", "chart_id", "relId", "rel_id"]));
+      return { type: "chart", ...(chartId ? { chartId } : {}), ...(label ? { label } : {}), ...(rawXml ? { rawXml } : {}) };
+    }
+    case "unknown":
+      return { type: "unknown", ...(label ? { label } : {}), ...(rawXml ? { rawXml } : {}) };
+    case "chartPlaceholder": {
+      const chartId = readOptionalString(pick(kindJson, ["chartId", "chart_id", "relId", "rel_id"]));
+      return { type: "chart", ...(chartId ? { chartId } : {}), ...(label ? { label } : {}), ...(rawXml ? { rawXml } : {}) };
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Convert a DocumentController sheet drawings list (or other JSON-serializable drawings array)
+ * into the UI overlay model.
+ *
+ * This adapter understands:
+ * - DocumentController's simplified anchor schema (`{ type: "cell", row, col }` + pixel size)
+ * - formula-model / Rust `DrawingObject` JSON (externally- or internally-tagged enums)
+ *
+ * Invalid entries are ignored (best-effort).
+ */
+export function convertDocumentSheetDrawingsToUiDrawingObjects(drawingsJson: unknown): DrawingObject[] {
+  if (!Array.isArray(drawingsJson)) return [];
+
+  const out: DrawingObject[] = [];
+  for (const raw of drawingsJson) {
+    try {
+      if (isRecord(raw)) {
+        const kind = convertDocumentDrawingKindToUiKind(pick(raw, ["kind"]));
+        if (kind) {
+          const id = parseDrawingObjectId(pick(raw, ["id"]));
+          const zOrder = readOptionalNumber(pick(raw, ["zOrder", "z_order"])) ?? 0;
+          const size = convertDocumentDrawingSizeToEmu(pick(raw, ["size"]));
+          const anchor = convertDocumentDrawingAnchorToUiAnchor(pick(raw, ["anchor"]), size);
+          if (!anchor) continue;
+          out.push({ id, kind, anchor, zOrder, ...(size ? { size } : {}) });
+          continue;
+        }
+      }
+
+      // Fallback to formula-model conversion (externally-tagged enums).
+      out.push(convertModelDrawingObjectToUiDrawingObject(raw));
+    } catch {
+      // ignore
+    }
+  }
+
   return out;
 }
 

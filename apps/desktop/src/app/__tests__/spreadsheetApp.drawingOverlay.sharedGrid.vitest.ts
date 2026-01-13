@@ -236,23 +236,19 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       // Inject a simple workbook drawing layer: one floating image anchored to A1.
       const imageId = "image1.png";
       const bytes = new Uint8Array([1, 2, 3]);
-      const doc = (app as any).document as any;
-      doc.getSheetDrawings = () => ({
-        drawings: [
-          {
-            id: 1,
-            kind: { Image: { image_id: imageId } },
-            anchor: {
-              OneCell: {
-                from: { cell: { row: 0, col: 0 }, offset: { x_emu: 0, y_emu: 0 } },
-                ext: { cx: 914400, cy: 914400 },
-              },
-            },
-            z_order: 0,
-          },
-        ],
-      });
-      doc.getImage = (id: string) => (id === imageId ? { bytes, mimeType: "image/png" } : null);
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+
+      doc.setImage(imageId, { bytes, mimeType: "image/png" });
+      doc.setSheetDrawings(sheetId, [
+        {
+          id: "d1",
+          zOrder: 0,
+          anchor: { type: "cell", sheetId, row: 0, col: 0 },
+          kind: { type: "image", imageId },
+          size: { width: 120, height: 80 },
+        },
+      ]);
 
       renderSpy.mockClear();
 

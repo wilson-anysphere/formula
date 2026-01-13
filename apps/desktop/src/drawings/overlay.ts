@@ -471,6 +471,25 @@ export class DrawingOverlay {
     this.selectedId = id;
   }
 
+  /**
+   * Invalidate a decoded bitmap for an image id.
+   *
+   * This is used by higher-level stores (e.g. DocumentController-backed images) when the
+   * underlying bytes for an existing image id change (undo/redo, overwrite, etc).
+   */
+  invalidateImage(imageId: string): void {
+    this.bitmapCache.invalidate(String(imageId ?? ""));
+  }
+
+  /**
+   * Clear all cached decoded bitmaps.
+   *
+   * Useful after loading a new workbook snapshot where all image ids/bytes may change.
+   */
+  clearImageCache(): void {
+    this.bitmapCache.clear();
+  }
+
   destroy(): void {
     // Cancel any in-flight render and release cached bitmap resources.
     this.renderAbort?.abort();
