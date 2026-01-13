@@ -1,5 +1,6 @@
 export * from "./types.ts";
 export * from "./store.ts";
+export * from "./bounded-store.ts";
 export * from "./memory-store.ts";
 export * from "./storage.ts";
 export * from "./local-storage-store.ts";
