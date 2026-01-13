@@ -5,6 +5,8 @@ import {
   getTauriDialogOrThrow,
   getTauriEventApiOrNull,
   getTauriEventApiOrThrow,
+  hasTauriWindowApi,
+  hasTauriWindowHandleApi,
   getTauriWindowHandleOrNull,
   getTauriWindowHandleOrThrow,
 } from "../api";
@@ -87,6 +89,19 @@ describe("tauri/api dynamic accessors", () => {
       expect(() => getTauriWindowHandleOrThrow()).toThrowError("Tauri window API not available");
     });
 
+    it("exposes separate feature-detection helpers for the window namespace vs handle resolution", () => {
+      expect(hasTauriWindowApi()).toBe(false);
+      expect(hasTauriWindowHandleApi()).toBe(false);
+
+      (globalThis as any).__TAURI__ = { window: {} };
+      expect(hasTauriWindowApi()).toBe(true);
+      expect(hasTauriWindowHandleApi()).toBe(false);
+
+      (globalThis as any).__TAURI__ = { window: { appWindow: { label: "main" } } };
+      expect(hasTauriWindowApi()).toBe(true);
+      expect(hasTauriWindowHandleApi()).toBe(true);
+    });
+
     it("prefers getCurrentWebviewWindow when available", () => {
       const handle = { label: "main" };
       (globalThis as any).__TAURI__ = {
@@ -129,4 +144,3 @@ describe("tauri/api dynamic accessors", () => {
     });
   });
 });
-

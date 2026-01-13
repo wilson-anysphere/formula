@@ -59,6 +59,27 @@ export function getTauriEventApiOrThrow(): TauriEventApi {
   return api;
 }
 
+export function hasTauriWindowApi(): boolean {
+  return Boolean((globalThis as any).__TAURI__?.window);
+}
+
+/**
+ * Returns true when the runtime exposes an API surface that can *produce* a window handle.
+ *
+ * This intentionally does not call the `getCurrent*()` accessors (some callsites only want
+ * feature-detection without invoking the underlying bindings).
+ */
+export function hasTauriWindowHandleApi(): boolean {
+  const winApi = (globalThis as any).__TAURI__?.window as any;
+  if (!winApi) return false;
+  return (
+    typeof winApi.getCurrentWebviewWindow === "function" ||
+    typeof winApi.getCurrentWindow === "function" ||
+    typeof winApi.getCurrent === "function" ||
+    Boolean(winApi.appWindow)
+  );
+}
+
 export function getTauriWindowHandleOrNull(): any | null {
   const winApi = (globalThis as any).__TAURI__?.window as any;
   if (!winApi) return null;
@@ -87,4 +108,3 @@ export function getTauriWindowHandleOrThrow(): any {
   }
   return handle;
 }
-

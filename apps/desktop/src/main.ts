@@ -77,7 +77,13 @@ import type { CollabSession } from "@formula/collab-session";
 import * as Y from "yjs";
 import { startWorkbookSync } from "./tauri/workbookSync";
 import { TauriWorkbookBackend } from "./tauri/workbookBackend";
-import { getTauriDialogOrThrow, getTauriEventApiOrThrow, getTauriWindowHandleOrThrow } from "./tauri/api";
+import {
+  getTauriDialogOrThrow,
+  getTauriEventApiOrThrow,
+  getTauriWindowHandleOrThrow,
+  hasTauriWindowApi,
+  hasTauriWindowHandleApi,
+} from "./tauri/api";
 import * as nativeDialogs from "./tauri/nativeDialogs";
 import { shellOpen } from "./tauri/shellOpen";
 import { setTrayStatus } from "./tauri/trayStatus";
@@ -1698,14 +1704,7 @@ const onRedo = () => {
 };
 
 const titlebarWindowControls = (() => {
-  const winApi = (globalThis as any).__TAURI__?.window;
-  const hasWindowHandle =
-    winApi &&
-    (typeof winApi.getCurrentWebviewWindow === "function" ||
-      typeof winApi.getCurrentWindow === "function" ||
-      typeof winApi.getCurrent === "function" ||
-      Boolean(winApi.appWindow));
-  if (!hasWindowHandle) return undefined;
+  if (!hasTauriWindowHandleApi()) return undefined;
   return {
     onClose: () => {
       void hideTauriWindow();
@@ -7340,8 +7339,7 @@ registerDesktopCommands({
       // When running under Tauri, the close-request handler is normally installed by the desktop
       // host integration. If it isn't available (e.g. permission/config mismatch), fall back to
       // the window API so Close Window still works.
-      const winApi = (globalThis as any).__TAURI__?.window;
-      if (!winApi) {
+      if (!hasTauriWindowApi()) {
         showDesktopOnlyToast("Closing windows is available in the desktop app.");
         return;
       }
