@@ -534,7 +534,7 @@
   padding: 6px;
   text-align: start;
   font-size: 12px;
-  color: var(--text-primary);
+  color: var(--grid-header-text);
   font-weight: 600;
 }
 
