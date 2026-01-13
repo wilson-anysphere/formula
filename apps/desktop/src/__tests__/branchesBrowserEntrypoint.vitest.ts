@@ -22,6 +22,11 @@ test("branches browser entrypoint bundles for the browser (no Node built-ins)", 
   // If the browser entrypoint accidentally pulled in SQLiteBranchStore, the bundle would
   // contain Node built-ins like `node:fs`/`node:path` (and bundling would often fail).
   const bundled = result.outputFiles.map((f) => f.text).join("\n");
+
+  // Only allow the optional Node-only compression fallback (runtime-gated inside YjsBranchStore).
+  const nodeSpecifiers = Array.from(new Set(bundled.match(/node:[A-Za-z0-9_.\\/\\-]+/g) ?? [])).sort();
+  expect(nodeSpecifiers.filter((s) => s !== "node:zlib")).toEqual([]);
+
   expect(bundled).not.toContain("SQLiteBranchStore");
   expect(bundled).not.toContain("node:fs");
   expect(bundled).not.toContain("node:path");
