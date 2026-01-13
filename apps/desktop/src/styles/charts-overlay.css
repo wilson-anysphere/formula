@@ -3,7 +3,7 @@
   pointer-events: none;
   /*
     Deterministic overlay stacking across both legacy and shared grid renderers:
-    charts should render above the grid cell content and above the drawings overlay.
+    charts should render above the grid cell content but below the drawings/images overlay.
   */
   z-index: 2;
   z-index: var(--grid-z-chart-overlay, 2);
@@ -12,6 +12,9 @@
 .chart-selection-canvas {
   /* Selection handles for charts are painted on a separate overlay canvas. */
   pointer-events: none;
+  /* Keep chart handles above charts/drawings (matches selection overlay ordering). */
+  z-index: 4;
+  z-index: var(--grid-z-selection-overlay, 4);
 }
 
 /* Canvas-based drawings overlay (shapes, images, etc). */
@@ -23,10 +26,10 @@
   top: 0;
   /*
     Deterministic overlay stacking across both legacy and shared grid renderers:
-    drawings should render above the grid cell content but below charts + selection.
+    drawings/images should render above the grid cell content and charts, but below selection + outline.
   */
-  z-index: 1;
-  z-index: var(--grid-z-drawing-overlay, 1);
+  z-index: 3;
+  z-index: var(--grid-z-drawing-overlay, 3);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -41,22 +44,26 @@
   any floating UI (comments, tooltips, conflicts, etc).
 */
 .grid-root {
-  --grid-z-drawing-overlay: 1;
+  /* CanvasGridRenderer uses z-index 0/1/2 for its base/content/selection canvases. */
   --grid-z-chart-overlay: 2;
-  --grid-z-selection-overlay: 3;
+  --grid-z-drawing-overlay: 3;
+  --grid-z-selection-overlay: 4;
   --grid-z-outline-overlay: 4;
 }
 
 /*
-  Grid overlay stacking (both legacy + shared):
-  - drawings above cell content
-  - charts above drawings
-  - selection above all (except outline + scrollbars)
+  Grid overlay stacking (low → high):
+    - cells (CanvasGridRenderer base/content canvases: z=0/1)
+    - chart canvas (z=2)
+    - drawings/images canvas (z=3)
+    - selection + outline (z=4)
+    - scrollbars (z=5; see scrollbars.css)
+    - cell editor (z=10; see shell.css)
 */
 
 .grid-canvas--selection {
-  z-index: 3;
-  z-index: var(--grid-z-selection-overlay, 3);
+  z-index: 4;
+  z-index: var(--grid-z-selection-overlay, 4);
 }
 
 .outline-layer {
@@ -64,21 +71,20 @@
   z-index: var(--grid-z-outline-overlay, 4);
 }
 
-/* Shared-grid overlay stacking: drawings above cells, charts above drawings, selection above all. */
 .drawing-layer--shared {
-  z-index: 1;
-  z-index: var(--grid-z-drawing-overlay, 1);
+  z-index: 3;
+  z-index: var(--grid-z-drawing-overlay, 3);
 }
 
-/* Shared-grid overlay stacking: charts above cells, selection above charts. */
 .grid-canvas--shared-chart {
   z-index: 2;
   z-index: var(--grid-z-chart-overlay, 2);
 }
 
 .grid-canvas--shared-selection {
-  z-index: 3;
-  z-index: var(--grid-z-selection-overlay, 3);
+  /* Override CanvasGridRenderer's inline z-index (2) in shared-grid mode. */
+  z-index: 4 !important;
+  z-index: var(--grid-z-selection-overlay, 4) !important;
 }
 
 .outline-layer--shared {
@@ -86,4 +92,4 @@
   z-index: var(--grid-z-outline-overlay, 4);
 }
 
-/* (Reserved) additional chart overlay styles go here. */
+/* (Reserved) additional chart/drawing overlay styles go here. */
