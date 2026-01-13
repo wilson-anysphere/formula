@@ -64,7 +64,7 @@ Env overrides:
 }
 
 function parseArgs(argv) {
-  /** @type {{ dist?: string, limitMb?: string, compression?: string, enforce?: boolean }} */
+  /** @type {{ dist?: string, limitMb?: string, compression?: string, enforce?: boolean, help?: boolean }} */
   const out = {};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -136,16 +136,6 @@ function brotliParamsForExt(ext) {
   };
 }
 
-function compressSizeBytes(buf, ext, compression) {
-  if (compression === "gzip") {
-    return gzipSync(buf, { level: 9 }).length;
-  }
-  if (compression === "brotli") {
-    return brotliCompressSync(buf, brotliParamsForExt(ext)).length;
-  }
-  throw new Error(`Unsupported compression: ${compression}`);
-}
-
 function appendStepSummary(markdown) {
   const summaryPath = process.env.GITHUB_STEP_SUMMARY;
   if (!summaryPath) return;
@@ -167,7 +157,8 @@ async function main() {
   const enforce = Boolean(args.enforce) || isTruthyEnv(process.env.FORMULA_ENFORCE_FRONTEND_ASSET_SIZE);
   const limitMb = args.limitMb != null ? Number(args.limitMb) : parseLimitMb(process.env.FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB);
   if (!Number.isFinite(limitMb) || limitMb <= 0) {
-    throw new Error(`Invalid --limit-mb=${JSON.stringify(args.limitMb)}`);
+    console.error(`frontend-asset-size: ERROR invalid --limit-mb=${JSON.stringify(args.limitMb)} (expected a number > 0)`);
+    return 2;
   }
   const limitBytes = limitMb * MB_BYTES;
 
@@ -177,15 +168,32 @@ async function main() {
     .trim()
     .toLowerCase();
   if (compression !== "brotli" && compression !== "gzip") {
-    throw new Error(`Invalid compression mode: ${compression} (expected brotli|gzip)`);
+    console.error(`frontend-asset-size: ERROR invalid compression mode: ${compression} (expected brotli|gzip)`);
+    return 2;
   }
 
   const assetsStat = await stat(assetsDir).catch(() => null);
   if (!assetsStat?.isDirectory()) {
-    throw new Error(
-      `Missing Vite assets directory: ${path.relative(repoRoot, assetsDir)}\n` +
-        `Hint: build first (e.g. \`pnpm build:web\` or \`pnpm build:desktop\`).`,
-    );
+    const relAssetsDir = path.relative(repoRoot, assetsDir).split(path.sep).join("/");
+    const msg = [
+      `## Frontend asset download size (${relAssetsDir})`,
+      "",
+      `- Budget: **${limitMb} MB** total (${compression})`,
+      `- Enforcement: **${enforce ? "enabled" : "disabled"}**`,
+      "",
+      "_Vite `dist/assets/` directory not found._",
+      "",
+      "Hint: build first (e.g. `pnpm build:web` or `pnpm build:desktop`).",
+      "",
+    ].join("\n");
+    console.error(`frontend-asset-size: ERROR missing Vite assets directory: ${relAssetsDir}`);
+    console.log(msg);
+    try {
+      appendStepSummary(msg);
+    } catch {
+      // Ignore summary write failures.
+    }
+    return 1;
   }
 
   const allFiles = await walkFiles(assetsDir);
@@ -278,19 +286,21 @@ async function main() {
 
   if (!enforce) return 0;
   if (overLimit) {
-    throw new Error(
-      `frontend-asset-size: total ${compression} size ${humanBytes(totalCompressed)} exceeds ${limitMb} MB ` +
+    console.error(
+      `frontend-asset-size: ERROR total ${compression} size ${humanBytes(totalCompressed)} exceeds ${limitMb} MB ` +
         `(set FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB to adjust)`,
     );
+    return 1;
   }
   return 0;
 }
 
-main()
-  .then((code) => {
-    process.exitCode = code;
-  })
-  .catch((err) => {
-    console.error(err?.stack || String(err));
-    process.exitCode = 2;
-  });
+let exitCode = 0;
+try {
+  exitCode = await main();
+} catch (err) {
+  console.error("frontend-asset-size: ERROR failed to generate report.");
+  console.error(err);
+  exitCode = 2;
+}
+process.exitCode = exitCode;
