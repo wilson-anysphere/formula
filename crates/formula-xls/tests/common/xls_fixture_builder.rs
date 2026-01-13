@@ -866,6 +866,89 @@ fn build_page_setup_fixture_sheet_stream(xf_cell: u16, mode: PageSetupScalingMod
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
 }
+
+/// Build a BIFF8 `.xls` fixture with a single sheet whose BoundSheet name is invalid per Excel
+/// rules (`Bad:Name`) and must be sanitized by the importer.
+///
+/// The worksheet substream includes:
+/// - SETUP (paper size, orientation, scaling, header/footer margins)
+/// - LEFT/RIGHT/TOP/BOTTOMMARGIN
+/// - HORIZONTALPAGEBREAKS / VERTICALPAGEBREAKS
+///
+/// This fixture is used to ensure BIFF-derived print settings are applied to the sanitized sheet
+/// name stored in the output workbook (`Bad_Name`), not the original BIFF BoundSheet name.
+pub fn build_page_setup_sanitized_sheet_name_fixture_xls() -> Vec<u8> {
+    // `build_single_sheet_workbook_stream` always emits a single cell XF at index 16 (after 16
+    // style XFs).
+    let sheet_stream = build_page_setup_sanitized_sheet_name_sheet_stream(16);
+    let workbook_stream = build_single_sheet_workbook_stream("Bad:Name", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+fn build_page_setup_sanitized_sheet_name_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: keep large enough to cover our page break positions.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&6u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&4u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    // WINDOW2 is required by some consumers; keep defaults.
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Margins (distinct values, in inches).
+    push_record(&mut sheet, RECORD_LEFTMARGIN, &1.11f64.to_le_bytes());
+    push_record(&mut sheet, RECORD_RIGHTMARGIN, &2.22f64.to_le_bytes());
+    push_record(&mut sheet, RECORD_TOPMARGIN, &3.33f64.to_le_bytes());
+    push_record(&mut sheet, RECORD_BOTTOMMARGIN, &4.44f64.to_le_bytes());
+
+    // Page setup:
+    // - A4 paper size (9)
+    // - 123% scaling
+    // - Landscape orientation (fPortrait=0)
+    // - Non-default header/footer margins
+    let mut setup = Vec::<u8>::new();
+    setup.extend_from_slice(&9u16.to_le_bytes()); // iPaperSize: 9 = A4
+    setup.extend_from_slice(&123u16.to_le_bytes()); // iScale: 123%
+    setup.extend_from_slice(&0u16.to_le_bytes()); // iPageStart
+    setup.extend_from_slice(&0u16.to_le_bytes()); // iFitWidth
+    setup.extend_from_slice(&0u16.to_le_bytes()); // iFitHeight
+    setup.extend_from_slice(&0u16.to_le_bytes()); // grbit: fPortrait=0 => landscape
+    setup.extend_from_slice(&600u16.to_le_bytes()); // iRes
+    setup.extend_from_slice(&600u16.to_le_bytes()); // iVRes
+    setup.extend_from_slice(&0.55f64.to_le_bytes()); // numHdr
+    setup.extend_from_slice(&0.66f64.to_le_bytes()); // numFtr
+    setup.extend_from_slice(&1u16.to_le_bytes()); // iCopies
+    push_record(&mut sheet, RECORD_SETUP, &setup);
+
+    // Manual page breaks.
+    // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.
+    // The importer converts these to the model’s “after which break occurs” form by subtracting 1.
+    push_record(&mut sheet, RECORD_HPAGEBREAKS, &hpagebreaks_record(&[2, 5]));
+    push_record(&mut sheet, RECORD_VPAGEBREAKS, &vpagebreaks_record(&[3]));
+
+    // Provide at least one cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
 fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -882,6 +965,10 @@ fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
 
     // WINDOW2 is required by some consumers; keep defaults.
     push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // WSBOOL controls scaling mode. Enable fit-to-page so SETUP.iFit* fields are respected.
+    let wsbool: u16 = 0x0C01 | WSBOOL_OPTION_FIT_TO_PAGE;
+    push_record(&mut sheet, RECORD_WSBOOL, &wsbool.to_le_bytes());
 
     // Margins.
     push_record(&mut sheet, RECORD_LEFTMARGIN, &1.1f64.to_le_bytes());
