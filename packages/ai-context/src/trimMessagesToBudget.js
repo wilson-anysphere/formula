@@ -441,6 +441,14 @@ export async function trimMessagesToBudget(params) {
   /** @type {any[]} */
   const out = [...systemTrimmed];
 
+  // If we couldn't keep any recent messages (e.g. the most recent coherent tool-call group
+  // is too large to fit), fall back to using the summary budget even if we would otherwise
+  // prefer keeping recent messages over a summary. This avoids returning an empty/non-actionable
+  // context under tight budgets.
+  if (summarize && toSummarize.length > 0 && summaryBudget === 0 && recentKept.length === 0 && otherBudget > 0) {
+    summaryBudget = Math.min(summaryMaxTokens, otherBudget);
+  }
+
   if (summarize && toSummarize.length > 0 && summaryBudget > 0) {
     throwIfAborted(signal);
     const summaryValue = await awaitWithAbort(summarize(toSummarize), signal);

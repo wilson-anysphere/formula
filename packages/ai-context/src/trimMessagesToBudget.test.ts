@@ -285,4 +285,35 @@ describe("trimMessagesToBudget", () => {
     expect(withDropFirst.some((m) => m.role === "user" && m.content === "u1")).toBe(true);
     expect(withDropFirst.some((m) => m.role === "tool")).toBe(false);
   });
+
+  it("falls back to a summary when the most recent tool-call group cannot fit at all", async () => {
+    const estimator = createHeuristicTokenEstimator({ charsPerToken: 1, tokensPerMessageOverhead: 0 });
+
+    const messages = [
+      { role: "system", content: "sys" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "call-1", name: "lookup", arguments: { q: "x".repeat(1000) } }]
+      },
+      { role: "tool", toolCallId: "call-1", content: "tool-result" }
+    ];
+
+    const trimmed = await trimMessagesToBudget({
+      messages,
+      maxTokens: 200,
+      reserveForOutputTokens: 0,
+      estimator,
+      keepLastMessages: 50
+    });
+
+    // Coherent tool-call group is too large; should not keep partial remnants.
+    expect(trimmed.some((m) => m.role === "assistant" && Array.isArray(m.toolCalls) && m.toolCalls.length > 0)).toBe(false);
+    expect(trimmed.some((m) => m.role === "tool")).toBe(false);
+
+    const summary = trimmed.find((m) => m.role === "system" && typeof m.content === "string" && m.content.startsWith(CONTEXT_SUMMARY_MARKER));
+    expect(summary).toBeTruthy();
+    expect(String(summary?.content)).toContain("tool_calls");
+    expect(estimator.estimateMessagesTokens(trimmed)).toBeLessThanOrEqual(200);
+  });
 });
