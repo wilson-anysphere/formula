@@ -634,6 +634,38 @@ fn import_xls_path_with_biff_reader(
         };
         final_sheet_names_by_idx.push(sheet_name.clone());
         sheet_ids_by_calamine_idx.push(sheet_id);
+
+        if let (Some(workbook_stream), Some(biff_idx)) = (workbook_stream.as_deref(), biff_idx) {
+            if let Some(sheet_info) = biff_sheets.as_ref().and_then(|v| v.get(biff_idx)) {
+                if sheet_info.offset >= workbook_stream.len() {
+                    warnings.push(ImportWarning::new(format!(
+                        "failed to import `.xls` manual page breaks for BIFF sheet index {} (`{}`): out-of-bounds stream offset {}",
+                        biff_idx, sheet_name, sheet_info.offset
+                    )));
+                } else {
+                    match biff::parse_biff_sheet_manual_page_breaks(workbook_stream, sheet_info.offset)
+                    {
+                        Ok(mut parsed) => {
+                            warnings.extend(parsed.warnings.drain(..).map(|warning| {
+                                ImportWarning::new(format!(
+                                    "failed to fully import `.xls` manual page breaks for BIFF sheet index {} (`{}`): {warning}",
+                                    biff_idx, sheet_name
+                                ))
+                            }));
+                            // Even if no breaks are present, updating is harmless and ensures any
+                            // subsequent print settings updates (print area/titles) share a single
+                            // `SheetPrintSettings` entry.
+                            out.set_manual_page_breaks(sheet_id, parsed.manual_page_breaks);
+                        }
+                        Err(err) => warnings.push(ImportWarning::new(format!(
+                            "failed to import `.xls` manual page breaks for BIFF sheet index {} (`{}`): {err}",
+                            biff_idx, sheet_name
+                        ))),
+                    }
+                }
+            }
+        }
+
         let sheet = out
             .sheet_mut(sheet_id)
             .expect("sheet id should exist immediately after add");

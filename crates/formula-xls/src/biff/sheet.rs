@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use formula_model::autofilter::{SortCondition, SortState};
 use formula_model::{
-    CellRef, Hyperlink, HyperlinkTarget, OutlinePr, Range, SheetPane, SheetProtection,
-    SheetSelection, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
+    CellRef, Hyperlink, HyperlinkTarget, ManualPageBreaks, OutlinePr, Range, SheetPane,
+    SheetProtection, SheetSelection, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
 
 use super::records;
@@ -78,6 +78,12 @@ const RECORD_WINDOW2: u16 = 0x023E;
 const RECORD_SCL: u16 = 0x00A0;
 const RECORD_PANE: u16 = 0x0041;
 const RECORD_SELECTION: u16 = 0x001D;
+
+// Print records (worksheet substream).
+// - VERTICALPAGEBREAKS: [MS-XLS 2.4.349]
+// - HORIZONTALPAGEBREAKS: [MS-XLS 2.4.115]
+const RECORD_VERTICALPAGEBREAKS: u16 = 0x001A;
+const RECORD_HORIZONTALPAGEBREAKS: u16 = 0x001B;
 
 const ROW_HEIGHT_TWIPS_MASK: u16 = 0x7FFF;
 const ROW_HEIGHT_DEFAULT_FLAG: u16 = 0x8000;
@@ -537,6 +543,135 @@ pub(crate) fn parse_biff_sheet_view_state(
     }
 
     Ok(out)
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BiffSheetManualPageBreaks {
+    pub(crate) manual_page_breaks: ManualPageBreaks,
+    pub(crate) warnings: Vec<String>,
+}
+
+/// Best-effort parse of worksheet manual page breaks (`HORIZONTALPAGEBREAKS` / `VERTICALPAGEBREAKS`).
+///
+/// In BIFF8, the `HorzBrk.row`/`VertBrk.col` fields store the **0-based index** of the first row/col
+/// *after* the break. The model stores page breaks as the 0-based row/col index **after which** the
+/// break occurs; we therefore subtract 1 (saturating) when importing.
+///
+/// This scan is resilient to malformed records: payload-level parse failures are surfaced as
+/// warnings and otherwise ignored.
+pub(crate) fn parse_biff_sheet_manual_page_breaks(
+    workbook_stream: &[u8],
+    start: usize,
+) -> Result<BiffSheetManualPageBreaks, String> {
+    let mut out = BiffSheetManualPageBreaks::default();
+
+    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
+
+    while let Some(next) = iter.next() {
+        let record = match next {
+            Ok(r) => r,
+            Err(err) => {
+                out.warnings.push(format!("malformed BIFF record: {err}"));
+                break;
+            }
+        };
+
+        if record.offset != start && records::is_bof_record(record.record_id) {
+            break;
+        }
+
+        let data = record.data;
+        match record.record_id {
+            RECORD_HORIZONTALPAGEBREAKS => {
+                parse_horizontal_page_breaks_record(data, record.offset, &mut out);
+            }
+            RECORD_VERTICALPAGEBREAKS => {
+                parse_vertical_page_breaks_record(data, record.offset, &mut out);
+            }
+            records::RECORD_EOF => break,
+            _ => {}
+        }
+    }
+
+    Ok(out)
+}
+
+fn parse_horizontal_page_breaks_record(
+    data: &[u8],
+    record_offset: usize,
+    out: &mut BiffSheetManualPageBreaks,
+) {
+    // HorizontalPageBreaks payload:
+    // - cbrk (u16)
+    // - HorzBrk[cbrk] (6 bytes each): row (u16), colStart (u16), colEnd (u16)
+    if data.len() < 2 {
+        out.warnings.push(format!(
+            "truncated HorizontalPageBreaks record at offset {record_offset}"
+        ));
+        return;
+    }
+
+    let cbrk = u16::from_le_bytes([data[0], data[1]]) as usize;
+
+    let mut parsed = 0usize;
+    let mut pos = 2usize;
+    for _ in 0..cbrk {
+        let Some(chunk) = data.get(pos..pos + 6) else {
+            break;
+        };
+        pos = pos.saturating_add(6);
+        parsed = parsed.saturating_add(1);
+
+        let row = u16::from_le_bytes([chunk[0], chunk[1]]);
+        out.manual_page_breaks
+            .row_breaks_after
+            .insert(row.saturating_sub(1) as u32);
+    }
+
+    if parsed < cbrk {
+        out.warnings.push(format!(
+            "truncated HorizontalPageBreaks record at offset {record_offset}: expected {cbrk} breaks, got {parsed}"
+        ));
+    }
+}
+
+fn parse_vertical_page_breaks_record(
+    data: &[u8],
+    record_offset: usize,
+    out: &mut BiffSheetManualPageBreaks,
+) {
+    // VerticalPageBreaks payload:
+    // - cbrk (u16)
+    // - VertBrk[cbrk] (6 bytes each): col (u16), rowStart (u16), rowEnd (u16)
+    if data.len() < 2 {
+        out.warnings.push(format!(
+            "truncated VerticalPageBreaks record at offset {record_offset}"
+        ));
+        return;
+    }
+
+    let cbrk = u16::from_le_bytes([data[0], data[1]]) as usize;
+
+    let mut parsed = 0usize;
+    let mut pos = 2usize;
+    for _ in 0..cbrk {
+        let Some(chunk) = data.get(pos..pos + 6) else {
+            break;
+        };
+        pos = pos.saturating_add(6);
+        parsed = parsed.saturating_add(1);
+
+        let col = u16::from_le_bytes([chunk[0], chunk[1]]);
+        out.manual_page_breaks
+            .col_breaks_after
+            .insert(col.saturating_sub(1) as u32);
+    }
+
+    if parsed < cbrk {
+        out.warnings.push(format!(
+            "truncated VerticalPageBreaks record at offset {record_offset}: expected {cbrk} breaks, got {parsed}"
+        ));
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1822,6 +1957,7 @@ fn unquote_sheet_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     fn record(id: u16, data: &[u8]) -> Vec<u8> {
         let mut out = Vec::with_capacity(4 + data.len());
@@ -2320,6 +2456,48 @@ mod tests {
                 .any(|w| w.contains("truncated SCENPROTECT record")),
             "expected truncated-SCENPROTECT warning, got {:?}",
             parsed.warnings
+        );
+    }
+
+    #[test]
+    fn parses_manual_page_breaks_and_warns_on_truncated_entries() {
+        // HorizontalPageBreaks with cbrk=2 but only one complete HorzBrk entry (6 bytes).
+        let mut horizontal = Vec::new();
+        horizontal.extend_from_slice(&2u16.to_le_bytes()); // cbrk
+        horizontal.extend_from_slice(&2u16.to_le_bytes()); // row (first row below break) => break after 1
+        horizontal.extend_from_slice(&0u16.to_le_bytes()); // colStart
+        horizontal.extend_from_slice(&255u16.to_le_bytes()); // colEnd
+
+        // VerticalPageBreaks with a single complete entry.
+        let mut vertical = Vec::new();
+        vertical.extend_from_slice(&1u16.to_le_bytes()); // cbrk
+        vertical.extend_from_slice(&3u16.to_le_bytes()); // col (first col right of break) => break after 2
+        vertical.extend_from_slice(&0u16.to_le_bytes()); // rowStart
+        vertical.extend_from_slice(&0u16.to_le_bytes()); // rowEnd
+
+        let stream = [
+            record(RECORD_HORIZONTALPAGEBREAKS, &horizontal),
+            record(RECORD_VERTICALPAGEBREAKS, &vertical),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_manual_page_breaks(&stream, 0).expect("parse");
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("HorizontalPageBreaks")),
+            "expected HorizontalPageBreaks warning, got {:?}",
+            parsed.warnings
+        );
+        assert_eq!(
+            parsed.manual_page_breaks.row_breaks_after,
+            BTreeSet::from([1u32])
+        );
+        assert_eq!(
+            parsed.manual_page_breaks.col_breaks_after,
+            BTreeSet::from([2u32])
         );
     }
 }
