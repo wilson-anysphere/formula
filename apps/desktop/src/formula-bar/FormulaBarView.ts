@@ -79,6 +79,13 @@ export class FormulaBarView {
   readonly root: HTMLElement;
   readonly textarea: HTMLTextAreaElement;
 
+  #scheduledRender:
+    | { id: number; kind: "raf" }
+    | { id: ReturnType<typeof setTimeout>; kind: "timeout" }
+    | null = null;
+  #pendingRender: { preserveTextareaValue: boolean } | null = null;
+  #lastHighlightHtml: string | null = null;
+
   #nameBoxDropdownEl: HTMLButtonElement;
   #cancelButtonEl: HTMLButtonElement;
   #commitButtonEl: HTMLButtonElement;
@@ -408,11 +415,19 @@ export class FormulaBarView {
   #onInputOrSelection(): void {
     if (!this.model.isEditing) return;
 
-    const start = this.textarea.selectionStart ?? this.textarea.value.length;
-    const end = this.textarea.selectionEnd ?? this.textarea.value.length;
-    this.model.updateDraft(this.textarea.value, start, end);
+    const value = this.textarea.value;
+    const start = this.textarea.selectionStart ?? value.length;
+    const end = this.textarea.selectionEnd ?? value.length;
+
+    // "keyup" and "select" events can fire without changing the textarea value/selection.
+    // Skip redundant model updates/renders in that case.
+    if (this.model.draft === value && this.model.cursorStart === start && this.model.cursorEnd === end) {
+      return;
+    }
+
+    this.model.updateDraft(value, start, end);
     this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(start, end);
-    this.#render({ preserveTextareaValue: true });
+    this.#requestRender({ preserveTextareaValue: true });
     this.#emitOverlays();
   }
 
@@ -420,9 +435,10 @@ export class FormulaBarView {
     if (!this.model.isEditing) return;
 
     const prevSelectedReferenceIndex = this.#selectedReferenceIndex;
-    const start = this.textarea.selectionStart ?? this.textarea.value.length;
-    const end = this.textarea.selectionEnd ?? this.textarea.value.length;
-    this.model.updateDraft(this.textarea.value, start, end);
+    const value = this.textarea.value;
+    const start = this.textarea.selectionStart ?? value.length;
+    const end = this.textarea.selectionEnd ?? value.length;
+    this.model.updateDraft(value, start, end);
     this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(start, end);
 
     const isFormulaEditing = this.model.draft.trim().startsWith("=");
@@ -444,8 +460,56 @@ export class FormulaBarView {
       }
     }
 
-    this.#render({ preserveTextareaValue: true });
+    this.#requestRender({ preserveTextareaValue: true });
     this.#emitOverlays();
+  }
+
+  #requestRender(opts: { preserveTextareaValue: boolean }): void {
+    // Merge pending render options; if any caller needs to overwrite the textarea
+    // value, the combined render must also overwrite it.
+    if (this.#pendingRender) {
+      this.#pendingRender = {
+        preserveTextareaValue: this.#pendingRender.preserveTextareaValue && opts.preserveTextareaValue,
+      };
+    } else {
+      this.#pendingRender = opts;
+    }
+
+    // Coalesce multiple rapid input/keyup/select events into a single render per frame.
+    if (this.#scheduledRender) return;
+
+    const flush = (): void => {
+      // Clear the scheduled handle before rendering so a render can schedule another frame.
+      this.#scheduledRender = null;
+      const pending = this.#pendingRender ?? { preserveTextareaValue: true };
+      this.#pendingRender = null;
+      this.#render(pending);
+    };
+
+    if (typeof requestAnimationFrame === "function") {
+      const id = requestAnimationFrame(() => flush());
+      this.#scheduledRender = { id, kind: "raf" };
+    } else {
+      const id = setTimeout(() => flush(), 0);
+      this.#scheduledRender = { id, kind: "timeout" };
+    }
+  }
+
+  #cancelPendingRender(): void {
+    if (!this.#scheduledRender) return;
+    const { id, kind } = this.#scheduledRender;
+    if (kind === "raf") {
+      // `cancelAnimationFrame` isn't present in all JS environments; fall back safely.
+      try {
+        cancelAnimationFrame(id);
+      } catch {
+        // ignore
+      }
+    } else {
+      clearTimeout(id);
+    }
+    this.#scheduledRender = null;
+    this.#pendingRender = null;
   }
 
   #onKeyDown(e: KeyboardEvent): void {
@@ -800,6 +864,10 @@ export class FormulaBarView {
   }
 
   #render(opts: { preserveTextareaValue: boolean }): void {
+    // If we're rendering synchronously (e.g. commit/cancel/AI suggestion), cancel any
+    // pending scheduled render so we don't immediately re-render the same state.
+    this.#cancelPendingRender();
+
     if (!this.model.isEditing) {
       this.#selectedReferenceIndex = null;
     }
@@ -892,7 +960,11 @@ export class FormulaBarView {
         previewInserted = true;
       }
     }
-    this.#highlightEl.innerHTML = highlightHtml;
+    // Avoid forcing a full DOM re-parse/layout if the highlight HTML is unchanged.
+    if (highlightHtml !== this.#lastHighlightHtml) {
+      this.#highlightEl.innerHTML = highlightHtml;
+      this.#lastHighlightHtml = highlightHtml;
+    }
 
     // Toggle editing UI state (textarea visibility, hover hit-testing, etc.) through CSS classes.
     this.root.classList.toggle("formula-bar--editing", this.model.isEditing);

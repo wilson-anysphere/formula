@@ -626,7 +626,7 @@ describe("FormulaBarView tab completion (integration)", () => {
     host.remove();
   });
 
-  it("does not render a dangling summary separator when the signature has no summary", () => {
+  it("does not render a dangling summary separator when the signature has no summary", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
@@ -637,6 +637,15 @@ describe("FormulaBarView tab completion (integration)", () => {
     view.textarea.value = "=ABS(";
     view.textarea.setSelectionRange(5, 5);
     view.textarea.dispatchEvent(new Event("input"));
+
+    // FormulaBarView renders on the next animation frame to keep long-formula edits responsive.
+    await new Promise<void>((resolve) => {
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => resolve());
+      } else {
+        setTimeout(() => resolve(), 0);
+      }
+    });
 
     const hint = host.querySelector<HTMLElement>('[data-testid="formula-hint"]');
     const signature = hint?.querySelector<HTMLElement>(".formula-bar-hint-signature");
