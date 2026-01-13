@@ -201,6 +201,7 @@ export class FormulaBarView {
 
   #readOnly = false;
   #isComposing = false;
+  #isFunctionPickerComposing = false;
 
   #scheduledRender:
     | { id: number; kind: "raf" }
@@ -833,6 +834,15 @@ export class FormulaBarView {
     const pickerKeyDown = (e: KeyboardEvent) => this.#onFunctionPickerKeyDown(e);
     functionPickerInput.addEventListener("keydown", pickerKeyDown);
     functionPickerList.addEventListener("keydown", pickerKeyDown);
+    functionPickerInput.addEventListener("compositionstart", () => {
+      this.#isFunctionPickerComposing = true;
+    });
+    functionPickerInput.addEventListener("compositionend", () => {
+      this.#isFunctionPickerComposing = false;
+    });
+    functionPickerInput.addEventListener("blur", () => {
+      this.#isFunctionPickerComposing = false;
+    });
 
     this.#syncExpandedUi();
 
@@ -1552,6 +1562,7 @@ export class FormulaBarView {
     this.#functionPickerOpen = true;
     this.#functionPickerEl.hidden = false;
     this.#fxButtonEl.setAttribute("aria-expanded", "true");
+    this.#isFunctionPickerComposing = false;
     this.#functionPickerInputEl.value = "";
     this.#functionPickerSelectedIndex = 0;
 
@@ -1569,6 +1580,7 @@ export class FormulaBarView {
     this.#functionPickerOpen = false;
     this.#functionPickerEl.hidden = true;
     this.#fxButtonEl.setAttribute("aria-expanded", "false");
+    this.#isFunctionPickerComposing = false;
     this.#functionPickerItems = [];
     this.#functionPickerItemEls = [];
     this.#functionPickerSelectedIndex = 0;
@@ -1624,6 +1636,13 @@ export class FormulaBarView {
 
   #onFunctionPickerKeyDown(e: KeyboardEvent): void {
     if (!this.#functionPickerOpen) return;
+
+    if (
+      (this.#isFunctionPickerComposing || e.isComposing) &&
+      (e.key === "Enter" || e.key === "Escape" || e.key === "ArrowDown" || e.key === "ArrowUp")
+    ) {
+      return;
+    }
 
     if (e.key === "Escape") {
       e.preventDefault();
