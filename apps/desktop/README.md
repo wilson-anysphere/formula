@@ -369,6 +369,10 @@ Params:
 - `wsUrl` is the base sync-server URL (no trailing `/docId`)
 - `docId` is the shared document/room name (must match across clients)
 - `token` must match the sync-server auth token (defaults to `dev-token`)
+- `collabEncrypt=1` enables **dev-only** end-to-end cell encryption for a deterministic demo range.
+  - Use this to exercise encrypted cell payloads (`enc`) end-to-end across multiple clients.
+  - To verify masking, open one client with `collabEncrypt=1` and another without it.
+- `collabEncryptRange=Sheet1!A1:C10` optionally overrides the encrypted range (default: `Sheet1!A1:C10`).
 - `collabPersistence=0` disables local persistence (IndexedDB) for debugging/tests (default: enabled)
   - Legacy alias (deprecated): `collabOffline=0`
 - `collabUserId`, `collabUserName`, `collabUserColor` override the per-client identity used for presence/comments/conflicts
