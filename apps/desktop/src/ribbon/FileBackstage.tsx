@@ -35,24 +35,31 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
   }, []);
 
   const shortcut = React.useCallback(
-    (key: string, options: { shift?: boolean } = {}) => {
-      if (isMac) {
-        return `${options.shift ? "⌘⇧" : "⌘"}${key}`;
-      }
-      return `Ctrl+${options.shift ? "Shift+" : ""}${key}`;
+    (commandId: string, fallbackKey: string, options: { shift?: boolean } = {}) => {
+      const fromIndex = uiState.shortcutById?.[commandId];
+      if (fromIndex) return fromIndex;
+      if (isMac) return `${options.shift ? "⇧" : ""}⌘${fallbackKey}`;
+      return `Ctrl+${options.shift ? "Shift+" : ""}${fallbackKey}`;
     },
-    [isMac],
+    [isMac, uiState.shortcutById],
   );
 
   const ariaShortcut = React.useCallback(
-    (key: string, options: { shift?: boolean } = {}) => {
-      const prefix = isMac ? "Meta" : "Control";
-      const parts = [prefix];
-      if (options.shift) parts.push("Shift");
-      parts.push(key.toUpperCase());
+    (commandId: string, fallbackKey: string, options: { shift?: boolean } = {}) => {
+      const fromIndex = uiState.ariaKeyShortcutsById?.[commandId];
+      if (fromIndex) return fromIndex;
+      const parts: string[] = [];
+      if (isMac) {
+        if (options.shift) parts.push("Shift");
+        parts.push("Meta");
+      } else {
+        parts.push("Control");
+        if (options.shift) parts.push("Shift");
+      }
+      parts.push(fallbackKey.toUpperCase());
       return parts.join("+");
     },
-    [isMac],
+    [isMac, uiState.ariaKeyShortcutsById],
   );
 
   const items = React.useMemo<BackstageItem[]>(
@@ -60,8 +67,8 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
       {
         iconId: "filePlus",
         label: "New Workbook",
-        hint: shortcut("N"),
-        ariaKeyShortcuts: ariaShortcut("N"),
+        hint: shortcut("workbench.newWorkbook", "N"),
+        ariaKeyShortcuts: ariaShortcut("workbench.newWorkbook", "N"),
         testId: "file-new",
         ariaLabel: "New workbook",
         onInvoke: actions?.newWorkbook,
@@ -69,8 +76,8 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
       {
         iconId: "folderOpen",
         label: "Open…",
-        hint: shortcut("O"),
-        ariaKeyShortcuts: ariaShortcut("O"),
+        hint: shortcut("workbench.openWorkbook", "O"),
+        ariaKeyShortcuts: ariaShortcut("workbench.openWorkbook", "O"),
         testId: "file-open",
         ariaLabel: "Open workbook",
         onInvoke: actions?.openWorkbook,
@@ -78,8 +85,8 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
       {
         iconId: "save",
         label: "Save",
-        hint: shortcut("S"),
-        ariaKeyShortcuts: ariaShortcut("S"),
+        hint: shortcut("workbench.saveWorkbook", "S"),
+        ariaKeyShortcuts: ariaShortcut("workbench.saveWorkbook", "S"),
         testId: "file-save",
         ariaLabel: "Save workbook",
         onInvoke: actions?.saveWorkbook,
@@ -87,8 +94,8 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
       {
         iconId: "edit",
         label: "Save As…",
-        hint: shortcut("S", { shift: true }),
-        ariaKeyShortcuts: ariaShortcut("S", { shift: true }),
+        hint: shortcut("workbench.saveWorkbookAs", "S", { shift: true }),
+        ariaKeyShortcuts: ariaShortcut("workbench.saveWorkbookAs", "S", { shift: true }),
         testId: "file-save-as",
         ariaLabel: "Save workbook as",
         onInvoke: actions?.saveWorkbookAs,
@@ -125,8 +132,8 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
       {
         iconId: "print",
         label: "Print…",
-        hint: shortcut("P"),
-        ariaKeyShortcuts: ariaShortcut("P"),
+        hint: shortcut("workbench.print", "P"),
+        ariaKeyShortcuts: ariaShortcut("workbench.print", "P"),
         testId: "file-print",
         ariaLabel: "Print",
         onInvoke: actions?.print,
@@ -152,8 +159,8 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
       {
         iconId: "close",
         label: "Close Window",
-        hint: shortcut("W"),
-        ariaKeyShortcuts: ariaShortcut("W"),
+        hint: shortcut("workbench.closeWorkbook", "W"),
+        ariaKeyShortcuts: ariaShortcut("workbench.closeWorkbook", "W"),
         testId: "file-close",
         ariaLabel: "Close window",
         onInvoke: actions?.closeWindow,
@@ -161,8 +168,8 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
       {
         iconId: "close",
         label: "Quit",
-        hint: shortcut("Q"),
-        ariaKeyShortcuts: ariaShortcut("Q"),
+        hint: shortcut("workbench.quit", "Q"),
+        ariaKeyShortcuts: ariaShortcut("workbench.quit", "Q"),
         testId: "file-quit",
         ariaLabel: "Quit application",
         onInvoke: actions?.quit,

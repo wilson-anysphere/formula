@@ -85,7 +85,11 @@ describe("Ribbon icon rendering", () => {
       await Promise.resolve();
     });
 
-    const freezeTopRow = container.querySelector<HTMLButtonElement>('[data-command-id="view.freezeTopRow"]');
+    // This command id also exists as a standalone Home tab button; scope to the open dropdown menu
+    // so we assert against the menu item UI (which should include a `.ribbon-dropdown__icon`).
+    const openMenus = Array.from(container.querySelectorAll<HTMLElement>(".ribbon-dropdown__menu"));
+    const activeMenu = openMenus.at(-1);
+    const freezeTopRow = activeMenu?.querySelector<HTMLButtonElement>('[data-command-id="view.freezeTopRow"]') ?? null;
     expect(freezeTopRow).toBeInstanceOf(HTMLButtonElement);
     expect(freezeTopRow?.querySelector(".ribbon-dropdown__icon svg")).toBeInstanceOf(SVGSVGElement);
 
