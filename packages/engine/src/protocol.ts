@@ -115,6 +115,119 @@ export interface CellChange {
   value: CellScalar;
 }
 
+// Pivots
+
+export type PivotValue =
+  | { type: "blank" }
+  | { type: "number"; value: number }
+  | { type: "date"; value: string }
+  | { type: "text"; value: string }
+  | { type: "bool"; value: boolean };
+
+export type PivotFieldType = "blank" | "number" | "date" | "text" | "bool" | "mixed";
+
+export interface PivotSchemaField {
+  name: string;
+  fieldType: PivotFieldType;
+  sampleValues: PivotValue[];
+}
+
+export interface PivotSchema {
+  fields: PivotSchemaField[];
+  recordCount: number;
+}
+
+export type PivotSortOrder = "ascending" | "descending" | "manual";
+
+export interface PivotField {
+  sourceField: string;
+  sortOrder?: PivotSortOrder;
+  // Note: manual sort values are represented in Rust as `PivotKeyPart` (including
+  // numeric variants encoded as raw f64 bit-pattern u64s). That is not currently
+  // representable losslessly in JS, so keep this shape permissive.
+  manualSort?: unknown[];
+}
+
+export type PivotAggregationType =
+  | "sum"
+  | "count"
+  | "average"
+  | "max"
+  | "min"
+  | "product"
+  | "countNumbers"
+  | "stdDev"
+  | "stdDevP"
+  | "var"
+  | "varP";
+
+export type PivotShowAsType =
+  | "normal"
+  | "percentOfGrandTotal"
+  | "percentOfRowTotal"
+  | "percentOfColumnTotal"
+  | "percentOf"
+  | "percentDifferenceFrom"
+  | "runningTotal"
+  | "rankAscending"
+  | "rankDescending";
+
+export interface PivotValueField {
+  sourceField: string;
+  name: string;
+  aggregation: PivotAggregationType;
+  numberFormat?: string;
+  showAs?: PivotShowAsType;
+  baseField?: string;
+  baseItem?: string;
+}
+
+export interface PivotFilterField {
+  sourceField: string;
+  // Allowed values are represented in Rust as `HashSet<PivotKeyPart>` which is not
+  // currently representable losslessly in JS (it serializes numeric keys as raw
+  // u64 bit patterns). For now treat as an opaque payload.
+  allowed?: unknown;
+}
+
+export interface PivotCalculatedField {
+  name: string;
+  formula: string;
+}
+
+export interface PivotCalculatedItem {
+  field: string;
+  name: string;
+  formula: string;
+}
+
+export type PivotLayout = "compact" | "outline" | "tabular";
+export type PivotSubtotalPosition = "top" | "bottom" | "none";
+
+export interface PivotGrandTotals {
+  rows: boolean;
+  columns: boolean;
+}
+
+/**
+ * Canonical pivot config schema expected by `crates/formula-wasm` (`formula_model::pivots::PivotConfig`).
+ */
+export interface PivotConfig {
+  rowFields: PivotField[];
+  columnFields: PivotField[];
+  valueFields: PivotValueField[];
+  filterFields: PivotFilterField[];
+  calculatedFields?: PivotCalculatedField[];
+  calculatedItems?: PivotCalculatedItem[];
+  layout: PivotLayout;
+  subtotals: PivotSubtotalPosition;
+  grandTotals: PivotGrandTotals;
+}
+
+export interface PivotCalculationResult {
+  writes: CellChange[];
+}
+
 // What-If / Goal Seek
 export type GoalSeekRecalcMode = "singleThreaded" | "multiThreaded";
 

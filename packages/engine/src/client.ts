@@ -12,6 +12,9 @@ import type {
   FormulaPartialParseResult,
   FormulaParseOptions,
   FormulaToken,
+  PivotCalculationResult,
+  PivotConfig,
+  PivotSchema,
   RewriteFormulaForCopyDeltaRequest,
   RpcOptions,
 } from "./protocol.ts";
@@ -88,6 +91,27 @@ export interface EngineClient {
    * cross-sheet caches coherent.
    */
   recalculate(sheet?: string, options?: RpcOptions): Promise<CellChange[]>;
+
+  /**
+   * Inspect a worksheet range (headers + records) and return a pivot schema for UI prompting.
+   *
+   * Additive API: older WASM builds may not export `getPivotSchema`.
+   */
+  getPivotSchema?(sheet: string, sourceRangeA1: string, sampleSize?: number, options?: RpcOptions): Promise<PivotSchema>;
+
+  /**
+   * Calculate a pivot table from a source range and return the list of worksheet writes needed to
+   * render the pivot at `destinationTopLeftA1`.
+   *
+   * Does **not** mutate workbook state; callers can apply the returned writes as desired.
+   */
+  calculatePivot?(
+    sheet: string,
+    sourceRangeA1: string,
+    destinationTopLeftA1: string,
+    config: PivotConfig,
+    options?: RpcOptions
+  ): Promise<PivotCalculationResult>;
 
   /**
    * Run Goal Seek (what-if analysis) over the current workbook.
@@ -266,6 +290,12 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.setRange(range, values, sheet, rpcOptions)),
     setLocale: async (localeId, rpcOptions) => await withEngine((connected) => connected.setLocale(localeId, rpcOptions)),
     recalculate: async (sheet, rpcOptions) => await withEngine((connected) => connected.recalculate(sheet, rpcOptions)),
+    getPivotSchema: async (sheet, sourceRangeA1, sampleSize, rpcOptions) =>
+      await withEngine((connected) => connected.getPivotSchema(sheet, sourceRangeA1, sampleSize, rpcOptions)),
+    calculatePivot: async (sheet, sourceRangeA1, destinationTopLeftA1, config, rpcOptions) =>
+      await withEngine((connected) =>
+        connected.calculatePivot(sheet, sourceRangeA1, destinationTopLeftA1, config, rpcOptions)
+      ),
     goalSeek: async (request, rpcOptions) => await withEngine((connected) => connected.goalSeek(request, rpcOptions)),
     setSheetDimensions: async (sheet, rows, cols, rpcOptions) =>
       await withEngine((connected) => connected.setSheetDimensions(sheet, rows, cols, rpcOptions)),

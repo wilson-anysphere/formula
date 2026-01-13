@@ -14,6 +14,13 @@ type WasmWorkbookInstance = {
   getCell(address: string, sheet?: string): unknown;
   getCellRich?: (address: string, sheet?: string) => unknown;
   goalSeek?: (request: unknown) => unknown;
+  getPivotSchema?: (sheet: string, sourceRangeA1: string, sampleSize?: number) => unknown;
+  calculatePivot?: (
+    sheet: string,
+    sourceRangeA1: string,
+    destinationTopLeftA1: string,
+    config: unknown
+  ) => unknown;
   setCell(address: string, value: CellScalar, sheet?: string): void;
   setCellRich?: (address: string, value: unknown, sheet?: string) => void;
   setCells?: (updates: Array<{ address: string; value: CellScalar; sheet?: string }>) => void;
@@ -76,6 +83,13 @@ function normalizeCellChanges(value: unknown): unknown {
     if (!("value" in obj)) return change;
     return { ...obj, value: normalizeCellScalar(obj.value) };
   });
+}
+
+function normalizePivotCalculation(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const obj = value as any;
+  if (!Array.isArray(obj.writes)) return value;
+  return { ...obj, writes: normalizeCellChanges(obj.writes) };
 }
 
 function cloneToPlainData(value: unknown): unknown {
@@ -425,6 +439,27 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("goalSeek: WasmWorkbook.goalSeek is not available in this WASM build");
               }
               result = cloneToPlainData((wb as any).goalSeek(params));
+              break;
+            case "getPivotSchema":
+              if (typeof (wb as any).getPivotSchema !== "function") {
+                throw new Error("getPivotSchema: WasmWorkbook.getPivotSchema is not available in this WASM build");
+              }
+              result = cloneToPlainData((wb as any).getPivotSchema(params.sheet, params.sourceRangeA1, params.sampleSize));
+              break;
+            case "calculatePivot":
+              if (typeof (wb as any).calculatePivot !== "function") {
+                throw new Error("calculatePivot: WasmWorkbook.calculatePivot is not available in this WASM build");
+              }
+              result = normalizePivotCalculation(
+                cloneToPlainData(
+                  (wb as any).calculatePivot(
+                    params.sheet,
+                    params.sourceRangeA1,
+                    params.destinationTopLeftA1,
+                    params.config
+                  )
+                )
+              );
               break;
             default:
               throw new Error(`unknown method: ${req.method}`);

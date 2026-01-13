@@ -13,6 +13,9 @@ import type {
   FormulaParseOptions,
   FormulaToken,
   InitMessage,
+  PivotCalculationResult,
+  PivotConfig,
+  PivotSchema,
   RewriteFormulaForCopyDeltaRequest,
   RpcCancel,
   RpcOptions,
@@ -294,6 +297,34 @@ export class EngineWorker {
   async recalculate(sheet?: string, options?: RpcOptions): Promise<CellChange[]> {
     await this.flush();
     return (await this.invoke("recalculate", { sheet }, options)) as CellChange[];
+  }
+
+  async getPivotSchema(
+    sheet: string,
+    sourceRangeA1: string,
+    sampleSize?: number,
+    options?: RpcOptions
+  ): Promise<PivotSchema> {
+    await this.flush();
+    return (await this.invoke("getPivotSchema", { sheet, sourceRangeA1, sampleSize }, options)) as PivotSchema;
+  }
+
+  async calculatePivot(
+    sheet: string,
+    sourceRangeA1: string,
+    destinationTopLeftA1: string,
+    config: PivotConfig,
+    options?: RpcOptions
+  ): Promise<PivotCalculationResult> {
+    await this.flush();
+    // `serde_wasm_bindgen` does not accept `undefined` values inside structs; prune optional keys
+    // so callers can pass `{ foo?: undefined }` without breaking deserialization.
+    const normalizedConfig = pruneNullsDeep(config) as PivotConfig;
+    return (await this.invoke(
+      "calculatePivot",
+      { sheet, sourceRangeA1, destinationTopLeftA1, config: normalizedConfig },
+      options
+    )) as PivotCalculationResult;
   }
 
   async goalSeek(request: GoalSeekRequest, options?: RpcOptions): Promise<GoalSeekResponse> {
