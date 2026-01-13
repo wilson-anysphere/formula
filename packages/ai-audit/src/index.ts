@@ -6,5 +6,6 @@ export * from "./composite-store.ts";
 export * from "./storage.ts";
 export * from "./local-storage-store.ts";
 export * from "./indexeddb-store.ts";
+export * from "./migrate.ts";
 export * from "./recorder.ts";
 export * from "./export.ts";
