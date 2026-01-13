@@ -319,18 +319,47 @@ test.describe("drawing + image rendering regressions", () => {
       // Ensure the image has been painted in the current frame.
       app.sharedGrid?.renderer?.renderImmediately?.();
 
-      const dpr = canvas.width / Math.max(1, canvas.getBoundingClientRect().width);
-      // Sample most of the cell "content" area (excluding padding + border) so we can distinguish
-      // a fully-painted image from a text-only fallback (which covers far fewer pixels).
-      const paddingX = 4;
-      const paddingY = 2;
+      const renderer = app.sharedGrid?.renderer;
+      if (!renderer) throw new Error("Missing shared grid renderer");
+
+      const cache: Map<string, any> | undefined = (renderer as any)?.imageBitmapCache;
+      const cached = cache?.get?.(imageId);
+      const state = cached?.state ?? null;
+      const bitmap = cached?.bitmap ?? null;
+
+      const zoom = typeof renderer.getZoom === "function" ? renderer.getZoom() : 1;
+      const paddingX = 4 * zoom;
+      const paddingY = 2 * zoom;
+
+      const availableWidth = Math.max(0, rect.width - paddingX * 2);
+      const availableHeight = Math.max(0, rect.height - paddingY * 2);
+
+      const srcW =
+        bitmap && typeof bitmap.width === "number" && Number.isFinite(bitmap.width) && bitmap.width > 0 ? bitmap.width : 1;
+      const srcH =
+        bitmap && typeof bitmap.height === "number" && Number.isFinite(bitmap.height) && bitmap.height > 0 ? bitmap.height : 1;
+
+      const scale =
+        availableWidth > 0 && availableHeight > 0 && srcW > 0 && srcH > 0
+          ? Math.min(availableWidth / srcW, availableHeight / srcH)
+          : 1;
+
+      const destW = srcW * scale;
+      const destH = srcH * scale;
+      const destX = rect.x + paddingX + Math.max(0, (availableWidth - destW) / 2);
+      const destY = rect.y + paddingY + Math.max(0, (availableHeight - destH) / 2);
+
+      // Sample inside the expected image destination rect (not the full cell) so we fail if the renderer
+      // silently falls back to drawing plain text and leaves the image region transparent.
       const sampleRect = (() => {
-        const x = Math.max(0, Math.floor(rect.x + paddingX));
-        const y = Math.max(0, Math.floor(rect.y + paddingY));
-        const w = Math.max(1, Math.floor(rect.width - paddingX * 2));
-        const h = Math.max(1, Math.floor(rect.height - paddingY * 2));
+        const x = Math.max(0, Math.floor(destX));
+        const y = Math.max(0, Math.floor(destY));
+        const w = Math.max(1, Math.floor(destW));
+        const h = Math.max(1, Math.floor(destH));
         return { x, y, width: w, height: h };
       })();
+
+      const dpr = canvas.width / Math.max(1, canvas.getBoundingClientRect().width);
 
       const samplePx = {
         x: Math.max(0, Math.floor(sampleRect.x * dpr)),
@@ -345,16 +374,14 @@ test.describe("drawing + image rendering regressions", () => {
       }
       const coverage = imageData.data.length > 0 ? nonTransparent / (imageData.data.length / 4) : 0;
 
-      const cache: Map<string, any> | undefined = (app.sharedGrid?.renderer as any)?.imageBitmapCache;
-      const state = cache?.get?.(imageId)?.state ?? null;
-      return { nonTransparent, coverage, sampleRect, state };
+      return { nonTransparent, coverage, sampleRect, state, zoom, srcW, srcH, rect };
     }, fixture.imageId);
 
     expect(result.state).toBe("ready");
 
     expect(
       result.coverage,
-      `expected shared-grid content canvas to paint most pixels for in-cell image (coverage=${result.coverage}, sample=${JSON.stringify(result.sampleRect)})`,
+      `expected shared-grid content canvas to paint the in-cell image region (coverage=${result.coverage}, zoom=${result.zoom}, src=${result.srcW}x${result.srcH}, cellRect=${JSON.stringify(result.rect)}, sample=${JSON.stringify(result.sampleRect)})`,
     ).toBeGreaterThan(0.6);
   });
 });
