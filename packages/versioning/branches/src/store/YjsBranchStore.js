@@ -21,9 +21,9 @@ function isNodeRuntime() {
 
 async function importNodeZlib() {
   // Important: keep the specifier non-literal so browser bundlers (esbuild, Rollup, etc)
-  // don't try to resolve `node:zlib` when producing a browser bundle. This code path
+  // don't try to resolve Node built-ins when producing a browser bundle. This code path
   // is only executed in Node runtimes (guarded by `isNodeRuntime()`).
-  const specifier = "node:zlib";
+  const specifier = "zlib";
   return import(/* @vite-ignore */ specifier);
 }
 
