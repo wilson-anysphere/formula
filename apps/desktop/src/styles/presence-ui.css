@@ -55,10 +55,10 @@
   align-items: center;
   gap: 6px;
   padding: 2px 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--formula-grid-line, var(--border));
   border-radius: 999px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
+  background: var(--formula-grid-header-bg, var(--bg-secondary));
+  color: var(--formula-grid-cell-text, var(--text-primary));
   font-size: 12px;
   min-width: 0;
   /* Keep the pills readable when drawn over busy grids. */
@@ -75,7 +75,7 @@
   height: 8px;
   border-radius: 999px;
   flex: 0 0 auto;
-  background: var(--text-primary);
+  background: var(--formula-grid-cell-text, var(--text-primary));
 }
 
 .presence-collaborators__name {
