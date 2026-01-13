@@ -398,7 +398,9 @@ Two important operational details:
 
 - **`flush(docId)` is implemented as a snapshot write.** `y-indexeddb` persists incremental Yjs updates asynchronously and does not expose a reliable “await all pending writes” API. To satisfy Formula’s `CollabPersistence.flush` contract, `IndexedDbCollabPersistence.flush` writes a full-document snapshot (`Y.encodeStateAsUpdate(doc)`) into the same IndexedDB `updates` object store. This guarantees that the full in-memory document state at the time of the call can be recovered on the next load, even if some incremental writes are still in flight.
 - **`compact(docId)` rewrites the update log to keep load time and disk usage bounded.** Without compaction, a long-lived document can accumulate a large number of incremental updates, which increases IndexedDB size and slows down `load()` (replay cost). Compaction replaces many small updates with a single snapshot update by clearing the `updates` store and writing `Y.encodeStateAsUpdate(doc)`.
-  - Knob: `new IndexedDbCollabPersistence({ maxUpdates })` (defaults to `500`) enables automatic background compaction once more than `maxUpdates` incremental updates have been observed.
+  - Knobs:
+    - `new IndexedDbCollabPersistence({ maxUpdates })` (defaults to `500`) enables automatic background compaction once more than `maxUpdates` incremental updates have been observed (`0` disables auto-compaction).
+    - `compactDebounceMs` controls how long compaction is debounced during bursts of edits (defaults to `250ms`).
 
 `CollabSession.flushLocalPersistence()` delegates to the underlying persistence `flush(docId)` when present. Desktop typically calls it during teardown (or before closing a window) to reduce the chance of losing the last few edits.
 
