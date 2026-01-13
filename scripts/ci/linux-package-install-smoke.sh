@@ -53,12 +53,25 @@ find_pkg_dirs() {
   # shellcheck disable=SC2178 # (used via nameref)
   local -n out_dirs="$out_var"
 
+  # Avoid `find .` here: release jobs run `pnpm install`, so traversing the repo
+  # (node_modules, pnpm store, etc) can be very slow. Only scan expected Tauri
+  # target directories.
+  local -a search_roots=()
+  local root
+  for root in "apps/desktop/src-tauri/target" "target"; do
+    if [[ -d "$root" ]]; then
+      search_roots+=("$root")
+    fi
+  done
+
+  if [[ ${#search_roots[@]} -eq 0 ]]; then
+    echo "linux-package-install-smoke: no target directories found (expected apps/desktop/src-tauri/target or target)" >&2
+    exit 1
+  fi
+
   local -a files
   mapfile -t files < <(
-    find . -type f \( \
-      -path "*/target/release/bundle/${pkg_type}/*${ext}" -o \
-      -path "*/target/*/release/bundle/${pkg_type}/*${ext}" \
-    \) -print | sort
+    find "${search_roots[@]}" -type f -path "*/release/bundle/${pkg_type}/*${ext}" -print | sort
   )
 
   if [[ ${#files[@]} -eq 0 ]]; then
