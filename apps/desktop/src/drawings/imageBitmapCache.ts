@@ -158,7 +158,16 @@ export class ImageBitmapCache {
     void promise.then(
       (bitmap) => {
         const current = this.entries.get(id);
-        if (current !== record || current.promise !== promise) return;
+        if (current !== record || current.promise !== promise) {
+          // This decode is no longer the active request for the image id (e.g.
+          // it was invalidated or superseded). If every tracked consumer has
+          // already aborted and there were no untracked consumers, ensure we
+          // don't leak the decoded bitmap.
+          if (!record.pinned && record.waiters === 0) {
+            ImageBitmapCache.tryClose(bitmap);
+          }
+          return;
+        }
 
         // If the decode finishes after all callers have aborted (and no
         // untracked waiters exist), drop it immediately to avoid caching a bitmap

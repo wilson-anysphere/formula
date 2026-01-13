@@ -96,4 +96,34 @@ describe("ImageBitmapCache", () => {
     // And the bitmap should remain available from the cache.
     await expect(cache.get(entry)).resolves.toBe(bitmap);
   });
+
+  it("closes decoded bitmaps from stale in-flight decodes when all waiters abort and the entry is invalidated", async () => {
+    const cache = new ImageBitmapCache({ negativeCacheMs: 0 });
+    const entry = makeEntry();
+
+    const close = vi.fn();
+    const bitmap = { close } as unknown as ImageBitmap;
+
+    let resolveDecode!: (value: ImageBitmap) => void;
+    const inflightDecode = new Promise<ImageBitmap>((resolve) => {
+      resolveDecode = resolve;
+    });
+
+    vi.stubGlobal("createImageBitmap", vi.fn(() => inflightDecode) as unknown as typeof createImageBitmap);
+
+    const controller = new AbortController();
+    const p = cache.get(entry, { signal: controller.signal });
+    controller.abort();
+    await expect(p).rejects.toMatchObject({ name: "AbortError" });
+
+    // Drop the cache entry while the decode is still in-flight.
+    cache.invalidate(entry.id);
+
+    // When the decode eventually resolves, the bitmap should be closed since no
+    // one is still awaiting it.
+    resolveDecode(bitmap);
+    await Promise.resolve();
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
 });
