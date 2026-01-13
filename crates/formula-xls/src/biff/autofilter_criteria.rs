@@ -57,6 +57,15 @@ pub(crate) fn parse_biff_sheet_autofilter_criteria(
     // Prefer the last AUTOFILTER record per column.
     let mut cols: HashMap<u32, FilterColumn> = HashMap::new();
 
+    // AUTOFILTER records can encode the target column either as:
+    // - a 0-based entry index within the AutoFilter range (`iEntry`), or
+    // - (observed in some producers) the absolute worksheet column index.
+    //
+    // We do a first pass to collect raw entry ids and choose a best-effort interpretation for
+    // the whole sheet.
+    let mut autofilter_records: Vec<records::LogicalBiffRecord<'_>> = Vec::new();
+    let mut raw_entries: Vec<u32> = Vec::new();
+
     for record in iter {
         let record = match record {
             Ok(r) => r,
@@ -72,19 +81,30 @@ pub(crate) fn parse_biff_sheet_autofilter_criteria(
         }
 
         match record.record_id {
-            RECORD_AUTOFILTER => match parse_autofilter_record(&record, codepage, autofilter_range)
-            {
-                Ok(Some(col)) => {
-                    cols.insert(col.col_id, col);
+            RECORD_AUTOFILTER => {
+                let data = record.data.as_ref();
+                if data.len() >= 2 {
+                    raw_entries.push(u16::from_le_bytes([data[0], data[1]]) as u32);
                 }
-                Ok(None) => {}
-                Err(err) => out.warnings.push(format!(
-                    "failed to decode AUTOFILTER record at offset {}: {err}",
-                    record.offset
-                )),
-            },
+                autofilter_records.push(record);
+            }
             records::RECORD_EOF => break,
             _ => {}
+        }
+    }
+
+    let entry_mode = choose_entry_mode(&raw_entries, autofilter_range);
+
+    for record in autofilter_records {
+        match parse_autofilter_record(&record, codepage, autofilter_range, entry_mode) {
+            Ok(Some(col)) => {
+                cols.insert(col.col_id, col);
+            }
+            Ok(None) => {}
+            Err(err) => out.warnings.push(format!(
+                "failed to decode AUTOFILTER record at offset {}: {err}",
+                record.offset
+            )),
         }
     }
 
@@ -93,6 +113,38 @@ pub(crate) fn parse_biff_sheet_autofilter_criteria(
     out.filter_columns = filter_columns;
 
     Ok(out)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutoFilterEntryMode {
+    Relative,
+    Absolute,
+}
+
+fn choose_entry_mode(raw_entries: &[u32], range: Range) -> AutoFilterEntryMode {
+    let start_col = range.start.col;
+    let end_col = range.end.col;
+    let width = end_col.saturating_sub(start_col).saturating_add(1);
+
+    let mut relative_hits = 0usize;
+    let mut absolute_hits = 0usize;
+
+    for &entry in raw_entries {
+        // Relative encoding: entry is 0..(width-1).
+        if entry < width {
+            relative_hits += 1;
+        }
+        // Absolute encoding: entry is an in-range worksheet column index.
+        if entry >= start_col && entry <= end_col {
+            absolute_hits += 1;
+        }
+    }
+
+    if absolute_hits > relative_hits {
+        AutoFilterEntryMode::Absolute
+    } else {
+        AutoFilterEntryMode::Relative
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,6 +214,7 @@ fn parse_autofilter_record(
     record: &records::LogicalBiffRecord<'_>,
     codepage: u16,
     autofilter_range: Range,
+    entry_mode: AutoFilterEntryMode,
 ) -> Result<Option<FilterColumn>, String> {
     let data = record.data.as_ref();
     if data.len() < 20 {
@@ -174,13 +227,10 @@ fn parse_autofilter_record(
     // - DOPER1 (8 bytes)
     // - DOPER2 (8 bytes)
     // - optional strings for string DOPER values (XLUnicodeString)
-    let col = u16::from_le_bytes([data[0], data[1]]) as u32;
+    let entry = u16::from_le_bytes([data[0], data[1]]) as u32;
     let grbit = u16::from_le_bytes([data[2], data[3]]);
 
-    if col < autofilter_range.start.col || col > autofilter_range.end.col {
-        return Ok(None);
-    }
-    let col_id = col - autofilter_range.start.col;
+    let col_id = resolve_col_id(entry, autofilter_range, entry_mode)?;
 
     let join = if (grbit & AUTOFILTER_FLAG_AND) != 0 {
         FilterJoin::All
@@ -239,6 +289,39 @@ fn parse_autofilter_record(
         }));
     }
 
+    // Best-effort mapping for "between"/"not between" operators. These are represented in OOXML
+    // as a pair of comparisons combined with AND/OR; model those directly so they round-trip
+    // through XLSX without losing structure.
+    if matches!(doper1.op, AutoFilterOp::Between | AutoFilterOp::NotBetween) {
+        if let (DoperValue::Number(a), DoperValue::Number(b)) = (&doper1.value, &doper2.value) {
+            let (min, max) = if a <= b { (*a, *b) } else { (*b, *a) };
+            let (join, criteria) = match doper1.op {
+                AutoFilterOp::Between => (
+                    FilterJoin::All,
+                    vec![
+                        FilterCriterion::Number(NumberComparison::GreaterThanOrEqual(min)),
+                        FilterCriterion::Number(NumberComparison::LessThanOrEqual(max)),
+                    ],
+                ),
+                AutoFilterOp::NotBetween => (
+                    FilterJoin::Any,
+                    vec![
+                        FilterCriterion::Number(NumberComparison::LessThan(min)),
+                        FilterCriterion::Number(NumberComparison::GreaterThan(max)),
+                    ],
+                ),
+                _ => unreachable!(),
+            };
+            return Ok(Some(FilterColumn {
+                col_id,
+                join,
+                criteria,
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            }));
+        }
+    }
+
     let mut criteria: Vec<FilterCriterion> = Vec::new();
     if let Some(c) = criterion_from_doper(&doper1) {
         criteria.push(c);
@@ -259,6 +342,35 @@ fn parse_autofilter_record(
         values: Vec::new(),
         raw_xml: Vec::new(),
     }))
+}
+
+fn resolve_col_id(
+    entry: u32,
+    range: Range,
+    entry_mode: AutoFilterEntryMode,
+) -> Result<u32, String> {
+    let start_col = range.start.col;
+    let end_col = range.end.col;
+    let width = end_col.saturating_sub(start_col).saturating_add(1);
+
+    match entry_mode {
+        AutoFilterEntryMode::Relative => {
+            if entry >= width {
+                return Err(format!(
+                    "AUTOFILTER iEntry {entry} out of range for filter width {width}"
+                ));
+            }
+            Ok(entry)
+        }
+        AutoFilterEntryMode::Absolute => {
+            if entry < start_col || entry > end_col {
+                return Err(format!(
+                    "AUTOFILTER column {entry} out of range for filter range cols {start_col}..={end_col}"
+                ));
+            }
+            Ok(entry - start_col)
+        }
+    }
 }
 
 fn parse_doper(bytes: &[u8]) -> ParsedDoper {
@@ -831,6 +943,174 @@ mod tests {
         assert_eq!(
             col.criteria,
             vec![FilterCriterion::Equals(FilterValue::Text("ABCDE".into()))]
+        );
+    }
+
+    #[test]
+    fn parses_entry_index_relative_to_autofilter_range_start() {
+        // AutoFilter range starts at column D (index 3). AUTOFILTER iEntry uses a 0-based index
+        // within the range in BIFF8, so entry 0 should map to colId=0 (column D).
+        let range = Range::new(CellRef::new(0, 3), CellRef::new(10, 5)); // D..F
+
+        let mut af = Vec::new();
+        af.extend_from_slice(&0u16.to_le_bytes()); // iEntry (relative)
+        af.extend_from_slice(&0u16.to_le_bytes()); // grbit
+
+        // DOPER1: string equals "X".
+        af.push(4);
+        af.push(3);
+        af.extend_from_slice(&0u16.to_le_bytes());
+        af.extend_from_slice(&0u32.to_le_bytes());
+        af.extend_from_slice(&[0u8; 8]); // DOPER2 unused
+        af.extend_from_slice(&xl_unicode_string_compressed("X"));
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_worksheet()),
+            record(RECORD_AUTOFILTER, &af),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_autofilter_criteria(
+            &stream,
+            0,
+            BiffVersion::Biff8,
+            1252,
+            range,
+        )
+        .expect("parse");
+
+        assert_eq!(parsed.filter_columns.len(), 1);
+        assert_eq!(parsed.filter_columns[0].col_id, 0);
+    }
+
+    #[test]
+    fn parses_entry_as_absolute_col_index_when_it_matches_range() {
+        // Some writers store the AUTOFILTER "entry" field as an absolute worksheet column.
+        // Validate the best-effort detection path when the AutoFilter range does not start at A.
+        let range = Range::new(CellRef::new(0, 3), CellRef::new(10, 5)); // D..F (start_col=3)
+
+        let mut af = Vec::new();
+        af.extend_from_slice(&3u16.to_le_bytes()); // entry encoded as absolute column D
+        af.extend_from_slice(&0u16.to_le_bytes()); // grbit
+
+        // DOPER1: string equals "X".
+        af.push(4);
+        af.push(3);
+        af.extend_from_slice(&0u16.to_le_bytes());
+        af.extend_from_slice(&0u32.to_le_bytes());
+        af.extend_from_slice(&[0u8; 8]); // DOPER2 unused
+        af.extend_from_slice(&xl_unicode_string_compressed("X"));
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_worksheet()),
+            record(RECORD_AUTOFILTER, &af),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_autofilter_criteria(
+            &stream,
+            0,
+            BiffVersion::Biff8,
+            1252,
+            range,
+        )
+        .expect("parse");
+
+        assert_eq!(parsed.filter_columns.len(), 1);
+        assert_eq!(parsed.filter_columns[0].col_id, 0);
+    }
+
+    #[test]
+    fn parses_between_operator_into_two_numeric_comparisons() {
+        let range = Range::new(CellRef::new(0, 0), CellRef::new(10, 0)); // A
+
+        let mut af = Vec::new();
+        af.extend_from_slice(&0u16.to_le_bytes()); // entry
+        af.extend_from_slice(&0u16.to_le_bytes()); // grbit
+
+        // DOPER1: between 2..5 (min).
+        af.push(1); // vt
+        af.push(1); // op between
+        af.extend_from_slice(&0u16.to_le_bytes());
+        af.extend_from_slice(&rk_number(2).to_le_bytes());
+        // DOPER2: max value, op unused.
+        af.push(1); // vt
+        af.push(0); // op none
+        af.extend_from_slice(&0u16.to_le_bytes());
+        af.extend_from_slice(&rk_number(5).to_le_bytes());
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_worksheet()),
+            record(RECORD_AUTOFILTER, &af),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_autofilter_criteria(
+            &stream,
+            0,
+            BiffVersion::Biff8,
+            1252,
+            range,
+        )
+        .expect("parse");
+
+        let col = &parsed.filter_columns[0];
+        assert_eq!(col.join, FilterJoin::All);
+        assert_eq!(
+            col.criteria,
+            vec![
+                FilterCriterion::Number(NumberComparison::GreaterThanOrEqual(2.0)),
+                FilterCriterion::Number(NumberComparison::LessThanOrEqual(5.0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_not_between_operator_into_or_comparisons() {
+        let range = Range::new(CellRef::new(0, 0), CellRef::new(10, 0)); // A
+
+        let mut af = Vec::new();
+        af.extend_from_slice(&0u16.to_le_bytes()); // entry
+        af.extend_from_slice(&0u16.to_le_bytes()); // grbit
+
+        // DOPER1: not between 2..5 (min).
+        af.push(1); // vt
+        af.push(2); // op not between
+        af.extend_from_slice(&0u16.to_le_bytes());
+        af.extend_from_slice(&rk_number(2).to_le_bytes());
+        // DOPER2: max value, op unused.
+        af.push(1); // vt
+        af.push(0); // op none
+        af.extend_from_slice(&0u16.to_le_bytes());
+        af.extend_from_slice(&rk_number(5).to_le_bytes());
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_worksheet()),
+            record(RECORD_AUTOFILTER, &af),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_autofilter_criteria(
+            &stream,
+            0,
+            BiffVersion::Biff8,
+            1252,
+            range,
+        )
+        .expect("parse");
+
+        let col = &parsed.filter_columns[0];
+        assert_eq!(col.join, FilterJoin::Any);
+        assert_eq!(
+            col.criteria,
+            vec![
+                FilterCriterion::Number(NumberComparison::LessThan(2.0)),
+                FilterCriterion::Number(NumberComparison::GreaterThan(5.0)),
+            ]
         );
     }
 }
