@@ -6,7 +6,7 @@
 
 use formula_engine::pivot::{
     AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotValue, SubtotalPosition,
-    ValueField,
+    ShowAsType, ValueField,
 };
 
 use super::{PivotCacheDefinition, PivotCacheValue, PivotTableDefinition};
@@ -102,13 +102,29 @@ pub fn pivot_table_to_engine_config(
                         source_field
                     )
                 });
+
+            let show_as = map_show_data_as(df.show_data_as.as_deref());
+
+            // `dataField@baseField` is an index into the cache fields list.
+            let base_field = df.base_field.and_then(|base_field_idx| {
+                cache_def
+                    .cache_fields
+                    .get(base_field_idx as usize)
+                    .map(|f| f.name.clone())
+            });
+
+            // `dataField@baseItem` refers to an item within `baseField`'s shared-items table.
+            //
+            // We currently do not parse shared items from `pivotCacheDefinition`, so we can't map
+            // this index to a stable display string yet.
+            let base_item = None;
             Some(ValueField {
                 source_field,
                 name,
                 aggregation,
-                show_as: None,
-                base_field: None,
-                base_item: None,
+                show_as,
+                base_field,
+                base_item,
             })
         })
         .collect::<Vec<_>>();
@@ -154,6 +170,26 @@ fn map_subtotal(subtotal: Option<&str>) -> AggregationType {
     }
 }
 
+fn map_show_data_as(show_data_as: Option<&str>) -> Option<ShowAsType> {
+    let show_data_as = show_data_as?.trim();
+    if show_data_as.is_empty() {
+        return None;
+    }
+
+    match show_data_as.to_ascii_lowercase().as_str() {
+        "normal" => Some(ShowAsType::Normal),
+        "percentofgrandtotal" => Some(ShowAsType::PercentOfGrandTotal),
+        "percentofrowtotal" => Some(ShowAsType::PercentOfRowTotal),
+        "percentofcolumntotal" => Some(ShowAsType::PercentOfColumnTotal),
+        "percentof" => Some(ShowAsType::PercentOf),
+        "percentdifferencefrom" => Some(ShowAsType::PercentDifferenceFrom),
+        "runningtotal" => Some(ShowAsType::RunningTotal),
+        "rankascending" => Some(ShowAsType::RankAscending),
+        "rankdescending" => Some(ShowAsType::RankDescending),
+        _ => None,
+    }
+}
+
 fn aggregation_display_name(agg: AggregationType) -> &'static str {
     match agg {
         AggregationType::Sum => "Sum",
@@ -167,5 +203,70 @@ fn aggregation_display_name(agg: AggregationType) -> &'static str {
         AggregationType::StdDevP => "StdDevP",
         AggregationType::Var => "Var",
         AggregationType::VarP => "VarP",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::pivots::{PivotCacheDefinition, PivotCacheField, PivotTableDefinition};
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn maps_show_data_as_percent_of_grand_total() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dataFields count="1">
+    <dataField fld="0" showDataAs="percentOfGrandTotal"/>
+  </dataFields>
+</pivotTableDefinition>"#;
+
+        let table =
+            PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml).expect("parse");
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![PivotCacheField {
+                name: "Sales".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let cfg = pivot_table_to_engine_config(&table, &cache_def);
+        assert_eq!(cfg.value_fields.len(), 1);
+        assert_eq!(
+            cfg.value_fields[0].show_as,
+            Some(ShowAsType::PercentOfGrandTotal)
+        );
+    }
+
+    #[test]
+    fn maps_base_field_to_cache_field_name() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dataFields count="1">
+    <dataField fld="0" showDataAs="percentOf" baseField="1"/>
+  </dataFields>
+</pivotTableDefinition>"#;
+
+        let table =
+            PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml).expect("parse");
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![
+                PivotCacheField {
+                    name: "Sales".to_string(),
+                    ..Default::default()
+                },
+                PivotCacheField {
+                    name: "Region".to_string(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        let cfg = pivot_table_to_engine_config(&table, &cache_def);
+        assert_eq!(cfg.value_fields.len(), 1);
+        assert_eq!(cfg.value_fields[0].base_field.as_deref(), Some("Region"));
     }
 }
