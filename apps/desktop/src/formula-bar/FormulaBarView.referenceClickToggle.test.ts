@@ -17,17 +17,24 @@ describe("FormulaBarView reference token click selection toggle", () => {
 
     view.textarea.value = "=A1+B1";
 
-    // Place caret inside "A1" (between A and 1), then click:
-    // Excel UX should expand selection to the full reference token.
+    // Place caret inside "A1" (between A and 1), then click: Excel UX should expand
+    // selection to the full reference token.
     view.textarea.setSelectionRange(2, 2);
+    view.textarea.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     view.textarea.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
     expect(view.textarea.selectionStart).toBe(1);
     expect(view.textarea.selectionEnd).toBe(3);
 
     // Second click on the same token should toggle back to a caret for manual edits.
-    // (In browsers, the click itself collapses the selection before firing; emulate that.)
+    //
+    // In browsers, the selection typically collapses to a caret (and can emit a `select`
+    // event) before the `click` handler runs. Emulate that ordering to ensure the toggle
+    // logic is resilient even when `activeReferenceIndex` and `selectedReferenceIndex`
+    // temporarily differ.
+    view.textarea.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     view.textarea.setSelectionRange(2, 2);
+    view.textarea.dispatchEvent(new Event("select"));
     view.textarea.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
     expect(view.textarea.selectionStart).toBe(2);
@@ -35,12 +42,15 @@ describe("FormulaBarView reference token click selection toggle", () => {
 
     // Repeat for the second reference to ensure the correct token is selected.
     view.textarea.setSelectionRange(5, 5);
+    view.textarea.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     view.textarea.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
     expect(view.textarea.selectionStart).toBe(4);
     expect(view.textarea.selectionEnd).toBe(6);
 
+    view.textarea.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     view.textarea.setSelectionRange(5, 5);
+    view.textarea.dispatchEvent(new Event("select"));
     view.textarea.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
     expect(view.textarea.selectionStart).toBe(5);
@@ -49,4 +59,3 @@ describe("FormulaBarView reference token click selection toggle", () => {
     host.remove();
   });
 });
-

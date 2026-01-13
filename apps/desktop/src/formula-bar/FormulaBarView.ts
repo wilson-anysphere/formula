@@ -154,6 +154,7 @@ export class FormulaBarView {
   #hoverOverride: RangeAddress | null = null;
   #hoverOverrideText: string | null = null;
   #selectedReferenceIndex: number | null = null;
+  #mouseDownSelectedReferenceIndex: number | null = null;
   #callbacks: FormulaBarViewCallbacks;
 
   #functionPickerEl: HTMLDivElement;
@@ -415,6 +416,7 @@ export class FormulaBarView {
 
     textarea.addEventListener("focus", () => this.#beginEditFromFocus());
     textarea.addEventListener("input", () => this.#onInputOrSelection());
+    textarea.addEventListener("mousedown", () => this.#onTextareaMouseDown());
     textarea.addEventListener("click", () => this.#onTextareaClick());
     textarea.addEventListener("keyup", () => this.#onInputOrSelection());
     textarea.addEventListener("select", () => this.#onInputOrSelection());
@@ -568,10 +570,24 @@ export class FormulaBarView {
     this.#emitOverlays();
   }
 
+  #onTextareaMouseDown(): void {
+    if (!this.model.isEditing) return;
+
+    // Clicking a textarea can collapse an existing selection *before* the `click` event
+    // fires (often emitting a `select` event in between). Capture whether a full
+    // reference token was selected at pointer-down time so `#onTextareaClick()` can
+    // reliably implement Excel-style click-to-select / click-again-to-edit toggling.
+    const start = this.textarea.selectionStart ?? this.textarea.value.length;
+    const end = this.textarea.selectionEnd ?? this.textarea.value.length;
+    this.model.updateDraft(this.textarea.value, start, end);
+    this.#mouseDownSelectedReferenceIndex = this.#inferSelectedReferenceIndex(start, end);
+  }
+
   #onTextareaClick(): void {
     if (!this.model.isEditing) return;
 
-    const prevSelectedReferenceIndex = this.#selectedReferenceIndex;
+    const prevSelectedReferenceIndex = this.#mouseDownSelectedReferenceIndex ?? this.#selectedReferenceIndex;
+    this.#mouseDownSelectedReferenceIndex = null;
     const value = this.textarea.value;
     const start = this.textarea.selectionStart ?? value.length;
     const end = this.textarea.selectionEnd ?? value.length;
