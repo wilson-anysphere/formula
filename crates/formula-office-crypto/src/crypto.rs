@@ -7,6 +7,8 @@ use cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use sha2::Digest;
 use zeroize::Zeroizing;
 
+const MAX_DIGEST_LEN: usize = 64; // SHA-512
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashAlgorithm {
     Sha1,
@@ -31,6 +33,39 @@ impl HashAlgorithm {
             HashAlgorithm::Sha256 => 32,
             HashAlgorithm::Sha384 => 48,
             HashAlgorithm::Sha512 => 64,
+        }
+    }
+
+    fn digest_two_into(&self, a: &[u8], b: &[u8], out: &mut [u8]) {
+        debug_assert!(
+            out.len() >= self.digest_len(),
+            "hash output buffer too small"
+        );
+        match self {
+            HashAlgorithm::Sha1 => {
+                let mut hasher = sha1::Sha1::new();
+                hasher.update(a);
+                hasher.update(b);
+                out[..20].copy_from_slice(&hasher.finalize());
+            }
+            HashAlgorithm::Sha256 => {
+                let mut hasher = sha2::Sha256::new();
+                hasher.update(a);
+                hasher.update(b);
+                out[..32].copy_from_slice(&hasher.finalize());
+            }
+            HashAlgorithm::Sha384 => {
+                let mut hasher = sha2::Sha384::new();
+                hasher.update(a);
+                hasher.update(b);
+                out[..48].copy_from_slice(&hasher.finalize());
+            }
+            HashAlgorithm::Sha512 => {
+                let mut hasher = sha2::Sha512::new();
+                hasher.update(a);
+                hasher.update(b);
+                out[..64].copy_from_slice(&hasher.finalize());
+            }
         }
     }
 
@@ -99,18 +134,52 @@ pub(crate) fn hash_password(
     password_utf16le: &[u8],
     spin_count: u32,
 ) -> Zeroizing<Vec<u8>> {
-    let mut initial = Vec::with_capacity(salt.len() + password_utf16le.len());
-    initial.extend_from_slice(salt);
-    initial.extend_from_slice(password_utf16le);
+    let digest_len = hash_alg.digest_len();
+    debug_assert!(digest_len <= MAX_DIGEST_LEN);
 
-    let mut h: Zeroizing<Vec<u8>> = Zeroizing::new(hash_alg.digest(&initial));
-    for i in 0..spin_count {
-        let mut buf = Vec::with_capacity(4 + h.len());
-        buf.extend_from_slice(&i.to_le_bytes());
-        buf.extend_from_slice(&h);
-        *h = hash_alg.digest(&buf);
+    // Avoid per-iteration allocations (spinCount is often 50k-100k):
+    // keep the current digest in a fixed buffer and overwrite it each round.
+    let mut h_buf: Zeroizing<[u8; MAX_DIGEST_LEN]> = Zeroizing::new([0u8; MAX_DIGEST_LEN]);
+    hash_alg.digest_two_into(salt, password_utf16le, &mut h_buf[..digest_len]);
+
+    match hash_alg {
+        HashAlgorithm::Sha1 => {
+            for i in 0..spin_count {
+                let mut hasher = sha1::Sha1::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..digest_len]);
+                h_buf[..digest_len].copy_from_slice(&hasher.finalize());
+            }
+        }
+        HashAlgorithm::Sha256 => {
+            for i in 0..spin_count {
+                let mut hasher = sha2::Sha256::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..digest_len]);
+                h_buf[..digest_len].copy_from_slice(&hasher.finalize());
+            }
+        }
+        HashAlgorithm::Sha384 => {
+            for i in 0..spin_count {
+                let mut hasher = sha2::Sha384::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..digest_len]);
+                h_buf[..digest_len].copy_from_slice(&hasher.finalize());
+            }
+        }
+        HashAlgorithm::Sha512 => {
+            for i in 0..spin_count {
+                let mut hasher = sha2::Sha512::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..digest_len]);
+                h_buf[..digest_len].copy_from_slice(&hasher.finalize());
+            }
+        }
     }
-    h
+
+    let mut out = vec![0u8; digest_len];
+    out.copy_from_slice(&h_buf[..digest_len]);
+    Zeroizing::new(out)
 }
 
 pub(crate) fn derive_agile_key(
@@ -122,23 +191,57 @@ pub(crate) fn derive_agile_key(
     block_key: &[u8],
 ) -> Zeroizing<Vec<u8>> {
     let h = hash_password(hash_alg, salt, password_utf16le, spin_count);
-    let mut buf = Vec::with_capacity(h.len() + block_key.len());
-    buf.extend_from_slice(&h);
-    buf.extend_from_slice(block_key);
-    let mut key: Zeroizing<Vec<u8>> = Zeroizing::new(hash_alg.digest(&buf));
-    key.truncate(key_bytes);
-    if key.len() < key_bytes {
-        key.resize(key_bytes, 0);
-    }
+
+    // Avoid allocating a temporary `H || blockKey` buffer: hash with two updates into a stack
+    // buffer, then truncate/pad.
+    let digest_len = hash_alg.digest_len();
+    debug_assert!(digest_len <= MAX_DIGEST_LEN);
+    let mut digest: Zeroizing<[u8; MAX_DIGEST_LEN]> = Zeroizing::new([0u8; MAX_DIGEST_LEN]);
+    hash_alg.digest_two_into(&h, block_key, &mut digest[..digest_len]);
+
+    let mut key: Zeroizing<Vec<u8>> = Zeroizing::new(vec![0u8; key_bytes]);
+    let take = key_bytes.min(digest_len);
+    key[..take].copy_from_slice(&digest[..take]);
     key
 }
 
-pub(crate) fn derive_iv(hash_alg: HashAlgorithm, salt: &[u8], block_key: &[u8], iv_len: usize) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(salt.len() + block_key.len());
-    buf.extend_from_slice(salt);
-    buf.extend_from_slice(block_key);
-    let hash = hash_alg.digest(&buf);
-    hash[..iv_len.min(hash.len())].to_vec()
+pub(crate) fn derive_iv(
+    hash_alg: HashAlgorithm,
+    salt: &[u8],
+    block_key: &[u8],
+    iv_len: usize,
+) -> Vec<u8> {
+    // Avoid allocating a temporary `salt || blockKey` buffer: hash with two updates into a stack
+    // buffer, then truncate.
+    let digest_len = hash_alg.digest_len();
+    debug_assert!(digest_len <= MAX_DIGEST_LEN);
+    let mut digest = [0u8; MAX_DIGEST_LEN];
+    hash_alg.digest_two_into(salt, block_key, &mut digest[..digest_len]);
+
+    let out_len = iv_len.min(digest_len);
+    digest[..out_len].to_vec()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn hash_password_perf_guard_spin_10k() {
+        // Regression guard: the spinCount loop is the hot path for both Standard (50k) and Agile
+        // (often 100k) password-based encryption.
+        let salt = [0x11u8; 16];
+        let pw = password_to_utf16le("password");
+
+        let start = Instant::now();
+        let _ = hash_password(HashAlgorithm::Sha256, &salt, &pw, 10_000);
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "hash_password(spinCount=10_000) took too long: {:?}",
+            start.elapsed()
+        );
+    }
 }
 
 pub(crate) fn aes_cbc_decrypt(
