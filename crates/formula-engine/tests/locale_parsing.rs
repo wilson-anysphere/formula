@@ -195,6 +195,18 @@ fn canonicalize_and_localize_error_literals() {
         de
     );
 
+    // Non-ASCII localized errors should be translated using Unicode-aware case folding.
+    // de-DE: `#ÜBERLAUF!` is the localized spelling for `#SPILL!`.
+    let de_spill_variants = ["=#ÜBERLAUF!", "=#Überlauf!", "=#üBeRlAuF!"];
+    for src in de_spill_variants {
+        let canon = locale::canonicalize_formula(src, &locale::DE_DE).unwrap();
+        assert_eq!(canon, "=#SPILL!");
+        assert_eq!(
+            locale::localize_formula(&canon, &locale::DE_DE).unwrap(),
+            "=#ÜBERLAUF!"
+        );
+    }
+
     let fr = "=#VALEUR!";
     let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
     assert_eq!(canon, "=#VALUE!");

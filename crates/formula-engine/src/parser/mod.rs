@@ -1769,7 +1769,7 @@ fn match_error_literal(input: &str) -> Option<usize> {
 }
 
 fn is_error_body_char(c: char) -> bool {
-    matches!(c, '_' | '/' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9')
+    matches!(c, '_' | '/' | '.') || c.is_alphanumeric()
 }
 
 fn prev_significant(tokens: &[Token], idx: usize) -> Option<usize> {

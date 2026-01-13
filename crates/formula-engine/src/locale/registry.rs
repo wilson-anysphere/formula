@@ -178,8 +178,21 @@ impl FormulaLocale {
     }
 
     pub fn canonical_error_literal(&self, localized: &str) -> Option<&'static str> {
+        if localized.is_ascii() {
+            for (canonical, loc) in self.error_literal_map {
+                if loc.eq_ignore_ascii_case(localized) {
+                    return Some(*canonical);
+                }
+            }
+            return None;
+        }
+
+        // Use Unicode-aware case folding for localized spellings with non-ASCII characters.
+        // This matches the behavior used for other case-insensitive comparisons in the engine
+        // (e.g. criteria matching).
+        let localized_fold = crate::value::casefold(localized);
         for (canonical, loc) in self.error_literal_map {
-            if loc.eq_ignore_ascii_case(localized) {
+            if crate::value::casefold(loc) == localized_fold {
                 return Some(*canonical);
             }
         }
@@ -187,8 +200,19 @@ impl FormulaLocale {
     }
 
     pub fn localized_error_literal(&self, canonical: &str) -> Option<&'static str> {
+        if canonical.is_ascii() {
+            for (canon, localized) in self.error_literal_map {
+                if canon.eq_ignore_ascii_case(canonical) {
+                    return Some(*localized);
+                }
+            }
+            return None;
+        }
+
+        // Canonical spellings are ASCII today, but keep this Unicode-aware for future additions.
+        let canonical_fold = crate::value::casefold(canonical);
         for (canon, localized) in self.error_literal_map {
-            if canon.eq_ignore_ascii_case(canonical) {
+            if crate::value::casefold(canon) == canonical_fold {
                 return Some(*localized);
             }
         }
@@ -239,6 +263,7 @@ pub static DE_DE: FormulaLocale = FormulaLocale {
     error_literal_map: &[
         ("#VALUE!", "#WERT!"),
         ("#REF!", "#BEZUG!"),
+        ("#SPILL!", "#ÜBERLAUF!"),
         ("#GETTING_DATA", "#DATEN_ABRUFEN"),
     ],
     functions: &DE_DE_FUNCTIONS,
