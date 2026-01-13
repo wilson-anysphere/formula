@@ -46,7 +46,6 @@ test("CollabVersioning.destroy unsubscribes from Yjs document updates", async (t
   });
 
   assert.ok(updateListeners.size > baselineListenerCount);
-  const listenerDelta = updateListeners.size - baselineListenerCount;
   assert.equal(versioning.manager.dirty, false);
 
   versioning.destroy();
