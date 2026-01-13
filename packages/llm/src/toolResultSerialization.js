@@ -177,6 +177,7 @@ function serializeDetectAnomalies(params) {
         })();
 
   const anomalies = Array.isArray(data?.anomalies) ? data.anomalies : null;
+  const toolTruncated = typeof data?.truncated === "boolean" ? data.truncated : false;
 
   // Prefer explicit total_anomalies when the tool has already truncated the list.
   const totalAnomalies =
@@ -192,12 +193,12 @@ function serializeDetectAnomalies(params) {
   for (const limit of attempts) {
     const preview = anomalies
       ? anomalies.slice(0, limit).map((entry) => {
-          if (!entry || typeof entry !== "object") return entry;
+          if (typeof entry !== "object" || entry === null) return truncatePrimitive(entry, 200);
           const record = /** @type {any} */ (entry);
           const out = {
-            ...(typeof record.cell === "string" ? { cell: record.cell } : {}),
-            ...("value" in record ? { value: record.value ?? null } : {}),
-            ...("score" in record ? { score: record.score ?? null } : {})
+            ...(typeof record.cell === "string" ? { cell: truncateString(record.cell, 200) } : {}),
+            ...("value" in record ? { value: truncatePrimitive(record.value ?? null, 200) } : {}),
+            ...("score" in record ? { score: truncatePrimitive(record.score ?? null, 200) } : {})
           };
           // If we couldn't extract known fields, fall back to a truncated string representation.
           if (!("cell" in out) && !("value" in out) && !("score" in out)) {
@@ -207,7 +208,11 @@ function serializeDetectAnomalies(params) {
         })
       : undefined;
 
-    const truncated = typeof totalAnomalies === "number" ? totalAnomalies > (preview ? preview.length : 0) : false;
+    const previewCount = preview ? preview.length : 0;
+    const truncated =
+      toolTruncated ||
+      (anomalies ? anomalies.length > previewCount : false) ||
+      (typeof totalAnomalies === "number" ? totalAnomalies > previewCount : false);
 
     const payload = {
       ...base,
@@ -220,7 +225,7 @@ function serializeDetectAnomalies(params) {
             : { count: totalAnomalies }
           : {}),
         ...(preview ? { anomalies: preview } : {}),
-        ...(anomalies ? { truncated } : {})
+        ...(anomalies || toolTruncated ? { truncated } : {})
       }
     };
 
