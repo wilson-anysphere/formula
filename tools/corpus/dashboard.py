@@ -130,6 +130,89 @@ def _round_trip_size_overhead(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "count_over_1_10": sum(1 for r in ratios if r > 1.10),
     }
 
+TREND_MAX_ENTRIES = 90
+
+
+def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact, machine-readable snapshot for trend tracking."""
+
+    counts = summary.get("counts") or {}
+    rates = summary.get("rates") or {}
+
+    diff_totals = dict(summary.get("diff_totals") or {})
+    diff_totals.setdefault("critical", 0)
+    diff_totals.setdefault("warning", 0)
+    diff_totals.setdefault("info", 0)
+    diff_totals["total"] = (
+        int(diff_totals.get("critical") or 0)
+        + int(diff_totals.get("warning") or 0)
+        + int(diff_totals.get("info") or 0)
+    )
+
+    overhead = summary.get("round_trip_size_overhead") or {}
+    if not isinstance(overhead, dict):
+        overhead = {}
+
+    entry: dict[str, Any] = {
+        "timestamp": summary.get("timestamp"),
+        "commit": summary.get("commit"),
+        "run_url": summary.get("run_url"),
+        "total": int(counts.get("total") or 0),
+        "open_ok": int(counts.get("open_ok") or 0),
+        "round_trip_ok": int(counts.get("round_trip_ok") or 0),
+        "open_rate": float(rates.get("open") or 0.0),
+        "round_trip_rate": float(rates.get("round_trip") or 0.0),
+        # Optional checks: rate among attempted workbooks only.
+        "calc_ok": int(counts.get("calculate_ok") or 0),
+        "calc_attempted": int(counts.get("calculate_attempted") or 0),
+        "calc_rate": rates.get("calculate"),
+        "render_ok": int(counts.get("render_ok") or 0),
+        "render_attempted": int(counts.get("render_attempted") or 0),
+        "render_rate": rates.get("render"),
+        "diff_totals": diff_totals,
+        "failures_by_category": summary.get("failures_by_category") or {},
+        # Size ratio: output_size / input_size for successful round-trips.
+        "size_overhead_mean": overhead.get("mean"),
+        "size_overhead_p50": overhead.get("p50"),
+        "size_overhead_p90": overhead.get("p90"),
+        "size_overhead_samples": int(overhead.get("count") or 0),
+    }
+
+    # Keep entries compact by eliding empty metadata keys.
+    if not entry.get("commit"):
+        entry.pop("commit", None)
+    if not entry.get("run_url"):
+        entry.pop("run_url", None)
+    return entry
+
+
+def _append_trend_file(
+    trend_path: Path,
+    *,
+    summary: dict[str, Any],
+    max_entries: int = TREND_MAX_ENTRIES,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """Append a trend entry for this run and write back the updated JSON list.
+
+    Returns: (updated_entries, previous_entry)
+    """
+
+    prev: dict[str, Any] | None = None
+    entries: list[dict[str, Any]] = []
+    if trend_path.exists():
+        raw = json.loads(trend_path.read_text(encoding="utf-8") or "[]")
+        if not isinstance(raw, list):
+            raise ValueError(f"trend file must be a JSON list: {trend_path}")
+        entries = [e for e in raw if isinstance(e, dict)]
+        if entries:
+            prev = entries[-1]
+
+    entries.append(_trend_entry(summary))
+    if max_entries > 0 and len(entries) > max_entries:
+        entries = entries[-max_entries:]
+
+    write_json(trend_path, entries)
+    return entries, prev
 
 def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) -> str:
     counts = summary["counts"]
@@ -351,6 +434,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Generate corpus compatibility dashboard.")
     parser.add_argument("--triage-dir", type=Path, required=True)
     parser.add_argument("--out-dir", type=Path, help="Defaults to --triage-dir")
+    parser.add_argument(
+        "--append-trend",
+        type=Path,
+        help="Append a compact time-series entry for this run to the given JSON list file.",
+    )
     args = parser.parse_args()
 
     triage_dir = args.triage_dir
@@ -549,6 +637,9 @@ def main() -> int:
     (out_dir / "summary.md").write_text(
         _markdown_summary(summary, reports), encoding="utf-8"
     )
+
+    if args.append_trend:
+        _append_trend_file(args.append_trend, summary=summary)
 
     return 0
 

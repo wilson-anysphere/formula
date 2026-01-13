@@ -102,6 +102,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Restore private corpus trend (time series)
+        uses: actions/cache/restore@v4
+        with:
+          path: tools/corpus/out/private/trend.json
+          key: corpus-private-trend-${{ github.run_id }}
+          restore-keys: |
+            corpus-private-trend-
       # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
       # CARGO_HOME so the shared cache action works as intended.
@@ -142,16 +149,75 @@ jobs:
             "${EXTRA_FLAGS[@]}"
       - name: Generate dashboard (private)
         run: |
-          if [ ! -d tools/corpus/out/private ]; then
+          # `tools/corpus/out/private/trend.json` may be restored from cache even when
+          # triage output is missing; gate on `index.json` to detect actual triage output.
+          if [ ! -f tools/corpus/out/private/index.json ]; then
             echo "No private triage output; skipping."
             exit 0
           fi
-          python -m tools.corpus.dashboard --triage-dir tools/corpus/out/private
+          python -m tools.corpus.dashboard \
+            --triage-dir tools/corpus/out/private \
+            --append-trend tools/corpus/out/private/trend.json
       - name: Publish summary (private)
         run: |
           if [ -f tools/corpus/out/private/summary.md ]; then
             cat tools/corpus/out/private/summary.md >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Publish trend delta (private)
+        run: |
+          if [ ! -f tools/corpus/out/private/summary.json ]; then
+            # Dashboard didn't run, so we didn't append a new trend entry.
+            exit 0
+          fi
+          if [ ! -f tools/corpus/out/private/trend.json ]; then
+            exit 0
+          fi
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+          
+          p = Path("tools/corpus/out/private/trend.json")
+          data = json.loads(p.read_text(encoding="utf-8") or "[]")
+          if not isinstance(data, list) or len(data) < 2:
+              raise SystemExit(0)
+          
+          prev, cur = data[-2], data[-1]
+          
+          def pct(v):
+              return "n/a" if v is None else f"{v:.2%}"
+          
+          def delta_pct(a, b):
+              if a is None or b is None:
+                  return "n/a"
+              return f"{(b - a) * 100:+.2f}pp"
+          
+          def delta_int(a, b):
+              if not isinstance(a, int) or not isinstance(b, int):
+                  return "n/a"
+              return f"{b - a:+d}"
+          
+          lines = []
+          lines.append("## Trend delta (vs previous private run)")
+          lines.append("")
+          lines.append(f"- Open rate: **{pct(cur.get('open_rate'))}** ({delta_pct(prev.get('open_rate'), cur.get('open_rate'))})")
+          lines.append(f"- Round-trip rate: **{pct(cur.get('round_trip_rate'))}** ({delta_pct(prev.get('round_trip_rate'), cur.get('round_trip_rate'))})")
+          lines.append(f"- Calc rate (attempted): **{pct(cur.get('calc_rate'))}** ({delta_pct(prev.get('calc_rate'), cur.get('calc_rate'))}); attempted {cur.get('calc_attempted', 0)}")
+          lines.append(f"- Render rate (attempted): **{pct(cur.get('render_rate'))}** ({delta_pct(prev.get('render_rate'), cur.get('render_rate'))}); attempted {cur.get('render_attempted', 0)}")
+          
+          prev_diff = prev.get("diff_totals") or {}
+          cur_diff = cur.get("diff_totals") or {}
+          lines.append(
+              "- Diff totals (critical/warn/info): "
+              f"**{cur_diff.get('critical', 0)}/{cur_diff.get('warning', 0)}/{cur_diff.get('info', 0)}** "
+              "("
+              f"{delta_int(prev_diff.get('critical'), cur_diff.get('critical'))}/"
+              f"{delta_int(prev_diff.get('warning'), cur_diff.get('warning'))}/"
+              f"{delta_int(prev_diff.get('info'), cur_diff.get('info'))}"
+              ")"
+          )
+          
+          print("\n".join(lines))
+          PY
       - name: Compatibility gate (private)
         run: |
           if [ ! -f tools/corpus/out/private/summary.json ]; then
@@ -161,6 +227,12 @@ jobs:
           python -m tools.corpus.compat_gate \
             --summary-json tools/corpus/out/private/summary.json \
             --min-round-trip-rate 0.97
+      - name: Save private corpus trend cache
+        if: always() && hashFiles('tools/corpus/out/private/trend.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: tools/corpus/out/private/trend.json
+          key: corpus-private-trend-${{ github.run_id }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
