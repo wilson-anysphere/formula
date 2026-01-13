@@ -105,7 +105,12 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libssl-dev \
-            patchelf
+            patchelf \
+            rpm
+
+          # `appimagetool` is distributed as an AppImage and requires the FUSE 2 runtime.
+          # Ubuntu 24.04 uses `libfuse2t64` as part of the time_t 64-bit transition.
+          sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64
 
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
@@ -145,6 +150,54 @@ jobs:
             See the assets below for the installers/bundles.
           releaseDraft: true
           prerelease: false
+          # Explicitly build all required Linux artifact types. We keep `bundle.targets: "all"`
+          # in `tauri.conf.json`, but some formats can be skipped if system tooling is missing.
+          # This forces the bundler to attempt each required output so the post-build check can
+          # catch regressions early.
+          args: ${{ matrix.platform == 'ubuntu-24.04' && '--bundles appimage,deb,rpm' || '' }}
+
+      - name: Verify Linux release artifacts (AppImage + deb + rpm + signatures)
+        if: matrix.platform == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bundle_dir="apps/desktop/src-tauri/target/release/bundle"
+          if [[ ! -d "$bundle_dir" ]]; then
+            echo "Expected bundle output directory not found: $bundle_dir" >&2
+            exit 1
+          fi
+
+          shopt -s nullglob
+          appimages=("$bundle_dir/appimage"/*.AppImage)
+          debs=("$bundle_dir/deb"/*.deb)
+          rpms=("$bundle_dir/rpm"/*.rpm)
+
+          echo "Bundle outputs:"
+          printf '  AppImage: %s\n' "${#appimages[@]}"
+          printf '  deb:      %s\n' "${#debs[@]}"
+          printf '  rpm:      %s\n' "${#rpms[@]}"
+
+          if ((${#appimages[@]} == 0)); then
+            echo "Missing required Linux artifact: .AppImage" >&2
+            exit 1
+          fi
+          if ((${#debs[@]} == 0)); then
+            echo "Missing required Linux artifact: .deb" >&2
+            exit 1
+          fi
+          if ((${#rpms[@]} == 0)); then
+            echo "Missing required Linux artifact: .rpm" >&2
+            exit 1
+          fi
+
+          # Ensure updater signature files exist for each bundle type.
+          for artifact in "${appimages[@]}" "${debs[@]}" "${rpms[@]}"; do
+            if [[ ! -f "${artifact}.sig" ]]; then
+              echo "Missing signature file for ${artifact} (expected ${artifact}.sig)" >&2
+              exit 1
+            fi
+          done
 
       - name: Report desktop bundle sizes
         env:

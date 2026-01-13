@@ -205,6 +205,49 @@ docker run --rm -it \
 Note: showing a tray icon also requires a desktop environment with **StatusNotifier/AppIndicator**
 support (e.g. the GNOME Shell “AppIndicator and KStatusNotifierItem Support” extension).
 
+## Linux: `.rpm` runtime dependencies (Fedora/RHEL)
+
+For RPM-based distros (Fedora/RHEL/CentOS derivatives), the same GTK3/WebKitGTK/AppIndicator stack
+must be present at runtime.
+
+These dependencies are declared in `apps/desktop/src-tauri/tauri.conf.json` under
+`bundle.linux.rpm.depends` (Fedora/RHEL package names):
+
+- `webkit2gtk4.1` – WebKitGTK system WebView used by Tauri on Linux.
+- `gtk3` – GTK3 (windowing/event loop; also required by WebKitGTK).
+- `libappindicator-gtk3` – tray icon backend.
+- `librsvg2` – SVG rendering used by parts of the GTK icon stack / common icon themes.
+- `openssl-libs` – OpenSSL runtime libraries required by native dependencies in the Tauri stack.
+
+### Validating the `.rpm`
+
+After building via `(cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)` (or after CI produces an artifact),
+verify the `Requires:` list and shared library resolution.
+
+From `apps/desktop/src-tauri`:
+
+```bash
+# Inspect declared dependencies (check webkit2gtk/gtk3/appindicator/etc)
+rpm_pkg="$(ls target/release/bundle/rpm/*.rpm | head -n 1)"
+rpm -qpR "$rpm_pkg"
+
+# Extract and confirm all linked shared libraries resolve
+tmpdir="$(mktemp -d)"
+(cd "$tmpdir" && rpm2cpio "$rpm_pkg" | cpio -idmv)
+ldd "$tmpdir/usr/bin/formula-desktop" | grep -q "not found" && exit 1 || true
+```
+
+For a clean install test (no GUI required), use a Fedora container:
+
+```bash
+docker run --rm -it \
+  -v "$PWD/target/release/bundle/rpm:/rpm" \
+  fedora:40 bash -lc '
+    dnf -y install /rpm/*.rpm
+    ldd /usr/bin/formula-desktop | grep -q "not found" && exit 1 || true
+  '
+```
+
 ## 5) Verifying a release
 
 After the workflow completes:
@@ -212,7 +255,7 @@ After the workflow completes:
 1. Open the GitHub Release (draft) and confirm:
    - macOS: `.dmg` (and/or `.app.tar.gz`)
    - Windows: installer (NSIS `.exe` and/or `.msi`)
-   - Linux: `.AppImage` and/or `.deb`
+   - Linux: `.AppImage`, `.deb`, and `.rpm`
 2. Download/install on each platform.
 3. Publish the release to make it visible to users and (if your updater endpoint references
    GitHub) available for auto-update.
