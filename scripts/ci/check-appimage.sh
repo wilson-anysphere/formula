@@ -68,6 +68,22 @@ expected_readelf_machine_substring() {
   esac
 }
 
+expected_file_arch_substring() {
+  # `file` prints e.g.:
+  #   ELF 64-bit LSB executable, x86-64, ...
+  #   ELF 64-bit LSB executable, ARM aarch64, ...
+  local arch
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64) echo "x86-64" ;;
+    aarch64) echo "aarch64" ;;
+    armv7l) echo "ARM" ;;
+    *)
+      die "unsupported runner architecture '$arch' (add mapping to scripts/ci/check-appimage.sh)"
+      ;;
+  esac
+}
+
 find_appimages() {
   # Prefer searching known Cargo/Tauri target directories rather than traversing the whole repo.
   local roots=()
@@ -285,6 +301,8 @@ main() {
 
   local expected_machine_substring
   expected_machine_substring="$(expected_readelf_machine_substring)"
+  local expected_file_substring
+  expected_file_substring="$(expected_file_arch_substring)"
 
   echo "Found ${#appimages[@]} AppImage artifact(s)."
   for appimage in "${appimages[@]}"; do
@@ -299,6 +317,17 @@ main() {
 
     local appimage_abs tmp squashfs_root main_bin appdir_ld_library_path ld_library_path
     appimage_abs="$(realpath "$appimage")"
+
+    # Sanity check the AppImage runtime architecture before we try to execute it.
+    # If this is the wrong arch, extraction will fail with "Exec format error"; make that
+    # failure mode explicit and actionable.
+    local appimage_file_info=""
+    appimage_file_info="$(file "$appimage_abs" 2>/dev/null || true)"
+    echo "$appimage_file_info"
+    if [[ -n "$appimage_file_info" ]] && ! grep -qiF "$expected_file_substring" <<<"$appimage_file_info"; then
+      die "wrong AppImage architecture for '$appimage': expected '$expected_file_substring' (runner arch $(uname -m)), got: $appimage_file_info"
+    fi
+
     tmp="$(mktemp -d)"
     # shellcheck disable=SC2064
     trap "rm -rf '$tmp'" EXIT
