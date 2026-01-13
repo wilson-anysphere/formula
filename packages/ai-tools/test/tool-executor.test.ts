@@ -1039,7 +1039,7 @@ describe("ToolExecutor", () => {
     });
     vi.stubGlobal("fetch", fetchMock as any);
 
-    const result = await executor.execute({
+    const defaultPortResult = await executor.execute({
       name: "fetch_external_data",
       parameters: {
         source_type: "api",
@@ -1048,8 +1048,18 @@ describe("ToolExecutor", () => {
       }
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result.ok).toBe(true);
+    const nonDefaultPortResult = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://api.example.com:8443/data",
+        destination: "Sheet1!A3"
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(defaultPortResult.ok).toBe(true);
+    expect(nonDefaultPortResult.ok).toBe(true);
   });
 
   it("fetch_external_data allowlist entries with ports require an exact host:port match", async () => {
