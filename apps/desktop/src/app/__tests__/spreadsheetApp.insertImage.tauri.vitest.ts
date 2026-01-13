@@ -100,6 +100,11 @@ describe("SpreadsheetApp insert image (Tauri picker)", () => {
   });
 
   beforeEach(() => {
+    // Ensure this test suite always runs with real timers.
+    // Some other suites use fake timers and (if they fail before cleanup) can leak them,
+    // which would cause `waitFor()` (Date.now + setTimeout) to hang indefinitely.
+    vi.useRealTimers();
+
     document.body.innerHTML = "";
     process.env.DESKTOP_GRID_MODE = "legacy";
 
@@ -187,4 +192,3 @@ describe("SpreadsheetApp insert image (Tauri picker)", () => {
     root.remove();
   });
 });
-
