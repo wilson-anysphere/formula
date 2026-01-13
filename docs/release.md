@@ -458,6 +458,7 @@ install WebView2 automatically if it is missing by using Tauri's WebView2 instal
   - Fast preflight (config-only): `node scripts/ci/check-webview2-install-mode.mjs`
   - Built-artifact inspection: `python scripts/ci/check-windows-webview2-installer.py` (asserts the produced installers
     contain a WebView2 bootstrapper/runtime reference), failing the release build if this regresses.
+    - Note: this inspection also supports the `fixedRuntime` mode (it will look for fixed runtime payload files).
 
 To verify locally after a Windows build, run:
 
