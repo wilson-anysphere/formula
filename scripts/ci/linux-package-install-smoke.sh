@@ -107,7 +107,18 @@ find_pkg_dirs() {
   fi
 
   if [[ ${#files[@]} -eq 0 ]]; then
-    echo "linux-package-install-smoke: no ${ext} artifacts found under target/**/release/bundle/${pkg_type}" >&2
+    echo "linux-package-install-smoke: no ${ext} artifacts found under any target root." >&2
+    echo "Expected something like: <target>/**/release/bundle/${pkg_type}/*${ext}" >&2
+    echo "Search roots:" >&2
+    printf '  - %s\n' "${search_roots[@]}" >&2
+    echo "::group::linux-package-install-smoke: debug listing (release/bundle dirs)"
+    for root in "${search_roots[@]}"; do
+      echo "==> $root"
+      ls -lah "$root/release/bundle" 2>/dev/null || true
+      # Also show target-triple layout (target/<triple>/release/bundle).
+      ls -lah "$root"/*/release/bundle 2>/dev/null || true
+    done
+    echo "::endgroup::"
     exit 1
   fi
 
