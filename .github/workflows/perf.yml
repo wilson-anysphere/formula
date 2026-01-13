@@ -128,6 +128,14 @@ jobs:
           DISPLAY: ""
         run: pnpm benchmark
         continue-on-error: true
+      
+      - name: Run TabCompletionEngine benchmark
+        if: always()
+        run: node packages/ai-completion/bench/tabCompletionEngine.bench.mjs --output benchmark-results.tab-completion.json --details benchmark-details.tab-completion.json
+
+      - name: Merge TabCompletionEngine results into benchmark-results.json
+        if: always()
+        run: node scripts/merge-benchmark-results.mjs benchmark-results.json benchmark-results.tab-completion.json
 
       - name: Publish benchmark results
         if: always()
