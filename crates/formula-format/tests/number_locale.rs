@@ -90,10 +90,14 @@ fn get_locale_normalizes_common_locale_id_spellings() {
     assert_eq!(locale::get_locale("en-us").unwrap().id, "en-US");
     assert_eq!(locale::get_locale("en").unwrap().id, "en-US");
     assert_eq!(locale::get_locale("en_gb").unwrap().id, "en-GB");
+    assert_eq!(locale::get_locale("en_US.UTF-8").unwrap().id, "en-US");
     assert_eq!(locale::get_locale("de_ch").unwrap().id, "de-CH");
+    assert_eq!(locale::get_locale("de_AT").unwrap().id, "de-DE");
     assert_eq!(locale::get_locale("fr_fr").unwrap().id, "fr-FR");
     assert_eq!(locale::get_locale("fr_ch").unwrap().id, "fr-CH");
+    assert_eq!(locale::get_locale("fr-CA").unwrap().id, "fr-FR");
     assert_eq!(locale::get_locale("es").unwrap().id, "es-ES");
+    assert_eq!(locale::get_locale("es-MX").unwrap().id, "en-US");
     assert_eq!(locale::get_locale("it").unwrap().id, "it-IT");
     assert_eq!(locale::get_locale("it_CH").unwrap().id, "it-CH");
 }

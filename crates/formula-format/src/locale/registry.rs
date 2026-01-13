@@ -93,6 +93,24 @@ fn normalize_locale_id(id: &str) -> Option<&'static str> {
         key.push(ch.to_ascii_lowercase());
     }
 
+    // Handle common POSIX locale tags like `en_US.UTF-8` or `de_DE@euro` by dropping the encoding /
+    // modifier suffix. (Browser/BCP-47 tags don't use these, but it's a cheap compatibility win.)
+    if let Some(idx) = key.find('.') {
+        key.truncate(idx);
+    }
+    if let Some(idx) = key.find('@') {
+        key.truncate(idx);
+    }
+
+    // Drop BCP-47 extensions (`en-US-u-nu-latn`, `fr-FR-x-private`, ...). For our purposes we only
+    // care about the language/region portion.
+    if let Some(idx) = key.find("-u-") {
+        key.truncate(idx);
+    }
+    if let Some(idx) = key.find("-x-") {
+        key.truncate(idx);
+    }
+
     match key.as_str() {
         "en-us" | "en" => Some("en-US"),
         "en-gb" | "en-uk" => Some("en-GB"),
@@ -101,9 +119,23 @@ fn normalize_locale_id(id: &str) -> Option<&'static str> {
         "fr-fr" | "fr" => Some("fr-FR"),
         "fr-ch" => Some("fr-CH"),
         "es-es" | "es" => Some("es-ES"),
+        // Spanish (Mexico) commonly uses `.` decimals and `,` thousands separators.
+        "es-mx" => Some("en-US"),
         "it-it" | "it" => Some("it-IT"),
         "it-ch" => Some("it-CH"),
-        _ => None,
+        _ => {
+            // Fall back to the language part for region-specific variants we don't explicitly list
+            // (e.g. `fr-CA`, `de-AT`, `en-AU`).
+            let lang = key.split('-').next().unwrap_or("");
+            match lang {
+                "en" => Some("en-US"),
+                "de" => Some("de-DE"),
+                "fr" => Some("fr-FR"),
+                "es" => Some("es-ES"),
+                "it" => Some("it-IT"),
+                _ => None,
+            }
+        }
     }
 }
 
@@ -240,16 +272,24 @@ mod tests {
     fn normalizes_locale_ids_like_formula_engine() {
         assert_eq!(normalize_locale_id("en-us"), Some("en-US"));
         assert_eq!(normalize_locale_id("en_US"), Some("en-US"));
+        assert_eq!(normalize_locale_id("en_US.UTF-8"), Some("en-US"));
+        assert_eq!(normalize_locale_id("en_US@posix"), Some("en-US"));
         assert_eq!(normalize_locale_id("en"), Some("en-US"));
         assert_eq!(normalize_locale_id("en-GB"), Some("en-GB"));
         assert_eq!(normalize_locale_id("en_uk"), Some("en-GB"));
+        assert_eq!(normalize_locale_id("en-AU"), Some("en-US"));
         assert_eq!(normalize_locale_id("de"), Some("de-DE"));
+        assert_eq!(normalize_locale_id("de-AT"), Some("de-DE"));
         assert_eq!(normalize_locale_id("de_ch"), Some("de-CH"));
         assert_eq!(normalize_locale_id("fr_fr"), Some("fr-FR"));
+        assert_eq!(normalize_locale_id("fr-CA"), Some("fr-FR"));
         assert_eq!(normalize_locale_id("fr_CH"), Some("fr-CH"));
         assert_eq!(normalize_locale_id("es-ES"), Some("es-ES"));
+        assert_eq!(normalize_locale_id("es-MX"), Some("en-US"));
+        assert_eq!(normalize_locale_id("es-AR"), Some("es-ES"));
         assert_eq!(normalize_locale_id("it_it"), Some("it-IT"));
         assert_eq!(normalize_locale_id("it-CH"), Some("it-CH"));
+        assert_eq!(normalize_locale_id("fr-FR-u-nu-latn"), Some("fr-FR"));
         assert_eq!(normalize_locale_id(""), None);
     }
 
