@@ -176,11 +176,14 @@ mod tests {
       <xdr:row>10</xdr:row>
       <xdr:rowOff>0</xdr:rowOff>
     </xdr:to>
-    <xdr:grpSp>
-      <xdr:nvGrpSpPr/>
-      <xdr:grpSpPr/>
+      <xdr:grpSp>
+        <xdr:nvGrpSpPr/>
+        <xdr:grpSpPr/>
       <xdr:graphicFrame>
-        <xdr:nvGraphicFramePr/>
+        <xdr:nvGraphicFramePr>
+          <xdr:cNvPr id="7" name="Chart 7"/>
+          <xdr:cNvGraphicFramePr/>
+        </xdr:nvGraphicFramePr>
         <xdr:xfrm/>
         <a:graphic>
           <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">
@@ -200,6 +203,8 @@ mod tests {
 
         let chart_ref = &refs[0];
         assert_eq!(chart_ref.rel_id, "rId42");
+        assert_eq!(chart_ref.drawing_object_id, Some(7));
+        assert_eq!(chart_ref.drawing_object_name.as_deref(), Some("Chart 7"));
         assert!(chart_ref.drawing_frame_xml.contains("<xdr:graphicFrame"));
         assert!(chart_ref.drawing_frame_xml.contains("r:id=\"rId42\""));
         assert!(!chart_ref.drawing_frame_xml.contains("<xdr:grpSp"));

@@ -76,6 +76,10 @@ fn extracts_chart_objects_with_anchor_and_parts() {
             .is_some_and(|name| !name.trim().is_empty()),
         "expected drawing object name to be populated from xdr:cNvPr"
     );
+    assert!(
+        chart_object.drawing_object_id.is_some(),
+        "expected drawing object id to be populated from xdr:cNvPr"
+    );
 
     match chart_object.anchor {
         Anchor::TwoCell { from, to } => {
