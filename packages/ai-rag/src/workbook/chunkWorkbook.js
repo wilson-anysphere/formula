@@ -120,7 +120,10 @@ function hasNonFormulaNonEmptyCell(cells, signal) {
         abortCountdown = 256;
       }
       abortCountdown -= 1;
-      if (isNonEmptyCell(cell) && !isFormulaCell(cell)) return true;
+      if (isNonEmptyCell(cell) && !isFormulaCell(cell)) {
+        throwIfAborted(signal);
+        return true;
+      }
     }
   }
   throwIfAborted(signal);
