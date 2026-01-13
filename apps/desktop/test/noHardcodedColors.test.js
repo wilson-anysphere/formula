@@ -6,6 +6,14 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Escape a string for safe interpolation into a RegExp.
+ * @param {string} input
+ */
+function escapeRegExp(input) {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function walk(dirPath) {
   /** @type {string[]} */
   const entries = [];
@@ -53,18 +61,56 @@ test("core UI does not hardcode colors outside tokens.css", () => {
   // - a decimal literal that starts with `.`, e.g. `.5`
   const rgbColor = /\brgb(a)?\s*\(\s*(?:\d|\.\d)/gi;
 
-  // Named colors (e.g. `crimson`) bypass theme tokens. Allow only keyword-like values that
-  // don't encode an actual palette color.
-  const namedColorCss = /\bcolor\s*:\s*([a-zA-Z]+)\b(?!\s*\()/g;
-  const namedColorJs = /\bcolor\s*:\s*["']([a-zA-Z]+)["']/g;
-  const allowedNamedColors = new Set([
-    "transparent",
-    "inherit",
-    "currentcolor",
-    "initial",
-    "unset",
-    "revert",
-  ]);
+  // CSS also supports named colors (`crimson`, `red`, etc). These are disallowed in core UI;
+  // use tokens instead (e.g. `var(--error)`), except for a few safe keywords.
+  //
+  // This list is intentionally *not* exhaustive; it's meant to catch high-signal offenders
+  // while avoiding matching unrelated strings (e.g. "Red" as a UI label).
+  const allowedColorKeywords = new Set(["transparent", "currentcolor", "inherit"]);
+  const disallowedNamedColors = [
+    "crimson",
+    "red",
+    "blue",
+    "green",
+    "orange",
+    "yellow",
+    "purple",
+    "pink",
+    "brown",
+    "black",
+    "white",
+    "gray",
+    "grey",
+    "cyan",
+    "magenta",
+    "lime",
+    "teal",
+    "navy",
+    "maroon",
+    "olive",
+    "silver",
+    "gold",
+  ];
+  // Treat hyphenated identifiers as "words" so we don't match things like:
+  // - `white-space`
+  // - `var(--sheet-tab-red)`
+  const namedColorToken = `(?<![\\w-])(?<color>${disallowedNamedColors.map(escapeRegExp).join("|")})(?![\\w-])`;
+  const cssNamedColor = new RegExp(`:[^;{}]*${namedColorToken}`, "gi");
+  const jsStyleColor = new RegExp(
+    // style objects + style literals (e.g. `style={{ color: "red" }}`)
+    String.raw`\b(?:accentColor|background|backgroundColor|border|borderColor|borderBottom|borderBottomColor|borderLeft|borderLeftColor|borderRight|borderRightColor|borderTop|borderTopColor|boxShadow|caretColor|color|fill|outline|outlineColor|stroke|textShadow)\b\s*:\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
+    "gi",
+  );
+  const domStyleColor = new RegExp(
+    // DOM style assignments (e.g. `el.style.color = "red"`)
+    String.raw`\.style\.(?:accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|outlineColor|stroke)\s*=\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
+    "gi",
+  );
+  const jsxAttributeColor = new RegExp(
+    // JSX/SVG attrs (e.g. `<path fill="red" />`)
+    String.raw`\b(?:accentColor|backgroundColor|borderColor|caretColor|color|fill|stroke|stopColor|floodColor|lightingColor)\b\s*=\s*(["'])[^"']*${namedColorToken}[^"']*\1`,
+    "gi",
+  );
 
   /** @type {{ file: string, match: string }[]} */
   const violations = [];
@@ -73,26 +119,28 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     const content = fs.readFileSync(file, "utf8");
     const hex = content.match(hexColor);
     const rgb = content.match(rgbColor);
+    const ext = path.extname(file);
+    /** @type {string | null} */
+    let named = null;
+    if (ext === ".css") {
+      const match = cssNamedColor.exec(content);
+      cssNamedColor.lastIndex = 0;
+      named = match?.groups?.color ?? null;
+    } else {
+      const match =
+        jsStyleColor.exec(content) ??
+        domStyleColor.exec(content) ??
+        jsxAttributeColor.exec(content);
+      jsStyleColor.lastIndex = 0;
+      domStyleColor.lastIndex = 0;
+      jsxAttributeColor.lastIndex = 0;
+      named = match?.groups?.color ?? null;
+    }
+    if (named && !allowedColorKeywords.has(named.toLowerCase())) {
+      violations.push({ file, match: named });
+    }
     if (hex) violations.push({ file, match: hex[0] });
     if (rgb) violations.push({ file, match: "rgb(...)" });
-
-    // Flag named color literals (e.g. `color: "crimson"` / `color: crimson`) while
-    // allowing keyword-like values such as `transparent`.
-    if (file.endsWith(".css")) {
-      for (const match of content.matchAll(namedColorCss)) {
-        const value = match[1]?.toLowerCase();
-        if (!value || allowedNamedColors.has(value)) continue;
-        violations.push({ file, match: `color: ${match[1]}` });
-        break;
-      }
-    } else {
-      for (const match of content.matchAll(namedColorJs)) {
-        const value = match[1]?.toLowerCase();
-        if (!value || allowedNamedColors.has(value)) continue;
-        violations.push({ file, match: `color: "${match[1]}"` });
-        break;
-      }
-    }
   }
 
   assert.deepEqual(
