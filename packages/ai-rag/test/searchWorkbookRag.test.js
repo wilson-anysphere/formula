@@ -113,6 +113,81 @@ test("searchWorkbookRag respects AbortSignal", async () => {
   );
 });
 
+test("searchWorkbookRag aborts while awaiting query embedding", async () => {
+  const abortController = new AbortController();
+  let embedCalled = false;
+  let queryCalled = false;
+
+  const embedder = {
+    async embedTexts() {
+      embedCalled = true;
+      // Never resolve unless aborted.
+      return new Promise(() => {});
+    },
+  };
+
+  const vectorStore = {
+    async query() {
+      queryCalled = true;
+      return [];
+    },
+  };
+
+  const promise = searchWorkbookRag({
+    queryText: "hello",
+    workbookId: "wb",
+    topK: 1,
+    vectorStore,
+    embedder,
+    signal: abortController.signal,
+  });
+
+  assert.equal(embedCalled, true);
+  abortController.abort();
+
+  await assert.rejects(promise, { name: "AbortError" });
+  assert.equal(queryCalled, false);
+});
+
+test("searchWorkbookRag aborts while awaiting vectorStore.query", async () => {
+  const abortController = new AbortController();
+  let queryCalled = false;
+  let resolveQueryStarted = () => {};
+  const queryStarted = new Promise((resolve) => {
+    resolveQueryStarted = resolve;
+  });
+
+  const embedder = {
+    async embedTexts() {
+      return [[1, 0, 0]];
+    },
+  };
+
+  const vectorStore = {
+    async query() {
+      queryCalled = true;
+      resolveQueryStarted();
+      // Never resolve unless aborted.
+      return new Promise(() => {});
+    },
+  };
+
+  const promise = searchWorkbookRag({
+    queryText: "hello",
+    workbookId: "wb",
+    topK: 1,
+    vectorStore,
+    embedder,
+    signal: abortController.signal,
+  });
+
+  await queryStarted;
+  assert.equal(queryCalled, true);
+  abortController.abort();
+
+  await assert.rejects(promise, { name: "AbortError" });
+});
+
 test("searchWorkbookRag forwards workbookId + signal and avoids oversampling when rerank/dedupe are disabled", async () => {
   const abortController = new AbortController();
   const { signal } = abortController;

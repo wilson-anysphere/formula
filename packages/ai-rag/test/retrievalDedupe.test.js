@@ -22,22 +22,22 @@ test("dedupeOverlappingResults drops highly-overlapping rects within a workbook/
   assert.deepEqual(out.map((r) => r.id), ["a"]);
 });
 
-test("dedupeOverlappingResults does not dedupe across sheets or workbooks", () => {
+test("dedupeOverlappingResults does not dedupe across sheets", () => {
   const results = [
     {
       id: "a",
       score: 1,
-      metadata: { workbookId: "wb1", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 7, c1: 0 } },
+      metadata: { workbookId: "wb", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 7, c1: 0 } },
     },
     {
       id: "b",
       score: 0.9,
-      metadata: { workbookId: "wb1", sheetName: "Sheet2", rect: { r0: 0, c0: 0, r1: 7, c1: 0 } },
+      metadata: { workbookId: "wb", sheetName: "Sheet2", rect: { r0: 0, c0: 0, r1: 7, c1: 0 } },
     },
     {
       id: "c",
       score: 0.8,
-      metadata: { workbookId: "wb2", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 7, c1: 0 } },
+      metadata: { workbookId: "wb", sheetName: "Sheet3", rect: { r0: 0, c0: 0, r1: 7, c1: 0 } },
     },
   ];
 
@@ -64,13 +64,20 @@ test("dedupeOverlappingResults preserves distinct rects below the overlap thresh
   assert.deepEqual(out.map((r) => r.id), ["a", "b"]);
 });
 
-test("dedupeOverlappingResults drops duplicate ids", () => {
+test("dedupeOverlappingResults drops overlapping duplicates even when ids match", () => {
   const results = [
-    { id: "a", score: 1, metadata: { workbookId: "wb" } },
-    { id: "a", score: 0.5, metadata: { workbookId: "wb" } },
+    {
+      id: "a",
+      score: 1,
+      metadata: { workbookId: "wb", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 1 } },
+    },
+    {
+      id: "a",
+      score: 0.5,
+      metadata: { workbookId: "wb", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 1 } },
+    },
   ];
 
   const out = dedupeOverlappingResults({ results });
   assert.deepEqual(out.map((r) => r.id), ["a"]);
 });
-
