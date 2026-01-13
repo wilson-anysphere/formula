@@ -60,7 +60,7 @@ fn detects_encrypted_ooxml_xlsx_container() {
         );
         let msg = err.to_string().to_lowercase();
         assert!(
-            msg.contains("encrypted") || msg.contains("password"),
+            msg.contains("password") || msg.contains("encrypt"),
             "expected error message to mention encryption/password protection, got: {msg}"
         );
 
@@ -111,14 +111,14 @@ fn encrypted_ooxml_fixtures_require_password() {
         let err = open_workbook(&path).expect_err("expected encrypted workbook to error");
         let msg = err.to_string().to_lowercase();
         assert!(
-            msg.contains("encrypted") || msg.contains("password"),
+            msg.contains("password") || msg.contains("encrypt"),
             "expected error message to mention encryption/password protection, got: {msg}"
         );
 
         let err = open_workbook_model(&path).expect_err("expected encrypted workbook to error");
         let msg = err.to_string().to_lowercase();
         assert!(
-            msg.contains("encrypted") || msg.contains("password"),
+            msg.contains("password") || msg.contains("encrypt"),
             "expected error message to mention encryption/password protection, got: {msg}"
         );
     }
