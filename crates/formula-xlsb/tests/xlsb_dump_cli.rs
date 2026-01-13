@@ -55,3 +55,46 @@ fn xlsb_dump_prints_known_error_literals() {
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     assert!(stdout.contains("#SPILL!"), "stdout:\n{stdout}");
 }
+
+#[test]
+fn xlsb_dump_help_mentions_password_flag() {
+    let assert = Command::new(assert_cmd::cargo::cargo_bin!("xlsb_dump"))
+        .arg("--help")
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        stdout.contains("--password"),
+        "expected --password in help output, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn xlsb_dump_errors_when_password_missing_for_encrypted_ooxml_wrapper() {
+    use std::io::Cursor;
+
+    // Synthetic OLE/CFB container that looks like Office-encrypted OOXML.
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_stream("EncryptionInfo")
+        .expect("create EncryptionInfo stream");
+    ole.create_stream("EncryptedPackage")
+        .expect("create EncryptedPackage stream");
+    let bytes = ole.into_inner().into_inner();
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("encrypted.xlsb");
+    std::fs::write(&path, bytes).expect("write fixture");
+
+    let assert = Command::new(assert_cmd::cargo::cargo_bin!("xlsb_dump"))
+        .arg(&path)
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_lowercase();
+    assert!(
+        stderr.contains("password"),
+        "expected stderr to mention password, got:\n{stderr}"
+    );
+}

@@ -127,3 +127,58 @@ fn rgce_coverage_cli_reports_zero_failures_for_fixtures() {
         );
     }
 }
+
+#[test]
+fn rgce_coverage_help_mentions_password_flag() {
+    let rgce_coverage_exe = env!("CARGO_BIN_EXE_rgce_coverage");
+    let output = Command::new(rgce_coverage_exe)
+        .arg("--help")
+        .output()
+        .expect("run rgce_coverage --help");
+
+    assert!(
+        output.status.success(),
+        "expected --help to exit successfully, status={:?}",
+        output.status.code()
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--password"),
+        "expected --password in help output, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn rgce_coverage_errors_when_password_missing_for_encrypted_ooxml_wrapper() {
+    use std::io::Cursor;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_stream("EncryptionInfo")
+        .expect("create EncryptionInfo stream");
+    ole.create_stream("EncryptedPackage")
+        .expect("create EncryptedPackage stream");
+    let bytes = ole.into_inner().into_inner();
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("encrypted.xlsb");
+    std::fs::write(&path, bytes).expect("write fixture");
+
+    let rgce_coverage_exe = env!("CARGO_BIN_EXE_rgce_coverage");
+    let output = Command::new(rgce_coverage_exe)
+        .arg(&path)
+        .output()
+        .expect("run rgce_coverage");
+
+    assert!(
+        !output.status.success(),
+        "expected rgce_coverage to fail when password is missing"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+    assert!(
+        stderr.contains("password"),
+        "expected stderr to mention password, got:\n{stderr}"
+    );
+}

@@ -8,6 +8,10 @@ use formula_xlsb::format::{format_a1, format_hex};
 use formula_xlsb::rgce::decode_rgce_with_rgcb;
 use formula_xlsb::{CellValue, Formula, SheetMeta, XlsbWorkbook};
 
+#[path = "../xlsb_cli_open.rs"]
+mod xlsb_cli_open;
+use xlsb_cli_open::open_xlsb_workbook;
+
 #[derive(Debug)]
 struct Args {
     path: PathBuf,
@@ -15,6 +19,7 @@ struct Args {
     formulas_only: bool,
     max: Option<usize>,
     rgce: bool,
+    password: Option<String>,
 }
 
 impl Args {
@@ -24,6 +29,7 @@ impl Args {
         let mut formulas_only = false;
         let mut max: Option<usize> = None;
         let mut rgce = false;
+        let mut password: Option<String> = None;
 
         let mut it = env::args().skip(1).peekable();
         while let Some(arg) = it.next() {
@@ -48,6 +54,12 @@ impl Args {
                     })?;
                     max = Some(n);
                 }
+                "--password" => {
+                    let value = it.next().ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidInput, "--password expects <pw>")
+                    })?;
+                    password = Some(value);
+                }
                 "--rgce" => rgce = true,
                 _ if arg.starts_with("--sheet=") => {
                     sheet = Some(arg["--sheet=".len()..].to_string());
@@ -58,6 +70,9 @@ impl Args {
                         io::Error::new(io::ErrorKind::InvalidInput, format!("invalid --max value: {value}"))
                     })?;
                     max = Some(n);
+                }
+                _ if arg.starts_with("--password=") => {
+                    password = Some(arg["--password=".len()..].to_string());
                 }
                 _ if arg.starts_with('-') => {
                     return Err(io::Error::new(
@@ -85,6 +100,7 @@ impl Args {
             formulas_only,
             max,
             rgce,
+            password,
         })
     }
 }
@@ -95,9 +111,10 @@ fn print_usage() {
 xlsb_dump: dump XLSB worksheet cells and formula rgce bytes (diagnostics)
 
 Usage:
-  xlsb_dump <path> [--sheet <name|index>] [--formulas-only] [--max <n>] [--rgce]
+  xlsb_dump <path> [--password <pw>] [--sheet <name|index>] [--formulas-only] [--max <n>] [--rgce]
 
 Options:
+  --password <pw>          Password for Office-encrypted XLSB (OLE EncryptedPackage wrapper)
   --sheet <name|index>   Only dump a single worksheet (match by name or 0-based index)
   --formulas-only        Only print cells with formula payloads
   --max <n>              Limit printed cells per sheet
@@ -115,7 +132,7 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse()?;
-    let wb = XlsbWorkbook::open(&args.path)?;
+    let wb = open_xlsb_workbook(&args.path, args.password.as_deref())?;
 
     println!("Workbook: {}", args.path.display());
     println!("Sheets:");

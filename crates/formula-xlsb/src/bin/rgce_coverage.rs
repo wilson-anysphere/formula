@@ -7,14 +7,19 @@ use std::path::PathBuf;
 use formula_model::sheet_name_eq_case_insensitive;
 use formula_xlsb::format::{format_a1, format_hex};
 use formula_xlsb::rgce::{decode_rgce_with_context_and_rgcb_and_base, CellCoord};
-use formula_xlsb::{Formula, SheetMeta, XlsbWorkbook};
+use formula_xlsb::{Formula, SheetMeta};
 use serde::Serialize;
+
+#[path = "../xlsb_cli_open.rs"]
+mod xlsb_cli_open;
+use xlsb_cli_open::open_xlsb_workbook;
 
 #[derive(Debug)]
 struct Args {
     path: PathBuf,
     sheet: Option<String>,
     max: Option<usize>,
+    password: Option<String>,
 }
 
 impl Args {
@@ -22,6 +27,7 @@ impl Args {
         let mut path: Option<PathBuf> = None;
         let mut sheet: Option<String> = None;
         let mut max: Option<usize> = None;
+        let mut password: Option<String> = None;
 
         let mut it = env::args().skip(1).peekable();
         while let Some(arg) = it.next() {
@@ -45,6 +51,12 @@ impl Args {
                     })?;
                     max = Some(n);
                 }
+                "--password" => {
+                    let value = it.next().ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidInput, "--password expects <pw>")
+                    })?;
+                    password = Some(value);
+                }
                 _ if arg.starts_with("--sheet=") => {
                     sheet = Some(arg["--sheet=".len()..].to_string());
                 }
@@ -54,6 +66,9 @@ impl Args {
                         io::Error::new(io::ErrorKind::InvalidInput, format!("invalid --max value: {value}"))
                     })?;
                     max = Some(n);
+                }
+                _ if arg.starts_with("--password=") => {
+                    password = Some(arg["--password=".len()..].to_string());
                 }
                 _ if arg.starts_with('-') => {
                     return Err(io::Error::new(
@@ -75,7 +90,12 @@ impl Args {
 
         let path = path.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing <path>"))?;
 
-        Ok(Self { path, sheet, max })
+        Ok(Self {
+            path,
+            sheet,
+            max,
+            password,
+        })
     }
 }
 
@@ -85,9 +105,10 @@ fn print_usage() {
 rgce_coverage: emit JSONL coverage data for formula rgce decoding
 
 Usage:
-  rgce_coverage <path.xlsb> [--sheet <name|index>] [--max <n>]
+  rgce_coverage <path.xlsb> [--password <pw>] [--sheet <name|index>] [--max <n>]
 
 Options:
+  --password <pw>          Password for Office-encrypted XLSB (OLE EncryptedPackage wrapper)
   --sheet <name|index>   Only scan a single worksheet (match by name or 0-based index)
   --max <n>              Limit scanned formula cells (across all selected sheets)
 "
@@ -125,7 +146,7 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse()?;
-    let wb = XlsbWorkbook::open(&args.path)?;
+    let wb = open_xlsb_workbook(&args.path, args.password.as_deref())?;
 
     let selected = resolve_sheets(wb.sheet_metas(), args.sheet.as_deref())?;
 
