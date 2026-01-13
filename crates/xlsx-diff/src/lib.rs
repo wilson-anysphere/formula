@@ -7,6 +7,7 @@
 
 mod part_kind;
 mod xml;
+pub mod cli;
 mod rels;
 
 use std::collections::{BTreeMap, BTreeSet};

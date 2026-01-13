@@ -859,6 +859,7 @@ fn ignore_glob_suppresses_rels_targets_with_xl_prefix_without_leading_slash() {
         ignore_parts: Default::default(),
         ignore_globs: vec!["xl/media/*".to_string()],
         ignore_paths: Vec::new(),
+        strict_calc_chain: false,
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);
