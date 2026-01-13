@@ -341,6 +341,9 @@ then revert the change—do not commit it).
    codesign --verify --deep --strict --verbose=2 "$app"
    codesign -d --entitlements :- "$app" 2>&1 | grep -E "allow-jit|allow-unsigned-executable-memory"
    spctl --assess --type execute -vv "$app"
+
+   # (Optional) If you're testing a notarized/stapled CI artifact:
+   xcrun stapler validate -v "$app"
    ```
 
 4. Launch the app and sanity-check runtime behavior:
