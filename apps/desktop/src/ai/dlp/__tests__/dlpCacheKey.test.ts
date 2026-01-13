@@ -172,4 +172,18 @@ describe("computeDlpCacheKey", () => {
 
     expect(key1).not.toEqual(key2);
   });
+
+  it("is stable across policy object key ordering", () => {
+    const base = {
+      documentId: "doc",
+      classificationRecords: [],
+      includeRestrictedContent: false,
+    };
+
+    // Same logical policy, different insertion order.
+    const policy1 = { version: 1, allowDocumentOverrides: true, rules: { b: { maxAllowed: "Internal" }, a: { maxAllowed: "Public" } } };
+    const policy2 = { rules: { a: { maxAllowed: "Public" }, b: { maxAllowed: "Internal" } }, allowDocumentOverrides: true, version: 1 };
+
+    expect(computeDlpCacheKey({ ...base, policy: policy1 })).toEqual(computeDlpCacheKey({ ...base, policy: policy2 }));
+  });
 });
