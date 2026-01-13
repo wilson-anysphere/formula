@@ -386,9 +386,10 @@ main() {
       die "wrong AppImage architecture for '$appimage': expected '$expected_file_substring' (runner arch $(uname -m)), got: $appimage_file_info"
     fi
 
-    tmp="$(mktemp -d)"
+    # Set up cleanup *before* mktemp so failures (e.g. mktemp itself) still close the log group.
     # shellcheck disable=SC2064
     trap 'rm -rf "$tmp"; if [[ "${CHECK_APPIMAGE_GROUP_OPEN:-0}" -eq 1 ]]; then echo "::endgroup::"; fi' EXIT
+    tmp="$(mktemp -d)"
 
     # Extract (no FUSE required). This will create ./squashfs-root.
     #
