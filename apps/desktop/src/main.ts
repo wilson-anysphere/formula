@@ -34,7 +34,7 @@ import { SheetTabStrip } from "./sheets/SheetTabStrip";
 
 import { ThemeController } from "./theme/themeController.js";
 
-import { mountRibbon } from "./ribbon/index.js";
+import { createRibbonActionsFromCommands, mountRibbon } from "./ribbon/index.js";
 
 import { computeSelectionFormatState } from "./ribbon/selectionFormatState.js";
 import { getRibbonUiStateSnapshot, setRibbonUiState } from "./ribbon/ribbonUiState.js";
@@ -8288,6 +8288,63 @@ async function handleRibbonExportPdf(): Promise<void> {
   }
 }
 
+const ribbonActions = createRibbonActionsFromCommands({
+  commandRegistry,
+  onCommandError: (_commandId, err) => {
+    // DLP policy violations are already surfaced via a dedicated toast (e.g. clipboard copy blocked).
+    // Avoid double-toasting "Command failed" for expected policy restrictions.
+    if ((err as any)?.name === "DlpViolationError") return;
+    showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+  },
+  // Ribbon toggles invoke both `onToggle` and `onCommand`. These overrides handle the
+  // pressed state and suppress the follow-up `onCommand` call so we don't double-execute.
+  toggleOverrides: {
+    "file.save.autoSave": (pressed) => {
+      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled, pressed).catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+      });
+      app.focus();
+    },
+    "data.queriesConnections.queriesConnections": (pressed) => {
+      const layoutController = ribbonLayoutController;
+      if (!layoutController) {
+        showToast("Queries panel is not available (layout controller missing).", "error");
+        // Ensure the ribbon toggle state reflects the actual panel placement.
+        scheduleRibbonSelectionFormatStateUpdate();
+        app.focus();
+        return;
+      }
+
+      if (pressed) layoutController.openPanel(PanelIds.DATA_QUERIES);
+      else layoutController.closePanel(PanelIds.DATA_QUERIES);
+      app.focus();
+    },
+    "view.toggleShowFormulas": (pressed) => {
+      // Route all ribbon "Show Formulas" toggles through the canonical command so
+      // ribbon, command palette, and keybindings share the same logic/guards.
+      if (app.getShowFormulas() !== pressed) {
+        void commandRegistry.executeCommand("view.toggleShowFormulas").catch((err) => {
+          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+        });
+      }
+      app.focus();
+    },
+    "view.togglePerformanceStats": (pressed) => {
+      void commandRegistry.executeCommand("view.togglePerformanceStats", pressed).catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+      });
+      app.focus();
+    },
+    "view.toggleSplitView": (pressed) => {
+      void commandRegistry.executeCommand("view.toggleSplitView", pressed).catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+      });
+      app.focus();
+    },
+  },
+  onUnknownCommand: handleRibbonCommand,
+});
+
 mountRibbon(ribbonReactRoot, {
   fileActions: {
     newWorkbook: () => {
@@ -8352,64 +8409,10 @@ mountRibbon(ribbonReactRoot, {
       });
     },
   },
-  onToggle: (commandId, pressed) => {
-    switch (commandId) {
-      case "file.save.autoSave": {
-        void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled, pressed).catch((err) => {
-          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-        });
-        app.focus();
-        return;
-      }
-      case "data.queriesConnections.queriesConnections": {
-        const layoutController = ribbonLayoutController;
-        if (!layoutController) {
-          showToast("Queries panel is not available (layout controller missing).", "error");
-          // Ensure the ribbon toggle state reflects the actual panel placement.
-          scheduleRibbonSelectionFormatStateUpdate();
-          app.focus();
-          return;
-        }
+  ...ribbonActions,
+});
 
-        if (pressed) layoutController.openPanel(PanelIds.DATA_QUERIES);
-        else layoutController.closePanel(PanelIds.DATA_QUERIES);
-        app.focus();
-        return;
-      }
-      case "view.toggleShowFormulas": {
-        // Route all ribbon "Show Formulas" toggles through the canonical command so
-        // ribbon, command palette, and keybindings share the same logic/guards.
-        if (app.getShowFormulas() !== pressed) {
-          void commandRegistry.executeCommand("view.toggleShowFormulas").catch((err) => {
-            showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-          });
-        }
-        app.focus();
-        return;
-      }
-      case "view.togglePerformanceStats":
-      case "view.toggleSplitView": {
-        void commandRegistry.executeCommand(commandId, pressed).catch((err) => {
-          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-        });
-        app.focus();
-        return;
-      }
-      case "format.toggleStrikethrough":
-        void commandRegistry.executeCommand("format.toggleStrikethrough", pressed).catch((err) => {
-          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-        });
-        return;
-      case "format.toggleWrapText":
-        void commandRegistry.executeCommand("format.toggleWrapText", pressed).catch((err) => {
-          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-        });
-        return;
-      default:
-        return;
-    }
-  },
-  onCommand: (commandId) => {
+function handleRibbonCommand(commandId: string): void {
     const doc = app.getDocument();
     const executeBuiltinCommand = (builtinId: string, ...args: any[]) => {
       void commandRegistry.executeCommand(builtinId, ...args).catch((err) => {
@@ -8419,21 +8422,6 @@ mountRibbon(ribbonReactRoot, {
 
     if (commandId === "format.toggleBold" || commandId === "format.toggleItalic" || commandId === "format.toggleUnderline") {
       executeBuiltinCommand(commandId);
-      return;
-    }
-
-    // Toggle buttons trigger both `onToggle` and `onCommand`. We handle most toggle
-    // semantics in `onToggle` (since it provides the `pressed` state). Avoid
-    // falling through to the default "unimplemented" toast here.
-    if (
-      commandId === "format.toggleStrikethrough" ||
-      commandId === "format.toggleWrapText" ||
-      commandId === "view.toggleShowFormulas" ||
-      commandId === "view.togglePerformanceStats" ||
-      commandId === "view.toggleSplitView" ||
-      commandId === "file.save.autoSave" ||
-      commandId === "data.queriesConnections.queriesConnections"
-    ) {
       return;
     }
 
@@ -9426,8 +9414,7 @@ mountRibbon(ribbonReactRoot, {
         showToast(`Ribbon: ${commandId}`);
         return;
     }
-  },
-});
+}
 // In Yjs-backed collaboration mode the workbook is continuously persisted, but
 // DocumentController's `isDirty` flips to true on essentially every local/remote
 // change (including `applyExternalDeltas`). That makes the browser/Tauri
