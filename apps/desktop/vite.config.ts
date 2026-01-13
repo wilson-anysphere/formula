@@ -172,6 +172,7 @@ export default defineConfig({
     include: [
       "src/**/*.vitest.ts",
       "src/ai/tools/**/*.test.ts",
+      "src/ai/dlp/__tests__/**/*.test.ts",
       "src/editor/cellEditorOverlay.f4.test.ts",
       "src/ai/inline-edit/__tests__/**/*.test.ts",
     ],
