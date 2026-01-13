@@ -8473,6 +8473,21 @@ function handleRibbonCommand(commandId: string): void {
         window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
         return;
 
+      case "formulas.formulaAuditing.tracePrecedents":
+        app.clearAuditing();
+        app.toggleAuditingPrecedents();
+        app.focus();
+        return;
+      case "formulas.formulaAuditing.traceDependents":
+        app.clearAuditing();
+        app.toggleAuditingDependents();
+        app.focus();
+        return;
+      case "formulas.formulaAuditing.removeArrows":
+        app.clearAuditing();
+        app.focus();
+        return;
+
       case "home.font.borders":
         // This command is a dropdown with menu items; the top-level command is not expected
         // to fire when the menu is present. Keep this as a fallback.

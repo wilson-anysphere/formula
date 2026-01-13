@@ -203,6 +203,9 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     // Ribbon command router maps ribbon ids to cell-formatting color presets (data-driven),
     // which intentionally include ARGB hex strings.
     if (rel === "ribbon/ribbonCommandRouter.ts") return false;
+    // Formatting presets for sheet/table styling intentionally include Excel/OOXML ARGB hex colors.
+    if (rel === "formatting/cellStyles.ts") return false;
+    if (rel === "formatting/formatAsTablePresets.ts") return false;
     if (rel.includes("/demo/")) return false;
     if (rel.includes("/__tests__/")) return false;
     // Vitest entrypoints live under `src/` with a `.vitest.*` suffix; treat them like other tests.
