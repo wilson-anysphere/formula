@@ -87,4 +87,17 @@ describe("parseShapeRenderSpec", () => {
 
     expect(parseShapeRenderSpec(raw)?.fill).toEqual({ type: "solid", color: "rgba(255,0,0,0.5)" });
   });
+
+  it("captures stroke dash presets from <a:ln><a:prstDash>", () => {
+    const raw = `
+      <xdr:spPr>
+        <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+        <a:ln w="12700">
+          <a:prstDash val="dash"/>
+        </a:ln>
+      </xdr:spPr>
+    `;
+
+    expect(parseShapeRenderSpec(raw)?.stroke).toEqual({ color: "#000000", widthEmu: 12700, dashPreset: "dash" });
+  });
 });

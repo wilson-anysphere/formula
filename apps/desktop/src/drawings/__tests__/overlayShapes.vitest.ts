@@ -134,5 +134,30 @@ describe("DrawingOverlay shapes", () => {
 
     expect(calls.some((call) => call.method === "strokeRect")).toBe(true);
   });
-});
 
+  it("applies dash patterns for stroked shapes when prstDash is present", async () => {
+    const { ctx, calls } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const xml = `
+      <xdr:sp>
+        <xdr:spPr>
+          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+          <a:ln w="12700">
+            <a:prstDash val="dash"/>
+          </a:ln>
+        </xdr:spPr>
+      </xdr:sp>
+    `;
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+    await overlay.render([createShapeObject(xml)], viewport);
+
+    expect(
+      calls.some(
+        (call) => call.method === "setLineDash" && Array.isArray(call.args[0]) && (call.args[0] as any[]).length > 0,
+      ),
+    ).toBe(true);
+    expect(calls.some((call) => call.method === "strokeRect")).toBe(false);
+  });
+});

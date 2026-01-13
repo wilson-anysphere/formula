@@ -45,6 +45,12 @@ export interface ShapeStroke {
   color: string;
   /** DrawingML EMU line width (1pt = 12700). */
   widthEmu: number;
+  /**
+   * Optional preset dash style from `<a:ln><a:prstDash val="…"/>`.
+   *
+   * The raw value is preserved so the renderer can map it to a pixel dash pattern.
+   */
+  dashPreset?: string;
 }
 
 export type ShapeGeometry =
@@ -367,6 +373,10 @@ function parseStroke(spPr: XmlElementLike): ShapeStroke | undefined {
 
   const solid = childElements(ln).find((c) => localName(c) === "solidFill");
   const color = (solid ? parseSrgbColor(solid) : null) ?? DEFAULT_STROKE_COLOR;
+
+  const dash = findFirstDescendantByLocalName(ln, "prstDash");
+  const dashPreset = dash ? getAttribute(dash, "val")?.trim() : null;
+  if (dashPreset) return { color, widthEmu, dashPreset };
   return { color, widthEmu };
 }
 

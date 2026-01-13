@@ -448,7 +448,7 @@ function drawShape(
   if (spec.stroke && strokeWidthPx > 0) {
     ctx.strokeStyle = spec.stroke.color;
     ctx.lineWidth = strokeWidthPx;
-    ctx.setLineDash([]);
+    ctx.setLineDash(dashPatternForPreset(spec.stroke.dashPreset, strokeWidthPx));
     ctx.stroke();
   }
 
@@ -475,6 +475,32 @@ function roundRectPath(
   ctx.arcTo(x, y + height, x, y, r);
   ctx.arcTo(x, y, x + width, y, r);
   ctx.closePath();
+}
+
+function dashPatternForPreset(preset: string | undefined, strokeWidthPx: number): number[] {
+  if (!preset) return [];
+  const unit = Math.max(1, strokeWidthPx);
+  switch (preset) {
+    case "dash":
+    case "sysDash":
+      return [4 * unit, 2 * unit];
+    case "dot":
+    case "sysDot":
+      return [unit, 2 * unit];
+    case "dashDot":
+    case "sysDashDot":
+      return [4 * unit, 2 * unit, unit, 2 * unit];
+    case "lgDash":
+      return [8 * unit, 3 * unit];
+    case "lgDashDot":
+      return [8 * unit, 3 * unit, unit, 3 * unit];
+    case "lgDashDotDot":
+    case "sysDashDotDot":
+      return [8 * unit, 3 * unit, unit, 3 * unit, unit, 3 * unit];
+    case "solid":
+    default:
+      return [];
+  }
 }
 
 type PaneQuadrant = "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
