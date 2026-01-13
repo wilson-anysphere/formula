@@ -52,4 +52,15 @@ export function extractSheetSchema(sheet: {
   origin?: { row: number; col: number };
   namedRanges?: NamedRangeSchema[];
   tables?: { name: string; range: string }[];
-}, options?: { signal?: AbortSignal }): SheetSchema;
+}, options?: {
+  signal?: AbortSignal;
+  /**
+   * Maximum number of data rows (excluding the header row) to scan when inferring column
+   * types. Defaults to 500.
+   */
+  maxAnalyzeRows?: number;
+  /**
+   * Maximum number of unique sample values to capture per column. Defaults to 3.
+   */
+  maxSampleValuesPerColumn?: number;
+}): SheetSchema;

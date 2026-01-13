@@ -5,6 +5,21 @@ import { throwIfAborted } from "./abort.js";
 // Cap the scan to avoid catastrophic allocations when callers accidentally pass
 // Excel-scale ranges (1,048,576 x 16,384).
 const DEFAULT_DATA_REGION_SCAN_CELL_LIMIT = 200_000;
+// Region analysis (header detection + type inference) should also stay bounded for large tables.
+// We only sample a prefix of the data rows to infer types / sample values.
+const DEFAULT_MAX_ANALYZE_ROWS = 500;
+const DEFAULT_MAX_SAMPLE_VALUES_PER_COLUMN = 3;
+
+/**
+ * Normalize a numeric limit option.
+ *
+ * @param {unknown} value
+ * @param {number} fallback
+ */
+function normalizeNonNegativeInt(value, fallback) {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return Math.floor(value);
+  return fallback;
+}
 
 /**
  * @typedef {"empty"|"number"|"boolean"|"date"|"string"|"formula"|"mixed"} InferredType
@@ -235,6 +250,7 @@ export function detectDataRegions(values, options = {}) {
 /**
  * @param {unknown[][]} sheetValues
  * @param {{ startRow: number, startCol: number, endRow: number, endCol: number }} normalized
+ * @param {{ signal?: AbortSignal, maxAnalyzeRows?: number, maxSampleValuesPerColumn?: number }} [options]
  * @returns {{
  *   hasHeader: boolean,
  *   headers: string[],
@@ -244,19 +260,41 @@ export function detectDataRegions(values, options = {}) {
  *   columnCount: number,
  * }}
  */
-function analyzeRegion(sheetValues, normalized, signal) {
-  const regionValues = slice2D(sheetValues, normalized, signal);
-  const headerRowValues = regionValues[0] ?? [];
-  const nextRowValues = regionValues[1];
+function analyzeRegion(sheetValues, normalized, options = {}) {
+  const signal = options.signal;
+  const maxAnalyzeRows = normalizeNonNegativeInt(options.maxAnalyzeRows, DEFAULT_MAX_ANALYZE_ROWS);
+  const maxSampleValuesPerColumn = normalizeNonNegativeInt(
+    options.maxSampleValuesPerColumn,
+    DEFAULT_MAX_SAMPLE_VALUES_PER_COLUMN
+  );
+
+  const startRow = normalized.startRow;
+  const endRow = normalized.endRow;
+  const startCol = normalized.startCol;
+  const endCol = normalized.endCol;
+
+  // Avoid allocating a full copied 2D region matrix. Only slice the first two rows for
+  // header heuristics; everything else reads directly from `sheetValues`.
+  const headerRowSource = sheetValues[startRow];
+  const headerRowValues = Array.isArray(headerRowSource) ? headerRowSource.slice(startCol, endCol + 1) : [];
+  const nextRowValues =
+    startRow + 1 <= endRow && Array.isArray(sheetValues[startRow + 1])
+      ? sheetValues[startRow + 1].slice(startCol, endCol + 1)
+      : undefined;
   const hasHeader = isLikelyHeaderRow(headerRowValues, nextRowValues);
 
   const dataStartRow = hasHeader ? 1 : 0;
-  const dataRows = regionValues.slice(dataStartRow);
+
+  // Preserve previous ragged-row behavior: columnCount is the max per-row slice length
+  // within the region.
   let columnCount = 0;
-  for (const row of regionValues) {
+  for (let r = startRow; r <= endRow; r++) {
     throwIfAborted(signal);
-    const len = Array.isArray(row) ? row.length : 0;
-    if (len > columnCount) columnCount = len;
+    const row = sheetValues[r];
+    const rowLen = Array.isArray(row) ? row.length : 0;
+    if (rowLen <= startCol) continue;
+    const sliceLen = Math.max(0, Math.min(rowLen, endCol + 1) - startCol);
+    if (sliceLen > columnCount) columnCount = sliceLen;
   }
 
   const headers = [];
@@ -272,35 +310,110 @@ function analyzeRegion(sheetValues, normalized, signal) {
   /** @type {{ name: string, type: InferredType, sampleValues: string[] }[]} */
   const columns = [];
 
+  const totalRows = Math.max(endRow - startRow + 1, 0);
+  const rowCount = Math.max(totalRows - (hasHeader ? 1 : 0), 0);
+
+  // Sample only a bounded number of data rows (after the header) to infer types and collect
+  // sample values.
+  const analyzeRows = Math.min(rowCount, maxAnalyzeRows);
+
+  const TYPE_NUMBER = 1 << 0;
+  const TYPE_BOOLEAN = 1 << 1;
+  const TYPE_DATE = 1 << 2;
+  const TYPE_STRING = 1 << 3;
+  const TYPE_FORMULA = 1 << 4;
+
+  /** @type {Uint8Array} */
+  const typeMaskByCol = new Uint8Array(columnCount);
+  /** @type {string[][]} */
+  const sampleValuesByCol = Array.from({ length: columnCount }, () => []);
+
+  /**
+   * @param {InferredType} t
+   */
+  function typeToMask(t) {
+    switch (t) {
+      case "number":
+        return TYPE_NUMBER;
+      case "boolean":
+        return TYPE_BOOLEAN;
+      case "date":
+        return TYPE_DATE;
+      case "string":
+        return TYPE_STRING;
+      case "formula":
+        return TYPE_FORMULA;
+      default:
+        return 0;
+    }
+  }
+
+  /**
+   * @param {number} mask
+   * @returns {InferredType}
+   */
+  function maskToInferredType(mask) {
+    if (mask === 0) return "empty";
+    if ((mask & (mask - 1)) === 0) {
+      switch (mask) {
+        case TYPE_NUMBER:
+          return "number";
+        case TYPE_BOOLEAN:
+          return "boolean";
+        case TYPE_DATE:
+          return "date";
+        case TYPE_STRING:
+          return "string";
+        case TYPE_FORMULA:
+          return "formula";
+        default:
+          return "mixed";
+      }
+    }
+
+    // Match inferColumnType's special-casing: formula + {number|date|string} => formula.
+    if ((mask & TYPE_FORMULA) !== 0) {
+      const other = mask & ~TYPE_FORMULA;
+      if (other !== 0 && (other & (other - 1)) === 0 && (other & TYPE_BOOLEAN) === 0) {
+        return "formula";
+      }
+    }
+    return "mixed";
+  }
+
+  const startDataRowIndex = startRow + dataStartRow;
+  for (let i = 0; i < analyzeRows; i++) {
+    throwIfAborted(signal);
+    const row = sheetValues[startDataRowIndex + i];
+    if (!Array.isArray(row)) continue;
+
+    // Scan the selected row across all columns.
+    for (let c = 0; c < columnCount; c++) {
+      // Avoid per-cell abort checks; per-row is enough to remain responsive while keeping
+      // overhead low for wide tables.
+      const v = row[startCol + c];
+      if (v === undefined || isCellEmpty(v)) continue;
+
+      typeMaskByCol[c] |= typeToMask(inferCellType(v));
+
+      const samples = sampleValuesByCol[c];
+      if (samples.length < maxSampleValuesPerColumn) {
+        const s = String(v);
+        if (!samples.includes(s)) samples.push(s);
+      }
+    }
+  }
+
   for (let c = 0; c < columnCount; c++) {
     throwIfAborted(signal);
-    /** @type {unknown[]} */
-    const colValues = [];
-    for (const row of dataRows) {
-      throwIfAborted(signal);
-      const v = row?.[c];
-      if (v !== undefined) colValues.push(v);
-    }
-    const type = inferColumnType(colValues, { signal });
+    const type = maskToInferredType(typeMaskByCol[c] ?? 0);
     inferredColumnTypes.push(type);
-
-    const sampleValues = [];
-    for (const v of colValues) {
-      throwIfAborted(signal);
-      if (isCellEmpty(v)) continue;
-      const s = String(v);
-      if (!sampleValues.includes(s)) sampleValues.push(s);
-      if (sampleValues.length >= 3) break;
-    }
-
     columns.push({
       name: headers[c] ?? `Column${c + 1}`,
       type,
-      sampleValues,
+      sampleValues: sampleValuesByCol[c] ?? [],
     });
   }
-
-  const rowCount = Math.max(regionValues.length - (hasHeader ? 1 : 0), 0);
 
   return {
     hasHeader,
@@ -352,16 +465,32 @@ function rangeContains(outer, inner) {
  *   namedRanges?: NamedRangeSchema[],
  *   tables?: { name: string, range: string }[]
  * }} sheet
- * @param {{ signal?: AbortSignal }} [options]
+ * @param {{
+ *   signal?: AbortSignal,
+ *   /**
+ *    * Maximum number of data rows (excluding the header row) to scan when inferring column types.
+ *    * Defaults to 500.
+ *    *\/
+ *   maxAnalyzeRows?: number,
+ *   /**
+ *    * Maximum number of unique sample values to capture per column. Defaults to 3.
+ *    *\/
+ *   maxSampleValuesPerColumn?: number,
+ * }} [options]
  * @returns {SheetSchema}
  */
 export function extractSheetSchema(sheet, options = {}) {
   const signal = options.signal;
   throwIfAborted(signal);
+  const maxAnalyzeRows = normalizeNonNegativeInt(options.maxAnalyzeRows, DEFAULT_MAX_ANALYZE_ROWS);
+  const maxSampleValuesPerColumn = normalizeNonNegativeInt(
+    options.maxSampleValuesPerColumn,
+    DEFAULT_MAX_SAMPLE_VALUES_PER_COLUMN
+  );
   const origin = sheet && typeof sheet === "object" && sheet.origin && typeof sheet.origin === "object"
     ? {
-        row: Number.isInteger(sheet.origin.row) && sheet.origin.row >= 0 ? sheet.origin.row : 0,
-        col: Number.isInteger(sheet.origin.col) && sheet.origin.col >= 0 ? sheet.origin.col : 0,
+         row: Number.isInteger(sheet.origin.row) && sheet.origin.row >= 0 ? sheet.origin.row : 0,
+         col: Number.isInteger(sheet.origin.col) && sheet.origin.col >= 0 ? sheet.origin.col : 0,
       }
     : { row: 0, col: 0 };
   throwIfAborted(signal);
@@ -403,7 +532,7 @@ export function extractSheetSchema(sheet, options = {}) {
     throwIfAborted(signal);
     const region = regions[i];
     const normalized = normalizeRange(region);
-    const analyzed = analyzeRegion(sheet.values, normalized, signal);
+    const analyzed = analyzeRegion(sheet.values, normalized, { signal, maxAnalyzeRows, maxSampleValuesPerColumn });
     const rect = {
       startRow: normalized.startRow + origin.row,
       endRow: normalized.endRow + origin.row,
@@ -497,14 +626,16 @@ export function extractSheetSchema(sheet, options = {}) {
       const localRect =
         origin.row === 0 && origin.col === 0
           ? explicit.rect
-          : {
-              startRow: explicit.rect.startRow - origin.row,
-              endRow: explicit.rect.endRow - origin.row,
-              startCol: explicit.rect.startCol - origin.col,
-              endCol: explicit.rect.endCol - origin.col,
-            };
+         : {
+               startRow: explicit.rect.startRow - origin.row,
+               endRow: explicit.rect.endRow - origin.row,
+               startCol: explicit.rect.startCol - origin.col,
+               endCol: explicit.rect.endCol - origin.col,
+             };
       const clamped = clampRectToMatrix(localRect);
-      const analyzed = clamped ? analyzeRegion(sheet.values, clamped, signal) : { columns: [], rowCount: 0 };
+      const analyzed = clamped
+        ? analyzeRegion(sheet.values, clamped, { signal, maxAnalyzeRows, maxSampleValuesPerColumn })
+        : { columns: [], rowCount: 0 };
       tableEntries.push({
         table: {
           name: explicit.name,
@@ -529,19 +660,4 @@ export function extractSheetSchema(sheet, options = {}) {
     namedRanges: sheet.namedRanges ?? [],
     dataRegions,
   };
-}
-
-/**
- * @param {unknown[][]} values
- * @param {{ startRow: number, startCol: number, endRow: number, endCol: number }} range
- */
-function slice2D(values, range, signal) {
-  /** @type {unknown[][]} */
-  const out = [];
-  for (let r = range.startRow; r <= range.endRow; r++) {
-    throwIfAborted(signal);
-    const row = values[r] ?? [];
-    out.push(row.slice(range.startCol, range.endCol + 1));
-  }
-  return out;
 }

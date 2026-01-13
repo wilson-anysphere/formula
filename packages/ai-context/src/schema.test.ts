@@ -151,6 +151,61 @@ describe("extractSheetSchema", () => {
     expect(schema.dataRegions[0].range).toBe("'Bob''s Sheet'!A1:B3");
   });
 
+  it("analyzes large regions using bounded sampling and preserves full row/column counts", () => {
+    const rows = 4_000;
+    const cols = 50;
+    const headerRow = Array.from({ length: cols }, (_, i) => {
+      if (i === 0) return "Name";
+      if (i === 1) return "Sales";
+      if (i === 2) return "Active";
+      if (i === 3) return "Date";
+      if (i === 4) return "Formula";
+      return `Col${i + 1}`;
+    });
+
+    const values = Array.from({ length: rows }, (_, r) => {
+      if (r === 0) return headerRow;
+      const row = Array.from({ length: cols }, () => null);
+      // Keep the region connected across all rows.
+      row[0] = `Item${r}`;
+      if (r === 1) {
+        row[1] = 123;
+        row[2] = true;
+        row[3] = "2024-01-01";
+        row[4] = "=A2*2";
+      }
+      // Conflicting type outside the sampled prefix should not influence inference.
+      if (r === 100) {
+        row[1] = "oops";
+      }
+      return row;
+    });
+
+    const schema = extractSheetSchema(
+      { name: "Sheet1", values },
+      { maxAnalyzeRows: 5, maxSampleValuesPerColumn: 1 },
+    );
+
+    expect(schema.dataRegions).toHaveLength(1);
+    expect(schema.dataRegions[0].rowCount).toBe(rows - 1);
+    expect(schema.dataRegions[0].columnCount).toBe(cols);
+
+    expect(schema.tables).toHaveLength(1);
+    const table = schema.tables[0];
+    expect(table.rowCount).toBe(rows - 1);
+    expect(table.columns).toHaveLength(cols);
+
+    const colByName = Object.fromEntries(table.columns.map((c) => [c.name, c]));
+    expect(colByName.Name.type).toBe("string");
+    expect(colByName.Sales.type).toBe("number");
+    expect(colByName.Active.type).toBe("boolean");
+    expect(colByName.Date.type).toBe("date");
+    expect(colByName.Formula.type).toBe("formula");
+    // sampleValues should respect maxSampleValuesPerColumn=1.
+    expect(colByName.Name.sampleValues.length).toBeLessThanOrEqual(1);
+    expect(colByName.Sales.sampleValues.length).toBeLessThanOrEqual(1);
+  });
+
   it("detectDataRegions treats missing cells in ragged rows as empty", () => {
     const values = [
       [1, 1],
