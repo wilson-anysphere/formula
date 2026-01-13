@@ -902,7 +902,7 @@ jobs:
           $installers | ForEach-Object { Write-Host " - $($_.FullName)" }
 
           foreach ($file in $installers) {
-            Write-Host "::group::signtool verify $($file.FullName)"
+            Write-Host "::group::signtool verify /pa /v $($file.FullName)"
             Write-Host "Verifying Authenticode signature for: $($file.FullName)"
             & $signtool verify /pa /v $file.FullName
             if ($LASTEXITCODE -ne 0) {
@@ -1291,6 +1291,13 @@ jobs:
           fi
 
           echo "Found app bundle: $app_path"
+
+          echo "::group::codesign --verify $app_path"
+          if ! /usr/bin/codesign --verify --deep --strict --verbose=2 "$app_path"; then
+            echo "::error::codesign verification failed for app bundle: $app_path" >&2
+            exit 1
+          fi
+          echo "::endgroup::"
 
           exe_path="$app_path/Contents/MacOS/formula-desktop"
           if [[ ! -f "$exe_path" ]]; then
