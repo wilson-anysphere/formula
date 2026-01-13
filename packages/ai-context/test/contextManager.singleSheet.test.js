@@ -38,6 +38,39 @@ test("buildContext: repeated calls with identical data do not re-index the sheet
   assert.equal(out2.retrieved[0].range, out1.retrieved[0].range);
 });
 
+test("buildContext: concurrent calls share a single indexing pass", async () => {
+  const ragIndex = new RagIndex();
+  let indexCalls = 0;
+  let releaseGate;
+  const gate = new Promise((resolve) => {
+    releaseGate = resolve;
+  });
+  const originalIndexSheet = ragIndex.indexSheet.bind(ragIndex);
+  ragIndex.indexSheet = async (...args) => {
+    indexCalls++;
+    await gate;
+    return originalIndexSheet(...args);
+  };
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1000, ragIndex });
+  const sheet = makeSheet([
+    ["Region", "Revenue"],
+    ["North", 1000],
+    ["South", 2000],
+  ]);
+
+  const p1 = cm.buildContext({ sheet, query: "revenue by region" });
+  const p2 = cm.buildContext({ sheet, query: "north revenue" });
+
+  // Give both requests a chance to reach the indexer. Without per-sheet locking this would
+  // call `indexSheet` twice before we release the gate.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  releaseGate();
+
+  await Promise.all([p1, p2]);
+  assert.equal(indexCalls, 1);
+});
+
 test("buildContext: cacheSheetIndex=false re-indexes even when the sheet is unchanged", async () => {
   const ragIndex = new RagIndex();
   let indexCalls = 0;

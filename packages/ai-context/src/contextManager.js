@@ -313,6 +313,45 @@ export class ContextManager {
     );
     /** @type {Map<string, string>} */
     this._sheetNameToActiveCacheKey = new Map();
+    /** @type {Map<string, Promise<void>>} */
+    this._sheetIndexLocks = new Map();
+  }
+
+  /**
+   * Ensure only one sheet-level index operation runs at a time per sheet name.
+   *
+   * `RagIndex.indexSheet()` clears and re-adds chunks by `${sheet.name}-region-` prefix,
+   * so concurrent indexing of the same sheet name can interleave deletes/adds and
+   * leave a mixed chunk set in the in-memory store.
+   *
+   * @template T
+   * @param {string} sheetName
+   * @param {AbortSignal | undefined} signal
+   * @param {() => Promise<T>} fn
+   * @returns {Promise<T>}
+   */
+  async _withSheetIndexLock(sheetName, signal, fn) {
+    const key = typeof sheetName === "string" ? sheetName : String(sheetName ?? "");
+    const prev = this._sheetIndexLocks.get(key) ?? Promise.resolve();
+    /** @type {() => void} */
+    let release = () => {};
+    const current = new Promise((resolve) => {
+      release = resolve;
+    });
+    const chain = prev.then(() => current);
+    this._sheetIndexLocks.set(key, chain);
+
+    try {
+      // Allow callers to abort while waiting for a previous indexing pass.
+      await awaitWithAbort(prev, signal);
+      throwIfAborted(signal);
+      return await fn();
+    } finally {
+      release();
+      if (this._sheetIndexLocks.get(key) === chain) {
+        this._sheetIndexLocks.delete(key);
+      }
+    }
   }
 
   /**
@@ -328,73 +367,78 @@ export class ContextManager {
     const signal = options.signal;
     const maxChunkRows = options.maxChunkRows;
     throwIfAborted(signal);
+    const sheetName = typeof sheet?.name === "string" ? sheet.name : String(sheet?.name ?? "");
 
-    if (!this.cacheSheetIndex) {
+    return await this._withSheetIndexLock(sheetName, signal, async () => {
+      throwIfAborted(signal);
+
+      if (!this.cacheSheetIndex) {
+        const indexStats = await this.ragIndex.indexSheet(sheet, { signal, maxChunkRows });
+        const schema = indexStats?.schema ?? extractSheetSchema(sheet, { signal });
+        return { schema };
+      }
+
+      const valuesHash = stableHashValue(sheet?.values ?? [], { signal });
+      const cacheKey = sheetIndexCacheKey(sheet);
+      const signature = computeSheetIndexSignature(sheet, { signal, maxChunkRows, valuesHash });
+      const schemaSignature = computeSheetSchemaSignature(sheet, { signal, valuesHash });
+
+      const cached = this._sheetIndexCache.get(cacheKey);
+      if (cached) {
+        // Refresh LRU on access.
+        this._sheetIndexCache.delete(cacheKey);
+        this._sheetIndexCache.set(cacheKey, cached);
+      }
+
+      const activeKey = this._sheetNameToActiveCacheKey.get(sheetName);
+      const upToDate = cached?.signature === signature && activeKey === cacheKey;
+      if (upToDate) {
+        if (cached?.schemaSignature === schemaSignature) return { schema: cached.schema };
+        // Schema-only metadata changed (e.g. named ranges / tables). Recompute schema without
+        // re-indexing/embedding.
+        const schema = extractSheetSchema(sheet, { signal });
+        const nextCached = {
+          signature,
+          schemaSignature,
+          schema,
+          sheetName,
+        };
+        this._sheetIndexCache.delete(cacheKey);
+        this._sheetIndexCache.set(cacheKey, nextCached);
+        return { schema };
+      }
+
       const indexStats = await this.ragIndex.indexSheet(sheet, { signal, maxChunkRows });
       const schema = indexStats?.schema ?? extractSheetSchema(sheet, { signal });
-      return { schema };
-    }
 
-    const valuesHash = stableHashValue(sheet?.values ?? [], { signal });
-    const cacheKey = sheetIndexCacheKey(sheet);
-    const signature = computeSheetIndexSignature(sheet, { signal, maxChunkRows, valuesHash });
-    const schemaSignature = computeSheetSchemaSignature(sheet, { signal, valuesHash });
-
-    const cached = this._sheetIndexCache.get(cacheKey);
-    if (cached) {
-      // Refresh LRU on access.
+      // Update caches after successful indexing.
+      this._sheetNameToActiveCacheKey.set(sheetName, cacheKey);
       this._sheetIndexCache.delete(cacheKey);
-      this._sheetIndexCache.set(cacheKey, cached);
-    }
+      this._sheetIndexCache.set(cacheKey, { signature, schemaSignature, schema, sheetName });
+      while (this._sheetIndexCache.size > this._sheetIndexCacheLimit) {
+        const oldestKey = this._sheetIndexCache.keys().next().value;
+        if (oldestKey === undefined) break;
+        const oldestEntry = this._sheetIndexCache.get(oldestKey);
+        this._sheetIndexCache.delete(oldestKey);
+        if (oldestEntry?.sheetName) {
+          const evictedSheetName = oldestEntry.sheetName;
+          const activeKeyForSheet = this._sheetNameToActiveCacheKey.get(evictedSheetName);
+          if (activeKeyForSheet === oldestKey) {
+            this._sheetNameToActiveCacheKey.delete(evictedSheetName);
 
-    const activeKey = this._sheetNameToActiveCacheKey.get(sheet.name);
-    const upToDate = cached?.signature === signature && activeKey === cacheKey;
-    if (upToDate) {
-      if (cached?.schemaSignature === schemaSignature) return { schema: cached.schema };
-      // Schema-only metadata changed (e.g. named ranges / tables). Recompute schema without
-      // re-indexing/embedding.
-      const schema = extractSheetSchema(sheet, { signal });
-      const nextCached = {
-        signature,
-        schemaSignature,
-        schema,
-        sheetName: sheet.name,
-      };
-      this._sheetIndexCache.delete(cacheKey);
-      this._sheetIndexCache.set(cacheKey, nextCached);
-      return { schema };
-    }
-
-    const indexStats = await this.ragIndex.indexSheet(sheet, { signal, maxChunkRows });
-    const schema = indexStats?.schema ?? extractSheetSchema(sheet, { signal });
-
-    // Update caches after successful indexing.
-    this._sheetNameToActiveCacheKey.set(sheet.name, cacheKey);
-    this._sheetIndexCache.delete(cacheKey);
-    this._sheetIndexCache.set(cacheKey, { signature, schemaSignature, schema, sheetName: sheet.name });
-    while (this._sheetIndexCache.size > this._sheetIndexCacheLimit) {
-      const oldestKey = this._sheetIndexCache.keys().next().value;
-      if (oldestKey === undefined) break;
-      const oldestEntry = this._sheetIndexCache.get(oldestKey);
-      this._sheetIndexCache.delete(oldestKey);
-      if (oldestEntry?.sheetName) {
-        const sheetName = oldestEntry.sheetName;
-        const activeKeyForSheet = this._sheetNameToActiveCacheKey.get(sheetName);
-        if (activeKeyForSheet === oldestKey) {
-          this._sheetNameToActiveCacheKey.delete(sheetName);
-
-          // Bound in-memory RAG storage as well as the signature cache. When a sheet's active
-          // index entry is evicted from the LRU, delete the sheet's chunks from the vector
-          // store so `RagIndex.search()` doesn't keep considering stale sheets forever.
-          if (typeof this.ragIndex?.store?.deleteByPrefix === "function") {
-            throwIfAborted(signal);
-            await this.ragIndex.store.deleteByPrefix(`${sheetName}-region-`, { signal });
+            // Bound in-memory RAG storage as well as the signature cache. When a sheet's active
+            // index entry is evicted from the LRU, delete the sheet's chunks from the vector
+            // store so `RagIndex.search()` doesn't keep considering stale sheets forever.
+            if (typeof this.ragIndex?.store?.deleteByPrefix === "function") {
+              throwIfAborted(signal);
+              await this.ragIndex.store.deleteByPrefix(`${evictedSheetName}-region-`, { signal });
+            }
           }
         }
       }
-    }
 
-    return { schema };
+      return { schema };
+    });
   }
 
   /**
