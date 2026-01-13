@@ -4,7 +4,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
-const configPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
+const defaultConfigPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
+// Test helper: allow overriding the config path so node:test suites can validate error cases
+// without mutating the real repo configuration.
+const configPath = process.env.FORMULA_TAURI_CONFIG_PATH
+  ? path.resolve(repoRoot, process.env.FORMULA_TAURI_CONFIG_PATH)
+  : defaultConfigPath;
 const relativeConfigPath = path.relative(repoRoot, configPath);
 
 const PLACEHOLDER_PUBKEY_MARKER = "REPLACE_WITH";
