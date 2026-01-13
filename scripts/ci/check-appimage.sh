@@ -379,7 +379,7 @@ main() {
 
     chmod +x "$appimage"
 
-    local appimage_abs tmp squashfs_root main_bin appdir_ld_library_path ld_library_path extract_out extract_status
+    local appimage_abs tmp="" squashfs_root main_bin appdir_ld_library_path ld_library_path extract_out extract_status
     appimage_abs="$(realpath "$appimage")"
 
     # Sanity check the AppImage runtime architecture before we try to execute it.
@@ -394,7 +394,7 @@ main() {
 
     # Set up cleanup *before* mktemp so failures (e.g. mktemp itself) still close the log group.
     # shellcheck disable=SC2064
-    trap 'rm -rf "$tmp"; if [[ "${CHECK_APPIMAGE_GROUP_OPEN:-0}" -eq 1 ]]; then echo "::endgroup::"; fi' EXIT
+    trap 'rm -rf "${tmp:-}"; if [[ "${CHECK_APPIMAGE_GROUP_OPEN:-0}" -eq 1 ]]; then echo "::endgroup::"; fi' EXIT
     tmp="$(mktemp -d)"
 
     # Extract (no FUSE required). This will create ./squashfs-root.
