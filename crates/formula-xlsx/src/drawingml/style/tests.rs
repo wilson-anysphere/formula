@@ -2,7 +2,7 @@ use formula_model::charts::LineDash;
 use formula_model::Color;
 use roxmltree::Document;
 
-use super::{parse_ln, parse_solid_fill};
+use super::{parse_ln, parse_solid_fill, parse_txpr};
 
 #[test]
 fn solid_fill_srgb() {
@@ -41,4 +41,38 @@ fn line_width_and_dash() {
     let line = parse_ln(doc.root_element()).unwrap();
     assert_eq!(line.width_100pt, Some(100));
     assert_eq!(line.dash, Some(LineDash::Dash));
+}
+
+#[test]
+fn txpr_parses_underline_and_strike_true() {
+    let xml = r#"<c:txPr xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:p>
+            <a:pPr>
+                <a:defRPr u="sng" strike="sngStrike">
+                    <a:latin typeface="Calibri"/>
+                </a:defRPr>
+            </a:pPr>
+        </a:p>
+    </c:txPr>"#;
+    let doc = Document::parse(xml).unwrap();
+    let style = parse_txpr(doc.root_element()).unwrap();
+    assert_eq!(style.underline, Some(true));
+    assert_eq!(style.strike, Some(true));
+}
+
+#[test]
+fn txpr_parses_underline_and_strike_false() {
+    let xml = r#"<c:txPr xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:p>
+            <a:pPr>
+                <a:defRPr u="none" strike="noStrike"/>
+            </a:pPr>
+        </a:p>
+    </c:txPr>"#;
+    let doc = Document::parse(xml).unwrap();
+    let style = parse_txpr(doc.root_element()).unwrap();
+    assert_eq!(style.underline, Some(false));
+    assert_eq!(style.strike, Some(false));
 }

@@ -8,41 +8,27 @@ pub fn parse_txpr(node: Node<'_, '_>) -> Option<TextRunStyle> {
         return None;
     }
 
-    // Prefer default run properties from the list style if present.
-    let rpr = node
+    // Prefer default run properties from the list style if present, but allow fallback to a run
+    // (`a:rPr`) for any properties that are not specified on `a:defRPr`.
+    let def_rpr = node
         .descendants()
-        .find(|n| n.is_element() && n.tag_name().name() == "defRPr")
-        .or_else(|| {
-            node.descendants()
-                .find(|n| n.is_element() && n.tag_name().name() == "rPr")
-        })?;
+        .find(|n| n.is_element() && n.tag_name().name() == "defRPr");
+    let run_rpr = node
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "rPr");
 
-    let font_family = rpr
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "latin")
-        .and_then(|n| n.attribute("typeface"))
-        .map(|s| s.to_string());
+    let mut style = TextRunStyle::default();
+    if let Some(def_rpr) = def_rpr {
+        apply_rpr(&mut style, def_rpr);
+    }
+    if let Some(run_rpr) = run_rpr {
+        apply_rpr_fallback(&mut style, run_rpr);
+    }
 
-    let size_100pt = rpr
-        .attribute("sz")
-        .and_then(|v| v.parse::<u32>().ok());
-
-    let bold = rpr.attribute("b").and_then(parse_bool_attr);
-    let italic = rpr.attribute("i").and_then(parse_bool_attr);
-
-    let color = rpr
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "solidFill")
-        .and_then(parse_solid_fill)
-        .map(|f| f.color);
-
-    let style = TextRunStyle {
-        font_family,
-        size_100pt,
-        bold,
-        italic,
-        color,
-    };
+    // Bail early if we didn't find any `a:*RPr` nodes at all.
+    if def_rpr.is_none() && run_rpr.is_none() {
+        return None;
+    }
 
     if style.is_empty() {
         None
@@ -51,10 +37,86 @@ pub fn parse_txpr(node: Node<'_, '_>) -> Option<TextRunStyle> {
     }
 }
 
+fn apply_rpr(style: &mut TextRunStyle, rpr: Node<'_, '_>) {
+    style.font_family = parse_font_family(rpr);
+    style.size_100pt = rpr.attribute("sz").and_then(|v| v.parse::<u32>().ok());
+    style.bold = rpr.attribute("b").and_then(parse_bool_attr);
+    style.italic = rpr.attribute("i").and_then(parse_bool_attr);
+    style.underline = rpr.attribute("u").and_then(parse_underline_attr);
+    style.strike = rpr.attribute("strike").and_then(parse_strike_attr);
+    style.baseline = rpr.attribute("baseline").and_then(|v| v.parse::<i32>().ok());
+    style.color = parse_color(rpr);
+}
+
+fn apply_rpr_fallback(style: &mut TextRunStyle, rpr: Node<'_, '_>) {
+    if style.font_family.is_none() {
+        style.font_family = parse_font_family(rpr);
+    }
+    if style.size_100pt.is_none() {
+        style.size_100pt = rpr.attribute("sz").and_then(|v| v.parse::<u32>().ok());
+    }
+    if style.bold.is_none() {
+        style.bold = rpr.attribute("b").and_then(parse_bool_attr);
+    }
+    if style.italic.is_none() {
+        style.italic = rpr.attribute("i").and_then(parse_bool_attr);
+    }
+    if style.underline.is_none() {
+        style.underline = rpr.attribute("u").and_then(parse_underline_attr);
+    }
+    if style.strike.is_none() {
+        style.strike = rpr.attribute("strike").and_then(parse_strike_attr);
+    }
+    if style.baseline.is_none() {
+        style.baseline = rpr.attribute("baseline").and_then(|v| v.parse::<i32>().ok());
+    }
+    if style.color.is_none() {
+        style.color = parse_color(rpr);
+    }
+}
+
+fn parse_font_family(rpr: Node<'_, '_>) -> Option<String> {
+    // DrawingML uses `typeface` on `<a:latin>` for both concrete font names and theme placeholders
+    // like `+mn-lt` / `+mj-lt`. Preserve the raw string so callers can later resolve theme fonts.
+    rpr.children()
+        .find(|n| n.is_element() && n.tag_name().name() == "latin")
+        .and_then(|n| n.attribute("typeface"))
+        .map(|s| s.to_string())
+}
+
+fn parse_color(rpr: Node<'_, '_>) -> Option<formula_model::charts::ColorRef> {
+    rpr.children()
+        .find(|n| n.is_element() && n.tag_name().name() == "solidFill")
+        .and_then(parse_solid_fill)
+        .map(|f| f.color)
+}
+
 fn parse_bool_attr(v: &str) -> Option<bool> {
     match v {
         "1" | "true" | "True" | "TRUE" => Some(true),
         "0" | "false" | "False" | "FALSE" => Some(false),
         _ => None,
+    }
+}
+
+fn parse_underline_attr(v: &str) -> Option<bool> {
+    // ST_TextUnderlineType includes values like `none`, `sng`, `dbl`, ...
+    if v.is_empty() {
+        None
+    } else if v == "none" {
+        Some(false)
+    } else {
+        Some(true)
+    }
+}
+
+fn parse_strike_attr(v: &str) -> Option<bool> {
+    // ST_TextStrikeType includes values like `noStrike`, `sngStrike`, `dblStrike`.
+    if v.is_empty() {
+        None
+    } else if v == "noStrike" {
+        Some(false)
+    } else {
+        Some(true)
     }
 }

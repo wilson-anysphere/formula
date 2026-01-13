@@ -111,6 +111,13 @@ pub struct TextRunStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub italic: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub underline: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strike: Option<bool>,
+    /// Baseline shift in 1/1000 of the font size (DrawingML `baseline` attribute).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<ColorRef>,
 }
 
@@ -120,6 +127,9 @@ impl TextRunStyle {
             && self.size_100pt.is_none()
             && self.bold.is_none()
             && self.italic.is_none()
+            && self.underline.is_none()
+            && self.strike.is_none()
+            && self.baseline.is_none()
             && self.color.is_none()
     }
 }
