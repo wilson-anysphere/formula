@@ -43,5 +43,7 @@ pub mod tauri_origin;
 pub mod process_metrics;
 #[cfg(feature = "desktop")]
 pub mod tray_status;
+#[cfg(any(feature = "desktop", test))]
+pub mod updater_download_cache;
 #[cfg(feature = "desktop")]
 pub mod updater;

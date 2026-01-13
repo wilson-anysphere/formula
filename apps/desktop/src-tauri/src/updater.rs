@@ -1,11 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::{Mutex, Notify};
 
 use crate::ipc_origin;
+use crate::updater_download_cache::UpdaterDownloadCache;
 
 static UPDATE_CHECK_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 static UPDATE_DOWNLOAD_STATE: OnceLock<Mutex<UpdateDownloadState>> = OnceLock::new();
@@ -13,7 +14,7 @@ static UPDATE_DOWNLOAD_STATE: OnceLock<Mutex<UpdateDownloadState>> = OnceLock::n
 struct DownloadedUpdate {
     version: String,
     update: tauri_plugin_updater::Update,
-    bytes: Vec<u8>,
+    download_path: std::path::PathBuf,
 }
 
 struct UpdateDownloadState {
@@ -34,6 +35,17 @@ fn update_download_state() -> &'static Mutex<UpdateDownloadState> {
             notify: std::sync::Arc::new(Notify::new()),
         })
     })
+}
+
+fn updater_download_cache_base_dir(app: &AppHandle) -> std::path::PathBuf {
+    match app.path().app_cache_dir() {
+        Ok(dir) => dir,
+        Err(err) => {
+            // Best-effort fallback: `app_cache_dir` should be available in normal desktop builds.
+            eprintln!("failed to resolve app cache dir for updater downloads: {err}");
+            std::env::temp_dir().join("formula").join("updater-cache")
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -195,22 +207,68 @@ async fn spawn_update_download(
 
         match download_result {
             Ok(bytes) => {
-                let notify = {
+                let cache = UpdaterDownloadCache::new(updater_download_cache_base_dir(&handle));
+                let download_path = match cache.write(&version, &bytes) {
+                    Ok(path) => path,
+                    Err(err) => {
+                        // Treat cache write failures as a download failure: without a persisted
+                        // payload we can't install later without keeping bytes resident in memory.
+                        let msg = err.to_string();
+                        let (notify, stale) = {
+                            let mut state = update_download_state().lock().await;
+                            state.in_flight = false;
+                            if state.downloading_version.as_deref() == Some(version.as_str()) {
+                                state.downloading_version = None;
+                            }
+                            let stale = state.downloaded.take();
+                            state.downloaded = None;
+                            state.last_error = Some(msg.clone());
+                            (state.notify.clone(), stale)
+                        };
+                        // If we had a previously cached file, it is now stale (the state no longer
+                        // references it). Best-effort cleanup.
+                        if let Some(stale) = stale {
+                            let _ = UpdaterDownloadCache::delete(&stale.download_path);
+                        }
+                        notify.notify_waiters();
+
+                        let _ = handle.emit(
+                            "update-download-error",
+                            serde_json::json!({ "source": source, "version": version, "message": msg }),
+                        );
+                        eprintln!("updater download cache write failed: {err}");
+                        return;
+                    }
+                };
+
+                // Release the downloaded bytes from memory ASAP. We'll reload from disk when the
+                // user approves install.
+                drop(bytes);
+
+                let (notify, stale) = {
                     let mut state = update_download_state().lock().await;
                     state.in_flight = false;
                     if state.downloading_version.as_deref() == Some(version.as_str()) {
                         state.downloading_version = None;
                     }
 
+                    let stale = state.downloaded.take();
                     state.downloaded = Some(DownloadedUpdate {
                         version: version.clone(),
                         update,
-                        bytes,
+                        download_path: download_path.clone(),
                     });
                     state.last_error = None;
-                    state.notify.clone()
+                    (state.notify.clone(), stale)
                 };
                 notify.notify_waiters();
+
+                // Best-effort cleanup for the previously downloaded payload, if any.
+                if let Some(stale) = stale {
+                    if stale.download_path != download_path {
+                        let _ = UpdaterDownloadCache::delete(&stale.download_path);
+                    }
+                }
 
                 let _ = handle.emit(
                     "update-downloaded",
@@ -219,17 +277,22 @@ async fn spawn_update_download(
             }
             Err(err) => {
                 let msg = err.to_string();
-                let notify = {
+                let (notify, stale) = {
                     let mut state = update_download_state().lock().await;
                     state.in_flight = false;
                     if state.downloading_version.as_deref() == Some(version.as_str()) {
                         state.downloading_version = None;
                     }
+                    let stale = state.downloaded.take();
                     state.downloaded = None;
                     state.last_error = Some(msg.clone());
-                    state.notify.clone()
+                    (state.notify.clone(), stale)
                 };
                 notify.notify_waiters();
+
+                if let Some(stale) = stale {
+                    let _ = UpdaterDownloadCache::delete(&stale.download_path);
+                }
 
                 let _ = handle.emit(
                     "update-download-error",
@@ -278,17 +341,30 @@ pub async fn install_downloaded_update(window: tauri::WebviewWindow) -> Result<(
         };
 
         if let Some(downloaded) = downloaded {
+            let bytes = UpdaterDownloadCache::read(&downloaded.download_path)
+                .map_err(|err| err.to_string())?;
+
             let result = downloaded
                 .update
-                .install(&downloaded.bytes)
+                .install(&bytes)
                 .map_err(|err| err.to_string());
+
+            // Ensure we don't keep the update payload resident after the install attempt.
+            drop(bytes);
 
             if result.is_err() {
                 // Restore the downloaded update so the user can retry without forcing a re-download.
                 let mut state = update_download_state().lock().await;
                 if state.downloaded.is_none() {
                     state.downloaded = Some(downloaded);
+                } else {
+                    // Another update finished downloading while we attempted to install; our cached
+                    // file is now stale and unreachable. Clean it up best-effort.
+                    let _ = UpdaterDownloadCache::delete(&downloaded.download_path);
                 }
+            } else {
+                // Install succeeded: remove the cached payload.
+                let _ = UpdaterDownloadCache::delete(&downloaded.download_path);
             }
 
             return result;
