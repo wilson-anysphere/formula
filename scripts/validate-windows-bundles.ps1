@@ -23,6 +23,22 @@
   Optional path(s) to MSI installer .msi files, directories containing them,
   or wildcard patterns. When provided, overrides default MSI discovery.
 
+.PARAMETER BundleDir
+  Optional path to a Tauri bundle directory (…/release/bundle). When provided,
+  the script will only search within this bundle directory for:
+    - msi/**/*.msi
+    - nsis/**/*.exe
+    - nsis-web/**/*.exe
+  This is useful in CI matrix jobs where the expected output directory is known.
+
+.PARAMETER RequireExe
+  Require at least one NSIS installer (.exe). By default, the script only
+  requires at least one installer of either type.
+
+.PARAMETER RequireMsi
+  Require at least one MSI installer (.msi). By default, the script only
+  requires at least one installer of either type.
+
 .EXAMPLE
   pwsh ./scripts/validate-windows-bundles.ps1
 
@@ -32,15 +48,19 @@
 .NOTES
   If the environment variable WINDOWS_CERTIFICATE is set (non-empty), this
   script will run:
-    signtool verify /pa /all <installer>
+    signtool verify /pa /all /v <installer>
   against every discovered installer and will fail if any are unsigned or have
-  invalid signatures.
+  invalid signatures. It also enforces that signatures are timestamped so they
+  remain valid after the signing certificate expires.
 #>
 
 [CmdletBinding()]
 param(
   [string[]]$ExePath = @(),
-  [string[]]$MsiPath = @()
+  [string[]]$MsiPath = @(),
+  [string]$BundleDir = "",
+  [switch]$RequireExe,
+  [switch]$RequireMsi
 )
 
 Set-StrictMode -Version Latest
@@ -193,10 +213,26 @@ function Assert-Signed {
     [System.IO.FileInfo]$File
   )
 
-  Write-Host "signtool verify: $($File.FullName)"
-  & $SignToolPath verify /pa /all $File.FullName
-  if ($LASTEXITCODE -ne 0) {
-    throw "Authenticode signature verification failed for: $($File.FullName)"
+  Write-Host "::group::signtool verify /pa /all $($File.Name)"
+  $output = & $SignToolPath verify /pa /all /v $File.FullName 2>&1 | Out-String
+  $exitCode = $LASTEXITCODE
+  if (-not [string]::IsNullOrWhiteSpace($output)) {
+    Write-Host $output.TrimEnd()
+  }
+  Write-Host "::endgroup::"
+
+  if ($exitCode -ne 0) {
+    throw "Authenticode signature verification failed for: $($File.FullName) (signtool exit code $exitCode)"
+  }
+
+  # Ensure the signature is timestamped so it remains valid after the signing
+  # certificate expires.
+  $outLc = $output.ToLowerInvariant()
+  if ($outLc.Contains("not timestamped")) {
+    throw "Authenticode signature is not timestamped for: $($File.FullName)"
+  }
+  if (-not ($outLc.Contains("signature is timestamped") -or $outLc.Contains("the signature is timestamped") -or $outLc.Contains("timestamp verified by"))) {
+    throw "Unable to determine Authenticode timestamp status for: $($File.FullName) (expected signtool output to mention a timestamp)"
   }
 }
 
@@ -204,41 +240,70 @@ $repoRoot = Get-RepoRoot
 
 Push-Location $repoRoot
 try {
-  $searchRoots = New-Object System.Collections.Generic.List[string]
-  # Prefer CARGO_TARGET_DIR when set (some CI environments export it), but always
-  # include the default workspace roots.
-  if (-not [string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
-    $cargoTarget = $env:CARGO_TARGET_DIR
-    if (-not [System.IO.Path]::IsPathRooted($cargoTarget)) {
-      $cargoTarget = Join-Path $repoRoot $cargoTarget
-    }
-    $searchRoots.Add($cargoTarget)
-  }
-  $searchRoots.Add([System.IO.Path]::Combine($repoRoot, "apps", "desktop", "src-tauri", "target"))
-  $searchRoots.Add([System.IO.Path]::Combine($repoRoot, "apps", "desktop", "target"))
-  $searchRoots.Add([System.IO.Path]::Combine($repoRoot, "target"))
-  $searchRoots = @($searchRoots | Where-Object { Test-Path -LiteralPath $_ } | Sort-Object -Unique)
-
   $exeInstallers = @()
   $msiInstallers = @()
 
-  if ($ExePath.Count -gt 0) {
-    $exeInstallers = Expand-FileInputs -Inputs $ExePath -Extension ".exe" -RepoRoot $repoRoot
-  } else {
-    foreach ($root in $searchRoots) {
-      $exeInstallers += Find-BundleFiles -TargetRoot $root -BundleKind "nsis" -Extension ".exe"
-      $exeInstallers += Find-BundleFiles -TargetRoot $root -BundleKind "nsis-web" -Extension ".exe"
-    }
-    $exeInstallers = @($exeInstallers | Sort-Object FullName -Unique)
-  }
+  $resolvedBundleDir = ""
+  $searchRoots = @()
 
-  if ($MsiPath.Count -gt 0) {
-    $msiInstallers = Expand-FileInputs -Inputs $MsiPath -Extension ".msi" -RepoRoot $repoRoot
-  } else {
-    foreach ($root in $searchRoots) {
-      $msiInstallers += Find-BundleFiles -TargetRoot $root -BundleKind "msi" -Extension ".msi"
+  if (-not [string]::IsNullOrWhiteSpace($BundleDir)) {
+    if ($ExePath.Count -gt 0 -or $MsiPath.Count -gt 0) {
+      throw "Use either -BundleDir or -ExePath/-MsiPath overrides, not both."
     }
+
+    $candidate = [Environment]::ExpandEnvironmentVariables($BundleDir.Trim())
+    if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+      $candidate = Join-Path $repoRoot $candidate
+    }
+    if (-not (Test-Path -LiteralPath $candidate)) {
+      throw "BundleDir not found: $candidate"
+    }
+    $bundleItem = Get-Item -LiteralPath $candidate
+    if (-not $bundleItem.PSIsContainer) {
+      throw "BundleDir must be a directory: $candidate"
+    }
+    $resolvedBundleDir = $bundleItem.FullName
+
+    $exeInstallers += @(Get-ChildItem -LiteralPath (Join-Path $resolvedBundleDir "nsis") -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue)
+    $exeInstallers += @(Get-ChildItem -LiteralPath (Join-Path $resolvedBundleDir "nsis-web") -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue)
+    $msiInstallers += @(Get-ChildItem -LiteralPath (Join-Path $resolvedBundleDir "msi") -Recurse -File -Filter "*.msi" -ErrorAction SilentlyContinue)
+
+    $exeInstallers = @($exeInstallers | Sort-Object FullName -Unique)
     $msiInstallers = @($msiInstallers | Sort-Object FullName -Unique)
+  } else {
+    $searchRoots = New-Object System.Collections.Generic.List[string]
+    # Prefer CARGO_TARGET_DIR when set (some CI environments export it), but always
+    # include the default workspace roots.
+    if (-not [string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
+      $cargoTarget = $env:CARGO_TARGET_DIR
+      if (-not [System.IO.Path]::IsPathRooted($cargoTarget)) {
+        $cargoTarget = Join-Path $repoRoot $cargoTarget
+      }
+      $searchRoots.Add($cargoTarget)
+    }
+    $searchRoots.Add([System.IO.Path]::Combine($repoRoot, "apps", "desktop", "src-tauri", "target"))
+    $searchRoots.Add([System.IO.Path]::Combine($repoRoot, "apps", "desktop", "target"))
+    $searchRoots.Add([System.IO.Path]::Combine($repoRoot, "target"))
+    $searchRoots = @($searchRoots | Where-Object { Test-Path -LiteralPath $_ } | Sort-Object -Unique)
+
+    if ($ExePath.Count -gt 0) {
+      $exeInstallers = Expand-FileInputs -Inputs $ExePath -Extension ".exe" -RepoRoot $repoRoot
+    } else {
+      foreach ($root in $searchRoots) {
+        $exeInstallers += Find-BundleFiles -TargetRoot $root -BundleKind "nsis" -Extension ".exe"
+        $exeInstallers += Find-BundleFiles -TargetRoot $root -BundleKind "nsis-web" -Extension ".exe"
+      }
+      $exeInstallers = @($exeInstallers | Sort-Object FullName -Unique)
+    }
+
+    if ($MsiPath.Count -gt 0) {
+      $msiInstallers = Expand-FileInputs -Inputs $MsiPath -Extension ".msi" -RepoRoot $repoRoot
+    } else {
+      foreach ($root in $searchRoots) {
+        $msiInstallers += Find-BundleFiles -TargetRoot $root -BundleKind "msi" -Extension ".msi"
+      }
+      $msiInstallers = @($msiInstallers | Sort-Object FullName -Unique)
+    }
   }
 
   # Exclude embedded WebView2 helper installers; we only care about the Formula installers.
@@ -250,7 +315,9 @@ try {
 
   Write-Host "Windows bundle validation"
   Write-Host "RepoRoot: $repoRoot"
-  if ($searchRoots.Count -gt 0) {
+  if (-not [string]::IsNullOrWhiteSpace($resolvedBundleDir)) {
+    Write-Host "BundleDir: $resolvedBundleDir"
+  } elseif ($searchRoots.Count -gt 0) {
     Write-Host ("SearchRoots: {0}" -f ($searchRoots -join ", "))
   }
   Write-Host ""
@@ -260,8 +327,23 @@ try {
   foreach ($f in $msiInstallers) { Write-Host ("  - {0}" -f $f.FullName) }
   Write-Host ""
 
-  if ($totalInstallers -eq 0) {
-    throw "No Windows installer artifacts were found (.exe and .msi are both missing). Ensure the release build produces installers under release/bundle/(nsis|msi)."
+  $searchHint = ""
+  if (-not [string]::IsNullOrWhiteSpace($resolvedBundleDir)) {
+    $searchHint = $resolvedBundleDir
+  } elseif ($searchRoots.Count -gt 0) {
+    $searchHint = ($searchRoots -join ", ")
+  } else {
+    $searchHint = "<none>"
+  }
+
+  if ($RequireExe -and $exeInstallers.Count -eq 0) {
+    throw "Missing required Windows installer artifact type: NSIS .exe. Common causes:`n- NSIS missing (makensis.exe not on PATH) so EXE bundling was skipped/failed`n- Tauri NSIS bundler does not support this target`nSearched: $searchHint"
+  }
+  if ($RequireMsi -and $msiInstallers.Count -eq 0) {
+    throw "Missing required Windows installer artifact type: MSI .msi. Common causes:`n- WiX Toolset missing (candle.exe/light.exe not on PATH) so MSI bundling was skipped/failed`n- Tauri MSI bundler does not support this target`nSearched: $searchHint"
+  }
+  if (-not $RequireExe -and -not $RequireMsi -and $totalInstallers -eq 0) {
+    throw "No Windows installer artifacts were found (.exe and .msi are both missing). Ensure the release build produces installers under release/bundle/(nsis|nsis-web|msi)."
   }
 
   $signingConfigured = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE)

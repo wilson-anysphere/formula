@@ -1179,9 +1179,11 @@ jobs:
           path: updater-manifest/latest-${{ matrix.cache_target }}.json
           if-no-files-found: error
 
-      - name: Assert Windows installer bundle exists for target
+      - name: Validate Windows installer bundles (presence + Authenticode)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
         run: |
           $ErrorActionPreference = "Stop"
           $target = "${{ matrix.rust_target }}"
@@ -1204,42 +1206,7 @@ jobs:
           if ($bundleDir -ne $bundleCandidates[0]) {
             Write-Host "windows-bundle: NOTE bundle dir is not in the preferred location; using: $bundleDir"
           }
-
-          # Wrap in @() so `.Count` behaves consistently even when 0 or 1 files match.
-          #
-          # Tauri Windows bundle outputs live under:
-          # - bundle/msi/*.msi
-          # - bundle/nsis/*.exe (and sometimes bundle/nsis-web/*.exe)
-          #
-          # We intentionally scope to these directories so random `.exe` files (e.g. helpers)
-          # do not satisfy the "Windows installer" requirement.
-          $msis = @(
-            Get-ChildItem -Path (Join-Path $bundleDir "msi") -Recurse -File -Filter "*.msi" -ErrorAction SilentlyContinue
-          )
-          $exes = @()
-          $exes += @(
-            Get-ChildItem -Path (Join-Path $bundleDir "nsis") -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue
-          )
-          $exes += @(
-            Get-ChildItem -Path (Join-Path $bundleDir "nsis-web") -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue
-          )
-
-          if ($msis.Count -eq 0) {
-            throw "windows-bundle: ERROR missing required Windows MSI installer under: $bundleDir`n`nCommon causes:`n- WiX Toolset missing (candle.exe/light.exe not on PATH) so MSI bundling was skipped/failed`n- Tauri MSI bundler does not support target $target on this runner"
-          }
-          if ($exes.Count -eq 0) {
-            throw "windows-bundle: ERROR missing required Windows EXE (NSIS) installer under: $bundleDir`n`nCommon causes:`n- NSIS missing (makensis.exe not on PATH) so EXE bundling was skipped/failed`n- Tauri NSIS bundler does not support target $target on this runner"
-          }
-
-          Write-Host "windows-bundle: OK (found $($msis.Count) MSI + $($exes.Count) EXE installer file(s))"
-          if ($msis.Count -gt 0) {
-            Write-Host "MSI installers:"
-            $msis | ForEach-Object { Write-Host " - $($_.FullName)" }
-          }
-          if ($exes.Count -gt 0) {
-            Write-Host "EXE installers:"
-            $exes | ForEach-Object { Write-Host " - $($_.FullName)" }
-          }
+          ./scripts/validate-windows-bundles.ps1 -BundleDir $bundleDir -RequireExe -RequireMsi
 
       - name: Verify Windows ARM64 MSI targets ARM64 (template summary)
         if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
@@ -1278,28 +1245,6 @@ jobs:
       - name: Verify Windows installers bundle/reference WebView2 (bootstrapper/runtime)
         if: runner.os == 'Windows'
         run: python scripts/ci/check-windows-webview2-installer.py
-
-      - name: Verify Windows installer Authenticode signatures (signtool)
-        # Only run when signing secrets are configured; forks/dry-runs may intentionally build unsigned artifacts.
-        if: runner.os == 'Windows' && ((secrets.WINDOWS_CERTIFICATE != '' && secrets.WINDOWS_CERTIFICATE_PASSWORD != '') || vars.FORMULA_REQUIRE_CODESIGN == '1')
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $target = "${{ matrix.rust_target }}"
-          if ([string]::IsNullOrWhiteSpace($target)) {
-            throw "windows-sigcheck: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
-          }
-          $bundleCandidates = @(
-            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"),
-            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/$target/release/bundle"),
-            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle")
-          )
-          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $bundleDir) {
-            $candidatesJoined = $bundleCandidates -join "`n"
-            throw "windows-sigcheck: ERROR expected Tauri bundle dir not found. Looked in:`n$candidatesJoined"
-          }
-          python scripts/ci/check-windows-installer-signatures.py --bundle-dir "$bundleDir"
 
       - name: Verify Linux release artifacts (AppImage + deb + rpm + signatures)
         if: runner.os == 'Linux'
