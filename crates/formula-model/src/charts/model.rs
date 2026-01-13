@@ -70,6 +70,8 @@ pub struct TextModel {
     pub formula: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub style: Option<TextRunStyle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub box_style: Option<ShapeStyle>,
 }
 
 impl TextModel {
@@ -78,6 +80,7 @@ impl TextModel {
             rich_text: RichText::new(text),
             formula: None,
             style: None,
+            box_style: None,
         }
     }
 }
@@ -89,6 +92,8 @@ pub struct LegendModel {
     pub overlay: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_style: Option<TextRunStyle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<ShapeStyle>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -481,6 +481,7 @@ fn parse_text_from_tx(tx_node: Node<'_, '_>) -> Option<TextModel> {
             rich_text: RichText::new(cached_value.unwrap_or_default()),
             formula,
             style: None,
+            box_style: None,
         });
     }
 
@@ -492,6 +493,7 @@ fn parse_text_from_tx(tx_node: Node<'_, '_>) -> Option<TextModel> {
             rich_text: RichText::new(v),
             formula: None,
             style: None,
+            box_style: None,
         })
 }
 

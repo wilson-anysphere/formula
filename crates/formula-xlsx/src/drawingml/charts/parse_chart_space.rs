@@ -783,6 +783,14 @@ fn parse_title(
         text.style = Some(style);
     }
 
+    let box_style = title_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "spPr")
+        .and_then(parse_sppr);
+    if let (Some(box_style), Some(text)) = (box_style, parsed.as_mut()) {
+        text.box_style = Some(box_style);
+    }
+
     if auto_deleted && parsed.is_none() {
         return None;
     }
@@ -817,10 +825,16 @@ fn parse_legend(
         .find(|n| n.is_element() && n.tag_name().name() == "txPr")
         .and_then(parse_txpr);
 
+    let style = legend_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "spPr")
+        .and_then(parse_sppr);
+
     Some(LegendModel {
         position,
         overlay,
         text_style,
+        style,
     })
 }
 
@@ -855,6 +869,7 @@ fn parse_text_from_tx(
             rich_text: RichText::new(text),
             formula: None,
             style: None,
+            box_style: None,
         });
     }
 
@@ -873,6 +888,7 @@ fn parse_text_from_tx(
             rich_text: RichText::new(cached_value.unwrap_or_default()),
             formula,
             style: None,
+            box_style: None,
         });
     }
 
@@ -885,6 +901,7 @@ fn parse_text_from_tx(
             rich_text: RichText::new(v),
             formula: None,
             style: None,
+            box_style: None,
         });
     }
 
