@@ -79,7 +79,9 @@ test("workbookStateFromYjsDoc tolerates foreign placeholder roots created via CJ
   assert.throws(() => doc.getArray("sheets"), /different constructor/);
 
   const state = workbookStateFromYjsDoc(doc);
-  assert.deepEqual(state.sheets, [{ id: "Sheet1", name: "Sheet1" }]);
+  assert.deepEqual(state.sheets, [
+    { id: "Sheet1", name: "Sheet1", visibility: "visible", tabColor: null, view: { frozenRows: 0, frozenCols: 0 } },
+  ]);
   assert.deepEqual(state.sheetOrder, ["Sheet1"]);
   assert.equal(state.cellsBySheet.get("Sheet1")?.cells.get("r0c0")?.value ?? null, "alpha");
 
@@ -89,4 +91,3 @@ test("workbookStateFromYjsDoc tolerates foreign placeholder roots created via CJ
   doc.destroy();
   remote.destroy();
 });
-

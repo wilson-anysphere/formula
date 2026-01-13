@@ -126,6 +126,41 @@ test("diffYjsWorkbookSnapshots reports workbook-level metadata changes", () => {
   assert.equal(diff.metadata.modified[0].key, "title");
 });
 
+test("diffYjsWorkbookSnapshots reports sheet metadata changes (visibility/tabColor/frozen panes)", () => {
+  const doc = new Y.Doc();
+  const sheets = doc.getArray("sheets");
+
+  const sheet1 = new Y.Map();
+  sheet1.set("id", "sheet1");
+  sheet1.set("name", "Sheet1");
+  sheet1.set("visibility", "visible");
+  sheet1.set("tabColor", "FF00FF00");
+  sheet1.set("view", { frozenRows: 1, frozenCols: 0 });
+  sheets.push([sheet1]);
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  doc.transact(() => {
+    sheet1.set("visibility", "hidden");
+    sheet1.set("tabColor", null);
+    sheet1.set("view", { frozenRows: 2, frozenCols: 3 });
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  assert.deepEqual(diff.sheets.added, []);
+  assert.deepEqual(diff.sheets.removed, []);
+  assert.deepEqual(diff.sheets.renamed, []);
+  assert.deepEqual(diff.sheets.moved, []);
+  assert.deepEqual(diff.sheets.metaChanged, [
+    { id: "sheet1", field: "tabColor", before: "FF00FF00", after: null },
+    { id: "sheet1", field: "view.frozenCols", before: 0, after: 3 },
+    { id: "sheet1", field: "view.frozenRows", before: 1, after: 2 },
+    { id: "sheet1", field: "visibility", before: "visible", after: "hidden" },
+  ]);
+});
+
 test("diffYjsWorkbookSnapshots reports formatOnly edits when column default formats change (layered formats)", () => {
   const doc = new Y.Doc();
   const sheets = doc.getArray("sheets");

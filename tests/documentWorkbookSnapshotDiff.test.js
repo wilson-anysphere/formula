@@ -96,6 +96,51 @@ test("diffDocumentWorkbookSnapshots reports workbook-level metadata changes (JSO
   assert.equal(diff.metadata.modified[0].key, "title");
 });
 
+test("diffDocumentWorkbookSnapshots reports sheet metadata changes (visibility/tabColor/frozen panes)", () => {
+  const beforeSnapshot = encodeSnapshot({
+    schemaVersion: 1,
+    sheets: [
+      {
+        id: "sheet1",
+        name: "Sheet1",
+        visibility: "visible",
+        tabColor: { rgb: "FF00FF00" },
+        frozenRows: 1,
+        frozenCols: 0,
+        cells: [],
+      },
+    ],
+  });
+
+  const afterSnapshot = encodeSnapshot({
+    schemaVersion: 1,
+    sheets: [
+      {
+        id: "sheet1",
+        name: "Sheet1",
+        visibility: "hidden",
+        tabColor: null,
+        frozenRows: 2,
+        frozenCols: 3,
+        cells: [],
+      },
+    ],
+  });
+
+  const diff = diffDocumentWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+
+  assert.deepEqual(diff.sheets.added, []);
+  assert.deepEqual(diff.sheets.removed, []);
+  assert.deepEqual(diff.sheets.renamed, []);
+  assert.deepEqual(diff.sheets.moved, []);
+  assert.deepEqual(diff.sheets.metaChanged, [
+    { id: "sheet1", field: "tabColor", before: "FF00FF00", after: null },
+    { id: "sheet1", field: "view.frozenCols", before: 0, after: 3 },
+    { id: "sheet1", field: "view.frozenRows", before: 1, after: 2 },
+    { id: "sheet1", field: "visibility", before: "visible", after: "hidden" },
+  ]);
+});
+
 test("diffDocumentWorkbookSnapshots reports formatOnly edits when default formats change (layered formats)", () => {
   const beforeSnapshot = encodeSnapshot({
     schemaVersion: 1,

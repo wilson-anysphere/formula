@@ -3,10 +3,13 @@ import { deepEqual } from "../diff/deepEqual.js";
 import { workbookStateFromYjsSnapshot } from "./workbookState.js";
 
 /**
- * @typedef {{ id: string, name: string | null }} SheetMeta
+ * @typedef {"visible" | "hidden" | "veryHidden"} SheetVisibility
+ * @typedef {{ frozenRows: number, frozenCols: number }} SheetViewMeta
+ * @typedef {{ id: string, name: string | null, visibility: SheetVisibility, tabColor: string | null, view: SheetViewMeta }} SheetMeta
  * @typedef {{ id: string, name: string | null, afterIndex: number }} AddedSheet
  * @typedef {{ id: string, name: string | null, beforeIndex: number }} RemovedSheet
  * @typedef {{ id: string, beforeIndex: number, afterIndex: number }} MovedSheet
+ * @typedef {{ id: string, field: string, before: any, after: any }} SheetMetaChange
  * @typedef {{ row: number, col: number }} CellRef
  * @typedef {{
  *   oldLocation: CellRef,
@@ -47,6 +50,7 @@ import { workbookStateFromYjsSnapshot } from "./workbookState.js";
  *   removed: RemovedSheet[];
  *   renamed: { id: string, beforeName: string | null, afterName: string | null }[];
  *   moved: MovedSheet[];
+ *   metaChanged: SheetMetaChange[];
  * }} SheetsDiff
  *
  * @typedef {{
@@ -165,7 +169,7 @@ export function diffYjsWorkbookSnapshots(opts) {
   const afterSheetsById = new Map(after.sheets.map((s) => [s.id, s]));
 
   /** @type {SheetsDiff} */
-  const sheets = { added: [], removed: [], renamed: [], moved: [] };
+  const sheets = { added: [], removed: [], renamed: [], moved: [], metaChanged: [] };
 
   const beforeOrder = Array.isArray(before.sheetOrder) && before.sheetOrder.length ? before.sheetOrder : before.sheets.map((s) => s.id);
   const afterOrder = Array.isArray(after.sheetOrder) && after.sheetOrder.length ? after.sheetOrder : after.sheets.map((s) => s.id);
@@ -203,6 +207,44 @@ export function diffYjsWorkbookSnapshots(opts) {
     }
   }
 
+  // Sheet metadata changes (visibility/tabColor/frozen panes).
+  for (const [id, afterSheet] of afterSheetsById) {
+    const beforeSheet = beforeSheetsById.get(id);
+    if (!beforeSheet) continue;
+
+    if ((beforeSheet.visibility ?? null) !== (afterSheet.visibility ?? null)) {
+      sheets.metaChanged.push({
+        id,
+        field: "visibility",
+        before: beforeSheet.visibility ?? null,
+        after: afterSheet.visibility ?? null,
+      });
+    }
+
+    if (!isDeepStrictEqual(beforeSheet.tabColor ?? null, afterSheet.tabColor ?? null)) {
+      sheets.metaChanged.push({
+        id,
+        field: "tabColor",
+        before: beforeSheet.tabColor ?? null,
+        after: afterSheet.tabColor ?? null,
+      });
+    }
+
+    const beforeView = beforeSheet.view ?? null;
+    const afterView = afterSheet.view ?? null;
+    const beforeFrozenRows = beforeView?.frozenRows ?? null;
+    const afterFrozenRows = afterView?.frozenRows ?? null;
+    if (beforeFrozenRows !== afterFrozenRows) {
+      sheets.metaChanged.push({ id, field: "view.frozenRows", before: beforeFrozenRows, after: afterFrozenRows });
+    }
+
+    const beforeFrozenCols = beforeView?.frozenCols ?? null;
+    const afterFrozenCols = afterView?.frozenCols ?? null;
+    if (beforeFrozenCols !== afterFrozenCols) {
+      sheets.metaChanged.push({ id, field: "view.frozenCols", before: beforeFrozenCols, after: afterFrozenCols });
+    }
+  }
+
   // Sheet reorder detection: find the minimal set of sheets whose relative order changed.
   const afterIds = new Set(afterOrder);
   const beforeIds = new Set(beforeOrder);
@@ -227,6 +269,7 @@ export function diffYjsWorkbookSnapshots(opts) {
   sheets.removed.sort((a, b) => compareStrings(a.id, b.id));
   sheets.renamed.sort((a, b) => compareStrings(a.id, b.id));
   sheets.moved.sort((a, b) => compareStrings(a.id, b.id));
+  sheets.metaChanged.sort((a, b) => compareStrings(a.id, b.id) || compareStrings(a.field, b.field));
 
   const sheetIds = new Set([...before.cellsBySheet.keys(), ...after.cellsBySheet.keys()]);
   /** @type {SheetDiffEntry[]} */

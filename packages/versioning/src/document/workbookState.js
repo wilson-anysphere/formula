@@ -227,7 +227,27 @@ function normalizeColFormatRuns(raw) {
 }
 
 /**
- * @typedef {{ id: string, name: string | null }} SheetMeta
+ * Excel-style worksheet visibility.
+ *
+ * @typedef {"visible" | "hidden" | "veryHidden"} SheetVisibility
+ *
+ * Small subset of per-sheet view state tracked for workbook-level diffs.
+ *
+ * Note: do not add large fields here (e.g. colWidths/rowHeights) — this is used
+ * for version history summaries and should remain small.
+ *
+ * @typedef {{ frozenRows: number, frozenCols: number }} SheetViewMeta
+ *
+ * @typedef {{
+ *   id: string,
+ *   name: string | null,
+ *   visibility: SheetVisibility,
+ *   /**
+ *    * Sheet tab color (ARGB hex, e.g. "FFFF0000") or null when cleared.
+ *    *\/
+ *   tabColor: string | null,
+ *   view: SheetViewMeta,
+ * }} SheetMeta
  * @typedef {{ id: string, cellRef: string | null, content: string | null, resolved: boolean, repliesLength: number }} CommentSummary
  *
  * @typedef {{
@@ -248,6 +268,73 @@ function coerceString(value) {
   if (typeof value === "string") return value;
   if (value == null) return null;
   return String(value);
+}
+
+/**
+ * @param {any} value
+ * @returns {number}
+ */
+function normalizeFrozenCount(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, Math.trunc(num));
+}
+
+/**
+ * @param {any} rawVisibility
+ * @returns {SheetVisibility}
+ */
+function normalizeSheetVisibility(rawVisibility) {
+  const visibility = coerceString(rawVisibility);
+  if (visibility === "visible" || visibility === "hidden" || visibility === "veryHidden") return visibility;
+  return "visible";
+}
+
+/**
+ * Normalize a tab color payload into an ARGB hex string (no leading "#").
+ *
+ * Snapshot producers vary:
+ * - BranchService uses a string `"AARRGGBB"` or `null`
+ * - DocumentController snapshots can store `{ rgb: "AARRGGBB" }`
+ *
+ * @param {any} raw
+ * @returns {string | null}
+ */
+function normalizeTabColor(raw) {
+  if (raw === null) return null;
+  if (raw === undefined) return null;
+
+  /** @type {string | null} */
+  let rgb = null;
+  if (typeof raw === "string") rgb = raw;
+  else if (raw && typeof raw === "object" && typeof raw.rgb === "string") rgb = raw.rgb;
+  if (rgb == null) return null;
+
+  const cleaned = rgb.trim().replace(/^#/, "");
+  if (!cleaned) return null;
+  return cleaned.toUpperCase();
+}
+
+/**
+ * Extract a small view metadata object (frozen panes only) from a sheet snapshot.
+ *
+ * @param {any} sheet
+ * @returns {SheetViewMeta}
+ */
+function sheetViewMetaFromSheetSnapshot(sheet) {
+  const view = sheet?.view;
+  if (view && typeof view === "object") {
+    return {
+      frozenRows: normalizeFrozenCount(view.frozenRows),
+      frozenCols: normalizeFrozenCount(view.frozenCols),
+    };
+  }
+
+  // Canonical DocumentController snapshot shape stores view state at top-level.
+  return {
+    frozenRows: normalizeFrozenCount(sheet?.frozenRows),
+    frozenCols: normalizeFrozenCount(sheet?.frozenCols),
+  };
 }
 
 /**
@@ -306,7 +393,13 @@ export function workbookStateFromDocumentSnapshot(snapshot) {
     const id = coerceString(sheet?.id);
     if (!id) continue;
     const name = coerceString(sheet?.name);
-    sheets.push({ id, name });
+    sheets.push({
+      id,
+      name,
+      visibility: normalizeSheetVisibility(sheet?.visibility),
+      tabColor: normalizeTabColor(sheet?.tabColor),
+      view: sheetViewMetaFromSheetSnapshot(sheet),
+    });
     sheetOrder.push(id);
 
     // --- Formatting defaults (layered formats) ---

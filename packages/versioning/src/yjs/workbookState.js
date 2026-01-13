@@ -3,7 +3,27 @@ import { cellKey } from "../diff/semanticDiff.js";
 import { parseSpreadsheetCellKey } from "./sheetState.js";
 
 /**
- * @typedef {{ id: string, name: string | null }} SheetMeta
+ * Excel-style worksheet visibility.
+ *
+ * @typedef {"visible" | "hidden" | "veryHidden"} SheetVisibility
+ *
+ * Small subset of per-sheet view state tracked for workbook-level diffs.
+ *
+ * Note: do not add large fields here (e.g. colWidths/rowHeights) — this is used
+ * for version history summaries and should remain small.
+ *
+ * @typedef {{ frozenRows: number, frozenCols: number }} SheetViewMeta
+ *
+ * @typedef {{
+ *   id: string,
+ *   name: string | null,
+ *   visibility: SheetVisibility,
+ *   /**
+ *    * Sheet tab color (ARGB hex, e.g. "FFFF0000") or null when cleared.
+ *    *\/
+ *   tabColor: string | null,
+ *   view: SheetViewMeta,
+ * }} SheetMeta
  * @typedef {{ id: string, cellRef: string | null, content: string | null, resolved: boolean, repliesLength: number }} CommentSummary
  *
  * @typedef {{
@@ -137,6 +157,75 @@ function coerceString(value) {
   if (typeof value === "string") return value;
   if (value == null) return null;
   return String(value);
+}
+
+/**
+ * @param {any} value
+ * @returns {number}
+ */
+function normalizeFrozenCount(value) {
+  const num = Number(yjsValueToJson(value));
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, Math.trunc(num));
+}
+
+/**
+ * @param {any} rawVisibility
+ * @returns {SheetVisibility}
+ */
+function normalizeSheetVisibility(rawVisibility) {
+  const visibility = coerceString(rawVisibility);
+  if (visibility === "visible" || visibility === "hidden" || visibility === "veryHidden") return visibility;
+  return "visible";
+}
+
+/**
+ * Normalize a tab color payload into an ARGB hex string (no leading "#").
+ *
+ * Snapshot producers vary:
+ * - BranchService uses a string `"AARRGGBB"` or `null`
+ * - DocumentController snapshots can store `{ rgb: "AARRGGBB" }`
+ *
+ * @param {any} raw
+ * @returns {string | null}
+ */
+function normalizeTabColor(raw) {
+  if (raw === null) return null;
+  if (raw === undefined) return null;
+
+  const json = yjsValueToJson(raw);
+  /** @type {string | null} */
+  let rgb = null;
+  if (typeof json === "string") rgb = json;
+  else if (json && typeof json === "object" && typeof json.rgb === "string") rgb = json.rgb;
+  if (rgb == null) return null;
+
+  const cleaned = rgb.trim().replace(/^#/, "");
+  if (!cleaned) return null;
+  return cleaned.toUpperCase();
+}
+
+/**
+ * Extract a small view metadata object (frozen panes only) from a sheet entry.
+ *
+ * @param {any} entry
+ * @returns {SheetViewMeta}
+ */
+function sheetViewMetaFromSheetEntry(entry) {
+  const rawView = readYMapOrObject(entry, "view");
+  if (rawView !== undefined) {
+    const view = yjsValueToJson(rawView);
+    return {
+      frozenRows: normalizeFrozenCount(view?.frozenRows),
+      frozenCols: normalizeFrozenCount(view?.frozenCols),
+    };
+  }
+
+  // Legacy/experimental: stored as top-level keys.
+  return {
+    frozenRows: normalizeFrozenCount(readYMapOrObject(entry, "frozenRows")),
+    frozenCols: normalizeFrozenCount(readYMapOrObject(entry, "frozenCols")),
+  };
 }
 
 /**
@@ -599,7 +688,13 @@ export function workbookStateFromYjsDoc(doc) {
     const id = coerceString(readYMapOrObject(entry, "id"));
     if (!id) continue;
     const name = coerceString(readYMapOrObject(entry, "name"));
-    sheets.push({ id, name });
+    sheets.push({
+      id,
+      name,
+      visibility: normalizeSheetVisibility(readYMapOrObject(entry, "visibility")),
+      tabColor: normalizeTabColor(readYMapOrObject(entry, "tabColor")),
+      view: sheetViewMetaFromSheetEntry(entry),
+    });
     sheetOrder.push(id);
     // Deterministic choice: pick the last matching entry by index (mirrors binder behavior).
     sheetEntriesById.set(id, entry);
