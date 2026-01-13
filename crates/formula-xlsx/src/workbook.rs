@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use formula_model::charts::{Chart, ChartKind, ChartModel, ChartType};
+use formula_model::charts::{
+    Chart, ChartColorStylePartModel, ChartKind, ChartModel, ChartStylePartModel, ChartType,
+};
 use roxmltree::Document;
 
 use crate::charts::parse_chart;
@@ -428,6 +430,14 @@ impl XlsxPackage {
                                 xpath: None,
                             }),
                         }
+                        // Even if parsing fails, preserve the raw XML on the model for
+                        // debugging/round-tripping.
+                        if model.style_part.is_none() {
+                            model.style_part = Some(ChartStylePartModel {
+                                id: None,
+                                raw_xml: String::from_utf8_lossy(&style_part.bytes).into_owned(),
+                            });
+                        }
                     }
 
                     if let Some(colors_part) = colors.as_ref() {
@@ -443,6 +453,13 @@ impl XlsxPackage {
                                 part: Some(colors_part.path.clone()),
                                 xpath: None,
                             }),
+                        }
+                        if model.colors_part.is_none() {
+                            model.colors_part = Some(ChartColorStylePartModel {
+                                id: None,
+                                colors: Vec::new(),
+                                raw_xml: String::from_utf8_lossy(&colors_part.bytes).into_owned(),
+                            });
                         }
                     }
                 }
