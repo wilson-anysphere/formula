@@ -3107,7 +3107,8 @@ pub async fn get_macro_security_status(
     tauri::async_runtime::spawn_blocking(move || {
         let workbook_id = workbook_id.as_deref();
         let mut state = shared.lock().unwrap();
-        let trust_store = trust_shared.lock().unwrap();
+        let mut trust_store = trust_shared.lock().unwrap();
+        trust_store.ensure_loaded();
         let workbook = state.get_workbook_mut().map_err(app_error)?;
         build_macro_security_status(workbook, workbook_id, &trust_store)
     })
@@ -3259,7 +3260,8 @@ pub async fn run_macro(
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
         let blocked = {
-            let trust_store = trust_shared.lock().unwrap();
+            let mut trust_store = trust_shared.lock().unwrap();
+            trust_store.ensure_loaded();
             let workbook_id = workbook_id_str.as_deref();
             let workbook = state.get_workbook_mut().map_err(app_error)?;
             enforce_macro_trust(workbook, workbook_id, &trust_store)?
@@ -4362,7 +4364,8 @@ pub async fn validate_vba_migration(
 
         let (vba_blocked_result, workbook, macro_ctx) = {
             let mut state = shared.lock().unwrap();
-            let trust_store = trust_shared.lock().unwrap();
+            let mut trust_store = trust_shared.lock().unwrap();
+            trust_store.ensure_loaded();
 
             let blocked = {
                 let workbook_id = workbook_id_str.as_deref();
@@ -4596,7 +4599,8 @@ pub async fn fire_workbook_open(
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
         let blocked = {
-            let trust_store = trust_shared.lock().unwrap();
+            let mut trust_store = trust_shared.lock().unwrap();
+            trust_store.ensure_loaded();
             let workbook_id = workbook_id_str.as_deref();
             let workbook = state.get_workbook_mut().map_err(app_error)?;
             enforce_macro_trust(workbook, workbook_id, &trust_store)?
@@ -4637,7 +4641,8 @@ pub async fn fire_workbook_before_close(
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
         let blocked = {
-            let trust_store = trust_shared.lock().unwrap();
+            let mut trust_store = trust_shared.lock().unwrap();
+            trust_store.ensure_loaded();
             let workbook_id = workbook_id_str.as_deref();
             let workbook = state.get_workbook_mut().map_err(app_error)?;
             enforce_macro_trust(workbook, workbook_id, &trust_store)?
@@ -4683,7 +4688,8 @@ pub async fn fire_worksheet_change(
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
         let blocked = {
-            let trust_store = trust_shared.lock().unwrap();
+            let mut trust_store = trust_shared.lock().unwrap();
+            trust_store.ensure_loaded();
             let workbook_id = workbook_id_str.as_deref();
             let workbook = state.get_workbook_mut().map_err(app_error)?;
             enforce_macro_trust(workbook, workbook_id, &trust_store)?
@@ -4729,7 +4735,8 @@ pub async fn fire_selection_change(
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
         let blocked = {
-            let trust_store = trust_shared.lock().unwrap();
+            let mut trust_store = trust_shared.lock().unwrap();
+            trust_store.ensure_loaded();
             let workbook_id = workbook_id_str.as_deref();
             let workbook = state.get_workbook_mut().map_err(app_error)?;
             enforce_macro_trust(workbook, workbook_id, &trust_store)?
@@ -5639,7 +5646,10 @@ mod tests {
             .iter()
             .find(|sheet| sheet.id == "Sheet1")
             .expect("Sheet1 present");
-        assert_eq!(sheet1.visibility, formula_model::SheetVisibility::VeryHidden);
+        assert_eq!(
+            sheet1.visibility,
+            formula_model::SheetVisibility::VeryHidden
+        );
     }
 
     #[test]

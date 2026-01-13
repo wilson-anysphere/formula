@@ -222,6 +222,19 @@ fn env_flag_truthy(name: &str) -> bool {
     }
 }
 
+fn spawn_post_window_visible_init(app: &tauri::AppHandle) {
+    // Defer any non-critical, potentially expensive startup work until after the first
+    // window-visible mark has been recorded.
+    //
+    // Important: keep this best-effort and never block the UI thread; all work runs on a
+    // background thread.
+    let trust_shared = app.state::<SharedMacroTrustStore>().inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut trust_store = trust_shared.lock().unwrap();
+        trust_store.ensure_loaded();
+    });
+}
+
 #[tauri::command]
 fn report_startup_webview_loaded(app: tauri::AppHandle, state: State<'_, SharedStartupMetrics>) {
     // The frontend calls this once it has installed its startup listeners (so early-emitted
@@ -229,13 +242,23 @@ fn report_startup_webview_loaded(app: tauri::AppHandle, state: State<'_, SharedS
     // via `Builder::on_page_load` when the main webview finishes its initial navigation; this
     // command is idempotent and will not overwrite an earlier host-recorded timestamp.
     let shared = state.inner().clone();
-    let (window_visible_ms, webview_loaded_ms, snapshot) = {
+    let (window_visible_ms, webview_loaded_ms, snapshot, first_window_visible) = {
         let mut metrics = shared.lock().unwrap();
+        let first_window_visible = metrics.window_visible_ms.is_none();
         let window_visible_ms = metrics.record_window_visible();
         let webview_loaded_ms = metrics.record_webview_loaded();
         let snapshot = metrics.snapshot();
-        (window_visible_ms, webview_loaded_ms, snapshot)
+        (
+            window_visible_ms,
+            webview_loaded_ms,
+            snapshot,
+            first_window_visible,
+        )
     };
+
+    if first_window_visible {
+        spawn_post_window_visible_init(&app);
+    }
 
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.emit("startup:window-visible", window_visible_ms);
@@ -247,8 +270,9 @@ fn report_startup_webview_loaded(app: tauri::AppHandle, state: State<'_, SharedS
 #[tauri::command]
 fn report_startup_tti(app: tauri::AppHandle, state: State<'_, SharedStartupMetrics>) {
     let shared = state.inner().clone();
-    let (tti_ms, snapshot) = {
+    let (tti_ms, snapshot, first_window_visible) = {
         let mut metrics = shared.lock().unwrap();
+        let first_window_visible = metrics.window_visible_ms.is_none();
         // If we somehow never recorded a window-visible timestamp (e.g. the webview
         // never called `report_startup_webview_loaded`), fall back to "at least by
         // the time we became interactive the window was visible".
@@ -256,8 +280,12 @@ fn report_startup_tti(app: tauri::AppHandle, state: State<'_, SharedStartupMetri
         let tti_ms = metrics.record_tti();
         let snapshot = metrics.snapshot();
         metrics.maybe_log();
-        (tti_ms, snapshot)
+        (tti_ms, snapshot, first_window_visible)
     };
+
+    if first_window_visible {
+        spawn_post_window_visible_init(&app);
+    }
 
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.emit("startup:tti", tti_ms);
@@ -869,13 +897,13 @@ fn main() {
     let startup_metrics_for_page_load = startup_metrics.clone();
 
     let state: SharedAppState = Arc::new(Mutex::new(AppState::new()));
-    let macro_trust: SharedMacroTrustStore = Arc::new(Mutex::new(
-        MacroTrustStore::load_default().unwrap_or_else(|_| {
-            // Backend startup should not fail if the trust store is unreadable; fall back
-            // to an ephemeral store (macros will remain blocked by default).
-            MacroTrustStore::new_ephemeral()
-        }),
-    ));
+    // Create the trust store *without* reading from disk so cold start can get the window on
+    // screen faster. We'll load persisted trust decisions asynchronously after the webview has
+    // reported that the window is visible.
+    //
+    // Security note: while the store is not yet loaded, macros are default-deny (blocked).
+    let macro_trust: SharedMacroTrustStore =
+        Arc::new(Mutex::new(MacroTrustStore::new_unloaded_default()));
 
     let open_file_state: SharedOpenFileState = Arc::new(Mutex::new(OpenFileState::default()));
     let oauth_redirect_state: SharedOauthRedirectState =
@@ -1153,8 +1181,15 @@ fn main() {
             | tauri::WindowEvent::Focused(true) => {
                 if window.label() == "main" {
                     let startup = window.state::<SharedStartupMetrics>().inner().clone();
-                    let mut metrics = startup.lock().unwrap();
-                    metrics.record_window_visible();
+                    let first_window_visible = {
+                        let mut metrics = startup.lock().unwrap();
+                        let first = metrics.window_visible_ms.is_none();
+                        metrics.record_window_visible();
+                        first
+                    };
+                    if first_window_visible {
+                        spawn_post_window_visible_init(window.app_handle());
+                    }
                 }
             }
             tauri::WindowEvent::CloseRequested { api, .. } => {
@@ -1212,7 +1247,8 @@ fn main() {
                     let trust_for_macro = shared_trust.clone();
                     let macro_outcome = tauri::async_runtime::spawn_blocking(move || {
                         let mut state = state_for_macro.lock().unwrap();
-                        let trust_store = trust_for_macro.lock().unwrap();
+                        let mut trust_store = trust_for_macro.lock().unwrap();
+                        trust_store.ensure_loaded();
 
                         let should_run = macros_trusted_for_before_close(&mut state, &trust_store)?;
                         drop(trust_store);

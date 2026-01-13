@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::Context;
 use crate::atomic_write::write_file_atomic;
+use anyhow::Context;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -50,6 +50,12 @@ pub struct MacroTrustStore {
     path: Option<PathBuf>,
     persisted: HashMap<String, PersistedDecision>,
     trusted_once: HashSet<String>,
+    /// Whether the persisted on-disk trust decisions have been loaded.
+    ///
+    /// This exists so the desktop shell can defer filesystem I/O (reading the trust store file)
+    /// until after the first window is visible. While `loaded == false`, macro execution is
+    /// conservatively blocked regardless of persisted state (default-deny).
+    loaded: bool,
 }
 
 impl MacroTrustStore {
@@ -58,18 +64,18 @@ impl MacroTrustStore {
             path: None,
             persisted: HashMap::new(),
             trusted_once: HashSet::new(),
+            loaded: true,
         }
     }
 
     pub fn load(path: PathBuf) -> anyhow::Result<Self> {
-        let persisted = load_trust_file(&path)
-            .unwrap_or_default()
-            .entries;
+        let persisted = load_trust_file(&path).unwrap_or_default().entries;
 
         Ok(Self {
             path: Some(path),
             persisted,
             trusted_once: HashSet::new(),
+            loaded: true,
         })
     }
 
@@ -80,7 +86,47 @@ impl MacroTrustStore {
         Self::load(path)
     }
 
+    /// Construct the default trust store without performing any filesystem reads.
+    ///
+    /// The store starts in a "not loaded" state. Call [`Self::ensure_loaded`] (typically from a
+    /// background task) before relying on persisted trust decisions.
+    pub fn new_unloaded_default() -> Self {
+        let Some(path) = default_trust_store_path() else {
+            return Self::new_ephemeral();
+        };
+        Self {
+            path: Some(path),
+            persisted: HashMap::new(),
+            trusted_once: HashSet::new(),
+            loaded: false,
+        }
+    }
+
+    pub fn is_loaded(&self) -> bool {
+        self.loaded
+    }
+
+    /// Load persisted trust decisions from disk if they have not been loaded yet.
+    pub fn ensure_loaded(&mut self) {
+        if self.loaded {
+            return;
+        }
+        let Some(path) = self.path.clone() else {
+            // Ephemeral store: nothing to load.
+            self.loaded = true;
+            return;
+        };
+        self.persisted = load_trust_file(&path).unwrap_or_default().entries;
+        self.loaded = true;
+    }
+
     pub fn trust_state(&self, fingerprint: &str) -> MacroTrustDecision {
+        // Default-deny until we have loaded persisted state from disk. This avoids accidentally
+        // trusting macros before the trust store is ready (and allows desktop startup to defer
+        // filesystem I/O until after the window is visible).
+        if !self.loaded {
+            return MacroTrustDecision::Blocked;
+        }
         if self.trusted_once.contains(fingerprint) {
             return MacroTrustDecision::TrustedOnce;
         }
@@ -91,7 +137,15 @@ impl MacroTrustStore {
         }
     }
 
-    pub fn set_trust(&mut self, fingerprint: String, decision: MacroTrustDecision) -> anyhow::Result<()> {
+    pub fn set_trust(
+        &mut self,
+        fingerprint: String,
+        decision: MacroTrustDecision,
+    ) -> anyhow::Result<()> {
+        // Avoid clobbering an existing trust store file. If we haven't loaded persisted entries
+        // yet, load them now before mutating/saving.
+        self.ensure_loaded();
+
         match decision {
             MacroTrustDecision::Blocked => {
                 self.trusted_once.remove(&fingerprint);
@@ -126,7 +180,8 @@ impl MacroTrustStore {
             entries: self.persisted.clone(),
         };
         let json = serde_json::to_vec_pretty(&file).context("serialize macro trust store")?;
-        write_file_atomic(path, &json).with_context(|| format!("write macro trust store {path:?}"))?;
+        write_file_atomic(path, &json)
+            .with_context(|| format!("write macro trust store {path:?}"))?;
         Ok(())
     }
 }
@@ -153,7 +208,9 @@ pub fn compute_macro_fingerprint(workbook_id: &str, vba_project_bin: &[u8]) -> S
 fn load_trust_file(path: &Path) -> anyhow::Result<TrustStoreFile> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(TrustStoreFile::default()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(TrustStoreFile::default())
+        }
         Err(err) => return Err(err).with_context(|| format!("read macro trust store {path:?}")),
     };
 
@@ -209,5 +266,36 @@ mod tests {
         drop(store);
         let store2 = MacroTrustStore::load(path).expect("reload store");
         assert_eq!(store2.trust_state("fp"), MacroTrustDecision::TrustedAlways);
+    }
+
+    #[test]
+    fn persisted_trust_is_default_deny_until_store_is_loaded() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("trust.json");
+
+        // Persist a trust decision on disk.
+        let mut store = MacroTrustStore::load(path.clone()).expect("load store");
+        store
+            .set_trust("fp".to_string(), MacroTrustDecision::TrustedAlways)
+            .expect("set trust");
+        drop(store);
+
+        // Simulate the desktop cold-start behavior: create the store without reading from disk.
+        let mut unloaded = MacroTrustStore {
+            path: Some(path),
+            persisted: HashMap::new(),
+            trusted_once: HashSet::new(),
+            loaded: false,
+        };
+
+        // Default-deny until `ensure_loaded` runs.
+        assert_eq!(unloaded.trust_state("fp"), MacroTrustDecision::Blocked);
+
+        unloaded.ensure_loaded();
+        assert!(unloaded.is_loaded());
+        assert_eq!(
+            unloaded.trust_state("fp"),
+            MacroTrustDecision::TrustedAlways
+        );
     }
 }
