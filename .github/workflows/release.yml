@@ -502,13 +502,20 @@ jobs:
           # Tauri Windows bundles are emitted under src-tauri/target/**/release/bundle/**.
           # We only enforce signature validity when Windows signing secrets are present
           # so forks/dry runs (which cannot access secrets) skip this check cleanly.
-          $searchRoot = "apps/desktop/src-tauri/target"
-          if (-not (Test-Path $searchRoot)) {
-            Write-Error "Expected build output directory not found: $searchRoot"
+          # Cargo workspaces typically emit bundles under `<repo>/target/**`, but standalone Tauri
+          # builds may use `apps/desktop/src-tauri/target/**`. Support both so we don't break
+          # releases if the build output layout changes.
+          $searchRoots = @(
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target"),
+            (Join-Path $env:GITHUB_WORKSPACE "target")
+          ) | Where-Object { Test-Path $_ }
+
+          if ($searchRoots.Count -eq 0) {
+            Write-Error "Expected build output directory not found. Looked for:`n- apps/desktop/src-tauri/target`n- target"
           }
 
           # Wrap in @() so `.Count` behaves consistently even when 0 or 1 files match.
-          $installers = @(Get-ChildItem -Path $searchRoot -Recurse -File -Include *.exe, *.msi |
+          $installers = @(Get-ChildItem -Path $searchRoots -Recurse -File -Include *.exe, *.msi |
             Where-Object { $_.FullName -match '[\\/]release[\\/]bundle[\\/]' })
 
           if ($installers.Count -eq 0) {
