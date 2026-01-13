@@ -190,6 +190,57 @@ test("CollabSession↔DocumentController binder blocks edits to non-editable cel
   docB.destroy();
 });
 
+test("CollabSession↔DocumentController binder blocks sheet-level formatting when it intersects restricted ranges", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc });
+  session.setPermissions({
+    role: "editor",
+    userId: "u-b",
+    rangeRestrictions: [
+      {
+        // Restrict a range that does *not* include A1 so naive "probe A1" checks
+        // would incorrectly allow sheet-level formatting.
+        sheetName: "Sheet1",
+        startRow: 1,
+        startCol: 1,
+        endRow: 2,
+        endCol: 2,
+        readAllowlist: [],
+        editAllowlist: ["u-a"],
+      },
+    ],
+  });
+
+  const dc = new DocumentController();
+  const binder = await bindCollabSessionToDocumentController({ session, documentController: dc });
+
+  assert.equal(dc.getSheetDefaultStyleId("Sheet1"), 0);
+
+  const before = Buffer.from(Y.encodeStateAsUpdate(doc));
+
+  let updateCount = 0;
+  const onUpdate = () => {
+    updateCount += 1;
+  };
+  doc.on("update", onUpdate);
+
+  // Attempt a sheet-wide format edit (affects all cells, including restricted ones).
+  dc.setSheetFormat("Sheet1", { font: { bold: true } });
+
+  await new Promise((r) => setTimeout(r, 25));
+
+  doc.off("update", onUpdate);
+
+  // The local UI should be reverted and the shared Yjs document must not change.
+  assert.equal(dc.getSheetDefaultStyleId("Sheet1"), 0);
+  assert.equal(updateCount, 0);
+  assert.deepEqual(Buffer.from(Y.encodeStateAsUpdate(doc)), before);
+
+  binder.destroy();
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession↔DocumentController binder encrypts protected cells and decrypts when key is available", async () => {
   const docId = "collab-session-documentController-encryption-test-doc";
   const docA = new Y.Doc({ guid: docId });

@@ -1765,7 +1765,6 @@ export class CollabSession {
     if (!role) return false;
     return !roleCanEdit(role);
   }
-
   canEditCell(cell: CellAddress): boolean {
     const canEditByPermissions = this.permissions
       ? getCellPermissions({
@@ -2632,6 +2631,8 @@ export async function bindCollabSessionToDocumentController(options: {
   session.localOrigins.add(binderOrigin);
   const normalizedUndoService = defaultUndoService ? { ...defaultUndoService, origin: binderOrigin } : { origin: binderOrigin };
 
+  const sessionPermissions = session.getPermissions();
+
   return bindYjsToDocumentController({
     ydoc: session.doc,
     documentController,
@@ -2645,6 +2646,13 @@ export async function bindCollabSessionToDocumentController(options: {
     // local-only UI changes (freeze panes, row/col sizing, sheet formatting
     // defaults), but those must not be written into the shared Yjs document.
     canWriteSharedState: () => !session.isReadOnly(),
+    permissions: sessionPermissions
+      ? {
+          role: sessionPermissions.role,
+          restrictions: sessionPermissions.rangeRestrictions,
+          userId: sessionPermissions.userId,
+        }
+      : null,
     // Use the standard enterprise mask. The binder also uses this hook for
     // encrypted cells that cannot be decrypted.
     maskCellValue: (value) => maskCellValue(value),
