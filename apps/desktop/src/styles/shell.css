@@ -254,7 +254,7 @@ dialog.print-preview-dialog::backdrop {
   border: 2px solid var(--formula-grid-selection-border, var(--accent));
   outline: none;
   resize: none;
-  font: 14px/20px var(--font-sans);
+  font: 14px/20px var(--font-mono);
   background: var(--formula-grid-bg, var(--bg-primary));
   color: var(--formula-grid-cell-text, var(--text-primary));
   overflow: hidden;
