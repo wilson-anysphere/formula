@@ -1,0 +1,52 @@
+use std::path::Path;
+
+use formula_offcrypto::{decrypt_standard_encrypted_package, parse_encryption_info, EncryptionInfo};
+
+const KEY: [u8; 16] = [
+    0x0b, 0x9d, 0x2f, 0xab, 0xa2, 0xd8, 0xe6, 0xe7, 0xac, 0x2e, 0xc2, 0xc5, 0xa1, 0xfc,
+    0xc4, 0xa1,
+];
+
+const SALT: [u8; 16] = [
+    0x91, 0x33, 0xca, 0x74, 0x07, 0xdd, 0x5a, 0x2d, 0x04, 0x55, 0x34, 0x91, 0x79, 0xe3,
+    0x2a, 0xe9,
+];
+
+fn fixture_path(name: &str) -> std::path::PathBuf {
+    Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/offcrypto/"
+    ))
+    .join(name)
+}
+
+#[test]
+fn decrypts_real_excel_standard_aes_encryptedpackage_fixture() {
+    let encryption_info =
+        std::fs::read(fixture_path("standard_aes_encryptioninfo.bin")).expect("read EncryptionInfo");
+    let parsed =
+        parse_encryption_info(&encryption_info).expect("parse EncryptionInfo (Standard CryptoAPI)");
+    let verifier_salt = match parsed {
+        EncryptionInfo::Standard { verifier, .. } => verifier.salt,
+        other => panic!("expected Standard EncryptionInfo, got {other:?}"),
+    };
+    assert_eq!(
+        verifier_salt.as_slice(),
+        SALT.as_ref(),
+        "fixture salt constant should match EncryptionVerifier.salt"
+    );
+
+    let encrypted_package =
+        std::fs::read(fixture_path("standard_aes_encryptedpackage.bin")).expect("read fixture");
+    let expected =
+        std::fs::read(fixture_path("standard_aes_plain.zip")).expect("read expected plaintext zip");
+
+    // Standard/CryptoAPI AES `EncryptedPackage` encryption uses AES-ECB for the actual package bytes.
+    // The verifier salt is part of `EncryptionInfo` (used in key derivation / verifier checks), but
+    // is not required for AES-ECB package decryption once the file key is known.
+    let decrypted = decrypt_standard_encrypted_package(&KEY, &encrypted_package).expect("decrypt");
+
+    assert_eq!(decrypted.len(), expected.len());
+    assert_eq!(decrypted, expected);
+    assert!(decrypted.starts_with(b"PK\x03\x04"), "expected ZIP magic");
+}

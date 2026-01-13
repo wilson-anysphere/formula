@@ -22,14 +22,14 @@ fn padded_aes_len(len: usize) -> usize {
 fn aes_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {
     assert!(
         buf.len() % AES_BLOCK_LEN == 0,
-        "ECB input must be block-aligned"
+        "plaintext must be block-aligned for AES-ECB"
     );
 
     fn encrypt_with<C>(key: &[u8], buf: &mut [u8])
     where
         C: BlockEncrypt + KeyInit,
     {
-        let cipher = C::new_from_slice(key).expect("key length validated by caller");
+        let cipher = C::new_from_slice(key).expect("valid AES key length");
         for block in buf.chunks_mut(AES_BLOCK_LEN) {
             cipher.encrypt_block(GenericArray::from_mut_slice(block));
         }
@@ -39,7 +39,7 @@ fn aes_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {
         16 => encrypt_with::<Aes128>(key, buf),
         24 => encrypt_with::<Aes192>(key, buf),
         32 => encrypt_with::<Aes256>(key, buf),
-        other => panic!("unsupported AES key length {other}"),
+        other => panic!("unsupported AES key length {other} (expected 16/24/32)"),
     }
 }
 
@@ -123,8 +123,8 @@ proptest! {
                 ciphertext.pop();
             }
             Corruption::RemoveBytesFromNonFinalSegment => {
-                // Remove >16 bytes (more than the maximum PKCS#7 padding) so the ciphertext is
-                // guaranteed to be too short to reproduce `orig_size`.
+                // Remove two AES blocks so ciphertext remains block-aligned but is guaranteed to be
+                // too short to reproduce `orig_size`.
                 //
                 // Remove from the first segment (non-final) to also exercise segment boundary logic.
                 let start = ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN + (ENCRYPTED_PACKAGE_SEGMENT_LEN / 2);
