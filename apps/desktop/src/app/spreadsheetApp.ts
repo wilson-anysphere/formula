@@ -917,7 +917,12 @@ export class SpreadsheetApp {
           token: collab.token,
           disableBc: collab.disableBc,
         },
-        presence: { user: collab.user, activeSheet: this.sheetId },
+        presence: {
+          user: collab.user,
+          activeSheet: this.sheetId,
+          staleAfterMs: 60_000,
+          throttleMs: 50,
+        },
         encryption: devEncryption ?? undefined,
         // Enable formula/value conflict monitoring in collab mode.
         formulaConflicts: {
