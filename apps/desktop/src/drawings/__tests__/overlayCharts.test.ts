@@ -16,6 +16,8 @@ function createStubCanvasContext(): { ctx: CanvasRenderingContext2D; calls: Canv
     rect: (...args: unknown[]) => calls.push({ method: "rect", args }),
     clip: () => calls.push({ method: "clip", args: [] }),
     setLineDash: (...args: unknown[]) => calls.push({ method: "setLineDash", args }),
+    fill: () => calls.push({ method: "fill", args: [], fillStyle: ctx.fillStyle }),
+    stroke: () => calls.push({ method: "stroke", args: [], strokeStyle: ctx.strokeStyle }),
     strokeRect: (...args: unknown[]) => calls.push({ method: "strokeRect", args, strokeStyle: ctx.strokeStyle }),
     fillRect: (...args: unknown[]) => calls.push({ method: "fillRect", args }),
     fillText: (...args: unknown[]) => calls.push({ method: "fillText", args, fillStyle: ctx.fillStyle }),
@@ -100,7 +102,7 @@ describe("DrawingOverlay charts", () => {
     expect(calls.some((call) => call.method === "strokeRect")).toBe(true);
   });
 
-  it("resolves nested CSS vars for placeholder strokes", async () => {
+  it("resolves nested CSS vars for overlay tokens", async () => {
     const hadDocument = Object.prototype.hasOwnProperty.call(globalThis, "document");
     const hadGetComputedStyle = Object.prototype.hasOwnProperty.call(globalThis, "getComputedStyle");
     const originalDocument = (globalThis as any).document;
@@ -111,6 +113,12 @@ describe("DrawingOverlay charts", () => {
       const vars: Record<string, string> = {
         "--chart-series-1": "var(--chart-series-base)",
         "--chart-series-base": "rgb(1, 2, 3)",
+        "--text-primary": "var(--text-primary-base)",
+        "--text-primary-base": "rgb(10, 11, 12)",
+        "--selection-border": "var(--selection-border-base)",
+        "--selection-border-base": "rgb(4, 5, 6)",
+        "--bg-primary": "var(--bg-primary-base)",
+        "--bg-primary-base": "rgb(7, 8, 9)",
       };
       (globalThis as any).getComputedStyle = () => ({
         getPropertyValue: (name: string) => vars[name] ?? "",
@@ -120,10 +128,20 @@ describe("DrawingOverlay charts", () => {
       const canvas = createStubCanvas(ctx);
 
       const overlay = new DrawingOverlay(canvas, images, geom);
+      overlay.setSelectedId(1);
       await overlay.render([createChartObject("chart_1")], viewport);
 
-      const strokeCall = calls.find((call) => call.method === "strokeRect");
-      expect(strokeCall?.strokeStyle).toBe("rgb(1, 2, 3)");
+      const strokeCalls = calls.filter((call) => call.method === "strokeRect");
+      // First strokeRect is the placeholder outline.
+      expect(strokeCalls.at(0)?.strokeStyle).toBe("rgb(1, 2, 3)");
+      // The final strokeRect is the selection border.
+      expect(strokeCalls.at(-1)?.strokeStyle).toBe("rgb(4, 5, 6)");
+
+      const labelCall = calls.find((call) => call.method === "fillText");
+      expect(labelCall?.fillStyle).toBe("rgb(10, 11, 12)");
+
+      const handleFill = calls.find((call) => call.method === "fill");
+      expect(handleFill?.fillStyle).toBe("rgb(7, 8, 9)");
     } finally {
       if (hadDocument) {
         (globalThis as any).document = originalDocument;
