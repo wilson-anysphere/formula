@@ -49,6 +49,7 @@
     },
     "plotArea": {
       "kind": "scatter",
+      "varyColors": null,
       "scatterStyle": "lineMarker",
       "axIds": [
         50010001,
@@ -121,6 +122,8 @@
           ],
           "formatCode": "General"
         },
+        "smooth": null,
+        "invertIfNegative": null,
         "style": {
           "line": {
             "width100pt": 225

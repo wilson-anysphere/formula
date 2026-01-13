@@ -49,6 +49,7 @@
     },
     "plotArea": {
       "kind": "line",
+      "varyColors": null,
       "grouping": "standard",
       "axIds": [
         50010001,
@@ -116,6 +117,8 @@
         },
         "xValues": null,
         "yValues": null,
+        "smooth": null,
+        "invertIfNegative": null,
         "marker": {
           "shape": "none"
         }

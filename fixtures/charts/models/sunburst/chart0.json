@@ -109,6 +109,8 @@
         },
         "xValues": null,
         "yValues": null,
+        "smooth": null,
+        "invertIfNegative": null,
         "points": [
           {
             "idx": 0,

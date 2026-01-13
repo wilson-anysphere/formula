@@ -49,8 +49,11 @@
     },
     "plotArea": {
       "kind": "bar",
+      "varyColors": null,
       "barDirection": "col",
       "grouping": "clustered",
+      "gapWidth": null,
+      "overlap": null,
       "axIds": [
         50010001,
         50010002
@@ -116,7 +119,9 @@
           "formatCode": "General"
         },
         "xValues": null,
-        "yValues": null
+        "yValues": null,
+        "smooth": null,
+        "invertIfNegative": null
       }
     ],
     "plotVisOnly": true,

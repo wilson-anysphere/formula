@@ -50,7 +50,8 @@
     "plotArea": {
       "kind": "pie",
       "varyColors": true,
-      "firstSliceAngle": 0
+      "firstSliceAngle": 0,
+      "holeSize": null
     },
     "axes": [],
     "series": [
@@ -76,7 +77,9 @@
           "formatCode": "General"
         },
         "xValues": null,
-        "yValues": null
+        "yValues": null,
+        "smooth": null,
+        "invertIfNegative": null
       }
     ],
     "plotVisOnly": true,

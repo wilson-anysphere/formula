@@ -112,7 +112,9 @@
           "formatCode": "General"
         },
         "xValues": null,
-        "yValues": null
+        "yValues": null,
+        "smooth": null,
+        "invertIfNegative": null
       }
     ],
     "plotVisOnly": true,
