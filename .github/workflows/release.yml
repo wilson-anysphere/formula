@@ -498,15 +498,24 @@ jobs:
           # Locate the packaged `.app` under the Tauri bundle output directory and verify the
           # main executable is a universal binary (x86_64 + arm64).
           #
-          # We look under `apps/desktop/src-tauri/target/**/release/bundle/**` first, but also
-          # fall back to the workspace root `target/` directory (Cargo workspaces often emit
-          # build artifacts there).
+          # Prefer the universal target output (`**/universal-apple-darwin/**`) to avoid
+          # accidentally validating an intermediate single-arch bundle.
           app_path="$(
-            find apps/desktop/src-tauri/target -type d -path '*/release/bundle/macos/*.app' -print 2>/dev/null | head -n 1 || true
+            find apps/desktop/src-tauri/target/universal-apple-darwin -type d -path '*/release/bundle/*/*.app' -print 2>/dev/null | head -n 1 || true
           )"
           if [[ -z "$app_path" ]]; then
             app_path="$(
-              find target -type d -path '*/release/bundle/macos/*.app' -print 2>/dev/null | head -n 1 || true
+              find target/universal-apple-darwin -type d -path '*/release/bundle/*/*.app' -print 2>/dev/null | head -n 1 || true
+            )"
+          fi
+          if [[ -z "$app_path" ]]; then
+            app_path="$(
+              find apps/desktop/src-tauri/target -type d -path '*/release/bundle/*/*.app' -print 2>/dev/null | head -n 1 || true
+            )"
+          fi
+          if [[ -z "$app_path" ]]; then
+            app_path="$(
+              find target -type d -path '*/release/bundle/*/*.app' -print 2>/dev/null | head -n 1 || true
             )"
           fi
 
