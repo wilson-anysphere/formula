@@ -24,4 +24,29 @@ describe("CollaboratorsListUiController", () => {
     ui.destroy();
     container.remove();
   });
+
+  it("caps visible collaborators and shows an overflow pill", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const ui = new CollaboratorsListUiController({ container, maxVisible: 2 });
+    ui.setCollaborators([
+      { key: "u1:1", name: "Ada", color: "#ff0000" },
+      { key: "u2:2", name: "Grace", color: "#00ff00" },
+      { key: "u3:3", name: "Linus", color: "#0000ff" },
+    ]);
+
+    expect(container.querySelector('[data-testid="presence-collaborators"]')?.getAttribute("aria-label")).toBe(
+      "Collaborators",
+    );
+
+    const items = container.querySelectorAll('[data-testid="presence-collaborator"]');
+    expect(items.length).toBe(2);
+
+    const overflow = container.querySelector('[data-testid="presence-collaborator-overflow"]') as HTMLElement | null;
+    expect(overflow?.textContent).toBe("+1");
+
+    ui.destroy();
+    container.remove();
+  });
 });
