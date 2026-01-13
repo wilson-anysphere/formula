@@ -47,6 +47,35 @@ import {
 
 ---
 
+## `ContextManager` (constructor options)
+
+`ContextManager` is the main “batteries included” API.
+
+```js
+import { ContextManager } from "./src/index.js";
+
+const cm = new ContextManager({
+  tokenBudgetTokens: 16_000, // default
+  // tokenEstimator: createHeuristicTokenEstimator(), // optional, but recommended to keep budgeting consistent
+  // redactor: (text) => text, // optional (defaults to `redactText`)
+  // ragIndex: new RagIndex(), // optional single-sheet RAG index
+  // workbookRag: { vectorStore, embedder, topK }, // required for workbook context builders
+});
+```
+
+Key options:
+
+- `tokenBudgetTokens`: max tokens for `promptContext` produced by context builders.
+- `tokenEstimator`: used for *all* token budgeting inside `ContextManager`. If you’re also using `trimMessagesToBudget`, pass the **same estimator** there too so budgets line up.
+- `redactor(text)`: last-mile redaction for prompt-facing strings. This is **not** a replacement for structured DLP.
+- `workbookRag`: enables workbook retrieval (`buildWorkbookContext*`). Requires:
+  - `vectorStore` implementing `query(...)` / `upsert(...)` (e.g. `InMemoryVectorStore`, `SqliteVectorStore`)
+  - `embedder` implementing `embedTexts([...])` (e.g. `HashEmbedder`)
+
+Many APIs in this package also accept `signal?: AbortSignal` to allow cancellation from UI surfaces.
+
+---
+
 ## Example: extract sheet schema + summarize
 
 `extractSheetSchema()` produces a compact representation of what’s in a sheet: detected data regions, headers, inferred types, and a few sample values per column.
