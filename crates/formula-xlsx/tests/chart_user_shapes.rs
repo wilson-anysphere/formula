@@ -91,6 +91,15 @@ fn detects_chart_user_shapes_part_from_chart_relationships_and_roundtrips() {
         user_shapes.rels_path.as_deref(),
         Some("xl/drawings/_rels/drawing99.xml.rels")
     );
+    let user_shapes_rels_path = user_shapes
+        .rels_path
+        .as_deref()
+        .expect("userShapes rels path should be present");
+    assert_eq!(
+        user_shapes.rels_bytes.as_deref(),
+        package.part(user_shapes_rels_path),
+        "userShapes rels bytes should be embedded on the extracted OpcPart"
+    );
 
     // Ensure round-tripping preserves the userShapes part byte-for-byte.
     let roundtrip = package.write_to_bytes().expect("round-trip write");
@@ -106,4 +115,3 @@ fn detects_chart_user_shapes_part_from_chart_relationships_and_roundtrips() {
         "chart userShapes rels should round-trip losslessly"
     );
 }
-
