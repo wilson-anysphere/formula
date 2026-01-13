@@ -178,6 +178,32 @@ export async function indexWorkbook(params) {
   }
   throwIfAborted(signal);
 
+  if (toUpsert.length > 0) {
+    if (!Array.isArray(vectors)) {
+      throw new Error(
+        `embedder.embedTexts returned a non-array result; expected an array of length ${toUpsert.length}`
+      );
+    }
+    if (vectors.length !== toUpsert.length) {
+      throw new Error(
+        `embedder.embedTexts returned ${vectors.length} vector(s); expected ${toUpsert.length}`
+      );
+    }
+
+    const expectedDim = vectorStore?.dimension;
+    if (Number.isFinite(expectedDim)) {
+      for (let i = 0; i < vectors.length; i += 1) {
+        const vec = vectors[i];
+        const len = vec?.length;
+        if (!Number.isFinite(len) || len !== expectedDim) {
+          throw new Error(
+            `Vector dimension mismatch for id=${toUpsert[i].id}: expected ${expectedDim}, got ${len}`
+          );
+        }
+      }
+    }
+  }
+
   if (toUpsert.length) {
     if (vectors.length !== toUpsert.length) {
       throw new Error(

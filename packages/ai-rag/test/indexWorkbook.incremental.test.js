@@ -281,3 +281,44 @@ test("indexWorkbook batches embedding requests (embedBatchSize=1)", async () => 
   const stored = await store.list({ workbookId: workbook.id, includeVector: false });
   assert.equal(stored.length, 2);
 });
+
+test("indexWorkbook rejects when embedder returns the wrong number of vectors (no partial writes)", async () => {
+  const workbook = makeWorkbookTwoTables();
+  const store = new InMemoryVectorStore({ dimension: 128 });
+
+  let embedCalls = 0;
+  const embedder = {
+    async embedTexts(texts) {
+      embedCalls += 1;
+      // Return fewer vectors than texts to simulate a misbehaving embedder.
+      return texts.slice(0, -1).map(() => new Float32Array(128));
+    },
+  };
+
+  await assert.rejects(
+    indexWorkbook({ workbook, vectorStore: store, embedder }),
+    /returned 1 vector\(s\); expected 2/
+  );
+
+  assert.equal(embedCalls, 1);
+  assert.deepEqual(await store.list({ workbookId: workbook.id, includeVector: false }), []);
+});
+
+test("indexWorkbook rejects when embedder vectors have the wrong dimension (no partial writes)", async () => {
+  const workbook = makeWorkbookTwoTables();
+  const store = new InMemoryVectorStore({ dimension: 128 });
+
+  const embedder = {
+    async embedTexts(texts) {
+      // First vector matches dimension, second does not.
+      return texts.map((_, i) => new Float32Array(i === 0 ? 128 : 127));
+    },
+  };
+
+  await assert.rejects(
+    indexWorkbook({ workbook, vectorStore: store, embedder }),
+    /Vector dimension mismatch/
+  );
+
+  assert.deepEqual(await store.list({ workbookId: workbook.id, includeVector: false }), []);
+});
