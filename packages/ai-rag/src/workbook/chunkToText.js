@@ -212,6 +212,8 @@ export function chunkToText(chunk, opts) {
       if (extra) row.push(extra);
       rows.push(row.join(" | "));
     }
+    const extraRows = fullRowCount - startRow - rows.length;
+    if (rows.length > 0 && extraRows > 0) rows.push(`… (+${extraRows} more rows)`);
     if (rows.length) {
       lines.push("SAMPLE ROWS:");
       for (const row of rows) lines.push(`  - ${row}`);

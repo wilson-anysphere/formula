@@ -110,6 +110,19 @@ test("chunkToText uses the full range width when reporting truncated column coun
   assert.ok(text.includes("… (+95 more columns)"), "expected truncation to reflect full range width");
 });
 
+test("chunkToText reports when sample rows are truncated relative to the full range height", () => {
+  const chunk = {
+    kind: "dataRegion",
+    title: "Tall region",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 9, c1: 0 }, // 10 rows
+    cells: [[{ v: 1 }]], // sampled 1 row
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /… \(\+9 more rows\)/);
+});
+
 test("chunkToText includes A1-like cell addresses for formulaRegion samples", () => {
   const chunk = {
     kind: "formulaRegion",
