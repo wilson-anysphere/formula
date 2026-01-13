@@ -71,7 +71,6 @@ const RECORD_WSBOOL: u16 = 0x0081;
 // In BIFF8, `WSBOOL.fFitToPage` controls whether SETUP.iFitWidth/iFitHeight apply. When unset,
 // Excel uses SETUP.iScale percent scaling instead.
 const WSBOOL_OPTION_FIT_TO_PAGE: u16 = 0x0100;
-
 // SETUP grbit flags.
 //
 // In BIFF8, SETUP.grbit bit 1 is `fPortrait`:

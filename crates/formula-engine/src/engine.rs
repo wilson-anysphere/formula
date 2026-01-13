@@ -777,6 +777,7 @@ impl Engine {
         if new_index >= self.workbook.sheet_order.len() {
             return false;
         }
+
         let Some(current) = self.workbook.sheet_order.iter().position(|&id| id == sheet_id) else {
             return false;
         };
@@ -858,11 +859,6 @@ impl Engine {
     }
 
     /// Set (or clear) the explicit width override for a column.
-    ///
-    /// `width` is expressed in Excel "character" units (OOXML `col/@width`), **not pixels**.
-    /// This is the value shown in Excel's "Column Width" UI and persisted in `.xlsx` files.
-    ///
-    /// Pass `None` to clear the override back to the sheet default.
     pub fn set_col_width(&mut self, sheet: &str, col_0based: u32, width: Option<f32>) {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         if self.workbook.grow_sheet_dimensions(
@@ -897,9 +893,6 @@ impl Engine {
     }
 
     /// Set whether a column is user-hidden.
-    ///
-    /// Note: Excel treats hidden state as distinct from width; a column can be hidden without
-    /// changing its stored width.
     pub fn set_col_hidden(&mut self, sheet: &str, col_0based: u32, hidden: bool) {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         if self.workbook.grow_sheet_dimensions(
@@ -1454,10 +1447,6 @@ impl Engine {
     /// - **External workbook references** like `=[Book.xlsx]Sheet1!A1`.
     /// - **Out-of-band values** for the current workbook when a cell is not present in the engine's
     ///   internal grid storage (useful for streaming/virtualized sheets).
-    ///
-    /// Performance note: when an external value provider is configured, the evaluator may
-    /// conservatively fall back to dense range iteration for local sheets (to avoid missing
-    /// provider-backed values). This can be expensive for large ranges like `A:A`.
     ///
     /// See [`ExternalValueProvider`] for the canonical external sheet-key formats and
     /// [`ExternalValueProvider::sheet_order`] semantics used for expanding external 3D sheet spans.

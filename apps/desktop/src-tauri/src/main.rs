@@ -18,6 +18,10 @@ use desktop::ipc_limits::{
 };
 use desktop::macro_trust::{compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore};
 use desktop::macros::MacroExecutionOptions;
+use desktop::oauth_loopback::{
+    acquire_oauth_loopback_listener, AcquireOauthLoopbackListener, OauthLoopbackState,
+    SharedOauthLoopbackState,
+};
 use desktop::open_file;
 use desktop::open_file_ipc::OpenFileState;
 use desktop::oauth_redirect_ipc::OauthRedirectState;
@@ -110,13 +114,6 @@ fn apply_cross_origin_isolation_headers(response: &mut Response<Vec<u8>>) {
 type SharedOpenFileState = Arc<Mutex<OpenFileState>>;
 
 type SharedOauthRedirectState = Arc<Mutex<OauthRedirectState>>;
-
-#[derive(Debug, Default)]
-struct OauthLoopbackState {
-    active_redirect_uris: HashSet<String>,
-}
-
-type SharedOauthLoopbackState = Arc<Mutex<OauthLoopbackState>>;
 
 type SharedStartupMetrics = Arc<Mutex<StartupMetrics>>;
 
@@ -810,13 +807,13 @@ async fn oauth_loopback_listen(
     let redirect_uri = parsed.normalized_redirect_uri;
 
     let shared = state.inner().clone();
-    {
-        let mut guard = shared.lock().unwrap();
-        if guard.active_redirect_uris.contains(&redirect_uri) {
-            return Ok(());
-        }
-        guard.active_redirect_uris.insert(redirect_uri.clone());
-    }
+    // We cap the number of concurrently-active listeners to prevent unbounded resource usage. When
+    // the cap is exceeded we return an error instead of evicting an existing listener (eviction
+    // could break an in-flight OAuth sign-in flow).
+    let active_guard = match acquire_oauth_loopback_listener(&shared, redirect_uri.clone())? {
+        AcquireOauthLoopbackListener::AlreadyActive => return Ok(()),
+        AcquireOauthLoopbackListener::Acquired(guard) => guard,
+    };
 
     let mut listeners: Vec<TcpListener> = Vec::new();
     let mut listener_errors: Vec<String> = Vec::new();
@@ -853,9 +850,6 @@ async fn oauth_loopback_listen(
     }
 
     if listeners.is_empty() {
-        if let Ok(mut guard) = shared.lock() {
-            guard.active_redirect_uris.remove(&redirect_uri);
-        }
         let details = listener_errors.join("; ");
         return Err(match host_kind {
             desktop::oauth_loopback::LoopbackHostKind::Ipv4Loopback => format!(
@@ -872,21 +866,7 @@ async fn oauth_loopback_listen(
 
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        struct ActiveGuard {
-            state: SharedOauthLoopbackState,
-            key: String,
-        }
-        impl Drop for ActiveGuard {
-            fn drop(&mut self) {
-                if let Ok(mut guard) = self.state.lock() {
-                    guard.active_redirect_uris.remove(&self.key);
-                }
-            }
-        }
-        let _guard = ActiveGuard {
-            state: shared.clone(),
-            key: redirect_uri.clone(),
-        };
+        let _guard = active_guard;
 
         let overall_timeout = Duration::from_secs(5 * 60);
         let handled = Arc::new(AtomicBool::new(false));

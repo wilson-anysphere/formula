@@ -2006,6 +2006,8 @@ impl AppState {
         let Some(storage) = self.persistent_storage() else {
             return false;
         };
+        // Explicit `Vec<String>` annotation avoids type inference falling back to an unsized `str`
+        // element type (which then fails in the `for sheet_id in sheet_ids` loop below).
         let sheet_ids: Vec<String> = match self.get_workbook() {
             Ok(workbook) => workbook.sheets.iter().map(|s| s.id.clone()).collect(),
             Err(_) => return false,
