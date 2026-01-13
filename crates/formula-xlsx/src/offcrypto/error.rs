@@ -31,6 +31,9 @@ pub enum OffCryptoError {
     #[error("unsupported OOXML encryption hash algorithm `{hash}`")]
     UnsupportedHashAlgorithm { hash: String },
 
+    #[error("invalid AES block size {block_size} bytes (expected 16)")]
+    InvalidBlockSize { block_size: usize },
+
     #[error("invalid OOXML Agile encryption parameter: {param}")]
     InvalidAgileParameter { param: &'static str },
 

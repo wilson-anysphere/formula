@@ -232,10 +232,8 @@ fn validate_aes_cbc_params(
         });
     }
     if block_size as usize != AES_BLOCK_SIZE {
-        return Err(OffCryptoError::InvalidAttribute {
-            element: element.to_string(),
-            attr: "blockSize".to_string(),
-            reason: format!("unsupported AES blockSize={block_size} (expected {AES_BLOCK_SIZE})"),
+        return Err(OffCryptoError::InvalidBlockSize {
+            block_size: block_size as usize,
         });
     }
 
@@ -293,8 +291,29 @@ pub fn parse_agile_encryption_info_stream_with_options(
         key_data_block_size,
     )?;
 
+    let key_data_salt_size = parse_u32_attr("keyData", key_data_node, "saltSize")?;
+    if key_data_salt_size == 0 {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: "keyData".to_string(),
+            attr: "saltSize".to_string(),
+            reason: "saltSize must be non-zero".to_string(),
+        });
+    }
+    let key_data_salt_value = decode_b64_attr("keyData", key_data_node, "saltValue", opts)?;
+    if key_data_salt_value.len() != key_data_salt_size as usize {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: "keyData".to_string(),
+            attr: "saltValue".to_string(),
+            reason: format!(
+                "decoded saltValue length {} does not match saltSize {}",
+                key_data_salt_value.len(),
+                key_data_salt_size
+            ),
+        });
+    }
+
     let key_data = AgileKeyData {
-        salt_value: decode_b64_attr("keyData", key_data_node, "saltValue", opts)?,
+        salt_value: key_data_salt_value,
         hash_algorithm: parse_hash_algorithm_attr("keyData", key_data_node, "hashAlgorithm")?,
         cipher_algorithm: key_data_cipher_algorithm,
         cipher_chaining: key_data_cipher_chaining,
@@ -402,6 +421,28 @@ pub fn parse_agile_encryption_info_stream_with_options(
         key_encryptor_block_size,
     )?;
 
+    let key_encryptor_salt_size = parse_u32_attr("encryptedKey", encrypted_key_node, "saltSize")?;
+    if key_encryptor_salt_size == 0 {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: "encryptedKey".to_string(),
+            attr: "saltSize".to_string(),
+            reason: "saltSize must be non-zero".to_string(),
+        });
+    }
+    let key_encryptor_salt_value =
+        decode_b64_attr("encryptedKey", encrypted_key_node, "saltValue", opts)?;
+    if key_encryptor_salt_value.len() != key_encryptor_salt_size as usize {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: "encryptedKey".to_string(),
+            attr: "saltValue".to_string(),
+            reason: format!(
+                "decoded saltValue length {} does not match saltSize {}",
+                key_encryptor_salt_value.len(),
+                key_encryptor_salt_size
+            ),
+        });
+    }
+
     let spin_count = parse_u32_attr("encryptedKey", encrypted_key_node, "spinCount")?;
     if spin_count > DEFAULT_MAX_SPIN_COUNT {
         return Err(OffCryptoError::SpinCountTooLarge {
@@ -411,7 +452,7 @@ pub fn parse_agile_encryption_info_stream_with_options(
     }
 
     let password_key_encryptor = AgilePasswordKeyEncryptor {
-        salt_value: decode_b64_attr("encryptedKey", encrypted_key_node, "saltValue", opts)?,
+        salt_value: key_encryptor_salt_value,
         spin_count,
         hash_algorithm: parse_hash_algorithm_attr("encryptedKey", encrypted_key_node, "hashAlgorithm")?,
         cipher_algorithm: key_encryptor_cipher_algorithm,
@@ -960,10 +1001,10 @@ mod tests {
                         xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
               <keyData saltValue="AA==" hashAlgorithm="SHA1" hashSize="20"
                        cipherAlgorithm="AES" cipherChaining="ChainingModeCFB"
-                       keyBits="128" blockSize="16" />
+                       keyBits="128" blockSize="16" saltSize="1" />
               <keyEncryptors>
                 <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
-                  <p:encryptedKey saltValue="AA==" spinCount="1" hashAlgorithm="SHA1" hashSize="20"
+                  <p:encryptedKey saltValue="AA==" saltSize="1" spinCount="1" hashAlgorithm="SHA1" hashSize="20"
                                   cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
                                   keyBits="128" blockSize="16"
                                   encryptedVerifierHashInput="AA=="
@@ -996,10 +1037,10 @@ mod tests {
                         xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
               <keyData saltValue="AA==" hashAlgorithm="SHA1" hashSize="20"
                        cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
-                       keyBits="128" blockSize="16" />
+                       keyBits="128" blockSize="16" saltSize="1" />
               <keyEncryptors>
                 <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
-                  <p:encryptedKey saltValue="AA==" spinCount="1" hashAlgorithm="SHA1" hashSize="20"
+                  <p:encryptedKey saltValue="AA==" saltSize="1" spinCount="1" hashAlgorithm="SHA1" hashSize="20"
                                   cipherAlgorithm="AES" cipherChaining="ChainingModeCFB"
                                   keyBits="128" blockSize="16"
                                   encryptedVerifierHashInput="AA=="
@@ -1026,8 +1067,49 @@ mod tests {
         let doc = roxmltree::Document::parse(xml).expect("parse xml");
         let node = doc.root_element();
 
-        let decoded = decode_b64_attr("keyData", node, "saltValue", &ParseOptions::default()).expect("decode");
+        let decoded =
+            decode_b64_attr("keyData", node, "saltValue", &ParseOptions::default()).expect("decode");
         assert_eq!(decoded, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn rejects_aes_block_size_not_16() {
+        let salt_b64 = BASE64.encode([0u8; 16]);
+        let xml = format!(
+            r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption">
+                 <keyData saltSize="16" blockSize="32" keyBits="128" hashSize="20"
+                          cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+                          saltValue="{salt_b64}"/>
+               </encryption>"#
+        );
+        let stream = wrap_xml_in_encryption_info_stream(&xml);
+
+        let err = parse_agile_encryption_info_stream(&stream).unwrap_err();
+        assert!(matches!(err, OffCryptoError::InvalidBlockSize { block_size: 32 }));
+    }
+
+    #[test]
+    fn rejects_salt_value_len_mismatch() {
+        let salt_b64 = BASE64.encode([0u8; 16]); // 16-byte saltValue
+        let xml = format!(
+            r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption">
+                 <keyData saltSize="8" blockSize="16" keyBits="128" hashSize="20"
+                          cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+                          saltValue="{salt_b64}"/>
+               </encryption>"#
+        );
+        let stream = wrap_xml_in_encryption_info_stream(&xml);
+
+        let err = parse_agile_encryption_info_stream(&stream).unwrap_err();
+        assert!(
+            matches!(err, OffCryptoError::InvalidAttribute { .. }),
+            "expected InvalidAttribute, got {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("saltSize") && msg.contains("8") && msg.contains("16"),
+            "expected message to mention saltSize mismatch, got: {msg}"
+        );
     }
 
     fn zero_pad(mut bytes: Vec<u8>) -> Vec<u8> {
