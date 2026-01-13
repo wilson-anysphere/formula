@@ -11674,6 +11674,37 @@ export class SpreadsheetApp {
     const primary = e.ctrlKey || e.metaKey;
     const key = e.key;
 
+    if (key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.selectDrawing(null);
+      this.focus();
+      return true;
+    }
+
+    if (key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown") {
+      e.preventDefault();
+      e.stopPropagation();
+      const step = e.shiftKey ? 10 : 1;
+      const { dxPx, dyPx } = (() => {
+        switch (key) {
+          case "ArrowLeft":
+            return { dxPx: -step, dyPx: 0 };
+          case "ArrowRight":
+            return { dxPx: step, dyPx: 0 };
+          case "ArrowUp":
+            return { dxPx: 0, dyPx: -step };
+          case "ArrowDown":
+            return { dxPx: 0, dyPx: step };
+        }
+      })();
+      // `shiftAnchor` expects deltas in screen pixels and converts to sheet units internally
+      // based on the provided `zoom` value.
+      this.nudgeSelectedDrawing(dxPx, dyPx);
+      this.focus();
+      return true;
+    }
+
     if (key === "Delete" || key === "Backspace") {
       e.preventDefault();
       this.deleteSelectedDrawing();
@@ -11719,6 +11750,59 @@ export class SpreadsheetApp {
     }
 
     return false;
+  }
+
+  private nudgeSelectedDrawing(dxPx: number, dyPx: number): void {
+    const selectedId = this.selectedDrawingId;
+    if (selectedId == null) return;
+    if (!Number.isFinite(dxPx) || !Number.isFinite(dyPx) || (dxPx === 0 && dyPx === 0)) return;
+
+    const setSheetDrawings =
+      typeof (this.document as any).setSheetDrawings === "function" ? ((this.document as any).setSheetDrawings as Function) : null;
+    // If drawings are backed by the document, respect read-only mode and avoid making any
+    // in-memory moves that would diverge from the persisted state.
+    if (setSheetDrawings && this.isReadOnly()) return;
+
+    const objects = this.sheetDrawings.length > 0 ? this.sheetDrawings : this.listDrawingObjectsForSheet();
+    if (objects.length === 0) return;
+
+    const index = objects.findIndex((obj) => obj.id === selectedId);
+    if (index === -1) return;
+    const selected = objects[index]!;
+
+    const viewport = this.getDrawingInteractionViewport();
+    const zoom = typeof viewport.zoom === "number" && Number.isFinite(viewport.zoom) && viewport.zoom > 0 ? viewport.zoom : 1;
+
+    const nextAnchor = shiftAnchor(selected.anchor, dxPx, dyPx, this.drawingGeom, zoom);
+    if (nextAnchor === selected.anchor) return;
+
+    const nextObjects = objects.map((obj) => (obj.id === selectedId ? { ...obj, anchor: nextAnchor } : obj));
+
+    // Update in-memory caches immediately so render/hit-test paths see the new positions even if
+    // the DocumentController publishes drawing changes asynchronously.
+    this.sheetDrawings = nextObjects;
+    const docAny: any = this.document as any;
+    const drawingsGetter = typeof docAny.getSheetDrawings === "function" ? docAny.getSheetDrawings : null;
+    this.drawingObjectsCache = { sheetId: this.sheetId, objects: nextObjects, source: drawingsGetter };
+    this.drawingHitTestIndex = null;
+    this.drawingHitTestIndexObjects = null;
+    this.scheduleDrawingsRender("keyboard:nudge");
+
+    // Persist the move (and create an undo step) when the document supports sheet drawings.
+    if (!setSheetDrawings) return;
+
+    this.document.beginBatch({ label: "Move Picture" });
+    try {
+      setSheetDrawings.call(this.document, this.sheetId, nextObjects, { source: "drawings" });
+      this.document.endBatch();
+    } catch (err) {
+      try {
+        this.document.cancelBatch();
+      } catch {
+        // ignore
+      }
+      throw err;
+    }
   }
 
   private handleShowFormulasShortcut(e: KeyboardEvent): boolean {
