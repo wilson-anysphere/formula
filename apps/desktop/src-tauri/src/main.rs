@@ -1503,7 +1503,9 @@ fn main() {
 
     started = true;
 
-    // "WebView loaded": the earliest point where the JS bridge is ready to invoke into Rust.
+    // Notify the Rust host that the JS bridge is ready to invoke commands. This is idempotent
+    // and (in the real app) allows the host to re-emit cached startup timing events once the
+    // frontend has installed listeners.
     await invoke("report_startup_webview_loaded");
 
     // Approximate "time to interactive": a microtask + first frame later.
