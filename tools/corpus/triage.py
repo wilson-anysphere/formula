@@ -1403,6 +1403,21 @@ def _report_id_for_report(report: dict[str, Any], *, path: Path) -> str:
     return sha256_hex(path.read_bytes())[:16]
 
 
+def _display_name_for_report(report: dict[str, Any], *, path: Path, privacy_mode: str) -> str:
+    name = report.get("display_name")
+    if isinstance(name, str) and name:
+        return name
+    if privacy_mode == _PRIVACY_PRIVATE:
+        sha = report.get("sha256")
+        if not isinstance(sha, str) or not sha:
+            try:
+                sha = sha256_hex(path.read_bytes())
+            except Exception:  # noqa: BLE001
+                sha = _sha256_text(str(path))
+        return _anonymized_display_name(sha256=sha, original_name=path.name)
+    return path.name
+
+
 def _report_filename_for_path(
     report: dict[str, Any], *, path: Path, corpus_dir: Path
 ) -> str:
@@ -1535,8 +1550,11 @@ def _triage_paths(
                 reports_by_index[idx] = res
                 done += 1
                 # Keep logs readable: one progress line per workbook (printed by parent only).
+                name_for_log = _display_name_for_report(
+                    res, path=paths[idx], privacy_mode=privacy_mode
+                )
                 print(
-                    f"[{done}/{len(paths)}] triaged {res.get('display_name', paths[idx].name)}"
+                    f"[{done}/{len(paths)}] triaged {name_for_log}"
                 )
                 _submit_next()
 
@@ -1754,7 +1772,13 @@ def main() -> int:
         filename = _report_filename_for_path(report, path=path, corpus_dir=args.corpus_dir)
         write_json(reports_dir / filename, report)
         report_index_entries.append(
-            {"id": report_id, "display_name": report.get("display_name", path.name), "file": filename}
+            {
+                "id": report_id,
+                "display_name": _display_name_for_report(
+                    report, path=path, privacy_mode=args.privacy_mode
+                ),
+                "file": filename,
+            }
         )
 
     corpus_dir_str = str(args.corpus_dir)
