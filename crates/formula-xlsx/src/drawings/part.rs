@@ -330,14 +330,14 @@ fn drawing_rels_path(drawing_path: &str) -> String {
 fn parse_anchor(anchor_node: &roxmltree::Node<'_, '_>) -> Result<Anchor> {
     let tag = anchor_node.tag_name().name();
 
-    let from = anchor_node
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "from")
-        .ok_or_else(|| XlsxError::Invalid(format!("{tag} missing <from>")))?;
-    let from = parse_anchor_point(&from)?;
-
     match tag {
         "oneCellAnchor" => {
+            let from = anchor_node
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "from")
+                .ok_or_else(|| XlsxError::Invalid(format!("{tag} missing <from>")))?;
+            let from = parse_anchor_point(&from)?;
+
             let ext_node = anchor_node
                 .children()
                 .find(|n| n.is_element() && n.tag_name().name() == "ext")
@@ -350,6 +350,12 @@ fn parse_anchor(anchor_node: &roxmltree::Node<'_, '_>) -> Result<Anchor> {
             })
         }
         "twoCellAnchor" => {
+            let from = anchor_node
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "from")
+                .ok_or_else(|| XlsxError::Invalid(format!("{tag} missing <from>")))?;
+            let from = parse_anchor_point(&from)?;
+
             let to = anchor_node
                 .children()
                 .find(|n| n.is_element() && n.tag_name().name() == "to")
