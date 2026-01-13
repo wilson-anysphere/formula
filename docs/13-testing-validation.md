@@ -912,7 +912,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pin Rust for deterministic builds (this repo uses rust-toolchain.toml).
+      - uses: dtolnay/rust-toolchain@1.92.0
       - run: npm ci
       - run: npm run test:integration
 
