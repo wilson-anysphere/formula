@@ -111,6 +111,11 @@ Implementation notes:
 
 - `crates/formula-io/src/bin/ooxml-encryption-info.rs` prints a one-line scheme/version summary
   based on the `(majorVersion, minorVersion)` header (e.g. `3.2` → Standard, `4.4` → Agile).
+  Run it with:
+
+  ```bash
+  bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- path/to/encrypted.xlsx
+  ```
 - `crates/formula-offcrypto` parses `EncryptionInfo` (Standard/CryptoAPI 3.2 and Agile 4.4
   password-key-encryptor subset) and implements Standard password→key derivation + verifier checks.
 - `crates/formula-io/src/offcrypto/encrypted_package.rs` decrypts the Standard/CryptoAPI
