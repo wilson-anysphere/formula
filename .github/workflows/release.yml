@@ -929,6 +929,19 @@ jobs:
               exit 1
             fi
 
+            # Optional lightweight runtime smoke test: the desktop binary supports a special
+            # `--cross-origin-isolation-check` mode that starts the webview under a virtual display
+            # and exits quickly with a status code.
+            echo "::group::Run packaged binary smoke check (--cross-origin-isolation-check)"
+            (
+              export HOME="${tmpdir}/home"
+              export XDG_CONFIG_HOME="${HOME}/.config"
+              export XDG_DATA_HOME="${HOME}/.local/share"
+              mkdir -p "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}"
+              timeout 45s bash scripts/xvfb-run-safe.sh "${bin}" --cross-origin-isolation-check
+            )
+            echo "::endgroup::"
+
             python scripts/ci/verify_linux_desktop_integration.py --deb-root "${tmpdir}"
 
             rm -rf "${tmpdir}"
