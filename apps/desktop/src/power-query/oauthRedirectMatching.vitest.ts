@@ -19,6 +19,14 @@ describe("matchesRedirectUri", () => {
     expect(matchesRedirectUri("http://127.0.0.1:4242/callback", "http://127.0.0.1:4242/callback?code=abc")).toBe(true);
   });
 
+  it("matches a localhost loopback redirect (including port) while ignoring query params", () => {
+    expect(matchesRedirectUri("http://localhost:4242/callback", "http://localhost:4242/callback?code=abc")).toBe(true);
+  });
+
+  it("matches an IPv6 loopback redirect (including port) while ignoring query params", () => {
+    expect(matchesRedirectUri("http://[::1]:4242/callback", "http://[::1]:4242/callback?code=abc")).toBe(true);
+  });
+
   it("rejects a loopback redirect with the wrong port", () => {
     expect(matchesRedirectUri("http://127.0.0.1:4242/callback", "http://127.0.0.1:5555/callback?code=abc")).toBe(false);
   });
@@ -28,4 +36,3 @@ describe("matchesRedirectUri", () => {
     expect(matchesRedirectUri("formula://oauth/callback", "not a url")).toBe(false);
   });
 });
-

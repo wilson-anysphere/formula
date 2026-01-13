@@ -131,14 +131,17 @@ export class DesktopOAuthBroker implements OAuthBroker {
     // of server startup.
     if (redirectUri) {
       try {
-        const parsedRedirect = new URL(redirectUri);
-        const isLoopback =
-          parsedRedirect.protocol === "http:" && parsedRedirect.hostname === "127.0.0.1" && parsedRedirect.port !== "";
+         const parsedRedirect = new URL(redirectUri);
+         const port = Number.parseInt(parsedRedirect.port, 10);
+         const isLoopbackHost =
+           parsedRedirect.hostname === "127.0.0.1" || parsedRedirect.hostname === "localhost" || parsedRedirect.hostname === "::1";
+         const isLoopback =
+           parsedRedirect.protocol === "http:" && isLoopbackHost && parsedRedirect.port !== "" && Number.isInteger(port) && port > 0;
 
-        if (isLoopback) {
-          const invoke = (globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined;
-          if (typeof invoke === "function") {
-            await invoke("oauth_loopback_listen", { redirect_uri: redirectUri });
+         if (isLoopback) {
+           const invoke = (globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined;
+           if (typeof invoke === "function") {
+             await invoke("oauth_loopback_listen", { redirect_uri: redirectUri });
           }
         }
       } catch {

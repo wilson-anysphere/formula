@@ -598,7 +598,7 @@ The command list is large; below are the “core” ones most contributors will 
   - `power_query_refresh_state_get|set`
   - `power_query_state_get|set`
 - **OAuth (desktop redirect capture)**
-  - `oauth_loopback_listen` (starts a temporary `http://127.0.0.1:<port>` listener for RFC 8252 loopback redirects)
+  - `oauth_loopback_listen` (starts a temporary RFC 8252 loopback listener for redirect URIs using `http://127.0.0.1:<port>/...`, `http://localhost:<port>/...`, or `http://[::1]:<port>/...`; listener times out after 5 minutes)
 - **SQL (connectors / queries)**
   - `sql_query`, `sql_get_schema`
 - **Macros + scripting**

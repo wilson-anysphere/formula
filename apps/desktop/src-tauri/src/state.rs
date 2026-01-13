@@ -1499,20 +1499,6 @@ impl AppState {
         let tab_color = match tab_color {
             None => None,
             Some(mut color) => {
-                // We currently only support setting sheet tab colors via explicit ARGB hex values.
-                // Theme/indexed colors can still be loaded and round-tripped from XLSX, but are not
-                // accepted as updates via the host APIs yet.
-                if color.theme.is_some()
-                    || color.indexed.is_some()
-                    || color.tint.is_some()
-                    || color.auto.is_some()
-                {
-                    return Err(AppStateError::WhatIf(
-                        "tab color must be specified using an ARGB hex value in `rgb` (AARRGGBB)"
-                            .to_string(),
-                    ));
-                }
-
                 if let Some(rgb) = color.rgb.as_deref() {
                     let trimmed = rgb.trim();
                     if trimmed.is_empty() {
@@ -1532,26 +1518,22 @@ impl AppState {
                     }
                 }
 
-                // We currently only support setting explicit ARGB tab colors from the host.
-                //
-                // While XLSX allows colors to be specified via theme/indexed palettes (+ optional
-                // tint), those can only be resolved with workbook theme context. We preserve these
-                // values when importing/exporting workbooks, but refuse to set them via the IPC
-                // surface (otherwise the UI could appear to "set" a color that cannot be rendered
-                // or round-tripped consistently).
-                if color.theme.is_some()
-                    || color.indexed.is_some()
-                    || color.tint.is_some()
-                    || color.auto.is_some()
-                {
-                    return Err(AppStateError::WhatIf(
-                        "tab color updates must use an explicit ARGB hex value via `rgb`; theme/indexed/tint/auto updates are not supported"
-                            .to_string(),
-                    ));
+                if let Some(tint) = color.tint {
+                    if !tint.is_finite() || !(-1.0..=1.0).contains(&tint) {
+                        return Err(AppStateError::WhatIf(
+                            "tab color tint must be a finite number between -1.0 and 1.0"
+                                .to_string(),
+                        ));
+                    }
                 }
 
                 // Treat an all-empty payload as clearing the tab color.
-                if color.rgb.is_none() {
+                if color.rgb.is_none()
+                    && color.theme.is_none()
+                    && color.indexed.is_none()
+                    && color.tint.is_none()
+                    && color.auto.is_none()
+                {
                     None
                 } else {
                     Some(color)
@@ -5554,7 +5536,7 @@ mod tests {
     }
 
     #[test]
-    fn set_sheet_tab_color_rejects_non_rgb_updates() {
+    fn set_sheet_tab_color_accepts_theme_updates_and_persists() {
         let mut workbook = Workbook::new_empty(None);
         workbook.add_sheet("Sheet1".to_string());
 
@@ -5563,41 +5545,48 @@ mod tests {
             .load_workbook_persistent(workbook, WorkbookPersistenceLocation::InMemory)
             .expect("load persistent workbook");
 
-        let err = state
+        state
             .set_sheet_tab_color(
                 "Sheet1",
                 Some(TabColor {
                     theme: Some(1),
+                    tint: Some(0.5),
                     ..Default::default()
                 }),
             )
-            .expect_err("expected non-RGB tab color update to fail");
+            .expect("set theme tab color");
 
-        match err {
-            AppStateError::WhatIf(msg) => assert!(
-                msg.contains("ARGB"),
-                "expected error message to mention ARGB, got: {msg}"
-            ),
-            other => panic!("expected AppStateError::WhatIf, got {other:?}"),
-        }
-
-        // Ensure failed update doesn't mutate in-memory state.
+        // Ensure update mutates in-memory state.
         let info = state.workbook_info().expect("workbook info");
         let sheet1 = info
             .sheets
             .iter()
             .find(|s| s.id == "Sheet1")
             .expect("Sheet1 exists");
-        assert_eq!(sheet1.tab_color, None);
+        assert_eq!(
+            sheet1.tab_color,
+            Some(TabColor {
+                theme: Some(1),
+                tint: Some(0.5),
+                ..Default::default()
+            })
+        );
 
-        // Ensure failed update doesn't write to persistent storage either.
+        // Ensure update writes to persistent storage.
         let storage = state.persistent_storage().expect("storage");
         let workbook_id = state.persistent_workbook_id().expect("workbook id");
         let model = storage
             .export_model_workbook(workbook_id)
             .expect("export model");
         let sheet1 = model.sheet_by_name("Sheet1").expect("Sheet1 exists");
-        assert_eq!(sheet1.tab_color, None);
+        assert_eq!(
+            sheet1.tab_color,
+            Some(TabColor {
+                theme: Some(1),
+                tint: Some(0.5),
+                ..Default::default()
+            })
+        );
     }
 
     #[test]

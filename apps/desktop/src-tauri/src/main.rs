@@ -22,6 +22,7 @@ use desktop::tray_status::{self, TrayStatusState};
 use desktop::updater;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -32,8 +33,9 @@ use tauri::{Emitter, Listener, Manager, State};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_notification::NotificationExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpSocket};
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 use tokio::time::{timeout, Duration};
 use url::Url;
 use uuid::Uuid;
@@ -624,29 +626,11 @@ async fn oauth_loopback_listen(
 
     let app = window.app_handle();
 
-    let parsed = Url::parse(redirect_uri.trim())
-        .map_err(|err| format!("Invalid OAuth redirect URI: {err}"))?;
-
-    if parsed.scheme() != "http" {
-        return Err("Loopback OAuth redirect capture requires an http:// redirect URI".to_string());
-    }
-
-    let host = parsed.host_str().unwrap_or("");
-    if host != "127.0.0.1" {
-        return Err(
-            "Loopback OAuth redirect capture currently supports only 127.0.0.1".to_string(),
-        );
-    }
-
-    let port = parsed
-        .port()
-        .ok_or_else(|| "Loopback OAuth redirect URI must include an explicit port".to_string())?;
-    if port == 0 {
-        return Err("Loopback OAuth redirect URI must not use port 0".to_string());
-    }
-
-    let expected_path = parsed.path().to_string();
-    let redirect_uri = parsed.to_string();
+    let parsed = desktop::oauth_loopback::parse_loopback_redirect_uri(&redirect_uri)?;
+    let host_kind = parsed.host_kind;
+    let port = parsed.port;
+    let expected_path = parsed.path;
+    let redirect_uri = parsed.normalized_redirect_uri;
 
     let shared = state.inner().clone();
     {
@@ -657,17 +641,58 @@ async fn oauth_loopback_listen(
         guard.active_redirect_uris.insert(redirect_uri.clone());
     }
 
-    let listener = match TcpListener::bind(("127.0.0.1", port)).await {
-        Ok(listener) => listener,
-        Err(err) => {
-            if let Ok(mut guard) = shared.lock() {
-                guard.active_redirect_uris.remove(&redirect_uri);
-            }
-            return Err(format!(
-                "Failed to bind loopback OAuth redirect listener on 127.0.0.1:{port}: {err}"
-            ));
+    let mut listeners: Vec<TcpListener> = Vec::new();
+    let mut listener_errors: Vec<String> = Vec::new();
+
+    let wants_ipv4 = matches!(
+        host_kind,
+        desktop::oauth_loopback::LoopbackHostKind::Ipv4Loopback
+            | desktop::oauth_loopback::LoopbackHostKind::Localhost
+    );
+    let wants_ipv6 = matches!(
+        host_kind,
+        desktop::oauth_loopback::LoopbackHostKind::Ipv6Loopback
+            | desktop::oauth_loopback::LoopbackHostKind::Localhost
+    );
+
+    if wants_ipv4 {
+        match TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await {
+            Ok(listener) => listeners.push(listener),
+            Err(err) => listener_errors.push(err.to_string()),
         }
-    };
+    }
+
+    if wants_ipv6 {
+        let addr = SocketAddr::from((Ipv6Addr::LOCALHOST, port));
+        let listener = (|| -> std::io::Result<TcpListener> {
+            let socket = TcpSocket::new_v6()?;
+            socket.set_only_v6(true)?;
+            socket.bind(addr)?;
+            socket.listen(1024)
+        })();
+        match listener {
+            Ok(listener) => listeners.push(listener),
+            Err(err) => listener_errors.push(err.to_string()),
+        }
+    }
+
+    if listeners.is_empty() {
+        if let Ok(mut guard) = shared.lock() {
+            guard.active_redirect_uris.remove(&redirect_uri);
+        }
+        let details = listener_errors.join("; ");
+        return Err(match host_kind {
+            desktop::oauth_loopback::LoopbackHostKind::Ipv4Loopback => format!(
+                "Failed to bind loopback OAuth redirect listener on 127.0.0.1:{port}: {details}"
+            ),
+            desktop::oauth_loopback::LoopbackHostKind::Ipv6Loopback => format!(
+                "Failed to bind loopback OAuth redirect listener on [::1]:{port}: {details}"
+            ),
+            desktop::oauth_loopback::LoopbackHostKind::Localhost => format!(
+                "Failed to bind loopback OAuth redirect listener on localhost:{port}: {details}"
+            ),
+        });
+    }
 
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -688,86 +713,134 @@ async fn oauth_loopback_listen(
         };
 
         let overall_timeout = Duration::from_secs(5 * 60);
-        let _ = timeout(overall_timeout, async {
-            loop {
-                let (mut socket, _) = match listener.accept().await {
-                    Ok(v) => v,
-                    Err(_) => break,
-                };
+        let handled = Arc::new(AtomicBool::new(false));
+        let (stop_tx, stop_rx) = watch::channel(false);
 
-                let mut buf = vec![0_u8; 8192];
-                let n = match timeout(Duration::from_secs(2), socket.read(&mut buf)).await {
-                    Ok(Ok(n)) => n,
-                    _ => 0,
-                };
-                if n == 0 {
-                    continue;
-                }
-                buf.truncate(n);
-                let req = String::from_utf8_lossy(&buf);
-                let line = req.lines().next().unwrap_or("");
-                let mut parts = line.split_whitespace();
-                let method = parts.next().unwrap_or("");
-                let target = parts.next().unwrap_or("");
+        let mut tasks = Vec::new();
+        for listener in listeners {
+            let app_handle = app_handle.clone();
+            let expected_path = expected_path.clone();
+            let redirect_uri = redirect_uri.clone();
+            let handled = handled.clone();
+            let stop_tx = stop_tx.clone();
+            let mut stop_rx = stop_rx.clone();
 
-                if method != "GET" {
-                    let _ = socket
-                        .write_all(b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n")
-                        .await;
-                    continue;
-                }
+            tasks.push(tauri::async_runtime::spawn(async move {
+                loop {
+                    if *stop_rx.borrow() {
+                        break;
+                    }
 
-                // The request target should be a path+query (e.g. `/callback?code=...`), but handle
-                // absolute-form targets defensively.
-                let target = if target.starts_with("http://") || target.starts_with("https://") {
-                    Url::parse(target)
-                        .ok()
-                        .map(|u| {
-                            let mut out = u.path().to_string();
-                            if let Some(q) = u.query() {
-                                out.push('?');
-                                out.push_str(q);
+                    tokio::select! {
+                        _ = stop_rx.changed() => {
+                            continue;
+                        }
+                        res = listener.accept() => {
+                            let (mut socket, _) = match res {
+                                Ok(v) => v,
+                                Err(_) => break,
+                            };
+
+                            let mut buf = vec![0_u8; 8192];
+                            let n = match timeout(Duration::from_secs(2), socket.read(&mut buf)).await {
+                                Ok(Ok(n)) => n,
+                                _ => 0,
+                            };
+                            if n == 0 {
+                                continue;
                             }
-                            out
-                        })
-                        .unwrap_or_else(|| target.to_string())
-                } else {
-                    target.to_string()
-                };
+                            buf.truncate(n);
+                            let req = String::from_utf8_lossy(&buf);
+                            let line = req.lines().next().unwrap_or("");
+                            let mut parts = line.split_whitespace();
+                            let method = parts.next().unwrap_or("");
+                            let target = parts.next().unwrap_or("");
 
-                let mut split = target.splitn(2, '?');
-                let path = split.next().unwrap_or("");
-                let query = split.next();
+                            if method != "GET" {
+                                let _ = socket
+                                    .write_all(b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n")
+                                    .await;
+                                continue;
+                            }
 
-                if path != expected_path {
-                    let _ = socket
-                        .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
-                        .await;
-                    continue;
+                            // The request target should be a path+query (e.g. `/callback?code=...`), but handle
+                            // absolute-form targets defensively.
+                            let target = if target.starts_with("http://") || target.starts_with("https://") {
+                                Url::parse(target)
+                                    .ok()
+                                    .map(|u| {
+                                        let mut out = u.path().to_string();
+                                        if let Some(q) = u.query() {
+                                            out.push('?');
+                                            out.push_str(q);
+                                        }
+                                        out
+                                    })
+                                    .unwrap_or_else(|| target.to_string())
+                            } else {
+                                target.to_string()
+                            };
+
+                            let mut split = target.splitn(2, '?');
+                            let path = split.next().unwrap_or("");
+                            let query = split.next();
+
+                            if path != expected_path {
+                                let _ = socket
+                                    .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+                                    .await;
+                                continue;
+                            }
+
+                            let mut full = match Url::parse(&redirect_uri) {
+                                Ok(u) => u,
+                                Err(_) => break,
+                            };
+                            full.set_query(query);
+                            full.set_fragment(None);
+                            let full_url = full.to_string();
+
+                            if handled
+                                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                                .is_ok()
+                            {
+                                handle_oauth_redirect_request(&app_handle, vec![full_url.clone()]);
+                                let _ = stop_tx.send(true);
+                            }
+
+                            let body = "<!doctype html><html><head><meta charset=\"utf-8\" /><title>Formula</title></head><body><h1>Sign-in complete</h1><p>You can close this window and return to Formula.</p></body></html>";
+                            let resp = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\r\n{}",
+                                body.len(),
+                                body
+                            );
+                            let _ = socket.write_all(resp.as_bytes()).await;
+                            let _ = socket.shutdown().await;
+                            break;
+                        }
+                    }
                 }
+            }));
+        }
 
-                let mut full = match Url::parse(&redirect_uri) {
-                    Ok(u) => u,
-                    Err(_) => break,
-                };
-                full.set_query(query);
-                full.set_fragment(None);
-                let full_url = full.to_string();
-
-                handle_oauth_redirect_request(&app_handle, vec![full_url.clone()]);
-
-                let body = "<!doctype html><html><head><meta charset=\"utf-8\" /><title>Formula</title></head><body><h1>Sign-in complete</h1><p>You can close this window and return to Formula.</p></body></html>";
-                let resp = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\r\n{}",
-                    body.len(),
-                    body
-                );
-                let _ = socket.write_all(resp.as_bytes()).await;
-                let _ = socket.shutdown().await;
-                break;
+        let mut stop_rx_wait = stop_rx.clone();
+        let wait_for_stop = async move {
+            loop {
+                if *stop_rx_wait.borrow() {
+                    break;
+                }
+                if stop_rx_wait.changed().await.is_err() {
+                    break;
+                }
             }
-        })
-        .await;
+        };
+
+        let _ = timeout(overall_timeout, wait_for_stop).await;
+        let _ = stop_tx.send(true);
+
+        for task in tasks {
+            let _ = task.await;
+        }
     });
 
     Ok(())
