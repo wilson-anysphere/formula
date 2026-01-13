@@ -38,7 +38,10 @@ export interface DesktopAIAuditStoreOptions {
 const DEFAULT_RETENTION_MAX_ENTRIES = 10_000;
 const DEFAULT_RETENTION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
-const storePromiseByKey = new Map<string, Promise<AIAuditStore>>();
+// Cache the underlying persisted store by storage key so multiple surfaces (chat,
+// agent, cell functions) reuse the same sqlite instance. Wrappers like
+// `BoundedAIAuditStore` are applied per consumer.
+const baseStorePromiseByKey = new Map<string, Promise<AIAuditStore>>();
 
 function isNodeRuntime(): boolean {
   // Avoid dot-accessing Node version info on `process.versions` so the desktop/WebView bundle stays Node-free.
@@ -104,16 +107,21 @@ async function resolveDesktopAIAuditStore(options: DesktopAIAuditStoreOptions = 
   const retentionMaxEntries = options.retentionMaxEntries ?? DEFAULT_RETENTION_MAX_ENTRIES;
   const retentionMaxAgeMs = options.retentionMaxAgeMs ?? DEFAULT_RETENTION_MAX_AGE_MS;
 
-  const cached = storePromiseByKey.get(storageKey);
-  if (cached) return cached;
+  const cached = baseStorePromiseByKey.get(storageKey);
+  const basePromise =
+    cached ??
+    createSqliteBackedStore({ storageKey, retentionMaxEntries, retentionMaxAgeMs }).catch((_err) => {
+      // Best-effort fallback: keep audit logging functional even if sql.js fails to load
+      // (e.g. blocked WASM fetch).
+      return new LocalStorageAIAuditStore();
+    });
 
-  const promise = createSqliteBackedStore({ storageKey, retentionMaxEntries, retentionMaxAgeMs }).catch((_err) => {
-    // Best-effort fallback: keep audit logging functional even if sql.js fails to load
-    // (e.g. blocked WASM fetch).
-    return new LocalStorageAIAuditStore();
-  }).then((store) => new BoundedAIAuditStore(store, maxEntryChars ? { max_entry_chars: maxEntryChars } : undefined));
-  storePromiseByKey.set(storageKey, promise);
-  return promise;
+  if (!cached) {
+    baseStorePromiseByKey.set(storageKey, basePromise);
+  }
+
+  // Wrap the persisted store with a per-entry size cap to avoid quota-based write failures.
+  return basePromise.then((store) => new BoundedAIAuditStore(store, maxEntryChars ? { max_entry_chars: maxEntryChars } : undefined));
 }
 
 class LazyAIAuditStore implements AIAuditStore {
