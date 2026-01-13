@@ -81,6 +81,12 @@ pub fn write_workbook_to_writer_with_kind<W: Write + Seek>(
     zip.start_file("[Content_Types].xml", options)?;
     zip.write_all(content_types_xml(workbook, &shared_strings, kind).as_bytes())?;
 
+    // Document properties
+    zip.start_file("docProps/core.xml", options)?;
+    zip.write_all(core_properties_xml().as_bytes())?;
+    zip.start_file("docProps/app.xml", options)?;
+    zip.write_all(app_properties_xml(workbook).as_bytes())?;
+
     // Workbook
     zip.start_file("xl/workbook.xml", options)?;
     zip.write_all(workbook_xml(workbook).as_bytes())?;
@@ -169,7 +175,65 @@ fn root_rels_xml() -> String {
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
 </Relationships>"#
+    )
+}
+
+fn core_properties_xml() -> String {
+    // We don't currently have timestamps/author information in the workbook model, but some
+    // downstream consumers expect the docProps part to exist. Use deterministic placeholders to
+    // keep output stable between runs.
+    let timestamp = "2000-01-01T00:00:00Z";
+    let author = "formula-xlsx";
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dc:creator>{author}</dc:creator>
+  <cp:lastModifiedBy>{author}</cp:lastModifiedBy>
+  <dcterms:created xsi:type="dcterms:W3CDTF">{timestamp}</dcterms:created>
+  <dcterms:modified xsi:type="dcterms:W3CDTF">{timestamp}</dcterms:modified>
+</cp:coreProperties>"#
+    )
+}
+
+fn app_properties_xml(workbook: &Workbook) -> String {
+    let sheet_count = workbook.sheets.len();
+    let mut sheet_names = String::new();
+    for sheet in &workbook.sheets {
+        sheet_names.push_str(&format!(
+            r#"<vt:lpstr>{}</vt:lpstr>"#,
+            escape_xml(&sheet.name)
+        ));
+    }
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>Microsoft Excel</Application>
+  <DocSecurity>0</DocSecurity>
+  <ScaleCrop>false</ScaleCrop>
+  <HeadingPairs>
+    <vt:vector size="2" baseType="variant">
+      <vt:variant>
+        <vt:lpstr>Worksheets</vt:lpstr>
+      </vt:variant>
+      <vt:variant>
+        <vt:i4>{sheet_count}</vt:i4>
+      </vt:variant>
+    </vt:vector>
+  </HeadingPairs>
+  <TitlesOfParts>
+    <vt:vector size="{sheet_count}" baseType="lpstr">
+      {sheet_names}
+    </vt:vector>
+  </TitlesOfParts>
+  <Company></Company>
+  <LinksUpToDate>false</LinksUpToDate>
+  <SharedDoc>false</SharedDoc>
+  <HyperlinksChanged>false</HyperlinksChanged>
+  <AppVersion>16.0300</AppVersion>
+</Properties>"#
     )
 }
 
@@ -1484,6 +1548,12 @@ fn content_types_xml(
     kind: WorkbookKind,
 ) -> String {
     let mut overrides = String::new();
+    overrides.push_str(
+        r#"<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>"#,
+    );
+    overrides.push_str(
+        r#"<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>"#,
+    );
     overrides.push_str(&format!(
         r#"<Override PartName="/xl/workbook.xml" ContentType="{}"/>"#,
         kind.workbook_content_type()
