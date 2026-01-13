@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateToolCall } from "../src/tool-schema.js";
+import { TOOL_REGISTRY, validateToolCall } from "../src/tool-schema.js";
 
 describe("create_pivot_table aggregation normalization", () => {
   it("accepts common spellings and normalizes to Rust camelCase aggregation strings", () => {
@@ -42,5 +42,29 @@ describe("set_range schema (large inputs)", () => {
     });
 
     expect(call.name).toBe("set_range");
+  });
+});
+
+describe("tool JSON schema fidelity (matches Zod refinements)", () => {
+  it("apply_formatting requires at least one formatting field (minProperties: 1)", () => {
+    const formatSchema = (TOOL_REGISTRY.apply_formatting.jsonSchema as any).properties?.format;
+    expect(formatSchema).toBeDefined();
+    expect(formatSchema.minProperties).toBe(1);
+  });
+
+  it("filter_range requires value2 when operator is between (oneOf variant)", () => {
+    const criteriaItemsSchema = (TOOL_REGISTRY.filter_range.jsonSchema as any).properties?.criteria?.items;
+    expect(criteriaItemsSchema).toBeDefined();
+    expect(criteriaItemsSchema.oneOf).toBeDefined();
+    expect(Array.isArray(criteriaItemsSchema.oneOf)).toBe(true);
+
+    const oneOf = criteriaItemsSchema.oneOf as any[];
+    const betweenVariant = oneOf.find((variant) => variant?.properties?.operator?.enum?.includes?.("between"));
+    expect(betweenVariant).toBeDefined();
+    expect(betweenVariant.required).toContain("value2");
+
+    const nonBetweenVariant = oneOf.find((variant) => variant?.properties?.operator?.enum && !variant.properties.operator.enum.includes("between"));
+    expect(nonBetweenVariant).toBeDefined();
+    expect(nonBetweenVariant.required).toEqual(["column", "operator", "value"]);
   });
 });

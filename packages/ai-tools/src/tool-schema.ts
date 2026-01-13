@@ -610,14 +610,28 @@ export const TOOL_REGISTRY: { [K in ToolName]: ToolRegistryEntry<K> } = {
         criteria: {
           type: "array",
           items: {
-            type: "object",
-            properties: {
-              column: { type: "string" },
-              operator: { type: "string", enum: ["equals", "contains", "greater", "less", "between"] },
-              value: { anyOf: [{ type: "string" }, { type: "number" }] },
-              value2: { anyOf: [{ type: "string" }, { type: "number" }] }
-            },
-            required: ["column", "operator", "value"]
+            oneOf: [
+              {
+                type: "object",
+                properties: {
+                  column: { type: "string" },
+                  operator: { type: "string", enum: ["between"] },
+                  value: { anyOf: [{ type: "string" }, { type: "number" }] },
+                  value2: { anyOf: [{ type: "string" }, { type: "number" }] }
+                },
+                required: ["column", "operator", "value", "value2"]
+              },
+              {
+                type: "object",
+                properties: {
+                  column: { type: "string" },
+                  operator: { type: "string", enum: ["equals", "contains", "greater", "less"] },
+                  value: { anyOf: [{ type: "string" }, { type: "number" }] },
+                  value2: { anyOf: [{ type: "string" }, { type: "number" }] }
+                },
+                required: ["column", "operator", "value"]
+              }
+            ]
           }
         },
         has_header: { type: "boolean", default: false }
@@ -635,6 +649,7 @@ export const TOOL_REGISTRY: { [K in ToolName]: ToolRegistryEntry<K> } = {
         range: { type: "string" },
         format: {
           type: "object",
+          minProperties: 1,
           properties: {
             bold: { type: "boolean" },
             italic: { type: "boolean" },
