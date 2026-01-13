@@ -6230,6 +6230,8 @@ export class SpreadsheetApp {
       throw new Error("Picture insertion is not supported in this build.");
     }
 
+    const existingObjects = this.listDrawingObjectsForSheet(sheetId);
+
     const readFileBytes = async (file: File): Promise<Uint8Array> => {
       // Preferred path: the standard File/Blob `arrayBuffer()` API.
       if (typeof (file as any)?.arrayBuffer === "function") {
