@@ -137,6 +137,32 @@ def _redact_uri_like(text: str) -> str:
     return text
 
 
+def _redact_uri_like_in_text(text: str) -> str:
+    """Redact URI-like substrings embedded in a larger string.
+
+    `xlsx-diff` paths often embed expanded XML namespaces in the form `{uri}localName`. In
+    privacy-mode=private we want to avoid leaking any non-standard/custom domains, while keeping the
+    overall diff path structure readable.
+    """
+
+    import re
+
+    # First, redact any `{uri}` namespace expansions (QName rendering).
+    def _replace_braced(match: re.Match[str]) -> str:
+        inner = match.group(1)
+        return "{" + _redact_uri_like(inner) + "}"
+
+    out = re.sub(r"\{([^{}]+)\}", _replace_braced, text)
+
+    # Also redact any raw http(s) URL tokens that appear outside of `{}`.
+    def _replace_url(match: re.Match[str]) -> str:
+        url = match.group(0)
+        return _redact_uri_like(url)
+
+    out = re.sub(r"https?://[^\s\"'<>]+", _replace_url, out)
+    return out
+
+
 def _now_ms() -> float:
     return time.perf_counter() * 1000.0
 
@@ -819,6 +845,24 @@ def triage_workbook(
         rust_out = _run_rust_triage(rust_exe, workbook.data, **rust_kwargs)
         report["steps"] = rust_out.get("steps") or {}
         report["result"] = rust_out.get("result") or {}
+
+        if privacy_mode == _PRIVACY_PRIVATE:
+            # Defense in depth: diff paths may include expanded XML namespaces like
+            # `{http://corp.example.com/ns}attr`. Redact any non-allowlisted URI-like strings.
+            steps = report.get("steps")
+            if isinstance(steps, dict):
+                diff_step = steps.get("diff")
+                if isinstance(diff_step, dict):
+                    details = diff_step.get("details")
+                    if isinstance(details, dict):
+                        top = details.get("top_differences")
+                        if isinstance(top, list):
+                            for entry in top:
+                                if not isinstance(entry, dict):
+                                    continue
+                                path = entry.get("path")
+                                if isinstance(path, str) and path:
+                                    entry["path"] = _redact_uri_like_in_text(path)
     except Exception as e:  # noqa: BLE001
         report["steps"] = {"load": asdict(_step_failed(_now_ms(), e))}
         report["result"] = {

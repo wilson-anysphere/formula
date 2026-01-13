@@ -137,6 +137,57 @@ class TriagePrivacyModeTests(unittest.TestCase):
         expected_sha = sha256_hex(data)
         self.assertEqual(report["display_name"], f"workbook-{expected_sha[:16]}.xlsb")
 
+    def test_triage_workbook_private_mode_redacts_custom_namespaces_in_diff_paths(self) -> None:
+        import tools.corpus.triage as triage_mod
+
+        original_run_rust_triage = triage_mod._run_rust_triage
+        try:
+            triage_mod._run_rust_triage = lambda *args, **kwargs: {  # type: ignore[assignment]
+                "steps": {
+                    "diff": {
+                        "status": "ok",
+                        "details": {
+                            "top_differences": [
+                                {
+                                    "severity": "CRITICAL",
+                                    "part": "xl/workbook.xml",
+                                    "path": "/root@{http://corp.example.com/ns}attr",
+                                    "kind": "attribute_changed",
+                                },
+                                {
+                                    "severity": "CRITICAL",
+                                    "part": "xl/workbook.xml",
+                                    "path": "/root@{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id",
+                                    "kind": "attribute_changed",
+                                },
+                            ]
+                        },
+                    }
+                },
+                "result": {"open_ok": True, "round_trip_ok": True},
+            }
+
+            data = _make_xlsx_with_custom_relationship_uris()
+            wb = WorkbookInput(display_name="book.xlsx", data=data)
+            report = triage_workbook(
+                wb,
+                rust_exe=Path("noop"),
+                diff_ignore=set(),
+                diff_limit=0,
+                recalc=False,
+                render_smoke=False,
+                privacy_mode="private",
+            )
+        finally:
+            triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
+
+        top = report["steps"]["diff"]["details"]["top_differences"]
+        self.assertEqual(len(top), 2)
+        self.assertIn("{sha256=", top[0]["path"])
+        self.assertNotIn("corp.example.com", top[0]["path"])
+        # Allowlisted OpenXML schema URIs should remain intact.
+        self.assertIn("schemas.openxmlformats.org", top[1]["path"])
+
 
 if __name__ == "__main__":
     unittest.main()
