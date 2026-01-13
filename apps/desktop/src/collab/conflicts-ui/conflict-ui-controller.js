@@ -14,11 +14,15 @@ export class ConflictUiController {
    * @param {HTMLElement} opts.container
    * @param {{ resolveConflict: (id: string, chosen: any) => boolean }} opts.monitor
    * @param {import("../../sheet/sheetNameResolver.ts").SheetNameResolver | null | undefined} [opts.sheetNameResolver]
+   * @param {(cellRef: { sheetId: string, row: number, col: number }) => void} [opts.onNavigateToCell]
+   * @param {(userId: string) => string} [opts.resolveUserLabel]
    */
   constructor(opts) {
     this.container = opts.container;
     this.monitor = opts.monitor;
     this.sheetNameResolver = opts.sheetNameResolver ?? null;
+    this.onNavigateToCell = typeof opts.onNavigateToCell === "function" ? opts.onNavigateToCell : null;
+    this.resolveUserLabel = typeof opts.resolveUserLabel === "function" ? opts.resolveUserLabel : null;
 
     /** @type {Array<any>} */
     this.conflicts = [];
@@ -109,9 +113,16 @@ export class ConflictUiController {
       conflict,
       side: "local"
     });
+
+    const resolvedRemote =
+      conflict.remoteUserId && this.resolveUserLabel ? this.resolveUserLabel(conflict.remoteUserId) : "";
+    const remoteLabel =
+      conflict.remoteUserId && typeof resolvedRemote === "string" && resolvedRemote.trim()
+        ? resolvedRemote
+        : conflict.remoteUserId;
     const right = this._renderConflictSide({
       testid: "conflict-remote",
-      label: conflict.remoteUserId ? `Theirs (${conflict.remoteUserId})` : "Theirs",
+      label: remoteLabel ? `Theirs (${remoteLabel})` : "Theirs",
       conflict,
       side: "remote"
     });
@@ -122,6 +133,21 @@ export class ConflictUiController {
 
     const actions = document.createElement("div");
     actions.className = "conflict-dialog__actions";
+
+    actions.appendChild(
+      this._button("Jump to cell", "conflict-jump-to-cell", () => {
+        if (!this.onNavigateToCell) return;
+        const cell = conflict?.cell;
+        if (!cell || typeof cell !== "object") return;
+        const sheetId = String(cell.sheetId ?? "");
+        const row = Number(cell.row);
+        const col = Number(cell.col);
+        if (!sheetId) return;
+        if (!Number.isInteger(row) || row < 0) return;
+        if (!Number.isInteger(col) || col < 0) return;
+        this.onNavigateToCell({ sheetId, row, col });
+      })
+    );
 
     actions.appendChild(
       this._button("Keep yours", "conflict-choose-local", () => {

@@ -15,11 +15,15 @@ export class StructuralConflictUiController {
    * @param {HTMLElement} opts.container
    * @param {{ resolveConflict: (id: string, resolution: any) => boolean }} opts.monitor
    * @param {import("../../sheet/sheetNameResolver.ts").SheetNameResolver | null | undefined} [opts.sheetNameResolver]
+   * @param {(cellRef: { sheetId: string, row: number, col: number }) => void} [opts.onNavigateToCell]
+   * @param {(userId: string) => string} [opts.resolveUserLabel]
    */
   constructor(opts) {
     this.container = opts.container;
     this.monitor = opts.monitor;
     this.sheetNameResolver = opts.sheetNameResolver ?? null;
+    this.onNavigateToCell = typeof opts.onNavigateToCell === "function" ? opts.onNavigateToCell : null;
+    this.resolveUserLabel = typeof opts.resolveUserLabel === "function" ? opts.resolveUserLabel : null;
 
     /** @type {Array<any>} */
     this.conflicts = [];
@@ -125,7 +129,7 @@ export class StructuralConflictUiController {
     body.appendChild(
       this._renderSide({
         testid: "structural-conflict-remote",
-        label: conflict.remoteUserId ? `Theirs (${conflict.remoteUserId})` : "Theirs",
+        label: formatRemoteLabel(conflict.remoteUserId, this.resolveUserLabel),
         conflict,
         side: "remote",
       }),
@@ -134,6 +138,26 @@ export class StructuralConflictUiController {
 
     const actions = document.createElement("div");
     actions.className = "conflict-dialog__actions";
+
+    actions.appendChild(
+      this._button("Jump to cell", "structural-conflict-jump-to-cell", () => {
+        if (!this.onNavigateToCell) return;
+        const cellKey = String(conflict?.cellKey ?? "");
+        if (!cellKey) return;
+        try {
+          const ref = cellRefFromKey(cellKey);
+          const sheetId = String(ref?.sheetId ?? "");
+          const row = Number(ref?.row);
+          const col = Number(ref?.col);
+          if (!sheetId) return;
+          if (!Number.isInteger(row) || row < 0) return;
+          if (!Number.isInteger(col) || col < 0) return;
+          this.onNavigateToCell({ sheetId, row, col });
+        } catch {
+          // Best-effort; ignore invalid keys.
+        }
+      }),
+    );
 
     if (conflict.type === "move") {
       actions.appendChild(
@@ -399,4 +423,23 @@ function formatJson(value) {
   } catch {
     return String(value);
   }
+}
+
+/**
+ * @param {string} remoteUserId
+ * @param {((userId: string) => string) | null} resolver
+ */
+function formatRemoteLabel(remoteUserId, resolver) {
+  const id = String(remoteUserId ?? "");
+  if (!id) return "Theirs";
+
+  let resolved = "";
+  try {
+    resolved = resolver ? resolver(id) : "";
+  } catch {
+    resolved = "";
+  }
+
+  const label = typeof resolved === "string" && resolved.trim() ? resolved : id;
+  return `Theirs (${label})`;
 }

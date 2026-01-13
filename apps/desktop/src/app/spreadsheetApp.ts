@@ -2044,6 +2044,8 @@ export class SpreadsheetApp {
       this.conflictUi = new ConflictUiController({
         container: this.conflictUiContainer,
         sheetNameResolver: this.sheetNameResolver,
+        onNavigateToCell: (cellRef: { sheetId: string; row: number; col: number }) => this.navigateToConflictCell(cellRef),
+        resolveUserLabel: (userId: string) => this.resolveRemoteUserLabel(userId),
         monitor: {
           resolveConflict: (id: string, chosen: unknown) => {
             const monitor = this.collabSession?.formulaConflictMonitor;
@@ -2073,6 +2075,8 @@ export class SpreadsheetApp {
       this.structuralConflictUi = new StructuralConflictUiController({
         container: this.conflictUiContainer,
         sheetNameResolver: this.sheetNameResolver,
+        onNavigateToCell: (cellRef: { sheetId: string; row: number; col: number }) => this.navigateToConflictCell(cellRef),
+        resolveUserLabel: (userId: string) => this.resolveRemoteUserLabel(userId),
         monitor: {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           resolveConflict: (id: string, resolution: any) => {
@@ -4556,6 +4560,54 @@ export class SpreadsheetApp {
     const selected = await showQuickPick(items, { placeHolder: "Go to…" });
     if (typeof selected !== "string" || selected.trim() === "") return;
     this.goTo(selected);
+  }
+
+  private resolveRemoteUserLabel(userId: string): string {
+    const id = String(userId ?? "");
+    if (!id) return id;
+    const presence = this.collabSession?.presence;
+    if (!presence) return id;
+
+    try {
+      const presences = presence.getRemotePresences({ includeOtherSheets: true }) as any[];
+      for (const entry of presences) {
+        if (String(entry?.id ?? "") !== id) continue;
+        const name = String(entry?.name ?? "");
+        if (name) return name;
+      }
+    } catch {
+      // Best-effort: presence snapshots can fail if the collab session is tearing down.
+    }
+
+    return id;
+  }
+
+  private navigateToConflictCell(cellRef: { sheetId: string; row: number; col: number }): void {
+    const sheetId = String(cellRef?.sheetId ?? "");
+    const row = Number(cellRef?.row);
+    const col = Number(cellRef?.col);
+    if (!sheetId) return;
+    if (!Number.isFinite(row) || !Number.isFinite(col)) return;
+
+    const safeRow = Math.max(0, Math.min(this.limits.maxRows - 1, Math.trunc(row)));
+    const safeCol = Math.max(0, Math.min(this.limits.maxCols - 1, Math.trunc(col)));
+
+    // Avoid stealing focus from the conflict dialog itself.
+    this.activateCell({ sheetId, row: safeRow, col: safeCol }, { scrollIntoView: false, focus: false });
+    // In legacy mode, the target cell may be hidden by outline state. Remap to the nearest
+    // visible cell so the user doesn't "jump" to an invisible selection.
+    this.ensureActiveCellVisible();
+
+    const target = { ...this.selection.active };
+    const didScroll = this.scrollCellToCenter(target);
+    // Legacy renderer needs an explicit redraw for scroll changes.
+    if (!this.sharedGrid && didScroll) {
+      this.refresh("scroll");
+    } else {
+      // Even when we didn't scroll, `ensureActiveCellVisible` may have remapped the active cell.
+      this.renderSelection();
+    }
+    this.updateStatus();
   }
 
   async getCellValueA1(a1: string): Promise<string> {
@@ -7229,6 +7281,52 @@ export class SpreadsheetApp {
       } else if (bottom > maxY) {
         nextY = bottom - viewportHeight + pad;
       }
+    }
+
+    return this.setScrollInternal(nextX, nextY);
+  }
+
+  private scrollCellToCenter(cell: CellCoord): boolean {
+    if (this.sharedGrid) {
+      const before = this.sharedGrid.getScroll();
+      const gridCell = this.gridCellFromDocCell(cell);
+      this.sharedGrid.scrollToCell(gridCell.row, gridCell.col, { align: "center" });
+      const after = this.sharedGrid.getScroll();
+      this.scrollX = after.x;
+      this.scrollY = after.y;
+      return before.x !== after.x || before.y !== after.y;
+    }
+
+    // Ensure frozen pane metrics are current even when called outside `renderGrid()`.
+    this.updateViewportMapping();
+
+    if (this.rowIndexByVisual.length === 0 || this.colIndexByVisual.length === 0) return false;
+
+    // Hidden rows/cols collapse to zero size; treat them as sharing the origin of the next visible
+    // row/col so scrolling remains stable.
+    const visualRowRaw = this.rowToVisual.get(cell.row) ?? this.lowerBound(this.rowIndexByVisual, cell.row);
+    const visualColRaw = this.colToVisual.get(cell.col) ?? this.lowerBound(this.colIndexByVisual, cell.col);
+    const visualRow = Math.max(0, Math.min(this.rowIndexByVisual.length - 1, visualRowRaw));
+    const visualCol = Math.max(0, Math.min(this.colIndexByVisual.length - 1, visualColRaw));
+
+    const viewportWidth = this.viewportWidth();
+    const viewportHeight = this.viewportHeight();
+    if (viewportWidth <= 0 || viewportHeight <= 0) return false;
+
+    const scrollableViewportWidth = Math.max(0, viewportWidth - this.frozenWidth);
+    const scrollableViewportHeight = Math.max(0, viewportHeight - this.frozenHeight);
+
+    let nextX = this.scrollX;
+    let nextY = this.scrollY;
+
+    if (scrollableViewportWidth > 0 && cell.col >= this.frozenCols) {
+      nextX =
+        visualCol * this.cellWidth + this.cellWidth / 2 - (this.frozenWidth + scrollableViewportWidth / 2);
+    }
+
+    if (scrollableViewportHeight > 0 && cell.row >= this.frozenRows) {
+      nextY =
+        visualRow * this.cellHeight + this.cellHeight / 2 - (this.frozenHeight + scrollableViewportHeight / 2);
     }
 
     return this.setScrollInternal(nextX, nextY);

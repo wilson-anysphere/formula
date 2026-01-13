@@ -1,0 +1,79 @@
+// @vitest-environment jsdom
+import { describe, expect, it, vi } from "vitest";
+
+import { ConflictUiController } from "./conflict-ui-controller.js";
+
+describe("ConflictUiController", () => {
+  it("renders a Jump to cell button and invokes the callback with the conflict cell", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const resolveConflict = vi.fn(() => true);
+    const onNavigateToCell = vi.fn();
+
+    const ui = new ConflictUiController({
+      container,
+      monitor: { resolveConflict },
+      onNavigateToCell,
+    });
+
+    ui.addConflict({
+      id: "c1",
+      kind: "formula",
+      cell: { sheetId: "Sheet1", row: 3, col: 2 },
+      cellKey: "Sheet1:3:2",
+      localFormula: "=1",
+      remoteFormula: "=2",
+      remoteUserId: "u2",
+      detectedAt: 0,
+    });
+
+    container.querySelector<HTMLButtonElement>('[data-testid="conflict-toast-open"]')?.click();
+
+    const jump = container.querySelector<HTMLButtonElement>('[data-testid="conflict-jump-to-cell"]');
+    expect(jump).not.toBeNull();
+    jump!.click();
+
+    expect(onNavigateToCell).toHaveBeenCalledTimes(1);
+    expect(onNavigateToCell).toHaveBeenCalledWith({ sheetId: "Sheet1", row: 3, col: 2 });
+
+    ui.destroy();
+    container.remove();
+  });
+
+  it("applies a user label resolver when rendering the remote (theirs) panel label", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const resolveConflict = vi.fn(() => true);
+
+    const ui = new ConflictUiController({
+      container,
+      monitor: { resolveConflict },
+      resolveUserLabel: (userId: string) => (userId === "u2" ? "Bob" : userId),
+    });
+
+    ui.addConflict({
+      id: "c2",
+      kind: "formula",
+      cell: { sheetId: "Sheet1", row: 0, col: 0 },
+      cellKey: "Sheet1:0:0",
+      localFormula: "=1",
+      remoteFormula: "=2",
+      remoteUserId: "u2",
+      detectedAt: 0,
+    });
+
+    container.querySelector<HTMLButtonElement>('[data-testid="conflict-toast-open"]')?.click();
+
+    const remotePanel = container.querySelector<HTMLElement>('[data-testid="conflict-remote"]');
+    expect(remotePanel).not.toBeNull();
+
+    const label = remotePanel!.querySelector<HTMLElement>(".conflict-dialog__panel-label");
+    expect(label?.textContent).toBe("Theirs (Bob)");
+
+    ui.destroy();
+    container.remove();
+  });
+});
+
