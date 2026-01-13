@@ -27,6 +27,10 @@ function joinNames(names: string[] | null | undefined): string | null {
  */
 export function formatQueryOperationLabel(op: QueryOperation): string {
   switch (op.type) {
+    case "take": {
+      const count = typeof op.count === "number" && Number.isFinite(op.count) ? String(op.count) : null;
+      return `${t("queryEditor.addStep.op.keepTopRows")}${formatDetails(count)}`;
+    }
     case "filterRows": {
       const column =
         op.predicate?.type === "comparison" && typeof op.predicate.column === "string" ? op.predicate.column : null;
@@ -60,6 +64,14 @@ export function formatQueryOperationLabel(op: QueryOperation): string {
       const col = typeof op.column === "string" ? op.column : null;
       return `${t("queryEditor.addStep.op.splitColumn")}${formatDetails(col)}`;
     }
+    case "distinctRows": {
+      const cols = joinNames(op.columns ?? null);
+      return `${t("queryEditor.addStep.op.removeDuplicates")}${formatDetails(cols)}`;
+    }
+    case "removeRowsWithErrors": {
+      const cols = joinNames(op.columns ?? null);
+      return `${t("queryEditor.addStep.op.removeRowsWithErrors")}${formatDetails(cols)}`;
+    }
     case "groupBy": {
       const groupCols = joinNames(op.groupColumns);
       return `${t("queryEditor.addStep.op.groupBy")}${formatDetails(groupCols)}`;
@@ -68,4 +80,3 @@ export function formatQueryOperationLabel(op: QueryOperation): string {
       return humanizeOperationType(op.type);
   }
 }
-

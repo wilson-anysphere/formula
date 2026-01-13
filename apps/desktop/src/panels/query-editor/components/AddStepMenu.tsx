@@ -59,6 +59,11 @@ export function AddStepMenu(props: {
         id: "rows",
         label: t("queryEditor.addStep.category.rows"),
         items: [
+          {
+            id: "take",
+            label: t("queryEditor.addStep.op.keepTopRows"),
+            create: () => ({ type: "take", count: 100 }),
+          },
           schemaItem({
             id: "filterRows",
             label: t("queryEditor.addStep.op.filterRows"),
@@ -75,6 +80,16 @@ export function AddStepMenu(props: {
               sortBy: [{ column: firstColumnName, direction: "ascending" }],
             }),
           }),
+          {
+            id: "distinctRows",
+            label: t("queryEditor.addStep.op.removeDuplicates"),
+            create: () => ({ type: "distinctRows", columns: null }),
+          },
+          {
+            id: "removeRowsWithErrors",
+            label: t("queryEditor.addStep.op.removeRowsWithErrors"),
+            create: () => ({ type: "removeRowsWithErrors", columns: null }),
+          },
         ] satisfies MenuItem[],
       },
       {

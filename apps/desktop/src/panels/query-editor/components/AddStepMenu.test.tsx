@@ -113,8 +113,9 @@ describe("AddStepMenu", () => {
   });
 
   it("disables schema-dependent operations when preview schema is missing", async () => {
+    const onAddStep = vi.fn();
     await act(async () => {
-      root?.render(<AddStepMenu onAddStep={() => {}} aiContext={{ query: baseQuery(), preview: null }} />);
+      root?.render(<AddStepMenu onAddStep={onAddStep} aiContext={{ query: baseQuery(), preview: null }} />);
     });
 
     await act(async () => {
@@ -125,6 +126,14 @@ describe("AddStepMenu", () => {
     expect(filterButton.disabled).toBe(true);
     expect(filterButton.title).toContain("Preview schema required");
     expect(host?.textContent).toContain("Preview schema required");
+
+    const keepTopRowsButton = findButtonByText(host!, "Keep Top Rows");
+    expect(keepTopRowsButton.disabled).toBe(false);
+
+    await act(async () => {
+      keepTopRowsButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onAddStep).toHaveBeenCalledWith({ type: "take", count: 100 });
   });
 
   it("closes the operation menu on outside click and Escape", async () => {
