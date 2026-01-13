@@ -172,16 +172,21 @@ def _coerce_display_name(name: str, *, default_ext: str) -> str:
     if any(sep in name for sep in ("/", "\\", "\x00")) or name in {".", ".."}:
         raise ValueError("--name must be a filename (no path separators)")
 
-    if name.endswith((".xlsx", ".xlsm", ".xlsb")):
-        return name
-    if name.endswith(".b64"):
+    lower = name.casefold()
+    if lower.endswith(".b64"):
         # Be helpful if the user passes the fixture filename itself.
         name = name[: -len(".b64")]
-    if not name.endswith((".xlsx", ".xlsm", ".xlsb")):
-        default_ext = default_ext or ".xlsx"
-        if default_ext not in {".xlsx", ".xlsm", ".xlsb"}:
-            default_ext = ".xlsx"
-        name += default_ext
+        lower = name.casefold()
+
+    # Normalize extension case to avoid surprises like `Book.XLSX.xlsx`.
+    for ext in (".xlsx", ".xlsm", ".xlsb"):
+        if lower.endswith(ext):
+            return name[: -len(ext)] + ext
+
+    default_ext = (default_ext or ".xlsx").lower()
+    if default_ext not in {".xlsx", ".xlsm", ".xlsb"}:
+        default_ext = ".xlsx"
+    name += default_ext
     if any(sep in name for sep in ("/", "\\", "\x00")) or name in {".", ".."}:
         raise ValueError("--name must be a filename (no path separators)")
     return name
@@ -263,7 +268,7 @@ def main() -> int:
         return 1
 
     try:
-        default_ext = Path(wb_in.display_name).suffix
+        default_ext = Path(wb_in.display_name).suffix.lower()
         if default_ext not in {".xlsx", ".xlsm", ".xlsb"}:
             default_ext = ".xlsx"
         display_name = _coerce_display_name(args.name or wb_in.display_name, default_ext=default_ext)
@@ -326,7 +331,7 @@ def main() -> int:
     if (
         not args.force
         and not args.sanitize
-        and args.input.suffix == ".b64"
+        and args.input.suffix.lower() == ".b64"
         and args.diff_limit == 25
         and not args.recalc
         and not args.render_smoke

@@ -43,6 +43,24 @@ class PromotePublicExpectationsTests(unittest.TestCase):
             _coerce_display_name("my-case.xlsb.b64", default_ext=".xlsb"), "my-case.xlsb"
         )
 
+    def test_coerce_display_name_normalizes_extension_case(self) -> None:
+        self.assertEqual(
+            _coerce_display_name("My-Case.XLSX", default_ext=".xlsx"),
+            "My-Case.xlsx",
+        )
+        self.assertEqual(
+            _coerce_display_name("My-Case.XLSM", default_ext=".xlsm"),
+            "My-Case.xlsm",
+        )
+        self.assertEqual(
+            _coerce_display_name("My-Case.XLSB", default_ext=".xlsb"),
+            "My-Case.xlsb",
+        )
+        self.assertEqual(
+            _coerce_display_name("My-Case.XLSX.B64", default_ext=".xlsx"),
+            "My-Case.xlsx",
+        )
+
     def test_coerce_display_name_rejects_path_separators(self) -> None:
         with self.assertRaises(ValueError):
             _coerce_display_name("foo/bar", default_ext=".xlsx")
