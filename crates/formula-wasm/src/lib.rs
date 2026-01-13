@@ -10,9 +10,9 @@ use formula_engine::locale::{
     canonicalize_formula_with_style, get_locale, localize_formula_with_style, FormulaLocale,
     ValueLocaleConfig, DE_DE, EN_US, ES_ES, FR_FR,
 };
-use formula_engine::what_if::EngineWhatIfModel;
-use formula_engine::what_if::goal_seek::{GoalSeek, GoalSeekParams};
 use formula_engine::pivot as pivot_engine;
+use formula_engine::what_if::goal_seek::{GoalSeek, GoalSeekParams};
+use formula_engine::what_if::EngineWhatIfModel;
 use formula_model::{
     display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range, EXCEL_MAX_COLS,
     EXCEL_MAX_ROWS,
@@ -120,10 +120,10 @@ fn parse_options_from_js(options: Option<JsValue>) -> Result<ParseOptions, JsVal
         return Ok(opts);
     }
 
-    let looks_like_parse_options =
-        Reflect::has(&obj, &JsValue::from_str("locale")).unwrap_or(false)
-            || Reflect::has(&obj, &JsValue::from_str("reference_style")).unwrap_or(false)
-            || Reflect::has(&obj, &JsValue::from_str("normalize_relative_to")).unwrap_or(false);
+    let looks_like_parse_options = Reflect::has(&obj, &JsValue::from_str("locale"))
+        .unwrap_or(false)
+        || Reflect::has(&obj, &JsValue::from_str("reference_style")).unwrap_or(false)
+        || Reflect::has(&obj, &JsValue::from_str("normalize_relative_to")).unwrap_or(false);
     if looks_like_parse_options {
         // Fall back to the full ParseOptions struct for advanced callers.
         return serde_wasm_bindgen::from_value(obj.into()).map_err(|err| js_err(err.to_string()));
@@ -294,10 +294,22 @@ fn add_byte_offset(span: EngineSpan, delta: usize) -> EngineSpan {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind")]
 enum LexTokenDto {
-    Number { span: Utf16Span, value: String },
-    String { span: Utf16Span, value: String },
-    Boolean { span: Utf16Span, value: bool },
-    Error { span: Utf16Span, value: String },
+    Number {
+        span: Utf16Span,
+        value: String,
+    },
+    String {
+        span: Utf16Span,
+        value: String,
+    },
+    Boolean {
+        span: Utf16Span,
+        value: bool,
+    },
+    Error {
+        span: Utf16Span,
+        value: String,
+    },
     Cell {
         span: Utf16Span,
         row: u32,
@@ -310,41 +322,117 @@ enum LexTokenDto {
         row: CoordDto,
         col: CoordDto,
     },
-    R1C1Row { span: Utf16Span, row: CoordDto },
-    R1C1Col { span: Utf16Span, col: CoordDto },
-    Ident { span: Utf16Span, value: String },
-    QuotedIdent { span: Utf16Span, value: String },
-    Whitespace { span: Utf16Span, value: String },
-    Intersect { span: Utf16Span, value: String },
-    LParen { span: Utf16Span },
-    RParen { span: Utf16Span },
-    LBrace { span: Utf16Span },
-    RBrace { span: Utf16Span },
-    LBracket { span: Utf16Span },
-    RBracket { span: Utf16Span },
-    Bang { span: Utf16Span },
-    Colon { span: Utf16Span },
-    Dot { span: Utf16Span },
-    ArgSep { span: Utf16Span },
-    Union { span: Utf16Span },
-    ArrayRowSep { span: Utf16Span },
-    ArrayColSep { span: Utf16Span },
-    Plus { span: Utf16Span },
-    Minus { span: Utf16Span },
-    Star { span: Utf16Span },
-    Slash { span: Utf16Span },
-    Caret { span: Utf16Span },
-    Amp { span: Utf16Span },
-    Percent { span: Utf16Span },
-    Hash { span: Utf16Span },
-    Eq { span: Utf16Span },
-    Ne { span: Utf16Span },
-    Lt { span: Utf16Span },
-    Gt { span: Utf16Span },
-    Le { span: Utf16Span },
-    Ge { span: Utf16Span },
-    At { span: Utf16Span },
-    Eof { span: Utf16Span },
+    R1C1Row {
+        span: Utf16Span,
+        row: CoordDto,
+    },
+    R1C1Col {
+        span: Utf16Span,
+        col: CoordDto,
+    },
+    Ident {
+        span: Utf16Span,
+        value: String,
+    },
+    QuotedIdent {
+        span: Utf16Span,
+        value: String,
+    },
+    Whitespace {
+        span: Utf16Span,
+        value: String,
+    },
+    Intersect {
+        span: Utf16Span,
+        value: String,
+    },
+    LParen {
+        span: Utf16Span,
+    },
+    RParen {
+        span: Utf16Span,
+    },
+    LBrace {
+        span: Utf16Span,
+    },
+    RBrace {
+        span: Utf16Span,
+    },
+    LBracket {
+        span: Utf16Span,
+    },
+    RBracket {
+        span: Utf16Span,
+    },
+    Bang {
+        span: Utf16Span,
+    },
+    Colon {
+        span: Utf16Span,
+    },
+    Dot {
+        span: Utf16Span,
+    },
+    ArgSep {
+        span: Utf16Span,
+    },
+    Union {
+        span: Utf16Span,
+    },
+    ArrayRowSep {
+        span: Utf16Span,
+    },
+    ArrayColSep {
+        span: Utf16Span,
+    },
+    Plus {
+        span: Utf16Span,
+    },
+    Minus {
+        span: Utf16Span,
+    },
+    Star {
+        span: Utf16Span,
+    },
+    Slash {
+        span: Utf16Span,
+    },
+    Caret {
+        span: Utf16Span,
+    },
+    Amp {
+        span: Utf16Span,
+    },
+    Percent {
+        span: Utf16Span,
+    },
+    Hash {
+        span: Utf16Span,
+    },
+    Eq {
+        span: Utf16Span,
+    },
+    Ne {
+        span: Utf16Span,
+    },
+    Lt {
+        span: Utf16Span,
+    },
+    Gt {
+        span: Utf16Span,
+    },
+    Le {
+        span: Utf16Span,
+    },
+    Ge {
+        span: Utf16Span,
+    },
+    At {
+        span: Utf16Span,
+    },
+    Eof {
+        span: Utf16Span,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -559,8 +647,13 @@ pub fn rewrite_formulas_for_copy_delta(requests: JsValue) -> Result<JsValue, JsV
     let origin = CellAddr::new(0, 0);
     let mut out: Vec<String> = Vec::with_capacity(requests.len());
     for req in requests {
-        let (rewritten, _) =
-            rewrite_formula_for_copy_delta(&req.formula, DEFAULT_SHEET, origin, req.delta_row, req.delta_col);
+        let (rewritten, _) = rewrite_formula_for_copy_delta(
+            &req.formula,
+            DEFAULT_SHEET,
+            origin,
+            req.delta_row,
+            req.delta_col,
+        );
         out.push(rewritten);
     }
 
@@ -1035,12 +1128,12 @@ fn cell_value_to_engine_rich(value: &CellValue) -> Result<EngineValue, JsValue> 
             }
 
             Ok(EngineValue::Array(formula_engine::value::Array::new(
-                rows,
-                cols,
-                values,
+                rows, cols, values,
             )))
         }
-        CellValue::Spill(spill) => Ok(EngineValue::Spill { origin: spill.origin }),
+        CellValue::Spill(spill) => Ok(EngineValue::Spill {
+            origin: spill.origin,
+        }),
     }
 }
 
@@ -1466,7 +1559,7 @@ impl WorkbookState {
                     self.formula_locale,
                     formula_engine::ReferenceStyle::A1,
                 )
-                    .map_err(|err| js_err(err.to_string()))?
+                .map_err(|err| js_err(err.to_string()))?
             };
 
             let key = FormulaCellKey::new(sheet.clone(), cell_ref);
@@ -1970,8 +2063,10 @@ impl WorkbookState {
                     }
 
                     // Destination range contents are overwritten by the move.
-                    let in_dst =
-                        key.row >= dst.start.row && key.row <= dst.end.row && key.col >= dst.start.col && key.col <= dst.end.col;
+                    let in_dst = key.row >= dst.start.row
+                        && key.row <= dst.end.row
+                        && key.col >= dst.start.col
+                        && key.col <= dst.end.col;
                     if in_dst {
                         return None;
                     }
@@ -1988,8 +2083,10 @@ impl WorkbookState {
                         dst_top_left.col + src.width().saturating_sub(1),
                     );
                     let dst = Range::new(*dst_top_left, dst_end);
-                    let in_dst =
-                        key.row >= dst.start.row && key.row <= dst.end.row && key.col >= dst.start.col && key.col <= dst.end.col;
+                    let in_dst = key.row >= dst.start.row
+                        && key.row <= dst.end.row
+                        && key.col >= dst.start.col
+                        && key.col <= dst.end.col;
                     if in_dst {
                         // Destination range contents are overwritten by the copy.
                         return None;
@@ -1997,8 +2094,10 @@ impl WorkbookState {
                     Some(key.clone())
                 }
                 EngineEditOp::Fill { sheet, src, dst } if &key.sheet == sheet => {
-                    let in_dst =
-                        key.row >= dst.start.row && key.row <= dst.end.row && key.col >= dst.start.col && key.col <= dst.end.col;
+                    let in_dst = key.row >= dst.start.row
+                        && key.row <= dst.end.row
+                        && key.col >= dst.start.col
+                        && key.col <= dst.end.col;
                     if !in_dst {
                         return Some(key.clone());
                     }
@@ -2149,7 +2248,8 @@ impl WorkbookState {
                     if let Some(formula) = after.formula.as_deref() {
                         sheet_cells.insert(address.clone(), JsonValue::String(formula.to_string()));
                     } else {
-                        let Some(value) = engine_value_to_scalar_json_input(after.value.clone()) else {
+                        let Some(value) = engine_value_to_scalar_json_input(after.value.clone())
+                        else {
                             sheet_cells.remove(&address);
                             continue;
                         };
@@ -2164,7 +2264,8 @@ impl WorkbookState {
         for change in &result.changed_cells {
             let Some(after) = &change.after else {
                 let sheet = self.ensure_sheet(&change.sheet);
-                self.pending_spill_clears.remove(&FormulaCellKey::new(sheet.clone(), change.cell));
+                self.pending_spill_clears
+                    .remove(&FormulaCellKey::new(sheet.clone(), change.cell));
                 self.pending_formula_baselines
                     .remove(&FormulaCellKey::new(sheet.clone(), change.cell));
                 continue;
@@ -2175,9 +2276,11 @@ impl WorkbookState {
             let key = FormulaCellKey::new(sheet.clone(), change.cell);
 
             if let Some(formula) = after.formula.as_deref() {
-                self.pending_formula_baselines.entry(key).or_insert_with(|| {
-                    engine_value_to_json(self.engine.get_cell_value(&sheet, &address))
-                });
+                self.pending_formula_baselines
+                    .entry(key)
+                    .or_insert_with(|| {
+                        engine_value_to_json(self.engine.get_cell_value(&sheet, &address))
+                    });
 
                 // Reset stored value to blank while preserving the formula. This matches the
                 // `setCell` behavior where formula results are treated as unknown until recalc.
@@ -2980,7 +3083,11 @@ impl WasmWorkbook {
     }
 
     #[wasm_bindgen(js_name = "getCellRich")]
-    pub fn get_cell_rich(&self, address: String, sheet: Option<String>) -> Result<JsValue, JsValue> {
+    pub fn get_cell_rich(
+        &self,
+        address: String,
+        sheet: Option<String>,
+    ) -> Result<JsValue, JsValue> {
         let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
         let cell = self.inner.get_cell_rich_data(sheet, &address)?;
         use serde::ser::Serialize as _;
@@ -3279,12 +3386,10 @@ mod tests {
         // The JS worker protocol expects scalar-ish JSON values today. Rich values like
         // entities/records should degrade to their display strings so existing callers never have
         // to handle structured JSON objects.
-        let entity =
-            EngineValue::Entity(formula_engine::value::EntityValue::new("Apple Inc."));
+        let entity = EngineValue::Entity(formula_engine::value::EntityValue::new("Apple Inc."));
         assert_eq!(engine_value_to_json(entity), json!("Apple Inc."));
 
-        let record =
-            EngineValue::Record(formula_engine::value::RecordValue::new("My record"));
+        let record = EngineValue::Record(formula_engine::value::RecordValue::new("My record"));
         assert_eq!(engine_value_to_json(record), json!("My record"));
     }
 
@@ -3362,7 +3467,8 @@ mod tests {
             properties,
         });
 
-        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity).unwrap();
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity)
+            .unwrap();
         wb.set_cell_internal(DEFAULT_SHEET, "B1", json!(r#"=A1.["Change%"]"#))
             .unwrap();
         wb.recalculate_internal(None).unwrap();
@@ -3393,7 +3499,8 @@ mod tests {
             properties,
         });
 
-        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity).unwrap();
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity)
+            .unwrap();
         wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1.Owner.Age"))
             .unwrap();
         wb.recalculate_internal(None).unwrap();
@@ -3415,7 +3522,8 @@ mod tests {
             properties,
         });
 
-        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity).unwrap();
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity)
+            .unwrap();
         wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1.Nope"))
             .unwrap();
         wb.recalculate_internal(None).unwrap();
@@ -3541,7 +3649,10 @@ mod tests {
 
         let rich = wb.get_cell_rich_data(DEFAULT_SHEET, "A1").unwrap();
         assert_eq!(rich.input, array);
-        assert_eq!(rich.value, CellValue::Error(formula_model::ErrorValue::Spill));
+        assert_eq!(
+            rich.value,
+            CellValue::Error(formula_model::ErrorValue::Spill)
+        );
     }
 
     #[test]
@@ -3561,14 +3672,18 @@ mod tests {
 
         let rich = wb.get_cell_rich_data(DEFAULT_SHEET, "A1").unwrap();
         assert_eq!(rich.input, spill);
-        assert_eq!(rich.value, CellValue::Error(formula_model::ErrorValue::Spill));
+        assert_eq!(
+            rich.value,
+            CellValue::Error(formula_model::ErrorValue::Spill)
+        );
     }
 
     #[test]
     fn set_cell_rich_overwrites_existing_scalar_input() {
         let mut wb = WorkbookState::new_with_default_sheet();
 
-        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(5.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(5.0))
+            .unwrap();
         let before = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
         assert_eq!(before.input, json!(5.0));
         assert_eq!(before.value, json!(5.0));
@@ -3591,9 +3706,11 @@ mod tests {
         let mut wb = WorkbookState::new_with_default_sheet();
 
         let entity = CellValue::Entity(formula_model::EntityValue::new("Acme"));
-        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity).unwrap();
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity)
+            .unwrap();
 
-        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(5.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(5.0))
+            .unwrap();
 
         let cell = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
         assert_eq!(cell.input, json!(5.0));
@@ -3609,7 +3726,8 @@ mod tests {
         let mut wb = WorkbookState::new_with_default_sheet();
 
         let entity = CellValue::Entity(formula_model::EntityValue::new("Acme"));
-        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity).unwrap();
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity)
+            .unwrap();
 
         wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", CellValue::Empty)
             .unwrap();
@@ -3728,12 +3846,7 @@ mod tests {
         assert_eq!(rich.input, entity);
 
         // Rich inputs are not representable in the scalar workbook JSON schema.
-        assert!(wb
-            .sheets
-            .get(DEFAULT_SHEET)
-            .unwrap()
-            .get("A1")
-            .is_none());
+        assert!(wb.sheets.get(DEFAULT_SHEET).unwrap().get("A1").is_none());
     }
 
     #[test]
@@ -3748,8 +3861,11 @@ mod tests {
         assert_eq!(byte_cursor, formula.len());
 
         let prefix = &formula[..byte_cursor];
-        let parsed = formula_engine::parse_formula_partial(prefix, formula_engine::ParseOptions::default());
-        let err = parsed.error.expect("expected unterminated string literal error");
+        let parsed =
+            formula_engine::parse_formula_partial(prefix, formula_engine::ParseOptions::default());
+        let err = parsed
+            .error
+            .expect("expected unterminated string literal error");
         assert_eq!(err.message, "Unterminated string literal");
 
         let span_start = byte_index_to_utf16_cursor(prefix, err.span.start);
@@ -3764,7 +3880,8 @@ mod tests {
         let formula_utf16_len = formula.encode_utf16().count() as u32;
 
         // Cursor beyond the end clamps to the end.
-        let byte_cursor = utf16_cursor_to_byte_index(formula, formula_utf16_len.saturating_add(100));
+        let byte_cursor =
+            utf16_cursor_to_byte_index(formula, formula_utf16_len.saturating_add(100));
         assert_eq!(byte_cursor, formula.len());
 
         // Cursor in the middle of a surrogate pair should clamp to a valid UTF-8 boundary.
@@ -3835,7 +3952,8 @@ mod tests {
             .unwrap();
 
         // Ensure a formula that references the rich value produces the same degraded display output.
-        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1"))
+            .unwrap();
         wb.recalculate_internal(None).unwrap();
 
         let a1 = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
@@ -3883,8 +4001,10 @@ mod tests {
             .set_cell_value(DEFAULT_SHEET, "A2", record_engine)
             .unwrap();
 
-        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1")).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "B2", json!("=A2")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B2", json!("=A2"))
+            .unwrap();
         wb.recalculate_internal(None).unwrap();
 
         let a1 = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
@@ -4243,6 +4363,36 @@ mod tests {
     }
 
     #[test]
+    fn canonicalize_and_localize_formula_roundtrip_de_de() {
+        let localized = "=SUMME(1,5;2)";
+        let canonical = canonicalize_formula(localized, "de-DE", None).unwrap();
+        assert_eq!(canonical, "=SUM(1.5,2)");
+
+        let roundtrip = localize_formula(&canonical, "de-DE", None).unwrap();
+        assert_eq!(roundtrip, localized);
+    }
+
+    #[test]
+    fn canonicalize_and_localize_formula_roundtrip_fr_fr() {
+        let localized = "=SOMME(1,5;2)";
+        let canonical = canonicalize_formula(localized, "fr-FR", None).unwrap();
+        assert_eq!(canonical, "=SUM(1.5,2)");
+
+        let roundtrip = localize_formula(&canonical, "fr-FR", None).unwrap();
+        assert_eq!(roundtrip, localized);
+    }
+
+    #[test]
+    fn canonicalize_and_localize_formula_roundtrip_r1c1_reference_style() {
+        let localized = "=SUMME(R1C1;R1C2)";
+        let canonical = canonicalize_formula(localized, "de-DE", Some("R1C1".to_string())).unwrap();
+        assert_eq!(canonical, "=SUM(R1C1,R1C2)");
+
+        let roundtrip = localize_formula(&canonical, "de-DE", Some("R1C1".to_string())).unwrap();
+        assert_eq!(roundtrip, localized);
+    }
+
+    #[test]
     fn sheet_dimensions_expand_whole_column_references() {
         let mut wb = WasmWorkbook::new();
 
@@ -4268,8 +4418,10 @@ mod tests {
     #[test]
     fn apply_operation_insert_rows_updates_literal_cells_and_formulas() {
         let mut wb = WorkbookState::new_with_default_sheet();
-        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0)).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1"))
+            .unwrap();
 
         let result = wb
             .apply_operation_internal(EditOpDto::InsertRows {
@@ -4283,10 +4435,7 @@ mod tests {
             wb.engine.get_cell_value(DEFAULT_SHEET, "A2"),
             EngineValue::Number(1.0)
         );
-        assert_eq!(
-            wb.engine.get_cell_formula(DEFAULT_SHEET, "B2"),
-            Some("=A2")
-        );
+        assert_eq!(wb.engine.get_cell_formula(DEFAULT_SHEET, "B2"), Some("=A2"));
 
         let sheet_cells = wb.sheets.get(DEFAULT_SHEET).unwrap();
         assert_eq!(sheet_cells.get("A2"), Some(&json!(1.0)));
@@ -4317,8 +4466,10 @@ mod tests {
     #[test]
     fn apply_operation_delete_cols_updates_inputs_and_formulas() {
         let mut wb = WorkbookState::new_with_default_sheet();
-        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0)).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!(2.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!(2.0))
+            .unwrap();
         wb.set_cell_internal(DEFAULT_SHEET, "C1", json!("=A1+B1"))
             .unwrap();
 
@@ -4360,16 +4511,20 @@ mod tests {
         let exported = wb.to_json().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&exported).unwrap();
         assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A1"], json!(2.0));
-        assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["B1"], json!("=#REF!+A1"));
+        assert_eq!(
+            parsed["sheets"]["Sheet1"]["cells"]["B1"],
+            json!("=#REF!+A1")
+        );
         assert!(parsed["sheets"]["Sheet1"]["cells"].get("C1").is_none());
-
     }
 
     #[test]
     fn apply_operation_insert_cells_shift_right_moves_cells_and_rewrites_references() {
         let mut wb = WorkbookState::new_with_default_sheet();
-        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0)).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "C1", json!(3.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "C1", json!(3.0))
+            .unwrap();
         wb.set_cell_internal(DEFAULT_SHEET, "D1", json!("=A1+C1"))
             .unwrap();
 
@@ -4416,13 +4571,18 @@ mod tests {
     #[test]
     fn apply_operation_delete_cells_shift_left_creates_ref_errors_and_updates_shifted_references() {
         let mut wb = WorkbookState::new_with_default_sheet();
-        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0)).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!(2.0)).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "C1", json!(3.0)).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "D1", json!(4.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!(2.0))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "C1", json!(3.0))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "D1", json!(4.0))
+            .unwrap();
         wb.set_cell_internal(DEFAULT_SHEET, "E1", json!("=A1+D1"))
             .unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("=B1")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("=B1"))
+            .unwrap();
 
         let result = wb
             .apply_operation_internal(EditOpDto::DeleteCellsShiftLeft {
@@ -4478,8 +4638,10 @@ mod tests {
     #[test]
     fn apply_operation_insert_cells_shift_down_rewrites_references_into_shifted_region() {
         let mut wb = WorkbookState::new_with_default_sheet();
-        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(42.0)).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(42.0))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1"))
+            .unwrap();
 
         let result = wb
             .apply_operation_internal(EditOpDto::InsertCellsShiftDown {
@@ -4493,10 +4655,7 @@ mod tests {
             wb.engine.get_cell_value(DEFAULT_SHEET, "A2"),
             EngineValue::Number(42.0)
         );
-        assert_eq!(
-            wb.engine.get_cell_formula(DEFAULT_SHEET, "B1"),
-            Some("=A2")
-        );
+        assert_eq!(wb.engine.get_cell_formula(DEFAULT_SHEET, "B1"), Some("=A2"));
 
         let sheet_cells = wb.sheets.get(DEFAULT_SHEET).unwrap();
         assert_eq!(sheet_cells.get("A2"), Some(&json!(42.0)));
@@ -4518,9 +4677,12 @@ mod tests {
     fn apply_operation_delete_cells_shift_up_rewrites_moved_references_and_invalidates_deleted_targets(
     ) {
         let mut wb = WorkbookState::new_with_default_sheet();
-        wb.set_cell_internal(DEFAULT_SHEET, "A3", json!(3.0)).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A3")).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "B2", json!("=A2")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A3", json!(3.0))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A3"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B2", json!("=A2"))
+            .unwrap();
 
         let result = wb
             .apply_operation_internal(EditOpDto::DeleteCellsShiftUp {
@@ -4534,10 +4696,7 @@ mod tests {
             wb.engine.get_cell_value(DEFAULT_SHEET, "A1"),
             EngineValue::Number(3.0)
         );
-        assert_eq!(
-            wb.engine.get_cell_formula(DEFAULT_SHEET, "B1"),
-            Some("=A1")
-        );
+        assert_eq!(wb.engine.get_cell_formula(DEFAULT_SHEET, "B1"), Some("=A1"));
 
         // Reference directly into deleted region becomes #REF!
         assert_eq!(
@@ -4653,9 +4812,12 @@ mod tests {
     #[test]
     fn apply_operation_move_range_updates_inputs_and_returns_moved_ranges() {
         let mut wb = WorkbookState::new_with_default_sheet();
-        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(42.0)).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1")).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "C1", json!("=A1")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(42.0))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "C1", json!("=A1"))
+            .unwrap();
 
         let result = wb
             .apply_operation_internal(EditOpDto::MoveRange {
@@ -4669,17 +4831,20 @@ mod tests {
             wb.engine.get_cell_value(DEFAULT_SHEET, "A2"),
             EngineValue::Number(42.0)
         );
-        assert_eq!(
-            wb.engine.get_cell_formula(DEFAULT_SHEET, "B2"),
-            Some("=A2")
-        );
+        assert_eq!(wb.engine.get_cell_formula(DEFAULT_SHEET, "B2"), Some("=A2"));
         assert_eq!(
             wb.engine.get_cell_formula(DEFAULT_SHEET, "C1"),
             Some("=A2"),
             "formulas outside the moved range should follow the moved cells"
         );
-        assert_eq!(wb.engine.get_cell_value(DEFAULT_SHEET, "A1"), EngineValue::Blank);
-        assert_eq!(wb.engine.get_cell_value(DEFAULT_SHEET, "B1"), EngineValue::Blank);
+        assert_eq!(
+            wb.engine.get_cell_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Blank
+        );
+        assert_eq!(
+            wb.engine.get_cell_value(DEFAULT_SHEET, "B1"),
+            EngineValue::Blank
+        );
 
         let sheet_cells = wb.sheets.get(DEFAULT_SHEET).unwrap();
         assert_eq!(sheet_cells.get("A2"), Some(&json!(42.0)));
@@ -4755,12 +4920,11 @@ mod tests {
                 .and_then(|cells| cells.get("B2")),
             Some(&entity)
         );
-        assert!(
-            wb.sheets_rich
-                .get(DEFAULT_SHEET)
-                .and_then(|cells| cells.get("A1"))
-                .is_none()
-        );
+        assert!(wb
+            .sheets_rich
+            .get(DEFAULT_SHEET)
+            .and_then(|cells| cells.get("A1"))
+            .is_none());
 
         // Rich values remain absent from the scalar workbook schema.
         let sheet_cells = wb.sheets.get(DEFAULT_SHEET).unwrap();
@@ -4788,7 +4952,8 @@ mod tests {
     #[test]
     fn apply_operation_copy_range_adjusts_relative_references() {
         let mut wb = WorkbookState::new_with_default_sheet();
-        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1"))
+            .unwrap();
 
         let result = wb
             .apply_operation_internal(EditOpDto::CopyRange {
@@ -4798,10 +4963,7 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(
-            wb.engine.get_cell_formula(DEFAULT_SHEET, "B1"),
-            Some("=A1")
-        );
+        assert_eq!(wb.engine.get_cell_formula(DEFAULT_SHEET, "B1"), Some("=A1"));
         assert_eq!(
             wb.engine.get_cell_formula(DEFAULT_SHEET, "B2"),
             Some("=A2"),
