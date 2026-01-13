@@ -93,6 +93,8 @@ pub enum Error {
     Zip(#[from] zip::result::ZipError),
     #[error("XML error: {0}")]
     Xml(#[from] quick_xml::Error),
+    #[error("invalid password")]
+    InvalidPassword,
     #[error("invalid XLSB: unexpected end of record")]
     UnexpectedEof,
     #[error("invalid UTF-16 string in record")]

@@ -105,6 +105,11 @@ fn max_xlsb_package_bytes() -> u64 {
         .unwrap_or(MAX_XLSB_PACKAGE_BYTES)
 }
 
+/// OLE/CFB file signature.
+///
+/// See: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cfb/
+const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+
 /// Controls how much of the original package we keep around for round-trip preservation.
 #[derive(Debug, Clone)]
 pub struct OpenOptions {
@@ -223,6 +228,32 @@ impl XlsbWorkbook {
         Self::open_with_options(path, OpenOptions::default())
     }
 
+    /// Open an XLSB workbook, transparently handling Office-encrypted (OLE/CFB `EncryptedPackage`)
+    /// wrappers using the provided `password`.
+    ///
+    /// If the input is a normal ZIP-based XLSB package, this behaves like [`Self::open`].
+    pub fn open_with_password(path: impl AsRef<Path>, password: &str) -> Result<Self, ParseError> {
+        let path = path.as_ref().to_path_buf();
+        let mut file = File::open(&path)?;
+
+        let mut header = [0u8; 8];
+        let n = file.read(&mut header)?;
+        file.seek(SeekFrom::Start(0))?;
+
+        if n >= OLE_MAGIC.len() && header[..OLE_MAGIC.len()] == OLE_MAGIC {
+            // Office-encrypted `.xlsb` files are stored as an OLE/CFB wrapper containing
+            // `EncryptionInfo` + `EncryptedPackage`. Decrypt to raw ZIP bytes in memory.
+            let mut ole_bytes = Vec::new();
+            file.read_to_end(&mut ole_bytes)?;
+
+            let zip_bytes = office_crypto::decrypt_encrypted_package(&ole_bytes, password)
+                .map_err(map_office_crypto_err)?;
+            return Self::open_from_owned_bytes(zip_bytes.into(), OpenOptions::default());
+        }
+
+        Self::open_with_options(path, OpenOptions::default())
+    }
+
     pub fn open_with_options(
         path: impl AsRef<Path>,
         options: OpenOptions,
@@ -239,18 +270,6 @@ impl XlsbWorkbook {
     /// Open an XLSB workbook from in-memory ZIP bytes, without copying.
     pub fn from_bytes(bytes: Arc<[u8]>, options: OpenOptions) -> Result<Self, ParseError> {
         Self::open_from_owned_bytes(bytes, options)
-    }
-
-    /// Open an Office-encrypted/password-protected workbook using `password`.
-    ///
-    /// This expects the input file to be an OLE compound file containing
-    /// `EncryptionInfo` + `EncryptedPackage` streams (the standard Office
-    /// encryption wrapper for OOXML/XLSB packages).
-    pub fn open_with_password(path: impl AsRef<Path>, password: &str) -> Result<Self, ParseError> {
-        let bytes = std::fs::read(path.as_ref())?;
-        let package = office_crypto::decrypt_encrypted_package_ole(&bytes, password)
-            .map_err(|err| ParseError::OfficeCrypto(err.to_string()))?;
-        Self::open_from_vec(package)
     }
 
     /// Open an XLSB workbook from an in-memory reader.
@@ -333,6 +352,31 @@ impl XlsbWorkbook {
         options: OpenOptions,
     ) -> Result<Self, ParseError> {
         Self::open_from_owned_bytes(Arc::from(bytes), options)
+    }
+
+    /// Open an XLSB workbook from either:
+    /// - raw ZIP bytes (normal XLSB package), or
+    /// - an Office-encrypted OLE/CFB container with `EncryptionInfo` + `EncryptedPackage`.
+    ///
+    /// This is primarily intended for callers that already have the input in memory (e.g. from an
+    /// upload).
+    pub fn open_from_bytes_with_password(
+        bytes: &[u8],
+        password: &str,
+        options: OpenOptions,
+    ) -> Result<Self, ParseError> {
+        if bytes.starts_with(b"PK") {
+            return Self::open_from_bytes_with_options(bytes, options);
+        }
+
+        if bytes.len() >= OLE_MAGIC.len() && bytes[..OLE_MAGIC.len()] == OLE_MAGIC {
+            let zip_bytes = office_crypto::decrypt_encrypted_package(bytes, password)
+                .map_err(map_office_crypto_err)?;
+            return Self::open_from_owned_bytes(zip_bytes.into(), options);
+        }
+
+        // Fall back to the standard ZIP reader (which will surface a `ZipError` for non-ZIP input).
+        Self::open_from_bytes_with_options(bytes, options)
     }
 
     fn open_from_owned_bytes(bytes: Arc<[u8]>, options: OpenOptions) -> Result<Self, ParseError> {
@@ -2545,6 +2589,13 @@ mod zip_guardrail_tests {
             }
             other => panic!("unexpected error: {other}"),
         }
+    }
+}
+
+fn map_office_crypto_err(err: office_crypto::OfficeCryptoError) -> ParseError {
+    match err {
+        office_crypto::OfficeCryptoError::InvalidPassword => ParseError::InvalidPassword,
+        other => ParseError::OfficeCrypto(other.to_string()),
     }
 }
 
