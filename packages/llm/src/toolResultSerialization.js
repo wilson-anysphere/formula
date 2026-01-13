@@ -235,9 +235,7 @@ function serializeDetectAnomalies(params) {
 
   return finalizeJson(
     safeJsonStringify({
-      tool: base.tool,
-      ok: base.ok,
-      ...(base.error ? { error: base.error } : {}),
+      ...base,
       data: {
         ...(range ? { range } : {}),
         ...(method ? { method } : {}),
