@@ -65,6 +65,52 @@ describe("BoundedAIAuditStore", () => {
     expect((stored[0]!.input as any).big).toBe(123n);
   });
 
+  it("preserves verification fields containing BigInt when compacting oversized entries", async () => {
+    const underlying = new MemoryAIAuditStore();
+    const maxEntryChars = 2_000;
+    const store = new BoundedAIAuditStore(underlying, { max_entry_chars: maxEntryChars });
+
+    const huge = "x".repeat(50_000);
+    const entry: AIAuditEntry = {
+      id: "entry-bigint-verify",
+      timestamp_ms: Date.now(),
+      session_id: "session-bigint-verify",
+      mode: "chat",
+      input: { prompt: huge },
+      model: "unit-test-model",
+      tool_calls: [],
+      verification: {
+        needs_tools: false,
+        used_tools: false,
+        verified: true,
+        confidence: 1,
+        warnings: [],
+        claims: [
+          {
+            claim: "bigint",
+            verified: true,
+            toolEvidence: { big: 123n },
+          },
+        ],
+      },
+    };
+
+    // Sanity: entry cannot be JSON.stringified due to BigInt and is oversized due to input.
+    expect(() => JSON.stringify(entry)).toThrow();
+
+    await store.logEntry(entry);
+
+    const stored = await underlying.listEntries({ session_id: "session-bigint-verify" });
+    expect(stored).toHaveLength(1);
+
+    const storedEntry = stored[0]!;
+    expect(storedEntry.verification?.claims?.[0]?.toolEvidence).toEqual({ big: 123n });
+
+    // Ensure the size cap is still respected when serializing BigInt values.
+    const json = JSON.stringify(storedEntry, (_k, v) => (typeof v === "bigint" ? v.toString() : v));
+    expect(json.length).toBeLessThanOrEqual(maxEntryChars);
+  });
+
   it("compacts oversized entries to stay within the configured size limit", async () => {
     const underlying = new MemoryAIAuditStore();
     const maxEntryChars = 2_000;

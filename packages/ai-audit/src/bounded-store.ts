@@ -89,7 +89,7 @@ function compactAuditEntry(entry: AIAuditEntry, maxChars: number): AIAuditEntry 
   // Fast path: even if the initial JSON.stringify threw, it's still possible that
   // the entry fits when serialized. Try once defensively.
   try {
-    if (JSON.stringify(entry).length <= maxChars) return entry;
+    if (JSON.stringify(entry, bigIntReplacer).length <= maxChars) return entry;
   } catch {
     // continue with compaction
   }
@@ -112,7 +112,7 @@ function compactAuditEntry(entry: AIAuditEntry, maxChars: number): AIAuditEntry 
 
     let serialized: string | null = null;
     try {
-      serialized = JSON.stringify(candidate);
+      serialized = JSON.stringify(candidate, bigIntReplacer);
     } catch {
       // Non-serializable candidate (e.g. circular optional fields). We'll retry
       // with optional fields removed.
