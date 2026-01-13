@@ -216,7 +216,9 @@ find_main_binary() {
     if [ -L "$apprun" ]; then
       local resolved
       resolved="$(readlink -f "$apprun")"
-      if [ -n "$resolved" ] && [ -f "$resolved" ]; then
+      # Guard against AppRun symlinks that resolve outside of the extracted squashfs-root.
+      # In CI we only trust binaries inside the extracted AppImage, not host paths.
+      if [[ -n "$resolved" && "$resolved" == "$squashfs_root"* ]] && [ -f "$resolved" ]; then
         if file -b "$resolved" | grep -q 'ELF'; then
           echo "$resolved"
           return 0
