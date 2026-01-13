@@ -149,6 +149,8 @@ export class FormulaBarView {
   readonly root: HTMLElement;
   readonly textarea: HTMLTextAreaElement;
 
+  #isComposing = false;
+
   #scheduledRender:
     | { id: number; kind: "raf" }
     | { id: ReturnType<typeof setTimeout>; kind: "timeout" }
@@ -516,6 +518,12 @@ export class FormulaBarView {
     textarea.addEventListener("select", () => this.#onInputOrSelection());
     textarea.addEventListener("scroll", () => this.#syncScroll());
     textarea.addEventListener("keydown", (e) => this.#onKeyDown(e));
+    textarea.addEventListener("compositionstart", () => {
+      this.#isComposing = true;
+    });
+    textarea.addEventListener("compositionend", () => {
+      this.#isComposing = false;
+    });
 
     // Non-AI function autocomplete dropdown (Excel-like).
     // Mount after registering FormulaBarView's own listeners so focus/input updates keep the model in sync first.
@@ -982,6 +990,13 @@ export class FormulaBarView {
 
   #onKeyDown(e: KeyboardEvent): void {
     if (!this.model.isEditing) return;
+
+    if (
+      (this.#isComposing || e.isComposing) &&
+      (e.key === "Enter" || e.key === "Escape" || e.key === "Tab" || e.key === "F4")
+    ) {
+      return;
+    }
 
     if (this.#functionAutocomplete.handleKeyDown(e)) return;
 
