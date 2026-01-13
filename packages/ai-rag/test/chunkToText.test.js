@@ -22,6 +22,23 @@ test("chunkToText renders labeled sample rows when a header row is detected", ()
   assert.match(text, /Units=10/);
 });
 
+test("chunkToText escapes '|' characters in cell text so row separators remain unambiguous", () => {
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 1 },
+    cells: [
+      [{ v: "Region" }, { v: "Revenue" }],
+      [{ v: "North|East" }, { v: 1200 }],
+    ],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /Region=North¦East/);
+  assert.doesNotMatch(text, /North\|East/);
+});
+
 test("chunkToText detects header rows below a title row and preserves the title as pre-header context", () => {
   const chunk = {
     kind: "dataRegion",

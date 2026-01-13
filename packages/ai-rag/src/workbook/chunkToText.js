@@ -8,8 +8,11 @@ function formatScalar(value) {
   if (value == null) return "";
   if (typeof value === "string") {
     const trimmed = value.replace(/\s+/g, " ").trim();
-    if (trimmed.length > 60) return `${trimmed.slice(0, 57)}...`;
-    return trimmed;
+    // Our output format uses `|` as a column separator; replace literal pipes in
+    // cell text so the rendered rows remain unambiguous in LLM context.
+    const cleaned = trimmed.replace(/\|/g, "¦");
+    if (cleaned.length > 60) return `${cleaned.slice(0, 57)}...`;
+    return cleaned;
   }
   if (typeof value === "number") {
     if (!Number.isFinite(value)) return String(value);
