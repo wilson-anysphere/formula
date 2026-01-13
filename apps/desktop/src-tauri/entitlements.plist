@@ -6,6 +6,8 @@
       Outbound network access.
       - Required by the updater and any HTTPS/WSS calls made by the desktop backend.
       - Note: this is only enforced when sandboxing is enabled (we do not enable app sandboxing today).
+      - If we ever enable the App Sandbox, note that Formula also runs a loopback HTTP listener
+        for OAuth redirects; that flow may require `com.apple.security.network.server` as well.
     -->
     <key>com.apple.security.network.client</key>
     <true/>
