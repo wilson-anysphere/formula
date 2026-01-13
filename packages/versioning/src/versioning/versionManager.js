@@ -387,6 +387,7 @@ export class VersionManager extends SimpleEventEmitter {
     this._autoSnapshotInFlight = true;
     try {
       const created = await this.maybeSnapshot();
+      if (this._destroyed) return;
       // Prune on the autosnapshot cadence even when the document is idle.
       if (!created) {
         await this._queueRetention();
@@ -397,6 +398,7 @@ export class VersionManager extends SimpleEventEmitter {
   }
 
   async _queueRetention() {
+    if (this._destroyed) return;
     if (!this.retention) return;
     const next = this._pruneChain.catch(() => {}).then(() => this._applyRetention());
     this._pruneChain = next;

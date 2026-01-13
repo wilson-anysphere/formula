@@ -122,3 +122,36 @@ test("CollabVersioning.destroy prevents autosnapshot ticks from creating new ver
   const versions = await versioning.listVersions();
   assert.equal(versions.length, 0);
 });
+
+test("CollabVersioning.destroy prevents retention work from running on post-destroy autosnapshot ticks", async (t) => {
+  const doc = new Y.Doc();
+  t.after(() => doc.destroy());
+
+  const versioning = createCollabVersioning({
+    // @ts-expect-error - minimal session stub for unit tests
+    session: { doc },
+    autoStart: false,
+    // Configure retention so autosnapshot ticks would normally call `listVersions`.
+    retention: { maxSnapshots: 1 },
+  });
+  t.after(() => versioning.destroy());
+
+  // Seed a snapshot so retention has meaningful work (and to avoid relying on YjsVersionStore internals).
+  await versioning.createSnapshot({ description: "seed" });
+
+  const store = versioning.manager.store;
+  const originalListVersions = store.listVersions.bind(store);
+  let listVersionsCalls = 0;
+  store.listVersions = async (...args) => {
+    listVersionsCalls += 1;
+    return await originalListVersions(...args);
+  };
+
+  // Reset after the seed snapshot's own retention work.
+  listVersionsCalls = 0;
+
+  versioning.destroy();
+  await versioning.manager._autoSnapshotTick();
+
+  assert.equal(listVersionsCalls, 0);
+});
