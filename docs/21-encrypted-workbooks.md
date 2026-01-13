@@ -391,12 +391,17 @@ When implementing (or calling) encrypted-workbook support:
 ## Test fixtures in this repo
 
 - Encrypted/password-protected OOXML workbook fixtures live under `fixtures/encrypted/ooxml/` (for
-  example `.xlsx`, `.xlsm`, `.xlsb`).
+  example `.xlsx`, `.xlsm`, `.xlsb`). The repo currently includes:
+  - `fixtures/encrypted/ooxml/agile.xlsx` (Agile encryption; `EncryptionInfo` 4.4)
+  - `fixtures/encrypted/ooxml/standard.xlsx` (Standard encryption; `EncryptionInfo` 3.2)
   These files are OLE/CFB wrappers (not ZIP/OPC), so they must not live under `fixtures/xlsx/`
   where the round-trip corpus is enumerated via `xlsx-diff::collect_fixture_paths`.
+- `crates/formula-io/tests/encrypted_ooxml.rs` asserts that opening these fixtures without a
+  password surfaces an error mentioning encryption/password protection (guards the “password
+  required” UX path).
 - Some encryption coverage is exercised with **synthetic** containers generated directly in tests
-  (for example `crates/formula-io/tests/encrypted_ooxml.rs` and
-  `crates/formula-io/tests/encrypted_xls.rs`).
+  (for example `crates/formula-io/tests/encrypted_xls.rs`, plus a synthetic encrypted OOXML wrapper
+  in `crates/formula-io/tests/encrypted_ooxml.rs`).
 
 ---
 
