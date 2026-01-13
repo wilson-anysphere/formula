@@ -3721,10 +3721,13 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     let t_tag = prefixed_tag(prefix, "t");
 
     let mut existing_t: Option<String> = None;
+    let mut original_has_vm = false;
     for attr in cell_start.attributes() {
         let attr = attr?;
         if attr.key.as_ref() == b"t" {
             existing_t = Some(attr.unescape_value()?.into_owned());
+        } else if attr.key.as_ref() == b"vm" {
+            original_has_vm = true;
         }
     }
 
@@ -3749,21 +3752,25 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     // dangling rich-data pointer.
     //
     // Additionally, when patching incomplete workbook packages (see `drop_vm_on_value_change`),
-    // drop `vm` whenever the cached value semantics change unless the caller explicitly overrides
-    // `vm`.
-    let existing_is_rich_value_placeholder = if existing_t
-        .as_deref()
-        .is_some_and(|t| t.trim().eq_ignore_ascii_case("e"))
-    {
-        extract_cell_v_text(&inner_events)?
-            .as_deref()
-            .and_then(|v| v.trim().parse::<ErrorValue>().ok())
-            == Some(ErrorValue::Value)
+    // drop `vm` whenever the cached value semantics change (unless the caller explicitly overrides
+    // `vm`).
+    let patch_is_rich_value_placeholder = matches!(&patch.value, CellValue::Error(ErrorValue::Value));
+    let existing_is_rich_value_placeholder = if original_has_vm {
+        let t_is_error = match existing_t.as_deref() {
+            None => true,
+            Some(t) => t.trim().eq_ignore_ascii_case("e"),
+        };
+        if t_is_error {
+            extract_cell_v_text(&inner_events)?
+                .as_deref()
+                .and_then(|v| v.trim().parse::<ErrorValue>().ok())
+                == Some(ErrorValue::Value)
+        } else {
+            false
+        }
     } else {
         false
     };
-    let patch_is_rich_value_placeholder =
-        matches!(&patch.value, CellValue::Error(ErrorValue::Value));
     let value_eq = if drop_vm_on_value_change {
         cell_value_semantics_eq(
             existing_t.as_deref(),
