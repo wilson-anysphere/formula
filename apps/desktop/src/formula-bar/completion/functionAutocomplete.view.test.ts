@@ -53,6 +53,56 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     host.remove();
   });
 
+  it("accepts with Enter (and does not commit the edit)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    let committed = false;
+    const view = new FormulaBarView(host, {
+      onCommit: () => {
+        committed = true;
+      },
+    });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+
+    expect(committed).toBe(false);
+    expect(view.textarea.value).toBe("=VLOOKUP(");
+    expect(view.model.draft).toBe("=VLOOKUP(");
+    expect(view.model.isEditing).toBe(true);
+
+    host.remove();
+  });
+
+  it("prefers dropdown completion over AI ghost text when open", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    // Configure a conflicting AI suggestion so we can observe precedence.
+    view.setAiSuggestion("=VLOAI");
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
+
+    expect(view.model.draft).toBe("=VLOOKUP(");
+    expect(view.model.aiSuggestion()).toBeNull();
+
+    host.remove();
+  });
+
   it("closes the dropdown on Escape", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -78,4 +128,3 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     host.remove();
   });
 });
-
