@@ -72,3 +72,34 @@ fn calculated_column_dependency_cycle_errors() {
     assert!(msg.contains("dependency cycle"), "unexpected error: {msg}");
     assert!(msg.contains("T"), "unexpected error: {msg}");
 }
+
+#[test]
+fn calculated_column_dependencies_traverse_var_bindings_and_body() {
+    let mut model = DataModel::new();
+
+    // Persisted model: calculated column storage already exists, but definitions can be registered
+    // in any order.
+    let mut t = Table::new("T", vec!["a", "A", "B", "C"]);
+    t.push_row(vec![1.into(), Value::Blank, Value::Blank, Value::Blank])
+        .unwrap();
+    model.add_table(t).unwrap();
+
+    // Register out-of-order on purpose: C depends on both A (via VAR binding) and B (via RETURN).
+    model
+        .add_calculated_column_definition("T", "C", "VAR x = [A] RETURN x + [B]")
+        .unwrap();
+    model
+        .add_calculated_column_definition("T", "A", "[a] + 1")
+        .unwrap();
+    model
+        .add_calculated_column_definition("T", "B", "[a] + 2")
+        .unwrap();
+
+    model.insert_row("T", vec![10.into()]).unwrap();
+
+    let t = model.table("T").unwrap();
+    assert_eq!(t.row_count(), 2);
+    assert_eq!(t.value(1, "A").unwrap(), Value::from(11.0));
+    assert_eq!(t.value(1, "B").unwrap(), Value::from(12.0));
+    assert_eq!(t.value(1, "C").unwrap(), Value::from(23.0));
+}
