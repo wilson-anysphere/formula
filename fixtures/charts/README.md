@@ -3,6 +3,7 @@
 This directory is the canonical home for chart regression fixtures used by:
 
 - XLSX chart parsing/model extraction tests (`crates/formula-xlsx/tests/chart_fixture_models_match.rs`)
+- Fixture completeness + golden PNG assertions (`crates/formula-xlsx/tests/chart_fixture_corpus_complete.rs`)
 - Future deterministic chart rendering + visual regression tests (`docs/17-charts.md`)
 
 ## Layout
@@ -67,6 +68,21 @@ After regenerating, run:
 ```bash
 cargo test -p formula-xlsx --test chart_fixture_models_match
 ```
+
+## Fixture completeness checks
+
+CI also runs `cargo test -p formula-xlsx --test chart_fixture_corpus_complete`, which enforces:
+
+- A golden PNG exists for every `fixtures/charts/xlsx/<stem>.xlsx` at
+  `fixtures/charts/golden/excel/<stem>.png`.
+- Golden PNG dimensions must be exactly **800×600 px**.
+- A `fixtures/charts/models/<stem>/` directory exists and contains at least one `chart<N>.json`.
+
+For a subset of fixtures representing ChartEx workbooks, the test also asserts that the package
+contains a `xl/charts/chartEx1.xml` part and that `xl/charts/chart1.xml` includes some formatting
+elements we care about (e.g. `<c:numFmt>`, `<c:legendPos>`, `<c:dPt>`). If you add a new ChartEx
+fixture, update the `chartex_stems` list in
+`crates/formula-xlsx/tests/chart_fixture_corpus_complete.rs`.
 
 ## Updating / regenerating golden PNGs
 

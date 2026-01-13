@@ -6,6 +6,171 @@ Excel's charting system is built on DrawingML (ECMA-376), one of the most comple
 
 ---
 
+## Current Implementation (Rust)
+
+This repo currently has **read + preserve** support for embedded charts in `formula-xlsx`, plus a **best-effort parser** into `formula-model` types. Rendering is not implemented yet.
+
+### Extraction: `XlsxPackage::extract_chart_objects()`
+
+Implemented in `crates/formula-xlsx/src/workbook.rs`.
+
+At a high level the extractor:
+
+1. Walks drawing parts (`xl/drawings/drawing*.xml`) and finds embedded chart references inside
+   `<xdr:graphicFrame> … <c:chart r:id="…"/> … </xdr:graphicFrame>`.
+2. Extracts and returns:
+   - The chart anchor (`formula_model::drawings::Anchor`) derived from `<xdr:twoCellAnchor>`,
+     `<xdr:oneCellAnchor>`, or `<xdr:absoluteAnchor>`.
+   - The raw `<xdr:graphicFrame>` subtree as a string (`drawing_frame_xml`) for debugging and
+     future round-trip editing.
+3. Resolves the drawing relationship id (`r:id`) to an `xl/charts/chartN.xml` part.
+4. Reads `xl/charts/_rels/chartN.xml.rels` to discover optional related parts:
+   - **ChartEx part** (`xl/charts/chartExN.xml`) when relationship type/target contains `chartEx`
+     (Excel 2016+ “modern” charts).
+   - **Chart style** (`xl/charts/styleN.xml`) and **chart colors** (`xl/charts/colorsN.xml`) via
+     relationship type or filename heuristics.
+5. Returns a `formula_xlsx::drawingml::charts::ChartObject` containing:
+   - `parts.chart` (the classic `c:chartSpace` part) plus optional `parts.chart_ex`, `parts.style`,
+     `parts.colors` as raw bytes (`OpcPart`).
+   - `model: Option<ChartModel>` parsed best-effort (see below).
+   - `diagnostics` for missing parts / parsing failures while extracting.
+
+> Note: `XlsxPackage::extract_charts()` exists as an older/simple API that returns a smaller
+> `formula_model::charts::Chart` shape. New work should prefer `extract_chart_objects()`.
+
+### Parsing: `drawingml::charts::parse_chart_space`
+
+Implemented in `crates/formula-xlsx/src/drawingml/charts/parse_chart_space.rs`.
+
+`parse_chart_space()` parses a classic DrawingML chart (`<c:chartSpace>`) into
+`formula_model::charts::ChartModel` with best-effort coverage:
+
+- Detects chart kind by the **first** `*Chart` element under `c:plotArea`.
+- Parses:
+  - chart title (`c:title`) and legend (`c:legend`) including basic text styling (`c:txPr`)
+  - plot-area chart settings (e.g. `barDir`, `grouping`, `varyColors`, `scatterStyle`)
+  - axes for `c:catAx` and `c:valAx` (id, position, scaling, number format, tick label position,
+    major gridline presence + some inline styling)
+  - series formulas (`tx`, `cat`, `val`, `xVal`, `yVal`) and cached values (`strCache`, `numCache`)
+  - some inline formatting: `spPr` shape styles, markers, and per-point `c:dPt` overrides
+- Records non-fatal parse limitations as `ChartModel.diagnostics` warnings (for example:
+  `mc:AlternateContent`, `c:extLst`, unsupported axis types, multiple chart types in one plotArea).
+
+### Parsing: `drawingml::charts::parse_chart_ex`
+
+Implemented in `crates/formula-xlsx/src/drawingml/charts/parse_chart_ex.rs`.
+
+ChartEx (`<cx:chartSpace>`) is used for modern chart types like histogram, waterfall, treemap, etc.
+The current parser intentionally produces a **placeholder** `ChartModel`:
+
+- `chart_kind` is always `ChartKind::Unknown { name: "ChartEx:<kind>" }` (best-effort inferred).
+- Series formulas + cached values are extracted when present.
+- Title/legend/axes/styles are not modeled yet; diagnostics note the placeholder status.
+
+`extract_chart_objects()` currently prefers `parse_chart_ex()` when a ChartEx part is present.
+
+### Supported chart kinds today
+
+From `parse_chart_space()`:
+
+- **Bar/Column** (`ChartKind::Bar`): `<c:barChart>` and `<c:bar3DChart>`.
+  - `barDir="col"` vs `barDir="bar"` distinguishes column vs bar.
+- **Line** (`ChartKind::Line`): `<c:lineChart>` and `<c:line3DChart>`.
+- **Pie/Doughnut** (`ChartKind::Pie`): `<c:pieChart>`, `<c:pie3DChart>`, `<c:doughnutChart>`.
+- **Scatter** (`ChartKind::Scatter`): `<c:scatterChart>`.
+- Everything else becomes `ChartKind::Unknown { name: "<elementName>" }` (series/axes may still be
+  extracted).
+
+From `parse_chart_ex()`:
+
+- Everything is currently `ChartKind::Unknown { name: "ChartEx:<kind>" }`.
+
+### Lossless preservation vs parsed model
+
+**Preserved losslessly (byte-for-byte via `XlsxPackage` round-trip):**
+
+- Chart OPC parts referenced by the drawing:
+  - `xl/charts/chartN.xml` (`ChartParts.chart.bytes`)
+  - `xl/charts/chartExN.xml` + `xl/charts/_rels/chartExN.xml.rels` when present
+  - `xl/charts/styleN.xml` / `xl/charts/colorsN.xml` when present
+- Raw `<xdr:graphicFrame>` XML (`ChartObject.drawing_frame_xml`) is extracted exactly as a slice
+  of the drawing part.
+
+**Parsed into `formula_model::charts::ChartModel` (best-effort):**
+
+- A subset of chart metadata (kind, title, legend, axes, series formulas + caches, some inline
+  formatting).
+
+Anything not modeled in `ChartModel` today is still preserved in the original XML bytes, but will
+not be available to consumers operating purely on the parsed model until the roadmap items below
+are implemented.
+
+---
+
+## Known Gaps (Roadmap)
+
+This list is intentionally written as a work checklist and should map 1:1 to planned parser/model
+work in `formula-xlsx` + `formula-model`.
+
+- [ ] **Combo charts**: support plot areas with multiple `*Chart` elements (mixed chart types,
+      secondary axes, mixed stacking/grouping).
+- [ ] **More classic chart types**: area, radar, bubble, stock, surface, etc. (currently become
+      `ChartKind::Unknown`).
+- [ ] **ChartEx modeling**: parse `cx:chartSpace` into a first-class model (histogram, waterfall,
+      treemap, sunburst, funnel, box & whisker, Pareto, …) instead of placeholder `Unknown`.
+- [ ] **ChartStyle / ChartColorStyle parts**: parse and apply `xl/charts/styleN.xml` and
+      `xl/charts/colorsN.xml` (currently extracted but not interpreted).
+- [ ] **`mc:AlternateContent` handling**: implement Choice/Fallback selection and preserve the
+      semantics in the model.
+- [ ] **`c:extLst` handling**: model important extensions (today we only record a warning).
+- [ ] **Literal series data**: support `c:strLit` / `c:numLit` (today we only handle `strRef` /
+      `numRef`).
+- [ ] **Multi-level categories**: support `c:multiLvlStrRef` / `c:multiLvlStrCache` and related
+      hierarchical category structures.
+- [ ] **Axis titles**: parse `c:*Ax/c:title` (currently ignored).
+- [ ] **Data labels**: parse `c:dLbls` / `c:dLbl` (showValue/showCategoryName/position, per-point
+      overrides, rich text).
+
+---
+
+## Fixtures & Tests
+
+The chart regression corpus lives under `fixtures/charts/` (see also
+`fixtures/charts/README.md` for the canonical instructions).
+
+### Adding a new fixture
+
+1. Create a workbook with (ideally) **one embedded chart**.
+2. Save it to `fixtures/charts/xlsx/<stem>.xlsx`.
+3. Export a golden image from Excel at **800×600 px** to
+   `fixtures/charts/golden/excel/<stem>.png`.
+4. Generate model JSON files:
+
+   ```bash
+   cargo run -p formula-xlsx --bin dump_chart_models -- fixtures/charts/xlsx/<stem>.xlsx
+   ```
+
+   This writes `fixtures/charts/models/<stem>/chart<N>.json` (one JSON per extracted chart).
+5. Commit the XLSX, the model JSON(s), and the golden PNG.
+
+### What the tests enforce
+
+The Rust test suite treats this corpus as **source-of-truth** for chart parsing regression.
+
+- `crates/formula-xlsx/tests/chart_fixture_corpus_complete.rs`
+  - Every `fixtures/charts/xlsx/*.xlsx` must have a corresponding golden PNG.
+  - Golden images must be exactly **800×600 px**.
+  - Every fixture must have a `fixtures/charts/models/<stem>/` directory with at least one
+    `chart<N>.json`.
+  - Certain ChartEx fixtures are additionally checked for presence of `chartEx1.xml` and some
+    representative formatting/features inside `chart1.xml`.
+- `crates/formula-xlsx/tests/chart_fixture_models_match.rs`
+  - Loads each fixture with `XlsxPackage::extract_chart_objects()`.
+  - Requires an exact 1:1 match between extracted chart count and the number of `chart<N>.json`
+    files under `fixtures/charts/models/<stem>/`.
+  - Asserts the parsed `ChartModel` matches the committed JSON (today this uses
+    `parse_chart_space(chart1.xml)` as the baseline model).
+
 ## Chart Types to Support
 
 ### Priority 0 (Launch Required)
@@ -58,11 +223,13 @@ xl/
 │   └── _rels/
 │       └── drawing1.xml.rels  <- Links to chart parts
 └── charts/
-    ├── chart1.xml          <- Chart definition
-    ├── colors1.xml         <- Color scheme
-    ├── style1.xml          <- Chart style
+    ├── chart1.xml          <- Classic chartSpace chart definition
+    ├── chartEx1.xml        <- Optional ChartEx part (modern chart types)
+    ├── colors1.xml         <- Optional chart color style
+    ├── style1.xml          <- Optional chart style
     └── _rels/
-        └── chart1.xml.rels <- External data links
+        ├── chart1.xml.rels   <- Links to ChartEx/style/colors/external data
+        └── chartEx1.xml.rels <- Optional rels for ChartEx resources
 ```
 
 ### DrawingML Chart XML Structure
@@ -149,7 +316,10 @@ xl/
 
 ### ChartEx (Excel 2016+ Charts)
 
-Treemaps, sunbursts, waterfalls use the newer ChartEx format:
+Treemaps, sunbursts, waterfalls use the newer ChartEx format.
+
+In OPC terms this typically shows up as a separate `xl/charts/chartExN.xml` part referenced from
+`xl/charts/_rels/chartN.xml.rels` via a `…/relationships/chartEx` relationship.
 
 ```xml
 <cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex">
@@ -181,6 +351,33 @@ Treemaps, sunbursts, waterfalls use the newer ChartEx format:
 ## Implementation Architecture
 
 ### Chart Data Model
+
+#### Current Rust model (`formula-model`)
+
+Today, chart parsing/extraction in Rust is centered around:
+
+- `formula_xlsx::XlsxPackage::extract_chart_objects()` → `formula_xlsx::drawingml::charts::ChartObject`
+- `formula_xlsx::drawingml::charts::{parse_chart_space, parse_chart_ex}` → `formula_model::charts::ChartModel`
+
+Simplified shape:
+
+```rust
+use formula_model::charts::ChartModel;
+use formula_model::drawings::Anchor;
+use formula_xlsx::drawingml::charts::{ChartParts, ChartDiagnostic};
+
+pub struct ChartObject {
+    pub sheet_name: Option<String>,
+    pub drawing_part: String,
+    pub anchor: Anchor,
+    pub drawing_frame_xml: String,
+    pub parts: ChartParts,           // raw OPC parts (chart/chartEx/style/colors)
+    pub model: Option<ChartModel>,   // parsed best-effort (may be None)
+    pub diagnostics: Vec<ChartDiagnostic>,
+}
+```
+
+#### Future UI model (TypeScript)
 
 ```typescript
 interface Chart {
@@ -592,6 +789,10 @@ class ChartAnimator {
 ---
 
 ## Testing Strategy
+
+Current parser regression tests are implemented in Rust and driven by the
+`fixtures/charts/` corpus (see **Fixtures & Tests** above). The TypeScript examples below describe
+future renderer-level visual regression and round-trip testing.
 
 ### Visual Regression Tests
 
