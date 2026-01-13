@@ -692,6 +692,15 @@ The backend buffers early redirects in memory (`OauthRedirectState` in `apps/des
 - **Redirect is received but auth doesn’t complete:** ensure the redirect URI used in the auth request matches exactly (scheme + host + port + path). The frontend matcher is strict about `pathname` and other endpoint parts (e.g. `/callback` vs `/callback/`, or `127.0.0.1` vs `localhost`).
 - **Using implicit flow (`#access_token` fragments):** loopback capture can only see query parameters; use auth-code + PKCE (code in the query string).
 
+##### Quick manual smoke tests
+
+- **Loopback redirect capture:** from the desktop webview (DevTools), run:
+  ```js
+  await __TAURI__.core.invoke("oauth_loopback_listen", { redirect_uri: "http://127.0.0.1:4242/oauth/callback" });
+  ```
+  Then visit `http://127.0.0.1:4242/oauth/callback?code=test&state=dev` in your browser. You should see the “Sign-in complete” HTML response and the desktop app should receive an `oauth-redirect` event.
+- **Deep link capture:** open a URL like `formula://oauth/callback?code=test&state=dev` via your OS URL opener. The app should be activated and receive an `oauth-redirect` event.
+
 #### Tray + app menu + global shortcuts
 
 - Tray menu and click behavior are implemented in `apps/desktop/src-tauri/src/tray.rs`.
