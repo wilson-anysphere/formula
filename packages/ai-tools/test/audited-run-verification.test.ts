@@ -282,4 +282,93 @@ describe("runChatWithToolsAuditedVerified", () => {
     expect(callCount).toBe(3);
     expect(result.verification.verified).toBe(true);
   });
+
+  it("retries once when tools are attempted but none succeed (strict_tool_verification)", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { value: 2 });
+    workbook.setCell(parseA1Cell("Sheet1!A3"), { value: 3 });
+
+    const toolExecutor = new SpreadsheetLLMToolExecutor(workbook);
+
+    let callCount = 0;
+    const client = {
+      async chat(request: any) {
+        callCount++;
+
+        // First run: model tries a tool call, but it's invalid/denied (too large).
+        if (callCount === 1) {
+          const hasStrictSystem = request.messages.some(
+            (m: any) => m?.role === "system" && typeof m.content === "string" && m.content.includes("MUST use tools")
+          );
+          expect(hasStrictSystem).toBe(false);
+
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{ id: "call-1", name: "read_range", arguments: { range: "Sheet1!A1:Z1000" } }]
+            },
+            usage: { promptTokens: 10, completionTokens: 5 }
+          };
+        }
+
+        // Model answers anyway after the failed tool call (no more tools).
+        if (callCount === 2) {
+          return {
+            message: { role: "assistant", content: "Average is 999." },
+            usage: { promptTokens: 2, completionTokens: 3 }
+          };
+        }
+
+        // Second run: strict system message should be present and the model should use tools successfully.
+        if (callCount === 3) {
+          const hasStrictSystem = request.messages.some(
+            (m: any) => m?.role === "system" && typeof m.content === "string" && m.content.includes("MUST use tools")
+          );
+          expect(hasStrictSystem).toBe(true);
+
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{ id: "call-2", name: "read_range", arguments: { range: "Sheet1!A1:A3" } }]
+            },
+            usage: { promptTokens: 10, completionTokens: 5 }
+          };
+        }
+
+        return {
+          message: { role: "assistant", content: "Average is 2." },
+          usage: { promptTokens: 2, completionTokens: 3 }
+        };
+      }
+    };
+
+    const auditStore = new MemoryAIAuditStore();
+
+    const result = await runChatWithToolsAuditedVerified({
+      client,
+      tool_executor: toolExecutor as any,
+      messages: [{ role: "user", content: "What is the average of A1:A3?" }],
+      strict_tool_verification: true,
+      audit: {
+        audit_store: auditStore,
+        session_id: "session-verification-strict-tool-fail-1",
+        mode: "chat",
+        input: { prompt: "What is the average of A1:A3?" },
+        model: "unit-test-model"
+      }
+    });
+
+    expect(callCount).toBe(4);
+    expect(result.verification.needs_tools).toBe(true);
+    expect(result.verification.verified).toBe(true);
+
+    const entries = await auditStore.listEntries({ session_id: "session-verification-strict-tool-fail-1" });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.tool_calls).toHaveLength(2);
+    expect(entries[0]!.tool_calls[0]).toMatchObject({ name: "read_range", ok: false });
+    expect(entries[0]!.tool_calls[1]).toMatchObject({ name: "read_range", ok: true });
+  });
 });

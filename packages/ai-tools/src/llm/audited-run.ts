@@ -71,8 +71,8 @@ export interface AuditedRunParams {
   signal?: AbortSignal;
   /**
    * When enabled, if the query is classified as needing data tools but the model
-   * produced an answer without using any tools, the run is retried once with a
-   * stricter system instruction to "use tools; do not guess".
+   * produced an answer without any successful tool calls, the run is retried
+   * once with a stricter system instruction to "use tools; do not guess".
    */
   strict_tool_verification?: boolean;
   /**
@@ -210,9 +210,9 @@ export async function runChatWithToolsAuditedVerified(
       });
 
     let result = await runOnce(params.messages);
-    const usedToolsInitially = recorder.entry.tool_calls.length > 0;
+    const successfulToolInitially = recorder.entry.tool_calls.some((call) => call.ok === true);
 
-    if (params.strict_tool_verification && needsTools && !usedToolsInitially) {
+    if (params.strict_tool_verification && needsTools && !successfulToolInitially) {
       const strictMessages = appendStrictToolInstruction(params.messages);
       result = await runOnce(strictMessages);
     }
