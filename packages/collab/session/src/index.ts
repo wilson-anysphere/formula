@@ -2330,3 +2330,10 @@ export async function bindCollabSessionToDocumentController(options: {
     formulaConflictsMode,
   }) as DocumentControllerBinder;
 }
+
+export {
+  migrateLegacyCellKeys,
+  type CellKeyMigrationConflictStrategy,
+  type MigrateLegacyCellKeysOptions,
+  type MigrateLegacyCellKeysResult,
+} from "./migrations/migrateCellKeys.js";

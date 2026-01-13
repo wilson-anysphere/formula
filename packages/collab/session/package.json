@@ -8,6 +8,9 @@
   },
   "main": "src/index.ts",
   "types": "src/index.ts",
+  "scripts": {
+    "test": "pnpm -w test:node collab/session"
+  },
   "dependencies": {
     "@formula/collab-conflicts": "workspace:*",
     "@formula/collab-encryption": "workspace:*",
