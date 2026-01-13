@@ -29,8 +29,6 @@ desktop = [
     "dep:tauri-plugin-notification",
     "dep:tauri-plugin-shell",
     "dep:tauri-plugin-updater",
-    "dep:http-range",
-    "dep:percent-encoding",
     # Clipboard integrations on Linux may rely on GTK (system) libraries. Keep them
     # behind the `desktop` feature so backend unit tests can run headless without
     # a GTK/WebKit toolchain installed.
@@ -98,8 +96,10 @@ tauri-plugin-single-instance = { version = "2.2", optional = true }
 tauri-plugin-notification = { version = "2", optional = true }
 tauri-plugin-updater = { version = "2.9", optional = true }
 thiserror = "1.0"
-http-range = { version = "0.1", optional = true }
-percent-encoding = { version = "2", optional = true }
+http-range = "0.1"
+infer = "0.16"
+mime_guess = "2.0"
+percent-encoding = "2"
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

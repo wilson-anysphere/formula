@@ -1,4 +1,5 @@
 pub(crate) mod atomic_write;
+pub mod asset_protocol_core;
 pub mod commands;
 pub mod ed25519_verifier;
 pub mod external_url;

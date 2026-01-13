@@ -1,30 +1,10 @@
-use std::io::{Read, Seek, SeekFrom, Write};
-
-use rand_core::RngCore;
 use tauri::http::{
-    header::{
-        ACCEPT_RANGES, ACCESS_CONTROL_EXPOSE_HEADERS, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE,
-    },
+    header::CONTENT_TYPE,
     Request, Response, StatusCode,
 };
-use tauri::path::SafePathBuf;
 use tauri::scope::fs::Scope;
-use tauri::utils::mime_type::MimeType;
 use tauri::{Manager, Runtime, UriSchemeContext};
 use url::Url;
-
-/// Max bytes allowed for non-range `asset://...` responses.
-///
-/// Range requests are already clamped to ~1 MiB, but non-range requests historically read the
-/// entire file into memory, which can OOM the backend if a compromised webview requests a very
-/// large file.
-const MAX_NON_RANGE_ASSET_BYTES: u64 = 10 * 1024 * 1024; // 10 MiB
-
-/// Max length for the `Range:` request header.
-///
-/// This is a defense-in-depth limit to avoid pathological multi-range headers causing excessive
-/// CPU/memory usage during parsing.
-const MAX_RANGE_HEADER_BYTES: usize = 4 * 1024;
 
 /// Custom `asset:` protocol handler with COEP-friendly headers.
 ///
@@ -99,16 +79,7 @@ pub fn handler<R: Runtime>(
         }
     };
 
-    match get_response(request, &scope, &window_origin) {
-        Ok(response) => response,
-        Err(err) => Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .header(CONTENT_TYPE, "text/plain")
-            .header("Access-Control-Allow-Origin", &window_origin)
-            .header("Cross-Origin-Resource-Policy", "cross-origin")
-            .body(err.to_string().into_bytes())
-            .unwrap(),
-    }
+    get_response(request, &scope, &window_origin)
 }
 
 fn current_window_url<R: Runtime>(ctx: &UriSchemeContext<'_, R>) -> Option<Url> {
@@ -161,288 +132,51 @@ fn get_response(
     request: Request<Vec<u8>>,
     scope: &Scope,
     window_origin: &str,
-) -> Result<Response<Vec<u8>>, Box<dyn std::error::Error>> {
-    // Support CORS preflight requests so `fetch()` can opt into non-simple headers (e.g. `Range`)
-    // without forcing the backend to read any file bytes.
-    if request.method() == tauri::http::Method::OPTIONS {
-        return Response::builder()
-            .status(StatusCode::NO_CONTENT)
-            .header("Access-Control-Allow-Origin", window_origin)
-            .header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
-            // `Range` is not a simple request header, so it requires preflight when used from
-            // `fetch()`.
-            .header("Access-Control-Allow-Headers", "range")
-            .header("Cross-Origin-Resource-Policy", "cross-origin")
-            .body(Vec::new())
-            .map_err(Into::into);
-    }
+) -> Response<Vec<u8>> {
+    use desktop::asset_protocol_core::{handle_asset_request, AssetHeaderValue, AssetMethod, AssetRequest};
 
-    // The asset protocol is a read-only file responder. Reject unexpected methods early so callers
-    // cannot trigger surprising behavior via non-GET verbs.
-    if request.method() != tauri::http::Method::GET && request.method() != tauri::http::Method::HEAD {
-        return Response::builder()
-            .status(StatusCode::METHOD_NOT_ALLOWED)
-            .header("Allow", "GET, HEAD, OPTIONS")
-            .header("Access-Control-Allow-Origin", window_origin)
-            .header("Cross-Origin-Resource-Policy", "cross-origin")
-            .body(Vec::new())
-            .map_err(Into::into);
-    }
+    let method = if request.method() == tauri::http::Method::GET {
+        AssetMethod::Get
+    } else if request.method() == tauri::http::Method::HEAD {
+        AssetMethod::Head
+    } else if request.method() == tauri::http::Method::OPTIONS {
+        AssetMethod::Options
+    } else {
+        AssetMethod::Other
+    };
 
-    // skip leading `/`
-    let path = percent_encoding::percent_decode(&request.uri().path().as_bytes()[1..])
-        .decode_utf8_lossy()
-        .to_string();
+    let range_header_value = request.headers().get("range");
+    let range = range_header_value.map(|hv| AssetHeaderValue {
+        raw: hv.as_bytes(),
+        value: hv.to_str().ok(),
+    });
 
-    let mut resp = Response::builder()
+    let path = if method == AssetMethod::Get || method == AssetMethod::Head {
+        // skip leading `/`
+        percent_encoding::percent_decode(&request.uri().path().as_bytes()[1..])
+            .decode_utf8_lossy()
+            .to_string()
+    } else {
+        String::new()
+    };
+
+    let core_resp = handle_asset_request(
+        AssetRequest {
+            method,
+            path: &path,
+            range,
+        },
+        |path| scope.is_allowed(path),
+    );
+
+    let mut builder = Response::builder()
+        .status(StatusCode::from_u16(core_resp.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR))
         .header("Access-Control-Allow-Origin", window_origin)
         .header("Cross-Origin-Resource-Policy", "cross-origin");
 
-    if let Err(e) = SafePathBuf::new(path.clone().into()) {
-        eprintln!("[asset protocol] invalid path \"{path}\": {e}");
-        return resp
-            .status(StatusCode::FORBIDDEN)
-            .body(Vec::new())
-            .map_err(Into::into);
+    for (k, v) in core_resp.headers {
+        builder = builder.header(k, v);
     }
 
-    if !scope.is_allowed(&path) {
-        eprintln!("[asset protocol] path not allowed by scope: {path}");
-        return resp
-            .status(StatusCode::FORBIDDEN)
-            .body(Vec::new())
-            .map_err(Into::into);
-    }
-
-    let mut file = match std::fs::File::open(&path) {
-        Ok(file) => file,
-        Err(err) => {
-            return match err.kind() {
-                std::io::ErrorKind::NotFound => resp
-                    .status(StatusCode::NOT_FOUND)
-                    .body(Vec::new())
-                    .map_err(Into::into),
-                std::io::ErrorKind::PermissionDenied => resp
-                    .status(StatusCode::FORBIDDEN)
-                    .body(Vec::new())
-                    .map_err(Into::into),
-                _ => Err(err.into()),
-            };
-        }
-    };
-
-    let metadata = file.metadata()?;
-    if !metadata.is_file() {
-        return resp
-            .status(StatusCode::NOT_FOUND)
-            .body(Vec::new())
-            .map_err(Into::into);
-    }
-
-    // File length.
-    let len = metadata.len();
-
-    // We only enforce this on non-range (full-body) requests. Range requests are clamped to
-    // `MAX_LEN` below so they remain bounded per request.
-    let range_header_value = request.headers().get("range");
-    if let Some(range_value) = range_header_value {
-        let nbytes = range_value.as_bytes().len();
-        if nbytes > MAX_RANGE_HEADER_BYTES {
-            eprintln!(
-                "[asset protocol] refusing overly large Range header: {path} (bytes={nbytes}, limit={MAX_RANGE_HEADER_BYTES})"
-            );
-            return resp
-                .status(StatusCode::PAYLOAD_TOO_LARGE)
-                .header(CONTENT_TYPE, "text/plain")
-                .body(b"range header is too large".to_vec())
-                .map_err(Into::into);
-        }
-    }
-
-    let range_header = range_header_value.and_then(|r| r.to_str().ok());
-
-    if range_header.is_none()
-        && request.method() != tauri::http::Method::HEAD
-        && len > MAX_NON_RANGE_ASSET_BYTES
-    {
-        eprintln!(
-            "[asset protocol] refusing to serve large file without Range: {path} (size={len}, limit={MAX_NON_RANGE_ASSET_BYTES})"
-        );
-        return resp
-            .status(StatusCode::PAYLOAD_TOO_LARGE)
-            .header(CONTENT_TYPE, "text/plain")
-            .body(b"asset file is too large; use Range requests".to_vec())
-            .map_err(Into::into);
-    }
-
-    // MIME type detection.
-    let (mime_type, read_bytes) = {
-        let nbytes = len.min(8192);
-        let mut magic_buf = Vec::with_capacity(nbytes as usize);
-        let old_pos = file.stream_position()?;
-        (&mut file).take(nbytes).read_to_end(&mut magic_buf)?;
-        file.seek(SeekFrom::Start(old_pos))?;
-        (
-            MimeType::parse(&magic_buf, &path),
-            // Return the magic bytes if we already read the whole file so we can reuse them below.
-            if len < 8192 { Some(magic_buf) } else { None },
-        )
-    };
-
-    resp = resp.header(CONTENT_TYPE, mime_type.to_string());
-
-    // Handle 206 (partial range) requests.
-    if let Some(range_header) = range_header {
-        resp = resp.header(ACCEPT_RANGES, "bytes");
-        resp = resp.header(ACCESS_CONTROL_EXPOSE_HEADERS, "content-range");
-
-        let not_satisfiable = || {
-            Response::builder()
-                .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                .header(CONTENT_RANGE, format!("bytes */{len}"))
-                .header("Access-Control-Allow-Origin", window_origin)
-                .header("Cross-Origin-Resource-Policy", "cross-origin")
-                .body(Vec::new())
-                .map_err(Into::into)
-        };
-
-        let ranges = if let Ok(ranges) = http_range::HttpRange::parse(range_header, len) {
-            ranges
-                .iter()
-                // Map to <start-end>, example: 0-499
-                .map(|r| (r.start, r.start.saturating_add(r.length.saturating_sub(1))))
-                .collect::<Vec<_>>()
-        } else {
-            return not_satisfiable();
-        };
-
-        // Avoid unbounded allocations in multi-range requests. Range headers can contain many
-        // comma-separated ranges; even with per-range clamping, building a multipart response could
-        // otherwise allocate an arbitrarily large `Vec<u8>`.
-        const MAX_RANGES: usize = 32;
-        if ranges.len() > MAX_RANGES {
-            eprintln!(
-                "[asset protocol] too many ranges requested: {path} (count={})",
-                ranges.len()
-            );
-            return Response::builder()
-                .status(StatusCode::PAYLOAD_TOO_LARGE)
-                .header("Access-Control-Allow-Origin", window_origin)
-                .header("Cross-Origin-Resource-Policy", "cross-origin")
-                .body(Vec::new())
-                .map_err(Into::into);
-        }
-
-        /// Max bytes we send in one range.
-        const MAX_LEN: u64 = 1000 * 1024;
-
-        // Single range.
-        if ranges.len() == 1 {
-            let (start, mut end) = ranges[0];
-            if start >= len || end >= len || end < start {
-                return not_satisfiable();
-            }
-
-            // Clamp to MAX_LEN.
-            end = start + (end - start).min(len - start).min(MAX_LEN - 1);
-            let nbytes = end + 1 - start;
-
-            let mut buf = Vec::with_capacity(nbytes as usize);
-            file.seek(SeekFrom::Start(start))?;
-            (&mut file).take(nbytes).read_to_end(&mut buf)?;
-
-            resp = resp.header(CONTENT_RANGE, format!("bytes {start}-{end}/{len}"));
-            resp = resp.header(CONTENT_LENGTH, nbytes.to_string());
-            resp = resp.status(StatusCode::PARTIAL_CONTENT);
-            return resp.body(buf).map_err(Into::into);
-        }
-
-        // Multi-range support (rare; kept for compatibility).
-        // We implement it correctly (Tauri's internal implementation historically had a few quirks).
-        let ranges = ranges
-            .into_iter()
-            .filter_map(|(start, mut end)| {
-                if start >= len || end >= len || end < start {
-                    None
-                } else {
-                    end = start + (end - start).min(len - start).min(MAX_LEN - 1);
-                    Some((start, end))
-                }
-            })
-            .collect::<Vec<_>>();
-
-        if ranges.is_empty() {
-            return not_satisfiable();
-        }
-
-        let mut total_range_bytes = 0u64;
-        for (start, end) in &ranges {
-            // (end + 1 - start) should be safe because we validated start/end above.
-            total_range_bytes = total_range_bytes.saturating_add(end + 1 - start);
-        }
-        if total_range_bytes > MAX_NON_RANGE_ASSET_BYTES {
-            eprintln!(
-                "[asset protocol] refusing to serve multi-range response larger than limit: {path} (bytes={total_range_bytes}, limit={MAX_NON_RANGE_ASSET_BYTES})"
-            );
-            return Response::builder()
-                .status(StatusCode::PAYLOAD_TOO_LARGE)
-                .header("Access-Control-Allow-Origin", window_origin)
-                .header("Cross-Origin-Resource-Policy", "cross-origin")
-                .body(Vec::new())
-                .map_err(Into::into);
-        }
-
-        let boundary = random_boundary();
-        let boundary_sep = format!("\r\n--{boundary}\r\n");
-        let boundary_closer = format!("\r\n--{boundary}--\r\n");
-
-        resp = resp.header(
-            CONTENT_TYPE,
-            format!("multipart/byteranges; boundary={boundary}"),
-        );
-        resp = resp.status(StatusCode::PARTIAL_CONTENT);
-
-        let mut buf = Vec::new();
-        for (start, end) in ranges {
-            buf.write_all(boundary_sep.as_bytes())?;
-            buf.write_all(format!("{CONTENT_TYPE}: {mime_type}\r\n").as_bytes())?;
-            buf.write_all(format!("{CONTENT_RANGE}: bytes {start}-{end}/{len}\r\n").as_bytes())?;
-            buf.write_all(b"\r\n")?;
-
-            let nbytes = end + 1 - start;
-            let mut local_buf = Vec::with_capacity(nbytes as usize);
-            file.seek(SeekFrom::Start(start))?;
-            (&mut file).take(nbytes).read_to_end(&mut local_buf)?;
-            buf.extend_from_slice(&local_buf);
-        }
-        buf.write_all(boundary_closer.as_bytes())?;
-        return resp.body(buf).map_err(Into::into);
-    }
-
-    if request.method() == tauri::http::Method::HEAD {
-        // If HEAD, don't return a body.
-        resp = resp.header(CONTENT_LENGTH, len.to_string());
-        return resp.body(Vec::new()).map_err(Into::into);
-    }
-
-    // Avoid reading the file if we already read it as part of MIME detection.
-    let buf = if let Some(bytes) = read_bytes {
-        bytes
-    } else {
-        let mut local_buf = Vec::with_capacity(len as usize);
-        file.read_to_end(&mut local_buf)?;
-        local_buf
-    };
-    resp = resp.header(CONTENT_LENGTH, len.to_string());
-    resp.body(buf).map_err(Into::into)
-}
-
-fn random_boundary() -> String {
-    let mut x = [0_u8; 30];
-    // `rand_core` is already a dependency of the desktop backend.
-    rand_core::OsRng.fill_bytes(&mut x);
-    x.iter()
-        .map(|b| format!("{b:x}"))
-        .collect::<Vec<_>>()
-        .join("")
+    builder.body(core_resp.body).unwrap()
 }
