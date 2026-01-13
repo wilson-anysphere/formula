@@ -78,12 +78,16 @@ test("index.ts (WebCrypto) encryption key cache is bounded (LRU) and clearable",
   assert.equal(importKeyCalls, 3);
 
   // key2 should be evicted.
-  await encryptCellPlaintext({ plaintext, key: key2, context });
+  const encrypted2 = await encryptCellPlaintext({ plaintext, key: key2, context });
   assert.equal(importKeyCalls, 4);
+  const decrypted2 = await decryptCellPlaintext({ encrypted: encrypted2, key: key2, context });
+  assert.deepEqual(decrypted2, plaintext);
 
   clearEncryptionKeyCache();
-  await encryptCellPlaintext({ plaintext, key: key3, context });
+  const encrypted3 = await encryptCellPlaintext({ plaintext, key: key3, context });
   assert.equal(importKeyCalls, 5, "expected clearEncryptionKeyCache() to force re-import");
+  const decrypted3 = await decryptCellPlaintext({ encrypted: encrypted3, key: key3, context });
+  assert.deepEqual(decrypted3, plaintext);
 
   // If the max cache size is reduced at runtime, the accessed key should refresh
   // its recency *before* eviction is applied so it doesn't get evicted as the LRU
