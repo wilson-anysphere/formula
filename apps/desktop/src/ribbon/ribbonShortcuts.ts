@@ -5,7 +5,7 @@ import { getPrimaryCommandKeybindingDisplay } from "../extensions/keybindings.js
  * used by the KeybindingService / command palette.
  *
  * The ribbon uses a mix of canonical CommandRegistry ids (e.g. `clipboard.copy`)
- * and Excel-style ids (e.g. `home.number.accounting`). This lookup normalizes
+ * and UI-specific ids (or aliases). This lookup normalizes
  * ribbon ids to the corresponding KeybindingService command id so ribbon
  * tooltips/menus can display keybinding hints.
  */
@@ -27,11 +27,11 @@ const KEYBINDING_COMMAND_BY_RIBBON_ID: Record<string, string> = {
   // (Most formatting buttons use built-in ids directly, so they are picked up by
   // the identity mapping in `deriveRibbonShortcutById` below.)
 
-  "home.number.numberFormat.currency": "format.numberFormat.currency",
-  "home.number.numberFormat.accounting": "format.numberFormat.currency",
-  "home.number.numberFormat.percentage": "format.numberFormat.percent",
-  "home.number.numberFormat.shortDate": "format.numberFormat.date",
-  "home.number.numberFormat.longDate": "format.numberFormat.date",
+  // Some ribbon controls use more specific commands (e.g. short/long date) but
+  // share the classic Excel preset shortcut with a single canonical command.
+  "format.numberFormat.accounting": "format.numberFormat.currency",
+  "format.numberFormat.shortDate": "format.numberFormat.date",
+  "format.numberFormat.longDate": "format.numberFormat.date",
   "home.number.formatCells": "format.openFormatCells",
   "home.number.moreFormats.formatCells": "format.openFormatCells",
 
