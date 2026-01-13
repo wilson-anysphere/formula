@@ -168,5 +168,34 @@ describe("SpreadsheetApp outline state", () => {
     app.destroy();
     root.remove();
   });
-});
 
+  it("drops outline state when deleting a sheet", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    expect(app.getGridMode()).toBe("legacy");
+
+    const doc = app.getDocument();
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "X");
+
+    // Ensure we have outline state cached for Sheet2.
+    const outline2 = (app as any).getOutlineForSheet("Sheet2") as any;
+    outline2.rows.entryMut(1).hidden.user = true;
+
+    const outlinesBySheet = (app as any).outlinesBySheet as Map<string, unknown>;
+    expect(outlinesBySheet.has("Sheet2")).toBe(true);
+
+    // Deleting the sheet should remove its outline entry so state doesn't leak or accumulate.
+    doc.deleteSheet("Sheet2");
+
+    expect(outlinesBySheet.has("Sheet2")).toBe(false);
+
+    app.destroy();
+    root.remove();
+  });
+});
