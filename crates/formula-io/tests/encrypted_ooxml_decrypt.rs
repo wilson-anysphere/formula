@@ -5,10 +5,10 @@
 //! always enabled and provides immediate sanity checks once fixtures are present.
 #![cfg(feature = "encrypted-workbooks")]
 
-use std::io::{Cursor, Write as _};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
-use formula_io::{open_workbook_with_options, OpenOptions, Workbook};
+use formula_io::{open_workbook_model_with_password, Error};
 use formula_model::{CellRef, CellValue};
 
 fn fixture_path(rel: &str) -> PathBuf {
@@ -33,26 +33,8 @@ fn assert_expected_contents(workbook: &formula_model::Workbook) {
 }
 
 fn open_model_with_password(path: &Path, password: &str) -> formula_model::Workbook {
-    let wb = open_workbook_with_options(
-        path,
-        OpenOptions {
-            password: Some(password.to_string()),
-            ..Default::default()
-        },
-    )
-    .unwrap_or_else(|err| panic!("open encrypted workbook {path:?} failed: {err:?}"));
-
-    match wb {
-        Workbook::Model(model) => model,
-        Workbook::Xlsx(package) => {
-            let bytes = package
-                .write_to_bytes()
-                .expect("serialize decrypted XLSX package to bytes");
-            formula_io::xlsx::read_workbook_from_reader(Cursor::new(bytes))
-                .expect("open decrypted workbook model from XLSX bytes")
-        }
-        other => panic!("expected Workbook::Xlsx or Workbook::Model, got {other:?}"),
-    }
+    open_workbook_model_with_password(path, Some(password))
+        .unwrap_or_else(|err| panic!("open encrypted workbook {path:?} failed: {err:?}"))
 }
 
 #[test]
@@ -60,11 +42,6 @@ fn decrypts_agile_and_standard_with_correct_password() {
     let plaintext_path = fixture_path("plaintext.xlsx");
     let agile_path = fixture_path("agile.xlsx");
     let standard_path = fixture_path("standard.xlsx");
-
-    // Allow this test to land before the fixtures themselves.
-    if !plaintext_path.exists() || !agile_path.exists() || !standard_path.exists() {
-        return;
-    }
 
     // Baseline sanity: plaintext fixture matches expected contents.
     let plaintext = formula_io::open_workbook_model(&plaintext_path).expect("open plaintext.xlsx");
@@ -102,33 +79,13 @@ fn errors_on_wrong_password() {
     let agile_path = fixture_path("agile.xlsx");
     let standard_path = fixture_path("standard.xlsx");
 
-    // Allow this test to land before the fixtures themselves.
-    if !agile_path.exists() || !standard_path.exists() {
-        return;
-    }
-
     for path in [&agile_path, &standard_path] {
-        let err = open_workbook_with_options(
-            path,
-            OpenOptions {
-                password: Some("wrong-password".to_string()),
-                ..Default::default()
-            },
-        )
-        .expect_err("expected wrong password to error");
-
-        let msg = err.to_string().to_lowercase();
         assert!(
-            msg.contains("password"),
-            "expected error to mention password, got: {msg}"
-        );
-        assert!(
-            msg.contains("invalid")
-                || msg.contains("incorrect")
-                || msg.contains("wrong")
-                || msg.contains("fail"),
-            "expected error to indicate password failure, got: {msg}"
+            matches!(
+                open_workbook_model_with_password(path, Some("wrong-password")),
+                Err(Error::InvalidPassword { .. })
+            ),
+            "expected InvalidPassword error for {path:?}"
         );
     }
 }
-
