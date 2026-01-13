@@ -218,6 +218,23 @@ test("suggestRanges completes partial A1 range syntax (A1: -> A1:A10) and preser
   assert.equal(absSuggestions[0].range, "$A$1:$A$10");
 });
 
+test("suggestRanges preserves absolute markers from the typed end column token (A1:$A -> A1:$A3)", () => {
+  const ctx = createColumnAContext([
+    [0, 10],
+    [1, 20],
+    [2, 30],
+  ]);
+
+  const suggestions = suggestRanges({
+    currentArgText: "A1:$A",
+    cellRef: { row: 10, col: 0 },
+    surroundingCells: ctx,
+  });
+
+  assert.equal(suggestions[0].range, "A1:$A3");
+  assert.equal(suggestions[1].range, "A:$A");
+});
+
 test("suggestRanges supports partial end-column prefixes for multi-letter columns (AB1:A -> AB1:AB3)", () => {
   // Column AB is 0-based index 27 (A=0, B=1, ..., Z=25, AA=26, AB=27).
   const AB_COL = 27;
