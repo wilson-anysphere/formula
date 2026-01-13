@@ -39,6 +39,28 @@ fn build_tiny_zip() -> Vec<u8> {
     writer.finish().expect("finish zip").into_inner()
 }
 
+fn build_zip_with_padding() -> Vec<u8> {
+    let cursor = Cursor::new(Vec::new());
+    let mut writer = zip::ZipWriter::new(cursor);
+    let stored = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Stored);
+    writer
+        .start_file("hello.txt", stored)
+        .expect("start zip file");
+    writer.write_all(b"hello").expect("write zip contents");
+
+    // `office-crypto`'s Agile decrypt implementation currently assumes the plaintext payload is at
+    // least one full 4096-byte segment. Keep this fixture larger than that so we can compare our
+    // implementation against it.
+    writer
+        .start_file("padding.bin", stored)
+        .expect("start padding file");
+    writer
+        .write_all(&vec![0xA5; 8 * 1024])
+        .expect("write padding");
+
+    writer.finish().expect("finish zip").into_inner()
+}
+
 fn encrypt_zip_with_password(plain_zip: &[u8], password: &str) -> Vec<u8> {
     let mut cursor = Cursor::new(Vec::new());
     let mut agile =
@@ -518,4 +540,23 @@ fn agile_decrypt_succeeds_without_data_integrity_and_warns() {
         warnings.contains(&OffCryptoWarning::MissingDataIntegrity),
         "expected MissingDataIntegrity warning, got: {warnings:?}"
     );
+}
+
+#[test]
+fn agile_decrypt_matches_office_crypto_reference() {
+    let password = "pass";
+    let plain_zip = build_zip_with_padding();
+
+    let encrypted_cfb = encrypt_zip_with_password(&plain_zip, password);
+    let encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
+    let encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
+
+    let decrypted =
+        decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, password).unwrap();
+    assert_eq!(decrypted, plain_zip);
+
+    let office_crypto_decrypted =
+        office_crypto::decrypt_from_bytes(encrypted_cfb.clone(), password).unwrap();
+    assert_eq!(office_crypto_decrypted, plain_zip);
+    assert_eq!(office_crypto_decrypted, decrypted);
 }

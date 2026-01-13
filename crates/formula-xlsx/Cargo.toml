@@ -46,6 +46,7 @@ formula-office-crypto = { path = "../formula-office-crypto" }
 [dev-dependencies]
 ms-offcrypto-writer = "1.0.7"
 md-5 = "0.10"
+office-crypto = "0.2.0"
 openssl = "0.10"
 pretty_assertions = "1"
 insta = "1.46"
