@@ -75,6 +75,8 @@ export interface ShapeRenderSpec {
   stroke?: ShapeStroke;
   /** Best-effort first line of text from `<xdr:txBody>`. */
   label?: string;
+  /** Best-effort label color extracted from the first paragraph's run properties. */
+  labelColor?: string;
 }
 
 const DRAWINGML_NAMESPACES = {
@@ -419,6 +421,27 @@ function parseLabel(root: XmlElementLike): string | undefined {
   return text.split(/\r?\n/, 1)[0]!.trim();
 }
 
+function parseLabelColor(root: XmlElementLike): string | undefined {
+  const txBody = findFirstDescendantByLocalName(root, "txBody");
+  if (!txBody) return undefined;
+  const p = findFirstDescendantByLocalName(txBody, "p");
+  if (!p) return undefined;
+
+  // Try to resolve a color from the first paragraph's run properties.
+  // Prefer explicit run properties (`a:rPr`) over defaults (`a:defRPr`).
+  const candidates = ["rPr", "defRPr"];
+  for (const name of candidates) {
+    const node = findFirstDescendant(
+      p,
+      (n) => localName(n) === name && findFirstDescendantByLocalName(n, "srgbClr") != null,
+    );
+    if (!node) continue;
+    const color = parseSrgbColor(node);
+    if (color) return color;
+  }
+  return undefined;
+}
+
 function cacheResult(rawXml: string, spec: ShapeRenderSpec | null): ShapeRenderSpec | null {
   // Keep the cache bounded (simple FIFO eviction is sufficient here).
   if (SHAPE_SPEC_CACHE.size >= SHAPE_SPEC_CACHE_MAX) {
@@ -452,13 +475,19 @@ export function parseShapeRenderSpec(rawXml: string): ShapeRenderSpec | null {
   const geometry = normalizePresetGeometry(prst);
   if (!geometry) return cacheResult(rawXml, null);
 
-  return cacheResult(rawXml, {
+  const label = parseLabel(root);
+  const labelColor = label ? parseLabelColor(root) : undefined;
+
+  const spec: ShapeRenderSpec = {
     geometry:
       geometry === "roundRect"
         ? { type: "roundRect", adj: prstGeom ? parseRoundRectAdj(prstGeom) : undefined }
         : { type: geometry },
     fill: parseFill(spPr),
     stroke: parseStroke(spPr),
-    label: parseLabel(root),
-  });
+    label,
+  };
+  if (labelColor) spec.labelColor = labelColor;
+
+  return cacheResult(rawXml, spec);
 }

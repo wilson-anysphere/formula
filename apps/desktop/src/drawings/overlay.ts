@@ -453,7 +453,7 @@ function drawShape(
   }
 
   if (spec.label) {
-    ctx.fillStyle = colors.placeholderLabel;
+    ctx.fillStyle = spec.labelColor ?? colors.placeholderLabel;
     ctx.globalAlpha = 0.8;
     ctx.font = "12px sans-serif";
     ctx.fillText(spec.label, rect.x + 4, rect.y + 14);

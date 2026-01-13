@@ -70,7 +70,7 @@ describe("parseShapeRenderSpec", () => {
     expect(parseShapeRenderSpec(raw)).toEqual({
       geometry: { type: "roundRect", adj: 50000 },
       fill: { type: "none" },
-      stroke: { color: "#000000", widthEmu: 9525 },
+      stroke: { color: "black", widthEmu: 9525 },
       label: undefined,
     });
   });
@@ -98,6 +98,34 @@ describe("parseShapeRenderSpec", () => {
       </xdr:spPr>
     `;
 
-    expect(parseShapeRenderSpec(raw)?.stroke).toEqual({ color: "#000000", widthEmu: 12700, dashPreset: "dash" });
+    expect(parseShapeRenderSpec(raw)?.stroke).toEqual({ color: "black", widthEmu: 12700, dashPreset: "dash" });
+  });
+
+  it("extracts a label color from txBody default run properties when present", () => {
+    // Based on `fixtures/xlsx/basic/shape-textbox.xlsx`.
+    const raw = `
+      <xdr:sp>
+        <xdr:txBody>
+          <a:bodyPr wrap="square" anchor="t"/>
+          <a:lstStyle/>
+          <a:p>
+            <a:pPr algn="ctr">
+              <a:defRPr sz="1400">
+                <a:solidFill><a:srgbClr val="00FF00"/></a:solidFill>
+              </a:defRPr>
+            </a:pPr>
+            <a:r><a:t>Hello Shape</a:t></a:r>
+          </a:p>
+        </xdr:txBody>
+        <xdr:spPr>
+          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+        </xdr:spPr>
+      </xdr:sp>
+    `;
+
+    expect(parseShapeRenderSpec(raw)).toMatchObject({
+      label: "Hello Shape",
+      labelColor: "#00FF00",
+    });
   });
 });
