@@ -263,7 +263,7 @@ The desktop app is shipped via **GitHub Releases** (see `docs/release.md` for th
 Tagged builds are expected to produce:
 
 - **macOS:** universal `.dmg` (plus updater payload `.app.tar.gz`)
-- **Windows:** installers for **x64** and **ARM64** (`.exe`/`.msi`)
+- **Windows:** installers for **x64** and **ARM64** (`.msi` + `.exe`)
 - **Linux:** `.AppImage` + `.deb` + `.rpm`
 
 Auto-update is driven by the Tauri updater manifest (`latest.json`) uploaded to the release.
