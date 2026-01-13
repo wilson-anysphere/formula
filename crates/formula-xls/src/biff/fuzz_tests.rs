@@ -132,6 +132,19 @@ proptest! {
         prop_assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let _ = strings::parse_biff8_unicode_string_best_effort(&buf, CODEPAGE_1252);
+
+                // Exercise the strict string parsers as well; they should return an error on
+                // malformed payloads rather than panic.
+                let _ = strings::parse_biff5_short_string(&buf, CODEPAGE_1252);
+                let _ = strings::parse_biff8_short_string(&buf, CODEPAGE_1252);
+                let _ = strings::parse_biff8_unicode_string(&buf, CODEPAGE_1252);
+                let _ = strings::parse_biff_short_string(&buf, BiffVersion::Biff5, CODEPAGE_1252);
+                let _ = strings::parse_biff_short_string(&buf, BiffVersion::Biff8, CODEPAGE_1252);
+                let _ = strings::parse_biff5_short_string_best_effort(&buf, CODEPAGE_1252);
+
+                // Continued string parser (uses the fragment-aware cursor).
+                let fragments: [&[u8]; 1] = [&buf];
+                let _ = strings::parse_biff8_unicode_string_continued(&fragments, 0, CODEPAGE_1252);
             }))
             .is_ok(),
             "strings::parse_biff8_unicode_string_best_effort panicked"
@@ -141,6 +154,7 @@ proptest! {
         prop_assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let _ = globals::parse_biff_workbook_globals(&buf, BiffVersion::Biff8, CODEPAGE_1252);
+                let _ = globals::parse_biff_workbook_globals(&buf, BiffVersion::Biff5, CODEPAGE_1252);
             }))
             .is_ok(),
             "globals::parse_biff_workbook_globals panicked"
@@ -167,6 +181,7 @@ proptest! {
                 let parsed =
                     defined_names::parse_biff_defined_names(&buf, BiffVersion::Biff8, CODEPAGE_1252, sheet_names)
                         .expect("defined name parsing is best-effort and should not hard-fail");
+                let _ = defined_names::parse_biff_defined_names(&buf, BiffVersion::Biff5, CODEPAGE_1252, sheet_names);
                 for name in parsed.names {
                     assert!(!name.name.is_empty(), "defined name should not be empty");
                     assert!(!name.name.contains('\0'), "defined name should have embedded NULs stripped");
@@ -219,6 +234,10 @@ proptest! {
                     assert!(range.start.col <= range.end.col);
                 }
 
+                // Manual page breaks (re-exported by the parent `biff` module).
+                let _ = super::parse_biff_sheet_manual_page_breaks(&buf, 0)
+                    .expect("offset 0 should always be in-bounds");
+
                 let xfs = sheet::parse_biff_sheet_cell_xf_indices_filtered(&buf, 0, None)
                     .expect("offset 0 should always be in-bounds");
                 for (cell, _xf) in xfs {
@@ -250,6 +269,7 @@ proptest! {
                 let parsed =
                     autofilter::parse_biff_filter_database_ranges(&buf, BiffVersion::Biff8, CODEPAGE_1252, None)
                         .expect("autofilter parsing is best-effort and should not hard-fail");
+                let _ = autofilter::parse_biff_filter_database_ranges(&buf, BiffVersion::Biff5, CODEPAGE_1252, None);
                 for (_sheet_idx, range) in parsed.by_sheet {
                     assert!(range.start.row <= range.end.row);
                     assert!(range.start.col <= range.end.col);
