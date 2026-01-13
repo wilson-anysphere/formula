@@ -7,6 +7,16 @@ test.describe("ribbon Find & Select", () => {
     await gotoDesktop(page);
     await waitForDesktopReady(page);
 
+    // Recents tracking is persisted in localStorage; clear it so we can assert the ribbon
+    // click records the canonical command id via CommandRegistry execution.
+    await page.evaluate(() => {
+      try {
+        localStorage.removeItem("formula.commandRecents");
+      } catch {
+        // ignore
+      }
+    });
+
     // Desktop currently defaults to the View tab (where debug controls live). Switch to Home
     // so we can access the Find & Select dropdown.
     await page.getByRole("tab", { name: "Home" }).click();
@@ -17,6 +27,17 @@ test.describe("ribbon Find & Select", () => {
     // --- Find ---
     await findSelect.click();
     await page.getByTestId("ribbon-root").getByTestId("ribbon-find").click();
+    await page.waitForFunction(() => {
+      try {
+        const raw = localStorage.getItem("formula.commandRecents");
+        if (!raw) return false;
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return false;
+        return parsed.some((entry) => entry && typeof entry === "object" && entry.commandId === "edit.find");
+      } catch {
+        return false;
+      }
+    });
     const findDialog = page.locator("dialog.find-replace-dialog[open]");
     await expect(findDialog).toBeVisible();
     await expect(findDialog.locator("input").first()).toBeFocused();
