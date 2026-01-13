@@ -82,18 +82,15 @@ test("streams large version snapshots without exceeding SYNC_SERVER_MAX_MESSAGE_
 
   await waitForCondition(() => docB.getText("bigText").length === bigText.length, 10_000, 50);
 
-  const storeA = new YjsVersionStore({
-    doc: docA,
-    writeMode: "stream",
-    // Split the snapshot bytes so each Yjs update stays well under 128KB.
-    chunkSize: 32 * 1024,
-    maxChunksPerTransaction: 2,
-  });
-
   const versioningA = new CollabVersioning({
     session: { doc: docA } as any,
-    store: storeA,
     autoStart: false,
+    // Use CollabVersioning's default in-doc store, but tune its streaming chunk
+    // settings so each update stays well under 128KB.
+    yjsStoreOptions: {
+      chunkSize: 32 * 1024,
+      maxChunksPerTransaction: 2,
+    },
   });
 
   const created = await versioningA.createSnapshot({ description: "big snapshot" });
