@@ -940,7 +940,9 @@ jobs:
               export XDG_CONFIG_HOME="${HOME}/.config"
               export XDG_DATA_HOME="${HOME}/.local/share"
               mkdir -p "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}"
-              timeout 45s bash scripts/xvfb-run-safe.sh "${bin}" --cross-origin-isolation-check
+              # Run `timeout` *inside* the xvfb helper so the helper's EXIT trap can reliably
+              # clean up the background Xvfb process even when the command times out.
+              bash scripts/xvfb-run-safe.sh timeout 45s "${bin}" --cross-origin-isolation-check
             )
             echo "::endgroup::"
 
