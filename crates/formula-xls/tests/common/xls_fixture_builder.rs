@@ -1143,7 +1143,8 @@ fn build_page_setup_sanitized_sheet_name_sheet_stream(xf_cell: u16) -> Vec<u8> {
 
     // Manual page breaks.
     // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.
-    // Our fixture helpers accept the model’s “after which break occurs” form (0-based).
+    // Our fixture helpers accept the model’s “after which break occurs” form (0-based) and encode
+    // them into BIFF8’s representation by adding 1.
     push_record(&mut sheet, RECORD_HPAGEBREAKS, &hpagebreaks_record(&[1, 4]));
     push_record(&mut sheet, RECORD_VPAGEBREAKS, &vpagebreaks_record(&[2]));
 
@@ -1249,6 +1250,10 @@ fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
             0.6,  // footer margin
         ),
     );
+
+    // WSBOOL: Excel stores `Fit to page` as a worksheet boolean flag (fFitToPage = bit 0x0100).
+    // Use the same base value (0x0C01) as other fixtures so outline defaults remain consistent.
+    push_record(&mut sheet, RECORD_WSBOOL, &0x0D01u16.to_le_bytes());
 
     // Manual page breaks.
     // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.

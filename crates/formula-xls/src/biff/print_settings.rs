@@ -79,6 +79,10 @@ const WSBOOL_OPTION_FIT_TO_PAGE: u16 = 0x0100;
 // - 0 => landscape
 // - 1 => portrait
 const SETUP_GRBIT_PORTRAIT: u16 = 0x0002;
+// When set, printer settings are undefined (ignore paper size, scale, orientation, etc).
+const SETUP_GRBIT_F_NOPLS: u16 = 0x0004;
+// When set, the `fPortrait` bit must be ignored and orientation defaults to portrait.
+const SETUP_GRBIT_F_NOORIENT: u16 = 0x0040;
 
 #[derive(Debug, Clone)]
 pub(crate) struct BiffSheetPrintSettings {
@@ -271,34 +275,57 @@ fn parse_setup_record(
 
     let paper_size = parse_u16_at(data, 0);
     let scale = parse_u16_at(data, 2);
-    let fit_width = parse_u16_at(data, 6);
-    let fit_height = parse_u16_at(data, 8);
+    let mut fit_width = parse_u16_at(data, 6);
+    let mut fit_height = parse_u16_at(data, 8);
     let grbit = parse_u16_at(data, 10);
     let header_margin = parse_f64_at(data, 16);
     let footer_margin = parse_f64_at(data, 24);
 
-    if let Some(code) = paper_size {
-        // BIFF8 uses `iPaperSize==0` and values >=256 for printer-specific/custom paper sizes.
-        // These values do not map cleanly onto OpenXML `ST_PaperSize` numeric codes and are not
-        // representable in the model. Ignore them and keep the default paper size.
-        if code == 0 || code >= 256 {
-            push_warning_bounded(
-                warnings,
-                format!(
-                "ignoring custom/invalid paper size code {code} in SETUP record at offset {offset}"
-            ),
-            );
-        } else {
-            page_setup.paper_size.code = code;
-        }
-    }
+    let mut scale_out = scale;
+    let (f_no_pls, f_no_orient, f_portrait) = match grbit {
+        Some(grbit) => (
+            (grbit & SETUP_GRBIT_F_NOPLS) != 0,
+            (grbit & SETUP_GRBIT_F_NOORIENT) != 0,
+            (grbit & SETUP_GRBIT_PORTRAIT) != 0,
+        ),
+        None => (false, false, false),
+    };
 
-    if let Some(grbit) = grbit {
-        page_setup.orientation = if (grbit & SETUP_GRBIT_PORTRAIT) != 0 {
-            Orientation::Portrait
-        } else {
-            Orientation::Landscape
-        };
+    if f_no_pls {
+        // Per spec: iPaperSize/iScale/fPortrait/iRes/iVRes/iCopies are undefined; ignore them.
+        // Also reset any previously seen printer-related values so "last wins" behaves as if
+        // printer settings were not present.
+        page_setup.paper_size = PageSetup::default().paper_size;
+        page_setup.orientation = Orientation::Portrait;
+        scale_out = None;
+        // Best-effort: treat fit-to-page fields as undefined as well so we do not infer FitTo mode
+        // from non-zero iFitWidth/iFitHeight when WSBOOL is absent.
+        fit_width = None;
+        fit_height = None;
+    } else {
+        if let Some(code) = paper_size {
+            // BIFF8 uses `iPaperSize==0` and values >=256 for printer-specific/custom paper sizes.
+            // These values do not map cleanly onto OpenXML `ST_PaperSize` numeric codes and are not
+            // representable in the model. Ignore them and keep the default paper size.
+            if code == 0 || code >= 256 {
+                push_warning_bounded(
+                    warnings,
+                    format!(
+                        "ignoring custom/invalid paper size code {code} in SETUP record at offset {offset}"
+                    ),
+                );
+            } else {
+                page_setup.paper_size.code = code;
+            }
+        }
+
+        if grbit.is_some() {
+            page_setup.orientation = if f_no_orient || f_portrait {
+                Orientation::Portrait
+            } else {
+                Orientation::Landscape
+            };
+        }
     }
     if let Some(v) = header_margin {
         if v.is_finite() {
@@ -321,7 +348,7 @@ fn parse_setup_record(
         }
     }
 
-    (scale, fit_width, fit_height)
+    (scale_out, fit_width, fit_height)
 }
 
 fn parse_margin_record(

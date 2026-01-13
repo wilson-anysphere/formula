@@ -1,15 +1,10 @@
 use std::collections::{BTreeMap, HashMap};
 
 use formula_model::{
-    autofilter::{
-        FilterColumn, FilterCriterion, FilterJoin, FilterValue, SortCondition, SortState,
-    },
+    autofilter::{FilterColumn, FilterCriterion, FilterJoin, FilterValue, SortCondition, SortState},
     CellRef, Hyperlink, HyperlinkTarget, ManualPageBreaks, OutlinePr, Range, SheetPane,
     SheetProtection, SheetSelection, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
-
-#[cfg(test)]
-use formula_model::{Orientation, PageSetup, Scaling};
 
 use super::records;
 use super::rgce;
@@ -157,23 +152,6 @@ const RECORD_WINDOW2: u16 = 0x023E;
 const RECORD_SCL: u16 = 0x00A0;
 const RECORD_PANE: u16 = 0x0041;
 const RECORD_SELECTION: u16 = 0x001D;
-
-// Print/page setup records (worksheet substream).
-// - SETUP: [MS-XLS 2.4.296]
-// - LEFTMARGIN/RIGHTMARGIN/TOPMARGIN/BOTTOMMARGIN: [MS-XLS 2.4.128] etc.
-//
-// NOTE: Production code uses `biff::print_settings` for page setup parsing. The legacy parser
-// below is kept only for unit tests of BIFF record semantics.
-#[cfg(test)]
-const RECORD_SETUP: u16 = 0x00A1;
-#[cfg(test)]
-const RECORD_LEFTMARGIN: u16 = 0x0026;
-#[cfg(test)]
-const RECORD_RIGHTMARGIN: u16 = 0x0027;
-#[cfg(test)]
-const RECORD_TOPMARGIN: u16 = 0x0028;
-#[cfg(test)]
-const RECORD_BOTTOMMARGIN: u16 = 0x0029;
 
 // Manual page breaks (worksheet substream).
 // - VERTICALPAGEBREAKS: [MS-XLS 2.4.349]
@@ -338,14 +316,6 @@ pub(crate) struct SheetViewState {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct BiffSheetProtection {
     pub(crate) protection: SheetProtection,
-    pub(crate) warnings: Vec<String>,
-}
-
-#[cfg(test)]
-#[derive(Debug, Clone, Default)]
-#[allow(dead_code)]
-pub(crate) struct BiffSheetPrintSettings {
-    pub(crate) page_setup: PageSetup,
     pub(crate) warnings: Vec<String>,
 }
 
@@ -877,233 +847,7 @@ fn parse_vertical_page_breaks_record(
             .insert(col.saturating_sub(1) as u32);
     }
 }
-/// Best-effort parse of worksheet print/page setup settings (margins, scaling, paper size, etc).
-///
-/// This scan is resilient to malformed records: payload-level parse failures are surfaced as
-/// warnings and otherwise ignored.
-#[cfg(test)]
-pub(crate) fn parse_biff_sheet_print_settings(
-    workbook_stream: &[u8],
-    start: usize,
-) -> Result<BiffSheetPrintSettings, String> {
-    let mut out = BiffSheetPrintSettings::default();
 
-    let mut page_setup = PageSetup::default();
-
-    // We need to consult WSBOOL.fFitToPage to decide whether SETUP.iScale or SETUP.iFit* apply.
-    // Keep the raw SETUP fields around and compute scaling at the end so record order doesn't
-    // matter and "last wins" semantics are respected.
-    let mut setup_scale: Option<u16> = None;
-    let mut setup_fit_width: Option<u16> = None;
-    let mut setup_fit_height: Option<u16> = None;
-    let mut wsbool_fit_to_page: Option<bool> = None;
-
-    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
-
-    while let Some(next) = iter.next() {
-        let record = match next {
-            Ok(r) => r,
-            Err(err) => {
-                push_warning_bounded(&mut out.warnings, format!("malformed BIFF record: {err}"));
-                break;
-            }
-        };
-
-        if record.offset != start && records::is_bof_record(record.record_id) {
-            break;
-        }
-
-        let data = record.data;
-        match record.record_id {
-            // Page setup/margins/scaling.
-            RECORD_SETUP => {
-                // SETUP [MS-XLS 2.4.296]
-                //
-                // Payload (BIFF8):
-                // - iPaperSize:u16
-                // - iScale:u16
-                // - iPageStart:u16 (unused)
-                // - iFitWidth:u16
-                // - iFitHeight:u16
-                // - grbit:u16
-                // - iRes:u16 (unused)
-                // - iVRes:u16 (unused)
-                // - numHdr:Xnum (f64)
-                // - numFtr:Xnum (f64)
-                // - iCopies:u16 (unused)
-                if data.len() < 34 {
-                    push_warning_bounded(
-                        &mut out.warnings,
-                        format!(
-                            "truncated SETUP record at offset {} (expected 34 bytes, got {})",
-                            record.offset,
-                            data.len()
-                        ),
-                    );
-                    continue;
-                }
-
-                let i_paper_size = u16::from_le_bytes([data[0], data[1]]);
-                let i_scale = u16::from_le_bytes([data[2], data[3]]);
-                let i_fit_width = u16::from_le_bytes([data[6], data[7]]);
-                let i_fit_height = u16::from_le_bytes([data[8], data[9]]);
-                let grbit = u16::from_le_bytes([data[10], data[11]]);
-
-                let num_hdr = f64::from_le_bytes(data[16..24].try_into().unwrap());
-                let num_ftr = f64::from_le_bytes(data[24..32].try_into().unwrap());
-
-                // grbit flags:
-                // - fLandscape (bit1): 1=landscape, 0=portrait
-                // - fNoPls (bit2): if set, printer-related fields are undefined and must be ignored
-                // - fNoOrient (bit6): if set, fLandscape must be ignored and orientation defaults to portrait
-                const GRBIT_F_LANDSCAPE: u16 = 0x0002;
-                const GRBIT_F_NOPLS: u16 = 0x0004;
-                const GRBIT_F_NOORIENT: u16 = 0x0040;
-
-                let f_no_pls = (grbit & GRBIT_F_NOPLS) != 0;
-                let f_no_orient = (grbit & GRBIT_F_NOORIENT) != 0;
-                let f_landscape = (grbit & GRBIT_F_LANDSCAPE) != 0;
-
-                if !f_no_pls {
-                    setup_fit_width = Some(i_fit_width);
-                    setup_fit_height = Some(i_fit_height);
-                    // BIFF8 uses `iPaperSize==0` and values >=256 for printer-specific/custom
-                    // paper sizes. These sizes do not map cleanly onto OpenXML `ST_PaperSize`
-                    // numeric codes and are not representable in the model. Ignore these values
-                    // and keep whatever paper size we already have (typically the default).
-                    if i_paper_size == 0 || i_paper_size >= 256 {
-                        push_warning_bounded(
-                            &mut out.warnings,
-                            format!(
-                                "ignoring custom/invalid paper size code {i_paper_size} in SETUP record at offset {}",
-                                record.offset
-                            ),
-                        );
-                    } else {
-                        page_setup.paper_size.code = i_paper_size;
-                    }
-                    setup_scale = Some(i_scale);
-
-                    page_setup.orientation = if f_no_orient {
-                        Orientation::Portrait
-                    } else if f_landscape {
-                        Orientation::Landscape
-                    } else {
-                        Orientation::Portrait
-                    };
-                }
-
-                if num_hdr.is_finite() {
-                    page_setup.margins.header = num_hdr;
-                } else {
-                    push_warning_bounded(
-                        &mut out.warnings,
-                        format!(
-                            "invalid header margin in SETUP record at offset {}: {num_hdr}",
-                            record.offset
-                        ),
-                    );
-                }
-
-                if num_ftr.is_finite() {
-                    page_setup.margins.footer = num_ftr;
-                } else {
-                    push_warning_bounded(
-                        &mut out.warnings,
-                        format!(
-                            "invalid footer margin in SETUP record at offset {}: {num_ftr}",
-                            record.offset
-                        ),
-                    );
-                }
-            }
-            RECORD_LEFTMARGIN | RECORD_RIGHTMARGIN | RECORD_TOPMARGIN | RECORD_BOTTOMMARGIN => {
-                let record_name = match record.record_id {
-                    RECORD_LEFTMARGIN => "LEFTMARGIN",
-                    RECORD_RIGHTMARGIN => "RIGHTMARGIN",
-                    RECORD_TOPMARGIN => "TOPMARGIN",
-                    RECORD_BOTTOMMARGIN => "BOTTOMMARGIN",
-                    _ => unreachable!("checked in match arm"),
-                };
-                if data.len() < 8 {
-                    push_warning_bounded(
-                        &mut out.warnings,
-                        format!(
-                            "truncated {record_name} record at offset {} (expected 8 bytes, got {})",
-                            record.offset,
-                            data.len()
-                        ),
-                    );
-                    continue;
-                }
-                let value = f64::from_le_bytes(data[0..8].try_into().unwrap());
-                if !value.is_finite() {
-                    push_warning_bounded(
-                        &mut out.warnings,
-                        format!(
-                            "invalid {record_name} value at offset {}: {value}",
-                            record.offset
-                        ),
-                    );
-                    continue;
-                }
-                match record.record_id {
-                    RECORD_LEFTMARGIN => page_setup.margins.left = value,
-                    RECORD_RIGHTMARGIN => page_setup.margins.right = value,
-                    RECORD_TOPMARGIN => page_setup.margins.top = value,
-                    RECORD_BOTTOMMARGIN => page_setup.margins.bottom = value,
-                    _ => {}
-                }
-            }
-            RECORD_WSBOOL => {
-                // WSBOOL [MS-XLS 2.4.376]
-                // fFitToPage: bit8 (mask 0x0100)
-                if data.len() < 2 {
-                    push_warning_bounded(
-                        &mut out.warnings,
-                        format!(
-                            "truncated WSBOOL record at offset {} (expected >=2 bytes, got {})",
-                            record.offset,
-                            data.len()
-                        ),
-                    );
-                    continue;
-                }
-                let grbit = u16::from_le_bytes([data[0], data[1]]);
-                wsbool_fit_to_page = Some((grbit & 0x0100) != 0);
-            }
-            records::RECORD_EOF => break,
-            _ => {}
-        }
-    }
-
-    // Best-effort: WSBOOL.fFitToPage is the canonical indicator of whether SETUP's iFit* fields
-    // apply, but some producers omit WSBOOL from the worksheet stream. In that case, fall back to
-    // treating non-zero iFitWidth/iFitHeight as a signal that fit-to-page scaling is active.
-    let fit_to_page = wsbool_fit_to_page.unwrap_or_else(|| {
-        setup_fit_width.unwrap_or(0) != 0 || setup_fit_height.unwrap_or(0) != 0
-    });
-    if fit_to_page {
-        if let (Some(width), Some(height)) = (setup_fit_width, setup_fit_height) {
-            page_setup.scaling = Scaling::FitTo { width, height };
-        } else {
-            // Some `.xls` writers omit or truncate the SETUP record even when fit-to-page is
-            // enabled. Preserve the fit-to-page *mode* even when the target dimensions are
-            // unavailable.
-            page_setup.scaling = Scaling::FitTo {
-                width: 0,
-                height: 0,
-            };
-        }
-    } else {
-        let scale = setup_scale.unwrap_or(100);
-        page_setup.scaling = Scaling::Percent(if scale == 0 { 100 } else { scale });
-    }
-
-    out.page_setup = page_setup;
-
-    Ok(out)
-}
 #[derive(Debug, Clone, Copy)]
 struct Window2Flags {
     show_grid_lines: bool,
@@ -2816,6 +2560,17 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
+    use formula_model::{Orientation, PageSetup, Scaling};
+
+    use super::super::parse_biff_sheet_print_settings;
+
+    // Worksheet print/page setup related record ids used by the print settings parser.
+    const RECORD_SETUP: u16 = 0x00A1;
+    const RECORD_LEFTMARGIN: u16 = 0x0026;
+    const RECORD_RIGHTMARGIN: u16 = 0x0027;
+    const RECORD_TOPMARGIN: u16 = 0x0028;
+    const RECORD_BOTTOMMARGIN: u16 = 0x0029;
+
     fn record(id: u16, data: &[u8]) -> Vec<u8> {
         let mut out = Vec::with_capacity(4 + data.len());
         out.extend_from_slice(&id.to_le_bytes());
@@ -3682,7 +3437,7 @@ mod tests {
                     77,     // iScale (ignored when fit-to-page)
                     2,      // iFitWidth
                     3,      // iFitHeight
-                    0x0002, // landscape (fLandscape=1)
+                    0x0000, // landscape (SETUP.grbit.fPortrait=0)
                     0.5,    // header inches
                     0.6,    // footer inches
                 ),
@@ -3698,7 +3453,10 @@ mod tests {
         .concat();
 
         let parsed = parse_biff_sheet_print_settings(&stream, 0).expect("parse");
-        let setup = &parsed.page_setup;
+        let setup = parsed
+            .page_setup
+            .as_ref()
+            .expect("expected page setup from SETUP record");
         assert_eq!(setup.paper_size.code, 9);
         assert_eq!(setup.orientation, Orientation::Landscape);
         assert_eq!(setup.scaling, Scaling::FitTo { width: 2, height: 3 });
@@ -3717,7 +3475,7 @@ mod tests {
 
     #[test]
     fn parses_percent_scaling_when_fit_to_page_disabled() {
-        let grbit = 0x0002u16; // fLandscape=1
+        let grbit = 0x0000u16; // landscape (SETUP.grbit.fPortrait=0)
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
             record(
@@ -3730,7 +3488,10 @@ mod tests {
         .concat();
 
         let parsed = parse_biff_sheet_print_settings(&stream, 0).expect("parse");
-        let setup = &parsed.page_setup;
+        let setup = parsed
+            .page_setup
+            .as_ref()
+            .expect("expected page setup from SETUP record");
         assert_eq!(setup.scaling, Scaling::Percent(80));
     }
 
@@ -3749,7 +3510,10 @@ mod tests {
         .concat();
 
         let parsed = parse_biff_sheet_print_settings(&stream, 0).expect("parse");
-        let setup = &parsed.page_setup;
+        let setup = parsed
+            .page_setup
+            .as_ref()
+            .expect("expected page setup from SETUP record");
         assert_eq!(setup.paper_size, PageSetup::default().paper_size);
         assert_eq!(setup.orientation, Orientation::Portrait);
         assert_eq!(setup.scaling, Scaling::Percent(100));
@@ -3768,7 +3532,10 @@ mod tests {
         .concat();
 
         let parsed = parse_biff_sheet_print_settings(&stream, 0).expect("parse");
-        let setup = &parsed.page_setup;
+        let setup = parsed
+            .page_setup
+            .as_ref()
+            .expect("expected page setup from margin record");
         assert_eq!(setup.margins.left, 1.0);
         assert!(
             parsed
