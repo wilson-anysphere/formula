@@ -17,6 +17,17 @@ function flushPromises() {
   return new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
+function normalizeHtmlForSnapshot(html: string): string {
+  // React.useId() produces globally incrementing ids, so snapshotting raw HTML can
+  // churn if other tests add components that call useId(). Normalize the known
+  // ids we generate in these components so snapshots stay stable.
+  return html
+    .replace(/goal-seek-title-[^"\\s]+/g, "goal-seek-title-<id>")
+    .replace(/goal-seek-error-[^"\\s]+/g, "goal-seek-error-<id>")
+    .replace(/scenario-manager-error-[^"\\s]+/g, "scenario-manager-error-<id>")
+    .replace(/monte-carlo-error-[^"\\s]+/g, "monte-carlo-error-<id>");
+}
+
 function setTextInputValue(input: HTMLInputElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
   if (setter) {
@@ -100,7 +111,7 @@ describe("what-if UI components", () => {
 
     expect(host.querySelectorAll("[style]").length).toBe(0);
     expect(host.querySelector('[data-testid="scenario-manager-panel"]')).toBeTruthy();
-    expect(host.innerHTML).toMatchSnapshot();
+    expect(normalizeHtmlForSnapshot(host.innerHTML)).toMatchSnapshot();
   });
 
   it("ScenarioManagerPanel renders selected scenario metadata and a summary report table", async () => {
@@ -180,7 +191,7 @@ describe("what-if UI components", () => {
     expect(host.querySelector('[data-testid="scenario-manager-selected-meta"]')?.textContent).toContain("demo");
     expect(host.querySelector('[data-testid="scenario-manager-report"]')).toBeTruthy();
     expect(host.querySelectorAll("[style]").length).toBe(0);
-    expect(host.innerHTML).toMatchSnapshot();
+    expect(normalizeHtmlForSnapshot(host.innerHTML)).toMatchSnapshot();
   });
 
   it("GoalSeekDialog renders a dialog shell with labeled fields (no inline styles)", async () => {
@@ -200,7 +211,7 @@ describe("what-if UI components", () => {
     expect(dialog?.getAttribute("role")).toBe("dialog");
     expect(dialog?.getAttribute("aria-modal")).toBe("true");
     expect(dialog?.querySelectorAll("label").length).toBeGreaterThanOrEqual(3);
-    expect(host.innerHTML).toMatchSnapshot();
+    expect(normalizeHtmlForSnapshot(host.innerHTML)).toMatchSnapshot();
   });
 
   it("GoalSeekDialog shows progress + result after running", async () => {
@@ -233,7 +244,7 @@ describe("what-if UI components", () => {
     expect(host.querySelector('[data-testid="goal-seek-progress"]')).toBeTruthy();
     expect(host.querySelector('[data-testid="goal-seek-result"]')).toBeTruthy();
     expect(host.querySelectorAll("[style]").length).toBe(0);
-    expect(host.innerHTML).toMatchSnapshot();
+    expect(normalizeHtmlForSnapshot(host.innerHTML)).toMatchSnapshot();
   });
 
   it("MonteCarloWizard renders responsive rows with accessible input labels (no inline styles)", async () => {
@@ -252,7 +263,7 @@ describe("what-if UI components", () => {
     expect(host.querySelector('input[aria-label="Input cell"]')).toBeTruthy();
     expect(host.querySelector('select[aria-label="Distribution type"]')).toBeTruthy();
     expect(host.querySelector('input[aria-label="Distribution JSON"]')).toBeTruthy();
-    expect(host.innerHTML).toMatchSnapshot();
+    expect(normalizeHtmlForSnapshot(host.innerHTML)).toMatchSnapshot();
   });
 
   it("MonteCarloWizard shows progress + results after running", async () => {
@@ -301,6 +312,6 @@ describe("what-if UI components", () => {
     expect(host.querySelector('[data-testid="monte-carlo-progress"]')).toBeTruthy();
     expect(host.querySelector('[data-testid="monte-carlo-results"]')).toBeTruthy();
     expect(host.querySelectorAll("[style]").length).toBe(0);
-    expect(host.innerHTML).toMatchSnapshot();
+    expect(normalizeHtmlForSnapshot(host.innerHTML)).toMatchSnapshot();
   });
 });

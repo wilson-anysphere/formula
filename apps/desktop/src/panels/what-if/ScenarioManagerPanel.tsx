@@ -32,6 +32,9 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [invalidField, setInvalidField] = useState<"resultCells" | null>(null);
   const [busy, setBusy] = useState(false);
+  const reactInstanceId = React.useId();
+  const domInstanceId = useMemo(() => reactInstanceId.replace(/[^a-zA-Z0-9_-]/g, "-"), [reactInstanceId]);
+  const errorId = useMemo(() => `scenario-manager-error-${domInstanceId}`, [domInstanceId]);
 
   useEffect(() => {
     void (async () => {
@@ -113,7 +116,7 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
       <h3 className="what-if-panel__title">{t("whatIf.scenario.title")}</h3>
 
       {error ? (
-        <p className="what-if__message what-if__message--error" role="alert">
+        <p className="what-if__message what-if__message--error" role="alert" id={errorId}>
           {error}
         </p>
       ) : null}
@@ -186,6 +189,7 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
           autoCapitalize="off"
           aria-invalid={invalidField === "resultCells"}
           disabled={busy}
+          aria-describedby={invalidField === "resultCells" && error ? errorId : undefined}
         />
       </label>
 

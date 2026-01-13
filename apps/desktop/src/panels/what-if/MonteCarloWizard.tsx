@@ -30,6 +30,9 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
   const [result, setResult] = useState<SimulationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [invalidField, setInvalidField] = useState<"iterations" | "outputCells" | null>(null);
+  const reactInstanceId = React.useId();
+  const domInstanceId = useMemo(() => reactInstanceId.replace(/[^a-zA-Z0-9_-]/g, "-"), [reactInstanceId]);
+  const errorId = useMemo(() => `monte-carlo-error-${domInstanceId}`, [domInstanceId]);
 
   const parsedIterations = useMemo(() => Number(iterations), [iterations]);
   const parsedSeed = useMemo(() => Number(seed), [seed]);
@@ -93,7 +96,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
       <h3 className="what-if-panel__title">{t("whatIf.monteCarlo.title")}</h3>
 
       {error ? (
-        <p className="what-if__message what-if__message--error" role="alert">
+        <p className="what-if__message what-if__message--error" role="alert" id={errorId}>
           {error}
         </p>
       ) : null}
@@ -114,6 +117,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
             disabled={running}
             inputMode="numeric"
             aria-invalid={invalidField === "iterations"}
+            aria-describedby={invalidField === "iterations" && error ? errorId : undefined}
           />
         </label>
 
@@ -138,6 +142,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
             spellCheck={false}
             autoCapitalize="off"
             aria-invalid={invalidField === "outputCells"}
+            aria-describedby={invalidField === "outputCells" && error ? errorId : undefined}
           />
         </label>
       </div>
