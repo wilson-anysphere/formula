@@ -176,10 +176,10 @@ export function dedupeOverlappingResults(results, opts = {}) {
     seenIds.add(cand.id);
 
     const meta = cand.value?.metadata ?? {};
-    const workbookId =
-      typeof meta.workbookId === "string" && meta.workbookId
-        ? meta.workbookId
-        : null;
+    // `workbookId` was introduced later in the metadata schema. Preserve backwards
+    // compatibility: if it is missing/empty, treat it as a single implicit group so
+    // callers can still dedupe within a sheet.
+    const workbookId = typeof meta.workbookId === "string" && meta.workbookId ? meta.workbookId : null;
     const sheetName = meta.sheetName;
     const rect = meta.rect;
 
@@ -188,17 +188,8 @@ export function dedupeOverlappingResults(results, opts = {}) {
       for (const prev of kept) {
         const prevMeta = prev.value?.metadata ?? {};
         const prevWorkbookId =
-          typeof prevMeta.workbookId === "string" && prevMeta.workbookId
-            ? prevMeta.workbookId
-            : null;
-
-        // If both results have workbook ids, only dedupe within the same workbook.
-        // If only one has a workbook id, be conservative and assume they are different
-        // workbooks (avoid suppressing results across workbooks due to missing metadata).
-        if (workbookId !== prevWorkbookId) {
-          if (workbookId !== null || prevWorkbookId !== null) continue;
-        }
-
+          typeof prevMeta.workbookId === "string" && prevMeta.workbookId ? prevMeta.workbookId : null;
+        if (prevWorkbookId !== workbookId) continue;
         if (prevMeta.sheetName !== sheetName) continue;
         const prevRect = prevMeta.rect;
         if (!isValidRect(prevRect)) continue;
