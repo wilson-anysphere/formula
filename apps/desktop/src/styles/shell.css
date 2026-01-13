@@ -469,7 +469,20 @@ dialog.print-preview-dialog::backdrop {
     padding: 0 6px;
   }
 
+  /*
+    Keep the sheet position live region in the accessibility tree while removing it
+    from the visual layout on very narrow widths.
+  */
   .statusbar [data-testid="sheet-position"] {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 }
