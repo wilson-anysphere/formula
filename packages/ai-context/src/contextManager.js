@@ -374,9 +374,18 @@ export class ContextManager {
       const oldestEntry = this._sheetIndexCache.get(oldestKey);
       this._sheetIndexCache.delete(oldestKey);
       if (oldestEntry?.sheetName) {
-        const activeKeyForSheet = this._sheetNameToActiveCacheKey.get(oldestEntry.sheetName);
+        const sheetName = oldestEntry.sheetName;
+        const activeKeyForSheet = this._sheetNameToActiveCacheKey.get(sheetName);
         if (activeKeyForSheet === oldestKey) {
-          this._sheetNameToActiveCacheKey.delete(oldestEntry.sheetName);
+          this._sheetNameToActiveCacheKey.delete(sheetName);
+
+          // Bound in-memory RAG storage as well as the signature cache. When a sheet's active
+          // index entry is evicted from the LRU, delete the sheet's chunks from the vector
+          // store so `RagIndex.search()` doesn't keep considering stale sheets forever.
+          if (typeof this.ragIndex?.store?.deleteByPrefix === "function") {
+            throwIfAborted(signal);
+            await this.ragIndex.store.deleteByPrefix(`${sheetName}-region-`, { signal });
+          }
         }
       }
     }

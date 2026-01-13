@@ -129,6 +129,44 @@ test("buildContext: schema metadata updates (namedRanges) do not force re-indexi
   assert.deepEqual(out2.schema.namedRanges, sheet.namedRanges);
 });
 
+test("buildContext: LRU cache eviction removes old sheet chunks from the in-memory store", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 1000 });
+  // Force eviction quickly.
+  cm._sheetIndexCacheLimit = 2;
+
+  const sheetA = makeSheet(
+    [
+      ["Name", "Value"],
+      ["A", 1],
+    ],
+    "SheetA",
+  );
+  const sheetB = makeSheet(
+    [
+      ["Name", "Value"],
+      ["B", 2],
+    ],
+    "SheetB",
+  );
+  const sheetC = makeSheet(
+    [
+      ["Name", "Value"],
+      ["C", 3],
+    ],
+    "SheetC",
+  );
+
+  await cm.buildContext({ sheet: sheetA, query: "a" });
+  assert.equal(cm.ragIndex.store.size, 1);
+
+  await cm.buildContext({ sheet: sheetB, query: "b" });
+  assert.equal(cm.ragIndex.store.size, 2);
+
+  // Indexing a 3rd distinct sheet should evict the oldest one and delete its chunks.
+  await cm.buildContext({ sheet: sheetC, query: "c" });
+  assert.equal(cm.ragIndex.store.size, 2);
+});
+
 test("buildContext: mutated sheet data triggers re-indexing and updates stored chunks", async () => {
   const ragIndex = new RagIndex();
   let indexCalls = 0;
