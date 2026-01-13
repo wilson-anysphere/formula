@@ -1,11 +1,15 @@
-import type { Anchor, DrawingObject, ImageEntry, ImageStore } from "./types";
+import { createDrawingObjectId, type Anchor, type DrawingObject, type ImageEntry, type ImageStore } from "./types";
 
 export async function insertImageFromFile(
   file: File,
   opts: {
     imageId: string;
     anchor: Anchor;
-    nextObjectId: number;
+    /**
+     * @deprecated Drawing object ids must be globally unique across collaborators; callers should not
+     *             pass incrementing counters anymore. This field is ignored.
+     */
+    nextObjectId?: number;
     objects: DrawingObject[];
     images: ImageStore;
   },
@@ -16,7 +20,7 @@ export async function insertImageFromFile(
   opts.images.set(image);
 
   const object: DrawingObject = {
-    id: opts.nextObjectId,
+    id: createDrawingObjectId(),
     kind: { type: "image", imageId: image.id },
     anchor: opts.anchor,
     zOrder: opts.objects.length,
@@ -41,4 +45,3 @@ function guessMimeType(name: string): string {
       return "application/octet-stream";
   }
 }
-

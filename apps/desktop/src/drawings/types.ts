@@ -77,3 +77,26 @@ export interface Rect {
   width: number;
   height: number;
 }
+
+export function createDrawingObjectId(): number {
+  // We keep `DrawingObject.id` as a number for minimal disruption, but IDs must be globally unique
+  // across collaborators. Generate a random 53-bit integer so it is safe to represent as a JS number.
+  //
+  // Collision probability: with a uniform 53-bit space, the birthday bound gives ~n^2 / 2^54.
+  // Even at 10k inserted objects this is ~5e-9.
+  const cryptoObj = globalThis.crypto;
+  if (cryptoObj && typeof cryptoObj.getRandomValues === "function") {
+    // 53 bits = 21 high bits + 32 low bits.
+    const parts = new Uint32Array(2);
+    cryptoObj.getRandomValues(parts);
+    const high21 = parts[0] & 0x1fffff;
+    const id = high21 * 2 ** 32 + parts[1];
+    // Avoid `0` (useful as a sentinel in some code paths).
+    if (id !== 0) return id;
+  }
+
+  // Fallback for environments without WebCrypto. `Math.random()` is not cryptographically secure,
+  // but still provides sufficient entropy to make collisions extremely unlikely at our scale.
+  const fallback = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+  return fallback === 0 ? 1 : fallback;
+}
