@@ -54,6 +54,42 @@ describe("FormulaBarView fx function picker", () => {
     host.remove();
   });
 
+  it("navigates function results with arrow keys", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    const fxButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-fx-button"]')!;
+    fxButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    const pickerInput = host.querySelector<HTMLInputElement>('[data-testid="formula-function-picker-input"]')!;
+    pickerInput.value = "sum";
+    pickerInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    const items = Array.from(
+      host.querySelectorAll<HTMLLIElement>('[data-testid^="formula-function-picker-item-"]'),
+    );
+    expect(items.length).toBeGreaterThan(1);
+
+    const secondName = items[1]!.dataset.testid!.replace("formula-function-picker-item-", "");
+
+    // Move selection to the second result.
+    pickerInput.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    expect(items[0]!.getAttribute("aria-selected")).toBe("false");
+    expect(items[1]!.getAttribute("aria-selected")).toBe("true");
+
+    // Insert selected function.
+    pickerInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+
+    expect(view.textarea.value).toBe(`=${secondName}(`);
+    expect(view.textarea.selectionStart).toBe(view.textarea.value.length);
+    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length);
+
+    host.remove();
+  });
+
   it("closes on Escape and restores focus to the formula input", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
