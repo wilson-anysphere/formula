@@ -17,10 +17,10 @@ test.describe("formula bar - fx function picker", () => {
     await page.getByTestId("formula-fx-button").click();
 
     // 3) Search/select a known function.
-    const pickerInput = page.getByTestId("command-palette-input");
+    const pickerInput = page.getByTestId("formula-function-picker-input");
     await expect(pickerInput).toBeVisible();
     await pickerInput.fill("sum");
-    const sumOption = page.getByTestId("command-palette-function-SUM");
+    const sumOption = page.getByTestId("formula-function-picker-item-SUM");
     await expect(sumOption).toBeVisible();
     await sumOption.click();
 

@@ -1214,9 +1214,10 @@ export class FormulaBarView {
     const start = Math.max(0, Math.min(selection.start, prevText.length));
     const end = Math.max(0, Math.min(selection.end, prevText.length));
 
-    const insert = `${name}(`;
+    const insert = `${name}()`;
     const nextText = prevText.slice(0, start) + insert + prevText.slice(end);
-    const cursor = start + insert.length;
+    // Place the caret inside the parentheses so users can immediately type arguments.
+    const cursor = start + Math.max(0, insert.length - 1);
 
     this.textarea.value = nextText;
     try {
@@ -1261,6 +1262,7 @@ export class FormulaBarView {
       const fn = items[i]!;
       const li = document.createElement("li");
       li.className = "command-palette__item";
+      li.dataset.testid = `formula-function-picker-item-${fn.name}`;
       li.setAttribute("role", "option");
       li.setAttribute("aria-selected", i === this.#functionPickerSelectedIndex ? "true" : "false");
 
