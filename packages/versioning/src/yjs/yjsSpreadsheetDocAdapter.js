@@ -646,6 +646,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
     /**
      * @param {"update"} event
      * @param {() => void} listener
+     * @returns {() => void} unsubscribe
      */
     on(event, listener) {
       if (event !== "update") {

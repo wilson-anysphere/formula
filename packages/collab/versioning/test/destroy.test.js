@@ -4,13 +4,39 @@ import * as Y from "yjs";
 
 import { createCollabVersioning } from "../src/index.ts";
 
+/**
+ * Track `doc.on("update", ...)` registrations without relying on Yjs internals.
+ *
+ * @param {Y.Doc} doc
+ */
+function trackUpdateListeners(doc) {
+  /** @type {Set<unknown>} */
+  const listeners = new Set();
+  const originalOn = doc.on.bind(doc);
+  const originalOff = doc.off.bind(doc);
+
+  doc.on = (eventName, listener) => {
+    if (eventName === "update") listeners.add(listener);
+    return originalOn(eventName, listener);
+  };
+  doc.off = (eventName, listener) => {
+    if (eventName === "update") listeners.delete(listener);
+    return originalOff(eventName, listener);
+  };
+
+  return listeners;
+}
+
 test("CollabVersioning.destroy unsubscribes from Yjs document updates", async (t) => {
   const doc = new Y.Doc();
   t.after(() => doc.destroy());
+  const updateListeners = trackUpdateListeners(doc);
 
   // Instantiate workbook roots before VersionManager attaches listeners so the
   // test only measures the effects of *updates*.
   const cells = doc.getMap("cells");
+
+  assert.equal(updateListeners.size, 0);
 
   const versioning = createCollabVersioning({
     // @ts-expect-error - minimal session stub for unit tests
@@ -18,9 +44,11 @@ test("CollabVersioning.destroy unsubscribes from Yjs document updates", async (t
     autoStart: false,
   });
 
+  assert.equal(updateListeners.size, 1);
   assert.equal(versioning.manager.dirty, false);
 
   versioning.destroy();
+  assert.equal(updateListeners.size, 0);
 
   // Workbook edits after destroy should not mark the old manager dirty.
   cells.set("Sheet1:0:0", "alpha");
@@ -33,8 +61,11 @@ test("CollabVersioning.destroy unsubscribes from Yjs document updates", async (t
 test("CollabVersioning create/destroy cycles do not accumulate dirty listeners", (t) => {
   const doc = new Y.Doc();
   t.after(() => doc.destroy());
+  const updateListeners = trackUpdateListeners(doc);
 
   const cells = doc.getMap("cells");
+
+  assert.equal(updateListeners.size, 0);
 
   const versioning1 = createCollabVersioning({
     // @ts-expect-error - minimal session stub for unit tests
@@ -42,19 +73,23 @@ test("CollabVersioning create/destroy cycles do not accumulate dirty listeners",
     autoStart: false,
   });
   const manager1 = versioning1.manager;
+  assert.equal(updateListeners.size, 1);
   versioning1.destroy();
+  assert.equal(updateListeners.size, 0);
 
   const versioning2 = createCollabVersioning({
     // @ts-expect-error - minimal session stub for unit tests
     session: { doc },
     autoStart: false,
   });
-  t.after(() => versioning2.destroy());
   const manager2 = versioning2.manager;
+  assert.equal(updateListeners.size, 1);
 
   cells.set("Sheet1:0:0", "alpha");
 
   assert.equal(manager1.dirty, false);
   assert.equal(manager2.dirty, true);
-});
 
+  versioning2.destroy();
+  assert.equal(updateListeners.size, 0);
+});

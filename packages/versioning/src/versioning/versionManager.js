@@ -159,7 +159,7 @@ function randomUUID() {
  * @typedef {{
  *   encodeState(): Uint8Array;
  *   applyState(snapshot: Uint8Array): void;
- *   on(event: "update", listener: () => void): any;
+ *   on(event: "update", listener: () => void): void | (() => void);
  * }} VersionedDoc
  */
 
