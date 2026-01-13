@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DataTable, type Query, type QueryOperation } from "@formula/power-query";
 
+import { setLocale } from "../../../i18n/index.js";
 import { AddStepMenu } from "./AddStepMenu";
 
 // React 18 relies on this flag to suppress act() warnings in test runners.
@@ -34,6 +35,7 @@ describe("AddStepMenu", () => {
   let root: ReturnType<typeof createRoot> | null = null;
 
   beforeEach(() => {
+    setLocale("en-US");
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
@@ -110,6 +112,21 @@ describe("AddStepMenu", () => {
     });
   });
 
+  it("disables schema-dependent operations when preview schema is missing", async () => {
+    await act(async () => {
+      root?.render(<AddStepMenu onAddStep={() => {}} aiContext={{ query: baseQuery(), preview: null }} />);
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "+ Add step").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const filterButton = findButtonByText(host!, "Filter Rows");
+    expect(filterButton.disabled).toBe(true);
+    expect(filterButton.title).toContain("Preview schema required");
+    expect(host?.textContent).toContain("Preview schema required");
+  });
+
   it("handles empty AI intent and renders returned suggestions with readable labels", async () => {
     const preview = new DataTable([{ name: "Region", type: "string" }], []);
     const query = baseQuery();
@@ -163,4 +180,3 @@ describe("AddStepMenu", () => {
     expect(suggestionButtons[0]?.textContent).toBe("Filter Rows (Region)");
   });
 });
-

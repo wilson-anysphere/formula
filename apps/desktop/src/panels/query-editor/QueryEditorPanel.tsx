@@ -6,6 +6,7 @@ import { StepsList } from "./components/StepsList";
 import { PreviewGrid } from "./components/PreviewGrid";
 import { SchemaView } from "./components/SchemaView";
 import { AddStepMenu } from "./components/AddStepMenu";
+import { formatQueryOperationLabel } from "./operationLabels";
 
 export type QueryEditorPanelProps = {
   query: Query;
@@ -116,9 +117,18 @@ export function QueryEditorPanel(props: QueryEditorPanelProps) {
         </div>
         <AddStepMenu
           onAddStep={(operation) => {
+            const baseName = formatQueryOperationLabel(operation);
+            const existingNames = new Set(props.query.steps.map((step) => step.name));
+            let name = baseName;
+            let suffix = 1;
+            while (existingNames.has(name)) {
+              name = `${baseName} ${suffix}`;
+              suffix += 1;
+            }
+
             const step: QueryStep = {
               id: crypto.randomUUID(),
-              name: operation.type,
+              name,
               operation,
             };
             const insertAt = effectiveSelectedStepIndex + 1;

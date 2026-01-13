@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 
 import type { ArrowTableAdapter, DataTable, Query, QueryOperation } from "@formula/power-query";
 import { t } from "../../../i18n/index.js";
+import { formatQueryOperationLabel } from "../operationLabels";
 
 export function AddStepMenu(props: {
   onAddStep: (op: QueryOperation) => void;
@@ -111,40 +112,6 @@ export function AddStepMenu(props: {
     ];
   }, [firstColumnName, schemaReady, schemaRequiredReason, secondColumnName]);
 
-  function humanizeOperationType(type: string): string {
-    return type
-      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-      .replace(/^./, (ch) => ch.toUpperCase());
-  }
-
-  function describeOperation(op: QueryOperation): string {
-    switch (op.type) {
-      case "filterRows": {
-        const column =
-          op.predicate?.type === "comparison" && typeof op.predicate.column === "string" ? op.predicate.column : "";
-        return column ? `${t("queryEditor.addStep.op.filterRows")} (${column})` : t("queryEditor.addStep.op.filterRows");
-      }
-      case "sortRows": {
-        const col = op.sortBy?.[0]?.column ?? "";
-        return col ? `${t("queryEditor.addStep.op.sort")} (${col})` : t("queryEditor.addStep.op.sort");
-      }
-      case "removeColumns":
-        return t("queryEditor.addStep.op.removeColumns");
-      case "selectColumns":
-        return t("queryEditor.addStep.op.keepColumns");
-      case "renameColumn":
-        return t("queryEditor.addStep.op.renameColumns");
-      case "changeType":
-        return t("queryEditor.addStep.op.changeType");
-      case "splitColumn":
-        return t("queryEditor.addStep.op.splitColumn");
-      case "groupBy":
-        return t("queryEditor.addStep.op.groupBy");
-      default:
-        return humanizeOperationType(op.type);
-    }
-  }
-
   return (
     <div className="query-editor-add-step">
       <div className="query-editor-add-step__menu">
@@ -233,7 +200,7 @@ export function AddStepMenu(props: {
                     className="query-editor-add-step__suggestion"
                     title={JSON.stringify(op, null, 2)}
                   >
-                    {describeOperation(op)}
+                    {formatQueryOperationLabel(op)}
                   </button>
                 ))
               )}
