@@ -24,6 +24,45 @@ describe("ToolExecutor include_formula_values", () => {
     expect(result.data?.values).toEqual([[2]]);
   });
 
+  it("read_range surfaces computed values for formula cells under DLP ALLOW decisions when enabled", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { formula: "=1+1", value: 2 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      include_formula_values: true,
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true,
+            },
+          },
+        },
+        audit_logger,
+      },
+    });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A1" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+    expect(result.data?.values).toEqual([[2]]);
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event.decision?.decision).toBe("allow");
+  });
+
   it("compute_statistics includes numeric values from formula cells when enabled", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { formula: "=1+1", value: 2 });
