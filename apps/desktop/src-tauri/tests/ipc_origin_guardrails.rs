@@ -116,6 +116,10 @@ fn commands_rs_privileged_commands_enforce_origin_guards() {
         "marketplace_search",
         "marketplace_get_extension",
         "marketplace_download_package",
+        // Updater flows (network + privileged restart/exit).
+        "check_for_updates",
+        "quit_app",
+        "restart_app",
         // Macro + Python execution.
         "run_macro",
         "run_python_script",
@@ -156,5 +160,15 @@ fn clipboard_mod_privileged_commands_enforce_origin_guards() {
 
     for cmd in ["clipboard_read", "clipboard_write"] {
         assert_ipc_origin_checks(&clipboard_mod, file, cmd);
+    }
+}
+
+#[test]
+fn updater_rs_privileged_commands_enforce_origin_guards() {
+    let updater_rs = read_repo_file("src/updater.rs");
+    let file = "src/updater.rs";
+
+    for cmd in ["install_downloaded_update"] {
+        assert_ipc_origin_checks(&updater_rs, file, cmd);
     }
 }

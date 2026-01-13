@@ -4597,9 +4597,14 @@ pub async fn fire_selection_change(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn check_for_updates(
+    window: tauri::WebviewWindow,
     app: tauri::AppHandle,
     source: crate::updater::UpdateCheckSource,
 ) -> Result<(), String> {
+    ipc_origin::ensure_main_window(window.label(), "update checks", ipc_origin::Verb::Are)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "update checks", ipc_origin::Verb::Are)?;
+
     crate::updater::spawn_update_check(&app, source);
     Ok(())
 }
@@ -4637,7 +4642,11 @@ pub async fn open_external_url(window: tauri::Window, url: String) -> Result<(),
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub fn quit_app() {
+pub fn quit_app(window: tauri::WebviewWindow) -> Result<(), String> {
+    ipc_origin::ensure_main_window(window.label(), "app quitting", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "app quitting", ipc_origin::Verb::Is)?;
+
     // We intentionally use a hard process exit here. The desktop shell already delegates
     // "should we quit?" decisions (event macros + unsaved prompts) to the frontend.
     // Once the frontend invokes this command, exiting immediately avoids re-entering the
@@ -4647,7 +4656,11 @@ pub fn quit_app() {
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub fn restart_app(app: tauri::AppHandle) {
+pub fn restart_app(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(), String> {
+    ipc_origin::ensure_main_window(window.label(), "app restart", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "app restart", ipc_origin::Verb::Is)?;
+
     // For update flows we need a graceful shutdown so Tauri and its plugins (notably
     // `tauri-plugin-updater`) can complete any pending work before the process exits.
     //
@@ -4667,6 +4680,8 @@ pub fn restart_app(app: tauri::AppHandle) {
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     app.exit(0);
+
+    Ok(())
 }
 
 // Clipboard bridge commands.
