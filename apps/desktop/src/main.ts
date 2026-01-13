@@ -77,6 +77,7 @@ import type { CollabSession } from "@formula/collab-session";
 import * as Y from "yjs";
 import { startWorkbookSync } from "./tauri/workbookSync";
 import { TauriWorkbookBackend } from "./tauri/workbookBackend";
+import { getTauriDialogOrThrow, getTauriEventApiOrThrow, getTauriWindowHandleOrThrow } from "./tauri/api";
 import * as nativeDialogs from "./tauri/nativeDialogs";
 import { shellOpen } from "./tauri/shellOpen";
 import { setTrayStatus } from "./tauri/trayStatus";
@@ -9115,61 +9116,9 @@ sheetSwitcherEl.addEventListener("change", () => {
   })();
 });
 
-type TauriListen = (event: string, handler: (event: any) => void) => Promise<() => void>;
-
-function getTauriListen(): TauriListen {
-  const listen = (globalThis as any).__TAURI__?.event?.listen as TauriListen | undefined;
-  if (!listen) {
-    throw new Error("Tauri event API not available");
-  }
-  return listen;
-}
-
-type TauriEmit = (event: string, payload?: any) => Promise<void> | void;
-
-function getTauriEmit(): TauriEmit | null {
-  const emit = (globalThis as any).__TAURI__?.event?.emit as TauriEmit | undefined;
-  return emit ?? null;
-}
-
-type TauriDialogOpen = (options?: Record<string, unknown>) => Promise<string | string[] | null>;
-type TauriDialogSave = (options?: Record<string, unknown>) => Promise<string | null>;
-
-function getTauriDialog(): { open: TauriDialogOpen; save: TauriDialogSave } {
-  const tauri = (globalThis as any).__TAURI__;
-  const dialog = tauri?.dialog ?? tauri?.plugin?.dialog;
-  const open = dialog?.open as TauriDialogOpen | undefined;
-  const save = dialog?.save as TauriDialogSave | undefined;
-  if (!open || !save) {
-    throw new Error("Tauri dialog API not available");
-  }
-  return { open, save };
-}
-
-function getTauriWindowHandle(): any {
-  const winApi = (globalThis as any).__TAURI__?.window;
-  if (!winApi) {
-    throw new Error("Tauri window API not available");
-  }
-
-  // Tauri v2 exposes window handles via helper functions; keep this flexible since
-  // we intentionally avoid a hard dependency on `@tauri-apps/api`.
-  const handle =
-    (typeof winApi.getCurrentWebviewWindow === "function" ? winApi.getCurrentWebviewWindow() : null) ??
-    (typeof winApi.getCurrentWindow === "function" ? winApi.getCurrentWindow() : null) ??
-    (typeof winApi.getCurrent === "function" ? winApi.getCurrent() : null) ??
-    winApi.appWindow ??
-    null;
-
-  if (!handle) {
-    throw new Error("Tauri window handle not available");
-  }
-  return handle;
-}
-
 async function hideTauriWindow(): Promise<void> {
   try {
-    const win = getTauriWindowHandle();
+    const win = getTauriWindowHandleOrThrow();
     if (typeof win.hide === "function") {
       await win.hide();
       return;
@@ -9187,7 +9136,7 @@ async function hideTauriWindow(): Promise<void> {
 
 async function minimizeTauriWindow(): Promise<void> {
   try {
-    const win = getTauriWindowHandle();
+    const win = getTauriWindowHandleOrThrow();
     if (typeof win.minimize === "function") {
       await win.minimize();
       return;
@@ -9203,7 +9152,7 @@ async function minimizeTauriWindow(): Promise<void> {
 
 async function toggleTauriWindowMaximize(): Promise<void> {
   try {
-    const win = getTauriWindowHandle();
+    const win = getTauriWindowHandleOrThrow();
     if (typeof win.toggleMaximize === "function") {
       await win.toggleMaximize();
       return;
@@ -9708,7 +9657,7 @@ async function openWorkbookFromPath(
 
 async function promptOpenWorkbook(): Promise<void> {
   if (!tauriBackend) return;
-  const { open } = getTauriDialog();
+  const { open } = getTauriDialogOrThrow();
   const selection = await open({
     multiple: false,
     filters: getOpenFileFilters(),
@@ -9775,7 +9724,7 @@ async function handleSaveAs(
   if (!activeWorkbook) return;
 
   const previousPanelWorkbookId = options.previousPanelWorkbookId ?? activePanelWorkbookId;
-  const { save } = getTauriDialog();
+  const { save } = getTauriDialogOrThrow();
   const path = await save({
     filters: [
       { name: t("fileDialog.filters.excelWorkbook"), extensions: ["xlsx"] },
@@ -9969,8 +9918,7 @@ try {
   // - open-file-ready, oauth-redirect-ready
   // - close-prep-done, close-handled
   // - updater-ui-ready, coi-check-result
-  const listen = getTauriListen();
-  const emit = getTauriEmit();
+  const { listen, emit } = getTauriEventApiOrThrow();
   let pendingOpenFiles: Promise<void> = Promise.resolve();
 
   const queueOpenWorkbook = (path: string) => {

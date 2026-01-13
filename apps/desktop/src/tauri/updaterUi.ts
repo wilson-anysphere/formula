@@ -4,6 +4,7 @@ import { markKeybindingBarrier } from "../keybindingBarrier.js";
 
 import { requestAppRestart } from "./appQuit";
 import { notify } from "./notifications";
+import { getTauriEventApiOrNull, getTauriWindowHandleOrNull, type TauriListen } from "./api";
 import { shellOpen } from "./shellOpen";
 import { installUpdateAndRestart } from "./updater";
 
@@ -45,8 +46,6 @@ type UpdaterEventPayload = {
   downloadUrl?: string;
   download_url?: string;
 };
-
-type TauriListen = (event: string, handler: (event: any) => void) => Promise<() => void>;
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
@@ -218,25 +217,11 @@ function setManualUpdateCheckFollowUp(active: boolean): void {
   }
 }
 function getTauriListen(): TauriListen | null {
-  const listen = (globalThis as any).__TAURI__?.event?.listen as TauriListen | undefined;
-  if (typeof listen !== "function") return null;
-  return listen;
+  return getTauriEventApiOrNull()?.listen ?? null;
 }
 
 function getTauriWindowHandle(): any | null {
-  const winApi = (globalThis as any).__TAURI__?.window;
-  if (!winApi) return null;
-
-  // Mirrors the flexible handle lookup used in `main.ts`. We intentionally avoid
-  // a hard dependency on `@tauri-apps/api`.
-  const handle =
-    (typeof winApi.getCurrentWebviewWindow === "function" ? winApi.getCurrentWebviewWindow() : null) ??
-    (typeof winApi.getCurrentWindow === "function" ? winApi.getCurrentWindow() : null) ??
-    (typeof winApi.getCurrent === "function" ? winApi.getCurrent() : null) ??
-    winApi.appWindow ??
-    null;
-
-  return handle ?? null;
+  return getTauriWindowHandleOrNull();
 }
 
 async function showMainWindowBestEffort(): Promise<void> {

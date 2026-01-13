@@ -13,6 +13,7 @@ import {
   onDesktopPowerQueryServiceChanged,
 } from "../../power-query/service.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
+import { getTauriEventApiOrNull } from "../../tauri/api";
 import { showInputBox } from "../../extensions/ui.js";
 
 import { PanelIds } from "../panelRegistry.js";
@@ -61,7 +62,7 @@ const EXAMPLE_LOOPBACK_OAUTH_REDIRECT_URI = "http://127.0.0.1:4242/oauth/callbac
 const LOOPBACK_REDIRECT_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 
 function hasTauriEventApi(): boolean {
-  return typeof (globalThis as any).__TAURI__?.event?.listen === "function";
+  return getTauriEventApiOrNull() != null;
 }
 
 function supportsDesktopOAuthRedirectCapture(redirectUri: string): boolean {

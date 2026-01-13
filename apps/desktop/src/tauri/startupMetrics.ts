@@ -1,3 +1,5 @@
+import { getTauriEventApiOrNull } from "./api";
+
 export type StartupTimings = {
   /**
    * Monotonic ms since native process start, reported by the Rust host.
@@ -75,8 +77,7 @@ function getTauriInvoke(): TauriInvoke | null {
 }
 
 function getTauriListen(): TauriListen | null {
-  const listen = (globalThis as any).__TAURI__?.event?.listen as TauriListen | undefined;
-  return typeof listen === "function" ? listen : null;
+  return getTauriEventApiOrNull()?.listen ?? null;
 }
 
 export function getStartupTimings(): StartupTimings {

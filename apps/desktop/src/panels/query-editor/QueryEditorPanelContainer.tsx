@@ -4,6 +4,7 @@ import { parseCronExpression, type Query } from "@formula/power-query";
 
 import { parseA1 } from "../../document/coords.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
+import { getTauriDialogOrNull } from "../../tauri/api";
 import { showInputBox } from "../../extensions/ui.js";
 
 import type { QuerySheetDestination } from "../../power-query/applyToDocument.js";
@@ -44,15 +45,8 @@ function defaultQuery(): Query {
   };
 }
 
-type TauriDialogOpen = (options?: Record<string, unknown>) => Promise<string | string[] | null>;
-
-function getTauriDialogOpen(): TauriDialogOpen | null {
-  const open = (globalThis as any).__TAURI__?.dialog?.open as TauriDialogOpen | undefined;
-  return typeof open === "function" ? open : null;
-}
-
 async function pickFile(extensions: string[]): Promise<string | null> {
-  const open = getTauriDialogOpen();
+  const open = getTauriDialogOrNull()?.open ?? null;
   if (open) {
     const result = await open({
       multiple: false,
