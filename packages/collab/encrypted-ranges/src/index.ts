@@ -132,10 +132,6 @@ function yRangeToEncryptedRange(value: unknown, fallbackId?: string): EncryptedR
   const obj = map ? null : value && typeof value === "object" ? (value as any) : null;
   const get = (k: string): unknown => (map ? map.get(k) : obj ? obj[k] : undefined);
 
-  const idRaw = coerceString(get("id"))?.trim() ?? "";
-  const id = idRaw || String(fallbackId ?? "").trim();
-  if (!id) return null;
-
   const sheetIdRaw = coerceString(get("sheetId"));
   const keyIdRaw = coerceString(get("keyId"));
   const sheetId = sheetIdRaw?.trim() ?? "";
@@ -151,6 +147,17 @@ function yRangeToEncryptedRange(value: unknown, fallbackId?: string): EncryptedR
     return null;
   }
   if (startRow > endRow || startCol > endCol) return null;
+
+  // Legacy support: older clients stored encryptedRanges entries without an `id` field
+  // (plain objects in a Y.Array). Derive a deterministic id from the range fields so:
+  // - policy helpers can still find these ranges, and
+  // - migrations that rewrite encryptedRanges into canonical Y.Maps don't drop them.
+  //
+  // This also intentionally dedupes identical legacy ranges.
+  const idRaw = coerceString(get("id"))?.trim() ?? "";
+  const idFromKey = String(fallbackId ?? "").trim();
+  const id = idRaw || idFromKey || `legacy:${sheetId}:${startRow}:${startCol}:${endRow}:${endCol}:${keyId}`;
+  if (!id) return null;
 
   const createdAtRaw = get("createdAt");
   const createdAtNum =

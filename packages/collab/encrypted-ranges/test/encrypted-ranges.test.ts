@@ -240,4 +240,37 @@ describe("@formula/collab-encrypted-ranges", () => {
     mgr.remove("range-1");
     expect(mgr.list()).toHaveLength(0);
   });
+
+  it("policy helper supports legacy encryptedRanges entries without id", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Array<any>();
+    ranges.push([
+      {
+        // Legacy shape (pre-id): plain object entries in the encryptedRanges array.
+        sheetId: "s1",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+        keyId: "k1",
+      },
+    ]);
+
+    doc.transact(() => {
+      metadata.set("encryptedRanges", ranges);
+    });
+
+    const policy = createEncryptionPolicyFromDoc(doc);
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 0, col: 0 })).toBe(true);
+    expect(policy.keyIdForCell({ sheetId: "s1", row: 0, col: 0 })).toBe("k1");
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 0, col: 1 })).toBe(false);
+
+    const mgr = new EncryptedRangeManager({ doc });
+    const list = mgr.list();
+    expect(list).toHaveLength(1);
+    expect(list[0]!.id).toMatch(/^legacy:/);
+  });
 });

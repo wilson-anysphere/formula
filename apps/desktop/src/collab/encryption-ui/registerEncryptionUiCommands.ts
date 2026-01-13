@@ -5,8 +5,8 @@ import type { Range } from "../../selection/types";
 import { rangeToA1 } from "../../selection/a1";
 
 import { base64ToBytes, bytesToBase64 } from "@formula/collab-encryption";
+import { createEncryptionPolicyFromDoc, type EncryptedRangeManager } from "@formula/collab-encrypted-ranges";
 import { serializeEncryptionKeyExportString, parseEncryptionKeyExportString } from "./keyExportFormat";
-import type { EncryptedRangeManager } from "./encryptedRangeManager";
 
 const COMMAND_CATEGORY = "Collaboration";
 
@@ -124,7 +124,8 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         return;
       }
 
-      manager.addEncryptedRange({ sheetId, ...range, keyId: storedKeyId });
+      const createdBy = session.getPermissions()?.userId ?? undefined;
+      manager.add({ sheetId, ...range, keyId: storedKeyId, createdAt: Date.now(), ...(createdBy ? { createdBy } : {}) });
 
       const exportString = serializeEncryptionKeyExportString({ docId, keyId: storedKeyId, keyBytes });
       void tryCopyToClipboard(exportString);
@@ -155,8 +156,9 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       const active = app.getActiveCell();
       const sheetId = app.getCurrentSheetId();
       const docId = session.doc.guid;
-      const range = manager.findRangeForCell({ sheetId, row: active.row, col: active.col });
-      if (!range) {
+      const policy = createEncryptionPolicyFromDoc(session.doc);
+      const keyId = policy.keyIdForCell({ sheetId, row: active.row, col: active.col });
+      if (!keyId) {
         showToast("The active cell is not inside an encrypted range.", "warning");
         return;
       }
@@ -167,11 +169,11 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         return;
       }
 
-      const cached = keyStore.getCachedKey(docId, range.keyId);
+      const cached = keyStore.getCachedKey(docId, keyId);
       let keyBytes: Uint8Array | null = cached?.keyBytes ?? null;
       if (!keyBytes) {
         try {
-          const entry = await keyStore.get(docId, range.keyId);
+          const entry = await keyStore.get(docId, keyId);
           if (entry) {
             keyBytes = base64ToBytes(entry.keyBytesBase64);
           }
@@ -184,7 +186,7 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         return;
       }
 
-      const exportString = serializeEncryptionKeyExportString({ docId, keyId: range.keyId, keyBytes });
+      const exportString = serializeEncryptionKeyExportString({ docId, keyId, keyBytes });
       const copied = await tryCopyToClipboard(exportString);
       if (copied) showToast("Encryption key copied to clipboard.", "info");
 
