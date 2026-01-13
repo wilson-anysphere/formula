@@ -5,7 +5,13 @@ import { runChatWithToolsStreaming, serializeToolResultForModel } from "../../..
 import type { ChatStreamEvent, ToolCall } from "../../../llm/src/index.js";
 
 import { redactUrlSecrets } from "../utils/urlRedaction.ts";
-import { classifyQueryNeedsTools, verifyAssistantClaims, verifyToolUsage, type VerificationResult } from "./verification.ts";
+import {
+  classifyQueryNeedsTools,
+  classifyRequiredToolKind,
+  verifyAssistantClaims,
+  verifyToolUsage,
+  type VerificationResult
+} from "./verification.ts";
 
 export interface AuditedRunOptions {
   audit_store: AIAuditStore;
@@ -163,6 +169,7 @@ export async function runChatWithToolsAuditedVerified(
   try {
     const userText = extractLastUserText(params.messages);
     const needsTools = classifyQueryNeedsTools({ userText, attachments: params.attachments });
+    const requiredToolKind = classifyRequiredToolKind({ userText, attachments: params.attachments });
 
     const runOnce = async (messages: any[]) =>
       runChatWithToolsStreaming({
@@ -218,6 +225,7 @@ export async function runChatWithToolsAuditedVerified(
 
     const baseVerification = verifyToolUsage({
       needsTools,
+      requiredToolKind,
       toolCalls: recorder.entry.tool_calls.map((call) => ({ name: call.name, ok: call.ok }))
     });
 

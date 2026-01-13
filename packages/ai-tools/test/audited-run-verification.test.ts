@@ -46,6 +46,58 @@ describe("runChatWithToolsAuditedVerified", () => {
     expect(entries[0]!.verification).toEqual(result.verification);
   });
 
+  it("fails verification for data questions when only mutation tools are used", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const toolExecutor = new SpreadsheetLLMToolExecutor(workbook);
+
+    let callCount = 0;
+    const client = {
+      async chat() {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{ id: "call-1", name: "write_cell", arguments: { cell: "Sheet1!A1", value: 1 } }]
+            },
+            usage: { promptTokens: 10, completionTokens: 5 }
+          };
+        }
+
+        return {
+          message: { role: "assistant", content: "Average is 2." },
+          usage: { promptTokens: 2, completionTokens: 3 }
+        };
+      }
+    };
+
+    const auditStore = new MemoryAIAuditStore();
+
+    const result = await runChatWithToolsAuditedVerified({
+      client,
+      tool_executor: toolExecutor as any,
+      messages: [{ role: "user", content: "What is the average of Sheet1!A1:A3?" }],
+      // Intentionally disable claim verification so we test tool-usage verification.
+      verify_claims: false,
+      audit: {
+        audit_store: auditStore,
+        session_id: "session-verification-mutation-only-1",
+        mode: "chat",
+        input: { prompt: "What is the average of Sheet1!A1:A3?" },
+        model: "unit-test-model"
+      }
+    });
+
+    expect(result.verification.needs_tools).toBe(true);
+    expect(result.verification.used_tools).toBe(true);
+    expect(result.verification.verified).toBe(false);
+
+    const entries = await auditStore.listEntries({ session_id: "session-verification-mutation-only-1" });
+    expect(entries[0]!.tool_calls.some((c) => c.name === "write_cell" && c.ok === true)).toBe(true);
+    expect(entries[0]!.verification).toEqual(result.verification);
+  });
+
   it("passes verification when a read-only data tool succeeds", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });
@@ -99,6 +151,57 @@ describe("runChatWithToolsAuditedVerified", () => {
 
     const entries = await auditStore.listEntries({ session_id: "session-verification-2" });
     expect(entries[0]!.tool_calls.some((c) => c.name === "read_range" && c.ok === true)).toBe(true);
+    expect(entries[0]!.verification).toEqual(result.verification);
+  });
+
+  it("passes verification for mutation prompts when a mutation tool succeeds", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const toolExecutor = new SpreadsheetLLMToolExecutor(workbook);
+
+    let callCount = 0;
+    const client = {
+      async chat() {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{ id: "call-1", name: "write_cell", arguments: { cell: "Sheet1!A1", value: 1 } }]
+            },
+            usage: { promptTokens: 10, completionTokens: 5 }
+          };
+        }
+
+        return {
+          message: { role: "assistant", content: "Done." },
+          usage: { promptTokens: 2, completionTokens: 3 }
+        };
+      }
+    };
+
+    const auditStore = new MemoryAIAuditStore();
+
+    const result = await runChatWithToolsAuditedVerified({
+      client,
+      tool_executor: toolExecutor as any,
+      messages: [{ role: "user", content: "Set Sheet1!A1 to 1" }],
+      verify_claims: false,
+      audit: {
+        audit_store: auditStore,
+        session_id: "session-verification-mutation-prompt-1",
+        mode: "chat",
+        input: { prompt: "Set Sheet1!A1 to 1" },
+        model: "unit-test-model"
+      }
+    });
+
+    expect(result.verification.needs_tools).toBe(true);
+    expect(result.verification.used_tools).toBe(true);
+    expect(result.verification.verified).toBe(true);
+
+    const entries = await auditStore.listEntries({ session_id: "session-verification-mutation-prompt-1" });
+    expect(entries[0]!.tool_calls.some((c) => c.name === "write_cell" && c.ok === true)).toBe(true);
     expect(entries[0]!.verification).toEqual(result.verification);
   });
 

@@ -15,7 +15,9 @@ export interface VerificationResult {
    * Whether the run is considered verified.
    *
    * For tool-usage-only verification (see `verifyToolUsage`), a run is verified
-   * when tools were not needed or at least one tool call succeeded.
+   * when tools were not needed or the required kind of tool call succeeded
+   * (by default, any successful tool; for analysis questions this may require a
+   * successful read/compute/detect/filter tool).
    *
    * When post-response claim verification runs (see `verifyAssistantClaims`),
    * this reflects whether all extracted numeric claims were validated against
@@ -50,6 +52,18 @@ export interface VerificationResult {
 export interface VerifyToolUsageParams {
   needsTools: boolean;
   /**
+   * What kind of tool evidence is required to consider the run "verified" when
+   * `needsTools` is true.
+   *
+   * - "any": (default) any successful tool call counts as verification. This is
+   *   appropriate for mutation/action requests like "Set A1 to 1".
+   * - "verified": require at least one successful read/compute/detect/filter tool
+   *   call. This is appropriate for analysis/data questions like "What is the
+   *   average of A1:A10?" where a mutation tool (e.g. write_cell) is not evidence
+   *   that the answer was computed.
+   */
+  requiredToolKind?: "any" | "verified";
+  /**
    * Tool calls emitted during the run. The verifier only depends on a subset of
    * fields so it can work with both audit logs and UI-level tool call tracking.
    */
@@ -57,6 +71,11 @@ export interface VerifyToolUsageParams {
 }
 
 export interface ClassifyQueryNeedsToolsParams {
+  userText: string;
+  attachments?: unknown[] | null;
+}
+
+export interface ClassifyRequiredToolKindParams {
   userText: string;
   attachments?: unknown[] | null;
 }
@@ -107,6 +126,44 @@ const VERIFIED_TOOL_PREFIXES = ["read_", "compute_", "detect_", "filter_"];
 
 const VERIFIED_TOOL_NAMES = new Set(["read_range", "compute_statistics", "detect_anomalies", "filter_range"]);
 
+// Analysis-ish keywords used to decide whether a prompt is a "data question" that
+// should require read/compute tooling (as opposed to a pure mutation/action).
+//
+// This list intentionally skews broad. False positives are acceptable because the
+// only consequence is marking the run "unverified" unless a read/compute tool is
+// used.
+const ANALYSIS_KEYWORDS = [
+  "average",
+  "avg",
+  "mean",
+  "median",
+  "mode",
+  "sum",
+  "total",
+  "count",
+  "min",
+  "minimum",
+  "max",
+  "maximum",
+  "stdev",
+  "stddev",
+  "standard deviation",
+  "variance",
+  "quartile",
+  "percentile",
+  "percentage",
+  "correlation",
+  "corr"
+];
+
+const ANALYSIS_KEYWORD_REGEXES = ANALYSIS_KEYWORDS.map((keyword) => new RegExp(`\\b${escapeRegex(keyword)}\\b`, "i"));
+
+// Mutation-ish verbs used to identify "action requests". Today this is only used
+// as a secondary signal; analysis intent always wins.
+const MUTATION_KEYWORDS = ["set", "write", "replace", "update", "fill", "clear", "delete", "insert", "append", "remove"];
+
+const MUTATION_KEYWORD_REGEXES = MUTATION_KEYWORDS.map((keyword) => new RegExp(`\\b${escapeRegex(keyword)}\\b`, "i"));
+
 export function classifyQueryNeedsTools(params: ClassifyQueryNeedsToolsParams): boolean {
   const attachments = params.attachments ?? [];
   if (Array.isArray(attachments) && attachments.length > 0) return true;
@@ -123,10 +180,40 @@ export function classifyQueryNeedsTools(params: ClassifyQueryNeedsToolsParams): 
   return false;
 }
 
+/**
+ * Infer what kind of tool evidence should be required to mark a run verified.
+ *
+ * This intentionally distinguishes:
+ * - analysis/data questions ("verified"): require at least one successful
+ *   read/compute/detect/filter tool call.
+ * - mutation/action requests ("any"): any successful tool call counts.
+ *
+ * If both intents are present, this prefers "verified" (conservative).
+ */
+export function classifyRequiredToolKind(params: ClassifyRequiredToolKindParams): "any" | "verified" {
+  const attachments = params.attachments ?? [];
+  if (Array.isArray(attachments) && attachments.length > 0) return "verified";
+
+  const text = params.userText ?? "";
+  if (!text) return "any";
+
+  // Strong signal for a "question" intent.
+  const looksLikeQuestion =
+    text.includes("?") || /^\s*(?:what|which|who|whom|whose|why|how|when|where)\b/i.test(text.trim());
+
+  const hasAnalysisKeyword = ANALYSIS_KEYWORD_REGEXES.some((re) => re.test(text));
+  const hasMutationKeyword = MUTATION_KEYWORD_REGEXES.some((re) => re.test(text));
+
+  if (looksLikeQuestion || hasAnalysisKeyword) return "verified";
+  if (hasMutationKeyword) return "any";
+  return "any";
+}
+
 export function verifyToolUsage(params: VerifyToolUsageParams): VerificationResult {
   const needs_tools = params.needsTools;
   const toolCalls = Array.isArray(params.toolCalls) ? params.toolCalls : [];
   const used_tools = toolCalls.length > 0;
+  const requiredToolKind = params.requiredToolKind ?? "any";
 
   const successfulTool = toolCalls.some((call) => call.ok === true);
   const successfulVerifiedTool = toolCalls.some((call) => isVerifiedToolName(call.name) && call.ok === true);
@@ -142,7 +229,9 @@ export function verifyToolUsage(params: VerifyToolUsageParams): VerificationResu
     };
   }
 
-  if (successfulTool) {
+  const meetsRequirement = requiredToolKind === "verified" ? successfulVerifiedTool : successfulTool;
+
+  if (meetsRequirement) {
     return {
       needs_tools,
       used_tools,
@@ -158,6 +247,9 @@ export function verifyToolUsage(params: VerifyToolUsageParams): VerificationResu
   if (!used_tools) {
     warnings.push("No tools were used; answer may be a guess.");
     confidence = 0.2;
+  } else if (successfulTool && requiredToolKind === "verified" && !successfulVerifiedTool) {
+    warnings.push("No verified data tools succeeded; answer may be unverified.");
+    confidence = 0.35;
   } else {
     warnings.push("No tools succeeded; answer may be unverified.");
     confidence = 0.35;
@@ -270,6 +362,10 @@ function isVerifiedToolName(name: string): boolean {
   if (!name) return false;
   if (VERIFIED_TOOL_NAMES.has(name)) return true;
   return VERIFIED_TOOL_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function verifyRangeStatClaim(

@@ -39,6 +39,18 @@ describe("verifyToolUsage", () => {
     expect(result.verified).toBe(true);
     expect(result.confidence).toBeGreaterThan(0.5);
   });
+
+  it("requires a verified read/compute tool when requiredToolKind is 'verified'", () => {
+    const result = verifyToolUsage({
+      needsTools: true,
+      requiredToolKind: "verified",
+      toolCalls: [{ name: "write_cell", ok: true }]
+    });
+
+    expect(result.needs_tools).toBe(true);
+    expect(result.used_tools).toBe(true);
+    expect(result.verified).toBe(false);
+  });
 });
 
 describe("verifyAssistantClaims", () => {
