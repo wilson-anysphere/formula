@@ -73,6 +73,11 @@ import { installUnsavedChangesPrompt } from "./document/index.js";
 import type { DocumentController } from "./document/documentController.js";
 import { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize } from "./formatting/selectionSizeGuard.js";
+import {
+  applyGoodBadNeutralCellStyle,
+  getGoodBadNeutralCellStyleQuickPickItems,
+  GOOD_BAD_NEUTRAL_CELL_STYLE_PRESETS,
+} from "./formatting/cellStyles.js";
 import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
 import { t, tWithVars } from "./i18n/index.js";
 import { getOpenFileFilters } from "./file_dialog_filters.js";
@@ -8335,6 +8340,45 @@ function handleRibbonCommand(commandId: string): void {
     const command = commandRegistry.getCommand(commandId);
     if (command) {
       executeCommand(commandId);
+      return;
+    }
+
+    const cellStylesPrefix = "home.styles.cellStyles.";
+    if (commandId.startsWith(cellStylesPrefix)) {
+      const kind = commandId.slice(cellStylesPrefix.length);
+      if (kind !== "goodBadNeutral") {
+        showToast("Cell Styles are not implemented yet.");
+        app.focus();
+        return;
+      }
+
+      void (async () => {
+        // Formatting actions should never run while the user is editing (primary or split-view secondary editor).
+        if (isSpreadsheetEditing()) return;
+
+        // Guard before prompting so users don't pick a style only to hit the size cap on apply.
+        const selection = app.getSelectionRanges();
+        const limits = getGridLimitsForFormatting();
+        const decision = evaluateFormattingSelectionSize(selection, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
+        if (!decision.allowed) {
+          showToast("Selection is too large to format. Try selecting fewer cells or an entire row/column.", "warning");
+          app.focus();
+          return;
+        }
+
+        const presetId = await showQuickPick(getGoodBadNeutralCellStyleQuickPickItems(), {
+          placeHolder: "Good, Bad, and Neutral",
+        });
+        if (!presetId) {
+          app.focus();
+          return;
+        }
+
+        const presetLabel = GOOD_BAD_NEUTRAL_CELL_STYLE_PRESETS[presetId]?.label ?? "Cell style";
+        applyFormattingToSelection(`Cell style: ${presetLabel}`, (doc, sheetId, ranges) =>
+          applyGoodBadNeutralCellStyle(doc, sheetId, ranges, presetId),
+        );
+      })();
       return;
     }
 
