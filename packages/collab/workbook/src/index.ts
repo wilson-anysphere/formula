@@ -782,3 +782,35 @@ export function createMetadataManagerForSession(session: {
 }): MetadataManager {
   return new MetadataManager({ doc: session.doc, transact: (fn) => session.transactLocal(fn) });
 }
+
+export type PermissionAwareWorkbookSession = {
+  doc: Y.Doc;
+  transactLocal: (fn: () => void) => void;
+  isReadOnly: () => boolean;
+};
+
+function assertSessionCanMutateWorkbook(session: { isReadOnly: () => boolean }): void {
+  if (!session.isReadOnly()) return;
+  throw new Error("Permission denied: cannot mutate workbook in a read-only session");
+}
+
+function transactLocalWithWorkbookPermissions(session: PermissionAwareWorkbookSession): WorkbookTransact {
+  return (fn) => {
+    assertSessionCanMutateWorkbook(session);
+    session.transactLocal(fn);
+  };
+}
+
+export function createSheetManagerForSessionWithPermissions(session: PermissionAwareWorkbookSession): SheetManager {
+  return new SheetManager({ doc: session.doc, transact: transactLocalWithWorkbookPermissions(session) });
+}
+
+export function createNamedRangeManagerForSessionWithPermissions(
+  session: PermissionAwareWorkbookSession
+): NamedRangeManager {
+  return new NamedRangeManager({ doc: session.doc, transact: transactLocalWithWorkbookPermissions(session) });
+}
+
+export function createMetadataManagerForSessionWithPermissions(session: PermissionAwareWorkbookSession): MetadataManager {
+  return new MetadataManager({ doc: session.doc, transact: transactLocalWithWorkbookPermissions(session) });
+}
