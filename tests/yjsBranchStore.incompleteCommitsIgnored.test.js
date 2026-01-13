@@ -209,3 +209,54 @@ test("YjsBranchStore.ensureDocument deletes stale unreachable incomplete gzip-ch
 
   assert.equal(commits.has(staleId), false);
 });
+
+test("YjsBranchStore.ensureDocument repairs main branch head when it points at an incomplete commit", async () => {
+  const ydoc = new Y.Doc();
+  const store = new YjsBranchStore({
+    ydoc,
+    payloadEncoding: "gzip-chunks",
+    maxChunksPerTransaction: 1,
+  });
+  const docId = "doc1";
+  const actor = { userId: "u1", role: "owner" };
+
+  await store.ensureDocument(docId, actor, { sheets: {} });
+
+  const meta = ydoc.getMap("branching:meta");
+  const branches = ydoc.getMap("branching:branches");
+  const commits = ydoc.getMap("branching:commits");
+  const rootId = meta.get("rootCommitId");
+  assert.ok(typeof rootId === "string" && rootId.length > 0);
+
+  const rootCommit = commits.get(rootId);
+  assert.ok(rootCommit instanceof Y.Map);
+  const baseCreatedAt = Number(rootCommit.get("createdAt") ?? Date.now());
+
+  const incompleteHeadId = "incomplete-head";
+
+  ydoc.transact(() => {
+    const incomplete = new Y.Map();
+    incomplete.set("id", incompleteHeadId);
+    incomplete.set("docId", docId);
+    incomplete.set("parentCommitId", rootId);
+    incomplete.set("mergeParentCommitId", null);
+    incomplete.set("createdBy", actor.userId);
+    incomplete.set("createdAt", baseCreatedAt + 1_000);
+    incomplete.set("writeStartedAt", Date.now());
+    incomplete.set("message", "incomplete");
+    incomplete.set("patchEncoding", "gzip-chunks");
+    incomplete.set("commitComplete", false);
+    incomplete.set("patchChunks", new Y.Array());
+    commits.set(incompleteHeadId, incomplete);
+
+    const main = branches.get("main");
+    assert.ok(main instanceof Y.Map);
+    main.set("headCommitId", incompleteHeadId);
+  });
+
+  await store.ensureDocument(docId, actor, { sheets: {} });
+
+  const main = branches.get("main");
+  assert.ok(main instanceof Y.Map);
+  assert.equal(main.get("headCommitId"), rootId);
+});

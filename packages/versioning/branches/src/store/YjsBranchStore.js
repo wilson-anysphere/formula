@@ -663,6 +663,31 @@ export class YjsBranchStore {
           );
         }
 
+        // Defensive repair: ensure main branch head points at a readable commit.
+        // Some corrupted docs can end up with a missing headCommitId, a dangling
+        // commit reference, or a partially-written gzip-chunks commit id.
+        const head = mainBranch.get("headCommitId");
+        let needsHeadRepair = typeof head !== "string" || head.length === 0;
+        if (!needsHeadRepair) {
+          const headCommit = getYMap(this.#commits.get(head));
+          if (!headCommit) {
+            needsHeadRepair = true;
+          } else {
+            const headDocId = headCommit.get("docId");
+            if (typeof headDocId === "string" && headDocId.length > 0 && headDocId !== docId) {
+              needsHeadRepair = true;
+            } else if (!this.#isCommitComplete(headCommit)) {
+              needsHeadRepair = true;
+            } else {
+              const hasPayload = this.#commitHasPatch(headCommit) || this.#commitHasSnapshot(headCommit);
+              if (!hasPayload) needsHeadRepair = true;
+            }
+          }
+        }
+        if (needsHeadRepair) {
+          mainBranch.set("headCommitId", headForMissingMainBranch);
+        }
+
         // Backwards-compatible migration: ensure current branch name exists + is valid.
         let current = this.#meta.get("currentBranchName");
         if (typeof current !== "string" || current.length === 0) current = "main";
