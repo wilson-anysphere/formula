@@ -267,6 +267,68 @@ impl DaxModel {
         object_set(&obj, "rows", &rows.into())?;
         Ok(obj.into())
     }
+
+    /// Compute an Excel-like pivot *crosstab* grid (row axis + column axis).
+    ///
+    /// This is a convenience wrapper around [`formula_dax::pivot_crosstab`]; it returns an object
+    /// shaped as `{ data: any[][] }` where the first row is a header row.
+    #[wasm_bindgen(js_name = "pivotCrosstab")]
+    pub fn pivot_crosstab(
+        &self,
+        base_table: &str,
+        row_fields: JsValue,
+        column_fields: JsValue,
+        measures: JsValue,
+        filter_context: Option<DaxFilterContext>,
+    ) -> Result<JsValue, JsValue> {
+        let row_fields: Vec<GroupByDto> = serde_wasm_bindgen::from_value(row_fields)
+            .map_err(|err| js_error(err.to_string()))?;
+        let column_fields: Vec<GroupByDto> = serde_wasm_bindgen::from_value(column_fields)
+            .map_err(|err| js_error(err.to_string()))?;
+        let measures: Vec<PivotMeasureDto> =
+            serde_wasm_bindgen::from_value(measures).map_err(|err| js_error(err.to_string()))?;
+
+        let row_fields: Vec<GroupByColumn> = row_fields
+            .into_iter()
+            .map(|c| GroupByColumn::new(c.table, c.column))
+            .collect();
+        let column_fields: Vec<GroupByColumn> = column_fields
+            .into_iter()
+            .map(|c| GroupByColumn::new(c.table, c.column))
+            .collect();
+
+        let mut pivot_measures = Vec::with_capacity(measures.len());
+        for m in measures {
+            pivot_measures.push(PivotMeasure::new(m.name, m.expression).map_err(dax_error_to_js)?);
+        }
+
+        let filter = filter_context
+            .map(|ctx| ctx.ctx)
+            .unwrap_or_else(FilterContext::empty);
+
+        let result = pivot_crosstab(
+            &self.model,
+            base_table,
+            &row_fields,
+            &column_fields,
+            &pivot_measures,
+            &filter,
+        )
+        .map_err(dax_error_to_js)?;
+
+        let data = Array::new();
+        for row in result.data {
+            let out = Array::new();
+            for value in row {
+                out.push(&dax_value_to_js(value));
+            }
+            data.push(&out);
+        }
+
+        let obj = Object::new();
+        object_set(&obj, "data", &data.into())?;
+        Ok(obj.into())
+    }
 }
 
 /// JS wrapper around [`formula_dax::FilterContext`].
@@ -569,4 +631,3 @@ mod tests {
         }
     }
 }
-
