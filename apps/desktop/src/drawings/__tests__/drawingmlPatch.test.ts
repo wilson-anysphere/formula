@@ -24,6 +24,13 @@ describe("DrawingML patch helpers", () => {
     expect(out).toContain(`name="Chart 1"`);
   });
 
+  it("patchNvPrId is prefix-tolerant (non-xdr prefixes)", () => {
+    const input = `<p:cNvPr id='5' name='Picture 5'/>`;
+    const out = patchNvPrId(input, 6);
+    expect(out).toContain(`id='6'`);
+    expect(out).toContain(`name='Picture 5'`);
+  });
+
   it("patchXfrmExt updates ext under xfrm (and leaves other ext nodes alone)", () => {
     const input =
       `<xdr:spPr><xdr:ext cx="1" cy="2"/>` +
@@ -37,6 +44,12 @@ describe("DrawingML patch helpers", () => {
     const input = `<xdr:graphicFrame><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm></xdr:graphicFrame>`;
     const out = patchXfrmExt(input, 123, 456);
     expect(out).toContain(`<a:ext cx="123" cy="456"/>`);
+  });
+
+  it("patchXfrmExt is prefix-tolerant (non-a/xdr prefixes)", () => {
+    const input = `<foo:xfrm><bar:off x="0" y="0"/><bar:ext cx="1" cy="2"/></foo:xfrm>`;
+    const out = patchXfrmExt(input, 7, 8);
+    expect(out).toContain(`<bar:ext cx="7" cy="8"/>`);
   });
 
   it("patchXfrmOff updates off under xfrm", () => {
