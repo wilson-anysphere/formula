@@ -25,7 +25,7 @@ The core record is `AIAuditEntry` (`packages/ai-audit/src/types.ts`):
 | `workbook_id?` | `string` | Optional workbook identifier for filtering across sessions. |
 | `user_id?` | `string` | Optional user identifier (host-controlled). |
 | `mode` | `AIMode` | One of: `"tab_completion" \| "inline_edit" \| "chat" \| "agent" \| "cell_function"`. |
-| `input` | `unknown` | Host-provided input payload (often `{ prompt, attachments, ... }`). Treat as sensitive. |
+| `input` | `unknown` | Host-provided input payload (often `{ prompt, attachments, ... }`). Treat as sensitive. May be compacted by `BoundedAIAuditStore` in size-constrained stores. |
 | `model` | `string` | Model identifier used for the run (provider-agnostic). |
 | `token_usage?` | `{ prompt_tokens, completion_tokens, total_tokens? }` | Optional token usage totals. `total_tokens` may be omitted by providers; `AIAuditRecorder` computes a running total when possible. |
 | `latency_ms?` | `number` | Total measured latency (either accumulated via `recordModelLatency()` or set at finalize-time from start → end). |

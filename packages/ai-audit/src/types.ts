@@ -73,6 +73,13 @@ export interface AIAuditEntry {
   user_id?: string;
 
   mode: AIMode;
+  /**
+   * Host-provided input payload (often `{ prompt, attachments, ... }`).
+   *
+   * Consumers should treat this as sensitive data. In size-constrained audit
+   * stores, this may be replaced with a truncated JSON string summary by
+   * `BoundedAIAuditStore` (see `packages/ai-audit/src/bounded-store.ts`).
+   */
   input: unknown;
 
   model: string;
