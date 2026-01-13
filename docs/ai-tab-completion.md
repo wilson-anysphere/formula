@@ -50,7 +50,8 @@ The engine consumes a `CompletionContext` (see `packages/ai-completion/src/tabCo
    - If present, cached **base suggestions** are reused.
 
 3. **Compute base suggestions (in parallel)**
-   - The engine parses the draft with `parsePartialFormula()`, then runs three sources concurrently:
+   - The engine parses the draft with `parsePartialFormula()` (which may be sync **or async** when provided by a host),
+     then runs three sources concurrently:
 
    **A. Rule-based (deterministic)**
    - Implemented by `getRuleBasedSuggestions()`.
@@ -128,6 +129,7 @@ If you’re integrating the engine into a new surface:
   - Desktop uses `${sheetId}:${cellsVersion}` (see `apps/desktop/src/ai/completion/formulaBarTabCompletion.ts`).
 - If you provide a `SchemaProvider`, implement `schemaProvider.getCacheKey()` so suggestions refresh when the schema changes (new sheets, renamed tables, etc).
   - Keep the key small and stable (e.g. names + a schema version).
+  - If your parsing/suggestion behavior is **locale-dependent** (argument separators, localized function names), include the locale id in the cache key so suggestions are not reused across locale changes.
 
 ---
 
