@@ -202,7 +202,9 @@ In `apps/desktop/src/commands/builtinKeybindings.ts`, add a binding that targets
 {
   command: "format.toggleStrikethrough",
   key: "ctrl+5",
-  mac: "cmd+shift+x",
+  // Excel uses Ctrl+5 for strikethrough; we keep the same chord on macOS to
+  // avoid consuming a Cmd-based shortcut.
+  mac: "ctrl+5",
   when: WHEN_SPREADSHEET_READY,
 }
 ```
