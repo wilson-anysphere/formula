@@ -21,6 +21,14 @@ const AGILE_UNICODE_FIXTURE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/encrypted/ooxml/agile-unicode.xlsx"
 ));
+const AGILE_BASIC_FIXTURE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/encrypted/ooxml/agile-basic.xlsm"
+));
+const EXCEL_BASIC_PASSWORD_FIXTURE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/encrypted/ooxml/basic-password.xlsm"
+));
 const STANDARD_FIXTURE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/encrypted/ooxml/standard.xlsx"
@@ -183,9 +191,25 @@ fn decrypts_standard_large_encrypted_package() {
 }
 
 #[test]
+fn decrypts_agile_basic_xlsm_fixture() {
+    let decrypted =
+        decrypt_encrypted_package(AGILE_BASIC_FIXTURE, "password").expect("decrypt agile xlsm");
+    assert_eq!(decrypted.as_slice(), STANDARD_BASIC_PLAINTEXT);
+    assert_decrypted_zip_contains_workbook(&decrypted);
+}
+
+#[test]
 fn decrypts_standard_basic_xlsm_fixture() {
     let decrypted =
         decrypt_encrypted_package(STANDARD_BASIC_FIXTURE, "password").expect("decrypt standard");
+    assert_eq!(decrypted.as_slice(), STANDARD_BASIC_PLAINTEXT);
+    assert_decrypted_zip_contains_workbook(&decrypted);
+}
+
+#[test]
+fn decrypts_excel_agile_xlsm_fixture() {
+    let decrypted = decrypt_encrypted_package(EXCEL_BASIC_PASSWORD_FIXTURE, "password")
+        .expect("decrypt excel xlsm");
     assert_eq!(decrypted.as_slice(), STANDARD_BASIC_PLAINTEXT);
     assert_decrypted_zip_contains_workbook(&decrypted);
 }
@@ -472,7 +496,21 @@ fn wrong_password_returns_invalid_password() {
     );
 
     let err =
+        decrypt_encrypted_package(AGILE_BASIC_FIXTURE, "wrong").expect_err("expected error");
+    assert!(
+        matches!(err, OfficeCryptoError::InvalidPassword),
+        "expected InvalidPassword, got {err:?}"
+    );
+
+    let err =
         decrypt_encrypted_package(STANDARD_BASIC_FIXTURE, "wrong").expect_err("expected error");
+    assert!(
+        matches!(err, OfficeCryptoError::InvalidPassword),
+        "expected InvalidPassword, got {err:?}"
+    );
+
+    let err = decrypt_encrypted_package(EXCEL_BASIC_PASSWORD_FIXTURE, "wrong")
+        .expect_err("expected error");
     assert!(
         matches!(err, OfficeCryptoError::InvalidPassword),
         "expected InvalidPassword, got {err:?}"
