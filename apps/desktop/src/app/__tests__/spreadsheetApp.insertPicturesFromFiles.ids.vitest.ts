@@ -103,6 +103,12 @@ describe("SpreadsheetApp.insertPicturesFromFiles ids", () => {
       observe() {}
       disconnect() {}
     };
+
+    // The drawing overlay decodes images via `createImageBitmap`; jsdom does not provide it.
+    Object.defineProperty(globalThis, "createImageBitmap", {
+      configurable: true,
+      value: vi.fn(async () => ({})),
+    });
   });
 
   afterEach(() => {
