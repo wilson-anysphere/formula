@@ -212,17 +212,15 @@ export class DrawingInteractionController {
   private readonly onPointerDown = (e: PointerEvent) => {
     const pointerType = e.pointerType ?? "";
     const button = typeof e.button === "number" ? e.button : 0;
-    const isContextClick =
-      pointerType === "mouse" &&
-      (button === 2 || (this.isMacPlatform && button === 0 && e.ctrlKey && !e.metaKey));
+    const isMouse = pointerType === "mouse";
+    // On macOS, Ctrl+click is commonly treated as a right click and fires the
+    // `contextmenu` event. Ensure we treat it as a context-click (not a drag/resize).
+    const isMacContextClick = isMouse && this.isMacPlatform && button === 0 && e.ctrlKey && !e.metaKey;
+    const isNonPrimaryMouseButton = isMouse && button !== 0;
+    const isContextClick = isNonPrimaryMouseButton || isMacContextClick;
 
     const rect = this.element.getBoundingClientRect();
     const { x, y } = this.getLocalPoint(e, rect);
-
-    // Mouse UX: only start drag/resize on the primary mouse button. Secondary
-    // buttons (right/middle click) should still select the drawing, but must not
-    // prevent context menus (or start moving/resizing).
-    const isNonPrimaryMouseButton = e.pointerType === "mouse" && e.button !== 0;
 
     const viewport = this.callbacks.getViewport();
     const zoom = sanitizeZoom(viewport.zoom);
@@ -239,7 +237,7 @@ export class DrawingInteractionController {
     // the outline and extend half their size beyond the rect).
     const selectedIndex = this.selectedId != null ? index.byId.get(this.selectedId) : undefined;
     const selectedObject = selectedIndex != null ? index.ordered[selectedIndex] : undefined;
-    if (selectedObject && !inHeader && !isContextClick) {
+    if (selectedObject && !inHeader) {
       const anchor = selectedObject.anchor;
       const objInFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < paneLayout.frozenRows;
       const objInFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < paneLayout.frozenCols;
@@ -251,7 +249,12 @@ export class DrawingInteractionController {
           index.bounds[selectedIndex!],
           this.scratchRect,
         );
-        if (hitTestRotationHandle(selectedBounds, x, y, selectedObject.transform) && !isNonPrimaryMouseButton) {
+        if (hitTestRotationHandle(selectedBounds, x, y, selectedObject.transform)) {
+          if (isContextClick) {
+            // Keep the current selection but allow the event to bubble so the app
+            // can show a context menu.
+            return;
+          }
           const centerX = selectedBounds.x + selectedBounds.width / 2;
           const centerY = selectedBounds.y + selectedBounds.height / 2;
           const startAngleRad = Math.atan2(y - centerY, x - centerX);
@@ -277,7 +280,12 @@ export class DrawingInteractionController {
          }
 
         const handle = hitTestResizeHandle(selectedBounds, x, y, selectedObject.transform);
-        if (handle && !isNonPrimaryMouseButton) {
+        if (handle) {
+          if (isContextClick) {
+            // Keep the current selection but allow the event to bubble so the app
+            // can show a context menu.
+            return;
+          }
           this.stopPointerEvent(e);
           this.activeRect = rect;
           this.trySetPointerCapture(e.pointerId);
@@ -313,16 +321,9 @@ export class DrawingInteractionController {
     }
 
     if (isContextClick) {
-      // Allow the downstream `contextmenu` handler to open without initiating a
-      // drag/resize. Still stop propagation so grid selection doesn't change.
-      e.stopPropagation();
-      e.stopImmediatePropagation();
       this.callbacks.requestFocus?.();
       return;
     }
-
-    // Secondary mouse buttons should not initiate drag/resize or capture the pointer.
-    if (isNonPrimaryMouseButton) return;
 
     this.stopPointerEvent(e);
     this.callbacks.requestFocus?.();
