@@ -550,7 +550,8 @@ then revert the change—do not commit it).
 3. Verify the signature + entitlements (replace the path as needed):
 
    ```bash
-   app="$(find apps/desktop/src-tauri/target -maxdepth 8 -type d -path '*/release/bundle/macos/*.app' | head -n 1)"
+   app="$(find apps/desktop/src-tauri/target -maxdepth 8 -type d -path '*/release/bundle/macos/*.app' 2>/dev/null | head -n 1 || true)"
+   test -n "$app" || { echo "No .app bundle found under apps/desktop/src-tauri/target/**/release/bundle/macos/*.app" >&2; exit 1; }
    echo "Checking app at: $app"
    codesign --verify --deep --strict --verbose=2 "$app"
    codesign -d --entitlements :- "$app" 2>&1 | grep -E "allow-jit|allow-unsigned-executable-memory|network\\.client"
@@ -1159,7 +1160,8 @@ root="$tmpdir/squashfs-root"
 test -x "$root/usr/bin/formula-desktop"
 
 # Confirm a desktop entry exists and includes MIME types (file associations)
-desktop_file="$(ls "$root/usr/share/applications/"*.desktop | head -n 1)"
+desktop_file="$(ls "$root/usr/share/applications/"*.desktop 2>/dev/null | head -n 1 || true)"
+test -n "$desktop_file" || { echo "No .desktop file found under $root/usr/share/applications/" >&2; exit 1; }
 cat "$desktop_file"
 grep -E '^MimeType=' "$desktop_file"
 
