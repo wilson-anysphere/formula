@@ -1582,6 +1582,37 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("does not accept function autocomplete on Alt+Enter (newline wins over completion)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = queryFunctionAutocomplete(host);
+    expect(dropdown.hasAttribute("hidden")).toBe(false);
+
+    const e = new KeyboardEvent("keydown", { key: "Enter", altKey: true, cancelable: true });
+    view.textarea.dispatchEvent(e);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(true);
+    // Alt+Enter should insert a newline rather than accepting the selected completion.
+    expect(view.textarea.value).toBe("=VLO\n");
+    expect(view.model.draft).toBe("=VLO\n");
+    expect(view.textarea.selectionStart).toBe(5);
+    expect(view.textarea.selectionEnd).toBe(5);
+
+    host.remove();
+  });
+
   it("does not cancel twice if Escape is pressed multiple times", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
