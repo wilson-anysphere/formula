@@ -214,6 +214,8 @@ Behavior notes:
     encrypted `.xlsx`/`.xlsm`/`.xlsb`.
   - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
     is provided.
+  - Decryption happens in memory; do not write decrypted bytes to disk. See
+    [`docs/21-encrypted-workbooks.md#security-notes-handling-decrypted-bytes-safely`](./21-encrypted-workbooks.md#security-notes-handling-decrypted-bytes-safely).
 - Without `formula-io/encrypted-workbooks`, encrypted OOXML containers surface
   `Error::UnsupportedEncryption` (the password-aware entrypoints do not decrypt them end-to-end).
 
@@ -226,7 +228,6 @@ When handling user reports, these error variants map cleanly to “what happened
 | `PasswordRequired` | The file is encrypted/password-protected, but no password was provided. (For encrypted OOXML containers, this is only returned when `formula-io/encrypted-workbooks` is enabled; otherwise they surface as `UnsupportedEncryption`.) | Retry with `open_workbook_with_password(.., Some(password))` / `open_workbook_model_with_password(.., Some(password))`, or ask the user to remove encryption in Excel. |
 | `InvalidPassword` | Password was provided but decryption/verification failed (wrong password, Agile `dataIntegrity` mismatch, unsupported encryption parameters, or a corrupt container). | Ask the user to re-enter the password and confirm it opens in Excel. If you control the build, ensure `formula-io/encrypted-workbooks` is enabled. If Formula still cannot open it, capture `EncryptionInfo` version + the exact error, then ask the user to remove encryption and re-save. |
 | `UnsupportedOoxmlEncryption` | We identified an encrypted OOXML container, but the `EncryptionInfo` version is not recognized/implemented (i.e. not Standard/CryptoAPI `minor == 2` or Agile `4.4`). | Ask the user to remove encryption (open in Excel → remove password → re-save), or provide an unencrypted copy. |
-| `UnsupportedEncryptedWorkbookKind` | The encrypted workbook decrypted successfully, but the decrypted payload kind isn’t supported by this API (rare; typically only encountered with synthetic/plaintext wrapper variants). | Use an API that supports that kind, or ask for an unencrypted copy / different format. |
 | `EncryptedWorkbook` | Legacy `.xls` BIFF encryption was detected (BIFF `FILEPASS`). | Retry with `open_workbook_with_password(.., Some(password))` / `open_workbook_model_with_password(.., Some(password))` (routes to the `.xls` importer for legacy `.xls`). If that still fails, the encryption scheme may be unsupported; ask the user to remove encryption in Excel or provide an unencrypted copy. |
 | `UnsupportedEncryption` | The workbook is encrypted, but this build/decryptor doesn’t support it (including “feature not enabled” for encrypted OOXML, or unsupported cipher/KDF parameters). | Capture the `EncryptionInfo` version and error string; consider enabling `formula-io/encrypted-workbooks` (OOXML Agile 4.4 + Standard/CryptoAPI minor=2) or ask the user to remove encryption in Excel and re-save. |
 
@@ -299,6 +300,15 @@ Encrypted workbook fixtures are stored under:
 - `fixtures/encrypted/ooxml/` (see `fixtures/encrypted/ooxml/README.md` for the full list; includes
   Agile + Standard encrypted fixtures, empty-password and Unicode-password samples, macro-enabled
   `.xlsm` samples, and `*-large.xlsx` multi-segment variants)
+
+### Fixture passwords (quick reference)
+
+`fixtures/encrypted/ooxml/README.md` is the **canonical** source of truth. At time of writing:
+
+- `agile.xlsx`, `standard.xlsx`, `standard-4.2.xlsx`, `standard-rc4.xlsx`, `agile-large.xlsx`,
+  `standard-large.xlsx`, `agile-basic.xlsm`, `standard-basic.xlsm`: `password`
+- `agile-empty-password.xlsx`: empty string (`""`) (distinct from a *missing* password)
+- `agile-unicode.xlsx`: `pässwörd` (Unicode, NFC form)
 
 These are **vendored test fixtures** used by multiple encryption-focused tests (for example under
 `crates/formula-io/tests/*encrypted_ooxml*` and `crates/formula-xlsx/tests/encrypted_ooxml_*.rs`).

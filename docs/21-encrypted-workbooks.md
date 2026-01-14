@@ -33,13 +33,14 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
   - With **`encrypted-workbooks`** enabled:
     - `open_workbook(..)` / `open_workbook_model(..)` surface `formula_io::Error::PasswordRequired`
       when no password is provided.
-    - The password-aware entrypoints (`open_workbook_with_password` /
-      `open_workbook_model_with_password`) can decrypt and open:
-      - **Agile (4.4)** encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks in memory and validate Agile
-        `dataIntegrity` (HMAC) when present (some producers omit it).
+    - Use `open_workbook_with_options(OpenOptions { password: ... })` (or the `_with_password`
+      helpers) to decrypt and open supported encrypted workbooks in memory:
+      - **Agile (4.4)** encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks (validates Agile `dataIntegrity`
+        (HMAC) when present; some producers omit it).
         - Wrong password *or* integrity mismatch surfaces as `formula_io::Error::InvalidPassword`.
-      - **Standard/CryptoAPI** (minor=2; commonly 3.2/4.2) encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks
-        in memory (wrong password surfaces as `formula_io::Error::InvalidPassword`).
+      - **Standard/CryptoAPI** (`versionMinor == 2` with `versionMajor ∈ {2,3,4}`; commonly `3.2`/`4.2`)
+        encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks (wrong password surfaces as
+        `formula_io::Error::InvalidPassword`).
 - Legacy **`.xls`** with BIFF `FILEPASS` yields:
   - `formula_io::Error::EncryptedWorkbook` via `open_workbook(..)` / `open_workbook_model(..)` (prompt
     callers to retry via the password-capable APIs).
@@ -51,9 +52,9 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
 - The desktop app (with `formula-io/encrypted-workbooks` enabled) surfaces a **password required**
   style error (so the UI can prompt for a password).
 
-**Intended behavior (when decryption + password plumbing is implemented):**
+**Intended behavior / remaining work:**
 
-- Support opening Excel-encrypted workbooks without writing decrypted bytes to disk.
+- Continue to support opening Excel-encrypted workbooks without writing decrypted bytes to disk.
 - Distinguish “password required” vs “invalid password” vs “unsupported encryption scheme”
   (see [Error semantics](#error-semantics)).
 
@@ -61,8 +62,8 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
 
 | File type | Encryption marker | Schemes (common) | Current behavior | Planned/target behavior |
 |---|---|---|---|---|
-| `.xlsx` / `.xlsm` / `.xlsb` (OOXML) | OLE/CFB streams `EncryptionInfo` + `EncryptedPackage` | Agile (4.4), Standard (minor=2; commonly 3.2/4.2) | `UnsupportedEncryption` by default (decryption is behind `formula-io/encrypted-workbooks`). With that feature: `PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption` (Agile + Standard decrypt+open). | Decrypt + open; surface `PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption` (or a more specific “unsupported scheme” error) |
-| `.xls` (BIFF) | BIFF `FILEPASS` record in workbook stream | XOR, RC4, CryptoAPI | `formula-io`: `EncryptedWorkbook` when no password is provided. `open_workbook_with_password` / `open_workbook_model_with_password` route to `formula-xls`’s decrypting importer (XOR, RC4 “standard”, RC4 CryptoAPI). | Expand scheme coverage as needed (see [Legacy `.xls` encryption](#legacy-xls-encryption-biff-filepass)) |
+| `.xlsx` / `.xlsm` / `.xlsb` (OOXML) | OLE/CFB streams `EncryptionInfo` + `EncryptedPackage` | Agile (4.4), Standard (minor=2; e.g. 3.2/4.2) | With `formula-io/encrypted-workbooks`: decrypt + open in memory via `open_workbook_with_options` / `_with_password`, surfacing `PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption`. Without it: `UnsupportedEncryption` for Office-encrypted OOXML. | Expand scheme/parameter coverage; consider streaming decrypt + tighter resource limits; optionally tighten integrity verification defaults. |
+| `.xls` (BIFF) | BIFF `FILEPASS` record in workbook stream | XOR, RC4, CryptoAPI | `formula-io`: `EncryptedWorkbook` when no password is provided. `open_workbook_with_options` / `_with_password` route to `formula-xls`’s decrypting importer (supports XOR, RC4 “standard”, and RC4 CryptoAPI). | Expand scheme coverage as needed (see [Legacy `.xls` encryption](#legacy-xls-encryption-biff-filepass)) |
 
 ---
 
@@ -336,16 +337,22 @@ Today, the `formula-io` crate:
     - `open_workbook(..)` / `open_workbook_model(..)` return `Error::PasswordRequired` when no
       password is provided (or `Error::UnsupportedOoxmlEncryption` when the `EncryptionInfo` version
       is unknown).
-    - `open_workbook_with_password(..)` / `open_workbook_model_with_password(..)` attempt in-memory
-      decryption for **Agile (4.4)** and **Standard/CryptoAPI** (minor=2; commonly `3.2`/`4.2`)
-      encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks. For Agile, `dataIntegrity` (HMAC) is validated when
-      present; some real-world producers omit it.
+    - To supply a password:
+      - Use `open_workbook_with_options(path, OpenOptions { password: Some(...) })` (preferred) or the
+        convenience wrapper `open_workbook_with_password(path, Some(password))` to decrypt and open
+        encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks into a `Workbook`.
+      - Use `open_workbook_model_with_password(path, Some(password))` to decrypt and open directly
+        into a `formula_model::Workbook` (note: `open_workbook_model_with_options` does **not** decrypt
+        encrypted OOXML wrappers).
+    - Supported schemes:
+      - **Agile (4.4)** and **Standard/CryptoAPI** (`versionMinor == 2`; commonly `3.2`/`4.2`)
+      - For Agile, `dataIntegrity` (HMAC) is validated when present; some real-world producers omit it.
   - Without that feature, encrypted OOXML containers surface `Error::UnsupportedEncryption` (or
     `Error::UnsupportedOoxmlEncryption` for unknown `EncryptionInfo` versions).
 - For legacy `.xls` with BIFF `FILEPASS`:
   - without a password, `open_workbook(...)` / `open_workbook_model(...)` return
     `Error::EncryptedWorkbook`
-  - `open_workbook_with_password(...)` / `open_workbook_model_with_password(...)` return:
+  - password-aware APIs (`open_workbook_with_options` / `_with_password`) return:
     - `Error::PasswordRequired` when `password` is `None`
     - `Error::InvalidPassword` when a password is provided but decryption fails
     - and otherwise route to `formula_xls::import_xls_path_with_password(...)` (supports XOR, RC4
@@ -370,8 +377,9 @@ Example (detection + UX routing):
 use formula_io::{
     detect_workbook_encryption,
     open_workbook,
-    open_workbook_with_password,
+    open_workbook_with_options,
     Error,
+    OpenOptions,
     WorkbookEncryption,
 };
 
@@ -389,7 +397,13 @@ match open_workbook(path) {
         //
         // Prompt the user for a password, then retry with it:
         let password = "user-input-password";
-        match open_workbook_with_password(path, Some(password)) {
+        match open_workbook_with_options(
+            path,
+            OpenOptions {
+                password: Some(password.to_string()),
+                ..Default::default()
+            },
+        ) {
             Ok(workbook) => {
                 // With the `formula-io/encrypted-workbooks` feature enabled, this succeeds for
                 // Agile (4.4) and Standard/CryptoAPI (minor=2) encrypted `.xlsx`/`.xlsm`/`.xlsb`
@@ -421,10 +435,10 @@ match open_workbook(path) {
 
 With the `formula-io` cargo feature **`encrypted-workbooks`** enabled:
 
-- The password-aware entrypoints (`open_workbook_with_password`, `open_workbook_model_with_password`)
-  will **decrypt and open** Agile (4.4) and Standard/CryptoAPI (minor=2; commonly `3.2`/`4.2`)
-  encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks in memory. For Agile, `dataIntegrity` (HMAC) is
-  validated when present; some real-world producers omit it.
+- Password-aware entrypoints (`open_workbook_with_options` / `_with_password`) will **decrypt and open**
+  Agile (4.4) and Standard/CryptoAPI (minor=2; commonly `3.2`/`4.2`) encrypted `.xlsx`/`.xlsm`/`.xlsb`
+  workbooks in memory. For Agile, `dataIntegrity` (HMAC) is validated when present; some real-world
+  producers omit it.
 
 Without that feature, encrypted OOXML containers surface as `UnsupportedEncryption` (the password-aware
 entrypoints do not decrypt them end-to-end).
@@ -434,6 +448,8 @@ entrypoints do not decrypt them end-to-end).
 - Passwords are treated as **UTF-8 strings at the API boundary** and encoded internally according
   to the relevant spec requirements (typically UTF-16LE for key derivation).
 - Callers should avoid logging passwords or embedding them in error messages.
+- Decrypted bytes are sensitive: do not write them to disk. See
+  [Security notes](#security-notes-handling-decrypted-bytes-safely).
 - `detect_workbook_encryption` can be used to decide whether to prompt for a password before
   attempting a full open (see below).
 
@@ -595,12 +611,14 @@ When implementing (or calling) encrypted-workbook support:
 ## Test fixtures in this repo
 
 - Encrypted/password-protected OOXML workbook fixtures live under `fixtures/encrypted/ooxml/` (for
-  example `.xlsx`, `.xlsm`, `.xlsb`). The repo currently includes:
+  example `.xlsx` and `.xlsm`). The repo currently includes:
   - `fixtures/encrypted/ooxml/plaintext.xlsx` (unencrypted ZIP/OPC workbook used as the known-good plaintext)
   - `fixtures/encrypted/ooxml/plaintext-large.xlsx` (unencrypted ZIP/OPC workbook used to exercise multi-segment decryption; intentionally > 4096 bytes)
   - `fixtures/encrypted/ooxml/agile.xlsx` (Agile encryption; `EncryptionInfo` 4.4)
   - `fixtures/encrypted/ooxml/agile-large.xlsx` (Agile encryption; `EncryptionInfo` 4.4; decrypts to `plaintext-large.xlsx`)
   - `fixtures/encrypted/ooxml/standard.xlsx` (Standard encryption; `EncryptionInfo` 3.2)
+  - `fixtures/encrypted/ooxml/standard-4.2.xlsx` (Standard encryption; `EncryptionInfo` 4.2)
+  - `fixtures/encrypted/ooxml/standard-rc4.xlsx` (Standard encryption; `EncryptionInfo` 3.2; RC4 CryptoAPI)
   - `fixtures/encrypted/ooxml/standard-large.xlsx` (Standard encryption; `EncryptionInfo` 3.2; decrypts to `plaintext-large.xlsx`)
   - `fixtures/encrypted/ooxml/agile-empty-password.xlsx` (Agile encryption; `EncryptionInfo` 4.4; empty password `""`)
   - `fixtures/encrypted/ooxml/agile-unicode.xlsx` (Agile encryption; `EncryptionInfo` 4.4; Unicode password `pässwörd` in NFC normalization form)
