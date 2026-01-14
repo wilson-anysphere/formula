@@ -15690,25 +15690,11 @@ export class SpreadsheetApp {
     };
 
     const droppedFiles = (() => {
-      const out: File[] = [];
-      const seen = new Set<string>();
-
-      const push = (file: File) => {
-        if (!file) return;
-        const name = typeof (file as any).name === "string" ? String((file as any).name) : "";
-        const size = typeof (file as any).size === "number" ? Number((file as any).size) : 0;
-        const lastModified = typeof (file as any).lastModified === "number" ? Number((file as any).lastModified) : 0;
-        const key = `${name}\n${size}\n${lastModified}`;
-        if (seen.has(key)) return;
-        seen.add(key);
-        out.push(file);
-      };
-
-      for (const file of Array.from(dt.files ?? [])) {
-        push(file);
-      }
+      const files = Array.from(dt.files ?? []);
+      if (files.length > 0) return files;
 
       // Some environments provide file handles via `dataTransfer.items` but leave `files` empty.
+      const out: File[] = [];
       for (const item of Array.from(dt.items ?? [])) {
         if (!item || typeof item !== "object") continue;
         if ((item as any).kind !== "file") continue;
@@ -15716,12 +15702,11 @@ export class SpreadsheetApp {
         if (typeof getAsFile !== "function") continue;
         try {
           const file = getAsFile.call(item) as File | null;
-          if (file) push(file);
+          if (file) out.push(file);
         } catch {
           // ignore
         }
       }
-
       return out;
     })();
 
