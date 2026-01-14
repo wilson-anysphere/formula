@@ -3,6 +3,7 @@ import * as Y from "yjs";
 import { normalizeCell } from "../cell.js";
 import { normalizeDocumentState } from "../state.js";
 import { a1ToRowCol, rowColToA1 } from "./a1.js";
+import { getArrayRoot, getMapRoot, getYArray, getYMap, getYText, yjsValueToJson } from "../../../../collab/yjs-utils/src/index.ts";
 
 /**
  * @typedef {import("../types.js").DocumentState} DocumentState
@@ -54,147 +55,6 @@ function getDocConstructors(doc) {
 }
 
 /**
- * @param {unknown} value
- * @returns {Y.Map<any> | null}
- */
-function getYMap(value) {
-  if (value instanceof Y.Map) return value;
-
-  // Duck-type to handle multiple `yjs` module instances.
-  if (!value || typeof value !== "object") return null;
-  const maybe = /** @type {any} */ (value);
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.set !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.keys !== "function") return null;
-  if (typeof maybe.forEach !== "function") return null;
-  // Plain JS Maps also have get/set/delete/keys/forEach, so additionally require
-  // Yjs' deep observer APIs.
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return /** @type {Y.Map<any>} */ (maybe);
-}
-
-/**
- * @param {unknown} value
- * @returns {Y.Array<any> | null}
- */
-function getYArray(value) {
-  if (value instanceof Y.Array) return value;
-
-  // Duck-type to handle multiple `yjs` module instances.
-  if (!value || typeof value !== "object") return null;
-  const maybe = /** @type {any} */ (value);
-  if (typeof maybe.toArray !== "function") return null;
-  if (typeof maybe.push !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return /** @type {Y.Array<any>} */ (maybe);
-}
-
-/**
- * @param {unknown} value
- * @returns {value is Y.Text}
- */
-function isYText(value) {
-  if (value instanceof Y.Text) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  if (typeof maybe.toString !== "function") return false;
-  if (typeof maybe.toDelta !== "function") return false;
-  if (typeof maybe.applyDelta !== "function") return false;
-  if (typeof maybe.insert !== "function") return false;
-  if (typeof maybe.delete !== "function") return false;
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return true;
-}
-
-function isYAbstractType(value) {
-  if (value instanceof Y.AbstractType) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
-}
-
-function replaceForeignRootType({ doc, name, existing, create }) {
-  const t = create();
-
-  // Mirror Yjs' own Doc.get conversion logic for AbstractType placeholders, but
-  // also support roots instantiated by a different Yjs module instance (e.g.
-  // CJS `require("yjs")`).
-  t._map = existing?._map;
-  t._start = existing?._start;
-  t._length = existing?._length;
-
-  const map = existing?._map;
-  if (map instanceof Map) {
-    map.forEach((item) => {
-      for (let n = item; n !== null; n = n.left) {
-        n.parent = t;
-      }
-    });
-  }
-
-  for (let n = existing?._start ?? null; n !== null; n = n.right) {
-    n.parent = t;
-  }
-
-  doc.share.set(name, t);
-  t._integrate(doc, null);
-  return t;
-}
-
-function getMapRoot(doc, name) {
-  const existing = doc.share.get(name);
-  if (!existing) return doc.getMap(name);
-
-  const map = getYMap(existing);
-  if (map) {
-    if (map instanceof Y.Map) return map;
-    if (doc instanceof Y.Doc) {
-      return replaceForeignRootType({ doc, name, existing: map, create: () => new Y.Map() });
-    }
-    return map;
-  }
-
-  if (isYAbstractType(existing)) {
-    if (doc instanceof Y.Doc) {
-      return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() });
-    }
-    return doc.getMap(name);
-  }
-
-  throw new Error(`Unsupported Yjs root type for "${name}"`);
-}
-
-function getArrayRoot(doc, name) {
-  const existing = doc.share.get(name);
-  if (!existing) return doc.getArray(name);
-
-  const array = getYArray(existing);
-  if (array) {
-    if (array instanceof Y.Array) return array;
-    if (doc instanceof Y.Doc) {
-      return replaceForeignRootType({ doc, name, existing: array, create: () => new Y.Array() });
-    }
-    return array;
-  }
-
-  if (isYAbstractType(existing)) {
-    if (doc instanceof Y.Doc) {
-      return replaceForeignRootType({ doc, name, existing, create: () => new Y.Array() });
-    }
-    return doc.getArray(name);
-  }
-
-  throw new Error(`Unsupported Yjs root type for "${name}"`);
-}
-
-/**
  * @param {any} value
  * @param {string} key
  */
@@ -210,7 +70,8 @@ function readYMapOrObject(value, key) {
  * @returns {string | null}
  */
 function coerceString(value) {
-  if (isYText(value)) return value.toString();
+  const text = getYText(value);
+  if (text) return text.toString();
   if (typeof value === "string") return value;
   if (value == null) return null;
   return String(value);
@@ -231,40 +92,6 @@ function normalizeFormula(value) {
   const stripped = strippedLeading.trim();
   if (stripped === "") return null;
   return `=${stripped}`;
-}
-
-/**
- * Convert a Yjs value (potentially nested) into a plain JS value.
- *
- * @param {any} value
- * @returns {any}
- */
-function yjsValueToJson(value) {
-  if (isYText(value)) return value.toString();
-
-  const array = getYArray(value);
-  if (array) return array.toArray().map((v) => yjsValueToJson(v));
-
-  const map = getYMap(value);
-  if (map) {
-    /** @type {Record<string, any>} */
-    const out = {};
-    const keys = Array.from(map.keys()).sort();
-    for (const key of keys) out[key] = yjsValueToJson(map.get(key));
-    return out;
-  }
-
-  if (Array.isArray(value)) return value.map((v) => yjsValueToJson(v));
-
-  if (isRecord(value)) {
-    /** @type {Record<string, any>} */
-    const out = {};
-    const keys = Object.keys(value).sort();
-    for (const key of keys) out[key] = yjsValueToJson(value[key]);
-    return out;
-  }
-
-  return value;
 }
 
 /**
@@ -775,9 +602,10 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
    * @returns {any}
    */
   function cloneYjsValue(value) {
-    if (isYText(value)) {
+    const text = getYText(value);
+    if (text) {
       const out = new docConstructors.Text();
-      out.applyDelta(structuredClone(value.toDelta()));
+      out.applyDelta(structuredClone(text.toDelta()));
       return out;
     }
     const array = getYArray(value);

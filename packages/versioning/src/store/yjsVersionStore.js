@@ -1,4 +1,5 @@
 import * as Y from "yjs";
+import { getMapRoot, getYArray, getYMap } from "../../../collab/yjs-utils/src/index.ts";
 
 /**
  * @typedef {"snapshot" | "checkpoint" | "restore"} VersionKind
@@ -50,18 +51,7 @@ function isNodeRuntime() {
  * @returns {value is Y.Map<any>}
  */
 function isYMap(value) {
-  if (value instanceof Y.Map) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
-  // module instances (ESM + CJS). Avoid relying on `constructor.name`; prefer a
-  // structural check instead.
-  if (typeof maybe.get !== "function") return false;
-  if (typeof maybe.set !== "function") return false;
-  if (typeof maybe.delete !== "function") return false;
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return true;
+  return Boolean(getYMap(value));
 }
 
 /**
@@ -69,96 +59,7 @@ function isYMap(value) {
  * @returns {value is Y.Array<any>}
  */
 function isYArray(value) {
-  if (value instanceof Y.Array) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  return (
-    typeof maybe.get === "function" &&
-    typeof maybe.toArray === "function" &&
-    typeof maybe.push === "function" &&
-    typeof maybe.delete === "function" &&
-    typeof maybe.observeDeep === "function" &&
-    typeof maybe.unobserveDeep === "function"
-  );
-}
-
-function isYAbstractType(value) {
-  if (value instanceof Y.AbstractType) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
-}
-
-function replaceForeignRootType(params) {
-  const { doc, name, existing, create } = params;
-  const t = create();
-
-  // Mirror Yjs' own Doc.get conversion logic for AbstractType placeholders, but
-  // also support roots instantiated by a different Yjs module instance (e.g.
-  // CJS `require("yjs")`).
-  //
-  // We intentionally only do this replacement when `doc` is from this module's
-  // Yjs instance (i.e. `doc instanceof Y.Doc`). If the entire doc was created by
-  // a foreign Yjs build, inserting local types into it can cause the same
-  // cross-instance integration errors we're trying to avoid.
-  (t)._map = existing?._map;
-  (t)._start = existing?._start;
-  (t)._length = existing?._length;
-
-  const map = existing?._map;
-  if (map instanceof Map) {
-    map.forEach((item) => {
-      for (let n = item; n !== null; n = n.left) {
-        n.parent = t;
-      }
-    });
-  }
-
-  for (let n = existing?._start ?? null; n !== null; n = n.right) {
-    n.parent = t;
-  }
-
-  doc.share.set(name, t);
-  t._integrate(doc, null);
-  return t;
-}
-
-/**
- * @param {import("yjs").Doc} doc
- * @param {string} name
- * @returns {any}
- */
-function getMapRoot(doc, name) {
-  const existing = doc.share.get(name);
-  if (existing == null) return doc.getMap(name);
-
-  if (isYMap(existing)) {
-    // If the map root was created by a different Yjs module instance (ESM vs CJS),
-    // `instanceof` checks fail and inserting local nested types can throw
-    // ("Unexpected content type"). Normalize the root to this module instance.
-    if (!(existing instanceof Y.Map) && doc instanceof Y.Doc) {
-      return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() });
-    }
-    return existing;
-  }
-
-  // Placeholder root types should be coerced via Yjs' own constructors.
-  //
-  // Note: other parts of the system (e.g. collaborative undo) patch foreign
-  // prototype chains so foreign types can pass `instanceof Y.AbstractType`
-  // checks. Use constructor identity to detect placeholders created by *this*
-  // Yjs module instance.
-  if (existing instanceof Y.AbstractType && existing.constructor === Y.AbstractType) return doc.getMap(name);
-  if (isYAbstractType(existing) && doc instanceof Y.Doc) {
-    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() });
-  }
-  if (isYAbstractType(existing)) return doc.getMap(name);
-
-  // Root is missing or unsupported; instantiate via Yjs' constructor (will throw
-  // if the root exists but has a non-map schema).
-  return doc.getMap(name);
+  return Boolean(getYArray(value));
 }
 
 /**

@@ -1,50 +1,4 @@
-import * as Y from "yjs";
-
-function isYMap(value) {
-  if (value instanceof Y.Map) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
-  // module instances (ESM + CJS). Avoid relying on `constructor.name`; prefer a
-  // structural check instead.
-  if (typeof maybe.forEach !== "function") return false;
-  if (typeof maybe.get !== "function") return false;
-  if (typeof maybe.set !== "function") return false;
-  if (typeof maybe.delete !== "function") return false;
-  // Plain JS Maps also have get/set/delete/forEach, so additionally require Yjs'
-  // deep observer APIs.
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return true;
-}
-
-function isYArray(value) {
-  if (value instanceof Y.Array) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  return (
-    typeof maybe.toArray === "function" &&
-    typeof maybe.get === "function" &&
-    typeof maybe.push === "function" &&
-    typeof maybe.delete === "function" &&
-    typeof maybe.observeDeep === "function" &&
-    typeof maybe.unobserveDeep === "function"
-  );
-}
-
-function isYText(value) {
-  if (value instanceof Y.Text) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  return (
-    typeof maybe.toDelta === "function" &&
-    typeof maybe.applyDelta === "function" &&
-    typeof maybe.insert === "function" &&
-    typeof maybe.delete === "function" &&
-    typeof maybe.observeDeep === "function" &&
-    typeof maybe.unobserveDeep === "function"
-  );
-}
+import { getYArray, getYMap, getYText } from "../../../collab/yjs-utils/src/index.ts";
 
 /**
  * Deep-clone a Yjs value from one document into a freshly-constructed Yjs type
@@ -58,36 +12,39 @@ function isYText(value) {
  * @returns {any}
  */
 export function cloneYjsValue(value, constructors = null) {
-  if (isYMap(value)) {
+  const map = getYMap(value);
+  if (map) {
     // NOTE: Yjs types cannot be moved between documents (or between different Yjs
     // module instances). Construct new instances using the source value's
     // constructor so the clone matches the module instance that produced the
     // original. This is critical when a doc has been hydrated by a different
     // loader (e.g. CJS vs ESM) and `instanceof` checks are unreliable.
-    const MapCtor = constructors?.Map ?? /** @type {any} */ (value).constructor;
+    const MapCtor = constructors?.Map ?? /** @type {any} */ (map).constructor;
     const out = new MapCtor();
-    value.forEach((v, k) => {
+    map.forEach((v, k) => {
       out.set(k, cloneYjsValue(v, constructors));
     });
     return out;
   }
 
-  if (isYArray(value)) {
-    const ArrayCtor = constructors?.Array ?? /** @type {any} */ (value).constructor;
+  const array = getYArray(value);
+  if (array) {
+    const ArrayCtor = constructors?.Array ?? /** @type {any} */ (array).constructor;
     const out = new ArrayCtor();
-    for (const item of value.toArray()) {
+    for (const item of array.toArray()) {
       out.push([cloneYjsValue(item, constructors)]);
     }
     return out;
   }
 
-  if (isYText(value)) {
-    const TextCtor = constructors?.Text ?? /** @type {any} */ (value).constructor;
+  const text = getYText(value);
+  if (text) {
+    const TextCtor = constructors?.Text ?? /** @type {any} */ (text).constructor;
     const out = new TextCtor();
     // Preserve formatting by cloning the Y.Text delta instead of just its plain string.
     // Note: it's safe to call `applyDelta` on an un-integrated Y.Text, but you
     // must integrate it into a Y.Doc before reading it (toString/toDelta).
-    out.applyDelta(structuredClone(value.toDelta()));
+    out.applyDelta(structuredClone(text.toDelta()));
     return out;
   }
 

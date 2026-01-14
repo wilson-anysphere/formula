@@ -1,85 +1,10 @@
 import * as Y from "yjs";
 import { cellKey } from "../diff/semanticDiff.js";
 import { parseCellKey } from "../../../collab/session/src/cell-key.js";
+import { getArrayRoot, getMapRoot, getYMap, yjsValueToJson } from "../../../collab/yjs-utils/src/index.ts";
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isYMap(value) {
-  if (value instanceof Y.Map) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  return (
-    typeof maybe.get === "function" &&
-    typeof maybe.set === "function" &&
-    typeof maybe.delete === "function" &&
-    typeof maybe.forEach === "function" &&
-    typeof maybe.observeDeep === "function" &&
-    typeof maybe.unobserveDeep === "function"
-  );
-}
-
-function isYArray(value) {
-  if (value instanceof Y.Array) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  return (
-    typeof maybe.get === "function" &&
-    typeof maybe.toArray === "function" &&
-    typeof maybe.push === "function" &&
-    typeof maybe.delete === "function" &&
-    typeof maybe.observeDeep === "function" &&
-    typeof maybe.unobserveDeep === "function"
-  );
-}
-
-function isYText(value) {
-  if (value instanceof Y.Text) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  return (
-    typeof maybe.toString === "function" &&
-    typeof maybe.toDelta === "function" &&
-    typeof maybe.applyDelta === "function" &&
-    typeof maybe.insert === "function" &&
-    typeof maybe.delete === "function" &&
-    typeof maybe.observeDeep === "function" &&
-    typeof maybe.unobserveDeep === "function"
-  );
-}
-
-function isYAbstractType(value) {
-  if (value instanceof Y.AbstractType) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
-}
-
-function replaceForeignRootType({ doc, name, existing, create }) {
-  const t = create();
-  t._map = existing?._map;
-  t._start = existing?._start;
-  t._length = existing?._length;
-
-  const map = existing?._map;
-  if (map instanceof Map) {
-    map.forEach((item) => {
-      for (let n = item; n !== null; n = n.left) {
-        n.parent = t;
-      }
-    });
-  }
-
-  for (let n = existing?._start ?? null; n !== null; n = n.right) {
-    n.parent = t;
-  }
-
-  doc.share.set(name, t);
-  t._integrate?.(doc, null);
-  return t;
 }
 
 /**
@@ -294,83 +219,12 @@ function parseIndexedFormats(raw, axis) {
 }
 
 /**
- * Convert a Yjs value (potentially nested) into a plain JS value.
- *
- * This is primarily used for encrypted cell payloads where we need deterministic,
- * deep-equality-friendly data but must not attempt to decrypt.
- *
- * @param {any} value
- * @returns {any}
- */
-function yjsValueToJson(value) {
-  if (isYText(value)) return value.toString();
-  if (isYArray(value)) return value.toArray().map((v) => yjsValueToJson(v));
-  if (isYMap(value)) {
-    /** @type {Record<string, any>} */
-    const out = {};
-    const keys = [];
-    value.forEach((_v, k) => keys.push(String(k)));
-    keys.sort();
-    for (const k of keys) out[k] = yjsValueToJson(value.get(k));
-    return out;
-  }
-
-  if (Array.isArray(value)) return value.map((v) => yjsValueToJson(v));
-
-  if (value && typeof value === "object") {
-    const proto = Object.getPrototypeOf(value);
-    // Only canonicalize plain objects; preserve prototypes for non-plain types.
-    if (proto !== Object.prototype && proto !== null) {
-      return structuredClone(value);
-    }
-    /** @type {Record<string, any>} */
-    const out = {};
-    const keys = Object.keys(value).sort();
-    for (const key of keys) out[key] = yjsValueToJson(value[key]);
-    return out;
-  }
-
-  return value;
-}
-
-/**
- * @param {Y.Doc} doc
- * @param {string} name
- */
-function getArrayRoot(doc, name) {
-  const existing = doc.share.get(name);
-  if (isYArray(existing)) return existing;
-  if (isYAbstractType(existing) && doc instanceof Y.Doc) {
-    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Array() });
-  }
-  if (isYAbstractType(existing)) return doc.getArray(name);
-  return doc.getArray(name);
-}
-
-/**
- * @param {Y.Doc} doc
- * @param {string} name
- */
-function getMapRoot(doc, name) {
-  const existing = doc.share.get(name);
-  if (isYMap(existing)) return existing;
-  // Placeholder / missing roots are safe to instantiate via Yjs' constructors.
-  // However, in mixed-module environments a foreign Yjs instance can create an
-  // `AbstractType` placeholder via `Doc.get(name)`, in which case `doc.getMap(name)`
-  // would throw "different constructor". Normalize those placeholders when possible.
-  if (isYAbstractType(existing) && doc instanceof Y.Doc) {
-    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() });
-  }
-  if (isYAbstractType(existing)) return doc.getMap(name);
-  return doc.getMap(name);
-}
-
-/**
  * @param {any} sheetEntry
  * @param {string} key
  */
 function readSheetEntryField(sheetEntry, key) {
-  if (isYMap(sheetEntry)) return sheetEntry.get(key);
+  const map = getYMap(sheetEntry);
+  if (map) return map.get(key);
   if (sheetEntry && typeof sheetEntry === "object") return sheetEntry[key];
   return undefined;
 }
@@ -413,13 +267,14 @@ export function parseSpreadsheetCellKey(key, opts = {}) {
  * @param {any} cellData
  */
 function extractCell(cellData) {
-  if (isYMap(cellData)) {
-    const enc = cellData.get("enc");
+  const map = getYMap(cellData);
+  if (map) {
+    const enc = map.get("enc");
     return {
       ...(enc !== null && enc !== undefined
         ? { enc: yjsValueToJson(enc), value: null, formula: null }
-        : { value: cellData.get("value") ?? null, formula: cellData.get("formula") ?? null }),
-      format: cellData.get("format") ?? cellData.get("style") ?? null,
+        : { value: map.get("value") ?? null, formula: map.get("formula") ?? null }),
+      format: map.get("format") ?? map.get("style") ?? null,
     };
   }
   if (cellData && typeof cellData === "object") {

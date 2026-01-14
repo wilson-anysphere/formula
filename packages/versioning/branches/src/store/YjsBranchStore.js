@@ -2,6 +2,7 @@ import * as Y from "yjs";
 import { applyPatch, diffDocumentStates } from "../patch.js";
 import { emptyDocumentState, normalizeDocumentState } from "../state.js";
 import { randomUUID } from "../uuid.js";
+import { getMapRoot, getYArray, getYMap } from "../../../../collab/yjs-utils/src/index.ts";
 
 /**
  * @typedef {import("../types.js").Actor} Actor
@@ -115,111 +116,6 @@ function normalizeBytes(bytes) {
     return new Uint8Array(s.buffer, s.byteOffset ?? 0, s.byteLength);
   }
   throw new Error("YjsBranchStore: invalid bytes");
-}
-
-/**
- * @param {unknown} value
- * @returns {Y.Map<any> | null}
- */
-function getYMap(value) {
-  if (value instanceof Y.Map) return value;
-
-  // See CollabSession#getYMapCell for why we can't rely solely on instanceof.
-  if (!value || typeof value !== "object") return null;
-  const maybe = /** @type {any} */ (value);
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.set !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  // Plain JS Maps also have get/set/delete, so additionally require Yjs' deep
-  // observer APIs.
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return /** @type {Y.Map<any>} */ (maybe);
-}
-
-/**
- * @param {unknown} value
- * @returns {Y.Array<any> | null}
- */
-function getYArray(value) {
-  if (value instanceof Y.Array) return value;
-  if (!value || typeof value !== "object") return null;
-  const maybe = /** @type {any} */ (value);
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.toArray !== "function") return null;
-  if (typeof maybe.push !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return /** @type {Y.Array<any>} */ (maybe);
-}
-
-function isYAbstractType(value) {
-  if (value instanceof Y.AbstractType) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
-}
-
-function replaceForeignRootType({ doc, name, existing, create }) {
-  const t = create();
-
-  // Mirror Yjs' own Doc.get conversion logic for AbstractType placeholders, but
-  // also support roots instantiated by a different Yjs module instance (e.g.
-  // CJS `require("yjs")`).
-  t._map = existing?._map;
-  t._start = existing?._start;
-  t._length = existing?._length;
-
-  const map = existing?._map;
-  if (map instanceof Map) {
-    map.forEach((item) => {
-      for (let n = item; n !== null; n = n.left) {
-        n.parent = t;
-      }
-    });
-  }
-
-  for (let n = existing?._start ?? null; n !== null; n = n.right) {
-    n.parent = t;
-  }
-
-  doc.share.set(name, t);
-  t._integrate(doc, null);
-  return t;
-}
-
-/**
- * Safely access a Map root without relying on `doc.getMap`, which can throw when
- * the root was instantiated by a different Yjs module instance (ESM vs CJS).
- *
- * @param {any} doc
- * @param {string} name
- * @returns {Y.Map<any>}
- */
-function getMapRoot(doc, name) {
-  const existing = doc?.share?.get?.(name);
-  if (!existing) return doc.getMap(name);
-
-  const map = getYMap(existing);
-  if (map) {
-    if (map instanceof Y.Map) return map;
-    if (doc instanceof Y.Doc) {
-      return replaceForeignRootType({ doc, name, existing: map, create: () => new Y.Map() });
-    }
-    return map;
-  }
-
-  if (isYAbstractType(existing)) {
-    if (doc instanceof Y.Doc) {
-      return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() });
-    }
-    return doc.getMap(name);
-  }
-
-  throw new Error(`Unsupported Yjs root type for "${name}"`);
 }
 
 /**

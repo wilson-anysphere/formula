@@ -6,6 +6,7 @@ import {
   sheetFormatLayersFromSheetEntry,
   sheetHasLayeredFormats,
 } from "./sheetState.js";
+import { getArrayRoot, getMapRoot, getYArray, getYMap, getYText, yjsValueToJson } from "../../../collab/yjs-utils/src/index.ts";
 
 /**
  * Excel-style worksheet visibility.
@@ -40,116 +41,13 @@ import {
  *   cellsBySheet: Map<string, { cells: Map<string, any> }>;
  * }} WorkbookState
  */
-
-function isYMap(value) {
-  if (value instanceof Y.Map) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  return (
-    typeof maybe.get === "function" &&
-    typeof maybe.set === "function" &&
-    typeof maybe.delete === "function" &&
-    typeof maybe.keys === "function" &&
-    typeof maybe.forEach === "function" &&
-    typeof maybe.observeDeep === "function" &&
-    typeof maybe.unobserveDeep === "function"
-  );
-}
-
-function isYArray(value) {
-  if (value instanceof Y.Array) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  return (
-    typeof maybe.get === "function" &&
-    typeof maybe.toArray === "function" &&
-    typeof maybe.push === "function" &&
-    typeof maybe.delete === "function" &&
-    typeof maybe.observeDeep === "function" &&
-    typeof maybe.unobserveDeep === "function"
-  );
-}
-
-function isYText(value) {
-  if (value instanceof Y.Text) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  return (
-    typeof maybe.toString === "function" &&
-    typeof maybe.toDelta === "function" &&
-    typeof maybe.applyDelta === "function" &&
-    typeof maybe.observeDeep === "function" &&
-    typeof maybe.unobserveDeep === "function"
-  );
-}
-
-function isYAbstractType(value) {
-  if (value instanceof Y.AbstractType) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
-}
-
-function replaceForeignRootType({ doc, name, existing, create }) {
-  const t = create();
-  t._map = existing?._map;
-  t._start = existing?._start;
-  t._length = existing?._length;
-
-  const map = existing?._map;
-  if (map instanceof Map) {
-    map.forEach((item) => {
-      for (let n = item; n !== null; n = n.left) {
-        n.parent = t;
-      }
-    });
-  }
-
-  for (let n = existing?._start ?? null; n !== null; n = n.right) {
-    n.parent = t;
-  }
-
-  doc.share.set(name, t);
-  t._integrate?.(doc, null);
-  return t;
-}
-
-/**
- * @param {Y.Doc} doc
- * @param {string} name
- */
-function getMapRoot(doc, name) {
-  const existing = doc.share.get(name);
-  if (isYMap(existing)) return existing;
-  if (isYAbstractType(existing) && doc instanceof Y.Doc) {
-    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() });
-  }
-  if (isYAbstractType(existing)) return doc.getMap(name);
-  return doc.getMap(name);
-}
-
-/**
- * @param {Y.Doc} doc
- * @param {string} name
- */
-function getArrayRoot(doc, name) {
-  const existing = doc.share.get(name);
-  if (isYArray(existing)) return existing;
-  if (isYAbstractType(existing) && doc instanceof Y.Doc) {
-    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Array() });
-  }
-  if (isYAbstractType(existing)) return doc.getArray(name);
-  return doc.getArray(name);
-}
-
 /**
  * @param {any} value
  * @param {string} key
  */
 function readYMapOrObject(value, key) {
-  if (isYMap(value)) return value.get(key);
+  const map = getYMap(value);
+  if (map) return map.get(key);
   if (value && typeof value === "object") return value[key];
   return undefined;
 }
@@ -158,7 +56,8 @@ function readYMapOrObject(value, key) {
  * @param {any} value
  */
 function coerceString(value) {
-  if (isYText(value)) return value.toString();
+  const text = getYText(value);
+  if (text) return text.toString();
   if (typeof value === "string") return value;
   if (value == null) return null;
   return String(value);
@@ -198,15 +97,15 @@ function normalizeTabColor(raw) {
   if (raw === null) return null;
   if (raw === undefined) return null;
 
-   const json = yjsValueToJson(raw);
-   /** @type {string | null} */
-   let rgb = null;
-   if (typeof json === "string") rgb = json;
-   else if (json && typeof json === "object") {
-     if (typeof json.rgb === "string") rgb = json.rgb;
-     else if (typeof json.argb === "string") rgb = json.argb;
-   }
-   if (rgb == null) return null;
+  const json = yjsValueToJson(raw);
+  /** @type {string | null} */
+  let rgb = null;
+  if (typeof json === "string") rgb = json;
+  else if (json && typeof json === "object") {
+    if (typeof json.rgb === "string") rgb = json.rgb;
+    else if (typeof json.argb === "string") rgb = json.argb;
+  }
+  if (rgb == null) return null;
 
   let str = rgb.trim();
   if (!str) return null;
@@ -243,49 +142,6 @@ function sheetViewMetaFromSheetEntry(entry) {
 }
 
 /**
- * Convert a Yjs value (potentially nested) into a plain JS value with stable
- * object key ordering.
- *
- * This is primarily used for diffing named ranges, where values are expected to
- * be JSON-ish.
- *
- * @param {any} value
- * @returns {any}
- */
-function yjsValueToJson(value) {
-  if (isYText(value)) return value.toString();
-  if (isYArray(value)) return value.toArray().map((v) => yjsValueToJson(v));
-  if (isYMap(value)) {
-    /** @type {Record<string, any>} */
-    const out = {};
-    const keys = Array.from(value.keys()).sort();
-    for (const key of keys) {
-      out[key] = yjsValueToJson(value.get(key));
-    }
-    return out;
-  }
-
-  if (Array.isArray(value)) return value.map((v) => yjsValueToJson(v));
-
-  // Only canonicalize plain objects; preserve prototypes for non-plain types.
-  if (value && typeof value === "object") {
-    const proto = Object.getPrototypeOf(value);
-    if (proto !== Object.prototype && proto !== null) {
-      return structuredClone(value);
-    }
-    /** @type {Record<string, any>} */
-    const out = {};
-    const keys = Object.keys(value).sort();
-    for (const key of keys) {
-      out[key] = yjsValueToJson(value[key]);
-    }
-    return out;
-  }
-
-  return value;
-}
-
-/**
  * @param {any} value
  * @param {string} mapKey
  * @returns {CommentSummary}
@@ -298,7 +154,8 @@ function commentSummaryFromValue(value, mapKey) {
 
   const replies = readYMapOrObject(value, "replies");
   let repliesLength = 0;
-  if (isYArray(replies)) repliesLength = replies.length;
+  const repliesArray = getYArray(replies);
+  if (repliesArray) repliesLength = repliesArray.length;
   else if (Array.isArray(replies)) repliesLength = replies.length;
 
   return { id, cellRef, content, resolved, repliesLength };
@@ -324,7 +181,8 @@ function legacyListCommentsFromMapRoot(mapType) {
     if (!item.deleted && item.parentSub === null) {
       const content = item.content?.getContent?.() ?? [];
       for (const value of content) {
-        if (isYMap(value)) out.push(value);
+        const map = getYMap(value);
+        if (map) out.push(map);
       }
     }
     item = item.right;
@@ -475,30 +333,15 @@ export function workbookStateFromYjsDoc(doc) {
     // before choosing a constructor.
     const existing = doc.share.get("comments");
 
+    const existingMap = getYMap(existing);
     // Canonical schema: Y.Map keyed by comment id.
-    if (isYMap(existing)) {
+    if (existingMap) {
       const byId = new Map();
-      for (const key of Array.from(existing.keys()).sort()) {
-        byId.set(key, commentSummaryFromValue(existing.get(key), key));
+      for (const key of Array.from(existingMap.keys()).sort()) {
+        byId.set(key, commentSummaryFromValue(existingMap.get(key), key));
       }
       // Recovery: legacy list items stored on a Map root (see helper above).
-      for (const item of legacyListCommentsFromMapRoot(existing)) {
-        const id = coerceString(readYMapOrObject(item, "id"));
-        if (!id) continue;
-        if (byId.has(id)) continue;
-        byId.set(id, commentSummaryFromValue(item, id));
-      }
-      for (const id of Array.from(byId.keys()).sort()) {
-        comments.set(id, byId.get(id));
-      }
-    } else if (isYArray(existing)) {
-      /** @type {Map<string, CommentSummary>} */
-      const byId = new Map();
-      // Recovery: map entries stored on an Array root (mixed schema).
-      for (const [key, value] of mapEntriesFromArrayRoot(existing)) {
-        byId.set(key, commentSummaryFromValue(value, key));
-      }
-      for (const item of existing.toArray()) {
+      for (const item of legacyListCommentsFromMapRoot(existingMap)) {
         const id = coerceString(readYMapOrObject(item, "id"));
         if (!id) continue;
         if (byId.has(id)) continue;
@@ -508,18 +351,15 @@ export function workbookStateFromYjsDoc(doc) {
         comments.set(id, byId.get(id));
       }
     } else {
-      const placeholder = existing;
-      const hasStart = placeholder?._start != null; // sequence item => likely array
-      const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
-      const kind = hasStart && mapSize === 0 ? "array" : "map";
-
-      if (kind === "map") {
-        const commentsMap = getMapRoot(doc, "comments");
+      const existingArray = getYArray(existing);
+      if (existingArray) {
+        /** @type {Map<string, CommentSummary>} */
         const byId = new Map();
-        for (const key of Array.from(commentsMap.keys()).sort()) {
-          byId.set(key, commentSummaryFromValue(commentsMap.get(key), key));
+        // Recovery: map entries stored on an Array root (mixed schema).
+        for (const [key, value] of mapEntriesFromArrayRoot(existingArray)) {
+          byId.set(key, commentSummaryFromValue(value, key));
         }
-        for (const item of legacyListCommentsFromMapRoot(commentsMap)) {
+        for (const item of existingArray.toArray()) {
           const id = coerceString(readYMapOrObject(item, "id"));
           if (!id) continue;
           if (byId.has(id)) continue;
@@ -529,17 +369,39 @@ export function workbookStateFromYjsDoc(doc) {
           comments.set(id, byId.get(id));
         }
       } else {
-        const commentsArray = getArrayRoot(doc, "comments");
-        /** @type {[string, CommentSummary][]} */
-        const entries = [];
-        for (const item of commentsArray.toArray()) {
-          const id = coerceString(readYMapOrObject(item, "id"));
-          if (!id) continue;
-          entries.push([id, commentSummaryFromValue(item, id)]);
-        }
-        entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-        for (const [id, summary] of entries) {
-          comments.set(id, summary);
+        const placeholder = existing;
+        const hasStart = placeholder?._start != null; // sequence item => likely array
+        const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
+        const kind = hasStart && mapSize === 0 ? "array" : "map";
+
+        if (kind === "map") {
+          const commentsMap = getMapRoot(doc, "comments");
+          const byId = new Map();
+          for (const key of Array.from(commentsMap.keys()).sort()) {
+            byId.set(key, commentSummaryFromValue(commentsMap.get(key), key));
+          }
+          for (const item of legacyListCommentsFromMapRoot(commentsMap)) {
+            const id = coerceString(readYMapOrObject(item, "id"));
+            if (!id) continue;
+            if (byId.has(id)) continue;
+            byId.set(id, commentSummaryFromValue(item, id));
+          }
+          for (const id of Array.from(byId.keys()).sort()) {
+            comments.set(id, byId.get(id));
+          }
+        } else {
+          const commentsArray = getArrayRoot(doc, "comments");
+          /** @type {[string, CommentSummary][]} */
+          const entries = [];
+          for (const item of commentsArray.toArray()) {
+            const id = coerceString(readYMapOrObject(item, "id"));
+            if (!id) continue;
+            entries.push([id, commentSummaryFromValue(item, id)]);
+          }
+          entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+          for (const [id, summary] of entries) {
+            comments.set(id, summary);
+          }
         }
       }
     }
