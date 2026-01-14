@@ -1143,6 +1143,9 @@ export class SpreadsheetApp {
   private drawingObjects: DrawingObject[] = [];
   private drawingHitTestIndex: HitTestIndex | null = null;
   private drawingHitTestIndexObjects: readonly DrawingObject[] | null = null;
+  private splitViewDrawingHitTestIndex: HitTestIndex | null = null;
+  private splitViewDrawingHitTestIndexObjects: readonly DrawingObject[] | null = null;
+  private splitViewDrawingHitTestIndexGrid: DesktopSharedGrid | null = null;
   private readonly drawingHitTestScratchRect = { x: 0, y: 0, width: 0, height: 0 };
   private selectedDrawingId: DrawingObjectId | null = null;
   private splitViewSecondaryGrid: { container: HTMLElement; grid: DesktopSharedGrid } | null = null;
@@ -3023,8 +3026,7 @@ export class SpreadsheetApp {
     const invalidateAndRenderDrawings = (reason?: string) => {
       // Keep memory bounded: only cache the active sheet's objects.
       this.drawingObjectsCache = null;
-      this.drawingHitTestIndex = null;
-      this.drawingHitTestIndexObjects = null;
+      this.invalidateDrawingHitTestIndexCaches();
       this.scheduleDrawingsRender(reason);
     };
 
@@ -3835,8 +3837,7 @@ export class SpreadsheetApp {
     // in-progress gesture by restoring the pre-gesture object list.
     this.selectedDrawingId = null;
     this.drawingObjectsCache = null;
-    this.drawingHitTestIndex = null;
-    this.drawingHitTestIndexObjects = null;
+    this.invalidateDrawingHitTestIndexCaches();
     this.drawingObjects = [];
     this.root.replaceChildren();
   }
@@ -6207,8 +6208,7 @@ export class SpreadsheetApp {
     this.drawingInteractionController?.reset({ clearSelection: true });
     this.sheetId = sheetId;
     this.drawingObjectsCache = null;
-    this.drawingHitTestIndex = null;
-    this.drawingHitTestIndexObjects = null;
+    this.invalidateDrawingHitTestIndexCaches();
     this.selectedDrawingId = null;
     this.syncActiveSheetBackgroundImage();
     if (this.collabMode) this.reindexCommentCells();
@@ -6267,8 +6267,7 @@ export class SpreadsheetApp {
       this.drawingInteractionController?.reset({ clearSelection: true });
       this.sheetId = target.sheetId;
       this.drawingObjectsCache = null;
-      this.drawingHitTestIndex = null;
-      this.drawingHitTestIndexObjects = null;
+      this.invalidateDrawingHitTestIndexCaches();
       this.selectedDrawingId = null;
       this.syncActiveSheetBackgroundImage();
       if (this.collabMode) this.reindexCommentCells();
@@ -6336,8 +6335,7 @@ export class SpreadsheetApp {
       this.drawingInteractionController?.reset({ clearSelection: true });
       this.sheetId = target.sheetId;
       this.drawingObjectsCache = null;
-      this.drawingHitTestIndex = null;
-      this.drawingHitTestIndexObjects = null;
+      this.invalidateDrawingHitTestIndexCaches();
       this.selectedDrawingId = null;
       this.syncActiveSheetBackgroundImage();
       if (this.collabMode) this.reindexCommentCells();
@@ -6645,6 +6643,11 @@ export class SpreadsheetApp {
    */
   setSplitViewSecondaryGridView(view: { container: HTMLElement; grid: DesktopSharedGrid } | null): void {
     this.splitViewSecondaryGrid = view;
+    // Drop any cached hit-test index tied to the previous secondary grid instance.
+    // This prevents keeping a destroyed SecondaryGridView alive via `index.geom` closures.
+    this.splitViewDrawingHitTestIndex = null;
+    this.splitViewDrawingHitTestIndexObjects = null;
+    this.splitViewDrawingHitTestIndexGrid = null;
   }
 
   getGridLimits(): GridLimits {
@@ -7247,6 +7250,7 @@ export class SpreadsheetApp {
     // list if the cache hasn't been populated yet.
     const objects = this.drawingObjects.length > 0 ? this.drawingObjects : this.listDrawingObjectsForSheet();
     if (objects.length === 0) return null;
+    const bounds = this.drawingHitTestScratchRect;
 
     // --- Primary pane ----------------------------------------------------------
     this.maybeRefreshRootPosition({ force: true });
@@ -7257,8 +7261,8 @@ export class SpreadsheetApp {
       const viewport = this.getDrawingInteractionViewport(sharedViewport);
       if (x >= 0 && y >= 0 && x <= viewport.width && y <= viewport.height) {
         const index = this.getDrawingHitTestIndex(objects);
-        const hit = hitTestDrawings(index, viewport, x, y, this.drawingGeom);
-        if (hit) return { id: hit.object.id };
+        const hit = hitTestDrawingsInto(index, viewport, x, y, bounds);
+        if (hit) return { id: hit.id };
       }
     }
 
@@ -7279,7 +7283,8 @@ export class SpreadsheetApp {
       const headerHeight = headerRows > 0 ? secondary.grid.renderer.scroll.rows.totalSize(headerRows) : 0;
       const headerOffsetX = Math.min(headerWidth, rect.width);
       const headerOffsetY = Math.min(headerHeight, rect.height);
-      const zoom = secondary.grid.renderer.getZoom();
+      const zoomRaw = secondary.grid.renderer.getZoom();
+      const zoom = Number.isFinite(zoomRaw) && zoomRaw > 0 ? zoomRaw : 1;
       const { frozenRows, frozenCols } = this.getFrozen();
 
       const viewport: DrawingViewport = {
@@ -7316,9 +7321,9 @@ export class SpreadsheetApp {
         },
       };
 
-      const index = buildHitTestIndex(objects, geom, { zoom });
-      const hit = hitTestDrawings(index, viewport, sx, sy, geom);
-      if (hit) return { id: hit.object.id };
+      const index = this.getSplitViewDrawingHitTestIndex(secondary, objects, geom, zoom);
+      const hit = hitTestDrawingsInto(index, viewport, sx, sy, bounds);
+      if (hit) return { id: hit.id };
     }
 
     return null;
@@ -7378,8 +7383,7 @@ export class SpreadsheetApp {
     if (this.isReadOnly() || this.isEditing()) {
       // Revert any live preview state to the persisted document snapshot.
       this.drawingObjectsCache = null;
-      this.drawingHitTestIndex = null;
-      this.drawingHitTestIndexObjects = null;
+      this.invalidateDrawingHitTestIndexCaches();
       this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
       return;
     }
@@ -7552,8 +7556,7 @@ export class SpreadsheetApp {
 
     // Ensure we don't keep stale in-memory objects after the commit.
     this.drawingObjectsCache = null;
-    this.drawingHitTestIndex = null;
-    this.drawingHitTestIndexObjects = null;
+    this.invalidateDrawingHitTestIndexCaches();
   }
 
   deleteSelectedDrawing(): void {
@@ -7656,8 +7659,7 @@ export class SpreadsheetApp {
     this.drawingOverlay.setSelectedId(null);
     this.drawingInteractionController?.setSelectedId(null);
     this.drawingObjectsCache = null;
-    this.drawingHitTestIndex = null;
-    this.drawingHitTestIndexObjects = null;
+    this.invalidateDrawingHitTestIndexCaches();
     this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
   }
 
@@ -7687,8 +7689,7 @@ export class SpreadsheetApp {
 
     // Clear the caches so hit testing + overlay re-render see the committed state.
     this.drawingObjectsCache = null;
-    this.drawingHitTestIndex = null;
-    this.drawingHitTestIndexObjects = null;
+    this.invalidateDrawingHitTestIndexCaches();
     this.selectDrawing(result.duplicatedId);
   }
 
@@ -9158,6 +9159,14 @@ export class SpreadsheetApp {
     );
   }
 
+  private invalidateDrawingHitTestIndexCaches(): void {
+    this.drawingHitTestIndex = null;
+    this.drawingHitTestIndexObjects = null;
+    this.splitViewDrawingHitTestIndex = null;
+    this.splitViewDrawingHitTestIndexObjects = null;
+    this.splitViewDrawingHitTestIndexGrid = null;
+  }
+
   private getDrawingHitTestIndex(objects: readonly DrawingObject[]): HitTestIndex {
     const zoom = this.getZoom();
     const cached = this.drawingHitTestIndex;
@@ -9165,6 +9174,29 @@ export class SpreadsheetApp {
     const index = buildHitTestIndex(objects, this.drawingGeom, { zoom });
     this.drawingHitTestIndex = index;
     this.drawingHitTestIndexObjects = objects;
+    return index;
+  }
+
+  private getSplitViewDrawingHitTestIndex(
+    secondary: { container: HTMLElement; grid: DesktopSharedGrid },
+    objects: readonly DrawingObject[],
+    geom: DrawingGridGeometry,
+    zoom: number,
+  ): HitTestIndex {
+    const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+    const cached = this.splitViewDrawingHitTestIndex;
+    if (
+      cached &&
+      this.splitViewDrawingHitTestIndexGrid === secondary.grid &&
+      this.splitViewDrawingHitTestIndexObjects === objects &&
+      Math.abs(cached.zoom - z) < 1e-6
+    ) {
+      return cached;
+    }
+    const index = buildHitTestIndex(objects, geom, { zoom: z });
+    this.splitViewDrawingHitTestIndex = index;
+    this.splitViewDrawingHitTestIndexObjects = objects;
+    this.splitViewDrawingHitTestIndexGrid = secondary.grid;
     return index;
   }
 
@@ -12867,8 +12899,7 @@ export class SpreadsheetApp {
     const docAny: any = this.document as any;
     const drawingsGetter = typeof docAny.getSheetDrawings === "function" ? docAny.getSheetDrawings : null;
     this.drawingObjectsCache = { sheetId: this.sheetId, objects: nextObjects, source: drawingsGetter };
-    this.drawingHitTestIndex = null;
-    this.drawingHitTestIndexObjects = null;
+    this.invalidateDrawingHitTestIndexCaches();
     this.scheduleDrawingsRender("keyboard:nudge");
 
     // Persist the move (and create an undo step) when the document supports sheet drawings.
