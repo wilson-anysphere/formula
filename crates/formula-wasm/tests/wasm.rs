@@ -405,6 +405,25 @@ fn lex_formula_honors_locale_id_option_for_arg_separator() {
 }
 
 #[wasm_bindgen_test]
+fn lex_formula_tokenizes_localized_error_literals_with_inverted_punctuation() {
+    for (formula, expected_error) in [
+        ("=#¡VALOR!", "#¡VALOR!"),
+        ("=#¿NOMBRE?", "#¿NOMBRE?"),
+    ] {
+        let tokens_js = lex_formula(formula, None).unwrap();
+        let tokens: Vec<LexToken> = serde_wasm_bindgen::from_value(tokens_js).unwrap();
+        assert!(
+            matches!(tokens.get(0), Some(LexToken { kind, value: Some(v), .. }) if kind == "Error" && v == &json!(expected_error)),
+            "expected first token to be Error({expected_error:?}), got: {tokens:?}"
+        );
+        assert!(
+            matches!(tokens.last().map(|t| t.kind.as_str()), Some("Eof")),
+            "expected last token to be Eof, got: {tokens:?}"
+        );
+    }
+}
+
+#[wasm_bindgen_test]
 fn lex_formula_rejects_unknown_locale_id_option() {
     let opts = Object::new();
     Reflect::set(&opts, &JsValue::from_str("localeId"), &JsValue::from_str("xx-XX")).unwrap();
