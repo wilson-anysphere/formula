@@ -3,7 +3,7 @@ import { rangeToA1 } from "../../selection/a1";
 import type { Range } from "../../selection/types";
 
 import { PreviewEngine, runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/index.js";
-import { SpreadsheetLLMToolExecutor } from "../../../../../packages/ai-tools/src/llm/integration.js";
+import { SpreadsheetLLMToolExecutor, type SpreadsheetLLMToolExecutorOptions } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js";
 import { AIAuditRecorder } from "../../../../../packages/ai-audit/src/recorder.js";
 
@@ -68,6 +68,13 @@ export interface InlineEditControllerOptions {
   reserveForOutputTokens?: number;
   keepLastMessages?: number;
   tokenEstimator?: TokenEstimator;
+
+  /**
+   * Optional tool execution configuration (e.g. `include_formula_values`).
+   *
+   * `default_sheet` and `require_approval_for_mutations` are supplied internally by inline edit.
+   */
+  toolExecutorOptions?: Omit<SpreadsheetLLMToolExecutorOptions, "default_sheet" | "require_approval_for_mutations">;
 }
 
 export class InlineEditController {
@@ -134,7 +141,8 @@ export class InlineEditController {
       const selectionSheetLabel = sheetDisplayName(params.sheetId, this.options.sheetNameResolver);
       const selectionRef = `${formatSheetNameForA1(selectionSheetLabel || params.sheetId)}!${rangeToA1(params.range)}`;
 
-      const toolPolicy = getDesktopToolPolicy({ mode: "inline_edit", prompt: params.prompt });
+      const toolPolicy =
+        this.options.toolExecutorOptions?.toolPolicy ?? getDesktopToolPolicy({ mode: "inline_edit", prompt: params.prompt });
       const offeredToolsByPolicy = toolPolicy.allowTools ?? [];
 
       // If the selection itself is blocked for cloud processing, stop before reading any
@@ -232,6 +240,7 @@ export class InlineEditController {
         ragService: null,
         schemaProvider: this.options.schemaProvider ?? null,
         sheetNameResolver: this.options.sheetNameResolver ?? null,
+        includeFormulaValues: Boolean(this.options.toolExecutorOptions?.include_formula_values),
         dlp,
         mode: "inline_edit",
         model,
@@ -256,8 +265,9 @@ export class InlineEditController {
       });
 
       const toolExecutor = new SpreadsheetLLMToolExecutor(api, {
+        ...(this.options.toolExecutorOptions ?? {}),
         default_sheet: params.sheetId,
-        sheet_name_resolver: this.options.sheetNameResolver ?? null,
+        sheet_name_resolver: this.options.toolExecutorOptions?.sheet_name_resolver ?? this.options.sheetNameResolver ?? null,
         require_approval_for_mutations: true,
         toolPolicy,
         dlp
@@ -324,7 +334,11 @@ export class InlineEditController {
             const preview = await this.previewEngine.generatePreview(
               [{ name: call.name, parameters: call.arguments } as any],
               api,
-              { default_sheet: params.sheetId, sheet_name_resolver: this.options.sheetNameResolver ?? null }
+              {
+                default_sheet: params.sheetId,
+                sheet_name_resolver: this.options.toolExecutorOptions?.sheet_name_resolver ?? this.options.sheetNameResolver ?? null,
+                include_formula_values: this.options.toolExecutorOptions?.include_formula_values ?? false
+              }
             );
             throwIfAborted(signal);
             const approved = await this.overlay.requestApproval(preview);
