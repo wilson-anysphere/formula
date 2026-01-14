@@ -2,6 +2,7 @@ import { describe, expect, it, afterEach } from "vitest";
 
 import { createDefaultAIAuditStore } from "../src/factory.node.js";
 import { BoundedAIAuditStore } from "../src/bounded-store.js";
+import { LocalStorageAIAuditStore } from "../src/local-storage-store.js";
 import { MemoryAIAuditStore } from "../src/memory-store.js";
 import { SqliteAIAuditStore } from "../src/sqlite-store.js";
 
@@ -10,7 +11,36 @@ import { IDBKeyRange, indexedDB } from "fake-indexeddb";
 const originalGlobals = {
   indexedDB: Object.getOwnPropertyDescriptor(globalThis as any, "indexedDB"),
   IDBKeyRange: Object.getOwnPropertyDescriptor(globalThis as any, "IDBKeyRange"),
+  localStorage: Object.getOwnPropertyDescriptor(globalThis as any, "localStorage"),
 };
+
+class MemoryLocalStorage implements Storage {
+  #data = new Map<string, string>();
+
+  get length(): number {
+    return this.#data.size;
+  }
+
+  clear(): void {
+    this.#data.clear();
+  }
+
+  getItem(key: string): string | null {
+    return this.#data.get(key) ?? null;
+  }
+
+  key(index: number): string | null {
+    return Array.from(this.#data.keys())[index] ?? null;
+  }
+
+  removeItem(key: string): void {
+    this.#data.delete(key);
+  }
+
+  setItem(key: string, value: string): void {
+    this.#data.set(key, value);
+  }
+}
 
 function unwrap(store: unknown): unknown {
   if (!(store instanceof BoundedAIAuditStore)) return store;
@@ -39,6 +69,13 @@ afterEach(async () => {
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
     delete (globalThis as any).IDBKeyRange;
   }
+
+  if (originalGlobals.localStorage) {
+    Object.defineProperty(globalThis as any, "localStorage", originalGlobals.localStorage);
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete (globalThis as any).localStorage;
+  }
 });
 
 describe("createDefaultAIAuditStore (node entrypoint)", () => {
@@ -57,6 +94,15 @@ describe("createDefaultAIAuditStore (node entrypoint)", () => {
     expect(unwrap(store)).toBeInstanceOf(MemoryAIAuditStore);
   });
 
+  it('prefer: "localstorage" chooses LocalStorageAIAuditStore when localStorage is available', async () => {
+    const storage = new MemoryLocalStorage();
+    Object.defineProperty(globalThis as any, "localStorage", { value: storage, configurable: true });
+
+    const store = await createDefaultAIAuditStore({ prefer: "localstorage" });
+    expect(store).toBeInstanceOf(BoundedAIAuditStore);
+    expect(unwrap(store)).toBeInstanceOf(LocalStorageAIAuditStore);
+  });
+
   it('prefer: "sqlite" returns a bounded wrapper by default', async () => {
     const store = await createDefaultAIAuditStore({ prefer: "sqlite" });
     expect(store).toBeInstanceOf(BoundedAIAuditStore);
@@ -70,4 +116,3 @@ describe("createDefaultAIAuditStore (node entrypoint)", () => {
     await closeIfSupported(store);
   });
 });
-
