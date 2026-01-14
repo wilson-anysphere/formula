@@ -64,7 +64,7 @@ fn decrypts_agile_and_standard_small_fixtures() {
         plaintext.len()
     );
 
-    for encrypted in ["agile.xlsx", "standard.xlsx"] {
+    for encrypted in ["agile.xlsx", "standard.xlsx", "standard-rc4.xlsx"] {
         let decrypted = decrypt_fixture(encrypted);
         assert_eq!(
             decrypted, plaintext,
@@ -146,6 +146,7 @@ fn xlsxpackage_from_bytes_with_password_supports_agile_and_standard() {
     for encrypted in [
         "agile.xlsx",
         "standard.xlsx",
+        "standard-rc4.xlsx",
         "agile-large.xlsx",
         "standard-large.xlsx",
     ] {
