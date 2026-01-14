@@ -317,9 +317,11 @@ fn scan_to_encryption_tag_utf16le(payload: &[u8]) -> Option<&[u8]> {
 /// - a 4-byte little-endian length prefix before the XML
 /// - leading junk before the `<encryption ...>` root tag (scan forward)
 pub(super) fn decode_encryption_info_xml_text<'a>(payload: &'a [u8]) -> Result<Cow<'a, str>> {
-    let nul_heavy = is_nul_heavy(payload);
-
     // Optional: a 4-byte little-endian length prefix before the XML.
+    //
+    // NOTE: We intentionally *do not* trim trailing NUL bytes before this step so the length prefix
+    // check can still succeed if producers include padding after the XML.
+    let nul_heavy = is_nul_heavy(payload);
     let candidate = length_prefixed_slice(payload)
         // Fallback: scan forward to the `<encryption` tag when the payload has leading bytes.
         .or_else(|| scan_to_encryption_tag(payload))
@@ -327,7 +329,25 @@ pub(super) fn decode_encryption_info_xml_text<'a>(payload: &'a [u8]) -> Result<C
         .or_else(|| if nul_heavy { scan_to_encryption_tag_utf16le(payload) } else { None })
         .unwrap_or(payload);
 
-    // UTF-16 fallback heuristic (NUL-heavy buffers, explicit BOM, or `<\0` / `\0<` prefix).
+    // --- Try UTF-8 first (after trimming trailing NUL padding) ---
+    //
+    // Some producers write UTF-8 XML into a fixed-size buffer/stream and then pad the remainder
+    // with NUL bytes. That can make the overall payload "NUL-heavy" and trip UTF-16 heuristics.
+    //
+    // To be robust, always attempt UTF-8 decoding first (after stripping UTF-8 BOM and trimming
+    // trailing NUL bytes). Only fall back to UTF-16 when the UTF-8 result is not plausible XML.
+    let candidate_utf8 = strip_utf8_bom(trim_trailing_nul_bytes(candidate));
+    if let Ok(xml) = std::str::from_utf8(candidate_utf8) {
+        let xml = xml.strip_prefix('\u{FEFF}').unwrap_or(xml);
+        // Plausibility check: XML 1.0 forbids NUL bytes; UTF-16 mis-decoded as UTF-8 will contain
+        // embedded NULs (`<\0e\0n\0...` or `\0<\0e...`). Require that the string looks like XML to
+        // avoid returning such buffers as UTF-8.
+        if xml.trim_start().starts_with('<') && !xml.contains('\0') {
+            return Ok(Cow::Borrowed(xml));
+        }
+    }
+
+    // --- UTF-16 fallback heuristic (explicit BOM, `<\0` / `\0<` prefix, or NUL-heavy ignoring padding) ---
     if candidate.starts_with(&[0xFF, 0xFE]) {
         return Ok(Cow::Owned(decode_utf16_xml(candidate, Utf16Endian::Le)?));
     }
@@ -342,8 +362,10 @@ pub(super) fn decode_encryption_info_xml_text<'a>(payload: &'a [u8]) -> Result<C
             return Ok(Cow::Owned(decode_utf16_xml(candidate, Utf16Endian::Be)?));
         }
     }
-    if is_nul_heavy(candidate) {
-        let preferred = guess_utf16_endianness(candidate);
+
+    let candidate_no_trailing_nuls = trim_trailing_nul_bytes(candidate);
+    if is_nul_heavy(candidate_no_trailing_nuls) {
+        let preferred = guess_utf16_endianness(candidate_no_trailing_nuls);
         if let Some(endian) = preferred {
             // If the heuristic picks the wrong endianness, fall back to trying the other side.
             let decoded = decode_utf16_xml(candidate, endian).or_else(|_| {
@@ -377,8 +399,8 @@ pub(super) fn decode_encryption_info_xml_text<'a>(payload: &'a [u8]) -> Result<C
         }
     }
 
-    let candidate = strip_utf8_bom(trim_trailing_nul_bytes(candidate));
-    let xml = std::str::from_utf8(candidate)?;
+    // If the buffer doesn't look like UTF-16, fall back to UTF-8 decoding (propagating any UTF-8 error).
+    let xml = std::str::from_utf8(candidate_utf8)?;
     let xml = xml.strip_prefix('\u{FEFF}').unwrap_or(xml);
     Ok(Cow::Borrowed(xml))
 }

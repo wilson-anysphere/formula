@@ -1282,6 +1282,19 @@ mod tests {
     }
 
     #[test]
+    fn decodes_utf8_encryption_info_when_trailing_nul_padding_is_nul_heavy() {
+        // Regression test: a valid UTF-8 XML document padded with many trailing NUL bytes can
+        // become "NUL-heavy" and must not be misclassified as UTF-16LE.
+        let xml = minimal_encryption_info_xml();
+        let mut payload = Vec::new();
+        payload.extend_from_slice(xml.as_bytes());
+        payload.extend(std::iter::repeat(0u8).take(4096));
+
+        let decoded = decode_encryption_info_xml_text(&payload).expect("decode should succeed");
+        assert_eq!(decoded.as_ref(), xml);
+    }
+
+    #[test]
     fn parses_agile_encryption_info_with_utf16le_xml() {
         let xml = minimal_encryption_info_xml();
         let expected = parse_stream_payload(xml.as_bytes());

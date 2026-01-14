@@ -1091,7 +1091,7 @@ fn parse_key_data(
         maybe_warn_salt_size(w, "keyData", node.attribute("saltSize"), salt_value.len());
     }
 
-    validate_block_size(node, "blockSize", block_size)?;
+    validate_block_size(block_size)?;
     validate_hash_size(node, "hashSize", hash_algorithm, hash_size)?;
     // Prevent unbounded allocations later in the decrypt path (key derivation).
     key_len_bytes(key_bits, "keyData", "keyBits")?;
@@ -1174,7 +1174,7 @@ fn parse_password_key_encryptor(
             salt_value.len(),
         );
     }
-    validate_block_size(node, "blockSize", block_size)?;
+    validate_block_size(block_size)?;
     validate_hash_size(node, "hashSize", hash_algorithm, hash_size)?;
     key_len_bytes(key_bits, "p:encryptedKey", "keyBits")?;
 
@@ -2007,11 +2007,7 @@ fn hash_output_len(alg: HashAlgorithm) -> usize {
     }
 }
 
-fn validate_block_size(
-    _node: roxmltree::Node<'_, '_>,
-    _attr: &'static str,
-    block_size: usize,
-) -> Result<()> {
+fn validate_block_size(block_size: usize) -> Result<()> {
     if block_size != AES_BLOCK_SIZE {
         return Err(OffCryptoError::InvalidBlockSize { block_size });
     }
