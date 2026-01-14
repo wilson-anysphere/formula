@@ -42,19 +42,21 @@ function createHarness(
   opts: {
     zoomDisabled?: boolean;
     withSecondaryGrid?: boolean;
-    ribbonTabs?: Array<{ label: string; selected: boolean }>;
-    sheetTabs?: Array<{ label: string; selected: boolean }>;
+    ribbonTabs?: Array<{ id: string; label: string; selected: boolean }>;
+    sheetTabs?: Array<{ id: string; label: string; selected: boolean }>;
     includeFormulaInput?: boolean;
   } = {},
 ) {
   const ribbonTabs = [
     {
+      id: "home",
       label: "Home",
       selected: true,
     },
   ];
   const sheetTabs = [
     {
+      id: "Sheet1",
       label: "Sheet1",
       selected: true,
     },
@@ -71,16 +73,14 @@ function createHarness(
       (tab) =>
         `<button class="ribbon__tab" role="tab" aria-selected="${tab.selected ? "true" : "false"}" tabindex="${
           tab.selected ? "0" : "-1"
-        }">${tab.label}</button>`,
+        }" data-testid="ribbon-tab-${tab.id}">${tab.label}</button>`,
     )
     .join("");
 
   const sheetTabHtml = (extraSheetTabs ?? sheetTabs)
     .map(
       (tab) =>
-        `<button role="tab" aria-selected="${tab.selected ? "true" : "false"}" tabindex="${tab.selected ? "0" : "-1"}">${
-          tab.label
-        }</button>`,
+        `<button role="tab" aria-selected="${tab.selected ? "true" : "false"}" tabindex="${tab.selected ? "0" : "-1"}" data-testid="sheet-tab-${tab.id}">${tab.label}</button>`,
     )
     .join("");
 
@@ -316,12 +316,12 @@ describe("F6 focus cycling keybinding dispatch", () => {
     const { service, elements } = createHarness({
       includeFormulaInput: true,
       ribbonTabs: [
-        { label: "Home", selected: false },
-        { label: "Insert", selected: true },
+        { id: "home", label: "Home", selected: false },
+        { id: "insert", label: "Insert", selected: true },
       ],
       sheetTabs: [
-        { label: "Sheet1", selected: false },
-        { label: "Sheet2", selected: true },
+        { id: "Sheet1", label: "Sheet1", selected: false },
+        { id: "Sheet2", label: "Sheet2", selected: true },
       ],
     });
 
