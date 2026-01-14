@@ -4070,19 +4070,67 @@ impl WasmWorkbook {
     pub fn set_info_origin_for_sheet(
         &mut self,
         sheet_name: String,
-        origin: Option<String>,
+        origin_a1: Option<String>,
     ) -> Result<(), JsValue> {
         let sheet_name = sheet_name.trim();
         if sheet_name.is_empty() {
             return Err(js_err("sheet must be a non-empty string"));
         }
         let sheet = self.inner.ensure_sheet(sheet_name);
-        let origin = origin.and_then(|s| {
-            let s = s.trim();
-            (!s.is_empty()).then_some(s.to_string())
-        });
-        self.inner.engine.set_info_origin_for_sheet(&sheet, origin);
-        Ok(())
+        let origin_trimmed = origin_a1
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
+        // `INFO("origin")` is tied to host-provided worksheet view state. The core engine
+        // validates and stores the origin as a parsed A1 cell reference, so we pass the host
+        // string through verbatim (after trimming) and let the engine handle parsing.
+        self.inner
+            .engine
+            .set_sheet_origin(&sheet, origin_trimmed)
+            .map_err(|err| js_err(err.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = "setInfoSystem")]
+    pub fn set_info_system(&mut self, system: Option<String>) {
+        let mut info = self.inner.engine.engine_info().clone();
+        info.system = system;
+        self.inner.engine.set_engine_info(info);
+    }
+
+    #[wasm_bindgen(js_name = "setInfoOSVersion")]
+    pub fn set_info_os_version(&mut self, os_version: Option<String>) {
+        let mut info = self.inner.engine.engine_info().clone();
+        info.osversion = os_version;
+        self.inner.engine.set_engine_info(info);
+    }
+
+    #[wasm_bindgen(js_name = "setInfoRelease")]
+    pub fn set_info_release(&mut self, release: Option<String>) {
+        let mut info = self.inner.engine.engine_info().clone();
+        info.release = release;
+        self.inner.engine.set_engine_info(info);
+    }
+
+    #[wasm_bindgen(js_name = "setInfoVersion")]
+    pub fn set_info_version(&mut self, version: Option<String>) {
+        let mut info = self.inner.engine.engine_info().clone();
+        info.version = version;
+        self.inner.engine.set_engine_info(info);
+    }
+
+    #[wasm_bindgen(js_name = "setInfoMemAvail")]
+    pub fn set_info_mem_avail(&mut self, mem_avail: Option<f64>) {
+        let mut info = self.inner.engine.engine_info().clone();
+        info.memavail = mem_avail;
+        self.inner.engine.set_engine_info(info);
+    }
+
+    #[wasm_bindgen(js_name = "setInfoTotMem")]
+    pub fn set_info_tot_mem(&mut self, tot_mem: Option<f64>) {
+        let mut info = self.inner.engine.engine_info().clone();
+        info.totmem = tot_mem;
+        self.inner.engine.set_engine_info(info);
     }
 
     #[wasm_bindgen(js_name = "fromJson")]
