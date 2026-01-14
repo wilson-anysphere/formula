@@ -397,7 +397,11 @@ def _append_trend_file(
             )
             raw = []
         if not isinstance(raw, list):
-            raise ValueError(f"trend file must be a JSON list: {trend_path}")
+            print(
+                f"warning: trend file was not a JSON list; overwriting: {trend_path}",
+                file=sys.stderr,
+            )
+            raw = []
         entries = [e for e in raw if isinstance(e, dict)]
         if entries:
             prev = entries[-1]

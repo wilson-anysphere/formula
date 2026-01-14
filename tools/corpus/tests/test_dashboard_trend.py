@@ -196,6 +196,32 @@ class DashboardTrendTests(unittest.TestCase):
             on_disk = json.loads(trend_path.read_text(encoding="utf-8"))
             self.assertEqual(len(on_disk), 1)
 
+    def test_append_trend_file_overwrites_non_list_json(self) -> None:
+        summary = {
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "commit": "abc",
+            "run_url": "https://example.invalid/run/1",
+            "counts": {"total": 1, "open_ok": 1, "round_trip_ok": 1},
+            "rates": {"open": 1.0, "round_trip": 1.0},
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            trend_path = Path(td) / "trend.json"
+            # Wrong type (dict instead of list) should be treated as corruption and overwritten.
+            trend_path.write_text(json.dumps({"oops": True}), encoding="utf-8")
+
+            stderr = io.StringIO()
+            with redirect_stderr(stderr):
+                entries, prev = _append_trend_file(trend_path, summary=summary, max_entries=90)
+            self.assertIn("not a JSON list", stderr.getvalue())
+
+            self.assertIsNone(prev)
+            self.assertEqual(len(entries), 1)
+
+            on_disk = json.loads(trend_path.read_text(encoding="utf-8"))
+            self.assertIsInstance(on_disk, list)
+            self.assertEqual(len(on_disk), 1)
+
     def test_append_trend_file_max_entries_zero_means_unlimited(self) -> None:
         summary = {
             "timestamp": "2026-01-01T00:00:00+00:00",
