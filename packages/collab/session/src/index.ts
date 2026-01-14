@@ -2131,6 +2131,10 @@ export class CollabSession {
    * enforces edit permissions and throws when the caller cannot edit the target
    * cell.
    *
+   * Note: when permissions are configured and `ignorePermissions` is not set,
+   * `cellKey` must be parseable (e.g. `${sheetId}:${row}:${col}` or supported
+   * legacy forms). Unparseable keys are rejected to avoid bypassing restrictions.
+   *
    * Escape hatch: internal tooling (e.g. migrations/admin repair scripts) may
    * bypass permission checks by passing `{ ignorePermissions: true }`. This
    * does *not* bypass encryption invariants.
@@ -2333,6 +2337,10 @@ export class CollabSession {
    * When session permissions are configured via `setPermissions()`, this method
    * enforces edit permissions and throws when the caller cannot edit the target
    * cell.
+   *
+   * Note: when permissions are configured and `ignorePermissions` is not set,
+   * `cellKey` must be parseable (e.g. `${sheetId}:${row}:${col}` or supported
+   * legacy forms). Unparseable keys are rejected to avoid bypassing restrictions.
    *
    * Escape hatch: internal tooling (e.g. migrations/admin repair scripts) may
    * bypass permission checks by passing `{ ignorePermissions: true }`. This
