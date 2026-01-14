@@ -168,8 +168,7 @@ fn phonetic_reads_cell_metadata_or_falls_back_to_text() {
     sheet.set_phonetic("A1", None);
     assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text("abc".to_string()));
 
-    // Blank input should remain blank.
-    sheet.set("A1", Value::Blank);
+    sheet.set("A1", Value::Blank); // Blank input should remain blank.
     assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text(String::new()));
 }
 
@@ -185,6 +184,40 @@ fn phonetic_spills_over_range_references() {
         Value::Text("あびし".to_string())
     );
     assert_eq!(sheet.get("Z2"), Value::Text("def".to_string()));
+}
+
+#[test]
+fn phonetic_metadata_is_cleared_when_cell_input_changes() {
+    let mut sheet = TestSheet::new();
+
+    sheet.set("A1", "漢字");
+    sheet.set_phonetic("A1", Some("かんじ"));
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("かんじ".to_string())
+    );
+
+    // Editing the cell value should clear stored phonetic metadata so PHONETIC never returns stale
+    // furigana.
+    sheet.set("A1", "東京");
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("東京".to_string())
+    );
+
+    // Editing the cell formula should also clear stored phonetic metadata.
+    sheet.set("A1", "日本");
+    sheet.set_phonetic("A1", Some("にほん"));
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("にほん".to_string())
+    );
+
+    sheet.set_formula("A1", "=\"大阪\"");
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("大阪".to_string())
+    );
 }
 
 #[test]

@@ -258,6 +258,16 @@ struct Cell {
     /// Excel preserves formatting when editing values/formulas, so engine APIs should avoid
     /// overwriting this field unless explicitly changing formatting.
     style_id: u32,
+    /// Optional per-cell phonetic guide (furigana) metadata used by the `PHONETIC()` function.
+    ///
+    /// Lifecycle rules (Excel-like):
+    /// - When a cell's *input* changes via `Engine::set_cell_value`, `Engine::set_cell_formula*`,
+    ///   or `Engine::set_range_values`, any existing `phonetic` metadata is cleared (set to
+    ///   `None`) to avoid returning stale furigana for new content.
+    /// - When a cell is cleared via `Engine::clear_cell`, the cell record is removed entirely
+    ///   (phonetic metadata is implicitly removed).
+    /// - During recalculation, the engine may update cached `value` fields, but it must not mutate
+    ///   `phonetic` metadata.
     phonetic: Option<String>,
     formula: Option<String>,
     compiled: Option<CompiledFormula>,
@@ -3051,6 +3061,7 @@ impl Engine {
                 } else {
                     let cell = self.workbook.get_or_create_cell_mut(key);
                     cell.value = value.clone();
+                    cell.phonetic = None;
                     cell.formula = None;
                     cell.compiled = None;
                     cell.bytecode_compile_reason = None;
