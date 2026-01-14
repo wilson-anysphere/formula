@@ -240,7 +240,12 @@ def check_job(
         Returns (line_number_of_field, values) or None if field not present.
         """
 
-        block_markers = {"|", "|-", "|+", ">", ">-", ">+"}
+        # YAML block scalar indicators:
+        # - `|` / `>` (literal/folded)
+        # - optional indentation + chomping indicators in either order (e.g. `|2-`, `|-2`).
+        # GitHub Actions workflow YAML commonly uses these forms, so treat anything of the form
+        # `[|>][0-9+-]*` as a block scalar header.
+        block_marker_re = re.compile(r"^[|>][0-9+-]*$")
         for i, (ln, line) in enumerate(step):
             if is_comment(line):
                 continue
@@ -249,7 +254,7 @@ def check_job(
                 continue
             indent = len(m.group(1))
             rest = m.group(2).strip()
-            if rest and rest not in block_markers:
+            if rest and not block_marker_re.match(rest):
                 # Single-line value.
                 rest = strip_flow_mapping_trailing_brace(strip_wrapping_quotes(rest))
                 return (ln, [rest])

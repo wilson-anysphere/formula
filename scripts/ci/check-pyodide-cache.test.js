@@ -194,6 +194,50 @@ jobs:
   assert.match(proc.stdout, /Pyodide cache guard: OK/i);
 });
 
+test("passes when restore-keys uses a YAML block scalar indicator with digits (|2-)", { skip: !canRun }, () => {
+  const proc = run({
+    ensureScript: `const PYODIDE_VERSION = "0.26.4";`,
+    workflowYaml: `
+name: Desktop build
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Detect Pyodide version (for caching)
+        id: pyodide
+        run: echo "version=0.26.4" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Pyodide asset cache
+        uses: actions/cache/restore@v4
+        with:
+          enableCrossOsArchive: true
+          path: apps/desktop/public/pyodide/
+          key: pyodide-\${{ runner.os }}-\${{ steps.pyodide.outputs.version }}-\${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
+          restore-keys: |2-
+            pyodide-\${{ runner.os }}-\${{ steps.pyodide.outputs.version }}-
+            pyodide-\${{ steps.pyodide.outputs.version }}-
+
+      - name: Restore tracked Pyodide files
+        run: git restore --source=HEAD -- apps/desktop/public/pyodide
+
+      - name: Ensure Pyodide assets are present (populate cache on miss)
+        run: node apps/desktop/scripts/ensure-pyodide-assets.mjs
+
+      - name: Save Pyodide asset cache
+        uses: actions/cache/save@v4
+        with:
+          enableCrossOsArchive: true
+          path: apps/desktop/public/pyodide/
+          key: pyodide-\${{ runner.os }}-\${{ steps.pyodide.outputs.version }}-\${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
+
+      - name: Build desktop frontend assets
+        run: pnpm build:desktop
+`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Pyodide cache guard: OK/i);
+});
+
 test("fails when caching the whole pyodide tree uses multiline path without restoring tracked files", { skip: !canRun }, () => {
   const proc = run({
     ensureScript: `const PYODIDE_VERSION = "0.26.4";`,
