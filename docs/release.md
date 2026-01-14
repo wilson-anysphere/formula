@@ -92,10 +92,10 @@ To test packaging/signing changes without creating a git tag, run the **Desktop 
 manually from GitHub Actions:
 
 1. Go to **Actions → Desktop Release → Run workflow**.
-2. Select the branch/commit you want to test.
+2. Select the branch (or tag) you want to test.
 3. Leave **upload** unchecked (default). This is **dry-run** mode:
    - bundles are built for all OS/targets
-   - outputs are uploaded as **workflow artifacts** (no GitHub Release is created/modified)
+   - outputs are uploaded as **workflow artifacts** (look for artifacts starting with `desktop-bundles-...`; no GitHub Release is created/modified)
 4. (Recommended) Set **version** to label the artifacts (example: `0.2.3-test`). You can also set
    **tag** (example: `v0.2.3-test`); if provided, it takes precedence.
 
