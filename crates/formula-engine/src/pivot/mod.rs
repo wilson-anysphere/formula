@@ -60,6 +60,12 @@ fn pivot_field_ref_from_legacy_string(raw: String) -> PivotFieldRef {
     PivotFieldRef::CacheFieldName(raw)
 }
 
+mod apply;
+pub use apply::{
+    apply_pivot_cell_writes_to_worksheet, apply_pivot_result_to_worksheet, PivotApplyError,
+    PivotApplyOptions,
+};
+
 #[derive(Debug, Error)]
 pub enum PivotError {
     #[error("worksheet not found: {0}")]
@@ -86,6 +92,17 @@ pub enum PivotError {
         item: String,
         message: String,
     },
+}
+
+fn pivot_key_part_to_pivot_value(part: &PivotKeyPart) -> PivotValue {
+    match part {
+        // Excel renders blank pivot items as the literal string "(blank)".
+        PivotKeyPart::Blank => PivotValue::Text("(blank)".to_string()),
+        PivotKeyPart::Number(bits) => PivotValue::Number(f64::from_bits(*bits)),
+        PivotKeyPart::Date(d) => PivotValue::Date(*d),
+        PivotKeyPart::Text(s) => PivotValue::Text(s.clone()),
+        PivotKeyPart::Bool(b) => PivotValue::Bool(*b),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -423,6 +440,9 @@ pub struct CellWrite {
     pub row: u32,
     pub col: u32,
     pub value: PivotValue,
+    /// Optional number format code to apply when writing this cell to a worksheet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number_format: Option<String>,
 }
 
 impl PivotResult {
@@ -435,6 +455,7 @@ impl PivotResult {
                     row: destination.row + r as u32,
                     col: destination.col + c as u32,
                     value: value.clone(),
+                    number_format: None,
                 });
             }
         }
@@ -507,7 +528,7 @@ impl CreatePivotTableRequest {
                         .name
                         .unwrap_or_else(|| format!("{:?} of {}", vf.aggregation, &field));
                     ValueField {
-                        source_field: PivotFieldRef::CacheFieldName(field),
+                        source_field: pivot_field_ref_from_legacy_string(field),
                         name,
                         aggregation: vf.aggregation,
                         number_format: None,
@@ -521,7 +542,7 @@ impl CreatePivotTableRequest {
                 .filter_fields
                 .into_iter()
                 .map(|f| FilterField {
-                    source_field: PivotFieldRef::CacheFieldName(f.field),
+                    source_field: pivot_field_ref_from_legacy_string(f.field),
                     allowed: f
                         .allowed
                         .map(|vals| vals.into_iter().map(|v| v.to_key_part()).collect()),
@@ -1782,7 +1803,7 @@ impl PivotEngine {
                             continue;
                         }
                     }
-                    row.push(part.to_pivot_value());
+                    row.push(pivot_key_part_to_pivot_value(part));
                 }
 
                 // If row key shorter than row_fields (shouldn't happen), pad.
@@ -1839,7 +1860,7 @@ impl PivotEngine {
                     for idx in 0..cfg.row_fields.len() {
                         if idx < label_column {
                             if let Some(prefix) = prefix_parts.get(idx) {
-                                row.push(prefix.to_pivot_value());
+                                row.push(pivot_key_part_to_pivot_value(prefix));
                             } else {
                                 row.push(PivotValue::Blank);
                             }
@@ -4427,9 +4448,9 @@ mod tests {
 
         assert_eq!(
             result.data,
-            vec![
-                vec!["Key".into(), "Sum of Sales".into()],
-                vec!["(blank)".into(), 10.into()],
+                vec![
+                    vec!["Key".into(), "Sum of Sales".into()],
+                    vec!["(blank)".into(), 10.into()],
             ]
         );
     }
