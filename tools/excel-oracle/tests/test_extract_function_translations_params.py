@@ -21,6 +21,11 @@ class ExtractFunctionTranslationsScriptTests(unittest.TestCase):
         self.assertIn(".PARAMETER OutPath", text)
         self.assertIn(".PARAMETER Visible", text)
         self.assertIn(".PARAMETER MaxFunctions", text)
+        # The extractor docs should mention how it ties into the repo's locale-data workflow.
+        self.assertIn("normalize-locale-function-sources.js", text)
+        self.assertIn("generate-locale-function-tsv.js --check", text)
+        # Debug-only flags should be called out clearly to avoid committing partial locale sources.
+        self.assertIn("do not commit partial locale sources", text)
 
         # Parameter block (CmdletBinding param()).
         self.assertIn("[string]$LocaleId", text)
