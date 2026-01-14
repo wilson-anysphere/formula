@@ -6107,6 +6107,29 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn to_json_preserves_sheet_tab_order_roundtrip() {
+        // `toJson()` should preserve the engine sheet tab order even though the `sheets` payload is
+        // map-based (sorted key order).
+        let mut state = WorkbookState::new_empty();
+        state.ensure_sheet("B");
+        state.ensure_sheet("A");
+        state.ensure_sheet("C");
+
+        let wb = WasmWorkbook { inner: state };
+        let json_str = wb.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(parsed["sheetOrder"], json!(["B", "A", "C"]));
+
+        // Round-trip back through `fromJson()` to ensure `sheetOrder` is respected on hydration.
+        let wb2 = WasmWorkbook::from_json(&json_str).unwrap();
+        let json_str2 = wb2.to_json().unwrap();
+        let parsed2: serde_json::Value = serde_json::from_str(&json_str2).unwrap();
+        assert_eq!(parsed2["sheetOrder"], json!(["B", "A", "C"]));
+    }
+
+    #[test]
     fn from_xlsx_bytes_imports_calc_settings_into_engine() {
         let bytes = include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
