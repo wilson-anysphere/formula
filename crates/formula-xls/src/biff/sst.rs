@@ -234,16 +234,31 @@ impl<'a> FragmentCursor<'a> {
         Ok(())
     }
 
-    fn read_bytes(&mut self, n: usize) -> Result<Vec<u8>, String> {
+    fn advance_fragment_in_biff8_string(&mut self, is_unicode: &mut bool) -> Result<(), String> {
+        self.advance_fragment()?;
+        // When a BIFF8 string spans a CONTINUE boundary, Excel inserts a 1-byte option flags prefix
+        // at the start of the continued fragment. The only relevant bit is `fHighByte` (unicode vs
+        // compressed).
+        let cont_flags = self.read_u8()?;
+        *is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
+        Ok(())
+    }
+
+    fn read_biff8_string_bytes(
+        &mut self,
+        mut n: usize,
+        is_unicode: &mut bool,
+    ) -> Result<Vec<u8>, String> {
+        // Read `n` canonical bytes from a BIFF8 continued string payload, skipping the 1-byte
+        // continuation flags prefix that appears at the start of each continued fragment.
         let mut out = Vec::with_capacity(n);
-        let mut remaining = n;
-        while remaining > 0 {
-            let available = self.remaining_in_fragment();
-            if available == 0 {
-                self.advance_fragment()?;
+        while n > 0 {
+            if self.remaining_in_fragment() == 0 {
+                self.advance_fragment_in_biff8_string(is_unicode)?;
                 continue;
             }
-            let take = remaining.min(available);
+            let available = self.remaining_in_fragment();
+            let take = n.min(available);
             let frag = self
                 .fragments
                 .get(self.frag_idx)
@@ -251,9 +266,29 @@ impl<'a> FragmentCursor<'a> {
             let end = self.offset + take;
             out.extend_from_slice(&frag[self.offset..end]);
             self.offset = end;
-            remaining -= take;
+            n -= take;
         }
         Ok(out)
+    }
+
+    fn skip_biff8_string_bytes(
+        &mut self,
+        mut n: usize,
+        is_unicode: &mut bool,
+    ) -> Result<(), String> {
+        // Skip `n` canonical bytes from a BIFF8 continued string payload, consuming any inserted
+        // continuation flags bytes at fragment boundaries.
+        while n > 0 {
+            if self.remaining_in_fragment() == 0 {
+                self.advance_fragment_in_biff8_string(is_unicode)?;
+                continue;
+            }
+            let available = self.remaining_in_fragment();
+            let take = n.min(available);
+            self.offset += take;
+            n -= take;
+        }
+        Ok(())
     }
 
     fn skip_biff8_char_data(&mut self, cch: usize, initial_is_unicode: bool) -> Result<(), String> {
@@ -264,9 +299,7 @@ impl<'a> FragmentCursor<'a> {
             if self.remaining_in_fragment() == 0 {
                 // Continuing character bytes into a new CONTINUE fragment: first
                 // byte is option flags for the continued segment (fHighByte).
-                self.advance_fragment()?;
-                let cont_flags = self.read_u8()?;
-                is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
+                self.advance_fragment_in_biff8_string(&mut is_unicode)?;
                 continue;
             }
 
@@ -294,25 +327,28 @@ impl<'a> FragmentCursor<'a> {
         let cch = self.read_u16_le()? as usize;
         let flags = self.read_u8()?;
 
+        let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
+
         let richtext_runs = if flags & STR_FLAG_RICH_TEXT != 0 {
-            self.read_u16_le()? as usize
+            let bytes = self.read_biff8_string_bytes(2, &mut is_unicode)?;
+            u16::from_le_bytes([bytes[0], bytes[1]]) as usize
         } else {
             0
         };
 
         let ext_size = if flags & STR_FLAG_EXT != 0 {
-            self.read_u32_le()? as usize
+            let bytes = self.read_biff8_string_bytes(4, &mut is_unicode)?;
+            u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize
         } else {
             0
         };
 
-        let is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
         self.skip_biff8_char_data(cch, is_unicode)?;
 
         let richtext_bytes = richtext_runs
             .checked_mul(4)
             .ok_or_else(|| "rich text run count overflow".to_string())?;
-        self.skip_bytes(richtext_bytes)?;
+        self.skip_biff8_string_bytes(richtext_bytes, &mut is_unicode)?;
 
         if ext_size == 0 {
             return Ok(None);
@@ -321,12 +357,123 @@ impl<'a> FragmentCursor<'a> {
         // Avoid pathological allocation on corrupt files.
         const MAX_EXT_RST_BYTES: usize = 1024 * 1024; // 1 MiB
         if ext_size > MAX_EXT_RST_BYTES {
-            self.skip_bytes(ext_size)?;
+            self.skip_biff8_string_bytes(ext_size, &mut is_unicode)?;
             return Ok(None);
         }
 
-        let ext_bytes = self.read_bytes(ext_size)?;
+        let ext_bytes = self.read_biff8_string_bytes(ext_size, &mut is_unicode)?;
         Ok(extract_phonetic_from_ext_rst(&ext_bytes, codepage))
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(id: u16, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&id.to_le_bytes());
+        out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    fn xl_unicode_string_compressed(s: &str) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&(s.len() as u16).to_le_bytes());
+        out.push(0); // flags (compressed)
+        out.extend_from_slice(s.as_bytes());
+        out
+    }
+
+    #[test]
+    fn parses_sst_phonetic_with_richtext_crun_split_across_continue() {
+        let main = "ABCDE";
+        let phonetic = "kana";
+        let ext_payload = xl_unicode_string_compressed(phonetic);
+        let rg_run = [0x11u8, 0x22, 0x33, 0x44];
+
+        // SST header + string header up through the first byte of cRun.
+        let mut frag1 = Vec::new();
+        frag1.extend_from_slice(&1u32.to_le_bytes()); // cstTotal
+        frag1.extend_from_slice(&1u32.to_le_bytes()); // cstUnique
+        frag1.extend_from_slice(&(main.len() as u16).to_le_bytes()); // cch
+        frag1.push(STR_FLAG_RICH_TEXT | STR_FLAG_EXT); // flags
+        frag1.push(0x01); // cRun low byte (cRun=1)
+
+        // Continuation starts with option flags byte, then remaining string bytes.
+        let mut frag2 = Vec::new();
+        frag2.push(0); // continued segment compressed
+        frag2.push(0x00); // cRun high byte
+        frag2.extend_from_slice(&(ext_payload.len() as u32).to_le_bytes()); // cbExtRst
+        frag2.extend_from_slice(main.as_bytes());
+        frag2.extend_from_slice(&rg_run);
+        frag2.extend_from_slice(&ext_payload);
+
+        let stream = [
+            record(RECORD_SST, &frag1),
+            record(records::RECORD_CONTINUE, &frag2),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let out = parse_biff8_sst_phonetics(&stream, 1252).expect("parse");
+        assert_eq!(out, vec![Some(phonetic.into())]);
+    }
+
+    #[test]
+    fn parses_sst_phonetic_with_ext_payload_split_across_continue_and_preserves_following_string() {
+        let main1 = "abc";
+        let phonetic = "Z";
+        let ext_payload = xl_unicode_string_compressed(phonetic);
+        assert_eq!(ext_payload.len(), 4);
+
+        let main2 = "X";
+
+        // Build full SST payload for both strings, then split within the first string's ext bytes.
+        let mut payload_full = Vec::new();
+        payload_full.extend_from_slice(&2u32.to_le_bytes()); // cstTotal
+        payload_full.extend_from_slice(&2u32.to_le_bytes()); // cstUnique
+
+        // String 1: ext-only.
+        let mut s1 = Vec::new();
+        s1.extend_from_slice(&(main1.len() as u16).to_le_bytes());
+        s1.push(STR_FLAG_EXT);
+        s1.extend_from_slice(&(ext_payload.len() as u32).to_le_bytes());
+        s1.extend_from_slice(main1.as_bytes());
+        s1.extend_from_slice(&ext_payload);
+
+        // String 2: simple.
+        let s2 = xl_unicode_string_compressed(main2);
+
+        payload_full.extend_from_slice(&s1);
+        payload_full.extend_from_slice(&s2);
+
+        // Split after 3 bytes of the ext payload so the last ext byte appears in the CONTINUE.
+        let ext_start = 8 /*sst header*/
+            + 2 /*cch*/
+            + 1 /*flags*/
+            + 4 /*cbExtRst*/
+            + main1.len();
+        let split_at = ext_start + 3;
+
+        let frag1 = payload_full[..split_at].to_vec();
+        let remaining = &payload_full[split_at..];
+
+        let mut frag2 = Vec::new();
+        frag2.push(0); // continued segment compressed
+        frag2.extend_from_slice(remaining);
+
+        let stream = [
+            record(RECORD_SST, &frag1),
+            record(records::RECORD_CONTINUE, &frag2),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let out = parse_biff8_sst_phonetics(&stream, 1252).expect("parse");
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0], Some(phonetic.into()));
+        assert_eq!(out[1], None);
+    }
+}
