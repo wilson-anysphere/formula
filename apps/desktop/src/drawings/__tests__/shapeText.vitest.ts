@@ -247,6 +247,25 @@ describe("parseDrawingMLShapeText", () => {
     expect(parsed?.textRuns.map((r) => r.text).join("")).toBe("Hello 😀");
   });
 
+  it("parses bodyPr insets (lIns/tIns/rIns/bIns) as EMU values", () => {
+    const rawXml = `
+      <xdr:sp>
+        <xdr:txBody>
+          <a:bodyPr lIns="95250" tIns="0" rIns="19050" bIns="38100"/>
+          <a:lstStyle/>
+          <a:p><a:r><a:t>Hello</a:t></a:r></a:p>
+        </xdr:txBody>
+      </xdr:sp>
+    `;
+
+    const parsed = parseDrawingMLShapeText(rawXml);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.insetLeftEmu).toBe(95250);
+    expect(parsed?.insetTopEmu).toBe(0);
+    expect(parsed?.insetRightEmu).toBe(19050);
+    expect(parsed?.insetBottomEmu).toBe(38100);
+  });
+
   it("applies default run styles with per-run overrides", () => {
     const rawXml = `
       <xdr:sp>

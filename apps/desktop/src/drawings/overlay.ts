@@ -2019,12 +2019,26 @@ function renderShapeText(
   cache?: ShapeTextCacheEntry,
 ): void {
   const scale = Number.isFinite(opts.zoom) && opts.zoom > 0 ? opts.zoom : 1;
-  const padding = 4 * scale;
+  const defaultInsetPx = 4 * scale;
+  const insetLeftPx =
+    typeof layout.insetLeftEmu === "number" && Number.isFinite(layout.insetLeftEmu)
+      ? emuToPx(layout.insetLeftEmu, scale)
+      : defaultInsetPx;
+  const insetTopPx =
+    typeof layout.insetTopEmu === "number" && Number.isFinite(layout.insetTopEmu) ? emuToPx(layout.insetTopEmu, scale) : defaultInsetPx;
+  const insetRightPx =
+    typeof layout.insetRightEmu === "number" && Number.isFinite(layout.insetRightEmu)
+      ? emuToPx(layout.insetRightEmu, scale)
+      : defaultInsetPx;
+  const insetBottomPx =
+    typeof layout.insetBottomEmu === "number" && Number.isFinite(layout.insetBottomEmu)
+      ? emuToPx(layout.insetBottomEmu, scale)
+      : defaultInsetPx;
   const inner = SHAPE_TEXT_INNER_RECT_SCRATCH;
-  inner.x = bounds.x + padding;
-  inner.y = bounds.y + padding;
-  inner.width = Math.max(0, bounds.width - padding * 2);
-  inner.height = Math.max(0, bounds.height - padding * 2);
+  inner.x = bounds.x + insetLeftPx;
+  inner.y = bounds.y + insetTopPx;
+  inner.width = Math.max(0, bounds.width - insetLeftPx - insetRightPx);
+  inner.height = Math.max(0, bounds.height - insetTopPx - insetBottomPx);
   if (inner.width <= 0 || inner.height <= 0) return;
   if (layout.textRuns.length === 0) return;
 

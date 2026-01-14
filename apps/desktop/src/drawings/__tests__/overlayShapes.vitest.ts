@@ -147,6 +147,30 @@ describe("DrawingOverlay shapes", () => {
     expect(calls.some((call) => call.method === "fillText" && call.args[0] === "  Indented")).toBe(true);
   });
 
+  it("respects bodyPr insets when positioning shape text", () => {
+    const { ctx, calls } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const xml = `
+      <xdr:sp>
+        <xdr:txBody>
+          <a:bodyPr lIns="0" tIns="0" rIns="0" bIns="0"/>
+          <a:lstStyle/>
+          <a:p><a:r><a:t>Hello</a:t></a:r></a:p>
+        </xdr:txBody>
+      </xdr:sp>
+    `;
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+    overlay.render([createShapeObject(xml, { width: 200, height: 40 })], viewport);
+
+    const call = calls.find((c) => c.method === "fillText" && c.args[0] === "Hello");
+    expect(call).toBeTruthy();
+    // Default anchor origin is (5,7) from createShapeObject; insets are 0 so the text should start there.
+    expect(call!.args[1]).toBeCloseTo(5, 5);
+    expect(call!.args[2]).toBeCloseTo(7, 5);
+  });
+
   it("renders line shapes using moveTo/lineTo", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);

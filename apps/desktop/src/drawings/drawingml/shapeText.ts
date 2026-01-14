@@ -13,6 +13,11 @@ export type ShapeTextLayout = {
   alignment?: "left" | "center" | "right";
   vertical?: "top" | "middle" | "bottom";
   wrap?: boolean;
+  /** Optional text insets from `<a:bodyPr lIns/tIns/rIns/bIns>` (DrawingML EMUs). */
+  insetLeftEmu?: number;
+  insetTopEmu?: number;
+  insetRightEmu?: number;
+  insetBottomEmu?: number;
 };
 
 type RunStyle = Omit<ShapeTextRun, "text">;
@@ -162,6 +167,13 @@ function parseFontSizePt(sz: string | null): number | undefined {
   if (!Number.isFinite(n) || n <= 0) return undefined;
   // DrawingML `sz` is in 1/100 of a point.
   return n / 100;
+}
+
+function parseNonNegativeInt(value: string | null): number | undefined {
+  if (value == null) return undefined;
+  const n = Number.parseInt(value, 10);
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return n;
 }
 
 function normalizeHexColor(value: string | null): string | undefined {
@@ -361,6 +373,10 @@ function parseShapeTextDom(rawXml: string): ShapeTextLayout | null {
   const bodyPr = findFirstByLocalName(txBody, "bodyPr");
   const vertical = parseVertical(bodyPr?.getAttribute("anchor") ?? null);
   const wrap = parseWrap(bodyPr?.getAttribute("wrap") ?? null);
+  const insetLeftEmu = parseNonNegativeInt(bodyPr?.getAttribute("lIns") ?? null);
+  const insetTopEmu = parseNonNegativeInt(bodyPr?.getAttribute("tIns") ?? null);
+  const insetRightEmu = parseNonNegativeInt(bodyPr?.getAttribute("rIns") ?? null);
+  const insetBottomEmu = parseNonNegativeInt(bodyPr?.getAttribute("bIns") ?? null);
 
   const shapeDefaultStyle = parseRunStyleFromDom(findFirstByLocalName(txBody, "defRPr"));
 
@@ -455,7 +471,7 @@ function parseShapeTextDom(rawXml: string): ShapeTextLayout | null {
     }
   }
 
-  return { textRuns, alignment, vertical, wrap };
+  return { textRuns, alignment, vertical, wrap, insetLeftEmu, insetTopEmu, insetRightEmu, insetBottomEmu };
 }
 
 function decodeXmlEntities(text: string): string {
@@ -598,6 +614,10 @@ function parseShapeTextFallback(rawXml: string): ShapeTextLayout | null {
   const bodyPrOpen = bodyPrXml ? /<[^>]+>/.exec(bodyPrXml)?.[0] ?? bodyPrXml : "";
   const vertical = parseVertical(getAttrFromTag(bodyPrOpen, "anchor"));
   const wrap = parseWrap(getAttrFromTag(bodyPrOpen, "wrap"));
+  const insetLeftEmu = parseNonNegativeInt(getAttrFromTag(bodyPrOpen, "lIns"));
+  const insetTopEmu = parseNonNegativeInt(getAttrFromTag(bodyPrOpen, "tIns"));
+  const insetRightEmu = parseNonNegativeInt(getAttrFromTag(bodyPrOpen, "rIns"));
+  const insetBottomEmu = parseNonNegativeInt(getAttrFromTag(bodyPrOpen, "bIns"));
 
   const shapeDefaultStyle = parseRunStyleFromXmlSnippet(extractFirstElementXml(txBodyXml, "defRPr"));
   const lstStyleXml = extractFirstElementXml(txBodyXml, "lstStyle");
@@ -687,7 +707,7 @@ function parseShapeTextFallback(rawXml: string): ShapeTextLayout | null {
     }
   }
 
-  return { textRuns, alignment, vertical, wrap };
+  return { textRuns, alignment, vertical, wrap, insetLeftEmu, insetTopEmu, insetRightEmu, insetBottomEmu };
 }
 
 /**
