@@ -60,12 +60,22 @@ test.describe("ribbon formatting state", () => {
     // Alignment buttons (not toggles) should still show a pressed style.
     const alignLeft = ribbon.locator('button[data-command-id="format.alignLeft"]');
     const alignCenter = ribbon.locator('button[data-command-id="format.alignCenter"]');
+    const alignTop = ribbon.locator('button[data-command-id="format.alignTop"]');
+    const alignBottom = ribbon.locator('button[data-command-id="format.alignBottom"]');
     await expect(alignLeft).toHaveClass(/is-pressed/);
     await expect(alignCenter).not.toHaveClass(/is-pressed/);
 
     await alignCenter.click();
     await expect(alignCenter).toHaveClass(/is-pressed/);
     await expect(alignLeft).not.toHaveClass(/is-pressed/);
+
+    // Vertical alignment should also stay in sync with the current selection.
+    await expect(alignBottom).toHaveClass(/is-pressed/);
+    await expect(alignTop).not.toHaveClass(/is-pressed/);
+
+    await alignTop.click();
+    await expect(alignTop).toHaveClass(/is-pressed/);
+    await expect(alignBottom).not.toHaveClass(/is-pressed/);
 
     // Number format label should update after applying a preset.
     const numberFormatDropdown = ribbon.locator('button[data-command-id="home.number.numberFormat"]');
