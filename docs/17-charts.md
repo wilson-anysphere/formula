@@ -59,6 +59,7 @@ Implemented in `crates/formula-xlsx/src/drawingml/charts/parse_chart_space.rs`.
   - plot-area chart settings (e.g. `barDir`, `grouping`, `varyColors`, `scatterStyle`)
   - axes for `c:catAx` and `c:valAx` (id, position, scaling, number format, tick label position,
       major gridline presence + some inline styling)
+  - series identity/order metadata (`c:ser/c:idx/@val`, `c:ser/c:order/@val`)
   - series formulas (`tx`, `cat`, `val`, `xVal`, `yVal`) and cached values (`strCache`, `numCache`)
   - series data label settings (`c:ser/c:dLbls`) including `showVal`, `showCatName`, `showSerName`,
     `dLblPos`, and `numFmt`
@@ -75,6 +76,8 @@ The current parser intentionally produces a **placeholder** `ChartModel`:
 
 - `chart_kind` is always `ChartKind::Unknown { name: "ChartEx:<kind>" }` (best-effort inferred).
 - Series formulas + cached values are extracted when present.
+- Series identity/order metadata is extracted best-effort when present (e.g. `cx:ser/cx:idx/@val`,
+  `cx:ser/cx:order/@val`).
 - Title and legend are extracted best-effort when present.
 - Axes, styles, and chart-type-specific semantics are not modeled yet; diagnostics note the
   placeholder status.
