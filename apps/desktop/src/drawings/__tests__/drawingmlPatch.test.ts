@@ -164,29 +164,62 @@ describe("duplicateDrawingObject", () => {
 });
 
 describe("DrawingInteractionController commit-time patching", () => {
-  function createPointerEvent(clientX: number, clientY: number, pointerId: number): any {
+  function createPointerEvent(init: { clientX: number; clientY: number; pointerId: number }) {
     return {
-      clientX,
-      clientY,
-      pointerId,
-      preventDefault: () => {},
-      stopPropagation: () => {},
-      stopImmediatePropagation: () => {},
+      ...init,
+      defaultPrevented: false,
+      _propagationStopped: false,
+      _immediateStopped: false,
+      preventDefault() {
+        this.defaultPrevented = true;
+      },
+      stopPropagation() {
+        this._propagationStopped = true;
+      },
+      stopImmediatePropagation() {
+        this._immediateStopped = true;
+        this._propagationStopped = true;
+      },
     };
   }
 
-  function createStubCanvas() {
-    const listeners = new Map<string, (e: any) => void>();
-    const canvas: any = {
-      addEventListener: (type: string, cb: (e: any) => void) => listeners.set(type, cb),
-      removeEventListener: (type: string) => listeners.delete(type),
+  function createStubElement(
+    rect: { left: number; top: number; width: number; height: number } = { left: 0, top: 0, width: 500, height: 500 },
+  ) {
+    const listeners = new Map<string, Array<(e: any) => void>>();
+    const element: any = {
+      addEventListener: (type: string, cb: (e: any) => void) => {
+        const list = listeners.get(type) ?? [];
+        list.push(cb);
+        listeners.set(type, list);
+      },
+      removeEventListener: (type: string, cb: (e: any) => void) => {
+        const list = listeners.get(type) ?? [];
+        listeners.set(
+          type,
+          list.filter((v) => v !== cb),
+        );
+      },
+      getBoundingClientRect: () =>
+        ({
+          left: rect.left,
+          top: rect.top,
+          right: rect.left + rect.width,
+          bottom: rect.top + rect.height,
+          width: rect.width,
+          height: rect.height,
+          x: rect.left,
+          y: rect.top,
+          toJSON: () => ({}),
+        }) as unknown as DOMRect,
       setPointerCapture: () => {},
       releasePointerCapture: () => {},
-      getBoundingClientRect: () => ({ left: 0, top: 0 } as DOMRect),
       style: { cursor: "default" },
-      dispatch: (type: string, event: any) => listeners.get(type)?.(event),
+      dispatch: (type: string, event: any) => {
+        for (const cb of listeners.get(type) ?? []) cb(event);
+      },
     };
-    return canvas as HTMLCanvasElement & { dispatch(type: string, event: any): void };
+    return element as HTMLElement & { dispatch(type: string, event: any): void };
   }
 
   const CELL_W = 100;
@@ -216,9 +249,9 @@ describe("DrawingInteractionController commit-time patching", () => {
     };
 
     let objects: DrawingObject[] = [obj];
-    const canvas = createStubCanvas();
+    const el = createStubElement();
 
-    new DrawingInteractionController(canvas, geom, {
+    new DrawingInteractionController(el, geom, {
       getViewport: () => viewport,
       getObjects: () => objects,
       setObjects: (next) => {
@@ -227,8 +260,8 @@ describe("DrawingInteractionController commit-time patching", () => {
     });
 
     // Start resizing at the bottom-right corner (se handle).
-    canvas.dispatch("pointerdown", createPointerEvent(100, 100, 1));
-    canvas.dispatch("pointermove", createPointerEvent(120, 130, 1));
+    el.dispatch("pointerdown", createPointerEvent({ clientX: 100, clientY: 100, pointerId: 1 }));
+    el.dispatch("pointermove", createPointerEvent({ clientX: 120, clientY: 130, pointerId: 1 }));
 
     // Pointermove updates the anchor, but should not patch xml yet.
     expect(objects[0]!.anchor).toMatchObject({
@@ -238,7 +271,7 @@ describe("DrawingInteractionController commit-time patching", () => {
     expect(objects[0]!.preserved?.["xlsx.pic_xml"]).toContain(`cx="${startCx}"`);
     expect(objects[0]!.preserved?.["xlsx.pic_xml"]).toContain(`cy="${startCy}"`);
 
-    canvas.dispatch("pointerup", createPointerEvent(120, 130, 1));
+    el.dispatch("pointerup", createPointerEvent({ clientX: 120, clientY: 130, pointerId: 1 }));
 
     // Commit-time: preserved xml is patched to the new size.
     expect(objects[0]!.preserved?.["xlsx.pic_xml"]).toContain(`cx="${pxToEmu(120)}"`);
@@ -265,9 +298,9 @@ describe("DrawingInteractionController commit-time patching", () => {
     };
 
     let objects: DrawingObject[] = [obj];
-    const canvas = createStubCanvas();
+    const el = createStubElement();
 
-    new DrawingInteractionController(canvas, geom, {
+    new DrawingInteractionController(el, geom, {
       getViewport: () => viewport,
       getObjects: () => objects,
       setObjects: (next) => {
@@ -275,9 +308,9 @@ describe("DrawingInteractionController commit-time patching", () => {
       },
     });
 
-    canvas.dispatch("pointerdown", createPointerEvent(50, 50, 2));
-    canvas.dispatch("pointermove", createPointerEvent(55, 57, 2));
-    canvas.dispatch("pointerup", createPointerEvent(55, 57, 2));
+    el.dispatch("pointerdown", createPointerEvent({ clientX: 50, clientY: 50, pointerId: 2 }));
+    el.dispatch("pointermove", createPointerEvent({ clientX: 55, clientY: 57, pointerId: 2 }));
+    el.dispatch("pointerup", createPointerEvent({ clientX: 55, clientY: 57, pointerId: 2 }));
 
     const xml = (objects[0]!.kind as any).rawXml as string;
     expect(xml).toContain(`x="${pxToEmu(15)}"`);
@@ -305,9 +338,9 @@ describe("DrawingInteractionController commit-time patching", () => {
     };
 
     let objects: DrawingObject[] = [obj];
-    const canvas = createStubCanvas();
+    const el = createStubElement();
 
-    new DrawingInteractionController(canvas, geom, {
+    new DrawingInteractionController(el, geom, {
       getViewport: () => viewport,
       getObjects: () => objects,
       setObjects: (next) => {
@@ -315,15 +348,15 @@ describe("DrawingInteractionController commit-time patching", () => {
       },
     });
 
-    canvas.dispatch("pointerdown", createPointerEvent(50, 50, 3));
-    canvas.dispatch("pointermove", createPointerEvent(60, 70, 3));
+    el.dispatch("pointerdown", createPointerEvent({ clientX: 50, clientY: 50, pointerId: 3 }));
+    el.dispatch("pointermove", createPointerEvent({ clientX: 60, clientY: 70, pointerId: 3 }));
 
     // Pointermove updates anchor but should not patch xml yet.
     const before = (objects[0]!.kind as any).rawXml as string;
     expect(before).toContain(`<xdr:colOff>0</xdr:colOff>`);
     expect(before).toContain(`<xdr:rowOff>0</xdr:rowOff>`);
 
-    canvas.dispatch("pointerup", createPointerEvent(60, 70, 3));
+    el.dispatch("pointerup", createPointerEvent({ clientX: 60, clientY: 70, pointerId: 3 }));
 
     const xml = (objects[0]!.kind as any).rawXml as string;
     // Both from + to should have the same shifted offsets.
@@ -350,9 +383,9 @@ describe("DrawingInteractionController commit-time patching", () => {
     };
 
     let objects: DrawingObject[] = [obj];
-    const canvas = createStubCanvas();
+    const el = createStubElement();
 
-    new DrawingInteractionController(canvas, geom, {
+    new DrawingInteractionController(el, geom, {
       getViewport: () => viewport,
       getObjects: () => objects,
       setObjects: (next) => {
@@ -360,8 +393,8 @@ describe("DrawingInteractionController commit-time patching", () => {
       },
     });
 
-    canvas.dispatch("pointerdown", createPointerEvent(100, 100, 4));
-    canvas.dispatch("pointermove", createPointerEvent(120, 130, 4));
+    el.dispatch("pointerdown", createPointerEvent({ clientX: 100, clientY: 100, pointerId: 4 }));
+    el.dispatch("pointermove", createPointerEvent({ clientX: 120, clientY: 130, pointerId: 4 }));
 
     // Pointermove updates anchor but should not patch xml yet.
     expect(objects[0]!.anchor).toMatchObject({
@@ -372,7 +405,7 @@ describe("DrawingInteractionController commit-time patching", () => {
     expect(before).toContain(`cx="${startCx}"`);
     expect(before).toContain(`cy="${startCy}"`);
 
-    canvas.dispatch("pointerup", createPointerEvent(120, 130, 4));
+    el.dispatch("pointerup", createPointerEvent({ clientX: 120, clientY: 130, pointerId: 4 }));
 
     const xml = (objects[0]!.kind as any).rawXml as string;
     // Outer anchor wrapper ext updated.
