@@ -271,16 +271,19 @@ Useful entrypoints when working on encrypted workbook support:
           routed to `formula-xls` and surfaced as:
           - `Error::InvalidPassword` when the password is incorrect
           - `Error::UnsupportedEncryption` for unsupported/invalid `FILEPASS` encryption metadata
-- **Standard (CryptoAPI) helpers:**
+ - **OOXML decrypt helpers (Agile + Standard/CryptoAPI):**
   - End-to-end decrypt (OLE wrapper → decrypted ZIP bytes):
-    - `crates/formula-office-crypto` (Agile decrypt + writer; plus some Standard/CryptoAPI variants)
-    - `crates/formula-offcrypto` (Standard/CryptoAPI AES-ECB; see `decrypt_standard_ooxml_from_bytes`)
-  - Parse Standard `EncryptionInfo`, derive/verify password key:
-    `crates/formula-offcrypto`
-  - Decrypt `EncryptedPackage`:
-    - Standard AES-ECB (baseline): `crates/formula-offcrypto/src/lib.rs` (`decrypt_encrypted_package_ecb`)
-  - Segment framing helper (size prefix + 0x1000 segment boundaries):
-    `crates/formula-offcrypto/src/encrypted_package.rs`
+    - `crates/formula-office-crypto` (end-to-end decrypt; supports Agile + Standard/CryptoAPI, plus an
+      Agile writer)
+  - MS-OFFCRYPTO parsing helpers + standalone decrypt primitives:
+    - `crates/formula-offcrypto` (also used by `formula-xlsx`’s Standard path)
+  - Standard/CryptoAPI specifics:
+    - Parse Standard `EncryptionInfo`, derive/verify password keys: `crates/formula-offcrypto`
+    - Decrypt Standard AES-ECB `EncryptedPackage` (baseline): `crates/formula-offcrypto/src/lib.rs`
+      (`decrypt_encrypted_package_ecb`)
+    - Decrypt Standard RC4 `EncryptedPackage`: see `docs/offcrypto-standard-cryptoapi-rc4.md`
+    - Segment framing helper (size prefix + 0x1000 segment boundaries):
+      `crates/formula-offcrypto/src/encrypted_package.rs`
 - **Agile (4.4) OOXML decryption details (HMAC target bytes + IV usage gotchas):**
   - `docs/22-ooxml-encryption.md`
 - **Standard (CryptoAPI) developer notes:**
