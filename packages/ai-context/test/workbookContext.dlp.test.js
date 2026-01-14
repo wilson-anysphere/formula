@@ -1557,6 +1557,76 @@ test("buildWorkbookContext: structured DLP REDACT also redacts non-heuristic wor
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
 
+test("buildWorkbookContext: structured DLP REDACT does not leak workbook ids via missing metadata.title (no-op redactor)", async () => {
+  const workbook = {
+    id: "TopSecretWorkbook",
+    sheets: [
+      {
+        name: "PublicSheet",
+        // Needs at least 2 connected non-empty cells for ai-rag region detection to produce a chunk.
+        cells: [[{ v: "Hello" }, { v: "public" }]],
+      },
+      {
+        name: "SecretSheet",
+        cells: [[{ v: "Ignore" }]],
+      },
+    ],
+  };
+
+  const embedder = new HashEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  // Pre-index the workbook but simulate a legacy/third-party store that did not persist
+  // `metadata.title`. In that case, ContextManager should not fall back to `hit.id` under
+  // structured DLP redaction because the id embeds user-controlled workbook identifiers.
+  await indexWorkbook({
+    workbook,
+    vectorStore,
+    embedder,
+    transform: (record) => {
+      const meta = record.metadata && typeof record.metadata === "object" ? record.metadata : {};
+      // Remove title entirely.
+      const { title: _title, ...rest } = meta;
+      return { metadata: rest };
+    },
+  });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    redactor: (t) => t, // no-op redactor
+    workbookRag: { vectorStore, embedder, topK: 1 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "public",
+    topK: 1,
+    skipIndexing: true,
+    skipIndexingWithDlp: true,
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Internal", redactDisallowed: true }),
+      // Restrict a different sheet so the retrieved chunk is still allowed, but structuredOverallDecision is REDACT.
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "SecretSheet",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.ok(out.retrieved.length > 0);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+  assert.doesNotMatch(out.promptContext, /TopSecretWorkbook/);
+  assert.doesNotMatch(JSON.stringify(out.retrieved), /TopSecretWorkbook/);
+});
+
 test("buildWorkbookContext: structured Restricted classifications can block when policy requires", async () => {
   const workbook = makeSensitiveWorkbook();
   workbook.sheets[0].cells[1][0].v = "TopSecret";

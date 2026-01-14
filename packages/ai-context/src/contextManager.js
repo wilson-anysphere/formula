@@ -2247,7 +2247,6 @@ export class ContextManager {
     throwIfAborted(signal);
     const retrievedChunks = hits.map((hit, idx) => {
       const meta = hit.metadata ?? {};
-      const title = meta.title ?? hit.id;
       const kind = meta.kind ?? "chunk";
       const audit = chunkAudits[idx];
       const decision = audit?.decision ?? null;
@@ -2260,6 +2259,11 @@ export class ContextManager {
       const shouldRedactSheetNameToken = Boolean(dlp) && (rangeDisallowed || sheetNameTokenDisallowed);
       const shouldRedactTitleToken = Boolean(dlp) && (rangeDisallowed || titleTokenDisallowed);
       const shouldRedactChunkId = shouldRedactSheetNameToken || shouldRedactTitleToken || workbookIdTokenDisallowed;
+      // Legacy / third-party vector stores may omit `metadata.title`. Falling back to `hit.id`
+      // can leak disallowed metadata tokens (workbook id, sheet name) under structured DLP,
+      // because chunk ids embed those identifiers and heuristic redaction can't detect
+      // non-heuristic secrets like "TopSecret".
+      const title = meta.title ?? (shouldRedactChunkId ? "[REDACTED]" : hit.id);
 
       const safeSheetName = shouldRedactSheetNameToken
         ? "[REDACTED]"
