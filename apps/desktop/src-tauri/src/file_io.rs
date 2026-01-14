@@ -63,6 +63,7 @@ const XLAM_WORKBOOK_CONTENT_TYPE: &str = "application/vnd.ms-excel.addin.macroEn
 ///
 /// This helper enforces a non-empty password and uses defaults that match Excel's common "Agile"
 /// encryption settings.
+#[cfg(any(feature = "desktop", test))]
 pub(crate) fn encrypt_package_to_ole_bytes(
     zip_bytes: &[u8],
     password: &str,
