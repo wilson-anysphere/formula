@@ -154,7 +154,13 @@ async fn network_fetch_impl_with_debug_assertions(
         "network_fetch",
     )
     .await?;
-    let body_text = String::from_utf8_lossy(&bytes).to_string();
+    // Prefer reusing the existing buffer for valid UTF-8 responses to avoid a second allocation
+    // proportional to the response size. When the payload is not valid UTF-8, fall back to a lossy
+    // conversion (preserving the previous behavior of returning *some* text).
+    let body_text = match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(err) => String::from_utf8_lossy(&err.into_bytes()).into_owned(),
+    };
 
     Ok(NetworkFetchResult {
         ok: status.is_success(),

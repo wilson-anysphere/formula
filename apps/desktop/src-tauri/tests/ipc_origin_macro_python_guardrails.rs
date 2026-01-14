@@ -33,17 +33,17 @@ fn is_likely_char_literal(bytes: &[u8], start: usize) -> bool {
     false
 }
 
-fn find_matching_brace(source: &str, open_brace: usize) -> Option<usize> {
-    #[derive(Clone, Copy, Debug)]
-    enum Mode {
-        Normal,
-        LineComment,
-        BlockComment { depth: usize },
-        String { escape: bool },
-        Char { escape: bool },
-        RawString { hashes: usize },
-    }
+#[derive(Clone, Copy, Debug)]
+enum Mode {
+    Normal,
+    LineComment,
+    BlockComment { depth: usize },
+    String { escape: bool },
+    Char { escape: bool },
+    RawString { hashes: usize },
+}
 
+fn find_matching_brace(source: &str, open_brace: usize) -> Option<usize> {
     let bytes = source.as_bytes();
     let mut mode = Mode::Normal;
     let mut depth: i32 = 0;
@@ -119,6 +119,187 @@ fn find_matching_brace(source: &str, open_brace: usize) -> Option<usize> {
                     b'}' => {
                         depth -= 1;
                         if depth == 0 {
+                            return Some(i);
+                        }
+                    }
+                    _ => {}
+                }
+
+                i += 1;
+            }
+            Mode::LineComment => {
+                if bytes[i] == b'\n' {
+                    mode = Mode::Normal;
+                }
+                i += 1;
+            }
+            Mode::BlockComment { mut depth } => {
+                if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                    depth += 1;
+                    mode = Mode::BlockComment { depth };
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    depth = depth.saturating_sub(1);
+                    i += 2;
+                    if depth == 0 {
+                        mode = Mode::Normal;
+                    } else {
+                        mode = Mode::BlockComment { depth };
+                    }
+                    continue;
+                }
+                i += 1;
+            }
+            Mode::String { mut escape } => {
+                let b = bytes[i];
+                if escape {
+                    escape = false;
+                    mode = Mode::String { escape };
+                    i += 1;
+                    continue;
+                }
+                if b == b'\\' {
+                    escape = true;
+                    mode = Mode::String { escape };
+                    i += 1;
+                    continue;
+                }
+                if b == b'"' {
+                    mode = Mode::Normal;
+                    i += 1;
+                    continue;
+                }
+                i += 1;
+            }
+            Mode::Char { mut escape } => {
+                let b = bytes[i];
+                if escape {
+                    escape = false;
+                    mode = Mode::Char { escape };
+                    i += 1;
+                    continue;
+                }
+                if b == b'\\' {
+                    escape = true;
+                    mode = Mode::Char { escape };
+                    i += 1;
+                    continue;
+                }
+                if b == b'\'' {
+                    mode = Mode::Normal;
+                    i += 1;
+                    continue;
+                }
+                i += 1;
+            }
+            Mode::RawString { hashes } => {
+                if bytes[i] == b'"' {
+                    let mut ok = true;
+                    for h in 0..hashes {
+                        if i + 1 + h >= bytes.len() || bytes[i + 1 + h] != b'#' {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if ok {
+                        mode = Mode::Normal;
+                        i += 1 + hashes;
+                        continue;
+                    }
+                }
+                i += 1;
+            }
+        }
+    }
+
+    None
+}
+
+fn find_function_body_open_brace(source: &str, start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut mode = Mode::Normal;
+    let mut paren_depth: i32 = 0;
+    let mut saw_params = false;
+    let mut i = start;
+
+    while i < bytes.len() {
+        match mode {
+            Mode::Normal => {
+                // Raw byte string: br###"..."###
+                if bytes[i] == b'b' && i + 1 < bytes.len() && bytes[i + 1] == b'r' {
+                    let mut j = i + 2;
+                    let mut hashes = 0usize;
+                    while j < bytes.len() && bytes[j] == b'#' {
+                        hashes += 1;
+                        j += 1;
+                    }
+                    if j < bytes.len() && bytes[j] == b'"' {
+                        mode = Mode::RawString { hashes };
+                        i = j + 1;
+                        continue;
+                    }
+                }
+
+                // Raw string: r###"..."###
+                if bytes[i] == b'r' {
+                    let mut j = i + 1;
+                    let mut hashes = 0usize;
+                    while j < bytes.len() && bytes[j] == b'#' {
+                        hashes += 1;
+                        j += 1;
+                    }
+                    if j < bytes.len() && bytes[j] == b'"' {
+                        mode = Mode::RawString { hashes };
+                        i = j + 1;
+                        continue;
+                    }
+                }
+
+                // Byte string: b"..."
+                if bytes[i] == b'b' && i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+                    mode = Mode::String { escape: false };
+                    i += 2;
+                    continue;
+                }
+
+                if bytes[i] == b'"' {
+                    mode = Mode::String { escape: false };
+                    i += 1;
+                    continue;
+                }
+
+                if bytes[i] == b'\'' && is_likely_char_literal(bytes, i) {
+                    mode = Mode::Char { escape: false };
+                    i += 1;
+                    continue;
+                }
+
+                if bytes[i] == b'/' && i + 1 < bytes.len() {
+                    if bytes[i + 1] == b'/' {
+                        mode = Mode::LineComment;
+                        i += 2;
+                        continue;
+                    }
+                    if bytes[i + 1] == b'*' {
+                        mode = Mode::BlockComment { depth: 1 };
+                        i += 2;
+                        continue;
+                    }
+                }
+
+                match bytes[i] {
+                    b'(' => {
+                        saw_params = true;
+                        paren_depth += 1;
+                    }
+                    b')' => paren_depth -= 1,
+                    b'{' => {
+                        // Some commands use const generics like `LimitedScriptCode<{ MAX }>` in the
+                        // parameter list. Avoid treating those braces as the function body by
+                        // waiting until the signature's parens are closed.
+                        if saw_params && paren_depth == 0 {
                             return Some(i);
                         }
                     }
