@@ -105,4 +105,9 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   "data.sortFilter.advanced": true,
   "data.sortFilter.advanced.advancedFilter": true,
   "data.sortFilter.advanced.clearFilter": true,
+
+  // --- Page Layout → Arrange --------------------------------------------------
+  // Drawing order operations should not run while the user is editing text (cell editor / formula bar).
+  "pageLayout.arrange.bringForward": true,
+  "pageLayout.arrange.sendBackward": true,
 };
