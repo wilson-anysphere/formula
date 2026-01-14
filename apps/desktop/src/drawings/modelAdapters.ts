@@ -427,7 +427,8 @@ function convertModelAnchorPoint(model: unknown, context: string): AnchorPoint {
 }
 
 export function convertModelAnchorToUiAnchor(modelAnchorJson: unknown): Anchor {
-  const { tag, value } = unwrapPossiblyTaggedEnum(modelAnchorJson, "Anchor", { tagKeys: ["kind", "type"] });
+  const unwrappedModelAnchorJson = unwrapSingletonId(modelAnchorJson);
+  const { tag, value } = unwrapPossiblyTaggedEnum(unwrappedModelAnchorJson, "Anchor", { tagKeys: ["kind", "type"] });
   if (!isRecord(value)) throw new Error(`Anchor.${tag} must be an object`);
   let normalized = normalizeEnumTag(tag);
   // Back-compat: tolerate tags that include the DrawingML element name suffix (e.g. `OneCellAnchor`).
@@ -500,11 +501,14 @@ function convertModelDrawingObjectKind(
   model: unknown,
   context?: { sheetId?: string; drawingObjectId?: number },
 ): DrawingObjectKind {
+  const unwrappedModel = unwrapSingletonId(model);
   const labelMeta =
-    isRecord(model) && typeof (model as JsonRecord).label === "string" && String((model as JsonRecord).label).trim() !== ""
-      ? String((model as JsonRecord).label).trim()
+    isRecord(unwrappedModel) &&
+    typeof (unwrappedModel as JsonRecord).label === "string" &&
+    String((unwrappedModel as JsonRecord).label).trim() !== ""
+      ? String((unwrappedModel as JsonRecord).label).trim()
       : undefined;
-  const { tag, value } = unwrapPossiblyTaggedEnum(model, "DrawingObjectKind", { tagKeys: ["kind", "type"] });
+  const { tag, value } = unwrapPossiblyTaggedEnum(unwrappedModel, "DrawingObjectKind", { tagKeys: ["kind", "type"] });
   if (!isRecord(value)) throw new Error(`DrawingObjectKind.${tag} must be an object`);
   let normalized = normalizeEnumTag(tag);
   // Back-compat: tolerate tags that include a `Kind` suffix (e.g. `ShapeKind`).
@@ -1045,16 +1049,18 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
 }
 
 function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKind | null {
-  if (!isRecord(kindJson)) return null;
+  const unwrapped = unwrapSingletonId(kindJson);
+  if (!isRecord(unwrapped)) return null;
+  const record = unwrapped as JsonRecord;
   // If the kind is stored as an internally-tagged enum (e.g. `{ type: "Shape", value: {...} }`),
   // prefer the formula-model adapter. DocumentController drawings should store kind metadata in a
   // flat shape; treating a tagged enum as a DocumentController kind can accidentally drop nested
   // payloads like `raw_xml`.
-  const contentCandidate = pick(kindJson, ["value", "content"]);
+  const contentCandidate = pick(record, ["value", "content"]);
   if (isRecord(contentCandidate)) return null;
-  const type = normalizeEnumTag(readOptionalString(pick(kindJson, ["type"])) ?? "");
-  const rawXml = readOptionalString(pick(kindJson, ["rawXml", "raw_xml"]));
-  const labelRaw = readOptionalString(pick(kindJson, ["label"]));
+  const type = normalizeEnumTag(readOptionalString(pick(record, ["type"])) ?? "");
+  const rawXml = readOptionalString(pick(record, ["rawXml", "raw_xml"]));
+  const labelRaw = readOptionalString(pick(record, ["label"]));
   let label: string | undefined;
   if (typeof labelRaw === "string") {
     const trimmed = labelRaw.trim();
@@ -1065,7 +1071,7 @@ function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKin
 
   switch (type) {
     case "image": {
-      const imageIdRaw = readOptionalString(pick(kindJson, ["imageId", "image_id"]));
+      const imageIdRaw = readOptionalString(pick(record, ["imageId", "image_id"]));
       const imageId = typeof imageIdRaw === "string" ? imageIdRaw.trim() : "";
       if (!imageId) return null;
       return { type: "image", imageId };
@@ -1075,7 +1081,7 @@ function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKin
       return { type: "shape", ...(derived ? { label: derived } : {}), ...(rawXml ? { rawXml } : {}) };
     }
     case "chart": {
-      const chartIdRaw = readOptionalString(pick(kindJson, ["chartId", "chart_id", "relId", "rel_id"]));
+      const chartIdRaw = readOptionalString(pick(record, ["chartId", "chart_id", "relId", "rel_id"]));
       const chartId = typeof chartIdRaw === "string" ? chartIdRaw.trim() : "";
       // Mirror `convertModelDrawingObjectKind` behavior: some graphicFrames are not charts
       // (e.g. SmartArt) and surface with `chartId/relId = "unknown"`. Treat those as unknown
@@ -1094,10 +1100,10 @@ function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKin
     case "unknown":
       {
         const derived = label ?? extractDrawingObjectName(rawXml) ?? graphicFramePlaceholderLabel(rawXml) ?? undefined;
-        return { type: "unknown", ...(rawXml ? { rawXml } : {}), ...(derived ? { label: derived } : {}) };
+      return { type: "unknown", ...(rawXml ? { rawXml } : {}), ...(derived ? { label: derived } : {}) };
       }
     case "chartplaceholder": {
-      const chartIdRaw = readOptionalString(pick(kindJson, ["chartId", "chart_id", "relId", "rel_id"]));
+      const chartIdRaw = readOptionalString(pick(record, ["chartId", "chart_id", "relId", "rel_id"]));
       const chartId = typeof chartIdRaw === "string" ? chartIdRaw.trim() : "";
       if ((!chartId || chartId === "unknown") && !looksLikeChartGraphicFrame) {
         const derived = label ?? extractDrawingObjectName(rawXml) ?? graphicFramePlaceholderLabel(rawXml) ?? undefined;

@@ -90,3 +90,19 @@ test("convertDocumentSheetDrawingsToUiDrawingObjects unwraps singleton-wrapped m
   assert.equal(ui.length, 1);
   assert.deepEqual(ui[0]?.anchor, { type: "absolute", pos: { xEmu: 5, yEmu: 6 }, size: { cx: 10, cy: 20 } });
 });
+
+test("convertDocumentSheetDrawingsToUiDrawingObjects accepts singleton-wrapped DocumentController kind objects (interop)", () => {
+  const drawings = [
+    {
+      id: "1",
+      zOrder: 0,
+      kind: { 0: { type: "image", imageId: "img1" } },
+      anchor: { type: "cell", row: 0, col: 0 },
+      size: { width: 10, height: 10 },
+    },
+  ];
+
+  const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+  assert.equal(ui.length, 1);
+  assert.deepEqual(ui[0]?.kind, { type: "image", imageId: "img1" });
+});
