@@ -95,6 +95,41 @@ describe("FormulaBarView tab completion (integration)", () => {
     host.remove();
   });
 
+  it('includes workbook metadata in preview evaluation for CELL("filename")', async () => {
+    const doc = new DocumentController();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+      getWorkbookFileMetadata: () => ({ directory: "/tmp/", filename: "Book.xlsx" }),
+      completionClient: {
+        completeTabCompletion: async () => 'CELL("filename")',
+      },
+    });
+
+    view.focus({ cursor: "end" });
+    // Use concatenation to ensure the preview evaluator treats the result as a string.
+    view.textarea.value = '=""&';
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await completion.flushTabCompletion();
+
+    expect(view.model.aiSuggestion()).toBe('=""&CELL("filename")');
+    expect(view.model.aiSuggestionPreview()).toBe("/tmp/[Book.xlsx]Sheet1");
+
+    completion.destroy();
+    host.remove();
+  });
+
   it("evaluates preview values for implicit this-row structured references ([@Column])", async () => {
     const doc = new DocumentController();
     // Table range includes header row at A1:C1 and data rows at A2:C4.

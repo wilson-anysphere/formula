@@ -35,6 +35,13 @@ interface FormulaBarTabCompletionControllerOptions {
   limits?: { maxRows: number; maxCols: number };
   schemaProvider?: SchemaProvider | null;
   /**
+   * Optional getter for workbook file metadata (directory + filename).
+   *
+   * This is used by preview evaluation so functions like `CELL("filename")` and
+   * `INFO("directory")` can return accurate values while the user is typing.
+   */
+  getWorkbookFileMetadata?: (() => { directory: string | null; filename: string | null } | null) | null;
+  /**
    * Optional getter for the WASM engine client (when available).
    *
    * Tab completion should remain responsive while the engine is booting; callers
@@ -64,6 +71,7 @@ export class FormulaBarTabCompletionController {
   readonly #document: DocumentController;
   readonly #getSheetId: () => string;
   readonly #sheetNameResolver: SheetNameResolver | null;
+  readonly #getWorkbookFileMetadata: (() => { directory: string | null; filename: string | null } | null) | null;
   readonly #limits: { maxRows: number; maxCols: number } | null;
   readonly #schemaProvider: SchemaProvider;
 
@@ -78,6 +86,7 @@ export class FormulaBarTabCompletionController {
     this.#document = opts.document;
     this.#getSheetId = opts.getSheetId;
     this.#sheetNameResolver = opts.sheetNameResolver ?? null;
+    this.#getWorkbookFileMetadata = typeof opts.getWorkbookFileMetadata === "function" ? opts.getWorkbookFileMetadata : null;
     this.#limits = opts.limits ?? null;
 
     const defaultSchemaProvider: SchemaProvider = {
@@ -280,6 +289,7 @@ export class FormulaBarTabCompletionController {
             cellAddress: activeCell,
             schemaProvider: this.#schemaProvider,
             sheetNameResolver: this.#sheetNameResolver,
+            getWorkbookFileMetadata: this.#getWorkbookFileMetadata,
           }),
         },
       )
@@ -351,10 +361,20 @@ function createPreviewEvaluator(params: {
   cellAddress: string;
   schemaProvider?: SchemaProvider | null;
   sheetNameResolver?: SheetNameResolver | null;
+  getWorkbookFileMetadata?: (() => { directory: string | null; filename: string | null } | null) | null;
 }): (args: { suggestion: Suggestion; context: CompletionContext }) => unknown | Promise<unknown> {
   const { document, sheetId, cellAddress } = params;
   const schemaProvider = params.schemaProvider ?? null;
   const sheetNameResolver = params.sheetNameResolver ?? null;
+  const getWorkbookFileMetadata = params.getWorkbookFileMetadata ?? null;
+
+  const resolveSheetDisplayNameById = (id: string): string => {
+    const resolved = sheetNameResolver?.getSheetNameById(id) ?? null;
+    if (typeof resolved === "string" && resolved.trim() !== "") return resolved;
+    const meta = typeof (document as any)?.getSheetMeta === "function" ? (document as any).getSheetMeta(id) : null;
+    const metaName = typeof meta?.name === "string" ? meta.name.trim() : "";
+    return metaName || id;
+  };
 
   // Hard cap on the number of cell reads we allow for preview. This keeps
   // completion responsive even when the suggested formula references a large
@@ -437,6 +457,8 @@ function createPreviewEvaluator(params: {
         return undefined;
       }
     })();
+
+    const workbookFileMetadata = typeof getWorkbookFileMetadata === "function" ? getWorkbookFileMetadata() : null;
 
     const namedRanges = await getNamedRanges();
     const tables = await getTables();
@@ -691,6 +713,8 @@ function createPreviewEvaluator(params: {
         value = evaluateFormula(state.formula, getCellValue, {
           cellAddress: `${targetSheet}!${normalized}`,
           resolveNameToReference,
+          workbookFileMetadata,
+          currentSheetName: resolveSheetDisplayNameById(targetSheet),
           localeId,
         });
       } else {
@@ -707,6 +731,8 @@ function createPreviewEvaluator(params: {
         cellAddress: `${sheetId}!${cellAddress}`,
         resolveNameToReference,
         resolveStructuredRefToReference,
+        workbookFileMetadata,
+        currentSheetName: resolveSheetDisplayNameById(sheetId),
         localeId,
       });
       // Errors from the lightweight evaluator usually mean unsupported syntax.

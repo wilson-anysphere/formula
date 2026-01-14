@@ -3666,6 +3666,7 @@ export class SpreadsheetApp {
         formulaBar: this.formulaBar,
         document: this.document,
         getSheetId: () => this.sheetId,
+        getWorkbookFileMetadata: () => this.workbookFileMetadata,
         getEngineClient: () => this.wasmEngine,
         sheetNameResolver: this.sheetNameResolver ?? undefined,
         limits: this.limits,
