@@ -10,7 +10,12 @@ function readPreferredKey(obj: unknown, camelKey: string, snakeKey: string): unk
 
 export function getStyleNumberFormat(style: unknown): string | null {
   const raw = readPreferredKey(style, "numberFormat", "number_format");
-  return typeof raw === "string" && raw.trim() !== "" ? raw : null;
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  // Treat "General" (Excel default) as equivalent to clearing the number format.
+  if (trimmed.toLowerCase() === "general") return null;
+  return raw;
 }
 
 export function getStyleWrapText(style: unknown): boolean {
@@ -61,4 +66,3 @@ export function getStyleFontSizePt(style: unknown): number | null {
   const legacy = readPreferredKey(style, "fontSize", "font_size");
   return typeof legacy === "number" && Number.isFinite(legacy) ? legacy : null;
 }
-
