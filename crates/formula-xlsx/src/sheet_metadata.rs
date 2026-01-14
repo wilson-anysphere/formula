@@ -1,6 +1,7 @@
 use formula_model::{SheetVisibility, TabColor};
 use quick_xml::events::{BytesEnd, BytesStart, Event};
 use quick_xml::{Reader, Writer};
+use std::collections::{HashMap, HashSet};
 
 use crate::XlsxError;
 
@@ -84,6 +85,8 @@ pub fn write_workbook_sheets(
     // fall back to an unprefixed `id` attribute.
     let rel_id_attr = rel_id_attr.unwrap_or_else(|| "id".to_string());
 
+    let preserved_attrs = collect_preserved_sheet_attributes(workbook_xml)?;
+
     let mut reader = Reader::from_str(workbook_xml);
     reader.config_mut().trim_text(false);
 
@@ -107,6 +110,7 @@ pub fn write_workbook_sheets(
                         sheet_tag.as_str(),
                         rel_id_attr.as_str(),
                         sheet,
+                        preserved_attrs.for_sheet(sheet),
                     )))?;
                 }
             }
@@ -121,6 +125,7 @@ pub fn write_workbook_sheets(
                         sheet_tag.as_str(),
                         rel_id_attr.as_str(),
                         sheet,
+                        preserved_attrs.for_sheet(sheet),
                     )))?;
                 }
                 writer.write_event(Event::End(BytesEnd::new(sheets_tag.as_str())))?;
@@ -158,6 +163,7 @@ fn build_sheet_element(
     tag: &str,
     rel_id_attr: &str,
     sheet: &WorkbookSheetInfo,
+    preserved_attrs: Option<&[PreservedSheetAttribute]>,
 ) -> BytesStart<'static> {
     let mut elem = BytesStart::new(tag).into_owned();
     elem.push_attribute(("name", sheet.name.as_str()));
@@ -168,7 +174,151 @@ fn build_sheet_element(
         SheetVisibility::Hidden => elem.push_attribute(("state", "hidden")),
         SheetVisibility::VeryHidden => elem.push_attribute(("state", "veryHidden")),
     }
+    if let Some(attrs) = preserved_attrs {
+        for attr in attrs {
+            elem.push_attribute((attr.key.as_str(), attr.value.as_str()));
+        }
+    }
     elem
+}
+
+#[derive(Debug, Clone)]
+struct PreservedSheetAttribute {
+    key: String,
+    value: String,
+}
+
+#[derive(Debug, Default)]
+struct PreservedSheetAttributes {
+    /// Map of relationship id (`*:id` by local-name) => preserved attributes.
+    by_rel_id: HashMap<String, Vec<PreservedSheetAttribute>>,
+    /// Map of `sheetId` => preserved attributes (fallback when rel id doesn't match).
+    by_sheet_id: HashMap<u32, Vec<PreservedSheetAttribute>>,
+}
+
+impl PreservedSheetAttributes {
+    fn for_sheet(&self, sheet: &WorkbookSheetInfo) -> Option<&[PreservedSheetAttribute]> {
+        self.by_rel_id
+            .get(&sheet.rel_id)
+            .map(|v| v.as_slice())
+            .or_else(|| self.by_sheet_id.get(&sheet.sheet_id).map(|v| v.as_slice()))
+    }
+}
+
+fn collect_xmlns_prefixes(e: &BytesStart<'_>, out: &mut HashSet<String>) -> Result<(), XlsxError> {
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        let key = attr.key.as_ref();
+        let Some(prefix) = key.strip_prefix(b"xmlns:") else {
+            continue;
+        };
+        out.insert(String::from_utf8_lossy(prefix).into_owned());
+    }
+    Ok(())
+}
+
+fn collect_preserved_sheet_attributes(workbook_xml: &str) -> Result<PreservedSheetAttributes, XlsxError> {
+    let mut reader = Reader::from_str(workbook_xml);
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    let mut in_sheets = false;
+    let mut prefixes_in_scope: HashSet<String> = HashSet::new();
+    // The `xml` prefix is implicitly declared by the XML Namespaces spec.
+    prefixes_in_scope.insert("xml".to_string());
+
+    let mut out = PreservedSheetAttributes::default();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(ref e) | Event::Empty(ref e) if e.local_name().as_ref() == b"workbook" => {
+                collect_xmlns_prefixes(e, &mut prefixes_in_scope)?;
+            }
+            Event::Start(ref e) if e.local_name().as_ref() == b"sheets" => {
+                collect_xmlns_prefixes(e, &mut prefixes_in_scope)?;
+                in_sheets = true;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"sheets" => {
+                // Self-closing `<sheets/>` has no children, but its namespace declarations are
+                // still in-scope for any `<sheet>` elements we insert later.
+                collect_xmlns_prefixes(e, &mut prefixes_in_scope)?;
+            }
+            Event::End(ref e) if e.local_name().as_ref() == b"sheets" => {
+                in_sheets = false;
+            }
+            Event::Start(ref e) | Event::Empty(ref e)
+                if in_sheets && e.local_name().as_ref() == b"sheet" =>
+            {
+                let mut rel_id: Option<String> = None;
+                let mut sheet_id: Option<u32> = None;
+                let mut preserved: Vec<PreservedSheetAttribute> = Vec::new();
+
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    let key = attr.key.as_ref();
+
+                    // Record the identifiers used for matching.
+                    if key == b"sheetId" {
+                        let v = attr.unescape_value()?;
+                        sheet_id = Some(v.parse::<u32>().map_err(|_| XlsxError::InvalidSheetId)?);
+                        continue;
+                    }
+                    if crate::openxml::local_name(key) == b"id" {
+                        rel_id = Some(attr.unescape_value()?.to_string());
+                        continue;
+                    }
+
+                    // Managed attributes are always overwritten by the caller-provided sheet list.
+                    if matches!(key, b"name" | b"state") {
+                        continue;
+                    }
+
+                    // Never carry over namespace declarations from the original `<sheet>` element.
+                    // We replace `<sheet>` nodes wholesale, so any sheet-scoped declarations would
+                    // be dropped unless we re-emit them. For safety we intentionally *do not*
+                    // re-emit sheet-scoped `xmlns:*` attributes, and we will also drop any unknown
+                    // attributes that rely on a prefix which isn't declared on the workbook root
+                    // or `<sheets>` element. This avoids emitting invalid XML with undeclared
+                    // prefixes, at the cost of losing those attributes.
+                    if key == b"xmlns" || key.starts_with(b"xmlns:") {
+                        continue;
+                    }
+
+                    let key_str = match std::str::from_utf8(key) {
+                        Ok(s) => s,
+                        Err(_) => continue,
+                    };
+
+                    if let Some((prefix, _)) = key_str.split_once(':') {
+                        if !prefixes_in_scope.contains(prefix) {
+                            continue;
+                        }
+                    }
+
+                    preserved.push(PreservedSheetAttribute {
+                        key: key_str.to_string(),
+                        value: attr.unescape_value()?.to_string(),
+                    });
+                }
+
+                if preserved.is_empty() {
+                    continue;
+                }
+
+                if let Some(rel_id) = rel_id.as_ref() {
+                    out.by_rel_id.insert(rel_id.clone(), preserved.clone());
+                }
+                if let Some(sheet_id) = sheet_id {
+                    out.by_sheet_id.insert(sheet_id, preserved);
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
 }
 
 fn detect_workbook_sheet_qnames(
@@ -613,6 +763,56 @@ mod tests {
         let rewritten = write_workbook_sheets(workbook_xml, &updated).unwrap();
         let reparsed = parse_workbook_sheets(&rewritten).unwrap();
         assert_eq!(reparsed, updated);
+    }
+
+    #[test]
+    fn write_workbook_sheets_preserves_unknown_sheet_attributes() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+  xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1" customAttr="a" xr:uid="u1"/>
+    <sheet name="Sheet2" sheetId="2" r:id="rId2" customAttr="b" xr:uid="u2"/>
+  </sheets>
+</workbook>
+"#;
+
+        let sheets = parse_workbook_sheets(workbook_xml).unwrap();
+        let mut updated = sheets.clone();
+        updated.swap(0, 1);
+        updated[0].name = "Renamed".to_string();
+
+        let rewritten = write_workbook_sheets(workbook_xml, &updated).unwrap();
+
+        let doc = roxmltree::Document::parse(&rewritten)
+            .expect("rewritten workbook.xml should be valid XML");
+
+        // Find output sheet elements by relationship id and verify unknown attributes were carried
+        // over.
+        let rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        let xr_ns = "http://schemas.microsoft.com/office/spreadsheetml/2014/revision";
+
+        let mut seen = 0;
+        for sheet in doc.descendants().filter(|n| n.tag_name().name() == "sheet") {
+            let rel_id = sheet
+                .attribute((rel_ns, "id"))
+                .expect("sheet should have r:id");
+            match rel_id {
+                "rId1" => {
+                    assert_eq!(sheet.attribute("customAttr"), Some("a"));
+                    assert_eq!(sheet.attribute((xr_ns, "uid")), Some("u1"));
+                    seen += 1;
+                }
+                "rId2" => {
+                    assert_eq!(sheet.attribute("customAttr"), Some("b"));
+                    assert_eq!(sheet.attribute((xr_ns, "uid")), Some("u2"));
+                    seen += 1;
+                }
+                other => panic!("unexpected rel id: {other}"),
+            }
+        }
+        assert_eq!(seen, 2);
     }
 
     #[test]
