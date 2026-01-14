@@ -43,6 +43,26 @@ fn delete_sheet_invalidates_quoted_sheet_references() {
 }
 
 #[test]
+fn delete_sheet_does_not_rewrite_external_workbook_references() {
+    let mut wb = Workbook::new();
+    let sheet1 = wb.add_sheet("Sheet1").unwrap();
+    let sheet2 = wb.add_sheet("Sheet2").unwrap();
+
+    wb.sheet_mut(sheet2)
+        .unwrap()
+        .set_formula_a1("A1", Some("=[Book.xlsx]Sheet1!A1+Sheet1!A1".to_string()))
+        .unwrap();
+
+    wb.delete_sheet(sheet1).unwrap();
+
+    let sheet2 = wb.sheet(sheet2).unwrap();
+    assert_eq!(
+        sheet2.formula(CellRef::new(0, 0)),
+        Some("[Book.xlsx]Sheet1!A1+#REF!")
+    );
+}
+
+#[test]
 fn delete_sheet_adjusts_3d_reference_boundaries() {
     let mut wb = Workbook::new();
     let sheet1 = wb.add_sheet("Sheet1").unwrap();

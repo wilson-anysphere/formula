@@ -241,6 +241,12 @@ fn rewrite_sheet_spec_for_delete(
     sheet_order: &[String],
 ) -> DeleteSheetSpecRewrite {
     let (workbook_prefix, remainder) = split_workbook_prefix(spec);
+    // Deleting a local sheet must not rewrite references that explicitly target an external
+    // workbook (e.g. `[Book.xlsx]Sheet1!A1`). Those are independent from the current workbook's
+    // sheet list, even if the sheet name happens to match.
+    if workbook_prefix.is_some() {
+        return DeleteSheetSpecRewrite::Unchanged;
+    }
     let mut parts = remainder.splitn(2, ':');
     let start = parts.next().unwrap_or_default();
     let end = parts.next();
