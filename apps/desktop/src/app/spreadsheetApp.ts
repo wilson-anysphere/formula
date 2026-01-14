@@ -9782,7 +9782,9 @@ export class SpreadsheetApp {
       return max;
     })();
 
-    const rawDuplicate = { ...duplicated, zOrder: maxZOrder + 1 };
+    // Match other insert paths (paste/insert picture): store new ids as strings so the
+    // DocumentController snapshot stays JSON-friendly while adapters normalize back to numbers.
+    const rawDuplicate: any = { ...duplicated, id: String(duplicated.id), zOrder: maxZOrder + 1 };
 
     this.document.beginBatch({ label: "Duplicate Drawing" });
     try {

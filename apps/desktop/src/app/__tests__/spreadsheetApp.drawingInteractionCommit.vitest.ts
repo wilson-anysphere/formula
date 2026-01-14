@@ -447,7 +447,9 @@ describe("SpreadsheetApp drawing interaction commits", () => {
 
     const duplicated = drawings.find((d: any) => String(d?.id) !== "drawing_foo");
     expect(duplicated).toBeTruthy();
-    expect(typeof duplicated.id).toBe("number");
+    // New drawing ids are persisted as strings for stable JSON snapshots.
+    expect(typeof duplicated.id).toBe("string");
+    expect(String(duplicated.id)).toMatch(/^[0-9]+$/);
 
     app.dispose();
     root.remove();
