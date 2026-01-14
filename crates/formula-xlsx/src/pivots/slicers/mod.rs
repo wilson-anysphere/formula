@@ -2074,13 +2074,44 @@ fn slicer_cache_xml_set_selection(
             Event::Start(ref e)
                 if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"slicerCacheItem") =>
             {
-                let patched = patch_slicer_cache_item(e, selection, &preferred_selection_attr_key)?;
+                // Some producers store the slicer item key as nested text (e.g. `<t>East</t>`)
+                // instead of as an attribute. When we're setting an explicit subset selection we
+                // need to read the payload to discover that key.
+                if selection.selected_items.is_some() {
+                    let (key, _, _) = parse_slicer_cache_item(e, None)?;
+                    if key.is_empty() {
+                        let start_owned = e.to_owned();
+                        buf.clear();
+                        let (payload, nested_text) =
+                            read_slicer_cache_item_payload(&mut reader, &mut buf)?;
+                        let patched = patch_slicer_cache_item(
+                            &start_owned,
+                            selection,
+                            &preferred_selection_attr_key,
+                            nested_text.as_deref(),
+                        )?;
+                        writer.write_event(Event::Start(patched))?;
+                        for ev in payload {
+                            writer.write_event(ev)?;
+                        }
+                        buf.clear();
+                        continue;
+                    }
+                }
+
+                let patched = patch_slicer_cache_item(
+                    e,
+                    selection,
+                    &preferred_selection_attr_key,
+                    None,
+                )?;
                 writer.write_event(Event::Start(patched))?;
             }
             Event::Empty(ref e)
                 if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"slicerCacheItem") =>
             {
-                let patched = patch_slicer_cache_item(e, selection, &preferred_selection_attr_key)?;
+                let patched =
+                    patch_slicer_cache_item(e, selection, &preferred_selection_attr_key, None)?;
                 writer.write_event(Event::Empty(patched))?;
             }
             Event::Eof => break,
@@ -2096,6 +2127,7 @@ fn patch_slicer_cache_item(
     start: &BytesStart<'_>,
     selection: &SlicerSelectionState,
     preferred_selection_attr_key: &[u8],
+    extra_key_candidate: Option<&str>,
 ) -> Result<BytesStart<'static>, XlsxError> {
     let mut attrs_raw: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
     let mut key_candidates: Vec<String> = Vec::new();
@@ -2119,6 +2151,13 @@ fn patch_slicer_cache_item(
             if !value.is_empty() {
                 key_candidates.push(value);
             }
+        }
+    }
+
+    if let Some(candidate) = extra_key_candidate {
+        let candidate = candidate.trim();
+        if !candidate.is_empty() {
+            key_candidates.push(candidate.to_string());
         }
     }
 
@@ -2582,6 +2621,30 @@ mod slicer_cache_patch_tests {
         assert_eq!(
             parsed.selected_items,
             Some(HashSet::from(["0".to_string()]))
+        );
+    }
+
+    #[test]
+    fn updates_slicer_cache_xml_nested_text_keys() {
+        // Some producers nest the item key in a text node instead of an `n`/`name` attribute.
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicerCache xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+  <slicerCacheData>
+    <slicerCacheItem s="1"><t>East</t></slicerCacheItem>
+    <slicerCacheItem s="0"><t>West</t></slicerCacheItem>
+  </slicerCacheData>
+</slicerCache>"#;
+
+        let selection = SlicerSelectionState {
+            available_items: Vec::new(),
+            selected_items: Some(HashSet::from(["West".to_string()])),
+        };
+
+        let updated = slicer_cache_xml_set_selection(xml, &selection).expect("patch xml");
+        let parsed = parse_slicer_cache_selection(&updated).expect("parse updated");
+        assert_eq!(
+            parsed.selected_items,
+            Some(HashSet::from(["West".to_string()]))
         );
     }
 }
