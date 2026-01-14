@@ -1,6 +1,16 @@
 import type { CommandContribution } from "../extensions/commandRegistry.js";
 import { getFunctionSignature } from "../formula-bar/highlight/functionSignatures.js";
-import { normalizeFormulaLocaleId, normalizeLocaleId } from "../spreadsheet/formulaLocale.js";
+import {
+  normalizeFormulaLocaleId,
+  normalizeLocaleId,
+  type FormulaLocaleId,
+} from "../spreadsheet/formulaLocale.js";
+
+// Translation tables from the Rust engine (canonical <-> localized function names).
+// Keep these in sync with `crates/formula-engine/src/locale/data/*.tsv`.
+import DE_DE_FUNCTION_TSV from "../../../../crates/formula-engine/src/locale/data/de-DE.tsv?raw";
+import ES_ES_FUNCTION_TSV from "../../../../crates/formula-engine/src/locale/data/es-ES.tsv?raw";
+import FR_FR_FUNCTION_TSV from "../../../../crates/formula-engine/src/locale/data/fr-FR.tsv?raw";
 
 import FUNCTION_NAMES from "../../../../shared/functionNames.mjs";
 
@@ -37,16 +47,120 @@ export type CommandPaletteSection = {
 
 type FunctionSignature = NonNullable<ReturnType<typeof getFunctionSignature>>;
 
-type PreparedFunctionForSearch = { name: string; nameLower: string; nameLowerNormalized: string };
+type PreparedFunctionForSearch = {
+  /**
+   * Displayed function name (canonical or localized).
+   */
+  name: string;
+  nameLower: string;
+  /**
+   * Normalized search key (punctuation removed) so dotted names are discoverable.
+   */
+  nameLowerNormalized: string;
+  /**
+   * Canonical function name (uppercased). Used for deduping canonical/localized aliases.
+   */
+  canonicalUpper: string;
+  isLocalized: boolean;
+};
 
-const FUNCTIONS: PreparedFunctionForSearch[] = (Array.isArray(FUNCTION_NAMES) ? FUNCTION_NAMES : [])
+const UNICODE_ALNUM_RE: RegExp | null = (() => {
+  try {
+    return new RegExp("^[\\p{Alphabetic}\\p{Number}]$", "u");
+  } catch {
+    return null;
+  }
+})();
+
+function isUnicodeAlphanumeric(ch: string): boolean {
+  if (UNICODE_ALNUM_RE) return UNICODE_ALNUM_RE.test(ch);
+  return (ch >= "A" && ch <= "Z") || (ch >= "a" && ch <= "z") || (ch >= "0" && ch <= "9");
+}
+
+function normalizeFunctionSearchToken(text: string): string {
+  const lower = String(text ?? "").toLowerCase();
+  let out = "";
+  for (const ch of lower) {
+    if (ch === "_" || isUnicodeAlphanumeric(ch)) out += ch;
+  }
+  return out;
+}
+
+function casefoldIdent(ident: string): string {
+  return String(ident ?? "").toUpperCase();
+}
+
+type FunctionTranslationTables = {
+  canonicalToLocalized: Map<string, string>;
+};
+
+function parseFunctionTranslationsTsv(tsv: string): FunctionTranslationTables {
+  const canonicalToLocalized: Map<string, string> = new Map();
+  for (const rawLine of String(tsv ?? "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const [canonical, localized] = line.split("\t");
+    if (!canonical || !localized) continue;
+    const canonUpper = casefoldIdent(canonical.trim());
+    const localizedTrimmed = localized.trim();
+    const locUpper = casefoldIdent(localizedTrimmed);
+    if (!canonUpper || !locUpper) continue;
+    if (canonUpper !== locUpper) {
+      canonicalToLocalized.set(canonUpper, localizedTrimmed);
+    }
+  }
+  return { canonicalToLocalized };
+}
+
+const FUNCTION_TRANSLATIONS_BY_LOCALE: Record<Exclude<FormulaLocaleId, "en-US">, FunctionTranslationTables> = {
+  "de-DE": parseFunctionTranslationsTsv(DE_DE_FUNCTION_TSV),
+  "fr-FR": parseFunctionTranslationsTsv(FR_FR_FUNCTION_TSV),
+  "es-ES": parseFunctionTranslationsTsv(ES_ES_FUNCTION_TSV),
+};
+
+const FUNCTIONS_BY_LOCALE_CACHE = new Map<string, PreparedFunctionForSearch[]>();
+
+function getFunctionsForLocale(localeId: string): PreparedFunctionForSearch[] {
+  const formulaLocaleId = normalizeFormulaLocaleId(localeId);
+  if (!formulaLocaleId || formulaLocaleId === "en-US") return CANONICAL_FUNCTIONS;
+
+  const cached = FUNCTIONS_BY_LOCALE_CACHE.get(formulaLocaleId);
+  if (cached) return cached;
+
+  const tables = FUNCTION_TRANSLATIONS_BY_LOCALE[formulaLocaleId];
+  if (!tables) return CANONICAL_FUNCTIONS;
+
+  const out: PreparedFunctionForSearch[] = [];
+  for (const fn of CANONICAL_FUNCTIONS) {
+    const localized = tables.canonicalToLocalized.get(fn.canonicalUpper);
+    if (localized) {
+      const nameLower = localized.toLowerCase();
+      out.push({
+        name: localized,
+        nameLower,
+        nameLowerNormalized: normalizeFunctionSearchToken(nameLower),
+        canonicalUpper: fn.canonicalUpper,
+        isLocalized: true,
+      });
+    }
+    // Always include the canonical name as a fallback. We'll suppress it in the final
+    // result list if the localized alias also matched the query (avoids duplicate rows).
+    out.push(fn);
+  }
+
+  FUNCTIONS_BY_LOCALE_CACHE.set(formulaLocaleId, out);
+  return out;
+}
+
+const CANONICAL_FUNCTIONS: PreparedFunctionForSearch[] = (Array.isArray(FUNCTION_NAMES) ? FUNCTION_NAMES : [])
   .map((name) => String(name ?? "").trim())
   .filter((name) => name.length > 0)
   .map((name) => {
     const nameLower = name.toLowerCase();
     // Remove punctuation so dotted function names like `RANK.EQ` are searchable by `rankeq`.
-    const nameLowerNormalized = nameLower.replace(/[^a-z0-9_]/g, "");
-    return { name, nameLower, nameLowerNormalized };
+    const nameLowerNormalized = normalizeFunctionSearchToken(nameLower);
+    const canonicalUpper = casefoldIdent(name);
+    return { name, nameLower, nameLowerNormalized, canonicalUpper, isLocalized: false };
   });
 
 export function buildCommandPaletteSections(opts: {
@@ -72,12 +186,13 @@ export function buildCommandPaletteSections(opts: {
  * This is used by the command palette UI to surface spreadsheet functions alongside commands.
  */
 export function searchFunctionResults(query: string, opts: { limit: number }): CommandPaletteFunctionResult[] {
-  const normalized = String(query ?? "")
-    .trim()
-    .replace(/^=+/, "")
-    .replace(/\s+/g, "")
-    // Users often type formulas like `SUM(` or `=SUM(`; ignore non-word characters.
-    .replace(/[^A-Za-z0-9_]/g, "");
+  const normalized = normalizeFunctionSearchToken(
+    String(query ?? "")
+      .trim()
+      .replace(/^=+/, "")
+      // Users often type formulas like `SUM(` or `=SUM(`; ignore non-word characters.
+      .replace(/\s+/g, ""),
+  );
   const limit = Math.max(0, Math.floor(opts.limit));
   return scoreFunctionResults(normalized.toLowerCase(), limit);
 }
@@ -143,7 +258,7 @@ function buildQuerySections(
   limits: { maxResults: number; maxResultsPerGroup: number },
 ): CommandPaletteSection[] {
   const compiled = compileFuzzyQuery(query);
-  const functionQueryLower = compiled.normalizedLower.replace(/\s+/g, "").replace(/[^a-z0-9_]/g, "");
+  const functionQueryLower = normalizeFunctionSearchToken(compiled.normalizedLower);
 
   const commandResults = scoreCommandResults(compiled, commands, limits.maxResults).slice(0, limits.maxResultsPerGroup);
   const functionResults = scoreFunctionResults(functionQueryLower, limits.maxResults).slice(0, limits.maxResultsPerGroup);
@@ -232,14 +347,24 @@ function scoreFunctionResults(queryLower: string, limit: number): CommandPalette
   const trimmed = queryLower.trim();
   const cappedLimit = Math.max(0, Math.floor(limit));
   if (!trimmed || cappedLimit === 0) return [];
-  const normalizedQuery = trimmed.replace(/[^a-z0-9_]/g, "");
+  const normalizedQuery = normalizeFunctionSearchToken(trimmed);
   if (!normalizedQuery) return [];
 
-  const functions = FUNCTIONS;
+  const localeId = (() => {
+    try {
+      const raw = typeof document !== "undefined" ? document.documentElement?.lang : "";
+      return String(raw ?? "").trim() || "en-US";
+    } catch {
+      return "en-US";
+    }
+  })();
+
+  const functions = getFunctionsForLocale(localeId);
 
   // Keep only the top-N matches so we don't allocate/sort huge arrays for large
   // function catalogs.
-  const top: FunctionMatch[] = [];
+  const candidateLimit = Math.max(cappedLimit * 5, 50);
+  const top: Array<FunctionMatch & { canonicalUpper: string; isLocalized: boolean }> = [];
 
   const isBetter = (a: FunctionMatch, b: FunctionMatch): boolean => {
     if (a.score !== b.score) return a.score > b.score;
@@ -265,9 +390,9 @@ function scoreFunctionResults(queryLower: string, limit: number): CommandPalette
     else if (fn.nameLowerNormalized.startsWith(normalizedQuery)) score += 2_500;
     else if (fn.nameLowerNormalized.includes(normalizedQuery)) score += 1_000;
 
-    const candidate: FunctionMatch = { name: fn.name, score, matchRanges: match.ranges };
+    const candidate = { name: fn.name, score, matchRanges: match.ranges, canonicalUpper: fn.canonicalUpper, isLocalized: fn.isLocalized };
 
-    if (top.length < cappedLimit) {
+    if (top.length < candidateLimit) {
       top.push(candidate);
       continue;
     }
@@ -283,17 +408,16 @@ function scoreFunctionResults(queryLower: string, limit: number): CommandPalette
     return a.name.localeCompare(b.name);
   });
 
-  const localeId = (() => {
-    try {
-      const raw = typeof document !== "undefined" ? document.documentElement?.lang : "";
-      return String(raw ?? "").trim() || "en-US";
-    } catch {
-      return "en-US";
-    }
-  })();
   const argSeparator = inferArgSeparator(localeId);
 
-  return top.map((match) => {
+  const localizedCanonicals = new Set<string>();
+  for (const match of top) {
+    if (match.isLocalized) localizedCanonicals.add(match.canonicalUpper);
+  }
+
+  const deduped = top.filter((match) => match.isLocalized || !localizedCanonicals.has(match.canonicalUpper)).slice(0, cappedLimit);
+
+  return deduped.map((match) => {
     const sig = getFunctionSignature(match.name, { localeId });
     const signature = sig ? formatSignature(sig, argSeparator) : undefined;
     const summary = sig?.summary?.trim() ? sig.summary.trim() : undefined;

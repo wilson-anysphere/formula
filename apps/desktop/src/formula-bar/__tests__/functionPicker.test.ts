@@ -97,13 +97,46 @@ describe("FormulaBarView fx function picker", () => {
       pickerInput.value = "sum";
       pickerInput.dispatchEvent(new Event("input", { bubbles: true }));
 
-      const sumItem = host.querySelector<HTMLElement>('[data-testid="formula-function-picker-item-SUM"]');
+      // In de-DE, search results should prefer the localized name.
+      const sumItem = host.querySelector<HTMLElement>('[data-testid="formula-function-picker-item-SUMME"]');
       expect(sumItem).toBeTruthy();
 
       const desc = sumItem!.querySelector<HTMLElement>(".command-palette__item-description");
       expect(desc).toBeTruthy();
-      expect(desc!.textContent).toContain("SUM(");
+      expect(desc!.textContent).toContain("SUMME(");
       expect(desc!.textContent).toContain(";");
+    } finally {
+      host.remove();
+      document.documentElement.lang = prevLang;
+    }
+  });
+
+  it("searches + inserts localized function names when the UI locale uses localized formulas (de-DE SUMME → SUMME())", () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "de-DE";
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    try {
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+
+      const fxButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-fx-button"]')!;
+      fxButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      const pickerInput = host.querySelector<HTMLInputElement>('[data-testid="formula-function-picker-input"]')!;
+      pickerInput.value = "summe";
+      pickerInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+      const summeItem = host.querySelector<HTMLElement>('[data-testid="formula-function-picker-item-SUMME"]');
+      expect(summeItem).toBeTruthy();
+
+      pickerInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+
+      expect(view.textarea.value).toBe("=SUMME()");
+      expect(view.textarea.selectionStart).toBe(view.textarea.value.length - 1);
+      expect(view.textarea.selectionEnd).toBe(view.textarea.value.length - 1);
     } finally {
       host.remove();
       document.documentElement.lang = prevLang;
