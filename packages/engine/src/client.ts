@@ -64,6 +64,14 @@ export interface EngineClient {
   getWorkbookInfo?(options?: RpcOptions): Promise<WorkbookInfoDto>;
   getCell(address: string, sheet?: string, options?: RpcOptions): Promise<CellData>;
   /**
+   * Return the cell's phonetic guide (furigana) metadata, if present.
+   *
+   * This metadata is imported from XLSX `<rPh>` runs and is consumed by Excel's `PHONETIC()` function.
+   *
+   * Additive API: older WASM builds / worker bundles may not support this call.
+   */
+  getCellPhonetic?(address: string, sheet?: string, options?: RpcOptions): Promise<string | null>;
+  /**
    * Read a cell's rich `{type,value}` input/value.
    *
    * This is an additive API: rich values are not representable in the legacy
@@ -91,6 +99,14 @@ export interface EngineClient {
    * rich values.
    */
   setCellRich?(address: string, value: CellValueRich | null, sheet?: string, options?: RpcOptions): Promise<void>;
+  /**
+   * Set (or clear) a cell's phonetic guide (furigana) metadata.
+   *
+   * Pass `null` to clear.
+   *
+   * Additive API: older WASM builds / worker bundles may not support this call.
+   */
+  setCellPhonetic?(address: string, phonetic: string | null, sheet?: string, options?: RpcOptions): Promise<void>;
   /**
    * Set multiple cells in a single RPC call.
    *
@@ -592,6 +608,8 @@ export function createEngineClient(options?: {
     getWorkbookInfo: async (rpcOptions) => await withEngine((connected) => connected.getWorkbookInfo(rpcOptions)),
     getCell: async (address, sheet, rpcOptions) =>
       await withEngine((connected) => connected.getCell(address, sheet, rpcOptions)),
+    getCellPhonetic: async (address, sheet, rpcOptions) =>
+      await withEngine((connected) => connected.getCellPhonetic(address, sheet, rpcOptions)),
     getCellRich: async (address, sheet, rpcOptions) =>
       await withEngine((connected) => connected.getCellRich(address, sheet, rpcOptions)),
     getRange: async (range, sheet, rpcOptions) =>
@@ -601,6 +619,8 @@ export function createEngineClient(options?: {
     setCell: async (address, value, sheet) => await withEngine((connected) => connected.setCell(address, value, sheet)),
     setCellRich: async (address, value, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setCellRich(address, value, sheet, rpcOptions)),
+    setCellPhonetic: async (address, phonetic, sheet, rpcOptions) =>
+      await withEngine((connected) => connected.setCellPhonetic(address, phonetic, sheet, rpcOptions)),
     setCells: async (updates, rpcOptions) => await withEngine((connected) => connected.setCells(updates, rpcOptions)),
     setRange: async (range, values, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setRange(range, values, sheet, rpcOptions)),

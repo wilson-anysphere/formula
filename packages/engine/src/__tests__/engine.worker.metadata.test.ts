@@ -286,6 +286,60 @@ describe("engine.worker workbook metadata RPCs", () => {
     }
   });
 
+  it("dispatches cell phonetic guide RPCs to the underlying wasm workbook", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      let resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setCellPhonetic",
+        params: { sheet: "Sheet1", address: "A1", phonetic: "かんじ" }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 2,
+        method: "getCellPhonetic",
+        params: { sheet: "Sheet1", address: "A1" }
+      });
+      expect(resp.ok).toBe(true);
+      expect((resp as RpcResponseOk).result).toBe("かんじ");
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 3,
+        method: "setCellPhonetic",
+        params: { sheet: "Sheet1", address: "A1", phonetic: null }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 4,
+        method: "getCellPhonetic",
+        params: { sheet: "Sheet1", address: "A1" }
+      });
+      expect(resp.ok).toBe(true);
+      expect((resp as RpcResponseOk).result).toBe(null);
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
+        ["setCellPhonetic", "A1", "かんじ", "Sheet1"],
+        ["getCellPhonetic", "A1", "Sheet1"],
+        ["setCellPhonetic", "A1", null, "Sheet1"],
+        ["getCellPhonetic", "A1", "Sheet1"],
+      ]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
+
   it("returns a clear error when the wasm workbook does not support a metadata method", async () => {
     const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookNoMetadata.mjs", import.meta.url).href;
     const { port, dispose } = await setupWorker({ wasmModuleUrl });

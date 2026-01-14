@@ -17,7 +17,9 @@ function recordCall(name, ...args) {
 }
 
 export class WasmWorkbook {
-  constructor() {}
+  constructor() {
+    this._phoneticByKey = new Map();
+  }
 
   // Minimal surface required by the worker's type expectations.
   toJson() {
@@ -44,6 +46,20 @@ export class WasmWorkbook {
   }
   setCellRich(address, value, sheet) {
     recordCall("setCellRich", address, value, sheet);
+  }
+  setCellPhonetic(address, phonetic, sheet) {
+    recordCall("setCellPhonetic", address, phonetic, sheet);
+    const key = `${sheet ?? "Sheet1"}!${address}`;
+    if (phonetic == null || phonetic === "") {
+      this._phoneticByKey.delete(key);
+    } else {
+      this._phoneticByKey.set(key, String(phonetic));
+    }
+  }
+  getCellPhonetic(address, sheet) {
+    recordCall("getCellPhonetic", address, sheet);
+    const key = `${sheet ?? "Sheet1"}!${address}`;
+    return this._phoneticByKey.get(key);
   }
   setRange(range, values, sheet) {
     recordCall("setRange", range, values, sheet);

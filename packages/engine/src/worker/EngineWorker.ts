@@ -544,6 +544,11 @@ export class EngineWorker {
     return (await this.invoke("getCell", { address, sheet }, options)) as CellData;
   }
 
+  async getCellPhonetic(address: string, sheet?: string, options?: RpcOptions): Promise<string | null> {
+    await this.flush();
+    return (await this.invoke("getCellPhonetic", { address, sheet }, options)) as string | null;
+  }
+
   async getCellRich(
     address: string,
     sheet?: string,
@@ -593,6 +598,16 @@ export class EngineWorker {
   async setCellRich(address: string, value: CellValueRich | null, sheet?: string, options?: RpcOptions): Promise<void> {
     await this.flush();
     await this.invoke("setCellRich", { address, value, sheet }, options);
+  }
+
+  async setCellPhonetic(
+    address: string,
+    phonetic: string | null,
+    sheet?: string,
+    options?: RpcOptions
+  ): Promise<void> {
+    await this.flush();
+    await this.invoke("setCellPhonetic", { address, phonetic, sheet }, options);
   }
 
   async setCells(

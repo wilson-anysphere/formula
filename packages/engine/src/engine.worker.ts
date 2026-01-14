@@ -761,6 +761,17 @@ async function handleRequest(message: WorkerInboundMessage, generation: number):
                 result = normalizeCellData(wb.getCell(params.address, sheet));
               }
               break;
+            case "getCellPhonetic":
+              if (typeof (wb as any).getCellPhonetic !== "function") {
+                throw new Error(
+                  "getCellPhonetic: WasmWorkbook.getCellPhonetic is not available in this WASM build"
+                );
+              }
+              {
+                const sheet = normalizeSheetName(params.sheet);
+                result = (wb as any).getCellPhonetic(params.address, sheet) ?? null;
+              }
+              break;
             case "getCellRich":
               if (typeof (wb as any).getCellRich !== "function") {
                 throw new Error("getCellRich: WasmWorkbook.getCellRich is not available in this WASM build");
@@ -878,6 +889,17 @@ async function handleRequest(message: WorkerInboundMessage, generation: number):
               }
               {
                 (wb as any).setCellRich(params.address, params.value, normalizeSheetName(params.sheet));
+              }
+              result = null;
+              break;
+            case "setCellPhonetic":
+              if (typeof (wb as any).setCellPhonetic !== "function") {
+                throw new Error(
+                  "setCellPhonetic: WasmWorkbook.setCellPhonetic is not available in this WASM build"
+                );
+              }
+              {
+                (wb as any).setCellPhonetic(params.address, params.phonetic ?? null, normalizeSheetName(params.sheet));
               }
               result = null;
               break;
