@@ -613,7 +613,15 @@ fn resolve_part_key(parts: &BTreeMap<String, Vec<u8>>, name: &str) -> Option<Str
             return Some(with_slash);
         }
     }
-    None
+
+    // Fall back to a linear scan for non-canonical producer output:
+    // - Windows-style `\` separators (treated as `/`)
+    // - ASCII case differences (e.g. `XL/SlicerCaches/SlicerCache1.xml`)
+    // - percent-encoded path segments
+    parts
+        .keys()
+        .find(|key| crate::zip_util::zip_part_names_equivalent(key.as_str(), name))
+        .cloned()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2282,6 +2290,45 @@ mod slicer_cache_patch_tests {
         assert_eq!(
             parsed.selected_items,
             Some(HashSet::from(["0".to_string()]))
+        );
+    }
+}
+
+#[cfg(test)]
+mod slicer_cache_package_patch_tests {
+    use super::*;
+    use std::collections::{BTreeMap, HashSet};
+
+    #[test]
+    fn set_slicer_cache_selection_resolves_noncanonical_part_names() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicerCache xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+  <slicerCacheData>
+    <slicerCacheItem n="East" s="1"/>
+    <slicerCacheItem n="West" s="0"/>
+  </slicerCacheData>
+</slicerCache>"#;
+
+        let mut parts = BTreeMap::new();
+        // Non-canonical ZIP entry name using Windows-style separators.
+        parts.insert(r"xl\slicerCaches\slicerCache1.xml".to_string(), xml.to_vec());
+        let mut pkg = XlsxPackage::from_parts_map(parts);
+
+        let selection = SlicerSelectionState {
+            available_items: Vec::new(),
+            selected_items: Some(HashSet::from(["West".to_string()])),
+        };
+
+        pkg.set_slicer_cache_selection("xl/slicerCaches/slicerCache1.xml", &selection)
+            .expect("patch slicer selection");
+
+        let updated = pkg
+            .part("xl/slicerCaches/slicerCache1.xml")
+            .expect("read updated slicer cache");
+        let parsed = parse_slicer_cache_selection(updated).expect("parse updated");
+        assert_eq!(
+            parsed.selected_items,
+            Some(HashSet::from(["West".to_string()]))
         );
     }
 }
