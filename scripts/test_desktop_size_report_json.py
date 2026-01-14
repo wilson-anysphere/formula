@@ -10,6 +10,10 @@ from pathlib import Path
 
 
 class DesktopSizeReportJsonTests(unittest.TestCase):
+    def _write_executable(self, path: Path, content: str) -> None:
+        path.write_text(content, encoding="utf-8", newline="\n")
+        path.chmod(0o755)
+
     def _repo_root(self) -> Path:
         return Path(__file__).resolve().parents[1]
 
@@ -262,6 +266,73 @@ class DesktopSizeReportJsonTests(unittest.TestCase):
 
                 json_path = tmp_dir / "desktop-size.json"
 
+                # Install a fake `cargo` binary that writes a marker file if invoked. The size report
+                # should not need to execute `cargo metadata` when CARGO_TARGET_DIR is already set.
+                marker = tmp_dir / "cargo-called"
+                if marker.exists():
+                    marker.unlink()
+                fake_bin_dir = tmp_dir / "fake-bin"
+                fake_bin_dir.mkdir(parents=True, exist_ok=True)
+                if sys.platform == "win32":
+                    stub_py = fake_bin_dir / "cargo_stub.py"
+                    stub_py.write_text(
+                        "\n".join(
+                            [
+                                "from __future__ import annotations",
+                                "",
+                                "import json",
+                                "import os",
+                                "import sys",
+                                "from pathlib import Path",
+                                "",
+                                "marker = os.environ.get('FORMULA_TEST_CARGO_MARKER')",
+                                "if marker:",
+                                "    Path(marker).write_text('called\\n', encoding='utf-8')",
+                                "",
+                                "args = sys.argv[1:]",
+                                "if args and args[0] == 'metadata':",
+                                "    td = os.environ.get('CARGO_TARGET_DIR') or 'target'",
+                                "    print(json.dumps({'target_directory': str(Path(td).resolve())}))",
+                                "    raise SystemExit(0)",
+                                "raise SystemExit(1)",
+                                "",
+                            ]
+                        ),
+                        encoding="utf-8",
+                        newline="\n",
+                    )
+                    self._write_executable(
+                        fake_bin_dir / "cargo.cmd",
+                        f"@echo off\n\"{sys.executable}\" \"{stub_py}\" %*\n",
+                    )
+                else:
+                    self._write_executable(
+                        fake_bin_dir / "cargo",
+                        "\n".join(
+                            [
+                                "#!/usr/bin/env python3",
+                                "from __future__ import annotations",
+                                "",
+                                "import json",
+                                "import os",
+                                "import sys",
+                                "from pathlib import Path",
+                                "",
+                                "marker = os.environ.get('FORMULA_TEST_CARGO_MARKER')",
+                                "if marker:",
+                                "    Path(marker).write_text('called\\n', encoding='utf-8')",
+                                "",
+                                "args = sys.argv[1:]",
+                                "if args and args[0] == 'metadata':",
+                                "    td = os.environ.get('CARGO_TARGET_DIR') or 'target'",
+                                "    print(json.dumps({'target_directory': str(Path(td).resolve())}))",
+                                "    raise SystemExit(0)",
+                                "raise SystemExit(1)",
+                                "",
+                            ]
+                        ),
+                    )
+
                 proc = self._run(
                     repo_root,
                     [
@@ -274,6 +345,8 @@ class DesktopSizeReportJsonTests(unittest.TestCase):
                     extra_env={
                         # Intentionally provide a relative path to exercise repo-root resolution.
                         "CARGO_TARGET_DIR": cargo_target.relative_to(repo_root).as_posix(),
+                        "FORMULA_TEST_CARGO_MARKER": str(marker),
+                        "PATH": f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH','')}",
                     },
                 )
                 self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -282,6 +355,7 @@ class DesktopSizeReportJsonTests(unittest.TestCase):
                 self._assert_basic_schema(report)
                 self.assertEqual(report["binary"]["path"], bin_path.relative_to(repo_root).as_posix())
                 self.assertEqual(report["binary"]["size_bytes"], 1234)
+                self.assertFalse(marker.exists(), f"desktop_size_report.py unexpectedly invoked cargo; marker at {marker}")
         finally:
             for src, dst in moved:
                 if src.exists():

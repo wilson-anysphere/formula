@@ -306,9 +306,13 @@ def _candidate_default_binary_paths(repo_root: Path) -> list[Path]:
             td = repo_root / td
         base_dirs.append(td)
 
-    cargo_target_dir = _cargo_target_directory(repo_root)
-    if cargo_target_dir is not None:
-        base_dirs.append(cargo_target_dir)
+    # Avoid invoking `cargo metadata` when the caller explicitly set `CARGO_TARGET_DIR`.
+    # This keeps the default-binary discovery logic dependency-free in lightweight CI
+    # guard jobs that do not install Rust.
+    if not raw_target_dir:
+        cargo_target_dir = _cargo_target_directory(repo_root)
+        if cargo_target_dir is not None:
+            base_dirs.append(cargo_target_dir)
 
     base_dirs.extend(
         [
