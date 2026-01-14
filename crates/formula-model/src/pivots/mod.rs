@@ -387,6 +387,77 @@ pub struct ValueField {
     pub base_item: Option<String>,
 }
 
+/// Layout style used when rendering a pivot table.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Layout {
+    Compact,
+    Outline,
+    #[default]
+    Tabular,
+}
+
+/// Controls where subtotals appear for each pivot field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SubtotalPosition {
+    Top,
+    Bottom,
+    #[default]
+    None,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Whether grand totals are enabled for pivot rows/columns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrandTotals {
+    #[serde(default = "default_true")]
+    pub rows: bool,
+    #[serde(default = "default_true")]
+    pub columns: bool,
+}
+
+impl Default for GrandTotals {
+    fn default() -> Self {
+        Self {
+            rows: true,
+            columns: true,
+        }
+    }
+}
+
+/// Filter configuration for a pivot field.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterField {
+    pub source_field: String,
+    /// Allowed values. `None` means allow all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed: Option<HashSet<PivotKeyPart>>,
+}
+
+/// Canonical pivot configuration stored alongside a pivot table definition.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PivotConfig {
+    pub row_fields: Vec<PivotField>,
+    pub column_fields: Vec<PivotField>,
+    pub value_fields: Vec<ValueField>,
+    pub filter_fields: Vec<FilterField>,
+    // Backward compat: these fields were added later; missing keys should decode to empty vectors.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calculated_fields: Vec<CalculatedField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calculated_items: Vec<CalculatedItem>,
+    pub layout: Layout,
+    pub subtotals: SubtotalPosition,
+    pub grand_totals: GrandTotals,
+}
+
 impl From<&str> for ScalarValue {
     fn from(value: &str) -> Self {
         ScalarValue::Text(value.to_string())
