@@ -265,6 +265,24 @@ fn asc_and_dbcs_convert_ascii_under_other_dbcs_codepages() {
 }
 
 #[test]
+fn asc_and_dbcs_convert_fullwidth_ascii_in_cp936_without_kana() {
+    let mut sheet = TestSheet::new();
+    sheet.set_text_codepage(936);
+
+    // ASCII fullwidth conversions.
+    assert_eq!(sheet.eval(r#"=ASC("ＡＢＣ")"#), Value::Text("ABC".to_string()));
+    assert_eq!(sheet.eval(r#"=DBCS("ABC")"#), Value::Text("ＡＢＣ".to_string()));
+
+    // Fullwidth space <-> ASCII space.
+    assert_eq!(sheet.eval(r#"=ASC("　")"#), Value::Text(" ".to_string()));
+    assert_eq!(sheet.eval(r#"=DBCS(" ")"#), Value::Text("　".to_string()));
+
+    // Kana conversions are Japanese (cp932) only.
+    assert_eq!(sheet.eval(r#"=DBCS("ｱｲｳ")"#), Value::Text("ｱｲｳ".to_string()));
+    assert_eq!(sheet.eval(r#"=ASC("アイウ")"#), Value::Text("アイウ".to_string()));
+}
+
+#[test]
 fn byte_count_text_functions_use_dbcs_semantics_for_other_dbcs_codepages() {
     let mut sheet = TestSheet::new();
 
