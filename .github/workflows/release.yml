@@ -3137,7 +3137,13 @@ jobs:
       - upload-sbom
       - verify-updater-manifest
       - verify-release-assets
-    if: needs.preflight.outputs.upload == 'true'
+    # Generating `SHA256SUMS.txt` re-validates the full GitHub Release asset set (including `latest.json.sig`)
+    # via `scripts/verify-desktop-release-assets.mjs`. That requires updater signatures, which are only
+    # produced when the TAURI_PRIVATE_KEY secret is configured.
+    #
+    # In forks without updater secrets we still build/upload unsigned artifacts, but we skip this strict
+    # release-asset verification job so the workflow can complete.
+    if: needs.preflight.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
