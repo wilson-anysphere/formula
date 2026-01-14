@@ -9,6 +9,7 @@ import { CLASSIFICATION_SCOPE } from "../../../../../packages/security/dlp/src/s
 
 import { DocumentControllerSpreadsheetApi } from "./documentControllerSpreadsheetApi.js";
 import { createSheetNameResolverFromIdToNameMap } from "../../sheet/sheetNameResolver.js";
+import { getLocale, setLocale } from "../../i18n/index.js";
 
 describe("DocumentControllerSpreadsheetApi", () => {
   it("resolves display names to stable sheet ids (no phantom sheet creation after rename)", async () => {
@@ -876,27 +877,36 @@ describe("DocumentControllerSpreadsheetApi", () => {
   });
 
   it("clone() uses a local formula evaluator for computed values (and avoids computing them in listNonEmptyCells)", () => {
-    const controller = new DocumentController();
-    controller.setCellValue("Sheet1", "B1", 1);
-    controller.setCellFormula("Sheet1", "A1", "B1+1");
+    const beforeLocale = getLocale();
+    // Use a locale with localized function names + ';' argument separators to ensure
+    // the clone evaluator stays locale-aware.
+    setLocale("de-DE");
+    try {
+      const controller = new DocumentController();
+      controller.setCellValue("Sheet1", "B1", 1);
+      controller.setCellValue("Sheet1", "C1", 2);
+      controller.setCellFormula("Sheet1", "A1", "SUMME(B1;C1)");
 
-    // Provide a dummy live provider so clone() will enable local evaluation. The clone should NOT use this.
-    const api = new DocumentControllerSpreadsheetApi(controller, {
-      getCellComputedValueForSheet: () => 999,
-    });
-    const cloned = api.clone() as any as DocumentControllerSpreadsheetApi;
+      // Provide a dummy live provider so clone() will enable local evaluation. The clone should NOT use this.
+      const api = new DocumentControllerSpreadsheetApi(controller, {
+        getCellComputedValueForSheet: () => 999,
+      });
+      const cloned = api.clone() as any as DocumentControllerSpreadsheetApi;
 
-    // Local evaluator should compute based on the cloned DocumentController state.
-    expect(cloned.getCell({ sheet: "Sheet1", row: 1, col: 1 })).toMatchObject({ value: 2, formula: "=B1+1" });
+      // Local evaluator should compute based on the cloned DocumentController state.
+      expect(cloned.getCell({ sheet: "Sheet1", row: 1, col: 1 })).toMatchObject({ value: 3, formula: "=SUMME(B1;C1)" });
 
-    // PreviewEngine diffs rely on listNonEmptyCells; clones intentionally do not compute formula values there.
-    const a1Entry = cloned.listNonEmptyCells("Sheet1").find((e) => e.address.row === 1 && e.address.col === 1);
-    expect(a1Entry?.cell.formula).toBe("=B1+1");
-    expect(a1Entry?.cell.value).toBeNull();
+      // PreviewEngine diffs rely on listNonEmptyCells; clones intentionally do not compute formula values there.
+      const a1Entry = cloned.listNonEmptyCells("Sheet1").find((e) => e.address.row === 1 && e.address.col === 1);
+      expect(a1Entry?.cell.formula).toBe("=SUMME(B1;C1)");
+      expect(a1Entry?.cell.value).toBeNull();
 
-    // Updating a dependency cell should invalidate any cached computed values.
-    cloned.setCell({ sheet: "Sheet1", row: 1, col: 2 }, { value: 10 });
-    expect(cloned.getCell({ sheet: "Sheet1", row: 1, col: 1 })).toMatchObject({ value: 11, formula: "=B1+1" });
+      // Updating a dependency cell should invalidate any cached computed values.
+      cloned.setCell({ sheet: "Sheet1", row: 1, col: 2 }, { value: 10 });
+      expect(cloned.getCell({ sheet: "Sheet1", row: 1, col: 1 })).toMatchObject({ value: 12, formula: "=SUMME(B1;C1)" });
+    } finally {
+      setLocale(beforeLocale);
+    }
   });
 
   it("read_range returns primitive values + formulas without per-cell controller.getCell calls", async () => {

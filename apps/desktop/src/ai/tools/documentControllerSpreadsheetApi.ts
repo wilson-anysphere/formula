@@ -8,6 +8,7 @@ import { formatA1Range, parseA1Cell, type CellAddress, type RangeAddress } from 
 import type { CellEntry, SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.ts";
 import { isCellEmpty, type CellData, type CellFormat } from "../../../../../packages/ai-tools/src/spreadsheet/types.ts";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
+import { getLocale } from "../../i18n/index.js";
 import { evaluateFormula, type SpreadsheetValue } from "../../spreadsheet/evaluateFormula";
 
 type DocumentControllerStyle = Record<string, any>;
@@ -467,6 +468,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     };
 
     const MAX_RANGE_CELLS = 200_000;
+    const localeId = getLocale();
 
     const getCellValueForSheet = (() => {
       const cache = new Map<string, (address: string) => SpreadsheetValue>();
@@ -516,7 +518,10 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
             memo.set(key, result);
             return result;
           }
-          result = evaluateFormula(formulaText, getCellValueForSheet(sheetId), { maxRangeCells: MAX_RANGE_CELLS });
+          result = evaluateFormula(formulaText, getCellValueForSheet(sheetId), {
+            maxRangeCells: MAX_RANGE_CELLS,
+            localeId,
+          });
         } else {
           result = coerceScalar(cellState?.value);
         }
