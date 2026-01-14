@@ -113,8 +113,11 @@ dialog.print-preview-dialog::backdrop {
   font-weight: 700;
 }
 
-.dialog__controls.print-preview-dialog__controls {
-  margin-top: 0;
+.print-preview-dialog__controls {
+  --dialog-controls-margin-top: 0;
+  --dialog-controls-gap: var(--space-3);
+  --dialog-control-padding: var(--space-2) var(--space-4);
+  --dialog-control-radius: var(--radius-sm);
 }
 
 .print-preview-dialog__viewer {
@@ -245,16 +248,6 @@ dialog.print-preview-dialog::backdrop {
 .find-results li {
   cursor: pointer;
   padding: var(--space-1) 0;
-}
-
-/* Tighten print preview dialog controls (match find/goto button sizing). */
-.print-preview-dialog .dialog__controls button {
-  border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-4);
-}
-
-.print-preview-dialog .dialog__controls {
-  gap: var(--space-3);
 }
 
 /* --- Grid canvas layering ------------------------------------------------ */
