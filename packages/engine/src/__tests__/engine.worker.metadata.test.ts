@@ -231,6 +231,22 @@ describe("engine.worker workbook metadata RPCs", () => {
       });
       expect(resp.ok).toBe(true);
 
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 14,
+        method: "setColStyleId",
+        params: { col: 0, styleId: null }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 15,
+        method: "setSheetDefaultStyleId",
+        params: { styleId: null }
+      });
+      expect(resp.ok).toBe(true);
+
       expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
         ["setWorkbookFileMetadata", "/tmp", "book.xlsx"],
         ["setCellStyleId", "Sheet1", "A1", 7],
@@ -246,7 +262,9 @@ describe("engine.worker workbook metadata RPCs", () => {
         ["internStyle", { font: { bold: true } }],
         // The worker defaults the sheet name to "Sheet1" when the caller omits it, and
         // normalizes `null`/`undefined` style ids to `0` for backward compatibility.
-        ["setRowStyleId", "Sheet1", 0, 0]
+        ["setRowStyleId", "Sheet1", 0, 0],
+        ["setColStyleId", "Sheet1", 0, 0],
+        ["setSheetDefaultStyleId", "Sheet1", 0]
       ]);
     } finally {
       dispose();
