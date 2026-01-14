@@ -70,6 +70,7 @@ fn indirect_external_workbook_refs_are_ref_error() {
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider.clone()));
+    engine.set_bytecode_enabled(true);
     engine
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
         .unwrap();
