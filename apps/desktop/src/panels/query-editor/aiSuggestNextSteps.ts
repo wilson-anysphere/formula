@@ -311,7 +311,7 @@ function coerceOperations(value: unknown, allowedColumns: Set<string>): QueryOpe
   return operations
     .map((op) => coerceQueryOperation(op, allowedColumns))
     .filter((op): op is QueryOperation => Boolean(op))
-    .slice(0, 8);
+    .slice(0, 3);
 }
 
 function buildUserPrompt(args: { intent: string; query: Query; preview: PreviewTable }): string {

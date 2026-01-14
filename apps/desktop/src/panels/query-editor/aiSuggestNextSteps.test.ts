@@ -88,6 +88,29 @@ describe("suggestQueryNextSteps", () => {
     expect(ops).toEqual([{ type: "take", count: 3 }]);
   });
 
+  it("limits the number of returned operations to 3", async () => {
+    chatMock.mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify([
+          { type: "take", count: 1 },
+          { type: "take", count: 2 },
+          { type: "take", count: 3 },
+          { type: "take", count: 4 },
+          { type: "take", count: 5 },
+        ]),
+      },
+    });
+
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const ops = await suggestQueryNextSteps("keep top rows", { query: baseQuery(), preview });
+    expect(ops).toEqual([
+      { type: "take", count: 1 },
+      { type: "take", count: 2 },
+      { type: "take", count: 3 },
+    ]);
+  });
+
   it("when schema is missing, only allows schema-independent operations", async () => {
     chatMock.mockResolvedValue({
       message: {
