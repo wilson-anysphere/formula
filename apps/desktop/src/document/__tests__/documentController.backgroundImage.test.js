@@ -51,3 +51,17 @@ test("sheet backgroundImageId changes flow through sheetView deltas and are undo
   assert.equal(doc.getSheetBackgroundImageId("Sheet1"), "bg.png");
 });
 
+test("applyExternalSheetViewDeltas trims backgroundImageId (defensive)", () => {
+  const doc = new DocumentController();
+
+  doc.applyExternalSheetViewDeltas([
+    {
+      sheetId: "Sheet1",
+      before: { frozenRows: 0, frozenCols: 0 },
+      after: { frozenRows: 0, frozenCols: 0, backgroundImageId: " bg.png " },
+    },
+  ]);
+
+  assert.equal(doc.getSheetBackgroundImageId("Sheet1"), "bg.png");
+  assert.equal(doc.getSheetView("Sheet1").backgroundImageId, "bg.png");
+});

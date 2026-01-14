@@ -6981,14 +6981,29 @@ export class DocumentController {
    * @param {{ source?: string, markDirty?: boolean }} [options]
    */
   applyExternalSheetViewDeltas(deltas, options = {}) {
-    if (!deltas || deltas.length === 0) return;
+    if (!Array.isArray(deltas) || deltas.length === 0) return;
+
+    /** @type {SheetViewDelta[]} */
+    const filtered = [];
+    for (const delta of deltas) {
+      if (!delta) continue;
+      const sheetId = String(delta.sheetId ?? "").trim();
+      if (!sheetId) continue;
+
+      const before = this.model.getSheetView(sheetId);
+      const after = normalizeSheetViewState(delta.after);
+      if (sheetViewStateEquals(before, after)) continue;
+      filtered.push({ sheetId, before, after });
+    }
+
+    if (filtered.length === 0) return;
 
     // External updates should never merge with user edits.
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
     const source = typeof options.source === "string" ? options.source : undefined;
-    this.#applyEdits([], deltas, [], [], [], [], [], null, { recalc: false, emitChange: true, source });
+    this.#applyEdits([], filtered, [], [], [], [], [], null, { recalc: false, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     if (options.markDirty !== false) {
