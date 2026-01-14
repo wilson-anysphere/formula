@@ -919,10 +919,10 @@ fn decode_rgce_impl(
                 for chunk in raw.chunks_exact(2) {
                     units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
                 }
-                let s = String::from_utf16(&units).map_err(|_| DecodeRgceError::InvalidUtf16 {
-                    offset: ptg_offset,
-                    ptg,
-                })?;
+                // BIFF strings are UTF-16LE, but real-world files can contain malformed UTF-16.
+                // Stay best-effort (matching `formula-xlsb`) by decoding lossily instead of
+                // aborting the entire formula decode.
+                let s = String::from_utf16_lossy(&units);
                 let escaped = s.replace('"', "\"\"");
                 stack.push(ExprFragment::new(format!("\"{escaped}\"")));
             }
