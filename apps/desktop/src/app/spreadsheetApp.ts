@@ -448,7 +448,7 @@ export class DocumentImageStore implements ImageStore {
     const doc = this.document as any;
 
     // Prefer the internal map to avoid cloning bytes on every read.
-    const entry = lookupImageEntry(imageId, doc.images);
+    const entry = lookupImageEntry(imageId, doc.images) ?? lookupImageEntry(imageId, doc.imageCache);
     if (entry) return entry;
 
     // Fallback: direct getter (may clone bytes).
@@ -472,25 +472,29 @@ export class DocumentImageStore implements ImageStore {
 
     // External sync path (collab hydration): apply without creating undo history.
     const doc = this.document as any;
-    if (this.options.mode === "external" && typeof doc.applyExternalImageDeltas === "function") {
+    if (this.options.mode === "external") {
       try {
         const imageId = entry.id;
-        const existing = doc.images?.get?.(imageId) ?? null;
+        const applyToCache = typeof doc.applyExternalImageCacheDeltas === "function";
+        const existing = applyToCache ? doc.imageCache?.get?.(imageId) ?? null : doc.images?.get?.(imageId) ?? null;
         const before =
           existing && existing.bytes instanceof Uint8Array
             ? // Preserve whether the stored entry explicitly had a mimeType field.
               ("mimeType" in existing ? { bytes: existing.bytes, mimeType: existing.mimeType ?? null } : { bytes: existing.bytes })
             : null;
-        doc.applyExternalImageDeltas(
-          [
-            {
-              imageId,
-              before,
-              after: { bytes: entry.bytes, mimeType: entry.mimeType },
-            },
-           ],
-          { source: this.options.source ?? "collab", markDirty: false },
-        );
+        const deltas = [
+          {
+            imageId,
+            before,
+            after: { bytes: entry.bytes, mimeType: entry.mimeType },
+          },
+        ];
+
+        if (applyToCache) {
+          doc.applyExternalImageCacheDeltas(deltas, { source: this.options.source ?? "collab", markDirty: false });
+        } else if (typeof doc.applyExternalImageDeltas === "function") {
+          doc.applyExternalImageDeltas(deltas, { source: this.options.source ?? "collab", markDirty: false });
+        }
       } catch {
         // ignore
       }

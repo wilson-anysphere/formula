@@ -2945,6 +2945,17 @@ export class DocumentController {
     this.images = new Map();
 
     /**
+     * Ephemeral image bytes cache (primarily for collaboration media hydration).
+     *
+     * Unlike `images`, this map is intentionally **not** included in `encodeState()` snapshots.
+     * Consumers should treat entries as best-effort and be prepared for them to be cleared on
+     * snapshot loads (`applyState`).
+     *
+     * @type {Map<string, ImageEntry>}
+     */
+    this.imageCache = new Map();
+
+    /**
      * Per-sheet drawings list (floating images/shapes/chart placeholders).
      *
      * Drawing objects must be JSON-serializable (so they can survive snapshots/undo/redo).
@@ -3507,7 +3518,7 @@ export class DocumentController {
   getImage(imageId) {
     const id = String(imageId ?? "").trim();
     if (!id) return null;
-    const entry = this.images.get(id);
+    const entry = this.images.get(id) ?? this.imageCache.get(id);
     return entry ? cloneImageEntry(entry) : null;
   }
 
@@ -3523,7 +3534,7 @@ export class DocumentController {
   getImageBlob(imageId) {
     const id = String(imageId ?? "").trim();
     if (!id) return null;
-    const entry = this.images.get(id);
+    const entry = this.images.get(id) ?? this.imageCache.get(id);
     if (!entry) return null;
     if (typeof Blob === "undefined") return null;
     try {
@@ -6351,6 +6362,8 @@ export class DocumentController {
     this.history = [];
     this.cursor = 0;
     this.savedCursor = null;
+    // Cached external image bytes should not survive snapshot restoration.
+    this.imageCache.clear();
     this.batchDepth = 0;
     this.activeBatch = null;
     this.lastMergeKey = null;
@@ -6545,6 +6558,95 @@ export class DocumentController {
       this.savedCursor = null;
     }
     this.#emitDirty();
+  }
+
+  /**
+   * Apply a set of image deltas into the ephemeral `imageCache` (e.g. collab hydration).
+   *
+   * Unlike {@link applyExternalImageDeltas}, these updates:
+   * - do NOT mutate the persisted `images` store (so snapshot size stays stable)
+   * - do NOT create undo history
+   * - do NOT mark the document dirty by default (image bytes are persisted elsewhere, e.g. IndexedDB/Yjs)
+   *
+   * Callers should provide the full `before`/`after` ImageEntry payloads (including bytes) so the
+   * controller can apply changes and emit accurate change metadata. No-op deltas are ignored.
+   *
+   * @param {ImageDelta[]} deltas
+   * @param {{ source?: string, markDirty?: boolean }} [options]
+   */
+  applyExternalImageCacheDeltas(deltas, options = {}) {
+    if (!Array.isArray(deltas) || deltas.length === 0) return;
+
+    /** @type {ImageDelta[]} */
+    const filtered = [];
+    for (const delta of deltas) {
+      if (!delta) continue;
+      const imageId = String(delta.imageId ?? "").trim();
+      if (!imageId) continue;
+      const before = delta.before ?? null;
+      const after = delta.after ?? null;
+      if (imageEntryEquals(before, after)) continue;
+      filtered.push({ imageId, before, after });
+    }
+
+    if (filtered.length === 0) return;
+
+    // External updates should never merge with user edits.
+    this.lastMergeKey = null;
+    this.lastMergeTime = 0;
+
+    for (const delta of filtered) {
+      if (!delta) continue;
+      const imageId = delta.imageId;
+      if (!delta.after) {
+        this.imageCache.delete(imageId);
+      } else {
+        // Avoid copying large byte arrays: treat cache entries as immutable and store a shallow clone.
+        /** @type {ImageEntry} */
+        const entry = { bytes: delta.after.bytes };
+        if (delta.after && "mimeType" in delta.after) entry.mimeType = delta.after.mimeType ?? null;
+        this.imageCache.set(imageId, entry);
+      }
+    }
+
+    const source = typeof options.source === "string" ? options.source : undefined;
+    /** @type {any} */
+    const payload = {
+      deltas: [],
+      sheetViewDeltas: [],
+      formatDeltas: [],
+      rowStyleDeltas: [],
+      colStyleDeltas: [],
+      sheetStyleDeltas: [],
+      rangeRunDeltas: [],
+      drawingDeltas: [],
+      imageDeltas: filtered.map((d) => ({
+        imageId: d.imageId,
+        before: d.before
+          ? {
+              mimeType: ("mimeType" in d.before ? d.before.mimeType : null) ?? null,
+              byteLength: d.before.bytes?.length ?? 0,
+            }
+          : null,
+        after: d.after
+          ? {
+              mimeType: ("mimeType" in d.after ? d.after.mimeType : null) ?? null,
+              byteLength: d.after.bytes?.length ?? 0,
+            }
+          : null,
+      })),
+      sheetMetaDeltas: [],
+      sheetOrderDelta: null,
+      recalc: false,
+    };
+    if (source) payload.source = source;
+    this.#emit("change", payload);
+
+    // Cache updates should not participate in dirty tracking by default. Callers can opt in.
+    if (options.markDirty === true) {
+      this.savedCursor = null;
+      this.#emitDirty();
+    }
   }
 
   /**
