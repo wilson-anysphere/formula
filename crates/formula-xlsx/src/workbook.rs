@@ -5,7 +5,7 @@ use formula_model::charts::{
     ChartType, PlotAreaModel,
 };
 use formula_model::drawings::Anchor as DrawingAnchor;
-use roxmltree::Document;
+use roxmltree::{Document, Node};
 
 use crate::charts::legacy_parsed_chart_from_model;
 use crate::drawingml::charts::{
@@ -512,9 +512,16 @@ impl XlsxPackage {
             let sheet_doc = Document::parse(sheet_xml)
                 .map_err(|e| ChartExtractionError::XmlParse(sheet_target.clone(), e))?;
 
-            let drawing_rids: Vec<String> = sheet_doc
-                .descendants()
-                .filter(|n| n.is_element() && n.tag_name().name() == "drawing")
+            fn is_drawing_node(node: Node<'_, '_>) -> bool {
+                node.is_element() && node.tag_name().name() == "drawing"
+            }
+
+            let drawing_rids: Vec<String> = crate::drawingml::anchor::descendants_selecting_alternate_content(
+                sheet_doc.root_element(),
+                is_drawing_node,
+                is_drawing_node,
+            )
+            .into_iter()
                 .filter_map(|n| {
                     n.attribute((REL_NS, "id"))
                         .or_else(|| n.attribute("r:id"))

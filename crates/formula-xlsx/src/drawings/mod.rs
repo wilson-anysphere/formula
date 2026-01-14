@@ -7,7 +7,7 @@ pub use part::*;
 use std::collections::HashMap;
 
 use formula_model::drawings::DrawingObject;
-use roxmltree::Document;
+use roxmltree::{Document, Node};
 
 use crate::path::{rels_for_part, resolve_target};
 use crate::{XlsxError, XlsxPackage};
@@ -55,9 +55,16 @@ impl XlsxPackage {
                 .map_err(|e| XlsxError::Invalid(format!("worksheet xml not utf-8: {e}")))?;
             let doc = Document::parse(worksheet_xml)?;
 
-            let drawing_rids: Vec<String> = doc
-                .descendants()
-                .filter(|n| n.is_element() && n.tag_name().name() == "drawing")
+            fn is_drawing_node(node: Node<'_, '_>) -> bool {
+                node.is_element() && node.tag_name().name() == "drawing"
+            }
+
+            let drawing_rids: Vec<String> = crate::drawingml::anchor::descendants_selecting_alternate_content(
+                doc.root_element(),
+                is_drawing_node,
+                is_drawing_node,
+            )
+            .into_iter()
                 .filter_map(|n| {
                     n.attribute((REL_NS, "id"))
                         .or_else(|| n.attribute("r:id"))
