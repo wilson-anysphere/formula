@@ -545,6 +545,8 @@ test("buildWorkbookContext: promptContext does not leak heuristic-sensitive shee
   assert.ok(out.retrieved.length > 0);
   assert.doesNotMatch(out.promptContext, /alice@example\.com/);
   assert.doesNotMatch(out.retrieved[0]?.text ?? "", /alice@example\.com/);
+  // Structured return fields should not leak the encoded chunk id either (ids include URL-encoded sheet names).
+  assert.doesNotMatch(JSON.stringify(out.retrieved), /alice%40example\.com/);
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
 

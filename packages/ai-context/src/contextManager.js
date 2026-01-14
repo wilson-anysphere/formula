@@ -920,7 +920,7 @@ export class ContextManager {
     throwIfAborted(signal);
     let queryForRag = params.query;
     if (dlp) {
-      const queryHeuristic = classifyText(params.query);
+      const queryHeuristic = classifyTextForDlp(params.query);
       const queryClassification = heuristicToPolicyClassification(queryHeuristic);
       const queryDecision = evaluatePolicy({
         action: DLP_ACTION.AI_CLOUD_PROCESSING,
@@ -931,7 +931,7 @@ export class ContextManager {
       if (queryDecision.decision !== DLP_DECISION.ALLOW) {
         queryForRag = this.redactor(params.query);
         const restrictedAllowed = dlp.includeRestrictedContent && policyAllowsRestrictedContent;
-        if (!restrictedAllowed && classifyText(queryForRag).level === "sensitive") {
+        if (!restrictedAllowed && classifyTextForDlp(queryForRag).level === "sensitive") {
           queryForRag = "[REDACTED]";
         }
       }
@@ -1230,7 +1230,7 @@ export class ContextManager {
       const raw = String(value ?? "");
       if (!dlp) return raw;
       const redacted = this.redactor(raw);
-      if (!restrictedAllowed && classifyText(redacted).level === "sensitive") return "[REDACTED]";
+      if (!restrictedAllowed && classifyTextForDlp(redacted).level === "sensitive") return "[REDACTED]";
       return redacted;
     };
 
@@ -1289,7 +1289,7 @@ export class ContextManager {
           transform: dlp
             ? (record) => {
                 const rawText = record.text ?? "";
-                const heuristic = classifyText(rawText);
+                const heuristic = classifyTextForDlp(rawText);
                 heuristicByChunkId.set(record.id, heuristic);
                 const heuristicClassification = heuristicToPolicyClassification(heuristic);
 
@@ -1336,7 +1336,7 @@ export class ContextManager {
                     } else {
                       safeText = this.redactor(rawText);
                     }
-                    if (!restrictedAllowed && classifyText(safeText).level === "sensitive") {
+                    if (!restrictedAllowed && classifyTextForDlp(safeText).level === "sensitive") {
                       safeText = this.redactor(`${safeChunkFirstLineFromMetadata(record.metadata)}\n[REDACTED]`);
                     }
                   }
@@ -1344,7 +1344,7 @@ export class ContextManager {
 
                 // Defense-in-depth: if the configured redactor is a no-op (or incomplete),
                 // ensure heuristic sensitive patterns never slip through under DLP enforcement.
-                if (!restrictedAllowed && classifyText(safeText).level === "sensitive") {
+                if (!restrictedAllowed && classifyTextForDlp(safeText).level === "sensitive") {
                   safeText = "[REDACTED]";
                 }
 
@@ -1371,7 +1371,7 @@ export class ContextManager {
     // still redact here so:
     // - retrieval stays consistent when indexed chunk text has been replaced with deterministic placeholders
     // - this remains safe if a future Cursor-managed embedding service is introduced
-    const queryHeuristic = dlp ? classifyText(params.query) : null;
+    const queryHeuristic = dlp ? classifyTextForDlp(params.query) : null;
     const queryClassification = queryHeuristic ? heuristicToPolicyClassification(queryHeuristic) : null;
     const queryDecision =
       dlp && queryClassification
@@ -1385,7 +1385,7 @@ export class ContextManager {
     let queryForEmbedding = params.query;
     if (dlp && queryDecision && queryDecision.decision !== DLP_DECISION.ALLOW) {
       queryForEmbedding = this.redactor(params.query);
-      if (!restrictedAllowed && classifyText(queryForEmbedding).level === "sensitive") {
+      if (!restrictedAllowed && classifyTextForDlp(queryForEmbedding).level === "sensitive") {
         queryForEmbedding = "[REDACTED]";
       }
     }
@@ -1440,7 +1440,7 @@ export class ContextManager {
       const text = meta.text ?? "";
       const raw = `${header}\n${text}`;
 
-      const heuristic = heuristicByChunkId.get(hit.id) ?? meta.dlpHeuristic ?? classifyText(raw);
+      const heuristic = heuristicByChunkId.get(hit.id) ?? meta.dlpHeuristic ?? classifyTextForDlp(raw);
       const heuristicClassification = heuristicToPolicyClassification(heuristic);
 
       // If the caller provided structured cell/range classifications, fold those in using the
@@ -1562,12 +1562,12 @@ export class ContextManager {
 
       // Defense-in-depth: if we're not explicitly including restricted content, never send
       // text that still matches the heuristic sensitive detectors.
-      if (dlp && !restrictedAllowed && classifyText(outText).level === "sensitive") {
+      if (dlp && !restrictedAllowed && classifyTextForDlp(outText).level === "sensitive") {
         outText = this.redactor(`${header}\n[REDACTED]`);
         redacted = true;
       }
 
-      if (dlp && !restrictedAllowed && classifyText(outText).level === "sensitive") {
+      if (dlp && !restrictedAllowed && classifyTextForDlp(outText).level === "sensitive") {
         outText = "[REDACTED]";
         redacted = true;
       }
@@ -1585,7 +1585,7 @@ export class ContextManager {
         score: hit.score,
         metadata: safeMeta,
         text: outText,
-        dlp: heuristicByChunkId.get(hit.id) ?? meta.dlpHeuristic ?? classifyText(outText),
+        dlp: heuristicByChunkId.get(hit.id) ?? meta.dlpHeuristic ?? classifyTextForDlp(outText),
       };
     });
 
@@ -1625,7 +1625,7 @@ export class ContextManager {
         if (!dlp) return raw;
         throwIfAborted(signal);
 
-        const heuristic = classifyText(raw);
+        const heuristic = classifyTextForDlp(raw);
         if (heuristic.level !== "sensitive") return raw;
         if (restrictedAllowed) return raw;
 
@@ -1656,7 +1656,7 @@ export class ContextManager {
         }
 
         const redacted = this.redactor(raw);
-        if (classifyText(redacted).level === "sensitive") return "[REDACTED]";
+        if (classifyTextForDlp(redacted).level === "sensitive") return "[REDACTED]";
         return redacted;
       };
 
@@ -1680,7 +1680,7 @@ export class ContextManager {
           return rangeToA1({ ...parsed, sheetName: safeSheet || undefined });
         } catch {
           const redacted = this.redactor(raw);
-          if (!restrictedAllowed && classifyText(redacted).level === "sensitive") return "[REDACTED]";
+          if (!restrictedAllowed && classifyTextForDlp(redacted).level === "sensitive") return "[REDACTED]";
           return redacted;
         }
       };
@@ -2142,6 +2142,34 @@ function compactSheetSchemaForPrompt(schema, options = {}) {
 }
 
 /**
+ * Like `classifyText()`, but also detects percent-encoded representations of sensitive tokens
+ * (e.g. "alice%40example.com" -> "alice@example.com").
+ *
+ * This is primarily to prevent metadata leaks via encoded identifiers (chunk ids, etc) when
+ * DLP requires redaction and callers use a no-op redactor.
+ *
+ * @param {string} text
+ * @returns {ReturnType<typeof classifyText>}
+ */
+function classifyTextForDlp(text) {
+  const raw = String(text ?? "");
+  const direct = classifyText(raw);
+  if (direct.level === "sensitive") return direct;
+  if (!raw.includes("%")) return direct;
+  if (!/%[0-9A-Fa-f]{2}/.test(raw)) return direct;
+  try {
+    const decoded = decodeURIComponent(raw);
+    if (decoded && decoded !== raw) {
+      const decodedHeuristic = classifyText(decoded);
+      if (decodedHeuristic.level === "sensitive") return decodedHeuristic;
+    }
+  } catch {
+    // ignore decode errors (invalid percent sequences)
+  }
+  return direct;
+}
+
+/**
  * @param {unknown[][]} values
  * @param {{ signal?: AbortSignal }} [options]
  * @returns {ReturnType<typeof classifyText>}
@@ -2151,15 +2179,15 @@ function classifyValuesForDlp(values, options = {}) {
   /** @type {Set<string>} */
   const findings = new Set();
   for (const row of values || []) {
-    throwIfAborted(signal);
-    for (const cell of row || []) {
       throwIfAborted(signal);
-      if (cell === null || cell === undefined) continue;
-      const heuristic = classifyText(String(cell));
-      if (heuristic.level !== "sensitive") continue;
-      for (const f of heuristic.findings || []) findings.add(String(f));
-      // Early exit once we've found at least one sensitive pattern; policy evaluation only
-      // needs the max classification, not exhaustive findings.
+      for (const cell of row || []) {
+        throwIfAborted(signal);
+        if (cell === null || cell === undefined) continue;
+        const heuristic = classifyTextForDlp(String(cell));
+        if (heuristic.level !== "sensitive") continue;
+        for (const f of heuristic.findings || []) findings.add(String(f));
+        // Early exit once we've found at least one sensitive pattern; policy evaluation only
+        // needs the max classification, not exhaustive findings.
       if (findings.size > 0) {
         return { level: "sensitive", findings: [...findings] };
       }
@@ -2197,7 +2225,7 @@ function classifyStructuredForDlp(value, options = {}) {
     if (found) return;
     const raw = String(text ?? "");
     const truncated = raw.length > maxStringLength ? raw.slice(0, maxStringLength) : raw;
-    const heuristic = classifyText(truncated);
+    const heuristic = classifyTextForDlp(truncated);
     if (heuristic.level !== "sensitive") return;
     found = true;
     for (const f of heuristic.findings || []) findings.add(String(f));
@@ -2327,7 +2355,7 @@ function redactValuesForDlp(values, redactor, options = {}) {
       const redacted = redactor(raw);
       // Defense-in-depth: if the configured redactor is a no-op (or incomplete),
       // ensure heuristic sensitive patterns never slip through under DLP redaction.
-      if (!restrictedAllowed && classifyText(redacted).level === "sensitive") {
+      if (!restrictedAllowed && classifyTextForDlp(redacted).level === "sensitive") {
         nextRow.push("[REDACTED]");
         continue;
       }
@@ -2370,7 +2398,7 @@ function redactStructuredValue(value, redactor, options = {}) {
 
   if (typeof value === "string") {
     const redacted = redactor(value);
-    if (!restrictedAllowed && classifyText(redacted).level === "sensitive") {
+    if (!restrictedAllowed && classifyTextForDlp(redacted).level === "sensitive") {
       return /** @type {T} */ ("[REDACTED]");
     }
     return /** @type {T} */ (redacted);
@@ -2378,7 +2406,7 @@ function redactStructuredValue(value, redactor, options = {}) {
   if (typeof value === "number" || typeof value === "bigint") {
     const raw = String(value);
     const redacted = redactor(raw);
-    if (!restrictedAllowed && classifyText(redacted).level === "sensitive") {
+    if (!restrictedAllowed && classifyTextForDlp(redacted).level === "sensitive") {
       return /** @type {T} */ ("[REDACTED]");
     }
     if (redacted !== raw) {
@@ -2459,7 +2487,7 @@ function redactStructuredValue(value, redactor, options = {}) {
     let outKey = key;
     if (!restrictedAllowed) {
       const redactedKey = redactor(key);
-      if (classifyText(redactedKey).level === "sensitive") {
+      if (classifyTextForDlp(redactedKey).level === "sensitive") {
         // If the key itself is sensitive and redaction did not remove the pattern,
         // replace it entirely with a stable placeholder.
         outKey = `[REDACTED_KEY_${redactedKeyIndex++}]`;
