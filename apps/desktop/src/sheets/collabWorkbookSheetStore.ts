@@ -1,6 +1,6 @@
 import type { CollabSession } from "@formula/collab-session";
 import * as Y from "yjs";
-import { getYArray, getYMap, getYText, isYAbstractType } from "@formula/collab-yjs-utils";
+import { cloneYjsValue, getYArray, getYMap, getYText, isYAbstractType, yjsValueToJson } from "@formula/collab-yjs-utils";
 
 import type { SheetMeta, SheetVisibility, TabColor } from "./workbookSheetStore";
 import { WorkbookSheetStore } from "./workbookSheetStore";
@@ -10,18 +10,15 @@ type CollabSessionLike = Pick<CollabSession, "sheets" | "transactLocal">;
 export type CollabSheetsKeyRef = { value: string };
 
 function coerceCollabSheetField(value: unknown): string | null {
-  if (value == null) return null;
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  const text = getYText(value);
-  if (text) {
-    try {
-      return text.toString();
-    } catch {
-      return null;
-    }
+  try {
+    const json = yjsValueToJson(value);
+    if (json == null) return null;
+    if (typeof json === "string") return json;
+    if (typeof json === "number" || typeof json === "boolean") return String(json);
+    return null;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 function coerceSheetVisibility(value: unknown): SheetVisibility | null {
@@ -106,40 +103,11 @@ function cloneCollabSheetMetaValue(value: unknown): unknown {
 
   // Clone nested Yjs types into local constructors so they can be safely re-inserted
   // into the document (Yjs types cannot be "re-parented" after deletion).
-  const text = getYText(value);
-  if (text) {
-    const out = new Y.Text();
-    const delta = text.toDelta();
-    const structuredCloneFn = (globalThis as any).structuredClone as ((input: unknown) => unknown) | undefined;
-    try {
-      out.applyDelta(typeof structuredCloneFn === "function" ? structuredCloneFn(delta) : JSON.parse(JSON.stringify(delta)));
-    } catch {
-      // Best-effort: fall back to inserting the string representation.
-      try {
-        out.insert(0, text.toString());
-      } catch {
-        // ignore
-      }
-    }
-    return out;
-  }
-
-  const map = getYMap(value);
-  if (map) {
-    const out = new Y.Map<unknown>();
-    map.forEach((v: unknown, k: string) => {
-      out.set(String(k), cloneCollabSheetMetaValue(v));
-    });
-    return out;
-  }
-
-  const array = getYArray(value);
-  if (array) {
-    const out = new Y.Array<unknown>();
-    for (const item of array.toArray()) {
-      out.push([cloneCollabSheetMetaValue(item)]);
-    }
-    return out;
+  const yText = getYText(value);
+  const yMap = getYMap(value);
+  const yArray = getYArray(value);
+  if (yText || yMap || yArray) {
+    return cloneYjsValue(value as any, { Map: Y.Map, Array: Y.Array, Text: Y.Text });
   }
 
   // Avoid copying other Yjs types directly (e.g. Xml) since we don't have a safe

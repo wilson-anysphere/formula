@@ -1,5 +1,5 @@
 import * as Y from "yjs";
-import { getYMap, getYText } from "@formula/collab-yjs-utils";
+import { getYMap, getYText, yjsValueToJson } from "@formula/collab-yjs-utils";
 
 import type { CollabSession } from "@formula/collab-session";
 import type { DocumentController } from "../document/documentController.js";
@@ -51,7 +51,7 @@ function readYMapOrObject(value: any, key: string): any {
 function coerceString(value: unknown): string | null {
   if (typeof value === "string") return value;
   const text = getYText(value);
-  if (text) return text.toString();
+  if (text) return String(yjsValueToJson(text));
   if (value == null) return null;
   return String(value);
 }
