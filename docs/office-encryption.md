@@ -438,4 +438,6 @@ Other useful keywords inside MS-OFFCRYPTO:
 
 Additional repo-specific references:
 - `docs/offcrypto-standard-encryptedpackage.md` (Standard `EncryptedPackage` segmenting/IV/padding)
+- `docs/offcrypto-standard-cryptoapi.md` (Standard key derivation + verifier validation, from-scratch)
+- `docs/offcrypto-standard-cryptoapi-rc4.md` (Standard CryptoAPI RC4 reference + test vectors)
 - `docs/21-encrypted-workbooks.md` (detection + UX/API semantics; fixture locations)

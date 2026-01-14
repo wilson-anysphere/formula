@@ -225,6 +225,9 @@ Useful entrypoints when working on encrypted workbook support:
     `crates/formula-io/src/offcrypto/encrypted_package.rs`
   - Segment framing helper (size prefix + 0x1000 segment boundaries):
     `crates/formula-offcrypto/src/encrypted_package.rs`
+- **Standard (CryptoAPI) developer notes:**
+  - Key derivation + verifier validation: `docs/offcrypto-standard-cryptoapi.md`
+  - `EncryptedPackage` stream framing/segmenting: `docs/offcrypto-standard-encryptedpackage.md`
 - **Agile encryption primitives (password hash / key+IV derivation):**
   - `crates/formula-xlsx/src/offcrypto/crypto.rs`
 - **Standard (CryptoAPI) RC4 algorithm writeup (KDF, 0x200 block size, test vectors):**
