@@ -317,3 +317,114 @@ fn tampered_encrypted_hmac_value_fails_integrity_check() {
         "expected IntegrityCheckFailed, got {err:?}"
     );
 }
+
+#[test]
+fn tampered_encrypted_hmac_key_fails_integrity_check() {
+    let zip = basic_xlsx_fixture_bytes();
+    let password = "correct horse battery staple";
+
+    let ole = encrypt_package_to_ole(
+        &zip,
+        password,
+        EncryptOptions {
+            spin_count: 10_000,
+            ..Default::default()
+        },
+    )
+    .expect("encrypt");
+
+    // Extract the streams and mutate `dataIntegrity/encryptedHmacKey` inside EncryptionInfo,
+    // leaving the EncryptedPackage stream unchanged. This should be detected as an integrity error.
+    let cursor = Cursor::new(&ole);
+    let mut ole_in = cfb::CompoundFile::open(cursor).expect("open cfb");
+
+    let mut encryption_info = Vec::new();
+    ole_in
+        .open_stream("EncryptionInfo")
+        .expect("open EncryptionInfo")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+
+    let mut encrypted_package = Vec::new();
+    ole_in
+        .open_stream("EncryptedPackage")
+        .expect("open EncryptedPackage")
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+
+    assert!(encryption_info.len() >= 8, "EncryptionInfo stream too short");
+    let version_major = u16::from_le_bytes([encryption_info[0], encryption_info[1]]);
+    let version_minor = u16::from_le_bytes([encryption_info[2], encryption_info[3]]);
+    assert_eq!(
+        (version_major, version_minor),
+        (4, 4),
+        "expected Agile EncryptionInfo version 4.4"
+    );
+
+    // Replicate the crate's tolerant XML offset detection (some producers include an explicit XML
+    // length field after the 8-byte header).
+    let (xml_offset, xml_len) = if encryption_info.len() >= 12 {
+        let candidate = u32::from_le_bytes([
+            encryption_info[8],
+            encryption_info[9],
+            encryption_info[10],
+            encryption_info[11],
+        ]) as usize;
+        let available = encryption_info.len().saturating_sub(12);
+        if candidate <= available {
+            (12usize, candidate)
+        } else {
+            (8usize, encryption_info.len().saturating_sub(8))
+        }
+    } else {
+        (8usize, encryption_info.len().saturating_sub(8))
+    };
+
+    let xml_end = xml_offset + xml_len;
+    assert!(encryption_info.len() >= xml_end, "EncryptionInfo XML out of range");
+
+    // Mutate the first base64 character of `encryptedHmacKey` to ensure the decoded bytes change
+    // while remaining valid base64.
+    let xml_bytes = &mut encryption_info[xml_offset..xml_end];
+    let needle = b"encryptedHmacKey=\"";
+    let pos = xml_bytes
+        .windows(needle.len())
+        .position(|w| w == needle)
+        .expect("encryptedHmacKey attribute not found");
+    let value_start = pos + needle.len();
+    let value_end = value_start
+        + xml_bytes[value_start..]
+            .iter()
+            .position(|&b| b == b'"')
+            .expect("unterminated encryptedHmacKey attribute");
+    assert!(
+        value_end > value_start,
+        "encryptedHmacKey attribute value unexpectedly empty"
+    );
+    xml_bytes[value_start] = if xml_bytes[value_start] != b'A' {
+        b'A'
+    } else {
+        b'B'
+    };
+
+    // Re-wrap into a fresh CFB container with the modified stream.
+    let cursor_out = Cursor::new(Vec::new());
+    let mut ole_out = cfb::CompoundFile::create(cursor_out).expect("create cfb");
+    ole_out
+        .create_stream("EncryptionInfo")
+        .expect("create EncryptionInfo")
+        .write_all(&encryption_info)
+        .expect("write EncryptionInfo");
+    ole_out
+        .create_stream("EncryptedPackage")
+        .expect("create EncryptedPackage")
+        .write_all(&encrypted_package)
+        .expect("write EncryptedPackage");
+    let tampered = ole_out.into_inner().into_inner();
+
+    let err = decrypt_encrypted_package_ole(&tampered, password).expect_err("expected failure");
+    assert!(
+        matches!(err, OfficeCryptoError::IntegrityCheckFailed),
+        "expected IntegrityCheckFailed, got {err:?}"
+    );
+}
