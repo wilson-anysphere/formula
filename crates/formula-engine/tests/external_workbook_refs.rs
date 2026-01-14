@@ -698,6 +698,59 @@ fn precedents_expand_external_3d_sheet_spans_when_sheet_order_is_available() {
 }
 
 #[test]
+fn precedents_expand_path_qualified_external_3d_sheet_spans() {
+    // Regression test: path-qualified external workbook 3D spans (e.g.
+    // `'C:\path\[Book.xlsx]Sheet1:Sheet3'!A1`) should expand into per-sheet external keys when the
+    // provider supplies sheet order via `workbook_sheet_names`.
+    let provider = Arc::new(ProviderWithWorkbookSheetNamesOnly::default());
+    provider.set_sheet_names(
+        r"C:\path\Book.xlsx",
+        vec![
+            "Sheet1".to_string(),
+            "Sheet2".to_string(),
+            "Sheet3".to_string(),
+        ],
+    );
+    for (sheet, value) in [("Sheet1", 1.0), ("Sheet2", 2.0), ("Sheet3", 3.0)] {
+        provider.set(
+            &format!(r"[C:\path\Book.xlsx]{sheet}"),
+            CellAddr { row: 0, col: 0 },
+            value,
+        );
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            r#"=SUM('C:\path\[Book.xlsx]Sheet1:Sheet3'!A1)"#,
+        )
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(6.0));
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![
+            PrecedentNode::ExternalCell {
+                sheet: r"[C:\path\Book.xlsx]Sheet1".to_string(),
+                addr: CellAddr { row: 0, col: 0 },
+            },
+            PrecedentNode::ExternalCell {
+                sheet: r"[C:\path\Book.xlsx]Sheet2".to_string(),
+                addr: CellAddr { row: 0, col: 0 },
+            },
+            PrecedentNode::ExternalCell {
+                sheet: r"[C:\path\Book.xlsx]Sheet3".to_string(),
+                addr: CellAddr { row: 0, col: 0 },
+            },
+        ]
+    );
+}
+
+#[test]
 fn precedents_expand_external_3d_sheet_span_matches_endpoints_nfkc_case_insensitively() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set_sheet_order(
