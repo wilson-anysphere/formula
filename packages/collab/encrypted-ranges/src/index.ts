@@ -375,23 +375,19 @@ export class EncryptedRangeManager {
     }
 
     const cloneEntryToLocal = (value: unknown, fallbackId?: string): Y.Map<unknown> | null => {
-      const map = getYMap(value);
-      const obj = !map && value && typeof value === "object" ? (value as any) : null;
-      if (!map && !obj) return null;
+      const parsed = yRangeToEncryptedRange(value, fallbackId);
+      if (!parsed) return null;
 
       const out = new Y.Map<unknown>();
-      if (map) {
-        map.forEach((v: any, k: string) => {
-          out.set(String(k), v);
-        });
-      } else {
-        for (const [k, v] of Object.entries(obj)) {
-          out.set(k, v as any);
-        }
-      }
-
-      const id = coerceString(out.get("id"))?.trim() ?? "";
-      if (!id && fallbackId) out.set("id", String(fallbackId).trim());
+      out.set("id", parsed.id);
+      out.set("sheetId", parsed.sheetId);
+      out.set("startRow", parsed.startRow);
+      out.set("startCol", parsed.startCol);
+      out.set("endRow", parsed.endRow);
+      out.set("endCol", parsed.endCol);
+      out.set("keyId", parsed.keyId);
+      if (parsed.createdAt != null) out.set("createdAt", parsed.createdAt);
+      if (parsed.createdBy != null) out.set("createdBy", parsed.createdBy);
       return out;
     };
 
@@ -413,11 +409,11 @@ export class EncryptedRangeManager {
       if (arr) {
         for (const item of arr.toArray()) pushFrom(item);
       } else {
-        const map = getYMap(current);
-        if (map) {
-          map.forEach((value, key) => {
-            pushFrom(value, String(key));
-          });
+      const map = getYMap(current);
+      if (map) {
+        map.forEach((value, key) => {
+          pushFrom(value, String(key));
+        });
         } else if (Array.isArray(current)) {
           for (const item of current) pushFrom(item);
         } else {
@@ -443,24 +439,18 @@ export class EncryptedRangeManager {
     const next = new Y.Array<Y.Map<unknown>>();
 
     const cloneEntry = (value: unknown, fallbackId?: string) => {
-      const map = getYMap(value);
-      const obj = !map && value && typeof value === "object" ? (value as any) : null;
-      if (!map && !obj) return;
-
+      const parsed = yRangeToEncryptedRange(value, fallbackId);
+      if (!parsed) return;
       const yRange = new Y.Map<unknown>();
-      if (map) {
-        map.forEach((v: any, k: string) => {
-          yRange.set(String(k), v);
-        });
-      } else {
-        for (const [k, v] of Object.entries(obj)) {
-          yRange.set(k, v as any);
-        }
-      }
-
-      const id = coerceString(yRange.get("id"))?.trim() ?? "";
-      if (!id && fallbackId) yRange.set("id", String(fallbackId).trim());
-
+      yRange.set("id", parsed.id);
+      yRange.set("sheetId", parsed.sheetId);
+      yRange.set("startRow", parsed.startRow);
+      yRange.set("startCol", parsed.startCol);
+      yRange.set("endRow", parsed.endRow);
+      yRange.set("endCol", parsed.endCol);
+      yRange.set("keyId", parsed.keyId);
+      if (parsed.createdAt != null) yRange.set("createdAt", parsed.createdAt);
+      if (parsed.createdBy != null) yRange.set("createdBy", parsed.createdBy);
       next.push([yRange]);
     };
 
