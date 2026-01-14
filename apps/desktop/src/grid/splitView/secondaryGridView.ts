@@ -1135,7 +1135,15 @@ export class SecondaryGridView {
         const viewport = this.getDrawingsViewport();
         const selectedId = this.getSelectedDrawingId?.() ?? null;
         this.drawingsOverlay.setSelectedId(selectedId);
-        this.drawingsOverlay.render(objects, viewport);
+        // `DrawingOverlay.render()` is synchronous, but some unit tests stub it with an async mock
+        // (returning a Promise). Handle both so rejected promises don't surface as unhandled
+        // rejections during scroll/resize-driven repaint storms.
+        const result = this.drawingsOverlay.render(objects, viewport) as unknown;
+        if (typeof (result as { then?: unknown } | null)?.then === "function") {
+          void Promise.resolve(result).catch(() => {
+            // Best-effort: drawing overlay should never break grid interactions.
+          });
+        }
       } while (this.drawingsRenderQueued);
     } catch {
       // Best-effort: drawing overlay should never break grid interactions.
