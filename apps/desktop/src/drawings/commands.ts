@@ -1,5 +1,6 @@
 import { createDrawingObjectId, type Anchor, type DrawingObject } from "./types";
 import { pxToEmu } from "./overlay";
+import { duplicateDrawingObject } from "./duplicate";
 
 /**
  * Normalize drawing z-order to a dense 0..n-1 range.
@@ -52,16 +53,11 @@ export function duplicateSelected(
   const dyEmu = pxToEmu(offsetPx);
 
   const normalized = normalizeZOrder(objects);
-  // Drawing ids must be globally unique across collaborators; avoid deterministic counters like
-  // `max + 1` that can collide when two users duplicate simultaneously.
-  let nextId = createDrawingObjectId();
-  while (normalized.some((o) => o.id === nextId)) {
-    nextId = createDrawingObjectId();
-  }
+  const nextId = nextDrawingId(normalized);
+  const duplicatedBase = duplicateDrawingObject(deepCloneDrawingObject(source), nextId);
   const clone: DrawingObject = {
-    ...deepCloneDrawingObject(source),
-    id: nextId,
-    anchor: shiftAnchor(source.anchor, dxEmu, dyEmu),
+    ...duplicatedBase,
+    anchor: shiftAnchor(duplicatedBase.anchor, dxEmu, dyEmu),
     zOrder: normalized.length, // top
   };
 
@@ -130,6 +126,30 @@ function reorderZOrder(objects: DrawingObject[], id: number, mode: ReorderMode):
   });
 
   return changed ? reordered : normalized;
+}
+
+function nextDrawingId(objects: DrawingObject[]): number {
+  const existing = new Set<number>();
+  let max = 0;
+  for (const obj of objects) {
+    existing.add(obj.id);
+    if (obj.id > max) max = obj.id;
+  }
+
+  // Prefer collision-resistant ids for multi-user safety, but guarantee uniqueness even if
+  // WebCrypto is stubbed/deterministic in tests.
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const candidate = createDrawingObjectId();
+    if (!existing.has(candidate)) return candidate;
+  }
+
+  // Fallback: find a deterministic unused safe integer id.
+  const candidate = max + 1;
+  if (Number.isSafeInteger(candidate) && candidate > 0 && !existing.has(candidate)) return candidate;
+
+  let next = 1;
+  while (existing.has(next) && next < Number.MAX_SAFE_INTEGER) next += 1;
+  return next;
 }
 
 function deepCloneDrawingObject(obj: DrawingObject): DrawingObject {

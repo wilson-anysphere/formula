@@ -44,25 +44,28 @@ test.describe("Drawing object commands", () => {
     await gotoDesktop(page, "/?grid=shared&drawings=1");
 
     await expect.poll(() => getDrawingObjects(page)).toHaveLength(1);
+    const [initial] = await getDrawingObjects(page);
+    const initialId = initial?.id as number;
+    expect(typeof initialId).toBe("number");
 
     // Click inside the seeded demo drawing (oneCell anchor near A1).
     await clickGridAt(page, { x: 100, y: 100 });
-    await expect.poll(() => getSelectedDrawingId(page)).toBe(1);
+    await expect.poll(() => getSelectedDrawingId(page)).toBe(initialId);
 
     await page.keyboard.press("Control+D");
 
     const afterDup = await getDrawingObjects(page);
     expect(afterDup).toHaveLength(2);
-    const ids = afterDup.map((o) => o.id);
-    // The seeded demo drawing uses id=1. Duplicates should get a new globally-unique id
-    // (not necessarily `max+1`), so assert only uniqueness + inclusion of the original id.
-    expect(ids).toContain(1);
+    const ids = afterDup.map((o) => o.id as number);
+    // Duplicates should get a new globally-unique id (not necessarily `max+1`), so assert only
+    // uniqueness + inclusion of the original id.
+    expect(ids).toContain(initialId);
     expect(new Set(ids).size).toBe(2);
-    const dupId = ids.find((id) => id !== 1);
-    expect(typeof dupId).toBe("number");
+    const duplicatedId = ids.find((id) => id !== initialId);
+    if (duplicatedId == null) throw new Error("Failed to find duplicated drawing id");
 
-    const orig = afterDup.find((o) => o.id === 1);
-    const dup = afterDup.find((o) => o.id === dupId);
+    const orig = afterDup.find((o) => o.id === initialId);
+    const dup = afterDup.find((o) => o.id === duplicatedId);
     expect(dup).toBeTruthy();
     expect(orig).toBeTruthy();
     expect(dup.anchor.type).toBe(orig.anchor.type);
@@ -82,10 +85,12 @@ test.describe("Drawing object commands", () => {
     }
 
     // Duplicate selects the cloned object; Delete should remove it.
-    await expect.poll(() => getSelectedDrawingId(page)).toBe(dupId!);
+    await expect.poll(() => getSelectedDrawingId(page)).toBe(duplicatedId);
     await page.keyboard.press("Delete");
 
     await expect.poll(() => getDrawingObjects(page)).toHaveLength(1);
+    const remaining = await getDrawingObjects(page);
+    expect(remaining[0]?.id).toBe(initialId);
     await expect.poll(() => getSelectedDrawingId(page)).toBe(null);
   });
 

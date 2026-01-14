@@ -7143,6 +7143,11 @@ export class SpreadsheetApp {
 
   selectDrawing(id: number | null): void {
     const prev = this.selectedDrawingId;
+    // Drawings and charts are mutually exclusive selections; selecting a drawing
+    // should clear any active chart selection so selection handles don't double-render.
+    if (id != null && this.selectedChartId != null) {
+      this.setSelectedChartId(null);
+    }
     this.selectedDrawingId = id;
     // Keep all drawing interaction controllers in sync so keyboard-driven selection changes
     // (e.g. Escape to deselect) don't leave pointer interactions thinking an object is still
@@ -7261,8 +7266,8 @@ export class SpreadsheetApp {
   }
 
   duplicateSelectedDrawing(): void {
-    const selected = this.selectedDrawingId;
-    if (selected == null) return;
+    const selectedId = this.selectedDrawingId;
+    if (selectedId == null) return;
     if (this.isReadOnly()) {
       const cell = this.selection.active;
       showCollabEditRejectedToast([
@@ -7272,7 +7277,7 @@ export class SpreadsheetApp {
     }
     if (this.isEditing()) return;
 
-    const result = duplicateDrawingSelected(this.listDrawingObjectsForSheet(), selected);
+    const result = duplicateDrawingSelected(this.listDrawingObjectsForSheet(), selectedId);
     if (!result) return;
 
     this.document.beginBatch({ label: "Duplicate Drawing" });

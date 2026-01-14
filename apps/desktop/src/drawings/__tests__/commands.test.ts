@@ -49,12 +49,33 @@ describe("drawings z-order + commands", () => {
     expect(res.objects).toHaveLength(2);
     const original = res.objects.find((o) => o.id === 1)!;
     const dup = res.objects.find((o) => o.id === res.duplicatedId)!;
+    expect(dup.id).not.toBe(original.id);
     expect(dup.zOrder).toBe(1);
     expect(dup.anchor.type).toBe("absolute");
     if (dup.anchor.type === "absolute" && original.anchor.type === "absolute") {
       expect(dup.anchor.pos.xEmu - original.anchor.pos.xEmu).toBe(pxToEmu(10));
       expect(dup.anchor.pos.yEmu - original.anchor.pos.yEmu).toBe(pxToEmu(10));
     }
+  });
+
+  it("duplicateSelected patches preserved DrawingML fragments for the new id", () => {
+    const obj: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId: "img1" },
+      anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: pxToEmu(10), cy: pxToEmu(10) } },
+      zOrder: 0,
+      preserved: {
+        "xlsx.pic_xml": `<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="1" name="Picture 1"/></xdr:nvPicPr></xdr:pic>`,
+      },
+    };
+    const res = duplicateSelected([obj], 1);
+    expect(res).not.toBeNull();
+    if (!res) return;
+
+    const dup = res.objects.find((o) => o.id === res.duplicatedId)!;
+    const xml = dup.preserved?.["xlsx.pic_xml"] ?? "";
+    expect(xml).toContain(`id=\"${res.duplicatedId}\"`);
+    expect(xml).not.toContain(`id=\"1\"`);
   });
 
   it("bringToFront and sendToBack reorders deterministically", () => {
@@ -73,4 +94,3 @@ describe("drawings z-order + commands", () => {
     expect(backward.map((o) => o.zOrder)).toEqual([0, 2, 1]);
   });
 });
-
