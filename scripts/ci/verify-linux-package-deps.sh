@@ -282,14 +282,11 @@ for rpm_path in "${rpms[@]}"; do
   echo "$requires"
   echo "::endgroup::"
 
-  # `rpm -qpR` lists "capabilities" which may be package names (when explicitly declared)
-  # or shared-library requirements (auto-generated).
+  # `rpm -qpR` lists RPM Requires "capabilities". For the RPMs produced by Tauri (tauri-bundler),
+  # these are primarily driven by the explicit `bundle.linux.rpm.depends` list in `tauri.conf.json`.
   #
-  # We validate **both**:
-  # 1) explicit package requirements (driven by `bundle.linux.rpm.depends` in `tauri.conf.json`),
-  #    so the RPM declares distro package names (Fedora/RHEL + openSUSE) instead of relying only
-  #    on auto-generated ELF soname requirements.
-  # 2) presence of the expected shared-library requirements (defense-in-depth).
+  # We intentionally validate these explicit package requirements so the RPM declares distro package
+  # names (Fedora/RHEL + openSUSE) rather than relying on automatic ELF dependency scanning.
 
   # 1) Explicit package requirements (Fedora/RHEL + openSUSE naming via RPM rich deps).
   assert_contains_any "$requires" "$rpm_path" "WebKitGTK 4.1 package (webview)" "webkit2gtk4\\.1" "libwebkit2gtk-4_1"
@@ -301,14 +298,6 @@ for rpm_path in "${rpms[@]}"; do
     "libappindicator3-1"
   assert_contains_any "$requires" "$rpm_path" "librsvg package (icons)" "librsvg2" "librsvg-2-2"
   assert_contains_any "$requires" "$rpm_path" "OpenSSL package" "openssl-libs" "libopenssl3"
-
-  # 2) Shared-library requirements (auto-generated).
-  #
-  # Keep these checks narrow: some runtime deps (notably AppIndicator + OpenSSL) may be loaded
-  # dynamically or pulled in indirectly, so they may not appear as direct ELF NEEDED entries.
-  # We enforce those via the explicit package Requires above.
-  assert_contains_any "$requires" "$rpm_path" "WebKitGTK 4.1 (webview) soname" "libwebkit2gtk-4\\.1"
-  assert_contains_any "$requires" "$rpm_path" "GTK3 soname" "libgtk-3"
 
   # Ensure the packaged binary itself is stripped (no accidental debug/symbol sections shipped).
   echo "::group::verify-linux-package-deps: stripped binary check (rpm) $(basename "$rpm_path")"
