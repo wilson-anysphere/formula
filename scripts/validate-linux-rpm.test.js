@@ -73,6 +73,18 @@ test("validate-linux-rpm.sh bounds fallback desktop file scans (perf guardrail)"
   }
 });
 
+test("validate-linux-rpm.sh bounds extracted .desktop discovery to avoid deep scans (perf guardrail)", () => {
+  for (const needle of ['find "$applications_dir"', 'find "$alt_dir"']) {
+    const idx = validatorScriptContents.indexOf(needle);
+    assert.ok(idx >= 0, `Expected validate-linux-rpm.sh to include ${needle} for desktop entry validation.`);
+    const snippet = validatorScriptContents.slice(idx, idx + 200);
+    assert.ok(
+      snippet.includes("-maxdepth"),
+      `Expected ${needle} scan to include -maxdepth.\nSaw snippet:\n${snippet}`,
+    );
+  }
+});
+
 function buildSharedMimeInfoXml({ omitGlobsForExts = new Set() } = {}) {
   const groups = new Map();
   const associations = Array.isArray(tauriConf?.bundle?.fileAssociations) ? tauriConf.bundle.fileAssociations : [];

@@ -256,6 +256,20 @@ test("validate-linux-appimage --help prints usage and exits 0", { skip: !hasBash
   assert.doesNotMatch(proc.stderr, /command not found/i);
 });
 
+test("validate-linux-appimage bounds extracted .desktop discovery to avoid deep scans (perf guardrail)", () => {
+  const script = readFileSync(join(repoRoot, "scripts", "validate-linux-appimage.sh"), "utf8");
+  const idx = script.indexOf('find "$applications_dir"');
+  assert.ok(
+    idx >= 0,
+    "Expected validate-linux-appimage.sh to use find \"$applications_dir\" when validating extracted desktop entries.",
+  );
+  const snippet = script.slice(idx, idx + 200);
+  assert.ok(
+    snippet.includes("-maxdepth"),
+    `Expected validate-linux-appimage.sh to bound the .desktop scan depth with -maxdepth.\nSaw snippet:\n${snippet}`,
+  );
+});
+
 test("validate-linux-appimage honors FORMULA_TAURI_CONF_PATH (relative to repo root)", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
   const appImagePath = join(tmp, "Formula.AppImage");

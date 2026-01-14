@@ -109,6 +109,17 @@ test("validate-linux-deb --help prints usage and mentions key env vars", { skip:
   assert.match(proc.stdout, /FORMULA_DEB_NAME_OVERRIDE/);
 });
 
+test("validate-linux-deb bounds extracted .desktop discovery to avoid deep scans (perf guardrail)", () => {
+  const script = readFileSync(join(repoRoot, "scripts", "validate-linux-deb.sh"), "utf8");
+  const idx = script.indexOf('find "$applications_dir"');
+  assert.ok(idx >= 0, "Expected validate-linux-deb.sh to use find \"$applications_dir\" when validating extracted desktop entries.");
+  const snippet = script.slice(idx, idx + 200);
+  assert.ok(
+    snippet.includes("-maxdepth"),
+    `Expected validate-linux-deb.sh to bound the .desktop scan depth with -maxdepth.\nSaw snippet:\n${snippet}`,
+  );
+});
+
 function writeFakeDpkgDebTool(binDir) {
   const defaultMimeXml = buildSharedMimeInfoXml();
   const script = `#!/usr/bin/env bash

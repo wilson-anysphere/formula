@@ -466,7 +466,7 @@ validate_desktop_integration_extracted() {
   local -a desktop_files=()
   while IFS= read -r -d '' desktop_file; do
     desktop_files+=("$desktop_file")
-  done < <(find "$applications_dir" -type f -name '*.desktop' -print0 2>/dev/null || true)
+  done < <(find "$applications_dir" -maxdepth 2 -type f -name '*.desktop' -print0 2>/dev/null || true)
   if [[ ${#desktop_files[@]} -eq 0 ]]; then
     err "No .desktop files found under extracted payload: ${applications_dir}"
     return 1

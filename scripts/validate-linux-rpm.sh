@@ -417,7 +417,7 @@ validate_desktop_mime_associations_extracted() {
   if [ -d "$applications_dir" ]; then
     while IFS= read -r -d '' desktop_file; do
       desktop_files+=("$desktop_file")
-    done < <(find "$applications_dir" -type f -name '*.desktop' -print0 2>/dev/null || true)
+  done < <(find "$applications_dir" -maxdepth 2 -type f -name '*.desktop' -print0 2>/dev/null || true)
   fi
 
   if [ "${#desktop_files[@]}" -eq 0 ]; then
@@ -429,7 +429,7 @@ validate_desktop_mime_associations_extracted() {
       if [ -d "$alt_dir" ]; then
         while IFS= read -r -d '' desktop_file; do
           desktop_files+=("$desktop_file")
-        done < <(find "$alt_dir" -type f -name '*.desktop' -print0 2>/dev/null || true)
+        done < <(find "$alt_dir" -maxdepth 2 -type f -name '*.desktop' -print0 2>/dev/null || true)
       fi
     done
   fi
