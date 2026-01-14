@@ -134,6 +134,18 @@ test("verify_linux_desktop_integration fails when no .desktop entries target the
   assert.match(proc.stderr, /target the expected executable/i);
 });
 
+test("verify_linux_desktop_integration fails when Exec= is missing a file/URL placeholder", { skip: !hasPython3 }, () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+  const configPath = writeConfig(tmp);
+  // Targets the expected binary, but omits %U/%u/%F/%f so file associations cannot pass opened file paths.
+  const pkgRoot = writePackageRoot(tmp, { execLine: "formula-desktop" });
+
+  const proc = runValidator({ packageRoot: pkgRoot, configPath });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /placeholder/i);
+  assert.match(proc.stderr, /%u\/%U\/%f\/%F/i);
+});
+
 test(
   "verify_linux_desktop_integration supports overriding doc package name without changing Exec binary target",
   { skip: !hasPython3 },
