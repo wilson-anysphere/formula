@@ -800,16 +800,65 @@ fn hash_password_fixed_spin(
     salt: &[u8],
     alg_id_hash: u32,
 ) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
-    // H0 = Hash(salt || password)
-    let mut h = hash(alg_id_hash, &[salt, password_utf16le])?;
+    // Performance note: this function sits on the hot-path for Standard/CryptoAPI verification and
+    // is specified to run a fixed 50,000-iteration spin loop. Avoid allocating a fresh `Vec<u8>`
+    // for each round; the implementation below only allocates once for the final return value.
+    use sha1::Digest as _;
 
-    // Hi = Hash(LE32(i) || H(i-1)), for i = 0..49999 (50,000 iterations).
-    for i in 0..STANDARD_SPIN_COUNT {
-        let i_le = (i as u32).to_le_bytes();
-        h = hash(alg_id_hash, &[&i_le, h.as_slice()])?;
+    const MAX_DIGEST_LEN: usize = 20; // SHA-1
+
+    enum Hasher {
+        Md5(Md5),
+        Sha1(Sha1),
     }
 
-    Ok(h)
+    impl Hasher {
+        fn update(&mut self, bytes: &[u8]) {
+            match self {
+                Hasher::Md5(h) => h.update(bytes),
+                Hasher::Sha1(h) => h.update(bytes),
+            }
+        }
+
+        fn finalize_reset_into(&mut self, out: &mut [u8]) {
+            match self {
+                Hasher::Md5(h) => {
+                    debug_assert_eq!(out.len(), 16);
+                    out.copy_from_slice(&h.finalize_reset());
+                }
+                Hasher::Sha1(h) => {
+                    debug_assert_eq!(out.len(), 20);
+                    out.copy_from_slice(&h.finalize_reset());
+                }
+            }
+        }
+    }
+
+    let (mut hasher, hash_len) = match alg_id_hash {
+        CALG_SHA1 => (Hasher::Sha1(Sha1::new()), 20usize),
+        CALG_MD5 => (Hasher::Md5(Md5::new()), 16usize),
+        other => {
+            return Err(OffcryptoError::UnsupportedAlgIdHash {
+                alg_id_hash: other,
+            })
+        }
+    };
+
+    // H0 = Hash(salt || password)
+    hasher.update(salt);
+    hasher.update(password_utf16le);
+
+    let mut h = Zeroizing::new([0u8; MAX_DIGEST_LEN]);
+    hasher.finalize_reset_into(&mut h[..hash_len]);
+
+    // Hi = Hash(LE32(i) || H(i-1)), for i = 0..49999 (50,000 iterations).
+    for i in 0u32..STANDARD_SPIN_COUNT {
+        hasher.update(&i.to_le_bytes());
+        hasher.update(&h[..hash_len]);
+        hasher.finalize_reset_into(&mut h[..hash_len]);
+    }
+
+    Ok(Zeroizing::new(h[..hash_len].to_vec()))
 }
 
 fn crypt_derive_key(
@@ -1062,6 +1111,36 @@ mod tests {
             matches!(err, OffcryptoError::InvalidCspNameLength { len: 3 }),
             "unexpected error: {err:?}"
         );
+    }
+
+    #[test]
+    fn hash_password_fixed_spin_matches_known_vectors_sha1_and_md5() {
+        // Test vectors computed independently with Python:
+        //
+        // password = "Pässwörd"
+        // password_utf16le = 5000e400730073007700f60072006400
+        // salt = 000102030405060708090a0b0c0d0e0f
+        // H0 = Hash(salt || password_utf16le)
+        // for i in range(50000): H = Hash(le32(i) || H)
+        let password_utf16le = utf16le_bytes("Pässwörd");
+        let salt: [u8; 16] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
+            0x0D, 0x0E, 0x0F,
+        ];
+
+        let h = hash_password_fixed_spin(&password_utf16le, &salt, CALG_SHA1).unwrap();
+        let expected_sha1: [u8; 20] = [
+            0x38, 0x0E, 0xEE, 0x94, 0xF0, 0x45, 0x4D, 0x44, 0xE1, 0x75, 0x85, 0x46, 0x57,
+            0x1B, 0xEB, 0x9B, 0xE5, 0xE5, 0x38, 0x7C,
+        ];
+        assert_eq!(h.as_slice(), expected_sha1.as_ref());
+
+        let h = hash_password_fixed_spin(&password_utf16le, &salt, CALG_MD5).unwrap();
+        let expected_md5: [u8; 16] = [
+            0x1A, 0x4F, 0x86, 0x04, 0xE8, 0xE7, 0x32, 0xF0, 0xC2, 0xBB, 0xB2, 0xC2, 0x38,
+            0x48, 0x9B, 0x60,
+        ];
+        assert_eq!(h.as_slice(), expected_md5.as_ref());
     }
 
     #[test]
