@@ -474,33 +474,60 @@ impl DrawingPart {
             .into_iter()
             .find(|n| is_pic_node(*n))
             {
-                if let Ok((id, pic_xml, embed)) = parse_pic(&pic, drawing_xml) {
-                    if let Ok(image_id) = resolve_image_id_from_archive(
-                        &relationships,
-                        &embed,
-                        path,
-                        archive,
-                        workbook,
-                    ) {
-                        let mut preserved = anchor_preserved.clone();
-                        preserved.insert("xlsx.embed_rel_id".to_string(), embed.clone());
-                        preserved.insert("xlsx.pic_xml".to_string(), pic_xml);
+                // Best-effort: pictures may reference missing relationships or media parts (or be
+                // malformed). In those cases, preserve the full anchor subtree as an unknown
+                // drawing object, but keep the parsed DrawingML id and any size information we can
+                // extract.
+                let size = extract_size_from_transform(&pic).or_else(|| size_from_anchor(anchor));
 
-                        let size =
-                            extract_size_from_transform(&pic).or_else(|| size_from_anchor(anchor));
+                match parse_pic(&pic, drawing_xml) {
+                    Ok((id, pic_xml, embed)) => {
+                        if let Ok(image_id) = resolve_image_id_from_archive(
+                            &relationships,
+                            &embed,
+                            path,
+                            archive,
+                            workbook,
+                        ) {
+                            let mut preserved = anchor_preserved.clone();
+                            preserved.insert("xlsx.embed_rel_id".to_string(), embed.clone());
+                            preserved.insert("xlsx.pic_xml".to_string(), pic_xml);
 
+                            objects.push(DrawingObject {
+                                id,
+                                kind: DrawingObjectKind::Image { image_id },
+                                anchor,
+                                z_order: z as i32,
+                                size,
+                                preserved,
+                            });
+                        } else {
+                            let raw_anchor =
+                                slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
+                            objects.push(DrawingObject {
+                                id,
+                                kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
+                                anchor,
+                                z_order: z as i32,
+                                size,
+                                preserved: anchor_preserved.clone(),
+                            });
+                        }
+                        continue;
+                    }
+                    Err(_) => {
+                        let raw_anchor = slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
                         objects.push(DrawingObject {
-                            id,
-                            kind: DrawingObjectKind::Image { image_id },
+                            id: DrawingObjectId((z + 1) as u32),
+                            kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
                             anchor,
                             z_order: z as i32,
                             size,
-                            preserved,
+                            preserved: anchor_preserved.clone(),
                         });
                         continue;
                     }
                 }
-                // Fall back to preserving the full anchor subtree when we can't resolve the image.
             }
 
             if let Some(sp) = crate::drawingml::anchor::element_children_selecting_alternate_content(
