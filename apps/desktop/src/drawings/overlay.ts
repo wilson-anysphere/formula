@@ -30,7 +30,14 @@ export function emuToPx(emu: number, zoom?: number): number {
 
 export function pxToEmu(px: number, zoom?: number): number {
   const z = resolveZoom(zoom);
-  return Math.round((px * EMU_PER_PX) / z);
+  const emu = (px * EMU_PER_PX) / z;
+  // `Math.round` rounds half values toward +∞, which makes the conversion non-odd:
+  // `Math.round(-0.5) === -0` while `Math.round(0.5) === 1`. For reversible interactions
+  // (e.g. ArrowRight then ArrowLeft at non-1x zoom), we want `pxToEmu(-x) === -pxToEmu(x)`.
+  // Achieve that by rounding half values away from zero.
+  const rounded = Math.round(Math.abs(emu));
+  if (!Number.isFinite(rounded) || rounded === 0) return 0;
+  return emu < 0 ? -rounded : rounded;
 }
 
 type CssVarStyle = Pick<CSSStyleDeclaration, "getPropertyValue">;

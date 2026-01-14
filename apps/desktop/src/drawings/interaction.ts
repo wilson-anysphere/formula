@@ -1481,104 +1481,109 @@ export function shiftAnchorPoint(
   const z = sanitizeZoom(zoom);
   let row = Number.isFinite(point.cell.row) ? Math.max(0, Math.trunc(point.cell.row)) : 0;
   let col = Number.isFinite(point.cell.col) ? Math.max(0, Math.trunc(point.cell.col)) : 0;
-  let xPx = (Number.isFinite(point.offset.xEmu) ? emuToPx(point.offset.xEmu) : 0) + dxPx / z;
-  let yPx = (Number.isFinite(point.offset.yEmu) ? emuToPx(point.offset.yEmu) : 0) + dyPx / z;
+  // Work in EMUs for the offset calculations. Converting offset -> px -> offset is lossy when
+  // EMUs are stored as integers (DrawingML schema), because `emuToPx(pxToEmu(x))` is not
+  // perfectly reversible for fractional pixel deltas (e.g. 1px @ 2x zoom => 0.5px).
+  //
+  // Using EMUs avoids accumulating drift (so ArrowRight then ArrowLeft returns to the exact
+  // starting offset).
+  const dxEmu = pxToEmu(dxPx / z);
+  const dyEmu = pxToEmu(dyPx / z);
+  let xEmu = (Number.isFinite(point.offset.xEmu) ? point.offset.xEmu : 0) + dxEmu;
+  let yEmu = (Number.isFinite(point.offset.yEmu) ? point.offset.yEmu : 0) + dyEmu;
 
   // Normalize X across column boundaries.
-  for (let i = 0; i < MAX_CELL_STEPS && xPx < 0; i++) {
+  for (let i = 0; i < MAX_CELL_STEPS && xEmu < 0; i++) {
     if (col <= 0) {
       col = 0;
-      xPx = 0;
+      xEmu = 0;
       break;
     }
     col -= 1;
     CELL_SCRATCH.row = row;
     CELL_SCRATCH.col = col;
-    const w = geom.cellSizePx(CELL_SCRATCH).width / z;
-    if (w <= 0) {
-      xPx = 0;
+    const wEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).width / z);
+    if (wEmu <= 0) {
+      xEmu = 0;
       break;
     }
-    xPx += w;
+    xEmu += wEmu;
   }
   for (let i = 0; i < MAX_CELL_STEPS; i++) {
     CELL_SCRATCH.row = row;
     CELL_SCRATCH.col = col;
-    const w = geom.cellSizePx(CELL_SCRATCH).width / z;
-    if (w <= 0) {
-      xPx = 0;
+    const wEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).width / z);
+    if (wEmu <= 0) {
+      xEmu = 0;
       break;
     }
-    if (xPx < w) break;
-    xPx -= w;
+    if (xEmu < wEmu) break;
+    xEmu -= wEmu;
     col += 1;
   }
 
   // Normalize Y across row boundaries.
-  for (let i = 0; i < MAX_CELL_STEPS && yPx < 0; i++) {
+  for (let i = 0; i < MAX_CELL_STEPS && yEmu < 0; i++) {
     if (row <= 0) {
       row = 0;
-      yPx = 0;
+      yEmu = 0;
       break;
     }
     row -= 1;
     CELL_SCRATCH.row = row;
     CELL_SCRATCH.col = col;
-    const h = geom.cellSizePx(CELL_SCRATCH).height / z;
-    if (h <= 0) {
-      yPx = 0;
+    const hEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).height / z);
+    if (hEmu <= 0) {
+      yEmu = 0;
       break;
     }
-    yPx += h;
+    yEmu += hEmu;
   }
   for (let i = 0; i < MAX_CELL_STEPS; i++) {
     CELL_SCRATCH.row = row;
     CELL_SCRATCH.col = col;
-    const h = geom.cellSizePx(CELL_SCRATCH).height / z;
-    if (h <= 0) {
-      yPx = 0;
+    const hEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).height / z);
+    if (hEmu <= 0) {
+      yEmu = 0;
       break;
     }
-    if (yPx < h) break;
-    yPx -= h;
+    if (yEmu < hEmu) break;
+    yEmu -= hEmu;
     row += 1;
   }
 
-  // Best-effort clamp to avoid tiny float drift.
+  // Best-effort clamp to avoid tiny drift.
   for (let i = 0; i < MAX_CELL_STEPS; i++) {
     CELL_SCRATCH.row = row;
     CELL_SCRATCH.col = col;
-    const w = geom.cellSizePx(CELL_SCRATCH).width / z;
-    if (w <= 0) {
-      xPx = 0;
+    const wEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).width / z);
+    if (wEmu <= 0) {
+      xEmu = 0;
       break;
     }
-    if (xPx < 0) xPx = 0;
-    if (xPx < w) break;
-    xPx -= w;
+    if (xEmu < 0) xEmu = 0;
+    if (xEmu < wEmu) break;
+    xEmu -= wEmu;
     col += 1;
   }
   for (let i = 0; i < MAX_CELL_STEPS; i++) {
     CELL_SCRATCH.row = row;
     CELL_SCRATCH.col = col;
-    const h = geom.cellSizePx(CELL_SCRATCH).height / z;
-    if (h <= 0) {
-      yPx = 0;
+    const hEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).height / z);
+    if (hEmu <= 0) {
+      yEmu = 0;
       break;
     }
-    if (yPx < 0) yPx = 0;
-    if (yPx < h) break;
-    yPx -= h;
+    if (yEmu < 0) yEmu = 0;
+    if (yEmu < hEmu) break;
+    yEmu -= hEmu;
     row += 1;
   }
 
   return {
     ...point,
     cell: { row, col },
-    // Keep floating-point EMUs so zoom-scaled moves (e.g. 1px screen move at 2x zoom => 0.5px
-    // sheet move) remain reversible without accumulating integer rounding drift. DrawingML export
-    // rounds EMUs to integers at serialization time.
-    offset: { xEmu: pxToEmu(xPx), yEmu: pxToEmu(yPx) },
+    offset: { xEmu, yEmu },
   };
 }
 
