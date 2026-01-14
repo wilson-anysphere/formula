@@ -489,6 +489,7 @@ changes:
   enables this by default.
 - `render_smoke`: run `tools.corpus.triage --render-smoke` (Render smoke / L3).
 - `min_calc_rate`: optional CI gate threshold for Calculate pass rate (among attempted workbooks).
+- `min_calc_cell_fidelity`: optional CI gate threshold for Calculate **cell-level fidelity** (among attempted formula cells).
 - `min_render_rate`: optional CI gate threshold for Render pass rate (among attempted workbooks).
 
 Note: `--recalc` compares engine results against **cached formula values stored in the workbook**. If your
