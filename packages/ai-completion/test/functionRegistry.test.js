@@ -22,7 +22,7 @@ test("FunctionRegistry falls back to curated defaults when catalog is missing/in
   const missingCatalog = new FunctionRegistry(undefined, { catalog: null });
   assert.ok(missingCatalog.getFunction("SUM"), "Expected SUM to exist in fallback registry");
   assert.equal(
-    missingCatalog.getFunction("SEQUENCE"),
+    missingCatalog.getFunction("ACOTH"),
     undefined,
     "Expected catalog-only functions to be absent when catalog is missing"
   );
@@ -30,7 +30,7 @@ test("FunctionRegistry falls back to curated defaults when catalog is missing/in
   const invalidCatalog = new FunctionRegistry(undefined, { catalog: { functions: [{ nope: true }] } });
   assert.ok(invalidCatalog.getFunction("SUM"), "Expected SUM to exist in fallback registry");
   assert.equal(
-    invalidCatalog.getFunction("SEQUENCE"),
+    invalidCatalog.getFunction("ACOTH"),
     undefined,
     "Expected catalog-only functions to be absent when catalog is invalid"
   );
@@ -219,6 +219,11 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.isRangeArg("SCAN", 2), false, "Expected SCAN lambda not to be a range");
 
   assert.ok(registry.isRangeArg("_xlfn.MAP", 0), "Expected _xlfn.MAP array to be a range");
+  assert.equal(registry.getFunction("SEQUENCE")?.args?.[0]?.name, "rows", "Expected SEQUENCE arg1 to be rows");
+  assert.ok(registry.getFunction("SEQUENCE")?.args?.[1]?.optional, "Expected SEQUENCE columns to be optional");
+  assert.ok(registry.getFunction("RANDARRAY")?.args?.[0]?.optional, "Expected RANDARRAY rows to be optional");
+  assert.equal(registry.getArgType("RANDARRAY", 4), "boolean", "Expected RANDARRAY whole_number to be boolean");
+  assert.equal(registry.getFunction("RANDARRAY")?.args?.[4]?.name, "whole_number", "Expected RANDARRAY arg5 to be whole_number");
 
   // Conditional logic with repeating (test/value) pairs
   const ifs = registry.getFunction("IFS");

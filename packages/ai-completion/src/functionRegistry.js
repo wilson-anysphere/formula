@@ -3042,6 +3042,27 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "SEQUENCE",
+    description: "Generates a list of sequential numbers in an array.",
+    args: [
+      { name: "rows", type: "number" },
+      { name: "columns", type: "number", optional: true },
+      { name: "start", type: "number", optional: true },
+      { name: "step", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "RANDARRAY",
+    description: "Returns an array of random numbers between min and max.",
+    args: [
+      { name: "rows", type: "number", optional: true },
+      { name: "columns", type: "number", optional: true },
+      { name: "min", type: "number", optional: true },
+      { name: "max", type: "number", optional: true },
+      { name: "whole_number", type: "boolean", optional: true },
+    ],
+  },
+  {
     name: "HSTACK",
     description: "Appends arrays horizontally and in sequence to return a larger array.",
     args: [
