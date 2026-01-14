@@ -19219,6 +19219,120 @@ mod tests {
     }
 
     #[test]
+    fn delete_sheet_prunes_pivots_even_when_the_pivot_uses_the_stable_sheet_key() {
+        let mut engine = Engine::new();
+        engine.ensure_sheet("Sheet1");
+        engine.ensure_sheet("Sheet2");
+
+        // Give the sheet a display name distinct from its stable key so we can ensure pivot cleanup
+        // matches both forms.
+        engine.set_sheet_display_name("Sheet2", "Report");
+
+        // Attach a table to the sheet so we can also validate table-backed pivot pruning.
+        let sheet2_id = engine.workbook.sheet_id("Sheet2").unwrap();
+        engine.workbook.set_tables(
+            sheet2_id,
+            vec![Table {
+                id: 42,
+                name: "Table1".to_string(),
+                display_name: "Table1".to_string(),
+                range: Range::from_a1("A1:B2").unwrap(),
+                header_row_count: 1,
+                totals_row_count: 0,
+                columns: vec![],
+                style: None,
+                auto_filter: None,
+                relationship_id: None,
+                part_path: None,
+            }],
+        );
+
+        let pivot_dest_key = engine.add_pivot_table(PivotTableDefinition {
+            id: 0,
+            name: "PivotDestKey".to_string(),
+            source: PivotSource::Range {
+                sheet: "Sheet1".to_string(),
+                range: None,
+            },
+            destination: crate::pivot::PivotDestination {
+                // Reference the *stable key* for Sheet2.
+                sheet: "Sheet2".to_string(),
+                cell: CellRef::new(0, 0),
+            },
+            config: crate::pivot::PivotConfig::default(),
+            apply_number_formats: true,
+            last_output_range: None,
+            needs_refresh: false,
+        });
+
+        let pivot_source_table = engine.add_pivot_table(PivotTableDefinition {
+            id: 0,
+            name: "PivotSourceTable".to_string(),
+            source: PivotSource::Table { table_id: 42 },
+            destination: crate::pivot::PivotDestination {
+                sheet: "Sheet1".to_string(),
+                cell: CellRef::new(0, 0),
+            },
+            config: crate::pivot::PivotConfig::default(),
+            apply_number_formats: true,
+            last_output_range: None,
+            needs_refresh: false,
+        });
+
+        assert!(engine.pivot_table(pivot_dest_key).is_some());
+        assert!(engine.pivot_table(pivot_source_table).is_some());
+
+        // Delete using the *display name*.
+        engine.delete_sheet("Report").unwrap();
+
+        assert!(
+            engine.pivot_table(pivot_dest_key).is_none(),
+            "expected pivot definitions referencing the deleted sheet key to be pruned"
+        );
+        assert!(
+            engine.pivot_table(pivot_source_table).is_none(),
+            "expected table-backed pivots referencing tables from the deleted sheet to be pruned"
+        );
+    }
+
+    #[test]
+    fn delete_sheet_prunes_pivots_even_when_the_pivot_uses_the_sheet_display_name() {
+        let mut engine = Engine::new();
+        engine.ensure_sheet("Sheet1");
+        engine.ensure_sheet("Sheet2");
+
+        engine.set_sheet_display_name("Sheet2", "Report");
+
+        let pivot_dest_display = engine.add_pivot_table(PivotTableDefinition {
+            id: 0,
+            name: "PivotDestDisplay".to_string(),
+            source: PivotSource::Range {
+                sheet: "Sheet1".to_string(),
+                range: None,
+            },
+            destination: crate::pivot::PivotDestination {
+                // Reference the *display name* for Sheet2.
+                sheet: "Report".to_string(),
+                cell: CellRef::new(0, 0),
+            },
+            config: crate::pivot::PivotConfig::default(),
+            apply_number_formats: true,
+            last_output_range: None,
+            needs_refresh: false,
+        });
+
+        assert!(engine.pivot_table(pivot_dest_display).is_some());
+
+        // Delete using the *stable key*.
+        engine.delete_sheet("Sheet2").unwrap();
+
+        assert!(
+            engine.pivot_table(pivot_dest_display).is_none(),
+            "expected pivot definitions referencing the deleted sheet display name to be pruned"
+        );
+    }
+
+    #[test]
     fn index_area_num_over_sheet_span_uses_tab_order_after_reorder() {
         fn setup(engine: &mut Engine) {
             for sheet in ["Sheet1", "Sheet2", "Sheet3"] {
