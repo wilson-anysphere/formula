@@ -450,6 +450,57 @@ fn parse_absolute_anchor_malformed_shape_and_frame_preserve_size_in_archive() {
 }
 
 #[test]
+fn parse_absolute_anchor_unknown_object_preserves_id_in_parts() {
+    let drawing_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+          xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <xdr:absoluteAnchor>
+    <xdr:pos x="10" y="20"/>
+    <xdr:ext cx="30" cy="40"/>
+    <xdr:cxnSp>
+      <xdr:nvCxnSpPr>
+        <xdr:cNvPr id="2" name="Connector 1"/>
+        <xdr:cNvCxnSpPr/>
+      </xdr:nvCxnSpPr>
+      <xdr:spPr/>
+    </xdr:cxnSp>
+    <xdr:clientData/>
+  </xdr:absoluteAnchor>
+</xdr:wsDr>"#;
+
+    let parts: BTreeMap<String, Vec<u8>> =
+        [("xl/drawings/drawing1.xml".to_string(), drawing_xml.as_bytes().to_vec())]
+            .into_iter()
+            .collect();
+
+    let mut workbook = formula_model::Workbook::new();
+    let drawing = DrawingPart::parse_from_parts(
+        0,
+        "xl/drawings/drawing1.xml",
+        &parts,
+        &mut workbook,
+    )
+    .expect("parse drawing part");
+
+    assert_eq!(drawing.objects.len(), 1);
+    assert_eq!(
+        drawing.objects[0].anchor,
+        Anchor::Absolute {
+            pos: CellOffset::new(10, 20),
+            ext: EmuSize::new(30, 40),
+        }
+    );
+    assert_eq!(drawing.objects[0].id, DrawingObjectId(2));
+    assert_eq!(drawing.objects[0].size, Some(EmuSize::new(30, 40)));
+    assert!(matches!(
+        &drawing.objects[0].kind,
+        DrawingObjectKind::Unknown { raw_xml } if raw_xml.contains("cxnSp")
+    ));
+    assert!(workbook.images.is_empty());
+}
+
+#[test]
 fn parse_absolute_anchor_unknown_object_preserves_size_in_archive() {
     use std::io::{Cursor, Write};
 
@@ -507,6 +558,66 @@ fn parse_absolute_anchor_unknown_object_preserves_size_in_archive() {
     assert!(matches!(
         &drawing.objects[0].kind,
         DrawingObjectKind::Unknown { raw_xml } if raw_xml.contains("cxnSp")
+    ));
+    assert!(workbook.images.is_empty());
+}
+
+#[test]
+fn parse_absolute_anchor_malformed_pic_preserves_id_in_archive() {
+    use std::io::{Cursor, Write};
+
+    use zip::write::FileOptions;
+    use zip::{CompressionMethod, ZipArchive, ZipWriter};
+
+    let drawing_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+          xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <xdr:absoluteAnchor>
+    <xdr:pos x="10" y="20"/>
+    <xdr:ext cx="30" cy="40"/>
+    <xdr:pic>
+      <xdr:nvPicPr>
+        <xdr:cNvPr id="7" name="Picture 7"/>
+        <xdr:cNvPicPr/>
+      </xdr:nvPicPr>
+      <xdr:blipFill>
+        <a:stretch><a:fillRect/></a:stretch>
+      </xdr:blipFill>
+      <xdr:spPr>
+        <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+      </xdr:spPr>
+    </xdr:pic>
+    <xdr:clientData/>
+  </xdr:absoluteAnchor>
+</xdr:wsDr>"#;
+
+    let options =
+        FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    zip.start_file("xl/drawings/drawing1.xml", options)
+        .expect("start drawing");
+    zip.write_all(drawing_xml.as_bytes())
+        .expect("write drawing xml");
+    let bytes = zip.finish().expect("finish zip").into_inner();
+
+    let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("open zip");
+    let mut workbook = formula_model::Workbook::new();
+    let drawing = DrawingPart::parse_from_archive(
+        0,
+        "xl/drawings/drawing1.xml",
+        &mut archive,
+        &mut workbook,
+    )
+    .expect("parse drawing part from archive");
+
+    assert_eq!(drawing.objects.len(), 1);
+    assert_eq!(drawing.objects[0].id, DrawingObjectId(7));
+    assert_eq!(drawing.objects[0].size, Some(EmuSize::new(30, 40)));
+    assert!(matches!(
+        &drawing.objects[0].kind,
+        DrawingObjectKind::Unknown { raw_xml } if raw_xml.contains("Picture 7")
     ));
     assert!(workbook.images.is_empty());
 }
