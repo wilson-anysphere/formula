@@ -4,7 +4,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { drawingObjectToViewportRect } from "../../drawings/hitTest";
 import { pxToEmu } from "../../drawings/overlay";
+import { getRotationHandleCenter } from "../../drawings/selectionHandles";
 import type { DrawingObject } from "../../drawings/types";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
@@ -325,6 +327,76 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
     const colHeaderHeight = (app as any).colHeaderHeight as number;
     const hit = app.hitTestDrawingAtClientPoint(rowHeaderWidth + 100 - 1, colHeaderHeight + 100 - 1);
     expect(hit).toEqual({ id: 1 });
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("hitTestDrawingAtClientPoint treats the rotation handle as a drawing hit (rotatable drawings)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    expect(app.getGridMode()).toBe("shared");
+
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "shape", label: "rect" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(100) },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+      zOrder: 0,
+    };
+    app.setDrawingObjects([drawing]);
+    app.selectDrawingById(1);
+
+    const viewport = app.getDrawingInteractionViewport();
+    const bounds = drawingObjectToViewportRect(drawing, viewport, (app as any).drawingGeom);
+    const handleCenter = getRotationHandleCenter(bounds, drawing.transform);
+
+    const hit = app.hitTestDrawingAtClientPoint(handleCenter.x, handleCenter.y);
+    expect(hit).toEqual({ id: 1 });
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("hitTestDrawingAtClientPoint does not treat the rotation handle as a hit for chart drawings", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    expect(app.getGridMode()).toBe("shared");
+
+    const chartDrawing: DrawingObject = {
+      id: 1,
+      kind: { type: "chart", chartId: "chart_1" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(100) },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+      zOrder: 0,
+    };
+    app.setDrawingObjects([chartDrawing]);
+    app.selectDrawingById(1);
+
+    const viewport = app.getDrawingInteractionViewport();
+    const bounds = drawingObjectToViewportRect(chartDrawing, viewport, (app as any).drawingGeom);
+    const handleCenter = getRotationHandleCenter(bounds, chartDrawing.transform);
+
+    const hit = app.hitTestDrawingAtClientPoint(handleCenter.x, handleCenter.y);
+    expect(hit).toBeNull();
 
     app.destroy();
     root.remove();

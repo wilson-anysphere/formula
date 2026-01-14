@@ -7991,6 +7991,10 @@ export class SpreadsheetApp {
     if (objects.length === 0) return null;
     const scratchBounds = this.drawingHitTestScratchRect;
     const selectedId = this.getSelectedDrawingId();
+    // Rotation handles are only shown when the drawing overlay is responsible for rendering
+    // selection chrome (shared-grid mode or when the dedicated interaction controller is enabled).
+    // In legacy grid mode without the controller, rotation handles are not drawn at all.
+    const rotationHandleEnabled = this.gridMode === "shared" || this.drawingInteractionController != null;
 
     // --- Primary pane ----------------------------------------------------------
     this.maybeRefreshRootPosition({ force: true });
@@ -8024,8 +8028,9 @@ export class SpreadsheetApp {
             scratchBounds.y = sheetRect.y - scrollY + headerOffsetY;
             scratchBounds.width = sheetRect.width;
             scratchBounds.height = sheetRect.height;
+            const canRotate = rotationHandleEnabled && selectedObject.kind.type !== "chart";
             if (
-              hitTestRotationHandle(scratchBounds, x, y, selectedObject.transform) ||
+              (canRotate && hitTestRotationHandle(scratchBounds, x, y, selectedObject.transform)) ||
               hitTestResizeHandle(scratchBounds, x, y, selectedObject.transform)
             ) {
               return { id: selectedId };
@@ -8107,8 +8112,9 @@ export class SpreadsheetApp {
           scratchBounds.y = sheetRect.y - scrollY + headerOffsetY;
           scratchBounds.width = sheetRect.width;
           scratchBounds.height = sheetRect.height;
+          const canRotate = rotationHandleEnabled && selectedObject.kind.type !== "chart";
           if (
-            hitTestRotationHandle(scratchBounds, sx, sy, selectedObject.transform) ||
+            (canRotate && hitTestRotationHandle(scratchBounds, sx, sy, selectedObject.transform)) ||
             hitTestResizeHandle(scratchBounds, sx, sy, selectedObject.transform)
           ) {
             return { id: selectedId };
