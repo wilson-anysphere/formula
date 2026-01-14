@@ -96,6 +96,18 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
+test("fails when version comment is not a tag/branch token (e.g. # latest)", { skip: !hasBash }, () => {
+  const proc = runYaml(`
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # latest
+`);
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /comment should start/i);
+});
+
 test("ignores uses: strings inside YAML block scalars", { skip: !hasBash }, () => {
   const proc = runYaml(`
 jobs:

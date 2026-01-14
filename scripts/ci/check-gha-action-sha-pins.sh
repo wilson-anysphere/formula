@@ -169,6 +169,16 @@ while IFS= read -r match; do
       echo "  Found: uses: ${value}" >&2
       echo "  Fix: add a trailing comment with the original upstream ref (e.g. # v4.3.1 or # master)." >&2
       fail=1
+    else
+      # Dependabot uses the trailing comment to infer the intended version channel/tag for SHA pins.
+      # Validate that the comment begins with something tag-like (semver-ish) or a common branch name.
+      token="${comment%%[[:space:]]*}"
+      if ! [[ "$token" =~ ^(v?[0-9]+(\.[0-9]+){0,3}|master|main|stable)$ ]]; then
+        echo "error: ${file}:${line_no} action pin comment should start with an upstream ref (e.g. v4.3.1):" >&2
+        echo "  Found: uses: ${value} # ${comment}" >&2
+        echo "  Fix: start the comment with the upstream tag/branch (e.g. # v4 or # v4.3.1)." >&2
+        fail=1
+      fi
     fi
   fi
 done <<<"$(extract_uses_lines "$workflow" || true)"
