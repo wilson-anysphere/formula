@@ -2115,6 +2115,7 @@ export function createSyncServer(
 
       stopInFlight = (async () => {
         const errors: unknown[] = [];
+        const graceMs = Math.max(0, config.shutdownGraceMs ?? 0);
 
         // Enter drain mode: stop accepting new websocket upgrades and fail /readyz
         // so load balancers stop routing new connections.
@@ -2122,6 +2123,7 @@ export function createSyncServer(
           draining = true;
           metrics.shutdownDrainingCurrent.set(1);
         }
+        logger.info({ graceMs, wsConnections: wss.clients.size }, "shutdown_draining_started");
 
         if (processMetricsTimer) {
           clearInterval(processMetricsTimer);
@@ -2145,7 +2147,6 @@ export function createSyncServer(
           }
         }
 
-        const graceMs = Math.max(0, config.shutdownGraceMs ?? 0);
         if (graceMs > 0 && wss.clients.size > 0) {
           await new Promise<void>((resolve) => {
             let finished = false;
@@ -2173,6 +2174,15 @@ export function createSyncServer(
             timeout = setTimeout(finish, graceMs);
             timeout.unref();
           });
+        }
+
+        if (wss.clients.size > 0) {
+          logger.warn(
+            { graceMs, remainingWsConnections: wss.clients.size },
+            "shutdown_draining_grace_expired"
+          );
+        } else {
+          logger.info({ graceMs }, "shutdown_draining_complete");
         }
 
         // Force terminate remaining websocket clients (if any).
