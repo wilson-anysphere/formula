@@ -198,6 +198,35 @@ function buildWithWasmPack() {
   const rustcWrapper = normalizeRustcWrapper(rustcWrapperRaw);
   const rustcWorkspaceWrapper = normalizeRustcWrapper(rustcWorkspaceWrapperRaw);
 
+  function filterRustflagsForWasm(raw) {
+    if (typeof raw !== "string") return raw;
+    const trimmed = raw.trim();
+    if (!trimmed) return raw;
+    const tokens = trimmed.split(/\s+/).filter(Boolean);
+    const out = [];
+    for (let i = 0; i < tokens.length; i += 1) {
+      const token = tokens[i];
+      const next = i + 1 < tokens.length ? tokens[i + 1] : null;
+      // Some build wrappers (e.g. `scripts/cargo_agent.sh`) append host-only linker flags like
+      // `-C link-arg=-Wl,--threads=1` to reduce lld thread usage. Those flags are not understood by
+      // `rust-lld -flavor wasm`, causing wasm builds to fail.
+      if (token === "-C" && next && next.startsWith("link-arg=-Wl,--threads=")) {
+        i += 1;
+        continue;
+      }
+      if (token.startsWith("link-arg=-Wl,--threads=")) {
+        // Defensive: handle cases where the `-C` token was stripped elsewhere.
+        if (out[out.length - 1] === "-C") out.pop();
+        continue;
+      }
+      if (token.startsWith("-Clink-arg=-Wl,--threads=")) {
+        continue;
+      }
+      out.push(token);
+    }
+    return out.join(" ");
+  }
+
   // Equivalent to: `wasm-pack build crates/formula-wasm --target nodejs --out-dir pkg-node`
   // but avoids any ambiguity around relative output paths by running from the crate dir.
   //
@@ -222,6 +251,17 @@ function buildWithWasmPack() {
     // callers explicitly override it.
     RAYON_NUM_THREADS: rayonThreads,
   };
+
+  // Ensure target-specific wasm builds do not inherit host-only linker flags from wrapper scripts.
+  const inheritedRustflags = baseEnv.RUSTFLAGS;
+  const filteredRustflags = filterRustflagsForWasm(inheritedRustflags);
+  if (filteredRustflags !== inheritedRustflags) {
+    if (typeof filteredRustflags === "string" && filteredRustflags.trim()) {
+      baseEnv.RUSTFLAGS = filteredRustflags;
+    } else {
+      delete baseEnv.RUSTFLAGS;
+    }
+  }
 
   const run = (env) =>
     canUseRunLimited
