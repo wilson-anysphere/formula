@@ -4444,6 +4444,17 @@ export class SpreadsheetApp {
       return;
     }
 
+    const sheetIdByName = new Map<string, string>();
+    for (const id of this.document.getSheetIds()) {
+      const meta = this.document.getSheetMeta(id);
+      const name = typeof meta?.name === "string" ? meta.name.trim() : "";
+      if (!name) continue;
+      // Excel sheet names are effectively case-insensitive; normalize for matching.
+      if (!sheetIdByName.has(name.toLowerCase())) {
+        sheetIdByName.set(name.toLowerCase(), id);
+      }
+    }
+
     for (const entry of entries) {
       if (!entry || typeof entry !== "object") continue;
       const e = entry as any;
@@ -4472,6 +4483,11 @@ export class SpreadsheetApp {
       const sheetObjectChartId =
         sheetName && drawingObjectId != null ? FormulaChartModelStore.chartIdFromSheetObject(sheetName, drawingObjectId) : null;
 
+      const stableSheetId =
+        sheetName && sheetName.trim() !== "" ? (sheetIdByName.get(sheetName.trim().toLowerCase()) ?? null) : null;
+      const stableChartId =
+        stableSheetId && drawingObjectId != null ? FormulaChartModelStore.chartIdFromSheetObject(stableSheetId, drawingObjectId) : null;
+
       if (!chartId && sheetObjectChartId) {
         chartId = sheetObjectChartId;
       }
@@ -4486,6 +4502,9 @@ export class SpreadsheetApp {
       try {
         if (chartId && chartId.trim() !== "") {
           this.formulaChartModelStore.setFormulaModelChartModel(chartId, model);
+        }
+        if (stableChartId && stableChartId.trim() !== "" && stableChartId !== chartId) {
+          this.formulaChartModelStore.setFormulaModelChartModel(stableChartId, model);
         }
         if (sheetObjectChartId && sheetObjectChartId.trim() !== "" && sheetObjectChartId !== chartId) {
           this.formulaChartModelStore.setFormulaModelChartModel(sheetObjectChartId, model);
