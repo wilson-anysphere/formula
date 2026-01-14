@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DocumentController } from "../../document/documentController.js";
 import { READ_ONLY_SHEET_MUTATION_MESSAGE } from "../../collab/permissionGuards";
 import { createAddSheetCommand, createDeleteActiveSheetCommand } from "../sheetCommands";
+import { CollabWorkbookSheetStore } from "../collabWorkbookSheetStore";
 import { WorkbookSheetStore } from "../workbookSheetStore";
 
 describe("ribbon sheet commands", () => {
@@ -181,5 +182,148 @@ describe("ribbon sheet commands", () => {
     // Delete short-circuits before confirmation.
     expect(showToast).toHaveBeenCalledWith(READ_ONLY_SHEET_MUTATION_MESSAGE, "error");
     expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("inserts a sheet in collab sessions by mutating session.sheets (and activates it)", async () => {
+    type CollabSheet = { id: string; name: string; visibility: "visible" | "hidden" | "veryHidden" };
+    class MockSheets {
+      constructor(private readonly items: CollabSheet[]) {}
+      get length(): number {
+        return this.items.length;
+      }
+      toArray(): CollabSheet[] {
+        return this.items.slice();
+      }
+      get(i: number): CollabSheet | undefined {
+        return this.items[i];
+      }
+      insert(index: number, values: CollabSheet[]): void {
+        this.items.splice(index, 0, ...values);
+      }
+      delete(index: number, count: number): void {
+        this.items.splice(index, count);
+      }
+    }
+
+    const doc = new DocumentController();
+    const session = {
+      isReadOnly: () => false,
+      sheets: new MockSheets([
+        { id: "sheet_a", name: "Sheet1", visibility: "visible" },
+        { id: "sheet_b", name: "Sheet2", visibility: "visible" },
+      ]),
+      transactLocal: (fn: () => void) => fn(),
+    } as any;
+
+    const store = new WorkbookSheetStore([
+      { id: "sheet_a", name: "Sheet1", visibility: "visible" },
+      { id: "sheet_b", name: "Sheet2", visibility: "visible" },
+    ]);
+
+    let activeSheetId = "sheet_a";
+    const app = {
+      getCurrentSheetId: () => activeSheetId,
+      activateSheet: (sheetId: string) => {
+        activeSheetId = sheetId;
+      },
+      getDocument: () => doc,
+      getCollabSession: () => session,
+    };
+
+    const restoreFocusAfterSheetNavigation = vi.fn();
+    const showToast = vi.fn();
+
+    const handleInsertSheet = createAddSheetCommand({
+      app,
+      getWorkbookSheetStore: () => store,
+      restoreFocusAfterSheetNavigation,
+      showToast,
+    });
+
+    await handleInsertSheet();
+
+    expect(session.sheets.toArray().map((s: CollabSheet) => s.name)).toEqual(["Sheet1", "Sheet3", "Sheet2"]);
+    expect(activeSheetId).toBe(session.sheets.toArray()[1]!.id);
+    expect(doc.getSheetIds()).toContain(activeSheetId);
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it("deletes the active sheet in collab sessions via CollabWorkbookSheetStore (and rewrites formulas)", async () => {
+    type CollabSheet = { id: string; name: string; visibility: "visible" | "hidden" | "veryHidden" };
+    class MockSheets {
+      constructor(private readonly items: CollabSheet[]) {}
+      get length(): number {
+        return this.items.length;
+      }
+      toArray(): CollabSheet[] {
+        return this.items.slice();
+      }
+      get(i: number): CollabSheet | undefined {
+        return this.items[i];
+      }
+      insert(index: number, values: CollabSheet[]): void {
+        this.items.splice(index, 0, ...values);
+      }
+      delete(index: number, count: number): void {
+        this.items.splice(index, count);
+      }
+    }
+
+    const doc = new DocumentController();
+    const session = {
+      isReadOnly: () => false,
+      sheets: new MockSheets([
+        { id: "sheet_a", name: "Sheet1", visibility: "visible" },
+        { id: "sheet_b", name: "Sheet2", visibility: "visible" },
+        { id: "sheet_c", name: "Sheet3", visibility: "visible" },
+      ]),
+      transactLocal: (fn: () => void) => fn(),
+    } as any;
+
+    const store = new CollabWorkbookSheetStore(
+      session,
+      [
+        { id: "sheet_a", name: "Sheet1", visibility: "visible" },
+        { id: "sheet_b", name: "Sheet2", visibility: "visible" },
+        { id: "sheet_c", name: "Sheet3", visibility: "visible" },
+      ],
+      { value: "" },
+      { canEditWorkbook: () => true },
+    );
+
+    let activeSheetId = "sheet_b";
+
+    doc.setCellFormula("sheet_a", { row: 0, col: 0 }, "=Sheet2!A1");
+
+    const app = {
+      getCurrentSheetId: () => activeSheetId,
+      activateSheet: (sheetId: string) => {
+        activeSheetId = sheetId;
+      },
+      getDocument: () => doc,
+      getCollabSession: () => session,
+    };
+
+    const restoreFocusAfterSheetNavigation = vi.fn();
+    const showToast = vi.fn();
+    const confirm = vi.fn(async () => true);
+
+    const handleDeleteSheet = createDeleteActiveSheetCommand({
+      app,
+      getWorkbookSheetStore: () => store,
+      restoreFocusAfterSheetNavigation,
+      showToast,
+      confirm,
+    });
+
+    await handleDeleteSheet();
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(store.listAll().map((s) => s.name)).toEqual(["Sheet1", "Sheet3"]);
+    expect(session.sheets.toArray().map((s: CollabSheet) => s.name)).toEqual(["Sheet1", "Sheet3"]);
+    expect(activeSheetId).toBe("sheet_a");
+
+    expect(doc.getCell("sheet_a", { row: 0, col: 0 }).formula).toBe("=#REF!");
+    expect(showToast).not.toHaveBeenCalled();
   });
 });
