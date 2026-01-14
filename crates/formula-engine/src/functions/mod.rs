@@ -288,6 +288,17 @@ pub trait FunctionContext {
         None
     }
 
+    /// Returns the number format string for a cell, if available.
+    ///
+    /// This is used by worksheet information functions like `CELL("format")` /
+    /// `CELL("color")` / `CELL("parentheses")`.
+    ///
+    /// For external workbook references (`SheetId::External`), returning `None` is acceptable
+    /// because the cell format is not available via the engine's external reference interfaces.
+    fn get_cell_number_format(&self, _sheet_id: &SheetId, _addr: CellAddr) -> Option<&str> {
+        None
+    }
+
     /// Returns the workbook's style table, if available.
     fn style_table(&self) -> Option<&formula_model::StyleTable> {
         None

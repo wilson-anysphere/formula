@@ -266,6 +266,14 @@ pub trait ValueResolver {
     fn workbook_filename(&self) -> Option<&str> {
         None
     }
+
+    /// Return the number format string for a cell, if available.
+    ///
+    /// This is used by worksheet information functions like `CELL("format")` /
+    /// `CELL("color")` / `CELL("parentheses")`.
+    fn get_cell_number_format(&self, _sheet_id: usize, _addr: CellAddr) -> Option<&str> {
+        None
+    }
     /// Resolve a value from an external workbook reference like `[Book.xlsx]Sheet1!A1`.
     ///
     /// The `sheet` key is the canonical bracketed form (`"[Book.xlsx]Sheet1"`).
@@ -1866,6 +1874,13 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     fn row_style_id(&self, sheet_id: &FnSheetId, row: u32) -> Option<u32> {
         match sheet_id {
             FnSheetId::Local(id) => self.resolver.row_style_id(*id, row),
+            FnSheetId::External(_) => None,
+        }
+    }
+
+    fn get_cell_number_format(&self, sheet_id: &FnSheetId, addr: CellAddr) -> Option<&str> {
+        match sheet_id {
+            FnSheetId::Local(id) => self.resolver.get_cell_number_format(*id, addr),
             FnSheetId::External(_) => None,
         }
     }

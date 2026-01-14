@@ -5134,8 +5134,9 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 (start_id == end_id).then_some(start_id)
             }
             crate::eval::SheetReference::External(key) => {
-                // Keep INDIRECT's historical "no true 3D spans" behavior: only accept
-                // single-sheet external keys like `"[Book.xlsx]Sheet1"`.
+                // Match `functions::builtins_reference::INDIRECT`:
+                // - allow only single-sheet external workbook keys like `"[Book.xlsx]Sheet1"`
+                // - reject external 3D spans like `"[Book.xlsx]Sheet1:Sheet3!A1"`.
                 crate::eval::is_valid_external_sheet_key(key)
                     .then(|| grid.resolve_sheet_name(key))
                     .flatten()

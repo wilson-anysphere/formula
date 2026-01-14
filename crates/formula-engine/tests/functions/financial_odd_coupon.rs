@@ -4165,9 +4165,10 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
     //
     // Under the odd-coupon conventions:
     // - basis=0 uses a fixed `E = 360/frequency`.
-    // - basis=4 also uses a fixed `E = 360/frequency` (even though European `DAYS360(..., TRUE)`
-    //   between coupon dates can differ from `360/frequency` for some end-of-month schedules
-    //   involving February).
+    // - basis=4 uses European 30E/360 (`DAYS360(..., TRUE)`) for day counts like `A` and `DSC`, but
+    //   still uses a fixed `E = 360/frequency` (matching Excel's COUPDAYS behavior). This means `E`
+    //   can differ from `DAYS360(PCD, NCD, TRUE)` for some end-of-month schedules involving
+    //   February.
     //
     // Include two scenarios:
     // - one where European DAYS360 between coupon dates matches `360/frequency`
@@ -4320,6 +4321,16 @@ fn oddlprice_matches_excel_model_for_30_360_bases() {
     assert!(
         (days360_eu - e_fixed).abs() > 0.0,
         "expected DAYS360(PCD, NCD, TRUE) != 360/frequency for this scenario"
+    );
+
+    // Guard: ensure this scenario actually exercises a case where DAYS360 US vs European differ.
+    let a0 = days_between(last_interest, settlement, 0, system);
+    let a4 = days_between(last_interest, settlement, 4, system);
+    let dsm0 = days_between(settlement, maturity, 0, system);
+    let dsm4 = days_between(settlement, maturity, 4, system);
+    assert!(
+        a0 != a4 || dsm0 != dsm4,
+        "expected DAYS360 method=false vs method=true to diverge for this scenario"
     );
 
     for basis in [0, 4] {
