@@ -8058,6 +8058,17 @@ fn rewrite_defined_name_constants_for_bytecode(
 /// - `[Book.xlsx]Sheet1!A1` → `sheet = "[Book.xlsx]Sheet1"`
 /// - `'C:\path\[Book.xlsx]Sheet1'!A1` → `sheet = "[C:\path\Book.xlsx]Sheet1"`
 ///
+/// # Return value semantics
+///
+/// `get` returns an [`Option<Value>`] so providers can distinguish between a blank cell and a
+/// missing/unresolvable reference:
+///
+/// * For **local** lookups (where `sheet` is a plain worksheet name like `"Sheet1"`), returning
+///   `None` is treated as a blank cell (`Value::Blank`).
+/// * For **external workbook** lookups (where `sheet` is a key like `"[Book.xlsx]Sheet1"`), returning
+///   `None` is treated as an unresolved external link and evaluates to `#REF!`. Providers should
+///   return `Some(Value::Blank)` to represent a blank cell in an external workbook.
+///
 /// Note: Excel treats sheet names case-insensitively. The engine preserves the formula's casing in
 /// the sheet key for single-sheet external references, so providers that want Excel-compatible
 /// behavior should generally match sheet keys case-insensitively.

@@ -151,6 +151,12 @@ The engine passes a **sheet key** string to `ExternalValueProvider::get(sheet, a
     * The engine preserves the formula’s casing for single-sheet external keys; providers that want
       Excel-compatible behavior should generally match sheet keys case-insensitively.
 
+`ExternalValueProvider::get` return semantics:
+
+* For **local sheet names** (e.g. `"Sheet1"`), returning `None` is treated as a blank cell (`Value::Blank`).
+* For **external sheet keys** (e.g. `"[Book.xlsx]Sheet1"`), returning `None` is treated as an unresolved external link and
+  evaluates to `#REF!`. Providers should return `Some(Value::Blank)` to represent a blank cell in an external workbook.
+
 #### External 3D sheet spans (workbook sheet order)
 
 Excel 3D spans inside an external workbook (e.g. `Sheet1:Sheet3`) are represented by the engine as a
