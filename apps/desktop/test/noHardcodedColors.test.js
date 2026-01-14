@@ -195,22 +195,22 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     /\[\s*(?:["'\`])setAttribute(?:["'\`])\s*]\s*\(\s*(["'])style\1\s*,\s*(["'\`])\s*(?<value>[^"'`]*?)\2/gi;
   const setPropertyStyleColor = new RegExp(
     // DOM style setProperty assignments (e.g. `el.style.setProperty("color", "red")` or `setProperty("--foo", "red")`)
-    String.raw`\.\s*style\b\s*(?:\?\.|\.)\s*setProperty\s*\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
+    String.raw`\.\s*style\b\s*(?:\?\.|\.)\s*setProperty\s*(?:\(\s*|\.\s*call\s*\(\s*[^,]+,\s*)(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
     "gi",
   );
   const setPropertyStyleStyleBracketColor = new RegExp(
     // DOM style setProperty assignments via bracket access to the `style` property (e.g. `el["style"].setProperty("color", "red")`)
-    String.raw`\[\s*(?:["'\`])style(?:["'\`])\s*]\s*(?:\?\.|\.)\s*setProperty\s*\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
+    String.raw`\[\s*(?:["'\`])style(?:["'\`])\s*]\s*(?:\?\.|\.)\s*setProperty\s*(?:\(\s*|\.\s*call\s*\(\s*[^,]+,\s*)(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
     "gi",
   );
   const setPropertyStyleBracketColor = new RegExp(
     // DOM style setProperty assignments via bracket notation (e.g. `el.style["setProperty"]("color", "red")`)
-    String.raw`\.\s*style\b\s*(?:\?\.)?\s*\[\s*(?:["'\`])setProperty(?:["'\`])\s*]\s*\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
+    String.raw`\.\s*style\b\s*(?:\?\.)?\s*\[\s*(?:["'\`])setProperty(?:["'\`])\s*]\s*(?:\(\s*|\.\s*call\s*\(\s*[^,]+,\s*)(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
     "gi",
   );
   const setPropertyStyleStyleBracketBracketColor = new RegExp(
     // DOM style setProperty assignments via bracket access to `style` + bracket notation (e.g. `el["style"]["setProperty"]("color", "red")`)
-    String.raw`\[\s*(?:["'\`])style(?:["'\`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'\`])setProperty(?:["'\`])\s*]\s*\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
+    String.raw`\[\s*(?:["'\`])style(?:["'\`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'\`])setProperty(?:["'\`])\s*]\s*(?:\(\s*|\.\s*call\s*\(\s*[^,]+,\s*)(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
     "gi",
   );
   const setAttributeColor = new RegExp(
