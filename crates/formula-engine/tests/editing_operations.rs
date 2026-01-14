@@ -167,6 +167,35 @@ fn structural_edits_update_sheet_range_references() {
 }
 
 #[test]
+fn structural_edits_update_unicode_sheet_range_references() {
+    // Regression test for Unicode sheet name matching in structural edit rewrites.
+    //
+    // The engine treats sheet names case-insensitively across Unicode (see `Workbook::sheet_id`),
+    // so structural edits must resolve the same sheets when rewriting 3D spans.
+    let mut engine = Engine::new();
+    engine.set_cell_value("Café", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+    // `CAFÉ` uses a different Unicode case for `É` than the sheet's display name.
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM('CAFÉ:Sheet3'!A1)")
+        .unwrap();
+
+    engine
+        .apply_operation(EditOp::InsertRows {
+            sheet: "Sheet2".to_string(),
+            row: 0,
+            count: 1,
+        })
+        .unwrap();
+
+    assert_eq!(
+        engine.get_cell_formula("Summary", "A1"),
+        Some("=SUM('CAFÉ:Sheet3'!A2)")
+    );
+}
+
+#[test]
 fn insert_row_updates_mixed_absolute_and_relative_references() {
     let mut engine = Engine::new();
     engine
