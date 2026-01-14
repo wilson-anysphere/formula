@@ -2170,11 +2170,20 @@ fn import_xls_with_biff_reader(
                                                 std::borrow::Cow::Borrowed(&shared.rgce)
                                             };
 
-                                        let decoded = biff::rgce::decode_biff8_rgce_with_base(
-                                            &rgce_to_decode,
-                                            &rgce_ctx,
-                                            Some(target_cell),
-                                        );
+                                        let decoded = if shared.rgcb.is_empty() {
+                                            biff::rgce::decode_biff8_rgce_with_base(
+                                                &rgce_to_decode,
+                                                &rgce_ctx,
+                                                Some(target_cell),
+                                            )
+                                        } else {
+                                            biff::rgce::decode_biff8_rgce_with_base_and_rgcb(
+                                                &rgce_to_decode,
+                                                &shared.rgcb,
+                                                &rgce_ctx,
+                                                Some(target_cell),
+                                            )
+                                        };
 
                                         for warning in decoded.warnings {
                                             push_import_warning(

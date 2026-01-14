@@ -489,6 +489,30 @@ pub fn build_shared_formula_shrfmla_only_continued_ptgstr_fixture_xls() -> Vec<u
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a SHRFMLA-only shared formula whose token stream
+/// includes a `PtgArray` constant (backed by trailing `rgcb` bytes).
+///
+/// Some writers omit the base cell's `FORMULA` record entirely but still use `PtgArray`. Our
+/// SHRFMLA-only shared-formula recovery must preserve the `rgcb` bytes so array constants decode to
+/// `{...}` literals rather than `#UNKNOWN!`.
+///
+/// Sheet name: `ShrfmlaArray`
+/// Shared formula range: `B1:B2`
+/// - `B1`: recovered from SHRFMLA (no FORMULA record)
+/// - `B2`: `PtgExp(B1)`
+pub fn build_shared_formula_shrfmla_only_ptgarray_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_shrfmla_only_ptgarray_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a shared formula over `B1:B2`:
 /// - `B1`: `SUM(A1,1)`
 /// - `B2`: `SUM(A2,1)` via `PtgExp` referencing `B1`
@@ -7847,6 +7871,78 @@ fn build_shared_formula_shrfmla_only_continued_ptgstr_sheet_stream(xf_cell: u16)
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_shared_formula_shrfmla_only_ptgarray_workbook_stream() -> Vec<u8> {
+    // Use the generic single-sheet workbook builder: it creates a minimal BIFF8 globals stream
+    // including a default cell XF at index 16.
+    let xf_cell = 16u16;
+    let sheet_stream = build_shared_formula_shrfmla_only_ptgarray_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("ShrfmlaArray", &sheet_stream, 1252)
+}
+
+fn build_shared_formula_shrfmla_only_ptgarray_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide numeric inputs in A1/A2 so the references are within the sheet's used range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0));
+
+    // Shared formula body stored in SHRFMLA (range B1:B2):
+    //   PtgRefN (A(row)) + PtgArray + PtgFuncVar(SUM) + PtgAdd
+    let rgce_shared = {
+        let mut v = Vec::new();
+        // PtgRefN: row_off=0, col_off=-1 relative to the formula cell.
+        v.push(0x2C);
+        v.extend_from_slice(&0u16.to_le_bytes()); // row_off = 0
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col_off = -1 (14-bit), row+col relative
+
+        // PtgArray (array constant; data stored in trailing rgcb).
+        v.push(0x20);
+        v.extend_from_slice(&[0u8; 7]); // reserved
+
+        // PtgFuncVar: SUM(argc=1).
+        v.push(0x22);
+        v.push(1);
+        v.extend_from_slice(&4u16.to_le_bytes());
+
+        // PtgAdd.
+        v.push(0x03);
+        v
+    };
+
+    // rgcb payload for the array constant `{1,2;3,4}`.
+    let rgcb = rgcb_array_constant_numbers_2x2(&[1.0, 2.0, 3.0, 4.0]);
+
+    // SHRFMLA record defining shared rgce + rgcb for the range B1:B2.
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record_with_rgcb(0, 1, 1, 1, &rgce_shared, &rgcb),
+    );
+
+    // B2 formula record: PtgExp(B1).
+    let ptgexp = ptg_exp(0, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 1, xf_cell, 0.0, &ptgexp),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
 }
 

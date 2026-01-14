@@ -39,6 +39,8 @@ pub(crate) struct SharedFormulaDef {
     pub(crate) col_last: u16,
     /// Raw BIFF8 rgce token stream stored in the SHRFMLA record.
     pub(crate) rgce: Vec<u8>,
+    /// Trailing data blocks (`rgcb`) referenced by certain ptgs (notably `PtgArray`).
+    pub(crate) rgcb: Vec<u8>,
 }
 
 #[derive(Debug, Default)]
@@ -259,5 +261,6 @@ fn parse_shrfmla_record(record: &records::LogicalBiffRecord<'_>) -> Option<Share
         col_first: header.col_first,
         col_last: header.col_last,
         rgce: parsed.rgce,
+        rgcb: parsed.rgcb,
     })
 }
