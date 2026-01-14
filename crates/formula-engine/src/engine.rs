@@ -15652,6 +15652,27 @@ mod tests {
     }
 
     #[test]
+    fn cell_width_self_reference_is_not_circular() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A1", r#"=CELL("width", A1)"#)
+            .unwrap();
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.circular_reference_count(), 0);
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(8.0));
+
+        engine.set_col_width("Sheet1", 0, Some(15.0));
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.circular_reference_count(), 0);
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(15.1));
+
+        engine.set_col_hidden("Sheet1", 0, true);
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.circular_reference_count(), 0);
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(0.0));
+    }
+
+    #[test]
     fn multithreaded_and_singlethreaded_match_for_volatiles_given_same_recalc_context() {
         fn setup(engine: &mut Engine) {
             engine
