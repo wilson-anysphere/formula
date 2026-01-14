@@ -17,6 +17,16 @@ fn ptg_namex(ixti: u16, name_index: u16, ptg: u8) -> Vec<u8> {
     out
 }
 
+fn ptg_int(n: u16) -> [u8; 3] {
+    let [lo, hi] = n.to_le_bytes();
+    [0x1E, lo, hi] // PtgInt
+}
+
+fn ptg_funcvar_udf(argc: u8) -> [u8; 4] {
+    // PtgFuncVar(argc, iftab=0x00FF)
+    [0x22, argc, 0xFF, 0x00]
+}
+
 fn assert_parseable(formula: &str) {
     formula_engine::parse_formula(formula, formula_engine::ParseOptions::default())
         .expect("parse formula");
@@ -54,3 +64,17 @@ fn decodes_value_class_ptg_namex_with_implicit_intersection_prefix() {
     assert_parseable(&text);
 }
 
+#[test]
+fn decodes_ptg_name_as_udf_function_name_via_sentinel_funcvar() {
+    // Name-based UDF call pattern:
+    //   args..., PtgName(func), PtgFuncVar(argc+1, 0x00FF)
+    let mut rgce = Vec::new();
+    rgce.extend_from_slice(&ptg_int(1));
+    rgce.extend_from_slice(&ptg_int(2));
+    rgce.extend_from_slice(&ptg_name(123, 0x23));
+    rgce.extend_from_slice(&ptg_funcvar_udf(3));
+
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Name_123(1,2)");
+    assert_parseable(&text);
+}
