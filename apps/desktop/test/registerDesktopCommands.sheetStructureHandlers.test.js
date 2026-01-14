@@ -10,7 +10,7 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-test("main.ts wires sheetStructureHandlers into registerDesktopCommands (Insert/Delete Sheet)", () => {
+test("main.ts wires sheetStructureHandlers + autoFilterHandlers into registerDesktopCommands", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = fs.readFileSync(mainPath, "utf8");
 
@@ -50,7 +50,7 @@ test("main.ts wires sheetStructureHandlers into registerDesktopCommands (Insert/
   );
   assert.match(
     segment,
-    /\btoggle\s*:\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{/,
+    /\btoggle\s*:\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z_$][\w$]*)\s*=>\s*\{/,
     "Expected autoFilterHandlers.toggle to be wired in main.ts",
   );
   assert.match(
@@ -62,6 +62,11 @@ test("main.ts wires sheetStructureHandlers into registerDesktopCommands (Insert/
     segment,
     /\bapplyRibbonAutoFilterFromSelection\b/,
     "Expected autoFilterHandlers.toggle to apply ribbon AutoFilter from selection",
+  );
+  assert.match(
+    segment,
+    /\bclearRibbonAutoFiltersForActiveSheet\b/,
+    "Expected autoFilterHandlers.toggle to clear ribbon AutoFilters when disabling",
   );
   assert.match(
     segment,
