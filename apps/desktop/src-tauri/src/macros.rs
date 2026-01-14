@@ -895,7 +895,10 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
             while end > 0 && !message.is_char_boundary(end) {
                 end -= 1;
             }
-            let mut truncated = message[..end].to_string();
+            // Build a new bounded-capacity string so we don't retain (or grow to) a very large
+            // allocation for a single macro log line.
+            let mut truncated = String::with_capacity(max_line_bytes);
+            truncated.push_str(&message[..end]);
             if truncated.len() + suffix_len <= max_line_bytes {
                 truncated.push_str(MESSAGE_TRUNCATED_SUFFIX);
             }
