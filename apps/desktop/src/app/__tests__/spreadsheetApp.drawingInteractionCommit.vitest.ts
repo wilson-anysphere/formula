@@ -267,6 +267,121 @@ describe("SpreadsheetApp drawing interaction commits", () => {
     root.remove();
   });
 
+  it("preserves legacy DocumentController cell anchors (and pixel sizes) when committing move interactions", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument() as any;
+
+    const rawDrawing = {
+      id: "drawing_foo",
+      zOrder: 0,
+      kind: { type: "image", imageId: "img1" },
+      anchor: { type: "cell", sheetId, row: 0, col: 0 },
+      size: { width: 120, height: 80 },
+    };
+    doc.setSheetDrawings(sheetId, [rawDrawing]);
+
+    const before = convertDocumentSheetDrawingsToUiDrawingObjects(doc.getSheetDrawings(sheetId), { sheetId })[0]!;
+    expect(before.anchor.type).toBe("oneCell");
+    if (before.anchor.type !== "oneCell") {
+      throw new Error("Expected oneCell anchor for test drawing");
+    }
+
+    const after = {
+      ...before,
+      anchor: {
+        ...before.anchor,
+        from: {
+          ...before.anchor.from,
+          offset: { xEmu: pxToEmu(10), yEmu: pxToEmu(5) },
+        },
+      },
+    };
+
+    const callbacks = (app as any).drawingInteractionCallbacks;
+    callbacks.onInteractionCommit({ kind: "move", id: before.id, before, after, objects: [after] });
+
+    const updated = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
+    expect(updated?.anchor?.type).toBe("cell");
+    expect(updated?.anchor?.row).toBe(0);
+    expect(updated?.anchor?.col).toBe(0);
+    expect(updated?.anchor?.x).toBe(10);
+    expect(updated?.anchor?.y).toBe(5);
+    expect(updated?.size).toEqual({ width: 120, height: 80 });
+
+    if (typeof doc.undo === "function") {
+      expect(doc.undo()).toBe(true);
+      const reverted = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
+      expect(reverted?.anchor).toEqual(rawDrawing.anchor);
+      expect(reverted?.size).toEqual(rawDrawing.size);
+    }
+
+    app.dispose();
+    root.remove();
+  });
+
+  it("persists size for legacy cell-anchored drawings even when the size field was missing (resize commit)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument() as any;
+
+    const rawDrawing = {
+      id: "drawing_foo",
+      zOrder: 0,
+      kind: { type: "image", imageId: "img1" },
+      anchor: { type: "cell", sheetId, row: 0, col: 0 },
+      // NOTE: no `size` field.
+    };
+    doc.setSheetDrawings(sheetId, [rawDrawing]);
+
+    const before = convertDocumentSheetDrawingsToUiDrawingObjects(doc.getSheetDrawings(sheetId), { sheetId })[0]!;
+    expect(before.anchor.type).toBe("oneCell");
+    if (before.anchor.type !== "oneCell") {
+      throw new Error("Expected oneCell anchor for test drawing");
+    }
+
+    const after = {
+      ...before,
+      anchor: {
+        ...before.anchor,
+        size: { cx: pxToEmu(200), cy: pxToEmu(150) },
+      },
+    };
+
+    const callbacks = (app as any).drawingInteractionCallbacks;
+    callbacks.onInteractionCommit({ kind: "resize", id: before.id, before, after, objects: [after] });
+
+    const updated = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
+    expect(updated?.anchor?.type).toBe("cell");
+    expect(updated?.anchor?.row).toBe(0);
+    expect(updated?.anchor?.col).toBe(0);
+    expect(updated?.size).toEqual({ width: 200, height: 150 });
+
+    if (typeof doc.undo === "function") {
+      expect(doc.undo()).toBe(true);
+      const reverted = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
+      expect(reverted?.anchor).toEqual(rawDrawing.anchor);
+      expect(Object.prototype.hasOwnProperty.call(reverted ?? {}, "size")).toBe(false);
+    }
+
+    app.dispose();
+    root.remove();
+  });
+
   it("persists kind.rawXml patches from interaction commits (undoable)", () => {
     const root = createRoot();
     const status = {

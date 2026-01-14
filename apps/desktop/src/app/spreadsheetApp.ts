@@ -10204,6 +10204,85 @@ export class SpreadsheetApp {
       const normalizeEmuInt = (n: unknown): number => Math.round(normalizeEmu(n));
       const uiType = typeof (uiAnchor as any).type === "string" ? normalizeTag((uiAnchor as any).type) : "";
 
+      // Preserve the legacy DocumentController "cell" anchor schema
+      // (`{ type: "cell", row, col, x?, y? }`). `convertDocumentSheetDrawingsToUiDrawingObjects`
+      // maps this to the UI `Anchor` shape (`type: "oneCell"`). When committing edits, prefer
+      // patching the existing schema rather than rewriting the anchor to the UI representation
+      // so older snapshots and cross-version collab payloads remain stable.
+      const rawType = typeof (rawAnchor as any).type === "string" ? normalizeTag((rawAnchor as any).type) : "";
+      if (rawType === "cell" && uiType === "onecell") {
+        const uiFrom = (uiAnchor as any).from;
+        const uiCell = uiFrom && typeof uiFrom === "object" ? (uiFrom as any).cell : null;
+        if (uiCell && typeof uiCell === "object") {
+          (rawAnchor as any).row = Math.trunc(Number((uiCell as any).row ?? 0));
+          (rawAnchor as any).col = Math.trunc(Number((uiCell as any).col ?? 0));
+        }
+
+        const uiOffset = uiFrom && typeof uiFrom === "object" ? (uiFrom as any).offset : null;
+        if (uiOffset && typeof uiOffset === "object") {
+          const xEmu = normalizeEmu((uiOffset as any).xEmu);
+          const yEmu = normalizeEmu((uiOffset as any).yEmu);
+
+          // Patch any existing offset keys (EMU).
+          if ("xEmu" in rawAnchor) (rawAnchor as any).xEmu = xEmu;
+          if ("yEmu" in rawAnchor) (rawAnchor as any).yEmu = yEmu;
+          if ("x_emu" in rawAnchor) (rawAnchor as any).x_emu = xEmu;
+          if ("y_emu" in rawAnchor) (rawAnchor as any).y_emu = yEmu;
+          if ("dxEmu" in rawAnchor) (rawAnchor as any).dxEmu = xEmu;
+          if ("dyEmu" in rawAnchor) (rawAnchor as any).dyEmu = yEmu;
+          if ("offsetXEmu" in rawAnchor) (rawAnchor as any).offsetXEmu = xEmu;
+          if ("offsetYEmu" in rawAnchor) (rawAnchor as any).offsetYEmu = yEmu;
+          if ("offset_x_emu" in rawAnchor) (rawAnchor as any).offset_x_emu = xEmu;
+          if ("offset_y_emu" in rawAnchor) (rawAnchor as any).offset_y_emu = yEmu;
+
+          const xPx = Math.round(emuToPx(xEmu));
+          const yPx = Math.round(emuToPx(yEmu));
+
+          // Patch any existing offset keys (pixels).
+          if ("x" in rawAnchor) (rawAnchor as any).x = xPx;
+          if ("y" in rawAnchor) (rawAnchor as any).y = yPx;
+          if ("dx" in rawAnchor) (rawAnchor as any).dx = xPx;
+          if ("dy" in rawAnchor) (rawAnchor as any).dy = yPx;
+          if ("offsetX" in rawAnchor) (rawAnchor as any).offsetX = xPx;
+          if ("offsetY" in rawAnchor) (rawAnchor as any).offsetY = yPx;
+          if ("offsetXPx" in rawAnchor) (rawAnchor as any).offsetXPx = xPx;
+          if ("offsetYPx" in rawAnchor) (rawAnchor as any).offsetYPx = yPx;
+          if ("offset_x" in rawAnchor) (rawAnchor as any).offset_x = xPx;
+          if ("offset_y" in rawAnchor) (rawAnchor as any).offset_y = yPx;
+
+          const hasAnyOffsetKey =
+            "xEmu" in rawAnchor ||
+            "yEmu" in rawAnchor ||
+            "x_emu" in rawAnchor ||
+            "y_emu" in rawAnchor ||
+            "dxEmu" in rawAnchor ||
+            "dyEmu" in rawAnchor ||
+            "offsetXEmu" in rawAnchor ||
+            "offsetYEmu" in rawAnchor ||
+            "offset_x_emu" in rawAnchor ||
+            "offset_y_emu" in rawAnchor ||
+            "x" in rawAnchor ||
+            "y" in rawAnchor ||
+            "dx" in rawAnchor ||
+            "dy" in rawAnchor ||
+            "offsetX" in rawAnchor ||
+            "offsetY" in rawAnchor ||
+            "offsetXPx" in rawAnchor ||
+            "offsetYPx" in rawAnchor ||
+            "offset_x" in rawAnchor ||
+            "offset_y" in rawAnchor;
+
+          // If the stored schema did not include any offset fields but the new anchor does,
+          // add `x`/`y` so we don't lose sub-cell positioning information.
+          if (!hasAnyOffsetKey && (xEmu !== 0 || yEmu !== 0)) {
+            (rawAnchor as any).x = xPx;
+            (rawAnchor as any).y = yPx;
+          }
+        }
+
+        return rawAnchor;
+      }
+
       const patchCellRef = (cell: any, next: { row: number; col: number }): void => {
         if (!cell || typeof cell !== "object") return;
         (cell as any).row = Math.trunc(next.row);
@@ -10359,7 +10438,8 @@ export class SpreadsheetApp {
       // `convertDocumentSheetDrawingsToUiDrawingObjects` prefers the top-level `size` field when
       // constructing UI anchors. If the drawing is resized and we update `anchor.size` but leave
       // `size` stale, subsequent cache invalidations can make the drawing "snap back" visually.
-      const shouldUpdateSize = Object.prototype.hasOwnProperty.call(drawing, "size") || (after as any).size !== undefined;
+      const shouldUpdateSize =
+        commitKind === "resize" || Object.prototype.hasOwnProperty.call(drawing, "size") || (after as any).size !== undefined;
       if (shouldUpdateSize) {
         const derivedSize = (() => {
           const anchor = after.anchor as any;
@@ -10398,7 +10478,106 @@ export class SpreadsheetApp {
             Number.isFinite((derivedSize as any).cx) &&
             Number.isFinite((derivedSize as any).cy)
           ) {
-            next.size = { ...(derivedSize as any), cx: Math.round((derivedSize as any).cx), cy: Math.round((derivedSize as any).cy) };
+            const cxEmu = Math.round((derivedSize as any).cx);
+            const cyEmu = Math.round((derivedSize as any).cy);
+            const widthPx = Math.round(emuToPx(cxEmu));
+            const heightPx = Math.round(emuToPx(cyEmu));
+
+            const existingSize = (drawing as any).size;
+            const existingSizeType = existingSize && typeof existingSize === "object" ? existingSize : null;
+            const rawAnchorType =
+              typeof (drawing as any).anchor?.type === "string"
+                ? String((drawing as any).anchor.type).replace(/[^A-Za-z0-9]/g, "").toLowerCase()
+                : "";
+
+            if (existingSizeType) {
+              const patched: any = { ...existingSizeType };
+              let patchedAny = false;
+
+              // Preserve any existing EMU key conventions.
+              if ("cx" in patched) {
+                patched.cx = cxEmu;
+                patchedAny = true;
+              }
+              if ("cy" in patched) {
+                patched.cy = cyEmu;
+                patchedAny = true;
+              }
+              if ("cxEmu" in patched) {
+                patched.cxEmu = cxEmu;
+                patchedAny = true;
+              }
+              if ("cyEmu" in patched) {
+                patched.cyEmu = cyEmu;
+                patchedAny = true;
+              }
+              if ("widthEmu" in patched) {
+                patched.widthEmu = cxEmu;
+                patchedAny = true;
+              }
+              if ("heightEmu" in patched) {
+                patched.heightEmu = cyEmu;
+                patchedAny = true;
+              }
+              if ("width_emu" in patched) {
+                patched.width_emu = cxEmu;
+                patchedAny = true;
+              }
+              if ("height_emu" in patched) {
+                patched.height_emu = cyEmu;
+                patchedAny = true;
+              }
+              if ("wEmu" in patched) {
+                patched.wEmu = cxEmu;
+                patchedAny = true;
+              }
+              if ("hEmu" in patched) {
+                patched.hEmu = cyEmu;
+                patchedAny = true;
+              }
+
+              // Preserve any existing pixel key conventions.
+              if ("width" in patched) {
+                patched.width = widthPx;
+                patchedAny = true;
+              }
+              if ("w" in patched) {
+                patched.w = widthPx;
+                patchedAny = true;
+              }
+              if ("widthPx" in patched) {
+                patched.widthPx = widthPx;
+                patchedAny = true;
+              }
+              if ("width_px" in patched) {
+                patched.width_px = widthPx;
+                patchedAny = true;
+              }
+              if ("height" in patched) {
+                patched.height = heightPx;
+                patchedAny = true;
+              }
+              if ("h" in patched) {
+                patched.h = heightPx;
+                patchedAny = true;
+              }
+              if ("heightPx" in patched) {
+                patched.heightPx = heightPx;
+                patchedAny = true;
+              }
+              if ("height_px" in patched) {
+                patched.height_px = heightPx;
+                patchedAny = true;
+              }
+
+              next.size = patchedAny ? patched : { cx: cxEmu, cy: cyEmu };
+            } else if (rawAnchorType === "cell") {
+              // When resizing legacy cell-anchored drawings, prefer writing back pixel sizes
+              // (DocumentController schema) rather than introducing a new `{cx,cy}` encoding.
+              next.size = { width: widthPx, height: heightPx };
+            } else {
+              next.size = { cx: cxEmu, cy: cyEmu };
+            }
           } else {
             // Preserve non-EMU encodings (e.g. legacy pixel `{width,height}` sizes) as-is.
             next.size = derivedSize;
