@@ -386,6 +386,35 @@ class PromotePublicCLITests(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertIn("XLSB leak scanning is not supported", stdout.getvalue())
 
+    def test_main_rejects_name_with_mismatched_extension(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="promote-public-cli-test-") as td:
+            tmp = Path(td)
+            public_dir = tmp / "public"
+            triage_out = tmp / "triage"
+            input_path = tmp / "input.xlsx"
+            input_path.write_bytes(_make_minimal_xlsx())
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                with mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "promote_public.py",
+                        "--input",
+                        str(input_path),
+                        "--name",
+                        "case.xlsm",
+                        "--public-dir",
+                        str(public_dir),
+                        "--triage-out",
+                        str(triage_out),
+                    ],
+                ):
+                    rc = promote_mod.main()
+            self.assertEqual(rc, 1)
+            self.assertIn("--name extension must match input extension", stdout.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
