@@ -625,6 +625,17 @@ def main() -> int:
             + f"Warning: release binary exceeds configured limit (**{_human_bytes(bin_size_bytes)}** > **{limit_mb} MB**)."
         )
 
+    if stripped is False:
+        prefix = tool_note + "\n\n" if tool_note else ""
+        tool_note = (
+            prefix
+            + "Note: the release binary appears to be **not stripped**. "
+            "Stripping debug symbols is often a quick win for installer/binary size.\n\n"
+            "Consider:\n"
+            "- enabling `strip = true` (or `strip = \"symbols\"`) in `[profile.release]` (Cargo.toml)\n"
+            "- or running `strip` on the final artifact in packaging/build steps"
+        )
+
     # Optional: add llvm-size output (helpful even when cargo-bloat is present).
     llvm_size_cmd: list[str] | None = None
     llvm_size_out: CmdResult | None = None
