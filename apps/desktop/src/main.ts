@@ -8121,6 +8121,16 @@ const ribbonCommandHandlersCtx = {
     void commandRegistry.executeCommand(commandId, ...args).catch((err) => onRibbonCommandError(commandId, err));
   },
   sortSelection: (options: { order: "ascending" | "descending" }) => sortSelection(app, options),
+  openCustomSort: (commandId: string) => {
+    handleCustomSortCommand(commandId, {
+      isEditing: isSpreadsheetEditing,
+      getDocument: () => app.getDocument(),
+      getSheetId: () => app.getCurrentSheetId(),
+      getSelectionRanges: () => app.getSelectionRanges(),
+      getCellValue: (sheetId, cell) => app.getCellComputedValueForSheet(sheetId, cell),
+      focusGrid: () => app.focus(),
+    });
+  },
 };
 
 const ribbonActions = createRibbonActionsFromCommands({
@@ -8663,17 +8673,6 @@ function handleRibbonCommand(commandId: string): void {
         return;
       case "navigation.goTo":
         executeBuiltinCommand("navigation.goTo");
-        return;
-      case "home.editing.sortFilter.customSort":
-      case "data.sortFilter.sort.customSort":
-        handleCustomSortCommand(commandId, {
-          isEditing: isSpreadsheetEditing,
-          getDocument: () => app.getDocument(),
-          getSheetId: () => app.getCurrentSheetId(),
-          getSelectionRanges: () => app.getSelectionRanges(),
-          getCellValue: (sheetId, cell) => app.getCellComputedValueForSheet(sheetId, cell),
-          focusGrid: () => app.focus(),
-        });
         return;
       case "view.freezePanes":
       case "view.freezeTopRow":

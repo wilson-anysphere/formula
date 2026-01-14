@@ -96,4 +96,18 @@ describe("handleRibbonCommand", () => {
     expect(handleRibbonCommand(ctx, "data.sortFilter.sortZtoA")).toBe(true);
     expect(sortSelection).toHaveBeenCalledWith({ order: "descending" });
   });
+
+  it("routes custom sort commands through ctx.openCustomSort", () => {
+    const doc = new DocumentController();
+    const ctx = createCtx(doc);
+    const openCustomSort = vi.fn();
+    ctx.openCustomSort = openCustomSort;
+
+    expect(handleRibbonCommand(ctx, "home.editing.sortFilter.customSort")).toBe(true);
+    expect(openCustomSort).toHaveBeenCalledWith("home.editing.sortFilter.customSort");
+
+    openCustomSort.mockClear();
+    expect(handleRibbonCommand(ctx, "data.sortFilter.sort.customSort")).toBe(true);
+    expect(openCustomSort).toHaveBeenCalledWith("data.sortFilter.sort.customSort");
+  });
 });

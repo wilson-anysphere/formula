@@ -60,6 +60,7 @@ export type RibbonCommandHandlerContext = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   executeCommand?: (commandId: string, ...args: any[]) => void;
   sortSelection?: (options: { order: "ascending" | "descending" }) => void;
+  openCustomSort?: (commandId: string) => void;
   openFormatCells?: () => void;
   /**
    * Pass-through for app shell concerns. Not currently used by formatting handlers, but
@@ -911,6 +912,15 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     case "data.sortFilter.sortZtoA":
     case "data.sortFilter.sort.sortZtoA":
       ctx.sortSelection?.({ order: "descending" });
+      return true;
+    case "home.editing.sortFilter.customSort":
+    case "data.sortFilter.sort.customSort":
+      if (ctx.openCustomSort) {
+        ctx.openCustomSort(commandId);
+      } else {
+        ctx.showToast?.("Custom sort is not available.", "error");
+        ctx.app.focus();
+      }
       return true;
     default:
       return false;
