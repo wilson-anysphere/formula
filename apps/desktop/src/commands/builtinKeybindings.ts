@@ -13,6 +13,8 @@ export type BuiltinKeybinding = {
 // Spreadsheet-affecting shortcuts should fail closed when the focus/edit context keys
 // are missing during startup. Prefer explicit `== true/false` checks over `!foo`.
 const WHEN_SPREADSHEET_READY = "spreadsheet.isEditing == false && focus.inTextInput == false";
+// Some features (outline-based AutoFilter MVP) are only supported in the legacy grid renderer.
+const WHEN_LEGACY_GRID = "spreadsheet.gridMode == 'legacy'";
 // Comment creation/editing should be gated by explicit comment permissions (viewer vs commenter).
 // Note: `spreadsheet.isReadOnly` is not sufficient because the `commenter` role is read-only for
 // cell edits but can still comment.
@@ -148,7 +150,7 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     command: "data.sortFilter.filter",
     key: "ctrl+shift+l",
     mac: "cmd+shift+l",
-    when: WHEN_SPREADSHEET_READY,
+    when: `${WHEN_SPREADSHEET_READY} && ${WHEN_LEGACY_GRID}`,
   },
   // Theme switching (safe defaults: avoid Excel shortcuts by using Ctrl/Cmd+Alt/Option+Shift+<key>).
   {

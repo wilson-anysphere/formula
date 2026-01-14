@@ -62,6 +62,8 @@ export function registerRibbonAutoFilterCommands(params: {
     icon: null,
     description: "Toggle AutoFilter for the active sheet",
     keywords: ["filter", "auto filter", "autofilter", "sort & filter"],
+    // Hide from the command palette when the active grid mode does not support outline-based filtering.
+    when: "spreadsheet.gridMode == 'legacy'",
   });
 
   registerIfMissing(commandRegistry, "data.sortFilter.clear", "Clear", () => withHandlers((handlers) => handlers.clear()), {
@@ -70,7 +72,7 @@ export function registerRibbonAutoFilterCommands(params: {
     description: "Clear AutoFilter criteria (show all rows)",
     keywords: ["clear", "filter", "auto filter", "autofilter"],
     // Hide from the command palette when AutoFilter is not enabled for the active sheet.
-    when: "spreadsheet.hasAutoFilter == true",
+    when: "spreadsheet.hasAutoFilter == true && spreadsheet.gridMode == 'legacy'",
   });
 
   registerIfMissing(commandRegistry, "data.sortFilter.reapply", "Reapply", () => withHandlers((handlers) => handlers.reapply()), {
@@ -79,7 +81,7 @@ export function registerRibbonAutoFilterCommands(params: {
     description: "Reapply the current AutoFilter",
     keywords: ["reapply", "filter", "auto filter", "autofilter"],
     // Hide from the command palette when AutoFilter is not enabled for the active sheet.
-    when: "spreadsheet.hasAutoFilter == true",
+    when: "spreadsheet.hasAutoFilter == true && spreadsheet.gridMode == 'legacy'",
   });
 
   // Ribbon-only alias for the canonical Clear command. Keep it registered so the ribbon isn't

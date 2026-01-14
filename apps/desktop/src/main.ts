@@ -5301,6 +5301,9 @@ if (
       cellHasValue: (value != null && String(value).trim().length > 0) || (formula != null && formula.trim().length > 0),
       commentsPanelVisible: app.isCommentsPanelVisible(),
       cellHasComment: app.activeCellHasComment(),
+      // "legacy" vs "shared" grid mode. Used to gate keybindings/command-palette commands that
+      // depend on legacy-only features (e.g. outline-based AutoFilter MVP).
+      "spreadsheet.gridMode": app.getGridMode(),
       // Ribbon AutoFilter MVP is view-local (in-memory store + outline.hidden.filter). Expose
       // a context key so command-palette entries like "Clear" / "Reapply" can be hidden when
       // AutoFilter is not enabled for the active sheet.
@@ -5340,6 +5343,7 @@ if (
   app.getDocument().on("change", () => updateContextKeys());
   window.addEventListener("formula:comments-panel-visibility-changed", () => updateContextKeys());
   window.addEventListener("formula:comments-changed", () => updateContextKeys());
+  window.addEventListener("formula:view-changed", () => updateContextKeys());
   window.addEventListener("formula:read-only-changed", () => updateContextKeys());
   window.addEventListener("formula:sheet-metadata-changed", () => updateContextKeys());
 
