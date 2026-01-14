@@ -1,5 +1,5 @@
 use formula_engine::eval::CellAddr;
-use formula_engine::{Engine, ErrorKind, ExternalValueProvider, Value};
+use formula_engine::{Engine, ErrorKind, ExternalValueProvider, PrecedentNode, Value};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -166,6 +166,19 @@ fn bytecode_indirect_dynamic_external_cell_ref_compiles_and_evaluates_via_provid
     assert!(
         provider.calls() > 0,
         "expected INDIRECT to consult the external provider when dereferencing external workbook refs"
+    );
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 1 } // B1
+            },
+            PrecedentNode::ExternalCell {
+                sheet: "[Book.xlsx]Sheet1".to_string(),
+                addr: CellAddr { row: 0, col: 0 },
+            }
+        ]
     );
 }
 
