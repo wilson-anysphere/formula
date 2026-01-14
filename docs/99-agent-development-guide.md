@@ -17,8 +17,9 @@ If these files become hard to read because patch/diff formatting was pasted into
 clean them up locally by replacing the literal backslash-`n` sequences and stray diff markers with
 real newlines / normal Markdown formatting.
 
-For example, to replace literal `\n+` sequences with real newlines (best-effort; tune for your
-specific corruption), you can run:
+For example, to replace accidental literal backslash-`n` fragments (often introduced when diff/patch
+text is pasted into Markdown) with real newlines (best-effort; tune for your specific corruption),
+you can run:
 
 ```bash
 python -c 'from pathlib import Path; import re; p=Path("scratchpad.md"); s=p.read_text(encoding="utf-8", errors="surrogateescape"); p.write_text(re.sub(r"\\\\n\\+ ?", "\\n", s), encoding="utf-8", errors="surrogateescape")'
