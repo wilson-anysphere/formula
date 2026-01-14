@@ -1286,6 +1286,8 @@ fn pivot_layout_model_to_engine(layout: formula_model::pivots::Layout) -> pivot_
 fn pivot_subtotals_model_to_engine(
     position: formula_model::pivots::SubtotalPosition,
 ) -> pivot_engine::SubtotalPosition {
+    // `SubtotalPosition` is re-exported by the pivot engine from `formula-model`, so this is
+    // currently a 1:1 conversion.
     match position {
         formula_model::pivots::SubtotalPosition::None => pivot_engine::SubtotalPosition::None,
         formula_model::pivots::SubtotalPosition::Top => pivot_engine::SubtotalPosition::Top,
