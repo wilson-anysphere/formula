@@ -515,7 +515,7 @@ function usage() {
       "  --allow-windows-exe Allow raw .exe in latest.json Windows entries (defaults to disallowed).",
       "  --out <path>       Output path for SHA256SUMS.txt (default: ./SHA256SUMS.txt)",
       "  --all-assets       Hash all release assets (still excludes .sig by default)",
-      "  --include-sigs     Include .sig assets in SHA256SUMS (use with --all-assets to match CI)",
+      "  --include-sigs     Include .sig assets in SHA256SUMS (defaults to excluding)",
       "  --dry-run          Validate manifest/assets only (skip bundle hashing)",
       "  --verify-assets    Download updater assets referenced in latest.json and verify their signatures (slow)",
       "",
