@@ -254,7 +254,14 @@ def _report_path_str(path: Path, repo_root: Path) -> str:
             return path.as_posix()
 
 
-def _build_json_report(artifacts: list[Artifact], limit_mb: int, enforce: bool, repo_root: Path) -> dict[str, Any]:
+def _build_json_report(
+    artifacts: list[Artifact],
+    *,
+    bundle_dirs: list[Path] | None = None,
+    limit_mb: int,
+    enforce: bool,
+    repo_root: Path,
+) -> dict[str, Any]:
     limit_bytes = limit_mb * 1000 * 1000
     runner_os = os.environ.get("RUNNER_OS", "").strip()
 
@@ -276,6 +283,10 @@ def _build_json_report(artifacts: list[Artifact], limit_mb: int, enforce: bool, 
     report: dict[str, Any] = {
         "limit_mb": limit_mb,
         "enforce": enforce,
+        "bundle_dirs": [
+            _report_path_str(d, repo_root=repo_root)
+            for d in (bundle_dirs or [])
+        ],
         "artifacts": artifact_rows,
         "total_artifacts": len(artifacts),
         "over_limit_count": over_limit_count,
@@ -356,7 +367,13 @@ def main() -> int:
             print(f"bundle-size: ERROR --bundle-dir not found: {', '.join(missing)}", file=sys.stderr)
             _write_json_report(
                 json_path,
-                _build_json_report([], limit_mb=limit_mb, enforce=enforce, repo_root=repo_root),
+                _build_json_report(
+                    [],
+                    bundle_dirs=bundle_dirs,
+                    limit_mb=limit_mb,
+                    enforce=enforce,
+                    repo_root=repo_root,
+                ),
             )
             return 2
     else:
@@ -409,7 +426,13 @@ def main() -> int:
         _append_step_summary(md)
         _write_json_report(
             json_path,
-            _build_json_report([], limit_mb=limit_mb, enforce=enforce, repo_root=repo_root),
+            _build_json_report(
+                [],
+                bundle_dirs=[],
+                limit_mb=limit_mb,
+                enforce=enforce,
+                repo_root=repo_root,
+            ),
         )
         return 1
 
@@ -421,7 +444,13 @@ def main() -> int:
     _append_step_summary(md)
     if not _write_json_report(
         json_path,
-        _build_json_report(artifacts, limit_mb=limit_mb, enforce=enforce, repo_root=repo_root),
+        _build_json_report(
+            artifacts,
+            bundle_dirs=bundle_dirs,
+            limit_mb=limit_mb,
+            enforce=enforce,
+            repo_root=repo_root,
+        ),
     ):
         return 2
 
