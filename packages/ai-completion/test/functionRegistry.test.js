@@ -91,6 +91,8 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("IMABS", 0), "Expected IMABS inumber to be a range");
   assert.ok(registry.isRangeArg("IMDIV", 1), "Expected IMDIV inumber2 to be a range");
   assert.ok(registry.getFunction("IMSUM")?.args?.[0]?.repeating, "Expected IMSUM to accept repeating inumber args");
+  assert.equal(registry.getArgType("RTD", 0), "string", "Expected RTD prog_id to be string-like");
+  assert.ok(registry.getFunction("CUBEVALUE")?.args?.[1]?.repeating, "Expected CUBEVALUE member args to repeat");
 
   // SUBTOTAL(function_num, ref1, [ref2], ...)
   assert.equal(registry.isRangeArg("SUBTOTAL", 0), false, "Expected SUBTOTAL function_num not to be a range");

@@ -2287,6 +2287,79 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "CUBEKPIMEMBER",
+    description: "Returns a KPI property and displays the name in the cell.",
+    args: [
+      { name: "connection", type: "string" },
+      { name: "kpi_name", type: "string" },
+      { name: "kpi_property", type: "string" },
+      { name: "caption", type: "string", optional: true },
+    ],
+  },
+  {
+    name: "CUBEMEMBER",
+    description: "Returns a member or tuple from the cube.",
+    args: [
+      { name: "connection", type: "string" },
+      { name: "member_expression", type: "string" },
+      { name: "caption", type: "string", optional: true },
+    ],
+  },
+  {
+    name: "CUBEMEMBERPROPERTY",
+    description: "Returns the value of a member property in the cube.",
+    args: [
+      { name: "connection", type: "string" },
+      { name: "member_expression", type: "string" },
+      { name: "property", type: "string" },
+    ],
+  },
+  {
+    name: "CUBERANKEDMEMBER",
+    description: "Returns the nth (ranked) member in a set.",
+    args: [
+      { name: "connection", type: "string" },
+      { name: "set_expression", type: "string" },
+      { name: "rank", type: "number" },
+      { name: "caption", type: "string", optional: true },
+    ],
+  },
+  {
+    name: "CUBESET",
+    description: "Defines a calculated set of members or tuples by sending a set expression to the cube.",
+    args: [
+      { name: "connection", type: "string" },
+      { name: "set_expression", type: "string" },
+      { name: "caption", type: "string", optional: true },
+      { name: "sort_order", type: "number", optional: true },
+      { name: "sort_by", type: "string", optional: true },
+    ],
+  },
+  {
+    name: "CUBESETCOUNT",
+    description: "Returns the number of items in a set.",
+    args: [
+      { name: "set", type: "string" },
+    ],
+  },
+  {
+    name: "CUBEVALUE",
+    description: "Returns an aggregated value from the cube.",
+    args: [
+      { name: "connection", type: "string" },
+      { name: "member_expression1", type: "string", repeating: true },
+    ],
+  },
+  {
+    name: "RTD",
+    description: "Retrieves real-time data from a program that supports COM automation.",
+    args: [
+      { name: "prog_id", type: "string" },
+      { name: "server", type: "string" },
+      { name: "topic1", type: "string", repeating: true },
+    ],
+  },
+  {
     name: "CONCAT",
     description: "Combines the text from multiple ranges and/or strings.",
     args: [
