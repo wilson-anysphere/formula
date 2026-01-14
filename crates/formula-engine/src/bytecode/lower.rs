@@ -17,6 +17,49 @@ const EXCEL_MAX_ROW_IDX: i32 = (EXCEL_MAX_ROWS as i32) - 1;
 /// Excel's maximum column index (0-indexed) used by the bytecode backend.
 const EXCEL_MAX_COL_IDX: i32 = (EXCEL_MAX_COLS as i32) - 1;
 
+fn indirect_string_refers_to_external_workbook(text: &str) -> bool {
+    let ref_text = text.trim();
+    if ref_text.is_empty() {
+        return false;
+    }
+
+    // External workbook references are not representable in the bytecode value model. They must be
+    // evaluated by the AST backend so the engine can route dereferencing through the external value
+    // provider.
+    //
+    // Detect the common case where `INDIRECT`'s text argument is a string literal containing an
+    // external workbook reference like `"[Book.xlsx]Sheet1!A1"`.
+    for reference_style in [crate::ReferenceStyle::A1, crate::ReferenceStyle::R1C1] {
+        let parsed = crate::parse_formula(
+            ref_text,
+            crate::ParseOptions {
+                locale: crate::LocaleConfig::en_us(),
+                reference_style,
+                normalize_relative_to: None,
+            },
+        );
+        let Ok(parsed) = parsed else {
+            continue;
+        };
+        let lowered = crate::eval::lower_ast(&parsed, None);
+        match lowered {
+            crate::eval::Expr::CellRef(r)
+                if matches!(r.sheet, crate::eval::SheetReference::External(_)) =>
+            {
+                return true;
+            }
+            crate::eval::Expr::RangeRef(r)
+                if matches!(r.sheet, crate::eval::SheetReference::External(_)) =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+    }
+
+    false
+}
+
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LowerError {
     #[error("unsupported expression")]
@@ -851,6 +894,14 @@ fn lower_canonical_expr_inner(
                         })
                     }
                     other => {
+                        if other == Function::Indirect {
+                            if let Some(crate::Expr::String(text)) = call.args.first() {
+                                if indirect_string_refers_to_external_workbook(text) {
+                                    return Err(LowerError::ExternalReference);
+                                }
+                            }
+                        }
+
                         let args = call
                             .args
                             .iter()

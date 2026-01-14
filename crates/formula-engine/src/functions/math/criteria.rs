@@ -494,8 +494,14 @@ fn coerce_to_number(value: &Value, locale: NumberLocale) -> Option<f64> {
 fn coerce_to_text(value: &Value, value_locale: ValueLocaleConfig) -> Option<String> {
     match value {
         Value::Blank => None,
-        Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Bool(_) => {
-            value.coerce_to_string().ok()
+        Value::Text(_) | Value::Entity(_) | Value::Bool(_) => value.coerce_to_string().ok(),
+        Value::Record(record) => {
+            if let Some(display_field) = record.display_field.as_deref() {
+                if let Some(value) = record.get_field_case_insensitive(display_field) {
+                    return coerce_to_text(&value, value_locale);
+                }
+            }
+            Some(record.display.clone())
         }
         Value::Number(n) => {
             // Criteria text matching always treats numbers as numbers under the "General" format;

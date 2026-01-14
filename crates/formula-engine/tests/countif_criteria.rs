@@ -346,6 +346,31 @@ fn countif_text_wildcards_coerce_numbers_using_value_locale() {
 }
 
 #[test]
+fn countif_text_criteria_coerces_record_display_field_numbers_using_value_locale() {
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+
+    let mut record = RecordValue::new("Fallback").field("V", 1.5);
+    record.display_field = Some("V".to_string());
+    engine
+        .set_cell_value("Sheet1", "A1", Value::Record(record))
+        .unwrap();
+
+    // Build a criteria string of `="1,5"` so it is parsed as a *text* criteria (quoted RHS),
+    // rather than a locale-aware numeric criteria.
+    engine
+        .set_cell_formula("Sheet1", "Z1", r#"=COUNTIF(A1:A1, "=""1,5""")"#)
+        .unwrap();
+    assert!(
+        engine.bytecode_program_count() > 0,
+        "expected COUNTIF formula to compile to bytecode for this test"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "Z1"), Value::Number(1.0));
+}
+
+#[test]
 fn countif_criteria_parses_dates_using_value_locale_date_order() {
     let mut engine = Engine::new();
     engine.set_date_system(ExcelDateSystem::EXCEL_1900);
