@@ -303,9 +303,11 @@ try {
   $cell = $sheet.Range("A1")
 
   $i = 0
+  $total = $functionList.Count
   foreach ($fn in $functionList) {
     $i++
     $canonicalName = [string]$fn.name
+    Write-Progress -Activity "Extracting function translations" -Status ("{0}/{1} {2}" -f $i, $total, $canonicalName) -PercentComplete ([int](($i / [double]$total) * 100))
     $minArgs = [int]$fn.min_args
     $argTypes = @()
     if ($null -ne $fn.arg_types) { $argTypes = @($fn.arg_types | ForEach-Object { [string]$_ }) }
@@ -331,6 +333,7 @@ try {
       continue
     }
   }
+  Write-Progress -Activity "Extracting function translations" -Completed
 
   $orderedTranslations = [ordered]@{}
   foreach ($k in ($translations.Keys | Sort-Object)) {
