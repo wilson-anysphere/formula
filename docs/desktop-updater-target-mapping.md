@@ -40,6 +40,9 @@ We build a **single** universal macOS updater tarball (`*.app.tar.gz` preferred;
 This is intentional: on Intel Macs the updater target is `darwin-x86_64`, and on Apple Silicon it is
 `darwin-aarch64` even when the binary itself is universal.
 
+Note: GitHub Releases also include auto-generated “Source code (zip)” / “Source code (tar.gz)”
+entries; those are **not** installer/updater assets and must not be referenced from `latest.json`.
+
 `darwin-universal` is **not** required in this repo’s workflow (tauri-action only adds it when the
 `updaterJsonKeepUniversal` input is enabled).
 
