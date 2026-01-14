@@ -30,8 +30,10 @@ describe('desktopStartupRunnerShared cleanup on early exit', () => {
       return;
     }
 
-    const profileDir = resolve(repoRoot, `target/perf-home/vitest-cleanupOnEarlyExit-${Date.now()}-${process.pid}`);
-    const pidFile = resolve(profileDir, 'grandchild.pid');
+    const profileDir = `target/perf-home/vitest-cleanupOnEarlyExit-${Date.now()}-${process.pid}`;
+    // `runOnce` resolves `profileDir` relative to the repo root (not the vitest CWD),
+    // so compute the pid file path the same way.
+    const pidFile = resolve(repoRoot, profileDir, 'grandchild.pid');
 
     // The spawned "desktop" process (a Node script) prints `[startup] ...` and then exits quickly,
     // leaving a grandchild process alive in the same process group.

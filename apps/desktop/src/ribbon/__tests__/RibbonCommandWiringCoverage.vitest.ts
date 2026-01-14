@@ -265,6 +265,8 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
     const schemaIdSet = new Set(schemaCommandIds);
     const dropdownTriggerIds = collectRibbonDropdownTriggerIds(defaultRibbonSchema);
     const schemaDisabledIds = collectRibbonSchemaDisabledIds(defaultRibbonSchema);
+    const implementedIds = extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaIdSet);
+    const implementedSet = new Set(implementedIds);
 
     const commandRegistry = new CommandRegistry();
     registerCommandsForRibbonDisablingTest(commandRegistry);
@@ -279,10 +281,6 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
 
     // Guard: we should always have at least one exempt/non-command ribbon id (e.g. File tab wiring).
     expect(enabledButUnregistered.length).toBeGreaterThan(0);
-
-    const implementedIds = extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaIdSet);
-    const implementedSet = new Set(implementedIds);
-
     const missing = enabledButUnregistered.filter((id) => !implementedSet.has(id)).sort();
     expect(
       missing,

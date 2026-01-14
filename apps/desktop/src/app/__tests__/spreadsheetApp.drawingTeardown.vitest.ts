@@ -235,7 +235,6 @@ describe("SpreadsheetApp drawings teardown", () => {
     // pre-drag object list. Clear spies after dispose so we only assert on post-dispose events.
     setObjectsSpy.mockClear();
 
-    // Pointer events on the old root should not invoke drawing callbacks once disposed.
     dispatchPointerEvent(interactionTarget, "pointerdown", { clientX: 60, clientY: 40, pointerId: 2, button: 0 });
     dispatchPointerEvent(interactionTarget, "pointermove", { clientX: 100, clientY: 70, pointerId: 2 });
     expect(setObjectsSpy).not.toHaveBeenCalled();

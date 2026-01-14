@@ -730,6 +730,10 @@ export class SecondaryGridView {
     this.container.dataset.scrollX = String(scroll.x);
     this.container.dataset.scrollY = String(scroll.y);
     this.repositionEditor();
+    // Axis size overrides mutate the underlying GridGeometry while the `DrawingOverlay` spatial
+    // index is keyed by the stable `geom` object reference. Invalidate the cached bounds so the
+    // overlay recomputes drawing positions under the new row/col sizes.
+    this.drawingsOverlay.invalidateSpatialIndex();
     void this.renderDrawings();
   }
 
@@ -742,6 +746,9 @@ export class SecondaryGridView {
     // view re-syncs back into the same renderer instance (the pane is already updated during the
     // resize drag). Other panes (primary grid) still need to observe the change and sync.
     const source = "secondaryGridAxis";
+    // Like SpreadsheetApp's shared-grid implementation: axis resize updates the GridGeometry in
+    // place, so invalidate cached drawing bounds so the overlay stays aligned.
+    this.drawingsOverlay.invalidateSpatialIndex();
 
     if (change.kind === "col") {
       const docCol = change.index - this.headerCols;

@@ -1369,6 +1369,8 @@ export class SpreadsheetApp {
   private formulaRangePreviewTooltipLastRange: A1RangeAddress | null = null;
   private formulaRangePreviewTooltipLastRefText: string | null = null;
   private formulaRangePreviewTooltipRefreshQueued = false;
+  private formulaRangePreviewHoverRange: A1RangeAddress | null = null;
+  private formulaRangePreviewHoverText: string | null = null;
   private formulaEditCell: { sheetId: string; cell: CellCoord } | null = null;
   private keyboardRangeSelectionActive = false;
   private referencePreview: { start: CellCoord; end: CellCoord } | null = null;
@@ -3476,6 +3478,8 @@ export class SpreadsheetApp {
           if (!allowed) {
             // Avoid showing misleading previews/outlines for sheet-qualified refs, named ranges, or table refs
             // that point at a different sheet than the active one.
+            this.formulaRangePreviewHoverRange = null;
+            this.formulaRangePreviewHoverText = null;
             this.hideFormulaRangePreviewTooltip();
             this.referencePreview = null;
             if (this.sharedGrid) {
@@ -3956,7 +3960,7 @@ export class SpreadsheetApp {
   destroy(): void {
     this.disposed = true;
     // Ensure any drawing interaction controller listeners are released promptly.
-    this.drawingInteractionController?.dispose();
+    this.drawingInteractionController?.dispose({ revert: false });
     this.drawingInteractionController = null;
     this.drawingsInteraction = null;
     this.drawingInteractionCallbacks = null;
@@ -4011,7 +4015,7 @@ export class SpreadsheetApp {
     this.chartDragAbort?.abort();
     this.chartDragAbort = null;
     this.chartDragState = null;
-    this.chartDrawingInteraction?.dispose();
+    this.chartDrawingInteraction?.dispose({ revert: false });
     this.chartDrawingInteraction = null;
     this.setCollabUndoService(null);
     this.reservedRootGuardToastUnsubscribe?.();
@@ -4061,6 +4065,8 @@ export class SpreadsheetApp {
     this.formulaRangePreviewTooltipLastKey = null;
     this.formulaRangePreviewTooltipLastRange = null;
     this.formulaRangePreviewTooltipLastRefText = null;
+    this.formulaRangePreviewHoverRange = null;
+    this.formulaRangePreviewHoverText = null;
     this.sharedGrid?.destroy();
     this.sharedGrid = null;
     try {
@@ -10905,6 +10911,8 @@ export class SpreadsheetApp {
   }
 
   private hideFormulaRangePreviewTooltip(): void {
+    this.formulaRangePreviewHoverRange = null;
+    this.formulaRangePreviewHoverText = null;
     const tooltip = this.formulaRangePreviewTooltip;
     if (!tooltip) {
       this.formulaRangePreviewTooltipVisible = false;
@@ -11098,8 +11106,8 @@ export class SpreadsheetApp {
       return;
     }
 
-    this.formulaRangePreviewTooltipLastRange = range;
-    this.formulaRangePreviewTooltipLastRefText = refText;
+    this.formulaRangePreviewHoverRange = range;
+    this.formulaRangePreviewHoverText = refText ?? null;
 
     const rawText = typeof refText === "string" ? refText.trim() : "";
     const { sheetName } = splitSheetQualifier(rawText);
@@ -13972,6 +13980,9 @@ export class SpreadsheetApp {
     const doc = this.document as any;
     const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
     this.drawingObjectsCache = { sheetId: this.sheetId, objects, source: drawingsGetter };
+    // Base drawing objects changed; invalidate any cached combined lists/hit-test indexes.
+    this.canvasChartCombinedDrawingObjectsCache = null;
+    this.invalidateDrawingHitTestIndexCaches();
   }
 
   private listCanvasChartDrawingObjectsForSheet(sheetId: string): DrawingObject[] {

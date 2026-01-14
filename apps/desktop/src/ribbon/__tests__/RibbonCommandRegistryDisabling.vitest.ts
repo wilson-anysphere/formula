@@ -333,13 +333,13 @@ describe("CommandRegistry-backed ribbon disabling", () => {
           label: "Home",
           groups: [
             {
-              id: "cells",
-              label: "Cells",
+              id: "styles",
+              label: "Styles",
               buttons: [
                 {
-                  id: "home.cells.format",
-                  label: "Format",
-                  ariaLabel: "Format Cells",
+                  id: "home.styles.cellStyles",
+                  label: "Cell Styles",
+                  ariaLabel: "Cell Styles",
                   kind: "dropdown",
                   menuItems: [
                     { id: "home.cells.format.rowHeight", label: "Row Height…", ariaLabel: "Row Height" },
@@ -382,7 +382,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
       root.render(React.createElement(Ribbon, { actions: {}, schema }));
     });
 
-    const trigger = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format"]');
+    const trigger = container.querySelector<HTMLButtonElement>('[data-command-id="home.styles.cellStyles"]');
     expect(trigger).toBeInstanceOf(HTMLButtonElement);
     expect(trigger?.disabled).toBe(false);
 

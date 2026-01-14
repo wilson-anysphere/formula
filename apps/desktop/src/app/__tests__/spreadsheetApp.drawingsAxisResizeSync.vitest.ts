@@ -175,11 +175,21 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
 
       const renderSpy = vi.spyOn(app as any, "renderDrawings");
 
-      // Initial render (drawing overlay rendering is synchronous, but missing images may trigger
-      // async hydration + a subsequent repaint).
+      const waitForStrokeRect = async (): Promise<CtxCall | undefined> => {
+        // Drawing overlay rendering is synchronous, but missing images may trigger async hydration + a
+        // subsequent repaint. In shared-grid mode, additional viewport callbacks can also trigger
+        // redraws that abort in-flight renders. Poll across a few microtasks for a completed pass.
+        for (let i = 0; i < 8; i += 1) {
+          const stroke = calls!.find((call) => call.method === "strokeRect");
+          if (stroke) return stroke;
+          await Promise.resolve();
+        }
+        return undefined;
+      };
+
+      // Initial render.
       (app as any).renderDrawings();
-      await flushPromises();
-      const firstStroke = calls!.find((call) => call.method === "strokeRect");
+      const firstStroke = await waitForStrokeRect();
       expect(firstStroke).toBeTruthy();
       const x1 = Number(firstStroke!.args[0]);
       expect(Number.isFinite(x1)).toBe(true);
@@ -207,8 +217,7 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
       });
 
       expect(renderSpy).toHaveBeenCalled();
-      await flushPromises();
-      const secondStroke = calls!.find((call) => call.method === "strokeRect");
+      const secondStroke = await waitForStrokeRect();
       expect(secondStroke).toBeTruthy();
       const x2 = Number(secondStroke!.args[0]);
       expect(x2).toBeCloseTo(x1 + (nextSize - prevSize), 6);

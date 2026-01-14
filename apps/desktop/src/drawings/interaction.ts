@@ -201,28 +201,17 @@ export class DrawingInteractionController {
     this.element.addEventListener("pointercancel", this.onPointerCancel, this.listenerOptions);
   }
 
-  dispose(): void {
+  dispose(options: { revert?: boolean } = {}): void {
     // If the app/view is torn down mid-gesture (e.g. hot reload, workbook switch),
     // ensure we release pointer capture and close any pending undo batch.
     try {
-      // Important: do *not* call `setObjects` during teardown. The in-memory object
-      // state is owned by the host app; if it is being disposed, reverting objects
-      // is unnecessary and can trigger unwanted UI work/tests (the view is going away).
-      const active = this.dragging ?? this.resizing ?? this.rotating;
-      if (active) {
-        const pointerId = active.pointerId;
-        this.dragging = null;
-        this.resizing = null;
-        this.rotating = null;
-        this.activeRect = null;
-        this.detachEscapeListener();
-        this.tryReleasePointerCapture(pointerId);
-        try {
-          this.callbacks.cancelBatch?.();
-        } catch {
-          // Best-effort.
-        }
-        this.element.style.cursor = "default";
+      if (options.revert === true) {
+        this.cancelActiveGesture();
+      } else {
+        // Important: do *not* call `setObjects` during teardown. The in-memory object
+        // state is owned by the host app; if it is being disposed, reverting objects
+        // is unnecessary and can trigger unwanted UI work/tests (the view is going away).
+        this.abandonActiveGesture();
       }
     } catch {
       // Best-effort: teardown should still remove listeners even if the integration
@@ -935,6 +924,34 @@ export class DrawingInteractionController {
     }
 
     // Cursor best-effort: we may not have a meaningful point after cancel.
+    this.element.style.cursor = "default";
+  }
+
+  /**
+   * Clear any active gesture state without invoking `callbacks.setObjects`.
+   *
+   * This is useful for integration teardown paths where the host is being disposed anyway
+   * and doesn't want cleanup to trigger additional rendering/state updates.
+   */
+  private abandonActiveGesture(): void {
+    const active = this.dragging ?? this.resizing ?? this.rotating;
+    if (!active) return;
+
+    const pointerId = active.pointerId;
+
+    this.dragging = null;
+    this.resizing = null;
+    this.rotating = null;
+    this.activeRect = null;
+    this.detachEscapeListener();
+    this.tryReleasePointerCapture(pointerId);
+
+    try {
+      this.callbacks.cancelBatch?.();
+    } catch {
+      // ignore
+    }
+
     this.element.style.cursor = "default";
   }
 
