@@ -1316,6 +1316,26 @@ fn hash_join_multi_errors_on_mismatched_key_types() {
 }
 
 #[test]
+fn hash_join_multi_errors_on_empty_keys() {
+    let schema = vec![ColumnSchema {
+        name: "k".to_owned(),
+        column_type: ColumnType::String,
+    }];
+
+    let left = build_table(
+        schema.clone(),
+        vec![vec![Value::String(Arc::<str>::from("A"))]],
+    );
+    let right = build_table(
+        schema,
+        vec![vec![Value::String(Arc::<str>::from("A"))]],
+    );
+
+    let err = left.hash_join_multi(&right, &[], &[]).unwrap_err();
+    assert!(matches!(err, QueryError::EmptyKeys));
+}
+
+#[test]
 fn hash_join_multi_errors_on_mismatched_key_count() {
     let schema = vec![
         ColumnSchema {
