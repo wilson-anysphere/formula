@@ -3853,6 +3853,25 @@ impl WasmWorkbook {
         self.inner.set_locale_id(&locale_id)
     }
 
+    /// Get the workbook's legacy Windows text codepage (used for DBCS `*B` text functions like
+    /// `LENB`, `ASC`, and `DBCS`).
+    #[wasm_bindgen(js_name = "getTextCodepage")]
+    pub fn get_text_codepage(&self) -> u16 {
+        self.inner.engine.text_codepage()
+    }
+
+    /// Set the workbook's legacy Windows text codepage (used for DBCS `*B` text functions like
+    /// `LENB`, `ASC`, and `DBCS`).
+    ///
+    /// This marks compiled formulas dirty; callers should invoke `recalculate()` to observe changes.
+    #[wasm_bindgen(js_name = "setTextCodepage")]
+    pub fn set_text_codepage(&mut self, codepage: u16) -> Result<(), JsValue> {
+        self.inner.with_manual_calc_mode(|this| {
+            this.engine.set_text_codepage(codepage);
+            Ok(())
+        })
+    }
+
     /// Intern (deduplicate) a style object into the workbook's style table, returning its style id.
     ///
     /// The input uses a JS-friendly shape (best-effort). Unknown keys are ignored.
@@ -6552,6 +6571,30 @@ mod tests {
         wb2.inner.recalculate_internal(None).unwrap();
         assert_eq!(
             wb2.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Number(2.0)
+        );
+    }
+
+    #[test]
+    fn set_text_codepage_api_updates_lenb_behavior() {
+        let mut wb = WasmWorkbook::new();
+        wb.inner
+            .set_cell_internal(DEFAULT_SHEET, "A1", serde_json::json!("=LENB(\"あ\")"))
+            .unwrap();
+
+        wb.inner.recalculate_internal(None).unwrap();
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Number(1.0)
+        );
+
+        assert_eq!(wb.get_text_codepage(), 1252);
+        wb.set_text_codepage(932).unwrap();
+        assert_eq!(wb.get_text_codepage(), 932);
+
+        wb.inner.recalculate_internal(None).unwrap();
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
             EngineValue::Number(2.0)
         );
     }
