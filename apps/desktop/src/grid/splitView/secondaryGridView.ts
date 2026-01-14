@@ -744,20 +744,11 @@ export class SecondaryGridView {
       const docCol = change.index - this.headerCols;
       if (docCol < 0) return;
       const label = change.source === "autoFit" ? "Autofit Column Width" : "Resize Column";
-      // Axis size changes affect `GridGeometry` even though its object identity is stable.
-      // Invalidate the drawings overlay spatial index *before* we emit any document events so
-      // any render triggered synchronously by those events uses updated geometry.
-      this.drawingsOverlay.invalidateSpatialIndex();
       if (isDefault) {
         this.document.resetColWidth(sheetId, docCol, { label, source });
       } else {
         this.document.setColWidth(sheetId, docCol, baseSize, { label, source });
       }
-      // Similar to SpreadsheetApp: the CanvasGridRenderer updates sizes interactively during the
-      // drag, and we skip re-syncing sheet view deltas back into the same pane (source-tagged).
-      // Ensure the drawings overlay re-renders at the end of the interaction so pictures/shapes
-      // stay aligned with the updated grid geometry.
-      this.drawingsOverlay.invalidateSpatialIndex();
       void this.renderDrawings();
       return;
     }
@@ -765,10 +756,6 @@ export class SecondaryGridView {
     const docRow = change.index - this.headerRows;
     if (docRow < 0) return;
     const label = change.source === "autoFit" ? "Autofit Row Height" : "Resize Row";
-    // Axis size changes affect `GridGeometry` even though its object identity is stable.
-    // Invalidate the drawings overlay spatial index *before* we emit any document events so
-    // any render triggered synchronously by those events uses updated geometry.
-    this.drawingsOverlay.invalidateSpatialIndex();
     if (isDefault) {
       this.document.resetRowHeight(sheetId, docRow, { label, source });
     } else {
