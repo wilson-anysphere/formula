@@ -35,11 +35,31 @@ export function pickPyodideIndexURL(params: {
   return params.explicitIndexURL ?? params.cachedIndexURL;
 }
 
+export function isSafePyodideIndexURLForDesktopOverride(raw: unknown): boolean {
+  const normalized = normalizePyodideIndexURL(raw);
+  if (!normalized) return false;
+  // Prefer local-only origins for desktop builds so Python always comes from a pinned and
+  // sha256-verified cache (or explicitly bundled `/pyodide/...` assets).
+  return (
+    normalized.startsWith("pyodide://") ||
+    normalized.startsWith("/pyodide/") ||
+    normalized.startsWith("tauri://") ||
+    normalized.startsWith("asset://")
+  );
+}
+
 export function getExplicitPyodideIndexURL(explicitIndexURL?: string | undefined): string | undefined {
   const normalizedExplicit = normalizePyodideIndexURL(explicitIndexURL);
-  if (normalizedExplicit) return normalizedExplicit;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return normalizePyodideIndexURL((globalThis as any).__pyodideIndexURL);
+  const normalizedGlobal = normalizePyodideIndexURL(safeGetGlobal("__pyodideIndexURL"));
+
+  const inDesktopApp = Boolean(getTauriInvokeOrNull());
+  if (!inDesktopApp) {
+    return normalizedExplicit ?? normalizedGlobal;
+  }
+
+  if (isSafePyodideIndexURLForDesktopOverride(normalizedExplicit)) return normalizedExplicit;
+  if (isSafePyodideIndexURLForDesktopOverride(normalizedGlobal)) return normalizedGlobal;
+  return undefined;
 }
 
 function normalizeProgressPayload(payload: unknown): PyodideDownloadProgress | null {
