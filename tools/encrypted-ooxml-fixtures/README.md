@@ -6,11 +6,10 @@ workbooks (`.xlsx`) without Excel.
 It is an **alternative** regeneration tool for the encrypted OOXML fixtures under
 `fixtures/encrypted/ooxml/` (or to create new ones).
 
-Note: the **committed fixture bytes** in `fixtures/encrypted/ooxml/` are generated via Python +
-[`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool) (see
-`fixtures/encrypted/ooxml/README.md` for the canonical recipe, tool versions, and padding notes).
-This Apache POI generator is provided as a convenient cross-platform option, but it is **not** used
-to produce the committed fixture binaries.
+Note: most committed fixture bytes in `fixtures/encrypted/ooxml/` are generated via Python +
+[`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool), but some fixtures are generated via
+Apache POI (for example `standard-4.2.xlsx`, `standard-unicode.xlsx`). See
+`fixtures/encrypted/ooxml/README.md` for the canonical per-fixture provenance + regeneration notes.
 
 ## What it generates
 
@@ -35,6 +34,9 @@ tools/encrypted-ooxml-fixtures/generate.sh agile "" fixtures/encrypted/ooxml/pla
 
 # Unicode password (NFC normalization form):
 tools/encrypted-ooxml-fixtures/generate.sh agile "pässwörd" fixtures/encrypted/ooxml/plaintext.xlsx /tmp/agile-unicode.xlsx
+
+# Unicode password (NFC, includes non-BMP emoji):
+tools/encrypted-ooxml-fixtures/generate.sh standard "pässwörd🔒" fixtures/encrypted/ooxml/plaintext.xlsx /tmp/standard-unicode.xlsx
 
 # Macro-enabled `.xlsm` fixtures:
 tools/encrypted-ooxml-fixtures/generate.sh agile password fixtures/encrypted/ooxml/plaintext-basic.xlsm /tmp/agile-basic.xlsm
