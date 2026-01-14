@@ -770,7 +770,12 @@ export function registerBuiltinCommands(params: {
         openGoalSeekDialog();
         return;
       }
-      showToast("Goal Seek is not available in this build.", "error");
+      try {
+        showToast("Goal Seek is not available in this build.", "error");
+      } catch {
+        // In unit-test contexts there may be no #toast-root; fall back to a console warning.
+        console.warn("Goal Seek is not available in this build.");
+      }
     },
     {
       category: commandCategoryData,
