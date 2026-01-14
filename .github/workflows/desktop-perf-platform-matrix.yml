@@ -6,6 +6,9 @@ on:
     # Daily (UTC). Adjust as needed; goal is continuous cross-platform visibility.
     - cron: "0 7 * * *"
 
+permissions:
+  contents: read
+
 concurrency:
   # Avoid overlapping scheduled runs (they can be expensive across 3 OSes).
   # Keep per-ref isolation so manual runs on other branches don't get stuck behind main.
