@@ -1075,43 +1075,49 @@ function findActiveReferenceIndex(
   const start = Math.min(cursorStart, cursorEnd);
   const end = Math.max(cursorStart, cursorEnd);
 
-  const findContainingReference = (needleStart: number, needleEnd: number): number | null => {
-    if (references.length === 0) return null;
-    // `extractFormulaReferences` returns references ordered by appearance in the formula,
-    // so we can locate the active ref in O(log n) time using binary search.
-    let lo = 0;
-    let hi = references.length - 1;
-    let candidate = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      const ref = references[mid]!;
-      if (ref.start <= needleStart) {
-        candidate = mid;
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    if (candidate < 0) return null;
-    const ref = references[candidate]!;
-    if (ref.start <= needleStart && needleEnd <= ref.end) return ref.index;
-    return null;
-  };
+  if (references.length === 0) return null;
 
   // If text is selected, treat a reference as active only when the selection is contained
   // within that reference token.
   if (start !== end) {
-    return findContainingReference(start, end);
+    return findContainingReference(references, start, end);
   }
 
   // Caret: treat the reference containing either the character at the caret or
   // immediately before it as active. This matches typical editor behavior where
   // being at the end of a token still counts as "in" the token.
-  const positions = start === 0 ? [0] : [start, start - 1];
-  for (const pos of positions) {
-    const active = findContainingReference(pos, pos + 1);
+  let active = findContainingReference(references, start, start + 1);
+  if (active != null) return active;
+  if (start > 0) {
+    active = findContainingReference(references, start - 1, start);
     if (active != null) return active;
   }
+  return null;
+}
+
+function findContainingReference(
+  references: readonly Pick<FormulaReference, "start" | "end" | "index">[],
+  needleStart: number,
+  needleEnd: number
+): number | null {
+  // `extractFormulaReferences` returns references ordered by appearance in the formula,
+  // so we can locate the active ref in O(log n) time using binary search.
+  let lo = 0;
+  let hi = references.length - 1;
+  let candidate = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const ref = references[mid]!;
+    if (ref.start <= needleStart) {
+      candidate = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (candidate < 0) return null;
+  const ref = references[candidate]!;
+  if (ref.start <= needleStart && needleEnd <= ref.end) return ref.index;
   return null;
 }
 
