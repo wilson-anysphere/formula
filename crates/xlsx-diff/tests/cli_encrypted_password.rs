@@ -293,8 +293,8 @@ fn cli_original_password_file_overrides_shared_password_file() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let wrong_path = tmp.path().join("wrong.txt");
     let correct_path = tmp.path().join("correct.txt");
-    std::fs::write(&wrong_path, "wrong-password\n").expect("write wrong password file");
-    std::fs::write(&correct_path, format!("{PASSWORD}\n")).expect("write correct password file");
+    std::fs::write(&wrong_path, "wrong-password\r\n").expect("write wrong password file");
+    std::fs::write(&correct_path, format!("{PASSWORD}\r\n")).expect("write correct password file");
 
     // Original is encrypted; modified is plain.
     // Provide an incorrect shared password file, then override the original password file to be correct.
@@ -349,8 +349,8 @@ fn cli_modified_password_file_overrides_shared_password_file() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let wrong_path = tmp.path().join("wrong.txt");
     let correct_path = tmp.path().join("correct.txt");
-    std::fs::write(&wrong_path, "wrong-password\n").expect("write wrong password file");
-    std::fs::write(&correct_path, format!("{PASSWORD}\n")).expect("write correct password file");
+    std::fs::write(&wrong_path, "wrong-password\r\n").expect("write wrong password file");
+    std::fs::write(&correct_path, format!("{PASSWORD}\r\n")).expect("write correct password file");
 
     // Original is plain; modified is encrypted.
     // Provide an incorrect shared password file, then override the modified password file to be correct.
