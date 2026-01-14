@@ -6482,6 +6482,7 @@ export class SpreadsheetApp {
     // Switching sheets mid-drag/resize should cancel the active gesture before we
     // swap out the active-sheet drawing list; otherwise the interaction
     // controller could apply its cleanup (`setObjects`) to the new sheet.
+    this.chartDrawingInteraction?.reset({ clearSelection: true });
     this.drawingInteractionController?.reset({ clearSelection: true });
     this.sheetId = sheetId;
     this.drawingObjectsCache = null;
@@ -6551,6 +6552,7 @@ export class SpreadsheetApp {
     const focus = options?.focus !== false;
     let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
+      this.chartDrawingInteraction?.reset({ clearSelection: true });
       this.drawingInteractionController?.reset({ clearSelection: true });
       this.sheetId = target.sheetId;
       this.drawingObjectsCache = null;
@@ -6621,6 +6623,7 @@ export class SpreadsheetApp {
     const focus = options?.focus !== false;
     let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
+      this.chartDrawingInteraction?.reset({ clearSelection: true });
       this.drawingInteractionController?.reset({ clearSelection: true });
       this.sheetId = target.sheetId;
       this.drawingObjectsCache = null;

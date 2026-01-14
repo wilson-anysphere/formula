@@ -640,6 +640,69 @@ describe("SpreadsheetApp chart selection + drag", () => {
     }
   });
 
+  it("canvas charts mode: switching sheets mid-drag cancels the chart gesture (no stale gesture state)", () => {
+    const prior = process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "1";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+ 
+      const app = new SpreadsheetApp(root, status);
+      expect((app as any).useCanvasCharts).toBe(true);
+
+      const result = app.addChart({
+        chart_type: "bar",
+        data_range: "A2:B5",
+        title: "Canvas Chart Sheet Switch Drag",
+        position: "A1",
+      });
+
+      const before = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(before).toBeTruthy();
+      const beforeAnchor = { ...(before!.anchor as any) };
+
+      const rect = (app as any).chartAnchorToViewportRect(before!.anchor);
+      expect(rect).not.toBeNull();
+
+      const viewport = app.getDrawingInteractionViewport();
+      const originX = (viewport.headerOffsetX ?? 0) as number;
+      const originY = (viewport.headerOffsetY ?? 0) as number;
+
+      const startX = originX + rect.left + 10;
+      const startY = originY + rect.top + 10;
+      const endX = startX + 100; // move by one column
+      const endY = startY;
+
+      dispatchPointerEvent(root, "pointerdown", { clientX: startX, clientY: startY, pointerId: 301 });
+      dispatchPointerEvent(root, "pointermove", { clientX: endX, clientY: endY, pointerId: 301 });
+      expect((app as any).chartDrawingGestureActive).toBe(true);
+
+      // Ensure the target sheet exists before switching.
+      app.getDocument().setCellValue("Sheet2", { row: 0, col: 0 }, "X");
+
+      // Switch sheets while the pointer is still down. This should cancel the active chart drag.
+      app.activateSheet("Sheet2");
+      expect((app as any).chartDrawingGestureActive).toBe(false);
+
+      // Release the pointer after switching sheets (should be a no-op).
+      dispatchPointerEvent(root, "pointerup", { clientX: endX, clientY: endY, pointerId: 301 });
+
+      const after = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(after).toBeTruthy();
+      expect(after!.anchor).toMatchObject(beforeAnchor);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = prior;
+    }
+  });
+
   it("canvas charts mode: Escape cancels an in-progress chart drag without clearing selection", () => {
     const prior = process.env.CANVAS_CHARTS;
     process.env.CANVAS_CHARTS = "1";
