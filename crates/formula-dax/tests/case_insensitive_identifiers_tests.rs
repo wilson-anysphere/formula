@@ -126,6 +126,49 @@ fn identifiers_are_case_insensitive_for_unicode_names() {
 }
 
 #[test]
+fn add_table_rejects_duplicate_table_names_case_insensitively_for_unicode() {
+    // `ß` uppercases to `SS`, so these two table names collide under case-insensitive matching.
+    let mut model = DataModel::new();
+    model
+        .add_table(Table::new("Straße", vec!["Id"]))
+        .expect("first table insert");
+    let err = model
+        .add_table(Table::new("STRASSE", vec!["Id"]))
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DaxError::DuplicateTable { table } if table == "STRASSE"
+    ));
+}
+
+#[test]
+fn add_table_rejects_duplicate_column_names_case_insensitively_for_unicode() {
+    // `Maß` uppercases to `MASS`, so these columns collide under case-insensitive matching.
+    let mut model = DataModel::new();
+    let table = Table::new("T", vec!["Maß", "MASS"]);
+    let err = model.add_table(table).unwrap_err();
+    assert!(matches!(
+        err,
+        DaxError::DuplicateColumn { table, column } if table == "T" && column == "MASS"
+    ));
+}
+
+#[test]
+fn duplicate_measure_names_are_rejected_case_insensitively_for_unicode() {
+    // `Maß` uppercases to `MASS`, so these measure names collide under case-insensitive matching.
+    let mut model = DataModel::new();
+    model.add_measure("Maß", "1").unwrap();
+    let err = model.add_measure("MASS", "2").unwrap_err();
+    assert!(matches!(err, DaxError::DuplicateMeasure { .. }));
+
+    // Measure lookup should also be case-insensitive for Unicode names.
+    let value = model
+        .evaluate_measure("[MASS]", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(value, Value::from(1.0));
+}
+
+#[test]
 fn add_table_rejects_duplicate_column_names_case_insensitively() {
     let mut model = DataModel::new();
     let table = Table::new("T", vec!["Col", "col"]);
