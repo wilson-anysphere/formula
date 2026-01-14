@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Cursor, Read};
 
@@ -282,6 +283,149 @@ fn shared_strings_writer_reuses_effectively_plain_flagged_si_records() {
             .value,
         CellValue::Text(phonetic_text.to_string())
     );
+}
+
+#[test]
+fn streaming_shared_strings_reuses_effectively_plain_flagged_si_records() {
+    let rich_text = "RichFlagButNoRuns";
+    let phonetic_text = "PhoneticFlagButNoBytes";
+
+    let shared_strings_bin = build_shared_strings_bin_effectively_plain(rich_text, phonetic_text);
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_shared_strings_bin_override(shared_strings_bin);
+    let bytes = builder.build_bytes();
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    let output_path = tmpdir.path().join("output.xlsb");
+    std::fs::write(&input_path, &bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open input workbook");
+    wb.save_with_cell_edits_streaming_shared_strings(
+        &output_path,
+        0,
+        &[
+            CellEdit {
+                row: 0,
+                col: 0,
+                new_value: CellValue::Text(rich_text.to_string()),
+                new_style: None,
+                clear_formula: false,
+                new_formula: None,
+                new_formula_flags: None,
+                new_rgcb: None,
+                shared_string_index: None,
+            },
+            CellEdit {
+                row: 0,
+                col: 1,
+                new_value: CellValue::Text(phonetic_text.to_string()),
+                new_style: None,
+                clear_formula: false,
+                new_formula: None,
+                new_formula_flags: None,
+                new_rgcb: None,
+                shared_string_index: None,
+            },
+        ],
+    )
+    .expect("save_with_cell_edits_streaming_shared_strings");
+
+    let sheet_bin = read_zip_part(output_path.to_str().unwrap(), "xl/worksheets/sheet1.bin");
+    let (id_a1, payload_a1) = find_cell_record(&sheet_bin, 0, 0).expect("find A1 record");
+    assert_eq!(id_a1, CELL_ISST, "expected BrtCellIsst/STRING record id");
+    assert_eq!(
+        u32::from_le_bytes(payload_a1[8..12].try_into().unwrap()),
+        0,
+        "expected A1 to reuse shared string index 0"
+    );
+
+    let (id_b1, payload_b1) = find_cell_record(&sheet_bin, 0, 1).expect("find B1 record");
+    assert_eq!(id_b1, CELL_ISST, "expected BrtCellIsst/STRING record id");
+    assert_eq!(
+        u32::from_le_bytes(payload_b1[8..12].try_into().unwrap()),
+        1,
+        "expected B1 to reuse shared string index 1"
+    );
+
+    let shared_strings_out = read_zip_part(output_path.to_str().unwrap(), "xl/sharedStrings.bin");
+    let counts = read_shared_strings_counts(&shared_strings_out);
+    assert_eq!(counts.total, 2);
+    assert_eq!(counts.unique, 2);
+    assert_eq!(counts.si_records, 2);
+}
+
+#[test]
+fn streaming_multi_shared_strings_reuses_effectively_plain_flagged_si_records() {
+    let rich_text = "RichFlagButNoRuns";
+    let phonetic_text = "PhoneticFlagButNoBytes";
+
+    let shared_strings_bin = build_shared_strings_bin_effectively_plain(rich_text, phonetic_text);
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_shared_strings_bin_override(shared_strings_bin);
+    let bytes = builder.build_bytes();
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    let output_path = tmpdir.path().join("output.xlsb");
+    std::fs::write(&input_path, &bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open input workbook");
+    let edits_by_sheet = BTreeMap::from([(
+        0usize,
+        vec![
+            CellEdit {
+                row: 0,
+                col: 0,
+                new_value: CellValue::Text(rich_text.to_string()),
+                new_style: None,
+                clear_formula: false,
+                new_formula: None,
+                new_formula_flags: None,
+                new_rgcb: None,
+                shared_string_index: None,
+            },
+            CellEdit {
+                row: 0,
+                col: 1,
+                new_value: CellValue::Text(phonetic_text.to_string()),
+                new_style: None,
+                clear_formula: false,
+                new_formula: None,
+                new_formula_flags: None,
+                new_rgcb: None,
+                shared_string_index: None,
+            },
+        ],
+    )]);
+
+    wb.save_with_cell_edits_streaming_multi_shared_strings(&output_path, &edits_by_sheet)
+        .expect("save_with_cell_edits_streaming_multi_shared_strings");
+
+    let sheet_bin = read_zip_part(output_path.to_str().unwrap(), "xl/worksheets/sheet1.bin");
+    let (id_a1, payload_a1) = find_cell_record(&sheet_bin, 0, 0).expect("find A1 record");
+    assert_eq!(id_a1, CELL_ISST, "expected BrtCellIsst/STRING record id");
+    assert_eq!(
+        u32::from_le_bytes(payload_a1[8..12].try_into().unwrap()),
+        0,
+        "expected A1 to reuse shared string index 0"
+    );
+
+    let (id_b1, payload_b1) = find_cell_record(&sheet_bin, 0, 1).expect("find B1 record");
+    assert_eq!(id_b1, CELL_ISST, "expected BrtCellIsst/STRING record id");
+    assert_eq!(
+        u32::from_le_bytes(payload_b1[8..12].try_into().unwrap()),
+        1,
+        "expected B1 to reuse shared string index 1"
+    );
+
+    let shared_strings_out = read_zip_part(output_path.to_str().unwrap(), "xl/sharedStrings.bin");
+    let counts = read_shared_strings_counts(&shared_strings_out);
+    assert_eq!(counts.total, 2);
+    assert_eq!(counts.unique, 2);
+    assert_eq!(counts.si_records, 2);
 }
 
 #[test]

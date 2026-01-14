@@ -7,7 +7,9 @@ use crate::parser::{
 use crate::patch::{
     patch_sheet_bin, patch_sheet_bin_streaming, value_edit_is_noop_inline_string, CellEdit,
 };
-use crate::shared_strings_write::{SharedStringsWriter, SharedStringsWriterStreaming};
+use crate::shared_strings_write::{
+    reusable_plain_si_utf16_end, SharedStringsWriter, SharedStringsWriterStreaming,
+};
 use crate::styles::Styles;
 use crate::workbook_context::WorkbookContext;
 use crate::SharedString;
@@ -1124,15 +1126,28 @@ impl XlsbWorkbook {
             sheet_cell_records_streaming(&mut entry, &targets)?
         };
 
-        // Build a mapping of *plain* shared strings to their indices. We only reuse plain
-        // `BrtSI` entries (flags=0) to avoid unintentionally applying rich/phonetic formatting to
-        // newly edited cells.
+        // Build a mapping of *plain* shared strings to their indices.
+        //
+        // We only reuse strings that have no rich/phonetic payload:
+        // - true plain `BrtSI` records (flags=0), and
+        // - "effectively plain" `BrtSI` records where the rich/phonetic flag bits are set but the
+        //   corresponding blocks are empty (`cRun=0` / `cb=0`).
+        //
+        // This avoids unintentionally applying rich/phonetic formatting to newly edited cells
+        // while still deduplicating common real-world producer quirks.
         let base_si_count = u32::try_from(self.shared_strings_table.len())
             .map_err(|_| ParseError::UnexpectedEof)?;
         let mut existing_plain_to_index: HashMap<&str, u32> = HashMap::new();
         existing_plain_to_index.reserve(self.shared_strings_table.len());
         for (idx, si) in self.shared_strings_table.iter().enumerate() {
-            if si.raw_si.is_none() {
+            let reusable_plain = if si.raw_si.is_none() {
+                true
+            } else {
+                si.raw_si
+                    .as_deref()
+                    .is_some_and(|raw| reusable_plain_si_utf16_end(raw).is_some())
+            };
+            if reusable_plain {
                 existing_plain_to_index
                     .entry(si.plain_text())
                     .or_insert(idx as u32);
@@ -1353,7 +1368,14 @@ impl XlsbWorkbook {
         let mut existing_plain_to_index: HashMap<&str, u32> = HashMap::new();
         existing_plain_to_index.reserve(self.shared_strings_table.len());
         for (idx, si) in self.shared_strings_table.iter().enumerate() {
-            if si.raw_si.is_none() {
+            let reusable_plain = if si.raw_si.is_none() {
+                true
+            } else {
+                si.raw_si
+                    .as_deref()
+                    .is_some_and(|raw| reusable_plain_si_utf16_end(raw).is_some())
+            };
+            if reusable_plain {
                 existing_plain_to_index
                     .entry(si.plain_text())
                     .or_insert(idx as u32);

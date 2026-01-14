@@ -400,6 +400,23 @@ impl SharedStringsWriterStreaming {
 }
 
 fn parse_plain_si_text(payload: &[u8]) -> Option<String> {
+    let utf16_end = reusable_plain_si_utf16_end(payload)?;
+    let cch = u32::from_le_bytes(payload.get(1..5)?.try_into().ok()?) as usize;
+    let raw = payload.get(5..utf16_end)?;
+    let mut units = Vec::with_capacity(cch);
+    for chunk in raw.chunks_exact(2) {
+        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+    }
+    Some(String::from_utf16_lossy(&units))
+}
+
+/// Return the end offset (in bytes) of the UTF-16 text payload for a reusable "plain" `BrtSI`.
+///
+/// This treats strings as reusable when:
+/// - `flags == 0` (even if benign trailing bytes exist), or
+/// - only the rich/phonetic flag bits are set and the corresponding blocks are empty
+///   (`cRun == 0` / `cb == 0`), with no trailing bytes.
+pub(crate) fn reusable_plain_si_utf16_end(payload: &[u8]) -> Option<usize> {
     // BrtSI payload:
     //   [flags: u8][text: XLWideString]
     // Rich/phonetic data are only present if corresponding flag bits are set.
@@ -408,25 +425,18 @@ fn parse_plain_si_text(payload: &[u8]) -> Option<String> {
     if payload.len() < 1 + 4 {
         return None;
     }
-    let cch = u32::from_le_bytes(payload[1..5].try_into().ok()?) as usize;
+    let cch = u32::from_le_bytes(payload.get(1..5)?.try_into().ok()?) as usize;
     let byte_len = cch.checked_mul(2)?;
     let utf16_end = 1usize.checked_add(4)?.checked_add(byte_len)?;
     if payload.len() < utf16_end {
         return None;
     }
 
-    let raw = payload.get(5..utf16_end)?;
-    let mut units = Vec::with_capacity(cch);
-    for chunk in raw.chunks_exact(2) {
-        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
-    }
-    let text = String::from_utf16_lossy(&units);
-
     // Fast path: plain string with no extra blocks.
     if flags == 0 {
         // Some writers include benign trailing bytes after the UTF-16 text even when `flags==0`.
         // Be tolerant and only require that the declared UTF-16 bytes are present.
-        return Some(text);
+        return Some(utf16_end);
     }
 
     // Some real-world XLSB writers set the rich/phonetic bits in BrtSI flags even when the
@@ -460,7 +470,7 @@ fn parse_plain_si_text(payload: &[u8]) -> Option<String> {
         return None;
     }
 
-    Some(text)
+    Some(utf16_end)
 }
 
 fn write_appended_si_records(out: &mut impl Write, strings: &[String]) -> Result<(), Error> {
