@@ -259,7 +259,10 @@ describe("CanvasGridRenderer axis overrides large-selection perf characteristics
     expect(hideRun.mapHasCalls).toBeLessThan(250_000);
     expect(unhideRun.mapHasCalls).toBeLessThan(250_000);
 
-    if (!process.env.CI) {
+    // Time-based assertions are intentionally opt-in since wall-clock performance varies wildly
+    // across machines / environments (and is especially flaky in shared CI runners).
+    // Run with `FORMULA_PERF_ASSERT=1` to enforce a local perf budget.
+    if (process.env.FORMULA_PERF_ASSERT === "1") {
       expect(hideRun.elapsedMs).toBeLessThan(1_000);
       expect(unhideRun.elapsedMs).toBeLessThan(1_000);
     }
