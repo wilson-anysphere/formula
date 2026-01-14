@@ -9,6 +9,160 @@ function colNameToIndex(col: string): number {
   return col1 - 1;
 }
 
+const MASK_CHAR = "\u0000";
+
+type MaskedSpan = { length: number; text: string };
+
+function findWorkbookPrefixEnd(src: string, start: number): number | null {
+  // External workbook prefixes escape closing brackets by doubling: `]]` -> literal `]`.
+  //
+  // Workbook names may also contain `[` characters; treat them as plain text (no nesting).
+  if (src[start] !== "[") return null;
+  let i = start + 1;
+  while (i < src.length) {
+    if (src[i] === "]") {
+      if (src[i + 1] === "]") {
+        i += 2;
+        continue;
+      }
+      return i + 1;
+    }
+    i += 1;
+  }
+  return null;
+}
+
+function findMatchingStructuredRefBracketEnd(src: string, start: number): number | null {
+  // Structured references escape closing brackets inside items by doubling: `]]` -> literal `]`.
+  // That makes naive depth counting incorrect (it will pop twice for an escaped bracket).
+  //
+  // Match the span using a small backtracking parser:
+  // - On `[` increase depth.
+  // - On `]]`, prefer treating it as an escape (consume both, depth unchanged), but remember
+  //   a choice point. If we later fail to close all brackets, backtrack and reinterpret that
+  //   `]]` as a real closing bracket.
+  if (src[start] !== "[") return null;
+
+  let i = start;
+  let depth = 0;
+  const escapeChoices: Array<{ i: number; depth: number }> = [];
+
+  const backtrack = (): boolean => {
+    const choice = escapeChoices.pop();
+    if (!choice) return false;
+    i = choice.i;
+    depth = choice.depth;
+    // Reinterpret the first `]` of the `]]` pair as a real closing bracket.
+    depth -= 1;
+    i += 1;
+    return true;
+  };
+
+  while (true) {
+    if (i >= src.length) {
+      // Unclosed bracket span.
+      if (!backtrack()) return null;
+      continue;
+    }
+
+    const ch = src[i] ?? "";
+    if (ch === "[") {
+      depth += 1;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "]") {
+      if (src[i + 1] === "]" && depth > 0) {
+        escapeChoices.push({ i, depth });
+        i += 2;
+        continue;
+      }
+
+      depth -= 1;
+      i += 1;
+      if (depth === 0) return i;
+      if (depth < 0) {
+        if (!backtrack()) return null;
+      }
+      continue;
+    }
+
+    i += 1;
+  }
+}
+
+function findBracketSpanEnd(src: string, start: number): number | null {
+  // Prefer structured-ref-style matching first (handles nested `[[...]]` spans). If it fails,
+  // fall back to workbook-prefix scanning, which treats `[` as a literal character.
+  return findMatchingStructuredRefBracketEnd(src, start) ?? findWorkbookPrefixEnd(src, start);
+}
+
+function maskBracketSpans(segment: string): { masked: string; spans: MaskedSpan[] } {
+  const spans: MaskedSpan[] = [];
+  let out = "";
+
+  let i = 0;
+  while (i < segment.length) {
+    const ch = segment[i];
+    if (ch === "[") {
+      const end = findBracketSpanEnd(segment, i);
+      if (end && end > i) {
+        const original = segment.slice(i, end);
+        spans.push({ length: end - i, text: original });
+        out += MASK_CHAR.repeat(end - i);
+        i = end;
+        continue;
+      }
+    }
+
+    out += ch;
+    i += 1;
+  }
+
+  return { masked: out, spans };
+}
+
+function unmaskBracketSpans(segment: string, spans: readonly MaskedSpan[]): string {
+  if (spans.length === 0) return segment;
+
+  let out = "";
+  let spanIndex = 0;
+  let i = 0;
+
+  while (i < segment.length) {
+    const ch = segment[i];
+    if (ch !== MASK_CHAR) {
+      out += ch;
+      i += 1;
+      continue;
+    }
+
+    // Consume a contiguous run of mask characters.
+    let j = i;
+    while (j < segment.length && segment[j] === MASK_CHAR) j += 1;
+    let runLen = j - i;
+
+    while (runLen > 0 && spanIndex < spans.length) {
+      const span = spans[spanIndex]!;
+      // If the mask run doesn't match our stored spans, fall back to emitting the raw mask chars.
+      if (span.length > runLen) break;
+      out += span.text;
+      runLen -= span.length;
+      spanIndex += 1;
+    }
+
+    if (runLen > 0) {
+      out += MASK_CHAR.repeat(runLen);
+    }
+
+    i = j;
+  }
+
+  // If we couldn't restore all spans, leave the remainder masked (best-effort).
+  return out;
+}
+
 /**
  * Best-effort A1 reference shifter used by drag-fill (fill handle).
  *
@@ -66,6 +220,11 @@ export function shiftA1References(formula: string, deltaRows: number, deltaCols:
 }
 
 function shiftSegment(segment: string, deltaRows: number, deltaCols: number): string {
+  // Bracket spans (`[...]`) can appear in structured references and external workbook prefixes.
+  // Treat them as opaque so we don't accidentally rewrite workbook names or table column names
+  // that happen to look like A1 references (e.g. `[A1.xlsx]Sheet1!A1` or `Table1[A1]`).
+  const { masked, spans } = maskBracketSpans(segment);
+
   const sheetPrefixRe = "(?:(?:'(?:[^']|'')+'|[A-Za-z0-9_]+)!)?";
   const tokenBoundaryPrefixRe = "(^|[^A-Za-z0-9_])";
 
@@ -126,7 +285,7 @@ function shiftSegment(segment: string, deltaRows: number, deltaCols: number): st
     "g"
   );
 
-  const withColRanges = segment.replace(
+  const withColRanges = masked.replace(
     colRangeRegex,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     replaceColRange as any
@@ -156,5 +315,6 @@ function shiftSegment(segment: string, deltaRows: number, deltaCols: number): st
   // Excel drops the spill-range operator (`#`) once the base reference becomes invalid.
   // Our shifter can rewrite `A1#` into `#REF!#`; normalize that to `#REF!` for closer
   // parity with the engine's AST-based rewrite.
-  return shifted.replace(/#REF!#+/g, "#REF!");
+  const normalized = shifted.replace(/#REF!#+/g, "#REF!");
+  return unmaskBracketSpans(normalized, spans);
 }
