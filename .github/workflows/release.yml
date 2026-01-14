@@ -801,7 +801,7 @@ jobs:
         # Optional: set `FORMULA_COI_CHECK_ALL_PLATFORMS=0` (or `false`) as a GitHub Actions variable to
         # only run this step on Linux (useful if a hosted-runner regression makes the check flaky on
         # macOS/Windows while keeping at least one COI signal before publishing).
-        if: needs.validate-version.outputs.upload == 'true' && (runner.os == 'Linux' || (vars.FORMULA_COI_CHECK_ALL_PLATFORMS != '0' && vars.FORMULA_COI_CHECK_ALL_PLATFORMS != 'false'))
+        if: needs.preflight.outputs.upload == 'true' && (runner.os == 'Linux' || (vars.FORMULA_COI_CHECK_ALL_PLATFORMS != '0' && vars.FORMULA_COI_CHECK_ALL_PLATFORMS != 'false'))
         run: pnpm -C apps/desktop check:coi
       - name: Cache pinned Tauri CLI binary (cargo-tauri)
         id: tauri-cli-cache
@@ -950,7 +950,7 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: debug-symbols-${{ needs.validate-version.outputs.artifact_label }}-${{ matrix.cache_target }}
+          name: debug-symbols-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
           path: debug-symbols/*.zip
           if-no-files-found: error
 
@@ -1106,7 +1106,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: debug-symbols-${{ needs.validate-version.outputs.artifact_label }}-${{ matrix.cache_target }}
+          name: debug-symbols-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
           path: debug-symbols/*.zip
           if-no-files-found: error
 
