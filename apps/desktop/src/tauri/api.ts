@@ -73,14 +73,26 @@ export function getTauriAppGetNameOrNull(): TauriAppGetName | null {
   const app = getTauriAppNamespaceOrNull();
   const getName = safeGetProp(app, "getName") as (() => Promise<unknown>) | undefined;
   if (typeof getName !== "function") return null;
-  return async () => String(await getName.call(app));
+  return async () => {
+    const resolved = await getName.call(app);
+    if (typeof resolved !== "string") {
+      throw new Error("Tauri app.getName returned a non-string value");
+    }
+    return resolved;
+  };
 }
 
 export function getTauriAppGetVersionOrNull(): TauriAppGetVersion | null {
   const app = getTauriAppNamespaceOrNull();
   const getVersion = safeGetProp(app, "getVersion") as (() => Promise<unknown>) | undefined;
   if (typeof getVersion !== "function") return null;
-  return async () => String(await getVersion.call(app));
+  return async () => {
+    const resolved = await getVersion.call(app);
+    if (typeof resolved !== "string") {
+      throw new Error("Tauri app.getVersion returned a non-string value");
+    }
+    return resolved;
+  };
 }
 
 function getTauriDialogNamespaceOrNull(): any | null {

@@ -290,6 +290,20 @@ describe("tauri/api dynamic accessors", () => {
       expect(getVersion).toHaveBeenCalledTimes(1);
     });
 
+    it("throws when the underlying API resolves to a non-string value", async () => {
+      const getName = vi.fn(async () => 123);
+      const getVersion = vi.fn(async () => null);
+      (globalThis as any).__TAURI__ = { app: { getName, getVersion } };
+
+      const nameFn = getTauriAppGetNameOrNull();
+      const versionFn = getTauriAppGetVersionOrNull();
+      expect(nameFn).not.toBeNull();
+      expect(versionFn).not.toBeNull();
+
+      await expect(nameFn!()).rejects.toThrowError("Tauri app.getName returned a non-string value");
+      await expect(versionFn!()).rejects.toThrowError("Tauri app.getVersion returned a non-string value");
+    });
+
     it("supports the __TAURI__.plugin.app API shape", async () => {
       const appApi: any = {};
       const getName = vi.fn(async () => "Formula");
