@@ -77,6 +77,23 @@ describe("getActiveArgumentSpan", () => {
     });
   });
 
+  it("treats escaped closing brackets inside structured references as plain text", () => {
+    const formula = "=SUM(Table1[Total]],USD], 1)";
+    const insideRef = formula.indexOf("USD") + 1;
+    expect(getActiveArgumentSpan(formula, insideRef)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 0,
+      argText: "Table1[Total]],USD]",
+    });
+
+    const insideSecondArg = formula.lastIndexOf("1") + 1;
+    expect(getActiveArgumentSpan(formula, insideSecondArg)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 1,
+      argText: "1",
+    });
+  });
+
   it("ignores commas inside curly braces (array literals)", () => {
     const formula = "=SUM({1,2,3}, 4)";
     const insideSecondArg = formula.indexOf("4") + 1;

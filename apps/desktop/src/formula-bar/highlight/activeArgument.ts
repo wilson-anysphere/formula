@@ -42,6 +42,25 @@ function popParenFrame(stack: StackFrame[]): void {
   }
 }
 
+function isEscapedStructuredRefBracket(formulaText: string, index: number, bracketDepth: number): boolean {
+  // Excel escapes `]` inside structured reference items by doubling it: `]]` -> `]`.
+  //
+  // We only need a best-effort heuristic here: treat `]]` as an escaped literal `]`
+  // when it's followed by a character that couldn't immediately follow a closing
+  // bracket group. This matches the heuristic used by the formula tokenizer.
+  if (formulaText[index] !== "]" || formulaText[index + 1] !== "]") return false;
+  // When only a single bracket group is open, `]]` can't represent closing multiple
+  // nested groups (there's nothing to pop twice). Treat it as an escaped literal.
+  if (bracketDepth === 1) return true;
+  // `]]]...` implies at least one escaped `]` (consume the first two as the escape).
+  if (formulaText[index + 2] === "]") return true;
+  let k = index + 2;
+  while (k < formulaText.length && isWhitespace(formulaText[k] ?? "")) k += 1;
+  const after = formulaText[k] ?? "";
+  const isDelimiterAfterClose = after === "" || after === "," || after === ";" || after === "]" || after === ")";
+  return !isDelimiterAfterClose;
+}
+
 function findArgumentEnd(formulaText: string, start: number): number {
   let inString = false;
   let parenDepth = 0;
@@ -72,6 +91,11 @@ function findArgumentEnd(formulaText: string, start: number): number {
       continue;
     }
     if (ch === "]") {
+      if (bracketDepth > 0 && isEscapedStructuredRefBracket(formulaText, i, bracketDepth)) {
+        // Skip the escaped `]]` sequence without closing the bracket scope.
+        i += 1;
+        continue;
+      }
       if (bracketDepth > 0) bracketDepth -= 1;
       continue;
     }
@@ -154,6 +178,13 @@ export function getActiveArgumentSpan(formulaText: string, cursorIndex: number):
       continue;
     }
     if (ch === "]") {
+      const bracketDepth = stack.filter((frame) => frame.kind === "bracket").length;
+      if (bracketDepth > 0 && isEscapedStructuredRefBracket(formulaText, i, bracketDepth)) {
+        // Skip escaped bracket sequences inside structured reference items so
+        // delimiters like commas within column names don't break arg parsing.
+        i += 2;
+        continue;
+      }
       popUntilKind(stack, "bracket");
       i += 1;
       continue;
