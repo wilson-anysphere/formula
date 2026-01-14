@@ -307,11 +307,12 @@ jobs:
         run: |
           node - <<'NODE'
           const fs = require('node:fs');
-          const targetRaw = process.env.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB;
+          const targetRaw =
+            process.env.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB ?? process.env.FORMULA_DESKTOP_MEMORY_TARGET_MB;
           const target = Number(targetRaw);
           if (!Number.isFinite(target) || target <= 0) {
             console.log(
-              `[perf] FORMULA_DESKTOP_IDLE_RSS_TARGET_MB is not set to a positive number (${JSON.stringify(targetRaw)}); skipping idle RSS gate.`,
+              `[perf] FORMULA_DESKTOP_IDLE_RSS_TARGET_MB / FORMULA_DESKTOP_MEMORY_TARGET_MB is not set to a positive number (${JSON.stringify(targetRaw)}); skipping idle RSS gate.`,
             );
             process.exit(0);
           }
