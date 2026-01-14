@@ -109,6 +109,8 @@ Notes / caveats:
 - `sources/<locale>.json` is expected to come from this extractor whenever possible. Avoid replacing
   `sources/es-ES.json` with partial online translation tables; missing entries silently fall back to
   English in the generated TSVs.
+- For `es-ES`, treat a “complete” extraction as **one translation per canonical function** in
+  `shared/functionCatalog.json` (i.e. the extractor should not report a large skipped set).
 - After extracting, regenerate + verify with:
   - `node scripts/generate-locale-function-tsv.js`
   - `node scripts/generate-locale-function-tsv.js --check`
