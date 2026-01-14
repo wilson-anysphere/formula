@@ -4,6 +4,7 @@ import * as Y from "yjs";
 import { createCollabSession } from "@formula/collab-session";
 import { createCommentManagerForDoc } from "@formula/collab-comments";
 import { REMOTE_ORIGIN } from "@formula/collab-undo";
+import { EncryptedRangeManager } from "@formula/collab-encrypted-ranges";
 
 import { DocumentController } from "../document/documentController.js";
 import { bindDocumentControllerWithCollabUndo } from "./documentControllerCollabUndo";
@@ -195,6 +196,33 @@ describe("collaboration-safe undo/redo (desktop)", () => {
     expect(undoService.canRedo()).toBe(true);
     undoService.redo();
     expect(get()?.resolved ?? null).toBe(true);
+
+    binder.destroy();
+  });
+
+  it("undo/redo captures encrypted range edits when using binder-origin transactions", async () => {
+    const session = createCollabSession({ doc: new Y.Doc() });
+    const document = new DocumentController();
+
+    const { binder, undoService } = await bindDocumentControllerWithCollabUndo({
+      session,
+      documentController: document,
+      defaultSheetId: "Sheet1",
+    });
+
+    const ranges = new EncryptedRangeManager({ doc: session.doc, transact: undoService.transact! });
+    const id = ranges.add({ sheetId: "Sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 0, keyId: "k1" });
+    undoService.stopCapturing();
+
+    expect(ranges.list().map((r) => r.id)).toEqual([id]);
+    expect(undoService.canUndo()).toBe(true);
+
+    undoService.undo();
+    expect(ranges.list()).toHaveLength(0);
+
+    expect(undoService.canRedo()).toBe(true);
+    undoService.redo();
+    expect(ranges.list().map((r) => r.id)).toEqual([id]);
 
     binder.destroy();
   });
