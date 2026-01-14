@@ -311,11 +311,13 @@ try {
     if ($null -ne $fn.arg_types) { $argTypes = @($fn.arg_types | ForEach-Object { [string]$_ }) }
 
     $formula = Build-MinimalFormula -FunctionName $canonicalName -MinArgs $minArgs -ArgTypes $argTypes
+    Write-Verbose ("{0}: {1}" -f $canonicalName, $formula)
 
     try {
       $cell.Clear()
       Set-RangeFormula -RangeObj $cell -Formula $formula
       $local = [string]$cell.FormulaLocal
+      Write-Verbose ("{0} FormulaLocal: {1}" -f $canonicalName, $local)
       if (-not $local) {
         throw "FormulaLocal was empty"
       }
@@ -330,7 +332,7 @@ try {
       $translations[$canonicalName] = $localizedName
     } catch {
       $skipped.Add($canonicalName) | Out-Null
-      Write-Warning ("[{0}/{1}] Skipping {2}: {3}" -f $i, $functionList.Count, $canonicalName, $_.Exception.Message)
+      Write-Warning ("[{0}/{1}] Skipping {2} (formula={3}): {4}" -f $i, $functionList.Count, $canonicalName, $formula, $_.Exception.Message)
       continue
     }
   }
