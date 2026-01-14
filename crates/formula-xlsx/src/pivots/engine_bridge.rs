@@ -5,8 +5,8 @@
 //! into the engine's self-contained pivot types.
 
 use formula_engine::pivot::{
-    AggregationType, FilterField, GrandTotals, Layout, PivotConfig, PivotField, PivotValue,
-    ShowAsType, SubtotalPosition, ValueField,
+    AggregationType, CalculatedField, FilterField, GrandTotals, Layout, PivotConfig, PivotField,
+    PivotValue, ShowAsType, SubtotalPosition, ValueField,
 };
 use formula_engine::pivot::{PivotKeyPart, SortOrder};
 use std::collections::HashSet;
@@ -210,13 +210,21 @@ pub fn pivot_table_to_engine_config(
         Some(v) if v.eq_ignore_ascii_case("AtBottom") => SubtotalPosition::Bottom,
         _ => SubtotalPosition::None,
     };
+    let calculated_fields = cache_def
+        .calculated_fields()
+        .into_iter()
+        .map(|cf| CalculatedField {
+            name: cf.name,
+            formula: cf.formula,
+        })
+        .collect();
 
     PivotConfig {
         row_fields,
         column_fields,
         value_fields,
         filter_fields,
-        calculated_fields: Vec::new(),
+        calculated_fields,
         calculated_items: Vec::new(),
         layout,
         subtotals,

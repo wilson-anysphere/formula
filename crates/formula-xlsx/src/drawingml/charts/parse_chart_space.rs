@@ -346,6 +346,22 @@ fn parse_plot_area_chart(
             },
         };
 
+        // If a chart type is known but does not have a first-class `ComboChartEntry` variant,
+        // emit a warning so consumers can distinguish "we parsed it" from "we can render/model it".
+        //
+        // Note: Unknown chart kinds are already warned in `parse_plot_area_model`.
+        if matches!(&entry, ComboChartEntry::Unknown { .. })
+            && !matches!(&subplot_kind, ChartKind::Unknown { .. })
+        {
+            warn(
+                diagnostics,
+                format!(
+                    "unsupported chart type {}; rendering may be incomplete",
+                    chart_node.tag_name().name()
+                ),
+            );
+        }
+
         charts.push(entry);
     }
 

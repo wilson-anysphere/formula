@@ -21,6 +21,22 @@ pub struct PivotCacheDefinition {
     pub cache_fields: Vec<PivotCacheField>,
 }
 
+impl PivotCacheDefinition {
+    pub fn calculated_fields(&self) -> Vec<formula_model::pivots::CalculatedField> {
+        self.cache_fields
+            .iter()
+            .filter_map(|field| {
+                let formula = field.formula.as_deref()?;
+                let formula = formula.strip_prefix('=').unwrap_or(formula);
+                Some(formula_model::pivots::CalculatedField {
+                    name: field.name.clone(),
+                    formula: formula.to_string(),
+                })
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PivotCacheSourceType {
     Worksheet,
@@ -969,6 +985,70 @@ mod tests {
         assert_eq!(
             def.resolve_record_value(0, PivotCacheValue::Index(0)),
             PivotCacheValue::Missing
+        );
+    }
+
+    #[test]
+    fn imports_calculated_fields_into_engine_config() {
+        let cache_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cacheFields count="3">
+    <cacheField name="Sales"/>
+    <cacheField name="Cost"/>
+    <cacheField name="Profit" formula="Sales-Cost"/>
+  </cacheFields>
+</pivotCacheDefinition>"#;
+
+        let cache_def = parse_pivot_cache_definition(cache_xml).expect("parse cache definition");
+        assert_eq!(
+            cache_def.calculated_fields(),
+            vec![formula_model::pivots::CalculatedField {
+                name: "Profit".to_string(),
+                formula: "Sales-Cost".to_string(),
+            }]
+        );
+
+        let table_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dataFields count="1">
+    <dataField fld="2" subtotal="sum" name="Sum of Profit"/>
+  </dataFields>
+</pivotTableDefinition>"#;
+
+        let table = crate::pivots::PivotTableDefinition::parse(
+            "xl/pivotTables/pivotTable1.xml",
+            table_xml,
+        )
+        .expect("parse pivot table definition");
+
+        let cfg = crate::pivots::engine_bridge::pivot_table_to_engine_config(&table, &cache_def);
+        assert_eq!(
+            cfg.calculated_fields,
+            vec![formula_engine::pivot::CalculatedField {
+                name: "Profit".to_string(),
+                formula: "Sales-Cost".to_string(),
+            }]
+        );
+        assert_eq!(cfg.value_fields.len(), 1);
+        assert_eq!(cfg.value_fields[0].source_field, "Profit".to_string());
+    }
+
+    #[test]
+    fn calculated_fields_strip_leading_equals() {
+        let cache_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cacheFields count="1">
+    <cacheField name="Profit" formula="=Sales-Cost"/>
+  </cacheFields>
+</pivotCacheDefinition>"#;
+
+        let cache_def = parse_pivot_cache_definition(cache_xml).expect("parse cache definition");
+        assert_eq!(
+            cache_def.calculated_fields(),
+            vec![formula_model::pivots::CalculatedField {
+                name: "Profit".to_string(),
+                formula: "Sales-Cost".to_string(),
+            }]
         );
     }
 }
