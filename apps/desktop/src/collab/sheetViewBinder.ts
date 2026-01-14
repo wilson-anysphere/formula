@@ -138,19 +138,71 @@ function cloneJsonValue<T>(value: T): T {
 function normalizeDrawings(raw: unknown): any[] | undefined {
   if (raw == null) return undefined;
 
-  let json = raw as any;
-  if (json && typeof json === "object" && typeof json.toJSON === "function") {
+  // Drawings are user-authored shared state (collab sheet view), so keep normalization defensive:
+  // avoid deep-cloning entries with pathological ids (e.g. multi-megabyte strings).
+  const MAX_DRAWING_ID_STRING_CHARS = 4096;
+
+  const pushIfValid = (entry: unknown, out: any[]) => {
+    if (!entry || typeof entry !== "object") return;
+    // Accept only string or safe-integer ids (mirrors DocumentController validation).
+    const rawId = (entry as any)?.get?.("id") ?? (entry as any).id;
+    if (typeof rawId === "string") {
+      if (rawId.length > MAX_DRAWING_ID_STRING_CHARS) return;
+      if (!rawId.trim()) return;
+    } else if (typeof rawId === "number") {
+      if (!Number.isSafeInteger(rawId)) return;
+    } else {
+      return;
+    }
+
+    // Convert Yjs types to JSON before cloning (best-effort).
+    let json: any = entry;
+    if (json && typeof json === "object" && typeof json.toJSON === "function") {
+      try {
+        json = json.toJSON();
+      } catch {
+        // Ignore JSON conversion errors and fall back to the raw entry.
+      }
+    }
+    if (!isRecord(json)) return;
+
     try {
-      json = json.toJSON();
+      out.push(cloneJsonValue(json));
     } catch {
-      // Ignore JSON conversion errors and fall back to the raw value.
+      // ignore malformed/non-serializable drawing entries
+    }
+  };
+
+  // Support:
+  // - plain JS arrays (common)
+  // - Y.Array-like values (legacy/experimental schemas)
+  /** @type {any[]} */
+  const normalized: any[] = [];
+  if (Array.isArray(raw)) {
+    for (const entry of raw) pushIfValid(entry, normalized);
+  } else {
+    const maybeYArray = raw as any;
+    const length = typeof maybeYArray?.length === "number" ? maybeYArray.length : 0;
+    const get = typeof maybeYArray?.get === "function" ? maybeYArray.get.bind(maybeYArray) : null;
+    if (length > 0 && get) {
+      for (let i = 0; i < length; i += 1) {
+        pushIfValid(get(i), normalized);
+      }
+    } else if ((raw as any) && typeof (raw as any).toJSON === "function") {
+      // Last resort: materialize via toJSON and filter.
+      try {
+        const json = (raw as any).toJSON();
+        if (Array.isArray(json)) {
+          for (const entry of json) pushIfValid(entry, normalized);
+        }
+      } catch {
+        // ignore
+      }
     }
   }
+  if (normalized.length === 0) return undefined;
 
-  if (!Array.isArray(json) || json.length === 0) return undefined;
-
-  const cloned = cloneJsonValue(json);
-  return Array.isArray(cloned) && cloned.length > 0 ? cloned : undefined;
+  return normalized;
 }
 
 function deepEquals(a: any, b: any): boolean {

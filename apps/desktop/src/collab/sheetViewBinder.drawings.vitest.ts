@@ -57,4 +57,52 @@ describe("bindSheetViewToCollabSession (drawings)", () => {
 
     binder.destroy();
   });
+
+  it("ignores remote drawings with excessively long ids (defensive)", () => {
+    const doc = new Y.Doc();
+    const sheets = doc.getArray<Y.Map<any>>("sheets");
+
+    const sheetId = "sheet-1";
+    const sheetMap = new Y.Map<any>();
+    sheetMap.set("id", sheetId);
+    sheets.push([sheetMap]);
+
+    const document = new DocumentController();
+    document.addSheet({ sheetId, name: "Sheet1" });
+
+    const binder = bindSheetViewToCollabSession({
+      session: { doc, sheets, localOrigins: new Set(), isReadOnly: () => false } as any,
+      documentController: document,
+    });
+
+    // Start with one valid drawing so we can observe the remote invalid update clearing it.
+    document.setSheetDrawings(sheetId, [
+      {
+        id: "drawing-1",
+        zOrder: 0,
+        kind: { type: "image", imageId: "img-1" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+      },
+    ]);
+    expect((document as any).getSheetDrawings(sheetId).length).toBe(1);
+
+    const tooLongId = "x".repeat(5000);
+    doc.transact(() => {
+      const viewMap = sheetMap.get("view") as Y.Map<any>;
+      viewMap.set("drawings", [
+        {
+          id: tooLongId,
+          zOrder: 0,
+          kind: { type: "shape", label: "bad" },
+          anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+        },
+      ]);
+    });
+
+    // The binder should ignore the invalid entry and clear drawings (DocumentController also rejects
+    // long ids), rather than throwing or storing the oversized payload.
+    expect((document as any).getSheetDrawings(sheetId)).toEqual([]);
+
+    binder.destroy();
+  });
 });
