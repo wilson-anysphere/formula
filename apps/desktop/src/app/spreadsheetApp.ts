@@ -2290,35 +2290,36 @@ export class SpreadsheetApp {
               effectiveViewport = this.sharedGrid?.renderer.getViewportState() ?? viewport;
             }
 
-             const prevX = this.scrollX;
-             const prevY = this.scrollY;
-             const nextScroll = zoomChanged ? (this.sharedGrid?.renderer.scroll.getScroll() ?? scroll) : scroll;
-             this.scrollX = nextScroll.x;
-             this.scrollY = nextScroll.y;
-             // Axis size changes (row/col resize/auto-fit, outline hide/unhide, etc) mutate the
-             // renderer's VariableSizeAxis state. Drawings/pictures overlays cache sheet-space
-             // bounds derived from `drawingGeom`, so invalidate those caches whenever the axis
-             // sizing version changes. This keeps drawings aligned both *during* interactive
-             // resize drags and after programmatic size changes.
-             const renderer = this.sharedGrid?.renderer;
-             if (renderer) {
-                const rowsVersion = renderer.scroll.rows.getVersion();
-                const colsVersion = renderer.scroll.cols.getVersion();
-                if (rowsVersion !== this.sharedGridRowsVersion || colsVersion !== this.sharedGridColsVersion) {
-                  this.sharedGridRowsVersion = rowsVersion;
-                  this.sharedGridColsVersion = colsVersion;
-                  const overlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
-                  overlay?.invalidateSpatialIndex();
-                  this.invalidateDrawingHitTestIndexCaches();
-                  this.drawingsInteraction?.invalidateHitTestIndex();
-                  this.drawingInteractionController?.invalidateHitTestIndex();
-                }
+            const prevX = this.scrollX;
+            const prevY = this.scrollY;
+            const nextScroll = zoomChanged ? (this.sharedGrid?.renderer.scroll.getScroll() ?? scroll) : scroll;
+            this.scrollX = nextScroll.x;
+            this.scrollY = nextScroll.y;
+            // Axis size changes (row/col resize/auto-fit, outline hide/unhide, etc) mutate the
+            // renderer's VariableSizeAxis state. Drawings/pictures overlays cache sheet-space
+            // bounds derived from `drawingGeom`, so invalidate those caches whenever the axis
+            // sizing version changes. This keeps drawings aligned both *during* interactive
+            // resize drags and after programmatic size changes.
+            const renderer = this.sharedGrid?.renderer;
+            if (renderer) {
+              const rowsVersion = renderer.scroll.rows.getVersion();
+              const colsVersion = renderer.scroll.cols.getVersion();
+              if (rowsVersion !== this.sharedGridRowsVersion || colsVersion !== this.sharedGridColsVersion) {
+                this.sharedGridRowsVersion = rowsVersion;
+                this.sharedGridColsVersion = colsVersion;
+                const overlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
+                overlay?.invalidateSpatialIndex();
+                this.invalidateDrawingHitTestIndexCaches();
+                this.chartDrawingInteraction?.invalidateHitTestIndex();
+                this.drawingsInteraction?.invalidateHitTestIndex();
+                this.drawingInteractionController?.invalidateHitTestIndex();
               }
-              this.clearSharedHoverCellCache();
-              this.hideCommentTooltip();
-              this.renderDrawings(effectiveViewport);
-              if (!this.useCanvasCharts) {
-                this.renderCharts(false);
+            }
+            this.clearSharedHoverCellCache();
+            this.hideCommentTooltip();
+            this.renderDrawings(effectiveViewport);
+            if (!this.useCanvasCharts) {
+              this.renderCharts(false);
             }
             this.renderAuditing();
             this.renderSelection();
