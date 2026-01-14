@@ -296,11 +296,15 @@ export class DrawingOverlay {
   private renderAbort: AbortController | null = null;
   private preloadAbort: AbortController | null = typeof AbortController !== "undefined" ? new AbortController() : null;
   private preloadCount = 0;
+  private destroyed = false;
   private cssVarStyle: CssVarStyle | null | undefined = undefined;
   private colorTokens: OverlayColorTokens | null = null;
   private orderedObjects: DrawingObject[] = [];
   private orderedObjectsSource: DrawingObject[] | null = null;
   private themeObserver: MutationObserver | null = null;
+  private lastRenderArgs: { objects: DrawingObject[]; viewport: Viewport; options?: { drawObjects?: boolean } } | null = null;
+  private readonly pendingImageHydrations = new Map<string, Promise<ImageEntry | undefined>>();
+  private hydrationRerenderScheduled = false;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -378,12 +382,64 @@ export class DrawingOverlay {
     return this.orderedObjects;
   }
 
+  private scheduleHydrationRerender(): void {
+    if (this.hydrationRerenderScheduled) return;
+    this.hydrationRerenderScheduled = true;
+
+    const schedule =
+      typeof queueMicrotask === "function"
+        ? queueMicrotask
+        : (cb: () => void) => {
+            void Promise.resolve().then(cb);
+          };
+
+    schedule(() => {
+      this.hydrationRerenderScheduled = false;
+      if (this.destroyed) return;
+      const last = this.lastRenderArgs;
+      if (!last) return;
+      void this.render(last.objects, last.viewport, last.options).catch(() => {});
+    });
+  }
+
+  private hydrateImage(imageId: string): void {
+    const id = String(imageId ?? "");
+    if (!id) return;
+    if (typeof this.images.getAsync !== "function") return;
+    if (this.pendingImageHydrations.has(id)) return;
+
+    const promise = Promise.resolve()
+      .then(() => this.images.getAsync!(id))
+      .catch(() => undefined);
+
+    this.pendingImageHydrations.set(id, promise);
+
+    void promise.then((entry) => {
+      this.pendingImageHydrations.delete(id);
+      if (!entry) return;
+
+      // Ensure subsequent sync `get()` calls can resolve without awaiting `getAsync`.
+      try {
+        if (!this.images.get(id)) {
+          this.images.set(entry);
+        }
+      } catch {
+        // Best-effort: ignore caching failures.
+      }
+
+      this.scheduleHydrationRerender();
+    });
+  }
+
   async render(objects: DrawingObject[], viewport: Viewport, options?: { drawObjects?: boolean }): Promise<void> {
     this.renderSeq += 1;
     const seq = this.renderSeq;
     let completed = false;
     let shapeCount = 0;
     const drawObjects = options?.drawObjects !== false;
+    // Keep the latest render args around so async image hydration can trigger a follow-up render
+    // once bytes are available (without relying on callers to poll/refresh).
+    this.lastRenderArgs = { objects, viewport: { ...viewport }, options };
 
     // Cancel any prior render pass so we don't draw stale content after a newer
     // render begins (e.g. rapid scroll/zoom updates). This also lets callers
@@ -537,15 +593,16 @@ export class DrawingOverlay {
         }
 
         if (obj.kind.type === "image") {
-          let entry = this.images.get(obj.kind.imageId);
-          if (!entry && typeof this.images.getAsync === "function") {
-            // Best-effort: kick off async hydration (e.g. IndexedDB) but do not await here.
-            // SpreadsheetApp's render pipeline intentionally fire-and-forgets `render()`, and
-            // unit tests expect placeholder draws to be synchronous.
-            void this.images.getAsync(obj.kind.imageId).catch(() => {});
-          }
+          const imageId = obj.kind.imageId;
+          const entry = this.images.get(imageId);
 
           if (!entry) {
+            // Best-effort: hydrate missing bytes from a persistent store (e.g. IndexedDB). Do not
+            // await here: awaiting would delay placeholder rendering until the async lookup
+            // resolves, making the object temporarily disappear. Instead, render a placeholder
+            // immediately and schedule a follow-up render when bytes arrive.
+            this.hydrateImage(imageId);
+
             // Image metadata can arrive before the bytes are hydrated into the ImageStore
             // (e.g. collaboration metadata received before IndexedDB hydration). Render a
             // placeholder box so the image remains visible/selectable until bytes load.
@@ -571,7 +628,7 @@ export class DrawingOverlay {
 
           try {
             const bitmapPromise =
-              prefetchedImageBitmaps.get(obj.kind.imageId) ??
+              prefetchedImageBitmaps.get(imageId) ??
               this.bitmapCache.get(entry, signal ? { signal } : undefined);
             const bitmap = await bitmapPromise;
             if (signal?.aborted) return;
@@ -899,6 +956,7 @@ export class DrawingOverlay {
 
   destroy(): void {
     // Cancel any in-flight render and release cached bitmap resources.
+    this.destroyed = true;
     this.renderAbort?.abort();
     this.renderAbort = null;
     this.preloadAbort?.abort();
@@ -914,6 +972,9 @@ export class DrawingOverlay {
     this.orderedObjects = [];
     this.orderedObjectsSource = null;
     this.selectedId = null;
+    this.lastRenderArgs = null;
+    this.pendingImageHydrations.clear();
+    this.hydrationRerenderScheduled = false;
   }
 
   /**

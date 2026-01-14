@@ -1793,6 +1793,10 @@ export class SpreadsheetApp {
       cancelBatch: () => this.document.cancelBatch(),
       onSelectionChange: (selectedId) => {
         this.selectedDrawingId = selectedId;
+        // Ensure selection outlines/handles repaint immediately when the interaction
+        // controller updates selection (it can stop propagation to the root grid
+        // pointer handlers, so we cannot rely on `onPointerDown` to trigger a redraw).
+        this.scheduleDrawingsRender("drawings:selection");
       },
     });
     this.syncSheetDrawings();
