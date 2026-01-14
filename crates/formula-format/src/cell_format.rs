@@ -256,12 +256,35 @@ fn classify_time_tokens_to_cell_code(
 }
 
 fn resolve_builtin_placeholder(code: &str) -> Option<&'static str> {
-    let id = code
-        .strip_prefix(BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX)?
-        .trim()
-        .parse::<u16>()
-        .ok()?;
-    builtin_format_code(id)
+    let rest = code.strip_prefix(BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX)?;
+    let id = match rest.trim().parse::<u16>() {
+        Ok(id) => id,
+        // A malformed placeholder should not be interpreted as a literal format code because
+        // the placeholder text contains letters like `m`/`d` which would look like a date/time
+        // pattern. Treat it as General instead.
+        Err(_) => return Some("General"),
+    };
+
+    // Standard OOXML/BIFF built-ins: 0-49.
+    if let Some(resolved) = builtin_format_code(id) {
+        return Some(resolved);
+    }
+
+    // Excel reserves additional (non-OOXML) built-in ids for locale-specific date/time formats.
+    // When importers preserve them as placeholders, avoid passing the placeholder string into the
+    // parser (which can misclassify it as date/time based on the placeholder text itself).
+    //
+    // Fall back to a representative date format so callers still classify it as date/time.
+    if builtin_id_is_common_datetime(id) {
+        return Some(builtin_format_code(14).unwrap_or("General"));
+    }
+
+    // Unknown placeholder: behave like General.
+    Some("General")
+}
+
+fn builtin_id_is_common_datetime(id: u16) -> bool {
+    matches!(id, 14..=22 | 27..=36 | 45..=47 | 50..=58)
 }
 
 fn pattern_contains_parentheses(pattern: &str) -> bool {
