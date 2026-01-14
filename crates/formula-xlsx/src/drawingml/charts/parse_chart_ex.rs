@@ -229,7 +229,7 @@ fn parse_legend(
 }
 fn detect_chart_kind(
     doc: &Document<'_>,
-    _root_ns: &str,
+    root_ns: &str,
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> String {
     // 1) Prefer explicit chart-type nodes like `<cx:waterfallChart>`.
@@ -266,7 +266,6 @@ fn detect_chart_kind(
         return chart_type;
     }
 
-    let root_ns = _root_ns;
     let hints = collect_chart_ex_kind_hints(doc);
     let hint_list = if hints.is_empty() {
         "<none>".to_string()
