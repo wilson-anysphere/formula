@@ -79,7 +79,7 @@ test("rich values (images, rich text) stringify as plain text (no [object Object
   const wb = new InMemoryWorkbook();
   const sheet = wb.addSheet("Sheet1");
 
-  sheet.setValue(0, 0, { type: "image", value: { imageId: "img_1", altText: "Kitten" } });
+  sheet.setValue(0, 0, { type: "image", value: { imageId: "img_1", altText: " Kitten " } });
   sheet.setValue(0, 1, { type: "image", value: { imageId: "img_2" } });
   sheet.setValue(0, 2, { text: "Hello", runs: [{ start: 0, end: 5, style: {} }] });
 
@@ -87,6 +87,7 @@ test("rich values (images, rich text) stringify as plain text (no [object Object
   // stable text representation (alt text / placeholder / rich text).
   const kittenMatches = await findAll(wb, "Kitten", { scope: "sheet", currentSheetName: "Sheet1", matchEntireCell: true });
   assert.deepEqual(kittenMatches.map((m) => m.address), ["Sheet1!A1"]);
+  assert.equal(kittenMatches[0].text, "Kitten");
 
   const placeholderMatches = await findAll(wb, "[Image]", {
     scope: "sheet",
