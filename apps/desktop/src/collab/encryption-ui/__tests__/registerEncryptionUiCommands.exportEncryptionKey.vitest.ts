@@ -170,4 +170,49 @@ describe("registerEncryptionUiCommands", () => {
     expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/unsupported format/i), "error");
     expect(showToast).not.toHaveBeenCalledWith(expect.stringMatching(/not inside an encrypted range/i), "warning");
   });
+
+  it("exportEncryptionKey can still export when encryptedRanges schema is unsupported but the cell has an enc payload", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const docId = "doc-1";
+    const doc = new Y.Doc({ guid: docId });
+
+    const metadata = doc.getMap("metadata");
+    metadata.set("encryptedRanges", { foo: "bar" } as any);
+
+    const cells = doc.getMap("cells");
+    const cellMap = new Y.Map<any>();
+    cellMap.set("enc", {
+      v: 1,
+      alg: "AES-256-GCM",
+      keyId: "k1",
+      ivBase64: "AA==",
+      tagBase64: "AA==",
+      ciphertextBase64: "AA==",
+    });
+    cells.set("Sheet1:0:0", cellMap);
+
+    const keyBytes = new Uint8Array(32).fill(7);
+    const keyStore = {
+      getCachedKey: vi.fn((_docId: string, keyId: string) => (keyId === "k1" ? { keyId, keyBytes } : null)),
+      get: vi.fn(async () => null),
+    };
+
+    const app: any = {
+      getCollabSession: () => ({ doc, cells }),
+      getActiveCell: () => ({ row: 0, col: 0 }),
+      getCurrentSheetId: () => "Sheet1",
+      getCurrentSheetDisplayName: () => "Sheet1",
+      getCollabEncryptionKeyStore: () => keyStore,
+    };
+
+    registerEncryptionUiCommands({ commandRegistry, app });
+
+    vi.mocked(showInputBox).mockResolvedValue("done");
+
+    await commandRegistry.executeCommand("collab.exportEncryptionKey");
+
+    expect(keyStore.getCachedKey).toHaveBeenCalledWith(docId, "k1");
+    expect(showToast).not.toHaveBeenCalledWith(expect.stringMatching(/unsupported format/i), "error");
+  });
 });
