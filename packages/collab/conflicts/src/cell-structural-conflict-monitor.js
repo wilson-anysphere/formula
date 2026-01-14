@@ -467,7 +467,7 @@ export class CellStructuralConflictMonitor {
     // Upper bound on deletes per prune pass. Limits the size of the resulting
     // Yjs update and avoids long blocking scans/transactions when many expired
     // entries accumulate.
-    const maxDeletesPerPass = 1000;
+    const maxDeletesPerPass = 1_000;
 
     // Iterate manually (instead of `forEach`) so we can early-break once we have
     // enough deletions to make progress. This avoids scanning the entire map on
