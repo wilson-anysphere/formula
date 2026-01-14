@@ -232,6 +232,18 @@ fn cell_width_reflects_column_width_metadata() {
 }
 
 #[test]
+fn cell_width_self_reference_is_not_a_circular_dependency() {
+    // `CELL("width", A1)` only depends on column metadata; the `A1` reference is used for its
+    // address (column) only. Excel evaluates this successfully even when the formula is entered
+    // into the referenced cell.
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=CELL(\"width\",A1)");
+    sheet.recalculate();
+    assert_number(&sheet.get("A1"), 8.0);
+    assert_eq!(sheet.circular_reference_count(), 0);
+}
+
+#[test]
 fn cell_sheet_default_style_affects_format_prefix_and_protect() {
     use formula_engine::Engine;
     use formula_model::{Alignment, HorizontalAlignment, Protection};
