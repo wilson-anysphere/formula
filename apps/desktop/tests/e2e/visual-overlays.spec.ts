@@ -7,6 +7,9 @@ type Theme = "light" | "dark";
 const screenshotOptions = {
   animations: "disabled" as const,
   caret: "hide" as const,
+  // Element screenshots occasionally take longer to stabilize on CI (fonts/layout); keep a
+  // generous timeout to reduce flakes.
+  timeout: 15_000,
 };
 
 function commandModifier(): string {
