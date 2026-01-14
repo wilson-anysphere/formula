@@ -311,9 +311,10 @@ export const RibbonButton = React.memo(function RibbonButton({
         >
           {button.menuItems?.map((item) => {
             const menuItemLabel = labelById?.[item.id] ?? item.label;
-            const menuItemDisabledOverride = disabledById?.[item.id];
             const menuItemDisabled =
-              typeof menuItemDisabledOverride === "boolean" ? menuItemDisabledOverride : Boolean(item.disabled);
+              // Schema-disabled items must remain disabled; the UI state can only *add* additional
+              // disabling (e.g. editing-mode guards), not re-enable schema-disabled items.
+              Boolean(item.disabled) || disabledById?.[item.id] === true;
             const itemShortcut = shortcutById?.[item.id];
             const itemTitle = formatTooltipTitle(item.ariaLabel, itemShortcut);
             const itemAriaKeyShortcuts = ariaKeyShortcutsById?.[item.id];
