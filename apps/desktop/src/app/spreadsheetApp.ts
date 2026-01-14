@@ -9159,6 +9159,7 @@ export class SpreadsheetApp {
   setRowsHidden(rows: number[] | null | undefined, hidden: boolean): void {
     if (this.isReadOnly()) return;
     if (this.isEditing()) return;
+    if (this.isReadOnly()) return;
     if (!Array.isArray(rows) || rows.length === 0) return;
 
     const outline = this.getOutlineForSheet(this.sheetId);
@@ -9184,6 +9185,7 @@ export class SpreadsheetApp {
   setColsHidden(cols: number[] | null | undefined, hidden: boolean): void {
     if (this.isReadOnly()) return;
     if (this.isEditing()) return;
+    if (this.isReadOnly()) return;
     if (!Array.isArray(cols) || cols.length === 0) return;
 
     const outline = this.getOutlineForSheet(this.sheetId);
