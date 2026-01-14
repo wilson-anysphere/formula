@@ -16488,7 +16488,8 @@ fn walk_external_dependencies(
                 }
                 // LET/LAMBDA lexical bindings are only visible for unqualified identifiers.
                 // Explicit sheet-qualified names should still resolve as defined names.
-                if matches!(nref.sheet, SheetReference::Current) && name_is_local(lexical_scopes, &name_key)
+                if matches!(nref.sheet, SheetReference::Current)
+                    && name_is_local(lexical_scopes, &name_key)
                 {
                     return None;
                 }
@@ -19363,7 +19364,10 @@ mod tests {
 
         let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
         let addr = parse_a1("A1").expect("addr");
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
 
         assert_eq!(
             engine
@@ -19396,7 +19400,10 @@ mod tests {
 
         let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
         let addr = parse_a1("A1").expect("addr");
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
 
         assert_eq!(
             engine

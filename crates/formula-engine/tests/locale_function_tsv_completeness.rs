@@ -752,7 +752,10 @@ fn locale_error_tsvs_preserve_known_alias_spellings() {
     assert_error_preferred(&de_de.entries, "#VALUE!", "#WERT!");
 
     let de_de_locale = get_locale("de-DE").expect("expected de-DE locale to be registered");
-    assert_eq!(de_de_locale.localized_error_literal("#CALC!"), Some("#KALK!"));
+    assert_eq!(
+        de_de_locale.localized_error_literal("#CALC!"),
+        Some("#KALK!")
+    );
     assert_eq!(
         de_de_locale.localized_error_literal("#GETTING_DATA"),
         Some("#DATEN_ABRUFEN")
@@ -760,10 +763,22 @@ fn locale_error_tsvs_preserve_known_alias_spellings() {
     assert_eq!(de_de_locale.localized_error_literal("#N/A"), Some("#NV"));
     assert_eq!(de_de_locale.canonical_error_literal("#NV"), Some("#N/A"));
     assert_eq!(de_de_locale.canonical_error_literal("#N/A!"), Some("#N/A"));
-    assert_eq!(de_de_locale.localized_error_literal("#NUM!"), Some("#ZAHL!"));
-    assert_eq!(de_de_locale.localized_error_literal("#REF!"), Some("#BEZUG!"));
-    assert_eq!(de_de_locale.localized_error_literal("#SPILL!"), Some("#ÜBERLAUF!"));
-    assert_eq!(de_de_locale.localized_error_literal("#VALUE!"), Some("#WERT!"));
+    assert_eq!(
+        de_de_locale.localized_error_literal("#NUM!"),
+        Some("#ZAHL!")
+    );
+    assert_eq!(
+        de_de_locale.localized_error_literal("#REF!"),
+        Some("#BEZUG!")
+    );
+    assert_eq!(
+        de_de_locale.localized_error_literal("#SPILL!"),
+        Some("#ÜBERLAUF!")
+    );
+    assert_eq!(
+        de_de_locale.localized_error_literal("#VALUE!"),
+        Some("#WERT!")
+    );
 
     let fr_fr = parse_error_tsv(
         "fr-FR",
@@ -808,7 +823,10 @@ fn locale_error_tsvs_preserve_known_alias_spellings() {
         fr_fr_locale.localized_error_literal("#GETTING_DATA"),
         Some("#OBTENTION_DONNEES")
     );
-    assert_eq!(fr_fr_locale.localized_error_literal("#NAME?"), Some("#NOM?"));
+    assert_eq!(
+        fr_fr_locale.localized_error_literal("#NAME?"),
+        Some("#NOM?")
+    );
     assert_eq!(
         fr_fr_locale.localized_error_literal("#NULL!"),
         Some("#NUL!")

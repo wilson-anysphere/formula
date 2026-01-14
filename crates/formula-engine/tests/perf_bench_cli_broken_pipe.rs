@@ -21,4 +21,3 @@ fn cli_does_not_panic_on_broken_pipe() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
-

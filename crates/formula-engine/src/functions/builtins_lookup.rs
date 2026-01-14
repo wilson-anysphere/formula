@@ -2533,9 +2533,7 @@ fn excel_eq(ctx: &dyn FunctionContext, a: &Value, b: &Value) -> bool {
                 (Value::Bool(b), Value::Number(n)) | (Value::Number(n), Value::Bool(b)) => {
                     (*n == 0.0 && !b) || (*n == 1.0 && *b)
                 }
-                (a, b)
-                    if text_like_str(ctx, a).is_some() && text_like_str(ctx, b).is_some() =>
-                {
+                (a, b) if text_like_str(ctx, a).is_some() && text_like_str(ctx, b).is_some() => {
                     let a = text_like_str(ctx, a).unwrap();
                     let b = text_like_str(ctx, b).unwrap();
                     text_eq_case_insensitive(a.as_ref(), b.as_ref())

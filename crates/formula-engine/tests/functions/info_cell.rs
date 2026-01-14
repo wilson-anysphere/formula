@@ -1143,7 +1143,9 @@ fn cell_format_flags_respect_range_run_precedence() {
     assert_number(&engine.get_cell_value("Sheet1", "B3"), 1.0);
 
     // Explicit cell style overrides the range run.
-    engine.set_cell_style_id("Sheet1", "A1", cell_style).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A1", cell_style)
+        .unwrap();
     engine.recalculate_single_threaded();
 
     assert_eq!(
