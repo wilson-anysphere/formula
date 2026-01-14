@@ -843,6 +843,36 @@ mod tests {
     }
 
     #[test]
+    fn parses_sort12_frt_record_continued_via_continuefrt12() {
+        // AutoFilter range: A1:C5.
+        let af = Range::from_a1("A1:C5").unwrap();
+
+        // Split the embedded SORT payload across Sort12 + ContinueFrt12 records.
+        let sort_payload = canonical_sort_payload_one_key_b_desc_with_header();
+        let (first, rest) = sort_payload.split_at(8); // split after Ref8
+
+        let stream = [
+            record(RECORD_BOF, &bof_payload()),
+            frt_record(RT_SORT12, RT_SORT12, first),
+            frt_record(RECORD_CONTINUEFRT12, RECORD_CONTINUEFRT12, rest),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_sort_state(&stream, 0, af).unwrap();
+        assert!(parsed.warnings.is_empty(), "unexpected warnings: {:?}", parsed.warnings);
+
+        let sort_state = parsed.sort_state.expect("expected sort_state");
+        assert_eq!(
+            sort_state.conditions,
+            vec![SortCondition {
+                range: Range::from_a1("B2:B5").unwrap(),
+                descending: true,
+            }]
+        );
+    }
+
+    #[test]
     fn parses_sortdata12_frt_record_with_embedded_canonical_sort() {
         // AutoFilter range: A1:C5.
         let af = Range::from_a1("A1:C5").unwrap();
@@ -905,6 +935,36 @@ mod tests {
                 RT_SORTDATA12,
                 &canonical_sort_payload_one_key_b_desc_with_header(),
             ),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_sort_state(&stream, 0, af).unwrap();
+        assert!(parsed.warnings.is_empty(), "unexpected warnings: {:?}", parsed.warnings);
+
+        let sort_state = parsed.sort_state.expect("expected sort_state");
+        assert_eq!(
+            sort_state.conditions,
+            vec![SortCondition {
+                range: Range::from_a1("B2:B5").unwrap(),
+                descending: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_sortdata12_frt_record_continued_via_continuefrt12() {
+        // AutoFilter range: A1:C5.
+        let af = Range::from_a1("A1:C5").unwrap();
+
+        // Split the embedded SORT payload across SortData12 + ContinueFrt12 records.
+        let sort_payload = canonical_sort_payload_one_key_b_desc_with_header();
+        let (first, rest) = sort_payload.split_at(8); // split after Ref8
+
+        let stream = [
+            record(RECORD_BOF, &bof_payload()),
+            frt_record(RT_SORTDATA12, RT_SORTDATA12, first),
+            frt_record(RECORD_CONTINUEFRT12, RECORD_CONTINUEFRT12, rest),
             record(RECORD_EOF, &[]),
         ]
         .concat();
