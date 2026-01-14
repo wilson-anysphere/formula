@@ -13300,9 +13300,35 @@ mod tests {
             .set_cell_formula("Sheet1", "B1", "=SUM(A1:XFD1048576)")
             .unwrap();
 
-        // Full-sheet ranges would require enormous columnar buffers; skip bytecode compilation
-        // so evaluation uses the AST engine's sparse range handling instead.
-        assert_eq!(engine.bytecode_program_count(), 0);
+        // Full-sheet ranges are enormous; the bytecode runtime can evaluate aggregates over these
+        // ranges via sparse iteration, but the column cache must not allocate dense buffers for
+        // them.
+        assert_eq!(engine.bytecode_program_count(), 1);
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let key = CellKey {
+            sheet: sheet_id,
+            addr: parse_a1("B1").unwrap(),
+        };
+        let compiled = engine
+            .workbook
+            .get_cell(key)
+            .and_then(|c| c.compiled.clone())
+            .expect("compiled formula stored");
+        assert!(
+            matches!(compiled, CompiledFormula::Bytecode(_)),
+            "expected full-sheet aggregate formula to compile to bytecode"
+        );
+
+        let snapshot = Snapshot::from_workbook(
+            &engine.workbook,
+            &engine.spills,
+            engine.external_value_provider.clone(),
+            engine.external_data_provider.clone(),
+        );
+        let column_cache =
+            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
+        assert!(column_cache.by_sheet[sheet_id].is_empty());
     }
 
     fn assert_bytecode_matches_ast(formula: &str, expected: Value) {
