@@ -32,7 +32,7 @@ use formula_model::{SheetVisibility, TabColor};
 use formula_xlsx::print::{
     CellRange as PrintCellRange, ManualPageBreaks, PageSetup, SheetPrintSettings,
 };
-use crate::resource_limits::{MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
+use crate::resource_limits::{MAX_ORIGIN_XLSX_BYTES, MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
 use crate::sheet_name::sheet_name_eq_case_insensitive;
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
@@ -1870,10 +1870,31 @@ impl AppState {
         } else if ext.is_some_and(Self::is_xlsx_family_extension) {
             workbook.origin_xlsb_path = None;
             if let Some(bytes) = new_origin_xlsx_bytes {
-                workbook.origin_xlsx_bytes = Some(bytes);
+                if bytes.len() <= MAX_ORIGIN_XLSX_BYTES {
+                    workbook.origin_xlsx_bytes = Some(bytes);
+                } else {
+                    // Defense-in-depth: avoid retaining arbitrarily large baseline snapshots in
+                    // memory after save. Dropping the baseline forces subsequent saves to use the
+                    // regeneration-based path (instead of patching from stale bytes).
+                    eprintln!(
+                        "[save] dropping origin_xlsx_bytes baseline after save: snapshot {} bytes exceeds MAX_ORIGIN_XLSX_BYTES ({})",
+                        bytes.len(),
+                        MAX_ORIGIN_XLSX_BYTES
+                    );
+                    workbook.origin_xlsx_bytes = None;
+                }
             }
         } else if let Some(bytes) = new_origin_xlsx_bytes {
-            workbook.origin_xlsx_bytes = Some(bytes);
+            if bytes.len() <= MAX_ORIGIN_XLSX_BYTES {
+                workbook.origin_xlsx_bytes = Some(bytes);
+            } else {
+                eprintln!(
+                    "[save] dropping origin_xlsx_bytes baseline after save: snapshot {} bytes exceeds MAX_ORIGIN_XLSX_BYTES ({})",
+                    bytes.len(),
+                    MAX_ORIGIN_XLSX_BYTES
+                );
+                workbook.origin_xlsx_bytes = None;
+            }
         }
 
         // Saving establishes a new baseline for "net" changes. Clear the per-cell baseline so
@@ -4643,7 +4664,7 @@ fn seed_sheet_formatting_metadata_from_model(
 mod tests {
     use super::*;
     use crate::file_io::{read_xlsx_blocking, write_xlsx_blocking};
-    use crate::resource_limits::{MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
+    use crate::resource_limits::{MAX_ORIGIN_XLSX_BYTES, MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
     use formula_engine::pivot::{
         AggregationType, GrandTotals, Layout, PivotConfig, PivotField, SubtotalPosition, ValueField,
     };
@@ -4656,6 +4677,13 @@ mod tests {
     };
     use formula_xlsx::pivots::preserve::PreservedSheetPivotTables;
     use formula_xlsx::{PreservedPivotParts, RelationshipStub};
+
+    fn bytes_over_origin_xlsx_retention_limit() -> Arc<[u8]> {
+        static BYTES: std::sync::OnceLock<Arc<[u8]>> = std::sync::OnceLock::new();
+        BYTES
+            .get_or_init(|| Arc::<[u8]>::from(vec![0u8; MAX_ORIGIN_XLSX_BYTES + 1]))
+            .clone()
+    }
 
     #[test]
     fn record_cells_use_display_field_when_degrading_to_text() {
@@ -6086,6 +6114,71 @@ mod tests {
         let workbook = state.get_workbook().expect("workbook loaded");
         assert_eq!(workbook.origin_xlsb_path, None);
         assert_eq!(workbook.origin_xlsx_bytes.as_deref(), Some(new_bytes.as_ref()));
+    }
+
+    #[test]
+    fn mark_saved_retains_origin_xlsx_bytes_within_limit() {
+        let bytes = Arc::<[u8]>::from(vec![1u8, 2, 3]);
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        state
+            .mark_saved(Some("/tmp/foo.xlsx".to_string()), Some(bytes.clone()))
+            .expect("mark_saved succeeds");
+
+        let workbook = state.get_workbook().expect("workbook loaded");
+        assert_eq!(workbook.origin_xlsx_bytes.as_deref(), Some(bytes.as_ref()));
+    }
+
+    #[test]
+    fn mark_saved_drops_origin_xlsx_bytes_over_limit() {
+        let bytes = bytes_over_origin_xlsx_retention_limit();
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        state
+            .mark_saved(Some("/tmp/foo.xlsx".to_string()), Some(bytes))
+            .expect("mark_saved succeeds");
+
+        let workbook = state.get_workbook().expect("workbook loaded");
+        assert!(
+            workbook.origin_xlsx_bytes.is_none(),
+            "expected oversized XLSX baseline to be dropped"
+        );
+    }
+
+    #[test]
+    fn mark_saved_over_limit_clears_existing_origin_xlsx_bytes_baseline() {
+        let bytes = bytes_over_origin_xlsx_retention_limit();
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let small_bytes = Arc::<[u8]>::from(vec![9u8, 8, 7]);
+        state
+            .mark_saved(Some("/tmp/foo.xlsx".to_string()), Some(small_bytes))
+            .expect("mark_saved succeeds");
+
+        state
+            .mark_saved(Some("/tmp/foo.xlsx".to_string()), Some(bytes))
+            .expect("mark_saved succeeds");
+
+        let workbook = state.get_workbook().expect("workbook loaded");
+        assert!(
+            workbook.origin_xlsx_bytes.is_none(),
+            "expected oversized save snapshot to clear the previous baseline so future patch-based saves remain correct"
+        );
     }
 
     #[test]
