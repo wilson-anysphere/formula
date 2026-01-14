@@ -158,6 +158,35 @@ fn cell_format_classifies_thousands_separated_numbers_as_n() {
 
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
+        .unwrap();
+
+    // Explicit grouping format code (no decimals).
+    let grouped0 = engine.intern_style(Style {
+        number_format: Some("#,##0".to_string()),
+        ..Style::default()
+    });
+    engine.set_cell_style_id("Sheet1", "A1", grouped0).unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("N0".to_string())
+    );
+
+    // Built-in placeholder variant (id 3 = `#,##0`).
+    let grouped0_builtin = engine.intern_style(Style {
+        number_format: Some("__builtin_numFmtId:3".to_string()),
+        ..Style::default()
+    });
+    engine
+        .set_cell_style_id("Sheet1", "A1", grouped0_builtin)
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("N0".to_string())
+    );
 
     // Explicit grouping format code.
     let grouped = engine.intern_style(Style {
@@ -165,9 +194,6 @@ fn cell_format_classifies_thousands_separated_numbers_as_n() {
         ..Style::default()
     });
     engine.set_cell_style_id("Sheet1", "A1", grouped).unwrap();
-    engine
-        .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
-        .unwrap();
     engine.recalculate_single_threaded();
     assert_eq!(
         engine.get_cell_value("Sheet1", "B1"),
