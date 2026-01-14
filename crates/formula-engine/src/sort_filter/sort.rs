@@ -3,6 +3,7 @@ use crate::sort_filter::parse::{parse_text_datetime, parse_text_number};
 use crate::sort_filter::types::{CellValue, HeaderOption, RangeData};
 use crate::value::casefold;
 use chrono::{NaiveDate, NaiveDateTime, Timelike};
+use formula_format::{DateSystem, FormatOptions, Value as FormatValue};
 use formula_model::ErrorValue;
 use std::cmp::Ordering;
 
@@ -283,15 +284,15 @@ fn detect_key_value(cell: &CellValue, key: &SortKey, value_locale: ValueLocaleCo
 
     match key.value_type {
         SortValueType::Text => {
-            SortKeyValue::Text(fold_text(cell_to_string(cell), key.case_sensitive))
+            SortKeyValue::Text(fold_text(cell_to_string(cell, value_locale), key.case_sensitive))
         }
         SortValueType::Number => match coerce_number(cell, value_locale) {
             Some(n) => SortKeyValue::Number(n),
-            None => SortKeyValue::Text(fold_text(cell_to_string(cell), key.case_sensitive)),
+            None => SortKeyValue::Text(fold_text(cell_to_string(cell, value_locale), key.case_sensitive)),
         },
         SortValueType::DateTime => match coerce_datetime(cell, value_locale) {
             Some(dt) => SortKeyValue::DateTime(dt),
-            None => SortKeyValue::Text(fold_text(cell_to_string(cell), key.case_sensitive)),
+            None => SortKeyValue::Text(fold_text(cell_to_string(cell, value_locale), key.case_sensitive)),
         },
         SortValueType::Auto => {
             if let CellValue::Bool(b) = cell {
@@ -305,7 +306,7 @@ fn detect_key_value(cell: &CellValue, key: &SortKey, value_locale: ValueLocaleCo
                 return SortKeyValue::DateTime(dt);
             }
             match cell {
-                _ => SortKeyValue::Text(fold_text(cell_to_string(cell), key.case_sensitive)),
+                _ => SortKeyValue::Text(fold_text(cell_to_string(cell, value_locale), key.case_sensitive)),
             }
         }
     }
@@ -319,20 +320,26 @@ fn fold_text(s: String, case_sensitive: bool) -> String {
     }
 }
 
-fn cell_to_string(cell: &CellValue) -> String {
+fn cell_to_string(cell: &CellValue, value_locale: ValueLocaleConfig) -> String {
     match cell {
         CellValue::Blank => String::new(),
-        CellValue::Number(n) => {
-            // Excel doesn't use scientific notation when generating unique filter/sort items, but we
-            // don't have format metadata yet. Keep it simple and deterministic.
-            let mut s = n.to_string();
-            if s.ends_with(".0") {
-                s.truncate(s.len() - 2);
-            }
-            s
-        }
+        CellValue::Number(n) => formula_format::format_value(
+            FormatValue::Number(*n),
+            Some("General"),
+            &FormatOptions {
+                locale: value_locale.separators,
+                date_system: DateSystem::Excel1900,
+            },
+        )
+        .text,
         CellValue::Text(s) => s.clone(),
-        CellValue::Bool(b) => b.to_string(),
+        CellValue::Bool(b) => {
+            if *b {
+                "TRUE".to_string()
+            } else {
+                "FALSE".to_string()
+            }
+        }
         CellValue::Error(err) => err.to_string(),
         CellValue::DateTime(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
     }
@@ -390,6 +397,26 @@ mod tests {
             end_col: rows[0].len() - 1,
         };
         RangeData::new(range, rows).unwrap()
+    }
+
+    #[test]
+    fn cell_to_string_formats_numbers_using_workbook_locale() {
+        assert_eq!(
+            cell_to_string(&CellValue::Number(1.5), ValueLocaleConfig::de_de()),
+            "1,5"
+        );
+    }
+
+    #[test]
+    fn cell_to_string_formats_booleans_as_excel_true_false() {
+        assert_eq!(
+            cell_to_string(&CellValue::Bool(true), ValueLocaleConfig::en_us()),
+            "TRUE"
+        );
+        assert_eq!(
+            cell_to_string(&CellValue::Bool(false), ValueLocaleConfig::en_us()),
+            "FALSE"
+        );
     }
 
     #[test]
