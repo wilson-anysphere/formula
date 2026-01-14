@@ -487,13 +487,22 @@ impl ColumnarTableBackend {
                 }
                 AggregationKind::DistinctCount => {
                     let col_idx = spec.column_idx?;
-                    Plan::DistinctCount {
-                        distinct_non_blank_col: ensure(AggOp::DistinctCount, Some(col_idx)),
-                        // DAX DISTINCTCOUNT includes BLANK if any rows are blank.
-                        // Our columnar `DistinctCount` ignores nulls/blanks, so we add 1 when
-                        // `COUNTROWS(group) > COUNTNONBLANK(column)` for the group.
-                        count_rows_col: ensure(AggOp::Count, None),
-                        count_non_blank_col: ensure(AggOp::Count, Some(col_idx)),
+                    // Fast path: if the column has no blanks at all, DAX DISTINCTCOUNT is
+                    // equivalent to counting distinct non-null values, so we can avoid the extra
+                    // COUNTROWS/COUNTNONBLANK plumbing.
+                    if !self.stats_has_blank(col_idx).unwrap_or(true) {
+                        Plan::Direct {
+                            col: ensure(AggOp::DistinctCount, Some(col_idx)),
+                        }
+                    } else {
+                        Plan::DistinctCount {
+                            distinct_non_blank_col: ensure(AggOp::DistinctCount, Some(col_idx)),
+                            // DAX DISTINCTCOUNT includes BLANK if any rows are blank.
+                            // Our columnar `DistinctCount` ignores nulls/blanks, so we add 1 when
+                            // `COUNTROWS(group) > COUNTNONBLANK(column)` for the group.
+                            count_rows_col: ensure(AggOp::Count, None),
+                            count_non_blank_col: ensure(AggOp::Count, Some(col_idx)),
+                        }
                     }
                 }
             };
