@@ -105,14 +105,15 @@ ZIP/OPC round-trip corpus under `fixtures/xlsx/`):
   salt size) and keeps the table in this README in sync (to prevent silent fixture regeneration
   drift and to keep decryption CI performance predictable).
 - `crates/formula-io/tests/encrypted_ooxml_decrypt.rs` (behind `formula-io` feature `encrypted-workbooks`):
-  end-to-end decryption for `agile.xlsx`, `agile-empty-password.xlsx`, and `agile-unicode.xlsx` against `plaintext.xlsx`, plus `agile-unicode-excel.xlsx` against `plaintext-excel.xlsx`,
+  end-to-end decryption for Standard + Agile fixtures (including `standard.xlsx` / `standard-4.2.xlsx` / `standard-rc4.xlsx` / `standard-unicode.xlsx` and `agile.xlsx` / `agile-empty-password.xlsx` / `agile-unicode.xlsx`) against `plaintext.xlsx`, plus `agile-unicode-excel.xlsx` against `plaintext-excel.xlsx`,
+  plus large-package coverage (`agile-large.xlsx` / `standard-large.xlsx` against `plaintext-large.xlsx`, exercising multi-segment decryption for Agile),
   plus macro-enabled `.xlsm` fixture coverage (`agile-basic.xlsm` / `standard-basic.xlsm` against
   `plaintext-basic.xlsm`, validating `xl/vbaProject.bin` preservation and `.xlsm` format detection),
   plus on-the-fly Agile encryption/decryption (via `ms_offcrypto_writer`) for
   `open_workbook_with_password` / `open_workbook_model_with_password`.
   Includes coverage that a **missing** password is distinct from an **empty** password (`""`), and
   that Unicode password normalization matters (NFC vs NFD), and wrong-password coverage for
-  `standard.xlsx`, `agile-unicode.xlsx`, and the macro-enabled `.xlsm` fixtures.
+  these fixtures.
 - `crates/formula-io/tests/open_encrypted_xlsm_with_password.rs` (behind `formula-io` feature `encrypted-workbooks`):
   opens `basic-password.xlsm` and asserts the VBA parts survive decryption.
 - `crates/formula-xlsx/tests/encrypted_ooxml_decrypt.rs`:

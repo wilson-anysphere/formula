@@ -440,6 +440,37 @@ fn decrypts_standard_fixture_with_correct_password() {
 }
 
 #[test]
+fn decrypts_agile_large_fixture_with_correct_password() {
+    let plaintext_large_path = fixture_path("plaintext-large.xlsx");
+    let agile_large_path = fixture_path("agile-large.xlsx");
+
+    // Sanity: ensure the plaintext workbook is >4096 bytes so Agile decrypt exercises multi-segment
+    // decryption.
+    let plaintext_bytes =
+        std::fs::read(&plaintext_large_path).expect("read plaintext-large.xlsx");
+    assert!(
+        plaintext_bytes.len() > 4096,
+        "expected plaintext-large.xlsx to be >4096 bytes, got {}",
+        plaintext_bytes.len()
+    );
+
+    let plaintext = open_workbook_model(&plaintext_large_path).expect("open plaintext-large.xlsx");
+    let decrypted = open_model_with_password(&agile_large_path, "password");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let b2 = CellRef::from_a1("B2").unwrap();
+
+    let sheet_plain = plaintext.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    let sheet_decrypted = decrypted.sheet_by_name("Sheet1").expect("Sheet1 missing");
+
+    assert_eq!(sheet_decrypted.value(a1), CellValue::Number(1.0));
+    assert_eq!(sheet_decrypted.value(b2), CellValue::Number(2.0));
+
+    assert_eq!(sheet_decrypted.value(a1), sheet_plain.value(a1));
+    assert_eq!(sheet_decrypted.value(b2), sheet_plain.value(b2));
+}
+
+#[test]
 fn decrypts_standard_large_fixture_with_correct_password() {
     let plaintext_large_path = fixture_path("plaintext-large.xlsx");
     let standard_large_path = fixture_path("standard-large.xlsx");
@@ -475,6 +506,25 @@ fn open_workbook_with_password_decrypts_standard_fixture() {
     let model = formula_io::xlsx::read_workbook_from_reader(Cursor::new(decrypted))
         .expect("parse decrypted standard.xlsx bytes");
     assert_expected_contents(&model);
+}
+
+#[test]
+fn open_workbook_with_password_decrypts_agile_large_fixture() {
+    let plaintext_large_path = fixture_path("plaintext-large.xlsx");
+    let agile_large_path = fixture_path("agile-large.xlsx");
+
+    let plaintext = open_workbook_model(&plaintext_large_path).expect("open plaintext-large.xlsx");
+
+    let decrypted_bytes = open_decrypted_package_bytes_with_password(&agile_large_path, "password");
+    let decrypted = formula_io::xlsx::read_workbook_from_reader(Cursor::new(decrypted_bytes))
+        .expect("parse decrypted agile-large.xlsx bytes");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let b2 = CellRef::from_a1("B2").unwrap();
+    let sheet_plain = plaintext.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    let sheet_decrypted = decrypted.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(sheet_decrypted.value(a1), sheet_plain.value(a1));
+    assert_eq!(sheet_decrypted.value(b2), sheet_plain.value(b2));
 }
 
 #[test]
