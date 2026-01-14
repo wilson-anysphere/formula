@@ -253,8 +253,9 @@ proptest! {
                     assert!(props.outline_level <= 7);
                 }
 
-                let merged = sheet::parse_biff_sheet_merged_cells(&buf, 0).expect("offset 0 should always be in-bounds");
-                for range in merged {
+                let merged = sheet::parse_biff_sheet_merged_cells(&buf, 0)
+                    .expect("offset 0 should always be in-bounds");
+                for range in merged.ranges {
                     assert!(range.start.row <= range.end.row);
                     assert!(range.start.col <= range.end.col);
                 }

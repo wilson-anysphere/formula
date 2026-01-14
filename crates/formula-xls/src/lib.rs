@@ -1036,10 +1036,15 @@ fn import_xls_path_with_biff_reader(
                             workbook_stream,
                             sheet_info.offset,
                         ) {
-                            Ok(mut ranges) => {
-                                if !ranges.is_empty() {
-                                    merge_ranges.append(&mut ranges);
+                            Ok(mut parsed) => {
+                                if !parsed.ranges.is_empty() {
+                                    merge_ranges.append(&mut parsed.ranges);
                                 }
+                                warnings.extend(parsed.warnings.into_iter().map(|w| {
+                                    ImportWarning::new(format!(
+                                        "failed to import `.xls` merged cells for sheet `{sheet_name}`: {w}"
+                                    ))
+                                }));
                             }
                             Err(err) => warnings.push(ImportWarning::new(format!(
                                 "failed to import `.xls` merged cells for sheet `{sheet_name}`: {err}"
@@ -3174,7 +3179,10 @@ pub fn parse_biff_sheet_merged_cells(
     workbook_stream: &[u8],
     start: usize,
 ) -> Result<Vec<Range>, String> {
-    biff::parse_biff_sheet_merged_cells(workbook_stream, start)
+    Ok(
+        biff::parse_biff_sheet_merged_cells(workbook_stream, start)?
+            .ranges,
+    )
 }
 
 fn normalize_sheet_name_for_match(name: &str) -> String {

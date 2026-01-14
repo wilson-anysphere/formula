@@ -1886,8 +1886,8 @@ fn decode_autofilter12_record(
 pub(crate) fn parse_biff_sheet_merged_cells(
     workbook_stream: &[u8],
     start: usize,
-) -> Result<Vec<Range>, String> {
-    let mut out = Vec::new();
+) -> Result<SheetMergedCells, String> {
+    let mut out = SheetMergedCells::default();
 
     for record in records::BestEffortSubstreamIter::from_offset(workbook_stream, start)? {
         match record.record_id {
@@ -1922,13 +1922,14 @@ pub(crate) fn parse_biff_sheet_merged_cells(
                         continue;
                     }
 
-                    if out.len() >= MAX_MERGED_RANGES_PER_SHEET {
-                        return Err(format!(
+                    if out.ranges.len() >= MAX_MERGED_RANGES_PER_SHEET {
+                        out.warnings.push(format!(
                             "too many merged ranges (cap={MAX_MERGED_RANGES_PER_SHEET}); stopping after {} ranges",
-                            out.len()
+                            out.ranges.len()
                         ));
+                        return Ok(out);
                     }
-                    out.push(Range::new(
+                    out.ranges.push(Range::new(
                         CellRef::new(rw_first, col_first),
                         CellRef::new(rw_last, col_last),
                     ));
@@ -1940,6 +1941,12 @@ pub(crate) fn parse_biff_sheet_merged_cells(
     }
 
     Ok(out)
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct SheetMergedCells {
+    pub(crate) ranges: Vec<Range>,
+    pub(crate) warnings: Vec<String>,
 }
 
 pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
@@ -3083,9 +3090,14 @@ mod tests {
         ]
         .concat();
 
-        let ranges = parse_biff_sheet_merged_cells(&stream, 0).expect("parse");
+        let parsed = parse_biff_sheet_merged_cells(&stream, 0).expect("parse");
+        assert!(
+            parsed.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            parsed.warnings
+        );
         assert_eq!(
-            ranges,
+            parsed.ranges,
             vec![
                 Range::from_a1("A1:B1").unwrap(),
                 Range::from_a1("C2:D3").unwrap(),
@@ -3094,7 +3106,7 @@ mod tests {
     }
 
     #[test]
-    fn mergedcells_records_error_when_exceeding_cap() {
+    fn mergedcells_records_truncates_when_exceeding_cap() {
         // Construct a single MERGEDCELLS record with (cap + 1) valid Ref8 entries.
         let total = MAX_MERGED_RANGES_PER_SHEET + 1;
         assert!(
@@ -3118,10 +3130,15 @@ mod tests {
         ]
         .concat();
 
-        let err = parse_biff_sheet_merged_cells(&stream, 0).expect_err("expected cap error");
+        let parsed = parse_biff_sheet_merged_cells(&stream, 0).expect("parse");
+        assert_eq!(parsed.ranges.len(), MAX_MERGED_RANGES_PER_SHEET);
         assert!(
-            err.contains("too many merged ranges"),
-            "unexpected error: {err}"
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("too many merged ranges")),
+            "expected cap warning, got {:?}",
+            parsed.warnings
         );
     }
 
