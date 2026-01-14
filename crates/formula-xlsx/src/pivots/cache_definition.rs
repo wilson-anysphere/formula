@@ -683,7 +683,7 @@ fn workbook_pivot_cache_rel_id(xml: &[u8], cache_id: u32) -> Result<Option<Strin
                         let value = attr.unescape_value()?.into_owned();
 
                         if key.eq_ignore_ascii_case(b"cacheId") {
-                            found_cache_id = value.parse::<u32>().ok();
+                            found_cache_id = value.trim().parse::<u32>().ok();
                         } else if key.eq_ignore_ascii_case(b"id") {
                             rel_id = Some(value);
                         }
@@ -715,13 +715,13 @@ fn handle_element(def: &mut PivotCacheDefinition, e: &BytesStart<'_>) -> Result<
             let value = attr.unescape_value()?;
 
             if key.eq_ignore_ascii_case(b"recordCount") {
-                def.record_count = value.parse::<u64>().ok();
+                def.record_count = value.trim().parse::<u64>().ok();
             } else if key.eq_ignore_ascii_case(b"refreshOnLoad") {
                 def.refresh_on_load = parse_bool(&value);
             } else if key.eq_ignore_ascii_case(b"createdVersion") {
-                def.created_version = value.parse::<u32>().ok();
+                def.created_version = value.trim().parse::<u32>().ok();
             } else if key.eq_ignore_ascii_case(b"refreshedVersion") {
-                def.refreshed_version = value.parse::<u32>().ok();
+                def.refreshed_version = value.trim().parse::<u32>().ok();
             }
         }
     } else if tag.eq_ignore_ascii_case(b"cacheSource") {
@@ -740,7 +740,8 @@ fn handle_element(def: &mut PivotCacheDefinition, e: &BytesStart<'_>) -> Result<
                     _ => PivotCacheSourceType::Unknown(raw_value),
                 };
             } else if key.eq_ignore_ascii_case(b"connectionId") {
-                def.cache_source_connection_id = attr.unescape_value()?.parse::<u32>().ok();
+                def.cache_source_connection_id =
+                    attr.unescape_value()?.trim().parse::<u32>().ok();
             }
         }
     } else if tag.eq_ignore_ascii_case(b"worksheetSource") {
@@ -792,7 +793,7 @@ fn parse_cache_field(e: &BytesStart<'_>) -> Result<PivotCacheField, XlsxError> {
         } else if key.eq_ignore_ascii_case(b"propertyName") {
             field.property_name = Some(value.to_string());
         } else if key.eq_ignore_ascii_case(b"numFmtId") {
-            field.num_fmt_id = value.parse::<u32>().ok();
+            field.num_fmt_id = value.trim().parse::<u32>().ok();
         } else if key.eq_ignore_ascii_case(b"databaseField") {
             field.database_field = parse_bool(&value);
         } else if key.eq_ignore_ascii_case(b"serverField") {
@@ -802,24 +803,24 @@ fn parse_cache_field(e: &BytesStart<'_>) -> Result<PivotCacheField, XlsxError> {
         } else if key.eq_ignore_ascii_case(b"formula") {
             field.formula = Some(value.to_string());
         } else if key.eq_ignore_ascii_case(b"sqlType") {
-            field.sql_type = value.parse::<i32>().ok();
+            field.sql_type = value.trim().parse::<i32>().ok();
         } else if key.eq_ignore_ascii_case(b"hierarchy") {
-            field.hierarchy = value.parse::<u32>().ok();
+            field.hierarchy = value.trim().parse::<u32>().ok();
         } else if key.eq_ignore_ascii_case(b"level") {
-            field.level = value.parse::<u32>().ok();
+            field.level = value.trim().parse::<u32>().ok();
         } else if key.eq_ignore_ascii_case(b"mappingCount") {
-            field.mapping_count = value.parse::<u32>().ok();
+            field.mapping_count = value.trim().parse::<u32>().ok();
         }
     }
     Ok(field)
 }
 
 fn parse_bool(value: &str) -> Option<bool> {
-    match value {
+    match value.trim() {
         "1" => Some(true),
         "0" => Some(false),
-        _ if value.eq_ignore_ascii_case("true") => Some(true),
-        _ if value.eq_ignore_ascii_case("false") => Some(false),
+        v if v.eq_ignore_ascii_case("true") => Some(true),
+        v if v.eq_ignore_ascii_case("false") => Some(false),
         _ => None,
     }
 }
@@ -1042,7 +1043,7 @@ mod tests {
     fn parses_cache_source_connection_id() {
         let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <cacheSource type="external" connectionId="42"/>
+  <cacheSource type="external" connectionId=" 42 "/>
 </pivotCacheDefinition>"#;
 
         let def = parse_pivot_cache_definition(xml).expect("parse");

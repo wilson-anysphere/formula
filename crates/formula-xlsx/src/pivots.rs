@@ -138,7 +138,7 @@ fn parse_pivot_cache_definition_part(
                         if crate::openxml::local_name(attr.key.as_ref())
                             .eq_ignore_ascii_case(b"recordCount")
                         {
-                            if let Ok(v) = attr.unescape_value()?.parse::<u64>() {
+                            if let Ok(v) = attr.unescape_value()?.trim().parse::<u64>() {
                                 record_count = Some(v);
                             }
                         }
@@ -182,7 +182,7 @@ fn parse_pivot_cache_records_part(path: &str, xml: &[u8]) -> Result<PivotCacheRe
                     for attr in e.attributes().with_checks(false) {
                         let attr = attr?;
                         if crate::openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"count") {
-                            if let Ok(v) = attr.unescape_value()?.parse::<u64>() {
+                            if let Ok(v) = attr.unescape_value()?.trim().parse::<u64>() {
                                 count = Some(v);
                             }
                         }

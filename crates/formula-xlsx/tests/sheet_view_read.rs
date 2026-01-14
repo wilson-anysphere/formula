@@ -57,15 +57,15 @@ fn reads_sheet_views_into_worksheet_view() {
 </workbook>"#;
 
     let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <sheetViews>
-    <sheetView zoomScale="125" showGridLines="0" showHeadings="0" showZeros="0">
-      <pane state="frozen" xSplit="2" ySplit="3" topLeftCell="C4"/>
-      <selection activeCell="D5" sqref="D5:E6"/>
-    </sheetView>
-  </sheetViews>
-  <sheetData/>
-</worksheet>"#;
+ <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+   <sheetViews>
+     <sheetView zoomScale="125" showGridLines="0" showHeadings="0" showZeros="0">
+      <pane state="frozen" xSplit=" 2 " ySplit=" 3 " topLeftCell=" C4 "/>
+      <selection activeCell=" D5 " sqref=" D5:E6 "/>
+     </sheetView>
+   </sheetViews>
+   <sheetData/>
+ </worksheet>"#;
 
     let bytes = build_minimal_xlsx(workbook_xml, sheet_xml);
 
@@ -75,4 +75,3 @@ fn reads_sheet_views_into_worksheet_view() {
     let fast = read_workbook_model_from_bytes(&bytes).expect("read_workbook_model_from_bytes");
     assert_sheet_view(&fast.sheets[0]);
 }
-

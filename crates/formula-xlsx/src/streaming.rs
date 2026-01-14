@@ -4189,8 +4189,8 @@ fn parse_col_element_attrs(
         };
         let val = attr.unescape_value()?.into_owned();
         match key_bytes {
-            b"min" => min = val.parse().ok(),
-            b"max" => max = val.parse().ok(),
+            b"min" => min = val.trim().parse().ok(),
+            b"max" => max = val.trim().parse().ok(),
             _ => element_attrs.push((key, val)),
         }
     }
@@ -4217,7 +4217,7 @@ fn parse_row_number(e: &BytesStart<'_>) -> Result<u32, StreamingPatchError> {
         let attr = attr?;
         if attr.key.as_ref() == b"r" {
             let v = attr.unescape_value()?.into_owned();
-            return Ok(v.parse::<u32>().unwrap_or(0));
+            return Ok(v.trim().parse::<u32>().unwrap_or(0));
         }
     }
     Ok(0)
@@ -4228,8 +4228,8 @@ fn parse_cell_ref_and_col(e: &BytesStart<'_>) -> Result<(CellRef, u32), Streamin
         let attr = attr?;
         if attr.key.as_ref() == b"r" {
             let a1 = attr.unescape_value()?.into_owned();
-            let cell_ref =
-                CellRef::from_a1(&a1).map_err(|_| StreamingPatchError::InvalidCellRef(a1))?;
+            let cell_ref = CellRef::from_a1(a1.trim())
+                .map_err(|_| StreamingPatchError::InvalidCellRef(a1))?;
             return Ok((cell_ref, cell_ref.col));
         }
     }
@@ -4252,8 +4252,8 @@ fn spans_for_patches(patches: &[CellPatchInternal]) -> Option<(u32, u32)> {
 
 fn parse_row_spans(spans: &str) -> Option<(u32, u32)> {
     let (start, end) = spans.split_once(':')?;
-    let start = start.parse::<u32>().ok()?;
-    let end = end.parse::<u32>().ok()?;
+    let start = start.trim().parse::<u32>().ok()?;
+    let end = end.trim().parse::<u32>().ok()?;
     Some((start, end))
 }
 

@@ -22,6 +22,11 @@ pub enum AutoFilterParseError {
     InvalidRef(#[from] RangeParseError),
 }
 
+fn parse_xml_bool(val: &str) -> bool {
+    let trimmed = val.trim();
+    trimmed == "1" || trimmed.eq_ignore_ascii_case("true")
+}
+
 pub fn parse_autofilter(xml: &str) -> Result<SheetAutoFilter, AutoFilterParseError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -59,7 +64,7 @@ pub fn parse_autofilter(xml: &str) -> Result<SheetAutoFilter, AutoFilterParseErr
                     for a in e.attributes().with_checks(false) {
                         let a = a?;
                         if a.key.as_ref() == b"colId" {
-                            col_id = Some(a.unescape_value()?.parse().unwrap_or(0));
+                            col_id = Some(a.unescape_value()?.trim().parse().unwrap_or(0));
                         }
                     }
                     current_col = col_id;
@@ -87,7 +92,7 @@ pub fn parse_autofilter(xml: &str) -> Result<SheetAutoFilter, AutoFilterParseErr
                     for a in e.attributes().with_checks(false) {
                         let a = a?;
                         if a.key.as_ref() == b"blank" {
-                            include_blanks = a.unescape_value()?.as_ref() == "1";
+                            include_blanks = parse_xml_bool(a.unescape_value()?.as_ref());
                         }
                     }
                     if include_blanks {
@@ -133,7 +138,9 @@ pub fn parse_autofilter(xml: &str) -> Result<SheetAutoFilter, AutoFilterParseErr
                     col_filter.join = FilterJoin::Any;
                     for a in e.attributes().with_checks(false) {
                         let a = a?;
-                        if a.key.as_ref() == b"and" && a.unescape_value()?.as_ref() == "1" {
+                        if a.key.as_ref() == b"and"
+                            && parse_xml_bool(a.unescape_value()?.as_ref())
+                        {
                             col_filter.join = FilterJoin::All;
                         }
                     }
@@ -223,7 +230,9 @@ pub fn parse_autofilter(xml: &str) -> Result<SheetAutoFilter, AutoFilterParseErr
                         let a = a?;
                         match a.key.as_ref() {
                             b"ref" => reference = Some(a.unescape_value()?.to_string()),
-                            b"descending" => descending = a.unescape_value()?.as_ref() == "1",
+                            b"descending" => {
+                                descending = parse_xml_bool(a.unescape_value()?.as_ref())
+                            }
                             _ => {}
                         }
                     }
@@ -266,7 +275,7 @@ pub fn parse_autofilter(xml: &str) -> Result<SheetAutoFilter, AutoFilterParseErr
                     for a in e.attributes().with_checks(false) {
                         let a = a?;
                         if a.key.as_ref() == b"colId" {
-                            col_id = Some(a.unescape_value()?.parse().unwrap_or(0));
+                            col_id = Some(a.unescape_value()?.trim().parse().unwrap_or(0));
                         }
                     }
                     if let Some(col_id) = col_id {
@@ -382,7 +391,9 @@ pub fn parse_autofilter(xml: &str) -> Result<SheetAutoFilter, AutoFilterParseErr
                         let a = a?;
                         match a.key.as_ref() {
                             b"ref" => reference = Some(a.unescape_value()?.to_string()),
-                            b"descending" => descending = a.unescape_value()?.as_ref() == "1",
+                            b"descending" => {
+                                descending = parse_xml_bool(a.unescape_value()?.as_ref())
+                            }
                             _ => {}
                         }
                     }
@@ -551,11 +562,12 @@ mod tests {
 
     #[test]
     fn parse_filters_list() {
-        let xml = r#"<autoFilter ref="A1:A3"><filterColumn colId="0"><filters blank="1"><filter val="Alice"/></filters></filterColumn></autoFilter>"#;
+        let xml = r#"<autoFilter ref="A1:D3"><filterColumn colId=" 2 "><filters blank=" true "><filter val="Alice"/></filters></filterColumn></autoFilter>"#;
         let filter = parse_autofilter(xml).unwrap();
         assert_eq!(filter.range.start, formula_model::CellRef::new(0, 0));
         assert_eq!(filter.filter_columns.len(), 1);
         let col = &filter.filter_columns[0];
+        assert_eq!(col.col_id, 2);
         assert_eq!(col.join, FilterJoin::Any);
         assert_eq!(
             col.criteria,
@@ -568,9 +580,10 @@ mod tests {
 
     #[test]
     fn parse_custom_filters() {
-        let xml = r#"<autoFilter ref="A1:A4"><filterColumn colId="0"><customFilters and="1"><customFilter operator="greaterThan" val="5"/><customFilter operator="lessThan" val="10"/></customFilters></filterColumn></autoFilter>"#;
+        let xml = r#"<autoFilter ref="A1:D4"><filterColumn colId=" 1 "><customFilters and=" true "><customFilter operator="greaterThan" val="5"/><customFilter operator="lessThan" val="10"/></customFilters></filterColumn></autoFilter>"#;
         let filter = parse_autofilter(xml).unwrap();
         let col = &filter.filter_columns[0];
+        assert_eq!(col.col_id, 1);
         assert_eq!(col.join, FilterJoin::All);
         assert_eq!(
             col.criteria,
@@ -579,5 +592,14 @@ mod tests {
                 FilterCriterion::Number(NumberComparison::LessThan(10.0))
             ]
         );
+    }
+
+    #[test]
+    fn parse_sort_condition_descending_bool() {
+        let xml = r#"<autoFilter ref="A1:D4"><sortState><sortCondition ref="C1:C4" descending=" true "/></sortState></autoFilter>"#;
+        let filter = parse_autofilter(xml).unwrap();
+        let sort_state = filter.sort_state.expect("sort state");
+        assert_eq!(sort_state.conditions.len(), 1);
+        assert_eq!(sort_state.conditions[0].descending, true);
     }
 }

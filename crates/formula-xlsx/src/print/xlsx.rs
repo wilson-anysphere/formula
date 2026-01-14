@@ -442,6 +442,7 @@ fn parse_defined_name_start(
             b"localSheetId" => {
                 local_sheet_id = Some(
                     attr.unescape_value()?
+                        .trim()
                         .parse::<usize>()
                         .map_err(|_| PrintError::InvalidA1("invalid localSheetId".to_string()))?,
                 )
@@ -622,12 +623,12 @@ fn parse_page_margins(e: &BytesStart<'_>) -> Result<PageMargins, PrintError> {
         let attr = attr?;
         let value = attr.unescape_value()?;
         match attr.key.as_ref() {
-            b"left" => margins.left = value.parse::<f64>().unwrap_or(margins.left),
-            b"right" => margins.right = value.parse::<f64>().unwrap_or(margins.right),
-            b"top" => margins.top = value.parse::<f64>().unwrap_or(margins.top),
-            b"bottom" => margins.bottom = value.parse::<f64>().unwrap_or(margins.bottom),
-            b"header" => margins.header = value.parse::<f64>().unwrap_or(margins.header),
-            b"footer" => margins.footer = value.parse::<f64>().unwrap_or(margins.footer),
+            b"left" => margins.left = value.trim().parse::<f64>().unwrap_or(margins.left),
+            b"right" => margins.right = value.trim().parse::<f64>().unwrap_or(margins.right),
+            b"top" => margins.top = value.trim().parse::<f64>().unwrap_or(margins.top),
+            b"bottom" => margins.bottom = value.trim().parse::<f64>().unwrap_or(margins.bottom),
+            b"header" => margins.header = value.trim().parse::<f64>().unwrap_or(margins.header),
+            b"footer" => margins.footer = value.trim().parse::<f64>().unwrap_or(margins.footer),
             _ => {}
         }
     }
@@ -664,22 +665,22 @@ fn parse_page_setup(
                 }
             }
             b"paperSize" => {
-                if let Ok(code) = value.parse::<u16>() {
+                if let Ok(code) = value.trim().parse::<u16>() {
                     paper_size = Some(PaperSize { code });
                 }
             }
             b"scale" => {
-                if let Ok(v) = value.parse::<u16>() {
+                if let Ok(v) = value.trim().parse::<u16>() {
                     scale = Some(v);
                 }
             }
             b"fitToWidth" => {
-                if let Ok(v) = value.parse::<u16>() {
+                if let Ok(v) = value.trim().parse::<u16>() {
                     fit_to_width = Some(v);
                 }
             }
             b"fitToHeight" => {
-                if let Ok(v) = value.parse::<u16>() {
+                if let Ok(v) = value.trim().parse::<u16>() {
                     fit_to_height = Some(v);
                 }
             }
@@ -695,7 +696,8 @@ fn parse_fit_to_page(e: &BytesStart<'_>) -> Result<bool, PrintError> {
         let attr = attr?;
         if attr.key.as_ref() == b"fitToPage" {
             let value = attr.unescape_value()?;
-            return Ok(value.as_ref() == "1" || value.as_ref().eq_ignore_ascii_case("true"));
+            let value = value.trim();
+            return Ok(value == "1" || value.eq_ignore_ascii_case("true"));
         }
     }
     Ok(false)
@@ -708,9 +710,10 @@ fn parse_break_id(e: &BytesStart<'_>) -> Result<Option<u32>, PrintError> {
         let attr = attr?;
         let value = attr.unescape_value()?;
         match attr.key.as_ref() {
-            b"id" => id = value.parse::<u32>().ok(),
+            b"id" => id = value.trim().parse::<u32>().ok(),
             b"man" => {
-                man = Some(value.as_ref() == "1" || value.as_ref().eq_ignore_ascii_case("true"))
+                let value = value.trim();
+                man = Some(value == "1" || value.eq_ignore_ascii_case("true"))
             }
             _ => {}
         }
@@ -951,7 +954,7 @@ fn parse_defined_name_key(
         match attr.key.as_ref() {
             b"name" => name = Some(attr.unescape_value()?.to_string()),
             b"localSheetId" => {
-                local_sheet_id = attr.unescape_value()?.parse::<usize>().ok();
+                local_sheet_id = attr.unescape_value()?.trim().parse::<usize>().ok();
             }
             _ => {}
         }
@@ -1354,8 +1357,8 @@ mod tests {
         for (name, bytes) in entries {
             zip.start_file(*name, options).unwrap();
             zip.write_all(bytes).unwrap();
-        }
-        zip.finish().unwrap().into_inner()
+    }
+    zip.finish().unwrap().into_inner()
     }
 
     #[test]
@@ -1386,6 +1389,32 @@ mod tests {
                 }][..]
             )
         );
+        assert_eq!(
+            parsed[0].print_titles,
+            Some(crate::print::PrintTitles {
+                repeat_rows: Some(crate::print::RowRange { start: 1, end: 1 }),
+                repeat_cols: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_workbook_defined_print_names_trims_local_sheet_id() {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+  <definedNames>
+    <definedName name="_xlnm.Print_Titles" localSheetId=" 0 ">Sheet1!$1:$1</definedName>
+  </definedNames>
+</workbook>"#;
+
+        let parsed = parse_workbook_defined_print_names(workbook_xml).expect("parse workbook xml");
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].sheet_name, "Sheet1");
+        assert_eq!(parsed[0].r_id, "rId1");
         assert_eq!(
             parsed[0].print_titles,
             Some(crate::print::PrintTitles {
@@ -1578,6 +1607,38 @@ mod tests {
             .expect("missing definedName");
         assert_eq!(defined_name.tag_name().namespace(), Some(SPREADSHEETML_NS));
         assert_eq!(defined_name.text(), Some("Sheet1!$1:$1"));
+    }
+
+    #[test]
+    fn update_workbook_xml_matches_local_sheet_id_with_whitespace() {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <definedNames>
+    <definedName name="_xlnm.Print_Titles" localSheetId=" 0 "/>
+  </definedNames>
+</workbook>"#;
+
+        let edits: HashMap<(String, usize), DefinedNameEdit> = HashMap::from([(
+            ("_xlnm.Print_Titles".to_string(), 0),
+            DefinedNameEdit::Set("Sheet1!$1:$1".to_string()),
+        )]);
+
+        let updated = update_workbook_xml(workbook_xml, &edits).unwrap();
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+        let doc = roxmltree::Document::parse(updated_str).unwrap();
+        let root = doc.root_element();
+
+        let matches: Vec<_> = root
+            .descendants()
+            .filter(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "definedName"
+                    && n.attribute("name") == Some("_xlnm.Print_Titles")
+                    && n.attribute("localSheetId").is_some_and(|v| v.trim() == "0")
+            })
+            .collect();
+        assert_eq!(matches.len(), 1, "expected exactly one updated definedName");
+        assert_eq!(matches[0].text(), Some("Sheet1!$1:$1"));
     }
 
     #[test]

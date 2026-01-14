@@ -363,7 +363,7 @@ fn handle_start_element(
             let value = attr.unescape_value()?.into_owned();
 
             if key.eq_ignore_ascii_case(b"x") {
-                item_index = value.parse::<u32>().ok();
+                item_index = value.trim().parse::<u32>().ok();
             } else if key.eq_ignore_ascii_case(b"n") || key.eq_ignore_ascii_case(b"name") {
                 item_name = Some(value);
             }
@@ -423,7 +423,7 @@ fn handle_start_element(
         for attr in start.attributes().with_checks(false) {
             let attr = attr?;
             if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"x") {
-                if let Ok(v) = attr.unescape_value()?.parse::<u32>() {
+                if let Ok(v) = attr.unescape_value()?.trim().parse::<u32>() {
                     match ctx {
                         FieldContext::Row => def.row_fields.push(v),
                         FieldContext::Col => def.col_fields.push(v),
@@ -452,11 +452,11 @@ fn handle_start_element(
             let key = local_name(attr.key.as_ref());
             let value = attr.unescape_value()?.into_owned();
             if key.eq_ignore_ascii_case(b"fld") {
-                fld = value.parse::<u32>().ok();
+                fld = value.trim().parse::<u32>().ok();
             } else if key.eq_ignore_ascii_case(b"item") {
-                item = value.parse::<i32>().ok();
+                item = value.trim().parse::<i32>().ok();
             } else if key.eq_ignore_ascii_case(b"hier") {
-                hier = value.parse::<u32>().ok();
+                hier = value.trim().parse::<u32>().ok();
             } else if key.eq_ignore_ascii_case(b"name") {
                 name = Some(value);
             } else if key.eq_ignore_ascii_case(b"hierarchical") {
@@ -486,17 +486,17 @@ fn handle_start_element(
             let value = attr.unescape_value()?.into_owned();
 
             if key.eq_ignore_ascii_case(b"fld") {
-                field.fld = value.parse::<u32>().ok();
+                field.fld = value.trim().parse::<u32>().ok();
             } else if key.eq_ignore_ascii_case(b"name") {
                 field.name = Some(value);
             } else if key.eq_ignore_ascii_case(b"subtotal") {
                 field.subtotal = Some(value);
             } else if key.eq_ignore_ascii_case(b"numFmtId") {
-                field.num_fmt_id = value.parse::<u32>().ok();
+                field.num_fmt_id = value.trim().parse::<u32>().ok();
             } else if key.eq_ignore_ascii_case(b"baseField") {
-                field.base_field = value.parse::<u32>().ok();
+                field.base_field = value.trim().parse::<u32>().ok();
             } else if key.eq_ignore_ascii_case(b"baseItem") {
-                field.base_item = value.parse::<u32>().ok();
+                field.base_item = value.trim().parse::<u32>().ok();
             } else if key.eq_ignore_ascii_case(b"showDataAs") {
                 field.show_data_as = Some(value);
             } else if key.eq_ignore_ascii_case(b"calculated") {
@@ -527,7 +527,7 @@ fn parse_start_element(
             if key.eq_ignore_ascii_case(b"name") {
                 def.name = Some(value);
             } else if key.eq_ignore_ascii_case(b"cacheId") {
-                def.cache_id = value.parse::<u32>().ok();
+                def.cache_id = value.trim().parse::<u32>().ok();
             } else if key.eq_ignore_ascii_case(b"dataOnRows") {
                 if let Some(v) = parse_bool(&value) {
                     def.data_on_rows = v;
@@ -574,11 +574,11 @@ fn parse_start_element(
             if key.eq_ignore_ascii_case(b"ref") {
                 def.location_ref = Some(value);
             } else if key.eq_ignore_ascii_case(b"firstHeaderRow") {
-                def.first_header_row = value.parse::<u32>().ok();
+                def.first_header_row = value.trim().parse::<u32>().ok();
             } else if key.eq_ignore_ascii_case(b"firstDataRow") {
-                def.first_data_row = value.parse::<u32>().ok();
+                def.first_data_row = value.trim().parse::<u32>().ok();
             } else if key.eq_ignore_ascii_case(b"firstDataCol") {
-                def.first_data_col = value.parse::<u32>().ok();
+                def.first_data_col = value.trim().parse::<u32>().ok();
             }
         }
     }
@@ -606,14 +606,14 @@ mod tests {
         let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:pivotTableDefinition xmlns:p="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
   name="PivotTable1"
-  cacheId="7"
+  cacheId=" 7 "
   dataOnRows="1"
   rowGrandTotals="0"
   colGrandTotals="1"
   outline="1"
   compact="0"
   compactData="1">
-  <p:location ref="B3:F20" firstHeaderRow="2" firstDataRow="3" firstDataCol="2"/>
+  <p:location ref="B3:F20" firstHeaderRow=" 2 " firstDataRow=" 3 " firstDataCol=" 2 "/>
 </p:pivotTableDefinition>"#;
 
         let parsed = PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml)

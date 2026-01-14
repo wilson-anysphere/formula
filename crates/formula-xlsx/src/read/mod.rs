@@ -2983,29 +2983,30 @@ fn parse_worksheet_into_model(
                 }
 
                 if let Some(a1) = top_left_cell.as_deref() {
-                    if let Ok(cell) = CellRef::from_a1(a1) {
+                    if let Ok(cell) = CellRef::from_a1(a1.trim()) {
                         parsed_view.pane.top_left_cell = Some(cell);
                     }
                 }
 
-                if matches!(state.as_deref(), Some("frozen") | Some("frozenSplit")) {
+                let state = state.as_deref().map(|s| s.trim());
+                if matches!(state, Some("frozen") | Some("frozenSplit")) {
                     let frozen_cols = x_split_raw
                         .as_deref()
-                        .and_then(|s| s.parse::<u32>().ok())
+                        .and_then(|s| s.trim().parse::<u32>().ok())
                         .or_else(|| {
                             x_split_raw
                                 .as_deref()
-                                .and_then(|s| s.parse::<f32>().ok())
+                                .and_then(|s| s.trim().parse::<f32>().ok())
                                 .map(|f| f.round() as u32)
                         })
                         .unwrap_or(0);
                     let frozen_rows = y_split_raw
                         .as_deref()
-                        .and_then(|s| s.parse::<u32>().ok())
+                        .and_then(|s| s.trim().parse::<u32>().ok())
                         .or_else(|| {
                             y_split_raw
                                 .as_deref()
-                                .and_then(|s| s.parse::<f32>().ok())
+                                .and_then(|s| s.trim().parse::<f32>().ok())
                                 .map(|f| f.round() as u32)
                         })
                         .unwrap_or(0);
@@ -3017,9 +3018,9 @@ fn parse_worksheet_into_model(
                     parsed_view.pane.frozen_cols = 0;
                     parsed_view.pane.frozen_rows = 0;
                     parsed_view.pane.x_split =
-                        x_split_raw.as_deref().and_then(|s| s.parse::<f32>().ok());
+                        x_split_raw.as_deref().and_then(|s| s.trim().parse::<f32>().ok());
                     parsed_view.pane.y_split =
-                        y_split_raw.as_deref().and_then(|s| s.parse::<f32>().ok());
+                        y_split_raw.as_deref().and_then(|s| s.trim().parse::<f32>().ok());
                 }
             }
 
@@ -3040,7 +3041,7 @@ fn parse_worksheet_into_model(
                         let val = attr.unescape_value()?.into_owned();
                         match attr.key.as_ref() {
                             b"activeCell" => {
-                                if let Ok(cell) = CellRef::from_a1(&val) {
+                                if let Ok(cell) = CellRef::from_a1(val.trim()) {
                                     active_cell = Some(cell);
                                 }
                             }
@@ -3051,7 +3052,7 @@ fn parse_worksheet_into_model(
 
                     if let Some(active_cell) = active_cell {
                         parsed_view.selection = match sqref.as_deref() {
-                            Some(sqref) => SheetSelection::from_sqref(active_cell, sqref).ok(),
+                            Some(sqref) => SheetSelection::from_sqref(active_cell, sqref.trim()).ok(),
                             None => Some(SheetSelection::new(active_cell, Vec::new())),
                         };
                     }
@@ -3340,7 +3341,7 @@ fn parse_worksheet_into_model(
                             metadata_part,
                             rich_value_cells.as_mut(),
                         ) {
-                            if let Ok(vm_idx) = vm.parse::<u32>() {
+                            if let Ok(vm_idx) = vm.trim().parse::<u32>() {
                                 pending_vm_cells.push((cell_ref, vm_idx));
                             }
                         }
