@@ -159,7 +159,7 @@ fi
 
 matched=0
 for workflow in "${workflow_files[@]}"; do
-  if grep -q -E '^[[:space:]]*uses:[[:space:]]*pnpm/action-setup@' "$workflow"; then
+  if grep -q -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*pnpm/action-setup@' "$workflow"; then
     matched=1
     check_workflow_pnpm_pins "$workflow"
   fi
