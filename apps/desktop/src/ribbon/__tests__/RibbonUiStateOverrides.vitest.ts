@@ -235,6 +235,8 @@ describe("Ribbon UI state overrides", () => {
       "developer.code.macroSecurity",
       "developer.code.macroSecurity.trustCenter",
       "ai.inlineEdit",
+      "clipboard.cut",
+      "clipboard.paste",
       "clipboard.pasteSpecial",
       "clipboard.pasteSpecial.values",
       "clipboard.pasteSpecial.formulas",

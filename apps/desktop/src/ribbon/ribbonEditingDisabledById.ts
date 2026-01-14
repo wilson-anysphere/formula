@@ -42,6 +42,9 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   // --- Clipboard --------------------------------------------------------------
   // Paste Special operates on the grid selection and is guarded against active text editing,
   // so disable it in edit mode to avoid "click does nothing" UX.
+  // Cut/Paste can mutate the sheet selection; disable them in edit mode for Excel parity.
+  "clipboard.cut": true,
+  "clipboard.paste": true,
   "clipboard.pasteSpecial": true,
   "clipboard.pasteSpecial.values": true,
   "clipboard.pasteSpecial.formulas": true,
