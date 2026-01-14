@@ -1,4 +1,4 @@
-import { suggestRanges, type SurroundingCellsContext } from "@formula/ai-completion";
+import { suggestRanges, TabCompletionEngine, type PartialFormulaContext, type SurroundingCellsContext } from "@formula/ai-completion";
 
 const surroundingCells: SurroundingCellsContext = {
   getCellValue: () => 1,
@@ -12,3 +12,18 @@ suggestRanges({
   maxScanCols: 25,
 });
 
+// Ensure TypeScript consumers can provide an async parsePartialFormula implementation.
+const completion = new TabCompletionEngine({
+  parsePartialFormula: async (_input, _cursorPosition, _registry): Promise<PartialFormulaContext> => {
+    return { isFormula: false, inFunctionCall: false };
+  },
+});
+
+// And a sync implementation remains valid.
+new TabCompletionEngine({
+  parsePartialFormula: (_input, _cursorPosition, _registry): PartialFormulaContext => {
+    return { isFormula: false, inFunctionCall: false };
+  },
+});
+
+void completion;
