@@ -10,7 +10,7 @@ use formula_engine::{
 use formula_engine::editing::rewrite::rewrite_formula_for_copy_delta;
 use formula_engine::locale::{
     canonicalize_formula_with_style, get_locale, localize_formula_with_style, FormulaLocale,
-    iter_locales, ValueLocaleConfig, EN_US,
+    iter_locales, text_codepage_for_locale_id, ValueLocaleConfig, EN_US,
 };
 use formula_engine::pivot as pivot_engine;
 use formula_engine::what_if::{
@@ -3414,6 +3414,7 @@ impl WorkbookState {
         let Some(value_locale) = ValueLocaleConfig::for_locale_id(locale_id) else {
             return false;
         };
+        let text_codepage = text_codepage_for_locale_id(locale_id);
 
         let previous = self.engine.calc_settings().clone();
         if previous.calculation_mode != CalculationMode::Manual {
@@ -3424,6 +3425,7 @@ impl WorkbookState {
         self.formula_locale = formula_locale;
         self.engine.set_locale_config(formula_locale.config.clone());
         self.engine.set_value_locale(value_locale);
+        self.engine.set_text_codepage(text_codepage);
         self.engine.set_calc_settings(previous);
         true
     }
@@ -3885,6 +3887,11 @@ impl WasmWorkbook {
         }
     }
 
+    /// Set the workbook's locale id.
+    ///
+    /// This updates both the formula locale (tokenization/localization) and value locale (parsing
+    /// numbers/dates). For DBCS locales such as `ja-JP`, this may also update the workbook's legacy
+    /// text codepage so `LENB`/`LEFTB`/... and `ASC`/`DBCS` behave like Excel.
     #[wasm_bindgen(js_name = "setLocale")]
     pub fn set_locale(&mut self, locale_id: String) -> bool {
         self.inner.set_locale_id(&locale_id)
@@ -7618,6 +7625,41 @@ mod tests {
 
         assert_eq!(wb.get_text_codepage(), 1252);
         wb.set_text_codepage(932).unwrap();
+        assert_eq!(wb.get_text_codepage(), 932);
+
+        wb.inner.recalculate_internal(None).unwrap();
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Number(2.0)
+        );
+    }
+
+    #[test]
+    fn set_locale_sets_text_codepage_for_dbcs_locales() {
+        let mut wb = WasmWorkbook::new();
+        assert_eq!(wb.get_text_codepage(), 1252);
+
+        assert!(wb.set_locale("ja-JP".to_string()));
+        assert_eq!(wb.get_text_codepage(), 932);
+
+        assert!(wb.set_locale("zh-CN".to_string()));
+        assert_eq!(wb.get_text_codepage(), 936);
+    }
+
+    #[test]
+    fn set_locale_updates_lenb_behavior_for_ja_jp() {
+        let mut wb = WasmWorkbook::new();
+        wb.inner
+            .set_cell_internal(DEFAULT_SHEET, "A1", serde_json::json!("=LENB(\"あ\")"))
+            .unwrap();
+
+        wb.inner.recalculate_internal(None).unwrap();
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Number(1.0)
+        );
+
+        assert!(wb.set_locale("ja-JP".to_string()));
         assert_eq!(wb.get_text_codepage(), 932);
 
         wb.inner.recalculate_internal(None).unwrap();

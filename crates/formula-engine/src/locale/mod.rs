@@ -9,6 +9,34 @@ pub use translate::{
 };
 pub use value_locale::{DateOrder, ValueLocaleConfig};
 
+/// Resolve the workbook's legacy Windows text codepage for a locale id.
+///
+/// Excel's legacy DBCS (`*B`) text functions (`LENB`, `LEFTB`, etc.) and `ASC`/`DBCS` conversions
+/// depend on a workbook-level "text codepage". The engine models this as a Windows code page
+/// number (e.g. 932 for Shift_JIS).
+///
+/// This helper maps the engine's canonical locale ids onto the Windows codepages that Excel uses
+/// for common DBCS locales:
+/// - `ja-JP` → `932` (Shift_JIS)
+/// - `zh-CN` → `936` (GBK)
+/// - `ko-KR` → `949` (Korean)
+/// - `zh-TW` → `950` (Big5)
+///
+/// For all other (including unknown) locale ids, this returns the default single-byte codepage
+/// `1252` (Windows-1252).
+///
+/// The input may be a raw OS/browser locale tag (e.g. `"ja"`, `"zh-HK"`, `"de_DE.UTF-8"`). It is
+/// normalized using [`get_locale`] so aliases resolve to the engine's canonical locale ids.
+pub fn text_codepage_for_locale_id(locale_id: &str) -> u16 {
+    match get_locale(locale_id).map(|locale| locale.id) {
+        Some("ja-JP") => 932,
+        Some("zh-CN") => 936,
+        Some("ko-KR") => 949,
+        Some("zh-TW") => 950,
+        _ => 1252,
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct LocaleKeyParts<'a> {
     lang: &'a str,
