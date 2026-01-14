@@ -243,10 +243,6 @@ function engineClientAsSyncTarget(engine: EngineClient): EngineSyncTarget {
   const cached = ENGINE_SYNC_TARGET_BY_CLIENT.get(key);
   if (cached) return cached;
 
-  // NOTE: Intentionally omit style/formatting metadata APIs (internStyle / setCellStyleId / etc).
-  // Syncing style ids into the WASM engine has caused Chromium renderer crashes in the desktop app
-  // when applying formatting changes. Formatting remains a UI concern (DocumentController) until
-  // the engine-side style metadata layer is hardened.
   const target: EngineSyncTarget = {
     loadWorkbookFromJson: (json) => engine.loadWorkbookFromJson(json),
     setCell: (address, value, sheet) => engine.setCell(address, value, sheet),
@@ -255,9 +251,31 @@ function engineClientAsSyncTarget(engine: EngineClient): EngineSyncTarget {
     recalculate: (sheet) => engine.recalculate(sheet),
     setSheetDisplayName: (sheetId, name) => engine.setSheetDisplayName(sheetId, name),
     setWorkbookFileMetadata: (directory, filename) => engine.setWorkbookFileMetadata(directory, filename),
+    internStyle: (styleObj) => engine.internStyle(styleObj as any),
+    setCellStyleId: (sheet, address, styleId) => engine.setCellStyleId(address, styleId, sheet),
     setColWidth: (sheet, col, widthChars) => engine.setColWidth(col, widthChars, sheet),
     setColWidthChars: (sheet, col, widthChars) => engine.setColWidthChars(sheet, col, widthChars),
   };
+  // Row/col/sheet style metadata is optional (older WASM builds may not support it). Only expose
+  // these hooks when present so `engineApplyDocumentChange` can treat them as best-effort.
+  if (typeof engine.setRowStyleId === "function") {
+    target.setRowStyleId = (sheet, row, styleId) => engine.setRowStyleId(sheet, row, styleId);
+  }
+  if (typeof engine.setColStyleId === "function") {
+    target.setColStyleId = (sheet, col, styleId) => engine.setColStyleId(sheet, col, styleId);
+  }
+  if (typeof engine.setSheetDefaultStyleId === "function") {
+    target.setSheetDefaultStyleId = (sheet, styleId) => engine.setSheetDefaultStyleId(sheet, styleId);
+  }
+  if (typeof engine.setFormatRunsByCol === "function") {
+    target.setFormatRunsByCol = (sheet, col, runs) => engine.setFormatRunsByCol(sheet, col, runs);
+  } else if (typeof (engine as any).setColFormatRuns === "function") {
+    // DocumentController emits per-column compressed formatting runs (`formatRunsByCol` /
+    // `rangeRunDeltas`) for large rectangles of formatting-only changes. Expose this as the
+    // `EngineSyncTarget.setFormatRunsByCol` hook so `engineApplyDocumentChange` can forward the
+    // deltas without materializing per-cell style ids.
+    target.setFormatRunsByCol = (sheet, col, runs) => (engine as any).setColFormatRuns(sheet, col, runs);
+  }
 
   ENGINE_SYNC_TARGET_BY_CLIENT.set(key, target);
   return target;
