@@ -19,6 +19,7 @@ import json
 import math
 import re
 import sys
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -57,11 +58,15 @@ def _redact_text(value: str | None, *, privacy_mode: str) -> str | None:
     if value.startswith("sha256="):
         return value
 
-    # Keep repo-relative paths readable; only hash strings that look like absolute filesystem paths.
+    # Keep repo-relative paths readable; only hash strings that look like absolute filesystem paths
+    # or URI-like paths (file://, smb://, etc).
+    parsed = urllib.parse.urlparse(value)
     looks_abs = bool(
         value.startswith(("/", "\\", "~"))
         or value.startswith("//")
         or re.match(r"^[A-Za-z]:[\\/]", value)
+        # urlparse treats `C:\foo` as scheme "c" on non-Windows too; that's fine (it is a path).
+        or (parsed.scheme and ":" in value)
     )
     if not looks_abs:
         return value

@@ -94,12 +94,16 @@ def _redact_text(value: str | None, *, privacy_mode: str) -> str | None:
         return value
 
     # Keep repo-relative paths readable. Absolute paths (including Windows drive paths / UNC paths)
-    # tend to embed usernames/mount points and should be redacted.
+    # and URI-like paths (file://, smb://, etc) tend to embed usernames/mount points and should be
+    # redacted.
     looks_abs = bool(
         value.startswith(("/", "\\", "~"))
         or value.startswith("//")
         or re.match(r"^[A-Za-z]:[\\/]", value)
     )
+    if not looks_abs:
+        parsed = urllib.parse.urlparse(value)
+        looks_abs = bool(parsed.scheme and ":" in value)
     if not looks_abs:
         return value
 
