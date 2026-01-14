@@ -76,6 +76,54 @@ fn insert_row_above_rewrites_cross_sheet_refs_when_op_uses_sheet_key() {
 }
 
 #[test]
+fn insert_row_above_matches_sheet_names_case_insensitively_across_unicode() {
+    let mut engine = Engine::new();
+
+    // Use a Unicode sheet name that requires Unicode-aware case folding (ß -> SS).
+    engine.set_cell_value("Straße", "A1", 1.0).unwrap();
+    engine.set_cell_formula("Straße", "B1", "=A1").unwrap();
+    engine
+        .set_cell_formula("Other", "A1", "='Straße'!A1")
+        .unwrap();
+
+    // Apply the edit using a different (Unicode-folded) spelling of the sheet name.
+    engine
+        .apply_operation(EditOp::InsertRows {
+            sheet: "STRASSE".to_string(),
+            row: 0,
+            count: 1,
+        })
+        .unwrap();
+
+    assert_eq!(engine.get_cell_formula("Straße", "B2"), Some("=A2"));
+    assert_eq!(engine.get_cell_formula("Other", "A1"), Some("='Straße'!A2"));
+    assert_eq!(engine.get_cell_value("Straße", "A2"), Value::Number(1.0));
+}
+
+#[test]
+fn insert_row_above_matches_sheet_names_nfkc_case_insensitively() {
+    let mut engine = Engine::new();
+
+    // Use a sheet name that requires NFKC normalization to match (K == K).
+    engine.set_cell_value("Kelvin", "A1", 1.0).unwrap();
+    engine.set_cell_formula("Kelvin", "B1", "=A1").unwrap();
+    engine
+        .set_cell_formula("Other", "A1", "='Kelvin'!A1")
+        .unwrap();
+
+    engine
+        .apply_operation(EditOp::InsertRows {
+            sheet: "KELVIN".to_string(),
+            row: 0,
+            count: 1,
+        })
+        .unwrap();
+
+    assert_eq!(engine.get_cell_formula("Kelvin", "B2"), Some("=A2"));
+    assert_eq!(engine.get_cell_formula("Other", "A1"), Some("='Kelvin'!A2"));
+}
+
+#[test]
 fn delete_column_updates_references_and_creates_ref_errors() {
     let mut engine = Engine::new();
     engine.set_cell_formula("Sheet1", "C1", "=A1+B1").unwrap();
