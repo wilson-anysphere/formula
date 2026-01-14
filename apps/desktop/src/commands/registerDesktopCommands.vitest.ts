@@ -8,6 +8,10 @@ describe("registerDesktopCommands", () => {
   it("registers expected desktop command ids and wires representative handlers", async () => {
     const commandRegistry = new CommandRegistry();
 
+    const bringSelectedDrawingForward = vi.fn();
+    const sendSelectedDrawingBackward = vi.fn();
+    const focus = vi.fn();
+
     const openCommandPalette = vi.fn();
     const openFind = vi.fn();
     const openReplace = vi.fn();
@@ -42,7 +46,7 @@ describe("registerDesktopCommands", () => {
 
     registerDesktopCommands({
       commandRegistry,
-      app: {} as any,
+      app: { bringSelectedDrawingForward, sendSelectedDrawingBackward, focus } as any,
       layoutController: { layout: {} as any, openPanel: vi.fn(), closePanel: vi.fn() } as any,
       applyFormattingToSelection,
       getActiveCellNumberFormat: () => "0.00",
@@ -99,6 +103,14 @@ describe("registerDesktopCommands", () => {
 
     await commandRegistry.executeCommand("pageLayout.export.exportPdf");
     expect(pageLayoutHandlers.exportPdf).toHaveBeenCalledTimes(1);
+
+    await commandRegistry.executeCommand("pageLayout.arrange.bringForward");
+    expect(bringSelectedDrawingForward).toHaveBeenCalledTimes(1);
+
+    await commandRegistry.executeCommand("pageLayout.arrange.sendBackward");
+    expect(sendSelectedDrawingBackward).toHaveBeenCalledTimes(1);
+
+    expect(focus).toHaveBeenCalledTimes(2);
 
     // Ensure we didn't accidentally override registerBuiltinCommands' richer formatting command
     // registrations (which include keywords and accept pressed-state args for ribbon toggles).

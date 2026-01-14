@@ -81,6 +81,8 @@ const REQUIRED_PAGE_LAYOUT_COMMAND_IDS = [
   "pageLayout.pageSetup.printArea.clear",
   "pageLayout.pageSetup.printArea.addTo",
   "pageLayout.export.exportPdf",
+  "pageLayout.arrange.bringForward",
+  "pageLayout.arrange.sendBackward",
 ];
 
 const REQUIRED_DEVELOPER_CODE_COMMAND_IDS = RIBBON_MACRO_COMMAND_IDS.filter((id) => id.startsWith("developer.code."));

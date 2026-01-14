@@ -242,6 +242,39 @@ export function registerDesktopCommands(params: {
     },
   });
 
+  // Page Layout → Arrange drawing order commands. These are desktop-only (drawing overlay)
+  // but still registered in CommandRegistry so the ribbon does not auto-disable them and
+  // so other UI surfaces (command palette/keybindings) can invoke them consistently.
+  const commandCategoryPageLayout = "Page Layout";
+  commandRegistry.registerBuiltinCommand(
+    "pageLayout.arrange.bringForward",
+    "Bring Forward",
+    () => {
+      app.bringSelectedDrawingForward();
+      app.focus();
+    },
+    {
+      category: commandCategoryPageLayout,
+      icon: null,
+      description: "Bring the selected drawing forward",
+      keywords: ["arrange", "drawing", "bring forward", "z order", "layer"],
+    },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "pageLayout.arrange.sendBackward",
+    "Send Backward",
+    () => {
+      app.sendSelectedDrawingBackward();
+      app.focus();
+    },
+    {
+      category: commandCategoryPageLayout,
+      icon: null,
+      description: "Send the selected drawing backward",
+      keywords: ["arrange", "drawing", "send backward", "z order", "layer"],
+    },
+  );
+
   if (pageLayoutHandlers) {
     registerPageLayoutCommands({ commandRegistry, handlers: pageLayoutHandlers });
   }
