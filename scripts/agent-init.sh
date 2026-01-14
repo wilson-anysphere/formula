@@ -138,14 +138,14 @@ fi
 # shared caching.
 # To explicitly keep `CARGO_HOME=$HOME/.cargo` in local runs, set
 # `FORMULA_ALLOW_GLOBAL_CARGO_HOME=1` before sourcing this script.
-DEFAULT_GLOBAL_CARGO_HOME="${HOME:-/root}/.cargo"
-CARGO_HOME_NORM="${CARGO_HOME:-}"
-CARGO_HOME_NORM="${CARGO_HOME_NORM%/}"
-DEFAULT_GLOBAL_CARGO_HOME_NORM="${DEFAULT_GLOBAL_CARGO_HOME%/}"
+_formula_default_global_cargo_home="${HOME:-/root}/.cargo"
+_formula_cargo_home_norm="${CARGO_HOME:-}"
+_formula_cargo_home_norm="${_formula_cargo_home_norm%/}"
+_formula_default_global_cargo_home_norm="${_formula_default_global_cargo_home%/}"
 if [ -z "${CARGO_HOME:-}" ] || {
   [ -z "${CI:-}" ] &&
     [ -z "${FORMULA_ALLOW_GLOBAL_CARGO_HOME:-}" ] &&
-    [ "${CARGO_HOME_NORM}" = "${DEFAULT_GLOBAL_CARGO_HOME_NORM}" ];
+    [ "${_formula_cargo_home_norm}" = "${_formula_default_global_cargo_home_norm}" ];
 }; then
   # Prefer `git rev-parse --show-toplevel` to locate the repo root. This works
   # even when sourced from `sh` (our agent runner shell), where bash-only
@@ -153,18 +153,22 @@ if [ -z "${CARGO_HOME:-}" ] || {
   #
   # Fall back to `BASH_SOURCE` when running in bash (e.g. local dev), and finally
   # to `pwd` if neither is available.
-  REPO_ROOT=""
+  _formula_repo_root=""
   if command -v git >/dev/null 2>&1; then
-    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    _formula_repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
   fi
-  if [ -z "${REPO_ROOT}" ] && [ -n "${BASH_VERSION:-}" ]; then
-    REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  if [ -z "${_formula_repo_root}" ] && [ -n "${BASH_VERSION:-}" ]; then
+    _formula_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   fi
-  if [ -z "${REPO_ROOT}" ]; then
-    REPO_ROOT="$(pwd)"
+  if [ -z "${_formula_repo_root}" ]; then
+    _formula_repo_root="$(pwd)"
   fi
-  export CARGO_HOME="${REPO_ROOT}/target/cargo-home"
+  export CARGO_HOME="${_formula_repo_root}/target/cargo-home"
 fi
+unset _formula_default_global_cargo_home
+unset _formula_cargo_home_norm
+unset _formula_default_global_cargo_home_norm
+unset _formula_repo_root
 mkdir -p "$CARGO_HOME"
 
 # Ensure tools installed via `cargo install` under this CARGO_HOME are available.
@@ -233,6 +237,7 @@ setup_display() {
 if command -v Xvfb >/dev/null 2>&1; then
   setup_display
 fi
+unset -f setup_display
 
 # ============================================================================
 # Confirmation
