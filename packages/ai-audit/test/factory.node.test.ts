@@ -110,6 +110,19 @@ describe("createDefaultAIAuditStore (node entrypoint)", () => {
     expect(unwrap(store)).toBeInstanceOf(LocalStorageAIAuditStore);
   });
 
+  it('prefer: "localstorage" falls back to memory when localStorage access throws', async () => {
+    Object.defineProperty(globalThis as any, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("no localStorage");
+      }
+    });
+
+    const store = await createDefaultAIAuditStore({ prefer: "localstorage" });
+    expect(store).toBeInstanceOf(BoundedAIAuditStore);
+    expect(unwrap(store)).toBeInstanceOf(MemoryAIAuditStore);
+  });
+
   it('prefer: "sqlite" returns a bounded wrapper by default', async () => {
     const store = await createDefaultAIAuditStore({ prefer: "sqlite" });
     expect(store).toBeInstanceOf(BoundedAIAuditStore);
