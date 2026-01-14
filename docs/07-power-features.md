@@ -1512,6 +1512,10 @@ Validation + edge cases (Rust behavior):
   - Cell-ref parsing:
     - Accepted forms include `A1` (default sheet), `Sheet1!A1`, and `'My Sheet'!A1` (quoted with Excel escaping `''`).
     - Invalid refs fail fast during `EngineSolverModel::new` (e.g. empty refs, missing sheet name when `!` is present).
+      - `EngineSolverModel::new` returns `SolverError` messages like:
+        - `"cell reference cannot be empty"`
+        - `"invalid cell reference '<input>': missing address"` (e.g. `"Sheet1!"`)
+        - `"invalid cell reference '<input>': missing sheet name"` (e.g. `"!A1"`)
     - A future `formula-wasm` binding will likely mirror `goalSeek` and accept A1 addresses without `Sheet!` prefixes, using a separate `sheet` field as the default sheet.
   - Numeric coercion:
     - Decision variables are read **strictly** at construction time:
