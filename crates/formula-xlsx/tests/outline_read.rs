@@ -12,6 +12,7 @@ fn outline_load_from_bytes_populates_worksheet_outline() {
     assert_eq!(sheet.name, "Sheet1");
     assert!(sheet.outline.pr.summary_below);
     assert!(sheet.outline.pr.summary_right);
+    assert!(sheet.outline.pr.show_outline_symbols);
 
     for row in 2..=4 {
         assert_eq!(sheet.outline.rows.entry(row).level, 1);
@@ -19,6 +20,22 @@ fn outline_load_from_bytes_populates_worksheet_outline() {
     for col in 2..=4 {
         assert_eq!(sheet.outline.cols.entry(col).level, 1);
     }
+}
+
+#[test]
+fn outline_load_from_bytes_parses_outline_pr_flags() {
+    let mut outline = read_outline_from_xlsx_bytes(FIXTURE, SHEET_PATH).expect("fixture outline");
+    outline.pr.summary_below = false;
+    outline.pr.summary_right = false;
+    outline.pr.show_outline_symbols = false;
+    let edited_bytes =
+        write_outline_to_xlsx_bytes(FIXTURE, SHEET_PATH, &outline).expect("write edited xlsx");
+
+    let doc = load_from_bytes(&edited_bytes).expect("load edited workbook");
+    let sheet = &doc.workbook.sheets[0];
+    assert!(!sheet.outline.pr.summary_below);
+    assert!(!sheet.outline.pr.summary_right);
+    assert!(!sheet.outline.pr.show_outline_symbols);
 }
 
 #[test]
@@ -90,6 +107,7 @@ fn outline_read_workbook_model_from_bytes_parity() {
     assert_eq!(sheet.name, "Sheet1");
     assert!(sheet.outline.pr.summary_below);
     assert!(sheet.outline.pr.summary_right);
+    assert!(sheet.outline.pr.show_outline_symbols);
 
     for row in 2..=4 {
         assert_eq!(sheet.outline.rows.entry(row).level, 1);
@@ -97,6 +115,22 @@ fn outline_read_workbook_model_from_bytes_parity() {
     for col in 2..=4 {
         assert_eq!(sheet.outline.cols.entry(col).level, 1);
     }
+}
+
+#[test]
+fn outline_read_workbook_model_from_bytes_parses_outline_pr_flags() {
+    let mut outline = read_outline_from_xlsx_bytes(FIXTURE, SHEET_PATH).expect("fixture outline");
+    outline.pr.summary_below = false;
+    outline.pr.summary_right = false;
+    outline.pr.show_outline_symbols = false;
+    let edited_bytes =
+        write_outline_to_xlsx_bytes(FIXTURE, SHEET_PATH, &outline).expect("write edited xlsx");
+
+    let workbook = read_workbook_model_from_bytes(&edited_bytes).expect("load workbook model");
+    let sheet = &workbook.sheets[0];
+    assert!(!sheet.outline.pr.summary_below);
+    assert!(!sheet.outline.pr.summary_right);
+    assert!(!sheet.outline.pr.show_outline_symbols);
 }
 
 #[test]
@@ -145,4 +179,3 @@ fn outline_read_workbook_model_from_bytes_does_not_mark_outline_hidden_rows_user
         );
     }
 }
-
