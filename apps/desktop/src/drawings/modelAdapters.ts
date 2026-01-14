@@ -710,6 +710,29 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
   for (const raw of drawingsJson) {
     try {
       if (isRecord(raw)) {
+        // Best-effort passthrough for metadata authored by the UI layer
+        // (e.g. rotation interactions or XLSX compatibility XML).
+        const preservedValue = pick(raw, ["preserved"]);
+        let preserved: Record<string, string> | undefined;
+        if (isRecord(preservedValue)) {
+          const outPreserved: Record<string, string> = {};
+          for (const [k, v] of Object.entries(preservedValue)) {
+            if (typeof v === "string") outPreserved[k] = v;
+          }
+          if (Object.keys(outPreserved).length > 0) preserved = outPreserved;
+        }
+
+        const transformValue = pick(raw, ["transform"]);
+        let transform: DrawingTransform | undefined;
+        if (isRecord(transformValue)) {
+          const rotationDeg = readOptionalNumber((transformValue as JsonRecord).rotationDeg);
+          const flipH = (transformValue as JsonRecord).flipH;
+          const flipV = (transformValue as JsonRecord).flipV;
+          if (rotationDeg != null && typeof flipH === "boolean" && typeof flipV === "boolean") {
+            transform = { rotationDeg, flipH, flipV };
+          }
+        }
+
         const anchorValue = pick(raw, ["anchor"]);
         const anchorSheetId = (() => {
           if (!isRecord(anchorValue)) return undefined;
@@ -725,29 +748,6 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
           const anchor = convertDocumentDrawingAnchorToUiAnchor(anchorValue, size);
           if (!anchor) continue;
 
-          // Best-effort passthrough for metadata authored by the UI layer
-          // (e.g. rotation interactions or XLSX compatibility XML).
-          const preservedValue = pick(raw, ["preserved"]);
-          let preserved: Record<string, string> | undefined;
-          if (isRecord(preservedValue)) {
-            const outPreserved: Record<string, string> = {};
-            for (const [k, v] of Object.entries(preservedValue)) {
-              if (typeof v === "string") outPreserved[k] = v;
-            }
-            if (Object.keys(outPreserved).length > 0) preserved = outPreserved;
-          }
-
-          const transformValue = pick(raw, ["transform"]);
-          let transform: DrawingTransform | undefined;
-          if (isRecord(transformValue)) {
-            const rotationDeg = readOptionalNumber((transformValue as JsonRecord).rotationDeg);
-            const flipH = (transformValue as JsonRecord).flipH;
-            const flipV = (transformValue as JsonRecord).flipV;
-            if (rotationDeg != null && typeof flipH === "boolean" && typeof flipV === "boolean") {
-              transform = { rotationDeg, flipH, flipV };
-            }
-          }
-
           const obj: DrawingObject = { id, kind, anchor, zOrder, ...(size ? { size } : {}) };
           if (preserved) obj.preserved = preserved;
           if (transform) obj.transform = transform;
@@ -758,7 +758,15 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
         // If the drawing doesn't match the DocumentController schema, fall through to the
         // formula-model adapter but preserve any known sheet context so chart placeholders can
         // construct stable chart ids.
-        out.push(convertModelDrawingObjectToUiDrawingObject(raw, sheetId ? { sheetId } : undefined));
+        const base = convertModelDrawingObjectToUiDrawingObject(raw, sheetId ? { sheetId } : undefined);
+        // Preserve metadata even when parsing via the formula-model adapter (best-effort).
+        // This ensures UI-authored rotation/preserved XML survives when DocumentController stores
+        // drawings in a model-like shape.
+        const merged: DrawingObject =
+          preserved || transform
+            ? { ...base, ...(preserved ? { preserved } : {}), ...(transform ? { transform } : {}) }
+            : base;
+        out.push(merged);
         continue;
       }
 
