@@ -582,6 +582,35 @@ mod filepass_tests {
     }
 
     #[test]
+    fn cryptoapi_kdf_matches_known_vectors() {
+        // Test vectors mirrored from `biff::encryption::cryptoapi` (Apache POI-compatible).
+        let password = "SecretPassword";
+        let salt: [u8; 16] = [
+            0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC,
+            0xAD, 0xAE, 0xAF,
+        ];
+        let key_material = derive_key_material(password, &salt);
+
+        let expected_key_block0: [u8; 16] = [
+            0x3D, 0x7D, 0x0B, 0x04, 0x2E, 0xCF, 0x02, 0xA7, 0xBC, 0xE1, 0x26, 0xA1, 0xE2,
+            0x20, 0xE2, 0xC8,
+        ];
+        let expected_key_block1: [u8; 16] = [
+            0xF8, 0x06, 0xD7, 0x4E, 0x99, 0x94, 0x8E, 0xE8, 0xD3, 0x68, 0xD6, 0x1C, 0xEA,
+            0xAA, 0x7C, 0x36,
+        ];
+
+        assert_eq!(
+            derive_block_key(&key_material, 0, 16),
+            expected_key_block0
+        );
+        assert_eq!(
+            derive_block_key(&key_material, 1, 16),
+            expected_key_block1
+        );
+    }
+
+    #[test]
     fn decrypts_rc4_cryptoapi_40_bit_by_using_padded_rc4_key() {
         // Build a minimal BIFF8 workbook stream:
         // BOF (plaintext) + FILEPASS (plaintext) + one record with encrypted payload + EOF.
@@ -970,6 +999,11 @@ fn verify_password(info: &CryptoApiEncryptionInfo, password: &str) -> Result<[u8
             "CryptoAPI AlgID=0x{:08X} AlgIDHash=0x{:08X}",
             info.header.alg_id, info.header.alg_id_hash
         )));
+    }
+
+    // RC4 CryptoAPI uses a fixed 16-byte salt.
+    if info.verifier.salt.len() != 16 {
+        return Err(DecryptError::UnsupportedEncryption);
     }
 
     let key_size_bits = info.header.key_size_bits;
