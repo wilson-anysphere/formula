@@ -226,19 +226,37 @@ test("branchStateFromYjsDoc/applyBranchStateToYjsDoc: round-trips sheet view (fr
     const sheet = new Y.Map();
     sheet.set("id", "Sheet1");
     sheet.set("name", "Sheet1");
-    sheet.set("view", { frozenRows: 2, frozenCols: 1, colWidths: { "0": 120 }, rowHeights: { "1": 40 } });
+    sheet.set("view", {
+      frozenRows: 2,
+      frozenCols: 1,
+      backgroundImageId: "bg.png",
+      colWidths: { "0": 120 },
+      rowHeights: { "1": 40 },
+    });
     sheets.push([sheet]);
   });
 
   const state = branchStateFromYjsDoc(doc);
-  assert.deepEqual(state.sheets.metaById.Sheet1?.view, { frozenRows: 2, frozenCols: 1, colWidths: { "0": 120 }, rowHeights: { "1": 40 } });
+  assert.deepEqual(state.sheets.metaById.Sheet1?.view, {
+    frozenRows: 2,
+    frozenCols: 1,
+    backgroundImageId: "bg.png",
+    colWidths: { "0": 120 },
+    rowHeights: { "1": 40 },
+  });
 
   const doc2 = new Y.Doc();
   applyBranchStateToYjsDoc(doc2, state);
 
   const sheet2 = doc2.getArray("sheets").get(0);
   assert.ok(sheet2 instanceof Y.Map);
-  assert.deepEqual(sheet2.get("view"), { frozenRows: 2, frozenCols: 1, colWidths: { "0": 120 }, rowHeights: { "1": 40 } });
+  assert.deepEqual(sheet2.get("view"), {
+    frozenRows: 2,
+    frozenCols: 1,
+    backgroundImageId: "bg.png",
+    colWidths: { "0": 120 },
+    rowHeights: { "1": 40 },
+  });
 });
 
 test("branchStateFromYjsDoc: reads legacy top-level sheet view fields (frozen panes + axis sizes)", () => {
@@ -250,6 +268,7 @@ test("branchStateFromYjsDoc: reads legacy top-level sheet view fields (frozen pa
     sheet.set("name", "Sheet1");
     sheet.set("frozenRows", 2);
     sheet.set("frozenCols", 1);
+    sheet.set("background_image_id", "bg.png");
     sheet.set("colWidths", { "0": 120 });
     sheet.set("rowHeights", { "1": 40 });
     sheets.push([sheet]);
@@ -259,6 +278,7 @@ test("branchStateFromYjsDoc: reads legacy top-level sheet view fields (frozen pa
   assert.deepEqual(state.sheets.metaById.Sheet1?.view, {
     frozenRows: 2,
     frozenCols: 1,
+    backgroundImageId: "bg.png",
     colWidths: { "0": 120 },
     rowHeights: { "1": 40 },
   });
@@ -268,9 +288,17 @@ test("branchStateFromYjsDoc: reads legacy top-level sheet view fields (frozen pa
   const sheet2 = doc2.getArray("sheets").get(0);
   assert.ok(sheet2 instanceof Y.Map);
   // Canonical write format is nested under `view`.
-  assert.deepEqual(sheet2.get("view"), { frozenRows: 2, frozenCols: 1, colWidths: { "0": 120 }, rowHeights: { "1": 40 } });
+  assert.deepEqual(sheet2.get("view"), {
+    frozenRows: 2,
+    frozenCols: 1,
+    backgroundImageId: "bg.png",
+    colWidths: { "0": 120 },
+    rowHeights: { "1": 40 },
+  });
   assert.equal(sheet2.get("frozenRows"), undefined);
   assert.equal(sheet2.get("frozenCols"), undefined);
+  assert.equal(sheet2.get("backgroundImageId"), undefined);
+  assert.equal(sheet2.get("background_image_id"), undefined);
 });
 
 test("applyBranchStateToYjsDoc: drops legacy top-level axis sizes when applying snapshot", () => {
@@ -284,6 +312,7 @@ test("applyBranchStateToYjsDoc: drops legacy top-level axis sizes when applying 
     // Legacy top-level fields that should be canonicalized into `view`.
     sheet.set("frozenRows", 2);
     sheet.set("frozenCols", 1);
+    sheet.set("backgroundImageId", "bg.png");
     sheet.set("colWidths", { "0": 120 });
     sheet.set("rowHeights", { "1": 40 });
     sheets.push([sheet]);
@@ -293,6 +322,7 @@ test("applyBranchStateToYjsDoc: drops legacy top-level axis sizes when applying 
   assert.deepEqual(state.sheets.metaById.Sheet1?.view, {
     frozenRows: 2,
     frozenCols: 1,
+    backgroundImageId: "bg.png",
     colWidths: { "0": 120 },
     rowHeights: { "1": 40 },
   });
@@ -302,9 +332,17 @@ test("applyBranchStateToYjsDoc: drops legacy top-level axis sizes when applying 
   const sheet1 = doc.getArray("sheets").get(0);
   assert.ok(sheet1 instanceof Y.Map);
   assert.equal(sheet1.get("color"), "red");
-  assert.deepEqual(sheet1.get("view"), { frozenRows: 2, frozenCols: 1, colWidths: { "0": 120 }, rowHeights: { "1": 40 } });
+  assert.deepEqual(sheet1.get("view"), {
+    frozenRows: 2,
+    frozenCols: 1,
+    backgroundImageId: "bg.png",
+    colWidths: { "0": 120 },
+    rowHeights: { "1": 40 },
+  });
   assert.equal(sheet1.get("frozenRows"), undefined);
   assert.equal(sheet1.get("frozenCols"), undefined);
+  assert.equal(sheet1.get("backgroundImageId"), undefined);
+  assert.equal(sheet1.get("background_image_id"), undefined);
   assert.equal(sheet1.get("colWidths"), undefined);
   assert.equal(sheet1.get("rowHeights"), undefined);
 });
