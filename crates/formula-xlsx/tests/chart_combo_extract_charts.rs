@@ -1,5 +1,4 @@
 use formula_model::charts::ChartType;
-use formula_xlsx::charts::parse_chart;
 
 #[test]
 fn parse_chart_includes_series_from_all_chart_types_in_combo_plot_area() {
@@ -34,7 +33,8 @@ fn parse_chart_includes_series_from_all_chart_types_in_combo_plot_area() {
         </c:chartSpace>
     "#;
 
-    let parsed = parse_chart(xml.as_bytes(), "combo.xml")
+    #[allow(deprecated)]
+    let parsed = formula_xlsx::charts::parse_chart(xml.as_bytes(), "combo.xml")
         .expect("parse chart")
         .expect("chart present");
     assert_eq!(parsed.chart_type, ChartType::Bar);
