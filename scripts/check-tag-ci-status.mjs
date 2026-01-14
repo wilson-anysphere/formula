@@ -212,12 +212,16 @@ async function findNewestSuccessfulRun({ owner, repo, workflowId, sha, token }) 
     const data = await githubGetJson(url, { token });
     const runs = Array.isArray(data?.workflow_runs) ? data.workflow_runs : [];
 
-    if (page === 1 && runs.length > 0) {
-      newestCompletedRun = runs[0];
-    }
-
     for (const run of runs) {
-      if (run?.status === "completed" && run?.conclusion === "success") return { run, newestCompletedRun };
+      // Defensive: even though we query with head_sha, validate it to avoid passing
+      // the release preflight if GitHub ignores the query parameter (or changes API behavior).
+      if (run?.head_sha !== sha) continue;
+
+      if (!newestCompletedRun) newestCompletedRun = run;
+
+      if (run?.status === "completed" && run?.conclusion === "success") {
+        return { run, newestCompletedRun };
+      }
     }
 
     if (runs.length < DEFAULT_PER_PAGE) break;
@@ -305,4 +309,3 @@ main().catch((err) => {
   const msg = err instanceof Error ? err.stack ?? err.message : String(err);
   fatal(`Unexpected error while checking CI status.\n${msg}`);
 });
-
