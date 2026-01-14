@@ -32,12 +32,6 @@ export const RIBBON_MACRO_COMMAND_IDS = [
 
 export type RibbonMacroCommandId = (typeof RIBBON_MACRO_COMMAND_IDS)[number];
 
-const RIBBON_MACRO_COMMAND_ID_SET = new Set<string>(RIBBON_MACRO_COMMAND_IDS);
-
-export function isRibbonMacroCommandId(commandId: string): commandId is RibbonMacroCommandId {
-  return RIBBON_MACRO_COMMAND_ID_SET.has(String(commandId));
-}
-
 export type RibbonMacroCommandHandlers = {
   openPanel: (panelId: string) => void;
   focusScriptEditorPanel: () => void;
@@ -196,4 +190,3 @@ export function registerRibbonMacroCommands(params: {
     });
   }
 }
-
