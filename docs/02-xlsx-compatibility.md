@@ -1300,6 +1300,12 @@ interface XlsxDocument {
 }
 ```
 
+Forward-compat note: worksheet `<sheetProtection>` elements may include modern hashing attributes
+(`algorithmName`, `hashValue`, `saltValue`, `spinCount`). Even if the model only exposes the legacy
+`password` hash, these attributes must be preserved on round-trip when protection settings are
+unchanged (see Feature preservation rules: Worksheet protection, and the patch-in-place writer in
+`crates/formula-xlsx/src/write/mod.rs`).
+
 ### Relationship ID Preservation
 
 ```xml
