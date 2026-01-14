@@ -149,7 +149,12 @@ def main(argv: list[str]) -> int:
         ):
             if not root.is_dir():
                 continue
-            candidates.extend([p for p in root.glob("**/release/bundle") if p.is_dir()])
+            # Avoid recursive `**/release/bundle` globbing: Cargo target directories can be large,
+            # and we only expect bundles at:
+            # - <target>/release/bundle
+            # - <target>/<triple>/release/bundle
+            for pattern in ("release/bundle", "*/release/bundle"):
+                candidates.extend([p for p in root.glob(pattern) if p.is_dir()])
         bundle_dir = candidates[0] if candidates else None
         if bundle_dir is None:
             print(
