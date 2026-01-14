@@ -8744,10 +8744,11 @@ export class SpreadsheetApp {
     })();
 
     // Cache key: avoid re-reading cells on every mousemove while hovering the same reference span.
-    // Include the document content version so the tooltip can refresh after edits/recalculation
-    // (including changes on other sheets that may affect computed values in the active sheet).
-    const docContentVersion = this.document.contentVersion;
-    const key = `${this.sheetId}:${docContentVersion}:${startRow},${startCol}:${endRow},${endCol}:${label}:${tooLarge ? "L" : "S"}`;
+    // Include a monotonic document version so the tooltip can refresh after any workbook update
+    // (values/formulas/formatting/view changes, including edits on other sheets that may affect
+    // computed values in the active sheet).
+    const docUpdateVersion = this.document.updateVersion;
+    const key = `${this.sheetId}:${docUpdateVersion}:${startRow},${startCol}:${endRow},${endCol}:${label}:${tooLarge ? "L" : "S"}`;
     if (this.formulaRangePreviewTooltipVisible && this.formulaRangePreviewTooltipLastKey === key) {
       return;
     }
