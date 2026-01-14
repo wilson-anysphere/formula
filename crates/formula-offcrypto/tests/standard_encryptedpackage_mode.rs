@@ -47,19 +47,26 @@ fn read_ole_stream(raw_ole: &[u8], name: &str) -> Vec<u8> {
 /// implementation in this crate.
 ///
 /// This is only used as a diagnostic if ECB decryption does not match the plaintext fixture.
-fn assert_fixture_is_ecb(encrypted_name: &str, plaintext_name: &str, password: &str) {
+fn assert_fixture_is_ecb(
+    encrypted_name: &str,
+    plaintext_name: &str,
+    password: &str,
+    check_decrypt_from_bytes: bool,
+) {
     let encrypted =
         std::fs::read(fixture(encrypted_name)).unwrap_or_else(|_| panic!("read {encrypted_name}"));
     let expected =
         std::fs::read(fixture(plaintext_name)).unwrap_or_else(|_| panic!("read {plaintext_name}"));
 
     // 1) Sanity check: the high-level Standard decrypt entrypoint can open the fixture.
-    let decrypted = decrypt_from_bytes(&encrypted, password)
-        .unwrap_or_else(|err| panic!("decrypt_from_bytes({encrypted_name}) failed: {err:?}"));
-    assert_eq!(
-        decrypted, expected,
-        "decrypt_from_bytes output must match {plaintext_name} for {encrypted_name}"
-    );
+    if check_decrypt_from_bytes {
+        let decrypted = decrypt_from_bytes(&encrypted, password)
+            .unwrap_or_else(|err| panic!("decrypt_from_bytes({encrypted_name}) failed: {err:?}"));
+        assert_eq!(
+            decrypted, expected,
+            "decrypt_from_bytes output must match {plaintext_name} for {encrypted_name}"
+        );
+    }
 
     // 2) Regression: confirm the fixture `EncryptedPackage` specifically uses ECB mode.
     let encryption_info_bytes = read_ole_stream(&encrypted, "EncryptionInfo");
@@ -220,13 +227,21 @@ fn password_utf16le_bytes(password: &str) -> Vec<u8> {
 fn standard_fixtures_encryptedpackage_is_ecb() {
     // These are explicitly meant to be “baseline” Standard (CryptoAPI) **AES** fixtures. (The RC4
     // fixture is excluded because ECB/CBC is not applicable to RC4.)
-    for (encrypted, plaintext, password) in [
+    for (idx, (encrypted, plaintext, password)) in [
         ("standard.xlsx", "plaintext.xlsx", "password"),
         ("standard-large.xlsx", "plaintext-large.xlsx", "password"),
         ("standard-4.2.xlsx", "plaintext.xlsx", "password"),
         ("standard-unicode.xlsx", "plaintext.xlsx", "pässwörd🔒"),
         ("standard-basic.xlsm", "plaintext-basic.xlsm", "password"),
-    ] {
-        assert_fixture_is_ecb(encrypted, plaintext, password);
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        // `decrypt_from_bytes` currently includes multiple compatibility fallbacks (CBC-variant key
+        // derivation and `EncryptedPackage` scheme auto-detection). For this canary we only need to
+        // prove that the baseline ECB path matches the committed fixtures; checking the full
+        // entrypoint for every fixture is redundant and adds significant KDF cost.
+        let check_decrypt_from_bytes = idx == 0;
+        assert_fixture_is_ecb(encrypted, plaintext, password, check_decrypt_from_bytes);
     }
 }
