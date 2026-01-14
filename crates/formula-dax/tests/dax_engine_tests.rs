@@ -643,8 +643,8 @@ fn relatedtable_supports_iterators() {
 
 #[test]
 fn relatedtable_supports_iterators_for_columnar_relationships() {
-    // Columnar tables are immutable (so we can't add calculated columns), but `RELATEDTABLE`
-    // should still work in row context.
+    // Columnar tables are immutable snapshots, but `RELATEDTABLE` should still work in row
+    // context.
     let mut model = DataModel::new();
 
     let customers_schema = vec![
