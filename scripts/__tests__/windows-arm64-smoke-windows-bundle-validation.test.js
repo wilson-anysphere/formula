@@ -22,6 +22,11 @@ test("windows-arm64-smoke workflow validates built bundles via validate-windows-
   );
 });
 
+test("windows-arm64-smoke workflow validates desktop compliance artifact bundling config (LICENSE/NOTICE)", async () => {
+  const text = await readWorkflow();
+  assert.match(text, /node\s+scripts\/ci\/check-desktop-compliance-artifacts\.mjs\b/);
+});
+
 test("windows-arm64-smoke workflow verifies the produced desktop binary is stripped", async () => {
   const text = await readWorkflow();
   const lines = text.split(/\r?\n/);
