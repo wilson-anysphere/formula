@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { NoopAIAuditStore } from "../src/noop-store.js";
-import { FailingAIAuditStore } from "../src/failing-store.js";
+import { FailingAIAuditStore, NoopAIAuditStore } from "../src/index.js";
 import type { AIAuditEntry } from "../src/types.js";
 
 function makeEntry(): AIAuditEntry {
@@ -43,4 +42,3 @@ describe("FailingAIAuditStore", () => {
     await expect(store.listEntries()).rejects.toThrow("audit store is failing");
   });
 });
-
