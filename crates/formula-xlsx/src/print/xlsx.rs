@@ -61,14 +61,20 @@ pub(crate) fn parse_workbook_defined_print_names(
         let print_area = workbook
             .defined_names
             .iter()
-            .find(|dn| dn.name == "_xlnm.Print_Area" && dn.local_sheet_id == Some(sheet_index))
+            .find(|dn| {
+                dn.local_sheet_id == Some(sheet_index)
+                    && dn.name.eq_ignore_ascii_case("_xlnm.Print_Area")
+            })
             .map(|dn| parse_print_area_defined_name(&sheet_name, &dn.value))
             .transpose()?;
 
         let print_titles = workbook
             .defined_names
             .iter()
-            .find(|dn| dn.name == "_xlnm.Print_Titles" && dn.local_sheet_id == Some(sheet_index))
+            .find(|dn| {
+                dn.local_sheet_id == Some(sheet_index)
+                    && dn.name.eq_ignore_ascii_case("_xlnm.Print_Titles")
+            })
             .map(|dn| parse_print_titles_defined_name(&sheet_name, &dn.value))
             .transpose()?;
 
@@ -1337,6 +1343,43 @@ mod tests {
             zip.write_all(bytes).unwrap();
         }
         zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn parse_workbook_defined_print_names_matches_builtin_defined_names_case_insensitively() {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+  <definedNames>
+    <definedName name="_xlnm.print_area" localSheetId="0">Sheet1!$A$1:$A$1</definedName>
+    <definedName name="_xlnm.PRINT_TITLES" localSheetId="0">Sheet1!$1:$1</definedName>
+  </definedNames>
+</workbook>"#;
+
+        let parsed = parse_workbook_defined_print_names(workbook_xml).expect("parse print names");
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].sheet_name, "Sheet1");
+        assert_eq!(
+            parsed[0].print_area.as_deref(),
+            Some(
+                &[crate::print::CellRange {
+                    start_row: 1,
+                    end_row: 1,
+                    start_col: 1,
+                    end_col: 1
+                }][..]
+            )
+        );
+        assert_eq!(
+            parsed[0].print_titles,
+            Some(crate::print::PrintTitles {
+                repeat_rows: Some(crate::print::RowRange { start: 1, end: 1 }),
+                repeat_cols: None,
+            })
+        );
     }
 
     #[test]

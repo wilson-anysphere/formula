@@ -266,7 +266,6 @@ fn dax_identifier_requires_quotes(raw: &str) -> bool {
         }
         return true;
     }
-
     false
 }
 
