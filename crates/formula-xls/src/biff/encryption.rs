@@ -1486,6 +1486,25 @@ mod tests {
     }
 
     #[test]
+    fn parses_biff5_xor_filepass_with_biff8_style_header() {
+        // Some BIFF5 writers emit a BIFF8-style FILEPASS payload:
+        //   wEncryptionType (u16) + key (u16) + verifier (u16)
+        let payload = [
+            0x00, 0x00, // wEncryptionType (XOR)
+            0x34, 0x12, // key
+            0x78, 0x56, // verifier
+        ];
+        let parsed = parse_filepass_record(BiffVersion::Biff5, &payload).expect("parse");
+        assert_eq!(
+            parsed,
+            BiffEncryption::Biff5Xor {
+                key: 0x1234,
+                verifier: 0x5678
+            }
+        );
+    }
+
+    #[test]
     fn parses_biff8_xor_filepass() {
         let payload = [
             0x00, 0x00, // wEncryptionType
