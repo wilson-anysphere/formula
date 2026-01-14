@@ -66,7 +66,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-latest, macos-latest]
+        # Pin runner images for reproducibility. GitHub's `*-latest` labels move over time,
+        # which can both break workflows unexpectedly and introduce noise into perf trends.
+        # Update these pins deliberately after validating on newer runner images:
+        # https://github.com/actions/runner-images
+        os: [ubuntu-24.04, windows-2022, macos-14]
 
     steps:
       - name: Checkout
@@ -101,14 +105,14 @@ jobs:
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
       # CARGO_HOME so cargo installs/builds share the same cache.
       - name: Use shared Cargo home for CI caching (Windows)
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $cargoHome = Join-Path $env:USERPROFILE ".cargo"
           "CARGO_HOME=$cargoHome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Use shared Cargo home for CI caching (Unix)
-        if: matrix.os != 'windows-latest'
+        if: runner.os != 'Windows'
         run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
 
       - name: Rust cache
@@ -536,7 +540,7 @@ jobs:
     needs: desktop-perf
     # Avoid spending compute on scheduled runs in forks.
     if: (github.event_name != 'schedule' || github.repository == 'wilson-anysphere/formula') && always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
@@ -606,8 +610,8 @@ jobs:
           
           const rows = [
             { label: "Linux", artifact: "desktop-perf-ubuntu-24.04" },
-            { label: "Windows", artifact: "desktop-perf-windows-latest" },
-            { label: "macOS", artifact: "desktop-perf-macos-latest" },
+            { label: "Windows", artifact: "desktop-perf-windows-2022" },
+            { label: "macOS", artifact: "desktop-perf-macos-14" },
           ].map((r) => ({ ...r, data: byArtifact[r.artifact] ?? null }));
           
           const lines = [];

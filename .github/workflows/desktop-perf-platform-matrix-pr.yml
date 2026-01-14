@@ -27,7 +27,7 @@ jobs:
     # Avoid creating work for unrelated label events. This still leaves a workflow run entry,
     # but all jobs will be skipped immediately when the label isn't a trigger label.
     if: github.event.label.name == 'desktop-perf-matrix' || github.event.label.name == 'run-desktop-perf'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       should_run: ${{ steps.guard.outputs.should_run }}
       head_sha: ${{ steps.guard.outputs.head_sha }}
@@ -87,7 +87,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-latest, macos-latest]
+        # Pin runner images for reproducibility. GitHub's `*-latest` labels move over time,
+        # which can both break workflows unexpectedly and introduce noise into perf trends.
+        # Update these pins deliberately after validating on newer runner images:
+        # https://github.com/actions/runner-images
+        os: [ubuntu-24.04, windows-2022, macos-14]
     env:
       # The runners gate on these env vars; map the platform-matrix toggle to the existing
       # enforcement knobs (defaults off).
@@ -201,14 +205,14 @@ jobs:
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
       # CARGO_HOME so cargo installs/builds share the same cache.
       - name: Use shared Cargo home for CI caching (Windows)
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $cargoHome = Join-Path $env:USERPROFILE ".cargo"
           "CARGO_HOME=$cargoHome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Use shared Cargo home for CI caching (Unix)
-        if: matrix.os != 'windows-latest'
+        if: runner.os != 'Windows'
         run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
 
       - name: Rust cache
@@ -740,7 +744,7 @@ jobs:
     name: PR comment (desktop perf summary)
     needs: [guard, merge]
     if: always() && needs.guard.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
@@ -820,8 +824,8 @@ jobs:
               artifacts = {};
               for (const name of [
                 "desktop-perf-ubuntu-24.04",
-                "desktop-perf-windows-latest",
-                "desktop-perf-macos-latest",
+                "desktop-perf-windows-2022",
+                "desktop-perf-macos-14",
               ]) {
                 const p = path.join("artifacts", "desktop-perf", name, "perf-artifacts", "desktop-perf-metrics.json");
                 artifacts[name] = readJsonMaybe(p);
@@ -830,8 +834,8 @@ jobs:
             
             const byOs = [
               { label: "Linux", artifact: "desktop-perf-ubuntu-24.04" },
-              { label: "Windows", artifact: "desktop-perf-windows-latest" },
-              { label: "macOS", artifact: "desktop-perf-macos-latest" },
+              { label: "Windows", artifact: "desktop-perf-windows-2022" },
+              { label: "macOS", artifact: "desktop-perf-macos-14" },
             ].map((row) => {
               const data = artifacts[row.artifact] ?? null;
               return { ...row, data };
@@ -931,7 +935,7 @@ jobs:
     name: Desktop perf summary (all OS)
     needs: [guard, desktop-perf]
     if: always() && needs.guard.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
@@ -1009,8 +1013,8 @@ jobs:
           
           const rows = [
             { label: "Linux", artifact: "desktop-perf-ubuntu-24.04" },
-            { label: "Windows", artifact: "desktop-perf-windows-latest" },
-            { label: "macOS", artifact: "desktop-perf-macos-latest" },
+            { label: "Windows", artifact: "desktop-perf-windows-2022" },
+            { label: "macOS", artifact: "desktop-perf-macos-14" },
           ].map((r) => ({ ...r, data: byArtifact[r.artifact] ?? null }));
           
           const lines = [];
