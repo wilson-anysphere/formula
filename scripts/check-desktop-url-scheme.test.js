@@ -10,6 +10,10 @@ const scriptPath = path.join(repoRoot, "scripts", "check-desktop-url-scheme.mjs"
 
 const defaultIdentifier = "app.formula.desktop";
 
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 function isParquetConfigured(config) {
   const assocs = Array.isArray(config?.bundle?.fileAssociations) ? config.bundle.fileAssociations : [];
   return assocs.some((assoc) => {
@@ -33,22 +37,26 @@ function runWithConfigAndPlist(config, plistContents) {
   // The preflight script validates that when Parquet is configured we ship a shared-mime-info
   // definition under `mime/<identifier>.xml` (relative to tauri.conf.json). Create a minimal
   // definition file in the synthetic config directory so the preflight can read it.
-  if (isParquetConfigured(config)) {
+  const parquetConfigured = isParquetConfigured(config);
+  const skipMimeDefinition = Boolean(config?.__testSkipParquetMimeDefinition);
+  const overrideMimeXml = typeof config?.__testParquetMimeXml === "string" ? config.__testParquetMimeXml : "";
+  if (parquetConfigured && !skipMimeDefinition) {
     const identifier =
       typeof config?.identifier === "string" && config.identifier.trim() ? config.identifier.trim() : defaultIdentifier;
     const mimeDir = path.join(dir, "mime");
     mkdirSync(mimeDir, { recursive: true });
     writeFileSync(
       path.join(mimeDir, `${identifier}.xml`),
-      [
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
-        '  <mime-type type="application/vnd.apache.parquet">',
-        '    <glob pattern="*.parquet" />',
-        "  </mime-type>",
-        "</mime-info>",
-        "",
-      ].join("\n"),
+      overrideMimeXml ||
+        [
+          '<?xml version="1.0" encoding="UTF-8"?>',
+          '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+          '  <mime-type type="application/vnd.apache.parquet">',
+          '    <glob pattern="*.parquet" />',
+          "  </mime-type>",
+          "</mime-info>",
+          "",
+        ].join("\n"),
       "utf8",
     );
   }
@@ -105,8 +113,8 @@ function baseConfig({ fileAssociations } = {}) {
       },
     },
     bundle: {
-      fileAssociations: fileAssociations ?? defaultFileAssociations,
-      linux: defaultLinuxBundle,
+      fileAssociations: fileAssociations ?? cloneJson(defaultFileAssociations),
+      linux: cloneJson(defaultLinuxBundle),
     },
   };
 }
@@ -155,6 +163,30 @@ test("fails when Parquet association is configured but identifier is missing", (
   const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /identifier is missing/i);
+});
+
+test("fails when Parquet shared-mime-info file mapping does not match identifier (Linux bundle files)", () => {
+  const config = baseConfig();
+  config.bundle.linux.deb.files[parquetMimeDest] = "mime/wrong.xml";
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /mapping mismatch/i);
+});
+
+test("fails when Parquet is configured but shared-mime-info is not declared as a DEB dependency", () => {
+  const config = baseConfig();
+  config.bundle.linux.deb.depends = ["libgtk-3-0"];
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /shared-mime-info is not declared as a DEB dependency/i);
+});
+
+test("fails when Parquet is configured but the shared-mime-info definition file is missing", () => {
+  const config = baseConfig();
+  config.__testSkipParquetMimeDefinition = true;
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /shared-mime-info definition file is missing/i);
 });
 
 test("fails when bundle.fileAssociations is present but missing required extensions", () => {
