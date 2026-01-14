@@ -10473,6 +10473,57 @@ mod tests {
     }
 
     #[test]
+    fn inspect_workbook_encryption_returns_summary_for_encrypted_ooxml_utf16le_no_bom() {
+        use std::io::{Cursor, Write as _};
+
+        let base_dirs = directories::BaseDirs::new().expect("base dirs");
+        let dir = tempfile::Builder::new()
+            .prefix("formula-encrypted-ooxml-utf16le-no-bom")
+            .tempdir_in(base_dirs.home_dir())
+            .expect("create temp dir");
+        let path = dir.path().join("encrypted.xlsx");
+
+        let xml = r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"><keyData keyBits="256" hashAlgorithm="SHA512"/><keyEncryptors><keyEncryptor><encryptedKey spinCount="100000"/></keyEncryptor></keyEncryptors></encryption>"#;
+
+        let mut xml_utf16 = Vec::new();
+        for unit in xml.encode_utf16() {
+            xml_utf16.extend_from_slice(&unit.to_le_bytes());
+        }
+        // A trailing UTF-16 NUL terminator.
+        xml_utf16.extend_from_slice(&[0, 0]);
+
+        let cursor = Cursor::new(Vec::new());
+        let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+        {
+            let mut stream = ole
+                .create_stream("EncryptionInfo")
+                .expect("create EncryptionInfo stream");
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&4u16.to_le_bytes()); // VersionMajor (agile)
+            bytes.extend_from_slice(&4u16.to_le_bytes()); // VersionMinor (agile)
+            bytes.extend_from_slice(&0x40u32.to_le_bytes()); // Flags
+            bytes.extend_from_slice(&xml_utf16);
+            stream.write_all(&bytes).expect("write EncryptionInfo");
+        }
+        ole.create_stream("EncryptedPackage")
+            .expect("create EncryptedPackage stream");
+        let ole_bytes = ole.into_inner().into_inner();
+
+        std::fs::write(&path, &ole_bytes).expect("write encrypted workbook");
+
+        let summary = inspect_workbook_encryption(LimitedString::<MAX_IPC_PATH_BYTES>(
+            path.to_string_lossy().to_string(),
+        ))
+        .expect("inspect_workbook_encryption should succeed")
+        .expect("expected encryption summary");
+
+        assert_eq!(summary.encryption_type, EncryptionTypeDto::Agile);
+        assert_eq!(summary.hash_algorithm.as_deref(), Some("SHA512"));
+        assert_eq!(summary.spin_count, Some(100000));
+        assert_eq!(summary.key_bits, Some(256));
+    }
+
+    #[test]
     fn inspect_workbook_encryption_returns_summary_for_encrypted_ooxml_utf16be_no_bom() {
         use std::io::{Cursor, Write as _};
 
@@ -10521,6 +10572,43 @@ mod tests {
         assert_eq!(summary.hash_algorithm.as_deref(), Some("SHA512"));
         assert_eq!(summary.spin_count, Some(100000));
         assert_eq!(summary.key_bits, Some(256));
+    }
+
+    #[test]
+    fn inspect_workbook_encryption_rejects_oversized_encryption_info_stream() {
+        use std::io::{Cursor, Write as _};
+
+        let base_dirs = directories::BaseDirs::new().expect("base dirs");
+        let dir = tempfile::Builder::new()
+            .prefix("formula-encrypted-ooxml-oversized")
+            .tempdir_in(base_dirs.home_dir())
+            .expect("create temp dir");
+        let path = dir.path().join("encrypted.xlsx");
+
+        let cursor = Cursor::new(Vec::new());
+        let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+        {
+            let mut stream = ole
+                .create_stream("EncryptionInfo")
+                .expect("create EncryptionInfo stream");
+            let oversized = vec![0u8; 1024 * 1024 + 1];
+            stream.write_all(&oversized).expect("write EncryptionInfo");
+        }
+        ole.create_stream("EncryptedPackage")
+            .expect("create EncryptedPackage stream");
+        let ole_bytes = ole.into_inner().into_inner();
+
+        std::fs::write(&path, &ole_bytes).expect("write encrypted workbook");
+
+        let err = inspect_workbook_encryption(LimitedString::<MAX_IPC_PATH_BYTES>(
+            path.to_string_lossy().to_string(),
+        ))
+        .expect_err("expected oversized EncryptionInfo to error");
+
+        assert!(
+            err.contains("EncryptionInfo stream is too large"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
