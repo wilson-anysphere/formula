@@ -181,7 +181,7 @@ describe("tauri capability event permissions", () => {
       "update-downloaded",
       "update-download-error",
 
-      // Pyodide cache
+      // Pyodide (Python runtime download/install)
       "pyodide-download-progress",
 
       // Startup instrumentation
@@ -193,9 +193,6 @@ describe("tauri capability event permissions", () => {
 
       // Deep links
       "oauth-redirect",
-
-      // Pyodide (Python runtime download/install)
-      "pyodide-download-progress",
     ];
 
     for (const event of requiredListen) {
