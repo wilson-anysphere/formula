@@ -243,7 +243,11 @@ function toCellData(
   const rawFormula = cellState?.formula;
   const normalizedFormula = normalizeFormula(rawFormula);
 
-  const value = normalizedFormula ? null : cloneCellValue(cellState?.value ?? null);
+  // Real spreadsheet models may store both a formula string and a cached/computed value.
+  // Preserve `cellState.value` even when `formula` is present so `@formula/ai-tools`
+  // ToolExecutor can optionally surface/use computed formula values (opt-in via
+  // `include_formula_values`).
+  const value = cloneCellValue(cellState?.value ?? null);
 
   return {
     value,
@@ -306,7 +310,7 @@ function toCellDataFromCellState(controller: DocumentController, cellState: any)
   const styleId = typeof cellState?.styleId === "number" ? cellState.styleId : 0;
   const format = styleId === 0 ? undefined : styleToCellFormat(controller.styleTable.get(styleId));
 
-  const value = normalizedFormula ? null : cloneCellValue(cellState?.value ?? null);
+  const value = cloneCellValue(cellState?.value ?? null);
 
   return {
     value,
@@ -533,7 +537,12 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
         if (rawFormula != null) {
           const normalizedFormula = normalizeFormula(rawFormula);
           if (normalizedFormula) {
-            row[c] = { value: null, formula: normalizedFormula, ...(format ? { format } : {}) };
+            const rawValue = cellState.value ?? null;
+            row[c] = {
+              value: rawValue != null && typeof rawValue === "object" ? cloneCellValue(rawValue) : rawValue,
+              formula: normalizedFormula,
+              ...(format ? { format } : {})
+            };
             continue;
           }
         }

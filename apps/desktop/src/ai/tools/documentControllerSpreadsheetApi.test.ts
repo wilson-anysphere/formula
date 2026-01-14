@@ -792,6 +792,33 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(cell.formula).toBe("=SUM(B1:B3)");
   });
 
+  it("preserves cached/computed values on formula cells (value + formula together)", async () => {
+    const controller = new DocumentController();
+    // Simulate a workbook import that includes both the formula text and a cached/computed result.
+    // DocumentController's user-edit APIs set `value:null` for formulas, but snapshot import paths
+    // can populate both.
+    (controller as any).model.setCell("Sheet1", 0, 0, { value: 2, formula: "=1+1", styleId: 0 });
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+
+    const cell = api.getCell({ sheet: "Sheet1", row: 1, col: 1 });
+    expect(cell).toMatchObject({ value: 2, formula: "=1+1" });
+
+    const range = api.readRange({ sheet: "Sheet1", startRow: 1, endRow: 1, startCol: 1, endCol: 1 });
+    expect(range[0]?.[0]).toMatchObject({ value: 2, formula: "=1+1" });
+
+    const executor = new ToolExecutor(api, { default_sheet: "Sheet1", include_formula_values: true });
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "A1:A1" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+    expect(result.data?.values).toEqual([[2]]);
+  });
+
   it("read_range returns primitive values + formulas without per-cell controller.getCell calls", async () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", 123);
