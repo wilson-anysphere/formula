@@ -123,14 +123,20 @@ function expectOverlayZOrder(root: HTMLElement): void {
   const selectionZ = zIndexNumber(getComputedStyle(selectionLayer as Element).zIndex);
   const outlineZ = zIndexNumber(getComputedStyle(outlineLayer as Element).zIndex);
 
-  expect(drawingZ).toBe(1);
+  // Overlay stacking (low → high):
+  //   - chart canvas (z=2)
+  //   - drawings/images overlay (z=3)
+  //   - selection + outline (z=4)
+  expect(drawingZ).toBe(3);
   expect(chartZ).toBe(2);
-  expect(selectionZ).toBe(3);
+  expect(selectionZ).toBe(4);
   expect(outlineZ).toBe(4);
 
-  expect(drawingZ).toBeLessThan(chartZ);
-  expect(chartZ).toBeLessThan(selectionZ);
-  expect(selectionZ).toBeLessThan(outlineZ);
+  expect(chartZ).toBeLessThan(drawingZ);
+  expect(drawingZ).toBeLessThan(selectionZ);
+  // Outline sits at the same z-index as selection but is inserted later in the DOM,
+  // so it should render above selection even when z-index values match.
+  expect(selectionZ).toBeLessThanOrEqual(outlineZ);
 }
 
 describe("SpreadsheetApp overlay stacking", () => {
@@ -230,4 +236,3 @@ describe("SpreadsheetApp overlay stacking", () => {
     }
   });
 });
-
