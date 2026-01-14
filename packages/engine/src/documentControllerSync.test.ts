@@ -326,27 +326,30 @@ describe("engine sync helpers", () => {
     expect(engine.setStyleCalls).toEqual([{ address: "A1", styleId: 1, sheet: "Sheet1" }]);
   });
 
-  it("engineHydrateFromDocument syncs sheet/row/col style layers when the engine supports them", async () => {
+  it("engineHydrateFromDocument syncs sheet/row/col default style layers when the optional hooks are available", async () => {
     const doc = new DocumentController();
     doc.addSheet({ sheetId: "sheet_2", name: "Budget" });
 
-    doc.setSheetFormat("sheet_2", { font: { italic: true } });
     doc.setRowFormat("sheet_2", 0, { font: { bold: true } });
-    doc.setColFormat("sheet_2", 1, { font: { underline: true } });
+    doc.setColFormat("sheet_2", 1, { font: { bold: true } });
+    doc.setSheetFormat("sheet_2", { font: { bold: true } });
 
-    const sheet = (doc as any)?.model?.sheets?.get?.("sheet_2");
-    expect(sheet).toBeTruthy();
-    expect(sheet.defaultStyleId).not.toBe(0);
-    expect(sheet.rowStyleIds.get(0)).not.toBe(0);
-    expect(sheet.colStyleIds.get(1)).not.toBe(0);
+    const sheetModel = (doc as any)?.model?.sheets?.get?.("sheet_2");
+    const rowDocStyleId = sheetModel?.rowStyleIds?.get?.(0) as number | undefined;
+    const colDocStyleId = sheetModel?.colStyleIds?.get?.(1) as number | undefined;
+    const sheetDocStyleId = sheetModel?.defaultStyleId as number | undefined;
+    expect(rowDocStyleId).toBeTruthy();
+    expect(rowDocStyleId).toBe(colDocStyleId);
+    expect(rowDocStyleId).toBe(sheetDocStyleId);
 
     const engine = new FakeEngine([]);
     await engineHydrateFromDocument(engine, doc);
 
-    // Uses the display name as the engine sheet id.
-    expect(engine.sheetDefaultStyleCalls).toEqual([{ sheet: "Budget", styleId: expect.any(Number) }]);
-    expect(engine.rowStyleCalls).toEqual([{ sheet: "Budget", row: 0, styleId: expect.any(Number) }]);
-    expect(engine.colStyleCalls).toEqual([{ sheet: "Budget", col: 1, styleId: expect.any(Number) }]);
+    // Uses the display name as the engine sheet id, and interns the shared style once.
+    expect(engine.internStyleCalls).toEqual([doc.styleTable.get(rowDocStyleId!)]);
+    expect(engine.sheetDefaultStyleCalls).toEqual([{ sheet: "Budget", styleId: 1 }]);
+    expect(engine.rowStyleCalls).toEqual([{ sheet: "Budget", row: 0, styleId: 1 }]);
+    expect(engine.colStyleCalls).toEqual([{ sheet: "Budget", col: 1, styleId: 1 }]);
   });
 
   it("engineHydrateFromDocument syncs compressed range-run formatting when the engine supports it", async () => {
