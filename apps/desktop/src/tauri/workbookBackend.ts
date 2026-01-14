@@ -97,6 +97,20 @@ export class TauriWorkbookBackend implements WorkbookBackend {
   }
 
   /**
+   * Desktop-only: fetch DrawingML objects + image bytes parsed from the opened XLSX package.
+   *
+   * Payload shape (best-effort; callers should tolerate missing fields):
+   * - `{ drawings: [{ sheet_name, sheet_part, drawing_part, objects: DrawingObject[] }], images: [{ id, bytesBase64, mimeType }] }`
+   */
+  async getImportedDrawingLayer(): Promise<{ drawings: unknown[]; images: unknown[] }> {
+    const payload = await this.invoke("list_imported_drawing_objects");
+    const p = payload as any;
+    const drawings = Array.isArray(p?.drawings) ? p.drawings : [];
+    const images = Array.isArray(p?.images) ? p.images : [];
+    return { drawings, images };
+  }
+
+  /**
    * Desktop-only: fetch worksheet background images (`<picture r:id="...">`) extracted from the
    * opened XLSX package.
    */

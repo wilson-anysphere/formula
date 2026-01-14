@@ -1888,6 +1888,7 @@ fn main() {
             commands::list_tables,
             commands::list_imported_chart_objects,
             commands::list_imported_embedded_cell_images,
+            commands::list_imported_drawing_objects,
             commands::list_imported_sheet_background_images,
             commands::get_precedents,
             commands::get_dependents,

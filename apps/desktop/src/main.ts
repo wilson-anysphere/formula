@@ -220,6 +220,7 @@ import {
 } from "./workbook/load/clampUsedRange.js";
 import { mergeEmbeddedCellImagesIntoSnapshot } from "./workbook/load/embeddedCellImages.js";
 import { warnIfWorkbookLoadTruncated, type WorkbookLoadTruncation } from "./workbook/load/truncationWarning.js";
+import { buildImportedDrawingLayerSnapshotAdditions } from "./workbook/load/hydrateImportedDrawings.js";
 import { hydrateSheetBackgroundImagesFromBackend } from "./workbook/load/hydrateSheetBackgroundImages.js";
 import {
   mergeFormattingIntoSnapshot,
@@ -10463,11 +10464,65 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     maxCols: MAX_COLS,
   });
 
-  const snapshotPayload: any = { schemaVersion: 1, sheets: snapshotSheets };
-  if (Object.keys(drawingsBySheet).length > 0) {
-    snapshotPayload.drawingsBySheet = drawingsBySheet;
+  // Hydrate imported DrawingML floating objects + image store entries from the workbook origin bytes
+  // so the drawings overlay renders real workbook drawings on open (best-effort).
+  let importedDrawingImages: Array<{ id: string; bytesBase64: string; mimeType?: string | null }> = [];
+  let importedDrawingsBySheet: Record<string, any[]> = {};
+  try {
+    const imported = await tauriBackend.getImportedDrawingLayer();
+    const additions = buildImportedDrawingLayerSnapshotAdditions(imported, workbookSheetStore);
+    if (additions) {
+      importedDrawingImages = additions.images;
+      importedDrawingsBySheet = additions.drawingsBySheet;
+    }
+  } catch (err) {
+    console.warn("[formula][desktop] Failed to load imported drawing objects/images:", err);
   }
-  if (snapshotImages.length > 0) snapshotPayload.images = snapshotImages;
+
+  // Merge imported drawing-layer images into the snapshot image store, deduping by `id`.
+  const imagesById = new Map<string, any>();
+  for (const img of snapshotImages) {
+    const id = typeof (img as any)?.id === "string" ? String((img as any).id) : "";
+    const bytesBase64 = typeof (img as any)?.bytesBase64 === "string" ? (img as any).bytesBase64 : "";
+    if (!id || !bytesBase64) continue;
+    imagesById.set(id, img);
+  }
+  for (const img of importedDrawingImages) {
+    const id = typeof (img as any)?.id === "string" ? String((img as any).id) : "";
+    const bytesBase64 = typeof (img as any)?.bytesBase64 === "string" ? (img as any).bytesBase64 : "";
+    if (!id || !bytesBase64) continue;
+    if (imagesById.has(id)) continue;
+    imagesById.set(id, img);
+  }
+  const mergedImages = Array.from(imagesById.values()).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  // Merge imported drawing objects into `drawingsBySheet`. Prefer chart placeholder objects already
+  // populated from `listImportedChartObjects()` when there are id collisions.
+  for (const [sheetId, importedList] of Object.entries(importedDrawingsBySheet)) {
+    if (!knownSheetIds.has(sheetId)) continue;
+    if (!Array.isArray(importedList) || importedList.length === 0) continue;
+
+    const existing = drawingsBySheet[sheetId] ? [...drawingsBySheet[sheetId]!] : [];
+    const existingIds = new Set<string>();
+    for (const d of existing) {
+      const id = (d as any)?.id != null ? String((d as any).id) : "";
+      if (id) existingIds.add(id);
+    }
+
+    for (const d of importedList) {
+      if (!d || typeof d !== "object") continue;
+      const id = (d as any).id != null ? String((d as any).id) : "";
+      if (!id || existingIds.has(id)) continue;
+      existingIds.add(id);
+      existing.push(d);
+    }
+
+    if (existing.length > 0) drawingsBySheet[sheetId] = existing;
+  }
+
+  const snapshotPayload: any = { schemaVersion: 1, sheets: snapshotSheets };
+  if (Object.keys(drawingsBySheet).length > 0) snapshotPayload.drawingsBySheet = drawingsBySheet;
+  if (mergedImages.length > 0) snapshotPayload.images = mergedImages;
   const snapshot = encodeDocumentSnapshot(snapshotPayload);
   const workbookSignature = await workbookSignaturePromise;
   // Reset Power Query table signatures before applying the snapshot so any

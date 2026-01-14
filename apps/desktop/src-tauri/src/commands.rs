@@ -446,6 +446,37 @@ fn imported_sheet_background_images_from_preserved_payloads(
         .collect()
 }
 
+/// JSON payload for DrawingML objects + images imported from an XLSX package.
+///
+/// This is used to hydrate the desktop DocumentController with floating worksheet drawings
+/// (pictures/shapes/chart placeholders) and their referenced image bytes so the drawings overlay
+/// can render real imported workbook drawings.
+#[cfg(feature = "desktop")]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ImportedDrawingObjectsSheetEntry {
+    pub sheet_name: String,
+    pub sheet_part: String,
+    pub drawing_part: String,
+    pub objects: Vec<formula_model::drawings::DrawingObject>,
+}
+
+/// Image payload matching the DocumentController snapshot schema (`snapshot.images`).
+#[cfg(feature = "desktop")]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedWorkbookImageEntry {
+    pub id: String,
+    pub bytes_base64: String,
+    pub mime_type: Option<String>,
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ImportedDrawingLayerPayload {
+    pub drawings: Vec<ImportedDrawingObjectsSheetEntry>,
+    pub images: Vec<ImportedWorkbookImageEntry>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SheetUsedRange {
     pub start_row: usize,
@@ -3780,6 +3811,154 @@ pub async fn list_imported_sheet_background_images(
         }
 
         Ok::<_, String>(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Extract worksheet DrawingML objects (floating images/shapes/chart placeholders) and their
+/// referenced image bytes from the opened XLSX package (when available).
+///
+/// Best-effort: any failure returns an empty payload so workbook open is never blocked by
+/// DrawingML parsing.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn list_imported_drawing_objects(
+    window: tauri::WebviewWindow,
+    state: State<'_, SharedAppState>,
+) -> Result<ImportedDrawingLayerPayload, String> {
+    ipc_origin::ensure_main_window_and_stable_origin(
+        &window,
+        "imported drawing object extraction",
+        ipc_origin::Verb::Are,
+    )?;
+
+    let origin_bytes = {
+        let state = state.inner().lock().unwrap();
+        let Ok(workbook) = state.get_workbook() else {
+            return Ok(ImportedDrawingLayerPayload {
+                drawings: Vec::new(),
+                images: Vec::new(),
+            });
+        };
+        workbook.origin_xlsx_bytes.clone()
+    };
+
+    let Some(origin_bytes) = origin_bytes else {
+        return Ok(ImportedDrawingLayerPayload {
+            drawings: Vec::new(),
+            images: Vec::new(),
+        });
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        // Best-effort: DrawingML parsing should never prevent workbook interactions.
+        let pkg = match formula_xlsx::XlsxPackage::from_bytes(origin_bytes.as_ref()) {
+            Ok(pkg) => pkg,
+            Err(_) => {
+                return Ok::<_, String>(ImportedDrawingLayerPayload {
+                    drawings: Vec::new(),
+                    images: Vec::new(),
+                })
+            }
+        };
+
+        let extracted = match pkg.extract_drawing_objects() {
+            Ok(objs) => objs,
+            Err(_) => {
+                return Ok::<_, String>(ImportedDrawingLayerPayload {
+                    drawings: Vec::new(),
+                    images: Vec::new(),
+                })
+            }
+        };
+
+        // Safety caps to keep IPC payload sizes bounded (large images can be embedded in XLSX).
+        //
+        // - Individual image cap: skip any single image larger than 20MiB.
+        // - Total cap: stop adding images once we hit 50MiB total.
+        const MAX_SINGLE_IMAGE_BYTES: usize = 20 * 1024 * 1024;
+        const MAX_TOTAL_IMAGE_BYTES: usize = 50 * 1024 * 1024;
+
+        use base64::engine::general_purpose;
+        use base64::Engine as _;
+
+        fn infer_mime_type(id: &str, bytes: &[u8]) -> Option<String> {
+            let ext = id.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("");
+            let by_ext = formula_xlsx::drawings::content_type_for_extension(ext);
+            if by_ext != "application/octet-stream" {
+                return Some(by_ext.to_string());
+            }
+            infer::get(bytes).map(|kind| kind.mime_type().to_string())
+        }
+
+        // Collect unique image ids referenced by DrawingObjectKind::Image.
+        let mut images_by_id: BTreeMap<String, ImportedWorkbookImageEntry> = BTreeMap::new();
+        let mut total_bytes = 0usize;
+
+        for entry in &extracted {
+            for obj in &entry.objects {
+                let formula_model::drawings::DrawingObjectKind::Image { image_id } = &obj.kind
+                else {
+                    continue;
+                };
+
+                let id = image_id.as_str().to_string();
+                if images_by_id.contains_key(&id) {
+                    continue;
+                }
+
+                // Prefer canonical `xl/media/<id>`; fall back to the raw id as a part name.
+                let media_part = format!("xl/media/{id}");
+                let bytes = pkg
+                    .part(&media_part)
+                    .or_else(|| pkg.part(&id))
+                    .map(|b| b.to_vec());
+
+                let Some(bytes) = bytes else {
+                    // Missing image part: keep the drawing object but omit the image store entry.
+                    continue;
+                };
+
+                if bytes.len() > MAX_SINGLE_IMAGE_BYTES {
+                    continue;
+                }
+                if total_bytes.saturating_add(bytes.len()) > MAX_TOTAL_IMAGE_BYTES {
+                    break;
+                }
+
+                let bytes_base64 = general_purpose::STANDARD.encode(&bytes);
+                let mime_type = infer_mime_type(&id, &bytes);
+
+                images_by_id.insert(
+                    id.clone(),
+                    ImportedWorkbookImageEntry {
+                        id,
+                        bytes_base64,
+                        mime_type,
+                    },
+                );
+                total_bytes = total_bytes.saturating_add(bytes.len());
+            }
+
+            if total_bytes >= MAX_TOTAL_IMAGE_BYTES {
+                break;
+            }
+        }
+
+        let drawings: Vec<ImportedDrawingObjectsSheetEntry> = extracted
+            .into_iter()
+            .map(|entry| ImportedDrawingObjectsSheetEntry {
+                sheet_name: entry.sheet_name,
+                sheet_part: entry.sheet_part,
+                drawing_part: entry.drawing_part,
+                objects: entry.objects,
+            })
+            .collect();
+
+        let images: Vec<ImportedWorkbookImageEntry> = images_by_id.into_values().collect();
+
+        Ok::<_, String>(ImportedDrawingLayerPayload { drawings, images })
     })
     .await
     .map_err(|e| e.to_string())?
