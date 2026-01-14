@@ -1156,6 +1156,15 @@ pub(crate) mod tests {
     };
     use crate::util::parse_encryption_info_header;
 
+    #[test]
+    fn default_max_spin_count_is_one_million() {
+        assert_eq!(crate::DEFAULT_MAX_SPIN_COUNT, 1_000_000);
+        assert_eq!(
+            crate::DecryptOptions::default().max_spin_count,
+            crate::DEFAULT_MAX_SPIN_COUNT
+        );
+    }
+
     pub(crate) fn agile_encryption_info_fixture() -> Vec<u8> {
         // A small, deterministic Agile EncryptionInfo fixture for parsing tests.
         let xml = agile_descriptor_fixture_xml();

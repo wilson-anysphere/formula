@@ -1051,6 +1051,11 @@ mod tests {
     use cbc::cipher::block_padding::NoPadding;
     use cbc::cipher::{BlockEncryptMut, KeyIvInit};
 
+    #[test]
+    fn default_max_spin_count_is_one_million() {
+        assert_eq!(DEFAULT_MAX_SPIN_COUNT, 1_000_000);
+    }
+
     fn wrap_xml_in_encryption_info_stream(xml: &str) -> Vec<u8> {
         let mut encryption_info_stream = Vec::new();
         encryption_info_stream.extend_from_slice(&4u16.to_le_bytes()); // major
