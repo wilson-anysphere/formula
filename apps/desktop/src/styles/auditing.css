@@ -8,7 +8,7 @@
 .auditing-legend {
   position: absolute;
   /* row header width (48px) + offset (8px) */
-  left: 56px;
+  left: calc((var(--space-6) * 3) + var(--space-4));
   bottom: var(--space-4);
   padding: var(--space-2) var(--space-4);
   border: 1px solid var(--formula-grid-line, var(--border));
