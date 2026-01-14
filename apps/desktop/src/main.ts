@@ -2345,7 +2345,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "view.zoom.zoomToSelection": zoomDisabled,
       ...(outlineDisabled
         ? {
-            // Shared-grid mode does not support outline groups / hidden rows/cols yet.
+            // Shared-grid mode does not yet support outline groups.
             "data.outline.group": true,
             "data.outline.ungroup": true,
             "data.outline.subtotal": true,

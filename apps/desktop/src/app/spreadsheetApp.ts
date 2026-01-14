@@ -11798,7 +11798,7 @@ export class SpreadsheetApp {
     // Outline grouping shortcuts (Excel-style): Alt+Shift+Right/Left.
     if (e.altKey && e.shiftKey && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
       if (this.sharedGrid) {
-        // Shared-grid mode doesn't currently implement outline groups or hidden rows/cols.
+        // Shared-grid mode doesn't currently implement outline groups.
         // Treat the shortcut as a no-op (legacy outline logic rebuilds visibility caches which are
         // too expensive for large sheets).
         e.preventDefault();
