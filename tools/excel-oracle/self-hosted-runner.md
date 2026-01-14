@@ -109,6 +109,9 @@ Verification checklist (especially for `es-ES`):
 - Spot-check that Spanish-localized spellings are present in
   `crates/formula-engine/src/locale/data/es-ES.tsv` (not silently falling back to English), including
   financial functions like `NPV`/`IRR` (e.g. `VNA`/`TIR`).
+- Optional (recommended when touching locale data): run the Rust guard-rail tests:
+  - `bash scripts/cargo_agent.sh test -p formula-engine --test locale_function_tsv_completeness`
+  - `bash scripts/cargo_agent.sh test -p formula-engine --test locale_es_es_function_sentinels`
 
 Important: the extracted spellings reflect the **active Excel UI language**. Install the relevant
 Office language pack and set Excel's display language before extracting.

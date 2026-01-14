@@ -145,6 +145,9 @@ Notes / caveats:
   - `node scripts/generate-locale-function-tsv.js`
   - `node scripts/generate-locale-function-tsv.js --check`
   - and spot-check that Spanish financial functions like `NPV`/`IRR` localize (e.g. `VNA`/`TIR`).
+- Optional (recommended when touching locale data): run the Rust guard-rail tests:
+  - `bash scripts/cargo_agent.sh test -p formula-engine --test locale_function_tsv_completeness`
+  - `bash scripts/cargo_agent.sh test -p formula-engine --test locale_es_es_function_sentinels`
 
 Verification checklist note (especially `es-ES`):
 
