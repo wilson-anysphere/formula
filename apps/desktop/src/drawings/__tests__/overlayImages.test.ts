@@ -67,6 +67,9 @@ function createTrackedThenable<T>(opts: {
       opts.onThen();
       return promise.then(onFulfilled, onRejected);
     },
+    // `DrawingOverlay` may attach a `catch` handler to prefetched decode promises to avoid
+    // unhandled rejections. Provide it here so our lightweight thenable behaves like a Promise.
+    catch: (onRejected: (err: unknown) => unknown) => promise.catch(onRejected),
   };
 
   return { thenable: thenable as Promise<T>, resolve, reject };
@@ -183,4 +186,3 @@ describe("DrawingOverlay images", () => {
     expect(calls.some((call) => call.method === "strokeRect")).toBe(true);
   });
 });
-

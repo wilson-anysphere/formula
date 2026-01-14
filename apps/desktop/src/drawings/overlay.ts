@@ -433,7 +433,11 @@ export class DrawingOverlay {
         if (prefetchedImageBitmaps.has(imageId)) continue;
         const entry = this.images.get(imageId);
         if (!entry) continue;
-        prefetchedImageBitmaps.set(imageId, this.bitmapCache.get(entry, signal ? { signal } : undefined));
+        const bitmapPromise = this.bitmapCache.get(entry, signal ? { signal } : undefined);
+        // Attach a no-op rejection handler immediately so failures for images later in the
+        // z-order don't surface as unhandled promise rejections before we reach their draw pass.
+        void bitmapPromise.catch(() => {});
+        prefetchedImageBitmaps.set(imageId, bitmapPromise);
       }
 
       for (const obj of ordered) {
