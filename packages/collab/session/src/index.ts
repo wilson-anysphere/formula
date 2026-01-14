@@ -657,6 +657,7 @@ export class CollabSession {
   private providerSyncListener: ((isSynced: boolean) => void) | null = null;
   private commentsMigrationPermissionsUnsubscribe: (() => void) | null = null;
   private commentsUndoScopePermissionsUnsubscribe: (() => void) | null = null;
+  private commentsUndoScopeSyncHandler: ((isSynced: boolean) => void) | null = null;
 
   private readonly recentOutgoingUpdateBytes: number[] = [];
   private docUpdateListener: ((update: Uint8Array, origin: any) => void) | null = null;
@@ -966,6 +967,11 @@ export class CollabSession {
       // See regression test: `CollabSession undo does not clobber legacy comments root when undo is enabled before sync`.
       const shouldWaitForLocalPersistence = this.hasLocalPersistence;
       let localPersistenceReady = !shouldWaitForLocalPersistence;
+      const providerForCommentsScope = this.provider;
+      let providerHydrated = !(providerForCommentsScope && typeof providerForCommentsScope.on === "function");
+      if (providerForCommentsScope && typeof providerForCommentsScope.on === "function") {
+        providerHydrated = Boolean((providerForCommentsScope as any).synced);
+      }
 
       // Root names that are either already part of the built-in undo scope, or
       // should never be added via `undo.scopeNames`.
@@ -1011,13 +1017,10 @@ export class CollabSession {
         if (!allowed) return;
 
         const hasRoot = Boolean(this.doc.share.get("comments"));
-        const provider = this.provider;
-        const providerSynced =
-          provider && typeof provider.on === "function" ? Boolean((provider as any).synced) : true;
 
         // If the doc is still hydrating and the root doesn't exist yet, do not
         // instantiate it (it could clobber legacy Array-backed docs).
-        if (!hasRoot && (!providerSynced || !localPersistenceReady)) return;
+        if (!hasRoot && (!providerHydrated || !localPersistenceReady)) return;
 
         let root: Y.AbstractType<any> | null = null;
         try {
@@ -1076,14 +1079,27 @@ export class CollabSession {
       }
 
       // Re-attempt once the sync provider reports hydration complete.
-      const provider = this.provider;
+      const provider = providerForCommentsScope;
       if (provider && typeof provider.on === "function") {
         const handler = (isSynced: boolean) => {
+          providerHydrated = Boolean(isSynced);
           if (!isSynced) return;
-          provider.off?.("sync", handler);
+          try {
+            provider.off?.("sync", handler);
+          } catch {
+            // ignore
+          }
+          if (this.commentsUndoScopeSyncHandler === handler) {
+            this.commentsUndoScopeSyncHandler = null;
+          }
           ensureCommentsUndoScope();
         };
-        provider.on("sync", handler);
+        this.commentsUndoScopeSyncHandler = handler;
+        try {
+          provider.on("sync", handler);
+        } catch {
+          // ignore
+        }
         if ((provider as any).synced) handler(true);
       } else {
         // No sync provider: the caller-provided doc is already in memory.
@@ -1659,6 +1675,16 @@ export class CollabSession {
         // ignore
       }
       this.commentsUndoScopePermissionsUnsubscribe = null;
+    }
+    if (this.provider && this.commentsUndoScopeSyncHandler && typeof this.provider.off === "function") {
+      try {
+        this.provider.off("sync", this.commentsUndoScopeSyncHandler);
+      } catch {
+        // ignore
+      }
+      this.commentsUndoScopeSyncHandler = null;
+    } else {
+      this.commentsUndoScopeSyncHandler = null;
     }
     if (this.sheetsSchemaObserver) {
       this.sheets.unobserve(this.sheetsSchemaObserver);

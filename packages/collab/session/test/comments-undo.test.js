@@ -214,6 +214,42 @@ test("CollabSession undo does not clobber legacy Array-backed comments root when
   docB.destroy();
 });
 
+test("CollabSession undo adds comments root to scope after provider sync even if provider.synced is unset", () => {
+  const doc = new Y.Doc();
+  const provider = createMockProvider();
+
+  const session = createCollabSession({ doc, provider, undo: {} });
+  session.setPermissions({ role: "editor", userId: "u", rangeRestrictions: [] });
+
+  // Fresh doc has no comments root yet.
+  assert.equal(doc.share.get("comments"), undefined);
+
+  // Some providers/mocks emit `sync=true` without updating a `.synced` property.
+  // Undo scope setup should still treat the event as authoritative.
+  provider.emit("sync", true);
+
+  // Root should now be safe to instantiate and should be tracked by undo.
+  assert.ok(doc.share.get("comments") instanceof Y.Map);
+
+  const comments = createCommentManagerForSession(session);
+  const id = comments.addComment({
+    id: "c",
+    cellRef: "Sheet1:0:0",
+    kind: "threaded",
+    content: "hello",
+    author: { id: "u", name: "User" },
+    now: 1,
+  });
+
+  assert.equal(comments.listAll().some((c) => c.id === id), true);
+  assert.equal(session.undo?.canUndo(), true);
+  session.undo?.undo();
+  assert.equal(comments.listAll().some((c) => c.id === id), false);
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession undo does not clobber legacy Array-backed comments root (in-memory sync)", () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
