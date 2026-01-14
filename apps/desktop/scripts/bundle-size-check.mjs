@@ -36,9 +36,9 @@ function usage() {
       "  node apps/desktop/scripts/bundle-size-check.mjs [--dist <path>]",
       "",
       "Environment (budgets are interpreted as KiB = 1024 bytes):",
-      "  FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB   Total Vite JS (dist/assets/**/*.js) budget.",
+      "  FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB   Total JS (dist/**/*.js) budget.",
       "  FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB   Entry JS budget (scripts referenced by dist/index.html).",
-      "  FORMULA_DESKTOP_JS_DIST_TOTAL_BUDGET_KB   Optional: total JS across dist/**/*.js (includes copied public assets).",
+      "  FORMULA_DESKTOP_JS_ASSETS_BUDGET_KB  Optional: total JS in dist/assets/**/*.js (Vite chunks).",
       "",
       "Optional:",
       "  FORMULA_DESKTOP_BUNDLE_SIZE_WARN_ONLY=1   Print budget errors but exit 0.",
@@ -292,14 +292,14 @@ async function main() {
     ? null
     : Array.from(initialFiles.values()).reduce((sum, f) => sum + (f.gzipBytes ?? 0), 0);
 
-  const viteTotalBudgetKiB = parseBudgetKiB("FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB");
+  const totalBudgetKiB = parseBudgetKiB("FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB");
   const entryBudgetKiB = parseBudgetKiB("FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB");
-  const distTotalBudgetKiB = parseBudgetKiB("FORMULA_DESKTOP_JS_DIST_TOTAL_BUDGET_KB");
+  const assetsBudgetKiB = parseBudgetKiB("FORMULA_DESKTOP_JS_ASSETS_BUDGET_KB");
   const warnOnly = isTruthyEnv(process.env.FORMULA_DESKTOP_BUNDLE_SIZE_WARN_ONLY);
 
-  const viteTotalStatus = budgetStatus(assetsBytes, viteTotalBudgetKiB);
+  const totalStatus = budgetStatus(totalBytes, totalBudgetKiB);
   const entryStatus = budgetStatus(entryBytes, entryBudgetKiB);
-  const distTotalStatus = budgetStatus(totalBytes, distTotalBudgetKiB);
+  const assetsStatus = budgetStatus(assetsBytes, assetsBudgetKiB);
 
   const lines = [];
   lines.push("### Desktop JS bundle size (Vite)");
@@ -309,14 +309,14 @@ async function main() {
   lines.push("| Metric | Files | Bytes | KiB | Gzip KiB | Budget (KiB) | Status |");
   lines.push("| --- | ---: | ---: | ---: | ---: | ---: | --- |");
   lines.push(
-    `| Total JS (dist/assets/**/*.js) | ${assetFiles.length} | ${fmtInt(assetsBytes)} | ${fmtKiB(assetsBytes)} | ${
-      assetsGzipBytes == null ? "—" : fmtKiB(assetsGzipBytes)
-    } | ${viteTotalBudgetKiB == null ? "—" : viteTotalBudgetKiB} | ${viteTotalStatus.text} |`,
-  );
-  lines.push(
     `| Total JS (dist/**/*.js) | ${jsFiles.length} | ${fmtInt(totalBytes)} | ${fmtKiB(totalBytes)} | ${
       totalGzipBytes == null ? "—" : fmtKiB(totalGzipBytes)
-    } | ${distTotalBudgetKiB == null ? "—" : distTotalBudgetKiB} | ${distTotalStatus.text} |`,
+    } | ${totalBudgetKiB == null ? "—" : totalBudgetKiB} | ${totalStatus.text} |`,
+  );
+  lines.push(
+    `| Total JS (dist/assets/**/*.js) | ${assetFiles.length} | ${fmtInt(assetsBytes)} | ${fmtKiB(assetsBytes)} | ${
+      assetsGzipBytes == null ? "—" : fmtKiB(assetsGzipBytes)
+    } | ${assetsBudgetKiB == null ? "—" : assetsBudgetKiB} | ${assetsStatus.text} |`,
   );
   lines.push(
     `| Entry JS (script tags) | ${entryFiles.length} | ${fmtInt(entryBytes)} | ${fmtKiB(entryBytes)} | ${
@@ -404,9 +404,9 @@ async function main() {
   }
 
   const violations = [];
-  if (viteTotalBudgetKiB != null && !viteTotalStatus.ok) {
+  if (totalBudgetKiB != null && !totalStatus.ok) {
     violations.push(
-      `Total Vite JS: ${fmtKiB(assetsBytes)} KiB > budget ${viteTotalBudgetKiB} KiB (FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB)`,
+      `Total JS: ${fmtKiB(totalBytes)} KiB > budget ${totalBudgetKiB} KiB (FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB)`,
     );
   }
   if (entryBudgetKiB != null && !entryStatus.ok) {
@@ -414,9 +414,9 @@ async function main() {
       `Entry JS: ${fmtKiB(entryBytes)} KiB > budget ${entryBudgetKiB} KiB (FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB)`,
     );
   }
-  if (distTotalBudgetKiB != null && !distTotalStatus.ok) {
+  if (assetsBudgetKiB != null && !assetsStatus.ok) {
     violations.push(
-      `Total dist JS: ${fmtKiB(totalBytes)} KiB > budget ${distTotalBudgetKiB} KiB (FORMULA_DESKTOP_JS_DIST_TOTAL_BUDGET_KB)`,
+      `Total Vite JS: ${fmtKiB(assetsBytes)} KiB > budget ${assetsBudgetKiB} KiB (FORMULA_DESKTOP_JS_ASSETS_BUDGET_KB)`,
     );
   }
 
@@ -430,13 +430,16 @@ async function main() {
       errorLines.push(`- ${f.relPath} (${fmtKiB(f.bytes)} KiB)`);
     }
     errorLines.push("");
-    const exceededViteBudgets = !viteTotalStatus.ok || !entryStatus.ok;
-    if (exceededViteBudgets) {
+    const exceededAssetsBudgets = !entryStatus.ok || !assetsStatus.ok;
+    const exceededTotalBudget = !totalStatus.ok;
+    if (exceededAssetsBudgets) {
       errorLines.push("Largest Vite JS bundles (dist/assets):");
       for (const f of largestAssets.slice(0, 5)) {
         errorLines.push(`- ${f.relPath} (${fmtKiB(f.bytes)} KiB)`);
       }
-    } else {
+      errorLines.push("");
+    }
+    if (exceededTotalBudget) {
       errorLines.push("Largest JS files (dist):");
       for (const f of largest.slice(0, 5)) {
         errorLines.push(`- ${f.relPath} (${fmtKiB(f.bytes)} KiB)`);

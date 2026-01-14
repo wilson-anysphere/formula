@@ -37,9 +37,9 @@ pnpm -C apps/desktop check:bundle-size
 
 The check prints a markdown summary and (optionally) enforces budgets via env vars (KiB = 1024 bytes):
 
-- `FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB` – total Vite JS in `apps/desktop/dist/assets/**/*.js`
+- `FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB` – total JS in `apps/desktop/dist/**/*.js`
 - `FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB` – entry JS referenced by `apps/desktop/dist/index.html` `<script>` tags
-- `FORMULA_DESKTOP_JS_DIST_TOTAL_BUDGET_KB` (optional) – total JS across `apps/desktop/dist/**/*.js` (includes copied `public/` assets)
+- `FORMULA_DESKTOP_JS_ASSETS_BUDGET_KB` (optional) – total Vite JS in `apps/desktop/dist/assets/**/*.js`
 
 Optional:
 

@@ -269,10 +269,10 @@ jobs:
         env:
           # Budgets are interpreted as KiB (1024 bytes). Adjust intentionally when
           # landing changes that affect the initial load footprint.
-          # Note: this budget applies to Vite output in dist/assets/**/*.js (not copied public assets).
-          FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB: ${{ vars.FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB || '4000' }}
+          FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB: ${{ vars.FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB || '5000' }}
           FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB: ${{ vars.FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB || '3300' }}
-          FORMULA_DESKTOP_JS_DIST_TOTAL_BUDGET_KB: ${{ vars.FORMULA_DESKTOP_JS_DIST_TOTAL_BUDGET_KB }}
+          # Optional: budget just the Vite-emitted JS bundles (dist/assets/**/*.js).
+          FORMULA_DESKTOP_JS_ASSETS_BUDGET_KB: ${{ vars.FORMULA_DESKTOP_JS_ASSETS_BUDGET_KB }}
           FORMULA_DESKTOP_BUNDLE_SIZE_WARN_ONLY: ${{ vars.FORMULA_DESKTOP_BUNDLE_SIZE_WARN_ONLY }}
           FORMULA_DESKTOP_BUNDLE_SIZE_SKIP_GZIP: ${{ vars.FORMULA_DESKTOP_BUNDLE_SIZE_SKIP_GZIP }}
 
