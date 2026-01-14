@@ -2030,10 +2030,6 @@ export class SpreadsheetApp {
         }
       });
 
-      // Match the legacy header sizing so existing click offsets and overlays stay aligned.
-      this.sharedGrid.renderer.setColWidth(0, this.rowHeaderWidth);
-      this.sharedGrid.renderer.setRowHeight(0, this.colHeaderHeight);
-      this.sharedGridZoom = this.sharedGrid.renderer.getZoom();
     }
 
     this.drawingImages = new DocumentImageStore(this.document, new IndexedDbImageStore(localWorkbookId));
@@ -2127,6 +2123,16 @@ export class SpreadsheetApp {
       this.drawingInteractionController = new DrawingInteractionController(this.root, this.drawingGeom, callbacks, {
         capture: this.gridMode === "shared",
       });
+    }
+
+    if (this.sharedGrid) {
+      // Match the legacy header sizing so existing click offsets and overlays stay aligned.
+      //
+      // Important: set these after `this.drawingOverlay` is constructed since the shared-grid renderer
+      // emits viewport-layout change notifications (via rAF) when axis sizes update.
+      this.sharedGrid.renderer.setColWidth(0, this.rowHeaderWidth);
+      this.sharedGrid.renderer.setRowHeight(0, this.colHeaderHeight);
+      this.sharedGridZoom = this.sharedGrid.renderer.getZoom();
     }
 
     if (this.gridMode === "shared") {
