@@ -800,6 +800,7 @@ fn build_parts(
             orig_autofilter,
             orig_sheet_protection,
             orig_has_data_validations,
+            orig_has_conditional_formatting,
         ) = if let Some(orig) = orig {
             let orig_xml = std::str::from_utf8(orig).map_err(|e| {
                 WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
@@ -844,6 +845,8 @@ fn build_parts(
                 },
             )?;
 
+            let orig_has_conditional_formatting = orig_xml.contains("conditionalFormatting");
+
             (
                 orig_tab_color,
                 orig_merges,
@@ -854,6 +857,7 @@ fn build_parts(
                 orig_autofilter,
                 orig_sheet_protection,
                 orig_has_data_validations,
+                orig_has_conditional_formatting,
             )
         } else {
             (
@@ -865,6 +869,7 @@ fn build_parts(
                 BTreeMap::new(),
                 None,
                 None,
+                false,
                 false,
             )
         };
@@ -904,6 +909,9 @@ fn build_parts(
         };
 
         let autofilter_changed = sheet.auto_filter.as_ref() != orig_autofilter.as_ref();
+
+        let conditional_formatting_changed =
+            !sheet.conditional_formatting_rules.is_empty() && !orig_has_conditional_formatting;
 
         let sheet_protection_changed = if sheet.sheet_protection.enabled {
             match orig_sheet_protection.as_ref() {
@@ -1034,6 +1042,7 @@ fn build_parts(
             && !sheet_protection_changed
             && !drawings_need_emit
             && !drawings_need_remove
+            && !conditional_formatting_changed
             && !data_validations_changed
         {
             parts.insert(sheet_meta.path.clone(), sheet_xml_bytes);
@@ -1057,6 +1066,12 @@ fn build_parts(
             let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(&sheet_xml)?;
             let cols_xml = render_cols(sheet, worksheet_prefix.as_deref(), &style_to_xf);
             sheet_xml = update_cols_xml(&sheet_xml, &cols_xml)?;
+        }
+        if conditional_formatting_changed {
+            sheet_xml = crate::conditional_formatting::update_worksheet_conditional_formatting_xml(
+                &sheet_xml,
+                &sheet.conditional_formatting_rules,
+            )?;
         }
         if is_new_sheet || merges_changed {
             sheet_xml = crate::merge_cells::update_worksheet_xml(&sheet_xml, &current_merges)?;

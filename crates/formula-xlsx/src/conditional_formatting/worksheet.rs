@@ -37,6 +37,9 @@ fn insert_before_tag(name: &[u8]) -> bool {
             | b"webPublishItems"
             | b"tableParts"
             | b"extLst"
+            // Markup-compatibility blocks: insert known schema elements before these so we don't
+            // place SpreadsheetML children after <mc:AlternateContent>.
+            | b"AlternateContent"
     )
 }
 
