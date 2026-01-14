@@ -1299,6 +1299,26 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: '"md"', displayText: '"md" (days, ignoring months + years)', confidence: 0.62 },
     ],
   },
+  CELL: {
+    // info_type (in quotes)
+    0: [
+      { replacement: '"address"', displayText: '"address" (cell address)', confidence: 0.67 },
+      { replacement: '"col"', displayText: '"col" (column number)', confidence: 0.66 },
+      { replacement: '"row"', displayText: '"row" (row number)', confidence: 0.65 },
+      { replacement: '"filename"', displayText: '"filename" (path/filename)', confidence: 0.64 },
+      { replacement: '"contents"', displayText: '"contents" (cell contents)', confidence: 0.63 },
+    ],
+  },
+  INFO: {
+    // type_text (in quotes)
+    0: [
+      { replacement: '"osversion"', displayText: '"osversion" (OS version)', confidence: 0.67 },
+      { replacement: '"system"', displayText: '"system" (OS name)', confidence: 0.66 },
+      { replacement: '"recalc"', displayText: '"recalc" (recalc mode)', confidence: 0.65 },
+      { replacement: '"release"', displayText: '"release" (Excel version)', confidence: 0.64 },
+      { replacement: '"totmem"', displayText: '"totmem" (total memory)', confidence: 0.63 },
+    ],
+  },
   "WORKDAY.INTL": {
     // weekend
     2: INTL_WEEKEND_ENUM_1_2_7_11_17,

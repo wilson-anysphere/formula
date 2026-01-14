@@ -1733,6 +1733,44 @@ test('DATEDIF unit suggests "d", "m", "y", "ym", "yd"', async () => {
   }
 });
 
+test('CELL info_type suggests "address", "col", "row"', async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=CELL(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const infoType of ['"address"', '"col"', '"row"']) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=CELL(${infoType}`),
+      `Expected CELL to suggest info_type=${infoType}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
+test('INFO type_text suggests "osversion" and "system"', async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=INFO(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const typeText of ['"osversion"', '"system"']) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=INFO(${typeText}`),
+      `Expected INFO to suggest type_text=${typeText}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("MATCH match_type suggests 0, 1, -1", async () => {
   const engine = new TabCompletionEngine();
 
