@@ -170,6 +170,19 @@ function stableHash32(input: string): number {
   return hash >>> 0;
 }
 
+function stableHash53(input: string): number {
+  // 53-bit safe integer hash derived from two independent 32-bit FNV-1a hashes.
+  //
+  // We intentionally avoid BigInt here so the hash remains cheap and works in older JS runtimes.
+  // The collision probability is close to a uniform 53-bit space, which is dramatically safer than
+  // a 32-bit hash when mapping many non-numeric drawing ids into numeric keys.
+  const low32 = stableHash32(input);
+  const high32 = stableHash32(`h:${input}`);
+  // Use 21 high bits + 32 low bits => 53 bits.
+  const high21 = high32 & 0x1fffff;
+  return high21 * 2 ** 32 + low32;
+}
+
 function stableStringify(value: unknown): string {
   try {
     const serialized = JSON.stringify(value, (_key, v) => {
@@ -202,7 +215,8 @@ function parseDrawingObjectId(value: unknown): number {
   // - normal drawing ids (which are positive safe integers, including our random 53-bit ids)
   // - chart overlay ids (which use smaller-magnitude negative ids; see `chartIdToDrawingId`)
   const HASH_NAMESPACE_OFFSET = 0x200000000; // 2^33
-  const hashed = stableHash32(stableStringify(value));
+  const maxHash = Number.MAX_SAFE_INTEGER - HASH_NAMESPACE_OFFSET;
+  const hashed = stableHash53(stableStringify(value)) % maxHash;
   return -(HASH_NAMESPACE_OFFSET + hashed);
 }
 
