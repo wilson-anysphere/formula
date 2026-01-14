@@ -36,10 +36,9 @@ fn encrypted_payload_len_after_filepass(workbook_stream: &[u8]) -> Option<usize>
 #[test]
 fn imports_encrypted_xls_rc4_cryptoapi_across_1024_byte_boundary() {
     // Fixture password: "password"
+    // Use the top-level fixture so other crates/tests can share the same encrypted workbook corpus.
     let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("encrypted_rc4_cryptoapi_boundary.xls");
+        .join("../../fixtures/encryption/biff8_rc4_cryptoapi_boundary_pw_open.xls");
 
     // Best-effort: verify the encrypted payload after FILEPASS crosses the 1024-byte RC4 rekey
     // boundary so decryption must re-key mid-stream.
