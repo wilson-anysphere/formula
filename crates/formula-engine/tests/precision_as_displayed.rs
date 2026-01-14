@@ -1,5 +1,6 @@
 use formula_engine::calc_settings::CalcSettings;
 use formula_engine::{Engine, Value};
+use formula_engine::metadata::FormatRun;
 use formula_model::{Font, Style};
 
 #[test]
@@ -108,6 +109,34 @@ fn precision_as_displayed_rounds_numeric_literals_using_row_col_style_fallback()
     // For other rows, fall back to column styles.
     engine.set_cell_value("Sheet1", "A2", 1.239).unwrap();
     assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(1.2));
+}
+
+#[test]
+fn precision_as_displayed_rounds_numeric_literals_using_range_run_style_fallback() {
+    let mut engine = Engine::new();
+    let mut settings: CalcSettings = engine.calc_settings().clone();
+    settings.full_precision = false;
+    engine.set_calc_settings(settings);
+
+    let run_style_id = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+
+    engine
+        .set_format_runs_by_col(
+            "Sheet1",
+            0,
+            vec![FormatRun {
+                start_row: 0,
+                end_row_exclusive: 1,
+                style_id: run_style_id,
+            }],
+        )
+        .unwrap();
+
+    engine.set_cell_value("Sheet1", "A1", 1.239).unwrap();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.24));
 }
 
 #[test]
