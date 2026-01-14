@@ -559,26 +559,44 @@ export class TabCompletionEngine {
         /** @type {Suggestion[]} */
         const merged = [...suggestions, ...schemaSuggestions];
 
-        // If we couldn't generate a range completion (e.g. the user already typed a full
-        // A1 range like "A1:A10"), still provide a useful pure-insertion suggestion by
-        // auto-closing parens when the function could be complete.
+        // If we couldn't generate a *pure insertion* range completion (for example:
+        // - the user typed a complete range/cell reference that doesn't correspond to a detected
+        //   contiguous block in surrounding data, or
+        // - the arg is sheet-qualified but we don't have schema info to complete it,
+        // still provide a useful pure-insertion suggestion by auto-closing parens when the
+        // function could be complete.
         //
-        // This keeps the common "=SUM(A1:A10<tab>" workflow working even when the range
-        // suggester intentionally doesn't attempt to "re-suggest" already-complete ranges.
-        if (
-          merged.length === 0 &&
-          cursor === input.length &&
-          functionCouldBeComplete &&
-          looksLikeCompleteA1RangeArg(innerPrefix)
-        ) {
-          const closed = closeUnbalancedParens(input);
-          if (closed !== input) {
-            merged.push({
-              text: closed,
-              displayText: closed,
-              type: "range",
-              confidence: 0.25,
-            });
+        // Examples:
+        // - "=SUM(A1:A10<tab>" -> "=SUM(A1:A10)"
+        // - "=SUM(A1<tab>"     -> "=SUM(A1)" (even if A1 is empty)
+        // - "=SUM(Sheet2!A1"   -> "=SUM(Sheet2!A1)" (without schemaProvider)
+        if (cursor === input.length && functionCouldBeComplete && merged.length > 0) {
+          const hasPureInsertionSuggestion = merged.some(
+            (s) => typeof s?.text === "string" && s.text.startsWith(input) && s.text.length > input.length
+          );
+          if (!hasPureInsertionSuggestion && looksLikeCompleteRangeOrCellArg(innerPrefix)) {
+            const closed = closeUnbalancedParens(input);
+            if (closed !== input) {
+              merged.push({
+                text: closed,
+                displayText: closed,
+                type: "range",
+                confidence: 0.25,
+              });
+            }
+          }
+        } else if (cursor === input.length && functionCouldBeComplete && merged.length === 0) {
+          // Same auto-close fallback for cases where we truly had no range/schema candidates at all.
+          if (looksLikeCompleteRangeOrCellArg(innerPrefix)) {
+            const closed = closeUnbalancedParens(input);
+            if (closed !== input) {
+              merged.push({
+                text: closed,
+                displayText: closed,
+                type: "range",
+                confidence: 0.25,
+              });
+            }
           }
         }
 
@@ -2678,6 +2696,29 @@ function completeIdentifier(name, typedPrefix) {
   return `${typedPrefix}${cased.slice(typedPrefix.length)}`;
 }
 
+function looksLikeCompleteA1CellArg(text) {
+  if (typeof text !== "string") return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  // Support optional absolute markers ($A$1).
+  if (!/^\$?[A-Za-z]{1,3}\$?\d+$/.test(trimmed)) return false;
+  // Validate the column portion is within Excel's max column.
+  const normalized = trimmed.replace(/\$/g, "");
+  return looksLikeA1CellReference(normalized);
+}
+
+function looksLikeCompleteColumnRangeArg(text) {
+  if (typeof text !== "string") return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  const m = /^(\$?)([A-Za-z]{1,3}):(\$?)([A-Za-z]{1,3})$/.exec(trimmed);
+  if (!m) return false;
+  const start = m[2];
+  const end = m[4];
+  // Validate both columns are within Excel's max column.
+  return looksLikeA1CellReference(`${start}1`) && looksLikeA1CellReference(`${end}1`);
+}
+
 function looksLikeCompleteA1RangeArg(text) {
   if (typeof text !== "string") return false;
   const trimmed = text.trim();
@@ -2685,6 +2726,28 @@ function looksLikeCompleteA1RangeArg(text) {
   // Only trigger for fully-specified 2-cell A1 ranges like A1:A10 (possibly with $ markers).
   // This intentionally excludes sheet-qualified refs and structured references.
   return /^(\$?[A-Za-z]{1,3})(\$?\d+):(\$?[A-Za-z]{1,3})(\$?\d+)$/.test(trimmed);
+}
+
+function looksLikeCompleteRangeOrCellArg(text) {
+  if (typeof text !== "string") return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  // Sheet-qualified arguments: validate only the range portion.
+  const sheetArg = splitSheetQualifiedArg(trimmed);
+  const rangeText = sheetArg ? sheetArg.rangePrefix : trimmed;
+  if (sheetArg) {
+    const typedQuoted = trimmed.startsWith("'");
+    // If the user is typing an unquoted sheet name that actually requires quotes
+    // ("My Sheet!A1"), avoid suggesting a close-paren. The formula would still be
+    // syntactically invalid and fixing quotes isn't representable as a pure insertion.
+    if (!typedQuoted && needsSheetQuotes(sheetArg.sheetPrefix)) return false;
+  }
+  if (!rangeText) return false;
+  return (
+    looksLikeCompleteA1RangeArg(rangeText) ||
+    looksLikeCompleteA1CellArg(rangeText) ||
+    looksLikeCompleteColumnRangeArg(rangeText)
+  );
 }
 
 /**

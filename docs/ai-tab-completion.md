@@ -82,15 +82,21 @@ The engine consumes a `CompletionContext` (see `packages/ai-completion/src/tabCo
        - **Starter function stubs** when the user has only typed `=` (e.g. `=` → `=SUM(`) via `suggestTopLevelFunctions()`.
        - **Function name completion** (e.g. `=VLO` → `=VLOOKUP(`) via `suggestFunctionNames()`.
        - **Workbook identifiers** when not in a call (named ranges + structured refs) via `suggestWorkbookIdentifiers()`.
-       - **Range completions** when a function argument expects a range (e.g. `=SUM(A` → `=SUM(A1:A10)`) via `suggestRangeCompletions()`.
-         - When no A1/schema range completion applies, `suggestRangeCompletions()` falls back to **function-name completion**
-           at the cursor for common “range-producing expression” workflows:
-           - `=SUM(OFFS` → `=SUM(OFFSET(`
-           - `=SUM(A1:OFFS` → `=SUM(A1:OFFSET(`
-       - **Argument value hints** for simple arg types (`TRUE/FALSE`, `0/1`, “cell to the left”) via `suggestArgumentValues()`.
-         - When no enum/heuristic suggestions apply, the engine falls back to **nested function-name completion**
-           at the cursor (still enforcing the formula bar’s “pure insertion” constraint).
-           - Example: `=IF(VLO` → `=IF(VLOOKUP(`
+        - **Range completions** when a function argument expects a range (e.g. `=SUM(A` → `=SUM(A1:A10)`) via `suggestRangeCompletions()`.
+          - When no A1/schema range completion applies, `suggestRangeCompletions()` falls back to **function-name completion**
+            at the cursor for common “range-producing expression” workflows:
+            - `=SUM(OFFS` → `=SUM(OFFSET(`
+            - `=SUM(A1:OFFS` → `=SUM(A1:OFFSET(`
+          - When no *pure insertion* range completion applies, `suggestRangeCompletions()` may still offer a low-confidence
+            **auto-close parens** suggestion for complete range/cell references (including sheet-qualified refs), even when
+            the surrounding-cell scan can’t find a contiguous data block:
+            - `=SUM(A1` → `=SUM(A1)`
+            - `=SUM(A1:A10` → `=SUM(A1:A10)` (even if the range is empty)
+            - `=SUM(Sheet2!A1` → `=SUM(Sheet2!A1)` (even without a `SchemaProvider`)
+        - **Argument value hints** for simple arg types (`TRUE/FALSE`, `0/1`, “cell to the left”) via `suggestArgumentValues()`.
+          - When no enum/heuristic suggestions apply, the engine falls back to **nested function-name completion**
+            at the cursor (still enforcing the formula bar’s “pure insertion” constraint).
+            - Example: `=IF(VLO` → `=IF(VLOOKUP(`
            - This fallback is intentionally conservative (it requires ≥2 typed characters) to avoid noisy completions
              in cases like unquoted string-unit args (e.g. `DATEDIF(..., d`).
 

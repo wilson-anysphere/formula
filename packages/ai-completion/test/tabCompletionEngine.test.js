@@ -1499,6 +1499,74 @@ test("Typing =SUM(A1:A10 suggests auto-closing parens when the range is already 
   );
 });
 
+test("Typing =SUM(A1 suggests auto-closing parens even when the referenced cell is empty", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SUM(A1";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(A1)"),
+    `Expected a pure paren-close suggestion for a single-cell arg, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =SUM(A1:A10 suggests auto-closing parens even when the range has no data", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SUM(A1:A10";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(A1:A10)"),
+    `Expected a pure paren-close suggestion even when the range is empty, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =SUM(Sheet2!A1 suggests auto-closing parens without needing schema", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SUM(Sheet2!A1";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(Sheet2!A1)"),
+    `Expected a pure paren-close suggestion for a sheet-qualified cell ref, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =SUM('My Sheet'!A1 suggests auto-closing parens without needing schema", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SUM('My Sheet'!A1";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM('My Sheet'!A1)"),
+    `Expected a pure paren-close suggestion for a quoted sheet-qualified cell ref, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Auto-closing parens is not suggested when the function needs more args (VLOOKUP)", async () => {
   const engine = new TabCompletionEngine();
 
