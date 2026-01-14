@@ -1223,6 +1223,10 @@ For debugging, the workflow also writes a machine-readable JSON report (via the 
 uploads it as a GitHub Actions artifact named `desktop-bundle-size-report-*` (historical name; it
 contains **installer artifact** sizes).
 
+To catch regressions before tagging, Linux PRs/main also run `.github/workflows/desktop-bundle-size.yml`,
+which builds the Linux AppImage/DEB bundles and reports sizes in the workflow summary (optional gating
+via `FORMULA_ENFORCE_BUNDLE_SIZE` / `FORMULA_BUNDLE_SIZE_LIMIT_MB`).
+
 Note: this is an **installer artifact** budget (DMG/MSI/AppImage/etc), not the **frontend asset
 download size** budget (compressed JS/CSS/WASM; see `node scripts/frontend_asset_size_report.mjs`
 and `pnpm -C apps/desktop check:bundle-size`).
