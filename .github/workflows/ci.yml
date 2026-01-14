@@ -91,6 +91,7 @@ jobs:
             scripts/ci/check-gha-action-sha-pins.test.js \
             scripts/ci/check-gha-runner-pins.test.js \
             scripts/ci/check-benchmark-gh-pages-concurrency.test.js \
+            scripts/ci/check-toml-validity.test.js \
             scripts/__tests__/release-workflow-windows-bundle-validation.test.js \
             scripts/__tests__/release-workflow-macos-updater-archive.test.js \
             scripts/__tests__/release-workflow-macos-updater-archive-sigs.test.js \
