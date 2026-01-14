@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use formula_model::autofilter::{
     FilterColumn, FilterCriterion, FilterJoin, FilterValue, NumberComparison, OpaqueCustomFilter,
+    TextMatch, TextMatchKind,
 };
 use formula_model::Range;
 
@@ -607,10 +608,31 @@ fn criterion_from_doper(doper: &ParsedDoper) -> Option<FilterCriterion> {
             }
             _ => opaque(AutoFilterOp::LessThanOrEqual, None),
         },
-        AutoFilterOp::Contains
-        | AutoFilterOp::DoesNotContain
-        | AutoFilterOp::BeginsWith
-        | AutoFilterOp::EndsWith
+        AutoFilterOp::Contains | AutoFilterOp::BeginsWith | AutoFilterOp::EndsWith => {
+            let kind = match doper.op {
+                AutoFilterOp::Contains => TextMatchKind::Contains,
+                AutoFilterOp::BeginsWith => TextMatchKind::BeginsWith,
+                AutoFilterOp::EndsWith => TextMatchKind::EndsWith,
+                _ => unreachable!(),
+            };
+            match &doper.value {
+                DoperValue::Text { value, .. } => Some(FilterCriterion::TextMatch(TextMatch {
+                    kind,
+                    pattern: value.clone(),
+                    case_sensitive: false,
+                })),
+                DoperValue::Empty => Some(FilterCriterion::TextMatch(TextMatch {
+                    kind,
+                    pattern: String::new(),
+                    case_sensitive: false,
+                })),
+                // If we can't confidently decode a string, preserve as opaque.
+                DoperValue::Unknown => opaque(doper.op, None),
+                DoperValue::Bool(b) => opaque(doper.op, Some(b.to_string())),
+                DoperValue::Number(n) => opaque(doper.op, Some(n.to_string())),
+            }
+        }
+        AutoFilterOp::DoesNotContain
         | AutoFilterOp::DoesNotBeginWith
         | AutoFilterOp::DoesNotEndWith => match &doper.value {
             DoperValue::Text { value, .. } => opaque(doper.op, Some(value.clone())),

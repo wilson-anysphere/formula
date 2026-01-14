@@ -2,6 +2,7 @@ use std::io::Write;
 
 use formula_model::autofilter::{
     FilterColumn, FilterCriterion, FilterJoin, FilterValue, NumberComparison, OpaqueCustomFilter,
+    TextMatch, TextMatchKind,
 };
 use formula_model::Range;
 
@@ -280,7 +281,7 @@ fn import_autofilter_criteria_blanks_and_nonblanks() {
 }
 
 #[test]
-fn import_autofilter_criteria_text_operators_are_preserved_as_opaque_custom() {
+fn import_autofilter_criteria_text_operators_import_as_text_match() {
     let bytes = xls_fixture_builder::build_autofilter_criteria_text_ops_fixture_xls();
     let result = formula_xls::import_xls_bytes(&bytes).expect("import xls bytes");
 
@@ -297,9 +298,10 @@ fn import_autofilter_criteria_text_operators_are_preserved_as_opaque_custom() {
             FilterColumn {
                 col_id: 0,
                 join: FilterJoin::Any,
-                criteria: vec![FilterCriterion::OpaqueCustom(OpaqueCustomFilter {
-                    operator: "contains".to_string(),
-                    value: Some("Al".to_string()),
+                criteria: vec![FilterCriterion::TextMatch(TextMatch {
+                    kind: TextMatchKind::Contains,
+                    pattern: "Al".to_string(),
+                    case_sensitive: false,
                 })],
                 values: Vec::new(),
                 raw_xml: Vec::new(),
@@ -307,9 +309,10 @@ fn import_autofilter_criteria_text_operators_are_preserved_as_opaque_custom() {
             FilterColumn {
                 col_id: 1,
                 join: FilterJoin::Any,
-                criteria: vec![FilterCriterion::OpaqueCustom(OpaqueCustomFilter {
-                    operator: "beginsWith".to_string(),
-                    value: Some("B".to_string()),
+                criteria: vec![FilterCriterion::TextMatch(TextMatch {
+                    kind: TextMatchKind::BeginsWith,
+                    pattern: "B".to_string(),
+                    case_sensitive: false,
                 })],
                 values: Vec::new(),
                 raw_xml: Vec::new(),
@@ -317,9 +320,10 @@ fn import_autofilter_criteria_text_operators_are_preserved_as_opaque_custom() {
             FilterColumn {
                 col_id: 2,
                 join: FilterJoin::Any,
-                criteria: vec![FilterCriterion::OpaqueCustom(OpaqueCustomFilter {
-                    operator: "endsWith".to_string(),
-                    value: Some("z".to_string()),
+                criteria: vec![FilterCriterion::TextMatch(TextMatch {
+                    kind: TextMatchKind::EndsWith,
+                    pattern: "z".to_string(),
+                    case_sensitive: false,
                 })],
                 values: Vec::new(),
                 raw_xml: Vec::new(),
