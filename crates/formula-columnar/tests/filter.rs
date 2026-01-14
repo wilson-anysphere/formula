@@ -182,6 +182,38 @@ fn filter_boolean_without_nulls() {
 }
 
 #[test]
+fn filter_or_and_not_combinators() {
+    let table = build_table();
+
+    let expr_or = FilterExpr::Or(
+        Box::new(FilterExpr::Cmp {
+            col: 0,
+            op: CmpOp::Eq,
+            value: FilterValue::Number(1.0),
+        }),
+        Box::new(FilterExpr::Cmp {
+            col: 2,
+            op: CmpOp::Eq,
+            value: FilterValue::String(Arc::<str>::from("C")),
+        }),
+    );
+    let mask_or = table.filter_mask(&expr_or).unwrap();
+    assert_eq!(
+        mask_to_bools(&mask_or),
+        vec![true, false, false, false, true, false]
+    );
+
+    let not_is_null = FilterExpr::Not(Box::new(FilterExpr::IsNull { col: 2 }));
+    let mask_not = table.filter_mask(&not_is_null).unwrap();
+    let mask_is_not_null = table.filter_mask(&FilterExpr::IsNotNull { col: 2 }).unwrap();
+    assert_eq!(mask_to_bools(&mask_not), mask_to_bools(&mask_is_not_null));
+    assert_eq!(
+        mask_to_bools(&mask_is_not_null),
+        vec![true, true, false, true, true, true]
+    );
+}
+
+#[test]
 fn filter_number_canonicalizes_negative_zero_and_nans_for_equality() {
     let schema = vec![ColumnSchema {
         name: "n".to_owned(),
