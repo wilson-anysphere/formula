@@ -99,6 +99,7 @@ describe('desktopStartupUtil.runOnce env isolation', () => {
       "  TMPDIR: process.env.TMPDIR,",
       "  TEMP: process.env.TEMP,",
       "  TMP: process.env.TMP,",
+      "  FORMULA_PERF_HOME: process.env.FORMULA_PERF_HOME,",
       "};",
       "fs.writeFileSync(process.env.ENV_OUT_FILE, JSON.stringify(out), 'utf8');",
       "console.log('[startup] window_visible_ms=1 webview_loaded_ms=n/a first_render_ms=n/a tti_ms=2');",
@@ -132,6 +133,9 @@ describe('desktopStartupUtil.runOnce env isolation', () => {
     expect(payload.TMPDIR).toBe(resolve(profileAbs, 'tmp'));
     expect(payload.TEMP).toBe(resolve(profileAbs, 'tmp'));
     expect(payload.TMP).toBe(resolve(profileAbs, 'tmp'));
+
+    // The perf runner exposes the resolved perf root so downstream tooling can locate artifacts.
+    expect(payload.FORMULA_PERF_HOME).toBe(resolve(repoRoot, 'target', 'perf-home'));
   });
 });
 
