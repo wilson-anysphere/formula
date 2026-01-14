@@ -88,11 +88,12 @@ function parseArgs(argv) {
           "  node scripts/check-macos-entitlements.mjs --root <repoRoot>",
           "  node scripts/check-macos-entitlements.mjs --path <entitlements.plist>",
           "",
-          "Defaults:",
-          "  --root defaults to the repository root (derived from this script's location).",
-          "  --path defaults to the file referenced by bundle.macOS.entitlements in apps/desktop/src-tauri/tauri.conf.json.",
-          "",
-          "Notes:",
+           "Defaults:",
+           "  --root defaults to the repository root (derived from this script's location).",
+           "  --path defaults to the file referenced by bundle.macOS.entitlements in tauri.conf.json.",
+           "  - tauri.conf.json defaults to apps/desktop/src-tauri/tauri.conf.json (override via FORMULA_TAURI_CONF_PATH).",
+           "",
+           "Notes:",
           "  - When com.apple.security.app-sandbox is enabled, the guardrail also requires",
           "    com.apple.security.network.server (Formula runs an OAuth loopback redirect listener).",
           "",
@@ -154,8 +155,15 @@ function parseArgs(argv) {
 function main() {
   const { repoRoot, entitlementsPathOverride } = parseArgs(process.argv.slice(2));
   if (process.exitCode) return;
-  const configPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
-  const relativeConfigPath = path.relative(repoRoot, configPath);
+  const defaultConfigRelativePath = "apps/desktop/src-tauri/tauri.conf.json";
+  const configPathOverride = process.env.FORMULA_TAURI_CONF_PATH;
+  const configPath =
+    configPathOverride && String(configPathOverride).trim()
+      ? path.isAbsolute(String(configPathOverride).trim())
+        ? String(configPathOverride).trim()
+        : path.resolve(repoRoot, String(configPathOverride).trim())
+      : path.join(repoRoot, defaultConfigRelativePath);
+  const relativeConfigPath = path.relative(repoRoot, configPath) || defaultConfigRelativePath;
 
   let entitlementsPath = entitlementsPathOverride;
 

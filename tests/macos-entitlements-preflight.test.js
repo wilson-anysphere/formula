@@ -21,10 +21,12 @@ async function writeFixtureFile(root, relativePath, contents) {
 
 /**
  * @param {string} rootDir
+ * @param {Record<string, string | undefined>} [env]
  */
-function runCli(rootDir) {
+function runCli(rootDir, env = {}) {
   return spawnSync(process.execPath, [SCRIPT, "--root", rootDir], {
     encoding: "utf8",
+    env: { ...process.env, ...env },
   });
 }
 
@@ -57,6 +59,41 @@ test("macOS entitlements preflight passes when required JIT keys are present", a
     );
 
     const proc = runCli(tmpRoot);
+    assert.equal(proc.status, 0, proc.stderr || proc.stdout);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("macOS entitlements preflight honors FORMULA_TAURI_CONF_PATH", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "macos-entitlements-override-pass-"));
+  try {
+    await writeFixtureFile(
+      tmpRoot,
+      "custom/src-tauri/tauri.conf.json",
+      JSON.stringify({ bundle: { macOS: { entitlements: "entitlements.plist" } } }, null, 2) + "\n",
+    );
+    await writeFixtureFile(
+      tmpRoot,
+      "custom/src-tauri/entitlements.plist",
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+        '<plist version="1.0">',
+        "  <dict>",
+        "    <key>com.apple.security.network.client</key>",
+        "    <true/>",
+        "    <key>com.apple.security.cs.allow-jit</key>",
+        "    <true/>",
+        "    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>",
+        "    <true/>",
+        "  </dict>",
+        "</plist>",
+        "",
+      ].join("\n"),
+    );
+
+    const proc = runCli(tmpRoot, { FORMULA_TAURI_CONF_PATH: "custom/src-tauri/tauri.conf.json" });
     assert.equal(proc.status, 0, proc.stderr || proc.stdout);
   } finally {
     await fs.rm(tmpRoot, { recursive: true, force: true });
