@@ -45,6 +45,7 @@ use url::Url;
 use uuid::Uuid;
 
 const WORKBOOK_ID: &str = "local-workbook";
+const XLSX_VBA_SIGNATURE_MAX_BYTES: u64 = 32 * 1024 * 1024;
 
 /// Minimal HTML used by `--startup-bench`.
 ///
@@ -711,9 +712,10 @@ fn macros_trusted_for_before_close(
     let mut sig_part_fallback: Option<Vec<u8>> = None;
     if workbook.vba_project_signature_bin.is_none() {
         sig_part_fallback = workbook.origin_xlsx_bytes.as_deref().and_then(|origin| {
-            formula_xlsx::read_part_from_reader(
+            formula_xlsx::read_part_from_reader_limited(
                 std::io::Cursor::new(origin),
                 "xl/vbaProjectSignature.bin",
+                XLSX_VBA_SIGNATURE_MAX_BYTES,
             )
             .ok()
             .flatten()

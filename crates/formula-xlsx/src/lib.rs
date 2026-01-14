@@ -89,15 +89,13 @@ pub use offcrypto::{
 };
 pub use model_package::{WorkbookPackage, WorkbookPackageError};
 pub use package::{
-    read_part_from_reader, rewrite_content_types_workbook_content_type,
-    rewrite_content_types_workbook_kind, theme_palette_from_reader, worksheet_parts_from_reader,
-    CellPatch as PackageCellPatch, CellPatchSheet, MacroPresence, WorkbookKind, WorksheetPartInfo,
-    XlsxError, XlsxPackage, XlsxPackageLimits, MAX_XLSX_PACKAGE_PART_BYTES,
-    MAX_XLSX_PACKAGE_TOTAL_BYTES,
+    read_part_from_reader, read_part_from_reader_limited,
+    rewrite_content_types_workbook_content_type, rewrite_content_types_workbook_kind,
+    theme_palette_from_reader, worksheet_parts_from_reader, CellPatch as PackageCellPatch,
+    CellPatchSheet, MacroPresence, WorkbookKind, WorksheetPartInfo, XlsxError, XlsxPackage,
+    XlsxPackageLimits, MAX_XLSX_PACKAGE_PART_BYTES, MAX_XLSX_PACKAGE_TOTAL_BYTES,
 };
-pub use patch::{
-    CellPatch, CellStyleRef, WorkbookCellPatches, WorksheetCellPatches,
-};
+pub use patch::{CellPatch, CellStyleRef, WorkbookCellPatches, WorksheetCellPatches};
 pub use pivots::{
     cache_records::{pivot_cache_datetime_to_naive_date, PivotCacheRecordsReader, PivotCacheValue},
     graph::{PivotTableInstance, XlsxPivotGraph},
@@ -124,10 +122,6 @@ pub use read::{
 #[cfg(not(target_arch = "wasm32"))]
 pub use reader::{read_workbook, read_workbook_from_reader};
 pub use recalc_policy::RecalcPolicy;
-pub use rich_data::{
-    discover_rich_data_part_names, discover_rich_data_part_names_from_metadata_rels,
-    extract_rich_cell_images, RichDataError,
-};
 pub use rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map;
 pub use rich_data::resolve_rich_value_image_targets;
 pub use rich_data::rich_value_structure::{
@@ -136,6 +130,10 @@ pub use rich_data::rich_value_structure::{
 };
 pub use rich_data::rich_value_types::{parse_rich_value_types_xml, RichValueType, RichValueTypes};
 pub use rich_data::scan_cells_with_metadata_indices;
+pub use rich_data::{
+    discover_rich_data_part_names, discover_rich_data_part_names_from_metadata_rels,
+    extract_rich_cell_images, RichDataError,
+};
 pub use rich_data::{ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning};
 pub use sheet_metadata::{
     parse_sheet_tab_color, parse_workbook_sheets, write_sheet_tab_color, write_workbook_sheets,
@@ -976,10 +974,8 @@ impl XlsxDocument {
             // (e.g. `Target="media/image1.png"`) or omit the leading `/` for package-root targets
             // (e.g. `Target="xl/media/image1.png"`). Use the same best-effort target normalization
             // as the other rich-data extractors.
-            let target_part = crate::rich_data::resolve_rich_value_rel_target_part(
-                &rich_value_rel_part,
-                target,
-            );
+            let target_part =
+                crate::rich_data::resolve_rich_value_rel_target_part(&rich_value_rel_part, target);
             if !self.parts.contains_key(&target_part) {
                 return Ok(None);
             }
@@ -1221,8 +1217,7 @@ impl XlsxDocument {
             XlsxError::Invalid(format!("{rich_value_rel_part} is not valid UTF-8: {e}"))
         })?;
         let rel_ids = parse_rel_ids(xml)?;
-        let Some(rel_id) =
-            crate::rich_data::rel_slot_get(&rel_ids, rel_index as usize).cloned()
+        let Some(rel_id) = crate::rich_data::rel_slot_get(&rel_ids, rel_index as usize).cloned()
         else {
             return Ok(None);
         };

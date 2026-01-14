@@ -4452,9 +4452,10 @@ fn build_macro_security_status(
         let mut sig_part_fallback: Option<Vec<u8>> = None;
         if workbook.vba_project_signature_bin.is_none() {
             sig_part_fallback = workbook.origin_xlsx_bytes.as_deref().and_then(|origin| {
-                formula_xlsx::read_part_from_reader(
+                formula_xlsx::read_part_from_reader_limited(
                     std::io::Cursor::new(origin),
                     "xl/vbaProjectSignature.bin",
+                    32 * 1024 * 1024,
                 )
                 .ok()
                 .flatten()

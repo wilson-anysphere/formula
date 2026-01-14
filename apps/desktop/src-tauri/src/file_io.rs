@@ -20,11 +20,10 @@ use formula_xlsx::print::{
     write_workbook_print_settings, WorkbookPrintSettings,
 };
 use formula_xlsx::{
-    patch_xlsx_streaming_workbook_cell_patches,
+    parse_sheet_tab_color, parse_workbook_sheets, patch_xlsx_streaming_workbook_cell_patches,
     patch_xlsx_streaming_workbook_cell_patches_with_part_overrides, strip_vba_project_streaming,
-    parse_sheet_tab_color, parse_workbook_sheets, write_sheet_tab_color, write_workbook_sheets,
-    CellPatch as XlsxCellPatch, PartOverride, PreservedPivotParts, WorkbookCellPatches, WorkbookKind,
-    XlsxPackage, XlsxPackageLimits,
+    write_sheet_tab_color, write_workbook_sheets, CellPatch as XlsxCellPatch, PartOverride,
+    PreservedPivotParts, WorkbookCellPatches, WorkbookKind, XlsxPackage, XlsxPackageLimits,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufReader, Cursor, Read};
@@ -47,6 +46,14 @@ const XLTX_WORKBOOK_CONTENT_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml";
 const XLTM_WORKBOOK_CONTENT_TYPE: &str = "application/vnd.ms-excel.template.macroEnabled.main+xml";
 const XLAM_WORKBOOK_CONTENT_TYPE: &str = "application/vnd.ms-excel.addin.macroEnabled.main+xml";
+
+// Limits for extracting individual parts from untrusted XLSX/XLSM ZIP containers during
+// patch-based save flows. These should be generous enough for legitimate workbooks but finite to
+// prevent ZIP-bomb OOM via untrusted uncompressed size metadata.
+const XLSX_CONTENT_TYPES_MAX_BYTES: u64 = 4 * 1024 * 1024;
+const XLSX_WORKBOOK_XML_MAX_BYTES: u64 = 16 * 1024 * 1024;
+const XLSX_WORKSHEET_XML_MAX_BYTES: u64 = 128 * 1024 * 1024;
+const XLSX_VBA_SIGNATURE_MAX_BYTES: u64 = 32 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct Sheet {
@@ -368,13 +375,10 @@ impl Workbook {
     /// This also clears any per-cell input baselines tracked for the removed sheet so future
     /// patch-based saves don't retain stale edit history.
     pub fn remove_sheet(&mut self, sheet_id: &str) -> Option<Sheet> {
-        let idx = self
-            .sheets
-            .iter()
-            .position(|s| {
-                s.id.eq_ignore_ascii_case(sheet_id)
-                    || crate::sheet_name::sheet_name_eq_case_insensitive(&s.name, sheet_id)
-            })?;
+        let idx = self.sheets.iter().position(|s| {
+            s.id.eq_ignore_ascii_case(sheet_id)
+                || crate::sheet_name::sheet_name_eq_case_insensitive(&s.name, sheet_id)
+        })?;
         let removed = self.sheets.remove(idx);
         self.cell_input_baseline
             .retain(|(id, _, _), _| id != &removed.id);
@@ -527,7 +531,10 @@ fn zip_entry_name_matches(candidate: &str, target: &str) -> bool {
     normalized.eq_ignore_ascii_case(&target)
 }
 
-fn zip_archive_has_entry<R: Read + std::io::Seek>(archive: &zip::ZipArchive<R>, name: &str) -> bool {
+fn zip_archive_has_entry<R: Read + std::io::Seek>(
+    archive: &zip::ZipArchive<R>,
+    name: &str,
+) -> bool {
     archive
         .file_names()
         .any(|candidate| zip_entry_name_matches(candidate, name))
@@ -663,7 +670,11 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
         .ok()
         .and_then(|r| formula_xlsx::read_part_from_reader(r, "xl/vbaProject.bin").ok().flatten());
     out.vba_project_signature_bin = open_reader().ok().and_then(|r| {
-        formula_xlsx::read_part_from_reader(r, "xl/vbaProjectSignature.bin")
+        formula_xlsx::read_part_from_reader_limited(
+            r,
+            "xl/vbaProjectSignature.bin",
+            XLSX_VBA_SIGNATURE_MAX_BYTES,
+        )
             .ok()
             .flatten()
     });
@@ -986,7 +997,10 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         return read_xlsx_or_xlsm_blocking(path);
     }
 
-    if matches!(extension.as_deref(), Some("xls") | Some("xlt") | Some("xla")) {
+    if matches!(
+        extension.as_deref(),
+        Some("xls") | Some("xlt") | Some("xla")
+    ) {
         return read_xls_blocking(path);
     }
 
@@ -1613,20 +1627,19 @@ pub(crate) fn patch_workbook_main_content_type_in_package(
     bytes: &[u8],
     desired: &str,
 ) -> anyhow::Result<Option<Vec<u8>>> {
-    let Some(content_types_bytes) = formula_xlsx::read_part_from_reader(
+    let Some(content_types_bytes) = formula_xlsx::read_part_from_reader_limited(
         Cursor::new(bytes),
         "[Content_Types].xml",
+        XLSX_CONTENT_TYPES_MAX_BYTES,
     )
     .ok()
     .flatten() else {
         return Ok(None);
     };
 
-    let Some(patched_xml) = formula_xlsx::rewrite_content_types_workbook_content_type(
-        &content_types_bytes,
-        desired,
-    )
-    .context("rewrite workbook content type in [Content_Types].xml")?
+    let Some(patched_xml) =
+        formula_xlsx::rewrite_content_types_workbook_content_type(&content_types_bytes, desired)
+            .context("rewrite workbook content type in [Content_Types].xml")?
     else {
         return Ok(None);
     };
@@ -1652,9 +1665,12 @@ fn workbook_xml_sheet_order_override(
     origin_bytes: &[u8],
     workbook: &Workbook,
 ) -> anyhow::Result<Option<Vec<u8>>> {
-    let Some(workbook_xml_bytes) =
-        formula_xlsx::read_part_from_reader(Cursor::new(origin_bytes), "xl/workbook.xml")
-            .context("read xl/workbook.xml")?
+    let Some(workbook_xml_bytes) = formula_xlsx::read_part_from_reader_limited(
+        Cursor::new(origin_bytes),
+        "xl/workbook.xml",
+        XLSX_WORKBOOK_XML_MAX_BYTES,
+    )
+    .context("read xl/workbook.xml")?
     else {
         return Ok(None);
     };
@@ -1744,10 +1760,14 @@ fn sheet_metadata_part_overrides(
     let mut part_overrides: HashMap<String, PartOverride> = HashMap::new();
 
     // --- workbook.xml sheet visibility (state="hidden"/"veryHidden") ---
-    let workbook_xml_bytes = formula_xlsx::read_part_from_reader(Cursor::new(bytes), "xl/workbook.xml")
-        .map_err(|e| anyhow::anyhow!(e.to_string()))
-        .context("read xl/workbook.xml")?
-        .ok_or_else(|| anyhow::anyhow!("missing xl/workbook.xml"))?;
+    let workbook_xml_bytes = formula_xlsx::read_part_from_reader_limited(
+        Cursor::new(bytes),
+        "xl/workbook.xml",
+        XLSX_WORKBOOK_XML_MAX_BYTES,
+    )
+    .map_err(|e| anyhow::anyhow!(e.to_string()))
+    .context("read xl/workbook.xml")?
+    .ok_or_else(|| anyhow::anyhow!("missing xl/workbook.xml"))?;
     let workbook_xml =
         std::str::from_utf8(&workbook_xml_bytes).context("parse xl/workbook.xml as utf8")?;
 
@@ -1813,10 +1833,14 @@ fn sheet_metadata_part_overrides(
             continue;
         };
 
-        let sheet_xml_bytes = formula_xlsx::read_part_from_reader(Cursor::new(bytes), part_name)
-            .map_err(|e| anyhow::anyhow!(e.to_string()))
-            .with_context(|| format!("read worksheet part {part_name}"))?
-            .ok_or_else(|| anyhow::anyhow!("missing worksheet part {part_name}"))?;
+        let sheet_xml_bytes = formula_xlsx::read_part_from_reader_limited(
+            Cursor::new(bytes),
+            part_name,
+            XLSX_WORKSHEET_XML_MAX_BYTES,
+        )
+        .map_err(|e| anyhow::anyhow!(e.to_string()))
+        .with_context(|| format!("read worksheet part {part_name}"))?
+        .ok_or_else(|| anyhow::anyhow!("missing worksheet part {part_name}"))?;
         let sheet_xml = std::str::from_utf8(&sheet_xml_bytes)
             .with_context(|| format!("parse worksheet part {part_name} as utf8"))?;
 
@@ -1830,7 +1854,10 @@ fn sheet_metadata_part_overrides(
         let updated = write_sheet_tab_color(sheet_xml, sheet.tab_color.as_ref())
             .map_err(|e| anyhow::anyhow!(e.to_string()))
             .with_context(|| format!("rewrite tabColor in {part_name}"))?;
-        part_overrides.insert(part_name.to_string(), PartOverride::Replace(updated.into_bytes()));
+        part_overrides.insert(
+            part_name.to_string(),
+            PartOverride::Replace(updated.into_bytes()),
+        );
     }
 
     Ok(part_overrides)
@@ -1918,9 +1945,11 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         }
 
         if saw_content_types {
-            if let Ok(Some(bytes)) =
-                formula_xlsx::read_part_from_reader(Cursor::new(origin_bytes), "[Content_Types].xml")
-            {
+            if let Ok(Some(bytes)) = formula_xlsx::read_part_from_reader_limited(
+                Cursor::new(origin_bytes),
+                "[Content_Types].xml",
+                XLSX_CONTENT_TYPES_MAX_BYTES,
+            ) {
                 let content_types = String::from_utf8_lossy(&bytes);
                 if content_types.contains("macroEnabled.main+xml") {
                     return true;
@@ -1937,8 +1966,9 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         // conditional formatting, etc) intact by patching only the modified worksheet XML.
         let print_settings_changed = workbook.print_settings != workbook.original_print_settings;
         let power_query_changed = workbook.power_query_xml != workbook.original_power_query_xml;
-        let sheet_order_override =
-            workbook_xml_sheet_order_override(origin_bytes, workbook).ok().flatten();
+        let sheet_order_override = workbook_xml_sheet_order_override(origin_bytes, workbook)
+            .ok()
+            .flatten();
 
         let mut patches = WorkbookCellPatches::default();
         for sheet in &workbook.sheets {
@@ -1987,22 +2017,25 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
 
         let ext = extension.as_deref().unwrap_or_default();
         let is_xlsx_family = !ext.is_empty() && is_xlsx_family_extension(ext);
-        let desired_workbook_content_type =
-            (!ext.is_empty()).then_some(ext).and_then(workbook_main_content_type_for_extension);
+        let desired_workbook_content_type = (!ext.is_empty())
+            .then_some(ext)
+            .and_then(workbook_main_content_type_for_extension);
 
         let origin_has_vba = zip_part_exists(origin_bytes, "xl/vbaProject.bin");
         let needs_strip_vba = !ext.is_empty()
             && is_macro_free_xlsx_extension(ext)
-            && (workbook.vba_project_bin.is_some() || origin_package_has_macro_content(origin_bytes));
+            && (workbook.vba_project_bin.is_some()
+                || origin_package_has_macro_content(origin_bytes));
         let needs_inject_vba = !ext.is_empty()
             && is_macro_enabled_xlsx_extension(ext)
             && workbook.vba_project_bin.is_some()
             && !origin_has_vba;
 
         let needs_workbook_content_type_update = match desired_workbook_content_type {
-            Some(desired) => formula_xlsx::read_part_from_reader(
+            Some(desired) => formula_xlsx::read_part_from_reader_limited(
                 Cursor::new(origin_bytes),
                 "[Content_Types].xml",
+                XLSX_CONTENT_TYPES_MAX_BYTES,
             )
             .ok()
             .flatten()
@@ -2017,15 +2050,19 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
 
         let needs_date_system_update = is_xlsx_family
             && matches!(workbook.date_system, WorkbookDateSystem::Excel1904)
-            && formula_xlsx::read_part_from_reader(Cursor::new(origin_bytes), "xl/workbook.xml")
-                .ok()
-                .flatten()
-                .and_then(|bytes| {
-                    std::str::from_utf8(&bytes).ok().map(|xml| {
-                        !xml.contains("date1904=\"1\"") && !xml.contains("date1904='1'")
-                    })
-                })
-                .unwrap_or(true);
+            && formula_xlsx::read_part_from_reader_limited(
+                Cursor::new(origin_bytes),
+                "xl/workbook.xml",
+                XLSX_WORKBOOK_XML_MAX_BYTES,
+            )
+            .ok()
+            .flatten()
+            .and_then(|bytes| {
+                std::str::from_utf8(&bytes)
+                    .ok()
+                    .map(|xml| !xml.contains("date1904=\"1\"") && !xml.contains("date1904='1'"))
+            })
+            .unwrap_or(true);
 
         let fast_path_possible = patches.is_empty()
             && !print_settings_changed
@@ -2078,7 +2115,8 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
                     part_overrides.insert(FORMULA_POWER_QUERY_PART.to_string(), override_op);
                 }
                 None => {
-                    part_overrides.insert(FORMULA_POWER_QUERY_PART.to_string(), PartOverride::Remove);
+                    part_overrides
+                        .insert(FORMULA_POWER_QUERY_PART.to_string(), PartOverride::Remove);
                 }
             }
         }
@@ -2972,9 +3010,16 @@ mod tests {
         std::fs::write(&origin_path, cursor.into_inner()).expect("write origin xlsx");
 
         let mut workbook = read_xlsx_blocking(&origin_path).expect("read origin xlsx");
-        assert!(workbook.origin_xlsx_bytes.is_some(), "expected origin bytes baseline");
+        assert!(
+            workbook.origin_xlsx_bytes.is_some(),
+            "expected origin bytes baseline"
+        );
         assert_eq!(
-            workbook.sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            workbook
+                .sheets
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["Sheet1", "Sheet2", "Sheet3"]
         );
 
@@ -2989,6 +3034,41 @@ mod tests {
             .expect("read worksheet parts");
         let names: Vec<String> = parts.iter().map(|p| p.name.clone()).collect();
         assert_eq!(names, vec!["Sheet3", "Sheet1", "Sheet2"]);
+    }
+
+    #[test]
+    fn sheet_metadata_part_overrides_rejects_oversize_workbook_xml() {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options)
+            .expect("start workbook.xml");
+
+        // Write a highly compressible payload slightly above the read limit. The ZIP entry's
+        // uncompressed size metadata will exceed the cap, triggering a deterministic error without
+        // requiring a huge allocation during extraction.
+        let target_len = XLSX_WORKBOOK_XML_MAX_BYTES as usize + 1;
+        let chunk = vec![b'a'; 8192];
+        let mut remaining = target_len;
+        while remaining > 0 {
+            let n = remaining.min(chunk.len());
+            zip.write_all(&chunk[..n]).expect("write chunk");
+            remaining -= n;
+        }
+
+        let bytes = zip.finish().expect("finish zip").into_inner();
+
+        let workbook = Workbook::new_empty(None);
+        let err = sheet_metadata_part_overrides(&bytes, &workbook)
+            .expect_err("expected oversize workbook.xml to fail");
+        let msg = format!("{err:?}");
+        assert!(
+            err.chain()
+                .any(|cause| cause.to_string().contains("too large")
+                    && cause.to_string().contains("xl/workbook.xml")),
+            "expected PartTooLarge error, got: {msg}"
+        );
     }
 
     #[test]
@@ -3593,7 +3673,8 @@ mod tests {
             "/../../../packages/data-io/test/fixtures/simple.parquet"
         ));
 
-        let err = read_workbook_blocking(fixture_path).expect_err("expected parquet import to fail");
+        let err =
+            read_workbook_blocking(fixture_path).expect_err("expected parquet import to fail");
         assert!(
             err.to_string()
                 .contains("parquet support is not enabled in this build"),
@@ -4156,7 +4237,8 @@ mod tests {
         workbook.sheets[0].set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(123.0))));
 
         let out_path = tmp.path().join("patched.xlsx");
-        let written_bytes = write_xlsx_blocking(&out_path, &workbook).expect("write patched workbook");
+        let written_bytes =
+            write_xlsx_blocking(&out_path, &workbook).expect("write patched workbook");
 
         let roundtrip =
             formula_xlsx::read_workbook_from_reader(Cursor::new(written_bytes.as_ref()))
@@ -4494,18 +4576,43 @@ mod tests {
                 zip.write_all(bytes).unwrap();
             }
 
-            add_file(&mut zip, options, "[Content_Types].xml", content_types.as_bytes());
+            add_file(
+                &mut zip,
+                options,
+                "[Content_Types].xml",
+                content_types.as_bytes(),
+            );
             add_file(&mut zip, options, "_rels/.rels", root_rels.as_bytes());
-            add_file(&mut zip, options, "xl/workbook.xml", workbook_xml.as_bytes());
+            add_file(
+                &mut zip,
+                options,
+                "xl/workbook.xml",
+                workbook_xml.as_bytes(),
+            );
             add_file(
                 &mut zip,
                 options,
                 "xl/_rels/workbook.xml.rels",
                 workbook_rels.as_bytes(),
             );
-            add_file(&mut zip, options, "xl/worksheets/sheet1.xml", worksheet_xml.as_bytes());
-            add_file(&mut zip, options, "xl/macrosheets/sheet2.xml", macro_sheet_xml.as_bytes());
-            add_file(&mut zip, options, "xl/dialogsheets/sheet3.xml", dialog_sheet_xml.as_bytes());
+            add_file(
+                &mut zip,
+                options,
+                "xl/worksheets/sheet1.xml",
+                worksheet_xml.as_bytes(),
+            );
+            add_file(
+                &mut zip,
+                options,
+                "xl/macrosheets/sheet2.xml",
+                macro_sheet_xml.as_bytes(),
+            );
+            add_file(
+                &mut zip,
+                options,
+                "xl/dialogsheets/sheet3.xml",
+                dialog_sheet_xml.as_bytes(),
+            );
             add_file(
                 &mut zip,
                 options,
@@ -5781,10 +5888,9 @@ mod tests {
             );
 
             if ext == "xltx" {
-                let rels = std::str::from_utf8(
-                    written_pkg.part("xl/_rels/workbook.xml.rels").unwrap(),
-                )
-                .expect("workbook.xml.rels should be utf8");
+                let rels =
+                    std::str::from_utf8(written_pkg.part("xl/_rels/workbook.xml.rels").unwrap())
+                        .expect("workbook.xml.rels should be utf8");
                 assert!(
                     !rels.contains("relationships/vbaProject"),
                     "expected workbook.xml.rels to drop the vbaProject relationship"
@@ -5892,8 +5998,8 @@ mod tests {
 
             if ext == "xltx" {
                 // Assert print settings were applied for template output (storage export path).
-                let settings =
-                    read_workbook_print_settings(bytes.as_ref()).expect("read workbook print settings");
+                let settings = read_workbook_print_settings(bytes.as_ref())
+                    .expect("read workbook print settings");
                 let sheet = settings
                     .sheets
                     .iter()

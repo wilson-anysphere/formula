@@ -15,9 +15,9 @@ use crate::sheet_metadata::{
     parse_sheet_tab_color, parse_workbook_sheets, write_sheet_tab_color, write_workbook_sheets,
     WorkbookSheetInfo,
 };
-use crate::{DateSystem, RecalcPolicy};
 use crate::theme::{parse_theme_palette, ThemePalette};
 use crate::zip_util::open_zip_part;
+use crate::{DateSystem, RecalcPolicy};
 use formula_model::{CellRef, CellValue, SheetVisibility, StyleTable, TabColor};
 
 /// Maximum allowed *inflated* bytes for a single ZIP entry in an XLSX package.
@@ -120,7 +120,9 @@ impl WorkbookKind {
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml" => {
                 Some(Self::Workbook)
             }
-            "application/vnd.ms-excel.sheet.macroEnabled.main+xml" => Some(Self::MacroEnabledWorkbook),
+            "application/vnd.ms-excel.sheet.macroEnabled.main+xml" => {
+                Some(Self::MacroEnabledWorkbook)
+            }
             "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml" => {
                 Some(Self::Template)
             }
@@ -225,7 +227,9 @@ pub fn rewrite_content_types_workbook_content_type(
     loop {
         let event = reader.read_event_into(&mut buf)?;
         match event {
-            Event::Start(ref e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Override") => {
+            Event::Start(ref e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Override") =>
+            {
                 if override_tag_name.is_none() {
                     override_tag_name =
                         Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
@@ -241,7 +245,9 @@ pub fn rewrite_content_types_workbook_content_type(
                     writer.write_event(Event::Start(e.to_owned()))?;
                 }
             }
-            Event::Empty(ref e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Override") => {
+            Event::Empty(ref e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Override") =>
+            {
                 if override_tag_name.is_none() {
                     override_tag_name =
                         Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
@@ -322,6 +328,8 @@ pub enum XlsxError {
     MissingAttr(&'static str),
     #[error("missing xlsx part: {0}")]
     MissingPart(String),
+    #[error("xlsx part '{part}' is too large ({size} bytes, max {max} bytes)")]
+    PartTooLarge { part: String, size: u64, max: u64 },
     #[error("invalid xlsx: {0}")]
     Invalid(String),
     #[error(
@@ -466,7 +474,12 @@ impl CellPatch {
         value: CellValue,
         formula: Option<String>,
     ) -> Self {
-        Self::new(CellPatchSheet::SheetName(sheet_name.into()), cell, value, formula)
+        Self::new(
+            CellPatchSheet::SheetName(sheet_name.into()),
+            cell,
+            value,
+            formula,
+        )
     }
 
     pub fn for_worksheet_part(
@@ -538,7 +551,12 @@ pub fn read_part_from_reader<R: Read + Seek>(
     let candidates: [&str; 2] = if let Some(stripped) = part_name.strip_prefix('/') {
         [part_name, stripped]
     } else {
-        [part_name, with_slash.as_deref().expect("initialized for non-slashed names")]
+        [
+            part_name,
+            with_slash
+                .as_deref()
+                .expect("initialized for non-slashed names"),
+        ]
     };
 
     for candidate in candidates {
@@ -550,8 +568,82 @@ pub fn read_part_from_reader<R: Read + Seek>(
                 if file.is_dir() {
                     return Ok(None);
                 }
-                let mut buf = Vec::with_capacity(file.size() as usize);
+                let mut buf = Vec::new();
                 file.read_to_end(&mut buf)?;
+                return Ok(Some(buf));
+            }
+            Err(zip::result::ZipError::FileNotFound) => continue,
+            Err(err) => return Err(err.into()),
+        }
+    }
+
+    Ok(None)
+}
+
+/// Read a single ZIP part from an XLSX/XLSM container, enforcing a maximum uncompressed size.
+///
+/// This protects callers that need to extract a single part from untrusted workbooks without
+/// risking unbounded allocations from ZIP metadata or decompression bombs.
+pub fn read_part_from_reader_limited<R: Read + Seek>(
+    mut reader: R,
+    part_name: &str,
+    max_bytes: u64,
+) -> Result<Option<Vec<u8>>, XlsxError> {
+    reader.seek(SeekFrom::Start(0))?;
+    let mut zip = zip::ZipArchive::new(reader)?;
+
+    // OPC part names should not include a leading `/` in the ZIP archive, but some producers do.
+    // Be tolerant by trying both forms.
+    let with_slash = if part_name.starts_with('/') {
+        None
+    } else {
+        Some(format!("/{part_name}"))
+    };
+    let candidates: [&str; 2] = if let Some(stripped) = part_name.strip_prefix('/') {
+        [part_name, stripped]
+    } else {
+        [
+            part_name,
+            with_slash
+                .as_deref()
+                .expect("initialized for non-slashed names"),
+        ]
+    };
+
+    let max_bytes = max_bytes.min(usize::MAX as u64);
+    for candidate in candidates {
+        // `ZipFile` borrows `ZipArchive`; keep the `Result` in a local so it drops
+        // before `zip` to avoid borrowck issues.
+        let result = zip.by_name(candidate);
+        match result {
+            Ok(file) => {
+                if file.is_dir() {
+                    return Ok(None);
+                }
+
+                let part = candidate.strip_prefix('/').unwrap_or(candidate).to_string();
+                let size = file.size();
+                if size > max_bytes {
+                    return Err(XlsxError::PartTooLarge {
+                        part,
+                        size,
+                        max: max_bytes,
+                    });
+                }
+
+                // Do not trust ZIP metadata; enforce an upper bound on decompression output.
+                let take_limit = max_bytes.saturating_add(1);
+                let mut limited = file.take(take_limit);
+                let mut buf = Vec::new();
+                limited.read_to_end(&mut buf)?;
+                if (buf.len() as u64) > max_bytes {
+                    return Err(XlsxError::PartTooLarge {
+                        part,
+                        size: buf.len() as u64,
+                        max: max_bytes,
+                    });
+                }
+
                 return Ok(Some(buf));
             }
             Err(zip::result::ZipError::FileNotFound) => continue,
@@ -564,7 +656,9 @@ pub fn read_part_from_reader<R: Read + Seek>(
 
 /// Parse the workbook theme palette from `xl/theme/theme1.xml` (if present) without inflating the
 /// entire package.
-pub fn theme_palette_from_reader<R: Read + Seek>(reader: R) -> Result<Option<ThemePalette>, XlsxError> {
+pub fn theme_palette_from_reader<R: Read + Seek>(
+    reader: R,
+) -> Result<Option<ThemePalette>, XlsxError> {
     let Some(theme_xml) = read_part_from_reader(reader, "xl/theme/theme1.xml")? else {
         return Ok(None);
     };
@@ -597,7 +691,7 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
 
     let workbook_xml = match open_zip_part(&mut zip, "xl/workbook.xml") {
         Ok(mut file) => {
-            let mut buf = Vec::with_capacity(file.size() as usize);
+            let mut buf = Vec::new();
             file.read_to_end(&mut buf)?;
             buf
         }
@@ -611,7 +705,7 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
 
     let rels_bytes = match open_zip_part(&mut zip, "xl/_rels/workbook.xml.rels") {
         Ok(mut file) => {
-            let mut buf = Vec::with_capacity(file.size() as usize);
+            let mut buf = Vec::new();
             file.read_to_end(&mut buf)?;
             Some(buf)
         }
@@ -634,8 +728,7 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
         let resolved = rel_by_id
             .get(&sheet.rel_id)
             .filter(|rel| {
-                !rel
-                    .target_mode
+                !rel.target_mode
                     .as_deref()
                     .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
             })
@@ -993,15 +1086,18 @@ impl XlsxPackage {
             }
         }
 
-        let mut patches_by_part: HashMap<String, BTreeMap<(u32, u32), crate::streaming::WorksheetCellPatch>> =
-            HashMap::new();
+        let mut patches_by_part: HashMap<
+            String,
+            BTreeMap<(u32, u32), crate::streaming::WorksheetCellPatch>,
+        > = HashMap::new();
 
         for patch in patches {
             let worksheet_part = match &patch.sheet {
                 CellPatchSheet::WorksheetPart(part) => part.clone(),
-                CellPatchSheet::SheetName(name) => sheet_name_to_part.get(name).cloned().ok_or_else(|| {
-                    XlsxError::Invalid(format!("unknown sheet name {name}"))
-                })?,
+                CellPatchSheet::SheetName(name) => sheet_name_to_part
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| XlsxError::Invalid(format!("unknown sheet name {name}")))?,
             };
 
             patches_by_part
@@ -1020,10 +1116,11 @@ impl XlsxPackage {
                 );
         }
 
-        let mut patches_by_part: HashMap<String, Vec<crate::streaming::WorksheetCellPatch>> = patches_by_part
-            .into_iter()
-            .map(|(part, cells)| (part, cells.into_values().collect()))
-            .collect();
+        let mut patches_by_part: HashMap<String, Vec<crate::streaming::WorksheetCellPatch>> =
+            patches_by_part
+                .into_iter()
+                .map(|(part, cells)| (part, cells.into_values().collect()))
+                .collect();
         for patches in patches_by_part.values_mut() {
             patches.sort_by_key(|p| (p.cell.row, p.cell.col));
         }
@@ -1181,7 +1278,12 @@ impl XlsxPackage {
         patches: &WorkbookCellPatches,
         style_table: &StyleTable,
     ) -> Result<(), XlsxError> {
-        apply_cell_patches_to_package_with_styles(self, patches, style_table, RecalcPolicy::default())
+        apply_cell_patches_to_package_with_styles(
+            self,
+            patches,
+            style_table,
+            RecalcPolicy::default(),
+        )
     }
 
     /// Remove macro-related parts and relationships from the package.
@@ -1196,7 +1298,10 @@ impl XlsxPackage {
     ///
     /// This controls how the workbook "main" content type is rewritten in `[Content_Types].xml`
     /// after stripping macros.
-    pub fn remove_vba_project_with_kind(&mut self, target_kind: WorkbookKind) -> Result<(), XlsxError> {
+    pub fn remove_vba_project_with_kind(
+        &mut self,
+        target_kind: WorkbookKind,
+    ) -> Result<(), XlsxError> {
         crate::macro_strip::strip_macros_with_kind(&mut self.parts, target_kind)
     }
 }
@@ -1221,7 +1326,8 @@ fn workbook_xml_set_date_system(
         let event = reader.read_event_into(&mut buf)?;
         match event {
             Event::Empty(ref e) if local_name(e.name().as_ref()) == b"workbook" => {
-                workbook_ns.get_or_insert(crate::xml::workbook_xml_namespaces_from_workbook_start(e)?);
+                workbook_ns
+                    .get_or_insert(crate::xml::workbook_xml_namespaces_from_workbook_start(e)?);
 
                 // Degenerate/self-closing workbook roots can't contain child elements. If we need
                 // to force the 1904 date system we must expand `<workbook/>` into
@@ -1232,7 +1338,12 @@ fn workbook_xml_set_date_system(
 
                     let tag = workbook_ns
                         .as_ref()
-                        .map(|ns| crate::xml::prefixed_tag(ns.spreadsheetml_prefix.as_deref(), "workbookPr"))
+                        .map(|ns| {
+                            crate::xml::prefixed_tag(
+                                ns.spreadsheetml_prefix.as_deref(),
+                                "workbookPr",
+                            )
+                        })
                         .unwrap_or_else(|| "workbookPr".to_string());
                     let mut wb_pr = BytesStart::new(tag.as_str());
                     wb_pr.push_attribute(("date1904", "1"));
@@ -1244,12 +1355,18 @@ fn workbook_xml_set_date_system(
                 }
             }
             Event::Start(ref e) if local_name(e.name().as_ref()) == b"workbook" => {
-                workbook_ns.get_or_insert(crate::xml::workbook_xml_namespaces_from_workbook_start(e)?);
+                workbook_ns
+                    .get_or_insert(crate::xml::workbook_xml_namespaces_from_workbook_start(e)?);
                 writer.write_event(Event::Start(e.to_owned()))?;
                 if date_system == DateSystem::V1904 && !has_workbook_pr {
                     let tag = workbook_ns
                         .as_ref()
-                        .map(|ns| crate::xml::prefixed_tag(ns.spreadsheetml_prefix.as_deref(), "workbookPr"))
+                        .map(|ns| {
+                            crate::xml::prefixed_tag(
+                                ns.spreadsheetml_prefix.as_deref(),
+                                "workbookPr",
+                            )
+                        })
                         .unwrap_or_else(|| "workbookPr".to_string());
                     let mut wb_pr = BytesStart::new(tag.as_str());
                     wb_pr.push_attribute(("date1904", "1"));
@@ -1279,10 +1396,12 @@ fn workbook_xml_set_date_system(
     Ok(writer.into_inner())
 }
 
-fn patched_workbook_pr(e: &BytesStart<'_>, date_system: DateSystem) -> Result<BytesStart<'static>, XlsxError> {
+fn patched_workbook_pr(
+    e: &BytesStart<'_>,
+    date_system: DateSystem,
+) -> Result<BytesStart<'static>, XlsxError> {
     let name = e.name();
-    let mut wb_pr =
-        BytesStart::new(std::str::from_utf8(name.as_ref()).unwrap_or("workbookPr"));
+    let mut wb_pr = BytesStart::new(std::str::from_utf8(name.as_ref()).unwrap_or("workbookPr"));
     let mut had_date1904 = false;
     for attr in e.attributes() {
         let attr = attr?;
@@ -1356,7 +1475,8 @@ fn ensure_workbook_content_type(
             Event::Eof => break,
             Event::Empty(ref e) if crate::openxml::local_name(e.name().as_ref()) == b"Override" => {
                 if override_tag_name.is_none() {
-                    override_tag_name = Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                    override_tag_name =
+                        Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
                 }
                 let (is_workbook, updated) = patched_workbook_override(e, workbook_content_type)?;
                 if is_workbook {
@@ -1371,7 +1491,8 @@ fn ensure_workbook_content_type(
             }
             Event::Start(ref e) if crate::openxml::local_name(e.name().as_ref()) == b"Override" => {
                 if override_tag_name.is_none() {
-                    override_tag_name = Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                    override_tag_name =
+                        Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
                 }
                 let (is_workbook, updated) = patched_workbook_override(e, workbook_content_type)?;
                 if is_workbook {
@@ -1390,8 +1511,9 @@ fn ensure_workbook_content_type(
                 if !found {
                     // No workbook override found; insert one before `</Types>`.
                     changed = true;
-                    let override_tag_name =
-                        override_tag_name.clone().unwrap_or_else(|| prefixed_tag(e.name().as_ref(), "Override"));
+                    let override_tag_name = override_tag_name
+                        .clone()
+                        .unwrap_or_else(|| prefixed_tag(e.name().as_ref(), "Override"));
                     let mut override_el = BytesStart::new(override_tag_name.as_str());
                     override_el.push_attribute(("PartName", "/xl/workbook.xml"));
                     override_el.push_attribute(("ContentType", workbook_content_type));
@@ -1465,7 +1587,8 @@ pub(crate) fn ensure_content_types_default(
         match event {
             Event::Start(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Default") => {
                 if default_tag_name.is_none() {
-                    default_tag_name = Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                    default_tag_name =
+                        Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
                 }
                 for attr in e.attributes().with_checks(false) {
                     let attr = attr?;
@@ -1481,7 +1604,8 @@ pub(crate) fn ensure_content_types_default(
             }
             Event::Empty(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Default") => {
                 if default_tag_name.is_none() {
-                    default_tag_name = Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                    default_tag_name =
+                        Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
                 }
                 for attr in e.attributes().with_checks(false) {
                     let attr = attr?;
@@ -1858,17 +1982,20 @@ mod tests {
 <x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>"#;
 
-        let updated =
-            workbook_xml_set_date_system(workbook_xml.as_bytes(), DateSystem::V1904).expect("set date system");
+        let updated = workbook_xml_set_date_system(workbook_xml.as_bytes(), DateSystem::V1904)
+            .expect("set date system");
         let updated = std::str::from_utf8(&updated).expect("utf8");
         let doc = Document::parse(updated).expect("updated workbook.xml parses");
 
         assert!(
-            updated.contains(r#"xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main""#),
+            updated
+                .contains(r#"xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main""#),
             "expected output to preserve SpreadsheetML namespace declaration, got:\n{updated}"
         );
         assert!(
-            updated.contains(r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#),
+            updated.contains(
+                r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+            ),
             "expected output to preserve relationships namespace declaration, got:\n{updated}"
         );
         assert!(
@@ -1895,8 +2022,8 @@ mod tests {
         let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
 
-        let updated =
-            workbook_xml_set_date_system(workbook_xml.as_bytes(), DateSystem::V1904).expect("set date system");
+        let updated = workbook_xml_set_date_system(workbook_xml.as_bytes(), DateSystem::V1904)
+            .expect("set date system");
         let updated = std::str::from_utf8(&updated).expect("utf8");
         let doc = Document::parse(updated).expect("updated workbook.xml parses");
 
@@ -1943,8 +2070,7 @@ mod tests {
 
         ensure_content_types_default(&mut parts, "png", "image/png").expect("ensure png default");
 
-        let updated =
-            std::str::from_utf8(parts.get("[Content_Types].xml").unwrap()).expect("utf8");
+        let updated = std::str::from_utf8(parts.get("[Content_Types].xml").unwrap()).expect("utf8");
         let doc = Document::parse(updated).expect("parse content types");
         assert!(
             doc.descendants().any(|n| {
@@ -1975,14 +2101,20 @@ mod tests {
         ensure_content_types_default(&mut parts, "png", "image/png").expect("ensure png default");
         ensure_content_types_default(&mut parts, "png", "image/png").expect("ensure png default");
 
-        let updated =
-            std::str::from_utf8(parts.get("[Content_Types].xml").unwrap()).expect("utf8");
+        let updated = std::str::from_utf8(parts.get("[Content_Types].xml").unwrap()).expect("utf8");
         let doc = Document::parse(updated).expect("parse content types");
         let count = doc
             .descendants()
-            .filter(|n| n.is_element() && n.tag_name().name() == "Default" && n.attribute("Extension") == Some("png"))
+            .filter(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "Default"
+                    && n.attribute("Extension") == Some("png")
+            })
             .count();
-        assert_eq!(count, 1, "expected png Default to not duplicate, got:\n{updated}");
+        assert_eq!(
+            count, 1,
+            "expected png Default to not duplicate, got:\n{updated}"
+        );
     }
 
     #[test]
@@ -2001,15 +2133,16 @@ mod tests {
 
         ensure_content_types_default(&mut parts, "png", "image/png").expect("ensure png default");
 
-        let updated =
-            std::str::from_utf8(parts.get("[Content_Types].xml").unwrap()).expect("utf8");
+        let updated = std::str::from_utf8(parts.get("[Content_Types].xml").unwrap()).expect("utf8");
         let doc = Document::parse(updated).expect("parse content types");
 
         let ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types";
         let node = doc
             .descendants()
             .find(|n| {
-                n.is_element() && n.tag_name().name() == "Default" && n.attribute("Extension") == Some("png")
+                n.is_element()
+                    && n.tag_name().name() == "Default"
+                    && n.attribute("Extension") == Some("png")
             })
             .expect("inserted Default");
         assert_eq!(node.tag_name().namespace(), Some(ct_ns));
@@ -2201,7 +2334,9 @@ mod tests {
         let rels = crate::openxml::parse_relationships(rels_bytes).expect("parse rels");
         let vba_rel = rels
             .iter()
-            .find(|rel| rel.type_uri == "http://schemas.microsoft.com/office/2006/relationships/vbaProject")
+            .find(|rel| {
+                rel.type_uri == "http://schemas.microsoft.com/office/2006/relationships/vbaProject"
+            })
             .expect("expected workbook.xml.rels to contain a vbaProject relationship");
         assert_eq!(vba_rel.target, "vbaProject.bin");
         assert_eq!(vba_rel.id, "rId2");
@@ -2276,8 +2411,9 @@ mod tests {
 
         let vba_rels =
             std::str::from_utf8(pkg2.part("xl/_rels/vbaProject.bin.rels").unwrap()).unwrap();
-        assert!(vba_rels
-            .contains("http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature"));
+        assert!(vba_rels.contains(
+            "http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature"
+        ));
         assert!(vba_rels.contains(r#"Target="vbaProjectSignature.bin""#));
         assert!(vba_rels.contains(r#"Id="rId1""#));
     }
@@ -2600,7 +2736,8 @@ mod tests {
         let written = pkg.write_to_bytes().expect("write pkg");
         let pkg2 = XlsxPackage::from_bytes(&written).expect("read pkg2");
 
-        let rels_xml = std::str::from_utf8(pkg2.part("xl/_rels/workbook.xml.rels").unwrap()).unwrap();
+        let rels_xml =
+            std::str::from_utf8(pkg2.part("xl/_rels/workbook.xml.rels").unwrap()).unwrap();
         let doc = Document::parse(rels_xml).expect("parse workbook rels");
 
         let rel_ns = "http://schemas.openxmlformats.org/package/2006/relationships";
@@ -2850,7 +2987,8 @@ mod tests {
         zip.start_file("xl/workbook.xml", options).unwrap();
         zip.write_all(workbook_xml.as_bytes()).unwrap();
 
-        zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
         zip.write_all(workbook_rels.as_bytes()).unwrap();
 
         zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
@@ -2876,10 +3014,12 @@ mod tests {
         zip.start_file("xl/vbaProject.bin", options).unwrap();
         zip.write_all(b"fake-vba-project").unwrap();
 
-        zip.start_file("xl/_rels/vbaProject.bin.rels", options).unwrap();
+        zip.start_file("xl/_rels/vbaProject.bin.rels", options)
+            .unwrap();
         zip.write_all(vba_rels.as_bytes()).unwrap();
 
-        zip.start_file("xl/vbaProjectSignature.bin", options).unwrap();
+        zip.start_file("xl/vbaProjectSignature.bin", options)
+            .unwrap();
         zip.write_all(b"fake-signature").unwrap();
 
         zip.start_file("xl/vbaData.xml", options).unwrap();
@@ -2895,10 +3035,12 @@ mod tests {
         zip.start_file("xl/activeX/activeX1.bin", options).unwrap();
         zip.write_all(b"activex-binary").unwrap();
 
-        zip.start_file("xl/embeddings/oleObject1.bin", options).unwrap();
+        zip.start_file("xl/embeddings/oleObject1.bin", options)
+            .unwrap();
         zip.write_all(b"ole-embedding").unwrap();
 
-        zip.start_file("xl/ctrlProps/ctrlProp1.xml", options).unwrap();
+        zip.start_file("xl/ctrlProps/ctrlProp1.xml", options)
+            .unwrap();
         zip.write_all(ctrl_props_xml.as_bytes()).unwrap();
 
         zip.finish().unwrap().into_inner()
@@ -3018,7 +3160,10 @@ mod tests {
 
         let bytes = build_package(&[
             ("xl/drawings/vmlDrawing1.vml", vml_xml.as_bytes()),
-            ("xl/drawings/_rels/vmlDrawing1.vml.rels", rels_xml.as_bytes()),
+            (
+                "xl/drawings/_rels/vmlDrawing1.vml.rels",
+                rels_xml.as_bytes(),
+            ),
             ("xl/activeX/activeX1.bin", b"dummy-bin"),
         ]);
 
@@ -3026,7 +3171,8 @@ mod tests {
         pkg.remove_vba_project().expect("strip macros");
 
         let updated_rels =
-            std::str::from_utf8(pkg.part("xl/drawings/_rels/vmlDrawing1.vml.rels").unwrap()).unwrap();
+            std::str::from_utf8(pkg.part("xl/drawings/_rels/vmlDrawing1.vml.rels").unwrap())
+                .unwrap();
         assert!(!updated_rels.contains("rIdOle"));
 
         let updated_vml =
@@ -3071,9 +3217,15 @@ mod tests {
 
         let bytes = build_package(&[
             ("xl/worksheets/sheet1.xml", worksheet_xml.as_bytes()),
-            ("xl/worksheets/_rels/sheet1.xml.rels", sheet_rels_xml.as_bytes()),
+            (
+                "xl/worksheets/_rels/sheet1.xml.rels",
+                sheet_rels_xml.as_bytes(),
+            ),
             ("xl/drawings/vmlDrawing1.vml", vml_xml.as_bytes()),
-            ("xl/drawings/_rels/vmlDrawing1.vml.rels", vml_rels_xml.as_bytes()),
+            (
+                "xl/drawings/_rels/vmlDrawing1.vml.rels",
+                vml_rels_xml.as_bytes(),
+            ),
             ("xl/activeX/activeX1.bin", b"dummy-bin"),
         ]);
 
@@ -3105,10 +3257,9 @@ mod tests {
         assert!(!updated_vml.contains("OLEObject"));
         assert!(updated_vml.contains("ObjectType=\"Note\""));
 
-        let updated_vml_rels = std::str::from_utf8(
-            pkg.part("xl/drawings/_rels/vmlDrawing1.vml.rels").unwrap(),
-        )
-        .unwrap();
+        let updated_vml_rels =
+            std::str::from_utf8(pkg.part("xl/drawings/_rels/vmlDrawing1.vml.rels").unwrap())
+                .unwrap();
         assert!(!updated_vml_rels.contains("rIdOle"));
 
         assert!(pkg.part("xl/activeX/activeX1.bin").is_none());
@@ -3160,7 +3311,8 @@ mod tests {
         assert!(!updated_rels.contains("rIdImg"));
         assert!(updated_rels.contains("rIdKeep"));
 
-        let updated_drawing = std::str::from_utf8(pkg.part("xl/drawings/drawing1.xml").unwrap()).unwrap();
+        let updated_drawing =
+            std::str::from_utf8(pkg.part("xl/drawings/drawing1.xml").unwrap()).unwrap();
         assert!(!updated_drawing.contains("rIdImg"));
         assert!(updated_drawing.contains("rIdKeep"));
 
@@ -3190,7 +3342,10 @@ mod tests {
 
         let bytes = build_package(&[
             ("xl/drawings/vmlDrawing1.vml", vml_xml.as_bytes()),
-            ("xl/drawings/_rels/vmlDrawing1.vml.rels", rels_xml.as_bytes()),
+            (
+                "xl/drawings/_rels/vmlDrawing1.vml.rels",
+                rels_xml.as_bytes(),
+            ),
             ("xl/ctrlProps/image1.png", b"macro-image"),
             ("xl/media/image2.png", b"keep-image"),
         ]);
@@ -3199,7 +3354,8 @@ mod tests {
         pkg.remove_vba_project().expect("strip macros");
 
         let updated_rels =
-            std::str::from_utf8(pkg.part("xl/drawings/_rels/vmlDrawing1.vml.rels").unwrap()).unwrap();
+            std::str::from_utf8(pkg.part("xl/drawings/_rels/vmlDrawing1.vml.rels").unwrap())
+                .unwrap();
         assert!(!updated_rels.contains("rIdImg"));
         assert!(updated_rels.contains("rIdKeep"));
 
@@ -3255,7 +3411,8 @@ mod tests {
         assert!(!updated_rels.contains("rIdLink"));
         assert!(updated_rels.contains("rIdKeep"));
 
-        let updated_drawing = std::str::from_utf8(pkg.part("xl/drawings/drawing1.xml").unwrap()).unwrap();
+        let updated_drawing =
+            std::str::from_utf8(pkg.part("xl/drawings/drawing1.xml").unwrap()).unwrap();
         assert!(!updated_drawing.contains("rIdLink"));
         assert!(updated_drawing.contains("rIdKeep"));
 
