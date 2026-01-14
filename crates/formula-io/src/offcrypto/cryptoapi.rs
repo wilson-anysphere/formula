@@ -154,10 +154,8 @@ pub fn final_hash(h: &[u8], block: u32, hash_alg: HashAlg) -> Vec<u8> {
 
 /// CryptoAPI `CryptDeriveKey` byte expansion used by MS-OFFCRYPTO Standard encryption.
 ///
-/// For key lengths <= hash length, this is simply a truncation of the hash value.
-///
-/// For longer key sizes (e.g. AES-256 wants 32 bytes from SHA-1's 20 bytes), CryptoAPI
-/// expands by hashing two 64-byte pads (HMAC-like):
+/// CryptoAPI does **not** use the digest bytes directly as the key. For MD5/SHA-1 it expands the
+/// hash using an HMAC-like ipad/opad construction and then truncates to the desired key length.
 ///
 /// ```text
 /// buf = hash_value || 0x00*(64 - hash_len)
@@ -173,10 +171,6 @@ pub fn crypt_derive_key(hash_value: &[u8], key_len_bytes: usize, hash_alg: HashA
         hash_len,
         "hash_value len must match hash_alg.hash_len()"
     );
-
-    if key_len_bytes <= hash_value.len() {
-        return hash_value[..key_len_bytes].to_vec();
-    }
 
     // The MS-OFFCRYPTO Standard mode only uses MD5/SHA-1, both of which have a 64-byte block size.
     // `hash_len` is guaranteed <= 64.
@@ -206,7 +200,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn crypt_derive_key_sha1_truncates_when_key_len_le_hash_len() {
+    fn crypt_derive_key_sha1_applies_cryptderivekey_even_when_key_len_le_hash_len() {
         // SHA-1("hello") = aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d
         let hash_value: [u8; 20] = [
             0xAA, 0xF4, 0xC6, 0x1D, 0xDC, 0xC5, 0xE8, 0xA2, 0xDA, 0xBE, 0xDE, 0x0F, 0x3B,
@@ -215,8 +209,8 @@ mod tests {
 
         let key = crypt_derive_key(&hash_value, 16, HashAlg::Sha1);
         let expected: [u8; 16] = [
-            0xAA, 0xF4, 0xC6, 0x1D, 0xDC, 0xC5, 0xE8, 0xA2, 0xDA, 0xBE, 0xDE, 0x0F, 0x3B,
-            0x48, 0x2C, 0xD9,
+            0xB1, 0xBF, 0x85, 0x34, 0x6E, 0xCA, 0xE4, 0x29, 0xC0, 0xB3, 0x50, 0x63, 0x5B,
+            0xAA, 0x3F, 0x25,
         ];
         assert_eq!(key, expected);
     }
