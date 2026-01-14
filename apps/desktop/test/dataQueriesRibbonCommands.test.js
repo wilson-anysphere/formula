@@ -83,6 +83,12 @@ test("Data → Queries & Connections ribbon commands are registered in CommandRe
 
   // Pressed state sync should reflect whether the Data Queries panel is open.
   assert.match(main, /"data\.queriesConnections\.queriesConnections":\s*isPanelOpen\(\s*PanelIds\.DATA_QUERIES\s*\)/);
+  // Floating panels can be minimized; treat minimized as effectively closed so the ribbon toggle
+  // can restore the panel (instead of showing as already-pressed while hidden).
+  const isPanelOpenIdx = main.indexOf("const isPanelOpen");
+  assert.ok(isPanelOpenIdx !== -1, "Expected main.ts to define an isPanelOpen helper for ribbon pressed-state");
+  const isPanelOpenSnippet = main.slice(isPanelOpenIdx, isPanelOpenIdx + 500);
+  assert.match(isPanelOpenSnippet, /\bminimized\b/, "Expected isPanelOpen to treat minimized floating panels as closed");
 
   // Since these ids are now real commands, they should not be kept in the ribbon
   // CommandRegistry exemption list (that list is for ribbon-only wiring).
