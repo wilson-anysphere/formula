@@ -1832,6 +1832,16 @@ function functionCouldBeCompleteAfterArg(fnSpec, argIndex) {
 
 function applyNameCase(name, typedPrefix) {
   if (!typedPrefix) return name;
+  // Support Excel `_xlfn.` function qualifier prefixes by applying casing rules
+  // only to the function-name portion (not the qualifier).
+  const qualifierUpper = "_XLFN.";
+  if (typedPrefix.toUpperCase().startsWith(qualifierUpper) && name.toUpperCase().startsWith(qualifierUpper)) {
+    const qualifier = name.slice(0, qualifierUpper.length);
+    const restName = name.slice(qualifierUpper.length);
+    const restTyped = typedPrefix.slice(qualifierUpper.length);
+    return `${qualifier}${applyNameCase(restName, restTyped)}`;
+  }
+
   // Infer case preference from the *letters* the user typed (ignore digits, dots, underscores).
   // This yields nicer results for common patterns like:
   //   "=vlo"  -> "=vlookup("

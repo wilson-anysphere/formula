@@ -257,6 +257,23 @@ test("Typing =_xlfn.XLO suggests =_xlfn.XLOOKUP(", async () => {
   );
 });
 
+test("Typing =_xlfn.Xlo suggests =_xlfn.Xlookup( (title-style casing)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=_xlfn.Xlo";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.Xlookup("),
+    `Expected an _xlfn.Xlookup suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =_xlfn.TAK suggests =_xlfn.TAKE(", async () => {
   const engine = new TabCompletionEngine();
 
