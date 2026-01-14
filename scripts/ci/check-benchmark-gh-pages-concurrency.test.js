@@ -160,12 +160,40 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
+test("passes when workflow-level concurrency uses inline mapping form", { skip: !hasBash }, () => {
+  const proc = runYaml(`
+concurrency: { group: benchmark-gh-pages-publish, cancel-in-progress: false }
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: benchmark-action/github-action-benchmark@v1
+        with:
+          auto-push: true
+`);
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
 test("passes when job-level concurrency uses scalar form", { skip: !hasBash }, () => {
   const proc = runYaml(`
 jobs:
   publish:
     runs-on: ubuntu-24.04
     concurrency: benchmark-gh-pages-publish
+    steps:
+      - uses: benchmark-action/github-action-benchmark@v1
+        with:
+          auto-push: true
+`);
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("passes when job-level concurrency uses inline mapping form", { skip: !hasBash }, () => {
+  const proc = runYaml(`
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    concurrency: { group: benchmark-gh-pages-publish, cancel-in-progress: false }
     steps:
       - uses: benchmark-action/github-action-benchmark@v1
         with:

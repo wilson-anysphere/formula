@@ -78,6 +78,25 @@ for wf in "${workflows[@]}"; do
         return s;
       }
 
+      function inline_mapping_has_group(v, expected,    inner, n, parts, i, part, gv) {
+        v = trim(v);
+        if (substr(v, 1, 1) != "{" || substr(v, length(v), 1) != "}") {
+          return 0;
+        }
+        inner = substr(v, 2, length(v) - 2);
+        n = split(inner, parts, ",");
+        for (i = 1; i <= n; i++) {
+          part = trim(parts[i]);
+          if (part ~ /^group[[:space:]]*:/) {
+            gv = part;
+            sub(/^group[[:space:]]*:/, "", gv);
+            gv = strip_quotes(gv);
+            if (gv == expected) return 1;
+          }
+        }
+        return 0;
+      }
+
       function auto_push_enabled(v,    low, compact) {
         v = strip_quotes(v);
         low = tolower(v);
@@ -186,7 +205,7 @@ for wf in "${workflows[@]}"; do
           sub(/^concurrency:[[:space:]]*/, "", v);
           v = strip_quotes(v);
           if (v != "") {
-            if (v == expected_group) {
+            if (v == expected_group || inline_mapping_has_group(v, expected_group)) {
               workflow_concurrency_ok = 1;
             }
           } else {
@@ -244,7 +263,7 @@ for wf in "${workflows[@]}"; do
           sub(/^concurrency:[[:space:]]*/, "", v);
           v = strip_quotes(v);
           if (v != "") {
-            if (v == expected_group) {
+            if (v == expected_group || inline_mapping_has_group(v, expected_group)) {
               job_concurrency_ok = 1;
             }
             in_job_concurrency = 0;
