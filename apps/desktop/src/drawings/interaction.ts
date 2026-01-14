@@ -144,6 +144,18 @@ export class DrawingInteractionController {
   })();
   private escapeListenerAttached = false;
 
+  /**
+   * Mark a pointer event as a context-click that hit a drawing object.
+   *
+   * This is used to coordinate with other pointer handlers (e.g. the shared-grid
+   * selection canvas) without stopping propagation: downstream listeners can
+   * detect this flag and avoid treating the click as a grid cell context-click.
+   */
+  private markDrawingContextClick(e: PointerEvent): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (e as any).__formulaDrawingContextClick = true;
+  }
+
   constructor(
     private readonly element: HTMLElement,
     private readonly geom: GridGeometry,
@@ -295,6 +307,7 @@ export class DrawingInteractionController {
           if (isContextClick) {
             // Keep the current selection but allow the event to bubble so the app
             // can show a context menu.
+            this.markDrawingContextClick(e);
             return;
           }
           const centerX = selectedBounds.x + selectedBounds.width / 2;
@@ -332,6 +345,7 @@ export class DrawingInteractionController {
           if (isContextClick) {
             // Keep the current selection but allow the event to bubble so the app
             // can show a context menu.
+            this.markDrawingContextClick(e);
             return;
           }
           this.stopPointerEvent(e);
@@ -372,6 +386,7 @@ export class DrawingInteractionController {
     }
 
     if (isContextClick) {
+      this.markDrawingContextClick(e);
       this.callbacks.requestFocus?.();
       return;
     }

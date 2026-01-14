@@ -1353,6 +1353,14 @@ export class DesktopSharedGrid {
         event.pointerType === "mouse" &&
         (event.button === 2 || (isMacPlatform && event.button === 0 && event.ctrlKey && !event.metaKey));
       if (isContextClick) {
+        // Drawings/pictures are rendered under the shared-grid selection canvas and
+        // handle their own right-click selection logic. When a context-click hit a
+        // drawing, DrawingInteractionController tags the pointer event so we can
+        // avoid moving the active cell underneath the drawing (Excel-like behavior).
+        if ((event as any).__formulaDrawingContextClick) {
+          return;
+        }
+
         const point = this.getViewportPoint(event);
         const picked = renderer.pickCellAt(point.x, point.y);
         if (!picked) return;
