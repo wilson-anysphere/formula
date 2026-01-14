@@ -106,20 +106,25 @@ const IMPLEMENTED_COMMAND_PREFIXES = [
   "home.styles.formatAsTable.",
 ];
 
-function extractImplementedCommandIdsFromMainTs(schemaCommandIds: Set<string>): string[] {
+function extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaCommandIds: Set<string>): string[] {
   const mainTsPath = fileURLToPath(new URL("../../main.ts", import.meta.url));
-  const source = readFileSync(mainTsPath, "utf8");
+  const ribbonHandlersPath = fileURLToPath(new URL("../commandHandlers.ts", import.meta.url));
+
+  const mainTsSource = readFileSync(mainTsPath, "utf8");
+  const ribbonHandlersSource = readFileSync(ribbonHandlersPath, "utf8");
+  const combinedSource = `${mainTsSource}\n\n${ribbonHandlersSource}`;
+
   const ids = new Set<string>();
 
   const addIfSchema = (id: string) => {
     if (schemaCommandIds.has(id)) ids.add(id);
   };
 
-  for (const match of source.matchAll(/case\s+["']([^"']+)["']/g)) {
+  for (const match of combinedSource.matchAll(/case\s+["']([^"']+)["']/g)) {
     addIfSchema(match[1]!);
   }
 
-  for (const match of source.matchAll(/commandId\s*===\s*["']([^"']+)["']/g)) {
+  for (const match of combinedSource.matchAll(/commandId\s*===\s*["']([^"']+)["']/g)) {
     addIfSchema(match[1]!);
   }
 
@@ -128,7 +133,7 @@ function extractImplementedCommandIdsFromMainTs(schemaCommandIds: Set<string>): 
   // Use a structural regex anchored on the surrounding property names so we don't accidentally
   // treat other large object literals (e.g. `disabledById`) as command handlers.
   const extractOverrideKeys = (re: RegExp): void => {
-    const match = re.exec(source);
+    const match = re.exec(mainTsSource);
     const body = match?.[1];
     if (!body) return;
     for (const keyMatch of body.matchAll(/["']([^"']+)["']\s*:/g)) {
@@ -138,7 +143,7 @@ function extractImplementedCommandIdsFromMainTs(schemaCommandIds: Set<string>): 
   extractOverrideKeys(/commandOverrides\s*:\s*\{([\s\S]*?)\}\s*,\s*onBeforeExecuteCommand\s*:/);
   extractOverrideKeys(/toggleOverrides\s*:\s*\{([\s\S]*?)\}\s*,\s*onUnknownCommand\s*:/);
 
-  const presentPrefixes = IMPLEMENTED_COMMAND_PREFIXES.filter((prefix) => source.includes(prefix));
+  const presentPrefixes = IMPLEMENTED_COMMAND_PREFIXES.filter((prefix) => combinedSource.includes(prefix));
   for (const id of schemaCommandIds) {
     if (presentPrefixes.some((prefix) => id.startsWith(prefix))) {
       ids.add(id);
@@ -229,11 +234,11 @@ function registerCommandsForRibbonDisablingTest(commandRegistry: CommandRegistry
 }
 
 describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
-  it("does not auto-disable ribbon ids that are explicitly wired in main.ts", () => {
+  it("does not auto-disable ribbon ids that are explicitly wired in desktop ribbon fallback handlers", () => {
     const schemaCommandIds = collectRibbonCommandIds(defaultRibbonSchema);
     const schemaIdSet = new Set(schemaCommandIds);
 
-    const implementedIds = extractImplementedCommandIdsFromMainTs(schemaIdSet);
+    const implementedIds = extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaIdSet);
 
     // Guard against a broken traversal so the test can't pass vacuously.
     expect(implementedIds).toContain("file.save.save");
@@ -247,13 +252,13 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
     const disabledImplemented = implementedIds.filter((id) => disabledById[id]);
     expect(
       disabledImplemented,
-      `Found ribbon ids that are wired in main.ts but disabled by the CommandRegistry baseline:\n${disabledImplemented
+      `Found ribbon ids that are wired in desktop ribbon fallback handlers but disabled by the CommandRegistry baseline:\n${disabledImplemented
         .map((id) => `- ${id}`)
         .join("\n")}`,
     ).toEqual([]);
   });
 
-  it("ensures enabled ribbon ids that are not registered as commands are handled in the desktop shell", () => {
+  it("ensures enabled ribbon ids that are not registered as commands are handled in desktop ribbon fallback handlers", () => {
     const schemaCommandIds = collectRibbonCommandIds(defaultRibbonSchema);
     const schemaIdSet = new Set(schemaCommandIds);
     const dropdownTriggerIds = collectRibbonDropdownTriggerIds(defaultRibbonSchema);
@@ -271,30 +276,14 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
     // Guard: we should always have at least one exempt/non-command ribbon id (e.g. File tab wiring).
     expect(enabledButUnregistered.length).toBeGreaterThan(0);
 
-    const implementedIds = extractImplementedCommandIdsFromMainTs(schemaIdSet);
+    const implementedIds = extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaIdSet);
     const implementedSet = new Set(implementedIds);
-
-    // Some ribbon ids are handled via `ribbon/commandHandlers.ts` (invoked from `main.ts`).
-    // Keep this test resilient to that split so enabled-but-unregistered ids can still be
-    // validated as "handled" even if `main.ts` doesn't contain the literal string id.
-    {
-      const handlerPath = fileURLToPath(new URL("../commandHandlers.ts", import.meta.url));
-      const handlerSource = readFileSync(handlerPath, "utf8");
-      for (const match of handlerSource.matchAll(/case\s+["']([^"']+)["']/g)) {
-        const id = match[1]!;
-        if (schemaIdSet.has(id)) implementedSet.add(id);
-      }
-      for (const match of handlerSource.matchAll(/commandId\s*===\s*["']([^"']+)["']/g)) {
-        const id = match[1]!;
-        if (schemaIdSet.has(id)) implementedSet.add(id);
-      }
-    }
 
     const missing = enabledButUnregistered.filter((id) => !implementedSet.has(id)).sort();
     expect(
       missing,
       [
-        "Found ribbon ids that would be enabled but are not registered as commands and are not handled in the desktop shell.",
+        "Found ribbon ids that would be enabled but are not registered as commands and are not handled in desktop ribbon fallback handlers.",
         "These ids should either be registered as builtin commands, explicitly handled in the desktop shell,",
         "or removed from the CommandRegistry exemption list so they are disabled by default.",
         "",
