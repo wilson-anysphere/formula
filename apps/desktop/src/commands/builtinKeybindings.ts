@@ -143,6 +143,13 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     mac: "cmd+`",
     when: WHEN_SPREADSHEET_READY,
   },
+  {
+    // Excel: Ctrl+Shift+L toggles AutoFilter.
+    command: "data.sortFilter.filter",
+    key: "ctrl+shift+l",
+    mac: "cmd+shift+l",
+    when: WHEN_SPREADSHEET_READY,
+  },
   // Theme switching (safe defaults: avoid Excel shortcuts by using Ctrl/Cmd+Alt/Option+Shift+<key>).
   {
     command: "view.theme.light",
