@@ -30,6 +30,9 @@ This doc is intentionally “close to the metal”. Helpful entrypoints in this 
   - `Error::PasswordRequired`
   - `Error::InvalidPassword`
   - `Error::UnsupportedOoxmlEncryption`
+  - Note: with the `formula-io` crate feature **`encrypted-workbooks`** enabled, the password-aware
+    open APIs (`open_workbook_with_password`, `open_workbook_model_with_password`) can also decrypt
+    and open Agile (4.4) encrypted `.xlsx`/`.xlsm` in memory (via the `formula-xlsx` decryptor).
 - **Agile (4.4) reference decryptor (includes `dataIntegrity` HMAC verification):**
   `crates/formula-xlsx/src/offcrypto/*`
 - **End-to-end decrypt helpers + Agile writer (OLE wrapper → decrypted ZIP bytes):**
@@ -282,7 +285,8 @@ actual = HMAC(key = hmacKey, hash = keyData/@hashAlgorithm, data = EncryptedPack
 ```
 
 4. Compare `actual` to the decrypted `hmacValue`
-   - mismatch ⇒ treat as an **integrity failure** (recommended to surface a distinct error rather than `InvalidPassword`)
+   - mismatch ⇒ treat as an **integrity failure** (ideally surfaced distinctly; `formula-io` currently
+     maps this to `Error::InvalidPassword` for UX)
 
 ## Common errors and what they mean
 
@@ -291,7 +295,8 @@ The Agile decryption errors are designed to be actionable. The most important di
 | Error | Meaning | Typical user action |
 |------|---------|---------------------|
 | `formula_io::Error::PasswordRequired` | Encrypted OOXML detected, but no password provided | Prompt for password |
-| `formula_io::Error::InvalidPassword` / `formula_offcrypto::OffcryptoError::InvalidPassword` / `formula_xlsx::offcrypto::OffCryptoError::WrongPassword` | Password verifier mismatch | Retry password |
+| `formula_io::Error::InvalidPassword` | Wrong password **or** integrity mismatch (Agile HMAC); callers should treat this as “password incorrect or file corrupted/tampered”. | Retry password; if persistent, treat as corrupted/tampered |
+| `formula_offcrypto::OffcryptoError::InvalidPassword` / `formula_xlsx::offcrypto::OffCryptoError::WrongPassword` | Password verifier mismatch | Retry password |
 | `formula_xlsx::offcrypto::OffCryptoError::IntegrityMismatch` | HMAC mismatch (tampering/corruption) | Re-download file; if persistent, treat as corrupted |
 | `formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed` | HMAC mismatch (tampering/corruption) | Re-download file; if persistent, treat as corrupted |
 | `formula_io::Error::UnsupportedOoxmlEncryption` / `formula_offcrypto::OffcryptoError::UnsupportedVersion` | `EncryptionInfo` version not recognized | Re-save without encryption; or add support |
