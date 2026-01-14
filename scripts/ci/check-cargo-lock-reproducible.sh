@@ -8,6 +8,13 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
+# `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml` pin. Some environments set it
+# globally (often to `stable`), which would bypass the pinned toolchain and reintroduce drift
+# for CI/local preflight runs.
+if [[ -n "${RUSTUP_TOOLCHAIN:-}" && -f "${repo_root}/rust-toolchain.toml" ]]; then
+  unset RUSTUP_TOOLCHAIN
+fi
+
 desktop_manifest="apps/desktop/src-tauri/Cargo.toml"
 
 run_metadata() {
