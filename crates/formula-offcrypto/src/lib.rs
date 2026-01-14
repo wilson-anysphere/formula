@@ -3336,8 +3336,14 @@ pub fn decrypt_agile_ooxml_from_bytes(
     raw_ole: Vec<u8>,
     password: &str,
 ) -> Result<Vec<u8>, OffcryptoError> {
+    // Open the OLE container once so we can validate stream presence without re-parsing it.
+    let cursor = Cursor::new(raw_ole);
+    let mut ole = cfb::CompoundFile::open(cursor).map_err(|e| {
+        OffcryptoError::InvalidStructure(format!("failed to open OLE compound file: {e}"))
+    })?;
+
     // 1) Parse and validate `EncryptionInfo` (must be Agile 4.4).
-    let encryption_info = read_ole_stream(&raw_ole, "EncryptionInfo")?;
+    let encryption_info = read_stream_from_ole(&mut ole, "EncryptionInfo")?;
     let info = match parse_encryption_info(&encryption_info)? {
         EncryptionInfo::Agile { info, .. } => info,
         EncryptionInfo::Standard { .. } => {
@@ -3360,11 +3366,14 @@ pub fn decrypt_agile_ooxml_from_bytes(
         }
     };
 
+    // Ensure `EncryptedPackage` exists before doing expensive password key derivation.
+    ensure_stream_exists(&mut ole, "EncryptedPackage")?;
+
     // 2) Derive secret key (also validates the password via verifier hashes).
     let secret_key = agile_secret_key(&info, password)?;
 
     // 3) Read `EncryptedPackage`.
-    let encrypted_package = read_ole_stream(&raw_ole, "EncryptedPackage")?;
+    let encrypted_package = read_stream_from_ole(&mut ole, "EncryptedPackage")?;
 
     // 4) Decrypt `EncryptedPackage`.
     let decrypted = agile_decrypt_package(&info, &secret_key, &encrypted_package)?;
@@ -3408,6 +3417,21 @@ fn read_stream_from_ole<F: Read + Seek>(
     s.read_to_end(&mut buf)
         .map_err(|e| OffcryptoError::InvalidStructure(format!("failed to read `{stream}`: {e}")))?;
     Ok(buf)
+}
+
+fn ensure_stream_exists<F: Seek>(
+    ole: &mut cfb::CompoundFile<F>,
+    stream: &'static str,
+) -> Result<(), OffcryptoError> {
+    match open_stream_best_effort(ole, stream) {
+        Ok(_stream) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(OffcryptoError::InvalidStructure(
+            format!("missing `{stream}` stream"),
+        )),
+        Err(err) => Err(OffcryptoError::InvalidStructure(format!(
+            "failed to open `{stream}`: {err}"
+        ))),
+    }
 }
 
 fn open_stream_best_effort<F: Seek>(
