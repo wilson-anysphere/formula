@@ -215,6 +215,31 @@ test("CollabSession.setPermissions stores normalized rangeRestrictions (sheetNam
   assert.equal(restriction.sheetName, undefined);
 });
 
+test("CollabSession safeSetCell* rejects invalid cell keys (no Yjs mutation)", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc, schema: { autoInit: false } });
+
+  const before = Y.encodeStateAsUpdate(doc);
+
+  await assert.rejects(session.safeSetCellValue("bad-key", "hacked"), /Invalid cellKey/);
+  await assert.rejects(session.safeSetCellFormula("bad-key", "=HACK()"), /Invalid cellKey/);
+  await assert.rejects(session.safeSetCellValue("", "hacked"), /Invalid cellKey/);
+  await assert.rejects(session.safeSetCellFormula("", "=HACK()"), /Invalid cellKey/);
+  await assert.rejects(
+    // @ts-expect-error intentionally invalid type
+    session.safeSetCellValue(null, "hacked"),
+    /Invalid cellKey/,
+  );
+
+  assert.deepEqual(session.cells.toJSON(), {});
+
+  const after = Y.encodeStateAsUpdate(doc);
+  assert.equal(Buffer.from(before).equals(Buffer.from(after)), true);
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession integration: sync + presence (in-memory)", async () => {
   const doc1 = new Y.Doc();
   const doc2 = new Y.Doc();
