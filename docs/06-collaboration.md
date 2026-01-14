@@ -269,6 +269,7 @@ APIs (source: [`packages/collab/encrypted-ranges/src/index.ts`](../packages/coll
 
 - `EncryptedRangeManager`
   - `list(): EncryptedRange[]` (deterministic ordering)
+    - Throws if `metadata.encryptedRanges` is present but in an unsupported schema (rather than silently returning `[]` and risking plaintext writes).
   - `add(range: { sheetId, startRow, startCol, endRow, endCol, keyId, createdAt?, createdBy? }): string`
     - `sheetId` should be the stable workbook sheet id; as a best-effort convenience, `EncryptedRangeManager` will resolve a sheet *display name* to its id when possible (useful for legacy/UI-driven callsites).
   - `update(id: string, patch: Partial<...>): void`
