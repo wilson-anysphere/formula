@@ -476,7 +476,6 @@ fn verify_password_standard_rc4_key_style(
         Err(e) => Err(e),
     }
 }
-
 fn verify_password_standard_with_key_and_mode(
     header: &EncryptionHeader,
     verifier: &EncryptionVerifier,
