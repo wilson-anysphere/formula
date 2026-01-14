@@ -18,7 +18,7 @@ use formula_engine::what_if::{
     CellRef as WhatIfCellRef, CellValue as WhatIfCellValue, WhatIfError, WhatIfModel,
 };
 use formula_model::{
-    display_formula_text, Alignment, CellRef, CellValue, DateSystem, DefinedNameScope, Font,
+    display_formula_text, Alignment, CellRef, CellValue, Color, DateSystem, DefinedNameScope, Font,
     HorizontalAlignment, Protection, Range, SheetVisibility, Style, TabColor, VerticalAlignment,
     EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
@@ -155,6 +155,87 @@ fn get_js_string(obj: &Object, keys: &[&str]) -> Option<String> {
     None
 }
 
+fn parse_tint_thousandths(value: f64) -> Option<i16> {
+    if !value.is_finite() {
+        return None;
+    }
+
+    let thousandths = if value.abs() <= 1.0 {
+        // OOXML `tint` is typically a float in [-1.0, 1.0].
+        (value.clamp(-1.0, 1.0) * 1000.0).round()
+    } else {
+        // Some UI payloads may already express tint in thousandths.
+        value.clamp(-1000.0, 1000.0).round()
+    };
+
+    Some(thousandths as i16)
+}
+
+fn parse_color_string(raw: &str) -> Option<Color> {
+    let s = raw.trim();
+    let hex = s.strip_prefix('#').unwrap_or(s);
+    match hex.len() {
+        6 => u32::from_str_radix(hex, 16)
+            .ok()
+            .map(|rgb| Color::new_argb(0xFF00_0000 | rgb)),
+        8 => u32::from_str_radix(hex, 16).ok().map(Color::new_argb),
+        _ => None,
+    }
+}
+
+fn parse_color_from_js(value: &JsValue) -> Option<Color> {
+    if let Some(s) = value.as_string() {
+        return parse_color_string(&s);
+    }
+
+    let obj = js_value_to_object(value)?;
+
+    if let Some(rgb) = get_js_string(&obj, &["rgb", "argb"]) {
+        return parse_color_string(&rgb);
+    }
+
+    let auto = get_js_prop(&obj, "auto")
+        .and_then(|v| {
+            v.as_bool()
+                .or_else(|| v.as_f64().map(|n| n.is_finite() && n != 0.0))
+        })
+        .unwrap_or(false);
+    if auto {
+        return Some(Color::Auto);
+    }
+
+    if let Some(theme) = get_js_prop(&obj, "theme")
+        .and_then(|v| v.as_f64())
+        .and_then(|n| {
+            if n.is_finite() && n >= 0.0 && n <= u16::MAX as f64 {
+                Some(n.trunc() as u16)
+            } else {
+                None
+            }
+        })
+    {
+        let tint = get_js_prop(&obj, "tint")
+            .and_then(|v| v.as_f64())
+            .and_then(parse_tint_thousandths);
+        return Some(Color::Theme { theme, tint });
+    }
+
+    if let Some(indexed) = get_js_prop(&obj, "indexed")
+        .and_then(|v| v.as_f64())
+        .and_then(|n| {
+            if n.is_finite() && n >= 0.0 && n <= u16::MAX as f64 {
+                Some(n.trunc() as u16)
+            } else {
+                None
+            }
+        })
+    {
+        return Some(Color::Indexed(indexed));
+    }
+
+    None
+}
+
 fn parse_alignment_from_js(value: &JsValue) -> Option<Alignment> {
     let obj = js_value_to_object(value)?;
 
@@ -253,6 +334,10 @@ fn parse_font_from_js(value: &JsValue, top_level_strike: Option<bool>) -> Option
     let underline = get_js_bool(&obj, &["underline"]).unwrap_or(false);
     let strike = get_js_bool(&obj, &["strike"]).unwrap_or(top_level_strike.unwrap_or(false));
 
+    let color = get_js_prop(&obj, "color")
+        .as_ref()
+        .and_then(parse_color_from_js);
+
     let out = Font {
         name,
         size_100pt,
@@ -260,7 +345,7 @@ fn parse_font_from_js(value: &JsValue, top_level_strike: Option<bool>) -> Option
         italic,
         underline,
         strike,
-        color: None, // TODO: map OOXML-like color payloads when needed.
+        color,
     };
 
     let is_default = out.name.is_none()
@@ -337,9 +422,38 @@ fn parse_style_from_js(style: JsValue) -> Result<Style, JsValue> {
     };
 
     let top_level_strike = get_js_bool(&obj, &["strike"]);
-    let font = get_js_prop(&obj, "font")
+    let mut font = get_js_prop(&obj, "font")
         .as_ref()
         .and_then(|value| parse_font_from_js(value, top_level_strike));
+
+    // Some UI payloads flatten `strike` and/or font color at the top level.
+    let top_level_color = get_js_prop(&obj, "fontColor")
+        .or_else(|| get_js_prop(&obj, "font_color"))
+        .as_ref()
+        .and_then(parse_color_from_js);
+
+    if font.is_none() && top_level_strike.unwrap_or(false) {
+        font = Some(Font {
+            strike: true,
+            ..Default::default()
+        });
+    }
+
+    if let Some(color) = top_level_color {
+        font = Some(match font {
+            Some(mut existing) => {
+                if existing.color.is_none() {
+                    existing.color = Some(color);
+                }
+                existing
+            }
+            None => Font {
+                color: Some(color),
+                strike: top_level_strike.unwrap_or(false),
+                ..Default::default()
+            },
+        });
+    }
 
     let alignment = get_js_prop(&obj, "alignment")
         .as_ref()
@@ -383,10 +497,94 @@ fn parse_style_from_js(style: JsValue) -> Result<Style, JsValue> {
 /// unavailable on non-wasm targets.
 #[cfg(test)]
 fn style_json_to_model_style(value: &JsonValue) -> Style {
+    fn parse_color_from_json(value: &JsonValue) -> Option<Color> {
+        match value {
+            JsonValue::String(s) => parse_color_string(s),
+            JsonValue::Object(obj) => {
+                if let Some(rgb) = obj.get("rgb").and_then(|v| v.as_str()) {
+                    return parse_color_string(rgb);
+                }
+                if let Some(argb) = obj.get("argb").and_then(|v| v.as_str()) {
+                    return parse_color_string(argb);
+                }
+                if obj
+                    .get("auto")
+                    .and_then(|v| v.as_bool().or_else(|| v.as_f64().map(|n| n.is_finite() && n != 0.0)))
+                    .unwrap_or(false)
+                {
+                    return Some(Color::Auto);
+                }
+                if let Some(theme) = obj.get("theme").and_then(|v| v.as_f64()).and_then(|n| {
+                    if n.is_finite() && n >= 0.0 && n <= u16::MAX as f64 {
+                        Some(n.trunc() as u16)
+                    } else {
+                        None
+                    }
+                }) {
+                    let tint = obj
+                        .get("tint")
+                        .and_then(|v| v.as_f64())
+                        .and_then(parse_tint_thousandths);
+                    return Some(Color::Theme { theme, tint });
+                }
+                if let Some(indexed) = obj
+                    .get("indexed")
+                    .and_then(|v| v.as_f64())
+                    .and_then(|n| {
+                        if n.is_finite() && n >= 0.0 && n <= u16::MAX as f64 {
+                            Some(n.trunc() as u16)
+                        } else {
+                            None
+                        }
+                    })
+                {
+                    return Some(Color::Indexed(indexed));
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn normalize_color_json(value: &JsonValue) -> Option<JsonValue> {
+        let color = parse_color_from_json(value)?;
+        serde_json::to_value(color).ok()
+    }
+
     // Prefer parsing as a full `Style` first (preserves font/fill/border when the caller supplies
     // the snake_case schema), but overlay UI-friendly camelCase mappings so callers can provide
     // `numberFormat`, `{ protection: { locked } }`, etc.
-    let mut out: Style = serde_json::from_value(value.clone()).unwrap_or_default();
+    let mut sanitized = value.clone();
+    if let Some(obj) = sanitized.as_object_mut() {
+        // Normalize UI/OOXML-like font color payloads into `formula_model::Color`-compatible shapes
+        // (e.g. `{ rgb: "FFRRGGBB" }` -> "#FFRRGGBB") so `serde_json` parsing succeeds.
+        if let Some(font) = obj.get_mut("font").and_then(|v| v.as_object_mut()) {
+            if let Some(color_value) = font.get("color").cloned() {
+                if let Some(normalized) = normalize_color_json(&color_value) {
+                    font.insert("color".to_string(), normalized);
+                } else {
+                    font.remove("color");
+                }
+            }
+        }
+
+        // Some UI payloads use `{ fontColor: ... }` at the top level instead of `font.color`.
+        let top_level_color = obj
+            .get("fontColor")
+            .or_else(|| obj.get("font_color"))
+            .cloned()
+            .and_then(|v| normalize_color_json(&v));
+        if let Some(color) = top_level_color {
+            let font = obj
+                .entry("font".to_string())
+                .or_insert_with(|| JsonValue::Object(Default::default()));
+            if let Some(font_obj) = font.as_object_mut() {
+                font_obj.entry("color".to_string()).or_insert(color);
+            }
+        }
+    }
+
+    let mut out: Style = serde_json::from_value(sanitized).unwrap_or_default();
 
     let Some(obj) = value.as_object() else {
         return out;
@@ -9139,5 +9337,55 @@ mod tests {
         }));
         assert_eq!(style.number_format.as_deref(), Some("0.00"));
         assert_eq!(style.font.as_ref().map(|f| f.bold), Some(true));
+    }
+
+    #[test]
+    fn intern_style_parses_font_color_rgb_object() {
+        let style = style_json_to_model_style(&json!({
+            "font": { "color": { "rgb": "FF112233" } }
+        }));
+        let mut engine = Engine::new();
+        let style_id = engine.intern_style(style);
+        let stored = engine
+            .style_table()
+            .get(style_id)
+            .unwrap_or_else(|| panic!("expected style for id {style_id}"));
+
+        assert_eq!(
+            stored.font.as_ref().and_then(|f| f.color),
+            Some(Color::new_argb(0xFF112233))
+        );
+    }
+
+    #[test]
+    fn intern_style_parses_top_level_font_color_hex() {
+        let style = style_json_to_model_style(&json!({
+            "fontColor": "#112233"
+        }));
+        let mut engine = Engine::new();
+        let style_id = engine.intern_style(style);
+        let stored = engine
+            .style_table()
+            .get(style_id)
+            .unwrap_or_else(|| panic!("expected style for id {style_id}"));
+
+        assert_eq!(
+            stored.font.as_ref().and_then(|f| f.color),
+            Some(Color::new_argb(0xFF112233))
+        );
+    }
+
+    #[test]
+    fn style_json_to_model_style_parses_theme_and_tint_font_color() {
+        let style = style_json_to_model_style(&json!({
+            "font": { "color": { "theme": 1, "tint": 0.5 } }
+        }));
+        assert_eq!(
+            style.font.as_ref().and_then(|f| f.color),
+            Some(Color::Theme {
+                theme: 1,
+                tint: Some(500),
+            })
+        );
     }
 }
