@@ -93,6 +93,39 @@ describe("FormulaBarView argument preview (integration)", () => {
     host.remove();
   });
 
+  it("treats escaped brackets inside structured refs as part of the argument expression", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+
+    const provider = vi.fn((expr: string) => {
+      if (expr === "Table1[Total]],USD]") return 42;
+      return "(preview unavailable)";
+    });
+    view.setArgumentPreviewProvider(provider);
+
+    const formula = "=SUM(Table1[Total]],USD], 1)";
+    view.textarea.value = formula;
+
+    // Cursor inside the structured reference argument.
+    const cursor = formula.indexOf("USD") + 1;
+    view.textarea.setSelectionRange(cursor, cursor);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await flushPreview();
+
+    const preview = host.querySelector<HTMLElement>('[data-testid="formula-hint-arg-preview"]');
+    expect(preview?.dataset.argStart).toBe(String(formula.indexOf("Table1")));
+    expect(preview?.dataset.argEnd).toBe(String(formula.indexOf("Table1[Total]],USD]") + "Table1[Total]],USD]".length));
+    expect(preview?.textContent).toBe("↳ Table1[Total]],USD]  →  42");
+    expect(provider).toHaveBeenCalledWith("Table1[Total]],USD]");
+
+    host.remove();
+  });
+
   it("collapses whitespace in the displayed argument expression", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
