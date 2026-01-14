@@ -313,7 +313,9 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   }
 
   const startupMode = resolveDesktopStartupMode({ defaultMode: 'cold' });
-  const benchKind = resolveDesktopStartupBenchKind({ defaultKind: 'full' });
+  // Prefer the lightweight shell benchmark in CI so we can measure startup without requiring
+  // built frontend assets. Locally, default to full end-to-end startup timings.
+  const benchKind = resolveDesktopStartupBenchKind({ defaultKind: process.env.CI ? 'shell' : 'full' });
 
   const runs = Math.max(1, Number(process.env.FORMULA_DESKTOP_STARTUP_RUNS ?? '20') || 20);
   const timeoutMs = Math.max(
