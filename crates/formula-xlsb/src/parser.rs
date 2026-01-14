@@ -1316,7 +1316,11 @@ mod tests {
         };
         assert_eq!(
             parse_ptg_exp_candidates(&rgce_u32_u32),
-            Some(vec![(row_u32, col_u32), (row_u32, col_u32), (0x0010, 0x0002)])
+            Some(vec![
+                (row_u32, col_u32),
+                (row_u32, col_u32),
+                (0x0010, 0x0002)
+            ])
         );
 
         // Some producers include trailing bytes after the coordinates; we should still return the
@@ -1328,7 +1332,11 @@ mod tests {
         };
         assert_eq!(
             parse_ptg_exp_candidates(&rgce_u32_u32_trailing),
-            Some(vec![(row_u32, col_u32), (row_u32, col_u32), (0x0010, 0x0002)])
+            Some(vec![
+                (row_u32, col_u32),
+                (row_u32, col_u32),
+                (0x0010, 0x0002)
+            ])
         );
 
         // Trailing bytes after a u32/u16 payload should not prevent parsing. Use non-zero trailing
@@ -1842,11 +1850,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         // cached value as a plain UTF-16 string.
                         let start_offset = rr.offset;
                         let mut parsed = None;
-                        match read_xl_wide_string_with_flags(
-                            &mut rr,
-                            FlagsWidth::U16,
-                            true,
-                        ) {
+                        match read_xl_wide_string_with_flags(&mut rr, FlagsWidth::U16, true) {
                             Ok((flags, candidate)) => {
                                 let cce_offset = rr.offset;
                                 let mut accept = false;
