@@ -492,8 +492,13 @@ export class DrawingInteractionController {
     if (hit && this.callbacks.onPointerDownHit && this.callbacks.onPointerDownHit(e, hit) === false) {
       return;
     }
+
     const nextSelectedId = hit?.object.id ?? null;
-    if (nextSelectedId !== this.selectedId) {
+    // Excel-like behavior: context-clicks (right-click / Ctrl+click on macOS) should not drop the
+    // current selection when the click misses all objects. They should still select the object
+    // under the cursor when there is a hit.
+    const shouldUpdateSelection = !isContextClick || hit != null;
+    if (shouldUpdateSelection && nextSelectedId !== this.selectedId) {
       this.selectedId = nextSelectedId;
       this.callbacks.onSelectionChange?.(this.selectedId);
     }

@@ -635,8 +635,8 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
     const down = createPointerLikeMouseEvent("pointerdown", { clientX: handleCenter.x, clientY: handleCenter.y, button: 2 });
     selectionCanvas.dispatchEvent(down);
 
-    // No visible rotation handle for charts, so this should behave like a miss (selection clears, no tag).
-    expect(app.getSelectedDrawingId()).toBeNull();
+    // No visible rotation handle for charts, so this should behave like a miss (selection stays, no tag).
+    expect(app.getSelectedDrawingId()).toBe(1);
     expect((down as any).__formulaDrawingContextClick).toBeUndefined();
     expect(down.defaultPrevented).toBe(false);
 

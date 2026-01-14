@@ -16674,7 +16674,9 @@ export class SpreadsheetApp {
     if (!hit) {
       // Clicking anywhere outside a drawing clears the drawing selection, but still allows the
       // grid to handle the pointerdown (e.g. row/column header selection).
-      if (prevSelected != null) {
+      // Excel-like: preserve drawing selection on context-click misses so right-clicking the grid
+      // can open cell context menus without dropping the existing object selection.
+      if (!isContextClick && prevSelected != null) {
         this.selectedDrawingId = null;
         this.selectedDrawingIndex = null;
         this.dispatchDrawingSelectionChanged();
