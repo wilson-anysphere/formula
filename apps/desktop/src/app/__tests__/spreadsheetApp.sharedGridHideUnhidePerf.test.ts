@@ -304,96 +304,126 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
       };
 
       const app = new SpreadsheetApp(root, status);
-      expect(app.getGridMode()).toBe("shared");
-
-      const sharedGrid = (app as any).sharedGrid;
-      expect(sharedGrid).toBeTruthy();
-      const renderer = sharedGrid.renderer;
-
-      const baselineRowOverrides = (renderer as any).rowHeightOverridesBase.size as number;
-      const baselineColOverrides = (renderer as any).colWidthOverridesBase.size as number;
-
       const outline = (app as any).getOutlineForSheet(app.getCurrentSheetId()) as any;
-      const baselineOutlineRows = outline.rows.entries.size as number;
-      const baselineOutlineCols = outline.cols.entries.size as number;
 
-      const rebuildSpy = vi.spyOn(app as any, "rebuildAxisVisibilityCache");
-      const rowEntrySpy = vi.spyOn(outline.rows, "entry");
-      const colEntrySpy = vi.spyOn(outline.cols, "entry");
-      rebuildSpy.mockClear();
-      rowEntrySpy.mockClear();
-      colEntrySpy.mockClear();
+      const rowEntries: Map<number, unknown> = outline.rows.entries;
+      const colEntries: Map<number, unknown> = outline.cols.entries;
+      const hadOwnRowGet = Object.prototype.hasOwnProperty.call(rowEntries, "get");
+      const hadOwnColGet = Object.prototype.hasOwnProperty.call(colEntries, "get");
+      const baseRowGet = rowEntries.get;
+      const baseColGet = colEntries.get;
+      let rowGetCalls = 0;
+      let colGetCalls = 0;
+      (rowEntries as any).get = function (this: Map<number, unknown>, key: number) {
+        rowGetCalls += 1;
+        return baseRowGet.call(this, key);
+      };
+      (colEntries as any).get = function (this: Map<number, unknown>, key: number) {
+        colGetCalls += 1;
+        return baseColGet.call(this, key);
+      };
 
-      const requestRenderSpy = vi.spyOn(renderer, "requestRender");
-      requestRenderSpy.mockClear();
+      const restoreOutlineGetOverrides = () => {
+        if (hadOwnRowGet) (rowEntries as any).get = baseRowGet;
+        else delete (rowEntries as any).get;
+        if (hadOwnColGet) (colEntries as any).get = baseColGet;
+        else delete (colEntries as any).get;
+      };
 
-      // Hide a block far away from the active cell so `ensureActiveCellVisible` / `scrollCellIntoView`
-      // should not trigger additional scroll/selection work.
-      const rowStart = 20_000;
-      const colStart = 2_000;
-      const rows: number[] = new Array<number>(OVERRIDE_COUNT);
-      const cols: number[] = new Array<number>(OVERRIDE_COUNT);
-      for (let i = 0; i < OVERRIDE_COUNT; i += 1) {
-        rows[i] = rowStart + i;
-        cols[i] = colStart + i;
+      try {
+        expect(app.getGridMode()).toBe("shared");
+
+        const sharedGrid = (app as any).sharedGrid;
+        expect(sharedGrid).toBeTruthy();
+        const renderer = sharedGrid.renderer;
+
+        const baselineRowOverrides = (renderer as any).rowHeightOverridesBase.size as number;
+        const baselineColOverrides = (renderer as any).colWidthOverridesBase.size as number;
+
+        const baselineOutlineRows = outline.rows.entries.size as number;
+        const baselineOutlineCols = outline.cols.entries.size as number;
+
+        const rebuildSpy = vi.spyOn(app as any, "rebuildAxisVisibilityCache");
+        const rowEntrySpy = vi.spyOn(outline.rows, "entry");
+        const colEntrySpy = vi.spyOn(outline.cols, "entry");
+        rebuildSpy.mockClear();
+        rowEntrySpy.mockClear();
+        colEntrySpy.mockClear();
+
+        const requestRenderSpy = vi.spyOn(renderer, "requestRender");
+        requestRenderSpy.mockClear();
+
+        // Hide a block far away from the active cell so `ensureActiveCellVisible` / `scrollCellIntoView`
+        // should not trigger additional scroll/selection work.
+        const rowStart = 20_000;
+        const colStart = 2_000;
+        const rows: number[] = new Array<number>(OVERRIDE_COUNT);
+        const cols: number[] = new Array<number>(OVERRIDE_COUNT);
+        for (let i = 0; i < OVERRIDE_COUNT; i += 1) {
+          rows[i] = rowStart + i;
+          cols[i] = colStart + i;
+        }
+
+        const hideRun = withAllocationGuards(() => {
+          app.hideRows(rows);
+          app.hideCols(cols);
+        });
+
+        expect(rebuildSpy).not.toHaveBeenCalled();
+        expect(outline.rows.entries.size).toBeLessThanOrEqual(baselineOutlineRows + OVERRIDE_COUNT);
+        expect(outline.cols.entries.size).toBeLessThanOrEqual(baselineOutlineCols + OVERRIDE_COUNT);
+
+        const headerRows = (app as any).sharedHeaderRows?.() ?? 1;
+        const headerCols = (app as any).sharedHeaderCols?.() ?? 1;
+        const zoom = renderer.getZoom();
+        const hiddenAxisSizeBase = 2;
+        expect(renderer.getRowHeight(rowStart + headerRows)).toBeCloseTo(hiddenAxisSizeBase * zoom, 6);
+        expect(renderer.getColWidth(colStart + headerCols)).toBeCloseTo(hiddenAxisSizeBase * zoom, 6);
+
+        // Keep bounded by selection size. (Future implementations may store fewer overrides.)
+        expect((renderer as any).rowHeightOverridesBase.size).toBeLessThanOrEqual(baselineRowOverrides + OVERRIDE_COUNT);
+        expect((renderer as any).colWidthOverridesBase.size).toBeLessThanOrEqual(baselineColOverrides + OVERRIDE_COUNT);
+
+        // Ensure the implementation remains sparse: avoid scanning all rows/cols to check hidden state.
+        // (Current implementation iterates only `outline.*.entries` plus constant-time checks.)
+        expect(rowEntrySpy.mock.calls.length).toBeLessThan(100_000);
+        expect(colEntrySpy.mock.calls.length).toBeLessThan(100_000);
+        expect(rowGetCalls).toBeLessThan(150_000);
+        expect(colGetCalls).toBeLessThan(150_000);
+
+        const unhideRun = withAllocationGuards(() => {
+          app.unhideRows(rows);
+          app.unhideCols(cols);
+        });
+
+        expect(rebuildSpy).not.toHaveBeenCalled();
+        // Unhide should not create additional outline entries; it may keep or delete entries depending on implementation.
+        expect(outline.rows.entries.size).toBeLessThanOrEqual(baselineOutlineRows + OVERRIDE_COUNT);
+        expect(outline.cols.entries.size).toBeLessThanOrEqual(baselineOutlineCols + OVERRIDE_COUNT);
+
+        expect((renderer as any).rowHeightOverridesBase.size).toBe(baselineRowOverrides);
+        expect((renderer as any).colWidthOverridesBase.size).toBe(baselineColOverrides);
+
+        expect(renderer.getRowHeight(rowStart + headerRows)).toBeCloseTo(renderer.scroll.rows.defaultSize, 6);
+        expect(renderer.getColWidth(colStart + headerCols)).toBeCloseTo(renderer.scroll.cols.defaultSize, 6);
+
+        // One render invalidation per outline update (hide rows, hide cols, unhide rows, unhide cols),
+        // with some tolerance for coalescing in future implementations.
+        expect(requestRenderSpy.mock.calls.length).toBeLessThanOrEqual(4);
+
+        // Keep work proportional to the number of hidden indices, not sheet maxes.
+        expect(hideRun.mapSetCalls).toBeLessThan(600_000);
+        expect(unhideRun.mapSetCalls).toBeLessThan(600_000);
+
+        if (!process.env.CI) {
+          expect(hideRun.elapsedMs).toBeLessThan(1_500);
+          expect(unhideRun.elapsedMs).toBeLessThan(1_500);
+        }
+      } finally {
+        restoreOutlineGetOverrides();
+        app.destroy();
+        root.remove();
       }
-
-      const hideRun = withAllocationGuards(() => {
-        app.hideRows(rows);
-        app.hideCols(cols);
-      });
-
-      expect(rebuildSpy).not.toHaveBeenCalled();
-      expect(outline.rows.entries.size).toBeLessThanOrEqual(baselineOutlineRows + OVERRIDE_COUNT);
-      expect(outline.cols.entries.size).toBeLessThanOrEqual(baselineOutlineCols + OVERRIDE_COUNT);
-
-      const headerRows = (app as any).sharedHeaderRows?.() ?? 1;
-      const headerCols = (app as any).sharedHeaderCols?.() ?? 1;
-      const zoom = renderer.getZoom();
-      const hiddenAxisSizeBase = 2;
-      expect(renderer.getRowHeight(rowStart + headerRows)).toBeCloseTo(hiddenAxisSizeBase * zoom, 6);
-      expect(renderer.getColWidth(colStart + headerCols)).toBeCloseTo(hiddenAxisSizeBase * zoom, 6);
-
-      // Keep bounded by selection size. (Future implementations may store fewer overrides.)
-      expect((renderer as any).rowHeightOverridesBase.size).toBeLessThanOrEqual(baselineRowOverrides + OVERRIDE_COUNT);
-      expect((renderer as any).colWidthOverridesBase.size).toBeLessThanOrEqual(baselineColOverrides + OVERRIDE_COUNT);
-
-      // Ensure the implementation remains sparse: avoid scanning all rows/cols to check hidden state.
-      // (Current implementation iterates only `outline.*.entries` plus constant-time checks.)
-      expect(rowEntrySpy.mock.calls.length).toBeLessThan(100_000);
-      expect(colEntrySpy.mock.calls.length).toBeLessThan(100_000);
-
-      const unhideRun = withAllocationGuards(() => {
-        app.unhideRows(rows);
-        app.unhideCols(cols);
-      });
-
-      expect(rebuildSpy).not.toHaveBeenCalled();
-      // Unhide should not create additional outline entries; it may keep or delete entries depending on implementation.
-      expect(outline.rows.entries.size).toBeLessThanOrEqual(baselineOutlineRows + OVERRIDE_COUNT);
-      expect(outline.cols.entries.size).toBeLessThanOrEqual(baselineOutlineCols + OVERRIDE_COUNT);
-
-      expect((renderer as any).rowHeightOverridesBase.size).toBe(baselineRowOverrides);
-      expect((renderer as any).colWidthOverridesBase.size).toBe(baselineColOverrides);
-
-      expect(renderer.getRowHeight(rowStart + headerRows)).toBeCloseTo(renderer.scroll.rows.defaultSize, 6);
-      expect(renderer.getColWidth(colStart + headerCols)).toBeCloseTo(renderer.scroll.cols.defaultSize, 6);
-
-      // One render invalidation per outline update (hide rows, hide cols, unhide rows, unhide cols),
-      // with some tolerance for coalescing in future implementations.
-      expect(requestRenderSpy.mock.calls.length).toBeLessThanOrEqual(4);
-
-      // Keep work proportional to the number of hidden indices, not sheet maxes.
-      expect(hideRun.mapSetCalls).toBeLessThan(600_000);
-      expect(unhideRun.mapSetCalls).toBeLessThan(600_000);
-
-      if (!process.env.CI) {
-        expect(hideRun.elapsedMs).toBeLessThan(1_500);
-        expect(unhideRun.elapsedMs).toBeLessThan(1_500);
-      }
-
-      app.destroy();
-      root.remove();
     } finally {
       if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
       else process.env.DESKTOP_GRID_MODE = prior;
