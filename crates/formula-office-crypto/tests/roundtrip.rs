@@ -7,7 +7,8 @@ use hmac::{Hmac, Mac};
 use sha2::Digest;
 
 use formula_office_crypto::{
-    decrypt_encrypted_package_ole, is_encrypted_ooxml_ole, OfficeCryptoError,
+    decrypt_encrypted_package, decrypt_encrypted_package_ole, is_encrypted_ooxml_ole,
+    OfficeCryptoError,
 };
 
 const BLOCK_KEY_VERIFIER_HASH_INPUT: &[u8; 8] = b"\xFE\xA7\xD2\x76\x3B\x4B\x9E\x79";
@@ -315,7 +316,8 @@ fn agile_encryption_accepts_header_plus_plaintext_hmac_target() {
     let ole_bytes = encrypt_agile_ooxml_ole_header_plus_plaintext_hmac(plaintext, password);
     assert!(is_encrypted_ooxml_ole(&ole_bytes));
 
-    let decrypted = decrypt_encrypted_package_ole(&ole_bytes, password).expect("decrypt");
+    // Regression coverage for the high-level convenience API.
+    let decrypted = decrypt_encrypted_package(&ole_bytes, password).expect("decrypt");
     assert_eq!(decrypted, plaintext);
     assert_zip_contains_workbook_xml(&decrypted);
 }
