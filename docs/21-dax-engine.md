@@ -471,11 +471,13 @@ The engine supports the following filter argument forms (see `apply_calculate_fi
    Overrides relationship filtering for the duration of the evaluation.
 
    - `direction` is a bare identifier (parsed as `Expr::TableName`) or a string literal, one of:
-      - `BOTH`
-      - `ONEWAY` (or `SINGLE`)
-      - `ONEWAY_LEFTFILTERSRIGHT`
-      - `ONEWAY_RIGHTFILTERSLEFT`
-      - `NONE` (disables the relationship)
+       - `BOTH`
+       - `ONEWAY` (or `SINGLE`)
+       - `ONEWAY_LEFTFILTERSRIGHT`
+       - `ONEWAY_RIGHTFILTERSLEFT`
+       - `NONE` (disables the relationship)
+   - If multiple `CROSSFILTER(...)` modifiers in the same `CALCULATE(...)` target the **same**
+     relationship with different directions, the engine errors (ambiguous).
 
 3. `ALL(Table)` / `ALL(Table[Column])`, `ALLNOBLANKROW(Table)` / `ALLNOBLANKROW(Table[Column])`, and
    `REMOVEFILTERS(Table)` / `REMOVEFILTERS(Table[Column])`  
