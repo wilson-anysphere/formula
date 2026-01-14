@@ -1342,6 +1342,24 @@ const INSTANCE_NUM_ENUM_1_2 = [
   { replacement: "2", displayText: "2 (2nd occurrence)", confidence: 0.65 },
 ];
 
+const CHOOSE_INDEX_NUM_ENUM_1_2_3 = [
+  { replacement: "1", displayText: "1 (value1)", confidence: 0.66 },
+  { replacement: "2", displayText: "2 (value2)", confidence: 0.65 },
+  { replacement: "3", displayText: "3 (value3)", confidence: 0.64 },
+];
+
+const VLOOKUP_COL_INDEX_NUM_ENUM_1_2_3 = [
+  { replacement: "2", displayText: "2 (2nd column)", confidence: 0.66 },
+  { replacement: "1", displayText: "1 (1st column)", confidence: 0.65 },
+  { replacement: "3", displayText: "3 (3rd column)", confidence: 0.64 },
+];
+
+const HLOOKUP_ROW_INDEX_NUM_ENUM_1_2_3 = [
+  { replacement: "2", displayText: "2 (2nd row)", confidence: 0.66 },
+  { replacement: "1", displayText: "1 (1st row)", confidence: 0.65 },
+  { replacement: "3", displayText: "3 (3rd row)", confidence: 0.64 },
+];
+
 /**
  * Function-specific enumerations for commonly misunderstood "flag" arguments.
  * These are curated because the function catalog only carries coarse arg types.
@@ -1431,6 +1449,10 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "1", displayText: "1 (drop first column(s))", confidence: 0.6 },
       { replacement: "-1", displayText: "-1 (drop last column(s))", confidence: 0.59 },
     ],
+  },
+  CHOOSE: {
+    // index_num
+    0: CHOOSE_INDEX_NUM_ENUM_1_2_3,
   },
   CHOOSECOLS: {
     // col_num
@@ -2110,6 +2132,8 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     2: DAY_COUNT_BASIS_ENUM_0_TO_4,
   },
   VLOOKUP: {
+    // col_index_num
+    2: VLOOKUP_COL_INDEX_NUM_ENUM_1_2_3,
     // range_lookup (TRUE = approx match, FALSE = exact)
     3: [
       { replacement: "FALSE", displayText: "FALSE (exact match)", confidence: 0.7 },
@@ -2117,6 +2141,8 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     ],
   },
   HLOOKUP: {
+    // row_index_num
+    2: HLOOKUP_ROW_INDEX_NUM_ENUM_1_2_3,
     // range_lookup
     3: [
       { replacement: "FALSE", displayText: "FALSE (exact match)", confidence: 0.7 },

@@ -2494,6 +2494,30 @@ test("XLOOKUP search_mode suggests 1, -1, 2, -2", async () => {
   );
 });
 
+test("VLOOKUP col_index_num suggests 2, 1, 3 (no 0)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=VLOOKUP(A1, A1:B10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["2", "1", "3"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `${currentInput}${v}`),
+      `Expected VLOOKUP to suggest col_index_num=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+
+  assert.ok(
+    !suggestions.some((s) => s.text === `${currentInput}0`),
+    `Did not expect VLOOKUP to suggest col_index_num=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("VLOOKUP range_lookup suggests TRUE/FALSE with higher confidence", async () => {
   const engine = new TabCompletionEngine();
 
@@ -2517,6 +2541,53 @@ test("VLOOKUP range_lookup suggests TRUE/FALSE with higher confidence", async ()
   assert.ok(
     (approx?.confidence ?? 0) > 0.5,
     `Expected VLOOKUP/TRUE to have elevated confidence, got: ${approx?.confidence}`
+  );
+});
+
+test("HLOOKUP row_index_num suggests 2, 1, 3 (no 0)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=HLOOKUP(A1, A1:B10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["2", "1", "3"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `${currentInput}${v}`),
+      `Expected HLOOKUP to suggest row_index_num=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+
+  assert.ok(
+    !suggestions.some((s) => s.text === `${currentInput}0`),
+    `Did not expect HLOOKUP to suggest row_index_num=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("CHOOSE index_num suggests 1, 2, 3 (no 0)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=CHOOSE(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["1", "2", "3"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `${currentInput}${v}`),
+      `Expected CHOOSE to suggest index_num=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+  assert.ok(
+    !suggestions.some((s) => s.text === `${currentInput}0`),
+    `Did not expect CHOOSE to suggest index_num=0, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 
