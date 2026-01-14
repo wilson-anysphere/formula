@@ -580,8 +580,9 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
   shouldEncryptCell(cell: { sheetId: string; row: number; col: number }): boolean;
   keyIdForCell(cell: { sheetId: string; row: number; col: number }): string | null;
 } {
-  const mgr = new EncryptedRangeManager({ doc });
-  const sheetsRoot = getWorkbookRoots(doc).sheets;
+  const roots = getWorkbookRoots(doc);
+  const metadata = roots.metadata;
+  const sheetsRoot = roots.sheets;
 
   function normalizeCell(cell: { sheetId: string; row: number; col: number }): { sheetId: string; row: number; col: number } | null {
     const sheetId = String(cell?.sheetId ?? "").trim();
@@ -617,17 +618,66 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
 
     const { sheetId, row, col } = normalized;
     let sheetName: string | null = null;
-    for (const range of mgr.list()) {
-      if (range.sheetId !== sheetId) {
-        // Legacy support: older clients stored `sheetName` instead of the stable
-        // workbook sheet id. Match those entries against the current sheet name.
-        sheetName ??= resolveSheetName(sheetId);
-        if (!sheetName || range.sheetId !== sheetName) continue;
-      }
-      if (row < range.startRow || row > range.endRow) continue;
-      if (col < range.startCol || col > range.endCol) continue;
+
+    const matchesSheet = (rangeSheetId: string): boolean => {
+      if (rangeSheetId === sheetId) return true;
+      // Legacy support: older clients stored `sheetName` instead of the stable
+      // workbook sheet id. Match those entries against the current sheet name.
+      sheetName ??= resolveSheetName(sheetId);
+      return Boolean(sheetName) && rangeSheetId === sheetName;
+    };
+
+    const raw = metadata.get(METADATA_KEY);
+
+    // Policy precedence: if multiple encrypted ranges overlap, prefer the most recently
+    // added entry when the doc stores ranges in an array (canonical schema).
+    //
+    // This mirrors typical user expectations: adding a new range is treated as "override"
+    // for subsequent writes, and the array ordering is deterministic across collaborators
+    // in Yjs.
+    const scanValue = (value: unknown, fallbackId?: string): EncryptedRange | null => {
+      const range = yRangeToEncryptedRange(value, fallbackId);
+      if (!range) return null;
+      if (!matchesSheet(range.sheetId)) return null;
+      if (row < range.startRow || row > range.endRow) return null;
+      if (col < range.startCol || col > range.endCol) return null;
       return range;
+    };
+
+    const arr = getYArray(raw);
+    if (arr) {
+      const items = arr.toArray();
+      for (let i = items.length - 1; i >= 0; i -= 1) {
+        const match = scanValue(items[i]);
+        if (match) return match;
+      }
+      return null;
     }
+
+    const map = getYMap(raw);
+    if (map) {
+      /** @type {Array<[string, unknown]>} */
+      const entries: Array<[string, unknown]> = [];
+      map.forEach((value, key) => {
+        entries.push([String(key), value]);
+      });
+      // Deterministic ordering for legacy map schema.
+      entries.sort((a, b) => a[0].localeCompare(b[0]));
+      for (let i = entries.length - 1; i >= 0; i -= 1) {
+        const [key, value] = entries[i]!;
+        const match = scanValue(value, key);
+        if (match) return match;
+      }
+      return null;
+    }
+
+    if (Array.isArray(raw)) {
+      for (let i = raw.length - 1; i >= 0; i -= 1) {
+        const match = scanValue(raw[i]);
+        if (match) return match;
+      }
+    }
+
     return null;
   }
 

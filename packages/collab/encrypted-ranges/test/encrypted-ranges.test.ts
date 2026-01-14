@@ -413,4 +413,17 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(list.map((r) => r.id)).toEqual(["a"]);
     expect(list[0]?.endCol).toBe(1);
   });
+
+  it("policy helper prefers the most recently added encrypted range when overlaps exist", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const mgr = new EncryptedRangeManager({ doc });
+    mgr.add({ sheetId: "s1", startRow: 0, startCol: 0, endRow: 1, endCol: 1, keyId: "k1" });
+    mgr.add({ sheetId: "s1", startRow: 0, startCol: 0, endRow: 0, endCol: 0, keyId: "k2" });
+
+    const policy = createEncryptionPolicyFromDoc(doc);
+    expect(policy.keyIdForCell({ sheetId: "s1", row: 0, col: 0 })).toBe("k2");
+    expect(policy.keyIdForCell({ sheetId: "s1", row: 1, col: 1 })).toBe("k1");
+  });
 });
