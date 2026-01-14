@@ -569,9 +569,10 @@ def main() -> int:
         choices=[_PRIVACY_PUBLIC, _PRIVACY_PRIVATE],
         default=_PRIVACY_PUBLIC,
         help=(
-            "Control redaction of outputs. `private` hashes filesystem path metadata in the report "
-            "(for example, paths that include local usernames/mount points) and hashes any non-standard "
-            "formula function names surfaced in summary aggregations (e.g. topMissingFunctions)."
+            "Control redaction of outputs. `private` hashes potentially sensitive strings in the report "
+            "(absolute paths/URIs, domain-like strings, and spreadsheet-ish filenames), hashes any "
+            "non-standard/UDF function names surfaced in summary aggregations (e.g. topMissingFunctions), "
+            "and redacts custom tags/function namespaces within mismatch entries."
         ),
     )
     parser.add_argument(
