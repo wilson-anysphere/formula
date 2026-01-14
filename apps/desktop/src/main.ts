@@ -2186,6 +2186,9 @@ const RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY: Record<string, true> = (() => {
   delete out["audit.togglePrecedents"];
   delete out["audit.toggleDependents"];
   delete out["audit.toggleTransitive"];
+  // Formula Auditing ribbon ids are registered commands (and are safe to keep enabled in read-only),
+  // but we avoid embedding the full ids here so `node:test` drift-guards can ensure we aren't
+  // routing them through main.ts fallback wiring.
   for (const id of FORMULA_AUDITING_RIBBON_COMMAND_IDS) {
     delete out[id];
   }
