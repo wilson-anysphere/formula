@@ -2,6 +2,8 @@
 
 use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
+use cbc::Encryptor;
+use cipher::{block_padding::NoPadding, BlockEncryptMut, KeyIvInit};
 use formula_offcrypto::{
     decrypt_ooxml_standard, standard_derive_key, OffcryptoError, StandardEncryptionHeader,
     StandardEncryptionHeaderFlags, StandardEncryptionInfo, StandardEncryptionVerifier,
@@ -11,6 +13,10 @@ use std::io::{Cursor, Read, Write};
 
 const CALG_AES_128: u32 = 0x0000_660E;
 const CALG_SHA1: u32 = 0x0000_8004;
+const STANDARD_SALT: [u8; 16] = [
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e,
+    0x1f,
+];
 
 fn aes_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {
     assert_eq!(buf.len() % 16, 0);
@@ -38,11 +44,6 @@ fn aes_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {
 }
 
 fn build_standard_encryption_info_and_key(password: &str) -> (Vec<u8>, Vec<u8>) {
-    let salt: [u8; 16] = [
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d,
-        0x1e, 0x1f,
-    ];
-
     let mut info = StandardEncryptionInfo {
         header: StandardEncryptionHeader {
             // MS-OFFCRYPTO Standard encryption must set `fCryptoAPI`, and because we declare an AES
@@ -60,7 +61,7 @@ fn build_standard_encryption_info_and_key(password: &str) -> (Vec<u8>, Vec<u8>) 
             csp_name: String::new(),
         },
         verifier: StandardEncryptionVerifier {
-            salt: salt.to_vec(),
+            salt: STANDARD_SALT.to_vec(),
             encrypted_verifier: [0u8; 16],
             verifier_hash_size: 20,
             encrypted_verifier_hash: vec![0u8; 32],
@@ -131,6 +132,61 @@ fn encrypt_encrypted_package_ecb(key: &[u8], plaintext: &[u8]) -> Vec<u8> {
     out
 }
 
+fn derive_standard_segment_iv(salt: &[u8], segment_index: u32) -> [u8; 16] {
+    let mut h = Sha1::new();
+    h.update(salt);
+    h.update(&segment_index.to_le_bytes());
+    let digest = h.finalize();
+    let mut iv = [0u8; 16];
+    iv.copy_from_slice(&digest[..16]);
+    iv
+}
+
+fn aes_cbc_encrypt_in_place(key: &[u8], iv: &[u8; 16], buf: &mut [u8]) {
+    assert_eq!(buf.len() % 16, 0);
+
+    let len = buf.len();
+    match key.len() {
+        16 => {
+            let enc = Encryptor::<Aes128>::new_from_slices(key, iv).expect("key/iv");
+            enc.encrypt_padded_mut::<NoPadding>(buf, len)
+                .expect("AES-CBC encrypt");
+        }
+        24 => {
+            let enc = Encryptor::<Aes192>::new_from_slices(key, iv).expect("key/iv");
+            enc.encrypt_padded_mut::<NoPadding>(buf, len)
+                .expect("AES-CBC encrypt");
+        }
+        32 => {
+            let enc = Encryptor::<Aes256>::new_from_slices(key, iv).expect("key/iv");
+            enc.encrypt_padded_mut::<NoPadding>(buf, len)
+                .expect("AES-CBC encrypt");
+        }
+        _ => panic!("unexpected AES key length"),
+    }
+}
+
+fn encrypt_encrypted_package_cbc_segmented(key: &[u8], salt: &[u8], plaintext: &[u8]) -> Vec<u8> {
+    const SEGMENT_LEN: usize = 0x1000;
+    let total_size = plaintext.len() as u64;
+
+    let mut out = Vec::new();
+    out.extend_from_slice(&total_size.to_le_bytes());
+
+    for (idx, chunk) in plaintext.chunks(SEGMENT_LEN).enumerate() {
+        let mut padded = chunk.to_vec();
+        let rem = padded.len() % 16;
+        if rem != 0 {
+            padded.resize(padded.len() + (16 - rem), 0);
+        }
+        let iv = derive_standard_segment_iv(salt, idx as u32);
+        aes_cbc_encrypt_in_place(key, &iv, &mut padded);
+        out.extend_from_slice(&padded);
+    }
+
+    out
+}
+
 fn build_tiny_zip() -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut zip = zip::ZipWriter::new(cursor);
@@ -163,6 +219,28 @@ fn decrypt_ooxml_standard_roundtrips_zip() {
     let mut contents = String::new();
     file.read_to_string(&mut contents).expect("read file");
     assert_eq!(contents, "hello");
+}
+
+#[test]
+fn decrypt_ooxml_standard_supports_cbc_segmented_encryptedpackage_variant() {
+    // Some producers encrypt Standard/CryptoAPI `EncryptedPackage` using per-segment AES-CBC with an
+    // IV derived from the verifier salt and segment index:
+    // `iv_i = SHA1(salt || LE32(i))[0..16]`.
+    //
+    // `formula-offcrypto` is expected to auto-detect ECB vs CBC-segmented by probing the first
+    // decrypted segment for a ZIP signature.
+    let password = "Password1234_";
+    let (encryption_info, key) = build_standard_encryption_info_and_key(password);
+
+    let zip_bytes = build_tiny_zip();
+    assert_eq!(&zip_bytes[..2], b"PK");
+
+    let encrypted_package =
+        encrypt_encrypted_package_cbc_segmented(&key, &STANDARD_SALT, &zip_bytes);
+    let decrypted = decrypt_ooxml_standard(&encryption_info, &encrypted_package, password)
+        .expect("decrypt CBC-segmented Standard EncryptedPackage");
+
+    assert_eq!(decrypted, zip_bytes);
 }
 
 #[test]
