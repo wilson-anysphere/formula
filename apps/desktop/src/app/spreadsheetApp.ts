@@ -5748,6 +5748,15 @@ export class SpreadsheetApp {
   }
 
   /**
+   * Chart renderer used by the drawings overlay for imported DrawingML charts.
+   *
+   * Split-view secondary panes can reuse this so chart drawings render in both panes.
+   */
+  getDrawingChartRenderer(): ChartRendererAdapter {
+    return new ChartRendererAdapter(this.formulaChartModelStore);
+  }
+
+  /**
    * Best-effort selected drawing id (used to render selection handles in the drawings overlay).
    *
    * Today this mirrors chart selection when available.

@@ -10,7 +10,7 @@ import { MAX_GRID_ZOOM, MIN_GRID_ZOOM } from "@formula/grid";
 import type { CellRange as FillEngineRange } from "@formula/fill-engine";
 import type { DocumentController } from "../../document/documentController.js";
 import type { DrawingObject, ImageStore } from "../../drawings/types";
-import { DrawingOverlay, type GridGeometry, type Viewport as DrawingsViewport } from "../../drawings/overlay";
+import { DrawingOverlay, type ChartRenderer, type GridGeometry, type Viewport as DrawingsViewport } from "../../drawings/overlay";
 import { showToast } from "../../extensions/ui.js";
 import { applyFillCommitToDocumentController } from "../../fill/applyFillCommit";
 import { CellEditorOverlay, type EditorCommit } from "../../editor/cellEditorOverlay.js";
@@ -132,6 +132,12 @@ export class SecondaryGridView {
      * Image store backing drawing objects.
      */
     images: ImageStore;
+    /**
+     * Optional chart renderer for drawing objects of kind `chart`.
+     *
+     * When omitted, charts render as placeholders in the secondary pane.
+     */
+    chartRenderer?: ChartRenderer;
     /**
      * Optional hook to render selection handles on a selected drawing object.
      */
@@ -413,7 +419,7 @@ export class SecondaryGridView {
         };
       },
     };
-    this.drawingsOverlay = new DrawingOverlay(drawingsCanvas, this.drawingsImages, geom);
+    this.drawingsOverlay = new DrawingOverlay(drawingsCanvas, this.drawingsImages, geom, options.chartRenderer);
 
     // Initial sizing (ResizeObserver will keep it updated).
     this.resizeToContainer();

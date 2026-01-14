@@ -4293,6 +4293,7 @@ if (
         getComputedValue: (cell) => app.getCellComputedValueForSheet(getSecondarySheetId(), cell),
         getDrawingObjects: (sheetId) => app.getDrawingObjects(sheetId),
         images: app.getDrawingImages(),
+        chartRenderer: app.getDrawingChartRenderer(),
         getSelectedDrawingId: () => app.getSelectedDrawingId(),
         onRequestRefresh: () => app.refresh(),
         onSelectionChange: () => syncPrimarySelectionFromSecondary(),
