@@ -260,6 +260,25 @@ fn localize_does_not_insert_thousands_separators_for_1000() {
 }
 
 #[test]
+fn localize_translates_decimal_separator_in_scientific_notation() {
+    // Excel accepts scientific notation in formulas and `FormulaLocal` localizes only the decimal
+    // separator (not thousands grouping). Verify both directions for a representative case.
+    let canonical = "=SUM(1.23E3,0.5)";
+
+    for (loc, expected) in [
+        (&locale::DE_DE, "=SUMME(1,23E3;0,5)"),
+        (&locale::FR_FR, "=SOMME(1,23E3;0,5)"),
+        (&locale::ES_ES, "=SUMA(1,23E3;0,5)"),
+    ] {
+        let localized = locale::localize_formula(canonical, loc).unwrap();
+        assert_eq!(localized, expected);
+
+        let roundtrip = locale::canonicalize_formula(&localized, loc).unwrap();
+        assert_eq!(roundtrip, canonical);
+    }
+}
+
+#[test]
 fn canonicalize_accepts_canonical_leading_decimal_in_de_de() {
     let canonical = locale::canonicalize_formula("=SUMME(.5;1)", &locale::DE_DE).unwrap();
     assert_eq!(canonical, "=SUM(.5,1)");
