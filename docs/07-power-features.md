@@ -1266,7 +1266,7 @@ Validation + edge cases (Rust behavior):
 - Engine integration (`EngineSolverModel`):
   - Decision variables must be coercible to numbers at construction time; otherwise `EngineSolverModel::new` fails with a `SolverError` like `"cell Sheet1!A1 is not numeric (...)"`.
   - Objective and constraint cells are coerced per-iteration; non-numeric values become `NaN` (methods treat non-finite values as very bad via a large penalty).
-  - Cell refs accept the same forms as What‑If (`A1` default-sheet, `Sheet!A1`, `\'My Sheet\'!A1`).
+  - Cell refs accept the same forms as What‑If (`A1` default-sheet, `Sheet!A1`, `'My Sheet'!A1`).
 
 ---
 
