@@ -520,10 +520,22 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(price?.args?.[0]?.name, "settlement", "Expected PRICE arg1 to be settlement");
   assert.equal(price?.args?.[5]?.name, "frequency", "Expected PRICE arg6 to be frequency");
   assert.ok(price?.args?.[6]?.optional, "Expected PRICE basis to be optional");
+  assert.equal(registry.getArgType("PRICE", 2), "value", "Expected PRICE rate to be value-like");
+  assert.equal(registry.getArgType("PRICE", 5), "number", "Expected PRICE frequency to stay numeric (enum hints)");
+  assert.equal(registry.getArgType("PRICE", 6), "number", "Expected PRICE basis to stay numeric (enum hints)");
 
   assert.equal(registry.getArgType("ACCRINT", 7), "boolean", "Expected ACCRINT calc_method to be boolean");
+  assert.equal(registry.getArgType("ACCRINT", 3), "value", "Expected ACCRINT rate to be value-like");
+  assert.equal(registry.getArgType("ACCRINT", 5), "number", "Expected ACCRINT frequency to stay numeric (enum hints)");
+  assert.equal(registry.getArgType("ACCRINT", 6), "number", "Expected ACCRINT basis to stay numeric (enum hints)");
   assert.equal(registry.getFunction("COUPDAYBS")?.args?.[2]?.name, "frequency", "Expected COUPDAYBS arg3 to be frequency");
   assert.equal(registry.getFunction("TBILLYIELD")?.args?.[2]?.name, "pr", "Expected TBILLYIELD arg3 to be pr");
+  assert.equal(registry.getArgType("TBILLYIELD", 2), "value", "Expected TBILLYIELD pr to be value-like");
+  assert.equal(registry.getArgType("INTRATE", 2), "value", "Expected INTRATE investment to be value-like");
+  assert.equal(registry.getArgType("INTRATE", 4), "number", "Expected INTRATE basis to stay numeric (enum hints)");
+  assert.equal(registry.getArgType("AMORLINC", 0), "value", "Expected AMORLINC cost to be value-like");
+  assert.equal(registry.getArgType("AMORLINC", 6), "number", "Expected AMORLINC basis to stay numeric (enum hints)");
+  assert.equal(registry.getArgType("DDB", 0), "value", "Expected DDB cost to be value-like");
 
   // Odd-period bond functions should keep frequency/basis positions aligned.
   assert.equal(registry.getFunction("ODDLPRICE")?.args?.[6]?.name, "frequency", "Expected ODDLPRICE arg7 to be frequency");

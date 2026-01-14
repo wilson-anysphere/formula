@@ -4756,6 +4756,23 @@ test("IRR guess suggests a left-cell reference (value-like arg)", async () => {
   );
 });
 
+test("PRICE rate suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=PRICE(A1, B1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 3 }, // D1
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=PRICE(A1, B1, C1"),
+    `Expected PRICE to suggest C1 for rate, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("PMT type suggests 0 and 1", async () => {
   const engine = new TabCompletionEngine();
 
