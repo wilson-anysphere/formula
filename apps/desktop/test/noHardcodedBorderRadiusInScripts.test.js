@@ -138,14 +138,11 @@ test("desktop UI scripts should not hardcode border-radius values in inline styl
 
     /** @type {{ re: RegExp, kind: string }[]} */
     const patterns = [
-      // Style strings (e.g. `style: "border-radius: 4px;"`, or arrays joined into style strings)
-      {
-        re: /\bborder-radius\s*:\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))(?<unit>px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi,
-        kind: "border-radius",
-      },
+      // Style strings (e.g. `style: "border-radius: 4px;"`, `border-radius: calc(4px)`)
+      { re: /\bborder-radius\s*:\s*(?<value>[^;"'`}]*)/gi, kind: "border-radius" },
       // Longhand border radii in style strings (e.g. `border-top-left-radius: 4px`)
       {
-        re: /\bborder-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\s*:\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))(?<unit>px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi,
+        re: /\bborder-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\s*:\s*(?<value>[^;"'`}]*)/gi,
         kind: "border-*-radius",
       },
       // React style objects (e.g. `{ borderRadius: 4 }`) interpret numeric values as px.
@@ -155,14 +152,11 @@ test("desktop UI scripts should not hardcode border-radius values in inline styl
         re: /\bborder(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*:\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "border*Radius-number",
       },
-      // React/DOM style objects (e.g. `{ borderRadius: "4px" }`)
-      {
-        re: /\bborderRadius\s*:\s*(["'`])\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))(?<unit>px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi,
-        kind: "borderRadius",
-      },
+      // React/DOM style objects (e.g. `{ borderRadius: "4px" }`, `"calc(4px)"`)
+      { re: /\bborderRadius\s*:\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "borderRadius" },
       // Longhand border radii in React style objects (string => px).
       {
-        re: /\bborder(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*:\s*(["'`])\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))(?<unit>px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi,
+        re: /\bborder(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*:\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi,
         kind: "border*Radius",
       },
       // DOM style assignment (e.g. `el.style.borderRadius = 4`)
@@ -172,14 +166,11 @@ test("desktop UI scripts should not hardcode border-radius values in inline styl
         re: /\.style\.border(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*=\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "style.border*Radius-number",
       },
-      // DOM style assignment (e.g. `el.style.borderRadius = "4px"`)
-      {
-        re: /\.style\.borderRadius\s*=\s*(["'`])\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))(?<unit>px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi,
-        kind: "style.borderRadius",
-      },
+      // DOM style assignment (e.g. `el.style.borderRadius = "4px"`, `"calc(4px)"`)
+      { re: /\.style\.borderRadius\s*=\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.borderRadius" },
       // DOM style assignment for longhand border radii (string => px).
       {
-        re: /\.style\.border(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*=\s*(["'`])\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))(?<unit>px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi,
+        re: /\.style\.border(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*=\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi,
         kind: "style.border*Radius",
       },
       // setProperty("border-radius", 4)
@@ -192,14 +183,14 @@ test("desktop UI scripts should not hardcode border-radius values in inline styl
         re: /\.style\.setProperty\(\s*(["'])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "setProperty-border-*-radius-number",
       },
-      // setProperty("border-radius", "4px")
+      // setProperty("border-radius", "4px") / setProperty(..., "calc(4px)")
       {
-        re: /\.style\.setProperty\(\s*(["'])border-radius\1\s*,\s*(["'`])\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))(?<unit>px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi,
+        re: /\.style\.setProperty\(\s*(["'])border-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
         kind: "setProperty",
       },
       // setProperty("border-top-left-radius", "4px")
       {
-        re: /\.style\.setProperty\(\s*(["'])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(["'`])\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))(?<unit>px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi,
+        re: /\.style\.setProperty\(\s*(["'])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
         kind: "setProperty-border-*-radius",
       },
     ];
@@ -207,19 +198,40 @@ test("desktop UI scripts should not hardcode border-radius values in inline styl
     for (const { re } of patterns) {
       let match;
       while ((match = re.exec(stripped))) {
+        const valueString = match.groups?.value;
+        if (typeof valueString === "string") {
+          // Scan the matched value for any hardcoded length units (e.g. `calc(4px)` or `var(--radius, 4px)`).
+          const unitRegex =
+            /([+-]?(?:\d+(?:\.\d+)?|\.\d+))(px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi;
+          const valueStart = match[0].indexOf(valueString);
+          let unitMatch;
+          while ((unitMatch = unitRegex.exec(valueString))) {
+            const numeric = unitMatch[1];
+            const unit = unitMatch[2] ?? "";
+            const n = Number(numeric);
+            if (!Number.isFinite(n)) continue;
+            if (n === 0) continue;
+
+            const absIndex = match.index + Math.max(0, valueStart) + unitMatch.index;
+            const line = getLineNumber(stripped, absIndex);
+            violations.push(
+              `${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: border-radius: ${numeric}${unit}`,
+            );
+          }
+          continue;
+        }
+
         const numeric = match.groups?.num;
         if (!numeric) continue;
-        const unit = match.groups?.unit;
         const px = Number(numeric);
         if (px === 0) continue;
 
         // Find the absolute index of the numeric capture for stable line numbers.
-        const needle = unit ? `${numeric}${unit}` : String(numeric);
+        const needle = String(numeric);
         const relative = match[0].indexOf(needle);
         const absIndex = match.index + (relative >= 0 ? relative : 0);
         const line = getLineNumber(stripped, absIndex);
-        const display = unit ? `${numeric}${unit}` : `${numeric}px`;
-        violations.push(`${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: border-radius: ${display}`);
+        violations.push(`${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: border-radius: ${numeric}px`);
       }
     }
   }
