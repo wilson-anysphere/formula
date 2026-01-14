@@ -5778,9 +5778,11 @@ fn rewrite_all_formulas_structural(
     sheet_names: &HashMap<SheetId, String>,
     edit: StructuralEdit,
 ) -> Vec<FormulaRewrite> {
-    let mut sheet_ids: HashMap<String, SheetId> = HashMap::new();
-    for (sheet_id, name) in sheet_names {
-        sheet_ids.insert(name.to_ascii_lowercase(), *sheet_id);
+    // 3D references (`Sheet1:Sheet3!A1`) use sheet *tab order* to define span membership, so use
+    // the workbook's current sheet ordering rather than stable sheet ids.
+    let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
+    for (order_index, name) in workbook.sheet_names.iter().enumerate() {
+        sheet_order_indices.insert(name.to_ascii_lowercase(), order_index);
     }
 
     let mut rewrites = Vec::new();
@@ -5798,7 +5800,7 @@ fn rewrite_all_formulas_structural(
                 ctx_sheet,
                 origin,
                 &edit,
-                |name| sheet_ids.get(&name.to_ascii_lowercase()).copied(),
+                |name| sheet_order_indices.get(&name.to_ascii_lowercase()).copied(),
             );
             if changed {
                 rewrites.push(FormulaRewrite {
@@ -5819,9 +5821,11 @@ fn rewrite_all_formulas_range_map(
     sheet_names: &HashMap<SheetId, String>,
     edit: &RangeMapEdit,
 ) -> Vec<FormulaRewrite> {
-    let mut sheet_ids: HashMap<String, SheetId> = HashMap::new();
-    for (sheet_id, name) in sheet_names {
-        sheet_ids.insert(name.to_ascii_lowercase(), *sheet_id);
+    // 3D references (`Sheet1:Sheet3!A1`) use sheet *tab order* to define span membership, so use
+    // the workbook's current sheet ordering rather than stable sheet ids.
+    let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
+    for (order_index, name) in workbook.sheet_names.iter().enumerate() {
+        sheet_order_indices.insert(name.to_ascii_lowercase(), order_index);
     }
 
     let mut rewrites = Vec::new();
@@ -5839,7 +5843,7 @@ fn rewrite_all_formulas_range_map(
                 ctx_sheet,
                 origin,
                 edit,
-                |name| sheet_ids.get(&name.to_ascii_lowercase()).copied(),
+                |name| sheet_order_indices.get(&name.to_ascii_lowercase()).copied(),
             );
             if changed {
                 rewrites.push(FormulaRewrite {
@@ -10994,7 +10998,13 @@ fn rewrite_defined_name_structural(
                 ctx_sheet,
                 origin,
                 edit,
-                |name| engine.workbook.sheet_id(name),
+                |name| {
+                    engine
+                        .workbook
+                        .sheet_names
+                        .iter()
+                        .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                },
             );
             (NameDefinition::Reference(new_formula), changed)
         }
@@ -11004,7 +11014,13 @@ fn rewrite_defined_name_structural(
                 ctx_sheet,
                 origin,
                 edit,
-                |name| engine.workbook.sheet_id(name),
+                |name| {
+                    engine
+                        .workbook
+                        .sheet_names
+                        .iter()
+                        .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                },
             );
             (NameDefinition::Formula(new_formula), changed)
         }
@@ -11046,7 +11062,13 @@ fn rewrite_defined_name_range_map(
                 ctx_sheet,
                 origin,
                 edit,
-                |name| engine.workbook.sheet_id(name),
+                |name| {
+                    engine
+                        .workbook
+                        .sheet_names
+                        .iter()
+                        .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                },
             );
             (NameDefinition::Reference(new_formula), changed)
         }
@@ -11056,7 +11078,13 @@ fn rewrite_defined_name_range_map(
                 ctx_sheet,
                 origin,
                 edit,
-                |name| engine.workbook.sheet_id(name),
+                |name| {
+                    engine
+                        .workbook
+                        .sheet_names
+                        .iter()
+                        .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                },
             );
             (NameDefinition::Formula(new_formula), changed)
         }

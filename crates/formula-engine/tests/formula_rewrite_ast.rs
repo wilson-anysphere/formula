@@ -1,6 +1,6 @@
 use formula_engine::editing::rewrite::{
     rewrite_formula_for_copy_delta, rewrite_formula_for_structural_edit,
-    rewrite_formula_for_structural_edit_with_resolver, StructuralEdit,
+    rewrite_formula_for_structural_edit_with_sheet_order_resolver, StructuralEdit,
 };
 use formula_engine::CellAddr;
 use pretty_assertions::assert_eq;
@@ -131,7 +131,7 @@ fn structural_edits_rewrite_sheet_range_refs_when_edit_sheet_in_span() {
     };
     let origin = CellAddr::new(0, 0);
 
-    let (out, changed) = rewrite_formula_for_structural_edit_with_resolver(
+    let (out, changed) = rewrite_formula_for_structural_edit_with_sheet_order_resolver(
         "=SUM(Sheet1:Sheet3!A1)",
         "Summary",
         origin,
@@ -158,7 +158,7 @@ fn structural_edits_rewrite_reversed_sheet_range_refs_when_edit_sheet_in_span() 
     };
     let origin = CellAddr::new(0, 0);
 
-    let (out, changed) = rewrite_formula_for_structural_edit_with_resolver(
+    let (out, changed) = rewrite_formula_for_structural_edit_with_sheet_order_resolver(
         "=SUM(Sheet3:Sheet1!A1)",
         "Summary",
         origin,
@@ -174,6 +174,37 @@ fn structural_edits_rewrite_reversed_sheet_range_refs_when_edit_sheet_in_span() 
 
     assert!(changed);
     assert_eq!(out, "=SUM(Sheet3:Sheet1!A2)");
+}
+
+#[test]
+fn structural_edits_use_tab_order_for_sheet_range_membership() {
+    // Simulate a workbook where sheet ids are stable but not the same as tab order positions.
+    //
+    // Tab order is: Sheet2, Sheet3, Sheet1, Summary
+    // So the 3D span `Sheet1:Sheet3` includes Sheet3 and Sheet1, but *not* Sheet2.
+    let edit = StructuralEdit::InsertRows {
+        sheet: "Sheet2".to_string(),
+        row: 0,
+        count: 1,
+    };
+    let origin = CellAddr::new(0, 0);
+
+    let (out, changed) = rewrite_formula_for_structural_edit_with_sheet_order_resolver(
+        "=SUM(Sheet1:Sheet3!A1)",
+        "Summary",
+        origin,
+        &edit,
+        |name| match name {
+            "Sheet2" => Some(0),
+            "Sheet3" => Some(1),
+            "Sheet1" => Some(2),
+            "Summary" => Some(3),
+            _ => None,
+        },
+    );
+
+    assert!(!changed);
+    assert_eq!(out, "=SUM(Sheet1:Sheet3!A1)");
 }
 
 #[test]
