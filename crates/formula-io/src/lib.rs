@@ -4264,9 +4264,10 @@ fn try_open_standard_aes_encrypted_ooxml_model_workbook(
             path: path.to_path_buf(),
             source,
         })?;
-    // Some producers treat the 8-byte prefix as `(u32 size, u32 reserved)` and may write a
-    // non-zero reserved high DWORD. Compute ciphertext length for a plausibility check and fall
-    // back to the low DWORD when the combined u64 is not sensible.
+    // MS-OFFCRYPTO describes this field as a `u64le`, but some producers treat it as
+    // `(u32 size, u32 reserved)` and may write a non-zero reserved high DWORD. Compute ciphertext
+    // length for a plausibility check and fall back to the low DWORD when the combined u64 is not
+    // sensible.
     let base = encrypted_package_stream
         .seek(SeekFrom::Current(0))
         .map_err(|source| Error::OpenIo {
@@ -4279,13 +4280,13 @@ fn try_open_standard_aes_encrypted_ooxml_model_workbook(
             path: path.to_path_buf(),
             source,
         })?;
+    let ciphertext_len = end.saturating_sub(base);
     encrypted_package_stream
         .seek(SeekFrom::Start(base))
         .map_err(|source| Error::OpenIo {
             path: path.to_path_buf(),
             source,
         })?;
-    let ciphertext_len = end.saturating_sub(base);
     let plaintext_len = parse_encrypted_package_size_prefix_bytes(len_bytes, Some(ciphertext_len));
     if !encrypted_package_plaintext_len_is_plausible(plaintext_len, ciphertext_len) {
         return Err(Error::UnsupportedOoxmlEncryption {
@@ -4379,6 +4380,31 @@ fn try_open_standard_aes_encrypted_ooxml_model_workbook(
         }
     })?;
 
+    // This helper only supports the `.xlsx`/`.xlsm` reader stack. If the decrypted payload is an
+    // `.xlsb` package (contains `xl/workbook.bin`), fall back to the buffered decrypt path so the
+    // caller can open it via the normal `.xlsb` reader.
+    let archive = zip::ZipArchive::new(reader).map_err(|source| Error::OpenXlsx {
+        path: path.to_path_buf(),
+        source: xlsx::XlsxError::Zip(source),
+    })?;
+    for name in archive.file_names() {
+        let mut normalized = name.trim_start_matches('/');
+        let replaced;
+        if normalized.contains('\\') {
+            replaced = normalized.replace('\\', "/");
+            normalized = &replaced;
+        }
+        if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
+            return Ok(None);
+        }
+    }
+    let mut reader = archive.into_inner();
+    reader
+        .seek(SeekFrom::Start(0))
+        .map_err(|source| Error::OpenIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
     let workbook = xlsx::read_workbook_from_reader(reader).map_err(|source| Error::OpenXlsx {
         path: path.to_path_buf(),
         source,

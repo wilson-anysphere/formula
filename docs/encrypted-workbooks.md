@@ -199,6 +199,9 @@ At the `formula-io` layer, callers should branch on the error variant (not strin
 - `InvalidPassword` — password provided, but decryption failed
 - `UnsupportedOoxmlEncryption` / `UnsupportedEncryption` — encrypted workbook detected, but the
   scheme or build configuration doesn’t support decrypting it
+- `UnsupportedEncryptedWorkbookKind` — workbook decrypted successfully, but the decrypted workbook
+  type is not supported in this encrypted-open path (currently unused; encrypted `.xlsx`/`.xlsm`/`.xlsb`
+  are supported)
 - `EncryptedWorkbook` — legacy `.xls` encryption detected (BIFF `FILEPASS`); retry via the password
   APIs (`open_workbook_with_password` / `open_workbook_model_with_password`)
 

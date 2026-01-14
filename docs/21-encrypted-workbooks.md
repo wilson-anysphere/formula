@@ -372,11 +372,11 @@ Today, the `formula-io` crate:
     - `open_workbook(..)` / `open_workbook_model(..)` return `Error::PasswordRequired` when no
       password is provided (or `Error::UnsupportedOoxmlEncryption` when the `EncryptionInfo` version
       is unknown).
-    - To supply a password:
-      - Use `open_workbook_with_options(path, OpenOptions { password: Some(...) })` (preferred) or the
-        convenience wrapper `open_workbook_with_password(path, Some(password))` to decrypt and open
-        encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks into a `Workbook` (encrypted `.xlsb` opens as
-        `Workbook::Xlsb`).
+      - To supply a password:
+        - Use `open_workbook_with_options(path, OpenOptions { password: Some(...) })` (preferred) or the
+          convenience wrapper `open_workbook_with_password(path, Some(password))` to decrypt and open
+          encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks into a `Workbook` (encrypted `.xlsb` opens as
+          `Workbook::Xlsb`).
       - To open directly into a `formula_model::Workbook`, use:
         - `open_workbook_model_with_options(path, OpenOptions { password: Some(...) })`, or
         - the convenience wrapper `open_workbook_model_with_password(path, Some(password))`.
@@ -568,7 +568,7 @@ These distinctions matter for UX and telemetry: “needs password” is a normal
 
 Current behavior in `formula-io`:
 
-- Encrypted OOXML wrappers surface:
+  - Encrypted OOXML wrappers surface:
   - `Error::UnsupportedOoxmlEncryption` (unrecognized `EncryptionInfo` version)
   - With `formula-io/encrypted-workbooks` enabled:
     - `Error::PasswordRequired` (no password provided)
