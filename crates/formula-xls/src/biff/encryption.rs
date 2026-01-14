@@ -464,7 +464,8 @@ fn apply_xor_obfuscation_in_place(
     key: u16,
     xor_array: &[u8; 16],
 ) -> Result<(), DecryptError> {
-    let mut key_bytes = key.to_le_bytes();
+    // Ensure key bytes don't linger on the stack on early-return error paths.
+    let key_bytes = Zeroizing::new(key.to_le_bytes());
     let mut pos = 0usize;
 
     let mut offset = encrypted_start;
@@ -503,7 +504,6 @@ fn apply_xor_obfuscation_in_place(
 
         offset = data_end;
     }
-    key_bytes.zeroize();
     Ok(())
 }
 
