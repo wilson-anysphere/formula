@@ -33,6 +33,7 @@ export interface SelectionRenderStyle {
   fillColor: string;
   borderColor: string;
   activeBorderColor: string;
+  fillHandleColor: string;
   borderWidth: number;
   activeBorderWidth: number;
   fillHandleSize: number;
@@ -60,6 +61,9 @@ function defaultStyleFromTheme(): SelectionRenderStyle {
     fillColor: resolveToken("--formula-grid-selection-fill", () => resolveCssVar("--selection-fill", { fallback: "transparent" })),
     borderColor: resolveToken("--formula-grid-selection-border", () => resolveCssVar("--selection-border", { fallback: "transparent" })),
     activeBorderColor: resolveToken("--formula-grid-selection-border", () => resolveCssVar("--selection-border", { fallback: "transparent" })),
+    fillHandleColor: resolveToken("--formula-grid-selection-handle", () =>
+      resolveCssVar("--selection-border", { fallback: "transparent" }),
+    ),
     borderWidth: 2,
     activeBorderWidth: 3,
     fillHandleSize: 8,
@@ -172,7 +176,7 @@ export class SelectionRenderer {
     if (!rect) return;
 
     ctx.save();
-    ctx.fillStyle = style.activeBorderColor;
+    ctx.fillStyle = style.fillHandleColor;
     ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
     ctx.restore();
   }

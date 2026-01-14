@@ -1138,6 +1138,7 @@ export class SpreadsheetApp {
     fillColor: "transparent",
     borderColor: "transparent",
     activeBorderColor: resolveCssVar("--formula-grid-selection-border", { fallback: resolveCssVar("--selection-border", { fallback: "transparent" }) }),
+    fillHandleColor: "transparent",
     borderWidth: 2,
     activeBorderWidth: 3,
     fillHandleSize: 0,
