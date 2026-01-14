@@ -1011,7 +1011,17 @@ async function handleRequest(message: WorkerInboundMessage, generation: number):
               // Treat missing support as a no-op so callers (and DocumentController hydration)
               // don't fail hard when running against a minimal build.
               if (typeof (wb as any).setWorkbookFileMetadata === "function") {
-                (wb as any).setWorkbookFileMetadata(params.directory ?? null, params.filename ?? null);
+                const dirRaw = (params as any).directory;
+                const filenameRaw = (params as any).filename;
+                const directory =
+                  typeof dirRaw === "string" ? (dirRaw.trim() === "" ? null : dirRaw.trim()) : dirRaw == null ? null : String(dirRaw).trim();
+                const filename =
+                  typeof filenameRaw === "string"
+                    ? (filenameRaw.trim() === "" ? null : filenameRaw.trim())
+                    : filenameRaw == null
+                      ? null
+                      : String(filenameRaw).trim();
+                (wb as any).setWorkbookFileMetadata(directory, filename);
               }
               result = null;
               break;
@@ -1201,6 +1211,12 @@ async function handleRequest(message: WorkerInboundMessage, generation: number):
                   if ("result" in obj && "changes" in obj) {
                     const normalizedResult =
                       obj.result && typeof obj.result === "object" ? { ...(obj.result as any) } : obj.result;
+                    if (normalizedResult && typeof normalizedResult === "object") {
+                      const statusRaw = (normalizedResult as any).status;
+                      if (typeof statusRaw === "string") {
+                        (normalizedResult as any).status = statusRaw.trim();
+                      }
+                    }
                     const rawChanges = obj.changes;
                     result = {
                       result: normalizedResult,
@@ -1210,9 +1226,11 @@ async function handleRequest(message: WorkerInboundMessage, generation: number):
                     // Backward compatibility: older WASM builds returned a flat payload
                     // `{ success, status?, solution, iterations, finalError, finalOutput? }`.
                     const legacy = cloneToPlainData(obj) as any;
+                    const legacyStatusRaw = typeof legacy.status === "string" ? legacy.status : "";
+                    const legacyStatusTrimmed = legacyStatusRaw.trim();
                     const status =
-                      typeof legacy.status === "string" && legacy.status.trim()
-                        ? legacy.status
+                      legacyStatusTrimmed !== ""
+                        ? legacyStatusTrimmed
                         : legacy.success
                           ? "Converged"
                           : "NumericalFailure";

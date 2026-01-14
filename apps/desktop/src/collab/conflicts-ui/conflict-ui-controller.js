@@ -123,10 +123,8 @@ export class ConflictUiController {
         resolvedRemote = "";
       }
     }
-    const remoteLabel =
-      conflict.remoteUserId && typeof resolvedRemote === "string" && resolvedRemote.trim()
-        ? resolvedRemote
-        : conflict.remoteUserId;
+    const resolvedRemoteTrimmed = typeof resolvedRemote === "string" ? resolvedRemote.trim() : "";
+    const remoteLabel = conflict.remoteUserId && resolvedRemoteTrimmed ? resolvedRemoteTrimmed : conflict.remoteUserId;
     const right = this._renderConflictSide({
       testid: "conflict-remote",
       label: remoteLabel ? `Theirs (${remoteLabel})` : "Theirs",
@@ -159,7 +157,7 @@ export class ConflictUiController {
         if (!this.onNavigateToCell) return;
         const cell = conflict?.cell;
         if (!cell || typeof cell !== "object") return;
-        const sheetId = String(cell.sheetId ?? "");
+        const sheetId = String(cell.sheetId ?? "").trim();
         const row = Number(cell.row);
         const col = Number(cell.col);
         if (!sheetId) return;

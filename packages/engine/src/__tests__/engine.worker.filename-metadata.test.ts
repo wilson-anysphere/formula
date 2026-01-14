@@ -410,6 +410,45 @@ describe("engine.worker workbook file metadata integration", () => {
       dispose();
     }
   });
+
+  it("trims directory/filename strings passed via setWorkbookFileMetadata", async () => {
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookEvalFilename.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setCells",
+        params: {
+          updates: [
+            { address: "A1", value: '=CELL("filename")', sheet: "Sheet1" },
+            { address: "A2", value: '=INFO("directory")', sheet: "Sheet1" },
+          ],
+        },
+      });
+
+      await sendRequest(port, {
+        type: "request",
+        id: 2,
+        method: "setWorkbookFileMetadata",
+        params: { directory: "  /tmp  ", filename: "  book.xlsx  " },
+      });
+      await sendRequest(port, { type: "request", id: 3, method: "recalculate", params: {} });
+
+      let resp = await sendRequest(port, { type: "request", id: 4, method: "getCell", params: { address: "A1", sheet: "Sheet1" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("/tmp/[book.xlsx]Sheet1");
+
+      resp = await sendRequest(port, { type: "request", id: 5, method: "getCell", params: { address: "A2", sheet: "Sheet1" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("/tmp/");
+    } finally {
+      dispose();
+    }
+  });
 });
 
 const previousSelf = (globalThis as any).self;

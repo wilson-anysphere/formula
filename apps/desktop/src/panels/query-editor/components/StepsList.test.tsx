@@ -38,7 +38,7 @@ describe("StepsList", () => {
     const steps: QueryStep[] = [
       {
         id: "s1",
-        name: "filterRows",
+        name: "  filterRows  ",
         operation: { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "isNotNull" } },
       },
       {
@@ -48,7 +48,7 @@ describe("StepsList", () => {
       },
       {
         id: "s3",
-        name: "My Custom Step",
+        name: "  My Custom Step  ",
         operation: { type: "removeColumns", columns: ["Region"] },
       },
     ];
@@ -57,9 +57,7 @@ describe("StepsList", () => {
       root?.render(<StepsList steps={steps} selectedIndex={0} onSelect={() => {}} />);
     });
 
-    expect(host?.textContent).toContain("Filter Rows (Region)");
-    expect(host?.textContent).toContain("Sort (Region)");
-    expect(host?.textContent).toContain("My Custom Step");
+    const buttons = Array.from(host?.querySelectorAll<HTMLButtonElement>(".query-editor-steps__button") ?? []);
+    expect(buttons.map((b) => b.textContent)).toEqual(["Filter Rows (Region)", "Sort (Region)", "My Custom Step"]);
   });
 });
-

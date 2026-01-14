@@ -41,6 +41,42 @@ describe("ConflictUiController", () => {
     container.remove();
   });
 
+  it("trims sheetId before invoking onNavigateToCell", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const resolveConflict = vi.fn(() => true);
+    const onNavigateToCell = vi.fn();
+
+    const ui = new ConflictUiController({
+      container,
+      monitor: { resolveConflict },
+      onNavigateToCell,
+    });
+
+    ui.addConflict({
+      id: "c_trim_sheet",
+      kind: "formula",
+      cell: { sheetId: "  Sheet1  ", row: 3, col: 2 },
+      cellKey: "Sheet1:3:2",
+      localFormula: "=1",
+      remoteFormula: "=2",
+      remoteUserId: "u2",
+      detectedAt: 0,
+    });
+
+    container.querySelector<HTMLButtonElement>('[data-testid="conflict-toast-open"]')?.click();
+
+    const jump = container.querySelector<HTMLButtonElement>('[data-testid="conflict-jump-to-cell"]');
+    expect(jump).not.toBeNull();
+    jump!.click();
+
+    expect(onNavigateToCell).toHaveBeenCalledWith({ sheetId: "Sheet1", row: 3, col: 2 });
+
+    ui.destroy();
+    container.remove();
+  });
+
   it("ignores errors thrown by onNavigateToCell", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -87,7 +123,7 @@ describe("ConflictUiController", () => {
     const ui = new ConflictUiController({
       container,
       monitor: { resolveConflict },
-      resolveUserLabel: (userId: string) => (userId === "u2" ? "Bob" : userId),
+      resolveUserLabel: (userId: string) => (userId === "u2" ? "  Bob  " : userId),
     });
 
     ui.addConflict({

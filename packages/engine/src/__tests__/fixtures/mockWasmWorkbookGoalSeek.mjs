@@ -34,9 +34,9 @@ export class WasmWorkbook {
     // depending on whether the caller supplies `derivativeStep` (used here as a simple
     // test toggle).
     if (request && request.derivativeStep != null) {
-      return {
-        result: {
-          status: "Converged",
+        return {
+          result: {
+          status: "  Converged  ",
           solution: 5,
           iterations: 3,
           finalOutput: 25,
@@ -53,7 +53,7 @@ export class WasmWorkbook {
 
     return {
       success: true,
-      status: "Converged",
+      status: "  Converged  ",
       solution: 5,
       iterations: 3,
       finalError: 0,

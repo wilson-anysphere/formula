@@ -20,9 +20,11 @@ export function StepsList(props: { steps: QueryStep[]; selectedIndex: number; on
                   : "query-editor-steps__button"
               }
             >
-              {typeof step.name === "string" && step.name.trim() && step.name !== step.operation.type
-                ? step.name
-                : formatQueryOperationLabel(step.operation)}
+              {(() => {
+                const trimmedName = typeof step.name === "string" ? step.name.trim() : "";
+                if (trimmedName !== "" && trimmedName !== step.operation.type) return trimmedName;
+                return formatQueryOperationLabel(step.operation);
+              })()}
             </button>
           </li>
         ))}
