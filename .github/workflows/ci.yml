@@ -423,7 +423,16 @@ jobs:
             librsvg2-dev \
             libssl-dev \
             patchelf
+      - name: Cache Tauri permission list (cargo tauri permission ls)
+        id: tauri-permission-list-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: target/ci/tauri-permission-ls.txt
+          key: tauri-permission-ls-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}-${{ hashFiles('Cargo.lock', 'apps/desktop/src-tauri/Cargo.toml', 'apps/desktop/src-tauri/tauri.conf.json') }}
       - name: Cache cargo-tauri binary
+        # If the permission list is already cached, `scripts/check-tauri-permissions.mjs` can run
+        # without installing the Tauri CLI binary.
+        if: steps.tauri-permission-list-cache.outputs.cache-hit != 'true'
         id: cargo-tauri-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
@@ -433,9 +442,10 @@ jobs:
           restore-keys: |
             cargo-tauri-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
       - name: Install pinned tauri-cli (cargo tauri)
-        if: steps.cargo-tauri-cache.outputs.cache-hit != 'true'
+        if: steps.tauri-permission-list-cache.outputs.cache-hit != 'true' && steps.cargo-tauri-cache.outputs.cache-hit != 'true'
         run: bash scripts/cargo_agent.sh install tauri-cli --version "${TAURI_CLI_VERSION}" --locked --force
       - name: Verify cargo-tauri version
+        if: steps.tauri-permission-list-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -447,6 +457,7 @@ jobs:
             exit 1
           fi
       - name: Cache Tauri tooling downloads
+        if: steps.tauri-permission-list-cache.outputs.cache-hit != 'true'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/tauri
@@ -456,12 +467,6 @@ jobs:
             # Backwards-compat: allow restoring caches created before we aligned the key format
             # with release/dry-run workflows (which did not include the extra toolchain hash segment).
             tauri-tooling-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
-      - name: Cache Tauri permission list (cargo tauri permission ls)
-        id: tauri-permission-list-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: target/ci/tauri-permission-ls.txt
-          key: tauri-permission-ls-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}-${{ hashFiles('Cargo.lock', 'apps/desktop/src-tauri/Cargo.toml', 'apps/desktop/src-tauri/tauri.conf.json') }}
       - name: Validate Tauri capability permission identifiers
         env:
           # Allows `scripts/check-tauri-permissions.mjs` to reuse the `cargo tauri permission ls`
