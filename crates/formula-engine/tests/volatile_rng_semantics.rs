@@ -39,6 +39,10 @@ fn setup_rng_sheet(engine: &mut Engine) {
     engine
         .set_cell_formula("Sheet1", "E1", "=SUM(C1#)")
         .unwrap();
+    // Re-evaluating the same spilled range within a single cell should observe stable values.
+    engine
+        .set_cell_formula("Sheet1", "F1", "=SUM(C1#)-SUM(C1#)")
+        .unwrap();
 }
 
 fn assert_rand_unit_interval(value: &Value, label: &str) {
@@ -86,7 +90,7 @@ fn assert_rand_sum_bounds(value: &Value, label: &str) {
 fn snapshot(engine: &Engine) -> Vec<Value> {
     // Include the spill cells explicitly so equality checks catch spill scheduling differences.
     [
-        "A1", "A2", "A3", "A4", "A5", "B1", "B2", "C1", "D1", "C2", "D2", "E1",
+        "A1", "A2", "A3", "A4", "A5", "B1", "B2", "C1", "D1", "C2", "D2", "E1", "F1",
     ]
     .into_iter()
     .map(|addr| engine.get_cell_value("Sheet1", addr))
@@ -113,6 +117,8 @@ fn volatile_rng_semantics_are_stable_within_recalc_and_order_independent() {
     assert_eq!(single.get_cell_value("Sheet1", "A4"), Value::Bool(true));
     // Repeated references to the same volatile cell are stable within a recalc pass.
     assert_eq!(single.get_cell_value("Sheet1", "B2"), Value::Number(0.0));
+    // Repeated evaluation of spilled-range consumers should be stable.
+    assert_eq!(single.get_cell_value("Sheet1", "F1"), Value::Number(0.0));
     // Multiple RAND() calls within a single cell evaluation should produce distinct draws.
     // We avoid asserting this is *always* non-zero because collisions are theoretically possible,
     // but we do assert basic invariants and later require observing a non-zero result across a few
@@ -183,6 +189,7 @@ fn volatile_rng_semantics_are_stable_within_recalc_and_order_independent() {
         // Invariants should continue to hold after every recalc.
         assert_eq!(single.get_cell_value("Sheet1", "A4"), Value::Bool(true));
         assert_eq!(single.get_cell_value("Sheet1", "B2"), Value::Number(0.0));
+        assert_eq!(single.get_cell_value("Sheet1", "F1"), Value::Number(0.0));
         match single.get_cell_value("Sheet1", "A5") {
             Value::Number(n) => {
                 assert!(
