@@ -90,8 +90,9 @@ Notes:
 
   Tuning knobs:
   - `FORMULA_DESKTOP_STARTUP_MODE=cold|warm` (default: `cold`)
-    - `cold`: resets the repo-local perf profile (`target/perf-home`) before **each** launch (true cold-start).
-    - `warm`: resets once, then reuses the profile so subsequent launches benefit from caches (the first launch is treated as warmup).
+    - `cold`: each measured run uses a fresh isolated profile directory (HOME + XDG dirs) under `FORMULA_PERF_HOME`
+      (default: `target/perf-home`), so caches do not carry across iterations (true cold-start).
+    - `warm`: uses a single profile directory; one warmup launch initializes caches, then measured runs reuse that profile.
   - `FORMULA_DESKTOP_STARTUP_RUNS` (default: 20)
   - `FORMULA_DESKTOP_STARTUP_TIMEOUT_MS` (default: 15000)
   - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell|full` (what to measure)

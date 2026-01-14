@@ -173,8 +173,9 @@ These scripts are designed to be safe to run locally:
 Startup benchmark (runner defaults shown):
 
 - `FORMULA_DESKTOP_STARTUP_MODE=cold|warm` (default: `cold`)
-  - `cold`: resets the perf profile before **each** run (true cold-start).
-  - `warm`: does one warmup run, then reuses the profile so persisted caches are reflected in the results.
+  - `cold`: each measured run uses a fresh isolated profile directory under `FORMULA_PERF_HOME` (default: `target/perf-home`),
+    so caches do not carry across iterations (true cold-start).
+  - `warm`: uses a single profile directory; one warmup run initializes caches, then measured runs reuse that profile.
 - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell|full` (default: `full` locally, `shell` on CI)
   - `shell`: runs the desktop binary with `--startup-bench` (does not require `apps/desktop/dist`)
   - `full`: runs the full app (requires `apps/desktop/dist`)
