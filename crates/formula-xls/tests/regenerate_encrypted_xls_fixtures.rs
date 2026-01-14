@@ -1123,7 +1123,8 @@ fn regenerate_encrypted_xls_fixtures() {
         panic!("write encrypted fixture {rc4_standard_path:?} failed: {err}");
     });
 
-    // Unicode-password variant (non-ASCII).
+    // Unicode-password variant (non-ASCII). This ensures RC4 Standard derives keys from UTF-16LE,
+    // not a narrow codepage.
     let rc4_standard_unicode_path = fixtures_dir.join("biff8_rc4_standard_unicode_pw_open.xls");
     let rc4_standard_unicode_bytes = build_rc4_standard_encrypted_xls_bytes("pässwörd");
     std::fs::write(&rc4_standard_unicode_path, rc4_standard_unicode_bytes).unwrap_or_else(|err| {

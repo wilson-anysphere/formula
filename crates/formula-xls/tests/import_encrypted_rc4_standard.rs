@@ -184,8 +184,9 @@ fn rc4_standard_wrong_password_errors() {
 
 #[test]
 fn decrypts_rc4_standard_biff8_xls_with_unicode_password() {
-    let result = formula_xls::import_xls_path_with_password(unicode_fixture_path(), Some(UNICODE_PASSWORD))
-        .expect("expected decrypt + import to succeed");
+    let result =
+        formula_xls::import_xls_path_with_password(unicode_fixture_path(), Some(UNICODE_PASSWORD))
+            .expect("expected decrypt + import to succeed");
     let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1");
     assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(42.0));
 }
