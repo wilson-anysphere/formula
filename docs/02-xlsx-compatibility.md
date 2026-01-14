@@ -1451,8 +1451,13 @@ Run the fixture harness (used by CI):
 bash scripts/cargo_agent.sh test -p xlsx-diff --test roundtrip_fixtures
 ```
 
-The harness performs a real load → save using `formula-xlsx::XlsxPackage` (OPC-level
-package handling) and then diffs the original vs written output.
+The harness performs a real load → save using the in-memory
+`formula-xlsx::XlsxPackage` repacker (OPC-level package handling) and then diffs the original vs
+written output.
+
+Note: the **product save path** for “edit an existing `.xlsx`/`.xlsm`” is typically the streaming
+rewrite pipeline (see [Performance Considerations](#performance-considerations)), which preserves
+unmodified ZIP entries via `raw_copy_file` and avoids materializing the entire package.
 
 Current normalization rules (to reduce false positives):
 
@@ -1518,6 +1523,34 @@ Full materialization happens when:
 - you operate on the full part map (`parts_map()` / `parts_map_mut()`).
 
 Prefer the lazy/streaming path unless you truly need whole-package inspection or mutation.
+
+### Streaming parsing (worksheet-scale)
+
+Even with a streaming ZIP wrapper, individual parts like `xl/worksheets/sheetN.xml` can be large
+when inflated. Avoid DOM-parsing whole worksheets when you only need a subset of information.
+
+General guidance:
+
+- Prefer streaming XML readers (SAX-style) for worksheet-scale tasks.
+- Keep cell-level parsing incremental (row-by-row) so memory usage is proportional to the
+  “working set”, not the full file.
+
+### Lazy loading (parse only what you touch)
+
+Many workloads only need a small subset of parts:
+
+- workbook metadata (`xl/workbook.xml`, `*.rels`)
+- styles (`xl/styles.xml`)
+- shared strings (`xl/sharedStrings.xml`)
+- specific worksheets
+
+Avoid parsing “everything” up-front; defer until the caller needs it.
+
+### Parallelism (best-effort)
+
+Some parts are independent and can be parsed concurrently (styles, shared strings, workbook
+metadata). Worksheets typically depend on those, but then can often be processed in parallel if the
+caller has a multi-core budget.
 
 ---
 
