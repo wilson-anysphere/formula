@@ -184,7 +184,9 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
-    repo_root = Path.cwd()
+    # Resolve the repository root relative to this script location so callers can invoke the
+    # verifier from arbitrary working directories.
+    repo_root = Path(__file__).resolve().parents[2]
 
     bundle_dir: Path | None = None
     if args.bundle_dir:
@@ -257,10 +259,19 @@ def main(argv: list[str]) -> int:
         # Common failure mode: signing succeeds but timestamping fails (network/proxy issues or a bad timestamp URL),
         # producing artifacts that are signed-but-not-timestamped. Timestamping matters because it keeps signatures valid
         # after the signing certificate expires.
+        tauri_conf_raw = os.environ.get("FORMULA_TAURI_CONF_PATH", "").strip() or "apps/desktop/src-tauri/tauri.conf.json"
+        tauri_conf_display = tauri_conf_raw
+        try:
+            p = Path(tauri_conf_raw)
+            if not p.is_absolute():
+                tauri_conf_display = str((repo_root / p).relative_to(repo_root))
+        except Exception:
+            pass
         print("sigcheck: ERROR one or more installers failed Authenticode verification:", file=sys.stderr)
         print(
-            "sigcheck: HINT If this is a timestamping failure, check apps/desktop/src-tauri/tauri.conf.json -> "
-            "bundle.windows.timestampUrl (must be a reachable https:// timestamp server) and re-run the build.",
+            "sigcheck: HINT If this is a timestamping failure, check "
+            + f"{tauri_conf_display} -> bundle.windows.timestampUrl "
+            + "(must be a reachable https:// timestamp server) and re-run the build.",
             file=sys.stderr,
         )
         for msg in failures:
