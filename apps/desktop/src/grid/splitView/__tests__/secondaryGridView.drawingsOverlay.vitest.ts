@@ -310,4 +310,56 @@ describe("SecondaryGridView drawings overlay", () => {
     gridView.destroy();
     container.remove();
   });
+
+  it("invalidates the drawings spatial index when sheet view axis overrides change", () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", { configurable: true, value: 300 });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
+    document.body.appendChild(container);
+
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: () => createMockCanvasContext(),
+    });
+
+    const invalidateSpy = vi.spyOn(DrawingOverlay.prototype, "invalidateSpatialIndex");
+
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+    const images: ImageStore = { get: () => undefined, set: () => {} };
+    const objects: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "shape" },
+        zOrder: 0,
+        anchor: {
+          type: "oneCell",
+          from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+          size: { cx: pxToEmu(40), cy: pxToEmu(20) },
+        },
+      },
+    ];
+
+    const view = new SecondaryGridView({
+      container,
+      document: doc,
+      getSheetId: () => sheetId,
+      rowCount: 20,
+      colCount: 20,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      getDrawingObjects: () => objects,
+      images,
+    });
+
+    // Ignore the initial sheet-view sync during construction.
+    invalidateSpy.mockClear();
+
+    doc.setColWidth(sheetId, 0, 160, { label: "Resize Column" });
+
+    expect(invalidateSpy).toHaveBeenCalled();
+
+    view.destroy();
+    container.remove();
+  });
 });

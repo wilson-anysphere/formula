@@ -631,16 +631,16 @@ export class SecondaryGridView {
     }
 
     this.grid.renderer.applyAxisSizeOverrides({ rows: rowSizes, cols: colSizes }, { resetUnspecified: true });
+    // Row/col overrides change the grid geometry while `drawingsOverlay` keeps a stable
+    // `GridGeometry` reference. Invalidate cached bounds so the next render recomputes
+    // anchors against the updated axis sizes.
+    this.drawingsOverlay.invalidateSpatialIndex();
 
     this.grid.syncScrollbars();
     const scroll = this.grid.getScroll();
     this.container.dataset.scrollX = String(scroll.x);
     this.container.dataset.scrollY = String(scroll.y);
     this.repositionEditor();
-    // Row/col overrides change the grid geometry while `drawingsOverlay` keeps a stable
-    // `GridGeometry` reference. Invalidate cached bounds so the next render recomputes
-    // anchors against the updated axis sizes.
-    this.drawingsOverlay.invalidateSpatialIndex();
     void this.renderDrawings();
   }
 
@@ -663,11 +663,12 @@ export class SecondaryGridView {
       } else {
         this.document.setColWidth(sheetId, docCol, baseSize, { label, source });
       }
+      // Invalidate cached drawing bounds so the overlay repositions correctly after resize.
+      this.drawingsOverlay.invalidateSpatialIndex();
       // Similar to SpreadsheetApp: the CanvasGridRenderer updates sizes interactively during the
       // drag, and we skip re-syncing sheet view deltas back into the same pane (source-tagged).
       // Ensure the drawings overlay re-renders at the end of the interaction so pictures/shapes
       // stay aligned with the updated grid geometry.
-      this.drawingsOverlay.invalidateSpatialIndex();
       void this.renderDrawings();
       return;
     }
@@ -680,6 +681,7 @@ export class SecondaryGridView {
     } else {
       this.document.setRowHeight(sheetId, docRow, baseSize, { label, source });
     }
+    // Invalidate cached drawing bounds so the overlay repositions correctly after resize.
     this.drawingsOverlay.invalidateSpatialIndex();
     void this.renderDrawings();
   }
