@@ -46,6 +46,7 @@ pub(crate) fn pivot_field_ref_name(field: &PivotFieldRef) -> Cow<'_, str> {
         // table names (e.g. `Dim Product[Category]` vs `'Dim Product'[Category]`). Prefer the
         // unquoted `{table}[{column}]` form and fall back to the quoted DAX form elsewhere.
         PivotFieldRef::DataModelColumn { table, column } => {
+            let column = column.replace(']', "]]");
             Cow::Owned(format!("{table}[{column}]"))
         }
     }
@@ -270,36 +271,48 @@ impl PivotCache {
             return self.field_index(name);
         }
 
-        // Best-effort: match Data Model refs against cache field captions. Caches may store
-        // measures either as the raw name (`Total`) or in DAX bracket form (`[Total]`), and may
-        // store column refs with or without quoted table names.
-        match field {
-            PivotFieldRef::DataModelMeasure(name) => {
-                if let Some(idx) = self.field_index(name) {
-                    return Some(idx);
-                }
-            }
-            PivotFieldRef::DataModelColumn { table, column } => {
-                // Some producers store unquoted `Table[Column]` captions even when DAX would
-                // normally require quoting (e.g. `Dim Product[Category]` instead of
-                // `'Dim Product'[Category]`).
-                let unquoted = format!("{table}[{column}]");
-                if let Some(idx) = self.field_index(&unquoted) {
-                    return Some(idx);
-                }
-            }
-            PivotFieldRef::CacheFieldName(_) => {}
+        // Best-effort: match Data Model refs against cache field captions. Caches may store:
+        // - Measures either as the raw name (`Total`) or in DAX bracket form (`[Total]`).
+        // - Column refs with or without quoted table names (`Sales[Region]` vs `'Sales Table'[Region]`).
+        //
+        // Try a few common textual encodings in priority order so callers can resolve fields
+        // regardless of how the cache captions were generated.
+        let canonical = field.canonical_name();
+        if let Some(idx) = self.field_index(canonical.as_ref()) {
+            return Some(idx);
         }
 
         let label = pivot_field_ref_name(field);
         if let Some(idx) = self.field_index(label.as_ref()) {
             return Some(idx);
         }
-        let canonical = field.canonical_name();
-        if let Some(idx) = self.field_index(canonical.as_ref()) {
-            return Some(idx);
+
+        match field {
+            PivotFieldRef::CacheFieldName(_) => {}
+            PivotFieldRef::DataModelMeasure(name) => {
+                if let Some(idx) = self.field_index(name) {
+                    return Some(idx);
+                }
+            }
+            PivotFieldRef::DataModelColumn { table, column } => {
+                // Unquoted table name + escaped bracket identifier.
+                let escaped_column = column.replace(']', "]]");
+                let unquoted = format!("{table}[{escaped_column}]");
+                if let Some(idx) = self.field_index(&unquoted) {
+                    return Some(idx);
+                }
+
+                // Some caches store the raw column name without DAX escaping.
+                let unescaped = format!("{table}[{column}]");
+                if unescaped != unquoted {
+                    if let Some(idx) = self.field_index(&unescaped) {
+                        return Some(idx);
+                    }
+                }
+            }
         }
-        self.field_index(&field.to_string())
+
+        None
     }
 
     pub fn refresh_from_range(&mut self, range: &[Vec<PivotValue>]) -> Result<(), PivotError> {

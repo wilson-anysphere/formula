@@ -66,7 +66,20 @@ impl PivotFieldRef {
     ///
     /// This is intended for diagnostics and UI; it is not a stable serialization format.
     pub fn display_string(&self) -> String {
-        self.canonical_name().into_owned()
+        match self {
+            PivotFieldRef::CacheFieldName(name) => name.clone(),
+            // For display, use an unquoted `Table[Column]` form even when the table name contains
+            // spaces/punctuation. This is friendlier for UI labels while still preserving the
+            // `{table,column}` structure.
+            PivotFieldRef::DataModelColumn { table, column } => {
+                let column = escape_dax_bracket_identifier(column);
+                format!("{table}[{column}]")
+            }
+            PivotFieldRef::DataModelMeasure(name) => {
+                let name = escape_dax_bracket_identifier(name);
+                format!("[{name}]")
+            }
+        }
     }
 
     /// Best-effort parse of an unstructured field identifier.
@@ -200,6 +213,7 @@ impl fmt::Display for PivotFieldRef {
         match self {
             PivotFieldRef::CacheFieldName(name) => f.write_str(name),
             PivotFieldRef::DataModelColumn { table, column } => {
+                let table = format_dax_table_ref(table);
                 let column = escape_dax_bracket_identifier(column);
                 write!(f, "{table}[{column}]")
             }
@@ -214,6 +228,20 @@ impl fmt::Display for PivotFieldRef {
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
+}
+
+fn format_dax_table_ref(table: &str) -> String {
+    // In DAX, a table name can be unquoted (e.g. `Sales`) or single-quoted (e.g. `'Sales 2024'`).
+    // Quote when the identifier contains anything other than ASCII alphanumerics or `_`.
+    let needs_quote = table
+        .chars()
+        .any(|c| !(c.is_ascii_alphanumeric() || c == '_'));
+    if !needs_quote {
+        return table.to_string();
+    }
+
+    // Within quoted identifiers, `'` is escaped as `''`.
+    format!("'{}'", table.replace('\'', "''"))
 }
 
 /// Parse a DAX column reference of the form `Table[Column]` or `'Table Name'[Column]`.
