@@ -20,15 +20,23 @@ const FONT_NAME_PRESETS: Record<"calibri" | "arial" | "times" | "courier", strin
 export const FONT_SIZE_PRESETS = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72] as const;
 
 function activeCellFontSizePt(app: SpreadsheetApp): number {
-  const sheetId = app.getCurrentSheetId();
-  const cell = app.getActiveCell();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const docAny = app.getDocument() as any;
-  const effectiveSize = docAny.getCellFormat?.(sheetId, cell)?.font?.size;
-  const state = docAny.getCell?.(sheetId, cell);
-  const style = docAny.styleTable?.get?.(state?.styleId ?? 0) ?? {};
-  const size = typeof effectiveSize === "number" ? effectiveSize : style.font?.size;
-  return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 11;
+  // Match the more defensive `registerBuiltinCommands` font-size step helper:
+  // - Keep safe when `SpreadsheetApp` is stubbed in tests.
+  // - Fall back to the typical Excel default when we cannot resolve a size.
+  try {
+    const sheetId = app.getCurrentSheetId?.();
+    const cell = app.getActiveCell?.();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const docAny = app.getDocument?.() as any;
+    if (!sheetId || !cell || !docAny) return 11;
+    const effectiveSize = docAny.getCellFormat?.(sheetId, cell)?.font?.size;
+    const state = docAny.getCell?.(sheetId, cell);
+    const style = docAny.styleTable?.get?.(state?.styleId ?? 0) ?? {};
+    const size = typeof effectiveSize === "number" ? effectiveSize : style.font?.size;
+    return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 11;
+  } catch {
+    return 11;
+  }
 }
 
 function stepFontSize(current: number, direction: "increase" | "decrease"): number {
@@ -93,26 +101,25 @@ export function registerBuiltinFormatFontCommands(params: {
 
   commandRegistry.registerBuiltinCommand(
     "format.increaseFontSize",
-    "Increase Font Size",
+    t("command.format.fontSize.increase"),
     () => {
       const current = activeCellFontSizePt(app);
       const next = stepFontSize(current, "increase");
       if (next === current) return;
-      applyFormattingToSelection("Font size", (doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
+      applyFormattingToSelection(t("command.format.fontSize.increase"), (doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
     },
     { category },
   );
 
   commandRegistry.registerBuiltinCommand(
     "format.decreaseFontSize",
-    "Decrease Font Size",
+    t("command.format.fontSize.decrease"),
     () => {
       const current = activeCellFontSizePt(app);
       const next = stepFontSize(current, "decrease");
       if (next === current) return;
-      applyFormattingToSelection("Font size", (doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
+      applyFormattingToSelection(t("command.format.fontSize.decrease"), (doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
     },
     { category },
   );
 }
-
