@@ -75,11 +75,10 @@ export function registerBuiltinCommands(params: {
   } = params;
 
   const refresh = (): void => {
-    if (!refreshRibbonUiState) return;
     try {
-      refreshRibbonUiState();
+      refreshRibbonUiState?.();
     } catch {
-      // Best-effort only.
+      // ignore
     }
   };
 
@@ -87,7 +86,7 @@ export function registerBuiltinCommands(params: {
     try {
       (app as any)?.focus?.();
     } catch {
-      // Best-effort only.
+      // ignore
     }
   };
 

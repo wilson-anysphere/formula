@@ -3353,49 +3353,6 @@ export class DocumentController {
   }
 
   /**
-   * Set a cell to an explicit raw `CellState`.
-   *
-   * This is a low-level escape hatch primarily used for applying external/serialized workbook
-   * snapshots that need to set both `value` and `formula` at the same time (e.g. cached rich-value
-   * IMAGE() payloads).
-   *
-   * Unlike `setCellValue` / `setCellFormula` / `setCellInput`, this does **not** create an undo/redo
-   * history entry; it is applied via `applyExternalDeltas`.
-   *
-   * @param {string} sheetId
-   * @param {number} row
-   * @param {number} col
-   * @param {Partial<CellState>} cell
-   * @param {{ recalc?: boolean, source?: string, markDirty?: boolean }} [options]
-   */
-  setCell(sheetId, row, col, cell, options = {}) {
-    const id = String(sheetId ?? "").trim();
-    if (!id) return;
-    const r = Number(row);
-    const c = Number(col);
-    if (!Number.isInteger(r) || r < 0) return;
-    if (!Number.isInteger(c) || c < 0) return;
-
-    /** @type {any} */
-    const patch = cell && typeof cell === "object" ? cell : {};
-    const before = this.model.getCell(id, r, c);
-    const after = {
-      value: Object.prototype.hasOwnProperty.call(patch, "value") ? patch.value ?? null : before.value,
-      formula: Object.prototype.hasOwnProperty.call(patch, "formula") ? normalizeFormula(patch.formula) : before.formula,
-      styleId: typeof patch.styleId === "number" ? patch.styleId : before.styleId,
-    };
-    if (cellStateEquals(before, after)) return;
-
-    const recalc = options.recalc ?? false;
-    const source = typeof options.source === "string" ? options.source : "setCell";
-    this.applyExternalDeltas([{ sheetId: id, row: r, col: c, before, after: cloneCellState(after) }], {
-      recalc,
-      source,
-      markDirty: options.markDirty,
-    });
-  }
-
-  /**
    * Read a cell without materializing the sheet.
    *
    * `DocumentController.getCell()` creates sheets lazily the first time a sheet id is
