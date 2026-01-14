@@ -4535,18 +4535,6 @@ impl WasmWorkbook {
             }
         }
 
-        // Sheet default column widths (Excel "character" units).
-        //
-        // This metadata is stored in OOXML `<sheetFormatPr defaultColWidth="...">` and is used by
-        // worksheet information functions like `CELL("width")` when no per-column width override is
-        // present.
-        for sheet in &model.sheets {
-            if let Some(width) = sheet.default_col_width {
-                wb.engine
-                    .set_sheet_default_col_width(&sheet.name, Some(width));
-            }
-        }
-
         // Apply per-sheet dimensions (logical grid size) before importing cells/formulas so
         // whole-column/row semantics (`A:A`, `1:1`) resolve correctly for large sheets.
         for sheet in &model.sheets {
