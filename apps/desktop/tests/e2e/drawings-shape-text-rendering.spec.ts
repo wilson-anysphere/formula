@@ -119,108 +119,103 @@ function loadShapeTextFixture(): {
   };
 }
 
-function colToA1(col: number): string {
-  // Convert a 0-based column index into A1 letters (0 -> A, 25 -> Z, 26 -> AA, ...).
-  let n = Math.max(0, Math.trunc(col));
-  let out = "";
-  while (n >= 0) {
-    out = String.fromCharCode(65 + (n % 26)) + out;
-    n = Math.floor(n / 26) - 1;
-  }
-  return out || "A";
-}
-
-function cellToA1(cell: { row: number; col: number }): string {
-  return `${colToA1(cell.col)}${Math.max(1, Math.trunc(cell.row) + 1)}`;
-}
-
 test.describe("drawing shape text rendering regressions", () => {
   test("renders DrawingML txBody text from shape-textbox.xlsx via DrawingOverlay canvas pixels", async ({ page }) => {
     const fixture = loadShapeTextFixture();
 
     await gotoDesktop(page);
-    // Ensure the grid root is present before we inject our test overlay canvas.
+    // Ensure the built-in drawing overlay canvas is present before we inject drawings.
     await page.waitForSelector("#grid");
+    await page.waitForSelector('[data-testid="drawing-layer-canvas"]');
 
     const result = await page.evaluate(async ({ fixture }) => {
-      const { DrawingOverlay, anchorToRectPx } = await import("/src/drawings/overlay.ts");
+      const { anchorToRectPx } = await import("/src/drawings/overlay.ts");
 
       const app = (window as any).__formulaApp;
       if (!app) throw new Error("Missing window.__formulaApp");
 
-      const gridRoot = document.querySelector<HTMLElement>("#grid");
-      if (!gridRoot) throw new Error("Missing #grid root");
+      const overlay = (app as any).drawingOverlay;
+      if (!overlay) throw new Error("Missing SpreadsheetApp.drawingOverlay");
 
-      const { width, height } = gridRoot.getBoundingClientRect();
-      const viewport = { scrollX: 0, scrollY: 0, width, height, dpr: window.devicePixelRatio || 1 };
+      const doc = app.getDocument?.();
+      if (!doc) throw new Error("Missing SpreadsheetApp.getDocument()");
+      if (typeof doc.setSheetDrawings !== "function") {
+        throw new Error("Missing DocumentController.setSheetDrawings()");
+      }
 
-      const existing = gridRoot.querySelector<HTMLCanvasElement>('[data-testid="e2e-drawing-overlay-shapes"]');
-      existing?.remove();
+      const sheetId = app.getCurrentSheetId?.();
+      if (!sheetId) throw new Error("Missing SpreadsheetApp.getCurrentSheetId()");
 
-      const canvas = document.createElement("canvas");
-      canvas.dataset.testid = "e2e-drawing-overlay-shapes";
-      canvas.style.position = "absolute";
-      canvas.style.inset = "0";
-      canvas.style.pointerEvents = "none";
-      canvas.style.zIndex = "6";
-      gridRoot.appendChild(canvas);
+      const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="drawing-layer-canvas"]');
+      if (!canvas) throw new Error("Missing drawing-layer-canvas element");
 
-      const images = {
-        get() {
-          return undefined;
-        },
-        set() {},
+      // Capture the app-driven render pass triggered by `setSheetDrawings`.
+      const origRender = overlay.render.bind(overlay);
+      (overlay as any).render = (objects: any, viewport: any, ...rest: any[]) => {
+        const promise = origRender(objects, viewport, ...rest);
+        (window as any).__testLastDrawingOverlayRender = { promise, objects, viewport };
+        return promise;
       };
+      (window as any).__testLastDrawingOverlayRender = null;
 
-      const geom = {
-        cellOriginPx: (cell: { row: number; col: number }) => {
-          const a1 = cellToA1(cell);
-          const rect = app.getCellRectA1(a1);
-          if (!rect) throw new Error(`Missing rect for cell ${a1}`);
-          return { x: rect.x, y: rect.y };
-        },
-        cellSizePx: (cell: { row: number; col: number }) => {
-          const a1 = cellToA1(cell);
-          const rect = app.getCellRectA1(a1);
-          if (!rect) throw new Error(`Missing rect for cell ${a1}`);
-          return { width: rect.width, height: rect.height };
-        },
-      };
-
-      const overlay = new DrawingOverlay(canvas, images as any, geom);
-      overlay.resize(viewport);
-
-      const obj = {
-        id: 1,
-        zOrder: 0,
-        kind: { type: "shape", raw_xml: fixture.shapeXml },
-        anchor: {
-          type: "twoCell",
-          from: {
-            cell: { row: fixture.anchor.fromRow, col: fixture.anchor.fromCol },
-            offset: { xEmu: fixture.anchor.fromColOff, yEmu: fixture.anchor.fromRowOff },
-          },
-          to: {
-            cell: { row: fixture.anchor.toRow, col: fixture.anchor.toCol },
-            offset: { xEmu: fixture.anchor.toColOff, yEmu: fixture.anchor.toRowOff },
+      // Store a formula-model style drawing object and let SpreadsheetApp convert it.
+      doc.setSheetDrawings(sheetId, [
+        {
+          id: "1",
+          zOrder: 0,
+          kind: { type: "shape", raw_xml: fixture.shapeXml },
+          anchor: {
+            type: "twoCell",
+            from: {
+              cell: { row: fixture.anchor.fromRow, col: fixture.anchor.fromCol },
+              offset: { xEmu: fixture.anchor.fromColOff, yEmu: fixture.anchor.fromRowOff },
+            },
+            to: {
+              cell: { row: fixture.anchor.toRow, col: fixture.anchor.toCol },
+              offset: { xEmu: fixture.anchor.toColOff, yEmu: fixture.anchor.toRowOff },
+            },
           },
         },
-      };
+      ]);
 
-      await overlay.render([obj], viewport);
+      const last = (window as any).__testLastDrawingOverlayRender as
+        | { promise: Promise<void>; objects: any[]; viewport: any }
+        | null;
+      if (!last) throw new Error("Expected SpreadsheetApp to invoke DrawingOverlay.render after setSheetDrawings");
+
+      const renderedHasShape = Array.isArray(last.objects) ? last.objects.some((o) => o?.kind?.type === "shape") : false;
+      if (!renderedHasShape) {
+        throw new Error("DrawingOverlay.render was invoked, but the rendered object list did not include a shape");
+      }
+
+      await last.promise;
+
+      const geom = (overlay as any).geom;
+      if (!geom) throw new Error("Missing DrawingOverlay.geom");
+
+      const obj = (last.objects as any[]).find((o) => o?.kind?.type === "shape");
+      if (!obj) throw new Error("Expected rendered shape object to exist");
+
+      const viewport = last.viewport;
+      if (!viewport) throw new Error("Missing drawing overlay viewport from render()");
 
       const rect = anchorToRectPx(obj.anchor, geom);
+      // Sample a small area near the expected text position (top + centered), avoiding
+      // placeholder label rendering at the top-left corner.
       const sampleRect = (() => {
-        const x = Math.max(0, Math.floor(rect.x));
-        const y = Math.max(0, Math.floor(rect.y));
-        const w = Math.min(Math.floor(rect.width), Math.max(1, Math.floor(width) - x));
-        const h = Math.min(Math.floor(rect.height), Math.max(1, Math.floor(height) - y));
+        const centerX = rect.x + rect.width / 2 - viewport.scrollX;
+        const centerY = rect.y + 12 - viewport.scrollY;
+        const size = 20;
+        const x = Math.max(0, Math.floor(centerX - size / 2));
+        const y = Math.max(0, Math.floor(centerY - size / 2));
+        const w = Math.min(Math.floor(size), Math.max(1, Math.floor(viewport.width) - x));
+        const h = Math.min(Math.floor(size), Math.max(1, Math.floor(viewport.height) - y));
         return { x, y, width: w, height: h };
       })();
 
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Missing 2d context");
-      const dpr = canvas.width / Math.max(1, canvas.getBoundingClientRect().width);
+      const dpr = typeof viewport.dpr === "number" && viewport.dpr > 0 ? viewport.dpr : window.devicePixelRatio || 1;
       const samplePx = {
         x: Math.max(0, Math.floor(sampleRect.x * dpr)),
         y: Math.max(0, Math.floor(sampleRect.y * dpr)),
