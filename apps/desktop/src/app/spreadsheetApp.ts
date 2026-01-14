@@ -3953,6 +3953,19 @@ export class SpreadsheetApp {
     this.invalidateDrawingHitTestIndexCaches();
     this.drawingObjects = [];
 
+    // Drop potentially-large UI caches so a destroyed SpreadsheetApp instance doesn't retain
+    // multi-megabyte clipboard payloads / comment indexes if it stays referenced.
+    this.clipboardCopyContext = null;
+    this.clipboardProviderPromise = null;
+    this.selectionSummaryCache = null;
+    this.selectionStatsFormatter = null;
+    this.commentMetaByCoord.clear();
+    this.commentPreviewByCoord.clear();
+    this.commentThreadsByCellRef.clear();
+    this.auditingCache.clear();
+    this.outlinesBySheet.clear();
+    this.chartRecordLookupCache = null;
+
     // Release backing stores for all canvas layers. Even after `root.replaceChildren()`,
     // the SpreadsheetApp instance still holds references to these canvases; shrinking
     // them prevents large GPU/bitmap buffers from sticking around when apps are created/
@@ -17770,13 +17783,14 @@ export class SpreadsheetApp {
 
     const prevEffectiveSelected = this.getSelectedDrawingId();
     this.drawingObjectsCache = null;
+    const prevDrawingSelected = this.selectedDrawingId;
     this.selectedDrawingId = drawingId;
     if (this.selectedChartId != null) {
       this.setSelectedChartId(null);
     }
     this.drawingOverlay.setSelectedId(drawingId);
     this.drawingInteractionController?.setSelectedId(drawingId);
-    if (prevSelected !== drawingId) {
+    if (prevDrawingSelected !== drawingId) {
       this.dispatchDrawingSelectionChanged();
     }
     this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
