@@ -2057,25 +2057,29 @@ pub(crate) fn parse_biff_sheet_hyperlinks(
         }
 
         match record.record_id {
-            RECORD_HLINK => match decode_hlink_record(record.data.as_ref(), codepage) {
-                Ok(Some(link)) => {
-                    if out.hyperlinks.len() >= MAX_HYPERLINKS_PER_SHEET {
-                        out.warnings.push(
-                            "too many hyperlinks; additional HLINK records skipped".to_string(),
-                        );
-                        break;
-                    }
-                    out.hyperlinks.push(link)
+            RECORD_HLINK => {
+                // Hardening: once we hit the cap, stop scanning immediately to avoid additional
+                // allocations and decode work on the rest of the sheet stream.
+                if out.hyperlinks.len() >= MAX_HYPERLINKS_PER_SHEET {
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        "too many hyperlinks; additional HLINK records skipped".to_string(),
+                    );
+                    break;
                 }
-                Ok(None) => {}
-                Err(err) => push_warning_bounded(
-                    &mut out.warnings,
-                    format!(
-                        "failed to decode HLINK record at offset {}: {err}",
-                        record.offset
+
+                match decode_hlink_record(record.data.as_ref(), codepage) {
+                    Ok(Some(link)) => out.hyperlinks.push(link),
+                    Ok(None) => {}
+                    Err(err) => push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "failed to decode HLINK record at offset {}: {err}",
+                            record.offset
+                        ),
                     ),
-                ),
-            },
+                }
+            }
             records::RECORD_EOF => break,
             _ => {}
         }
