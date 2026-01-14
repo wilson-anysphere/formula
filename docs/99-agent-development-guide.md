@@ -106,7 +106,7 @@ toolchain.
 . scripts/agent-init.sh  # bash/zsh: source scripts/agent-init.sh
 
 # Optional: override default Cargo parallelism for the session
-export FORMULA_CARGO_JOBS=8
+FORMULA_CARGO_JOBS=8
 . scripts/agent-init.sh
 ```
 

@@ -174,6 +174,32 @@ test('agent-init derives CARGO_BUILD_JOBS from FORMULA_CARGO_JOBS', { skip: !has
   assert.equal(rayon, '7');
 });
 
+test(
+  'agent-init updates MAKEFLAGS and RAYON_NUM_THREADS when re-sourced after changing FORMULA_CARGO_JOBS',
+  { skip: !hasBash },
+  () => {
+    const out = runBash(
+      [
+        'unset MAKEFLAGS',
+        'unset RAYON_NUM_THREADS',
+        'unset CARGO_BUILD_JOBS',
+        'export DISPLAY=:99',
+        'export FORMULA_CARGO_JOBS=7',
+        'source scripts/agent-init.sh >/dev/null',
+        'first=$(printf "%s,%s,%s" "$CARGO_BUILD_JOBS" "$MAKEFLAGS" "$RAYON_NUM_THREADS")',
+        'export FORMULA_CARGO_JOBS=3',
+        'source scripts/agent-init.sh >/dev/null',
+        'second=$(printf "%s,%s,%s" "$CARGO_BUILD_JOBS" "$MAKEFLAGS" "$RAYON_NUM_THREADS")',
+        'printf "%s\\n%s" "$first" "$second"',
+      ].join(' && '),
+    );
+
+    const [first, second] = out.split('\n');
+    assert.equal(first, '7,-j7,7');
+    assert.equal(second, '3,-j3,3');
+  },
+);
+
 test('agent-init exports FORMULA_CARGO_JOBS when set without export', { skip: !hasBash }, () => {
   const out = runBash(
     [
@@ -342,6 +368,33 @@ test('agent-init exports FORMULA_CARGO_JOBS when set without export under /bin/s
   assert.equal(stderr, '');
   assert.equal(stdout, 'FORMULA_CARGO_JOBS=7');
 });
+
+test(
+  'agent-init updates MAKEFLAGS and RAYON_NUM_THREADS when re-sourced after changing FORMULA_CARGO_JOBS under /bin/sh',
+  { skip: !hasSh },
+  () => {
+    const { stdout, stderr } = runSh(
+      [
+        'unset MAKEFLAGS',
+        'unset RAYON_NUM_THREADS',
+        'unset CARGO_BUILD_JOBS',
+        'export DISPLAY=:99',
+        'FORMULA_CARGO_JOBS=7',
+        '. scripts/agent-init.sh >/dev/null',
+        'first=$(printf "%s,%s,%s" "$CARGO_BUILD_JOBS" "$MAKEFLAGS" "$RAYON_NUM_THREADS")',
+        'FORMULA_CARGO_JOBS=3',
+        '. scripts/agent-init.sh >/dev/null',
+        'second=$(printf "%s,%s,%s" "$CARGO_BUILD_JOBS" "$MAKEFLAGS" "$RAYON_NUM_THREADS")',
+        'printf "%s\\n%s" "$first" "$second"',
+      ].join(' && '),
+    );
+
+    assert.equal(stderr, '');
+    const [first, second] = stdout.split('\n');
+    assert.equal(first, '7,-j7,7');
+    assert.equal(second, '3,-j3,3');
+  },
+);
 
 test('agent-init can be sourced with nounset enabled and DISPLAY unset under /bin/sh', { skip: !hasSh }, () => {
   const stubDir = mkdtempSync(resolve(tmpdir(), 'formula-xvfb-stub-'));

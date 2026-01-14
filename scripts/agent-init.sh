@@ -98,6 +98,7 @@ if [ "${_formula_cpu_count}" -ge 64 ]; then
 fi
 unset _formula_cpu_count
 
+_formula_prev_cargo_build_jobs="${CARGO_BUILD_JOBS:-}"
 if [ -n "${FORMULA_CARGO_JOBS:-}" ]; then
   export CARGO_BUILD_JOBS="${FORMULA_CARGO_JOBS}"
 elif [ -z "${CARGO_BUILD_JOBS:-}" ]; then
@@ -106,12 +107,26 @@ fi
 unset _formula_default_cargo_jobs
 
 # Make: Limit parallel jobs
-export MAKEFLAGS="${MAKEFLAGS:--j${CARGO_BUILD_JOBS}}"
+#
+# Keep MAKEFLAGS aligned with the chosen Cargo job count when MAKEFLAGS was previously derived from
+# `CARGO_BUILD_JOBS` (common when re-sourcing this script after changing `FORMULA_CARGO_JOBS`).
+if [ -z "${MAKEFLAGS:-}" ]; then
+  export MAKEFLAGS="-j${CARGO_BUILD_JOBS}"
+elif [ -n "${_formula_prev_cargo_build_jobs}" ] && [ "${MAKEFLAGS}" = "-j${_formula_prev_cargo_build_jobs}" ]; then
+  export MAKEFLAGS="-j${CARGO_BUILD_JOBS}"
+fi
 
 # Rayon: Limit thread pool size (defaults to one thread per core otherwise).
-if [ -z "${RAYON_NUM_THREADS:-}" ]; then
+#
+# Keep RAYON_NUM_THREADS aligned with the chosen Cargo job count when it was previously derived
+# from the prior `CARGO_BUILD_JOBS` value (common when re-sourcing this script after changing
+# `FORMULA_CARGO_JOBS`).
+if [ -z "${RAYON_NUM_THREADS:-}" ] || {
+  [ -n "${_formula_prev_cargo_build_jobs}" ] && [ "${RAYON_NUM_THREADS:-}" = "${_formula_prev_cargo_build_jobs}" ];
+}; then
   export RAYON_NUM_THREADS="${FORMULA_RAYON_NUM_THREADS:-${CARGO_BUILD_JOBS}}"
 fi
+unset _formula_prev_cargo_build_jobs
 
 # Rust codegen units:
 #
