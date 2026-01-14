@@ -30,10 +30,19 @@ function withEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {
 }
 
 const defaultBasePort = 4174;
+const maxBasePort = 65533;
 const basePort = (() => {
   const raw = process.env.FORMULA_E2E_PORT;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  if (Number.isFinite(parsed) && parsed > 0) {
+    if (parsed > maxBasePort) {
+      throw new Error(
+        `FORMULA_E2E_PORT must be between 1 and ${maxBasePort} (got ${parsed}). ` +
+          `Playwright reserves basePort+1/basePort+2 for the CSP + desktop servers.`
+      );
+    }
+    return parsed;
+  }
   if (process.env.CI) return defaultBasePort;
   // Use a wide range so developers are less likely to collide with a concurrently running
   // `pnpm dev` (fixed port) or another local service.

@@ -35,10 +35,18 @@ function stablePortFromString(input: string, { base = 4173, range = 10_000 } = {
 }
 
 const defaultPort = 4173;
+const maxPort = 65535;
 const port = (() => {
   const raw = process.env.PW_WEB_PORT ?? process.env.PLAYWRIGHT_WEB_PORT ?? process.env.PLAYWRIGHT_PORT;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  if (Number.isFinite(parsed) && parsed > 0) {
+    if (parsed > maxPort) {
+      throw new Error(
+        `PW_WEB_PORT/PLAYWRIGHT_WEB_PORT/PLAYWRIGHT_PORT must be between 1 and ${maxPort} (got ${parsed}).`
+      );
+    }
+    return parsed;
+  }
   if (process.env.CI) return defaultPort;
   return stablePortFromString(repoRoot, { base: defaultPort, range: 10_000 });
 })();
