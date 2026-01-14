@@ -10660,8 +10660,9 @@ pub trait ExternalValueProvider: Send + Sync {
     /// `sheet_order("C:\path\Book.xlsx")`.
     ///
     /// Note: the engine parses the workbook identifier by splitting the `"[workbook]..."` key at
-    /// the first `]`. As a result, workbook ids containing `]` characters are ambiguous and are
-    /// not currently supported for external 3D span expansion.
+    /// the **last** `]`. This allows workbook identifiers to include bracket characters (e.g. a
+    /// directory named `C:\[foo]\`). Sheet names are expected to follow Excel restrictions
+    /// (notably: no `]`), so this split is unambiguous.
     ///
     /// The engine currently treats workbook identifiers as opaque strings and does not perform any
     /// additional normalization (case folding, path separator normalization, etc). Providers should
