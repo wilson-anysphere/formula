@@ -115,8 +115,9 @@ test("drawing helpers support numeric ids (overlay-compatible)", () => {
   ]);
 
   doc.updateDrawing("Sheet1", 1, { zOrder: 2 });
-  // Numeric ids are accepted by helpers, but drawings are persisted with string ids so JSON snapshots remain stable.
-  assert.equal(doc.getSheetDrawings("Sheet1")[0]?.id, "1");
+  // Numeric ids are accepted by helpers and preserved as numeric ids (overlay-compatible).
+  // Helpers match ids via `String(d.id)`, so callers can still reference the drawing as "1".
+  assert.equal(doc.getSheetDrawings("Sheet1")[0]?.id, 1);
   assert.equal(doc.getSheetDrawings("Sheet1")[0]?.zOrder, 2);
 
   doc.deleteDrawing("Sheet1", 1);

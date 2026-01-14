@@ -72,6 +72,13 @@ function writeInfoPlist(
   writeFileSync(plistPath, content, { encoding: "utf8" });
 }
 
+function writeComplianceResources(contentsDir) {
+  const resourcesDir = join(contentsDir, "Resources");
+  mkdirSync(resourcesDir, { recursive: true });
+  writeFileSync(join(resourcesDir, "LICENSE"), "stub", { encoding: "utf8" });
+  writeFileSync(join(resourcesDir, "NOTICE"), "stub", { encoding: "utf8" });
+}
+
 function runValidator({ dmgPath, binDir }) {
   const proc = spawnSync("bash", [join(repoRoot, "scripts", "validate-macos-bundle.sh"), "--dmg", dmgPath], {
     cwd: repoRoot,
@@ -107,20 +114,12 @@ test(
     mkdirSync(macosDir, { recursive: true });
     writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
     chmodSync(join(macosDir, "formula-desktop"), 0o755);
-    const resourcesDir = join(appRoot, "Resources");
-    mkdirSync(resourcesDir, { recursive: true });
-    writeFileSync(join(resourcesDir, "LICENSE"), "license", { encoding: "utf8" });
-    writeFileSync(join(resourcesDir, "NOTICE"), "notice", { encoding: "utf8" });
-
-    const resourcesDir = join(appRoot, "Resources");
-    mkdirSync(resourcesDir, { recursive: true });
-    writeFileSync(join(resourcesDir, "LICENSE"), "LICENSE stub", { encoding: "utf8" });
-    writeFileSync(join(resourcesDir, "NOTICE"), "NOTICE stub", { encoding: "utf8" });
 
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: expectedIdentifier,
       version: expectedVersion,
     });
+    writeComplianceResources(appRoot);
 
     const dmgPath = join(tmp, "Formula.dmg");
     writeFileSync(dmgPath, "not-a-real-dmg", { encoding: "utf8" });
@@ -301,20 +300,12 @@ test(
     mkdirSync(macosDir, { recursive: true });
     writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
     chmodSync(join(macosDir, "formula-desktop"), 0o755);
-    const resourcesDir = join(appRoot, "Resources");
-    mkdirSync(resourcesDir, { recursive: true });
-    writeFileSync(join(resourcesDir, "LICENSE"), "license", { encoding: "utf8" });
-    writeFileSync(join(resourcesDir, "NOTICE"), "notice", { encoding: "utf8" });
-
-    const resourcesDir = join(appRoot, "Resources");
-    mkdirSync(resourcesDir, { recursive: true });
-    writeFileSync(join(resourcesDir, "LICENSE"), "LICENSE stub", { encoding: "utf8" });
-    writeFileSync(join(resourcesDir, "NOTICE"), "NOTICE stub", { encoding: "utf8" });
 
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: "com.example.wrong",
       version: expectedVersion,
     });
+    writeComplianceResources(appRoot);
 
     const dmgPath = join(tmp, "Formula.dmg");
     writeFileSync(dmgPath, "not-a-real-dmg", { encoding: "utf8" });
@@ -344,20 +335,12 @@ test(
     mkdirSync(macosDir, { recursive: true });
     writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
     chmodSync(join(macosDir, "formula-desktop"), 0o755);
-    const resourcesDir = join(appRoot, "Resources");
-    mkdirSync(resourcesDir, { recursive: true });
-    writeFileSync(join(resourcesDir, "LICENSE"), "license", { encoding: "utf8" });
-    writeFileSync(join(resourcesDir, "NOTICE"), "notice", { encoding: "utf8" });
-
-    const resourcesDir = join(appRoot, "Resources");
-    mkdirSync(resourcesDir, { recursive: true });
-    writeFileSync(join(resourcesDir, "LICENSE"), "LICENSE stub", { encoding: "utf8" });
-    writeFileSync(join(resourcesDir, "NOTICE"), "NOTICE stub", { encoding: "utf8" });
 
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: expectedIdentifier,
       version: "0.0.0",
     });
+    writeComplianceResources(appRoot);
 
     const dmgPath = join(tmp, "Formula.dmg");
     writeFileSync(dmgPath, "not-a-real-dmg", { encoding: "utf8" });
