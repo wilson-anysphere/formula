@@ -2226,7 +2226,14 @@ class BrowserExtensionHost {
         // model + worker guardrails (which replace `fetch`/`WebSocket` inside the
         // extension worker). CSP is defense-in-depth, not the primary enforcement
         // mechanism here.
-        const tauriInvoke = globalThis?.__TAURI__?.core?.invoke ?? globalThis?.__TAURI__?.invoke;
+        /** @type {any} */
+        let tauriInvoke = null;
+        try {
+          const tauri = globalThis?.__TAURI__;
+          tauriInvoke = tauri?.core?.invoke ?? tauri?.invoke ?? null;
+        } catch {
+          tauriInvoke = null;
+        }
         if (typeof tauriInvoke === "function") {
           const resolved = safeParseUrl(rawUrl);
           const url = resolved ? resolved.toString() : rawUrl;

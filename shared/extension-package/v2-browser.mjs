@@ -75,8 +75,15 @@ function isEd25519NotSupportedError(error) {
 }
 
 function getTauriInvoke() {
-  const invoke = globalThis.__TAURI__?.core?.invoke;
-  return typeof invoke === "function" ? invoke : null;
+  try {
+    const tauri = globalThis.__TAURI__;
+    const invoke = tauri?.core?.invoke;
+    return typeof invoke === "function" ? invoke : null;
+  } catch {
+    // Some hardened host environments (or tests) may define `__TAURI__` with a throwing getter.
+    // Treat that as "unavailable" so browser verification can fall back cleanly.
+    return null;
+  }
 }
 
 async function verifyEd25519Signature(payloadBytes, signatureBase64, publicKeyPem) {
