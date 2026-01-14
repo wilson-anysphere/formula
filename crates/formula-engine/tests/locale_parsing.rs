@@ -65,6 +65,20 @@ fn canonicalize_and_localize_array_literals_for_de_de() {
 }
 
 #[test]
+fn canonicalize_and_localize_array_literals_for_fr_fr_and_es_es() {
+    for (locale, localized) in [
+        (&locale::FR_FR, "=SOMME({1\\2;3\\4})"),
+        (&locale::ES_ES, "=SUMA({1\\2;3\\4})"),
+    ] {
+        let canonical = locale::canonicalize_formula(localized, locale).unwrap();
+        assert_eq!(canonical, "=SUM({1,2;3,4})");
+
+        let localized_roundtrip = locale::localize_formula(&canonical, locale).unwrap();
+        assert_eq!(localized_roundtrip, localized);
+    }
+}
+
+#[test]
 fn canonicalize_and_localize_unions_for_de_de() {
     let localized = "(A1;B1)";
     let canonical = locale::canonicalize_formula(localized, &locale::DE_DE).unwrap();
@@ -72,6 +86,18 @@ fn canonicalize_and_localize_unions_for_de_de() {
 
     let localized_roundtrip = locale::localize_formula(&canonical, &locale::DE_DE).unwrap();
     assert_eq!(localized_roundtrip, localized);
+}
+
+#[test]
+fn canonicalize_and_localize_unions_for_fr_fr_and_es_es() {
+    for locale in [&locale::FR_FR, &locale::ES_ES] {
+        let localized = "(A1;B1)";
+        let canonical = locale::canonicalize_formula(localized, locale).unwrap();
+        assert_eq!(canonical, "(A1,B1)");
+
+        let localized_roundtrip = locale::localize_formula(&canonical, locale).unwrap();
+        assert_eq!(localized_roundtrip, localized);
+    }
 }
 
 #[test]
