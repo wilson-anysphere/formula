@@ -1192,6 +1192,8 @@ export class SpreadsheetApp {
   private readonly drawingHitTestScratchRect = { x: 0, y: 0, width: 0, height: 0 };
   private selectedDrawingId: DrawingObjectId | null = null;
   private splitViewSecondaryGrid: { container: HTMLElement; grid: DesktopSharedGrid } | null = null;
+  private readonly drawingsListeners = new Set<() => void>();
+  private readonly drawingSelectionListeners = new Set<(id: DrawingObjectId | null) => void>();
   private readonly formulaChartModelStore = new FormulaChartModelStore();
   private nextDrawingImageId = 1;
   private insertImageInput: HTMLInputElement | null = null;
@@ -2554,6 +2556,7 @@ export class SpreadsheetApp {
             // Best-effort: keep chart overlays aligned when moving/resizing chart drawings.
             this.renderCharts(false);
           }
+          this.emitDrawingsChanged();
         },
         commitObjects: (next) => {
           this.document.setSheetDrawings(this.sheetId, next, { source: "drawings" });
@@ -3090,6 +3093,7 @@ export class SpreadsheetApp {
       this.drawingObjectsCache = null;
       this.invalidateDrawingHitTestIndexCaches();
       this.scheduleDrawingsRender(reason);
+      this.dispatchDrawingsChanged();
     };
 
     drawingUnsubs.push(
@@ -3654,13 +3658,17 @@ export class SpreadsheetApp {
   }
 
   private dispatchDrawingsChanged(): void {
-    if (typeof window === "undefined") return;
-    window.dispatchEvent(new Event("formula:drawings-changed"));
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("formula:drawings-changed"));
+    }
+    this.emitDrawingsChanged();
   }
 
   private dispatchDrawingSelectionChanged(): void {
-    if (typeof window === "undefined") return;
-    window.dispatchEvent(new CustomEvent("formula:drawing-selection-changed", { detail: { id: this.selectedDrawingId } }));
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("formula:drawing-selection-changed", { detail: { id: this.selectedDrawingId } }));
+    }
+    this.emitDrawingSelectionChanged();
   }
 
   private dispatchCommentsChanged(): void {
@@ -6352,6 +6360,9 @@ export class SpreadsheetApp {
     // and re-sync overlays from the formula bar's current hover state.
     this.hideFormulaRangePreviewTooltip();
     this.syncFormulaBarHoverRangeOverlays();
+    // Active sheet switch changes which drawings are visible/selected.
+    this.dispatchDrawingsChanged();
+    this.dispatchDrawingSelectionChanged();
   }
 
   /**
@@ -6415,6 +6426,8 @@ export class SpreadsheetApp {
     if (sheetChanged) {
       // Sheet changes always require a full redraw (grid + charts may differ).
       this.refresh();
+      this.dispatchDrawingsChanged();
+      this.dispatchDrawingSelectionChanged();
     } else if (didScroll) {
       this.refresh("scroll");
     }
@@ -6489,6 +6502,8 @@ export class SpreadsheetApp {
     }
     if (sheetChanged) {
       this.refresh();
+      this.dispatchDrawingsChanged();
+      this.dispatchDrawingSelectionChanged();
     } else if (didScroll) {
       this.refresh("scroll");
     }
@@ -6644,8 +6659,10 @@ export class SpreadsheetApp {
     }
 
     // Include locally-cached drawings (e.g. drag/resize interactions) that may not yet be
-    // reflected in the DocumentController snapshot. `DrawingInteractionController` updates
-    // `drawingObjectsCache` during pointermove, and we scan it below.
+    // reflected in the DocumentController snapshot.
+    for (const obj of this.drawingObjects) {
+      if (obj.kind.type === "image") keep.add(obj.kind.imageId);
+    }
     const cachedObjects = this.drawingObjectsCache;
     if (cachedObjects && cachedObjects.sheetId === this.sheetId) {
       for (const obj of cachedObjects.objects) {
@@ -6687,12 +6704,202 @@ export class SpreadsheetApp {
   }
 
   /**
-   * Chart renderer used by drawings overlays (primary + split-view secondary pane).
+   * List drawing objects anchored on a sheet.
+   *
+   * The returned array is sorted in z-order, with *topmost* objects first.
+   */
+  listDrawingsForSheet(sheetId?: string): DrawingObject[] {
+    const resolvedSheetId = sheetId ? String(sheetId) : this.sheetId;
+    if (!resolvedSheetId) return [];
+    const objects = this.listDrawingObjectsForSheet(resolvedSheetId);
+    return [...objects].sort((a, b) => b.zOrder - a.zOrder);
+  }
+
+  /**
+   * Subscribe to drawing list changes (insert/move/resize/delete/undo/redo/sheet switch).
+   */
+  subscribeDrawings(listener: () => void): () => void {
+    this.drawingsListeners.add(listener);
+    try {
+      listener();
+    } catch {
+      // ignore listener errors
+    }
+    return () => this.drawingsListeners.delete(listener);
+  }
+
+  private emitDrawingsChanged(): void {
+    if (this.drawingsListeners.size === 0) return;
+    for (const listener of [...this.drawingsListeners]) {
+      try {
+        listener();
+      } catch {
+        // ignore listener errors
+      }
+    }
+  }
+
+  subscribeDrawingSelection(listener: (selectedId: DrawingObjectId | null) => void): () => void {
+    this.drawingSelectionListeners.add(listener);
+    try {
+      listener(this.getSelectedDrawingId());
+    } catch {
+      // ignore listener errors
+    }
+    return () => this.drawingSelectionListeners.delete(listener);
+  }
+
+  private emitDrawingSelectionChanged(): void {
+    if (this.drawingSelectionListeners.size === 0) return;
+    const selectedId = this.getSelectedDrawingId();
+    for (const listener of [...this.drawingSelectionListeners]) {
+      try {
+        listener(selectedId);
+      } catch {
+        // ignore listener errors
+      }
+    }
+  }
+
+  deleteDrawingById(id: DrawingObjectId): void {
+    if (this.isReadOnly()) return;
+    if (this.isEditing()) return;
+
+    const prevSelected = this.getSelectedDrawingId();
+    const sheetId = this.sheetId;
+    const drawingId = id;
+
+    const target = this.listDrawingObjectsForSheet(sheetId).find((obj) => obj.id === drawingId) ?? null;
+    if (!target) return;
+    const imageId = target.kind.type === "image" ? target.kind.imageId : null;
+
+    const docAny: any = this.document as any;
+    const deleteDrawing =
+      typeof docAny.deleteDrawing === "function"
+        ? (docAny.deleteDrawing as (sheetId: string, drawingId: string | number, options?: unknown) => void)
+        : null;
+    const getSheetDrawings =
+      typeof docAny.getSheetDrawings === "function" ? (docAny.getSheetDrawings as (sheetId: string) => unknown) : null;
+    const setSheetDrawings =
+      typeof docAny.setSheetDrawings === "function" ? (docAny.setSheetDrawings as (sheetId: string, drawings: unknown, options?: unknown) => void) : null;
+    const deleteImage =
+      typeof docAny.deleteImage === "function" ? (docAny.deleteImage as (imageId: string, options?: unknown) => void) : null;
+
+    // `DrawingObject.id` is numeric in the UI layer, but DocumentController drawings can be stored with
+    // string ids (and we map them through a stable numeric hash). To delete the correct raw entry,
+    // scan the raw drawings list and compare via the adapter layer.
+    const rawIdsToDelete = new Set<string | number>();
+    if (getSheetDrawings) {
+      let raw: unknown = null;
+      try {
+        raw = getSheetDrawings.call(docAny, sheetId);
+      } catch {
+        raw = null;
+      }
+      if (Array.isArray(raw)) {
+        for (const entry of raw) {
+          if (!entry || typeof entry !== "object") continue;
+          let uiId: number | null = null;
+          try {
+            uiId = convertDocumentSheetDrawingsToUiDrawingObjects([entry], { sheetId })[0]?.id ?? null;
+          } catch {
+            uiId = null;
+          }
+          if (uiId !== drawingId) continue;
+          const rawId = (entry as any).id;
+          if (typeof rawId === "string") {
+            const trimmed = rawId.trim();
+            if (trimmed) rawIdsToDelete.add(trimmed);
+          } else if (typeof rawId === "number" && Number.isFinite(rawId)) {
+            rawIdsToDelete.add(rawId);
+          }
+        }
+      }
+    }
+    if (rawIdsToDelete.size === 0) rawIdsToDelete.add(drawingId);
+
+    const label = "Delete Drawing";
+    let batchStarted = false;
+    try {
+      this.document.beginBatch({ label });
+      batchStarted = true;
+    } catch {
+      batchStarted = false;
+    }
+
+    try {
+      if (deleteDrawing) {
+        for (const rawId of rawIdsToDelete) {
+          try {
+            deleteDrawing.call(docAny, sheetId, rawId, { label, source: "selectionPane" });
+          } catch {
+            // ignore
+          }
+        }
+      } else if (getSheetDrawings && setSheetDrawings) {
+        let existing: unknown = null;
+        try {
+          existing = getSheetDrawings.call(docAny, sheetId);
+        } catch {
+          existing = null;
+        }
+        const next = Array.isArray(existing)
+          ? existing.filter((d: any) => {
+              const rawId = d?.id;
+              if (typeof rawId === "string") return !rawIdsToDelete.has(rawId.trim() ? rawId.trim() : rawId);
+              if (typeof rawId === "number" && Number.isFinite(rawId)) return !rawIdsToDelete.has(rawId);
+              return true;
+            })
+          : [];
+        try {
+          setSheetDrawings.call(docAny, sheetId, next, { label, source: "selectionPane" });
+        } catch {
+          // ignore
+        }
+      }
+
+      if (imageId && deleteImage && !this.isImageReferencedByAnyDrawing(imageId)) {
+        try {
+          deleteImage.call(docAny, imageId, { label, source: "selectionPane" });
+        } catch {
+          // ignore
+        }
+        this.drawingOverlay.invalidateImage(imageId);
+      }
+    } finally {
+      if (batchStarted) {
+        try {
+          this.document.endBatch();
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    // Clear selection if it pointed at the deleted object.
+    if (this.selectedDrawingId === drawingId) {
+      this.selectedDrawingId = null;
+      this.drawingOverlay.setSelectedId(null);
+      this.drawingInteractionController?.setSelectedId(null);
+    }
+
+    this.drawingObjectsCache = null;
+    this.drawingHitTestIndex = null;
+    this.drawingHitTestIndexObjects = null;
+    this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+    this.emitDrawingsChanged();
+    if (this.getSelectedDrawingId() !== prevSelected) {
+      this.emitDrawingSelectionChanged();
+    }
+  }
+
+  /**
+   * Chart renderer used by the drawings overlay for imported DrawingML charts.
    *
    * In `?canvasCharts=1` mode this also supports ChartStore charts rendered as drawing objects.
    */
   getDrawingChartRenderer(): ChartRendererAdapter {
-    return new ChartRendererAdapter(this.createDrawingChartRendererStore());
+    return this.drawingChartRenderer;
   }
 
   /**
@@ -7657,6 +7864,7 @@ export class SpreadsheetApp {
   }
 
   deleteSelectedDrawing(): void {
+    const prevSelected = this.getSelectedDrawingId();
     const drawingId = this.selectedDrawingId;
     if (drawingId == null) return;
 
@@ -7758,6 +7966,13 @@ export class SpreadsheetApp {
     this.drawingObjectsCache = null;
     this.invalidateDrawingHitTestIndexCaches();
     this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+    // Deleting an object changes both the drawings list and the active selection.
+    // Emit explicit notifications so panels like Selection Pane update immediately even
+    // if DocumentController emits change events asynchronously.
+    this.emitDrawingsChanged();
+    if (this.getSelectedDrawingId() !== prevSelected) {
+      this.emitDrawingSelectionChanged();
+    }
   }
 
   duplicateSelectedDrawing(): void {
@@ -8459,6 +8674,9 @@ export class SpreadsheetApp {
 
       const prevSelected = this.selectedDrawingId;
       this.selectedDrawingId = inserted.id;
+      if (this.selectedChartId != null) {
+        this.setSelectedChartId(null);
+      }
       this.drawingOverlay.setSelectedId(inserted.id);
       if (this.gridMode === "shared") {
         this.ensureDrawingInteractionController().setSelectedId(inserted.id);
@@ -8468,6 +8686,7 @@ export class SpreadsheetApp {
       }
       this.renderDrawings();
       this.renderSelection();
+      this.emitDrawingsChanged();
       this.focus();
     } catch (err) {
       if (canInsertDrawing) {
@@ -8496,6 +8715,7 @@ export class SpreadsheetApp {
           // Best-effort: keep chart overlays aligned when moving/resizing chart drawings.
           this.renderCharts(false);
         }
+        this.emitDrawingsChanged();
       },
       shouldHandlePointerDown: () => !this.formulaBar?.isFormulaEditing(),
       onPointerDownHit: () => {
@@ -11112,17 +11332,21 @@ export class SpreadsheetApp {
   }
 
   private setSelectedChartId(id: string | null): void {
+    const prevSelected = this.getSelectedDrawingId();
     const next = id && String(id).trim() !== "" ? String(id) : null;
     // Selecting a chart should clear any drawing selection so selection handles don't
     // double-render and split-view panes can mirror a single "active object" selection.
     if (next != null && this.selectedDrawingId != null) {
       this.selectedDrawingId = null;
-      this.dispatchDrawingSelectionChanged();
       this.renderDrawings();
     }
-    if (next === this.selectedChartId) return;
-    this.selectedChartId = next;
-    this.renderChartSelectionOverlay();
+    if (next !== this.selectedChartId) {
+      this.selectedChartId = next;
+      this.renderChartSelectionOverlay();
+    }
+    if (this.getSelectedDrawingId() !== prevSelected) {
+      this.dispatchDrawingSelectionChanged();
+    }
   }
 
   private chartIdToDrawingId(chartId: string): number {
@@ -11562,6 +11786,7 @@ export class SpreadsheetApp {
         this.selectedDrawingId = null;
         this.dispatchDrawingSelectionChanged();
         this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+        this.emitDrawingSelectionChanged();
       }
       return;
     }
@@ -11585,6 +11810,7 @@ export class SpreadsheetApp {
           this.selectedDrawingId = null;
           this.dispatchDrawingSelectionChanged();
           this.renderDrawings(sharedViewport);
+          this.emitDrawingSelectionChanged();
         }
       }
       return;
@@ -11615,6 +11841,7 @@ export class SpreadsheetApp {
     if (this.selectedDrawingId !== prevSelected) {
       this.dispatchDrawingSelectionChanged();
       this.renderDrawings(sharedViewport);
+      this.emitDrawingSelectionChanged();
     }
 
     if (isContextClick) {
@@ -12540,10 +12767,13 @@ export class SpreadsheetApp {
     // is initialized.
     const overlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
     if (!overlay) return;
+    const prevSelected = this.getSelectedDrawingId();
     const viewport = this.getDrawingRenderViewport(sharedViewport);
     const baseObjects = this.listDrawingObjectsForSheet();
     this.drawingObjects = baseObjects;
-
+    if (this.selectedDrawingId != null && !baseObjects.some((o) => o.id === this.selectedDrawingId)) {
+      this.selectedDrawingId = null;
+    }
     const objects: DrawingObject[] = (() => {
       if (!this.useCanvasCharts) return baseObjects;
       // `listDrawingObjectsForSheet` keeps drawings z-order sorted ascending (back-to-front).
@@ -12594,6 +12824,9 @@ export class SpreadsheetApp {
     void overlay.render(objects, viewport).catch((err) => {
       console.warn("Drawing overlay render failed", err);
     });
+    if (this.getSelectedDrawingId() !== prevSelected) {
+      this.emitDrawingSelectionChanged();
+    }
   }
 
   private isImageReferencedByAnyDrawing(imageId: string): boolean {
@@ -13368,6 +13601,11 @@ export class SpreadsheetApp {
     // (and before the comments root observer is attached), refresh the comment
     // indexes/panel eagerly so indicators and the sidebar stay in sync.
     this.maybeRefreshCommentsUiForLocalEdit();
+
+    // Drawing state may also have changed (e.g. delete/move/resize). Notify subscribers so
+    // panels like the Selection Pane can re-query the current sheet's drawing list.
+    this.dispatchDrawingsChanged();
+    this.dispatchDrawingSelectionChanged();
     return true;
   }
 
@@ -14623,12 +14861,17 @@ export class SpreadsheetApp {
 
       const hit = hitTestDrawingsInto(hitIndex, drawingViewport, x, y, drawingBounds, this.drawingGeom);
       if (hit) {
+        const prevSelected = this.selectedDrawingId;
         if (editorWasOpen) {
           this.editor.commit("command");
         }
-        const prevSelected = this.selectedDrawingId;
         this.selectedDrawingId = hit.id;
-        if (prevSelected !== hit.id) {
+        if (this.selectedChartId != null) {
+          // Clear chart selection after setting `selectedDrawingId` so we don't emit an intermediate
+          // selection-change event (drawings and charts are mutually exclusive selections).
+          this.setSelectedChartId(null);
+        }
+        if (this.selectedDrawingId !== prevSelected) {
           this.dispatchDrawingSelectionChanged();
         }
         this.renderSelection();
@@ -17084,6 +17327,7 @@ export class SpreadsheetApp {
   private async cutSelectedDrawingToClipboard(): Promise<void> {
     const selectedId = this.selectedDrawingId;
     if (selectedId == null) return;
+    const prevSelected = this.getSelectedDrawingId();
 
     await this.copySelectedDrawingToClipboard();
 
@@ -17173,6 +17417,10 @@ export class SpreadsheetApp {
     this.selectedDrawingId = null;
     this.dispatchDrawingSelectionChanged();
     this.refresh();
+    this.emitDrawingsChanged();
+    if (this.getSelectedDrawingId() !== prevSelected) {
+      this.emitDrawingSelectionChanged();
+    }
     this.focus();
   }
 
@@ -17405,15 +17653,23 @@ export class SpreadsheetApp {
       throw err;
     }
 
+    const prevSelected = this.getSelectedDrawingId();
     this.drawingObjectsCache = null;
     const prevSelected = this.selectedDrawingId;
     this.selectedDrawingId = drawingId;
+    if (this.selectedChartId != null) {
+      this.setSelectedChartId(null);
+    }
     this.drawingOverlay.setSelectedId(drawingId);
     this.drawingInteractionController?.setSelectedId(drawingId);
     if (prevSelected !== drawingId) {
       this.dispatchDrawingSelectionChanged();
     }
     this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+    this.emitDrawingsChanged();
+    if (this.getSelectedDrawingId() !== prevSelected) {
+      this.emitDrawingSelectionChanged();
+    }
     this.focus();
     return true;
   }

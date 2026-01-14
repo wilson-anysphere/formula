@@ -3,6 +3,7 @@ import { t } from "../i18n/index.js";
 export const PanelIds = Object.freeze({
   AI_CHAT: "aiChat",
   AI_AUDIT: "aiAudit",
+  SELECTION_PANE: "selectionPane",
   MACROS: "macros",
   VERSION_HISTORY: "versionHistory",
   FORMULA_DEBUGGER: "formulaDebugger",
@@ -171,6 +172,16 @@ panelRegistry.registerPanel(
     title: "Audit Log",
     defaultDock: "right",
     defaultFloatingRect: { x: 140, y: 140, width: 640, height: 720 },
+    source: { kind: "builtin" },
+  },
+  { owner: "builtin" },
+);
+panelRegistry.registerPanel(
+  PanelIds.SELECTION_PANE,
+  {
+    title: "Selection Pane",
+    defaultDock: "right",
+    defaultFloatingRect: { x: 160, y: 160, width: 320, height: 520 },
     source: { kind: "builtin" },
   },
   { owner: "builtin" },

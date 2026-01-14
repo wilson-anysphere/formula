@@ -15,6 +15,7 @@ import { MonteCarloWizard } from "./what-if/MonteCarloWizard.js";
 import { createWhatIfApi } from "./what-if/api.js";
 import { ExtensionPanelBody } from "../extensions/ExtensionPanelBody.js";
 import { ExtensionsPanel } from "../extensions/ExtensionsPanel.js";
+import { SelectionPanePanel } from "./selection-pane/SelectionPanePanel.js";
 import type { ExtensionPanelBridge } from "../extensions/extensionPanelBridge.js";
 import type { DesktopExtensionHostManager } from "../extensions/extensionHostManager.js";
 import type { PanelRegistry } from "./panelRegistry.js";
@@ -29,6 +30,11 @@ import { verifyExtensionPackageV2Desktop } from "./marketplace/verifyExtensionPa
 import { t } from "../i18n/index.js";
 export interface PanelBodyRendererOptions {
   getDocumentController: () => unknown;
+  /**
+   * Optional SpreadsheetApp accessor for panels that need to interact with UI state beyond the
+   * DocumentController (e.g. selection pane for drawings).
+   */
+  getSpreadsheetApp?: () => unknown;
   getActiveSheetId?: () => string;
   getSelection?: () => unknown;
   getSearchWorkbook?: () => unknown;
@@ -307,6 +313,17 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           createChart={options.createChart}
         />,
       );
+      return;
+    }
+
+    if (panelId === PanelIds.SELECTION_PANE) {
+      makeBodyFillAvailableHeight(body);
+      const app = options.getSpreadsheetApp?.();
+      if (!app) {
+        body.textContent = "Selection Pane is unavailable.";
+        return;
+      }
+      renderReactPanel(panelId, body, <SelectionPanePanel app={app as any} />);
       return;
     }
 
