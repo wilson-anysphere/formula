@@ -6063,9 +6063,10 @@ fn rewrite_all_formulas_structural(
     // the workbook's current sheet ordering rather than stable sheet ids.
     let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
     for (order_index, &sheet_id) in workbook.sheet_ids_in_order().iter().enumerate() {
-        if let Some(name) = workbook.sheet_name(sheet_id) {
-            sheet_order_indices.insert(name.to_ascii_lowercase(), order_index);
-        }
+        let Some(name) = workbook.sheet_name(sheet_id) else {
+            continue;
+        };
+        sheet_order_indices.insert(Workbook::sheet_key(name), order_index);
     }
 
     let mut rewrites = Vec::new();
@@ -6083,7 +6084,7 @@ fn rewrite_all_formulas_structural(
                 ctx_sheet,
                 origin,
                 &edit,
-                |name| sheet_order_indices.get(&name.to_ascii_lowercase()).copied(),
+                |name| sheet_order_indices.get(&Workbook::sheet_key(name)).copied(),
             );
             if changed {
                 rewrites.push(FormulaRewrite {
@@ -6108,9 +6109,10 @@ fn rewrite_all_formulas_range_map(
     // the workbook's current sheet ordering rather than stable sheet ids.
     let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
     for (order_index, &sheet_id) in workbook.sheet_ids_in_order().iter().enumerate() {
-        if let Some(name) = workbook.sheet_name(sheet_id) {
-            sheet_order_indices.insert(name.to_ascii_lowercase(), order_index);
-        }
+        let Some(name) = workbook.sheet_name(sheet_id) else {
+            continue;
+        };
+        sheet_order_indices.insert(Workbook::sheet_key(name), order_index);
     }
 
     let mut rewrites = Vec::new();
@@ -6128,7 +6130,7 @@ fn rewrite_all_formulas_range_map(
                 ctx_sheet,
                 origin,
                 edit,
-                |name| sheet_order_indices.get(&name.to_ascii_lowercase()).copied(),
+                |name| sheet_order_indices.get(&Workbook::sheet_key(name)).copied(),
             );
             if changed {
                 rewrites.push(FormulaRewrite {

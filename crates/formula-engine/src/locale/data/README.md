@@ -195,6 +195,30 @@ Accordingly:
 - Separators **inside structured references** are also canonical (commas inside `Table1[[...],[...]]`
   are not locale-dependent), so translation avoids rewriting anything inside `[...]` bracket groups.
 
+## Structured references (`Table1[...]`) and bracketed segments
+
+Excel uses `[...]` for:
+
+- **Structured references** (tables), e.g. `Table1[Col]`, `Table1[[#Headers],[Col]]`, `[@Col]`
+- **External workbook prefixes**, e.g. `[Book.xlsx]Sheet1!A1`
+
+Our locale translation pipeline in `src/locale/translate.rs` treats **everything inside
+`[...]` as opaque** and does **not** translate it.
+
+This matches Excel behavior for the supported locales (`de-DE`, `fr-FR`, `es-ES`):
+
+- Structured-reference **item keywords are canonical (English)** and are not localized:
+  `#All`, `#Data`, `#Headers`, `#Totals`, `#This Row`
+- Structured-reference **syntax separators** inside the brackets are also canonical and are not
+  locale-dependent (e.g. the comma in `Table1[[#Headers],[Col]]` remains `,` even when the locale
+  uses `;` for function arguments).
+
+Treating bracket content as opaque is also important for correctness because it may contain:
+
+- workbook names (`[Book.xlsx]`) that must never be rewritten
+- table/column identifiers that may collide with localized boolean keywords (e.g. `WAHR`)
+- Excel’s `]]` escape sequence for a literal `]` inside table/column names
+
 ## Adding a new locale
 
 1. **Create the sources:**
