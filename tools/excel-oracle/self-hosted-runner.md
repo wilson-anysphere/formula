@@ -86,6 +86,10 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-tra
 node scripts/normalize-locale-function-sources.js
 node scripts/generate-locale-function-tsv.js
 node scripts/generate-locale-function-tsv.js --check
+# or:
+pnpm normalize:locale-function-sources
+pnpm generate:locale-function-tsv
+pnpm check:locale-function-tsv
 ```
 
 For `es-ES`, use:
@@ -98,6 +102,10 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-tra
 node scripts/normalize-locale-function-sources.js
 node scripts/generate-locale-function-tsv.js
 node scripts/generate-locale-function-tsv.js --check
+# or:
+pnpm normalize:locale-function-sources
+pnpm generate:locale-function-tsv
+pnpm check:locale-function-tsv
 ```
 
 Verification checklist (especially for `es-ES`):
