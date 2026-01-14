@@ -382,6 +382,8 @@ fn cell_sheet_default_style_affects_format_prefix_and_protect() {
 #[test]
 fn cell_width_defaults_to_excel_standard_width() {
     let mut sheet = TestSheet::new();
+    // Default Excel column width is 8.43 characters, but CELL("width") reports the rounded
+    // integer width (plus a custom-width marker in the first decimal place).
     assert_number(&sheet.eval("=CELL(\"width\",A1)"), 8.0);
 }
 
