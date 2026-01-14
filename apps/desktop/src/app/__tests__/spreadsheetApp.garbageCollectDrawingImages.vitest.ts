@@ -215,4 +215,62 @@ describe("SpreadsheetApp.garbageCollectDrawingImages", () => {
     app.destroy();
     root.remove();
   });
+
+  it("keeps image ids referenced by sheet backgrounds on non-active sheets", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc: any = app.getDocument();
+    const sheet2 = doc.addSheet({ sheetId: "Sheet2" });
+
+    // Set a background image id on a sheet that is not the active one.
+    app.setSheetBackgroundImageId(sheet2, "image_bg_other_sheet");
+
+    const garbageCollectAsync = vi.fn(async (_keep: Iterable<string>) => {});
+    (app as any).drawingImages = { get: () => undefined, set: () => {}, garbageCollectAsync, clear: () => {} };
+
+    await app.garbageCollectDrawingImages();
+
+    expect(garbageCollectAsync).toHaveBeenCalledTimes(1);
+    const keep = garbageCollectAsync.mock.calls[0]?.[0] as Iterable<string>;
+    const keepSet = new Set(Array.from(keep));
+    expect(keepSet.has("image_bg_other_sheet")).toBe(true);
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("keeps image ids referenced by in-cell images on non-active sheets", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc: any = app.getDocument();
+    const sheet2 = doc.addSheet({ sheetId: "Sheet2" });
+
+    // An in-cell image stored on a non-active sheet should still be kept.
+    doc.setCellValue(sheet2, { row: 0, col: 0 }, { type: "image", value: { imageId: "image_cell_other_sheet", altText: null } });
+
+    const garbageCollectAsync = vi.fn(async (_keep: Iterable<string>) => {});
+    (app as any).drawingImages = { get: () => undefined, set: () => {}, garbageCollectAsync, clear: () => {} };
+
+    await app.garbageCollectDrawingImages();
+
+    expect(garbageCollectAsync).toHaveBeenCalledTimes(1);
+    const keep = garbageCollectAsync.mock.calls[0]?.[0] as Iterable<string>;
+    const keepSet = new Set(Array.from(keep));
+    expect(keepSet.has("image_cell_other_sheet")).toBe(true);
+
+    app.destroy();
+    root.remove();
+  });
 });
