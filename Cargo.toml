@@ -37,3 +37,30 @@ strip = "symbols"
 lto = "thin"
 # Fewer codegen units improves LTO effectiveness and can shrink binaries.
 codegen-units = 1
+
+# NOTE: Cargo only reads `[profile.*]` settings from the *workspace* `Cargo.toml`
+# (this file), so desktop-specific release settings also live here.
+
+[profile.release.package.formula-desktop-tauri]
+# Prefer a smaller desktop host binary; hot-path compute lives in `formula-engine`
+# which remains at Cargo's default `opt-level=3`.
+opt-level = "z"
+
+# Debugging helper:
+#
+# Release stripping/LTO makes stack traces and profiling harder. Use this profile when you need a
+# more debuggable optimized desktop build:
+#
+#   cargo build --profile release-desktop-debug -p formula-desktop-tauri --bin formula-desktop --features desktop
+
+[profile.release-desktop-debug]
+inherits = "release"
+debug = 1
+strip = false
+# Keep debug builds reasonably fast to compile.
+lto = false
+codegen-units = 16
+
+[profile.release-desktop-debug.package.formula-desktop-tauri]
+# Use regular perf-oriented optimizations for the desktop shell when debugging.
+opt-level = 3

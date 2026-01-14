@@ -249,7 +249,12 @@ fn setup_bytecode_array_aggregate_engine(size: usize) -> (Engine, String) {
         .set_cell_value("Sheet1", "A1", 0.0_f64)
         .expect("seed cell");
 
-    let out_cell = "B1".to_string();
+    // Important: keep the output cell *outside* the referenced row range (`1:{size}`).
+    //
+    // Range nodes participate in calc ordering, and placing the formula inside the range would
+    // create a trivial circular reference (cell -> range node -> cell) which the engine resolves
+    // to `0` without evaluating the formula (since iterative calculation is disabled by default).
+    let out_cell = format!("B{}", size + 1);
     let half = size / 2;
     // Use ROW over a row-range to produce a large in-memory array on the bytecode backend, then
     // aggregate it. This exercises bytecode `Value::Array` aggregate fast paths (SUM/COUNTIF).

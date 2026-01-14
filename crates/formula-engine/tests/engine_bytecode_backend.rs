@@ -7086,6 +7086,28 @@ fn bytecode_backend_matches_ast_for_reference_functions() {
 }
 
 #[test]
+fn bytecode_backend_allows_row_column_on_whole_row_and_column_ranges() {
+    let mut engine = Engine::new();
+    engine
+        // Place the formulas outside of the referenced whole-row/whole-column ranges so we don't
+        // create an accidental circular reference (range nodes participate in calc ordering).
+        .set_cell_formula("Sheet1", "AA6001", "=SUM(ROW(1:5000))")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "AA6002", "=SUM(COLUMN(A:Z))")
+        .unwrap();
+
+    // Regression: whole-row / whole-column references expand to the full sheet width/height in the
+    // lowered bytecode AST, but ROW/COLUMN treat them as 1-D arrays and should remain bytecode-eligible.
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=SUM(ROW(1:5000))", "AA6001");
+    assert_engine_matches_ast(&engine, "=SUM(COLUMN(A:Z))", "AA6002");
+}
+
+#[test]
 fn bytecode_backend_distinguishes_missing_args_from_blank_cells_for_address() {
     let mut engine = Engine::new();
     // A1 is left blank (unset).

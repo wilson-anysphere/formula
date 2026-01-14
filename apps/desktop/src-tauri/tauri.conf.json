@@ -175,6 +175,6 @@
         "installMode": "passive"
       }
     },
-    "notification": {}
+    "notification": null
   }
 }

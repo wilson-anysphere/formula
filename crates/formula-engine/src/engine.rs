@@ -9077,11 +9077,105 @@ fn bytecode_expr_within_grid_limits(
             bytecode_expr_within_grid_limits(right, origin)?;
             Ok(())
         }
-        bytecode::Expr::FuncCall { args, .. } => {
-            for arg in args {
-                bytecode_expr_within_grid_limits(arg, origin)?;
+        bytecode::Expr::FuncCall { func, args } => {
+            use bytecode::ast::Function;
+
+            // Most functions treat range arguments as dense rectangular cell sets. The bytecode
+            // backend currently enforces a conservative cell-count limit to avoid allocating huge
+            // per-range buffers.
+            //
+            // A small set of reference-introspection functions do *not* need to materialize values
+            // for whole-row / whole-column ranges (e.g. `ROW(1:1000)`), so apply a more accurate
+            // limit based on their actual output shape.
+            match func {
+                Function::Row | Function::Column => {
+                    for (idx, arg) in args.iter().enumerate() {
+                        if idx == 0 {
+                            match arg {
+                                bytecode::Expr::RangeRef(r) => {
+                                    let resolved = r.resolve(origin);
+                                    if resolved.row_start < 0
+                                        || resolved.col_start < 0
+                                        || resolved.row_end >= EXCEL_MAX_ROWS_I32
+                                        || resolved.col_end >= EXCEL_MAX_COLS_I32
+                                    {
+                                        return Err(BytecodeCompileReason::ExceedsGridLimits);
+                                    }
+
+                                    let spans_all_cols = resolved.col_start == 0
+                                        && resolved.col_end
+                                            == EXCEL_MAX_COLS_I32.saturating_sub(1);
+                                    let spans_all_rows = resolved.row_start == 0
+                                        && resolved.row_end
+                                            == EXCEL_MAX_ROWS_I32.saturating_sub(1);
+
+                                    // ROW/COLUMN treat full-row/full-column references as 1-D
+                                    // arrays (see `functions::builtins_reference::{row_fn,column_fn}`
+                                    // and the corresponding bytecode runtime implementations).
+                                    let cells = if spans_all_cols || spans_all_rows {
+                                        match func {
+                                            Function::Row => i64::from(resolved.rows()),
+                                            Function::Column => i64::from(resolved.cols()),
+                                            _ => unreachable!("matched above"),
+                                        }
+                                    } else {
+                                        (i64::from(resolved.rows())) * (i64::from(resolved.cols()))
+                                    };
+
+                                    if cells > BYTECODE_MAX_RANGE_CELLS {
+                                        return Err(BytecodeCompileReason::ExceedsRangeCellLimit);
+                                    }
+                                    continue;
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        bytecode_expr_within_grid_limits(arg, origin)?;
+                    }
+                    Ok(())
+                }
+                Function::Rows | Function::Columns => {
+                    for arg in args {
+                        match arg {
+                            // ROWS/COLUMNS only need the reference bounds; they don't allocate
+                            // buffers proportional to the cell count.
+                            bytecode::Expr::RangeRef(r) => {
+                                let resolved = r.resolve(origin);
+                                if resolved.row_start < 0
+                                    || resolved.col_start < 0
+                                    || resolved.row_end >= EXCEL_MAX_ROWS_I32
+                                    || resolved.col_end >= EXCEL_MAX_COLS_I32
+                                {
+                                    return Err(BytecodeCompileReason::ExceedsGridLimits);
+                                }
+                            }
+                            bytecode::Expr::MultiRangeRef(r) => {
+                                for area in r.areas.iter() {
+                                    let resolved = area.range.resolve(origin);
+                                    if resolved.row_start < 0
+                                        || resolved.col_start < 0
+                                        || resolved.row_end >= EXCEL_MAX_ROWS_I32
+                                        || resolved.col_end >= EXCEL_MAX_COLS_I32
+                                    {
+                                        return Err(BytecodeCompileReason::ExceedsGridLimits);
+                                    }
+                                }
+                            }
+                            _ => {
+                                bytecode_expr_within_grid_limits(arg, origin)?;
+                            }
+                        }
+                    }
+                    Ok(())
+                }
+                _ => {
+                    for arg in args {
+                        bytecode_expr_within_grid_limits(arg, origin)?;
+                    }
+                    Ok(())
+                }
             }
-            Ok(())
         }
         bytecode::Expr::Lambda { body, .. } => bytecode_expr_within_grid_limits(body, origin),
         bytecode::Expr::Call { callee, args } => {

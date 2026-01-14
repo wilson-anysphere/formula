@@ -1155,6 +1155,34 @@ backend library can still compile (and be tested) without linking Tauri or syste
 
 ---
 
+## Rust release profile (desktop binary size)
+
+The packaged desktop app ships a native Rust binary (`formula-desktop`). To keep installer/bundle sizes down (and improve cold-start),
+release builds enable size-focused settings:
+
+- Source of truth: `Cargo.toml` (workspace root)
+  - `[profile.release]` (workspace-wide release defaults for shipped artifacts):
+    - `strip = "symbols"`
+    - `lto = "thin"`
+    - `codegen-units = 1`
+  - `[profile.release.package.formula-desktop-tauri]` (desktop shell crate only):
+    - `opt-level = "z"` (the compute-heavy `formula-engine` stays on Cargo’s default `opt-level=3`)
+
+Note: Cargo does not support `lto` / `panic = "abort"` as *per-package* overrides, so those must be configured profile-wide.
+
+### Overriding for debugging
+
+Release stripping removes symbols and makes stack traces harder to interpret. For a more debuggable optimized build, use the custom
+profile:
+
+```bash
+cargo build --profile release-desktop-debug -p formula-desktop-tauri --bin formula-desktop --features desktop
+```
+
+Or build a normal debug binary (no `--release`) when you don't need full optimization.
+
+---
+
 ## Tauri v2 Capabilities & Permissions
 
 In Tauri v2, permissioning is driven by **capabilities** rather than the Tauri v1 “allowlist”.
@@ -1181,12 +1209,10 @@ It gates:
     `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs`.
   - Even with allowlisting, commands must validate scope/authorization in Rust (trusted-origin + window-label checks,
     argument validation, filesystem/network scope checks, etc).
-- **`core:allow-invoke`** (scoped core permission): a second, capability-local command allowlist.
-  - In this repo it is granted in `apps/desktop/src-tauri/capabilities/main.json` using the **object form** with an explicit list:
-    `{ "identifier": "core:allow-invoke", "allow": [{ "command": "..." }] }`.
-  - We never grant the string form `"core:allow-invoke"` (it behaves like an unscoped/default allowlist).
-  - Keep it explicit (no wildcards) and in sync with actual frontend `invoke("...")` usage (guardrailed by
-    `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`).
+- **`core:allow-invoke`** (scoped core permission, optional): some Tauri toolchains include a capability-local command allowlist.
+  - The toolchain used in this repo does not currently expose that permission (so it is not present in `main.json`).
+  - If we add it in the future, use the object form with an explicit allowlist (never the string form, which behaves like an
+    unscoped/default allowlist).
 - **`core:event:allow-listen` / `core:event:allow-emit`**: which event names the frontend can `listen(...)` for or `emit(...)`.
 - **`core:event:allow-unlisten`**: allows the frontend to unregister event listeners it previously installed (so we don’t leak
   listeners for one-shot flows like close/open/OAuth readiness signals).
