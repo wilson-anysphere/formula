@@ -9299,26 +9299,6 @@ const ribbonActions = createRibbonActionsFromCommands({
   commandRegistry,
   onCommandError: onRibbonCommandError,
   onUnknownToggle: (commandId, pressed) => handleRibbonFormattingToggle(ribbonCommandHandlersCtx, commandId, pressed),
-  commandOverrides: {
-    "pageLayout.arrange.selectionPane": () => {
-      // Excel-style: "Selection Pane" should be idempotent. If the panel is already open,
-      // activate/focus it instead of toggling it closed.
-      openRibbonPanel(PanelIds.SELECTION_PANE);
-      // The panel is a React mount; wait a frame so DOM nodes exist before focusing.
-      if (typeof document !== "undefined" && typeof requestAnimationFrame === "function") {
-        requestAnimationFrame(() =>
-          requestAnimationFrame(() => {
-            const el = document.querySelector<HTMLElement>("[data-testid=\"selection-pane\"]");
-            try {
-              el?.focus();
-            } catch {
-              // Best-effort.
-            }
-          }),
-        );
-      }
-    },
-  },
   onBeforeExecuteCommand: async (_commandId, source) => {
     if (source.kind !== "extension") return;
     // Match keybinding/command palette behavior: executing an extension command should
