@@ -85,7 +85,7 @@ pub use editing::{
 };
 pub use engine::{
     BytecodeCompileReason, BytecodeCompileReportEntry, BytecodeCompileStats, Engine, EngineError,
-    EngineInfo, ExternalDataProvider, ExternalValueProvider, FormatRun, NameDefinition, NameScope,
+    EngineInfo, ExternalDataProvider, ExternalValueProvider, NameDefinition, NameScope,
     PrecedentNode, RecalcMode, RecalcValueChange, SheetId, SheetLifecycleError,
 };
 pub use parser::{
