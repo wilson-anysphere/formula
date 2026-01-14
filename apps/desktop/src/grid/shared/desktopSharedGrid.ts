@@ -407,8 +407,8 @@ export class DesktopSharedGrid {
   }
 
   scrollBy(dx: number, dy: number): void {
-    // Support `scrollBy(0,0)` as a "sync scrollbars + notify" call site (tests and host code use this
-    // to force a scrollbar refresh after viewport changes).
+    // Support `scrollBy(0,0)` as a "sync scrollbars + notify" call site (used by some tests and
+    // legacy call sites to force a scrollbar refresh after viewport changes).
     if (dx === 0 && dy === 0) {
       this.syncScrollbars();
       this.emitScroll();
