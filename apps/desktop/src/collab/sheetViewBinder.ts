@@ -29,11 +29,14 @@ const VIEW_KEYS = new Set([
   "backgroundImageId",
   // Backwards compatibility with older clients / alternate naming.
   "background_image_id",
+  "backgroundImage",
+  "background_image",
   "colWidths",
   "rowHeights",
   "mergedRanges",
   // Backwards compatibility with older clients.
   "mergedCells",
+  "merged_cells",
   "drawings",
 ]);
 
@@ -428,7 +431,12 @@ function readSheetViewFromSheetMap(sheet: any): SheetViewState {
   const mergedRanges =
     viewRaw !== undefined
       ? readMergedRanges(readYMapOrObject(viewRaw, "mergedRanges") ?? readYMapOrObject(viewRaw, "mergedCells"))
-      : readMergedRanges(sheet?.get?.("mergedRanges") ?? sheet?.get?.("mergedCells"));
+      : readMergedRanges(sheet?.get?.("mergedRanges") ?? sheet?.get?.("mergedCells") ?? sheet?.get?.("merged_cells"));
+  const mergedRangesWithSnakeCase =
+    mergedRanges ??
+    (viewRaw !== undefined
+      ? readMergedRanges(readYMapOrObject(viewRaw, "merged_cells"))
+      : undefined);
 
   let backgroundRaw: unknown = undefined;
   if (viewRaw !== undefined) {
@@ -456,7 +464,7 @@ function readSheetViewFromSheetMap(sheet: any): SheetViewState {
   if (backgroundImageId) out.backgroundImageId = backgroundImageId;
   if (colWidths) out.colWidths = colWidths;
   if (rowHeights) out.rowHeights = rowHeights;
-  if (mergedRanges) out.mergedRanges = mergedRanges;
+  if (mergedRangesWithSnakeCase) out.mergedRanges = mergedRangesWithSnakeCase;
   if (drawings) out.drawings = drawings;
   return out;
 }
@@ -795,6 +803,8 @@ export function bindSheetViewToCollabSession(options: {
                 // Backwards compatibility cleanup.
                 viewMap.delete("mergedCells");
                 sheet.delete("mergedCells");
+                viewMap.delete("merged_cells");
+                sheet.delete("merged_cells");
               }
             } else if (!mergedRangesEquals(prevMergedRanges, nextMergedRanges)) {
               const cloned = nextMergedRanges.map((r) => ({
@@ -809,6 +819,9 @@ export function bindSheetViewToCollabSession(options: {
               // Also write the legacy key so older clients can still render merged regions.
               viewMap.set("mergedCells", cloned);
               sheet.set("mergedCells", cloned);
+              // Some legacy encodings use snake_case.
+              viewMap.set("merged_cells", cloned);
+              sheet.set("merged_cells", cloned);
             }
 
             if (!deepEquals(drawingsBefore, drawingsAfter)) {
