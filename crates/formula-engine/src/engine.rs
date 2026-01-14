@@ -13577,7 +13577,7 @@ mod tests {
     }
 
     #[test]
-    fn bytecode_compiler_skips_huge_ranges() {
+    fn bytecode_compiler_handles_huge_ranges_via_sparse_iteration() {
         let mut engine = Engine::new();
         engine
             .set_cell_formula("Sheet1", "B1", "=SUM(A1:XFD1048576)")
@@ -13613,6 +13613,9 @@ mod tests {
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
         assert!(column_cache.by_sheet[sheet_id].is_empty());
+
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(0.0));
     }
 
     fn assert_bytecode_matches_ast(formula: &str, expected: Value) {
