@@ -312,6 +312,42 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     host.remove();
   });
 
+  it("accepts with Tab first, then uses a second Tab to commit (dropdown should not steal commit forever)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+    expect(dropdown?.hasAttribute("hidden")).toBe(false);
+
+    const first = new KeyboardEvent("keydown", { key: "Tab", cancelable: true });
+    view.textarea.dispatchEvent(first);
+
+    expect(first.defaultPrevented).toBe(true);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(true);
+    expect(view.model.draft).toBe("=VLOOKUP(");
+    expect(dropdown?.hasAttribute("hidden")).toBe(true);
+
+    const second = new KeyboardEvent("keydown", { key: "Tab", cancelable: true });
+    view.textarea.dispatchEvent(second);
+
+    expect(second.defaultPrevented).toBe(true);
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("=VLOOKUP(", { reason: "tab", shift: false });
+    expect(view.model.isEditing).toBe(false);
+
+    host.remove();
+  });
+
   it("prefers dropdown completion over AI ghost text when open", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
