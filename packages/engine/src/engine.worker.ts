@@ -761,7 +761,18 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).renameSheet !== "function") {
                 throw new Error("renameSheet: WasmWorkbook.renameSheet is not available in this WASM build");
               }
-              result = Boolean((wb as any).renameSheet(params.oldName, params.newName));
+              {
+                const oldName = normalizeSheetName(params.oldName);
+                const newName = normalizeSheetName(params.newName);
+                // Defensive: sheet names are expected to be non-empty strings. Avoid forwarding
+                // whitespace-only names into the engine (older WASM builds may not validate inputs
+                // consistently).
+                if (!oldName || !newName) {
+                  result = false;
+                } else {
+                  result = Boolean((wb as any).renameSheet(oldName, newName));
+                }
+              }
               break;
             case "setSheetOrigin":
               if (typeof (wb as any).setSheetOrigin !== "function") {

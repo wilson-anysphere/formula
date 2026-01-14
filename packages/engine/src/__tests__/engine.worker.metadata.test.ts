@@ -455,6 +455,39 @@ describe("engine.worker workbook metadata RPCs", () => {
     }
   });
 
+  it("trims sheet names for renameSheet", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      let resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "renameSheet",
+        params: { oldName: "  Sheet1  ", newName: "  Budget  " }
+      });
+      expect(resp.ok).toBe(true);
+      expect((resp as RpcResponseOk).result).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 2,
+        method: "renameSheet",
+        params: { oldName: "   ", newName: "Budget" }
+      });
+      expect(resp.ok).toBe(true);
+      expect((resp as RpcResponseOk).result).toBe(false);
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([["renameSheet", "Sheet1", "Budget"]]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
+
   it("treats blank sheet names as missing for sheet-optional cell edit RPCs", async () => {
     (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
     const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;

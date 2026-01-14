@@ -56,6 +56,11 @@ export class WasmWorkbook {
     return { rows: 100, cols: 200 };
   }
 
+  renameSheet(oldName, newName) {
+    recordCall("renameSheet", oldName, newName);
+    return true;
+  }
+
   setWorkbookFileMetadata(directory, filename) {
     recordCall("setWorkbookFileMetadata", directory, filename);
   }
