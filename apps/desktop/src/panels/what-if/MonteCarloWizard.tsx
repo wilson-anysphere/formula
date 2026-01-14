@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 import type {
   Distribution,
@@ -32,12 +32,21 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
   const [result, setResult] = useState<SimulationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [invalidField, setInvalidField] = useState<"iterations" | "outputCells" | null>(null);
+  const [invalidDistributionJson, setInvalidDistributionJson] = useState(false);
   const reactInstanceId = React.useId();
   const domInstanceId = useMemo(() => reactInstanceId.replace(/[^a-zA-Z0-9_-]/g, "-"), [reactInstanceId]);
   const errorId = useMemo(() => `monte-carlo-error-${domInstanceId}`, [domInstanceId]);
 
   const parsedIterations = useMemo(() => Number(iterations), [iterations]);
   const parsedSeed = useMemo(() => Number(seed), [seed]);
+
+  useEffect(() => {
+    if (!invalidDistributionJson) return;
+    if (inputs.some((i) => !i.distributionJsonValid)) return;
+    // Clear the validation error once all JSON fields are valid again.
+    setInvalidDistributionJson(false);
+    setError(null);
+  }, [inputs, invalidDistributionJson]);
 
   function updateInput(idx: number, patch: Partial<InputRow>) {
     setInputs((prev) => prev.map((v, i) => (i === idx ? { ...v, ...patch } : v)));
@@ -46,6 +55,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
   async function run() {
     setError(null);
     setInvalidField(null);
+    setInvalidDistributionJson(false);
     setResult(null);
     setProgress(null);
 
@@ -68,6 +78,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
 
     if (inputs.some((i) => !i.distributionJsonValid)) {
       setError(t("whatIf.monteCarlo.error.invalidDistributionJson"));
+      setInvalidDistributionJson(true);
       return;
     }
 
@@ -231,6 +242,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
                   className="what-if__input what-if__input--mono"
                   value={input.distributionJson}
                   aria-invalid={input.distributionJsonValid ? undefined : true}
+                  aria-describedby={invalidDistributionJson && !input.distributionJsonValid ? errorId : undefined}
                   onChange={(e) => {
                     const raw = e.target.value;
                     try {
