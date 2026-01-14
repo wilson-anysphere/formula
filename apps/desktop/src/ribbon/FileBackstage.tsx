@@ -11,6 +11,14 @@ export interface FileBackstageProps {
 }
 
 type BackstageItem = {
+  /**
+   * Optional command id associated with this backstage action.
+   *
+   * When present, the backstage item will respect `RibbonUiState.disabledById`
+   * for this id so edit-mode/read-only command disabling applies consistently
+   * across both the ribbon and File backstage entry points.
+   */
+  commandId?: string;
   iconId: RibbonIconId;
   label: string;
   hint: string;
@@ -65,6 +73,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
   const items = React.useMemo<BackstageItem[]>(
     () => [
       {
+        commandId: "workbench.newWorkbook",
         iconId: "filePlus",
         label: "New Workbook",
         hint: shortcut("workbench.newWorkbook", "N"),
@@ -74,6 +83,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.newWorkbook,
       },
       {
+        commandId: "workbench.openWorkbook",
         iconId: "folderOpen",
         label: "Open…",
         hint: shortcut("workbench.openWorkbook", "O"),
@@ -83,6 +93,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.openWorkbook,
       },
       {
+        commandId: "workbench.saveWorkbook",
         iconId: "save",
         label: "Save",
         hint: shortcut("workbench.saveWorkbook", "S"),
@@ -92,6 +103,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.saveWorkbook,
       },
       {
+        commandId: "workbench.saveWorkbookAs",
         iconId: "edit",
         label: "Save As…",
         hint: shortcut("workbench.saveWorkbookAs", "S", { shift: true }),
@@ -101,6 +113,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.saveWorkbookAs,
       },
       {
+        commandId: "file.save.autoSave",
         iconId: "cloud",
         label: "AutoSave",
         hint: autoSavePressed ? "On" : "Off",
@@ -112,6 +125,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.toggleAutoSave ? () => actions.toggleAutoSave?.(!autoSavePressed) : undefined,
       },
       {
+        commandId: "view.togglePanel.versionHistory",
         iconId: "clock",
         label: "Version History",
         hint: "",
@@ -121,6 +135,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.versionHistory,
       },
       {
+        commandId: "view.togglePanel.branchManager",
         iconId: "shuffle",
         label: "Branches",
         hint: "",
@@ -130,6 +145,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.branchManager,
       },
       {
+        commandId: "workbench.print",
         iconId: "print",
         label: "Print…",
         hint: shortcut("workbench.print", "P"),
@@ -139,6 +155,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.print,
       },
       {
+        commandId: "workbench.printPreview",
         iconId: "eye",
         label: "Print Preview",
         hint: "",
@@ -148,6 +165,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.printPreview,
       },
       {
+        commandId: "pageLayout.pageSetup.pageSetupDialog",
         iconId: "settings",
         label: "Page Setup…",
         hint: "",
@@ -157,6 +175,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.pageSetup,
       },
       {
+        commandId: "workbench.closeWorkbook",
         iconId: "close",
         label: "Close Window",
         hint: shortcut("workbench.closeWorkbook", "W"),
@@ -166,6 +185,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.closeWindow,
       },
       {
+        commandId: "workbench.quit",
         iconId: "close",
         label: "Quit",
         hint: shortcut("workbench.quit", "Q"),
@@ -269,7 +289,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         <div className="ribbon-backstage__title">File</div>
         <div className="ribbon-backstage__list" role="menu" aria-label="File actions">
           {items.map((item, idx) => {
-            const disabled = !item.onInvoke;
+            const disabled = !item.onInvoke || (item.commandId ? Boolean(uiState.disabledById[item.commandId]) : false);
             return (
               <button
                 // eslint-disable-next-line react/no-array-index-key

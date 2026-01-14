@@ -232,6 +232,39 @@ describe("FileBackstage", () => {
     act(() => root.unmount());
   });
 
+  it("disables backstage items when their command id is disabled via RibbonUiState", () => {
+    vi.stubGlobal("requestAnimationFrame", ((cb: FrameRequestCallback) => {
+      cb(0);
+      return 0 as any;
+    }) as any);
+
+    act(() => {
+      setRibbonUiState({
+        pressedById: Object.create(null),
+        labelById: Object.create(null),
+        disabledById: { "pageLayout.pageSetup.pageSetupDialog": true },
+        shortcutById: Object.create(null),
+        ariaKeyShortcutsById: Object.create(null),
+      });
+    });
+
+    const actions = enableFileActions();
+    const { container, root } = renderRibbon(actions);
+    const { overlay } = openFileBackstage(container);
+
+    const pageSetupItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-page-setup"]');
+    expect(pageSetupItem).toBeInstanceOf(HTMLButtonElement);
+    expect(pageSetupItem?.disabled).toBe(true);
+    expect(pageSetupItem?.hasAttribute("disabled")).toBe(true);
+
+    act(() => {
+      pageSetupItem?.click();
+    });
+    expect(actions.fileActions?.pageSetup).toHaveBeenCalledTimes(0);
+
+    act(() => root.unmount());
+  });
+
   it("traps Tab navigation inside the backstage menu", () => {
     vi.stubGlobal("requestAnimationFrame", ((cb: FrameRequestCallback) => {
       cb(0);
