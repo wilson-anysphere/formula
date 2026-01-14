@@ -40,10 +40,18 @@ function run(config, { writeLicense = true, writeNotice = true, mimeXmlContent }
   ].join("\n");
   const mimeXml = typeof mimeXmlContent === "string" ? mimeXmlContent : defaultMimeXml;
   mkdirSync(path.join(tmpdir, "mime"), { recursive: true });
-  writeFileSync(path.join(tmpdir, "mime", mimeBasename), mimeXml, "utf8");
+  {
+    const mimePath = path.join(tmpdir, "mime", mimeBasename);
+    mkdirSync(path.dirname(mimePath), { recursive: true });
+    writeFileSync(mimePath, mimeXml, "utf8");
+  }
   // Some configs may reference the MIME definition file at repo root (basename-only); create
   // a stub for that path too.
-  writeFileSync(path.join(tmpdir, mimeBasename), mimeXml, "utf8");
+  {
+    const rootMimePath = path.join(tmpdir, mimeBasename);
+    mkdirSync(path.dirname(rootMimePath), { recursive: true });
+    writeFileSync(rootMimePath, mimeXml, "utf8");
+  }
   writeFileSync(confPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 
   const proc = spawnSync(process.execPath, [scriptPath], {
@@ -317,6 +325,48 @@ test("passes when Parquet MIME file + shared-mime-info deps are configured", () 
     },
   });
   assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("fails when Parquet association is configured but identifier contains a path separator", () => {
+  const badIdentifier = "com/example.formula.desktop";
+  const mimeDest = `usr/share/mime/packages/${badIdentifier}.xml`;
+  const mimeSrc = `mime/${badIdentifier}.xml`;
+  const proc = run({
+    identifier: badIdentifier,
+    mainBinaryName: "formula-desktop",
+    bundle: {
+      resources: ["LICENSE", "NOTICE"],
+      fileAssociations: [{ ext: ["parquet"], mimeType: "application/vnd.apache.parquet" }],
+      linux: {
+        deb: {
+          depends: ["shared-mime-info"],
+          files: {
+            [mimeDest]: mimeSrc,
+            "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+            "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
+          },
+        },
+        rpm: {
+          depends: ["shared-mime-info"],
+          files: {
+            [mimeDest]: mimeSrc,
+            "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+            "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
+          },
+        },
+        appimage: {
+          files: {
+            [mimeDest]: mimeSrc,
+            "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+            "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
+          },
+        },
+      },
+    },
+  });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /identifier must be a valid filename/i);
+  assert.match(proc.stderr, /path separators/i);
 });
 
 test("fails when Parquet association is configured but Linux bundles omit MIME definition mapping", () => {

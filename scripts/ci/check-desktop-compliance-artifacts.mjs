@@ -181,6 +181,16 @@ function validateLinuxMimeFiles(files, kind, identifier) {
   if (!normalizedIdentifier) {
     die("tauri.conf.json identifier must be a non-empty string when Parquet file association is configured");
   }
+  // `identifier` becomes the shared-mime-info XML filename on Linux:
+  //   /usr/share/mime/packages/<identifier>.xml
+  // Guard against path separators so we don't accidentally allow surprising nested paths or
+  // fail later with confusing basename mismatches.
+  if (normalizedIdentifier.includes("/") || normalizedIdentifier.includes("\\")) {
+    die(
+      "tauri.conf.json identifier must be a valid filename when Parquet file association is configured " +
+        `(no '/' or '\\\\' path separators). Found: ${JSON.stringify(normalizedIdentifier)}`,
+    );
+  }
 
   const mimeFilename = `${normalizedIdentifier}.xml`;
   const dest = `usr/share/mime/packages/${mimeFilename}`;
