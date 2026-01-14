@@ -14550,20 +14550,31 @@ export class SpreadsheetApp {
     const dx = e.clientX - state.startClientX;
     const dy = e.clientY - state.startClientY;
 
-    const startRect = this.chartAnchorToViewportRect(state.startAnchor);
+    // Avoid `getFrozen()` allocations; compute frozen counts directly.
+    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const rawFrozenRows = Number(view?.frozenRows);
+    const rawFrozenCols = Number(view?.frozenCols);
+    const maxRows = this.limits.maxRows;
+    const maxCols = this.limits.maxCols;
+    const frozenRows = Number.isFinite(rawFrozenRows) ? Math.max(0, Math.min(Math.trunc(rawFrozenRows), maxRows)) : 0;
+    const frozenCols = Number.isFinite(rawFrozenCols) ? Math.max(0, Math.min(Math.trunc(rawFrozenCols), maxCols)) : 0;
+
+    const startRectScratch = this.chartCursorScratchRect;
+    const startRect = this.chartAnchorToViewportRect(state.startAnchor, startRectScratch, frozenRows, frozenCols);
     if (!startRect) return;
 
     const minSize = 20;
-    const nextRect = (() => {
-      if (state.mode === "move") {
-        return {
-          x: startRect.left + dx,
-          y: startRect.top + dy,
-          width: startRect.width,
-          height: startRect.height
-        };
-      }
+    let nextX = 0;
+    let nextY = 0;
+    let nextWidth = 0;
+    let nextHeight = 0;
 
+    if (state.mode === "move") {
+      nextX = startRect.left + dx;
+      nextY = startRect.top + dy;
+      nextWidth = startRect.width;
+      nextHeight = startRect.height;
+    } else {
       const handle = state.resizeHandle ?? "se";
       let x = startRect.left;
       let y = startRect.top;
@@ -14606,18 +14617,11 @@ export class SpreadsheetApp {
         }
       }
 
-      return { x, y, width, height };
-    })();
-
-    const { frozenRows, frozenCols } = this.getFrozen();
-
-    const computeAnchor = (scrollBaseX: number, scrollBaseY: number): ChartRecord["anchor"] =>
-      this.computeChartAnchorFromRectPx(state.startAnchor.kind, {
-        x: nextRect.x + scrollBaseX,
-        y: nextRect.y + scrollBaseY,
-        width: nextRect.width,
-        height: nextRect.height,
-      });
+      nextX = x;
+      nextY = y;
+      nextWidth = width;
+      nextHeight = height;
+    }
 
     // Convert from screen-space (viewport/cell-area) back to sheet-space coordinates for anchor updates.
     //
@@ -14637,7 +14641,12 @@ export class SpreadsheetApp {
           ? 0
           : this.scrollY;
 
-    let nextAnchor = computeAnchor(scrollBaseX, scrollBaseY);
+    const rectScratch = this.chartCursorScratchBounds;
+    rectScratch.x = nextX + scrollBaseX;
+    rectScratch.y = nextY + scrollBaseY;
+    rectScratch.width = nextWidth;
+    rectScratch.height = nextHeight;
+    let nextAnchor = this.computeChartAnchorFromRectPx(state.startAnchor.kind, rectScratch);
 
     if (nextAnchor.kind !== "absolute") {
       const desiredScrollX = nextAnchor.fromCol < frozenCols ? 0 : this.scrollX;
@@ -14645,7 +14654,9 @@ export class SpreadsheetApp {
       if (desiredScrollX !== scrollBaseX || desiredScrollY !== scrollBaseY) {
         scrollBaseX = desiredScrollX;
         scrollBaseY = desiredScrollY;
-        nextAnchor = computeAnchor(scrollBaseX, scrollBaseY);
+        rectScratch.x = nextX + scrollBaseX;
+        rectScratch.y = nextY + scrollBaseY;
+        nextAnchor = this.computeChartAnchorFromRectPx(state.startAnchor.kind, rectScratch);
       }
     }
     this.chartStore.updateChartAnchor(state.chartId, nextAnchor);
