@@ -78,7 +78,10 @@ pub enum Rc4CryptoApiEncryptedPackageError {
 /// The `EncryptedPackage` payload is split into 0x200-byte blocks. Each block is encrypted with a
 /// fresh RC4 key derived as:
 ///
-/// `rc4_key_b = Hash(H || LE32(b))[0..key_len]`
+/// `key_material_b = Hash(H || LE32(b))[0..key_len]`
+///
+/// CryptoAPI quirk: for 40-bit RC4 (`key_len == 5`), the RC4 key is treated as a 128-bit key:
+/// `rc4_key_b = key_material_b || 0x00 * 11` (16 bytes total).
 ///
 /// **40-bit note:** CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit RC4 key where the
 /// low 40 bits are set and the remaining 88 bits are zero. Concretely, when `key_len == 5`, the

@@ -244,7 +244,6 @@ block 1 rc4_key =
 
 This is a straight truncation of the 128-bit keys: it uses the **first 7 bytes** of the
 `SHA1(H || LE32(block))` digest.
-
 ### MD5 (`CALG_MD5`)
 
 Some Standard/CryptoAPI files use `CALG_MD5` instead of `CALG_SHA1` for the fixed-spin password

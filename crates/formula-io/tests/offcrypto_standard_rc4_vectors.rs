@@ -8,6 +8,9 @@
 
 use md5::{Digest as _, Md5};
 use sha1::Sha1;
+use std::io::{Cursor, Read as _, Seek as _, SeekFrom};
+
+use formula_io::Rc4CryptoApiDecryptReader;
 
 fn hex_decode(mut s: &str) -> Vec<u8> {
     // Keep parsing permissive for readability in expected-value literals.
@@ -243,4 +246,62 @@ fn standard_cryptoapi_rc4_derivation_md5_vector() {
     assert_eq!(key0_40, hex_decode("69badcae240000000000000000000000"));
     assert_eq!(key0_40.len(), 16);
     assert!(key0_40[5..].iter().all(|b| *b == 0));
+}
+
+#[test]
+fn standard_cryptoapi_rc4_40_bit_key_padding_vector() {
+    let password = "password";
+    let salt: Vec<u8> = (0u8..=0x0F).collect();
+    let spin_count = 50_000u32;
+    let key_len = 5usize; // 40-bit
+
+    let h = standard_rc4_spun_password_hash(password, &salt, spin_count);
+
+    // Hb = SHA1(H || LE32(0))
+    let mut hasher = Sha1::new();
+    hasher.update(h);
+    hasher.update(0u32.to_le_bytes());
+    let hb: [u8; 20] = hasher.finalize().into();
+    assert_eq!(
+        hb.to_vec(),
+        hex_decode("6ad7dedf2da3514b1d85eabee069d47dd058967f")
+    );
+
+    let key_material = hb[..5].to_vec();
+    assert_eq!(key_material, hex_decode("6ad7dedf2d"));
+
+    let mut padded_key = key_material.clone();
+    padded_key.resize(16, 0);
+    assert_eq!(padded_key, hex_decode("6ad7dedf2d0000000000000000000000"));
+
+    let plaintext = b"Hello, RC4 CryptoAPI!";
+
+    // CryptoAPI uses the padded 16-byte key for 40-bit RC4.
+    let ciphertext_padded = rc4_apply(&padded_key, plaintext);
+    assert_eq!(
+        ciphertext_padded,
+        hex_decode("7a8bd000713a6e30ba9916476d27b01d36707a6ef8")
+    );
+
+    // Regression guard: the unpadded 5-byte key produces a different keystream/ciphertext.
+    let ciphertext_unpadded = rc4_apply(&key_material, plaintext);
+    assert_eq!(
+        ciphertext_unpadded,
+        hex_decode("d1fa444913b4839b06eb4851750a07761005f025bf")
+    );
+    assert_ne!(ciphertext_padded, ciphertext_unpadded);
+
+    // Ensure the production decrypt reader uses the padded key form.
+    let mut stream = Vec::new();
+    stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+    stream.extend_from_slice(&ciphertext_padded);
+
+    let mut cursor = Cursor::new(stream);
+    cursor.seek(SeekFrom::Start(8)).unwrap();
+
+    let mut reader =
+        Rc4CryptoApiDecryptReader::new(cursor, plaintext.len() as u64, h.to_vec(), key_len).unwrap();
+    let mut decrypted = Vec::new();
+    reader.read_to_end(&mut decrypted).unwrap();
+    assert_eq!(decrypted, plaintext);
 }
