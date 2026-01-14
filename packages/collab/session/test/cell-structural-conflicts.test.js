@@ -1,31 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
- 
+
 import * as Y from "yjs";
- 
+
+import { getYMap } from "@formula/collab-yjs-utils";
 import { REMOTE_ORIGIN } from "@formula/collab-undo";
- 
+
 import { createCollabSession } from "../src/index.ts";
- 
-/**
- * Duck-type Y.Map detection to avoid `instanceof` pitfalls when multiple Yjs
- * module instances are present (pnpm workspaces can produce this in Node).
- *
- * @param {any} value
- */
-function isYMap(value) {
-  if (value instanceof Y.Map) return true;
-  if (!value || typeof value !== "object") return false;
-  if (typeof value.get !== "function") return false;
-  if (typeof value.set !== "function") return false;
-  if (typeof value.delete !== "function") return false;
-  // Plain JS Maps also have get/set/delete; require Yjs' deep observer APIs so we
-  // don't accidentally treat a native Map as a Y.Map.
-  if (typeof value.observeDeep !== "function") return false;
-  if (typeof value.unobserveDeep !== "function") return false;
-  return true;
-}
- 
+
 /**
  * @param {Y.Doc} docA
  * @param {Y.Doc} docB
@@ -63,7 +45,7 @@ function connectDocs(docA, docB) {
 function cutPaste(session, fromKey, toKey) {
   session.doc.transact(() => {
     const from = session.cells.get(fromKey);
-    const fromMap = isYMap(from) ? from : null;
+    const fromMap = getYMap(from);
     const value = fromMap?.get("value") ?? null;
     const formula = fromMap?.get("formula") ?? null;
     const enc = fromMap?.get("enc") ?? null;
@@ -97,7 +79,7 @@ function cutPaste(session, fromKey, toKey) {
 function cutPasteWithFormat(session, fromKey, toKey, format) {
   session.doc.transact(() => {
     const from = session.cells.get(fromKey);
-    const fromMap = isYMap(from) ? from : null;
+    const fromMap = getYMap(from);
     const value = fromMap?.get("value") ?? null;
     const formula = fromMap?.get("formula") ?? null;
     const enc = fromMap?.get("enc") ?? null;
@@ -629,7 +611,7 @@ test("CellStructuralConflictMonitor move conflict resolution applies the chosen 
   // A: edit A1 then move A1 -> B1 (single transaction).
   sessionA.doc.transact(() => {
     const a1 = sessionA.cells.get("Sheet1:0:0");
-    assert.ok(isYMap(a1));
+    assert.ok(getYMap(a1));
     a1.set("value", "from-a");
     const b1 = new Y.Map();
     b1.set("value", "from-a");
@@ -640,7 +622,7 @@ test("CellStructuralConflictMonitor move conflict resolution applies the chosen 
   // B: edit A1 then move A1 -> C1 (single transaction).
   sessionB.doc.transact(() => {
     const a1 = sessionB.cells.get("Sheet1:0:0");
-    assert.ok(isYMap(a1));
+    assert.ok(getYMap(a1));
     a1.set("value", "from-b");
     const c1 = new Y.Map();
     c1.set("value", "from-b");
@@ -808,8 +790,8 @@ test("CellStructuralConflictMonitor surfaces format conflicts when two users mov
 
   const yCellA = sessionA.cells.get("Sheet1:0:1");
   const yCellB = sessionB.cells.get("Sheet1:0:1");
-  assert.ok(isYMap(yCellA));
-  assert.ok(isYMap(yCellB));
+  assert.ok(getYMap(yCellA));
+  assert.ok(getYMap(yCellB));
   assert.deepEqual(yCellA.get("format") ?? null, expectedFormat);
   assert.deepEqual(yCellB.get("format") ?? null, expectedFormat);
 
