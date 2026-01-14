@@ -4,8 +4,8 @@ import { dirname, resolve } from "node:path";
 import {
   defaultDesktopBinPath,
   percentile,
+  runDesktopStartupIterations,
   resolvePerfHome,
-  runOnce,
   type StartupMetrics,
 } from "./desktopStartupUtil.ts";
 
@@ -333,44 +333,25 @@ async function main(): Promise<void> {
   const perfHome = resolvePerfHome();
   const profileRoot = resolve(perfHome, `desktop-startup-${benchKind}-${mode}-${Date.now()}-${process.pid}`);
 
-  // `desktopStartupUtil.runOnce()` supports resetting the selected profile dir via
-  // `FORMULA_DESKTOP_BENCH_RESET_HOME=1`. Manage it here so cold/warm semantics remain clear.
-  const prevResetHome = process.env.FORMULA_DESKTOP_BENCH_RESET_HOME;
-  const setResetHome = (value: string | undefined) => {
-    if (value === undefined) {
-      delete process.env.FORMULA_DESKTOP_BENCH_RESET_HOME;
-    } else {
-      process.env.FORMULA_DESKTOP_BENCH_RESET_HOME = value;
-    }
-  };
-
-  const results: StartupMetrics[] = [];
-  try {
-    if (mode === "warm") {
-      const profileDir = resolve(profileRoot, "profile");
-      setResetHome("1");
+  const results: StartupMetrics[] = await runDesktopStartupIterations({
+    mode,
+    runs,
+    timeoutMs,
+    binPath,
+    argv,
+    envOverrides,
+    profileRoot,
+    onProgress: ({ phase, mode: runMode, iteration, total, profileDir }) => {
       // eslint-disable-next-line no-console
-      console.log(`[desktop-${benchKind}-startup] warmup run 1/1 (warm, profile=${profileDir})...`);
-      await runOnce({ binPath, timeoutMs, argv, envOverrides, profileDir });
-
-      setResetHome(undefined);
-      for (let i = 0; i < runs; i += 1) {
-        // eslint-disable-next-line no-console
-        console.log(`[desktop-${benchKind}-startup] run ${i + 1}/${runs} (warm, profile=${profileDir})...`);
-        results.push(await runOnce({ binPath, timeoutMs, argv, envOverrides, profileDir }));
+      if (phase === "warmup") {
+        console.log(`[desktop-${benchKind}-startup] warmup run 1/1 (warm, profile=${profileDir})...`);
+      } else {
+        console.log(
+          `[desktop-${benchKind}-startup] run ${iteration}/${total} (${runMode}, profile=${profileDir})...`,
+        );
       }
-    } else {
-      setResetHome("1");
-      for (let i = 0; i < runs; i += 1) {
-        const profileDir = resolve(profileRoot, `run-${String(i + 1).padStart(2, "0")}`);
-        // eslint-disable-next-line no-console
-        console.log(`[desktop-${benchKind}-startup] run ${i + 1}/${runs} (cold, profile=${profileDir})...`);
-        results.push(await runOnce({ binPath, timeoutMs, argv, envOverrides, profileDir }));
-      }
-    }
-  } finally {
-    setResetHome(prevResetHome);
-  }
+    },
+  });
 
   const windowVisible = results.map((r) => r.windowVisibleMs).sort((a, b) => a - b);
   const firstRenderValues =

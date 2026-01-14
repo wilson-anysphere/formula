@@ -56,8 +56,8 @@ import {
   mean,
   median,
   percentile,
+  runDesktopStartupIterations,
   resolvePerfHome,
-  runOnce,
   stdDev,
   type StartupMetrics,
 } from './desktopStartupUtil.ts';
@@ -375,71 +375,34 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
     `desktop-startup-${benchKind}-${startupMode}-${Date.now()}-${process.pid}`,
   );
 
-  // `desktopStartupUtil.runOnce()` can optionally reset the profile directory (HOME/XDG/etc) on
-  // each invocation via this parent-process env var. Make startup mode deterministic by managing
-  // it here (and restoring the previous value after the benchmark completes).
-  const prevResetHome = process.env.FORMULA_DESKTOP_BENCH_RESET_HOME;
-  const setResetHome = (value: string | undefined) => {
-    if (value === undefined) {
-      delete process.env.FORMULA_DESKTOP_BENCH_RESET_HOME;
-    } else {
-      process.env.FORMULA_DESKTOP_BENCH_RESET_HOME = value;
-    }
-  };
-
   const metrics: StartupMetrics[] = [];
   const rssSamples: number[] = [];
 
-  const runOnceWithRss = async (profileDir: string): Promise<StartupMetrics> => {
-    let rssMb: number | null = null;
-    const result = await runOnce({
-      binPath,
+  metrics.push(
+    ...(await runDesktopStartupIterations({
+      mode: startupMode,
+      runs,
       timeoutMs,
+      binPath,
       argv,
       envOverrides,
-      profileDir,
+      profileRoot,
       afterCapture: async (child, _metrics, signal) => {
         if (!child.pid) return;
-        rssMb = await captureDesktopRssMb(child.pid, binPath, rssIdleDelayMs, timeoutMs, signal);
+        const rssMb = await captureDesktopRssMb(child.pid, binPath, rssIdleDelayMs, timeoutMs, signal);
+        if (rssMb != null && Number.isFinite(rssMb)) rssSamples.push(rssMb);
       },
       afterCaptureTimeoutMs: rssIdleDelayMs + 4000,
-    });
-    if (rssMb != null && Number.isFinite(rssMb)) rssSamples.push(rssMb);
-    return result;
-  };
-
-  try {
-    if (startupMode === 'warm') {
-      const profileDir = resolve(profileRoot, 'profile');
-      // Start from a clean profile, then allow subsequent launches to reuse caches.
-      setResetHome('1');
-      // eslint-disable-next-line no-console
-      console.log(`[desktop-${benchKind}-startup] warmup run 1/1 (warm, profile=${profileDir})...`);
-      await runOnce({ binPath, timeoutMs, argv, envOverrides, profileDir });
-
-      setResetHome(undefined);
-      for (let i = 0; i < runs; i += 1) {
+      onProgress: ({ phase, mode, iteration, total, profileDir }) => {
         // eslint-disable-next-line no-console
-        console.log(
-          `[desktop-${benchKind}-startup] run ${i + 1}/${runs} (warm, profile=${profileDir})...`,
-        );
-        metrics.push(await runOnceWithRss(profileDir));
-      }
-    } else {
-      // Reset before *every* run to avoid mixing cold + warm starts.
-      setResetHome('1');
-      for (let i = 0; i < runs; i += 1) {
-        const profileDir = resolve(profileRoot, `run-${String(i + 1).padStart(2, '0')}`);
-        // eslint-disable-next-line no-console
-        console.log(
-          `[desktop-${benchKind}-startup] run ${i + 1}/${runs} (cold, profile=${profileDir})...`,
-        );
-        metrics.push(await runOnceWithRss(profileDir));
-      }
-    }
-  } finally {
-    setResetHome(prevResetHome);
-  }
+        if (phase === 'warmup') {
+          console.log(`[desktop-${benchKind}-startup] warmup run 1/1 (warm, profile=${profileDir})...`);
+        } else {
+          console.log(`[desktop-${benchKind}-startup] run ${iteration}/${total} (${mode}, profile=${profileDir})...`);
+        }
+      },
+    })),
+  );
 
   const windowVisible = metrics.map((m) => m.windowVisibleMs);
   const firstRender = metrics

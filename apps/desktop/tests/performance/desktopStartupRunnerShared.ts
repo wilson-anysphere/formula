@@ -13,6 +13,16 @@ export type StartupMetrics = {
   ttiMs: number;
 };
 
+export type DesktopStartupMode = 'cold' | 'warm';
+
+export type DesktopStartupProgress = {
+  phase: 'warmup' | 'run';
+  mode: DesktopStartupMode;
+  iteration: number;
+  total: number;
+  profileDir: string;
+};
+
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
@@ -476,4 +486,93 @@ export async function runOnce({
       );
     });
   });
+}
+
+export async function runDesktopStartupIterations(options: {
+  mode: DesktopStartupMode;
+  runs: number;
+  timeoutMs: number;
+  binPath: string;
+  argv?: string[];
+  envOverrides?: NodeJS.ProcessEnv;
+  /**
+   * Root directory under which per-run profile directories are created.
+   *
+   * Typically `${resolvePerfHome()}/desktop-startup-...`.
+   */
+  profileRoot: string;
+  afterCapture?: (child: ChildProcess, metrics: StartupMetrics, signal: AbortSignal) => void | Promise<void>;
+  afterCaptureTimeoutMs?: number;
+  onProgress?: (progress: DesktopStartupProgress) => void;
+}): Promise<StartupMetrics[]> {
+  const {
+    mode,
+    runs,
+    timeoutMs,
+    binPath,
+    argv,
+    envOverrides,
+    profileRoot,
+    afterCapture,
+    afterCaptureTimeoutMs,
+    onProgress,
+  } = options;
+
+  const prevResetHome = process.env.FORMULA_DESKTOP_BENCH_RESET_HOME;
+  const setResetHome = (value: string | undefined) => {
+    if (value === undefined) {
+      delete process.env.FORMULA_DESKTOP_BENCH_RESET_HOME;
+    } else {
+      process.env.FORMULA_DESKTOP_BENCH_RESET_HOME = value;
+    }
+  };
+
+  const results: StartupMetrics[] = [];
+
+  try {
+    if (mode === 'warm') {
+      const profileDir = resolve(profileRoot, 'profile');
+
+      setResetHome('1');
+      onProgress?.({ phase: 'warmup', mode, iteration: 1, total: 1, profileDir });
+      await runOnce({ binPath, timeoutMs, argv, envOverrides, profileDir });
+
+      setResetHome(undefined);
+      for (let i = 0; i < runs; i += 1) {
+        onProgress?.({ phase: 'run', mode, iteration: i + 1, total: runs, profileDir });
+        results.push(
+          await runOnce({
+            binPath,
+            timeoutMs,
+            argv,
+            envOverrides,
+            profileDir,
+            afterCapture,
+            afterCaptureTimeoutMs,
+          }),
+        );
+      }
+    } else {
+      setResetHome('1');
+      for (let i = 0; i < runs; i += 1) {
+        const profileDir = resolve(profileRoot, `run-${String(i + 1).padStart(2, '0')}`);
+        onProgress?.({ phase: 'run', mode, iteration: i + 1, total: runs, profileDir });
+        results.push(
+          await runOnce({
+            binPath,
+            timeoutMs,
+            argv,
+            envOverrides,
+            profileDir,
+            afterCapture,
+            afterCaptureTimeoutMs,
+          }),
+        );
+      }
+    }
+  } finally {
+    setResetHome(prevResetHome);
+  }
+
+  return results;
 }
