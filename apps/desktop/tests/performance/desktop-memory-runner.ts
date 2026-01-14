@@ -1,21 +1,18 @@
-import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, parse, resolve, relative } from "node:path";
-import { createInterface, type Interface } from "node:readline";
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 
 import {
   defaultDesktopBinPath,
-  parseStartupLine,
-  parseProcChildrenPids,
+  findPidForExecutableLinux,
   formatPerfPath,
+  getProcessTreeRssBytesLinux,
   percentile,
   repoRoot,
   resolvePerfHome,
+  runOnce as runDesktopOnce,
   shouldUseXvfb,
-  terminateProcessTree,
-  type StartupMetrics,
-  type TerminateProcessTreeMode,
-} from "./desktopStartupUtil.ts";
+} from './desktopStartupUtil.ts';
 
 type Summary = {
   runs: number;
@@ -25,61 +22,31 @@ type Summary = {
 
 const perfHome = resolvePerfHome();
 
-function resolveProfileDirs(profileDir: string): {
-  home: string;
-  tmp: string;
-  xdgConfig: string;
-  xdgCache: string;
-  xdgState: string;
-  xdgData: string;
-  appData: string;
-  localAppData: string;
-} {
-  return {
-    home: profileDir,
-    tmp: resolve(profileDir, "tmp"),
-    xdgConfig: resolve(profileDir, "xdg-config"),
-    xdgCache: resolve(profileDir, "xdg-cache"),
-    xdgState: resolve(profileDir, "xdg-state"),
-    xdgData: resolve(profileDir, "xdg-data"),
-    appData: resolve(profileDir, "AppData", "Roaming"),
-    localAppData: resolve(profileDir, "AppData", "Local"),
-  };
-}
-
-function isSubpath(parentDir: string, maybeChild: string): boolean {
-  const rel = relative(parentDir, maybeChild);
-  if (rel === "" || rel.startsWith("..")) return false;
-  // `path.relative()` can return an absolute path on Windows when drives differ.
-  if (isAbsolute(rel)) return false;
-  return true;
-}
-
 function usage(): string {
   return [
-    "Desktop idle memory benchmark runner (real Tauri binary).",
-    "",
-    "Usage:",
-    "  node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-memory-runner.ts [options]",
-    "",
-    "Options:",
-    "  --runs <n>                 Iterations (env: FORMULA_DESKTOP_MEMORY_RUNS, default: 10)",
-    "  --timeout-ms <ms>          Timeout per run (env: FORMULA_DESKTOP_MEMORY_TIMEOUT_MS, default: 20000)",
-    "  --settle-ms <ms>           Delay after startup before sampling (env: FORMULA_DESKTOP_MEMORY_SETTLE_MS, default: 5000)",
-    "  --bin, --bin-path <path>   Desktop binary path (env: FORMULA_DESKTOP_BIN)",
-    "  --target-mb <mb>           p95 target (env: FORMULA_DESKTOP_IDLE_RSS_TARGET_MB, default: 100)",
-    "  --json, --json-path <path> Write JSON output (samples + summary) to this path",
-    "  --enforce                  Exit non-zero if p95 exceeds target (env: FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1)",
-    "  --allow-ci                 Allow running under CI without FORMULA_RUN_DESKTOP_MEMORY_BENCH=1",
-    "  -h, --help                 Show this help and exit",
-    "",
-    "Notes:",
-    "  - Uses an isolated profile directory under target/perf-home by default (override via FORMULA_PERF_HOME).",
-    "    Each invocation uses a unique profile dir to avoid persistent cache pollution across runs.",
-    "  - Set FORMULA_DESKTOP_BENCH_RESET_HOME=1 to delete the profile dir before each iteration.",
-    "  - Windows reports process-tree Working Set (closest analogue to RSS).",
-    "",
-  ].join("\n");
+    'Desktop idle memory benchmark runner (real Tauri binary).',
+    '',
+    'Usage:',
+    '  node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-memory-runner.ts [options]',
+    '',
+    'Options:',
+    '  --runs <n>                 Iterations (env: FORMULA_DESKTOP_MEMORY_RUNS, default: 10)',
+    '  --timeout-ms <ms>          Timeout per run (env: FORMULA_DESKTOP_MEMORY_TIMEOUT_MS, default: 20000)',
+    '  --settle-ms <ms>           Delay after startup before sampling (env: FORMULA_DESKTOP_MEMORY_SETTLE_MS, default: 5000)',
+    '  --bin, --bin-path <path>   Desktop binary path (env: FORMULA_DESKTOP_BIN)',
+    '  --target-mb <mb>           p95 target (env: FORMULA_DESKTOP_IDLE_RSS_TARGET_MB, default: 100)',
+    '  --json, --json-path <path> Write JSON output (samples + summary) to this path',
+    '  --enforce                  Exit non-zero if p95 exceeds target (env: FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1)',
+    '  --allow-ci                 Allow running under CI without FORMULA_RUN_DESKTOP_MEMORY_BENCH=1',
+    '  -h, --help                 Show this help and exit',
+    '',
+    'Notes:',
+    '  - Uses an isolated profile directory under target/perf-home by default (override via FORMULA_PERF_HOME).',
+    '    Each invocation uses a unique profile dir to avoid persistent cache pollution across runs.',
+    '  - Set FORMULA_DESKTOP_BENCH_RESET_HOME=1 to delete the profile dir before each iteration.',
+    '  - Windows reports process-tree Working Set (closest analogue to RSS).',
+    '',
+  ].join('\n');
 }
 
 function parseArgs(argv: string[]): {
@@ -93,19 +60,19 @@ function parseArgs(argv: string[]): {
   jsonPath: string | null;
 } {
   const args = [...argv];
-  const envRuns = Number(process.env.FORMULA_DESKTOP_MEMORY_RUNS ?? "") || 10;
-  const envTimeoutMs = Number(process.env.FORMULA_DESKTOP_MEMORY_TIMEOUT_MS ?? "") || 20_000;
+  const envRuns = Number(process.env.FORMULA_DESKTOP_MEMORY_RUNS ?? '') || 10;
+  const envTimeoutMs = Number(process.env.FORMULA_DESKTOP_MEMORY_TIMEOUT_MS ?? '') || 20_000;
   // Allow explicitly setting `FORMULA_DESKTOP_MEMORY_SETTLE_MS=0` to sample immediately.
   // Treat unset/blank/invalid values as the default.
   const settleRaw = process.env.FORMULA_DESKTOP_MEMORY_SETTLE_MS;
-  const settleParsed = settleRaw && settleRaw.trim() !== "" ? Number(settleRaw) : 5_000;
+  const settleParsed = settleRaw && settleRaw.trim() !== '' ? Number(settleRaw) : 5_000;
   const envSettleMs = Number.isFinite(settleParsed) ? Math.max(0, settleParsed) : 5_000;
 
   const rawTarget =
-    process.env.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB ?? process.env.FORMULA_DESKTOP_MEMORY_TARGET_MB ?? "";
+    process.env.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB ?? process.env.FORMULA_DESKTOP_MEMORY_TARGET_MB ?? '';
   const envTargetMb = Number(rawTarget) || 100;
 
-  const envEnforce = process.env.FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH === "1";
+  const envEnforce = process.env.FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH === '1';
   const envBin = process.env.FORMULA_DESKTOP_BIN ?? null;
 
   const out = {
@@ -122,36 +89,51 @@ function parseArgs(argv: string[]): {
   while (args.length > 0) {
     const arg = args.shift();
     if (!arg) break;
-    if (arg === "--runs" && args[0]) out.runs = Math.max(1, Number(args.shift()) || out.runs);
-    else if (arg === "--timeout-ms" && args[0]) out.timeoutMs = Math.max(1, Number(args.shift()) || out.timeoutMs);
-    else if (arg === "--settle-ms" && args[0]) {
+    if (arg === '--runs' && args[0]) out.runs = Math.max(1, Number(args.shift()) || out.runs);
+    else if (arg === '--timeout-ms' && args[0]) out.timeoutMs = Math.max(1, Number(args.shift()) || out.timeoutMs);
+    else if (arg === '--settle-ms' && args[0]) {
       const raw = String(args.shift());
       const parsed = Number(raw);
       if (Number.isFinite(parsed)) out.settleMs = Math.max(0, parsed);
-    }
-    else if ((arg === "--bin" || arg === "--bin-path") && args[0]) out.binPath = args.shift()!;
-    else if (arg === "--target-mb" && args[0]) {
+    } else if ((arg === '--bin' || arg === '--bin-path') && args[0]) out.binPath = args.shift()!;
+    else if (arg === '--target-mb' && args[0]) {
       const raw = Number(args.shift());
       if (Number.isFinite(raw) && raw > 0) out.targetMb = raw;
-    } else if (arg === "--allow-ci") out.allowInCi = true;
-    else if (arg === "--enforce") out.enforce = true;
-    else if ((arg === "--json" || arg === "--json-path") && args[0]) out.jsonPath = args.shift()!;
+    } else if (arg === '--allow-ci') out.allowInCi = true;
+    else if (arg === '--enforce') out.enforce = true;
+    else if ((arg === '--json' || arg === '--json-path') && args[0]) out.jsonPath = args.shift()!;
   }
 
   return out;
 }
 
-function closeReadline(rl: Interface | null): void {
-  if (!rl) return;
-  try {
-    rl.close();
-  } catch {
-    // ignore
-  }
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      resolvePromise();
+    }, ms);
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      rejectPromise(new Error('aborted'));
+    };
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener('abort', onAbort);
+    }
+  });
 }
+
 function parsePsTable(output: string): { pid: number; ppid: number; rssKb: number }[] {
   const rows: { pid: number; ppid: number; rssKb: number }[] = [];
-  for (const line of output.split("\n")) {
+  for (const line of output.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     const parts = trimmed.split(/\s+/);
@@ -165,57 +147,12 @@ function parsePsTable(output: string): { pid: number; ppid: number; rssKb: numbe
   return rows;
 }
 
-function readProcChildrenPidsLinux(pid: number): number[] {
-  try {
-    // `/proc/<pid>/task/<pid>/children` contains whitespace-separated child PIDs.
-    // (This is sufficient for our usage here since the xvfb wrapper is single-threaded.)
-    const content = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8");
-    return parseProcChildrenPids(content);
-  } catch {
-    return [];
-  }
-}
-
-function readProcExeLinux(pid: number): string | null {
-  try {
-    const target = readlinkSync(`/proc/${pid}/exe`, { encoding: "utf8" });
-    return target.replace(/ \(deleted\)$/, "");
-  } catch {
-    return null;
-  }
-}
-
-function findDesktopPidUnderWrapperLinux(wrapperPid: number, binPath: string): number | null {
-  let binReal = binPath;
-  try {
-    binReal = realpathSync(binPath);
-  } catch {
-    // ignore; best-effort match.
-  }
-
-  const children = readProcChildrenPidsLinux(wrapperPid);
-  for (const pid of children) {
-    const exe = readProcExeLinux(pid);
-    if (!exe) continue;
-    if (exe === binReal || exe === binPath) return pid;
-  }
-
-  // Fallback: look for a process whose exe basename matches `formula-desktop`.
-  for (const pid of children) {
-    const exe = readProcExeLinux(pid);
-    if (!exe) continue;
-    if (exe.endsWith("/formula-desktop")) return pid;
-  }
-
-  return null;
-}
-
 function processTreeRssKb(rootPid: number): number {
   // `ps` RSS is reported in KB on both Linux and macOS.
   // BSD/mac: `ps -ax -o pid= -o ppid= -o rss=`
   // GNU/Linux: same flags work.
-  const proc = spawnSync("ps", ["-ax", "-o", "pid=", "-o", "ppid=", "-o", "rss="], {
-    encoding: "utf8",
+  const proc = spawnSync('ps', ['-ax', '-o', 'pid=', '-o', 'ppid=', '-o', 'rss='], {
+    encoding: 'utf8',
     cwd: repoRoot,
     // `ps -ax` can print many lines on CI runners; bump the buffer for safety.
     maxBuffer: 5 * 1024 * 1024,
@@ -225,6 +162,7 @@ function processTreeRssKb(rootPid: number): number {
   if (proc.status !== 0) {
     throw new Error(`ps failed (exit ${proc.status}):\n${proc.stderr}`);
   }
+
   const rows = parsePsTable(proc.stdout);
   const childrenByParent = new Map<number, number[]>();
   const rssByPid = new Map<number, number>();
@@ -248,6 +186,7 @@ function processTreeRssKb(rootPid: number): number {
     const kids = childrenByParent.get(pid);
     if (kids) stack.push(...kids);
   }
+
   return total;
 }
 
@@ -256,31 +195,31 @@ function processTreeWorkingSetBytesWindows(rootPid: number): number {
   const script = [
     "$ErrorActionPreference = 'SilentlyContinue'",
     `$rootPid = ${rootPid}`,
-    "$procs = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, WorkingSetSize",
-    "$children = @{}",
-    "$ws = @{}",
-    "foreach ($p in $procs) {",
-    "  $pid = [int]$p.ProcessId",
-    "  $ppid = [int]$p.ParentProcessId",
-    "  if (-not $children.ContainsKey($ppid)) { $children[$ppid] = @() }",
-    "  $children[$ppid] += $pid",
-    "  $ws[$pid] = [int64]$p.WorkingSetSize",
-    "}",
-    "$stack = New-Object System.Collections.Generic.Stack[int]",
-    "$seen = New-Object System.Collections.Generic.HashSet[int]",
-    "$stack.Push($rootPid)",
-    "$total = [int64]0",
-    "while ($stack.Count -gt 0) {",
-    "  $pid = $stack.Pop()",
-    "  if (-not $seen.Add($pid)) { continue }",
-    "  if ($ws.ContainsKey($pid)) { $total += $ws[$pid] }",
-    "  if ($children.ContainsKey($pid)) { foreach ($c in $children[$pid]) { $stack.Push([int]$c) } }",
-    "}",
-    "Write-Output $total",
-  ].join("\n");
+    '$procs = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, WorkingSetSize',
+    '$children = @{}',
+    '$ws = @{}',
+    'foreach ($p in $procs) {',
+    '  $pid = [int]$p.ProcessId',
+    '  $ppid = [int]$p.ParentProcessId',
+    '  if (-not $children.ContainsKey($ppid)) { $children[$ppid] = @() }',
+    '  $children[$ppid] += $pid',
+    '  $ws[$pid] = [int64]$p.WorkingSetSize',
+    '}',
+    '$stack = New-Object System.Collections.Generic.Stack[int]',
+    '$seen = New-Object System.Collections.Generic.HashSet[int]',
+    '$stack.Push($rootPid)',
+    '$total = [int64]0',
+    'while ($stack.Count -gt 0) {',
+    '  $pid = $stack.Pop()',
+    '  if (-not $seen.Add($pid)) { continue }',
+    '  if ($ws.ContainsKey($pid)) { $total += $ws[$pid] }',
+    '  if ($children.ContainsKey($pid)) { foreach ($c in $children[$pid]) { $stack.Push([int]$c) } }',
+    '}',
+    'Write-Output $total',
+  ].join('\n');
 
-  const proc = spawnSync("powershell", ["-NoProfile", "-Command", script], {
-    encoding: "utf8",
+  const proc = spawnSync('powershell', ['-NoProfile', '-Command', script], {
+    encoding: 'utf8',
     cwd: repoRoot,
     maxBuffer: 1024 * 1024,
     timeout: 15000,
@@ -289,290 +228,100 @@ function processTreeWorkingSetBytesWindows(rootPid: number): number {
   if (proc.status !== 0) {
     throw new Error(`powershell memory sampling failed (exit ${proc.status}):\n${proc.stderr}`);
   }
-  const stdout = (proc.stdout ?? "").trim();
+
+  const stdout = (proc.stdout ?? '').trim();
   if (!stdout) return 0;
   const bytes = Number(stdout);
   if (!Number.isFinite(bytes) || bytes < 0) return 0;
   return bytes;
 }
 
-function processTreeMemoryMb(rootPid: number): number {
-  if (process.platform === "win32") {
+async function processTreeMemoryMb(options: {
+  rootPid: number;
+  binPath: string;
+  timeoutMs: number;
+  useXvfb: boolean;
+  signal?: AbortSignal;
+}): Promise<number> {
+  const { rootPid, binPath, timeoutMs, useXvfb, signal } = options;
+
+  if (process.platform === 'win32') {
     return processTreeWorkingSetBytesWindows(rootPid) / (1024 * 1024);
   }
+
+  if (process.platform === 'linux') {
+    let resolvedPid = rootPid;
+    if (useXvfb) {
+      const found = await findPidForExecutableLinux(rootPid, binPath, Math.min(2000, timeoutMs), signal);
+      if (found) resolvedPid = found;
+    }
+
+    const bytes = await getProcessTreeRssBytesLinux(resolvedPid);
+    return bytes / (1024 * 1024);
+  }
+
   return processTreeRssKb(rootPid) / 1024;
 }
 
 async function runOnce(binPath: string, timeoutMs: number, settleMs: number, profileDir: string): Promise<number> {
-  const dirs = resolveProfileDirs(profileDir);
-  if (process.env.FORMULA_DESKTOP_BENCH_RESET_HOME === "1") {
-    const profileRootDir = parse(dirs.home).root;
-    if (dirs.home === profileRootDir || dirs.home === repoRoot) {
-      throw new Error(`Refusing to reset unsafe desktop benchmark profile dir: ${dirs.home}`);
-    }
-    const rootDir = parse(perfHome).root;
-    if (perfHome === rootDir || perfHome === repoRoot) {
-      throw new Error(`Refusing to reset unsafe desktop benchmark perf home dir: ${perfHome}`);
-    }
-    const safeRoot = resolve(repoRoot, "target");
-    if (perfHome === safeRoot) {
-      throw new Error(
-        `Refusing to reset FORMULA_PERF_HOME=${perfHome} because it points at target/ itself.\n` +
-          "Pick a subdirectory like target/perf-home (recommended).",
-      );
-    }
-    const allowUnsafe =
-      process.env.FORMULA_PERF_ALLOW_UNSAFE_CLEAN === "1" ||
-      String(process.env.FORMULA_PERF_ALLOW_UNSAFE_CLEAN ?? "")
-        .trim()
-        .toLowerCase() === "true";
-    if (!isSubpath(safeRoot, dirs.home) && !allowUnsafe) {
-      throw new Error(
-        `Refusing to reset benchmark profile dir outside ${safeRoot} (got ${dirs.home}).\n` +
-          "Pick a path under target/ (recommended), or set FORMULA_PERF_ALLOW_UNSAFE_CLEAN=1 to override (DANGEROUS).",
-      );
-    }
-    if (dirs.home !== perfHome && !isSubpath(perfHome, dirs.home)) {
-      throw new Error(
-        `Refusing to reset desktop benchmark profile dir outside FORMULA_PERF_HOME=${perfHome} (got ${dirs.home})`,
-      );
-    }
-    rmSync(dirs.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  }
-  mkdirSync(dirs.home, { recursive: true });
-  mkdirSync(dirs.tmp, { recursive: true });
-  mkdirSync(dirs.xdgConfig, { recursive: true });
-  mkdirSync(dirs.xdgCache, { recursive: true });
-  mkdirSync(dirs.xdgState, { recursive: true });
-  mkdirSync(dirs.xdgData, { recursive: true });
-  mkdirSync(dirs.appData, { recursive: true });
-  mkdirSync(dirs.localAppData, { recursive: true });
-
   const useXvfb = shouldUseXvfb();
-  const xvfbPath = resolve(repoRoot, "scripts/xvfb-run-safe.sh");
-  const command = useXvfb ? "bash" : binPath;
-  const args = useXvfb ? [xvfbPath, binPath] : [];
 
-  const env = {
-    ...process.env,
-    // Keep perf benchmarks stable/quiet by disabling the automatic startup update check.
-    FORMULA_DISABLE_STARTUP_UPDATE_CHECK: "1",
-    // Enable the Rust-side single-line log in release builds.
-    FORMULA_STARTUP_METRICS: "1",
-    // Optional: allow downstream tooling to discover the chosen HOME root.
-    FORMULA_PERF_HOME: perfHome,
-    // In case the app reads $HOME / XDG dirs for config, keep per-run caches out of the real home dir.
-    HOME: dirs.home,
-    USERPROFILE: dirs.home,
-    XDG_CONFIG_HOME: dirs.xdgConfig,
-    XDG_CACHE_HOME: dirs.xdgCache,
-    XDG_STATE_HOME: dirs.xdgState,
-    XDG_DATA_HOME: dirs.xdgData,
-    APPDATA: dirs.appData,
-    LOCALAPPDATA: dirs.localAppData,
-    TMPDIR: dirs.tmp,
-    TEMP: dirs.tmp,
-    TMP: dirs.tmp,
-  } satisfies NodeJS.ProcessEnv;
+  let sampledRssMb: number | null = null;
+  let sampleError: Error | null = null;
 
-  return await new Promise<number>((resolvePromise, rejectPromise) => {
-    const child = spawn(command, args, {
-      cwd: repoRoot,
-      stdio: ["ignore", "pipe", "pipe"],
-      env,
-      // On POSIX, start the app in its own process group so we can terminate the whole tree.
-      detached: process.platform !== "win32",
-      windowsHide: true,
-    });
-
-    let rlOut: Interface | null = null;
-    let rlErr: Interface | null = null;
-
-    let settled = false;
-    let captured: StartupMetrics | null = null;
-    let sampledRssMb: number | null = null;
-
-    let startupTimeout: NodeJS.Timeout | null = null;
-    let settleTimer: NodeJS.Timeout | null = null;
-    let forceKillTimer: NodeJS.Timeout | null = null;
-    let exitDeadline: NodeJS.Timeout | null = null;
-    let timedOutWaitingForMetrics = false;
-
-    const cleanup = () => {
-      if (startupTimeout) clearTimeout(startupTimeout);
-      if (settleTimer) clearTimeout(settleTimer);
-      if (forceKillTimer) clearTimeout(forceKillTimer);
-      if (exitDeadline) clearTimeout(exitDeadline);
-      closeReadline(rlOut);
-      closeReadline(rlErr);
-    };
-
-    const settle = (kind: "resolve" | "reject", value: any) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      if (kind === "resolve") resolvePromise(value);
-      else rejectPromise(value);
-    };
-
-    const beginShutdown = (reason: "sampled" | "timeout") => {
-      if (exitDeadline) return;
-
-      const initialMode: TerminateProcessTreeMode =
-        process.platform === "win32" || reason === "timeout" ? "force" : "graceful";
-
-      terminateProcessTree(child, initialMode);
-      forceKillTimer = setTimeout(() => terminateProcessTree(child, "force"), 2000);
-      exitDeadline = setTimeout(() => {
-        terminateProcessTree(child, "force");
-
-        // Extremely defensive: don't hang the parent process even if kill fails.
-        try {
-          child.unref();
-        } catch {
-          // ignore
-        }
-        try {
-          child.stdout?.destroy();
-        } catch {
-          // ignore
-        }
-        try {
-          child.stderr?.destroy();
-        } catch {
-          // ignore
+  await runDesktopOnce({
+    binPath,
+    timeoutMs,
+    xvfb: useXvfb,
+    profileDir,
+    envOverrides: { FORMULA_PERF_HOME: perfHome },
+    afterCapture: async (child, _metrics, signal) => {
+      try {
+        if (settleMs > 0) {
+          await sleep(settleMs, signal);
         }
 
-        const msg =
-          reason === "sampled"
-            ? "Timed out waiting for desktop process to exit after sampling memory"
-            : "Timed out waiting for desktop process to exit after timing out waiting for startup metrics";
-        settle("reject", new Error(msg));
-      }, 5000);
-    };
-
-    const onLine = (line: string) => {
-      if (captured || timedOutWaitingForMetrics) return;
-      const parsed = parseStartupLine(line);
-      if (!parsed) return;
-      captured = parsed;
-      if (startupTimeout) {
-        clearTimeout(startupTimeout);
-        startupTimeout = null;
-      }
-
-      settleTimer = setTimeout(() => {
-        try {
-          const wrapperPid = child.pid;
-          if (!wrapperPid || wrapperPid <= 0) {
-            throw new Error("Desktop process PID was not available for memory sampling");
-          }
-          let rootPid = wrapperPid;
-          // When running under the xvfb wrapper, the spawned process is a bash script
-          // that also owns the Xvfb server. To keep the reported RSS scoped to the
-          // desktop app (and its WebView children), locate the actual desktop PID and
-          // measure its process tree instead of the wrapper's.
-          if (process.platform === "linux" && useXvfb) {
-            const found = findDesktopPidUnderWrapperLinux(wrapperPid, binPath);
-            if (found) rootPid = found;
-          }
-          sampledRssMb = processTreeMemoryMb(rootPid);
-        } catch (err) {
-          terminateProcessTree(child, "force");
-          try {
-            child.unref();
-          } catch {
-            // ignore
-          }
-          try {
-            child.stdout?.destroy();
-          } catch {
-            // ignore
-          }
-          try {
-            child.stderr?.destroy();
-          } catch {
-            // ignore
-          }
-          settle("reject", err instanceof Error ? err : new Error(String(err)));
-          return;
+        const pid = child.pid;
+        if (!pid || pid <= 0) {
+          throw new Error('Desktop process PID was not available for memory sampling');
         }
-        beginShutdown("sampled");
-      }, settleMs);
-    };
 
-    if (child.stdout) {
-      rlOut = createInterface({ input: child.stdout });
-      rlOut.on("line", onLine);
-    }
-    if (child.stderr) {
-      rlErr = createInterface({ input: child.stderr });
-      rlErr.on("line", onLine);
-    }
-
-    startupTimeout = setTimeout(() => {
-      timedOutWaitingForMetrics = true;
-      beginShutdown("timeout");
-    }, timeoutMs);
-
-    child.on("error", (err) => {
-      settle("reject", err);
-    });
-
-    // Use `close` (not `exit`) so stdout/stderr are fully drained before we decide whether we
-    // observed the `[startup] ...` line. This keeps error reporting stable even if the desktop
-    // process exits quickly after logging.
-    child.on("close", (code, signal) => {
-      if (settled) return;
-
-      if (timedOutWaitingForMetrics) {
-        settle("reject", new Error(`Timed out after ${timeoutMs}ms waiting for startup metrics`));
-        return;
+        const rssMb = await processTreeMemoryMb({ rootPid: pid, binPath, timeoutMs, useXvfb, signal });
+        if (!Number.isFinite(rssMb) || rssMb <= 0) {
+          throw new Error('Failed to sample desktop memory (process may have exited)');
+        }
+        sampledRssMb = rssMb;
+      } catch (err) {
+        sampleError = err instanceof Error ? err : new Error(String(err));
       }
-
-      if (sampledRssMb != null) {
-        settle("resolve", sampledRssMb);
-        return;
-      }
-
-      // If the desktop process exits early (before we sample memory), still attempt to kill the
-      // full process tree. WebView helpers can survive parent crashes and leak across runs.
-      terminateProcessTree(child, "force");
-
-      if (captured) {
-        settle(
-          "reject",
-          new Error(`Desktop process exited before memory could be sampled (code=${code}, signal=${signal})`),
-        );
-        return;
-      }
-
-      settle(
-        "reject",
-        new Error(`Desktop process exited before reporting startup metrics (code=${code}, signal=${signal})`),
-      );
-    });
+    },
+    // Covers settle delay + `ps`/PowerShell timeouts.
+    afterCaptureTimeoutMs: settleMs + (process.platform === 'win32' ? 20_000 : 10_000),
   });
+
+  if (sampleError) throw sampleError;
+  if (sampledRssMb == null) throw new Error('Desktop memory sampling failed');
+  return sampledRssMb;
 }
 
 function printSummary(summary: Summary): void {
-  const status = summary.rssMb.p95 <= summary.rssMb.targetMb ? "PASS" : "FAIL";
-  const measurement = process.platform === "win32" ? "working_set" : "rss";
+  const status = summary.rssMb.p95 <= summary.rssMb.targetMb ? 'PASS' : 'FAIL';
+  const measurement = process.platform === 'win32' ? 'working_set' : 'rss';
   // eslint-disable-next-line no-console
   console.log(
     [
-      "[desktop-memory]",
+      '[desktop-memory]',
       `runs=${summary.runs}`,
       `idleRssMb(${status} p50=${summary.rssMb.p50.toFixed(1)}MB,p95=${summary.rssMb.p95.toFixed(1)}MB,target=${summary.rssMb.targetMb}MB)`,
       `kind=${measurement}`,
-      summary.enforce ? "enforced=1" : "enforced=0",
-    ].join(" "),
+      summary.enforce ? 'enforced=1' : 'enforced=0',
+    ].join(' '),
   );
 }
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
-  if (argv.includes("--help") || argv.includes("-h")) {
+  if (argv.includes('--help') || argv.includes('-h')) {
     // eslint-disable-next-line no-console
     console.log(usage());
     return;
@@ -580,10 +329,10 @@ async function main(): Promise<void> {
 
   const { runs, timeoutMs, settleMs, binPath: argBin, targetMb, allowInCi, enforce, jsonPath } = parseArgs(argv);
 
-  if (process.env.CI && !allowInCi && process.env.FORMULA_RUN_DESKTOP_MEMORY_BENCH !== "1") {
+  if (process.env.CI && !allowInCi && process.env.FORMULA_RUN_DESKTOP_MEMORY_BENCH !== '1') {
     // eslint-disable-next-line no-console
     console.log(
-      "[desktop-memory] skipping in CI (set FORMULA_RUN_DESKTOP_MEMORY_BENCH=1 or pass --allow-ci to run)",
+      '[desktop-memory] skipping in CI (set FORMULA_RUN_DESKTOP_MEMORY_BENCH=1 or pass --allow-ci to run)',
     );
     return;
   }
@@ -591,11 +340,11 @@ async function main(): Promise<void> {
   const binPath = argBin ? resolve(argBin) : defaultDesktopBinPath();
   if (!binPath || !existsSync(binPath)) {
     throw new Error(
-      "Desktop binary not found. Build it via `bash scripts/cargo_agent.sh build -p formula-desktop-tauri --bin formula-desktop --release --features desktop` and pass --bin <path> (or set FORMULA_DESKTOP_BIN).",
+      'Desktop binary not found. Build it via `bash scripts/cargo_agent.sh build -p formula-desktop-tauri --bin formula-desktop --release --features desktop` and pass --bin <path> (or set FORMULA_DESKTOP_BIN).',
     );
   }
 
-  const memoryKind = process.platform === "win32" ? "Working Set" : "RSS";
+  const memoryKind = process.platform === 'win32' ? 'Working Set' : 'RSS';
   const profileRoot = resolve(perfHome, `desktop-memory-${Date.now()}-${process.pid}`);
   // eslint-disable-next-line no-console
   console.log(
@@ -607,8 +356,8 @@ async function main(): Promise<void> {
       `- perf-home: ${formatPerfPath(perfHome)} (override with FORMULA_PERF_HOME)\n` +
       `- profile: ${formatPerfPath(profileRoot)}\n` +
       (enforce
-        ? "- enforcement: enabled (set FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=0 to disable)\n"
-        : "- enforcement: disabled (set FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1 or pass --enforce to fail on regression)\n"),
+        ? '- enforcement: enabled (set FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=0 to disable)\n'
+        : '- enforcement: disabled (set FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1 or pass --enforce to fail on regression)\n'),
   );
 
   const results: number[] = [];
@@ -637,7 +386,7 @@ async function main(): Promise<void> {
   if (jsonPath) {
     const outputPath = resolve(jsonPath);
     mkdirSync(dirname(outputPath), { recursive: true });
-    const measurement = process.platform === "win32" ? "working_set" : "rss";
+    const measurement = process.platform === 'win32' ? 'working_set' : 'rss';
     const perfHomeRel = formatPerfPath(perfHome);
     const profileRootRel = formatPerfPath(profileRoot);
     writeFileSync(
@@ -665,7 +414,7 @@ async function main(): Promise<void> {
         null,
         2,
       ),
-      "utf8",
+      'utf8',
     );
   }
 
