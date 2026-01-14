@@ -114,6 +114,33 @@ describe("FormulaBarView name box dropdown", () => {
     host.remove();
   });
 
+  it("closes the dropdown when focus moves outside the name box", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onGoTo = vi.fn(() => true);
+    const provider: NameBoxDropdownProvider = {
+      getItems: () => [{ kind: "namedRange", key: "namedRange:SalesData", label: "SalesData", reference: "SalesData" }],
+    };
+
+    new FormulaBarView(host, { onCommit: () => {}, onGoTo }, { nameBoxDropdownProvider: provider });
+
+    const dropdown = host.querySelector<HTMLButtonElement>('[data-testid="name-box-dropdown"]')!;
+    const popup = host.querySelector<HTMLDivElement>('[data-testid="formula-name-box-popup"]')!;
+
+    dropdown.click();
+    expect(popup.hidden).toBe(false);
+
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    outside.focus();
+
+    expect(popup.hidden).toBe(true);
+
+    host.remove();
+    outside.remove();
+  });
+
   it("shows an empty-state message when the workbook has no names/tables", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

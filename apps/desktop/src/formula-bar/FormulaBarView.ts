@@ -245,6 +245,7 @@ export class FormulaBarView {
   #nameBoxDropdownActiveIndex: number = -1;
   #nameBoxDropdownRecentKeys: string[] = [];
   #nameBoxDropdownPointerDownListener: ((e: PointerEvent) => void) | null = null;
+  #nameBoxDropdownFocusInListener: ((e: FocusEvent) => void) | null = null;
   #nameBoxDropdownScrollListener: ((e: Event) => void) | null = null;
   #nameBoxDropdownResizeListener: (() => void) | null = null;
   #nameBoxDropdownBlurListener: (() => void) | null = null;
@@ -2549,6 +2550,16 @@ export class FormulaBarView {
     };
     window.addEventListener("pointerdown", this.#nameBoxDropdownPointerDownListener, true);
 
+    this.#nameBoxDropdownFocusInListener = (e: FocusEvent) => {
+      if (!this.#isNameBoxDropdownOpen) return;
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (this.#nameBoxDropdownPopupEl.contains(target)) return;
+      if (this.#nameBoxEl.contains(target)) return;
+      this.#closeNameBoxDropdown({ restoreAddress: true, reason: "outside" });
+    };
+    document.addEventListener("focusin", this.#nameBoxDropdownFocusInListener, true);
+
     this.#nameBoxDropdownScrollListener = (e: Event) => {
       if (!this.#isNameBoxDropdownOpen) return;
       const target = e.target as Node | null;
@@ -2574,6 +2585,10 @@ export class FormulaBarView {
     if (this.#nameBoxDropdownPointerDownListener) {
       window.removeEventListener("pointerdown", this.#nameBoxDropdownPointerDownListener, true);
       this.#nameBoxDropdownPointerDownListener = null;
+    }
+    if (this.#nameBoxDropdownFocusInListener) {
+      document.removeEventListener("focusin", this.#nameBoxDropdownFocusInListener, true);
+      this.#nameBoxDropdownFocusInListener = null;
     }
     if (this.#nameBoxDropdownScrollListener) {
       window.removeEventListener("scroll", this.#nameBoxDropdownScrollListener, true);
