@@ -1232,7 +1232,7 @@ describe("VBA Preservation", () => {
     const originalVBA = extractVBAProject(original);
     const savedVBA = extractVBAProject(saved);
     
-    // Should be byte-for-byte identical
+    // Should be byte-for-byte identical (OPC part payload bytes).
     expect(savedVBA).toEqual(originalVBA);
   });
 });

@@ -329,7 +329,7 @@ However, other real Excel workbooks **do** include a `cellimages` store part. In
   - `xl/cellimages.xml` + `xl/_rels/cellimages.xml.rels` + `xl/media/*`, in addition to the RichData tables.
 
 So: do not assume `xl/cellimages.xml` is absent. Treat it as an optional workbook-level image store and preserve it
-byte-for-byte when round-tripping.
+byte-for-byte (OPC part payload bytes) when round-tripping.
 
 ## 9) Real Excel example: multiple cells + multiple images (fixture)
 

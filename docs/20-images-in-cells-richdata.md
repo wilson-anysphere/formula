@@ -608,7 +608,7 @@ different root local-name:
 
 This part is not required to follow the local-image resolution chain in the observed fixtures (which only
 needs `metadata.xml` → `rdrichvalue.xml`/structure → `richValueRel.xml`/`.rels`), but should be preserved
-byte-for-byte for round-trip safety.
+byte-for-byte (OPC part payload bytes) for round-trip safety.
 
 **Workbook relationships**
 
@@ -815,7 +815,7 @@ is generally:
 
 In this repo’s fixture corpus, mapping `vm`/`metadata.xml` → rich value indices uses the
 `futureMetadata`/`xlrd:rvb` indirection described below. Other schemas may exist in the wild; preserve and
-round-trip unknown metadata byte-for-byte.
+round-trip unknown metadata byte-for-byte (OPC part payload bytes).
 
 ### Observed mapping: `futureMetadata` / `rvb` indirection
 

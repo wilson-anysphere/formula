@@ -79,12 +79,13 @@ Notes:
   two **observed** naming schemes in this repo:
   - legacy: `richValue*.xml` (some producers/tests also use the plural `richValues*.xml`)
   - modern “Place in Cell”: `rdrichvalue*.xml` + supporting structure/types tables
-  Formula should preserve the entire `xl/richData/` directory byte-for-byte unless we explicitly
-  implement rich-value editing.
+  Formula should preserve the entire `xl/richData/` directory byte-for-byte (OPC part payload bytes)
+  unless we explicitly implement rich-value editing.
 - `xl/metadata.xml` and the per-cell `c/@vm` + `c/@cm` attributes connect worksheet cells to the rich
   value system.
 - When present, `xl/_rels/metadata.xml.rels` typically connects `xl/metadata.xml` → `xl/richData/*` parts.
-  Formula should preserve these relationships byte-for-byte for safe round-trips.
+  Formula should preserve these relationships byte-for-byte (OPC part payload bytes) for safe
+  round-trips.
 
 See also: [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) for a deeper (still
 best-effort) description of the `richValue*`/**`rdRichValue*`** part sets and how the `richValueRel*`
