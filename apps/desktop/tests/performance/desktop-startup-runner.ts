@@ -293,6 +293,27 @@ async function main(): Promise<void> {
     );
   }
 
+  // For the shell benchmark, `first_render_ms` is a best-effort proxy and may be missing in older
+  // binaries (or if IPC is flaky). Avoid computing percentiles over a tiny, biased subset.
+  const minFirstRenderFraction = DESKTOP_STARTUP_OPTIONAL_METRIC_MIN_VALID_FRACTION;
+  const minFirstRenderRuns = Math.ceil(results.length * minFirstRenderFraction);
+  const includeFirstRender =
+    benchKind === "full" || (firstRenderValues.length > 0 && firstRenderValues.length >= minFirstRenderRuns);
+
+  if (benchKind === "shell") {
+    if (firstRenderValues.length === 0) {
+      // eslint-disable-next-line no-console
+      console.log("[desktop-startup] first_render_ms unavailable (0 runs reported it); skipping metric");
+    } else if (firstRenderValues.length < minFirstRenderRuns) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[desktop-startup] first_render_ms only available for ${firstRenderValues.length}/${results.length} runs (<${Math.round(
+          minFirstRenderFraction * 100,
+        )}%); skipping metric`,
+      );
+    }
+  }
+
   // `webview_loaded_ms` is recorded by the Rust host (via a native page-load callback) and should
   // generally be available for every run. Keep this best-effort skip policy anyway so the runner
   // can still work against older binaries and so we don't compute p95 over a biased tiny sample.
@@ -326,7 +347,7 @@ async function main(): Promise<void> {
     "ms",
   );
   const firstRenderStats =
-    firstRenderValues.length > 0
+    includeFirstRender
       ? buildBenchmarkResultFromValues("first_render_ms", firstRenderValues, firstRenderTargetMs, "ms")
       : null;
   const webviewLoadedStats =
