@@ -109,3 +109,51 @@ fn numeric_categories_with_date_axis_emits_no_warning() {
     assert!(ser.categories.is_none());
     assert!(ser.categories_num.is_some());
 }
+
+#[test]
+fn parses_numeric_categories_from_cat_numlit() {
+    let xml = r#"
+        <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">
+          <c:chart>
+            <c:plotArea>
+              <c:lineChart>
+                <c:ser>
+                  <c:cat>
+                    <c:numLit>
+                      <c:formatCode>General</c:formatCode>
+                      <c:ptCount val="2"/>
+                      <c:pt idx="0"><c:v>45123</c:v></c:pt>
+                      <c:pt idx="1"><c:v>45124</c:v></c:pt>
+                    </c:numLit>
+                  </c:cat>
+                </c:ser>
+              </c:lineChart>
+              <c:dateAx>
+                <c:axId val="1"/>
+                <c:axPos val="b"/>
+              </c:dateAx>
+              <c:valAx>
+                <c:axId val="2"/>
+                <c:axPos val="l"/>
+              </c:valAx>
+            </c:plotArea>
+          </c:chart>
+        </c:chartSpace>
+    "#;
+
+    let model = parse_chart_space(xml.as_bytes(), "chart1.xml").expect("parse chartSpace");
+    assert!(model.diagnostics.is_empty(), "unexpected diagnostics: {:?}", model.diagnostics);
+    assert_eq!(model.series.len(), 1);
+
+    let ser = &model.series[0];
+    assert!(ser.categories.is_none());
+    let cats = ser.categories_num.as_ref().expect("expected categories_num");
+    assert_eq!(cats.formula, None);
+    assert_eq!(cats.format_code.as_deref(), Some("General"));
+    assert_eq!(cats.cache.as_deref(), Some(&[45123.0, 45124.0][..]));
+    assert_eq!(
+        cats.literal.as_deref(),
+        Some(&[45123.0, 45124.0][..]),
+        "numLit should populate literal values"
+    );
+}
