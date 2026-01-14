@@ -144,10 +144,24 @@ fn pivot_resolves_identifiers_case_insensitively_and_uses_model_casing_for_heade
 }
 
 #[test]
+fn add_table_rejects_duplicate_table_names_case_insensitively() {
+    let mut model = DataModel::new();
+    model.add_table(Table::new("Orders", vec!["Id"])).unwrap();
+    let err = model
+        .add_table(Table::new("orders", vec!["Id"]))
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DaxError::DuplicateTable { table } if table == "orders"
+    ));
+}
+
+#[test]
 fn duplicate_measure_names_are_rejected_case_insensitively() {
     let mut model = DataModel::new();
     model.add_measure("Total", "1").unwrap();
-    let err = model.add_measure("total", "2").unwrap_err();
+    // Also ensure bracketed measure names normalize to the same identifier.
+    let err = model.add_measure("[total]", "2").unwrap_err();
     assert!(matches!(err, DaxError::DuplicateMeasure { .. }));
 }
 
