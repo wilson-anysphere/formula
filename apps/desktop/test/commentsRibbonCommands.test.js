@@ -42,6 +42,8 @@ test("Ribbon schema uses canonical Review → Comments command ids", () => {
 test("Desktop main.ts syncs Comments pressed state + dispatches via CommandRegistry", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = stripComments(fs.readFileSync(mainPath, "utf8"));
+  const routerPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRouter.ts");
+  const router = stripComments(fs.readFileSync(routerPath, "utf8"));
 
   // Pressed state should follow the SpreadsheetApp comments panel visibility.
   assert.match(
@@ -53,7 +55,8 @@ test("Desktop main.ts syncs Comments pressed state + dispatches via CommandRegis
   // Ribbon command activation should execute registered commands via the CommandRegistry
   // bridge (createRibbonActionsFromCommands). Avoid bespoke `handleRibbonCommand` routing for
   // comments.* ids so command palette recents + keybindings share the same path.
-  assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
+  assert.match(main, /\bcreateRibbonActions\(/);
+  assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
   assert.doesNotMatch(main, /\btoggleOverrides:\s*\{[\s\S]*?comments\.togglePanel/m);
   assert.doesNotMatch(main, /\bcommandOverrides:\s*\{[\s\S]*?comments\.togglePanel/m);
   assert.doesNotMatch(main, /\bcommandOverrides:\s*\{[\s\S]*?comments\.addComment/m);

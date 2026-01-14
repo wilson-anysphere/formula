@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,7 +33,7 @@ test("Ribbon schema includes Home → Styles command ids", () => {
 
 test("Home → Styles ribbon commands are registered in CommandRegistry and not handled via main.ts switch cases", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const main = fs.readFileSync(mainPath, "utf8");
+  const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   const desktopCommandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
   const desktopCommands = fs.readFileSync(desktopCommandsPath, "utf8");
@@ -42,6 +43,8 @@ test("Home → Styles ribbon commands are registered in CommandRegistry and not 
 
   const disablingPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRegistryDisabling.ts");
   const disabling = fs.readFileSync(disablingPath, "utf8");
+  const routerPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRouter.ts");
+  const router = stripComments(fs.readFileSync(routerPath, "utf8"));
 
   // Ensure the desktop command catalog wires in the Home Styles registrations.
   assert.match(desktopCommands, /\bregisterHomeStylesCommands\(/, "Expected registerDesktopCommands.ts to invoke registerHomeStylesCommands");
@@ -70,7 +73,8 @@ test("Home → Styles ribbon commands are registered in CommandRegistry and not 
     );
   }
 
-  // Sanity check: ribbon should be mounted through the CommandRegistry bridge.
-  assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
+  // Sanity check: main.ts should mount the ribbon through the ribbon command router, which in turn
+  // delegates registered ribbon ids to the CommandRegistry bridge (`createRibbonActionsFromCommands`).
+  assert.match(main, /\bcreateRibbonActions\(/);
+  assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
 });
-

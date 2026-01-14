@@ -27,6 +27,8 @@ test("Ribbon schema includes Home → Find & Select command ids", () => {
 test("Desktop main.ts routes Find/Replace ribbon commands through the CommandRegistry", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = stripComments(fs.readFileSync(mainPath, "utf8"));
+  const routerPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRouter.ts");
+  const router = stripComments(fs.readFileSync(routerPath, "utf8"));
 
   const desktopCommandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
   const desktopCommands = stripComments(fs.readFileSync(desktopCommandsPath, "utf8"));
@@ -48,5 +50,6 @@ test("Desktop main.ts routes Find/Replace ribbon commands through the CommandReg
   }
 
   // Sanity check: the ribbon should be mounted through the CommandRegistry bridge.
-  assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
+  assert.match(main, /\bcreateRibbonActions\(/);
+  assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
 });

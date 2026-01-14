@@ -24,6 +24,8 @@ test("Ribbon schema includes Home → Cells → Format sizing command ids", () =
 test("Axis sizing ribbon commands are registered in CommandRegistry and not handled via main.ts switch cases", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = stripComments(fs.readFileSync(mainPath, "utf8"));
+  const routerPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRouter.ts");
+  const router = stripComments(fs.readFileSync(routerPath, "utf8"));
 
   const axisCommandsPath = path.join(__dirname, "..", "src", "commands", "registerAxisSizingCommands.ts");
   const axisCommands = stripComments(fs.readFileSync(axisCommandsPath, "utf8"));
@@ -47,5 +49,6 @@ test("Axis sizing ribbon commands are registered in CommandRegistry and not hand
   assert.match(axisCommands, /\bregisterBuiltinCommand\(\s*AXIS_SIZING_COMMAND_IDS\.columnWidth/);
 
   // Sanity check: ribbon should be mounted through the CommandRegistry bridge.
-  assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
+  assert.match(main, /\bcreateRibbonActions\(/);
+  assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
 });

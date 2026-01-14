@@ -32,6 +32,8 @@ test("Ribbon schema includes Insert → Pictures command ids", () => {
 test("Insert → Pictures ribbon commands are registered in CommandRegistry and not handled via main.ts switch cases", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = stripComments(fs.readFileSync(mainPath, "utf8"));
+  const routerPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRouter.ts");
+  const router = stripComments(fs.readFileSync(routerPath, "utf8"));
 
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
   const commands = stripComments(fs.readFileSync(commandsPath, "utf8"));
@@ -74,5 +76,6 @@ test("Insert → Pictures ribbon commands are registered in CommandRegistry and 
   }
 
   // Sanity check: ribbon should be mounted through the CommandRegistry bridge.
-  assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
+  assert.match(main, /\bcreateRibbonActions\(/);
+  assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
 });

@@ -35,6 +35,8 @@ test("Ribbon schema includes Sort & Filter command ids (Home/Data tabs)", () => 
 test("Sort & Filter ribbon commands are registered in CommandRegistry (no exemptions / no main.ts switch cases)", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = stripComments(fs.readFileSync(mainPath, "utf8"));
+  const routerPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRouter.ts");
+  const router = stripComments(fs.readFileSync(routerPath, "utf8"));
 
   const desktopCommandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
   const desktopCommands = stripComments(fs.readFileSync(desktopCommandsPath, "utf8"));
@@ -117,5 +119,6 @@ test("Sort & Filter ribbon commands are registered in CommandRegistry (no exempt
   }
 
   // Sanity check: ribbon should be mounted through the CommandRegistry bridge.
-  assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
+  assert.match(main, /\bcreateRibbonActions\(/);
+  assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
 });

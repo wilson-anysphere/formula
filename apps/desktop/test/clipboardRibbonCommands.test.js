@@ -42,6 +42,8 @@ test("Ribbon schema includes canonical clipboard command ids for Home → Clipbo
 test("Desktop main.ts routes clipboard ribbon commands through the CommandRegistry", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = stripComments(fs.readFileSync(mainPath, "utf8"));
+  const routerPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRouter.ts");
+  const router = stripComments(fs.readFileSync(routerPath, "utf8"));
 
   const builtinsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
   const builtins = stripComments(fs.readFileSync(builtinsPath, "utf8"));
@@ -89,7 +91,8 @@ test("Desktop main.ts routes clipboard ribbon commands through the CommandRegist
 
   // The ribbon should be mounted through the CommandRegistry bridge so registered commands
   // are executed via commandRegistry.executeCommand(...).
-  assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
+  assert.match(main, /\bcreateRibbonActions\(/);
+  assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
   // Guardrail: we should not reintroduce bespoke clipboard routing in the ribbon fallback.
   assert.doesNotMatch(main, /\bcommandId\.startsWith\(\s*["']clipboard\./);
 });

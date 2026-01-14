@@ -55,6 +55,8 @@ test("Ribbon schema aligns Home → Editing AutoSum/Fill ids with CommandRegistr
 test("Desktop main.ts routes canonical Editing ribbon commands through the CommandRegistry (no legacy mapping)", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = stripComments(fs.readFileSync(mainPath, "utf8"));
+  const routerPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRouter.ts");
+  const router = stripComments(fs.readFileSync(routerPath, "utf8"));
 
   const builtinsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
   const builtins = stripComments(fs.readFileSync(builtinsPath, "utf8"));
@@ -129,5 +131,6 @@ test("Desktop main.ts routes canonical Editing ribbon commands through the Comma
   }
 
   // Sanity check: the ribbon should be mounted through the CommandRegistry bridge.
-  assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
+  assert.match(main, /\bcreateRibbonActions\(/);
+  assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
 });

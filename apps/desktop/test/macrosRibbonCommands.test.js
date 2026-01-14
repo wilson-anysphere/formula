@@ -50,14 +50,17 @@ test("Ribbon schema includes View/Developer macro command ids", () => {
 test("Desktop main.ts wires macro ribbon commands to Macros/Script Editor/VBA panels", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = stripComments(fs.readFileSync(mainPath, "utf8"));
+  const routerPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRouter.ts");
+  const router = stripComments(fs.readFileSync(routerPath, "utf8"));
 
   // Ribbon dispatch should delegate these macro command ids through CommandRegistry so they can
   // also be used by the command palette / keybindings. The ribbon uses the generic
-  // createRibbonActionsFromCommands bridge; macro ids should be registered as real commands,
-  // not routed via bespoke ribbon fallback logic.
+  // createRibbonActionsFromCommands bridge (via ribbonCommandRouter); macro ids should be registered as real commands,
+  // not routed via bespoke ribbon fallback logic in main.ts.
   // Ribbon dispatch should delegate through CommandRegistry (shared by ribbon, command palette, and keybindings).
   // Macro command registration is centralized in `registerDesktopCommands` (which wires ids via `registerRibbonMacroCommands`).
-  assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
+  assert.match(main, /\bcreateRibbonActions\(/);
+  assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
   assert.match(main, /\bregisterDesktopCommands\(/);
   assert.match(main, /\bribbonMacroHandlers\s*:/);
   assert.doesNotMatch(main, /\bregisterRibbonMacroCommands\(/);
