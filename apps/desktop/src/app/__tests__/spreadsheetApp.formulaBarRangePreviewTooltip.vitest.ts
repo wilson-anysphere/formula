@@ -6,8 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../spreadsheetApp";
 
-let priorGridMode: string | undefined;
-
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -75,17 +73,11 @@ function createRoot(): HTMLElement {
 
 describe("SpreadsheetApp formula-bar range preview tooltip", () => {
   afterEach(() => {
-    if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
-    else process.env.DESKTOP_GRID_MODE = priorGridMode;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
   beforeEach(() => {
-    priorGridMode = process.env.DESKTOP_GRID_MODE;
-    // Use legacy grid mode for these tests to avoid shared-grid viewport callbacks
-    // firing before the SpreadsheetApp constructor has fully initialized all overlays.
-    process.env.DESKTOP_GRID_MODE = "legacy";
     document.body.innerHTML = "";
 
     const storage = createInMemoryLocalStorage();
