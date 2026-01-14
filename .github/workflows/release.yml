@@ -1367,6 +1367,24 @@ jobs:
           # prerelease suffix like `-beta.1` or `-rc.0` (e.g. `v1.2.3-beta.1`).
           prerelease: ${{ contains(needs.preflight.outputs.release_tag, '-') }}
 
+      - name: Smoke check packaged cross-origin isolation (COOP/COEP)
+        # Run the COI smoke check against the already-built Tauri artifacts produced
+        # by the `tauri-apps/tauri-action` step above.
+        #
+        # By default we run this on all platforms. Set FORMULA_COI_CHECK_ALL_PLATFORMS
+        # to 0/false to only run the check on Linux.
+        #
+        # Skip Windows ARM64 cross-compile builds (the produced binary isn't runnable on x64 runners).
+        if: >-
+          needs.preflight.outputs.upload == 'true'
+          && (runner.os == 'Linux' || !contains(fromJson('["0","false","False","FALSE"]'), vars.FORMULA_COI_CHECK_ALL_PLATFORMS))
+          && (runner.os != 'Windows' || matrix.rust_target != 'aarch64-pc-windows-msvc')
+          && (
+            (runner.os == 'macOS' && steps.tauri_release_macos.outcome == 'success')
+            || (runner.os != 'macOS' && steps.tauri_release_non_macos.outcome == 'success')
+          )
+        run: pnpm -C apps/desktop check:coi -- --no-build
+
       - name: Attest build provenance (release assets)
         if: runner.os != 'macOS' && needs.preflight.outputs.upload == 'true' && steps.tauri_release_non_macos.outcome == 'success'
         id: provenance_non_macos
