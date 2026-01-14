@@ -14,7 +14,7 @@ use crate::encrypted_package_reader::{DecryptedPackageReader, EncryptionMethod};
 
 use formula_xlsx::offcrypto::{
     decrypt_aes_cbc_no_padding_in_place, derive_key, hash_password, CryptoError, HashAlgorithm,
-    KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
+    DEFAULT_MAX_SPIN_COUNT, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -205,10 +205,17 @@ fn parse_agile_encryption_info(xml: &str) -> Result<AgileEncryptionInfo, Decrypt
 
     validate_cipher_settings(encrypted_key_node)?;
 
+    let spin_count = parse_u32_attr(encrypted_key_node, "spinCount")?;
+    if spin_count > DEFAULT_MAX_SPIN_COUNT {
+        return Err(DecryptError::InvalidInfo(format!(
+            "spinCount {spin_count} exceeds maximum allowed {DEFAULT_MAX_SPIN_COUNT} (refusing to run expensive password KDF)"
+        )));
+    }
+
     let password_key = AgilePasswordKeyEncryptor {
         salt_value: parse_base64_attr(encrypted_key_node, "saltValue")?,
         hash_algorithm: parse_hash_algorithm(encrypted_key_node, "hashAlgorithm")?,
-        spin_count: parse_u32_attr(encrypted_key_node, "spinCount")?,
+        spin_count,
         block_size: parse_usize_attr(encrypted_key_node, "blockSize")?,
         key_bits: parse_usize_attr(encrypted_key_node, "keyBits")?,
         hash_size: parse_usize_attr(encrypted_key_node, "hashSize")?,
@@ -227,6 +234,39 @@ fn parse_agile_encryption_info(xml: &str) -> Result<AgileEncryptionInfo, Decrypt
         key_data,
         password_key,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_spin_count_above_default_max() {
+        let xml = r#"
+            <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                        xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+              <keyData saltValue="AA==" hashAlgorithm="SHA1" hashSize="20"
+                       cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                       keyBits="128" blockSize="16" />
+              <keyEncryptors>
+                <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+                  <p:encryptedKey saltValue="AA==" spinCount="4294967295" hashAlgorithm="SHA1" hashSize="20"
+                                  cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                                  keyBits="128" blockSize="16"
+                                  encryptedVerifierHashInput="AA=="
+                                  encryptedVerifierHashValue="AA=="
+                                  encryptedKeyValue="AA=="/>
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>
+        "#;
+
+        let err = parse_agile_encryption_info(xml).expect_err("expected error");
+        assert!(
+            matches!(err, DecryptError::InvalidInfo(ref msg) if msg.contains("spinCount") && msg.contains("maximum")),
+            "unexpected error: {err:?}"
+        );
+    }
 }
 
 fn validate_cipher_settings(node: roxmltree::Node<'_, '_>) -> Result<(), DecryptError> {
