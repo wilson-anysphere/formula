@@ -412,8 +412,9 @@ These tools are useful for answering “is our implementation wrong, or is the f
 Repository fixtures:
 
 - `fixtures/encrypted/ooxml/` contains synthetic encrypted OOXML workbooks (Agile + Standard, plus
-  empty-password + Unicode-password cases). See `fixtures/encrypted/ooxml/README.md` for passwords,
-  provenance, and regeneration notes.
+  empty-password + Unicode-password cases, macro-enabled `.xlsm` fixtures, and `*-large.xlsx`
+  multi-segment fixtures). See `fixtures/encrypted/ooxml/README.md` for passwords, provenance, and
+  regeneration notes.
 
 ## References (MS-OFFCRYPTO sections)
 
