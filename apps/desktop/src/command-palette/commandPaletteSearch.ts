@@ -1,5 +1,6 @@
 import type { CommandContribution } from "../extensions/commandRegistry.js";
 import { getFunctionSignature } from "../formula-bar/highlight/functionSignatures.js";
+import { normalizeFormulaLocaleId, normalizeLocaleId } from "../spreadsheet/formulaLocale.js";
 
 import FUNCTION_NAMES from "../../../../shared/functionNames.mjs";
 
@@ -282,9 +283,19 @@ function scoreFunctionResults(queryLower: string, limit: number): CommandPalette
     return a.name.localeCompare(b.name);
   });
 
+  const localeId = (() => {
+    try {
+      const raw = typeof document !== "undefined" ? document.documentElement?.lang : "";
+      return String(raw ?? "").trim() || "en-US";
+    } catch {
+      return "en-US";
+    }
+  })();
+  const argSeparator = inferArgSeparator(localeId);
+
   return top.map((match) => {
-    const sig = getFunctionSignature(match.name);
-    const signature = sig ? formatSignature(sig) : undefined;
+    const sig = getFunctionSignature(match.name, { localeId });
+    const signature = sig ? formatSignature(sig, argSeparator) : undefined;
     const summary = sig?.summary?.trim() ? sig.summary.trim() : undefined;
 
     return {
@@ -298,7 +309,26 @@ function scoreFunctionResults(queryLower: string, limit: number): CommandPalette
   });
 }
 
-function formatSignature(sig: FunctionSignature): string {
-  const params = sig.params.map((param) => (param.optional ? `[${param.name}]` : param.name)).join(", ");
+const ARG_SEPARATOR_CACHE = new Map<string, string>();
+
+function inferArgSeparator(localeId: string): string {
+  const locale = normalizeFormulaLocaleId(localeId) ?? normalizeLocaleId(localeId) ?? "en-US";
+  const cached = ARG_SEPARATOR_CACHE.get(locale);
+  if (cached) return cached;
+
+  try {
+    // Excel typically uses `;` as the list/arg separator when the decimal separator is `,`.
+    const parts = new Intl.NumberFormat(locale).formatToParts(1.1);
+    const decimal = parts.find((p) => p.type === "decimal")?.value ?? ".";
+    const sep = decimal === "," ? "; " : ", ";
+    ARG_SEPARATOR_CACHE.set(locale, sep);
+    return sep;
+  } catch {
+    return ", ";
+  }
+}
+
+function formatSignature(sig: FunctionSignature, argSeparator: string): string {
+  const params = sig.params.map((param) => (param.optional ? `[${param.name}]` : param.name)).join(argSeparator);
   return `${sig.name}(${params})`;
 }

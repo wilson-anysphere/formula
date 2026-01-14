@@ -320,8 +320,16 @@ function functionPickerItemFromName(name: string): FunctionPickerItem {
 }
 
 function formatSignature(sig: FunctionSignature): string {
-  const params = sig.params.map((param) => (param.optional ? `[${param.name}]` : param.name)).join(", ");
-  return `${sig.name}(${params})`;
+  const localeId = (() => {
+    try {
+      const raw = typeof document !== "undefined" ? document.documentElement?.lang : "";
+      return String(raw ?? "").trim() || "en-US";
+    } catch {
+      return "en-US";
+    }
+  })();
+  const parts = signatureParts(sig, null, { argSeparator: inferArgSeparator(localeId) });
+  return parts.map((p) => p.text).join("");
 }
 
 type CompletionContext = {
