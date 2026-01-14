@@ -523,6 +523,17 @@ fn compose_halfwidth_katakana(base: char, mark: char) -> Option<char> {
 }
 
 fn encode_bytes_len(codepage: u16, text: &str) -> usize {
+    // Excel semantics: `*B` byte-count functions only differ from their non-`B` equivalents in
+    // DBCS locales. For single-byte codepages, byte count matches character count.
+    //
+    // Note: even in single-byte locales, strings may contain characters that are not representable
+    // in the legacy codepage. Excel still treats these as single-byte for `LENB` in non-DBCS
+    // environments, so we use `chars().count()` rather than attempting to encode.
+    match codepage as u32 {
+        932 | 936 | 949 | 950 => {}
+        _ => return text.chars().count(),
+    }
+
     let Some(encoding) = encoding_for_codepage(codepage) else {
         // Best-effort fallback: treat byte count as character count.
         return text.chars().count();
