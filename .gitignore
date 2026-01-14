@@ -1,5 +1,7 @@
 /target/
 **/target/
+/target-cargo/
+**/target-cargo/
 
 apps/desktop/.turbo/
 apps/**/src-tauri/gen/
