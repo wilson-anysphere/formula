@@ -1360,6 +1360,18 @@ const HLOOKUP_ROW_INDEX_NUM_ENUM_1_2_3 = [
   { replacement: "3", displayText: "3 (3rd row)", confidence: 0.64 },
 ];
 
+const LARGE_K_ENUM_1_2_3 = [
+  { replacement: "1", displayText: "1 (largest)", confidence: 0.66 },
+  { replacement: "2", displayText: "2 (2nd largest)", confidence: 0.65 },
+  { replacement: "3", displayText: "3 (3rd largest)", confidence: 0.64 },
+];
+
+const SMALL_K_ENUM_1_2_3 = [
+  { replacement: "1", displayText: "1 (smallest)", confidence: 0.66 },
+  { replacement: "2", displayText: "2 (2nd smallest)", confidence: 0.65 },
+  { replacement: "3", displayText: "3 (3rd smallest)", confidence: 0.64 },
+];
+
 /**
  * Function-specific enumerations for commonly misunderstood "flag" arguments.
  * These are curated because the function catalog only carries coarse arg types.
@@ -1605,6 +1617,14 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "0", displayText: "0 (default; negatives away from 0)", confidence: 0.64 },
       { replacement: "1", displayText: "1 (negatives toward 0)", confidence: 0.63 },
     ],
+  },
+  LARGE: {
+    // k
+    1: LARGE_K_ENUM_1_2_3,
+  },
+  SMALL: {
+    // k
+    1: SMALL_K_ENUM_1_2_3,
   },
   QUARTILE: {
     // quart

@@ -1814,6 +1814,52 @@ test("Typing =LARGE(A suggests a range but does not auto-close parens (needs k)"
   );
 });
 
+test("LARGE k suggests 1, 2, 3 (no 0)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=LARGE(A1:A10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["1", "2", "3"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `${currentInput}${v}`),
+      `Expected LARGE to suggest k=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+  assert.ok(
+    !suggestions.some((s) => s.text === `${currentInput}0`),
+    `Did not expect LARGE to suggest k=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("SMALL k suggests 1, 2, 3 (no 0)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SMALL(A1:A10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["1", "2", "3"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `${currentInput}${v}`),
+      `Expected SMALL to suggest k=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+  assert.ok(
+    !suggestions.some((s) => s.text === `${currentInput}0`),
+    `Did not expect SMALL to suggest k=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =FORECAST.LINEAR(10, A suggests a range but does not auto-close parens (needs more args)", async () => {
   const engine = new TabCompletionEngine();
 
