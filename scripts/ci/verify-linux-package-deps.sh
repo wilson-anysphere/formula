@@ -335,12 +335,19 @@ for deb in "${debs[@]}"; do
     # Debian version format: [epoch:]upstream[-revision]
     deb_version_no_epoch="${deb_version_no_epoch#*:}"
   fi
-  deb_upstream_version="${deb_version_no_epoch}"
-  if [[ "$deb_upstream_version" == *-* ]]; then
-    deb_upstream_version="${deb_upstream_version%-*}"
-  fi
-  if [[ "$deb_upstream_version" != "$EXPECTED_DESKTOP_VERSION" ]]; then
-    fail "$deb: version mismatch (dpkg Version). Expected ${EXPECTED_DESKTOP_VERSION}, found ${deb_version}"
+  # Debian version format: [epoch:]upstream[-revision]
+  #
+  # Prefer matching the full "epoch-stripped" value first so pre-release versions
+  # that contain hyphens (e.g. 1.2.3-beta.1) are not incorrectly treated as
+  # "upstream + Debian revision" unless a separate revision suffix is present.
+  if [[ "$deb_version_no_epoch" != "$EXPECTED_DESKTOP_VERSION" ]]; then
+    deb_upstream_version="${deb_version_no_epoch}"
+    if [[ "$deb_upstream_version" == *-* ]]; then
+      deb_upstream_version="${deb_upstream_version%-*}"
+    fi
+    if [[ "$deb_upstream_version" != "$EXPECTED_DESKTOP_VERSION" ]]; then
+      fail "$deb: version mismatch (dpkg Version). Expected ${EXPECTED_DESKTOP_VERSION}, found ${deb_version}"
+    fi
   fi
 
   depends="$(dpkg-deb -f "$deb" Depends 2>/dev/null || true)"
