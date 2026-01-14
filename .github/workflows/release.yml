@@ -1854,6 +1854,12 @@ jobs:
       - name: Smoke test Linux .rpm install in clean Fedora container
         if: runner.os == 'Linux'
         run: bash scripts/ci/linux-package-install-smoke.sh rpm
+
+      - name: Smoke test Linux .rpm install in clean openSUSE container (optional)
+        if: runner.os == 'Linux' && vars.FORMULA_OPENSUSE_SMOKE == '1'
+        env:
+          FORMULA_RPM_SMOKE_IMAGE: opensuse/tumbleweed:latest
+        run: bash scripts/ci/linux-package-install-smoke.sh rpm
       - name: Dump macOS effective entitlements (codesign) (signed builds only)
         if: runner.os == 'macOS'
         shell: bash
