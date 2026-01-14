@@ -503,6 +503,25 @@ mod tests {
     }
 
     #[test]
+    fn cell_to_string_formats_scientific_numbers_using_workbook_locale() {
+        assert_eq!(
+            cell_to_string(&CellValue::Number(1.23e11), ValueLocaleConfig::de_de()),
+            "1,23E+11"
+        );
+    }
+
+    #[test]
+    fn cell_to_string_formats_numbers_with_excel_general_precision() {
+        assert_eq!(
+            cell_to_string(
+                &CellValue::Number(1_234_567_890_123_456.0),
+                ValueLocaleConfig::en_us()
+            ),
+            "1.23456789012346E+15"
+        );
+    }
+
+    #[test]
     fn cell_to_string_normalizes_negative_zero() {
         assert_eq!(
             cell_to_string(&CellValue::Number(-0.0), ValueLocaleConfig::en_us()),
