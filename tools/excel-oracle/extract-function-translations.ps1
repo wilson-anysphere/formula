@@ -104,6 +104,14 @@ function Build-MinimalFormula {
     [Parameter(Mandatory = $true)][object[]]$ArgTypes
   )
 
+  # Some functions have syntactic constraints that aren't captured by the
+  # catalog's `arg_types` (e.g. LET requires a name token as its first arg).
+  # Special-case them so we can still extract translations when Excel supports
+  # the function.
+  if ($FunctionName -eq "LET") {
+    return "=LET(x,1,x)"
+  }
+
   if ($MinArgs -le 0) {
     return "=$FunctionName()"
   }
@@ -195,6 +203,7 @@ $excel = $null
 $workbook = $null
 $sheet = $null
 $cell = $null
+$origCalculation = $null
 
 $translations = @{}
 $skipped = New-Object System.Collections.Generic.List[string]
@@ -213,6 +222,16 @@ try {
   try { $excel.AskToUpdateLinks = $false } catch {}
   # msoAutomationSecurityForceDisable = 3 (disable macros)
   try { $excel.AutomationSecurity = 3 } catch {}
+
+  # Avoid evaluating formulas during extraction (e.g. WEBSERVICE/CUBE functions).
+  # We only need Excel to parse the formula so we can read back FormulaLocal.
+  # xlCalculationManual = -4135, xlCalculationAutomatic = -4105
+  try {
+    $origCalculation = $excel.Calculation
+    $excel.Calculation = -4135
+  } catch {
+    # Best-effort; ignore if not supported by this Excel/Office build.
+  }
 
   $workbook = $excel.Workbooks.Add()
   $sheet = $workbook.Worksheets.Item(1)
@@ -271,6 +290,11 @@ try {
     try { $workbook.Close($false) } catch {}
   }
   if ($null -ne $excel) {
+    try {
+      if ($null -ne $origCalculation) {
+        $excel.Calculation = $origCalculation
+      }
+    } catch {}
     try { $excel.Quit() } catch {}
   }
 
@@ -282,4 +306,3 @@ try {
   [GC]::Collect()
   [GC]::WaitForPendingFinalizers()
 }
-
