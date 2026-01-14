@@ -6304,7 +6304,7 @@ export class SpreadsheetApp {
     const existingObjects = this.listDrawingObjectsForSheet(sheetId);
     const usedDrawingIds = new Set<number>();
     let maxDrawingId = 0;
-    for (const obj of existingObjects) {
+    for (const obj of this.listDrawingObjectsForSheet(sheetId)) {
       usedDrawingIds.add(obj.id);
       if (obj.id > maxDrawingId) maxDrawingId = obj.id;
     }
