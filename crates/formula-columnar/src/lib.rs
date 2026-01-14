@@ -63,13 +63,12 @@
 //! builder.append_row(&[Value::String(Arc::<str>::from("B")), Value::Number(2.0)]);
 //! let table = builder.finalize();
 //!
-//! let expr = FilterExpr::Cmp {
-//!     col: 0,
-//!     op: CmpOp::Eq,
-//!     value: FilterValue::String(Arc::<str>::from("A")),
-//! };
+//! let expr = FilterExpr::cmp(0, CmpOp::Eq, FilterValue::string("A"));
 //! let mask = table.filter_mask(&expr).unwrap();
 //! assert_eq!(mask.count_ones(), 1);
+//!
+//! // Optional: case-insensitive string comparisons (ASCII-only).
+//! let _expr_ci = FilterExpr::cmp_string_ci(0, CmpOp::Eq, "a");
 //!
 //! // Optionally materialize a filtered snapshot.
 //! let filtered = table.filter_table(&mask).unwrap();
