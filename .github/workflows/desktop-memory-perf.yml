@@ -6,10 +6,6 @@ on:
     # Daily (UTC). Keeps idle memory trends visible without gating PRs.
     - cron: "0 7 * * *"
 
-permissions:
-  # Required for benchmark-action/github-action-benchmark to push to gh-pages.
-  contents: write
-
 concurrency:
   # Avoid overlapping scheduled runs (desktop builds are expensive).
   group: desktop-memory-perf-${{ github.ref }}
@@ -32,6 +28,9 @@ jobs:
     if: github.event_name != 'schedule' || github.repository == 'wilson-anysphere/formula'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    permissions:
+      # Required for benchmark-action/github-action-benchmark to push to gh-pages.
+      contents: write
 
     steps:
       - name: Checkout
