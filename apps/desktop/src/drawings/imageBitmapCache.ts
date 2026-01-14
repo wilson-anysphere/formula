@@ -1,5 +1,5 @@
 import type { ImageEntry } from "./types";
-import { MAX_PNG_DIMENSION, MAX_PNG_PIXELS, readPngDimensions } from "./pngDimensions";
+import { MAX_PNG_DIMENSION, MAX_PNG_PIXELS, readImageDimensions } from "./pngDimensions";
 
 export interface ImageBitmapCacheOptions {
   /**
@@ -534,7 +534,7 @@ export class ImageBitmapCache {
       throw new Error("createImageBitmap is not available in this environment");
     }
 
-    const dims = readPngDimensions(entry.bytes);
+    const dims = readImageDimensions(entry.bytes);
     if (dims) {
       const pixels = dims.width * dims.height;
       if (
@@ -545,15 +545,17 @@ export class ImageBitmapCache {
         throw new Error(`Image dimensions too large (${dims.width}x${dims.height})`);
       }
 
-      // Some callers/tests use a PNG header stub (signature + partial IHDR) to communicate dimensions
-      // without including a full PNG payload. A valid PNG requires at least the full IHDR chunk
-      // header + 13-byte IHDR data + CRC:
-      //   signature(8) + length(4) + type(4) + data(13) + crc(4) = 33 bytes
-      //
-      // If we don't have that, decoding is guaranteed to fail; avoid invoking `createImageBitmap`
-      // in that case so callers can rely on the "no decode attempted" invariant.
-      if (entry.bytes.byteLength < 33) {
-        throw new Error("Invalid PNG: truncated IHDR");
+      if (dims.format === "png") {
+        // Some callers/tests use a PNG header stub (signature + partial IHDR) to communicate dimensions
+        // without including a full PNG payload. A valid PNG requires at least the full IHDR chunk
+        // header + 13-byte IHDR data + CRC:
+        //   signature(8) + length(4) + type(4) + data(13) + crc(4) = 33 bytes
+        //
+        // If we don't have that, decoding is guaranteed to fail; avoid invoking `createImageBitmap`
+        // in that case so callers can rely on the "no decode attempted" invariant.
+        if (entry.bytes.byteLength < 33) {
+          throw new Error("Invalid PNG: truncated IHDR");
+        }
       }
     }
 

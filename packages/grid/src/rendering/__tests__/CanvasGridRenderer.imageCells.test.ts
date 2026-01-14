@@ -130,6 +130,44 @@ function createPngHeaderBytes(width: number, height: number, totalBytes = 33): U
   return bytes;
 }
 
+function createJpegHeaderBytes(width: number, height: number): Uint8Array {
+  // Minimal structure: SOI + APP0 (dummy) + SOF0 with width/height.
+  // This is not a complete/valid JPEG, but it includes enough header structure for our
+  // dimension parser to extract the advertised size.
+  const bytes = new Uint8Array(33);
+  let o = 0;
+  // SOI
+  bytes[o++] = 0xff;
+  bytes[o++] = 0xd8;
+  // APP0 marker
+  bytes[o++] = 0xff;
+  bytes[o++] = 0xe0;
+  // APP0 length: 16 bytes (includes these 2 length bytes) + 14 bytes payload.
+  bytes[o++] = 0x00;
+  bytes[o++] = 0x10;
+  o += 14;
+  // SOF0 marker
+  bytes[o++] = 0xff;
+  bytes[o++] = 0xc0;
+  // SOF0 length: 11 bytes (includes these 2 length bytes) = 9 bytes payload.
+  bytes[o++] = 0x00;
+  bytes[o++] = 0x0b;
+  // Precision
+  bytes[o++] = 0x08;
+  // Height (big-endian)
+  bytes[o++] = (height >> 8) & 0xff;
+  bytes[o++] = height & 0xff;
+  // Width (big-endian)
+  bytes[o++] = (width >> 8) & 0xff;
+  bytes[o++] = width & 0xff;
+  // Components (1) + component spec (3 bytes)
+  bytes[o++] = 0x01;
+  bytes[o++] = 0x01;
+  bytes[o++] = 0x11;
+  bytes[o++] = 0x00;
+  return bytes;
+}
+
 async function flushMicrotasks(): Promise<void> {
   // Several turns helps flush async chains that include multiple `await` boundaries
   // (resolver -> header sniff -> createImageBitmap -> finally handlers).
@@ -410,6 +448,136 @@ describe("CanvasGridRenderer image cells", () => {
     expect(createImageBitmapSpy).not.toHaveBeenCalled();
     expect(content.rec.drawImages.length).toBe(0);
     expect(content.rec.fillTexts.some((args) => args[0] === "Blob bomb")).toBe(true);
+  });
+
+  it("rejects JPEG images with huge dimensions without invoking createImageBitmap", async () => {
+    vi.stubGlobal("requestAnimationFrame", (_cb: FrameRequestCallback) => 0);
+
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "jpeg_bomb", altText: "JPEG bomb", width: 100, height: 50 }
+            }
+          : null
+    };
+
+    const createImageBitmapSpy = vi.fn(async () => ({ width: 10, height: 10 } as any));
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    const bytes = createJpegHeaderBytes(10_001, 1);
+    const imageResolver = vi.fn(async () => bytes);
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    installContexts(contexts);
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 1,
+      defaultColWidth: 100,
+      defaultRowHeight: 50,
+      imageResolver
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+
+    renderer.renderImmediately();
+    const pending = (renderer as any).imageBitmapCache.get("jpeg_bomb") as
+      | { state: "pending"; promise: Promise<void> }
+      | { state: string };
+    if (pending?.state === "pending") {
+      await pending.promise;
+    }
+
+    renderer.renderImmediately();
+    await flushMicrotasks();
+
+    expect(imageResolver).toHaveBeenCalledTimes(1);
+    expect(createImageBitmapSpy).not.toHaveBeenCalled();
+    expect(content.rec.drawImages.length).toBe(0);
+    expect(content.rec.fillTexts.some((args) => args[0] === "JPEG bomb")).toBe(true);
+  });
+
+  it("rejects JPEG Blob images with huge dimensions without invoking createImageBitmap", async () => {
+    vi.stubGlobal("requestAnimationFrame", (_cb: FrameRequestCallback) => 0);
+
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "jpeg_bomb_blob", altText: "JPEG blob bomb", width: 100, height: 50 }
+            }
+          : null
+    };
+
+    const createImageBitmapSpy = vi.fn(async () => ({ width: 10, height: 10 } as any));
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    const bytes = createJpegHeaderBytes(10_001, 1);
+    const imageResolver = vi.fn(async () => new Blob([bytes], { type: "image/jpeg" }));
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    installContexts(contexts);
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 1,
+      defaultColWidth: 100,
+      defaultRowHeight: 50,
+      imageResolver
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+
+    renderer.renderImmediately();
+    const pending = (renderer as any).imageBitmapCache.get("jpeg_bomb_blob") as
+      | { state: "pending"; promise: Promise<void> }
+      | { state: string };
+    if (pending?.state === "pending") {
+      await pending.promise;
+    }
+
+    renderer.renderImmediately();
+    await flushMicrotasks();
+
+    expect(imageResolver).toHaveBeenCalledTimes(1);
+    expect(createImageBitmapSpy).not.toHaveBeenCalled();
+    expect(content.rec.drawImages.length).toBe(0);
+    expect(content.rec.fillTexts.some((args) => args[0] === "JPEG blob bomb")).toBe(true);
   });
 
   it("rejects PNG Blob images that exceed the pixel limit without invoking createImageBitmap", async () => {

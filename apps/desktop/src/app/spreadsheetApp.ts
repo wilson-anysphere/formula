@@ -67,7 +67,7 @@ import { duplicateSelected as duplicateDrawingSelected } from "../drawings/comma
 import { decodeBase64ToBytes as decodeClipboardImageBase64ToBytes, insertImageFromBytes } from "../drawings/insertImage";
 import { pickLocalImageFiles } from "../drawings/pickLocalImageFiles.js";
 import { MAX_INSERT_IMAGE_BYTES } from "../drawings/insertImageLimits.js";
-import { MAX_PNG_DIMENSION, MAX_PNG_PIXELS, readPngDimensions } from "../drawings/pngDimensions";
+import { MAX_PNG_DIMENSION, MAX_PNG_PIXELS, readImageDimensions } from "../drawings/pngDimensions";
 import { resolveEnableDrawingInteractions } from "../drawings/drawingInteractionsFlag.js";
 import { IndexedDbImageStore } from "../drawings/persistence/indexedDbImageStore";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
@@ -7562,7 +7562,7 @@ export class SpreadsheetApp {
         }
 
         // Guard against PNG decompression bombs: small compressed bytes can still decode into huge bitmaps.
-        const dims = readPngDimensions(bytes);
+        const dims = readImageDimensions(bytes);
         if (dims) {
           if (
             dims.width > MAX_PNG_DIMENSION ||
@@ -12759,7 +12759,7 @@ export class SpreadsheetApp {
       // Guard against PNG decompression bombs: small compressed bytes can still decode into huge bitmaps.
       // We already cap raw bytes via `MAX_INSERT_IMAGE_BYTES`; also cap pixel dimensions for common formats
       // we can cheaply inspect without decoding.
-      const dims = readPngDimensions(bytes);
+      const dims = readImageDimensions(bytes);
       if (dims) {
         if (
           dims.width > MAX_PNG_DIMENSION ||
@@ -23929,7 +23929,7 @@ export class SpreadsheetApp {
     }
 
     // Guard against PNG decompression bombs: small compressed bytes can still decode into huge bitmaps.
-    const dims = readPngDimensions(bytes);
+    const dims = readImageDimensions(bytes);
     if (dims) {
       if (
         dims.width > MAX_PNG_DIMENSION ||

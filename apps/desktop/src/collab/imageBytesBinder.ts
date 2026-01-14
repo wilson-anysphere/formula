@@ -3,7 +3,7 @@ import { getYMap } from "@formula/collab-yjs-utils";
 
 import type { CollabSession } from "@formula/collab-session";
 import type { ImageEntry, ImageStore } from "../drawings/types";
-import { MAX_PNG_DIMENSION, MAX_PNG_PIXELS, readPngDimensions } from "../drawings/pngDimensions";
+import { MAX_PNG_DIMENSION, MAX_PNG_PIXELS, readImageDimensions } from "../drawings/pngDimensions";
 
 export type ImageBytesBinder = {
   /**
@@ -183,7 +183,7 @@ function decodeBase64(base64Raw: string, maxBytes: number): Uint8Array | null {
 function coerceStoredImageEntry(raw: unknown, maxBytes: number): { mimeType: string; bytes: Uint8Array } | null {
   // Variant: direct bytes. (mimeType unknown; accept but use a generic fallback.)
   if (raw instanceof Uint8Array) {
-    const dims = readPngDimensions(raw);
+    const dims = readImageDimensions(raw);
     if (dims && (dims.width > MAX_PNG_DIMENSION || dims.height > MAX_PNG_DIMENSION || dims.width * dims.height > MAX_PNG_PIXELS)) {
       return null;
     }
@@ -195,7 +195,7 @@ function coerceStoredImageEntry(raw: unknown, maxBytes: number): { mimeType: str
     const mimeType = typeof map.get("mimeType") === "string" ? (map.get("mimeType") as string) : "application/octet-stream";
     const bytes = map.get("bytes");
     if (bytes instanceof Uint8Array) {
-      const dims = readPngDimensions(bytes);
+      const dims = readImageDimensions(bytes);
       if (dims && (dims.width > MAX_PNG_DIMENSION || dims.height > MAX_PNG_DIMENSION || dims.width * dims.height > MAX_PNG_PIXELS)) {
         return null;
       }
@@ -205,7 +205,7 @@ function coerceStoredImageEntry(raw: unknown, maxBytes: number): { mimeType: str
     if (typeof bytesBase64 === "string") {
       const decoded = decodeBase64(bytesBase64, maxBytes);
       if (!decoded) return null;
-      const dims = readPngDimensions(decoded);
+      const dims = readImageDimensions(decoded);
       if (dims && (dims.width > MAX_PNG_DIMENSION || dims.height > MAX_PNG_DIMENSION || dims.width * dims.height > MAX_PNG_PIXELS)) {
         return null;
       }
@@ -217,7 +217,7 @@ function coerceStoredImageEntry(raw: unknown, maxBytes: number): { mimeType: str
   if (isRecord(raw)) {
     const mimeType = typeof raw.mimeType === "string" ? (raw.mimeType as string) : "application/octet-stream";
     if (raw.bytes instanceof Uint8Array) {
-      const dims = readPngDimensions(raw.bytes);
+      const dims = readImageDimensions(raw.bytes);
       if (dims && (dims.width > MAX_PNG_DIMENSION || dims.height > MAX_PNG_DIMENSION || dims.width * dims.height > MAX_PNG_PIXELS)) {
         return null;
       }
@@ -226,7 +226,7 @@ function coerceStoredImageEntry(raw: unknown, maxBytes: number): { mimeType: str
     if (typeof raw.bytesBase64 === "string") {
       const decoded = decodeBase64(raw.bytesBase64, maxBytes);
       if (!decoded) return null;
-      const dims = readPngDimensions(decoded);
+      const dims = readImageDimensions(decoded);
       if (dims && (dims.width > MAX_PNG_DIMENSION || dims.height > MAX_PNG_DIMENSION || dims.width * dims.height > MAX_PNG_PIXELS)) {
         return null;
       }

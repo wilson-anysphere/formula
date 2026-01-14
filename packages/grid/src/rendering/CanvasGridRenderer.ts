@@ -8,7 +8,7 @@ import type { GridPresence } from "../presence/types.ts";
 import type { GridTheme } from "../theme/GridTheme.ts";
 import { DEFAULT_GRID_THEME, gridThemesEqual, resolveGridTheme } from "../theme/GridTheme.ts";
 import { DEFAULT_GRID_FONT_FAMILY } from "./defaultFontFamilies.ts";
-import { MAX_PNG_DIMENSION, MAX_PNG_PIXELS, readPngDimensions } from "./pngDimensions.ts";
+import { MAX_PNG_DIMENSION, MAX_PNG_PIXELS, readImageDimensions } from "./pngDimensions.ts";
 import type { GridViewportState } from "../virtualization/VirtualScrollManager.ts";
 import { VirtualScrollManager } from "../virtualization/VirtualScrollManager.ts";
 import { alignScrollToDevicePixels as alignScrollToDevicePixelsUtil } from "../virtualization/alignScrollToDevicePixels.ts";
@@ -247,45 +247,69 @@ function assertPngNotTooLarge(dims: { width: number; height: number }): void {
 }
 
 function guardPngBytes(bytes: Uint8Array): void {
-  const dims = readPngDimensions(bytes);
+  const dims = readImageDimensions(bytes);
   if (!dims) return;
   assertPngNotTooLarge(dims);
-  if (bytes.byteLength < MIN_PNG_BYTES) {
+  if (dims.format === "png" && bytes.byteLength < MIN_PNG_BYTES) {
     throw new Error("Invalid PNG: truncated IHDR");
   }
 }
 
 async function guardPngBlob(blob: Blob): Promise<void> {
-  // Fast path: only read enough bytes to parse IHDR width/height.
-  if (blob.size < 24) return;
-  const slice = blob.slice(0, 24) as any;
-  let header: ArrayBuffer | null = null;
-
-  if (typeof slice?.arrayBuffer === "function") {
-    try {
-      header = await slice.arrayBuffer();
-    } catch {
-      header = null;
+  const readSlice = async (slice: Blob): Promise<Uint8Array | null> => {
+    const anySlice = slice as any;
+    if (typeof anySlice?.arrayBuffer === "function") {
+      try {
+        return new Uint8Array(await anySlice.arrayBuffer());
+      } catch {
+        return null;
+      }
     }
-  } else if (typeof (globalThis as any).FileReader === "function") {
-    // Fallback for older browsers / jsdom where Blob#arrayBuffer is not implemented.
-    try {
-      const reader = new (globalThis as any).FileReader() as FileReader;
-      header = await new Promise<ArrayBuffer>((resolve, reject) => {
-        reader.onerror = () => reject(reader.error ?? new Error("FileReader failed"));
-        reader.onload = () => resolve(reader.result as ArrayBuffer);
-        reader.readAsArrayBuffer(slice as Blob);
-      });
-    } catch {
-      header = null;
+
+    if (typeof (globalThis as any).FileReader === "function") {
+      // Fallback for older browsers / jsdom where Blob#arrayBuffer is not implemented.
+      try {
+        const reader = new (globalThis as any).FileReader() as FileReader;
+        const header = await new Promise<ArrayBuffer>((resolve, reject) => {
+          reader.onerror = () => reject(reader.error ?? new Error("FileReader failed"));
+          reader.onload = () => resolve(reader.result as ArrayBuffer);
+          reader.readAsArrayBuffer(slice as Blob);
+        });
+        return new Uint8Array(header);
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
+  };
+
+  const TYPE_SNIFF_BYTES = 32;
+  const firstReadSize = Math.min(blob.size, TYPE_SNIFF_BYTES);
+  // We need at least a minimal signature to do anything useful.
+  if (firstReadSize < 10) return;
+
+  const initial = await readSlice(blob.slice(0, firstReadSize));
+  if (!initial) return;
+
+  const isJpeg =
+    initial.byteLength >= 3 && initial[0] === 0xff && initial[1] === 0xd8 && initial[2] === 0xff;
+  let headerBytes = initial;
+
+  if (isJpeg && blob.size > initial.byteLength) {
+    // JPEG dimensions can occur after variable-length metadata segments, so allow a larger sniff.
+    const MAX_JPEG_SNIFF_BYTES = 256 * 1024;
+    const toRead = Math.min(blob.size, MAX_JPEG_SNIFF_BYTES);
+    if (toRead > initial.byteLength) {
+      const larger = await readSlice(blob.slice(0, toRead));
+      if (larger) headerBytes = larger;
     }
   }
 
-  if (!header) return;
-  const dims = readPngDimensions(new Uint8Array(header));
+  const dims = readImageDimensions(headerBytes);
   if (!dims) return;
   assertPngNotTooLarge(dims);
-  if (blob.size < MIN_PNG_BYTES) {
+  if (dims.format === "png" && blob.size < MIN_PNG_BYTES) {
     throw new Error("Invalid PNG: truncated IHDR");
   }
 }
