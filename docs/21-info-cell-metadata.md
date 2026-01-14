@@ -200,7 +200,8 @@ These keys are computed from the cell’s **effective number format string** (`S
 
 Notes:
 
-- The number format is resolved from the base style layers: `cell (non-zero) > row > col > sheet default > 0 (General)`. Range-run formatting is not currently consulted for these keys.
+- The number format is resolved from the effective formatting layers (Excel-like precedence): `cell (non-zero) > range-run > row > col > sheet default > 0 (General)`.
+  - Styles that do not specify `number_format` are treated as “inherit”, so lower-precedence layers can contribute the number format.
 - Conditional formatting is ignored.
 - When number format metadata is unavailable (no style table, or external workbook refs), the engine falls back to General semantics:
   - `CELL("format")` → `"G"`
@@ -330,9 +331,10 @@ This section documents the “wiring points” for hosts.
   - `EngineClient.setEngineInfo({ system, directory, osversion, release, version, memavail, totmem })`
     - `null` / empty string clears string values
     - `memavail` / `totmem` must be finite numbers
-- Per-sheet origin cell (`INFO("origin")`):
+- Per-sheet origin cell (`INFO("origin")`, preferred):
   - `EngineClient.setSheetOrigin(sheet, originA1)`
   - `originA1` should be an in-bounds A1 address (`"C5"` or `"$C$5"`); the engine returns absolute A1 with `$`.
+  - Compatibility note: `INFO("origin")` also supports a legacy string-based fallback (`EngineClient.setInfoOrigin` / `EngineClient.setInfoOriginForSheet`). If the value parses as A1, it is normalized to absolute A1; otherwise it is returned verbatim.
 
 - Workbook file metadata (`CELL("filename")`, `INFO("directory")` fallback):
   - `EngineClient.setWorkbookFileMetadata(directory, filename)`
@@ -344,10 +346,11 @@ This section documents the “wiring points” for hosts.
   - `EngineClient.setSheetDefaultStyleId(sheet, styleId|null)`
   - `EngineClient.setRowStyleId(sheet, row, styleId|null)`
   - `EngineClient.setColStyleId(sheet, col, styleId|null)`
+  - `EngineClient.setFormatRunsByCol(sheet, col, runs)` (range-run formatting layer)
   - `EngineClient.setCellStyleId(address, styleId, sheet)`
 
   Notes:
-  - These keys use **number format strings** and **base styles** only; conditional formatting is ignored.
+  - These keys use **number format strings** and **layered styles** (sheet/col/row/range-run/cell); conditional formatting is ignored.
   - Style ids are workbook-global; `0` is always the default/empty style.
 
 - Column metadata (`CELL("width")`):
@@ -356,12 +359,6 @@ This section documents the “wiring points” for hosts.
   - `EngineClient.setColHidden(col, hidden, sheet)` to set the explicit hidden flag
 
 > In practice most web callers use `EngineClient` (`packages/engine/src/client.ts`) rather than calling `WasmWorkbook` directly; the same sheet-count rule applies to the JSON schema passed to `EngineClient.loadWorkbookFromJson(...)`.
-
-**Still pending / gaps**
-
-- **Range-run formatting** (`formatRunsByCol` / `Engine::set_format_runs_by_col`) is implemented in the native Rust engine, but is not currently exposed through the WASM worker RPC (`EngineClient`). Until it is, web hosts must either:
-  - materialize large formatting operations into row/col/cell style ids, or
-  - accept that `CELL("prefix")` (and any future formatting-backed keys) may not reflect range-run formatting.
 
 ### Desktop/Tauri
 
@@ -397,12 +394,9 @@ Most of the metadata plumbing described above is implemented. Key code locations
 
 Remaining TODOs / future work:
 
-1. **Expose range-run formatting to WASM**:
-   - add `WasmWorkbook.setFormatRunsByCol` (or equivalent) in `crates/formula-wasm/src/lib.rs`
-   - add worker RPC + `EngineClient` surface in `packages/engine`
-2. **Conditional formatting**:
+1. **Conditional formatting**:
    - Excel’s `CELL("color")` semantics involve *format strings*, not conditional formatting, but other potential `CELL()` keys (and future UI parity work) may require modeling conditional formats.
-3. **Additional Excel `CELL()` keys**:
+2. **Additional Excel `CELL()` keys**:
    - Implement more `CELL(info_type)` variants (e.g. `row`, `col` are done; others are still missing).
-4. **Keep metadata encoding tests stable**:
+3. **Keep metadata encoding tests stable**:
    - `CELL("width")` integer+flag encoding (default/custom/hidden)
