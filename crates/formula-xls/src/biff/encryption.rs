@@ -668,7 +668,8 @@ fn create_xor_array_method1(password: &[u8], xor_key: u16) -> [u8; 16] {
 
 fn xor_array_method1_for_password(password: &str, stored_key: u16, stored_verifier: u16) -> Option<[u8; 16]> {
     for candidate in xor_password_byte_candidates(password) {
-        if candidate.is_empty() || candidate.len() > 15 {
+        // Passwords are limited to 15 bytes, but some writers can emit an empty password (length 0).
+        if candidate.len() > 15 {
             continue;
         }
         let key = create_xor_key_method1(&candidate);
@@ -1454,6 +1455,68 @@ mod tests {
         }
         Ok(())
     }
+
+    fn encrypt_payloads_after_filepass_xor_method1(
+        workbook_stream: &mut [u8],
+        start_offset: usize,
+        xor_array: &[u8; 16],
+    ) -> Result<(), DecryptError> {
+        let mut offset = start_offset;
+        while offset < workbook_stream.len() {
+            let remaining = workbook_stream.len().saturating_sub(offset);
+            if remaining < 4 {
+                // Allow trailing bytes after EOF in synthetic streams.
+                break;
+            }
+
+            let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
+            let len =
+                u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
+
+            let data_start = offset + 4;
+            let data_end = data_start.checked_add(len).ok_or_else(|| {
+                DecryptError::InvalidFilePass("record length overflow while encrypting XOR".to_string())
+            })?;
+            if data_end > workbook_stream.len() {
+                return Err(DecryptError::InvalidFilePass(
+                    "record extends past end of stream while encrypting XOR".to_string(),
+                ));
+            }
+
+            // Mirror the decryption skip rules for MS-OFFCRYPTO/MS-XLS XOR obfuscation.
+            let mut encrypt_from = 0usize;
+            let skip_entire_payload = matches!(
+                record_id,
+                records::RECORD_BOF_BIFF8
+                    | records::RECORD_BOF_BIFF5
+                    | records::RECORD_FILEPASS
+                    | RECORD_INTERFACEHDR
+                    | RECORD_FILELOCK
+                    | RECORD_USREXCL
+                    | RECORD_RRDINFO
+                    | RECORD_RRDHEAD
+            );
+            if !skip_entire_payload {
+                if record_id == RECORD_BOUNDSHEET {
+                    encrypt_from = 4.min(len);
+                }
+
+                let payload = &mut workbook_stream[data_start..data_end];
+                for i in encrypt_from..payload.len() {
+                    let abs_pos = data_start + i;
+                    let mut value = payload[i];
+                    value = value.rotate_left(5);
+                    value ^= xor_array[abs_pos % 16];
+                    payload[i] = value;
+                }
+            }
+
+            offset = data_end;
+        }
+
+        Ok(())
+    }
+
     #[test]
     fn parses_biff5_xor_filepass() {
         let payload = [0x34, 0x12, 0x78, 0x56];
@@ -1585,6 +1648,39 @@ mod tests {
 
         let intermediate_key = derive_rc4_intermediate_key(password, &salt);
         encrypt_record_payloads_in_place(&mut encrypted, encrypted_start, intermediate_key, key_len)
+            .expect("encrypt");
+
+        decrypt_workbook_stream(&mut encrypted, password).expect("decrypt");
+        assert_eq!(encrypted, plain);
+    }
+
+    #[test]
+    fn xor_method1_decrypt_allows_empty_password_when_file_was_encrypted_with_empty_password() {
+        let password = "";
+        let bof_payload = [0x00, 0x06, 0x05, 0x00];
+
+        let key = create_xor_key_method1(&[]);
+        let verifier = create_password_verifier_method1(&[]);
+        let filepass_payload = [
+            0x00, 0x00, // wEncryptionType (XOR)
+            key.to_le_bytes()[0],
+            key.to_le_bytes()[1],
+            verifier.to_le_bytes()[0],
+            verifier.to_le_bytes()[1],
+        ];
+
+        let plain = [
+            record(records::RECORD_BOF_BIFF8, &bof_payload),
+            record(records::RECORD_FILEPASS, &filepass_payload),
+            record(RECORD_DUMMY, &dummy_payload(64, 0x42)),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let mut encrypted = plain.clone();
+        let encrypted_start = filepass_payload_range(&encrypted).end;
+        let xor_array = create_xor_array_method1(&[], key);
+        encrypt_payloads_after_filepass_xor_method1(&mut encrypted, encrypted_start, &xor_array)
             .expect("encrypt");
 
         decrypt_workbook_stream(&mut encrypted, password).expect("decrypt");
