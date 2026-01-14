@@ -316,6 +316,7 @@ fn unescape_dax_bracket_identifier(raw: &str) -> String {
     }
     out
 }
+
 /// Parse a DAX column reference of the form `Table[Column]` or `'Table Name'[Column]`.
 ///
 /// Parsing is best-effort:

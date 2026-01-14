@@ -218,3 +218,38 @@ fn decrypts_standard_cryptoapi_fixture_produced_by_poi() {
             .is_some_and(|xml| xml.contains("hello"));
     assert!(has_hello, "expected decrypted workbook to contain the string 'hello'");
 }
+
+#[test]
+fn decrypts_agile_and_standard_xlsm_fixtures() {
+    let plaintext_path = fixture_path_buf("plaintext.xlsm");
+    let plaintext = std::fs::read(plaintext_path).expect("read plaintext.xlsm fixture bytes");
+
+    for encrypted in ["agile.xlsm", "standard.xlsm"] {
+        let decrypted = decrypt_fixture(encrypted);
+        assert_eq!(
+            decrypted, plaintext,
+            "decrypted bytes must match plaintext.xlsm for {encrypted}"
+        );
+
+        // Sanity: the decrypted bytes should be a valid macro-enabled OPC/ZIP workbook package.
+        let pkg = XlsxPackage::from_bytes(&decrypted).expect("open decrypted package as XLSM");
+        assert!(
+            pkg.part_names().any(|n| n.eq_ignore_ascii_case("xl/workbook.xml")),
+            "decrypted package missing xl/workbook.xml"
+        );
+        assert!(
+            pkg.vba_project_bin().is_some(),
+            "expected decrypted XLSM package to contain xl/vbaProject.bin"
+        );
+
+        let content_types = pkg
+            .part("[Content_Types].xml")
+            .expect("missing [Content_Types].xml");
+        let content_types =
+            std::str::from_utf8(content_types).expect("[Content_Types].xml must be UTF-8");
+        assert!(
+            content_types.contains("macroEnabled.main+xml"),
+            "expected [Content_Types].xml to advertise a macro-enabled workbook content type"
+        );
+    }
+}

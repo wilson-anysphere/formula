@@ -637,6 +637,26 @@ fn open_workbook_with_password_decrypts_unicode_and_empty_password_fixtures() {
 }
 
 #[test]
+fn open_workbook_with_password_decrypts_encrypted_xlsm_fixtures() {
+    for fixture in ["agile.xlsm", "standard.xlsm"] {
+        let path = fixture_path(fixture);
+        let wb = open_workbook_with_password(&path, Some("password"))
+            .unwrap_or_else(|err| panic!("open decrypted XLSM fixture {fixture}: {err:?}"));
+        match wb {
+            Workbook::Xlsx(pkg) => {
+                pkg.read_part("xl/workbook.xml")
+                    .expect("read xl/workbook.xml")
+                    .expect("decrypted XLSM package missing xl/workbook.xml");
+                pkg.read_part("xl/vbaProject.bin")
+                    .expect("read xl/vbaProject.bin")
+                    .expect("expected decrypted XLSM fixture to contain xl/vbaProject.bin");
+            }
+            other => panic!("expected Workbook::Xlsx for {fixture}, got {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn errors_on_missing_password_for_empty_password_fixture() {
     let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
 
