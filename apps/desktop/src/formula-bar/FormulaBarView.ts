@@ -2027,8 +2027,6 @@ export class FormulaBarView {
       }
       if (!isFormulaEditing || coloredReferences.length === 0) {
         this.#referenceElsByIndex = null;
-      } else if (highlightChanged || this.#referenceElsByIndex == null) {
-        this.#rebuildReferenceElementsByIndex();
       }
 
       this.#lastHighlightHtml = highlightHtml;
@@ -2426,8 +2424,27 @@ export class FormulaBarView {
     }
 
     if (kind === "reference") {
+      const nextRange = this.model.resolveReferenceText(text);
+      const prevRange = this.#lastEmittedHoverRange;
+      const sameRange =
+        nextRange == null
+          ? prevRange == null
+          : prevRange != null &&
+            prevRange.startRow === nextRange.start.row &&
+            prevRange.startCol === nextRange.start.col &&
+            prevRange.endRow === nextRange.end.row &&
+            prevRange.endCol === nextRange.end.col;
+
+      // `mousemove` can fire repeatedly while still over the same token; avoid
+      // re-emitting identical hover previews.
+      if (this.#lastEmittedHoverText === text && sameRange) {
+        this.#hoverOverrideText = text;
+        this.#hoverOverride = nextRange;
+        return;
+      }
+
       this.#hoverOverrideText = text;
-      this.#hoverOverride = this.model.resolveReferenceText(text);
+      this.#hoverOverride = nextRange;
       this.#callbacks.onHoverRange?.(this.#hoverOverride);
       this.#callbacks.onHoverRangeWithText?.(this.#hoverOverride, this.#hoverOverrideText);
       // Keep overlay emission caches in sync; hover previews in view mode are emitted directly
@@ -2446,13 +2463,32 @@ export class FormulaBarView {
 
     if (kind === "identifier") {
       const resolved = this.model.resolveNameRange(text);
-      this.#hoverOverrideText = resolved ? text : null;
-      this.#hoverOverride = resolved
-        ? {
-            start: { row: resolved.startRow, col: resolved.startCol },
-            end: { row: resolved.endRow, col: resolved.endCol }
-          }
-        : null;
+      if (!resolved) {
+        this.#clearHoverOverride();
+        return;
+      }
+
+      const nextRange = {
+        start: { row: resolved.startRow, col: resolved.startCol },
+        end: { row: resolved.endRow, col: resolved.endCol },
+      } satisfies RangeAddress;
+
+      const prevRange = this.#lastEmittedHoverRange;
+      const sameRange =
+        prevRange != null &&
+        prevRange.startRow === nextRange.start.row &&
+        prevRange.startCol === nextRange.start.col &&
+        prevRange.endRow === nextRange.end.row &&
+        prevRange.endCol === nextRange.end.col;
+
+      if (this.#lastEmittedHoverText === text && sameRange) {
+        this.#hoverOverrideText = text;
+        this.#hoverOverride = nextRange;
+        return;
+      }
+
+      this.#hoverOverrideText = text;
+      this.#hoverOverride = nextRange;
       this.#callbacks.onHoverRange?.(this.#hoverOverride);
       this.#callbacks.onHoverRangeWithText?.(this.#hoverOverride, this.#hoverOverrideText);
       this.#lastEmittedHoverText = this.#hoverOverrideText;
