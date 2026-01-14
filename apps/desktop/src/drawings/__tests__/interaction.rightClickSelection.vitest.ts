@@ -267,4 +267,78 @@ describe("DrawingInteractionController mouse right-click", () => {
     container.remove();
     restorePlatform();
   });
+
+  it("does not clear an existing selection on right-click miss (empty space)", () => {
+    const canvas = document.createElement("canvas");
+    const container = document.createElement("div");
+    container.appendChild(canvas);
+    document.body.appendChild(container);
+
+    const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 500, height: 500, dpr: 1 };
+    const geom: GridGeometry = {
+      cellOriginPx: () => ({ x: 0, y: 0 }),
+      cellSizePx: () => ({ width: 0, height: 0 }),
+    };
+
+    const initialObjects: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "image", imageId: "img_1" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(0), yEmu: pxToEmu(0) },
+          size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+        },
+        zOrder: 0,
+      },
+    ];
+
+    let objects = initialObjects;
+    let selectedId: number | null = null;
+    const setObjects = vi.fn((next: DrawingObject[]) => {
+      objects = next;
+    });
+    const onSelectionChange = vi.fn((id: number | null) => {
+      selectedId = id;
+    });
+
+    const controller = new DrawingInteractionController(canvas, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects,
+      onSelectionChange,
+    });
+
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 500,
+      bottom: 500,
+      width: 500,
+      height: 500,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    // First, select the drawing via a context-click hit.
+    const hit = createPointerLikeMouseEvent("pointerdown", { clientX: 10, clientY: 10, button: 2 });
+    canvas.dispatchEvent(hit);
+
+    expect(selectedId).toBe(1);
+    expect(onSelectionChange).toHaveBeenCalledTimes(1);
+
+    // Then context-click empty space; selection should be preserved.
+    const miss = createPointerLikeMouseEvent("pointerdown", { clientX: 400, clientY: 400, button: 2 });
+    canvas.dispatchEvent(miss);
+
+    expect(selectedId).toBe(1);
+    expect(onSelectionChange).toHaveBeenCalledTimes(1);
+    expect(onSelectionChange).not.toHaveBeenCalledWith(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((miss as any).__formulaDrawingContextClick).toBeUndefined();
+
+    controller.dispose();
+    container.remove();
+  });
 });
