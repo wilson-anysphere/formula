@@ -12,6 +12,9 @@ test("can load real .xlsx bytes in the WASM worker engine and recalculate formul
   const formulasBase64 = (await readFile(path.join(repoRoot, "fixtures", "xlsx", "formulas", "formulas.xlsx"))).toString(
     "base64"
   );
+  const encryptedBase64 = (await readFile(path.join(repoRoot, "fixtures", "encrypted", "ooxml", "agile-empty-password.xlsx"))).toString(
+    "base64"
+  );
 
   await page.addInitScript(() => {
     (globalThis as any).__FORMULA_E2E__ = true;
@@ -21,7 +24,7 @@ test("can load real .xlsx bytes in the WASM worker engine and recalculate formul
   await expect(page.getByTestId("engine-status")).toContainText("ready", { timeout: 30_000 });
 
   const result = await page.evaluate(
-    async ({ basicBase64, formulasBase64 }) => {
+    async ({ basicBase64, formulasBase64, encryptedBase64 }) => {
       const decode = (b64: string) => {
         const binary = atob(b64);
         const out = new Uint8Array(binary.length);
@@ -51,6 +54,17 @@ test("can load real .xlsx bytes in the WASM worker engine and recalculate formul
           const formulaA1 = await engine.getCell("A1", "Sheet1");
           const formulaB1 = await engine.getCell("B1", "Sheet1");
           const formulaC1 = await engine.getCell("C1", "Sheet1");
+
+          const loadEncrypted = (engine as any).loadWorkbookFromEncryptedXlsxBytes;
+          if (typeof loadEncrypted !== "function") {
+            throw new Error("engine.loadWorkbookFromEncryptedXlsxBytes is not available");
+          }
+          // `agile-empty-password.xlsx` has an empty open password (`""`) and uses low-cost
+          // encryption parameters so the test stays fast under wasm.
+          await loadEncrypted(decode(encryptedBase64), "");
+          await engine.recalculate();
+          const encryptedA1 = await engine.getCell("A1", "Sheet1");
+          const encryptedB1 = await engine.getCell("B1", "Sheet1");
 
           // Verify sparse clear semantics: `null` inputs clear stored cells and are omitted from JSON.
           await engine.newWorkbook();
@@ -93,6 +107,8 @@ test("can load real .xlsx bytes in the WASM worker engine and recalculate formul
             formulaA1,
             formulaB1,
             formulaC1,
+            encryptedA1,
+            encryptedB1,
             beforeClearJson,
             afterClearA1,
             afterClearA2,
@@ -111,7 +127,7 @@ test("can load real .xlsx bytes in the WASM worker engine and recalculate formul
         };
       }
     },
-    { basicBase64, formulasBase64 }
+    { basicBase64, formulasBase64, encryptedBase64 }
   );
 
   expect(result.ok, result.ok ? undefined : result.error).toBe(true);
@@ -125,6 +141,10 @@ test("can load real .xlsx bytes in the WASM worker engine and recalculate formul
   // XLSX stores formulas without a leading "=", but the engine should expose the canonical input.
   expect(result.formulaC1.input).toBe("=A1+B1");
   expect(result.formulaC1.value).toBe(3);
+
+  // Encrypted XLSX fixture should decrypt + load correctly.
+  expect(result.encryptedA1.value).toBe(1);
+  expect(result.encryptedB1.value).toBe("Hello");
 
   const beforeClear = JSON.parse(result.beforeClearJson);
   expect(beforeClear.sheets.Sheet1.cells).toHaveProperty("A1", 1);
