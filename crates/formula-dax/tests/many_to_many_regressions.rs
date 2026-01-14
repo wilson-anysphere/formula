@@ -1067,6 +1067,69 @@ fn insert_row_can_resolve_unmatched_facts_and_updates_blank_member() {
 }
 
 #[test]
+fn insert_row_can_create_unmatched_fact_rows_and_updates_blank_member() {
+    // Regression for incremental updates on the fact side: inserting an unmatched FK row after the
+    // relationship exists should materialize the virtual blank member, and inserting the
+    // corresponding dimension key should "rescue" the fact row out of that member.
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key", "Amount"]);
+    fact.push_row(vec![1.into(), 1.into(), 10.0.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model.add_measure("Total Amount", "SUM(Fact[Amount])").unwrap();
+
+    let blank_attr = FilterContext::empty().with_column_equals("Dim", "Attr", Value::Blank);
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &blank_attr).unwrap(),
+        Value::Blank
+    );
+
+    // Insert an unmatched FK row after the relationship is defined.
+    model
+        .insert_row("Fact", vec![2.into(), 999.into(), 7.0.into()])
+        .unwrap();
+
+    // The unmatched row should now appear under the virtual blank member.
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &blank_attr).unwrap(),
+        7.0.into()
+    );
+
+    // Insert the missing dimension key to "rescue" the row.
+    model
+        .insert_row("Dim", vec![999.into(), "New".into()])
+        .unwrap();
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &blank_attr).unwrap(),
+        Value::Blank
+    );
+    let new_attr = FilterContext::empty().with_column_equals("Dim", "Attr", "New".into());
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &new_attr).unwrap(),
+        7.0.into()
+    );
+}
+
+#[test]
 fn related_respects_userelationship_overrides_with_m2m() {
     let mut model = DataModel::new();
 
