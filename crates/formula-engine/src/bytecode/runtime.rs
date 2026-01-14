@@ -5475,10 +5475,45 @@ fn xor_range_on_sheet(
 }
 
 fn coerce_to_cow_str(v: &Value) -> Result<Cow<'_, str>, ErrorKind> {
+    fn coerce_engine_value_to_string(v: &EngineValue) -> Result<String, ErrorKind> {
+        match v {
+            EngineValue::Text(s) => Ok(s.clone()),
+            EngineValue::Entity(entity) => Ok(entity.display.clone()),
+            EngineValue::Record(record) => {
+                if let Some(display_field) = record.display_field.as_deref() {
+                    if let Some(value) = record.get_field_case_insensitive(display_field) {
+                        return coerce_engine_value_to_string(&value);
+                    }
+                }
+                Ok(record.display.clone())
+            }
+            EngineValue::Number(n) => Ok(format_number_general_with_options(
+                *n,
+                thread_value_locale().separators,
+                thread_date_system(),
+            )),
+            EngineValue::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
+            EngineValue::Blank => Ok(String::new()),
+            EngineValue::Error(e) => Err(ErrorKind::from(*e)),
+            EngineValue::Reference(_)
+            | EngineValue::ReferenceUnion(_)
+            | EngineValue::Array(_)
+            | EngineValue::Lambda(_)
+            | EngineValue::Spill { .. } => Err(ErrorKind::Value),
+        }
+    }
+
     match v {
         Value::Text(s) => Ok(Cow::Borrowed(s.as_ref())),
         Value::Entity(v) => Ok(Cow::Borrowed(v.display.as_str())),
-        Value::Record(v) => Ok(Cow::Borrowed(v.display.as_str())),
+        Value::Record(v) => {
+            if let Some(display_field) = v.display_field.as_deref() {
+                if let Some(value) = v.get_field_case_insensitive(display_field) {
+                    return Ok(Cow::Owned(coerce_engine_value_to_string(&value)?));
+                }
+            }
+            Ok(Cow::Borrowed(v.display.as_str()))
+        }
         Value::Number(n) => Ok(Cow::Owned(format_number_general_with_options(
             *n,
             thread_value_locale().separators,
