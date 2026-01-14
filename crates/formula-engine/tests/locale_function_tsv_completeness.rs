@@ -54,12 +54,20 @@ fn parse_locale_tsv(locale_id: &str, path: &Path, raw_tsv: &str) -> ParsedLocale
             continue;
         }
 
-        let (canon, loc) = line.split_once('\t').unwrap_or_else(|| {
+        let mut parts = line.split('\t');
+        let canon = parts.next().unwrap_or("");
+        let loc = parts.next().unwrap_or_else(|| {
             panic!(
                 "invalid locale TSV entry in {locale_id} ({path}) (expected `Canonical<TAB>Localized`) at line {line_no}: {line:?}",
                 path = path.display()
             )
         });
+        if parts.next().is_some() {
+            panic!(
+                "invalid locale TSV entry in {locale_id} ({path}) (too many columns) at line {line_no}: {line:?}",
+                path = path.display()
+            );
+        }
         let canon = canon.trim();
         let loc = loc.trim();
         if canon.is_empty() || loc.is_empty() {
@@ -420,9 +428,14 @@ fn de_de_locale_function_tsv_is_not_mostly_identity_mappings() {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let (canon, loc) = line.split_once('\t').unwrap_or_else(|| {
+        let mut parts = line.split('\t');
+        let canon = parts.next().unwrap_or("");
+        let loc = parts.next().unwrap_or_else(|| {
             panic!("invalid TSV line in de-DE.tsv (expected `Canonical<TAB>Localized`): {line:?}")
         });
+        if parts.next().is_some() {
+            panic!("invalid TSV line in de-DE.tsv (too many columns): {line:?}");
+        }
         total += 1;
         if canon == loc {
             identity += 1;
@@ -460,9 +473,14 @@ fn es_es_locale_function_tsv_is_not_mostly_identity_mappings() {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let (canon, loc) = line.split_once('\t').unwrap_or_else(|| {
+        let mut parts = line.split('\t');
+        let canon = parts.next().unwrap_or("");
+        let loc = parts.next().unwrap_or_else(|| {
             panic!("invalid TSV line in es-ES.tsv (expected `Canonical<TAB>Localized`): {line:?}")
         });
+        if parts.next().is_some() {
+            panic!("invalid TSV line in es-ES.tsv (too many columns): {line:?}");
+        }
         total += 1;
         if canon == loc {
             identity += 1;
