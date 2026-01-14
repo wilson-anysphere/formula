@@ -294,7 +294,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const binPath = argBin ? resolve(argBin) : defaultDesktopBinPath();
+  const binPath = argBin ? resolve(repoRoot, argBin) : defaultDesktopBinPath();
   if (!binPath || !existsSync(binPath)) {
     throw new Error(
       'Desktop binary not found. Build it via `bash scripts/cargo_agent.sh build -p formula-desktop-tauri --bin formula-desktop --release --features desktop` and pass --bin <path> (or set FORMULA_DESKTOP_BIN).',
