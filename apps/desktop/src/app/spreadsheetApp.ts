@@ -1646,8 +1646,8 @@ export class SpreadsheetApp {
       },
       // Creating/removing charts should not force a full data re-scan for *every* existing chart.
       // `renderCharts(false)` updates chart positioning and ensures newly-created charts have a
-      // cached ChartModel, while full data refreshes still happen on "full" refreshes (cell edits),
-      // zoom changes, etc.
+      // cached ChartModel. Data refreshes happen only for charts marked dirty by cell/computed
+      // changes (see `dirtyChartIds`).
       onChange: () => this.renderCharts(false)
     });
 
@@ -1781,7 +1781,7 @@ export class SpreadsheetApp {
       getSelectionRange: () => this.getInlineEditSelectionRange(),
       onApplied: () => {
         this.renderGrid();
-        this.renderCharts(true);
+        this.renderCharts(false);
         this.renderSelection();
         this.updateStatus();
         this.focus();
@@ -1867,7 +1867,7 @@ export class SpreadsheetApp {
             this.clearSharedHoverCellCache();
             this.hideCommentTooltip();
             this.renderDrawings(effectiveViewport);
-            this.renderCharts(zoomChanged);
+            this.renderCharts(false);
             this.renderAuditing();
             this.renderSelection();
             if (this.scrollX !== prevX || this.scrollY !== prevY) {
@@ -2458,8 +2458,8 @@ export class SpreadsheetApp {
           this.scheduleStatusUpdate();
         }
       }
-      // Similarly, chart data caches are only refreshed on "full" refreshes. Schedule a debounced
-      // chart refresh so charts reflect remote data edits in real time.
+      // Similarly, chart data caches are refreshed lazily via `dirtyChartIds`. Schedule a debounced
+      // chart redraw so visible charts reflect remote data edits in real time.
       this.scheduleChartContentRefresh(payload);
     });
 
@@ -3240,7 +3240,7 @@ export class SpreadsheetApp {
       this.pendingRenderMode = "full";
       this.renderGrid();
       this.renderDrawings();
-      this.renderCharts(renderMode === "full");
+      this.renderCharts(false);
       this.renderReferencePreview();
       this.renderAuditing();
       this.renderPresence();
@@ -3340,7 +3340,7 @@ export class SpreadsheetApp {
       this.chartContentRefreshScheduled = false;
       if (this.disposed) return;
       if (!this.uiReady) return;
-      this.renderCharts(true);
+      this.renderCharts(false);
     });
   }
 
@@ -4417,7 +4417,7 @@ export class SpreadsheetApp {
     this.chartTheme = theme;
     // Keep imported chart rendering aligned with the workbook palette too.
     this.formulaChartModelStore.setDefaultTheme({ seriesColors: theme.seriesColors });
-    this.renderCharts(true);
+    this.renderCharts(false);
   }
 
   /**
@@ -7764,7 +7764,7 @@ export class SpreadsheetApp {
       this.scrollY = scroll.y;
 
       this.renderDrawings(viewport);
-      this.renderCharts(true);
+      this.renderCharts(false);
       this.renderAuditing();
       this.renderSelection();
       this.updateStatus();
@@ -7808,7 +7808,7 @@ export class SpreadsheetApp {
 
     this.renderDrawings();
     this.renderGrid();
-    this.renderCharts(true);
+    this.renderCharts(false);
     this.renderReferencePreview();
     this.renderAuditing();
     this.renderPresence();
