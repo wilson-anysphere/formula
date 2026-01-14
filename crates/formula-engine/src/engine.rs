@@ -904,7 +904,18 @@ impl Engine {
     }
     /// Insert (or reuse) a style in the workbook's style table, returning its stable id.
     pub fn intern_style(&mut self, style: Style) -> u32 {
-        self.workbook.styles.intern(style)
+        let before_len = self.workbook.styles.len();
+        let id = self.workbook.styles.intern(style);
+        if self.workbook.styles.len() != before_len {
+            // Style-table mutations can affect worksheet metadata functions like CELL("protect"),
+            // even though they are not represented as cell values. Conservatively refresh compiled
+            // formula results.
+            self.mark_all_compiled_cells_dirty();
+            if self.calc_settings.calculation_mode != CalculationMode::Manual {
+                self.recalculate();
+            }
+        }
+        id
     }
 
     /// Set the style id for a cell.
@@ -925,29 +936,58 @@ impl Engine {
                 crate::eval::AddressParseError::RowOutOfRange,
             ));
         }
-        if self.workbook.grow_sheet_dimensions(sheet_id, addr) {
+        let mut changed = self.workbook.grow_sheet_dimensions(sheet_id, addr);
+        if changed {
             self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
-            // Sheet dimensions affect out-of-bounds semantics (`#REF!`). Formatting edits can
-            // introduce new in-bounds coordinates, so conservatively refresh compiled results.
-            self.mark_all_compiled_cells_dirty();
         }
 
         let key = CellKey {
             sheet: sheet_id,
             addr,
         };
-        let remove_cell = {
-            let cell = self.workbook.get_or_create_cell_mut(key);
-            cell.style_id = style_id;
-            cell.value == Value::Blank
-                && cell.formula.is_none()
-                && cell.style_id == 0
-                && cell.phonetic.is_none()
-                && cell.number_format.is_none()
-        };
-        if remove_cell {
-            if let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) {
-                sheet.cells.remove(&addr);
+        let existing_style_id = self
+            .workbook
+            .get_cell(key)
+            .map(|cell| cell.style_id)
+            .unwrap_or(0);
+        if existing_style_id != style_id {
+            let remove_cell = {
+                let cell = self.workbook.get_or_create_cell_mut(key);
+                cell.style_id = style_id;
+                cell.value == Value::Blank
+                    && cell.formula.is_none()
+                    && cell.style_id == 0
+                    && cell.phonetic.is_none()
+                    && cell.number_format.is_none()
+            };
+            if remove_cell {
+                if let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) {
+                    sheet.cells.remove(&addr);
+                }
+            }
+            changed = true;
+        } else if style_id == 0 {
+            // Prune empty default-style cells to keep sheet storage sparse.
+            let remove_cell = self.workbook.get_cell(key).is_some_and(|cell| {
+                cell.value == Value::Blank
+                    && cell.formula.is_none()
+                    && cell.style_id == 0
+                    && cell.phonetic.is_none()
+                    && cell.number_format.is_none()
+            });
+            if remove_cell {
+                if let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) {
+                    sheet.cells.remove(&addr);
+                }
+            }
+        }
+        if changed {
+            // Formatting edits can affect worksheet information functions like `CELL("width")` and
+            // `CELL("protect")`, even though the metadata is not represented as a cell value.
+            // Conservatively refresh compiled formula results.
+            self.mark_all_compiled_cells_dirty();
+            if self.calc_settings.calculation_mode != CalculationMode::Manual {
+                self.recalculate();
             }
         }
         Ok(())
@@ -956,15 +996,15 @@ impl Engine {
     /// Set (or clear) the explicit width override for a column.
     pub fn set_col_width(&mut self, sheet: &str, col_0based: u32, width: Option<f32>) {
         let sheet_id = self.workbook.ensure_sheet(sheet);
-        if self.workbook.grow_sheet_dimensions(
+        let mut changed = self.workbook.grow_sheet_dimensions(
             sheet_id,
             CellAddr {
                 row: 0,
                 col: col_0based,
             },
-        ) {
+        );
+        if changed {
             self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
-            self.mark_all_compiled_cells_dirty();
         }
 
         let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
@@ -990,14 +1030,12 @@ impl Engine {
         }
 
         let after = sheet.col_properties.get(&col_0based).and_then(|p| p.width);
-
-        // Column width metadata can affect worksheet information functions like `CELL("width")`.
-        //
-        // Those functions are volatile and are included in the dependency graph's "volatile
-        // closure", so we do **not** need to mark all compiled formulas dirty here (which would
-        // trigger a full workbook recalc). Instead, just trigger a recalc in automatic modes so
-        // volatile formulas refresh.
         if before != after {
+            changed = true;
+        }
+
+        if changed {
+            self.mark_all_compiled_cells_dirty();
             if self.calc_settings.calculation_mode != CalculationMode::Manual {
                 self.recalculate();
             }
@@ -1007,15 +1045,15 @@ impl Engine {
     /// Set whether a column is user-hidden.
     pub fn set_col_hidden(&mut self, sheet: &str, col_0based: u32, hidden: bool) {
         let sheet_id = self.workbook.ensure_sheet(sheet);
-        if self.workbook.grow_sheet_dimensions(
+        let mut changed = self.workbook.grow_sheet_dimensions(
             sheet_id,
             CellAddr {
                 row: 0,
                 col: col_0based,
             },
-        ) {
+        );
+        if changed {
             self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
-            self.mark_all_compiled_cells_dirty();
         }
 
         let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
@@ -1049,11 +1087,15 @@ impl Engine {
             .get(&col_0based)
             .map(|p| p.hidden)
             .unwrap_or(false);
+        if before != after {
+            changed = true;
+        }
 
-        // Hidden state affects `CELL("width")` (hidden columns return 0). Like `set_col_width`,
-        // rely on the volatile closure + trigger auto recalc without dirtying the full workbook.
-        if before != after && self.calc_settings.calculation_mode != CalculationMode::Manual {
-            self.recalculate();
+        if changed {
+            self.mark_all_compiled_cells_dirty();
+            if self.calc_settings.calculation_mode != CalculationMode::Manual {
+                self.recalculate();
+            }
         }
     }
 
@@ -9933,6 +9975,14 @@ impl crate::eval::ValueResolver for Snapshot {
             addr: origin,
         };
         self.spill_end_by_origin.get(&key).map(|end| (origin, *end))
+    }
+
+    fn system_info(&self) -> Option<&str> {
+        Some(self.info.system.as_deref().unwrap_or("pcdos"))
+    }
+
+    fn origin(&self) -> Option<&str> {
+        self.info.origin.as_deref()
     }
 }
 

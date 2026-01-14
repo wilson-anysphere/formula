@@ -374,6 +374,16 @@ pub trait ValueResolver {
     fn spill_range(&self, _sheet_id: usize, _origin: CellAddr) -> Option<(CellAddr, CellAddr)> {
         None
     }
+
+    /// System identifier surfaced by `INFO("system")` (e.g. `pcdos`).
+    fn system_info(&self) -> Option<&str> {
+        None
+    }
+
+    /// Origin string surfaced by `INFO("origin")`.
+    fn origin(&self) -> Option<&str> {
+        None
+    }
 }
 
 #[derive(Debug, Clone)]

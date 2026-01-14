@@ -1011,6 +1011,77 @@ fn cell_protect_and_prefix_observe_row_col_style_layers() {
 }
 
 #[test]
+fn info_and_cell_metadata_changes_refresh_after_recalc() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"filename\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text(String::new())
+    );
+
+    engine.set_workbook_file_metadata(Some("/tmp/"), Some("Book1.xlsx"));
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("/tmp/[Book1.xlsx]Sheet1".to_string())
+    );
+
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"width\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    let before = engine.get_cell_value("Sheet1", "B2");
+
+    engine.set_col_width("Sheet1", 1, Some(42.0));
+    engine.recalculate_single_threaded();
+    let after = engine.get_cell_value("Sheet1", "B2");
+    assert_number(&after, 42.1);
+    assert_ne!(before, after);
+}
+
+#[test]
+fn metadata_setters_trigger_auto_recalc_in_automatic_mode() {
+    use formula_engine::calc_settings::{CalcSettings, CalculationMode};
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_calc_settings(CalcSettings {
+        calculation_mode: CalculationMode::Automatic,
+        ..CalcSettings::default()
+    });
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"filename\")")
+        .unwrap();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text(String::new())
+    );
+
+    // In automatic mode, metadata setters should eagerly recalculate.
+    engine.set_workbook_file_metadata(Some("/tmp/"), Some("Book1.xlsx"));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("/tmp/[Book1.xlsx]Sheet1".to_string())
+    );
+
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"width\")")
+        .unwrap();
+    let before = engine.get_cell_value("Sheet1", "B2");
+
+    engine.set_col_width("Sheet1", 1, Some(42.0));
+    let after = engine.get_cell_value("Sheet1", "B2");
+    assert_number(&after, 42.1);
+    assert_ne!(before, after);
+}
+
+#[test]
 fn cell_implicit_reference_does_not_create_dynamic_dependency_cycles() {
     let mut sheet = TestSheet::new();
 

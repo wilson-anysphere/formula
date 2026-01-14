@@ -364,7 +364,6 @@ pub trait FunctionContext {
     fn pivot_registry(&self) -> Option<&crate::pivot_registry::PivotRegistry> {
         None
     }
-
     /// Resolve a worksheet name to an internal sheet id for runtime-parsed sheet references.
     ///
     /// Implementations should match Excel's Unicode-aware, NFKC + case-insensitive comparison

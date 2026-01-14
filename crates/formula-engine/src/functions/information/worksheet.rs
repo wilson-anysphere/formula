@@ -160,9 +160,7 @@ fn parse_cell_info_type(key: &str) -> Option<CellInfoType> {
         // Excel returns an empty string for `CELL("filename")` until the workbook is saved.
         "filename" => Some(CellInfoType::Filename),
         // Notes:
-        // - `CELL("width")` consults per-column metadata when available (defaulting to 8.43).
-        // - `CELL("prefix")` returns best-effort defaults because this engine does not currently
-        //   track alignment/prefix formatting.
+        // - `CELL("width")` consults column metadata when available.
         // - `CELL("color")`/`CELL("parentheses")`/`CELL("format")` are implemented based on the
         //   cell number format string, but do not consider conditional formatting rules.
         _ => None,
@@ -476,13 +474,18 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             Value::Text(prefix.to_string())
         }
         CellInfoType::Filename => {
+            // `CELL("filename")` depends on workbook metadata, but keep the dynamic dependency trace
+            // behavior consistent with other CELL variants: record the reference argument only when
+            // it is explicitly provided (to avoid implicit self-edges when reference is omitted).
+            let cell_ref = record_explicit_cell(ctx);
+
             // Excel returns "" until the workbook has a known filename (i.e. it has been saved).
             let Some(filename) = ctx.workbook_filename().filter(|s| !s.is_empty()) else {
                 return Value::Text(String::new());
             };
 
             // Use the sheet containing the referenced cell (not necessarily the current sheet).
-            let sheet_name = match &reference.sheet_id {
+            let sheet_name = match &cell_ref.sheet_id {
                 SheetId::Local(id) => ctx.sheet_name(*id).unwrap_or_default(),
                 // We don't have separate workbook file metadata for external workbooks. The
                 // canonical external sheet key already includes `[Book.xlsx]Sheet`, so return it

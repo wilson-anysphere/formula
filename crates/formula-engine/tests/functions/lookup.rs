@@ -1526,8 +1526,8 @@ fn getpivotdata_supports_column_fields_and_multiple_value_fields() {
 #[test]
 fn getpivotdata_uses_registry_for_column_fields_and_multiple_values() {
     use formula_engine::pivot::{
-        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotFieldRef, PivotTable,
-        PivotValue, SubtotalPosition, ValueField,
+        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotTable, PivotValue,
+        SubtotalPosition, ValueField,
     };
     use formula_model::{CellRef, Range};
 
@@ -1553,7 +1553,7 @@ fn getpivotdata_uses_registry_for_column_fields_and_multiple_values() {
         column_fields: vec![PivotField::new("Product")],
         value_fields: vec![
             ValueField {
-                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
+                source_field: "Sales".into(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -1562,7 +1562,7 @@ fn getpivotdata_uses_registry_for_column_fields_and_multiple_values() {
                 base_item: None,
             },
             ValueField {
-                source_field: PivotFieldRef::CacheFieldName("Units".to_string()),
+                source_field: "Units".into(),
                 name: "Sum of Units".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -1643,8 +1643,8 @@ fn getpivotdata_falls_back_to_scan_when_pivot_not_registered() {
 #[test]
 fn getpivotdata_tracks_dynamic_dependency_on_pivot_destination_via_registry() {
     use formula_engine::pivot::{
-        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotFieldRef, PivotTable,
-        PivotValue, SubtotalPosition, ValueField,
+        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotTable, PivotValue,
+        SubtotalPosition, ValueField,
     };
     use formula_model::{CellRef, Range};
 
@@ -1658,7 +1658,7 @@ fn getpivotdata_tracks_dynamic_dependency_on_pivot_destination_via_registry() {
         row_fields: vec![PivotField::new("Region")],
         column_fields: vec![],
         value_fields: vec![ValueField {
-            source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
+            source_field: "Sales".into(),
             name: "Sum of Sales".to_string(),
             aggregation: AggregationType::Sum,
             number_format: None,
