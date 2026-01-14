@@ -5,17 +5,23 @@ This repo detects password-protected / encrypted OOXML workbooks as an **OLE/CFB
 
 High-level behavior in `formula-io`:
 
-- Encryption is always detected and surfaced via dedicated errors (`PasswordRequired` /
-  `InvalidPassword` / `UnsupportedOoxmlEncryption`) so callers can prompt for a password and route
-  “unsupported encryption” reports correctly.
-- With the `formula-io` cargo feature **`encrypted-workbooks`** enabled:
-  - The legacy password-aware entrypoints `open_workbook_with_password` /
-    `open_workbook_model_with_password` can decrypt **Agile (4.4)** encrypted `.xlsx`/`.xlsm`/`.xlsb`,
-    but still treat **Standard/CryptoAPI** as `PasswordRequired`/`InvalidPassword` for UX
-    compatibility.
-  - `open_workbook_with_options` uses a **streaming decryptor** and can open some **Standard (3.2)**
-    and **Agile (4.4)** encrypted `.xlsx`/`.xlsm` as `Workbook::Model` (note: this streaming path does
-    not yet validate Agile `dataIntegrity` HMAC).
+- Encrypted OOXML wrappers (`EncryptionInfo` + `EncryptedPackage`) are detected early so callers can
+  decide whether to prompt for a password vs report “unsupported encryption”.
+- Without the `formula-io` cargo feature **`encrypted-workbooks`**, encrypted OOXML containers surface
+  `Error::UnsupportedEncryption` (and `Error::UnsupportedOoxmlEncryption` for unknown/invalid
+  `EncryptionInfo` versions).
+- With **`encrypted-workbooks`** enabled:
+  - `open_workbook(..)` / `open_workbook_model(..)` surface `Error::PasswordRequired` when no password
+    is provided.
+  - The password-aware entrypoints can decrypt and open **Agile (4.4)** encrypted `.xlsx`/`.xlsm`.
+    - Encrypted `.xlsb` payloads are decrypted but currently reported as
+      `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }` by the `_with_password` helpers.
+  - **Standard/CryptoAPI** (`versionMinor == 2`) is detected, but is not yet opened end-to-end in the
+    `formula-io` open APIs; the password APIs currently preserve the `PasswordRequired` /
+    `InvalidPassword` distinction as a placeholder UX signal.
+  - A streaming decrypt reader exists in `crates/formula-io/src/encrypted_ooxml.rs` +
+    `crates/formula-io/src/encrypted_package_reader.rs`, but is not yet wired into the high-level
+    `open_workbook*` APIs.
 
 Standard/CryptoAPI decryption primitives also exist in lower-level crates (notably
 `crates/formula-offcrypto` and `crates/formula-office-crypto`), but the full open-path plumbing is

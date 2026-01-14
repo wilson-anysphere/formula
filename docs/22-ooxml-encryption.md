@@ -32,8 +32,9 @@ This doc is intentionally “close to the metal”. Helpful entrypoints in this 
   - `Error::UnsupportedOoxmlEncryption`
   - Note: with the `formula-io` crate feature **`encrypted-workbooks`** enabled, the password-aware
     open APIs (`open_workbook_with_password`, `open_workbook_model_with_password`) can also decrypt
-    and open Agile (4.4) encrypted `.xlsx`/`.xlsm`/`.xlsb` in memory (via the `formula-xlsx`
-    decryptor).
+    and open Agile (4.4) encrypted `.xlsx`/`.xlsm` in memory (via the `formula-xlsx` decryptor).
+    Encrypted `.xlsb` payloads are decrypted but currently reported as
+    `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }` by these helpers.
 - **Streaming decrypt reader (does not validate `dataIntegrity` HMAC):**
   - `crates/formula-io/src/encrypted_ooxml.rs`
   - `crates/formula-io/src/encrypted_package_reader.rs`

@@ -35,8 +35,9 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
       when no password is provided.
     - The password-aware entrypoints (`open_workbook_with_password` /
       `open_workbook_model_with_password`) can decrypt and open **Agile (4.4)** encrypted
-      `.xlsx`/`.xlsm`/`.xlsb` workbooks in memory and validate Agile `dataIntegrity` (HMAC) when
-      present.
+      `.xlsx`/`.xlsm` workbooks in memory and validate Agile `dataIntegrity` (HMAC) when present.
+      - Encrypted `.xlsb` payloads are decrypted but currently reported as
+        `formula_io::Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }` by these helpers.
       - Wrong password *or* integrity mismatch surfaces as `formula_io::Error::InvalidPassword`.
     - Standard/CryptoAPI (minor=2; commonly 3.2/4.2) currently preserves the `PasswordRequired` /
       `InvalidPassword` distinction as a placeholder UX signal until end-to-end decryption is wired
@@ -331,8 +332,10 @@ Today, the `formula-io` crate:
       password is provided (or `Error::UnsupportedOoxmlEncryption` when the `EncryptionInfo` version
       is unknown).
     - `open_workbook_with_password(..)` / `open_workbook_model_with_password(..)` attempt in-memory
-      decryption for **Agile (4.4)** encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks (validates Agile
+      decryption for **Agile (4.4)** encrypted `.xlsx`/`.xlsm` workbooks (validates Agile
       `dataIntegrity` when present).
+      - Encrypted `.xlsb` payloads are decrypted but currently reported as
+        `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }` by these helpers.
     - Standard/CryptoAPI (minor=2) is detected, but end-to-end open is not yet implemented; the
       password APIs currently preserve the `PasswordRequired` / `InvalidPassword` distinction as a
       placeholder UX signal.
@@ -387,7 +390,10 @@ match open_workbook(path) {
         match open_workbook_with_password(path, Some(password)) {
             Ok(workbook) => {
                 // With the `formula-io/encrypted-workbooks` feature enabled, this succeeds for
-                // Agile (4.4) encrypted `.xlsx`/`.xlsm`/`.xlsb` when the password is correct.
+                // Agile (4.4) encrypted `.xlsx`/`.xlsm` when the password is correct.
+                //
+                // Note: encrypted `.xlsb` payloads currently surface as
+                // `Error::UnsupportedEncryptedWorkbookKind`.
                 let _ = workbook;
             }
             Err(Error::InvalidPassword { .. }) => {
@@ -418,8 +424,10 @@ match open_workbook(path) {
 With the `formula-io` cargo feature **`encrypted-workbooks`** enabled:
 
 - The legacy password-aware entrypoints (`open_workbook_with_password`, `open_workbook_model_with_password`)
-  will **decrypt and open** Agile (4.4) encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks in memory and
-  validate Agile `dataIntegrity` (HMAC) when present.
+  will **decrypt and open** Agile (4.4) encrypted `.xlsx`/`.xlsm` workbooks in memory and validate
+  Agile `dataIntegrity` (HMAC) when present.
+  - Encrypted `.xlsb` payloads are decrypted but currently reported as
+    `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }` by these helpers.
 - Standard/CryptoAPI (minor=2; commonly 3.2/4.2) is detected, but end-to-end open is not yet
   implemented; the password APIs currently preserve `PasswordRequired` / `InvalidPassword` as a
   placeholder UX signal.
