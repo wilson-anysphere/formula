@@ -14,7 +14,15 @@ pub fn validate_external_url(url: &str) -> Result<Url, String> {
     let parsed = Url::parse(trimmed).map_err(|err| format!("Invalid URL: {err}"))?;
 
     match parsed.scheme() {
-        "http" | "https" | "mailto" => Ok(parsed),
+        "http" | "https" | "mailto" => {
+            // Reject userinfo (`https://user:pass@host/...`). This is rarely needed, is deprecated
+            // in modern browsers, and can be used to construct misleading URLs (e.g.
+            // `https://trusted.com@evil.com/...`).
+            if !parsed.username().is_empty() || parsed.password().is_some() {
+                return Err("Refusing to open URL containing a username/password".to_string());
+            }
+            Ok(parsed)
+        }
         "javascript" | "data" | "file" => Err(format!(
             "Refusing to open URL with blocked scheme \"{}:\"",
             parsed.scheme()
@@ -69,10 +77,20 @@ mod tests {
     }
 
     #[test]
+    fn rejects_urls_with_userinfo() {
+        let err = validate_external_url("https://user:pass@example.com")
+            .expect_err("userinfo rejected");
+        assert_eq!(err, "Refusing to open URL containing a username/password");
+
+        let err =
+            validate_external_url("http://user@example.com").expect_err("userinfo rejected");
+        assert_eq!(err, "Refusing to open URL containing a username/password");
+    }
+
+    #[test]
     fn trims_whitespace() {
         let url =
             validate_external_url(" \n\t https://example.com \n ").expect("whitespace trimmed");
         assert_eq!(url.as_str(), "https://example.com/");
     }
 }
-
