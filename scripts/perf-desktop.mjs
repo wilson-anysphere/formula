@@ -484,6 +484,7 @@ function reportSize({ env }) {
   }
 
   const distDir = path.join(repoRoot, "apps", "desktop", "dist");
+  const distLabel = path.relative(repoRoot, distDir) || distDir;
   if (existsSync(distDir)) {
     const total = dirSizeBytes(distDir);
     const totalMb = bytesToMb(total);
@@ -491,7 +492,7 @@ function reportSize({ env }) {
     if (distTargetMb != null && distStatus === "FAIL") failed = true;
     // eslint-disable-next-line no-console
     console.log(
-      `\n[desktop-size] dist/ total: ${humanBytes(total)} (${formatMb(totalMb)})  (${distDir})` +
+      `\n[desktop-size] dist/ total: ${humanBytes(total)} (${formatMb(totalMb)})  (${distLabel})` +
         (distTargetMb == null ? "" : `  ${distStatus} target=${formatMb(distTargetMb)}`),
     );
     const largest = listLargestFiles(distDir, 10);
@@ -532,7 +533,7 @@ function reportSize({ env }) {
     }
   } else {
     // eslint-disable-next-line no-console
-    console.log(`\n[desktop-size] dist/ not found at ${distDir} (run: pnpm -C apps/desktop build)`);
+    console.log(`\n[desktop-size] dist/ not found at ${distLabel} (run: pnpm -C apps/desktop build)`);
   }
 
   const binPath = process.env.FORMULA_DESKTOP_BIN
