@@ -349,7 +349,9 @@ def _detect_webview2_marker(installer: Path) -> str | None:
 
 
 def main() -> int:
-    repo_root = Path.cwd()
+    # Resolve the repository root relative to this script location so callers can invoke the
+    # verifier from arbitrary working directories.
+    repo_root = Path(__file__).resolve().parents[2]
 
     tauri_conf_path = _resolve_tauri_config_path(repo_root)
     tauri_conf_display = tauri_conf_path

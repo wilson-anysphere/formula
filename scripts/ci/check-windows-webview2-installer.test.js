@@ -36,7 +36,7 @@ const pythonExe = detectPythonExecutable();
 const hasPython = Boolean(pythonExe);
 
 /**
- * @param {{ installerBytes: Buffer; webviewInstallMode?: string }} opts
+ * @param {{ installerBytes: Buffer; webviewInstallMode?: string; cwd?: string }} opts
  */
 function run(opts) {
   assert.ok(pythonExe, "python executable not found");
@@ -60,7 +60,7 @@ function run(opts) {
   );
 
   const proc = spawnSync(pythonExe, [scriptPath], {
-    cwd: repoRoot,
+    cwd: opts.cwd ?? repoRoot,
     encoding: "utf8",
     env: {
       ...process.env,
@@ -99,4 +99,13 @@ test("fails when webviewInstallMode is set to skip (via FORMULA_TAURI_CONF_PATH)
   });
   assert.equal(proc.status, 2);
   assert.match(proc.stderr, /webviewInstallMode.*skip/i);
+});
+
+test("can be invoked from a non-repo-root cwd (repo root derived from script path)", { skip: !hasPython }, () => {
+  const proc = run({
+    installerBytes: Buffer.from("...MicrosoftEdgeWebView2Setup.exe...", "utf8"),
+    cwd: path.join(repoRoot, "apps", "desktop"),
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout + proc.stderr, /webview2-check: OK/i);
 });
