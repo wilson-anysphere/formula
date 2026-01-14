@@ -114,4 +114,30 @@ describe("@formula/ai-audit browser entrypoint", () => {
       `child process failed:\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`
     ).toBe(0);
   });
+
+  it("imports @formula/ai-audit/browser via package exports without Node-only globals (process.versions.node, Buffer)", () => {
+    const loaderUrl = new URL("../../../scripts/resolve-ts-loader.mjs", import.meta.url);
+    const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--no-warnings",
+        ...resolveNodeLoaderArgs(loaderUrl.href),
+        "--input-type=module",
+        "--eval",
+        `
+          Object.defineProperty(process.versions, "node", { value: undefined, configurable: true });
+          globalThis.Buffer = undefined;
+          await import("@formula/ai-audit/browser");
+        `
+      ],
+      { encoding: "utf8", cwd: pkgRoot }
+    );
+
+    expect(
+      result.status,
+      `child process failed:\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`
+    ).toBe(0);
+  });
 });
