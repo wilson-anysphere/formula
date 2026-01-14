@@ -2462,9 +2462,13 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
 
     const labelById: Record<string, string> = {
       "home.number.numberFormat": numberFormatLabel,
-      "home.number.numberFormat.ariaLabel": t("quickPick.numberFormat.placeholder"),
+      // Include the current selection value in the accessible name so screen readers can
+      // announce both the control purpose and the active format (e.g. "Number format: General").
+      "home.number.numberFormat.ariaLabel": `${t("quickPick.numberFormat.placeholder")}: ${numberFormatLabel}`,
       "view.appearance.theme": themeLabel,
-      "view.appearance.theme.ariaLabel": t("quickPick.theme.placeholder"),
+      // The visible label is already "Theme: X"; use the same value so screen readers can
+      // announce the current preference.
+      "view.appearance.theme.ariaLabel": themeLabel,
       // Common formatting toggles: use localized command titles for icon-only button tooltips/aria labels.
       "format.toggleBold": t("command.format.toggleBold"),
       "format.toggleItalic": t("command.format.toggleItalic"),
