@@ -5,6 +5,10 @@ import { suggestRanges } from "./rangeSuggester.js";
 import { suggestPatternValues } from "./patternSuggester.js";
 import { normalizeCellRef, toA1, columnIndexToLetter } from "./a1.js";
 
+// Curated set of starter function stubs shown when the user has typed only "=".
+// Keep this list stable (ordering matters for predictable UX + tests).
+const DEFAULT_STARTER_FUNCTIONS = ["SUM(", "AVERAGE(", "IF(", "XLOOKUP(", "VLOOKUP(", "INDEX(", "MATCH("];
+
 /**
  * @typedef {"formula" | "value" | "function_arg" | "range"} SuggestionType
  *
@@ -63,6 +67,7 @@ export class TabCompletionEngine {
    *   cacheSize?: number,
    *   maxSuggestions?: number,
    *   completionTimeoutMs?: number
+   *   starterFunctions?: string[] | (() => string[])
    * }} [options]
    */
   constructor(options = {}) {
@@ -75,6 +80,11 @@ export class TabCompletionEngine {
     const rawTimeout = options.completionTimeoutMs ?? 100;
     // Tab completion should stay responsive; clamp to a small budget.
     this.completionTimeoutMs = Number.isFinite(rawTimeout) ? Math.max(1, Math.min(rawTimeout, 200)) : 100;
+    const customStarters = options.starterFunctions;
+    this.getStarterFunctions =
+      typeof customStarters === "function"
+        ? customStarters
+        : () => (Array.isArray(customStarters) && customStarters.length > 0 ? customStarters : DEFAULT_STARTER_FUNCTIONS);
   }
 
   /**
@@ -909,7 +919,16 @@ export class TabCompletionEngine {
     // is available) users get the richer, context-aware suggestion instead of a
     // bare function stub. When the backend times out/unavailable, these still
     // provide useful immediate fallbacks.
-    const starters = ["SUM(", "AVERAGE(", "IF(", "XLOOKUP(", "VLOOKUP(", "INDEX(", "MATCH("];
+    let starters = DEFAULT_STARTER_FUNCTIONS;
+    try {
+      const candidate = typeof this.getStarterFunctions === "function" ? this.getStarterFunctions() : DEFAULT_STARTER_FUNCTIONS;
+      if (Array.isArray(candidate) && candidate.length > 0) {
+        const filtered = candidate.map(String).filter((s) => s.length > 0);
+        if (filtered.length > 0) starters = filtered;
+      }
+    } catch {
+      starters = DEFAULT_STARTER_FUNCTIONS;
+    }
 
     /** @type {Suggestion[]} */
     const suggestions = [];

@@ -269,6 +269,40 @@ describe("FormulaBarView tab completion (integration)", () => {
       setLocale(prevLocale);
     }
   });
+
+  it("suggests localized starter functions for bare '=' in de-DE", async () => {
+    const prevLocale = getLocale();
+    setLocale("de-DE");
+    const doc = new DocumentController();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+    });
+
+    try {
+      view.focus({ cursor: "end" });
+      view.textarea.value = "=";
+      view.textarea.setSelectionRange(1, 1);
+      view.textarea.dispatchEvent(new Event("input"));
+
+      await completion.flushTabCompletion();
+
+      expect(view.model.aiSuggestion()).toBe("=SUMME(");
+      expect(view.model.aiGhostText()).toBe("SUMME(");
+    } finally {
+      completion.destroy();
+      host.remove();
+      setLocale(prevLocale);
+    }
+  });
  
   it("falls back to the JS parser when the WASM partial parser throws", async () => {
     const prevLocale = getLocale();

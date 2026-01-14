@@ -47,6 +47,8 @@ Desktop also injects a locale-aware `FunctionRegistry` so **function-name comple
 - Implementation: `apps/desktop/src/ai/completion/parsePartialFormula.ts` (`createLocaleAwareFunctionRegistry()`).
   - Localized aliases are derived from the engine’s TSV translation tables.
   - Aliases apply a small `FunctionSpec.completionBoost` so localized names win ranking when multiple functions share a prefix (e.g. `SUMME(` beats `SUMIF(` for `SU`).
+- Desktop also sets `TabCompletionEngine`’s `starterFunctions` option (a getter function) so the **starter stubs** shown for a bare `=`
+  are localized where possible (e.g. de-DE `=` → `=SUMME(`).
 
 See: `apps/desktop/src/ai/completion/parsePartialFormula.ts`.
 

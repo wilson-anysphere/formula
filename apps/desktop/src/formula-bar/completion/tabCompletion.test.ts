@@ -63,6 +63,25 @@ describe("Formula bar tab completion", () => {
     }
   });
 
+  it("suggests localized starter functions for bare '=' in de-DE", async () => {
+    const prevLocale = getLocale();
+    setLocale("de-DE");
+    try {
+      const sheet = new SpreadsheetModel();
+
+      sheet.selectCell("A1");
+      sheet.beginFormulaEdit();
+      sheet.typeInFormulaBar("=", 1);
+
+      await sheet.flushTabCompletion();
+
+      expect(sheet.formulaBar.aiSuggestion()).toBe("=SUMME(");
+      expect(sheet.formulaBar.aiGhostText()).toBe("SUMME(");
+    } finally {
+      setLocale(prevLocale);
+    }
+  });
+
   it("suggests localized function-name completion in de-DE (SU -> SUMME)", async () => {
     const prevLocale = getLocale();
     setLocale("de-DE");

@@ -47,6 +47,24 @@ test("Typing = suggests starter functions like SUM(", async () => {
   );
 });
 
+test("TabCompletionEngine supports custom starter functions", async () => {
+  const engine = new TabCompletionEngine({ starterFunctions: ["FOO(", "BAR("], maxSuggestions: 2 });
+
+  const currentInput = "=";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.deepEqual(
+    suggestions.map((s) => s.text),
+    ["=FOO(", "=BAR("],
+    `Expected custom starter ordering, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("TabCompletionEngine supports async parsePartialFormula overrides", async () => {
   const engine = new TabCompletionEngine({
     // Simulate a worker/WASM-backed partial parser that is async.

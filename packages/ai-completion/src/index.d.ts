@@ -72,6 +72,13 @@ export class TabCompletionEngine {
     cacheSize?: number;
     maxSuggestions?: number;
     completionTimeoutMs?: number;
+    /**
+     * Curated list of "starter" function stubs suggested when the user has only typed `=`.
+     *
+     * Callers may provide either a static list or a getter function (useful when starters depend on
+     * runtime state like locale).
+     */
+    starterFunctions?: string[] | (() => string[]);
   });
 
   getSuggestions(

@@ -217,6 +217,46 @@ export function createLocaleAwareFunctionRegistry(): FunctionRegistry {
   return new LocaleAwareFunctionRegistry();
 }
 
+const CANONICAL_STARTER_FUNCTIONS = ["SUM(", "AVERAGE(", "IF(", "XLOOKUP(", "VLOOKUP(", "INDEX(", "MATCH("];
+
+function localizeFunctionNameForLocale(canonicalName: string, localeId: string): string {
+  const tables = FUNCTION_TRANSLATIONS_BY_LOCALE[localeId];
+  if (!tables) return canonicalName;
+  const upper = casefoldIdent(canonicalName);
+  return tables.canonicalToLocalized.get(upper) ?? canonicalName;
+}
+
+function localizeStarter(starter: string, localeId: string): string {
+  const raw = String(starter ?? "");
+  const idx = raw.indexOf("(");
+  if (idx < 0) return raw;
+  const name = raw.slice(0, idx);
+  const suffix = raw.slice(idx);
+  const localizedName = localizeFunctionNameForLocale(name, localeId);
+  return `${localizedName}${suffix}`;
+}
+
+/**
+ * Returns a starter-function list that matches the current UI locale when translation tables are available.
+ *
+ * This is intended for tab completion when the user has typed only "=" and expects localized function names
+ * (e.g. de-DE `=SUMME(`) instead of canonical English (`=SUM(`).
+ */
+export function createLocaleAwareStarterFunctions(): () => string[] {
+  return () => {
+    const localeId = (() => {
+      try {
+        return getLocale();
+      } catch {
+        return "en-US";
+      }
+    })();
+    const tables = FUNCTION_TRANSLATIONS_BY_LOCALE[localeId];
+    if (!tables) return CANONICAL_STARTER_FUNCTIONS;
+    return CANONICAL_STARTER_FUNCTIONS.map((s) => localizeStarter(s, localeId));
+  };
+}
+
 function findOpenParenIndex(prefix: string): number | null {
   // Port of `packages/ai-completion/src/formulaPartialParser.js` open-paren scan.
   /** @type {number[]} */

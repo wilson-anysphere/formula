@@ -139,6 +139,8 @@ const partial = await engine.parseFormulaPartial(formula, cursor, { localeId });
   aliases (e.g. de-DE `SUMME`) alongside canonical names, so function-name completion suggests localized spellings by
   default. Desktop does this in `apps/desktop/src/ai/completion/parsePartialFormula.ts` (`createLocaleAwareFunctionRegistry()`).
   `@formula/ai-completion` supports an optional `FunctionSpec.completionBoost` to bias name-completion ranking when needed.
+  It can also customize starter stubs for the bare `=` case via `TabCompletionEngine`’s `starterFunctions` option (desktop uses
+  `createLocaleAwareStarterFunctions()`).
 
 ### Mode 2: Inline Edit (Cmd/Ctrl+K)
 
