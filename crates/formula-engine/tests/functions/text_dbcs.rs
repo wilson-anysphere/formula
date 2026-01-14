@@ -440,6 +440,30 @@ fn phonetic_metadata_is_removed_when_set_cell_value_clears_contents_but_preserve
 }
 
 #[test]
+fn phonetic_metadata_is_retained_on_style_only_edits() {
+    use formula_model::Style;
+
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "漢字");
+    sheet.set_phonetic("A1", Some("かんじ"));
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("かんじ".to_string())
+    );
+
+    // Style-only edits must not clear phonetic metadata.
+    let style_id = sheet.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+    sheet.set_cell_style_id("A1", style_id);
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("かんじ".to_string())
+    );
+}
+
+#[test]
 fn phonetic_propagates_errors() {
     let mut sheet = TestSheet::new();
     sheet.set_formula("A1", "=1/0");
