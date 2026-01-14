@@ -223,21 +223,21 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
               "drawings",
             ];
 
-              for (const key of viewKeysToMerge) {
-                const winnerVal = winner.get(key);
-                const entryVal = entry.get(key);
+            for (const key of viewKeysToMerge) {
+              const winnerVal = winner.get(key);
+              const entryVal = entry.get(key);
 
-                if (winnerVal === undefined) {
-                  if (entryVal !== undefined) {
-                    if (key === "drawings") {
-                      const sanitized = sanitizeDrawingsValue(entryVal);
-                      winner.set(key, sanitized ?? cloneYjsValue(entryVal, cloneCtors));
-                    } else {
-                      winner.set(key, cloneYjsValue(entryVal, cloneCtors));
-                    }
+              if (winnerVal === undefined) {
+                if (entryVal !== undefined) {
+                  if (key === "drawings") {
+                    const sanitized = sanitizeDrawingsValue(entryVal);
+                    winner.set(key, sanitized ?? cloneYjsValue(entryVal, cloneCtors));
+                  } else {
+                    winner.set(key, cloneYjsValue(entryVal, cloneCtors));
                   }
-                  continue;
                 }
+                continue;
+              }
 
               // For legacy numeric view keys, prefer non-zero values over 0.
               if (key === "frozenRows" || key === "frozenCols") {
