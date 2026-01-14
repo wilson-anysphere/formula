@@ -171,4 +171,26 @@ describeWasm("EngineWorker encrypted workbook load (wasm)", () => {
       engine.terminate();
     }
   });
+
+  it("rejects invalid passwords with a clear error message", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel,
+    });
+
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const repoRoot = path.resolve(__dirname, "../../../..");
+    const encryptedPath = path.join(repoRoot, "fixtures", "encrypted", "ooxml", "agile-empty-password.xlsx");
+    const bytes = new Uint8Array(readFileSync(encryptedPath));
+
+    try {
+      await expect(engine.loadWorkbookFromEncryptedXlsxBytes(bytes, "wrong-password")).rejects.toThrow(/invalid password/i);
+    } finally {
+      engine.terminate();
+    }
+  });
 });
