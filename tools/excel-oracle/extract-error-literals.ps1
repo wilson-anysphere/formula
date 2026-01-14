@@ -228,6 +228,15 @@ try {
       throw "Failed to extract error literal for $code (FormulaLocal=$formulaLocal, Text=$displayText)"
     }
 
+    # Guardrail: if Excel substituted a *different* canonical error literal (e.g. returning `#NAME?`
+    # when asked for `#GETTING_DATA`), fail rather than writing a misleading mapping. This can
+    # happen when a given Excel build does not recognize a newer error kind.
+    foreach ($other in $canonicalCodes) {
+      if (($other -ieq $localized) -and -not ($other -ieq $code)) {
+        throw "Excel returned canonical error literal $localized when extracting $code (expected the same error kind). This may indicate your Excel build does not recognize $code."
+      }
+    }
+
     # Guardrail: for most errors, the trailing punctuation should be stable across locales.
     $last = $code.Substring($code.Length - 1, 1)
     if (($last -eq "!") -or ($last -eq "?")) {
