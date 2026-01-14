@@ -164,6 +164,70 @@ fn indirect_path_qualified_external_workbook_refs_resolve_via_provider_with_byte
 }
 
 #[test]
+fn indirect_path_qualified_external_workbook_refs_with_brackets_in_path_resolve_via_provider_with_bytecode(
+) {
+    struct CountingExternalProvider {
+        calls: AtomicUsize,
+    }
+
+    impl CountingExternalProvider {
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    impl ExternalValueProvider for CountingExternalProvider {
+        fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(sheet, r"[C:\[foo]\Book.xlsx]Sheet1");
+            assert_eq!(addr, CellAddr { row: 0, col: 0 });
+            Some(Value::Number(999.0))
+        }
+    }
+
+    let provider = Arc::new(CountingExternalProvider {
+        calls: AtomicUsize::new(0),
+    });
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider.clone()));
+    engine.set_bytecode_enabled(true);
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            // External workbook reference with a path-qualified workbook where the path prefix
+            // contains a bracket pair (e.g. `C:\[foo]\`). This should still be canonicalized into a
+            // unique external sheet key and resolved via the provider.
+            r#"=INDIRECT("'C:\[foo]\[Book.xlsx]Sheet1'!A1")"#,
+        )
+        .unwrap();
+
+    // Ensure we compile to bytecode (no AST fallback) so this test covers bytecode INDIRECT.
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected INDIRECT path-qualified external workbook refs to compile to bytecode (stats={:?}, report={:?})",
+        engine.bytecode_compile_stats(),
+        engine.bytecode_compile_report(32)
+    );
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(999.0));
+    assert!(
+        provider.calls() > 0,
+        "expected INDIRECT to consult the external provider when dereferencing path-qualified external workbook refs"
+    );
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![PrecedentNode::ExternalCell {
+            sheet: r"[C:\[foo]\Book.xlsx]Sheet1".to_string(),
+            addr: CellAddr { row: 0, col: 0 },
+        }]
+    );
+}
+
+#[test]
 fn indirect_external_workbook_refs_resolve_via_provider_without_bytecode() {
     struct CountingExternalProvider {
         calls: AtomicUsize,
