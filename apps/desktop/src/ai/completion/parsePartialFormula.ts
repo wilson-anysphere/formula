@@ -31,6 +31,21 @@ type EngineClientLike = {
   ) => Promise<{ context?: { function?: { name: string; argIndex: number } | null } | null }>;
 };
 
+function currentLocaleId(): string {
+  try {
+    const raw = typeof document !== "undefined" ? document.documentElement?.lang : "";
+    const trimmed = String(raw ?? "").trim();
+    if (trimmed) return trimmed;
+  } catch {
+    // ignore
+  }
+  try {
+    return getLocale();
+  } catch {
+    return "en-US";
+  }
+}
+
 function clampCursor(input: string, cursorPosition: number): number {
   const len = typeof input === "string" ? input.length : 0;
   if (!Number.isInteger(cursorPosition)) return len;
@@ -181,11 +196,7 @@ class LocaleAwareFunctionRegistry extends FunctionRegistry {
     const candidateLimit = Math.max(rawLimit * 50, 500);
 
     const localeId = (() => {
-      try {
-        return getLocale();
-      } catch {
-        return "en-US";
-      }
+      return currentLocaleId();
     })();
     const formulaLocaleId = normalizeFormulaLocaleId(localeId) ?? "en-US";
 
@@ -330,13 +341,7 @@ function functionNameFromIdent(identToken: string | null, functionRegistry: unkn
  */
 export function createLocaleAwareStarterFunctions(): () => string[] {
   return () => {
-    const localeId = (() => {
-      try {
-        return getLocale();
-      } catch {
-        return "en-US";
-      }
-    })();
+    const localeId = currentLocaleId();
     const normalizedLocaleId = normalizeFormulaLocaleId(localeId) ?? "en-US";
     const tables = FUNCTION_TRANSLATIONS_BY_LOCALE[normalizedLocaleId];
     if (!tables) return CANONICAL_STARTER_FUNCTIONS;
@@ -680,13 +685,7 @@ export function createLocaleAwarePartialFormulaParser(options: {
       return { isFormula: false, inFunctionCall: false };
     }
 
-    const localeId = (() => {
-      try {
-        return getLocale();
-      } catch {
-        return "en-US";
-      }
-    })();
+    const localeId = currentLocaleId();
     const normalizedLocaleId = normalizeFormulaLocaleId(localeId) ?? "en-US";
 
     // Use the built-in JS parser for spans (currentArg.start/end, etc.) and then

@@ -257,4 +257,28 @@ describe("createLocaleAwarePartialFormulaParser", () => {
       vi.useRealTimers();
     }
   });
+
+  it("prefers document.lang over the i18n locale when choosing the formula locale", async () => {
+    // The desktop shell may set `<html lang="...">` without calling `setLocale()`.
+    // Ensure the parser follows the document locale so localized formula UX stays consistent.
+    setLocale("en-US");
+    const prevDocument = (globalThis as any).document;
+    (globalThis as any).document = { documentElement: { lang: "de-DE" } };
+
+    try {
+      const parser = createLocaleAwarePartialFormulaParser({});
+      const fnRegistry = new FunctionRegistry();
+      const input = "=SUMME(1,";
+      const result = await parser(input, input.length, fnRegistry);
+
+      expect(result.isFormula).toBe(true);
+      expect(result.inFunctionCall).toBe(true);
+      // `,` is a decimal separator in de-DE, so argIndex should remain 0.
+      expect(result.argIndex).toBe(0);
+      expect(result.currentArg?.text).toBe("1,");
+      expect(result.functionName).toBe("SUM");
+    } finally {
+      (globalThis as any).document = prevDocument;
+    }
+  });
 });
