@@ -570,7 +570,7 @@ a:visited {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  padding: 6px 10px;
+  padding: 4px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-primary);
