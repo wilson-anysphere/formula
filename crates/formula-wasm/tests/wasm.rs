@@ -6,7 +6,7 @@ use js_sys::{Object, Reflect};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::wasm_bindgen_test;
 
-use formula_engine::pivot::PivotValue;
+use formula_engine::pivot::{PivotFieldType, PivotSchema, PivotValue};
 use formula_model::CellValue as ModelCellValue;
 use formula_wasm::{
     canonicalize_formula, lex_formula, localize_formula, parse_formula_partial,
@@ -2035,6 +2035,57 @@ fn calculate_pivot_returns_cell_writes_for_basic_row_sum() {
                 value: json!(22),
             },
         ]
+    );
+}
+
+#[wasm_bindgen_test]
+fn get_pivot_schema_reports_field_types_and_limits_samples() {
+    let mut wb = WasmWorkbook::new();
+
+    // Source data (headers + records).
+    wb.set_cell("A1".to_string(), JsValue::from_str("Category"), None)
+        .unwrap();
+    wb.set_cell("B1".to_string(), JsValue::from_str("Amount"), None)
+        .unwrap();
+    wb.set_cell("A2".to_string(), JsValue::from_str("A"), None)
+        .unwrap();
+    wb.set_cell("B2".to_string(), JsValue::from_f64(10.0), None)
+        .unwrap();
+    wb.set_cell("A3".to_string(), JsValue::from_str("A"), None)
+        .unwrap();
+    wb.set_cell("B3".to_string(), JsValue::from_f64(5.0), None)
+        .unwrap();
+    wb.set_cell("A4".to_string(), JsValue::from_str("B"), None)
+        .unwrap();
+    wb.set_cell("B4".to_string(), JsValue::from_f64(7.0), None)
+        .unwrap();
+
+    wb.recalculate(None).unwrap();
+
+    // Only sample the first two records.
+    let schema_js = wb
+        .get_pivot_schema(DEFAULT_SHEET.to_string(), "A1:B4".to_string(), Some(2))
+        .unwrap();
+    let schema: PivotSchema = serde_wasm_bindgen::from_value(schema_js).unwrap();
+
+    assert_eq!(schema.record_count, 3);
+    assert_eq!(schema.fields.len(), 2);
+
+    assert_eq!(schema.fields[0].name, "Category");
+    assert_eq!(schema.fields[0].field_type, PivotFieldType::Text);
+    assert_eq!(
+        schema.fields[0].sample_values,
+        vec![
+            PivotValue::Text("A".to_string()),
+            PivotValue::Text("A".to_string()),
+        ]
+    );
+
+    assert_eq!(schema.fields[1].name, "Amount");
+    assert_eq!(schema.fields[1].field_type, PivotFieldType::Number);
+    assert_eq!(
+        schema.fields[1].sample_values,
+        vec![PivotValue::Number(10.0), PivotValue::Number(5.0),]
     );
 }
 
