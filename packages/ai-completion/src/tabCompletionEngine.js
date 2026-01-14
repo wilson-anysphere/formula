@@ -910,6 +910,36 @@ const BOND_FREQUENCY_ENUM_1_2_4 = [
   { replacement: "4", displayText: "4 (quarterly)", confidence: 0.64 },
 ];
 
+const FINANCIAL_TYPE_ENUM_0_1 = [
+  { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
+  { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
+];
+
+const TOCOL_IGNORE_ENUM_0_TO_3 = [
+  { replacement: "0", displayText: "0 (keep all)", confidence: 0.66 },
+  { replacement: "1", displayText: "1 (ignore blanks)", confidence: 0.65 },
+  { replacement: "2", displayText: "2 (ignore errors)", confidence: 0.64 },
+  { replacement: "3", displayText: "3 (ignore blanks + errors)", confidence: 0.63 },
+];
+
+const TOCOL_SCAN_BY_COLUMN_ENUM = [
+  { replacement: "FALSE", displayText: "FALSE (scan by row)", confidence: 0.62 },
+  { replacement: "TRUE", displayText: "TRUE (scan by column)", confidence: 0.61 },
+];
+
+const INTL_WEEKEND_ENUM_1_2_7_11_17 = [
+  { replacement: "1", displayText: "1 (Sat/Sun weekend)", confidence: 0.66 },
+  { replacement: "2", displayText: "2 (Sun/Mon weekend)", confidence: 0.65 },
+  { replacement: "7", displayText: "7 (Fri/Sat weekend)", confidence: 0.64 },
+  { replacement: "11", displayText: "11 (Sunday only)", confidence: 0.63 },
+  { replacement: "17", displayText: "17 (Saturday only)", confidence: 0.62 },
+];
+
+const CUMULATIVE_BOOLEAN_ENUM = [
+  { replacement: "TRUE", displayText: "TRUE (cumulative)", confidence: 0.66 },
+  { replacement: "FALSE", displayText: "FALSE (probability)", confidence: 0.64 },
+];
+
 /**
  * Function-specific enumerations for commonly misunderstood "flag" arguments.
  * These are curated because the function catalog only carries coarse arg types.
@@ -1002,31 +1032,15 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
   },
   TOCOL: {
     // ignore
-    1: [
-      { replacement: "0", displayText: "0 (keep all)", confidence: 0.66 },
-      { replacement: "1", displayText: "1 (ignore blanks)", confidence: 0.65 },
-      { replacement: "2", displayText: "2 (ignore errors)", confidence: 0.64 },
-      { replacement: "3", displayText: "3 (ignore blanks + errors)", confidence: 0.63 },
-    ],
+    1: TOCOL_IGNORE_ENUM_0_TO_3,
     // scan_by_column
-    2: [
-      { replacement: "FALSE", displayText: "FALSE (scan by row)", confidence: 0.62 },
-      { replacement: "TRUE", displayText: "TRUE (scan by column)", confidence: 0.61 },
-    ],
+    2: TOCOL_SCAN_BY_COLUMN_ENUM,
   },
   TOROW: {
     // ignore
-    1: [
-      { replacement: "0", displayText: "0 (keep all)", confidence: 0.66 },
-      { replacement: "1", displayText: "1 (ignore blanks)", confidence: 0.65 },
-      { replacement: "2", displayText: "2 (ignore errors)", confidence: 0.64 },
-      { replacement: "3", displayText: "3 (ignore blanks + errors)", confidence: 0.63 },
-    ],
+    1: TOCOL_IGNORE_ENUM_0_TO_3,
     // scan_by_column
-    2: [
-      { replacement: "FALSE", displayText: "FALSE (scan by row)", confidence: 0.62 },
-      { replacement: "TRUE", displayText: "TRUE (scan by column)", confidence: 0.61 },
-    ],
+    2: TOCOL_SCAN_BY_COLUMN_ENUM,
   },
   TEXTSPLIT: {
     // ignore_empty
@@ -1159,17 +1173,11 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
   },
   POISSON: {
     // cumulative
-    2: [
-      { replacement: "TRUE", displayText: "TRUE (cumulative)", confidence: 0.66 },
-      { replacement: "FALSE", displayText: "FALSE (probability)", confidence: 0.64 },
-    ],
+    2: CUMULATIVE_BOOLEAN_ENUM,
   },
   WEIBULL: {
     // cumulative
-    3: [
-      { replacement: "TRUE", displayText: "TRUE (cumulative)", confidence: 0.66 },
-      { replacement: "FALSE", displayText: "FALSE (probability)", confidence: 0.64 },
-    ],
+    3: CUMULATIVE_BOOLEAN_ENUM,
   },
   "RANK.EQ": {
     // order
@@ -1194,66 +1202,39 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
   },
   PV: {
     // type
-    4: [
-      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
-      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
-    ],
+    4: FINANCIAL_TYPE_ENUM_0_1,
   },
   FV: {
     // type
-    4: [
-      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
-      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
-    ],
+    4: FINANCIAL_TYPE_ENUM_0_1,
   },
   PMT: {
     // type
-    4: [
-      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
-      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
-    ],
+    4: FINANCIAL_TYPE_ENUM_0_1,
   },
   NPER: {
     // type
-    4: [
-      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
-      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
-    ],
+    4: FINANCIAL_TYPE_ENUM_0_1,
   },
   RATE: {
     // type
-    4: [
-      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
-      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
-    ],
+    4: FINANCIAL_TYPE_ENUM_0_1,
   },
   IPMT: {
     // type
-    5: [
-      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
-      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
-    ],
+    5: FINANCIAL_TYPE_ENUM_0_1,
   },
   PPMT: {
     // type
-    5: [
-      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
-      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
-    ],
+    5: FINANCIAL_TYPE_ENUM_0_1,
   },
   CUMIPMT: {
     // type
-    5: [
-      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
-      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
-    ],
+    5: FINANCIAL_TYPE_ENUM_0_1,
   },
   CUMPRINC: {
     // type
-    5: [
-      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
-      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
-    ],
+    5: FINANCIAL_TYPE_ENUM_0_1,
   },
   ROMAN: {
     // form
@@ -1283,23 +1264,11 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
   },
   "WORKDAY.INTL": {
     // weekend
-    2: [
-      { replacement: "1", displayText: "1 (Sat/Sun weekend)", confidence: 0.66 },
-      { replacement: "2", displayText: "2 (Sun/Mon weekend)", confidence: 0.65 },
-      { replacement: "7", displayText: "7 (Fri/Sat weekend)", confidence: 0.64 },
-      { replacement: "11", displayText: "11 (Sunday only)", confidence: 0.63 },
-      { replacement: "17", displayText: "17 (Saturday only)", confidence: 0.62 },
-    ],
+    2: INTL_WEEKEND_ENUM_1_2_7_11_17,
   },
   "NETWORKDAYS.INTL": {
     // weekend
-    2: [
-      { replacement: "1", displayText: "1 (Sat/Sun weekend)", confidence: 0.66 },
-      { replacement: "2", displayText: "2 (Sun/Mon weekend)", confidence: 0.65 },
-      { replacement: "7", displayText: "7 (Fri/Sat weekend)", confidence: 0.64 },
-      { replacement: "11", displayText: "11 (Sunday only)", confidence: 0.63 },
-      { replacement: "17", displayText: "17 (Saturday only)", confidence: 0.62 },
-    ],
+    2: INTL_WEEKEND_ENUM_1_2_7_11_17,
   },
   "FORECAST.ETS": {
     // seasonality
@@ -1587,10 +1556,7 @@ function getCumulativeDistributionBooleanEnum(fnName, argIndex) {
 
   // Most distributions use the boolean arg as `cumulative`. This is a best-effort
   // hint and should stay conservative (only 2 suggestions).
-  return [
-    { replacement: "TRUE", displayText: "TRUE (cumulative)", confidence: 0.66 },
-    { replacement: "FALSE", displayText: "FALSE (probability)", confidence: 0.64 },
-  ];
+  return CUMULATIVE_BOOLEAN_ENUM;
 }
 
 /**
