@@ -5293,9 +5293,7 @@ if (
   const executeCommand = (commandId: string) => {
     const cmd = commandRegistry.getCommand(commandId);
     if (cmd?.source.kind === "builtin") {
-      void commandRegistry.executeCommand(commandId).catch((err) => {
-        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-      });
+      executeBuiltinCommand(commandId);
       return;
     }
     executeExtensionCommand(commandId);
@@ -5549,11 +5547,14 @@ if (
   });
   sharedContextMenu = contextMenu;
 
-  const executeBuiltinCommand = (commandId: string, ...args: any[]) => {
+  function executeBuiltinCommand(commandId: string, ...args: any[]): void {
     void commandRegistry.executeCommand(commandId, ...args).catch((err) => {
+      // DLP policy violations are already surfaced via a dedicated toast (e.g. clipboard copy blocked).
+      // Avoid double-toasting "Command failed" for expected policy restrictions.
+      if ((err as any)?.name === "DlpViolationError") return;
       showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
     });
-  };
+  }
 
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
   const primaryShortcut = (key: string) => (isMac ? `⌘${key}` : `Ctrl+${key}`);
