@@ -238,8 +238,8 @@
 }
 
 .ribbon__content {
-  padding: calc(var(--space-3) / 2) var(--space-4);
-  min-height: 58px;
+  padding: var(--space-0) var(--space-4);
+  min-height: 52px;
   background: var(--bg-surface);
   overflow-x: auto;
   overflow-y: hidden;

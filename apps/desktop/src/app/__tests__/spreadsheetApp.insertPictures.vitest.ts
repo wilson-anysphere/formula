@@ -83,7 +83,14 @@ function createApp(root: HTMLElement, status: { activeCell: HTMLElement; selecti
 }
 
 describe("SpreadsheetApp insertPicturesFromFiles", () => {
+  let priorCanvasCharts: string | undefined;
+  let priorUseCanvasCharts: string | undefined;
+
   afterEach(() => {
+    if (priorCanvasCharts === undefined) delete process.env.CANVAS_CHARTS;
+    else process.env.CANVAS_CHARTS = priorCanvasCharts;
+    if (priorUseCanvasCharts === undefined) delete process.env.USE_CANVAS_CHARTS;
+    else process.env.USE_CANVAS_CHARTS = priorUseCanvasCharts;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     delete process.env.DESKTOP_GRID_MODE;
@@ -92,6 +99,10 @@ describe("SpreadsheetApp insertPicturesFromFiles", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     process.env.DESKTOP_GRID_MODE = "legacy";
+    priorCanvasCharts = process.env.CANVAS_CHARTS;
+    priorUseCanvasCharts = process.env.USE_CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "0";
+    process.env.USE_CANVAS_CHARTS = "0";
 
     const storage = createInMemoryLocalStorage();
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
