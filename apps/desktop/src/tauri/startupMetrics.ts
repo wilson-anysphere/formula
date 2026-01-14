@@ -37,8 +37,38 @@ const BOOTSTRAPPED_KEY = "__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__";
 const FIRST_RENDER_REPORTED_KEY = "__FORMULA_STARTUP_FIRST_RENDER_REPORTED__";
 const TTI_REPORTED_KEY = "__FORMULA_STARTUP_TTI_REPORTED__";
 const HOST_INVOKE_RETRY_DEADLINE_MS = 10_000;
+const HOST_INVOKE_CALL_TIMEOUT_MS = 2_000;
 const FIRST_RENDER_REPORTING_KEY = "__FORMULA_STARTUP_FIRST_RENDER_REPORTING__";
 const TTI_REPORTING_KEY = "__FORMULA_STARTUP_TTI_REPORTING__";
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error("timeout")), timeoutMs);
+      promise.then(resolve, reject);
+    });
+  } finally {
+    if (timer != null) {
+      try {
+        clearTimeout(timer);
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+async function tryInvoke(invoke: TauriInvoke, cmd: string, args?: any): Promise<boolean> {
+  try {
+    // Tauri invokes should be fast; keep them bounded so best-effort startup instrumentation
+    // can't hang forever if the bridge wedges.
+    await withTimeout(Promise.resolve().then(() => invoke(cmd, args)), HOST_INVOKE_CALL_TIMEOUT_MS);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function getStore(): StartupTimings {
   const g = globalThis as any;
@@ -215,8 +245,8 @@ export async function markStartupFirstRender(): Promise<StartupTimings> {
     if (g[FIRST_RENDER_REPORTED_KEY]) return { ...store };
 
     try {
-      await invoke("report_startup_first_render");
-      g[FIRST_RENDER_REPORTED_KEY] = true;
+      const ok = await tryInvoke(invoke, "report_startup_first_render");
+      if (ok) g[FIRST_RENDER_REPORTED_KEY] = true;
     } catch {
       // Ignore host IPC failures; desktop startup should never be blocked on perf reporting.
     }
@@ -304,8 +334,8 @@ export async function markStartupTimeToInteractive(options?: {
   const ensureFirstRenderReported = async (invoke: TauriInvoke): Promise<void> => {
     if (g[FIRST_RENDER_REPORTED_KEY]) return;
     try {
-      await invoke("report_startup_first_render");
-      g[FIRST_RENDER_REPORTED_KEY] = true;
+      const ok = await tryInvoke(invoke, "report_startup_first_render");
+      if (ok) g[FIRST_RENDER_REPORTED_KEY] = true;
     } catch {
       // Best-effort: ignore failures; if we can't report first render, still attempt TTI so the
       // desktop process can emit a `[startup] ...` line.
@@ -317,8 +347,8 @@ export async function markStartupTimeToInteractive(options?: {
     if (invoke) {
       try {
         await ensureFirstRenderReported(invoke);
-        await invoke("report_startup_tti");
-        g[TTI_REPORTED_KEY] = true;
+        const ok = await tryInvoke(invoke, "report_startup_tti");
+        if (ok) g[TTI_REPORTED_KEY] = true;
       } catch {
         // Ignore host IPC failures; desktop startup should never be blocked on perf reporting.
       }
@@ -338,8 +368,8 @@ export async function markStartupTimeToInteractive(options?: {
         if (retriedInvoke) {
           try {
             await ensureFirstRenderReported(retriedInvoke);
-            await retriedInvoke("report_startup_tti");
-            g[TTI_REPORTED_KEY] = true;
+            const ok = await tryInvoke(retriedInvoke, "report_startup_tti");
+            if (ok) g[TTI_REPORTED_KEY] = true;
           } catch {
             // Ignore host IPC failures; desktop startup should never be blocked on perf reporting.
           }
