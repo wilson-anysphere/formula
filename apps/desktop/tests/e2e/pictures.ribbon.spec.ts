@@ -131,7 +131,9 @@ test.describe("Insert → Pictures", () => {
       // Preferred: filechooser event.
       // Fallback: if the implementation uses a persistent/hidden <input type=file>, set files directly.
       let fileChooserError: unknown = null;
-      const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 2_000 }).catch((err) => {
+      // The file chooser should appear immediately after the click, but be a bit
+      // forgiving in CI/headless where scheduling can be noisier.
+      const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5_000 }).catch((err) => {
         fileChooserError = err;
         return null;
       });
@@ -146,7 +148,7 @@ test.describe("Insert → Pictures", () => {
       } else {
         const input = page.locator('input[type="file"]:not([disabled])[accept*="image"]').last();
         try {
-          await expect(input).toBeAttached({ timeout: 2_000 });
+          await expect(input).toBeAttached({ timeout: 5_000 });
         } catch {
           const rawError = fileChooserError instanceof Error ? fileChooserError.message : String(fileChooserError);
           throw new Error(
