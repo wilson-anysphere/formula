@@ -93,6 +93,46 @@ fn pivot_grand_totals_partial_payload_defaults_missing_keys_to_true() {
 }
 
 #[test]
+fn pivot_field_ref_from_unstructured_parses_dax_like_refs() {
+    assert_eq!(
+        PivotFieldRef::from_unstructured("Sales"),
+        PivotFieldRef::CacheFieldName("Sales".to_string())
+    );
+    assert_eq!(
+        PivotFieldRef::from_unstructured("[Total Sales]"),
+        PivotFieldRef::DataModelMeasure("Total Sales".to_string())
+    );
+    assert_eq!(
+        PivotFieldRef::from_unstructured("Orders[Order ID]"),
+        PivotFieldRef::DataModelColumn {
+            table: "Orders".to_string(),
+            column: "Order ID".to_string(),
+        }
+    );
+    assert_eq!(
+        PivotFieldRef::from_unstructured("'Order Details'[Unit Price]"),
+        PivotFieldRef::DataModelColumn {
+            table: "Order Details".to_string(),
+            column: "Unit Price".to_string(),
+        }
+    );
+    assert_eq!(
+        PivotFieldRef::from_unstructured("'O''Reilly'[Book]"),
+        PivotFieldRef::DataModelColumn {
+            table: "O'Reilly".to_string(),
+            column: "Book".to_string(),
+        }
+    );
+    assert_eq!(
+        PivotFieldRef::from_unstructured("  Orders  [  Order ID  ]  "),
+        PivotFieldRef::DataModelColumn {
+            table: "Orders".to_string(),
+            column: "Order ID".to_string(),
+        }
+    );
+}
+
+#[test]
 fn pivot_value_to_key_part_canonicalizes_numbers() {
     assert_eq!(
         PivotValue::Number(0.0).to_key_part(),
