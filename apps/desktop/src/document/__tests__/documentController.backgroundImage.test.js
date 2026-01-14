@@ -126,6 +126,28 @@ test("applyExternalSheetViewDeltas accepts singleton-wrapped frozen counts (inte
   assert.equal(doc.getSheetView("Sheet1").frozenCols, 1);
 });
 
+test("applyExternalSheetViewDeltas accepts singleton-wrapped after view objects (interop)", () => {
+  const doc = new DocumentController();
+
+  doc.applyExternalSheetViewDeltas([
+    {
+      sheetId: "Sheet1",
+      before: { frozenRows: 0, frozenCols: 0 },
+      after: {
+        0: {
+          frozenRows: { 0: 2 },
+          frozenCols: [1],
+          backgroundImageId: " bg.png ",
+        },
+      },
+    },
+  ]);
+
+  assert.equal(doc.getSheetView("Sheet1").frozenRows, 2);
+  assert.equal(doc.getSheetView("Sheet1").frozenCols, 1);
+  assert.equal(doc.getSheetBackgroundImageId("Sheet1"), "bg.png");
+});
+
 test("applyState accepts singleton-wrapped frozen counts (interop)", () => {
   const doc = new DocumentController();
 

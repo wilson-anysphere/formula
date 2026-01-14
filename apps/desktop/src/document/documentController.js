@@ -7168,7 +7168,7 @@ export class DocumentController {
       if (!sheetId) continue;
 
       const before = this.model.getSheetView(sheetId);
-      const after = normalizeSheetViewState(delta.after);
+      const after = normalizeSheetViewState(unwrapSingletonObjectWrapper(delta.after));
       if (sheetViewStateEquals(before, after)) continue;
       filtered.push({ sheetId, before, after });
     }
