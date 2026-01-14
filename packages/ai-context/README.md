@@ -60,6 +60,9 @@ import {
   scoreRegionForQuery,
   pickBestRegionForQuery,
 
+  // TSV helpers (streaming-ish range formatting)
+  valuesRangeToTsv,
+
   // Context builders
   ContextManager,
 
