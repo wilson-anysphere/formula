@@ -2,6 +2,7 @@ import { CellEditorOverlay } from "../editor/cellEditorOverlay";
 import type { FormulaBarTabCompletionController } from "../ai/completion/formulaBarTabCompletion.js";
 import { FormulaBarView } from "../formula-bar/FormulaBarView";
 import type { RangeAddress as A1RangeAddress } from "../spreadsheet/a1.js";
+import { normalizeFormulaLocaleId, type FormulaLocaleId } from "../spreadsheet/formulaLocale.js";
 import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js";
 import { parseA1Range } from "../charts/a1.js";
 import { emuToPx } from "../charts/overlay.js";
@@ -84,6 +85,12 @@ import { AuditingOverlayRenderer } from "../grid/auditing-overlays/AuditingOverl
 import { computeAuditingOverlays, type AuditingMode, type AuditingOverlays } from "../grid/auditing-overlays/overlays";
 import { resolveCssVar } from "../theme/cssVars.js";
 import { t, tWithVars, getLocale } from "../i18n/index.js";
+
+// Translation tables from the Rust formula engine (canonical <-> localized function names).
+// Keep these in sync with `crates/formula-engine/src/locale/data/*.tsv`.
+import DE_DE_FUNCTION_TSV from "../../../../crates/formula-engine/src/locale/data/de-DE.tsv?raw";
+import ES_ES_FUNCTION_TSV from "../../../../crates/formula-engine/src/locale/data/es-ES.tsv?raw";
+import FR_FR_FUNCTION_TSV from "../../../../crates/formula-engine/src/locale/data/fr-FR.tsv?raw";
 import {
   DEFAULT_GRID_LIMITS,
   addCellToSelection,
@@ -1158,6 +1165,62 @@ const EMPTY_DRAWING_OBJECTS: DrawingObject[] = [];
 // Keep ChartStore (AI-generated) charts above workbook DrawingML objects without
 // scanning for `maxZ` on every scroll frame.
 const CANVAS_CHART_Z_ORDER_BASE = 1_000_000;
+
+type FunctionTranslationTables = {
+  canonicalToLocalized: Map<string, string>;
+};
+
+function casefoldIdent(ident: string): string {
+  return String(ident ?? "").toUpperCase();
+}
+
+function parseFunctionTranslationsTsv(tsv: string): FunctionTranslationTables {
+  const canonicalToLocalized: Map<string, string> = new Map();
+  for (const rawLine of String(tsv ?? "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const [canonical, localized] = line.split("\t");
+    if (!canonical || !localized) continue;
+    const canonUpper = casefoldIdent(canonical.trim());
+    const localizedTrimmed = localized.trim();
+    const locUpper = casefoldIdent(localizedTrimmed);
+    if (!canonUpper || !locUpper) continue;
+
+    // Only store translations that differ; identity entries can fall back to `casefoldIdent`.
+    if (canonUpper !== locUpper) {
+      canonicalToLocalized.set(canonUpper, localizedTrimmed);
+    }
+  }
+  return { canonicalToLocalized };
+}
+
+const FUNCTION_TRANSLATIONS_TSV_BY_LOCALE: Record<Exclude<FormulaLocaleId, "en-US">, string> = {
+  "de-DE": DE_DE_FUNCTION_TSV,
+  "fr-FR": FR_FR_FUNCTION_TSV,
+  "es-ES": ES_ES_FUNCTION_TSV,
+};
+
+const FUNCTION_TRANSLATIONS_CACHE = new Map<Exclude<FormulaLocaleId, "en-US">, FunctionTranslationTables>();
+
+function localizeFunctionNameForLocale(canonicalName: string, localeId: string): string {
+  const formulaLocaleId = normalizeFormulaLocaleId(localeId);
+  if (!formulaLocaleId || formulaLocaleId === "en-US") return canonicalName;
+
+  const cached = FUNCTION_TRANSLATIONS_CACHE.get(formulaLocaleId);
+  const tables =
+    cached ??
+    (() => {
+      const tsv = FUNCTION_TRANSLATIONS_TSV_BY_LOCALE[formulaLocaleId];
+      if (!tsv) return null;
+      const parsed = parseFunctionTranslationsTsv(tsv);
+      FUNCTION_TRANSLATIONS_CACHE.set(formulaLocaleId, parsed);
+      return parsed;
+    })();
+  if (!tables) return canonicalName;
+
+  const upper = casefoldIdent(canonicalName);
+  return tables.canonicalToLocalized.get(upper) ?? canonicalName;
+}
 
 export class SpreadsheetApp {
   private sheetId = "Sheet1";
@@ -22574,6 +22637,18 @@ export class SpreadsheetApp {
 
   private autoSumSelection(fn: "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN"): void {
     const sheetId = this.sheetId;
+    const localeId = (() => {
+      try {
+        return (
+          this.formulaBar?.currentLocaleId?.() ||
+          (typeof document !== "undefined" ? document.documentElement?.lang : "") ||
+          "en-US"
+        );
+      } catch {
+        return "en-US";
+      }
+    })();
+    const localizedFn = localizeFunctionNameForLocale(fn, localeId);
     const coordScratch = { row: 0, col: 0 };
 
     const normalizeRange = (range: Range): Range => ({
@@ -22652,7 +22727,7 @@ export class SpreadsheetApp {
       if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: true });
       else this.scrollCellIntoView(selected.target);
 
-      const formula = `=${fn}(${rangeToA1(selected.formulaRange)})`;
+      const formula = `=${localizedFn}(${rangeToA1(selected.formulaRange)})`;
       this.applyEdit(sheetId, selected.target, formula, { label: "AutoSum" });
       return;
     }
@@ -22691,7 +22766,7 @@ export class SpreadsheetApp {
 
     if (!formulaRange) return;
 
-    const formula = `=${fn}(${rangeToA1(formulaRange)})`;
+    const formula = `=${localizedFn}(${rangeToA1(formulaRange)})`;
     this.applyEdit(this.sheetId, active, formula, { label: t("command.edit.autoSum") });
   }
 

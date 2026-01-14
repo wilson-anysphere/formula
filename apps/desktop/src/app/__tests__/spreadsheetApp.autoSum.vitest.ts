@@ -142,6 +142,78 @@ describe("SpreadsheetApp AutoSum (Alt+=)", () => {
     root.remove();
   });
 
+  it.each([
+    { localeId: "de-DE", expectedFn: "SUMME" },
+    { localeId: "fr-FR", expectedFn: "SOMME" },
+    { localeId: "es-ES", expectedFn: "SUMA" },
+  ])("inserts a localized SUM formula when document.lang is $localeId ($expectedFn)", ({ localeId, expectedFn }) => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = localeId;
+
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+      const app = new SpreadsheetApp(root, status);
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+
+      doc.clearRange(sheetId, "A1:E5");
+
+      doc.setCellValue(sheetId, "A1", 1);
+      doc.setCellValue(sheetId, "A2", 2);
+      doc.setCellValue(sheetId, "A3", 3);
+
+      app.selectRange({ range: { startRow: 0, endRow: 2, startCol: 0, endCol: 0 } }, { scrollIntoView: false, focus: true });
+      app.autoSum();
+
+      expect(status.activeCell.textContent).toBe("A4");
+      expect(doc.getCell(sheetId, "A4").formula).toBe(`=${expectedFn}(A1:A3)`);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      document.documentElement.lang = prevLang;
+    }
+  });
+
+  it("localizes AutoSum variants like AVERAGE in de-DE (MITTELWERT)", () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "de-DE";
+
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+      const app = new SpreadsheetApp(root, status);
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+
+      doc.clearRange(sheetId, "A1:E5");
+
+      doc.setCellValue(sheetId, "A1", 1);
+      doc.setCellValue(sheetId, "A2", 2);
+      doc.setCellValue(sheetId, "A3", 3);
+
+      app.selectRange({ range: { startRow: 0, endRow: 2, startCol: 0, endCol: 0 } }, { scrollIntoView: false, focus: true });
+      app.autoSumAverage();
+
+      expect(status.activeCell.textContent).toBe("A4");
+      expect(doc.getCell(sheetId, "A4").formula).toBe("=MITTELWERT(A1:A3)");
+
+      app.destroy();
+      root.remove();
+    } finally {
+      document.documentElement.lang = prevLang;
+    }
+  });
+
   const variants: Array<{
     name: string;
     run: (app: SpreadsheetApp) => void;
