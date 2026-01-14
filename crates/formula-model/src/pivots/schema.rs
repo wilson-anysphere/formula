@@ -360,9 +360,11 @@ impl Default for SubtotalPosition {
 }
 /// Whether to render grand totals for rows and/or columns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct GrandTotals {
+    #[serde(default = "default_true")]
     pub rows: bool,
+    #[serde(default = "default_true")]
     pub columns: bool,
 }
 
