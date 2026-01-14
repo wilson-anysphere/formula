@@ -933,6 +933,14 @@
 
 .branch-merge__summary {
   margin-bottom: 8px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.branch-merge__summary-separator {
+  color: var(--text-secondary);
 }
 
 .branch-merge__conflict {
@@ -975,6 +983,16 @@
   gap: 8px;
   margin-top: 8px;
   flex-wrap: wrap;
+}
+
+.branch-merge__footer-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.branch-merge__footer-hint--error {
+  color: var(--error);
 }
 
 /* --- Branch merge conflict details -------------------------------------- */

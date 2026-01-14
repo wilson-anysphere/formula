@@ -593,7 +593,11 @@ export function MergeBranchPanel({
       ) : (
         <>
           <div className="branch-merge__summary">
-            {tWithVars("branchMerge.conflictsCount", { count: preview.conflicts.length })}
+            <span>{tWithVars("branchMerge.conflictsCount", { count: preview.conflicts.length })}</span>
+            <span className="branch-merge__summary-separator">•</span>
+            <span>
+              {tWithVars("branchMerge.resolvedCount", { resolved: resolutions.size, total: preview.conflicts.length })}
+            </span>
           </div>
 
           {preview.conflicts.map((c, idx) => {
@@ -966,6 +970,13 @@ export function MergeBranchPanel({
               {t("branchMerge.applyMerge")}
             </button>
           </div>
+          {hasManualErrors ? (
+            <div className="branch-merge__footer-hint branch-merge__footer-hint--error">
+              {t("branchMerge.footer.fixManualErrorsHint")}
+            </div>
+          ) : preview.conflicts.length !== resolutions.size ? (
+            <div className="branch-merge__footer-hint">{t("branchMerge.footer.resolveAllHint")}</div>
+          ) : null}
         </>
       )}
     </div>
