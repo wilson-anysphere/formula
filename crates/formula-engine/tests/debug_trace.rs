@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 struct TestExternalProvider {
     values: Mutex<HashMap<(String, CellAddr), Value>>,
     tables: Mutex<HashMap<(String, String), (String, Table)>>,
+    sheet_order: Mutex<HashMap<String, Vec<String>>>,
 }
 
 impl TestExternalProvider {
@@ -28,6 +29,13 @@ impl TestExternalProvider {
             .lock()
             .expect("lock poisoned")
             .insert((workbook.to_string(), table.name.clone()), (sheet.to_string(), table));
+    }
+
+    fn set_sheet_order(&self, workbook: &str, order: &[&str]) {
+        self.sheet_order
+            .lock()
+            .expect("lock poisoned")
+            .insert(workbook.to_string(), order.iter().map(|s| s.to_string()).collect());
     }
 }
 
@@ -45,6 +53,14 @@ impl ExternalValueProvider for TestExternalProvider {
             .lock()
             .expect("lock poisoned")
             .get(&(workbook.to_string(), table_name.to_string()))
+            .cloned()
+    }
+
+    fn sheet_order(&self, workbook: &str) -> Option<Vec<String>> {
+        self.sheet_order
+            .lock()
+            .expect("lock poisoned")
+            .get(workbook)
             .cloned()
     }
 }
@@ -1203,7 +1219,7 @@ fn debug_trace_collapses_degenerate_external_3d_sheet_spans() {
 }
 
 #[test]
-fn debug_trace_rejects_external_3d_sheet_spans() {
+fn debug_trace_rejects_external_3d_sheet_spans_without_sheet_order() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
     provider.set("[Book.xlsx]Sheet3", CellAddr { row: 0, col: 0 }, 3.0);
@@ -1226,6 +1242,47 @@ fn debug_trace_rejects_external_3d_sheet_spans() {
     );
     assert!(matches!(dbg.trace.kind, TraceKind::CellRef));
     assert!(dbg.trace.reference.is_none());
+}
+
+#[test]
+fn debug_trace_supports_external_3d_sheet_spans_with_sheet_order() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_sheet_order("Book.xlsx", &["Sheet1", "Sheet2", "Sheet3"]);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
+    provider.set("[Book.xlsx]Sheet2", CellAddr { row: 0, col: 0 }, 2.0);
+    provider.set("[Book.xlsx]Sheet3", CellAddr { row: 0, col: 0 }, 3.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]Sheet1:Sheet3!A1)")
+        .unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(computed, Value::Number(6.0));
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(
+        slice(&dbg.formula, dbg.trace.span),
+        "SUM([Book.xlsx]Sheet1:Sheet3!A1)"
+    );
+
+    assert!(matches!(
+        dbg.trace.kind,
+        TraceKind::FunctionCall { ref name } if name == "SUM"
+    ));
+    assert_eq!(dbg.trace.children.len(), 1);
+
+    let arg = &dbg.trace.children[0];
+    assert_eq!(slice(&dbg.formula, arg.span), "[Book.xlsx]Sheet1:Sheet3!A1");
+    assert!(matches!(arg.kind, TraceKind::CellRef));
+    assert_eq!(arg.value, Value::Blank);
+    assert!(
+        arg.reference.is_none(),
+        "3D sheet-range refs resolve to multiple sheets"
+    );
 }
 
 #[test]

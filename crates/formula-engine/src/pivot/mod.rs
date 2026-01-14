@@ -14,6 +14,7 @@
 use chrono::NaiveDate;
 use formula_columnar::{ColumnarTable, Value as ColumnarValue};
 use std::cmp::Ordering;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub use formula_model::pivots::{
@@ -34,6 +35,17 @@ pub use definition::{
 };
 pub(crate) use definition::refresh_pivot;
 pub(crate) use definition::PivotRefreshContext;
+
+pub(crate) fn pivot_field_ref_name(field: &PivotFieldRef) -> Cow<'_, str> {
+    match field {
+        PivotFieldRef::CacheFieldName(name) => Cow::Borrowed(name),
+        PivotFieldRef::DataModelColumn { table, column } => {
+            Cow::Owned(format!("{table}[{column}]"))
+        }
+        // Measures are stored without brackets; surface the raw name for now.
+        PivotFieldRef::DataModelMeasure(name) => Cow::Borrowed(name),
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum PivotError {
@@ -1678,7 +1690,7 @@ impl PivotEngine {
                     format!(
                         "{:?} of {}",
                         vf.aggregation,
-                        vf.source_field
+                        pivot_field_ref_name(&vf.source_field)
                     )
                 } else {
                     vf.name.clone()
@@ -1698,7 +1710,7 @@ impl PivotEngine {
                     format!(
                         "{:?} of {}",
                         vf.aggregation,
-                        vf.source_field
+                        pivot_field_ref_name(&vf.source_field)
                     )
                 } else {
                     vf.name.clone()

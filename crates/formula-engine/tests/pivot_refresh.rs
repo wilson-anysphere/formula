@@ -1,8 +1,8 @@
 use pretty_assertions::assert_eq;
 
 use formula_engine::pivot::{
-    AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotValue, SubtotalPosition,
-    PivotFieldRef, ValueField,
+    AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotFieldRef, PivotValue,
+    SubtotalPosition, ValueField,
 };
 use formula_model::Style;
 use formula_engine::Engine;

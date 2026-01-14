@@ -1526,8 +1526,8 @@ fn getpivotdata_supports_column_fields_and_multiple_value_fields() {
 #[test]
 fn getpivotdata_uses_registry_for_column_fields_and_multiple_values() {
     use formula_engine::pivot::{
-        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotTable, PivotValue,
-        PivotFieldRef, SubtotalPosition, ValueField,
+        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotFieldRef, PivotTable,
+        PivotValue, SubtotalPosition, ValueField,
     };
     use formula_model::{CellRef, Range};
 
