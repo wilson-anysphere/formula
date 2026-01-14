@@ -358,11 +358,12 @@ export class TabCompletionEngine {
       const callSuffix = spec.minArgs === 0 && spec.maxArgs === 0 ? "()" : "(";
       const replacement = `${prefix}${remainder}${callSuffix}`;
       const newText = replaceSpan(input, token.start, token.end, replacement);
+      const boost = typeof spec?.completionBoost === "number" && Number.isFinite(spec.completionBoost) ? spec.completionBoost : 0;
       suggestions.push({
         text: newText,
         displayText: replacement,
         type: "formula",
-        confidence: clamp01(0.6 + (prefix.length / spec.name.length) * 0.4),
+        confidence: clamp01(0.6 + (prefix.length / spec.name.length) * 0.4 + boost),
       });
 
       // Provide lightweight "modern alternative" suggestions for some legacy functions.

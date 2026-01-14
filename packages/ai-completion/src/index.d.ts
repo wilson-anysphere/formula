@@ -96,6 +96,12 @@ export interface FunctionSpec {
   minArgs?: number;
   maxArgs?: number;
   args: FunctionArgSpec[];
+  /**
+   * Optional confidence boost applied when this function spec is suggested as a name completion.
+   *
+   * This is intended for host-specific registries that want to bias ordering (e.g. localized aliases).
+   */
+  completionBoost?: number;
 }
 
 export class FunctionRegistry {

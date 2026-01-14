@@ -148,6 +148,9 @@ class LocaleAwareFunctionRegistry extends FunctionRegistry {
         const alias: any = {
           ...spec,
           name: localizedName,
+          // Small boost so localized aliases win ranking when both a localized alias (e.g. SUMME)
+          // and other canonical functions (e.g. SUMIF) match the same short prefix ("SU").
+          completionBoost: 0.05,
           __formulaLocaleId: localeId,
           __formulaCanonicalName: spec.name,
         } satisfies LocaleAliasMeta;
@@ -181,21 +184,28 @@ class LocaleAwareFunctionRegistry extends FunctionRegistry {
     const localized: any[] = [];
     /** @type {any[]} */
     const canonical: any[] = [];
+    /** @type {Set<string>} */
+    const suppressCanonical = new Set<string>();
 
     for (const spec of candidates) {
       const meta = spec as any as LocaleAliasMeta;
       const isAlias = typeof meta.__formulaLocaleId === "string" && meta.__formulaLocaleId.length > 0;
       if (isAlias) {
-        if (meta.__formulaLocaleId === localeId) localized.push(spec);
+        if (meta.__formulaLocaleId === localeId) {
+          localized.push(spec);
+          if (typeof meta.__formulaCanonicalName === "string") {
+            suppressCanonical.add(casefoldIdent(meta.__formulaCanonicalName));
+          }
+        }
         continue;
       }
       canonical.push(spec);
     }
 
-    // Prefer localized completions when any match exists. This keeps the formula bar’s "pure insertion"
-    // UX intact while making locale-specific names (often longer than canonical ones) win ranking.
-    if (localized.length > 0) return localized.slice(0, rawLimit);
-    return canonical.slice(0, rawLimit);
+    // Dedupe canonical specs that have localized aliases for this locale, then merge localized first
+    // so the UI can prefer localized function names while still surfacing untranslated functions.
+    const canonicalFiltered = canonical.filter((spec) => !suppressCanonical.has(casefoldIdent(spec?.name)));
+    return [...localized, ...canonicalFiltered].slice(0, rawLimit);
   }
 }
 
