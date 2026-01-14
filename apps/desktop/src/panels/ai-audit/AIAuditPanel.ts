@@ -229,7 +229,14 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
 
   const refreshButton = el(
     "button",
-    { type: "button", "data-testid": "ai-audit-refresh", onClick: () => void refresh() },
+    {
+      type: "button",
+      "data-testid": "ai-audit-refresh",
+      onClick: () =>
+        void refresh().catch(() => {
+          // Best-effort: avoid unhandled rejections from fire-and-forget UI handlers.
+        }),
+    },
     ["Refresh"],
   );
 
@@ -238,7 +245,10 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
     {
       type: "button",
       "data-testid": "ai-audit-load-more",
-      onClick: () => void loadMore(),
+      onClick: () =>
+        void loadMore().catch(() => {
+          // Best-effort: avoid unhandled rejections from fire-and-forget UI handlers.
+        }),
       disabled: true,
       title: "Load older entries",
     },
@@ -397,7 +407,11 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
       operationInFlight = false;
       const next = queuedOperation;
       queuedOperation = null;
-      if (next) void runOperation(next);
+      if (next) {
+        void runOperation(next).catch(() => {
+          // Best-effort: avoid unhandled rejections from internal queue chaining.
+        });
+      }
       else loadMoreButton.disabled = !hasMore;
     }
   }
@@ -487,7 +501,9 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
       const next = queuedOperation;
       if (next) {
         queuedOperation = null;
-        void runOperation(next);
+        void runOperation(next).catch(() => {
+          // Best-effort: avoid unhandled rejections from internal queue chaining.
+        });
       }
     }
   }
@@ -498,7 +514,9 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
       type: "button",
       "data-testid": "ai-audit-export-json",
       onClick: () => {
-        void exportLog();
+        void exportLog().catch(() => {
+          // Best-effort: avoid unhandled rejections from fire-and-forget UI handlers.
+        });
       },
     },
     ["Export log"],
@@ -507,15 +525,25 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
   function onFilterKeyDown(event: KeyboardEvent) {
     if (event.key === "Enter") {
       event.preventDefault();
-      void refresh();
+      void refresh().catch(() => {
+        // Best-effort: avoid unhandled rejections from fire-and-forget UI handlers.
+      });
     }
   }
 
   sessionInput.addEventListener("keydown", onFilterKeyDown);
   workbookInput.addEventListener("keydown", onFilterKeyDown);
   pageSizeInput.addEventListener("keydown", onFilterKeyDown);
-  timeRangeSelect.addEventListener("change", () => void refresh());
-  pageSizeInput.addEventListener("change", () => void refresh());
+  timeRangeSelect.addEventListener("change", () => {
+    void refresh().catch(() => {
+      // Best-effort: avoid unhandled rejections from fire-and-forget UI handlers.
+    });
+  });
+  pageSizeInput.addEventListener("change", () => {
+    void refresh().catch(() => {
+      // Best-effort: avoid unhandled rejections from fire-and-forget UI handlers.
+    });
+  });
 
   const controls = el(
     "div",
@@ -545,12 +573,17 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
   options.container.replaceChildren(root);
 
   const ready = refresh();
+  void ready.catch(() => {
+    // Best-effort: avoid unhandled rejections if callers don't await `ready`.
+  });
 
   const autoRefreshMs = options.autoRefreshMs ?? 0;
   const intervalId =
     autoRefreshMs > 0
       ? globalThis.setInterval(() => {
-          void refresh();
+          void refresh().catch(() => {
+            // Best-effort: avoid unhandled rejections from fire-and-forget auto-refresh.
+          });
         }, autoRefreshMs)
       : null;
 
