@@ -4,6 +4,40 @@ import { DocumentController } from "../../document/documentController.js";
 import { promptAndApplyCustomNumberFormat } from "../promptCustomNumberFormat.js";
 
 describe("promptAndApplyCustomNumberFormat (ribbon)", () => {
+  it("does nothing while editing (does not prompt)", async () => {
+    const showInputBox = vi.fn().mockResolvedValue("0.00");
+    const applyFormattingToSelection = vi.fn();
+
+    await promptAndApplyCustomNumberFormat({
+      isEditing: () => true,
+      showInputBox,
+      getActiveCellNumberFormat: () => null,
+      applyFormattingToSelection,
+    });
+
+    expect(showInputBox).not.toHaveBeenCalled();
+    expect(applyFormattingToSelection).not.toHaveBeenCalled();
+  });
+
+  it("does not apply if editing starts while the prompt is open", async () => {
+    let editing = false;
+    const showInputBox = vi.fn().mockImplementation(async () => {
+      editing = true;
+      return "0.00";
+    });
+    const applyFormattingToSelection = vi.fn();
+
+    await promptAndApplyCustomNumberFormat({
+      isEditing: () => editing,
+      showInputBox,
+      getActiveCellNumberFormat: () => null,
+      applyFormattingToSelection,
+    });
+
+    expect(showInputBox).toHaveBeenCalledTimes(1);
+    expect(applyFormattingToSelection).not.toHaveBeenCalled();
+  });
+
   it("applies the provided number format code", async () => {
     const doc = new DocumentController();
     const showInputBox = vi.fn().mockResolvedValue("0.00");
