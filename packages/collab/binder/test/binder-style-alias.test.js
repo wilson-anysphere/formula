@@ -168,6 +168,54 @@ test("binder preserves legacy `style` across duplicate key encodings even when t
   });
 });
 
+test("binder prefers ciphertext over an enc=null marker across duplicate key encodings", async (t) => {
+  const ydoc = new Y.Doc({ guid: "binder-encryption-null-marker-precedence-doc" });
+  const dc = new DocumentControllerStub();
+
+  const keyBytes = new Uint8Array(32).fill(7);
+  const keyId = "k1";
+
+  const binder = bindYjsToDocumentController({
+    ydoc,
+    documentController: dc,
+    encryption: {
+      keyForCell: (cell) => {
+        if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) {
+          return { keyId, keyBytes };
+        }
+        return null;
+      },
+    },
+  });
+
+  t.after(() => {
+    binder.destroy();
+    ydoc.destroy();
+  });
+
+  const enc = await encryptCellPlaintext({
+    plaintext: { value: "top-secret", formula: null },
+    key: { keyId, keyBytes },
+    context: { docId: ydoc.guid, sheetId: "Sheet1", row: 0, col: 0 },
+  });
+
+  const cells = ydoc.getMap("cells");
+  ydoc.transact(() => {
+    const canonical = new Y.Map();
+    canonical.set("enc", null);
+    cells.set("Sheet1:0:0", canonical);
+
+    const legacy = new Y.Map();
+    legacy.set("enc", enc);
+    cells.set("Sheet1:0,0", legacy);
+  });
+
+  await waitForCondition(() => {
+    const cell = dc.getCell("Sheet1", { row: 0, col: 0 });
+    return cell.value === "top-secret" && cell.formula == null;
+  });
+});
+
 test("binder rehydrate applies decrypted value + decrypted format when an encryption key becomes available (encryptFormat)", async (t) => {
   const ydoc = new Y.Doc({ guid: "binder-rehydrate-encryptFormat-doc" });
   const dc = new DocumentControllerStub();

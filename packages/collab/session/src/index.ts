@@ -644,6 +644,24 @@ export class CollabSession {
     });
   }
 
+  private bestEncryptedPayloadForKeys(keys: Iterable<string>): unknown | undefined {
+    let sawNullMarker = false;
+    for (const key of keys) {
+      const cellData = this.cells.get(key);
+      const ycell = getYMapCell(cellData);
+      if (!ycell) continue;
+      const encRaw = ycell.get("enc");
+      if (encRaw === undefined) continue;
+      // Prefer a non-null payload over an `enc: null` marker when duplicates exist
+      // across legacy key encodings. This avoids mistakenly treating a cell as
+      // "unsupported encrypted payload" when decryptable ciphertext exists under
+      // another alias key.
+      if (encRaw !== null) return encRaw;
+      sawNullMarker = true;
+    }
+    return sawNullMarker ? null : undefined;
+  }
+
   private getEncryptedPayloadForCell(cell: CellAddress): unknown | undefined {
     // Cells may exist under historical key encodings (`${sheetId}:${row},${col}`) or
     // the unit-test convenience form (`r{row}c{col}`). Treat any `enc` marker under
@@ -653,15 +671,18 @@ export class CollabSession {
       keys.push(`r${cell.row}c${cell.col}`);
     }
 
-    for (const key of keys) {
-      const cellData = this.cells.get(key);
-      const ycell = getYMapCell(cellData);
-      if (!ycell) continue;
-      const encRaw = ycell.get("enc");
-      if (encRaw !== undefined) return encRaw;
-    }
+    return this.bestEncryptedPayloadForKeys(keys);
+  }
 
-    return undefined;
+  private getEncryptedPayloadForCellKey(cellKey: string, cell: CellAddress): unknown | undefined {
+    // `cellKey` may be a non-canonical encoding (including legacy or malformed keys
+    // like `:0:0`). Include it in the scan so we don't miss `enc` markers stored
+    // under that exact key.
+    const keys: string[] = [makeCellKey(cell), cellKey, `${cell.sheetId}:${cell.row},${cell.col}`];
+    if (cell.sheetId === this.defaultSheetId) {
+      keys.push(`r${cell.row}c${cell.col}`);
+    }
+    return this.bestEncryptedPayloadForKeys(keys);
   }
 
   constructor(options: CollabSessionOptions = {}) {
@@ -2100,15 +2121,24 @@ export class CollabSession {
 
     // If any key for this coordinate is encrypted, treat the cell as encrypted
     // and do not fall back to plaintext duplicates.
+    //
+    // Prefer a non-null encrypted payload over an `enc: null` marker when duplicates exist
+    // across legacy key encodings (some foreign writers may store ciphertext under a legacy
+    // key while leaving a marker under the canonical key).
+    let encryptedMarkerCell: Y.Map<unknown> | null = null;
     for (const key of keys) {
       const cellData = this.cells.get(key);
       const candidate = getYMapCell(cellData);
       if (!candidate) continue;
-      if (candidate.get("enc") !== undefined) {
+      const encRaw = candidate.get("enc");
+      if (encRaw === undefined) continue;
+      if (encRaw !== null) {
         cell = candidate;
         break;
       }
+      if (!encryptedMarkerCell) encryptedMarkerCell = candidate;
     }
+    if (!cell && encryptedMarkerCell) cell = encryptedMarkerCell;
 
     if (!cell) {
       for (const key of keys) {
@@ -2345,8 +2375,7 @@ export class CollabSession {
 
     const cellData = this.cells.get(cellKey);
     const existingCell = getYMapCell(cellData);
-    const directEnc = existingCell?.get("enc");
-    const existingEnc = directEnc !== undefined ? directEnc : (parsedMaybe ? this.getEncryptedPayloadForCell(parsedMaybe) : undefined);
+    const existingEnc = parsedMaybe ? this.getEncryptedPayloadForCellKey(cellKey, parsedMaybe) : existingCell?.get("enc");
 
     const needsCellAddress = this.encryption != null || existingEnc !== undefined;
     const parsed = needsCellAddress ? parsedMaybe : null;
@@ -2383,7 +2412,8 @@ export class CollabSession {
         // (old clients could otherwise overwrite encrypted content).
         let cellData = this.cells.get(cellKey);
         let cell = getYMapCell(cellData);
-        if (cell && cell.get("enc") !== undefined) {
+        const encNow = parsed ? this.getEncryptedPayloadForCellKey(cellKey, parsed) : cell?.get("enc");
+        if (encNow !== undefined) {
           throw new Error(`Refusing to write plaintext to encrypted cell ${cellKey}`);
         }
 
@@ -2474,8 +2504,11 @@ export class CollabSession {
       // Re-check inside the transaction to avoid racing with remote updates that
       // may have encrypted this cell while we were preparing a plaintext write.
       const existing = getYMapCell(this.cells.get(cellKey));
-      if (!encryptedPayload && existing?.get("enc") !== undefined) {
-        throw new Error(`Refusing to write plaintext to encrypted cell ${cellKey}`);
+      if (!encryptedPayload) {
+        const encNow = parsed ? this.getEncryptedPayloadForCellKey(cellKey, parsed) : existing?.get("enc");
+        if (encNow !== undefined) {
+          throw new Error(`Refusing to write plaintext to encrypted cell ${cellKey}`);
+        }
       }
 
       if (!encryptedPayload && monitor && this.formulaConflictsIncludeValueConflicts) {
@@ -2570,8 +2603,7 @@ export class CollabSession {
 
     const cellData = this.cells.get(cellKey);
     const existingCell = getYMapCell(cellData);
-    const directEnc = existingCell?.get("enc");
-    const existingEnc = directEnc !== undefined ? directEnc : (parsedMaybe ? this.getEncryptedPayloadForCell(parsedMaybe) : undefined);
+    const existingEnc = parsedMaybe ? this.getEncryptedPayloadForCellKey(cellKey, parsedMaybe) : existingCell?.get("enc");
 
     const needsCellAddress = this.encryption != null || existingEnc !== undefined;
     const parsed = needsCellAddress ? parsedMaybe : null;
@@ -2717,7 +2749,8 @@ export class CollabSession {
           this.cells.set(cellKey, cell);
         }
 
-        if (cell.get("enc") !== undefined) {
+        const encNow = parsed ? this.getEncryptedPayloadForCellKey(cellKey, parsed) : cell.get("enc");
+        if (encNow !== undefined) {
           throw new Error(`Refusing to write plaintext to encrypted cell ${cellKey}`);
         }
 
@@ -2739,7 +2772,8 @@ export class CollabSession {
 
       // Re-check inside the transaction to avoid racing with remote updates that
       // may have encrypted this cell while we were preparing a plaintext write.
-      if (cell.get("enc") !== undefined) {
+      const encNow = parsed ? this.getEncryptedPayloadForCellKey(cellKey, parsed) : cell.get("enc");
+      if (encNow !== undefined) {
         throw new Error(`Refusing to write plaintext to encrypted cell ${cellKey}`);
       }
 
@@ -2812,12 +2846,10 @@ export class CollabSession {
     const encryptions: Array<Promise<void>> = [];
     const encryptFormat = Boolean(this.encryption?.encryptFormat);
 
-    for (const update of planned) {
-      const cellData = this.cells.get(update.cellKey);
-      const existingCell = getYMapCell(cellData);
-      const directEnc = existingCell?.get("enc");
-      const existingEnc =
-        directEnc !== undefined ? directEnc : (update.parsed ? this.getEncryptedPayloadForCell(update.parsed) : undefined);
+      for (const update of planned) {
+        const cellData = this.cells.get(update.cellKey);
+        const existingCell = getYMapCell(cellData);
+        const existingEnc = update.parsed ? this.getEncryptedPayloadForCellKey(update.cellKey, update.parsed) : existingCell?.get("enc");
 
       const needsCellAddress = this.encryption != null || existingEnc !== undefined;
       const encryptionCell = needsCellAddress ? update.parsed : null;
@@ -2955,8 +2987,7 @@ export class CollabSession {
       for (const update of planned) {
         if (update.shouldEncrypt) continue;
         if (!update.parsed) continue;
-        const directEnc = getYMapCell(this.cells.get(update.cellKey))?.get("enc");
-        const encRaw = directEnc !== undefined ? directEnc : this.getEncryptedPayloadForCell(update.parsed);
+        const encRaw = this.getEncryptedPayloadForCellKey(update.cellKey, update.parsed);
         if (encRaw !== undefined) {
           throw new Error(`Refusing to write plaintext to encrypted cell ${update.cellKey}`);
         }

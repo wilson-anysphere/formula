@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import * as Y from "yjs";
 
 import { createCollabSession } from "../src/index.ts";
+import { encryptCellPlaintext } from "../../encryption/src/index.node.js";
 
 const REMOTE_ORIGIN = Symbol("remote");
 
@@ -228,6 +229,62 @@ test("CollabSession setCells refuses to write plaintext when an enc marker is pr
   assert.equal(raw.get("enc"), null);
   assert.equal(raw.get("value"), undefined);
   assert.equal(raw.get("formula"), undefined);
+
+  session.destroy();
+  doc.destroy();
+});
+
+test("CollabSession prefers a non-null enc payload over an enc=null marker across legacy cell keys", async () => {
+  const docId = "collab-session-encryption-null-marker-precedence-test-doc";
+  const doc = new Y.Doc({ guid: docId });
+
+  const keyBytes = new Uint8Array(32).fill(7);
+  const keyId = "k-range-1";
+
+  const enc = await encryptCellPlaintext({
+    plaintext: { value: "top-secret", formula: null },
+    key: { keyId, keyBytes },
+    context: { docId, sheetId: "Sheet1", row: 0, col: 0 },
+  });
+
+  // Simulate a foreign/legacy doc state:
+  // - canonical key has an `enc: null` marker (encryption marker)
+  // - legacy key stores the real ciphertext payload
+  doc.transact(() => {
+    const cells = doc.getMap("cells");
+
+    const marker = new Y.Map();
+    marker.set("enc", null);
+    cells.set("Sheet1:0:0", marker);
+
+    const payload = new Y.Map();
+    payload.set("enc", enc);
+    cells.set("Sheet1:0,0", payload);
+  });
+
+  const session = createCollabSession({
+    doc,
+    encryption: {
+      keyForCell: (cell) => {
+        if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) {
+          return { keyId, keyBytes };
+        }
+        return null;
+      },
+    },
+  });
+
+  assert.equal(session.canReadCell({ sheetId: "Sheet1", row: 0, col: 0 }), true);
+  assert.equal(session.canEditCell({ sheetId: "Sheet1", row: 0, col: 0 }), true);
+
+  const cell = await session.getCell("Sheet1:0:0");
+  assert.equal(cell?.value ?? null, "top-secret");
+  assert.equal(cell?.formula ?? null, null);
+
+  // Ensure writes don't fail closed due to the marker when ciphertext exists on another alias.
+  await session.setCellValue("Sheet1:0:0", "updated");
+  const updated = await session.getCell("Sheet1:0:0");
+  assert.equal(updated?.value ?? null, "updated");
 
   session.destroy();
   doc.destroy();

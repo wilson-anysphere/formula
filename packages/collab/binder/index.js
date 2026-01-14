@@ -790,8 +790,18 @@ export function bindYjsToDocumentController(options) {
 
     if (encryptedCandidates.length > 0) {
       const encryptFormat = Boolean(encryption?.encryptFormat);
+      // Prefer a non-null encrypted payload over an `enc: null` marker when duplicates exist.
+      // Some foreign writers may store ciphertext under a legacy key encoding while leaving a
+      // marker under the canonical key. In that case, we must choose the ciphertext so the
+      // cell can be decrypted/read (and so key-id based checks don't incorrectly fail closed).
+      const payloadCandidates = encryptedCandidates.filter(({ cell }) => {
+        const encRaw = typeof cell.has === "function" ? (cell.has("enc") ? cell.get("enc") : undefined) : cell.get("enc");
+        return encRaw !== undefined && encRaw !== null;
+      });
       const chosen =
-        encryptedCandidates.find((entry) => entry.rawKey === canonicalKey) ?? encryptedCandidates[0];
+        (payloadCandidates.length > 0
+          ? payloadCandidates.find((entry) => entry.rawKey === canonicalKey) ?? payloadCandidates[0]
+          : encryptedCandidates.find((entry) => entry.rawKey === canonicalKey) ?? encryptedCandidates[0]);
       const parsed = await readCellFromYjs(chosen.cell, cellRef, encryption, docIdForEncryption, maskFn);
       // Back-compat: when `encryptFormat` is disabled (legacy behavior), allow plaintext
       // formatting to remain readable even when value/formula are encrypted.
@@ -2823,6 +2833,7 @@ export function bindYjsToDocumentController(options) {
     let existingEncKeyId = null;
     /** @type {boolean | null} */
     let encPayloadSupported = null;
+    let sawNullMarker = false;
     for (const rawKey of targets) {
       const cellData = cells.get(rawKey);
       const cell = getYMapCell(cellData);
@@ -2830,6 +2841,13 @@ export function bindYjsToDocumentController(options) {
       const encRaw = typeof cell.has === "function" ? (cell.has("enc") ? cell.get("enc") : undefined) : cell.get("enc");
       if (encRaw !== undefined) {
         existingEnc = true;
+        if (encRaw === null) {
+          // Marker-only `enc: null` cell. Keep scanning in case another alias key
+          // stores a non-null payload (ciphertext) for this coordinate.
+          sawNullMarker = true;
+          continue;
+        }
+
         existingEncPayload = encRaw;
         encPayloadSupported = isEncryptedCellPayload(encRaw);
         const keyId = (() => {
@@ -2854,6 +2872,10 @@ export function bindYjsToDocumentController(options) {
         }
         break;
       }
+    }
+    if (existingEnc && existingEncPayload === undefined && sawNullMarker) {
+      existingEncPayload = null;
+      encPayloadSupported = false;
     }
 
     const key = encryption?.keyForCell?.(cellRef) ?? null;
