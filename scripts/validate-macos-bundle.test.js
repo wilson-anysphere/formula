@@ -102,6 +102,11 @@ test(
     writeFileSync(join(resourcesDir, "LICENSE"), "license", { encoding: "utf8" });
     writeFileSync(join(resourcesDir, "NOTICE"), "notice", { encoding: "utf8" });
 
+    const resourcesDir = join(appRoot, "Resources");
+    mkdirSync(resourcesDir, { recursive: true });
+    writeFileSync(join(resourcesDir, "LICENSE"), "LICENSE stub", { encoding: "utf8" });
+    writeFileSync(join(resourcesDir, "NOTICE"), "NOTICE stub", { encoding: "utf8" });
+
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: expectedIdentifier,
       version: expectedVersion,
@@ -137,6 +142,11 @@ test(
     mkdirSync(resourcesDir, { recursive: true });
     writeFileSync(join(resourcesDir, "LICENSE"), "license", { encoding: "utf8" });
     writeFileSync(join(resourcesDir, "NOTICE"), "notice", { encoding: "utf8" });
+
+    const resourcesDir = join(appRoot, "Resources");
+    mkdirSync(resourcesDir, { recursive: true });
+    writeFileSync(join(resourcesDir, "LICENSE"), "LICENSE stub", { encoding: "utf8" });
+    writeFileSync(join(resourcesDir, "NOTICE"), "NOTICE stub", { encoding: "utf8" });
 
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: "com.example.wrong",
@@ -175,6 +185,11 @@ test(
     mkdirSync(resourcesDir, { recursive: true });
     writeFileSync(join(resourcesDir, "LICENSE"), "license", { encoding: "utf8" });
     writeFileSync(join(resourcesDir, "NOTICE"), "notice", { encoding: "utf8" });
+
+    const resourcesDir = join(appRoot, "Resources");
+    mkdirSync(resourcesDir, { recursive: true });
+    writeFileSync(join(resourcesDir, "LICENSE"), "LICENSE stub", { encoding: "utf8" });
+    writeFileSync(join(resourcesDir, "NOTICE"), "NOTICE stub", { encoding: "utf8" });
 
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: expectedIdentifier,
