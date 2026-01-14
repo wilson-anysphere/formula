@@ -1593,21 +1593,6 @@ where
 /// validating/processing pivots). These IPC-only mirror types apply conservative size limits at
 /// deserialization time and are converted to the core `PivotConfig` after validation.
 pub type PivotText = LimitedString<{ crate::resource_limits::MAX_PIVOT_TEXT_BYTES }>;
-
-fn pivot_field_ref_from_ipc(field: String) -> PivotFieldRef {
-    // Keep behavior aligned with `PivotFieldRef`'s serde `Deserialize` implementation and
-    // `formula_engine::pivot`'s internal `pivot_field_ref_from_legacy_string`.
-    //
-    // DAX-looking strings become structured refs; everything else stays a cache field name.
-    if let Some(measure) = formula_model::pivots::parse_dax_measure_ref(&field) {
-        return PivotFieldRef::DataModelMeasure(measure);
-    }
-    if let Some((table, column)) = formula_model::pivots::parse_dax_column_ref(&field) {
-        return PivotFieldRef::DataModelColumn { table, column };
-    }
-    PivotFieldRef::CacheFieldName(field)
-}
-
 /// IPC-friendly mirror of `formula_engine::pivot::PivotKeyPart` with resource limits applied.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", content = "value", rename_all = "camelCase")]
@@ -1768,7 +1753,7 @@ impl<'de> Deserialize<'de> for IpcPivotFieldRef {
 impl From<IpcPivotFieldRef> for PivotFieldRef {
     fn from(value: IpcPivotFieldRef) -> Self {
         match value {
-            IpcPivotFieldRef::Text(raw) => pivot_field_ref_from_ipc(raw.into_inner()),
+            IpcPivotFieldRef::Text(raw) => PivotFieldRef::from_unstructured_owned(raw.into_inner()),
             IpcPivotFieldRef::Column { table, column } => PivotFieldRef::DataModelColumn {
                 table: table.into_inner(),
                 column: column.into_inner(),
