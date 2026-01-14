@@ -5899,6 +5899,7 @@ export class SpreadsheetApp {
       return `${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`;
     };
 
+    const sheetId = this.sheetId;
     const placeAt = opts?.placeAt ?? this.selection.active;
     const anchorCell = { row: placeAt.row, col: placeAt.col };
 
@@ -6075,7 +6076,7 @@ export class SpreadsheetApp {
       // overwriting those changes by re-reading the current sheet drawings here.
       const baseDrawings = (() => {
         try {
-          const raw = docAny.getSheetDrawings(this.sheetId);
+          const raw = docAny.getSheetDrawings(sheetId);
           return Array.isArray(raw) ? raw : [];
         } catch {
           return [];
@@ -6099,7 +6100,7 @@ export class SpreadsheetApp {
         ...baseDrawings,
         ...prepared.map((p) => ({ ...(p.drawing as any), id: String(p.drawing.id) })),
       ];
-      docAny.setSheetDrawings(this.sheetId, nextDrawings, { label: "Insert Picture" });
+      docAny.setSheetDrawings(sheetId, nextDrawings, { label: "Insert Picture" });
       this.document.endBatch();
       toastSkippedOversized();
     } catch (err) {
@@ -6107,7 +6108,9 @@ export class SpreadsheetApp {
       throw err;
     }
 
-    if (prepared.length > 0) {
+    const stillOnSheet = this.sheetId === sheetId;
+
+    if (prepared.length > 0 && stillOnSheet) {
       const insertedObjects = prepared.map((p) => p.drawing);
       const lastInsertedId = insertedObjects[insertedObjects.length - 1]!.id;
       // Ensure subsequent reads re-derive drawing state from the DocumentController snapshot.
@@ -6132,11 +6135,13 @@ export class SpreadsheetApp {
       }
     }
 
-    // Ensure the drawings overlay is up-to-date after the batch completes.
-    this.renderDrawings();
-    this.renderSelection();
-    this.emitDrawingsChanged();
-    this.focus();
+    if (stillOnSheet) {
+      // Ensure the drawings overlay is up-to-date after the batch completes.
+      this.renderDrawings();
+      this.renderSelection();
+      this.emitDrawingsChanged();
+      this.focus();
+    }
   }
 
 

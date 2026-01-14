@@ -297,4 +297,48 @@ describe("SpreadsheetApp pictures/drawings sheet switching", () => {
     app.destroy();
     root.remove();
   });
+
+  it("inserts pictures into the original sheet even if the user switches sheets mid-insert", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc: any = app.getDocument();
+
+    // Ensure Sheet2 exists so we can switch away while the image bytes are still loading.
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "X");
+
+    let resolveBytes: ((buf: ArrayBuffer) => void) | null = null;
+    const arrayBuffer = new Promise<ArrayBuffer>((resolve) => {
+      resolveBytes = resolve;
+    });
+    const file = {
+      name: "slow.png",
+      type: "image/png",
+      size: 4,
+      arrayBuffer: () => arrayBuffer,
+    } as any as File;
+
+    const insertPromise = app.insertPicturesFromFiles([file], { placeAt: { row: 0, col: 0 } });
+
+    // Switch sheets while `insertPicturesFromFiles` is awaiting the file bytes.
+    app.activateSheet("Sheet2");
+    expect(app.getDrawingsDebugState().sheetId).toBe("Sheet2");
+
+    resolveBytes?.(new Uint8Array([1, 2, 3, 4]).buffer);
+    await insertPromise;
+
+    // Picture should land on Sheet1 (where the insert was initiated), not the newly active sheet.
+    expect(Array.isArray(doc.getSheetDrawings("Sheet1")) ? doc.getSheetDrawings("Sheet1") : []).toHaveLength(1);
+    expect(Array.isArray(doc.getSheetDrawings("Sheet2")) ? doc.getSheetDrawings("Sheet2") : []).toHaveLength(0);
+    // And it should not disrupt the current sheet's drawing selection.
+    expect(app.getDrawingsDebugState().selectedId).toBe(null);
+
+    app.destroy();
+    root.remove();
+  });
 });
