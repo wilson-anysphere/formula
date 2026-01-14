@@ -15,7 +15,9 @@ fn read_zip_part(path: &Path, part_path: &str) -> Vec<u8> {
     let file = File::open(path).expect("open xlsb");
     let mut zip = zip::ZipArchive::new(file).expect("open zip");
     let mut entry = zip.by_name(part_path).expect("find part");
-    let mut bytes = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut bytes = Vec::new();
     entry.read_to_end(&mut bytes).expect("read part bytes");
     bytes
 }

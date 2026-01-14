@@ -32,7 +32,9 @@ fn patch_sheet_bin_rejects_out_of_range_cell_edit_row() {
     let mut entry = zip
         .by_name("xl/worksheets/sheet1.bin")
         .expect("find sheet1.bin");
-    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut sheet_bin = Vec::new();
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
 
     let err = patch_sheet_bin(
@@ -74,7 +76,9 @@ fn patch_sheet_bin_rejects_out_of_range_cell_edit_col() {
     let mut entry = zip
         .by_name("xl/worksheets/sheet1.bin")
         .expect("find sheet1.bin");
-    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut sheet_bin = Vec::new();
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
 
     let err = patch_sheet_bin(
@@ -116,7 +120,9 @@ fn patch_sheet_bin_allows_cell_edit_at_excel_grid_limit() {
     let mut entry = zip
         .by_name("xl/worksheets/sheet1.bin")
         .expect("find sheet1.bin");
-    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut sheet_bin = Vec::new();
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
 
     patch_sheet_bin(
