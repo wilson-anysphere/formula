@@ -90,6 +90,9 @@ export async function confirm(message: string, opts: ConfirmDialogOptions = {}):
       ],
       { placeHolder: `${prefix}${message}` },
     );
+    // `showQuickPick` returns null when it cannot open a dialog (e.g. another modal is already open).
+    // Treat that the same as "no dialog API available" so callers can control behavior via `fallbackValue`.
+    if (choice == null) return fallback;
     return choice === true;
   }
 

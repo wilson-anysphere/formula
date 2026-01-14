@@ -162,4 +162,35 @@ describe("tauri/nativeDialogs", () => {
     await expect(alertPromise).resolves.toBeUndefined();
     expect(alertSpy).not.toHaveBeenCalled();
   });
+
+  it("fails closed when another modal dialog is already open (quick-pick fallback cannot show)", async () => {
+    const originalToString = Function.prototype.toString;
+
+    const confirmSpy = vi.fn(() => true);
+    const alertSpy = vi.fn(() => undefined);
+
+    // Make the stubs appear "native" so nativeDialogs skips them and uses the quick-pick fallback.
+    vi.spyOn(Function.prototype, "toString").mockImplementation(function (this: unknown): string {
+      if (this === confirmSpy) return "function confirm() { [native code] }";
+      if (this === alertSpy) return "function alert() { [native code] }";
+      return originalToString.call(this as any);
+    });
+
+    vi.stubGlobal("__TAURI__", undefined);
+    vi.stubGlobal("window", { confirm: confirmSpy, alert: alertSpy });
+
+    // Simulate another modal already being open.
+    const blocking = document.createElement("dialog");
+    blocking.setAttribute("open", "");
+    document.body.appendChild(blocking);
+
+    // In this situation we treat the prompt as cancelled so callers don't hang.
+    await expect(nativeDialogs.confirm("Discard?")).resolves.toBe(false);
+    await expect(nativeDialogs.confirm("Discard?", { fallbackValue: true })).resolves.toBe(true);
+    await expect(nativeDialogs.alert("Something went wrong")).resolves.toBeUndefined();
+
+    expect(document.querySelectorAll('dialog[data-testid="quick-pick"]').length).toBe(0);
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(alertSpy).not.toHaveBeenCalled();
+  });
 });
