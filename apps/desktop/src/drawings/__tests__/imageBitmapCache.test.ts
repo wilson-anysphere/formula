@@ -153,6 +153,45 @@ describe("ImageBitmapCache", () => {
     expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
   });
 
+  it("swallows async getOrRequest() onReady rejections (prevents unhandled promise rejections)", async () => {
+    const cache = new ImageBitmapCache({ maxEntries: 16, negativeCacheMs: 0 });
+    const entry = makeEntry("img_onReady_async_reject");
+
+    let resolveDecode!: (bitmap: ImageBitmap) => void;
+    const inflightDecode = new Promise<ImageBitmap>((resolve) => {
+      resolveDecode = resolve;
+    });
+
+    const createImageBitmapMock = vi.fn().mockReturnValueOnce(inflightDecode);
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const unhandled: unknown[] = [];
+    const handler = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", handler);
+    try {
+      const onReady = vi.fn(async () => {
+        throw new Error("boom");
+      });
+
+      expect(cache.getOrRequest(entry, onReady)).toBeNull();
+      expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+
+      resolveDecode({ close: vi.fn() } as unknown as ImageBitmap);
+
+      // Allow the cache's internal `.then` handlers + callback dispatch to run.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(onReady).toHaveBeenCalledTimes(1);
+      expect(unhandled).toHaveLength(0);
+    } finally {
+      process.off("unhandledRejection", handler);
+    }
+  });
+
   it("does not drop a shared in-flight decode when one waiter aborts", async () => {
     const cache = new ImageBitmapCache({ negativeCacheMs: 0 });
     const entry = makeEntry();
