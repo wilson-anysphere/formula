@@ -6130,25 +6130,42 @@ export class DocumentController {
   }
 
   /**
-   * Apply a set of image deltas that originated externally (e.g. collaboration sync).
+   * Apply a set of workbook image store deltas that originated externally (e.g. collaboration sync).
    *
    * Like {@link applyExternalDrawingDeltas}, these updates:
    * - bypass undo/redo history (not user-editable)
    * - emit `change` + `update` events so UI layers can react
    * - mark the document dirty by default
    *
+   * Callers should provide the full `before`/`after` ImageEntry payloads (including bytes) so
+   * the controller can apply changes and emit accurate change metadata. No-op deltas are ignored.
+   *
    * @param {ImageDelta[]} deltas
    * @param {{ source?: string, markDirty?: boolean }} [options]
    */
   applyExternalImageDeltas(deltas, options = {}) {
-    if (!deltas || deltas.length === 0) return;
+    if (!Array.isArray(deltas) || deltas.length === 0) return;
+
+    /** @type {ImageDelta[]} */
+    const filtered = [];
+    for (const delta of deltas) {
+      if (!delta) continue;
+      const imageId = String(delta.imageId ?? "").trim();
+      if (!imageId) continue;
+      const before = delta.before ?? null;
+      const after = delta.after ?? null;
+      if (imageEntryEquals(before, after)) continue;
+      filtered.push({ imageId, before, after });
+    }
+
+    if (filtered.length === 0) return;
 
     // External updates should never merge with user edits.
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
     const source = typeof options.source === "string" ? options.source : undefined;
-    this.#applyEdits([], [], [], [], [], deltas, [], null, { recalc: false, emitChange: true, source });
+    this.#applyEdits([], [], [], [], [], filtered, [], null, { recalc: false, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     if (options.markDirty !== false) {

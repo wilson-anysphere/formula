@@ -3985,38 +3985,78 @@ export class SpreadsheetApp {
     this.activeSheetBackgroundAbort = null;
 
     const doc: any = this.document as any;
+
+    // Normalize existing image store into a stable map keyed by trimmed ids.
+    const existingById = new Map<string, unknown>();
     const existingImages: unknown = doc?.images;
-    const existingIds = existingImages instanceof Map ? Array.from(existingImages.keys()).map((id) => String(id ?? "")) : [];
+    if (existingImages instanceof Map) {
+      for (const [rawId, entry] of existingImages.entries()) {
+        const id = String(rawId ?? "").trim();
+        if (!id) continue;
+        if (!existingById.has(id)) existingById.set(id, entry);
+      }
+    } else if (existingImages && typeof existingImages === "object") {
+      for (const [rawId, entry] of Object.entries(existingImages as Record<string, unknown>)) {
+        const id = String(rawId ?? "").trim();
+        if (!id) continue;
+        if (!existingById.has(id)) existingById.set(id, entry);
+      }
+    }
 
     const nextById = new Map<string, ImageEntry>();
     for (const entry of images) {
       const id = typeof entry?.id === "string" ? entry.id.trim() : "";
       if (!id) continue;
+      if (!(entry?.bytes instanceof Uint8Array)) continue;
       nextById.set(id, entry);
     }
 
-    // Batch so workbook image hydration becomes a single undo step.
-    this.document.beginBatch({ label: "Set workbook images" });
-    try {
-      for (const id of existingIds) {
-        if (!id) continue;
+    // Prefer a non-undoable "external deltas" path for hydration/testing hooks.
+    // This avoids polluting undo history and (by default) does not mark the document dirty.
+    if (typeof doc?.applyExternalImageDeltas === "function") {
+      /** @type {any[]} */
+      const deltas: any[] = [];
+
+      for (const [id, before] of existingById.entries()) {
         if (nextById.has(id)) continue;
-        try {
-          this.document.deleteImage(id, { source: "setWorkbookImages" });
-        } catch {
-          // ignore
-        }
+        deltas.push({ imageId: id, before, after: null });
       }
 
-      for (const [id, entry] of nextById) {
-        try {
-          this.document.setImage(id, { bytes: entry.bytes, mimeType: entry.mimeType }, { source: "setWorkbookImages" });
-        } catch {
-          // ignore
-        }
+      for (const [id, entry] of nextById.entries()) {
+        const before = existingById.get(id) ?? null;
+        deltas.push({ imageId: id, before, after: { bytes: entry.bytes, mimeType: entry.mimeType } });
       }
-    } finally {
-      this.document.endBatch();
+
+      try {
+        doc.applyExternalImageDeltas(deltas, { source: "setWorkbookImages", markDirty: false });
+      } catch {
+        // ignore
+      }
+    } else {
+      // Fallback: apply via undoable mutations (legacy/older controller builds).
+      const existingIds = Array.from(existingById.keys());
+      // Batch so workbook image hydration becomes a single undo step.
+      this.document.beginBatch({ label: "Set workbook images" });
+      try {
+        for (const id of existingIds) {
+          if (nextById.has(id)) continue;
+          try {
+            this.document.deleteImage(id, { source: "setWorkbookImages" });
+          } catch {
+            // ignore
+          }
+        }
+
+        for (const [id, entry] of nextById) {
+          try {
+            this.document.setImage(id, { bytes: entry.bytes, mimeType: entry.mimeType }, { source: "setWorkbookImages" });
+          } catch {
+            // ignore
+          }
+        }
+      } finally {
+        this.document.endBatch();
+      }
     }
 
     // ImageBitmap caches live inside individual CanvasGridRenderer instances. When the
