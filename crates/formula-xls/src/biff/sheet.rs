@@ -2966,6 +2966,18 @@ const MAX_HYPERLINKS_PER_SHEET: usize = 50_000;
 #[cfg(test)]
 const MAX_HYPERLINKS_PER_SHEET: usize = 100;
 
+/// Hard cap on the number of BIFF records scanned while searching for hyperlinks.
+///
+/// The `.xls` importer performs multiple best-effort passes over each worksheet substream (e.g.
+/// hyperlinks, notes, view state). Without a cap, a crafted workbook with millions of cell records
+/// can force excessive work even when a particular feature is absent (e.g. a sheet with no
+/// hyperlinks would still require scanning the entire substream).
+#[cfg(not(test))]
+const MAX_RECORDS_SCANNED_PER_SHEET_HYPERLINK_SCAN: usize = 500_000;
+// Keep unit tests fast by using a smaller cap.
+#[cfg(test)]
+const MAX_RECORDS_SCANNED_PER_SHEET_HYPERLINK_SCAN: usize = 1_000;
+
 /// Scan a worksheet BIFF substream for hyperlink records (HLINK, id 0x01B8).
 ///
 /// This is a best-effort parser: malformed records are skipped and surfaced as warnings rather
@@ -2984,6 +2996,7 @@ pub(crate) fn parse_biff_sheet_hyperlinks(
     let iter =
         records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
 
+    let mut scanned = 0usize;
     for record in iter {
         let record = match record {
             Ok(record) => record,
@@ -2998,6 +3011,17 @@ pub(crate) fn parse_biff_sheet_hyperlinks(
         // BOF indicates the start of a new substream; stop before consuming the next section so we
         // don't attribute later hyperlinks to this worksheet.
         if record.offset != start && records::is_bof_record(record.record_id) {
+            break;
+        }
+
+        scanned = scanned.saturating_add(1);
+        if scanned > MAX_RECORDS_SCANNED_PER_SHEET_HYPERLINK_SCAN {
+            push_warning_bounded_force(
+                &mut out.warnings,
+                format!(
+                    "too many BIFF records while scanning sheet hyperlinks (cap={MAX_RECORDS_SCANNED_PER_SHEET_HYPERLINK_SCAN}); stopping early"
+                ),
+            );
             break;
         }
 
@@ -5329,4 +5353,101 @@ mod tests {
             vec!["too many hyperlinks; additional HLINK records skipped".to_string()]
         );
     }
-}
+
+    #[test]
+    fn sheet_hyperlink_scan_stops_after_record_cap() {
+        let cap = MAX_RECORDS_SCANNED_PER_SHEET_HYPERLINK_SCAN;
+        assert!(cap >= 10, "test requires cap >= 10");
+
+        fn internal_hlink_payload(location: &str) -> Vec<u8> {
+            let mut data = Vec::new();
+
+            // ref8 anchor: A1 (0-based row/col).
+            data.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+            data.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+            data.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+            data.extend_from_slice(&0u16.to_le_bytes()); // colLast
+
+            // guid (ignored).
+            data.extend_from_slice(&[0u8; 16]);
+
+            // streamVersion + linkOpts.
+            data.extend_from_slice(&2u32.to_le_bytes());
+            data.extend_from_slice(&HLINK_FLAG_HAS_LOCATION.to_le_bytes());
+
+            // HyperlinkString (u32 char count + UTF-16LE bytes).
+            let u16s: Vec<u16> = location.encode_utf16().collect();
+            data.extend_from_slice(&(u16s.len() as u32).to_le_bytes());
+            for ch in u16s {
+                data.extend_from_slice(&ch.to_le_bytes());
+            }
+
+            data
+        }
+
+        let mut stream: Vec<u8> = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+        for _ in 0..(cap + 10) {
+            stream.extend_from_slice(&record(0x1234, &[]));
+        }
+        // This record should be ignored because the scan stops at the record cap.
+        stream.extend_from_slice(&record(RECORD_HLINK, &internal_hlink_payload("Sheet1!A1")));
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff_sheet_hyperlinks(&stream, 0, 1252).expect("parse");
+        assert_eq!(parsed.hyperlinks.len(), 0);
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("too many BIFF records") && w.contains("hyperlinks")),
+            "expected record-cap warning, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn sheet_hyperlink_record_cap_warning_is_emitted_even_when_other_warnings_are_suppressed() {
+        let record_cap = MAX_RECORDS_SCANNED_PER_SHEET_HYPERLINK_SCAN;
+        assert!(
+            record_cap > MAX_WARNINGS_PER_SHEET + 10,
+            "test requires record cap to exceed warning cap"
+        );
+
+        let mut stream: Vec<u8> = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // Fill the warning buffer with malformed HLINK records (payload too short).
+        for _ in 0..(MAX_WARNINGS_PER_SHEET + 10) {
+            stream.extend_from_slice(&record(RECORD_HLINK, &[]));
+        }
+
+        // Exceed the record-scan cap.
+        for _ in 0..(record_cap + 10) {
+            stream.extend_from_slice(&record(0x1234, &[]));
+        }
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff_sheet_hyperlinks(&stream, 0, 1252).expect("parse");
+        assert_eq!(
+            parsed.warnings.len(),
+            MAX_WARNINGS_PER_SHEET + 1,
+            "warnings should remain capped; warnings={:?}",
+            parsed.warnings
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("too many BIFF records") && w.contains("hyperlinks")),
+            "expected forced record-cap warning, got {:?}",
+            parsed.warnings
+        );
+        assert_eq!(
+            parsed.warnings.last().map(String::as_str),
+            Some(WARNINGS_SUPPRESSED_MESSAGE),
+            "suppression marker should remain last; warnings={:?}",
+            parsed.warnings
+        );
+    }
+} 
