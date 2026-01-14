@@ -20,6 +20,7 @@ import {
   resizeAnchor,
   shiftAnchor,
   type DrawingInteractionCallbacks,
+  type DrawingInteractionCommitKind,
 } from "../drawings/interaction.js";
 import {
   cursorForRotationHandle,
@@ -15745,6 +15746,16 @@ export class SpreadsheetApp {
   }
 
   private onPointerDown(e: PointerEvent): void {
+    // When the dedicated DrawingInteractionController is enabled (via `enableDrawingInteractions`),
+    // it owns primary-button drawing selection + drag/resize gestures and calls `preventDefault()`
+    // / `stopPropagation()` to keep grid selection stable.
+    //
+    // We still want SpreadsheetApp to handle non-drawing pointerdowns (cell selection, fill handle,
+    // etc), so only bail out when the event was already claimed by the controller.
+    if (this.drawingInteractionController && e.defaultPrevented && e.cancelBubble) {
+      return;
+    }
+
     const editorWasOpen = this.editor.isOpen();
 
     const rect = this.root.getBoundingClientRect();
@@ -15776,7 +15787,9 @@ export class SpreadsheetApp {
       // Allow grabbing a resize handle for the current drawing selection even when the
       // pointer is slightly outside the object's bounds (handles extend beyond the
       // selection outline).
-      if (primaryButton && this.selectedDrawingId != null) {
+      //
+      // When the dedicated DrawingInteractionController is enabled, it owns resize handling.
+      if (!this.drawingInteractionController && primaryButton && this.selectedDrawingId != null) {
         const selectedIndex = hitIndex.byId.get(this.selectedDrawingId);
         const selected = selectedIndex != null ? hitIndex.ordered[selectedIndex] ?? null : null;
         if (selected) {
@@ -15849,8 +15862,9 @@ export class SpreadsheetApp {
         this.renderSelection();
         this.focus();
 
-        // Begin drag/resize gesture for primary-button interactions.
-        if (primaryButton) {
+        // Begin drag/resize gesture for primary-button interactions when the legacy
+        // DrawingInteractionController is disabled (legacy mode).
+        if (!this.drawingInteractionController && primaryButton) {
           e.preventDefault();
           const handle = hitTestResizeHandle(drawingBounds, x, y, hit.transform);
           const scroll = effectiveScrollForAnchor(hit.anchor, drawingViewport);
@@ -16358,6 +16372,24 @@ export class SpreadsheetApp {
       const gesture = this.drawingGesture;
       this.stopDrawingGestureAutoScroll();
       this.drawingGesturePointerPos = null;
+      const shouldCommit = e.type === "pointerup";
+
+      // Pointer-cancel should abandon the gesture and revert to the persisted document
+      // snapshot (Excel-like behavior; avoids committing partial drags when the OS/browser
+      // interrupts pointer capture).
+      if (!shouldCommit) {
+        this.drawingGesture = null;
+        try {
+          this.root.releasePointerCapture(e.pointerId);
+        } catch {
+          // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+        }
+        this.drawingObjectsCache = null;
+        this.invalidateDrawingHitTestIndexCaches();
+        this.renderDrawings();
+        this.renderSelection();
+        return;
+      }
 
       const x = e.clientX - this.rootLeft;
       const y = e.clientY - this.rootTop;
@@ -16441,6 +16473,27 @@ export class SpreadsheetApp {
 
       // Ensure selection handles reflect the final position.
       this.renderSelection();
+
+      // Persist the final drawing position/size back to the DocumentController.
+      //
+      // In legacy mode, we update `drawingObjectsCache` during pointermove for live preview but
+      // only commit to the document once per gesture (on pointerup) so the operation is undoable
+      // as a single step.
+      //
+      // When the dedicated DrawingInteractionController is enabled, it owns commit semantics
+      // (including undo batching). Avoid double-committing in that case.
+      if (!this.drawingInteractionController) {
+        const moved = nextObjects.find((obj) => obj.id === gesture.objectId) ?? null;
+        if (moved) {
+          const before = { ...moved, anchor: gesture.startAnchor };
+          const kind: DrawingInteractionCommitKind = gesture.mode === "resize" ? "resize" : "move";
+          try {
+            this.commitDrawingInteraction({ kind, id: gesture.objectId, before, after: moved, objects: nextObjects });
+          } catch {
+            // Best-effort: drawing commits should never crash pointerup handling.
+          }
+        }
+      }
       return;
     }
 
