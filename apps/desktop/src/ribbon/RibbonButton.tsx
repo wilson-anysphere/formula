@@ -275,7 +275,7 @@ export const RibbonButton = React.memo(function RibbonButton({
           className="ribbon-dropdown__menu"
           data-keybinding-barrier="true"
           role="menu"
-          aria-label={button.ariaLabel}
+          aria-label={ariaLabel}
           onKeyDown={(event) => {
             const root = dropdownRef.current;
             if (!root) return;
