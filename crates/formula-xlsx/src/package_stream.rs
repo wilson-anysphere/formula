@@ -251,7 +251,7 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
     pub fn read_part(&self, name: &str) -> Result<Option<Vec<u8>>, XlsxError> {
         let canonical_input = canonical_part_name(name);
 
-        // Added parts are keyed by canonical name directly.
+        // Overrides are keyed by canonical part name directly.
         if let Some(override_op) = self.part_overrides.get(&canonical_input) {
             match override_op {
                 PartOverride::Remove => return Ok(None),
