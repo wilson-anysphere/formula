@@ -1555,7 +1555,11 @@ export class FormulaBarView {
     this.#selectedReferenceIndex = null;
     this.#mouseDownSelectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
-    this.#callbacks.onCancel?.();
+    try {
+      this.#callbacks.onCancel?.();
+    } catch {
+      // Avoid leaving the formula bar in a broken state if an embedding callback throws.
+    }
     this.#emitOverlays();
   }
 
@@ -1571,7 +1575,11 @@ export class FormulaBarView {
     this.#selectedReferenceIndex = null;
     this.#mouseDownSelectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
-    this.#callbacks.onCommit(committed, commit);
+    try {
+      this.#callbacks.onCommit(committed, commit);
+    } catch {
+      // Avoid leaving the formula bar in a broken state if an embedding callback throws.
+    }
     this.#emitOverlays();
   }
 
