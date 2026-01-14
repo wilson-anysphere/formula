@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
 
 import { gotoDesktop } from "./helpers";
@@ -37,68 +37,13 @@ async function getImageDrawingCount(page: Page): Promise<number> {
     const app = window.__formulaApp as any;
     if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
 
-    const objects = (() => {
-      if (typeof app.getDrawingsDebugState === "function") {
-        const state = app.getDrawingsDebugState();
-        if (Array.isArray(state)) return state;
-        if (state && typeof state === "object") {
-          const anyState = state as any;
-          if (Array.isArray(anyState.objects)) return anyState.objects;
-          if (Array.isArray(anyState.drawings)) return anyState.drawings;
-          if (Array.isArray(anyState.sheetDrawings)) return anyState.sheetDrawings;
-          if (Array.isArray(anyState.value)) return anyState.value;
-        }
-        // If the debug helper exists but returns an unexpected shape, fall back to other
-        // debug APIs when available (keeps this test resilient while the harness evolves).
-      }
-      if (typeof app.getDrawingObjects === "function") {
-        return app.getDrawingObjects();
-      }
-      throw new Error(
-        "Missing drawings debug API. Expected window.__formulaApp.getDrawingsDebugState() or window.__formulaApp.getDrawingObjects().",
-      );
-    })();
-
-    return objects.filter((obj: any) => {
-      // `SpreadsheetApp.getDrawingsDebugState()` returns `{ drawings: [{ kind: string, ... }] }`
-      // while `SpreadsheetApp.getDrawingObjects()` returns `{ kind: { type: string, ... }, ... }`.
-      const kind = obj?.kind;
-      if (typeof kind === "string") return kind === "image";
-      if (kind && typeof kind === "object" && typeof (kind as any).type === "string") return (kind as any).type === "image";
-      return false;
-    }).length;
-  });
-}
-
-async function resolveLocator(
-  root: Locator,
-  {
-    testId,
-    commandId,
-    role,
-    name,
-  }: { testId: string; commandId?: string; role?: Parameters<Locator["getByRole"]>[0]; name?: string },
-): Promise<Locator> {
-  const isAttached = async (locator: Locator): Promise<boolean> => {
-    try {
-      await locator.first().waitFor({ state: "attached", timeout: 1_000 });
-      return true;
-    } catch {
-      return false;
+    if (typeof app.getDrawingsDebugState !== "function") {
+      throw new Error("Missing window.__formulaApp.getDrawingsDebugState() (required for pictures ribbon e2e)");
     }
-  };
-
-  const byTestId = root.getByTestId(testId);
-  if (await isAttached(byTestId)) return byTestId;
-  if (commandId) {
-    const byCommand = root.locator(`[data-command-id="${commandId}"]`);
-    if (await isAttached(byCommand)) return byCommand;
-  }
-  if (role && name) {
-    const byRole = root.getByRole(role, { name });
-    if (await isAttached(byRole)) return byRole;
-  }
-  throw new Error(`Failed to resolve ribbon locator for testId=${testId}${commandId ? ` commandId=${commandId}` : ""}`);
+    const state = app.getDrawingsDebugState();
+    const drawings = Array.isArray(state?.drawings) ? state.drawings : [];
+    return drawings.filter((drawing: any) => drawing?.kind === "image").length;
+  });
 }
 
 test.describe("Insert → Pictures", () => {
@@ -109,20 +54,13 @@ test.describe("Insert → Pictures", () => {
     const ribbon = page.getByTestId("ribbon-root");
     await ribbon.getByRole("tab", { name: "Insert" }).click();
 
-    const picturesDropdown = await resolveLocator(ribbon, {
-      testId: "ribbon-insert-pictures",
-      commandId: "insert.illustrations.pictures",
-      role: "button",
-      name: "Pictures",
-    });
+    const picturesDropdown = ribbon.getByTestId("ribbon-insert-pictures");
+    await expect(picturesDropdown).toBeVisible();
     await picturesDropdown.click();
 
-    const thisDevice = await resolveLocator(ribbon, {
-      testId: "ribbon-insert-pictures-this-device",
-      commandId: "insert.illustrations.pictures.thisDevice",
-      role: "menuitem",
-      name: "This Device…",
-    });
+    const thisDevice = ribbon.getByTestId("ribbon-insert-pictures-this-device");
+    await expect(thisDevice).toBeVisible();
+    await expect(thisDevice).toBeEnabled();
 
     const image1Path = testInfo.outputPath("tiny-1.png");
     const image2Path = testInfo.outputPath("tiny-2.png");
@@ -136,9 +74,12 @@ test.describe("Insert → Pictures", () => {
       [fileChooser] = await Promise.all([page.waitForEvent("filechooser", { timeout: 10_000 }), thisDevice.click()]);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      throw new Error(
-        `Expected a file chooser to open after clicking Insert → Pictures → This Device… but none was observed.\n\nOriginal error: ${message}`,
-      );
+      if (message.includes("filechooser") && message.includes("Timeout")) {
+        throw new Error(
+          `Expected a file chooser to open after clicking Insert → Pictures → This Device… but none was observed.\n\nOriginal error: ${message}`,
+        );
+      }
+      throw err;
     }
 
     const selectedPaths = fileChooser.isMultiple() ? [image1Path, image2Path] : [image1Path];
