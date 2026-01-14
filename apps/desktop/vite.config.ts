@@ -256,16 +256,14 @@ export default defineConfig({
       "src/editor/cellEditorOverlay.f4.test.ts",
       "src/ai/inline-edit/__tests__/**/*.test.ts",
       // Drawing overlay interaction unit tests live under `src/drawings/__tests__` but use the
-      // `.test.ts` suffix for historical reasons. Include wrappers under `apps/desktop/src/...`
-      // so commands like:
-      //   pnpm -C apps/desktop exec vitest run apps/desktop/src/drawings/__tests__/selectionHandles.test.ts
-      // work as expected.
-      "apps/desktop/src/drawings/__tests__/selectionHandles.test.ts",
-      "apps/desktop/src/drawings/__tests__/drawingmlPatch.test.ts",
-      // Drawing model adapter tests use the `.test.ts` suffix as well. Include the wrapper path
-      // so `pnpm -C apps/desktop exec vitest run apps/desktop/src/drawings/__tests__/modelAdapters.test.ts`
-      // works even though the command is executed from within `apps/desktop/`.
-      "apps/desktop/src/drawings/__tests__/modelAdapters.test.ts",
+      // `.test.ts` suffix for historical reasons. Include them explicitly so they run under the
+      // desktop-scoped Vitest config, and so:
+      //   pnpm -C apps/desktop vitest run apps/desktop/src/drawings/__tests__/selectionHandles.test.ts
+      // works reliably (`apps/desktop/scripts/run-vitest.mjs` normalizes repo-rooted paths like
+      // `apps/desktop/src/...` to `src/...`).
+      "src/drawings/__tests__/selectionHandles.test.ts",
+      "src/drawings/__tests__/drawingmlPatch.test.ts",
+      "src/drawings/__tests__/modelAdapters.test.ts",
       // Node-only unit tests for the desktop performance harness live under `tests/performance/`.
       // Include these explicitly while still excluding Playwright e2e specs under `tests/e2e/`.
       "tests/performance/**/*.vitest.ts",
