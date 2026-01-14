@@ -2046,60 +2046,101 @@ jobs:
           # Locate the packaged `.app` under the Tauri bundle output directory and verify the
           # main executable is a universal binary (x86_64 + arm64).
           #
-          # Prefer the universal target output (`**/universal-apple-darwin/**`) to avoid
-          # accidentally validating an intermediate single-arch bundle.
-          app_path=""
+           # Prefer the universal target output (`**/universal-apple-darwin/**`) to avoid
+           # accidentally validating an intermediate single-arch bundle.
+           app_path=""
 
-          app_path="$(
-            find apps/desktop/src-tauri/target/universal-apple-darwin -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
-          )"
-          if [[ -z "$app_path" ]]; then
-            # Some Tauri builds export `CARGO_TARGET_DIR`. Check it next so this verification stays
-            # correct even if the workflow tweaks target dir routing for caching.
-            cargo_target_dir="${CARGO_TARGET_DIR:-}"
-            if [[ -n "$cargo_target_dir" && "$cargo_target_dir" != /* ]]; then
-              cargo_target_dir="${PWD}/${cargo_target_dir}"
-            fi
-            if [[ -n "$cargo_target_dir" && -d "$cargo_target_dir" ]]; then
-              app_path="$(
-                find "$cargo_target_dir/universal-apple-darwin" -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
-              )"
-              if [[ -z "$app_path" ]]; then
-                app_path="$(
-                  find "$cargo_target_dir" -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
-                )"
-              fi
-            fi
-          fi
-          if [[ -z "$app_path" ]]; then
-            app_path="$(
-              find target/universal-apple-darwin -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
-            )"
-          fi
-          if [[ -z "$app_path" ]]; then
-            app_path="$(
-              find apps/desktop/target/universal-apple-darwin -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
-            )"
-          fi
-          if [[ -z "$app_path" ]]; then
-            app_path="$(
-              find apps/desktop/src-tauri/target -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
-            )"
-          fi
-          if [[ -z "$app_path" ]]; then
-            app_path="$(
-              find apps/desktop/target -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
-            )"
-          fi
-          if [[ -z "$app_path" ]]; then
-            app_path="$(
-              find target -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
-            )"
-          fi
+           # Some Tauri builds export `CARGO_TARGET_DIR`. Normalize it for consistent path checks.
+           cargo_target_dir="${CARGO_TARGET_DIR:-}"
+           if [[ -n "$cargo_target_dir" && "$cargo_target_dir" != /* ]]; then
+             cargo_target_dir="${PWD}/${cargo_target_dir}"
+           fi
 
-          if [[ -z "$app_path" ]]; then
-            echo "::error::No .app bundle found under the expected Cargo target directories (CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-})." >&2
-            if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+           # Fast path: avoid traversing large Cargo target directories by checking the canonical
+           # bundle locations directly:
+           # - <target>/release/bundle/*/*.app
+           # - <target>/<triple>/release/bundle/*/*.app
+           nullglob_was_set=0
+           if shopt -q nullglob; then nullglob_was_set=1; fi
+           shopt -s nullglob
+           candidates=()
+
+           # Prefer universal target output first.
+           candidates+=(
+             apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/*/*.app
+           )
+
+           if [[ -n "$cargo_target_dir" && -d "$cargo_target_dir" ]]; then
+             candidates+=(
+               "$cargo_target_dir"/universal-apple-darwin/release/bundle/*/*.app
+               "$cargo_target_dir"/release/bundle/*/*.app
+               "$cargo_target_dir"/*/release/bundle/*/*.app
+             )
+           fi
+
+           candidates+=(
+             target/universal-apple-darwin/release/bundle/*/*.app
+             apps/desktop/target/universal-apple-darwin/release/bundle/*/*.app
+             apps/desktop/src-tauri/target/release/bundle/*/*.app
+             apps/desktop/src-tauri/target/*/release/bundle/*/*.app
+             apps/desktop/target/release/bundle/*/*.app
+             apps/desktop/target/*/release/bundle/*/*.app
+             target/release/bundle/*/*.app
+             target/*/release/bundle/*/*.app
+           )
+
+           if ((${#candidates[@]} > 0)); then
+             app_path="${candidates[0]}"
+           fi
+           if [[ "${nullglob_was_set}" -eq 0 ]]; then shopt -u nullglob; fi
+
+           # Fallback (slower): previous `find`-based discovery for unexpected layouts.
+           if [[ -z "$app_path" ]]; then
+             app_path="$(
+               find apps/desktop/src-tauri/target/universal-apple-darwin -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
+             )"
+             if [[ -z "$app_path" ]]; then
+               if [[ -n "$cargo_target_dir" && -d "$cargo_target_dir" ]]; then
+                 app_path="$(
+                   find "$cargo_target_dir/universal-apple-darwin" -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
+                 )"
+                 if [[ -z "$app_path" ]]; then
+                   app_path="$(
+                     find "$cargo_target_dir" -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
+                   )"
+                 fi
+               fi
+             fi
+             if [[ -z "$app_path" ]]; then
+               app_path="$(
+                 find target/universal-apple-darwin -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
+               )"
+             fi
+             if [[ -z "$app_path" ]]; then
+               app_path="$(
+                 find apps/desktop/target/universal-apple-darwin -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
+               )"
+             fi
+             if [[ -z "$app_path" ]]; then
+               app_path="$(
+                 find apps/desktop/src-tauri/target -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
+               )"
+             fi
+             if [[ -z "$app_path" ]]; then
+               app_path="$(
+                 find apps/desktop/target -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
+               )"
+             fi
+             if [[ -z "$app_path" ]]; then
+               app_path="$(
+                 find target -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
+               )"
+             fi
+           fi
+
+           if [[ -z "$app_path" ]]; then
+             echo "::error::No .app bundle found under the expected Cargo target directories (CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-})." >&2
+             if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
               echo
               echo "CARGO_TARGET_DIR *.app bundles:"
               find "${cargo_target_dir}" -type d -name '*.app' -print 2>/dev/null || true
