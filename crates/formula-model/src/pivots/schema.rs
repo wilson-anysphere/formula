@@ -303,7 +303,6 @@ fn unescape_dax_bracket_identifier(raw: &str) -> String {
     }
     out
 }
-
 /// Parse a DAX column reference of the form `Table[Column]` or `'Table Name'[Column]`.
 ///
 /// Parsing is best-effort:
@@ -749,6 +748,14 @@ mod tests {
             }
             .to_string(),
             "'RETURN'[X]"
+        );
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
+                table: "Straße".to_string(),
+                column: "X".to_string()
+            }
+            .to_string(),
+            "Straße[X]"
         );
         assert_eq!(
             PivotFieldRef::DataModelColumn {
