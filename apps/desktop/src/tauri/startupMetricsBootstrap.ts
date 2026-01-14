@@ -67,53 +67,55 @@ if (!g[BOOTSTRAPPED_KEY] && hasTauri) {
     // Ignore: if we can't probe the global, we'll rely on the retry loop below.
   }
 
-  const ensureListenersInstalled = async (): Promise<boolean> => {
-    // Best-effort: Tauri's injected JS APIs may not be immediately available at the earliest
-    // point JS can execute (especially in dev / during very early startup). Retry for a short
-    // period so we still eventually observe `startup:*` events in the frontend.
-    const deadlineMs = Date.now() + 10_000;
-    let delayMs = 1;
-    while (!g[LISTENERS_KEY] && Date.now() < deadlineMs) {
-      // If the `core.invoke` binding becomes available after the first JS tick, send a best-effort
-      // report as soon as possible (still re-emitting again once listeners are installed).
-      if (!g[WEBVIEW_REPORTED_KEY]) {
-        try {
-          const invoke = (globalThis as any).__TAURI__?.core?.invoke;
-          if (typeof invoke === "function") {
-            reportStartupWebviewLoaded();
-            g[WEBVIEW_REPORTED_KEY] = true;
-          }
-        } catch {
-          // ignore
-        }
-      }
+  // Best-effort: Tauri's injected JS APIs may not be immediately available at the earliest
+  // point JS can execute (especially in dev / during very early startup). Retry for a short
+  // period so we still eventually observe `startup:*` events in the frontend.
+  //
+  // Note: this retry loop is intentionally timer-driven (rather than `await`ing at the top of
+  // an async loop). This ensures environments using fake timers (tests) still advance the poller
+  // deterministically even when promise microtasks are only flushed after `advanceTimersByTime`.
+  const deadlineMs = Date.now() + 10_000;
+  let delayMs = 1;
+  const tick = (): void => {
+    if (g[LISTENERS_KEY]) return;
+    if (Date.now() >= deadlineMs) return;
+
+    // If the `core.invoke` binding becomes available after the first JS tick, send a best-effort
+    // report as soon as possible (still re-emitting again once listeners are installed).
+    if (!g[WEBVIEW_REPORTED_KEY]) {
       try {
-        // Only await listener installation once the runtime bindings exist. In environments where
-        // `__TAURI__` is injected after the first tick, awaiting here would postpone scheduling the
-        // retry timer (and can prevent fake-timer based tests from observing the retry loop).
-        if (hasTauriRuntime()) {
-          await installStartupTimingsListeners();
+        const invoke = (globalThis as any).__TAURI__?.core?.invoke;
+        if (typeof invoke === "function") {
+          reportStartupWebviewLoaded();
+          g[WEBVIEW_REPORTED_KEY] = true;
         }
       } catch {
         // ignore
       }
-      if (g[LISTENERS_KEY]) break;
-      await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
-      delayMs = Math.min(50, delayMs * 2);
     }
-    return Boolean(g[LISTENERS_KEY]);
-  };
 
-  void ensureListenersInstalled()
-    .then((installed) => {
-      if (!installed) return;
+    try {
+      // Fire-and-forget: `installStartupTimingsListeners` sets the global flag synchronously
+      // once the event API is available, and it catches individual listener failures.
+      void installStartupTimingsListeners();
+    } catch {
+      // ignore
+    }
+
+    if (g[LISTENERS_KEY]) {
+      // Re-emit cached timings now that listeners are installed.
       try {
         reportStartupWebviewLoaded();
       } catch {
         // Best-effort; instrumentation should never block startup.
       }
-    })
-    .catch(() => {
-      // Best-effort; instrumentation should never block startup.
-    });
+      return;
+    }
+
+    const nextDelay = delayMs;
+    delayMs = Math.min(50, delayMs * 2);
+    setTimeout(tick, nextDelay);
+  };
+
+  tick();
 }

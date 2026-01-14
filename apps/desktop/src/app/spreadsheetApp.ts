@@ -6493,6 +6493,16 @@ export class SpreadsheetApp {
       this.document.cancelBatch();
       throw err;
     }
+
+    // Ensure UI surfaces that consume `listDrawingsForSheet` (Selection Pane, etc) and the drawing
+    // overlay re-read the updated ordering immediately.
+    this.drawingObjectsCache = null;
+    this.canvasChartCombinedDrawingObjectsCache = null;
+    this.invalidateDrawingHitTestIndexCaches();
+    // The selected drawing didn't change, but its index in the ordering likely did.
+    this.selectedDrawingIndex = null;
+    this.scheduleDrawingsRender("arrange");
+    this.dispatchDrawingsChanged();
   }
 
   private getChartRecordById(chartId: string): ChartRecord | undefined {
