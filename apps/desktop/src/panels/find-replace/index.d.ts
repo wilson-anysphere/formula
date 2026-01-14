@@ -9,6 +9,17 @@ export type FindReplaceControllerParams = {
   getSelectionRanges?: () => FindReplaceSelectionRange[];
   beginBatch?: (options?: unknown) => void;
   endBatch?: () => void;
+  /**
+   * Optional guard for replace operations.
+   *
+   * When provided and it returns `false` (or `{ allowed: false }`), `replaceNext`/`replaceAll`
+   * will no-op and (when `showToast` is provided) surface the rejection reason to the user.
+   */
+  canReplace?: () => boolean | { allowed: boolean; reason?: string | null };
+  /**
+   * Optional toast helper for user-facing replace guard failures.
+   */
+  showToast?: (message: string, type?: any) => void;
 };
 
 export class FindReplaceController {

@@ -15,6 +15,8 @@ export class FindReplaceController {
     getSelectionRanges,
     beginBatch,
     endBatch,
+    canReplace,
+    showToast,
   }) {
     if (!workbook) throw new Error("FindReplaceController: workbook is required");
     this.workbook = workbook;
@@ -25,6 +27,8 @@ export class FindReplaceController {
     this.getSelectionRanges = getSelectionRanges;
     this.beginBatch = beginBatch;
     this.endBatch = endBatch;
+    this.canReplace = typeof canReplace === "function" ? canReplace : null;
+    this.showToast = typeof showToast === "function" ? showToast : null;
 
     this.query = "";
     this.replacement = "";
@@ -38,6 +42,38 @@ export class FindReplaceController {
     this.searchOrder = "byRows"; // "byRows" | "byColumns"
 
     this.lastResults = [];
+  }
+
+  /**
+   * @returns {{ allowed: boolean, reason?: string | null }}
+   */
+  getReplacePermission() {
+    const guard = this.canReplace;
+    if (typeof guard !== "function") return { allowed: true };
+    try {
+      const result = guard();
+      if (typeof result === "boolean") return { allowed: result, reason: null };
+      if (result && typeof result === "object" && typeof result.allowed === "boolean") {
+        return { allowed: result.allowed, reason: typeof result.reason === "string" ? result.reason : null };
+      }
+    } catch (err) {
+      return { allowed: false, reason: String(err?.message ?? err) };
+    }
+    return { allowed: true };
+  }
+
+  /**
+   * @param {string | null | undefined} reason
+   */
+  toastReplaceBlocked(reason) {
+    const showToast = this.showToast;
+    if (typeof showToast !== "function") return;
+    const message = typeof reason === "string" && reason.trim() ? reason.trim() : "Replacing cells is not allowed.";
+    try {
+      showToast(message, "warning");
+    } catch {
+      // ignore
+    }
   }
 
   getSearchOptions(overrides = {}) {
@@ -74,6 +110,11 @@ export class FindReplaceController {
   }
 
   async replaceNext() {
+    const permission = this.getReplacePermission();
+    if (!permission.allowed) {
+      this.toastReplaceBlocked(permission.reason);
+      return null;
+    }
     const from = this.getActiveCell?.();
     const res = await replaceNext(
       this.workbook,
@@ -93,6 +134,11 @@ export class FindReplaceController {
   }
 
   async replaceAll() {
+    const permission = this.getReplacePermission();
+    if (!permission.allowed) {
+      this.toastReplaceBlocked(permission.reason);
+      return null;
+    }
     this.beginBatch?.({ label: "Replace All" });
     try {
       return await replaceAll(this.workbook, this.query, this.replacement, this.getSearchOptions());

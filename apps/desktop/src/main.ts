@@ -1763,10 +1763,6 @@ function armFormatPainter(): void {
     return;
   }
 
-  if (app.isReadOnly?.() === true) {
-    return;
-  }
-
   if (isSpreadsheetEditing()) {
     try {
       showToast("Finish editing to use Format Painter");
@@ -1775,6 +1771,8 @@ function armFormatPainter(): void {
     }
     return;
   }
+
+  const isReadOnly = app.isReadOnly?.() === true;
 
   const doc = app.getDocument();
   const sheetId = app.getCurrentSheetId();
@@ -1799,7 +1797,7 @@ function armFormatPainter(): void {
 
   scheduleRibbonSelectionFormatStateUpdate();
   try {
-    showToast("Format Painter: select destination cells");
+    showToast(isReadOnly ? "Format Painter: select an entire row, column, or sheet" : "Format Painter: select destination cells");
   } catch {
     // ignore
   }
@@ -5778,6 +5776,9 @@ if (
       return normalizeExtensionCellValue(cell?.value ?? null);
     },
     async setCell(row: number, col: number, value: unknown) {
+      if (app.isReadOnly?.() === true) {
+        throw new Error("Read-only: you don't have permission to edit cell contents.");
+      }
       const sheetId = app.getCurrentSheetId();
       app.getDocument().setCellValue(sheetId, { row, col }, value, { source: "extension" });
     },
@@ -5796,6 +5797,9 @@ if (
       return { startRow, startCol, endRow, endCol, values };
     },
     async setRange(ref: string, values: unknown[][]) {
+      if (app.isReadOnly?.() === true) {
+        throw new Error("Read-only: you don't have permission to edit cell contents.");
+      }
       const { sheetId, startRow, startCol, endRow, endCol } = parseSheetQualifiedRange(ref);
       assertExtensionRangeWithinLimits({ startRow, startCol, endRow, endCol });
       const expectedRows = endRow - startRow + 1;
@@ -8319,7 +8323,20 @@ const findReplaceController = new FindReplaceController({
   },
   getSelectionRanges: () => app.getSelectionRanges(),
   beginBatch: (opts) => app.getDocument().beginBatch(opts),
-  endBatch: () => app.getDocument().endBatch()
+  endBatch: () => app.getDocument().endBatch(),
+  // Replace operations mutate cell contents; block them in read-only collab roles (viewer/commenter)
+  // and while the spreadsheet is actively editing to avoid silent no-ops (DocumentController filters
+  // disallowed cell deltas) and confusing UI behavior.
+  canReplace: () => {
+    if (isSpreadsheetEditing()) {
+      return { allowed: false, reason: "Finish editing before replacing cells." };
+    }
+    if (app.isReadOnly?.() === true) {
+      return { allowed: false, reason: "Read-only: you don't have permission to edit cell contents." };
+    }
+    return { allowed: true, reason: null };
+  },
+  showToast,
 });
 
 const { findDialog, replaceDialog, goToDialog } = registerFindReplaceShortcuts({
@@ -8428,7 +8445,17 @@ registerDesktopCommands({
   showQuickPick,
   findReplace: {
     openFind: () => showExclusiveFindReplaceDialog(findDialog as any),
-    openReplace: () => showExclusiveFindReplaceDialog(replaceDialog as any),
+    openReplace: () => {
+      if (app.isReadOnly?.() === true) {
+        try {
+          showToast("Read-only: you don't have permission to edit cell contents.", "warning");
+        } catch {
+          // `showToast` requires a #toast-root; ignore in headless contexts/tests.
+        }
+        return;
+      }
+      showExclusiveFindReplaceDialog(replaceDialog as any);
+    },
     openGoTo: () => showExclusiveFindReplaceDialog(goToDialog as any),
   },
   ribbonMacroHandlers: {

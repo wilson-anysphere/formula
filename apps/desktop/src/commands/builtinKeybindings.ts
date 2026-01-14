@@ -300,7 +300,8 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     key: "ctrl+h",
     // Cmd+H is reserved by macOS for "Hide". Use Cmd+Option+F like many native apps.
     mac: "cmd+option+f",
-    when: WHEN_FIND_REPLACE_GOTO,
+    // Replace mutates cell contents; block it for read-only collab roles (viewer/commenter).
+    when: `${WHEN_FIND_REPLACE_GOTO} && spreadsheet.isReadOnly == false`,
   },
   {
     command: "navigation.goTo",
