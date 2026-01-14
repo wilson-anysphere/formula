@@ -1,0 +1,5 @@
+# `cargo fuzz` build artifacts
+target/
+artifacts/
+coverage/
+

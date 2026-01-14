@@ -25,6 +25,11 @@ members = [
   "crates/xlsx-diff",
   "crates/formula-wasm",
 ]
+exclude = [
+  # `cargo-fuzz` harnesses live here; they require nightly and should not be built as part of the
+  # regular workspace (including CI).
+  "fuzz",
+]
 
 # Release build settings for shipped artifacts.
 #

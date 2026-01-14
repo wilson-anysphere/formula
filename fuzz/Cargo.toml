@@ -1,0 +1,29 @@
+[package]
+name = "formula-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+# Keep the fuzz harness lightweight: we only depend on the core `formula-engine` crate.
+formula-engine = { path = "../crates/formula-engine", default-features = false }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "fuzz_parse_formula"
+path = "fuzz_targets/fuzz_parse_formula.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_eval_formula"
+path = "fuzz_targets/fuzz_eval_formula.rs"
+test = false
+doc = false

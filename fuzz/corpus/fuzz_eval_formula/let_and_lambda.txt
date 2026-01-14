@@ -1,0 +1,1 @@
+=LET(x,10,LAMBDA(y,y*x)(3))
