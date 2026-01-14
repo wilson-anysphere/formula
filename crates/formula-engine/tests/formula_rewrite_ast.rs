@@ -1,5 +1,6 @@
 use formula_engine::editing::rewrite::{
-    rewrite_formula_for_copy_delta, rewrite_formula_for_range_map_with_resolver,
+    rewrite_formula_for_copy_delta, rewrite_formula_for_range_map,
+    rewrite_formula_for_range_map_with_resolver,
     rewrite_formula_for_structural_edit, rewrite_formula_for_structural_edit_with_sheet_order_resolver,
     GridRange, RangeMapEdit, StructuralEdit,
 };
@@ -351,6 +352,44 @@ fn structural_edits_match_sheet_names_nfkc_case_insensitively() {
 
     let (out, changed) =
         rewrite_formula_for_structural_edit("='Kelvin'!A1", "Other", origin, &edit);
+
+    assert!(changed);
+    assert_eq!(out, "='Kelvin'!A2");
+}
+
+#[test]
+fn range_map_edits_match_sheet_names_case_insensitively_across_unicode() {
+    // Excel compares sheet names case-insensitively across Unicode (with NFKC normalization).
+    // The sharp s (`ß`) uppercases to `SS`, which should be treated as the same sheet name.
+    let edit = RangeMapEdit {
+        sheet: "SS".to_string(),
+        moved_region: GridRange::new(0, 0, 0, 0),
+        delta_row: 1,
+        delta_col: 0,
+        deleted_region: None,
+    };
+    let origin = CellAddr::new(0, 0);
+
+    let (out, changed) = rewrite_formula_for_range_map("='ß'!A1", "Other", origin, &edit);
+
+    assert!(changed);
+    assert_eq!(out, "='ß'!A2");
+}
+
+#[test]
+fn range_map_edits_match_sheet_names_nfkc_case_insensitively() {
+    // Excel applies compatibility normalization (NFKC) when comparing sheet names.
+    // U+212A KELVIN SIGN (K) is NFKC-equivalent to ASCII 'K'.
+    let edit = RangeMapEdit {
+        sheet: "KELVIN".to_string(),
+        moved_region: GridRange::new(0, 0, 0, 0),
+        delta_row: 1,
+        delta_col: 0,
+        deleted_region: None,
+    };
+    let origin = CellAddr::new(0, 0);
+
+    let (out, changed) = rewrite_formula_for_range_map("='Kelvin'!A1", "Other", origin, &edit);
 
     assert!(changed);
     assert_eq!(out, "='Kelvin'!A2");
