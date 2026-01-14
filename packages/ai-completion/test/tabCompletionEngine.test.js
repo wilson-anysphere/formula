@@ -605,6 +605,57 @@ test("Typing =SUM(A suggests a contiguous range above the current cell", async (
   );
 });
 
+test("Function name completion works inside range args (=SUM(OFFS → =SUM(OFFSET()", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SUM(OFFS";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({ A1: 1 }),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(OFFSET("),
+    `Expected OFFSET( completion inside range arg, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Function name completion works inside range args after ':' (=SUM(A1:OFFS → =SUM(A1:OFFSET()", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SUM(A1:OFFS";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({ A1: 1 }),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(A1:OFFSET("),
+    `Expected OFFSET( completion after ':', got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Range-colon function completion is conservative for 1-3 letter tokens (A1:OFF)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SUM(A1:OFF";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({ A1: 1 }),
+  });
+
+  assert.ok(
+    suggestions.length === 0 || !suggestions.some((s) => s.text.includes("OFFSET(")),
+    `Did not expect OFFSET( completion for short A1:OFF token, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Range suggestions work inside grouping parens (=SUM((A → =SUM((A1:A10)))", async () => {
   const engine = new TabCompletionEngine();
 

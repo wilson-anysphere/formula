@@ -547,6 +547,20 @@ export class TabCompletionEngine {
           }
         }
 
+        // If we couldn't generate a range or schema completion at all, fall back to function-name
+        // completion at the cursor. This enables common "range-producing expression" workflows
+        // like `=SUM(OFFS<tab>` → `=SUM(OFFSET(` or `=SUM(A1:OFFS<tab>` → `=SUM(A1:OFFSET(`.
+        if (merged.length === 0) {
+          const token = findFunctionTokenAtCursor(input, cursor);
+          if (token) {
+            try {
+              merged.push(...this.suggestFunctionNames(context, token));
+            } catch {
+              // ignore
+            }
+          }
+        }
+
         return rankAndDedupe(merged).slice(0, this.maxSuggestions);
       });
   }
@@ -2788,6 +2802,84 @@ function countChar(text, ch) {
     if (text[i] === ch) count += 1;
   }
   return count;
+}
+
+const UNICODE_ALNUM_RE = (() => {
+  try {
+    // Match the Rust backend's `char::is_alphanumeric` (Alphabetic || Number).
+    return new RegExp("^[\\p{Alphabetic}\\p{Number}]$", "u");
+  } catch {
+    // Older JS engines may not support Unicode property escapes.
+    return null;
+  }
+})();
+
+/**
+ * True when `ch` is a valid identifier character for function names / name prefixes.
+ *
+ * This mirrors `packages/ai-completion/src/formulaPartialParser.js` so fallback function-name
+ * completion stays aligned between top-level and in-arg contexts.
+ *
+ * @param {string} ch
+ */
+function isIdentChar(ch) {
+  if (!ch) return false;
+  // Fast path for ASCII.
+  const code = ch.charCodeAt(0);
+  if (
+    (code >= 48 && code <= 57) || // 0-9
+    (code >= 65 && code <= 90) || // A-Z
+    (code >= 97 && code <= 122) || // a-z
+    code === 46 || // .
+    code === 95 // _
+  ) {
+    return true;
+  }
+  // Best-effort Unicode support for localized function names (e.g. ZÄHLENWENN).
+  return Boolean(UNICODE_ALNUM_RE && UNICODE_ALNUM_RE.test(ch));
+}
+
+/**
+ * Find an identifier token ending at the cursor that is eligible for function-name completion.
+ *
+ * This is used for best-effort fallbacks inside range arguments when A1/schema range completion
+ * fails (e.g. `=SUM(OFFS` or `=SUM(A1:OFFS`).
+ *
+ * @param {string} input
+ * @param {number} cursorPosition
+ * @returns {{ text: string, start: number, end: number } | null}
+ */
+function findFunctionTokenAtCursor(input, cursorPosition) {
+  const safeInput = typeof input === "string" ? input : "";
+  const cursor = clampCursor(safeInput, cursorPosition);
+  let i = cursor - 1;
+  while (i >= 0 && isIdentChar(safeInput[i])) i--;
+  const start = i + 1;
+  const end = cursor;
+  const text = safeInput.slice(start, end);
+
+  // Must be preceded by '=' or an operator/whitespace.
+  const before = start - 1 >= 0 ? safeInput[start - 1] : "";
+  if (before && !/[=\s(,;{+\\\-*/^@<>&:]/.test(before)) return null;
+  // Treat whitespace as a boundary only when it immediately follows an operator. This avoids
+  // suggesting function completions inside unquoted sheet names like "My Sheet" (where the
+  // space is part of the sheet identifier, not an operator).
+  if (before && /\s/.test(before)) {
+    let j = start - 1;
+    while (j >= 0 && /\s/.test(safeInput[j])) j -= 1;
+    const prevNonSpace = j >= 0 ? safeInput[j] : "";
+    if (prevNonSpace && !/[=(,;{+\\\-*/^@<>&:]/.test(prevNonSpace)) return null;
+  }
+
+  if (!text) return null;
+  if (/^\d+$/.test(text)) return null;
+
+  // Heuristic: after a range colon, 1-3 letter tokens are ambiguous with column letters
+  // (e.g. `A1:O` / `A1:OFF10`). Require >3 letters so we don't suggest function names
+  // while the user is still typing a cell reference.
+  if (before === ":" && /^[A-Za-z]{1,3}$/.test(text)) return null;
+
+  return { text, start, end };
 }
 
 /**
