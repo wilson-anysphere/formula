@@ -51,6 +51,7 @@ checked into the repo. For these fixtures we commit a generated placeholder PNG
 - `surface.png`
 - `doughnut.png`
 - `combo-bar-line.png`
+- `map.png`
 
 Replace these with real Excel exports once available (see instructions below).
 

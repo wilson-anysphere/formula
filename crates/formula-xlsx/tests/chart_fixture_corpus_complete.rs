@@ -23,6 +23,7 @@ fn chart_fixture_corpus_complete() -> Result<(), Box<dyn std::error::Error>> {
         "histogram",
         "pareto",
         "box-whisker",
+        "map",
         "treemap",
         "sunburst",
         "funnel",
@@ -156,4 +157,3 @@ fn png_dimensions(bytes: &[u8]) -> Result<(u32, u32), String> {
     let height = u32::from_be_bytes(bytes[data_start + 4..data_start + 8].try_into().unwrap());
     Ok((width, height))
 }
-
