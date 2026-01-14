@@ -39,9 +39,16 @@ Environment (shared):
                                (DANGEROUS: could delete user directories if misconfigured)
 
 Environment (startup):
+  FORMULA_DESKTOP_STARTUP_RUNS
+  FORMULA_DESKTOP_STARTUP_TIMEOUT_MS
+  FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell|full
   FORMULA_DESKTOP_STARTUP_MODE=cold|warm
     - cold (default): each measured run uses a fresh profile dir (true cold start)
     - warm: one warmup run primes caches, then measured runs reuse the same profile
+  FORMULA_DESKTOP_RSS_IDLE_DELAY_MS
+    - delay after startup metrics before sampling idle RSS (startup bench only)
+  FORMULA_DESKTOP_RSS_TARGET_MB
+    - p95 budget for startup bench idle RSS metric (default: 100MB)
   FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS
     - p95 budget for webview_loaded_ms (native WebView page-load complete; defaults to 800ms)
   FORMULA_DESKTOP_SHELL_WEBVIEW_LOADED_TARGET_MS
