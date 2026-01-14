@@ -142,7 +142,8 @@ export class DocumentBranchingWorkflow {
           // feature-detection so older controller instances (or persisted branch histories)
           // don't get their existing sheet names clobbered.
           name: supportsSheetMetadata ? (nextMeta?.name ?? sheetId) : sheetId,
-          view: nextMeta?.view ? structuredClone(nextMeta.view) : { frozenRows: 0, frozenCols: 0 },
+          // Avoid deep-cloning untrusted view payloads here; we normalize the merged state before committing.
+          view: nextMeta?.view ? nextMeta.view : { frozenRows: 0, frozenCols: 0 },
         };
         if (supportsSheetMetadata && nextMeta?.visibility) {
           sheetMeta.visibility = nextMeta.visibility;
@@ -177,7 +178,7 @@ export class DocumentBranchingWorkflow {
           }
         }
         if (nextMeta?.view) {
-          merged.sheets.metaById[sheetId] = { ...merged.sheets.metaById[sheetId], view: structuredClone(nextMeta.view) };
+          merged.sheets.metaById[sheetId] = { ...merged.sheets.metaById[sheetId], view: nextMeta.view };
         }
       }
     }

@@ -203,19 +203,19 @@ function normalizeDrawings(raw: unknown): any[] | undefined {
   const normalized: any[] = [];
   if (Array.isArray(raw)) {
     for (const entry of raw) pushIfValid(entry, normalized);
-  } else {
-    const maybeYArray = raw as any;
-    const length = typeof maybeYArray?.length === "number" ? maybeYArray.length : 0;
-    const get = typeof maybeYArray?.get === "function" ? maybeYArray.get.bind(maybeYArray) : null;
-    if (length > 0 && get) {
-      for (let i = 0; i < length; i += 1) {
-        pushIfValid(get(i), normalized);
-      }
-    } else if ((raw as any) && typeof (raw as any).toJSON === "function") {
-      // Last resort: materialize via toJSON and filter.
-      try {
-        const json = (raw as any).toJSON();
-        if (Array.isArray(json)) {
+    } else {
+      const maybeYArray = raw as any;
+      const length = typeof maybeYArray?.length === "number" ? maybeYArray.length : 0;
+      const get = typeof maybeYArray?.get === "function" ? maybeYArray.get.bind(maybeYArray) : null;
+      if (length > 0 && get) {
+        for (let i = 0; i < length; i += 1) {
+          pushIfValid(get(i), normalized);
+        }
+      } else if ((raw as any) && typeof (raw as any).toJSON === "function" && !getYText(raw)) {
+        // Last resort: materialize via toJSON and filter.
+        try {
+          const json = (raw as any).toJSON();
+          if (Array.isArray(json)) {
           for (const entry of json) pushIfValid(entry, normalized);
         }
       } catch {

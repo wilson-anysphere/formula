@@ -1349,7 +1349,9 @@ export function applyConflictResolutions(mergeResult, resolutions) {
         const nextMeta = {
           id: sheetId,
           name: chosen.meta.name == null ? null : String(chosen.meta.name),
-          view: isRecord(chosen.meta.view) ? structuredClone(chosen.meta.view) : { frozenRows: 0, frozenCols: 0 },
+          // Avoid deep-cloning untrusted view payloads here. We normalize the final merged document
+          // state (including drawings id validation) before returning.
+          view: isRecord(chosen.meta.view) ? chosen.meta.view : { frozenRows: 0, frozenCols: 0 },
         };
         if (chosen.meta.visibility === "visible" || chosen.meta.visibility === "hidden" || chosen.meta.visibility === "veryHidden") {
           nextMeta.visibility = chosen.meta.visibility;

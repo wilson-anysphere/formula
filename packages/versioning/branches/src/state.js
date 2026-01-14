@@ -25,6 +25,22 @@ function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function getYText(value) {
+  if (!value || typeof value !== "object") return null;
+  const maybe = value;
+  // Duck-type against multiple `yjs` module instances (ESM/CJS) and constructor renaming.
+  // Keep this aligned with `@formula/collab-yjs-utils` so we don't accidentally treat
+  // plain JS objects (or Maps) as Y.Text.
+  if (typeof maybe.toString !== "function") return null;
+  if (typeof maybe.toDelta !== "function") return null;
+  if (typeof maybe.applyDelta !== "function") return null;
+  if (typeof maybe.insert !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
+  return maybe;
+}
+
 /**
  * @param {any} value
  * @returns {number}
@@ -162,6 +178,10 @@ function normalizeSheetView(value) {
     if (raw == null) return [];
     let arr = raw;
     const isYArrayLike = Boolean(arr && typeof arr === "object" && typeof arr.length === "number" && typeof arr.get === "function");
+    // Avoid Yjs dev-mode warnings for unintegrated arrays by reading from `_prelimContent`.
+    if (isYArrayLike && arr?.doc == null && Array.isArray(arr?._prelimContent)) {
+      arr = arr._prelimContent;
+    }
     if (!Array.isArray(arr) && !isYArrayLike && typeof arr?.toArray === "function") {
       try {
         arr = arr.toArray();
@@ -177,17 +197,23 @@ function normalizeSheetView(value) {
 
     for (let idx = 0; idx < len; idx += 1) {
       const entry = Array.isArray(arr) ? arr[idx] : arr.get(idx);
-      let json = entry;
-      if (json && typeof json === "object" && typeof json.toJSON === "function") {
-        try {
-          json = json.toJSON();
-        } catch {
-          // ignore
+
+      // Validate `id` *before* materializing via `.toJSON()`. Yjs' `toJSON()` will stringify
+      // nested Y.Text values (including drawing ids), which can allocate large strings (or
+      // throw) for pathological ids.
+      let rawId = entry?.id;
+      if (entry && typeof entry === "object" && typeof entry.get === "function") {
+        const prelim = entry?.doc == null ? entry?._prelimContent : null;
+        if (prelim instanceof Map) {
+          rawId = prelim.get("id");
+        } else {
+          try {
+            rawId = entry.get("id");
+          } catch {
+            rawId = undefined;
+          }
         }
       }
-      if (!isRecord(json)) continue;
-
-      const rawId = json.id;
       let normalizedId;
       if (typeof rawId === "string") {
         if (rawId.length > MAX_DRAWING_ID_STRING_CHARS) continue;
@@ -198,8 +224,34 @@ function normalizeSheetView(value) {
         if (!Number.isSafeInteger(rawId)) continue;
         normalizedId = rawId;
       } else {
-        continue;
+        const text = getYText(rawId);
+        if (!text) continue;
+        // Unintegrated Y.Text instances warn on `.length`/`.toString()` reads and may have a
+        // stale `_length` (pending ops). Treat them as invalid ids.
+        if (text.doc == null) continue;
+        if (typeof text.length === "number" && text.length > MAX_DRAWING_ID_STRING_CHARS) continue;
+        let str;
+        try {
+          str = text.toString();
+        } catch {
+          continue;
+        }
+        if (typeof str !== "string") continue;
+        if (str.length > MAX_DRAWING_ID_STRING_CHARS) continue;
+        const trimmed = str.trim();
+        if (!trimmed) continue;
+        normalizedId = trimmed;
       }
+
+      let json = entry;
+      if (json && typeof json === "object" && typeof json.toJSON === "function") {
+        try {
+          json = json.toJSON();
+        } catch {
+          // ignore
+        }
+      }
+      if (!isRecord(json)) continue;
 
       try {
         const cloned = structuredClone(json);
