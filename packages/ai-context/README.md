@@ -579,6 +579,9 @@ When **structured DLP** is enabled (`buildContext({ dlp })` / `buildWorkbookCont
 `classifyText()` as a **conservative heuristic input** to the policy engine:
 
 - any heuristic “sensitive” finding is treated as a `Restricted` classification (`heuristic:*` labels)
+- heuristic scanning covers both:
+  - the bounded sheet/workbook text windows being prepared for prompt inclusion
+  - user-provided `attachments` (deep traversal, bounded)
 - policy is evaluated on `max(structured, heuristic)` so rules can **BLOCK** or **REDACT** even when there are no
   structured classification records
 

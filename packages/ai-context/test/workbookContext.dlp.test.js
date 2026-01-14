@@ -341,6 +341,46 @@ test("buildWorkbookContext: workbook_schema fallback redacts sensitive columns e
   assert.match(schemaSection, /\[REDACTED\]/);
 });
 
+test("buildWorkbookContext: attachment-only sensitive patterns can trigger DLP REDACT even when workbook content is public", async () => {
+  const workbook = {
+    id: "wb-dlp-attachments-only",
+    sheets: [
+      {
+        name: "PublicSheet",
+        cells: [[{ v: "Hello" }], [{ v: "World" }]],
+      },
+    ],
+  };
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+    // No-op redactor to ensure deep structured DLP redaction does not rely on regex helpers.
+    redactor: (text) => text,
+  });
+
+  const auditEvents = [];
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "hello",
+    attachments: [{ type: "chart", reference: "Chart1", data: { note: "987-65-4321" } }],
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ redactDisallowed: true }),
+      auditLogger: { log: (e) => auditEvents.push(e) },
+    },
+  });
+
+  assert.match(out.promptContext, /## attachments/i);
+  assert.doesNotMatch(out.promptContext, /987-65-4321/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditEvents[0]?.decision?.decision, "redact");
+});
+
 test("buildWorkbookContext: does not send raw sensitive workbook text to embedder when blocked", async () => {
   const workbook = makeSensitiveWorkbook();
   const embedder = new CapturingEmbedder({ dimension: 64 });

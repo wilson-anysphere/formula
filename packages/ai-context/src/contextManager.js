@@ -794,9 +794,17 @@ export class ContextManager {
       // callers can't accidentally leak sensitive content even when no structured selectors are present.
       dlpHeuristic = classifyValuesForDlp(valuesForContext, { signal });
       const heuristicPolicyClassification = heuristicToPolicyClassification(dlpHeuristic);
-      const combinedClassification = maxClassification(structuredSelectionClassification, heuristicPolicyClassification);
+      const attachmentsHeuristic = classifyStructuredForDlp(params.attachments ?? [], { signal });
+      const attachmentsPolicyClassification = heuristicToPolicyClassification(attachmentsHeuristic);
+      const combinedClassification = maxClassification(
+        maxClassification(structuredSelectionClassification, heuristicPolicyClassification),
+        attachmentsPolicyClassification,
+      );
       dlpSelectionClassification = combinedClassification;
-      if (heuristicPolicyClassification.level !== CLASSIFICATION_LEVEL.PUBLIC) {
+      if (
+        heuristicPolicyClassification.level !== CLASSIFICATION_LEVEL.PUBLIC ||
+        attachmentsPolicyClassification.level !== CLASSIFICATION_LEVEL.PUBLIC
+      ) {
         dlpHeuristicApplied = true;
         dlpDecision = evaluatePolicy({
           action: DLP_ACTION.AI_CLOUD_PROCESSING,
@@ -1321,6 +1329,13 @@ export class ContextManager {
           overallClassification = maxClassification(overallClassification, classification);
         }
       }
+    }
+    // Attachments can contain user-provided context (e.g. chart annotations) that should
+    // influence the overall AI cloud processing decision when DLP is enabled.
+    if (dlp && Array.isArray(params.attachments) && params.attachments.length) {
+      const attachmentsHeuristic = classifyStructuredForDlp(params.attachments, { signal });
+      const attachmentsClassification = heuristicToPolicyClassification(attachmentsHeuristic);
+      overallClassification = maxClassification(overallClassification, attachmentsClassification);
     }
     /** @type {ReturnType<typeof evaluatePolicy> | null} */
     let overallDecision = null;
@@ -1996,6 +2011,108 @@ function classifyValuesForDlp(values, options = {}) {
     }
   }
   return { level: "public", findings: [] };
+}
+
+/**
+ * Heuristically classify a structured value (attachments, arbitrary objects) for DLP.
+ *
+ * This mirrors `classifyValuesForDlp()` but for non-tabular values, with:
+ *  - cycle detection
+ *  - bounded traversal to avoid pathological user-provided payloads
+ *
+ * @param {unknown} value
+ * @param {{ signal?: AbortSignal, maxNodes?: number, maxDepth?: number, maxStringLength?: number }} [options]
+ * @returns {ReturnType<typeof classifyText>}
+ */
+function classifyStructuredForDlp(value, options = {}) {
+  const signal = options.signal;
+  const maxNodes = normalizeNonNegativeInt(options.maxNodes, 5_000);
+  const maxDepth = normalizeNonNegativeInt(options.maxDepth, 20);
+  const maxStringLength = normalizeNonNegativeInt(options.maxStringLength, 10_000);
+  /** @type {Set<string>} */
+  const findings = new Set();
+  let found = false;
+  let nodes = 0;
+  const seen = new WeakSet();
+
+  /**
+   * @param {unknown} text
+   */
+  function considerText(text) {
+    if (found) return;
+    const raw = String(text ?? "");
+    const truncated = raw.length > maxStringLength ? raw.slice(0, maxStringLength) : raw;
+    const heuristic = classifyText(truncated);
+    if (heuristic.level !== "sensitive") return;
+    found = true;
+    for (const f of heuristic.findings || []) findings.add(String(f));
+  }
+
+  /**
+   * @param {unknown} v
+   * @param {number} depth
+   */
+  function visit(v, depth) {
+    if (found) return;
+    throwIfAborted(signal);
+    nodes += 1;
+    if (nodes > maxNodes) return;
+    if (v === null || v === undefined) return;
+    const t = typeof v;
+    if (t === "string" || t === "number" || t === "bigint") {
+      considerText(v);
+      return;
+    }
+    if (t === "boolean" || t === "symbol" || t === "function") return;
+    if (v instanceof Date) {
+      considerText(v.toISOString());
+      return;
+    }
+    // Avoid scanning large binary blobs.
+    if (v instanceof ArrayBuffer || ArrayBuffer.isView(v)) return;
+
+    if (v instanceof Map) {
+      for (const [k, val] of v.entries()) {
+        if (found) break;
+        visit(k, depth + 1);
+        if (found) break;
+        visit(val, depth + 1);
+      }
+      return;
+    }
+
+    if (v instanceof Set) {
+      for (const val of v.values()) {
+        if (found) break;
+        visit(val, depth + 1);
+      }
+      return;
+    }
+
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (found) break;
+        visit(item, depth + 1);
+      }
+      return;
+    }
+
+    if (t === "object") {
+      if (seen.has(v)) return;
+      seen.add(v);
+      if (depth >= maxDepth) return;
+      const obj = /** @type {Record<string, unknown>} */ (v);
+      for (const key of Object.keys(obj)) {
+        if (found) break;
+        considerText(key);
+        if (found) break;
+        visit(obj[key], depth + 1);
+      }
+    }
+  }
+
+  visit(value, 0);
+  return findings.size > 0 ? { level: "sensitive", findings: [...findings] } : { level: "public", findings: [] };
 }
 
 /**
