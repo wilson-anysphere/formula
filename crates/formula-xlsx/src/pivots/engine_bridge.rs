@@ -16,7 +16,10 @@ use std::collections::HashSet;
 use crate::styles::StylesPart;
 
 use super::cache_records::pivot_cache_datetime_to_naive_date;
-use super::{PivotCacheDefinition, PivotCacheValue, PivotTableDefinition, PivotTableFieldItem};
+use super::{
+    PivotCacheDefinition, PivotCacheSourceType, PivotCacheValue, PivotTableDefinition,
+    PivotTableFieldItem,
+};
 use crate::pivots::slicers::{PivotSlicerParts, SlicerSelectionState, TimelineSelectionState};
 
 /// Convert a parsed pivot cache (definition + record iterator) into a pivot-engine
@@ -466,6 +469,15 @@ pub fn pivot_table_to_engine_config_with_styles(
     cache_def: &PivotCacheDefinition,
     styles: Option<&StylesPart>,
 ) -> PivotConfig {
+    fn cache_field_ref(cache_def: &PivotCacheDefinition, name: String) -> PivotFieldRef {
+        // Worksheet-backed caches should treat cache field names as literal header text. Parsing
+        // DAX-like strings (e.g. `Table[Column]`) is reserved for Data Model / external pivots.
+        match &cache_def.cache_source_type {
+            PivotCacheSourceType::Worksheet => PivotFieldRef::CacheFieldName(name),
+            _ => name.into(),
+        }
+    }
+
     let row_fields = table
         .row_fields
         .iter()
@@ -503,7 +515,7 @@ pub fn pivot_table_to_engine_config_with_styles(
                 cache_def
                     .cache_fields
                     .get(base_field_idx as usize)
-                    .map(|f| f.name.clone().into())
+                    .map(|f| cache_field_ref(cache_def, f.name.clone()))
             });
 
             // `dataField@baseItem` refers to an item within `baseField`'s shared-items table.
@@ -542,7 +554,7 @@ pub fn pivot_table_to_engine_config_with_styles(
         .filter_map(|page_field| {
             let field_idx = page_field.fld as usize;
             let cache_field = cache_def.cache_fields.get(field_idx)?;
-            let source_field: PivotFieldRef = cache_field.name.clone().into();
+            let source_field = cache_field_ref(cache_def, cache_field.name.clone());
 
             // `pageField@item` is typically a shared-item index for the field, with `-1` meaning
             // "(All)". We currently model report filters as a single-selection allowed-set.
@@ -635,7 +647,10 @@ fn pivot_table_field_to_engine(
 ) -> Option<PivotField> {
     let cache_field = cache_def.cache_fields.get(field_idx as usize)?;
 
-    let mut field = PivotField::new(cache_field.name.clone());
+    let mut field = PivotField::new(match &cache_def.cache_source_type {
+        PivotCacheSourceType::Worksheet => PivotFieldRef::CacheFieldName(cache_field.name.clone()),
+        _ => cache_field.name.clone().into(),
+    });
     let table_field = table.pivot_fields.get(field_idx as usize);
 
     if let Some(table_field) = table_field {
@@ -838,6 +853,40 @@ mod tests {
         let cfg = pivot_table_to_engine_config(&table, &cache_def);
         assert_eq!(cfg.value_fields.len(), 1);
         assert_eq!(cfg.value_fields[0].base_field, Some(cache_field("Region")));
+    }
+
+    #[test]
+    fn worksheet_pivots_preserve_cache_field_names_that_look_like_dax() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <pivotFields count="1">
+    <pivotField/>
+  </pivotFields>
+  <rowFields count="1">
+    <field x="0"/>
+  </rowFields>
+  <dataFields count="1">
+    <dataField fld="0"/>
+  </dataFields>
+</pivotTableDefinition>"#;
+
+        let table =
+            PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml).expect("parse");
+        let cache_def = PivotCacheDefinition {
+            cache_source_type: PivotCacheSourceType::Worksheet,
+            cache_fields: vec![PivotCacheField {
+                name: "Table[Column]".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let cfg = pivot_table_to_engine_config(&table, &cache_def);
+        assert_eq!(cfg.row_fields.len(), 1);
+        assert_eq!(
+            cfg.row_fields[0].source_field.as_cache_field_name(),
+            Some("Table[Column]")
+        );
     }
 
     #[test]
