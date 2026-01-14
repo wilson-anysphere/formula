@@ -63,6 +63,24 @@ test("passes when bundle.fileAssociations includes .xlsx and all entries have mi
   assert.match(proc.stdout, /preflight passed/i);
 });
 
+test("passes when deep-link schemes is configured as a string", () => {
+  const config = {
+    plugins: {
+      "deep-link": {
+        desktop: { schemes: "formula" },
+      },
+    },
+    bundle: {
+      fileAssociations: [
+        { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+      ],
+    },
+  };
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /preflight passed/i);
+});
+
 test("fails when bundle.fileAssociations is present but does not include .xlsx", () => {
   const config = baseConfig({
     fileAssociations: [{ ext: ["csv"], mimeType: "text/csv" }],

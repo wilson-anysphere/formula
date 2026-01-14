@@ -66,10 +66,20 @@ function extractDeepLinkSchemes(pluginConfig) {
 
   // plugins.deep-link.desktop is a `DeepLinkProtocol` or an array of `DeepLinkProtocol`.
   if (Array.isArray(desktop)) {
-    return desktop.flatMap((p) => (Array.isArray(p?.schemes) ? p.schemes : [])).filter(Boolean);
+    return desktop
+      .flatMap((p) => {
+        const raw = p?.schemes;
+        if (typeof raw === "string") return [raw];
+        if (Array.isArray(raw)) return raw;
+        return [];
+      })
+      .filter(Boolean);
   }
   if (typeof desktop === "object") {
-    return Array.isArray(desktop.schemes) ? desktop.schemes.filter(Boolean) : [];
+    const raw = desktop.schemes;
+    if (typeof raw === "string") return [raw].filter(Boolean);
+    if (Array.isArray(raw)) return raw.filter(Boolean);
+    return [];
   }
   return [];
 }
