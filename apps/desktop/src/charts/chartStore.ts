@@ -116,10 +116,19 @@ function isMostlyStrings(row: unknown[]): boolean {
 export class ChartStore {
   private readonly options: ChartStoreOptions;
   private charts: ChartRecord[] = [];
+  private readonly indexById = new Map<string, number>();
   private nextId = 1;
 
   constructor(options: ChartStoreOptions) {
     this.options = options;
+  }
+
+  private rebuildIndexById(): void {
+    this.indexById.clear();
+    for (let i = 0; i < this.charts.length; i += 1) {
+      const id = this.charts[i]?.id;
+      if (id) this.indexById.set(id, i);
+    }
   }
 
   private resolveSheetIdFromToken(sheetToken: string): string | null {
@@ -150,6 +159,7 @@ export class ChartStore {
     const next = prev.filter((chart) => chart.id !== id);
     if (next.length === prev.length) return;
     this.charts = next;
+    this.rebuildIndexById();
     this.options.onChange?.();
   }
 
@@ -157,16 +167,66 @@ export class ChartStore {
     const id = String(chartId ?? "");
     if (!id) return;
 
-    let changed = false;
-    const next = this.charts.map((chart) => {
-      if (chart.id !== id) return chart;
-      changed = true;
-      return {
-        ...chart,
-        anchor: { ...(anchor as any) },
-      };
-    });
-    if (!changed) return;
+    const prev = this.charts;
+    let idx = this.indexById.get(id);
+    const hasCachedIndex = typeof idx === "number" && idx >= 0 && idx < prev.length && prev[idx]?.id === id;
+    if (!hasCachedIndex) {
+      idx = -1;
+      for (let i = 0; i < prev.length; i += 1) {
+        if (prev[i]!.id === id) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx < 0) return;
+      this.indexById.set(id, idx);
+    }
+
+    const prevChart = prev[idx];
+    if (!prevChart) return;
+    const prevAnchor: any = prevChart.anchor;
+    const nextAnchor: any = anchor;
+    if (
+      prevAnchor?.kind === nextAnchor?.kind &&
+      (() => {
+        switch (prevAnchor?.kind) {
+          case "absolute":
+            return (
+              prevAnchor.xEmu === nextAnchor.xEmu &&
+              prevAnchor.yEmu === nextAnchor.yEmu &&
+              prevAnchor.cxEmu === nextAnchor.cxEmu &&
+              prevAnchor.cyEmu === nextAnchor.cyEmu
+            );
+          case "oneCell":
+            return (
+              prevAnchor.fromCol === nextAnchor.fromCol &&
+              prevAnchor.fromRow === nextAnchor.fromRow &&
+              prevAnchor.fromColOffEmu === nextAnchor.fromColOffEmu &&
+              prevAnchor.fromRowOffEmu === nextAnchor.fromRowOffEmu &&
+              prevAnchor.cxEmu === nextAnchor.cxEmu &&
+              prevAnchor.cyEmu === nextAnchor.cyEmu
+            );
+          case "twoCell":
+            return (
+              prevAnchor.fromCol === nextAnchor.fromCol &&
+              prevAnchor.fromRow === nextAnchor.fromRow &&
+              prevAnchor.fromColOffEmu === nextAnchor.fromColOffEmu &&
+              prevAnchor.fromRowOffEmu === nextAnchor.fromRowOffEmu &&
+              prevAnchor.toCol === nextAnchor.toCol &&
+              prevAnchor.toRow === nextAnchor.toRow &&
+              prevAnchor.toColOffEmu === nextAnchor.toColOffEmu &&
+              prevAnchor.toRowOffEmu === nextAnchor.toRowOffEmu
+            );
+          default:
+            return false;
+        }
+      })()
+    ) {
+      return;
+    }
+
+    const next = prev.slice();
+    next[idx] = { ...prevChart, anchor: { ...(anchor as any) } };
     this.charts = next;
     this.options.onChange?.();
   }
@@ -280,7 +340,9 @@ export class ChartStore {
       anchor
     };
 
+    const index = this.charts.length;
     this.charts = [...this.charts, chart];
+    this.indexById.set(id, index);
     this.options.onChange?.();
     return { chart_id: id };
   }
@@ -294,6 +356,7 @@ export class ChartStore {
       series: chart.series.map((ser) => ({ ...ser })),
       anchor: { ...(chart.anchor as any) }
     }));
+    cloned.rebuildIndexById();
     return cloned;
   }
 
