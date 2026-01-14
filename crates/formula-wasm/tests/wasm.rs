@@ -358,7 +358,11 @@ fn lex_formula_rejects_unknown_locale_id_option() {
     let message = err
         .as_string()
         .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
-    assert_eq!(message, "unknown localeId: xx-XX");
+    assert!(message.contains("unknown localeId: xx-XX"));
+    assert!(
+        message.contains("Supported locale ids"),
+        "expected actionable locale message, got {message:?}"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -611,7 +615,11 @@ fn parse_formula_partial_rejects_unknown_locale_id_option() {
     let message = err
         .as_string()
         .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
-    assert_eq!(message, "unknown localeId: xx-XX");
+    assert!(message.contains("unknown localeId: xx-XX"));
+    assert!(
+        message.contains("Supported locale ids"),
+        "expected actionable locale message, got {message:?}"
+    );
 }
 
 #[wasm_bindgen_test]

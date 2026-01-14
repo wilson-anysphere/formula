@@ -681,8 +681,7 @@ fn parse_options_and_locale_from_js(
         let mut opts = ParseOptions::default();
         let mut locale: Option<&'static FormulaLocale> = None;
         if let Some(locale_id) = dto.locale_id {
-            let formula_locale = get_locale(&locale_id)
-                .ok_or_else(|| js_err(format!("unknown localeId: {locale_id}")))?;
+            let formula_locale = require_formula_locale(&locale_id)?;
             opts.locale = formula_locale.config.clone();
             locale = Some(formula_locale);
         }

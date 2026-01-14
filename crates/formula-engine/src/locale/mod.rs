@@ -37,6 +37,17 @@ pub fn text_codepage_for_locale_id(locale_id: &str) -> u16 {
     }
 }
 
+/// Return the list of locale identifiers supported by the formula engine.
+///
+/// The order is deterministic so downstreams can safely embed it in user-facing error messages and
+/// tests.
+pub fn supported_locale_ids() -> &'static [&'static str] {
+    SUPPORTED_LOCALE_IDS
+}
+
+const SUPPORTED_LOCALE_IDS: &[&str] = &[
+    "en-US", "ja-JP", "zh-CN", "ko-KR", "zh-TW", "de-DE", "fr-FR", "es-ES",
+];
 #[derive(Debug, Clone, Copy)]
 struct LocaleKeyParts<'a> {
     lang: &'a str,
