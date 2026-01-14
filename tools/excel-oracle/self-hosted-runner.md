@@ -94,6 +94,10 @@ For `es-ES`, use:
 powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
   -LocaleId es-ES `
   -OutPath crates/formula-engine/src/locale/data/sources/es-ES.json
+
+node scripts/normalize-locale-function-sources.js
+node scripts/generate-locale-function-tsv.js
+node scripts/generate-locale-function-tsv.js --check
 ```
 
 Verification checklist (especially for `es-ES`):
