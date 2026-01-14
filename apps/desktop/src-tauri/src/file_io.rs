@@ -1686,9 +1686,7 @@ fn read_xlsb_col_properties_for_sheet(
                         if props.width.is_some() {
                             entry.width = props.width;
                         }
-                        if props.hidden {
-                            entry.hidden = true;
-                        }
+                        entry.hidden = props.hidden;
                     }
                 }
             }
@@ -3841,11 +3839,23 @@ mod tests {
                         COL_INFO_RECORD_ID,
                         &col_info_payload(0, 0, 20.0, false),
                     );
-                    // Column B: hidden.
+                    // Column B: hidden, then later unhidden with a different width. The later record
+                    // should win (record order matters).
                     write_record(
                         &mut patch,
                         COL_INFO_RECORD_ID,
                         &col_info_payload(1, 1, 8.0, true),
+                    );
+                    write_record(
+                        &mut patch,
+                        COL_INFO_RECORD_ID,
+                        &col_info_payload(1, 1, 15.0, false),
+                    );
+                    // Column C: hidden.
+                    write_record(
+                        &mut patch,
+                        COL_INFO_RECORD_ID,
+                        &col_info_payload(2, 2, 8.0, true),
                     );
                     write_record(&mut patch, END_COL_INFOS_RECORD_ID, &[]);
 
@@ -3928,7 +3938,7 @@ mod tests {
             other => panic!("expected numeric column width, got {other:?}"),
         }
 
-        // Hidden columns report width=0.
+        // Column B was unhidden by a later record and should report its final width.
         state
             .set_cell(
                 &sheet_id,
@@ -3939,7 +3949,26 @@ mod tests {
             )
             .expect("set CELL(width) formula for B1");
         let c2 = state.get_cell(&sheet_id, 1, 2).expect("read C2");
-        assert_eq!(c2.value, CellScalar::Number(0.0));
+        match c2.value {
+            CellScalar::Number(v) => assert!(
+                (v - 15.1).abs() < 0.2,
+                "expected column width ~15 for B1, got {v}"
+            ),
+            other => panic!("expected numeric column width, got {other:?}"),
+        }
+
+        // Hidden columns report width=0.
+        state
+            .set_cell(
+                &sheet_id,
+                2,
+                2,
+                None,
+                Some("=CELL(\"width\",C1)".to_string()),
+            )
+            .expect("set CELL(width) formula for C1");
+        let c3 = state.get_cell(&sheet_id, 2, 2).expect("read C3");
+        assert_eq!(c3.value, CellScalar::Number(0.0));
     }
 
     #[test]
