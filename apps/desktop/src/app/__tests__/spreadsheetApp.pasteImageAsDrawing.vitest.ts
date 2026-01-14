@@ -152,7 +152,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
 
     const imageId = raw?.kind?.imageId;
     expect(typeof imageId).toBe("string");
-    const stored = docAny.getImage?.(imageId);
+    const stored = (app as any).drawingImages?.get?.(imageId);
     expect(stored?.mimeType).toBe("image/png");
     expect(stored?.bytes).toBeInstanceOf(Uint8Array);
 
@@ -187,6 +187,42 @@ describe("SpreadsheetApp paste image clipboard", () => {
     const provider = {
       // Some platforms include `text/plain=""` alongside the image bytes.
       read: vi.fn(async () => ({ imagePng: pngBytes, text: "" })),
+      write: vi.fn(async () => {}),
+    };
+    (app as any).clipboardProviderPromise = Promise.resolve(provider);
+
+    await app.pasteClipboardToSelection();
+
+    const sheetId = app.getCurrentSheetId();
+    const docAny = app.getDocument() as any;
+    const drawings = docAny.getSheetDrawings?.(sheetId) ?? [];
+    expect(drawings).toHaveLength(1);
+    expect(drawings[0]?.kind?.type).toBe("image");
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("pastes pngBase64 clipboard payloads as a drawing object (legacy fallback)", async () => {
+    const base64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7+FeAAAAAASUVORK5CYII=";
+
+    Object.defineProperty(globalThis, "createImageBitmap", {
+      configurable: true,
+      value: vi.fn(async () => ({ width: 64, height: 32 })),
+    });
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+
+    const provider = {
+      read: vi.fn(async () => ({ pngBase64: `data:image/png;base64,${base64}` })),
       write: vi.fn(async () => {}),
     };
     (app as any).clipboardProviderPromise = Promise.resolve(provider);
