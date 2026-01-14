@@ -131,6 +131,25 @@ describe("createDefaultAIAuditStore", () => {
     expect((store as any).store).toBeInstanceOf(LocalStorageAIAuditStore);
   });
 
+  it('prefer: "localstorage" wraps MemoryAIAuditStore fallback in BoundedAIAuditStore by default when localStorage is unavailable', async () => {
+    const win: any = {};
+    Object.defineProperty(win, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("no localStorage");
+      }
+    });
+    Object.defineProperty(globalThis, "window", { value: win, configurable: true });
+    // Ensure IndexedDB is also present so this test catches accidental IndexedDB fallback.
+    (globalThis as any).indexedDB = indexedDB;
+    (globalThis as any).IDBKeyRange = IDBKeyRange;
+
+    const store = await createDefaultAIAuditStore({ prefer: "localstorage" });
+    expect(store).toBeInstanceOf(BoundedAIAuditStore);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((store as any).store).toBeInstanceOf(MemoryAIAuditStore);
+  });
+
   it('prefer: "memory" chooses MemoryAIAuditStore even when persistence APIs exist', async () => {
     const storage = new MemoryLocalStorage();
     Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
