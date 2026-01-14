@@ -962,11 +962,26 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
         const transformValue = pick(raw, ["transform"]);
         let transform: DrawingTransform | undefined;
         if (isRecord(transformValue)) {
-          const rotationDeg = readOptionalNumber((transformValue as JsonRecord).rotationDeg);
-          const flipH = (transformValue as JsonRecord).flipH;
-          const flipV = (transformValue as JsonRecord).flipV;
-          if (rotationDeg != null && typeof flipH === "boolean" && typeof flipV === "boolean") {
-            transform = { rotationDeg, flipH, flipV };
+          const record = transformValue as JsonRecord;
+          const hasAnyTransformKey =
+            Object.prototype.hasOwnProperty.call(record, "rotationDeg") ||
+            Object.prototype.hasOwnProperty.call(record, "rotation_deg") ||
+            Object.prototype.hasOwnProperty.call(record, "flipH") ||
+            Object.prototype.hasOwnProperty.call(record, "flip_h") ||
+            Object.prototype.hasOwnProperty.call(record, "flipV") ||
+            Object.prototype.hasOwnProperty.call(record, "flip_v");
+          if (hasAnyTransformKey) {
+            const rotationRaw = pick(record, ["rotationDeg", "rotation_deg"]);
+            const rotationDeg = rotationRaw === undefined ? 0 : readOptionalNumber(rotationRaw);
+            if (rotationDeg != null) {
+              const flipHRaw = pick(record, ["flipH", "flip_h"]);
+              const flipVRaw = pick(record, ["flipV", "flip_v"]);
+              const flipH = flipHRaw === undefined ? false : flipHRaw;
+              const flipV = flipVRaw === undefined ? false : flipVRaw;
+              if (typeof flipH === "boolean" && typeof flipV === "boolean") {
+                transform = { rotationDeg, flipH, flipV };
+              }
+            }
           }
         }
 
