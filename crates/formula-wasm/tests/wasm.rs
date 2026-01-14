@@ -430,19 +430,23 @@ fn canonicalize_and_localize_formula_roundtrip_fr_fr() {
 fn canonicalize_and_localize_error_literals_roundtrip_es_es_inverted_punctuation() {
     // es-ES uses inverted punctuation variants for many error literals.
     // Ensure these round-trip through the public wasm API.
-    assert_eq!(
-        canonicalize_formula("=#¡VALOR!", "es-ES", None).unwrap(),
-        "=#VALUE!"
-    );
+    for localized in ["=#¡VALOR!", "=#¡valor!", "=#VALOR!", "=#valor!"] {
+        assert_eq!(
+            canonicalize_formula(localized, "es-ES", None).unwrap(),
+            "=#VALUE!"
+        );
+    }
     assert_eq!(
         localize_formula("=#VALUE!", "es-ES", None).unwrap(),
         "=#¡VALOR!"
     );
 
-    assert_eq!(
-        canonicalize_formula("=#¿NOMBRE?", "es-ES", None).unwrap(),
-        "=#NAME?"
-    );
+    for localized in ["=#¿NOMBRE?", "=#¿nombre?", "=#NOMBRE?", "=#nombre?"] {
+        assert_eq!(
+            canonicalize_formula(localized, "es-ES", None).unwrap(),
+            "=#NAME?"
+        );
+    }
     assert_eq!(
         localize_formula("=#NAME?", "es-ES", None).unwrap(),
         "=#¿NOMBRE?"
