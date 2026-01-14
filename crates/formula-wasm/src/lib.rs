@@ -3312,7 +3312,7 @@ impl WasmWorkbook {
 
     /// Set (or clear) the default style id for all cells in a row.
     ///
-    /// `row` is 0-indexed (engine coordinates). `style_id=None` (or `Some(0)`) clears the override.
+    /// `row` is 0-indexed (engine coordinates). `style_id=0` (or `null`/`undefined`) clears the override.
     #[wasm_bindgen(js_name = "setRowStyleId")]
     pub fn set_row_style_id(&mut self, sheet: String, row: u32, style_id: Option<u32>) {
         let sheet = self.inner.ensure_sheet(&sheet);
@@ -3322,7 +3322,7 @@ impl WasmWorkbook {
 
     /// Set (or clear) the default style id for all cells in a column.
     ///
-    /// `col` is 0-indexed (engine coordinates). `style_id=None` (or `Some(0)`) clears the override.
+    /// `col` is 0-indexed (engine coordinates). `style_id=0` (or `null`/`undefined`) clears the override.
     #[wasm_bindgen(js_name = "setColStyleId")]
     pub fn set_col_style_id(&mut self, sheet: String, col: u32, style_id: Option<u32>) {
         let sheet = self.inner.ensure_sheet(&sheet);
@@ -3332,7 +3332,7 @@ impl WasmWorkbook {
 
     /// Set (or clear) the default style id for an entire sheet.
     ///
-    /// `style_id=None` (or `Some(0)`) resets the default style id to `0`.
+    /// `style_id=0` (or `null`/`undefined`) clears the override.
     #[wasm_bindgen(js_name = "setSheetDefaultStyleId")]
     pub fn set_sheet_default_style_id(&mut self, sheet: String, style_id: Option<u32>) {
         let sheet = self.inner.ensure_sheet(&sheet);

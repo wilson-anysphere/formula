@@ -231,8 +231,8 @@ export interface EngineClient {
   /**
    * Set (or clear) a per-column width override.
    *
-  * `widthChars` is expressed in Excel "character" units (OOXML `col/@width`), not pixels.
-  */
+   * `widthChars` is expressed in Excel "character" units (OOXML `col/@width`), not pixels.
+   */
   setColWidthChars(sheet: string, col: number, widthChars: number | null, options?: RpcOptions): Promise<void>;
   /**
    * Set a row-level formatting style id (layered formatting).
