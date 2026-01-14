@@ -150,8 +150,8 @@ test(
     chmodSync(join(macosDir, "formula-desktop"), 0o755);
     const resourcesDir = join(appRoot, "Resources");
     mkdirSync(resourcesDir, { recursive: true });
-    writeFileSync(join(resourcesDir, "LICENSE"), "license", { encoding: "utf8" });
-    writeFileSync(join(resourcesDir, "NOTICE"), "notice", { encoding: "utf8" });
+    writeFileSync(join(resourcesDir, "LICENSE"), "stub", { encoding: "utf8" });
+    writeFileSync(join(resourcesDir, "NOTICE"), "stub", { encoding: "utf8" });
 
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: expectedIdentifier,

@@ -85,41 +85,6 @@ esac
   const rpmPath = join(binDir, "rpm");
   writeFileSync(rpmPath, rpmScript, { encoding: "utf8" });
   chmodSync(rpmPath, 0o755);
-
-  // `validate-linux-rpm.sh --no-container` extracts the RPM payload to validate
-  // `.desktop` file MimeType entries, so provide lightweight stubs for rpm2cpio/cpio.
-  const rpm2cpioPath = join(binDir, "rpm2cpio");
-  writeFileSync(
-    rpm2cpioPath,
-    `#!/usr/bin/env bash
-set -euo pipefail
-# The real rpm2cpio converts an RPM to a CPIO archive. Our fake cpio ignores stdin,
-# so we can just succeed without emitting anything.
-exit 0
-`,
-    { encoding: "utf8" },
-  );
-  chmodSync(rpm2cpioPath, 0o755);
-
-  const cpioPath = join(binDir, "cpio");
-  writeFileSync(
-    cpioPath,
-    `#!/usr/bin/env bash
-set -euo pipefail
-# Create a minimal extracted payload tree expected by the validator.
-mkdir -p usr/share/applications
-cat > usr/share/applications/formula.desktop <<'DESKTOP'
-[Desktop Entry]
-Type=Application
-Name=Formula
-Exec=formula-desktop %U
-MimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;
-DESKTOP
-exit 0
-`,
-    { encoding: "utf8" },
-  );
-  chmodSync(cpioPath, 0o755);
 }
 
 function writeFakeRpmExtractTools(
@@ -193,6 +158,7 @@ test(
     const binDir = join(tmp, "bin");
     mkdirSync(binDir, { recursive: true });
     writeFakeRpmTool(binDir);
+    writeFakeRpmExtractTools(binDir);
 
     // Fake RPM artifact (contents unused by the validator; it calls our fake rpm tool).
     writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
@@ -225,6 +191,7 @@ test("validate-linux-rpm accepts --rpm pointing at a directory of RPMs", { skip:
   const binDir = join(tmp, "bin");
   mkdirSync(binDir, { recursive: true });
   writeFakeRpmTool(binDir);
+  writeFakeRpmExtractTools(binDir);
 
   writeFileSync(join(tmp, "Formula-1.rpm"), "not-a-real-rpm", { encoding: "utf8" });
   writeFileSync(join(tmp, "Formula-2.rpm"), "not-a-real-rpm", { encoding: "utf8" });
