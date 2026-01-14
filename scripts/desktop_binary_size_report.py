@@ -289,11 +289,14 @@ def _render_markdown(
             f"(set `{ENV_ENFORCE_SIZE_LIMIT}=1` to fail when over the limit)"
         )
     else:
+        over_limit = bin_size_bytes is not None and bin_size_bytes > (limit_mb * 1_000_000)
         lines.append(f"- Size limit: **{limit_mb} MB**")
         lines.append(
             f"- Enforcement: **{'enabled' if enforce else 'disabled'}** "
             f"(set `{ENV_ENFORCE_SIZE_LIMIT}=1` to fail when over the limit)"
         )
+        if bin_size_bytes is not None:
+            lines.append(f"- Over limit: **{'YES' if over_limit else 'no'}**")
     lines.append("")
 
     if tool_note:
