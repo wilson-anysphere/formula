@@ -59,15 +59,23 @@ test("desktop UI scripts should not hardcode monospace font stacks in inline sty
   const patterns = [
     // CSS declarations embedded in style strings (e.g. `style: "font-family: ui-monospace"`).
     { re: /\bfont-family\s*:\s*(?<value>[^;"'`]*)/gi, kind: "font-family" },
+    // CSS declarations embedded in style strings (e.g. `style: "font: 12px ui-monospace"`).
+    { re: /\bfont\s*:\s*(?<value>[^;"'`]*)/gi, kind: "font" },
     // React style objects (e.g. `{ fontFamily: "ui-monospace" }`).
     { re: /\bfontFamily\s*:\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "fontFamily" },
+    // React style objects (e.g. `{ font: "12px ui-monospace" }`).
+    { re: /\bfont\s*:\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "font" },
     // DOM style assignment (e.g. `el.style.fontFamily = "ui-monospace"`).
     { re: /\.style\.fontFamily\s*=\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.fontFamily" },
+    // DOM style assignment (e.g. `el.style.font = "12px ui-monospace"`).
+    { re: /\.style\.font\s*=\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.font" },
     // setProperty("font-family", "ui-monospace")
     {
       re: /\.style\.setProperty\(\s*(["'])font-family\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty(font-family)",
     },
+    // setProperty("font", "12px ui-monospace")
+    { re: /\.style\.setProperty\(\s*(["'])font\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi, kind: "setProperty(font)" },
   ];
 
   for (const file of files) {
@@ -217,4 +225,3 @@ test("desktop UI scripts should not hardcode monospace font stacks in inline sty
       .join("\n")}`,
   );
 });
-
