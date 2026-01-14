@@ -155,7 +155,11 @@ pub fn final_hash(h: &[u8], block: u32, hash_alg: HashAlg) -> Vec<u8> {
 /// CryptoAPI `CryptDeriveKey` byte expansion used by MS-OFFCRYPTO Standard encryption.
 ///
 /// CryptoAPI does **not** use the digest bytes directly as the key. For MD5/SHA-1 it expands the
-/// hash using an HMAC-like ipad/opad construction and then truncates to the desired key length.
+/// digest using an ipad/opad construction (HMAC-like) and then truncates to the desired key length.
+///
+/// Important nuance (Standard AES): this expansion step is performed **even when the desired key
+/// length is shorter than the digest length** (e.g. AES-128 derived from a 20-byte SHA-1 digest).
+/// See `docs/offcrypto-standard-cryptoapi.md` (§8.2).
 ///
 /// ```text
 /// buf = hash_value || 0x00*(64 - hash_len)
@@ -210,18 +214,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn crypt_derive_key_sha1_applies_cryptderivekey_even_when_key_len_le_hash_len() {
-        // SHA-1("hello") = aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d
+    fn crypt_derive_key_sha1_aes128_runs_expansion_even_when_key_len_lt_hash_len() {
+        // MS-OFFCRYPTO Standard AES-128 `CryptDeriveKey` sanity check:
+        //
+        // Given a per-block SHA-1 digest `H_block0`, CryptoAPI's `CryptDeriveKey` performs the
+        // ipad/opad expansion and *then* truncates to 16 bytes. It does **not** use
+        // `H_block0[0:16]` directly.
+        //
+        // Test vector from `docs/offcrypto-standard-cryptoapi.md` (§8.2).
         let hash_value: [u8; 20] = [
-            0xAA, 0xF4, 0xC6, 0x1D, 0xDC, 0xC5, 0xE8, 0xA2, 0xDA, 0xBE, 0xDE, 0x0F, 0x3B,
-            0x48, 0x2C, 0xD9, 0xAE, 0xA9, 0x43, 0x4D,
+            0xE2, 0xF8, 0xCD, 0xE4, 0x57, 0xE5, 0xD4, 0x49, 0xEB, 0x20, 0x50, 0x57, 0xC8,
+            0x8D, 0x20, 0x1D, 0x14, 0x53, 0x1F, 0xF3,
         ];
 
         let key = crypt_derive_key(&hash_value, 16, HashAlg::Sha1);
         let expected: [u8; 16] = [
-            // Prefix of the expanded key material (see `crypt_derive_key_sha1_expands_for_aes256`).
-            0xB1, 0xBF, 0x85, 0x34, 0x6E, 0xCA, 0xE4, 0x29, 0xC0, 0xB3, 0x50, 0x63, 0x5B,
-            0xAA, 0x3F, 0x25,
+            0x40, 0xB1, 0x3A, 0x71, 0xF9, 0x0B, 0x96, 0x6E, 0x37, 0x54, 0x08, 0xF2, 0xD1,
+            0x81, 0xA1, 0xAA,
         ];
         assert_eq!(key, expected);
     }
