@@ -64,7 +64,8 @@ matches="$(
 
       # Detect YAML block scalars (e.g. `run: |` / `releaseBody: >-`) so we can skip
       # their content lines.
-      if (line ~ /:[[:space:]]*[>|][+-]?[0-9]*[[:space:]]*$/) {
+      # YAML allows both orders for chomping/indentation indicators (e.g. `|2-`, `|-2`).
+      if (line ~ /:[[:space:]]*[>|][0-9+-]*[[:space:]]*$/) {
         in_block = 1;
         block_indent = ind;
       }

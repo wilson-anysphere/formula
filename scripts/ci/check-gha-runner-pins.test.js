@@ -96,3 +96,16 @@ jobs:
 `);
   assert.equal(proc.status, 0, proc.stderr);
 });
+
+test("ignores *-latest occurrences inside block scalars with indentation/chomp indicators", { skip: !hasBash }, () => {
+  const proc = run(`
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |2-
+          echo ubuntu-latest
+          echo windows-latest
+`);
+  assert.equal(proc.status, 0, proc.stderr);
+});
