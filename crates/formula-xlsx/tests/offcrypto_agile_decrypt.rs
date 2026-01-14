@@ -1046,3 +1046,32 @@ fn agile_decrypt_large_fixture_matches_office_crypto_reference() {
     assert_eq!(office_crypto_decrypted, expected);
     assert_eq!(office_crypto_decrypted, decrypted);
 }
+
+#[test]
+fn agile_decrypt_unicode_excel_fixture_matches_office_crypto_reference() {
+    // Cross-check against a real Excel-produced Agile-encrypted workbook with a non-BMP (emoji)
+    // password, to validate password encoding + multi-segment decryption.
+    let password = "pässwörd🔒";
+    let encrypted_cfb = std::fs::read(fixture_path("agile-unicode-excel.xlsx"))
+        .expect("read agile-unicode-excel.xlsx");
+    let expected =
+        std::fs::read(fixture_path("plaintext-excel.xlsx")).expect("read plaintext-excel.xlsx");
+
+    // Sanity: ensure we cover multi-segment (4096-byte) Agile decryption for this fixture.
+    assert!(
+        expected.len() > 4096,
+        "expected plaintext-excel.xlsx to be > 4096 bytes, got {}",
+        expected.len()
+    );
+
+    let encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
+    let encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
+
+    let decrypted =
+        decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, password).unwrap();
+    assert_eq!(decrypted, expected);
+
+    let office_crypto_decrypted = office_crypto::decrypt_from_bytes(encrypted_cfb, password).unwrap();
+    assert_eq!(office_crypto_decrypted, expected);
+    assert_eq!(office_crypto_decrypted, decrypted);
+}
