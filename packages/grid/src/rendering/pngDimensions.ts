@@ -6,7 +6,7 @@
 export const MAX_PNG_DIMENSION = 10_000;
 export const MAX_PNG_PIXELS = 50_000_000;
 
-export type ImageHeaderFormat = "png" | "jpeg" | "gif" | "webp";
+export type ImageHeaderFormat = "png" | "jpeg" | "gif" | "webp" | "bmp";
 export type ImageHeaderDimensions = { format: ImageHeaderFormat; width: number; height: number };
 
 export function readPngDimensions(bytes: Uint8Array): { width: number; height: number } | null {
@@ -198,6 +198,40 @@ export function readWebpDimensions(bytes: Uint8Array): { width: number; height: 
   return null;
 }
 
+export function readBmpDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  // BMP file header (14 bytes) + DIB header size (4 bytes) + width/height (>=4 bytes each)
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength < 26) return null;
+  // "BM"
+  if (bytes[0] !== 0x42 || bytes[1] !== 0x4d) return null;
+
+  try {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const dibSize = view.getUint32(14, true);
+
+    if (dibSize === 12) {
+      // BITMAPCOREHEADER: 16-bit width/height (unsigned).
+      const width = view.getUint16(18, true);
+      const height = view.getUint16(20, true);
+      if (width === 0 || height === 0) return null;
+      return { width, height };
+    }
+
+    if (dibSize >= 40) {
+      // BITMAPINFOHEADER and later: 32-bit signed width/height (height may be negative for top-down).
+      const widthRaw = view.getInt32(18, true);
+      const heightRaw = view.getInt32(22, true);
+      const width = Math.abs(widthRaw);
+      const height = Math.abs(heightRaw);
+      if (width === 0 || height === 0) return null;
+      return { width, height };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
 export function readImageDimensions(bytes: Uint8Array): ImageHeaderDimensions | null {
   const png = readPngDimensions(bytes);
   if (png) return { format: "png", ...png };
@@ -207,5 +241,7 @@ export function readImageDimensions(bytes: Uint8Array): ImageHeaderDimensions | 
   if (jpeg) return { format: "jpeg", ...jpeg };
   const webp = readWebpDimensions(bytes);
   if (webp) return { format: "webp", ...webp };
+  const bmp = readBmpDimensions(bytes);
+  if (bmp) return { format: "bmp", ...bmp };
   return null;
 }

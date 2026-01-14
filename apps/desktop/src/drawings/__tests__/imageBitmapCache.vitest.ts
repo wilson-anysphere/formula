@@ -111,6 +111,30 @@ function createWebpVp8xHeaderBytes(width: number, height: number): Uint8Array {
   return bytes;
 }
 
+function createBmpHeaderBytes(width: number, height: number): Uint8Array {
+  // Minimal structure: BMP file header + BITMAPINFOHEADER with width/height.
+  // This is not a complete/valid BMP, but it includes enough header structure for our
+  // dimension parser to extract the advertised size.
+  const bytes = new Uint8Array(54);
+  const view = new DataView(bytes.buffer);
+
+  // Signature "BM"
+  bytes[0] = 0x42;
+  bytes[1] = 0x4d;
+  // Pixel array offset (header size)
+  view.setUint32(10, 54, true);
+  // DIB header size (BITMAPINFOHEADER)
+  view.setUint32(14, 40, true);
+  // Width/height (signed 32-bit)
+  view.setInt32(18, width, true);
+  view.setInt32(22, height, true);
+  // Planes
+  view.setUint16(26, 1, true);
+  // Bits per pixel
+  view.setUint16(28, 24, true);
+  return bytes;
+}
+
 describe("ImageBitmapCache", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -439,6 +463,17 @@ describe("ImageBitmapCache", () => {
 
     const cache = new ImageBitmapCache({ maxEntries: 10 });
     const entry: ImageEntry = { id: "webp_bomb", bytes: createWebpVp8xHeaderBytes(10_001, 1), mimeType: "image/webp" };
+
+    await expect(cache.get(entry)).rejects.toThrow(/Image dimensions too large/);
+    expect(createImageBitmapMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects BMP images with huge dimensions without invoking createImageBitmap", async () => {
+    const createImageBitmapMock = vi.fn(() => Promise.resolve({ close: vi.fn() } as unknown as ImageBitmap));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 10 });
+    const entry: ImageEntry = { id: "bmp_bomb", bytes: createBmpHeaderBytes(10_001, 1), mimeType: "image/bmp" };
 
     await expect(cache.get(entry)).rejects.toThrow(/Image dimensions too large/);
     expect(createImageBitmapMock).not.toHaveBeenCalled();

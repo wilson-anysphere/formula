@@ -214,6 +214,30 @@ function createWebpVp8xHeaderBytes(width: number, height: number): Uint8Array {
   return bytes;
 }
 
+function createBmpHeaderBytes(width: number, height: number): Uint8Array {
+  // Minimal structure: BMP file header + BITMAPINFOHEADER with width/height.
+  // This is not a complete/valid BMP, but it includes enough header structure for our
+  // dimension parser to extract the advertised size.
+  const bytes = new Uint8Array(54);
+  const view = new DataView(bytes.buffer);
+
+  // Signature "BM"
+  bytes[0] = 0x42;
+  bytes[1] = 0x4d;
+  // Pixel array offset (header size)
+  view.setUint32(10, 54, true);
+  // DIB header size (BITMAPINFOHEADER)
+  view.setUint32(14, 40, true);
+  // Width/height (signed 32-bit)
+  view.setInt32(18, width, true);
+  view.setInt32(22, height, true);
+  // Planes
+  view.setUint16(26, 1, true);
+  // Bits per pixel
+  view.setUint16(28, 24, true);
+  return bytes;
+}
+
 async function flushMicrotasks(): Promise<void> {
   // Several turns helps flush async chains that include multiple `await` boundaries
   // (resolver -> header sniff -> createImageBitmap -> finally handlers).
@@ -885,6 +909,136 @@ describe("CanvasGridRenderer image cells", () => {
     expect(createImageBitmapSpy).not.toHaveBeenCalled();
     expect(content.rec.drawImages.length).toBe(0);
     expect(content.rec.fillTexts.some((args) => args[0] === "WebP blob bomb")).toBe(true);
+  });
+
+  it("rejects BMP images with huge dimensions without invoking createImageBitmap", async () => {
+    vi.stubGlobal("requestAnimationFrame", (_cb: FrameRequestCallback) => 0);
+
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "bmp_bomb", altText: "BMP bomb", width: 100, height: 50 }
+            }
+          : null
+    };
+
+    const createImageBitmapSpy = vi.fn(async () => ({ width: 10, height: 10 } as any));
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    const bytes = createBmpHeaderBytes(10_001, 1);
+    const imageResolver = vi.fn(async () => bytes);
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    installContexts(contexts);
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 1,
+      defaultColWidth: 100,
+      defaultRowHeight: 50,
+      imageResolver
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+
+    renderer.renderImmediately();
+    const pending = (renderer as any).imageBitmapCache.get("bmp_bomb") as
+      | { state: "pending"; promise: Promise<void> }
+      | { state: string };
+    if (pending?.state === "pending") {
+      await pending.promise;
+    }
+
+    renderer.renderImmediately();
+    await flushMicrotasks();
+
+    expect(imageResolver).toHaveBeenCalledTimes(1);
+    expect(createImageBitmapSpy).not.toHaveBeenCalled();
+    expect(content.rec.drawImages.length).toBe(0);
+    expect(content.rec.fillTexts.some((args) => args[0] === "BMP bomb")).toBe(true);
+  });
+
+  it("rejects BMP Blob images with huge dimensions without invoking createImageBitmap", async () => {
+    vi.stubGlobal("requestAnimationFrame", (_cb: FrameRequestCallback) => 0);
+
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "bmp_bomb_blob", altText: "BMP blob bomb", width: 100, height: 50 }
+            }
+          : null
+    };
+
+    const createImageBitmapSpy = vi.fn(async () => ({ width: 10, height: 10 } as any));
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    const bytes = createBmpHeaderBytes(10_001, 1);
+    const imageResolver = vi.fn(async () => new Blob([bytes], { type: "image/bmp" }));
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    installContexts(contexts);
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 1,
+      defaultColWidth: 100,
+      defaultRowHeight: 50,
+      imageResolver
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+
+    renderer.renderImmediately();
+    const pending = (renderer as any).imageBitmapCache.get("bmp_bomb_blob") as
+      | { state: "pending"; promise: Promise<void> }
+      | { state: string };
+    if (pending?.state === "pending") {
+      await pending.promise;
+    }
+
+    renderer.renderImmediately();
+    await flushMicrotasks();
+
+    expect(imageResolver).toHaveBeenCalledTimes(1);
+    expect(createImageBitmapSpy).not.toHaveBeenCalled();
+    expect(content.rec.drawImages.length).toBe(0);
+    expect(content.rec.fillTexts.some((args) => args[0] === "BMP blob bomb")).toBe(true);
   });
 
   it("rejects PNG Blob images that exceed the pixel limit without invoking createImageBitmap", async () => {
