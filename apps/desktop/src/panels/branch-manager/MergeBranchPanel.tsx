@@ -270,7 +270,7 @@ function CellInlineView({ cell }: { cell: Cell | null }) {
   if (!cell) return <span className="branch-merge__empty">∅</span>;
   if (cellHasEnc(cell)) return <span className="branch-merge__encrypted">{encryptedCellText(cell.enc)}</span>;
   if (cellHasFormula(cell)) {
-    const formula = normalizeFormulaInput(cell.formula) ?? cell.formula ?? null;
+    const formula = normalizeFormulaInput(cell.formula);
     return <FormulaDiffView before={formula} after={formula} />;
   }
   if (cellHasValue(cell)) return <span className="branch-merge__value">{valueSummary(cell.value)}</span>;
@@ -299,8 +299,8 @@ function CellConflictColumn({
   formulaMode: "base" | "ours" | "theirs";
 }) {
   const currentFormula = cell?.formula ?? null;
-  const normalizedBaseFormula = normalizeFormulaInput(baseFormula) ?? baseFormula;
-  const normalizedCurrentFormula = normalizeFormulaInput(currentFormula) ?? currentFormula;
+  const normalizedBaseFormula = normalizeFormulaInput(baseFormula);
+  const normalizedCurrentFormula = normalizeFormulaInput(currentFormula);
   const formulaOld = normalizedBaseFormula;
   const formulaNew = formulaMode === "base" ? normalizedBaseFormula : normalizedCurrentFormula;
   const showValueDiff = formulaMode !== "base" && cellValueKey(baseCell) !== cellValueKey(cell);
