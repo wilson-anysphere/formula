@@ -2,6 +2,7 @@ use std::sync::Mutex;
 
 use tauri::tray::TrayIcon;
 
+use crate::ipc_limits::{LimitedString, MAX_IPC_TRAY_STATUS_BYTES};
 use crate::ipc_origin;
 
 #[derive(Default)]
@@ -104,11 +105,11 @@ impl TrayStatusState {
 pub fn set_tray_status(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, TrayStatusState>,
-    status: String,
+    status: LimitedString<MAX_IPC_TRAY_STATUS_BYTES>,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_main_window(window.label(), "tray status", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_trusted_origin(&url, "tray status", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "tray status", ipc_origin::Verb::Is)?;
-    state.inner().update_status(&status)
+    state.inner().update_status(status.as_ref())
 }

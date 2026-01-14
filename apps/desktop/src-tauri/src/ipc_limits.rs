@@ -3,7 +3,6 @@
 /// These are defensive: webview input should be treated as untrusted, and very large payloads can
 /// lead to excessive memory usage and slow processing (e.g. workbook cloning, script parsing, or
 /// spawning subprocesses).
-
 use serde::de;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
@@ -83,6 +82,13 @@ pub const MAX_IPC_COLLAB_TOKEN_BYTES: usize = 64 * 1024; // 64 KiB
 /// This cap is intentionally generous while preventing untrusted IPC inputs from forcing large
 /// allocations during base64 decode.
 pub const MAX_IPC_COLLAB_ENCRYPTION_KEY_BASE64_BYTES: usize = 256;
+
+/// Maximum size (in bytes) of the tray-status string accepted over IPC.
+///
+/// `set_tray_status` only supports a few short status tokens; this cap prevents a compromised
+/// WebView from sending arbitrarily large strings even though the backend will reject unknown
+/// values.
+pub const MAX_IPC_TRAY_STATUS_BYTES: usize = 32;
 
 /// Maximum size (in bytes) of system notification titles accepted over IPC.
 ///

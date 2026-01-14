@@ -2,7 +2,8 @@ use desktop::commands::LimitedString;
 
 #[test]
 fn limited_string_deserialize_enforces_max_len() {
-    let ok: LimitedString<4> = serde_json::from_str("\"test\"").expect("expected payload to deserialize");
+    let ok: LimitedString<4> =
+        serde_json::from_str("\"test\"").expect("expected payload to deserialize");
     assert_eq!(ok.as_ref(), "test");
 
     let err = serde_json::from_str::<LimitedString<4>>("\"tests\"")
@@ -90,7 +91,11 @@ fn privileged_ipc_commands_have_string_length_caps() {
         "pub async fn read_binary_file_range",
         &["MAX_IPC_PATH_BYTES"],
     );
-    assert_fn_has_ipc_string_cap(commands_src, "pub async fn list_dir", &["MAX_IPC_PATH_BYTES"]);
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn list_dir",
+        &["MAX_IPC_PATH_BYTES"],
+    );
     assert_fn_has_ipc_string_cap(
         commands_src,
         "pub async fn open_external_url",
@@ -174,6 +179,66 @@ fn privileged_ipc_commands_have_string_length_caps() {
         "pub async fn collab_encryption_key_list",
         &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
     );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn get_macro_security_status",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn set_macro_trust",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub fn get_vba_project",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub fn list_macros",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub fn set_macro_ui_context",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES", "MAX_SHEET_ID_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn run_macro",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn run_python_script",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn validate_vba_migration",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn fire_workbook_open",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn fire_workbook_before_close",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn fire_worksheet_change",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES", "MAX_SHEET_ID_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn fire_selection_change",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES", "MAX_SHEET_ID_BYTES"],
+    );
 
     let main_src = include_str!("../src/main.rs");
     assert_fn_has_ipc_string_cap(
@@ -188,5 +253,12 @@ fn privileged_ipc_commands_have_string_length_caps() {
         main_src,
         "async fn oauth_loopback_listen",
         &["MAX_OAUTH_REDIRECT_URI_BYTES"],
+    );
+
+    let tray_src = include_str!("../src/tray_status.rs");
+    assert_fn_has_ipc_string_cap(
+        tray_src,
+        "pub fn set_tray_status",
+        &["MAX_IPC_TRAY_STATUS_BYTES"],
     );
 }

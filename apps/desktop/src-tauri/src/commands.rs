@@ -6492,7 +6492,7 @@ pub struct VbaProjectSummary {
 #[tauri::command]
 pub async fn get_macro_security_status(
     window: tauri::WebviewWindow,
-    workbook_id: Option<String>,
+    workbook_id: Option<LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>>,
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroSecurityStatus, String> {
@@ -6504,7 +6504,7 @@ pub async fn get_macro_security_status(
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let workbook_id = workbook_id.as_deref();
+        let workbook_id = workbook_id.as_ref().map(|id| id.as_ref());
         let mut state = shared.lock().unwrap();
         let mut trust_store = trust_shared.lock().unwrap();
         trust_store.ensure_loaded();
@@ -6519,7 +6519,7 @@ pub async fn get_macro_security_status(
 #[tauri::command]
 pub async fn set_macro_trust(
     window: tauri::WebviewWindow,
-    workbook_id: Option<String>,
+    workbook_id: Option<LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>>,
     decision: MacroTrustDecision,
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
@@ -6532,7 +6532,7 @@ pub async fn set_macro_trust(
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let workbook_id = workbook_id.as_deref();
+        let workbook_id = workbook_id.as_ref().map(|id| id.as_ref());
         let mut state = shared.lock().unwrap();
         let mut trust_store = trust_shared.lock().unwrap();
 
@@ -6554,7 +6554,7 @@ pub async fn set_macro_trust(
 #[tauri::command]
 pub fn get_vba_project(
     window: tauri::WebviewWindow,
-    workbook_id: Option<String>,
+    workbook_id: Option<LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>>,
     state: State<'_, SharedAppState>,
 ) -> Result<Option<VbaProjectSummary>, String> {
     ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
@@ -6598,7 +6598,7 @@ pub fn get_vba_project(
 #[tauri::command]
 pub fn list_macros(
     window: tauri::WebviewWindow,
-    workbook_id: Option<String>,
+    workbook_id: Option<LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>>,
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<MacroInfo>, String> {
     ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
@@ -6616,8 +6616,8 @@ pub fn list_macros(
 #[tauri::command]
 pub fn set_macro_ui_context(
     window: tauri::WebviewWindow,
-    workbook_id: Option<String>,
-    sheet_id: String,
+    workbook_id: Option<LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>>,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     active_row: usize,
     active_col: usize,
     selection: Option<MacroSelectionRect>,
@@ -6637,7 +6637,7 @@ pub fn set_macro_ui_context(
         end_col: rect.end_col,
     });
     state
-        .set_macro_ui_context(&sheet_id, active_row, active_col, selection)
+        .set_macro_ui_context(sheet_id.as_ref(), active_row, active_col, selection)
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -6646,8 +6646,8 @@ pub fn set_macro_ui_context(
 #[tauri::command]
 pub async fn run_macro(
     window: tauri::WebviewWindow,
-    workbook_id: Option<String>,
-    macro_id: String,
+    workbook_id: Option<LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>>,
+    macro_id: LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>,
     permissions: Option<LimitedMacroPermissions>,
     timeout_ms: Option<u64>,
     state: State<'_, SharedAppState>,
@@ -6658,7 +6658,6 @@ pub async fn run_macro(
     ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
-    let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -6666,7 +6665,7 @@ pub async fn run_macro(
         let blocked = {
             let mut trust_store = trust_shared.lock().unwrap();
             trust_store.ensure_loaded();
-            let workbook_id = workbook_id_str.as_deref();
+            let workbook_id = workbook_id.as_ref().map(|id| id.as_ref());
             let workbook = state.get_workbook_mut().map_err(app_error)?;
             enforce_macro_trust(workbook, workbook_id, &trust_store)?
         };
@@ -6679,7 +6678,7 @@ pub async fn run_macro(
             timeout_ms,
         };
         let outcome = state
-            .run_macro(&macro_id, options)
+            .run_macro(macro_id.as_ref(), options)
             .map_err(|e| e.to_string())?;
         Ok::<_, String>(macro_result_from_outcome(outcome))
     })
@@ -6691,7 +6690,7 @@ pub async fn run_macro(
 #[tauri::command]
 pub async fn run_python_script(
     window: tauri::WebviewWindow,
-    workbook_id: Option<String>,
+    workbook_id: Option<LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>>,
     code: IpcScriptCode,
     permissions: Option<PythonPermissions>,
     timeout_ms: Option<u64>,
@@ -7741,8 +7740,8 @@ fn run_typescript_migration_script(state: &mut AppState, code: &str) -> TypeScri
 #[tauri::command]
 pub async fn validate_vba_migration(
     window: tauri::WebviewWindow,
-    workbook_id: Option<String>,
-    macro_id: String,
+    workbook_id: Option<LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>>,
+    macro_id: LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>,
     target: MigrationTarget,
     code: IpcScriptCode,
     state: State<'_, SharedAppState>,
@@ -7753,8 +7752,8 @@ pub async fn validate_vba_migration(
     ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
+    let macro_id = macro_id.into_inner();
     let code = code.into_inner();
-    let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -7767,7 +7766,7 @@ pub async fn validate_vba_migration(
             trust_store.ensure_loaded();
 
             let blocked = {
-                let workbook_id = workbook_id_str.as_deref();
+                let workbook_id = workbook_id.as_ref().map(|id| id.as_ref());
                 let workbook = state.get_workbook_mut().map_err(app_error)?;
                 enforce_macro_trust(workbook, workbook_id, &trust_store)?
             };
@@ -7999,7 +7998,7 @@ fn macro_result_from_outcome(outcome: crate::macros::MacroExecutionOutcome) -> M
 #[tauri::command]
 pub async fn fire_workbook_open(
     window: tauri::WebviewWindow,
-    workbook_id: Option<String>,
+    workbook_id: Option<LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>>,
     permissions: Option<LimitedMacroPermissions>,
     timeout_ms: Option<u64>,
     state: State<'_, SharedAppState>,
@@ -8010,7 +8009,6 @@ pub async fn fire_workbook_open(
     ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
-    let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -8018,7 +8016,7 @@ pub async fn fire_workbook_open(
         let blocked = {
             let mut trust_store = trust_shared.lock().unwrap();
             trust_store.ensure_loaded();
-            let workbook_id = workbook_id_str.as_deref();
+            let workbook_id = workbook_id.as_ref().map(|id| id.as_ref());
             let workbook = state.get_workbook_mut().map_err(app_error)?;
             enforce_macro_trust(workbook, workbook_id, &trust_store)?
         };
@@ -8042,7 +8040,7 @@ pub async fn fire_workbook_open(
 #[tauri::command]
 pub async fn fire_workbook_before_close(
     window: tauri::WebviewWindow,
-    workbook_id: Option<String>,
+    workbook_id: Option<LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>>,
     permissions: Option<LimitedMacroPermissions>,
     timeout_ms: Option<u64>,
     state: State<'_, SharedAppState>,
@@ -8053,7 +8051,6 @@ pub async fn fire_workbook_before_close(
     ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
-    let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -8061,7 +8058,7 @@ pub async fn fire_workbook_before_close(
         let blocked = {
             let mut trust_store = trust_shared.lock().unwrap();
             trust_store.ensure_loaded();
-            let workbook_id = workbook_id_str.as_deref();
+            let workbook_id = workbook_id.as_ref().map(|id| id.as_ref());
             let workbook = state.get_workbook_mut().map_err(app_error)?;
             enforce_macro_trust(workbook, workbook_id, &trust_store)?
         };
@@ -8085,8 +8082,8 @@ pub async fn fire_workbook_before_close(
 #[tauri::command]
 pub async fn fire_worksheet_change(
     window: tauri::WebviewWindow,
-    workbook_id: Option<String>,
-    sheet_id: String,
+    workbook_id: Option<LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>>,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     start_row: usize,
     start_col: usize,
     end_row: usize,
@@ -8101,7 +8098,6 @@ pub async fn fire_worksheet_change(
     ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
-    let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -8109,7 +8105,7 @@ pub async fn fire_worksheet_change(
         let blocked = {
             let mut trust_store = trust_shared.lock().unwrap();
             trust_store.ensure_loaded();
-            let workbook_id = workbook_id_str.as_deref();
+            let workbook_id = workbook_id.as_ref().map(|id| id.as_ref());
             let workbook = state.get_workbook_mut().map_err(app_error)?;
             enforce_macro_trust(workbook, workbook_id, &trust_store)?
         };
@@ -8121,7 +8117,14 @@ pub async fn fire_worksheet_change(
             timeout_ms,
         };
         let outcome = state
-            .fire_worksheet_change(&sheet_id, start_row, start_col, end_row, end_col, options)
+            .fire_worksheet_change(
+                sheet_id.as_ref(),
+                start_row,
+                start_col,
+                end_row,
+                end_col,
+                options,
+            )
             .map_err(|e| e.to_string())?;
         Ok::<_, String>(macro_result_from_outcome(outcome))
     })
@@ -8133,8 +8136,8 @@ pub async fn fire_worksheet_change(
 #[tauri::command]
 pub async fn fire_selection_change(
     window: tauri::WebviewWindow,
-    workbook_id: Option<String>,
-    sheet_id: String,
+    workbook_id: Option<LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>>,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     start_row: usize,
     start_col: usize,
     end_row: usize,
@@ -8149,7 +8152,6 @@ pub async fn fire_selection_change(
     ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
-    let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -8157,7 +8159,7 @@ pub async fn fire_selection_change(
         let blocked = {
             let mut trust_store = trust_shared.lock().unwrap();
             trust_store.ensure_loaded();
-            let workbook_id = workbook_id_str.as_deref();
+            let workbook_id = workbook_id.as_ref().map(|id| id.as_ref());
             let workbook = state.get_workbook_mut().map_err(app_error)?;
             enforce_macro_trust(workbook, workbook_id, &trust_store)?
         };
@@ -8169,7 +8171,14 @@ pub async fn fire_selection_change(
             timeout_ms,
         };
         let outcome = state
-            .fire_selection_change(&sheet_id, start_row, start_col, end_row, end_col, options)
+            .fire_selection_change(
+                sheet_id.as_ref(),
+                start_row,
+                start_col,
+                end_row,
+                end_col,
+                options,
+            )
             .map_err(|e| e.to_string())?;
         Ok::<_, String>(macro_result_from_outcome(outcome))
     })
@@ -9370,7 +9379,8 @@ mod tests {
         let err =
             serde_json::from_str::<RangeCellEdit>(&json).expect_err("expected size limit to fail");
         assert!(
-            err.to_string().contains("cell value string") && err.to_string().contains(&max.to_string()),
+            err.to_string().contains("cell value string")
+                && err.to_string().contains(&max.to_string()),
             "unexpected error: {err}"
         );
     }
