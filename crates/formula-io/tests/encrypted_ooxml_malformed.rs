@@ -87,6 +87,37 @@ fn standard_streaming_open_rejects_invalid_encrypted_package_size_prefix() {
     );
 }
 
+#[test]
+fn encrypted_package_size_prefix_only_is_unsupported_ooxml_encryption() {
+    // If `EncryptedPackage` only contains the 8-byte size prefix (and no ciphertext payload),
+    // treat the workbook as a malformed/unsupported encrypted container rather than as a wrong
+    // password.
+    let fixture_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/encrypted/ooxml")
+        .join("standard.xlsx");
+    let fixture_bytes = std::fs::read(&fixture_path).expect("read standard.xlsx fixture");
+    let mut ole = cfb::CompoundFile::open(Cursor::new(fixture_bytes)).expect("open fixture cfb");
+
+    let mut encryption_info = Vec::new();
+    ole.open_stream("EncryptionInfo")
+        .expect("EncryptionInfo stream")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+
+    let encrypted_package = 0u64.to_le_bytes();
+    let bytes = build_encrypted_ooxml_container(&encryption_info, Some(&encrypted_package));
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("size-prefix-only.xlsx");
+    std::fs::write(&path, bytes).expect("write fixture");
+
+    let err = open_workbook_with_password(&path, Some("password")).expect_err("expected error");
+    assert!(
+        matches!(err, formula_io::Error::UnsupportedOoxmlEncryption { .. }),
+        "expected UnsupportedOoxmlEncryption, got {err:?}"
+    );
+}
+
 fn assert_err_no_panic<T: std::fmt::Debug>(
     label: &str,
     res: std::thread::Result<Result<T, formula_io::Error>>,
