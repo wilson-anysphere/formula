@@ -1,5 +1,6 @@
 import { extractSheetSchema } from "./schema.js";
 import { RagIndex } from "./rag.js";
+import { deleteLegacySheetRegionChunks, sheetChunkIdPrefix } from "./ragIds.js";
 import { valuesRangeToTsv } from "./tsv.js";
 import { DEFAULT_TOKEN_ESTIMATOR, packSectionsToTokenBudget, stableJsonStringify } from "./tokenBudget.js";
 import { headSampleRows, randomSampleRows, stratifiedSampleRows, systematicSampleRows, tailSampleRows } from "./sampling.js";
@@ -440,7 +441,7 @@ export class ContextManager {
   /**
    * Ensure only one sheet-level index operation runs at a time per sheet name.
    *
-   * `RagIndex.indexSheet()` clears and re-adds chunks by `${sheet.name}-region-` prefix,
+   * `RagIndex.indexSheet()` clears and re-adds chunks by a per-sheet prefix,
    * so concurrent indexing of the same sheet name can interleave deletes/adds and
    * leave a mixed chunk set in the in-memory store.
    *
@@ -649,7 +650,8 @@ export class ContextManager {
             // store so `RagIndex.search()` doesn't keep considering stale sheets forever.
             if (typeof this.ragIndex?.store?.deleteByPrefix === "function") {
               throwIfAborted(signal);
-              await this.ragIndex.store.deleteByPrefix(`${evictedSheetName}-region-`, { signal });
+              await this.ragIndex.store.deleteByPrefix(sheetChunkIdPrefix(evictedSheetName), { signal });
+              deleteLegacySheetRegionChunks(this.ragIndex.store, evictedSheetName, { signal });
             }
           }
         }

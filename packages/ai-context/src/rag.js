@@ -1,6 +1,7 @@
 import { normalizeRange, parseA1Range, rangeToA1 } from "./a1.js";
 import { extractSheetSchema } from "./schema.js";
 import { throwIfAborted } from "./abort.js";
+import { deleteLegacySheetRegionChunks, sheetChunkIdPrefix } from "./ragIds.js";
 import { valuesRangeToTsv } from "./tsv.js";
 
 /**
@@ -393,6 +394,7 @@ export function chunkSheetByRegionsWithSchema(sheet, options = {}) {
   const maxChunksPerRegion = options.maxChunksPerRegion ?? 50;
   const origin = normalizeSheetOrigin(sheet);
   const matrixBounds = getMatrixBounds(sheet.values);
+  const chunkIdPrefix = sheetChunkIdPrefix(sheet.name);
 
   /** @type {SheetChunk[]} */
   const chunks = [];
@@ -422,7 +424,7 @@ export function chunkSheetByRegionsWithSchema(sheet, options = {}) {
         )
       : [{ startRow: regionRectAbs.startRow, endRow: regionRectAbs.endRow, index: 0 }];
 
-    const baseId = `${sheet.name}-region-${regionIndex + 1}`;
+    const baseId = `${chunkIdPrefix}${regionIndex + 1}`;
     const originSuffix = origin.row !== 0 || origin.col !== 0 ? `-o${origin.row}x${origin.col}` : "";
 
     for (const window of windows) {
@@ -510,8 +512,11 @@ export class RagIndex {
     // but the number of regions can change over time. Clear the previous region
     // chunks for this sheet so stale chunks don't linger in the store.
     if (typeof this.store.deleteByPrefix === "function") {
-      await this.store.deleteByPrefix(`${sheet.name}-region-`, { signal });
+      await this.store.deleteByPrefix(sheetChunkIdPrefix(sheet.name), { signal });
     }
+    // Best-effort cleanup for stale chunks created by older versions of ai-context.
+    // Use a precise match to avoid resurrecting the legacy prefix collision bug.
+    deleteLegacySheetRegionChunks(this.store, sheet.name, { signal });
 
     throwIfAborted(signal);
     const splitByRowWindows = options.splitByRowWindows ?? options.splitRegions;
