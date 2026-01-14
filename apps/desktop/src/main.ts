@@ -837,9 +837,25 @@ async function setAutoSaveEnabledFromUi(nextEnabled: boolean): Promise<void> {
 function toggleDockPanel(panelId: string): void {
   const controller = ribbonLayoutController;
   if (!controller) return;
-  const placement = getPanelPlacement(controller.layout, panelId);
-  if (placement.kind === "closed") controller.openPanel(panelId);
-  else controller.closePanel(panelId);
+  const layout = controller.layout as any;
+  const placement = getPanelPlacement(layout, panelId) as any;
+  if (placement.kind === "closed") {
+    controller.openPanel(panelId);
+    return;
+  }
+  // Dock zones can be collapsed. Treat a collapsed docked panel as "closed" so status-bar toggles
+  // restore the dock instead of removing the panel.
+  if (placement.kind === "docked" && layout?.docks?.[placement.side]?.collapsed) {
+    controller.openPanel(panelId);
+    return;
+  }
+  // Floating panels can be minimized. Treat a minimized panel as "closed" so status-bar toggles
+  // restore it instead of closing the panel.
+  if (placement.kind === "floating" && layout?.floating?.[panelId]?.minimized) {
+    controller.setFloatingPanelMinimized(panelId, false);
+    return;
+  }
+  controller.closePanel(panelId);
 }
 let handleCloseRequestForRibbon: ((opts: { quit: boolean }) => Promise<void>) | null = null;
 
