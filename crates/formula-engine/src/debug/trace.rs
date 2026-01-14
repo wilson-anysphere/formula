@@ -726,7 +726,9 @@ fn split_sheet_span_name(name: &str) -> Option<(String, String)> {
     // Only treat `:` as a 3D sheet-span separator when it appears in the sheet portion after the
     // closing `]`, not inside the workbook id.
     let (start, end) = if let Some(rest) = name.strip_prefix('[') {
-        let close_rel = rest.find(']')?;
+        // The workbook id can contain `[` / `]` (e.g. `C:\[foo]\Book.xlsx`), so locate the final
+        // closing bracket which terminates the workbook segment.
+        let close_rel = rest.rfind(']')?;
         let close = 1 + close_rel;
         let sheet_part = &name[close + 1..];
         let colon_rel = sheet_part.find(':')?;
@@ -1711,7 +1713,7 @@ impl ParserImpl {
                 //
                 // When the endpoint sheet names match, collapse to the single external sheet key
                 // (`[Book]Sheet1`) so evaluation can consult the external provider directly.
-                let Some((_, sheet_part)) = start_name.split_once(']') else {
+                let Some((_, sheet_part)) = start_name.rsplit_once(']') else {
                     return Ok(SpannedExpr {
                         span: Span::new(sheet_tok.span.start, end_tok.span.end),
                         kind: SpannedExprKind::Error(ErrorKind::Ref),
@@ -1757,7 +1759,7 @@ impl ParserImpl {
                 match split_sheet_span_name(&start_name) {
                     Some((start, end)) => {
                         if crate::eval::is_valid_external_sheet_key(&start) {
-                            let Some((_, sheet_part)) = start.split_once(']') else {
+                            let Some((_, sheet_part)) = start.rsplit_once(']') else {
                                 return Ok(SpannedExpr {
                                     span: Span::new(sheet_tok.span.start, sheet_tok.span.end),
                                     kind: SpannedExprKind::Error(ErrorKind::Ref),
@@ -2615,7 +2617,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                             );
                         }
                         None => {
-                            let Some(end) = key.find(']') else {
+                            let Some(end) = key.rfind(']') else {
                                 let value = Value::Error(ErrorKind::Ref);
                                 return (
                                     EvalValue::Scalar(value.clone()),
@@ -4473,6 +4475,14 @@ mod tests {
             split_sheet_span_name(r"[C:\path\Book.xlsx]Sheet1:Sheet3"),
             Some((r"[C:\path\Book.xlsx]Sheet1".to_string(), "Sheet3".to_string()))
         );
+
+        // The workbook id itself can contain `[` / `]` when it represents a path with bracketed
+        // components (e.g. `C:\[foo]\Book.xlsx`).
+        assert_eq!(split_sheet_span_name(r"[C:\[foo]\Book.xlsx]Sheet1"), None);
+        assert_eq!(
+            split_sheet_span_name(r"[C:\[foo]\Book.xlsx]Sheet1:Sheet3"),
+            Some((r"[C:\[foo]\Book.xlsx]Sheet1".to_string(), "Sheet3".to_string()))
+        );
     }
 
     #[test]
@@ -4485,6 +4495,26 @@ mod tests {
                 assert_eq!(
                     cell.sheet,
                     SheetReference::External(r"[C:\path\Book.xlsx]Sheet1".to_string())
+                );
+                assert_eq!(
+                    cell.addr,
+                    crate::eval::Ref::from_abs_cell_addr(parse_a1("A1").unwrap()).unwrap()
+                );
+            }
+            other => panic!("expected CellRef, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_spanned_formula_supports_path_qualified_external_refs_with_bracketed_path_components() {
+        let expr =
+            parse_spanned_formula(r#"='C:\[foo]\[Book.xlsx]Sheet1'!A1"#).expect("parse should succeed");
+
+        match expr.kind {
+            SpannedExprKind::CellRef(cell) => {
+                assert_eq!(
+                    cell.sheet,
+                    SheetReference::External(r"[C:\[foo]\Book.xlsx]Sheet1".to_string())
                 );
                 assert_eq!(
                     cell.addr,
