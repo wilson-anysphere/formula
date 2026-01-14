@@ -38,6 +38,54 @@ fn fixture_path(rel: &str) -> PathBuf {
 }
 
 #[test]
+fn cli_errors_on_missing_args() {
+    let out = Command::new(ooxml_encryption_info_bin())
+        .output()
+        .expect("run cli");
+    assert!(
+        !out.status.success(),
+        "expected non-zero exit status, got {:?}",
+        out.status.code()
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "expected usage exit code 2, got {:?}",
+        out.status.code()
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.to_lowercase().contains("usage:"),
+        "expected usage message, got: {stderr}"
+    );
+}
+
+#[test]
+fn cli_errors_on_extra_args() {
+    let out = Command::new(ooxml_encryption_info_bin())
+        .arg("a.xlsx")
+        .arg("b.xlsx")
+        .output()
+        .expect("run cli");
+    assert!(
+        !out.status.success(),
+        "expected non-zero exit status, got {:?}",
+        out.status.code()
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "expected usage exit code 2, got {:?}",
+        out.status.code()
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.to_lowercase().contains("usage:"),
+        "expected usage message, got: {stderr}"
+    );
+}
+
+#[test]
 fn cli_errors_on_non_ole_input() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("not_ole.bin");
@@ -188,6 +236,92 @@ fn cli_prints_agile_version_and_root_tag() {
     assert!(
         stdout.contains("xml_root=encryption"),
         "expected xml_root detection, got: {stdout}"
+    );
+}
+
+#[test]
+fn cli_prints_agile_version_for_utf16le_xml() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("agile_utf16.xlsx");
+
+    let xml = r#"<?xml version="1.0" encoding="UTF-16"?><encryption></encryption>"#;
+    let mut xml_bytes = Vec::new();
+    // UTF-16LE BOM.
+    xml_bytes.extend_from_slice(&[0xFF, 0xFE]);
+    for u in xml.encode_utf16() {
+        xml_bytes.extend_from_slice(&u.to_le_bytes());
+    }
+
+    let bytes = make_ooxml_encrypted_container(4, 4, 0, &xml_bytes);
+    std::fs::write(&path, bytes).expect("write fixture");
+
+    let out = Command::new(ooxml_encryption_info_bin())
+        .arg(&path)
+        .output()
+        .expect("run cli");
+    assert!(
+        out.status.success(),
+        "expected success exit status, got {:?}",
+        out.status.code()
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Agile (4.4)"),
+        "expected Agile version, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("xml_root=encryption"),
+        "expected xml_root detection for UTF-16 XML, got: {stdout}"
+    );
+}
+
+#[test]
+fn cli_prints_extensible_version() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("extensible.xlsx");
+
+    let bytes = make_ooxml_encrypted_container(3, 3, 0x11223344, b"");
+    std::fs::write(&path, bytes).expect("write fixture");
+
+    let out = Command::new(ooxml_encryption_info_bin())
+        .arg(&path)
+        .output()
+        .expect("run cli");
+    assert!(
+        out.status.success(),
+        "expected success exit status, got {:?}",
+        out.status.code()
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        stdout.trim_end(),
+        "Extensible (3.3) flags=0x11223344",
+        "unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
+fn cli_prints_unknown_version() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("unknown.xlsx");
+
+    let bytes = make_ooxml_encrypted_container(1, 1, 0, b"");
+    std::fs::write(&path, bytes).expect("write fixture");
+
+    let out = Command::new(ooxml_encryption_info_bin())
+        .arg(&path)
+        .output()
+        .expect("run cli");
+    assert!(
+        out.status.success(),
+        "expected success exit status, got {:?}",
+        out.status.code()
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        stdout.trim_end(),
+        "Unknown (1.1) flags=0x00000000",
+        "unexpected stdout: {stdout}"
     );
 }
 
