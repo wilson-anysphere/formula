@@ -1399,6 +1399,9 @@ export class SpreadsheetApp {
 
   private outlineLayer: HTMLDivElement;
   private readonly outlineButtons = new Map<string, HTMLButtonElement>();
+  private lastSyncedHiddenColsKey: string | null = null;
+  private lastSyncedHiddenColsEngine: EngineClient | null = null;
+  private lastSyncedHiddenCols: number[] | null = null;
 
   private dpr = 1;
   private width = 0;
@@ -19433,6 +19436,55 @@ export class SpreadsheetApp {
     if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: false });
     this.refresh();
     this.focus();
+
+    // Keep the WASM formula engine in sync with legacy outline-based hidden columns so worksheet
+    // information functions like `CELL("width")` can reflect hidden state.
+    this.syncHiddenColsToWasmEngine();
+  }
+
+  private syncHiddenColsToWasmEngine(): void {
+    if (this.gridMode !== "legacy") return;
+    if (!this.wasmEngine || this.wasmSyncSuspended) return;
+
+    // If the engine instance was replaced (e.g. re-init), resync even if the outline state
+    // appears unchanged.
+    if (this.lastSyncedHiddenColsEngine !== this.wasmEngine) {
+      this.lastSyncedHiddenColsEngine = this.wasmEngine;
+      this.lastSyncedHiddenColsKey = null;
+      this.lastSyncedHiddenCols = null;
+    }
+
+    const hiddenCols: number[] = [];
+    for (const [summaryIndex, entry] of this.outline.cols.entries) {
+      if (!isHidden(entry.hidden)) continue;
+      // Outline indices are 1-based; engine uses 0-based column indices.
+      const col = summaryIndex - 1;
+      if (col < 0 || col >= this.limits.maxCols) continue;
+      hiddenCols.push(col);
+    }
+    hiddenCols.sort((a, b) => a - b);
+
+    const key = `${this.sheetId}:${hiddenCols.join(",")}`;
+    if (key === this.lastSyncedHiddenColsKey) return;
+    this.lastSyncedHiddenColsKey = key;
+
+    const prevHiddenCols = this.lastSyncedHiddenCols ?? [];
+    this.lastSyncedHiddenCols = hiddenCols;
+
+    void this.enqueueWasmSync(async (engine) => {
+      const prevSet = new Set(prevHiddenCols);
+      const nextSet = new Set(hiddenCols);
+
+      const colsToHide = hiddenCols.filter((col) => !prevSet.has(col));
+      const colsToShow = prevHiddenCols.filter((col) => !nextSet.has(col));
+
+      await Promise.all([
+        ...colsToHide.map(async (col) => await engine.setColHidden(col, true, this.sheetId)),
+        ...colsToShow.map(async (col) => await engine.setColHidden(col, false, this.sheetId)),
+      ]);
+      const changes = await engine.recalculate();
+      this.applyComputedChanges(changes);
+    });
   }
 
   private closestVisibleIndexInRange(values: number[], target: number, start: number, end: number): number | null {

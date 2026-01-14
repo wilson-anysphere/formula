@@ -4471,6 +4471,20 @@ impl WasmWorkbook {
                 wb.engine.set_col_style_id(&sheet_name, col, props.style_id);
             }
 
+            // Outline indices are 1-based (Excel / OOXML).
+            //
+            // Some workbooks persist hidden state as outline/group collapse flags rather than the
+            // user-hidden bit (`col_properties[*].hidden`), so include outline-based hidden state as
+            // well.
+            for (&index, entry) in sheet.outline.cols.iter() {
+                if entry.hidden.is_hidden() && index > 0 {
+                    let col = index - 1;
+                    if col < EXCEL_MAX_COLS {
+                        wb.engine.set_col_hidden(&sheet_name, col, true);
+                    }
+                }
+            }
+
             for (&row, props) in &sheet.row_properties {
                 if let Some(style_id) = props.style_id {
                     wb.engine.set_row_style_id(&sheet_name, row, Some(style_id));
@@ -6803,6 +6817,25 @@ mod tests {
         assert_eq!(
             wb.inner.engine.get_cell_value(DEFAULT_SHEET, "F1"),
             EngineValue::Error(ErrorKind::Unknown)
+        );
+    }
+
+    #[test]
+    fn from_xlsx_bytes_imports_hidden_columns_for_cell_width() {
+        let bytes = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/xlsx/basic/row-col-attrs.xlsx"
+        ));
+
+        let mut wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
+        wb.inner
+            .set_cell_internal(DEFAULT_SHEET, "D1", json!(r#"=CELL("width",C1)"#))
+            .unwrap();
+        wb.inner.recalculate_internal(None).unwrap();
+
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "D1"),
+            EngineValue::Number(0.0)
         );
     }
 

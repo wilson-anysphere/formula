@@ -15752,6 +15752,93 @@ fn walk_calc_expr(
                         lexical_scopes.pop();
                         return;
                     }
+                    "CELL" => {
+                        // `CELL("width", reference)` depends on column metadata (width/hidden) for
+                        // the referenced address, not the referenced cell's value.
+                        //
+                        // Treating the `reference` argument as a calc precedent can create a false
+                        // circular reference when the formula cell and reference cell are the same
+                        // (e.g. `A1=CELL("width",A1)`), which Excel allows.
+                        //
+                        // Column metadata changes are handled via explicit invalidation (see
+                        // `Engine::set_col_width` / `Engine::set_col_hidden`), so omit direct
+                        // reference literals from the dependency graph to avoid spurious cycles.
+                        if args.len() >= 2 {
+                            if let Expr::Text(key) = &args[0] {
+                                if key.trim().eq_ignore_ascii_case("width") {
+                                    // `info_type`
+                                    walk_calc_expr(
+                                        &args[0],
+                                        current_cell,
+                                        tables_by_sheet,
+                                        workbook,
+                                        spills,
+                                        precedents,
+                                        visiting_names,
+                                        lexical_scopes,
+                                    );
+
+                                    // `reference`
+                                    match &args[1] {
+                                        Expr::CellRef(_)
+                                        | Expr::RangeRef(_)
+                                        | Expr::StructuredRef(_)
+                                        | Expr::SpillRange(_) => {
+                                            // Skip direct reference literals.
+                                        }
+                                        Expr::ImplicitIntersection(inner) => match inner.as_ref() {
+                                            Expr::CellRef(_)
+                                            | Expr::RangeRef(_)
+                                            | Expr::StructuredRef(_)
+                                            | Expr::SpillRange(_) => {
+                                                // Still a direct reference; skip it.
+                                            }
+                                            other => {
+                                                walk_calc_expr(
+                                                    other,
+                                                    current_cell,
+                                                    tables_by_sheet,
+                                                    workbook,
+                                                    spills,
+                                                    precedents,
+                                                    visiting_names,
+                                                    lexical_scopes,
+                                                );
+                                            }
+                                        },
+                                        other => {
+                                            walk_calc_expr(
+                                                other,
+                                                current_cell,
+                                                tables_by_sheet,
+                                                workbook,
+                                                spills,
+                                                precedents,
+                                                visiting_names,
+                                                lexical_scopes,
+                                            );
+                                        }
+                                    }
+
+                                    // Any additional args are invalid per the function spec, but
+                                    // walk them defensively.
+                                    for a in args.iter().skip(2) {
+                                        walk_calc_expr(
+                                            a,
+                                            current_cell,
+                                            tables_by_sheet,
+                                            workbook,
+                                            spills,
+                                            precedents,
+                                            visiting_names,
+                                            lexical_scopes,
+                                        );
+                                    }
+                                    return;
+                                }
+                            }
+                        }
+                    }
                     "LAMBDA" => {
                         if args.is_empty() {
                             return;
