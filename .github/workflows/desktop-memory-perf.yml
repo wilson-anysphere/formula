@@ -404,7 +404,11 @@ jobs:
             echo "publish=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          count="$(node -e 'const fs=require(\"fs\");const p=process.argv[1];const v=JSON.parse(fs.readFileSync(p,\"utf8\"));console.log(Array.isArray(v)?v.length:0);' "$path")"
+          if ! count="$(node -e 'const fs=require(\"fs\");const p=process.argv[1];const v=JSON.parse(fs.readFileSync(p,\"utf8\"));console.log(Array.isArray(v)?v.length:0);' "$path")"; then
+            echo "::notice::Failed to parse ${path}; skipping gh-pages publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if ! [[ "$count" =~ ^[0-9]+$ ]] || [ "$count" -lt 1 ]; then
             echo "::notice::Benchmark results file is empty; skipping gh-pages publish."
             echo "publish=false" >> "$GITHUB_OUTPUT"
