@@ -5705,11 +5705,19 @@ export class SpreadsheetApp {
       const useEngineCache = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
       const hasWasmEngine = Boolean(this.wasmEngine && !this.wasmSyncSuspended);
       if (!hasWasmEngine || !useEngineCache) {
+        const tooltipRange = this.formulaRangePreviewTooltipLastRange;
+        const tooltipRefText = this.formulaRangePreviewTooltipLastRefText;
+        const tooltipWasVisible = this.formulaRangePreviewTooltipVisible && tooltipRange != null;
+
         // Workbook metadata changes behave like a recalculation from the perspective of formulas and charts,
         // but they do not flow through DocumentController deltas. Mark formula-containing charts as dirty
         // *before* triggering any synchronous redraws (tests often stub `requestAnimationFrame` to run
         // immediately), so their cached series data is regenerated against the updated metadata.
         this.markFormulaChartsDirty();
+        // Workbook metadata can affect formula results, but it is not represented as a document delta.
+        // If the formula-range preview tooltip is visible, its cache key may not change, so clear it
+        // to ensure the next refresh repaints against the latest metadata.
+        this.formulaRangePreviewTooltipLastKey = null;
         // Selection summary (status bar Sum/Avg/Count) caches results keyed only on document content
         // versions. Workbook metadata changes can affect computed values for formula cells without
         // bumping those versions, so clear the cache to ensure the status bar re-evaluates.
@@ -5730,6 +5738,23 @@ export class SpreadsheetApp {
         // summary) even when no document deltas occur (multi-sheet fallback evaluation or missing
         // WASM engine). Keep status/formula bar UI in sync.
         this.scheduleStatusUpdate();
+        // Updating the status bar can cause the formula bar to re-render and clear hover state
+        // without firing additional pointer events. If the range-preview tooltip was visible,
+        // re-sync it after status updates so it stays visible and reflects the latest metadata.
+        if (tooltipWasVisible) {
+          const schedule =
+            typeof requestAnimationFrame === "function"
+              ? requestAnimationFrame
+              : (cb: FrameRequestCallback) =>
+                  globalThis.setTimeout(() => cb(typeof performance !== "undefined" ? performance.now() : Date.now()), 0);
+
+          schedule(() => {
+            if (this.disposed) return;
+            // Force repaint even if the tooltip key would otherwise be unchanged.
+            this.formulaRangePreviewTooltipLastKey = null;
+            this.updateFormulaRangePreviewTooltip(tooltipRange, tooltipRefText);
+          });
+        }
         // Charts render outside the grid provider pipeline; schedule a chart refresh so visible charts
         // update promptly even when no DocumentController deltas occur (notably shared-grid mode, which
         // does not call `refresh()` for provider invalidations).
@@ -24830,6 +24855,9 @@ export class SpreadsheetApp {
       this.computedValuesVersion += 1;
       // Keep the status/formula bar in sync once computed values arrive.
       if (this.uiReady) this.updateStatus();
+      // Formula-range preview tooltip samples also depend on computed values; refresh them when
+      // engine-driven recomputation arrives without any DocumentController delta.
+      this.scheduleFormulaRangePreviewTooltipRefresh();
       if (this.uiReady && shouldInvalidate && sawActiveSheet) {
         if (this.sharedGrid && this.sharedProvider) {
           this.sharedProvider.invalidateDocCells({

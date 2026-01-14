@@ -238,6 +238,56 @@ describe("SpreadsheetApp formula-bar range preview tooltip", () => {
     formulaBar.remove();
   });
 
+  it("refreshes the tooltip sample when workbook file metadata changes (CELL(\"filename\"))", async () => {
+    const root = createRoot();
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+    const doc = app.getDocument();
+
+    // Force in-process evaluation path to ensure metadata-driven formulas update without relying on engine cache.
+    doc.addSheet({ sheetId: "Sheet2", name: "Sheet2" });
+
+    // Referenced cell uses workbook metadata (unsaved workbook -> empty string).
+    doc.setCellFormula("Sheet1", { row: 0, col: 0 }, '=CELL("filename")');
+    // Active cell references A1 so the formula highlight contains an A1 span we can hover.
+    doc.setCellFormula("Sheet1", { row: 0, col: 1 }, "=A1");
+
+    await app.whenIdle();
+    app.activateCell({ row: 0, col: 1 }, { focus: false, scrollIntoView: false });
+
+    const highlight = formulaBar.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const refSpan = highlight?.querySelector<HTMLElement>('span[data-kind="reference"]');
+    expect(refSpan?.textContent).toBe("A1");
+    refSpan?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+
+    const tooltip = formulaBar.querySelector<HTMLElement>('[data-testid="formula-range-preview-tooltip"]');
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.hidden).toBe(false);
+
+    let cells = Array.from(tooltip!.querySelectorAll("td")).map((td) => td.textContent);
+    expect(cells).toEqual([""]);
+
+    // Simulate Save As (directory + filename become known). Tooltip should refresh without
+    // requiring additional pointer events.
+    await app.setWorkbookFileMetadata("/tmp/", "Book.xlsx");
+    expect(app.getCellComputedValueForSheet("Sheet1", { row: 0, col: 0 })).toBe("/tmp/[Book.xlsx]Sheet1");
+    expect(tooltip?.hidden).toBe(false);
+    cells = Array.from(tooltip!.querySelectorAll("td")).map((td) => td.textContent);
+    expect(cells).toEqual(["/tmp/[Book.xlsx]Sheet1"]);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
   it("associates the tooltip with the formula input via aria-describedby", () => {
     const root = createRoot();
     const formulaBar = document.createElement("div");
