@@ -247,6 +247,8 @@ def _render_markdown(
     enforce: bool,
     rustc_version: str | None,
     cargo_version: str | None,
+    git_sha: str | None,
+    git_ref: str | None,
     cargo_bloat_version: str | None,
     file_info: str | None,
     stripped: bool | None,
@@ -278,6 +280,10 @@ def _render_markdown(
         lines.append(f"- rustc: `{rustc_version}`")
     if cargo_version:
         lines.append(f"- cargo: `{cargo_version}`")
+    if git_sha:
+        lines.append(f"- Git SHA: `{git_sha}`")
+    if git_ref:
+        lines.append(f"- Git ref: `{git_ref}`")
     lines.append(f"- Target dir: `{_relpath(target_dir, repo_root)}`")
     lines.append(f"- Binary path: `{_relpath(bin_path, repo_root)}`")
     if bin_size_bytes is not None:
@@ -443,6 +449,8 @@ def main() -> int:
 
     rustc_version: str | None = None
     cargo_version: str | None = None
+    git_sha: str | None = None
+    git_ref: str | None = None
     try:
         rustc = _run_capture(["rustc", "--version"], cwd=repo_root)
         if rustc.returncode == 0:
@@ -455,6 +463,21 @@ def main() -> int:
             cargo_version = cargo_ver.stdout.strip().splitlines()[0] if cargo_ver.stdout.strip() else None
     except FileNotFoundError:
         cargo_version = None
+
+    # Record git metadata for reproducibility.
+    git_ref = os.environ.get("GITHUB_REF_NAME") or os.environ.get("GITHUB_REF")
+    git_sha = os.environ.get("GITHUB_SHA")
+    if git_sha:
+        git_sha = git_sha.strip()
+        if len(git_sha) > 12:
+            git_sha = git_sha[:12]
+    else:
+        try:
+            rev = _run_capture(["git", "rev-parse", "--short=12", "HEAD"], cwd=repo_root)
+            if rev.returncode == 0:
+                git_sha = rev.stdout.strip().splitlines()[0] if rev.stdout.strip() else None
+        except FileNotFoundError:
+            git_sha = None
 
     try:
         target_dir = _cargo_target_directory(repo_root)
@@ -505,6 +528,8 @@ def main() -> int:
                 enforce=enforce,
                 rustc_version=rustc_version,
                 cargo_version=cargo_version,
+                git_sha=git_sha,
+                git_ref=git_ref,
                 cargo_bloat_version=None,
                 file_info=None,
                 stripped=None,
@@ -546,6 +571,8 @@ def main() -> int:
             enforce=enforce,
             rustc_version=rustc_version,
             cargo_version=cargo_version,
+            git_sha=git_sha,
+            git_ref=git_ref,
             cargo_bloat_version=None,
             file_info=None,
             stripped=None,
@@ -699,6 +726,8 @@ def main() -> int:
         enforce=enforce,
         rustc_version=rustc_version,
         cargo_version=cargo_version,
+        git_sha=git_sha,
+        git_ref=git_ref,
         cargo_bloat_version=cargo_bloat_version,
         file_info=file_info,
         stripped=stripped,
