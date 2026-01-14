@@ -5137,8 +5137,6 @@ impl Engine {
             self.pivot_registry.clone(),
         );
         let sheet_dims_generation = self.sheet_dims_generation;
-        let external_sheets =
-            Mutex::new(ExternalSheetResolver::new(snapshot.sheet_names_by_id.len()));
         let mut spill_dirty_roots: Vec<CellId> = Vec::new();
         let mut dynamic_dirty_roots: Vec<CellId> = Vec::new();
         let text_codepage = self.text_codepage;
@@ -5228,7 +5226,6 @@ impl Engine {
                                 cols_by_sheet: &column_cache.by_sheet,
                                 slice_mode,
                                 trace: None,
-                                external_sheets: &external_sheets,
                             };
                             let base = bytecode::CellCoord {
                                 row: k.addr.row as i32,
@@ -5259,12 +5256,9 @@ impl Engine {
                                                 recalc_ctx.now_utc.clone(),
                                                 recalc_ctx.recalc_id,
                                             ),
-                                            Mutex::new(ExternalSheetResolver::new(
-                                                snapshot.sheet_names_by_id.len(),
-                                            )),
                                         )
                                     },
-                                    |(vm, _eval_ctx_guard, external_sheets), (k, compiled)| {
+                                    |(vm, _eval_ctx_guard), (k, compiled)| {
                                         let ctx = crate::eval::EvalContext {
                                             current_sheet: k.sheet,
                                             current_cell: k.addr,
@@ -5297,7 +5291,6 @@ impl Engine {
                                                     cols_by_sheet: &column_cache.by_sheet,
                                                     slice_mode,
                                                     trace: None,
-                                                    external_sheets: &*external_sheets,
                                                 };
                                                 let base = bytecode::CellCoord {
                                                     row: k.addr.row as i32,
@@ -5362,19 +5355,18 @@ impl Engine {
                     CompiledFormula::Bytecode(bc) => {
                         let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
                         let slice_mode = slice_mode_for_program(&bc.program);
-                         let grid = EngineBytecodeGrid {
-                             snapshot: &snapshot,
-                             sheet_id: k.sheet,
-                             cols,
-                             cols_by_sheet: &column_cache.by_sheet,
-                             slice_mode,
-                             trace: None,
-                             external_sheets: &external_sheets,
-                         };
-                         let base = bytecode::CellCoord {
-                             row: k.addr.row as i32,
-                             col: k.addr.col as i32,
-                         };
+                        let grid = EngineBytecodeGrid {
+                            snapshot: &snapshot,
+                            sheet_id: k.sheet,
+                            cols,
+                            cols_by_sheet: &column_cache.by_sheet,
+                            slice_mode,
+                            trace: None,
+                        };
+                        let base = bytecode::CellCoord {
+                            row: k.addr.row as i32,
+                            col: k.addr.col as i32,
+                        };
                         let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
                         bytecode_value_to_engine(v)
                     }
@@ -5425,19 +5417,18 @@ impl Engine {
                         used_bytecode_trace = true;
                         let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
                         let slice_mode = slice_mode_for_program(&bc.program);
-                         let grid = EngineBytecodeGrid {
-                             snapshot: &snapshot,
-                             sheet_id: k.sheet,
-                             cols,
-                             cols_by_sheet: &column_cache.by_sheet,
-                             slice_mode,
-                             trace: Some(&bytecode_trace),
-                             external_sheets: &external_sheets,
-                         };
-                         let base = bytecode::CellCoord {
-                             row: k.addr.row as i32,
-                             col: k.addr.col as i32,
-                         };
+                        let grid = EngineBytecodeGrid {
+                            snapshot: &snapshot,
+                            sheet_id: k.sheet,
+                            cols,
+                            cols_by_sheet: &column_cache.by_sheet,
+                            slice_mode,
+                            trace: Some(&bytecode_trace),
+                        };
+                        let base = bytecode::CellCoord {
+                            row: k.addr.row as i32,
+                            col: k.addr.col as i32,
+                        };
                         let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
                         bytecode_value_to_engine(v)
                     }
@@ -11713,56 +11704,6 @@ struct EngineBytecodeGrid<'a> {
     cols_by_sheet: &'a [HashMap<i32, BytecodeColumn>],
     slice_mode: ColumnSliceMode,
     trace: Option<&'a Mutex<crate::eval::DependencyTrace>>,
-    /// Per-evaluation mapping for external workbook sheet keys (e.g. `"[Book.xlsx]Sheet1"`) to
-    /// synthetic sheet ids used by the bytecode runtime for `INDIRECT`.
-    ///
-    /// The bytecode value model represents explicit external workbook references using
-    /// [`bytecode::SheetId::External`], but `INDIRECT` parses sheet names at runtime via
-    /// [`bytecode::grid::Grid::resolve_sheet_name`], which currently returns a `usize`. To let
-    /// runtime-parsed external sheet keys flow through the bytecode runtime, we intern them as
-    /// synthetic ids and treat them as external during reads/bounds checks.
-    #[allow(dead_code)]
-    external_sheets: &'a Mutex<ExternalSheetResolver>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug)]
-struct ExternalSheetResolver {
-    #[allow(dead_code)]
-    base_id: usize,
-    #[allow(dead_code)]
-    ids_by_key: HashMap<Arc<str>, usize>,
-    #[allow(dead_code)]
-    keys_by_id: Vec<Arc<str>>,
-}
-
-#[allow(dead_code)]
-impl ExternalSheetResolver {
-    fn new(base_id: usize) -> Self {
-        Self {
-            base_id,
-            ids_by_key: HashMap::new(),
-            keys_by_id: Vec::new(),
-        }
-    }
-
-    #[allow(dead_code)]
-    fn get_or_intern(&mut self, key: &str) -> usize {
-        if let Some(&id) = self.ids_by_key.get(key) {
-            return id;
-        }
-        let id = self.base_id + self.keys_by_id.len();
-        let arc: Arc<str> = Arc::from(key);
-        self.ids_by_key.insert(Arc::clone(&arc), id);
-        self.keys_by_id.push(arc);
-        id
-    }
-
-    #[allow(dead_code)]
-    fn key_for_id(&self, id: usize) -> Option<Arc<str>> {
-        let idx = id.checked_sub(self.base_id)?;
-        self.keys_by_id.get(idx).cloned()
-    }
 }
 
 impl<'a> EngineBytecodeGrid<'a> {
@@ -19604,7 +19545,6 @@ mod tests {
             },
         );
 
-        let external_sheets = Mutex::new(ExternalSheetResolver::new(snapshot.sheet_names_by_id.len()));
         let grid = EngineBytecodeGrid {
             snapshot: &snapshot,
             sheet_id: 0,
@@ -19612,7 +19552,6 @@ mod tests {
             cols_by_sheet: std::slice::from_ref(&cols),
             slice_mode: ColumnSliceMode::IgnoreNonNumeric,
             trace: None,
-            external_sheets: &external_sheets,
         };
 
         assert!(
