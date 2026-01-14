@@ -262,12 +262,13 @@ async function main(): Promise<void> {
     envOverrides,
     profileRoot,
     onProgress: ({ phase, mode: runMode, iteration, total, profileDir }) => {
+      const profileLabel = relative(repoRoot, profileDir) || profileDir;
       // eslint-disable-next-line no-console
       if (phase === "warmup") {
-        console.log(`[desktop-${benchKind}-startup] warmup run 1/1 (warm, profile=${profileDir})...`);
+        console.log(`[desktop-${benchKind}-startup] warmup run 1/1 (warm, profile=${profileLabel})...`);
       } else {
         console.log(
-          `[desktop-${benchKind}-startup] run ${iteration}/${total} (${runMode}, profile=${profileDir})...`,
+          `[desktop-${benchKind}-startup] run ${iteration}/${total} (${runMode}, profile=${profileLabel})...`,
         );
       }
     },
