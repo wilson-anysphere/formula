@@ -102,6 +102,7 @@ Verification checklist (especially for `es-ES`):
   - The extractor should print `Wrote <N> translations ...` where `<N>` matches the number of
     functions in `shared/functionCatalog.json` (before normalization).
   - It should not report skipped functions (skipped/missing entries silently fall back to English).
+  - Ensure you did not use `-MaxFunctions` when generating committed sources (debugging only).
 - Normalize sources before committing (omits identity mappings + enforces stable casing):
   - `node scripts/normalize-locale-function-sources.js`
 - Run `node scripts/generate-locale-function-tsv.js --check`.

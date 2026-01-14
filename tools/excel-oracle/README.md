@@ -119,6 +119,7 @@ Notes / caveats:
 - The script warns if Excel maps multiple canonical functions to the same localized spelling (this
   would later cause `scripts/generate-locale-function-tsv.js` to fail).
 - Use `-Visible`, `-MaxFunctions N`, and/or PowerShell’s `-Verbose` switch for debugging.
+  - Note: `-MaxFunctions` is for debugging only; do not commit partial sources.
 - `sources/<locale>.json` is expected to come from this extractor whenever possible. Avoid replacing
   `sources/es-ES.json` with partial online translation tables; missing entries silently fall back to
   English in the generated TSVs.
