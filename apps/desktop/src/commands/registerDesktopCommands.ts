@@ -264,7 +264,7 @@ export function registerDesktopCommands(params: {
         return;
       }
       if (typeof (app as any)?.isReadOnly === "function" && (app as any).isReadOnly() === true) {
-        safeShowToast("Read-only: you don't have permission to fill cells.", "warning");
+        showCollabEditRejectedToast([{ rejectionKind: "fillCells", rejectionReason: "permission" }]);
         app.focus();
         return;
       }

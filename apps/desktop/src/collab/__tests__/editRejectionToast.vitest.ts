@@ -161,6 +161,18 @@ describe("collab edit rejection toast", () => {
     expect(content).toContain("merge cells");
   });
 
+  it("shows a fill cells toast for rejected fill actions", () => {
+    showCollabEditRejectedToast([
+      {
+        rejectionKind: "fillCells",
+        rejectionReason: "permission",
+      },
+    ]);
+
+    const content = document.querySelector("#toast-root")?.textContent ?? "";
+    expect(content).toContain("fill cells");
+  });
+
   it("shows a drawing toast for rejected drawing edits", () => {
     showCollabEditRejectedToast([
       {
