@@ -174,6 +174,40 @@ fn canonicalize_accepts_canonical_leading_decimal_in_fr_fr_and_es_es() {
 }
 
 #[test]
+fn localize_emits_locale_decimal_separator_for_canonical_leading_decimal() {
+    let canonical = "=SUM(.5,1)";
+    for (loc, expected_fn) in [
+        (&locale::DE_DE, "SUMME"),
+        (&locale::FR_FR, "SOMME"),
+        (&locale::ES_ES, "SUMA"),
+    ] {
+        let localized = locale::localize_formula(canonical, loc).unwrap();
+
+        assert!(
+            localized.contains(expected_fn),
+            "expected localized function name {expected_fn} in {localized:?}"
+        );
+        // Ensure the decimal separator was localized (no canonical `.5` remains).
+        assert!(
+            localized.contains(",5"),
+            "expected localized decimal separator in {localized:?}"
+        );
+        assert!(
+            !localized.contains(".5"),
+            "unexpected canonical decimal separator in {localized:?}"
+        );
+        // Comma-decimal locales use `;` as argument separator; ensure we rewrite it as well.
+        assert!(
+            localized.contains(';'),
+            "expected localized argument separator in {localized:?}"
+        );
+
+        let roundtrip = locale::canonicalize_formula(&localized, loc).unwrap();
+        assert_eq!(roundtrip, canonical);
+    }
+}
+
+#[test]
 fn canonicalize_and_localize_array_literals_for_de_de() {
     let localized = "=SUMME({1\\2;3\\4})";
     let canonical = locale::canonicalize_formula(localized, &locale::DE_DE).unwrap();
