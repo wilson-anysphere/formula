@@ -382,15 +382,28 @@ export function hitTestDrawings(
       }
 
       const rect = anchorToRectPx(obj.anchor, geom, zoom);
-      if (pointInRect(sheetX, sheetY, rect)) {
-        const screen = {
-          x: rect.x - scrollX + headerOffsetX,
-          y: rect.y - scrollY + headerOffsetY,
-          width: rect.width,
-          height: rect.height,
-        };
-        return { object: obj, bounds: screen };
+      const transform = obj.transform;
+      if (hasNonIdentityTransform(transform)) {
+        let flags = 4;
+        if (transform!.flipH) flags |= 1;
+        if (transform!.flipV) flags |= 2;
+        const radians = (transform!.rotationDeg * Math.PI) / 180;
+        const cos = Math.cos(radians);
+        const sin = Math.sin(radians);
+        const aabb = rectToAabb(rect, cos, sin, flags);
+        if (!pointInRect(sheetX, sheetY, aabb)) continue;
+        if (!pointInTransformedRect(sheetX, sheetY, rect, cos, sin, flags)) continue;
+      } else if (!pointInRect(sheetX, sheetY, rect)) {
+        continue;
       }
+
+      const screen = {
+        x: rect.x - scrollX + headerOffsetX,
+        y: rect.y - scrollY + headerOffsetY,
+        width: rect.width,
+        height: rect.height,
+      };
+      return { object: obj, bounds: screen };
     }
     return null;
   }
@@ -495,7 +508,22 @@ export function hitTestDrawingsObject(
       }
 
       const rect = anchorToRectPx(obj.anchor, geom, zoom);
-      if (pointInRect(sheetX, sheetY, rect)) return obj;
+      const transform = obj.transform;
+      if (hasNonIdentityTransform(transform)) {
+        let flags = 4;
+        if (transform!.flipH) flags |= 1;
+        if (transform!.flipV) flags |= 2;
+        const radians = (transform!.rotationDeg * Math.PI) / 180;
+        const cos = Math.cos(radians);
+        const sin = Math.sin(radians);
+        const aabb = rectToAabb(rect, cos, sin, flags);
+        if (!pointInRect(sheetX, sheetY, aabb)) continue;
+        if (!pointInTransformedRect(sheetX, sheetY, rect, cos, sin, flags)) continue;
+      } else if (!pointInRect(sheetX, sheetY, rect)) {
+        continue;
+      }
+
+      return obj;
     }
     return null;
   }

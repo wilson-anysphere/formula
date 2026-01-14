@@ -76,4 +76,25 @@ describe("drawings hit testing with rotation", () => {
     // Inside the unrotated AABB but outside the rotated rect.
     expect(hitTestDrawings(index, viewport, 110, 110, geom)).toBe(null);
   });
+
+  it("still hits rotated objects when the hit-test index zoom differs (fallback scan)", () => {
+    const obj: DrawingObject = {
+      id: 1,
+      kind: { type: "shape" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(100) },
+        size: { cx: pxToEmu(100), cy: pxToEmu(50) },
+      },
+      zOrder: 0,
+      transform: { rotationDeg: 90, flipH: false, flipV: false },
+    };
+
+    // Build index at zoom=1, but hit test with zoom=2 to exercise the fallback code path.
+    const index = buildHitTestIndex([obj], geom, { bucketSizePx: 64 });
+    const zoomedViewport: Viewport = { ...viewport, zoom: 2 };
+
+    // Scale the prior "inside rotated, outside unrotated" point by 2x.
+    expect(hitTestDrawings(index, zoomedViewport, 300, 160, geom)?.object.id).toBe(1);
+  });
 });
