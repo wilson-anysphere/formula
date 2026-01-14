@@ -16005,8 +16005,11 @@ fn walk_calc_expr(
                         //
                         // When `info_type` is not a compile-time literal, fall back to the generic
                         // dependency walker.
+                        // Treat formulas as untrusted input: avoid allocating a full lowercased
+                        // copy of `info_type` (a string literal) just to do a couple
+                        // case-insensitive comparisons.
                         let info_type_literal = match &args[0] {
-                            Expr::Text(s) => Some(s.trim().to_ascii_lowercase()),
+                            Expr::Text(s) => Some(s.trim()),
                             _ => None,
                         };
 
@@ -16027,8 +16030,8 @@ fn walk_calc_expr(
                         }
 
                         if let Some(info_type) = info_type_literal {
-                            let derefs_reference_value =
-                                matches!(info_type.as_str(), "contents" | "type");
+                            let derefs_reference_value = info_type.eq_ignore_ascii_case("contents")
+                                || info_type.eq_ignore_ascii_case("type");
 
                             if derefs_reference_value {
                                 // `CELL("contents" | "type", reference)` consults the value/type
