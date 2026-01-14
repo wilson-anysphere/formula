@@ -1748,7 +1748,7 @@ fn import_xls_path_with_biff_reader(
                          warnings: &mut Vec<ImportWarning>,
                          warnings_suppressed: &mut bool| {
                             for warning in recovered.warnings.drain(..) {
-                                push_import_warning(warnings, warning, warnings_suppressed);
+                                push_import_warning(warnings, warning, &mut *warnings_suppressed);
                             }
 
                             for (cell_ref, formula_text) in recovered.formulas {

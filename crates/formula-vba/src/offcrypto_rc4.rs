@@ -157,4 +157,17 @@ mod tests {
         );
         assert_eq!(derived.len(), 16);
     }
+
+    #[test]
+    fn rc4_cryptoapi_standard_derive_rc4_key_b_sha1_keysize_56_truncates() {
+        let password = "password";
+        let salt: [u8; 16] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F,
+        ];
+
+        let derived = derive_rc4_key_b(password, &salt, 56, 0, HashAlg::Sha1);
+        assert_eq!(derived, decode_hex("6ad7dedf2da351"));
+        assert_eq!(derived.len(), 7);
+    }
 }

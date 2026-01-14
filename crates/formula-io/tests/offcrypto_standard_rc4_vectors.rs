@@ -182,8 +182,12 @@ fn standard_cryptoapi_rc4_derivation_vector() {
 
     let key0 = standard_rc4_derive_block_key(h, 0, key_len);
     let key1 = standard_rc4_derive_block_key(h, 1, key_len);
+    let key2 = standard_rc4_derive_block_key(h, 2, key_len);
+    let key3 = standard_rc4_derive_block_key(h, 3, key_len);
     assert_eq!(key0, hex_decode("6ad7dedf2da3514b1d85eabee069d47d"));
     assert_eq!(key1, hex_decode("2ed4e8825cd48aa4a47994cda7415b4a"));
+    assert_eq!(key2, hex_decode("9ce57d0699be3938951f47fa949361db"));
+    assert_eq!(key3, hex_decode("e65b2643eaba3815a37a61159f137840"));
 
     // Sanity: different block indexes must yield different keys.
     assert_ne!(key0, key1);

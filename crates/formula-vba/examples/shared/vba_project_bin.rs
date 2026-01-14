@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Cursor;
 use std::path::Path;
 
@@ -91,6 +92,7 @@ fn try_extract_vba_project_bin_from_zip(path: &Path) -> Result<Option<Vec<u8>>, 
     Ok(Some(buf))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn extract_vba_project_bin_from_zip_bytes(zip_bytes: &[u8]) -> Result<Vec<u8>, String> {
     let cursor = Cursor::new(zip_bytes);
     let mut archive =
