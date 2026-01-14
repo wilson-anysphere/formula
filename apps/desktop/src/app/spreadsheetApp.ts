@@ -7508,6 +7508,18 @@ export class SpreadsheetApp {
       const entry = outline.rows.entryMut(row + 1);
       if (entry.hidden.filter !== hidden) {
         entry.hidden.filter = hidden;
+        // If we're un-hiding a row and the entry has no other metadata, prune it to
+        // avoid accumulating one entry per row after repeated filter operations.
+        if (
+          hidden === false &&
+          entry.level === 0 &&
+          entry.collapsed === false &&
+          entry.hidden.user === false &&
+          entry.hidden.outline === false &&
+          entry.hidden.filter === false
+        ) {
+          outline.rows.entries.delete(row + 1);
+        }
         changed = true;
       }
     }
@@ -7539,6 +7551,15 @@ export class SpreadsheetApp {
       if (row < start || row > end) continue;
       if (entry?.hidden?.filter) {
         entry.hidden.filter = false;
+        if (
+          entry.level === 0 &&
+          entry.collapsed === false &&
+          entry.hidden.user === false &&
+          entry.hidden.outline === false &&
+          entry.hidden.filter === false
+        ) {
+          outline.rows.entries.delete(index1);
+        }
         changed = true;
       }
     }
@@ -7562,9 +7583,18 @@ export class SpreadsheetApp {
 
     let changed = false;
     for (const outline of this.outlinesBySheet.values()) {
-      for (const entry of outline.rows.entries.values()) {
+      for (const [index1, entry] of outline.rows.entries.entries()) {
         if (!entry.hidden.filter) continue;
         entry.hidden.filter = false;
+        if (
+          entry.level === 0 &&
+          entry.collapsed === false &&
+          entry.hidden.user === false &&
+          entry.hidden.outline === false &&
+          entry.hidden.filter === false
+        ) {
+          outline.rows.entries.delete(index1);
+        }
         changed = true;
       }
     }
