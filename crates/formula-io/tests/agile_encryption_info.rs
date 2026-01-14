@@ -9,6 +9,8 @@ use formula_io::extract_agile_encryption_info_xml;
 /// Extremely large values can make CI decryption tests unnecessarily slow.
 const MAX_CI_SPIN_COUNT: u32 = 100_000;
 
+const NS_ENCRYPTION: &str = "http://schemas.microsoft.com/office/2006/encryption";
+
 fn fixture_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures")
@@ -45,6 +47,11 @@ impl AgileEncryptionParams {
     }
 }
 
+fn get_required_attr<'a>(node: roxmltree::Node<'a, 'a>, name: &str) -> &'a str {
+    node.attribute(name)
+        .unwrap_or_else(|| panic!("missing `{name}` attribute on <{}>", node.tag_name().name()))
+}
+
 fn read_encryption_info_xml(path: &Path) -> String {
     let file = std::fs::File::open(path).expect("open encrypted OOXML fixture");
     let mut ole = cfb::CompoundFile::open(file).expect("open CFB container");
@@ -73,33 +80,19 @@ fn parse_agile_params_from_xml(xml: &str) -> AgileEncryptionParams {
             panic!("expected an element with `spinCount` attribute in extracted `<encryption>` XML")
         });
 
-    let spin_count: u32 = node
-        .attribute("spinCount")
-        .unwrap()
+    let spin_count: u32 = get_required_attr(node, "spinCount")
         .parse()
-        .unwrap_or_else(|_| {
-            panic!(
-                "expected `spinCount` to be an integer, got {:?}",
-                node.attribute("spinCount")
-            )
-        });
-    let key_bits: u32 = node
-        .attribute("keyBits")
-        .unwrap()
+        .unwrap_or_else(|err| panic!("invalid encryptedKey@spinCount: {err}"));
+    let key_bits: u32 = get_required_attr(node, "keyBits")
         .parse()
-        .unwrap_or_else(|_| {
-            panic!(
-                "expected `keyBits` to be an integer, got {:?}",
-                node.attribute("keyBits")
-            )
-        });
+        .unwrap_or_else(|err| panic!("invalid encryptedKey@keyBits: {err}"));
 
     AgileEncryptionParams::new(
         spin_count,
-        node.attribute("cipherAlgorithm").unwrap(),
-        node.attribute("cipherChaining").unwrap(),
+        get_required_attr(node, "cipherAlgorithm"),
+        get_required_attr(node, "cipherChaining"),
         key_bits,
-        node.attribute("hashAlgorithm").unwrap(),
+        get_required_attr(node, "hashAlgorithm"),
         node.attribute("saltSize").map(|value| {
             value
                 .parse::<u32>()
@@ -164,6 +157,56 @@ fn parse_agile_params_from_readme(readme: &str, fixture: &str) -> AgileEncryptio
     )
 }
 
+fn assert_agile_key_data_params_match_expected(
+    xml: &str,
+    expected: &AgileEncryptionParams,
+    fixture_rel: &str,
+) {
+    const EXPECTED_BLOCK_SIZE: u32 = 16;
+
+    let doc = roxmltree::Document::parse(xml)
+        .unwrap_or_else(|err| panic!("parse Agile EncryptionInfo XML for {fixture_rel}: {err}"));
+
+    let key_data = doc
+        .descendants()
+        .find(|node| {
+            node.is_element()
+                && node.tag_name().name() == "keyData"
+                && node.tag_name().namespace() == Some(NS_ENCRYPTION)
+        })
+        .unwrap_or_else(|| panic!("missing <keyData> element in {fixture_rel}"));
+
+    assert_eq!(
+        get_required_attr(key_data, "cipherAlgorithm"),
+        expected.cipher_algorithm.as_str(),
+        "{fixture_rel}: unexpected keyData@cipherAlgorithm"
+    );
+    assert_eq!(
+        get_required_attr(key_data, "cipherChaining"),
+        expected.cipher_chaining.as_str(),
+        "{fixture_rel}: unexpected keyData@cipherChaining"
+    );
+
+    let key_bits: u32 = get_required_attr(key_data, "keyBits")
+        .parse()
+        .unwrap_or_else(|err| panic!("{fixture_rel}: invalid keyData@keyBits: {err}"));
+    assert_eq!(key_bits, expected.key_bits, "{fixture_rel}: unexpected keyData@keyBits");
+
+    assert_eq!(
+        get_required_attr(key_data, "hashAlgorithm"),
+        expected.hash_algorithm.as_str(),
+        "{fixture_rel}: unexpected keyData@hashAlgorithm"
+    );
+
+    let block_size: u32 = get_required_attr(key_data, "blockSize")
+        .parse()
+        .unwrap_or_else(|err| panic!("{fixture_rel}: invalid keyData@blockSize: {err}"));
+    assert_eq!(
+        block_size, EXPECTED_BLOCK_SIZE,
+        "{fixture_rel}: unexpected keyData@blockSize"
+    );
+}
+
 #[test]
 fn agile_encryption_info_params_match_docs_and_ci_bounds() {
     let readme = fixture_path("encrypted/ooxml/README.md");
@@ -171,41 +214,21 @@ fn agile_encryption_info_params_match_docs_and_ci_bounds() {
     let readme_text =
         std::fs::read_to_string(&readme).expect("read fixtures/encrypted/ooxml/README.md");
 
-    for (fixture_name, expected) in [
-        (
-            "agile.xlsx",
-            AgileEncryptionParams::new(100_000, "AES", "ChainingModeCBC", 256, "SHA512", Some(16)),
-        ),
-        (
-            "agile-large.xlsx",
-            AgileEncryptionParams::new(100_000, "AES", "ChainingModeCBC", 256, "SHA512", Some(16)),
-        ),
-        (
-            "agile-unicode.xlsx",
-            AgileEncryptionParams::new(100_000, "AES", "ChainingModeCBC", 256, "SHA512", Some(16)),
-        ),
-        (
-            "agile-unicode-excel.xlsx",
-            AgileEncryptionParams::new(100_000, "AES", "ChainingModeCBC", 256, "SHA512", Some(16)),
-        ),
-        (
-            "agile-basic.xlsm",
-            AgileEncryptionParams::new(100_000, "AES", "ChainingModeCBC", 256, "SHA512", Some(16)),
-        ),
-        (
-            "basic-password.xlsm",
-            AgileEncryptionParams::new(100_000, "AES", "ChainingModeCBC", 256, "SHA512", Some(16)),
-        ),
-        (
-            "agile-empty-password.xlsx",
-            AgileEncryptionParams::new(1_000, "AES", "ChainingModeCBC", 128, "SHA256", Some(16)),
-        ),
+    for fixture_name in [
+        "agile.xlsx",
+        "agile-large.xlsx",
+        "agile-unicode.xlsx",
+        "agile-unicode-excel.xlsx",
+        "agile-basic.xlsm",
+        "basic-password.xlsm",
+        "agile-empty-password.xlsx",
     ] {
         let fixture_rel = format!("encrypted/ooxml/{fixture_name}");
         let fixture = fixture_path(&fixture_rel);
 
         let xml = read_encryption_info_xml(&fixture);
         let actual = parse_agile_params_from_xml(&xml);
+        let expected = parse_agile_params_from_readme(&readme_text, fixture_name);
 
         assert!(
             actual.spin_count <= MAX_CI_SPIN_COUNT,
@@ -219,18 +242,11 @@ fn agile_encryption_info_params_match_docs_and_ci_bounds() {
             actual,
             expected,
             "{fixture_rel} Agile EncryptionInfo parameters drifted.\n\
-             Update `{}` and this test's `expected` parameters if the new values are intentional.\n\
+             Update `{}` (and regenerate the fixture) if the new values are intentional.\n\
              Extracted `<encryption>` XML:\n{xml}\n",
             readme.display()
         );
 
-        let documented = parse_agile_params_from_readme(&readme_text, fixture_name);
-        assert_eq!(
-            documented,
-            expected,
-            "`{}` does not match the test's expected parameters for {fixture_rel}. \
-             Keep the README in sync with the fixture + test expectations to prevent silent drift.",
-            readme.display()
-        );
+        assert_agile_key_data_params_match_expected(&xml, &expected, &fixture_rel);
     }
 }
