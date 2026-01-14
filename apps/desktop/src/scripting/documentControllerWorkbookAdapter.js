@@ -2,6 +2,7 @@ import { formatCellAddress, formatRangeAddress, parseRangeAddress } from "../../
 import { TypedEventEmitter } from "../../../../packages/scripting/src/events.js";
 import { applyStylePatch } from "../formatting/styleTable.js";
 import { getStyleNumberFormat } from "../formatting/styleFieldAccess.js";
+import { parseImageCellValue } from "../shared/imageCellValue.js";
 
 // Excel limits used by the scripting A1 address helpers and macro recorder.
 // - Rows: 1..1048576 (0-based: 0..1048575)
@@ -66,9 +67,41 @@ function normalizeFormulaText(formula) {
   return `=${stripped}`;
 }
 
+function scriptCellValueFromStateValue(value) {
+  if (value == null) return null;
+
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+
+  // DocumentController stores rich text as `{ text, runs }`. Scripting does not currently
+  // expose rich text formatting, so surface the plain text content.
+  if (typeof value === "object" && typeof value.text === "string") {
+    return value.text;
+  }
+
+  const image = parseImageCellValue(value);
+  if (image) return image.altText ?? "[Image]";
+
+  // Best-effort fallback for other object-like values (e.g. Date objects from Parquet import).
+  if (value instanceof Date) {
+    try {
+      return value.toISOString();
+    } catch {
+      return String(value);
+    }
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 function cellInputFromState(state) {
   if (state.formula != null) return normalizeFormulaText(state.formula);
-  const value = state.value ?? null;
+  const value = scriptCellValueFromStateValue(state.value ?? null);
   // This scripting surface treats strings that start with "=" as formulas on write. To allow
   // round-tripping literal strings that start with "=", we re-add the leading apostrophe when
   // reading from the DocumentController (which strips it during input normalization).

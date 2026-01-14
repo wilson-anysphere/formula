@@ -111,3 +111,17 @@ test("DocumentControllerWorkbookAdapter treats numberFormat='General' as clearin
 
   workbook.dispose();
 });
+
+test("DocumentControllerWorkbookAdapter getValues flattens rich text + in-cell image values", () => {
+  const controller = new DocumentController();
+  controller.setCellValue("Sheet1", "A1", { text: "Hello", runs: [{ start: 0, end: 5, style: { bold: true } }] });
+  controller.setCellValue("Sheet1", "A2", { type: "image", value: { imageId: "img-1", altText: "Logo" } });
+  controller.setCellValue("Sheet1", "A3", { type: "image", value: { imageId: "img-2" } });
+
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { activeSheetName: "Sheet1" });
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.deepEqual(sheet.getRange("A1:A3").getValues(), [["Hello"], ["Logo"], ["[Image]"]]);
+
+  workbook.dispose();
+});
