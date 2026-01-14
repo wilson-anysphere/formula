@@ -4,6 +4,7 @@ import io
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 from tools.corpus import sanitize as sanitize_mod
 from tools.corpus.sanitize import SanitizeOptions, sanitize_xlsx_bytes, scan_xlsx_bytes_for_leaks
@@ -1137,6 +1138,24 @@ class SanitizeTests(unittest.TestCase):
             expected = sanitize_mod._hash_text("alice@example.com", salt="unit-test-salt")
             sheet_xml = za.read("xl/worksheets/sheet1.xml").decode("utf-8", errors="ignore")
             self.assertIn(expected, sheet_xml)
+
+    def test_sanitize_output_is_deterministic_wrt_zip_timestamps(self) -> None:
+        # ZIP entry timestamps should not depend on wall-clock time; otherwise repeated sanitization
+        # produces noisy diffs and can leak ingest time.
+        original = _make_minimal_xlsx_with_secrets()
+
+        with mock.patch("zipfile.time.time", return_value=1_000_000_000):
+            sanitized_a, _ = sanitize_xlsx_bytes(original, options=SanitizeOptions())
+        with mock.patch("zipfile.time.time", return_value=2_000_000_000):
+            sanitized_b, _ = sanitize_xlsx_bytes(original, options=SanitizeOptions())
+
+        self.assertEqual(sanitized_a, sanitized_b)
+
+        with zipfile.ZipFile(io.BytesIO(sanitized_a), "r") as z:
+            for info in z.infolist():
+                if info.is_dir():
+                    continue
+                self.assertEqual(info.date_time, (1980, 1, 1, 0, 0, 0))
 
     def test_rename_sheets_updates_workbook_and_formulas(self) -> None:
         original = _make_minimal_xlsx_for_sheet_rename()

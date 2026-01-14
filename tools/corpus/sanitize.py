@@ -1518,7 +1518,13 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                     # If a part isn't well-formed XML, leave it untouched (we still might remove it above).
                     new = raw
 
-                zout.writestr(name, new)
+                # Deterministic ZIP output: avoid embedding current timestamps in sanitized
+                # workbooks (which both adds noise to git diffs and can leak ingest time).
+                info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.create_system = 0
+                info.external_attr = 0
+                zout.writestr(info, new)
 
     removed_list = sorted(removed_parts)
     rewritten_list = sorted(set(rewritten))
