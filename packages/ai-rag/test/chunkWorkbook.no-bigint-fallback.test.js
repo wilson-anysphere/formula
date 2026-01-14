@@ -74,3 +74,42 @@ test("chunkWorkbook: detectRegions connects across Number/string packing boundar
     globalThis.BigInt = originalBigInt;
   }
 });
+
+test("chunkWorkbook: detectRegions connects across Number/string row packing boundary when BigInt is unavailable", async () => {
+  const originalBigInt = globalThis.BigInt;
+  try {
+    // @ts-ignore - test override
+    globalThis.BigInt = undefined;
+
+    const url = new URL("../src/workbook/chunkWorkbook.js", import.meta.url);
+    url.search = "noBigIntRowBoundary=1";
+    const mod = await import(url.href);
+    const chunkWorkbook = mod.chunkWorkbook;
+
+    const packColFactor = 1 << 20;
+    const rowNum = Math.floor(Number.MAX_SAFE_INTEGER / packColFactor);
+    const rowString = rowNum + 1;
+    const col = 0;
+
+    const cells = new Map();
+    // Insert the string-side key first to ensure traversal crosses representations.
+    cells.set(`${rowString},${col}`, { value: "B" });
+    cells.set(`${rowNum},${col}`, { value: "A" });
+
+    const workbook = {
+      id: "wb-no-bigint-row-boundary",
+      sheets: [{ name: "Sheet1", cells }],
+      tables: [],
+      namedRanges: [],
+    };
+
+    const chunks = chunkWorkbook(workbook);
+    const dataRegions = chunks.filter((c) => c.kind === "dataRegion");
+    assert.equal(dataRegions.length, 1);
+    assert.deepEqual(dataRegions[0].rect, { r0: rowNum, c0: col, r1: rowString, c1: col });
+    assert.equal(dataRegions[0].cells[0][0].v, "A");
+    assert.equal(dataRegions[0].cells[1][0].v, "B");
+  } finally {
+    globalThis.BigInt = originalBigInt;
+  }
+});
