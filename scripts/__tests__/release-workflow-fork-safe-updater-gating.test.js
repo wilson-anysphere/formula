@@ -40,6 +40,24 @@ test("release workflow gates publish-updater-manifest job on upstream repo or TA
   assert.match(snippet, /secrets\.TAURI_PRIVATE_KEY\s*!=\s*''/);
 });
 
+test("release workflow gates verify-updater-manifest job on upstream repo or TAURI_PRIVATE_KEY", async () => {
+  const text = await readWorkflow();
+  const lines = text.split(/\r?\n/);
+
+  const snippet = snippetAfter(lines, /^  verify-updater-manifest:/, 25);
+  assert.match(snippet, /if:\s*needs\.preflight\.outputs\.upload\s*==\s*'true'/);
+  assert.match(snippet, /secrets\.TAURI_PRIVATE_KEY\s*!=\s*''/);
+});
+
+test("release workflow gates verify-release-assets job on upstream repo or TAURI_PRIVATE_KEY", async () => {
+  const text = await readWorkflow();
+  const lines = text.split(/\r?\n/);
+
+  const snippet = snippetAfter(lines, /^  verify-release-assets:/, 25);
+  assert.match(snippet, /if:\s*needs\.preflight\.outputs\.upload\s*==\s*'true'/);
+  assert.match(snippet, /secrets\.TAURI_PRIVATE_KEY\s*!=\s*''/);
+});
+
 test("release workflow gates checksums job on upstream repo or TAURI_PRIVATE_KEY", async () => {
   const text = await readWorkflow();
   const lines = text.split(/\r?\n/);
@@ -48,4 +66,3 @@ test("release workflow gates checksums job on upstream repo or TAURI_PRIVATE_KEY
   assert.match(snippet, /if:\s*needs\.preflight\.outputs\.upload\s*==\s*'true'/);
   assert.match(snippet, /secrets\.TAURI_PRIVATE_KEY\s*!=\s*''/);
 });
-
