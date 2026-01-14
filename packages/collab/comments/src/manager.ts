@@ -127,37 +127,6 @@ export function getCommentsRoot(doc: Y.Doc): CommentsRoot {
   return { kind: "map", map: doc.getMap("comments") as YCommentsMap };
 }
 
-function cloneToLocalYjsValue(value: unknown): unknown {
-  const map = getYMap(value);
-  if (map) {
-    const out = new Y.Map();
-    map.forEach((v, k) => out.set(k, cloneToLocalYjsValue(v)));
-    return out;
-  }
-
-  const array = getYArray(value);
-  if (array) {
-    const out = new Y.Array();
-    for (const item of array.toArray()) {
-      out.push([cloneToLocalYjsValue(item)]);
-    }
-    return out;
-  }
-
-  const text = getYText(value);
-  if (text) {
-    const out = new Y.Text();
-    out.applyDelta(structuredClone(text.toDelta()));
-    return out;
-  }
-
-  if (value && typeof value === "object") {
-    return structuredClone(value);
-  }
-
-  return value;
-}
-
 function normalizeCommentsRootToLocalTypes(doc: Y.Doc): void {
   const root = getCommentsRoot(doc);
   if (root.kind !== "map") return;
@@ -173,7 +142,10 @@ function normalizeCommentsRootToLocalTypes(doc: Y.Doc): void {
     if (!map) return;
     // Already local.
     if (map instanceof Y.Map) return;
-    replacements.push({ key, cloned: cloneToLocalYjsValue(map) as Y.Map<unknown> });
+    replacements.push({
+      key,
+      cloned: cloneYjsValue(map, { Map: Y.Map, Array: Y.Array, Text: Y.Text }) as Y.Map<unknown>,
+    });
   });
   if (replacements.length === 0) return;
 
