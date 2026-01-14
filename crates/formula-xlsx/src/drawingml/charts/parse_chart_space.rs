@@ -85,7 +85,7 @@ pub fn parse_chart_space(
     {
         warn(
             &mut diagnostics,
-            "mc:AlternateContent encountered; Choice/Fallback selection is not yet modeled",
+            "mc:AlternateContent encountered; Choice/Fallback selection is heuristic (mc:Choice/@Requires is ignored)",
         );
     }
     if doc
