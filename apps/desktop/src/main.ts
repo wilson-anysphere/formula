@@ -10718,7 +10718,16 @@ try {
 
   // Queue open-file requests until after the listener is registered, then signal readiness to
   // flush any pending paths from the Rust host.
-  installOpenFileIpc({ listen, emit, onOpenPath: queueOpenWorkbook });
+  installOpenFileIpc({
+    listen,
+    emit,
+    onOpenPath: (path) => {
+      // Ignore non-spreadsheet open requests (defensive): the desktop app may receive file-open IPC
+      // events from OS integrations and we should avoid attempting to open images/other assets.
+      if (!isOpenWorkbookPath(path)) return;
+      queueOpenWorkbook(path);
+    },
+  });
 
   void listen("file-dropped", async (event) => {
     const paths = (event as any)?.payload;
