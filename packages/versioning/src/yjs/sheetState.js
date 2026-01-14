@@ -559,6 +559,12 @@ export function applyLayeredFormatsToCells(cells, layers) {
     return null;
   };
 
+  // Avoid allocating a fresh `{}` per cell when `sheetDefaultFormat` is null.
+  const sheetBase = layers.sheetDefaultFormat ?? {};
+  // Only cache column bases for columns that actually have an explicit col format.
+  /** @type {Map<number, any> | null} */
+  const colBaseCache = layers.colFormats.size > 0 ? new Map() : null;
+
   /** @type {{ row: number, col: number }} */
   const addrScratch = { row: 0, col: 0 };
   for (const [key, cell] of cells.entries()) {
@@ -567,11 +573,24 @@ export function applyLayeredFormatsToCells(cells, layers) {
     const row = addr.row;
     const col = addr.col;
 
-    const cellFormat = extractStyleObject(yjsValueToJson(cell?.format ?? cell?.style));
-    let merged = deepMerge(
-      deepMerge(layers.sheetDefaultFormat ?? {}, layers.colFormats.get(col) ?? null),
-      layers.rowFormats.get(row) ?? null,
-    );
+    const rawCellFormat = cell?.format ?? cell?.style;
+    const cellFormat = rawCellFormat != null ? extractStyleObject(yjsValueToJson(rawCellFormat)) : null;
+
+    let base = sheetBase;
+    const colFormat = layers.colFormats.get(col) ?? null;
+    if (colBaseCache && colFormat) {
+      const cached = colBaseCache.get(col);
+      if (cached) {
+        base = cached;
+      } else {
+        base = deepMerge(sheetBase, colFormat);
+        colBaseCache.set(col, base);
+      }
+    } else if (colFormat) {
+      base = deepMerge(sheetBase, colFormat);
+    }
+
+    let merged = deepMerge(base, layers.rowFormats.get(row) ?? null);
     const runs = layers.formatRunsByCol.get(col);
     if (runs && runs.length > 0) {
       const run = findRunForRow(runs, row);
