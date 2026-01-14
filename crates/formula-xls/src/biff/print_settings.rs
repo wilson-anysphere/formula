@@ -12,6 +12,8 @@ const RECORD_LEFTMARGIN: u16 = 0x0026;
 const RECORD_RIGHTMARGIN: u16 = 0x0027;
 const RECORD_TOPMARGIN: u16 = 0x0028;
 const RECORD_BOTTOMMARGIN: u16 = 0x0029;
+// WSBOOL [MS-XLS 2.4.376] stores miscellaneous sheet flags, including fFitToPage.
+const RECORD_WSBOOL: u16 = 0x0081;
 
 // SETUP grbit flags.
 //
@@ -49,6 +51,9 @@ pub(crate) fn parse_biff_sheet_print_settings(
 
     let mut page_setup = PageSetup::default();
     let mut saw_any_record = false;
+    let mut setup_fit_width: Option<u16> = None;
+    let mut setup_fit_height: Option<u16> = None;
+    let mut wsbool_fit_to_page: Option<bool> = None;
 
     let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
 
@@ -69,6 +74,8 @@ pub(crate) fn parse_biff_sheet_print_settings(
         match record.record_id {
             RECORD_SETUP => {
                 saw_any_record = true;
+                setup_fit_width = parse_u16_at(data, 6);
+                setup_fit_height = parse_u16_at(data, 8);
                 parse_setup_record(&mut page_setup, data, record.offset, &mut out.warnings)
             }
             RECORD_LEFTMARGIN => parse_margin_record(
@@ -99,6 +106,23 @@ pub(crate) fn parse_biff_sheet_print_settings(
                 record.offset,
                 &mut out.warnings,
             ),
+            RECORD_WSBOOL => {
+                if data.len() < 2 {
+                    out.warnings.push(format!(
+                        "truncated WSBOOL record at offset {} (len={}, expected >=2)",
+                        record.offset,
+                        data.len()
+                    ));
+                } else {
+                    let grbit = u16::from_le_bytes([data[0], data[1]]);
+                    let fit_to_page = (grbit & 0x0100) != 0;
+                    wsbool_fit_to_page = Some(fit_to_page);
+                    if fit_to_page {
+                        // Only treat WSBOOL as a print-settings signal when fFitToPage is set.
+                        saw_any_record = true;
+                    }
+                }
+            }
             records::RECORD_EOF => break,
             _ => {}
         }
@@ -112,6 +136,14 @@ pub(crate) fn parse_biff_sheet_print_settings(
     }
 
     if saw_any_record {
+        if wsbool_fit_to_page == Some(true) {
+            // Some `.xls` writers omit the SETUP record even when fit-to-page is enabled.
+            // Preserve the scaling intent: FitTo {0,0} means "as many pages as needed".
+            page_setup.scaling = Scaling::FitTo {
+                width: setup_fit_width.unwrap_or(0),
+                height: setup_fit_height.unwrap_or(0),
+            };
+        }
         out.page_setup = Some(page_setup);
     }
 
