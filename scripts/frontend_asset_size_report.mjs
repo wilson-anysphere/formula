@@ -11,7 +11,7 @@
  */
 
 import { appendFileSync } from "node:fs";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from "node:zlib";
 
@@ -19,6 +19,7 @@ const DEFAULT_LIMIT_MB = 10;
 const DEFAULT_COMPRESSION = "brotli";
 const DEFAULT_DIST_DIR = path.join("apps", "web", "dist");
 const MB_BYTES = 1_000_000;
+const DEFAULT_JSON_OUT_ENV = "FORMULA_FRONTEND_ASSET_SIZE_JSON_PATH";
 
 function isTruthyEnv(val) {
   if (val == null) return false;
@@ -49,7 +50,7 @@ function humanBytes(sizeBytes) {
 
 function usage() {
   return `Usage:
-  node scripts/frontend_asset_size_report.mjs [--dist <path>] [--limit-mb <n>] [--compression brotli|gzip] [--enforce]
+  node scripts/frontend_asset_size_report.mjs [--dist <path>] [--limit-mb <n>] [--compression brotli|gzip] [--enforce] [--json-out <path>]
 
 Defaults:
   --dist ${DEFAULT_DIST_DIR}
@@ -60,14 +61,23 @@ Env overrides:
   FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB=10
   FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION=brotli|gzip
   FORMULA_ENFORCE_FRONTEND_ASSET_SIZE=1
+  ${DEFAULT_JSON_OUT_ENV}=path/to/report.json
 `;
 }
 
 function parseArgs(argv) {
-  /** @type {{ dist?: string, limitMb?: string, compression?: string, enforce?: boolean, help?: boolean }} */
+  let args = argv.slice();
+  // pnpm forwards a literal `--` delimiter into scripts. Strip the first occurrence so
+  // `pnpm report:... -- --dist apps/desktop/dist` behaves the same as passing args directly.
+  const delimiterIdx = args.indexOf("--");
+  if (delimiterIdx >= 0) {
+    args = [...args.slice(0, delimiterIdx), ...args.slice(delimiterIdx + 1)];
+  }
+
+  /** @type {{ dist?: string, limitMb?: string, compression?: string, enforce?: boolean, jsonOut?: string, help?: boolean }} */
   const out = {};
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
     if (arg === "--help" || arg === "-h") {
       out.help = true;
       continue;
@@ -98,6 +108,14 @@ function parseArgs(argv) {
     }
     if (arg === "--enforce") {
       out.enforce = true;
+      continue;
+    }
+    if (arg === "--json-out") {
+      out.jsonOut = args[++i];
+      continue;
+    }
+    if (arg.startsWith("--json-out=")) {
+      out.jsonOut = arg.slice("--json-out=".length);
       continue;
     }
     throw new Error(`Unknown argument: ${arg}\n\n${usage()}`);
@@ -143,6 +161,31 @@ function appendStepSummary(markdown) {
   appendFileSync(summaryPath, `${markdown}\n`, { encoding: "utf8" });
 }
 
+function toPosixPath(p) {
+  return p.split(path.sep).join("/");
+}
+
+function reportPath(p, repoRoot) {
+  const abs = path.resolve(p);
+  const rel = path.relative(repoRoot, abs);
+  if (rel === "") return ".";
+  if (!rel.startsWith("..") && !path.isAbsolute(rel)) return toPosixPath(rel);
+  return toPosixPath(abs);
+}
+
+async function writeJsonReport(jsonOutPath, report) {
+  if (!jsonOutPath) return true;
+  try {
+    await mkdir(path.dirname(jsonOutPath), { recursive: true });
+    await writeFile(jsonOutPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+    return true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`frontend-asset-size: ERROR failed to write JSON report to ${jsonOutPath}: ${msg}`);
+    return false;
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
@@ -153,6 +196,10 @@ async function main() {
   const repoRoot = process.cwd();
   const distDir = path.resolve(repoRoot, args.dist ?? DEFAULT_DIST_DIR);
   const assetsDir = path.join(distDir, "assets");
+
+  const rawJsonOut = args.jsonOut ?? process.env[DEFAULT_JSON_OUT_ENV];
+  const jsonOut =
+    rawJsonOut && String(rawJsonOut).trim() !== "" ? path.resolve(repoRoot, String(rawJsonOut)) : null;
 
   const enforce = Boolean(args.enforce) || isTruthyEnv(process.env.FORMULA_ENFORCE_FRONTEND_ASSET_SIZE);
   const limitMb = args.limitMb != null ? Number(args.limitMb) : parseLimitMb(process.env.FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB);
@@ -171,6 +218,8 @@ async function main() {
     console.error(`frontend-asset-size: ERROR invalid compression mode: ${compression} (expected brotli|gzip)`);
     return 2;
   }
+
+  const runnerOs = process.env.RUNNER_OS?.trim();
 
   const assetsStat = await stat(assetsDir).catch(() => null);
   if (!assetsStat?.isDirectory()) {
@@ -193,6 +242,29 @@ async function main() {
     } catch {
       // Ignore summary write failures.
     }
+
+    const report = {
+      dist_dir: reportPath(distDir, repoRoot),
+      assets_dir: reportPath(assetsDir, repoRoot),
+      compression,
+      limit_mb: limitMb,
+      limit_bytes: limitBytes,
+      enforce,
+      file_count: 0,
+      totals: {
+        raw_bytes: 0,
+        brotli_bytes: 0,
+        gzip_bytes: 0,
+        compressed_bytes: 0,
+      },
+      over_limit: false,
+      missing_assets_dir: true,
+      assets: [],
+    };
+    if (runnerOs) report.runner_os = runnerOs;
+    const wroteJson = await writeJsonReport(jsonOut, report);
+    if (!wroteJson) return 2;
+
     return 1;
   }
 
@@ -226,6 +298,16 @@ async function main() {
   const totalBrotli = rows.reduce((sum, r) => sum + r.brotliBytes, 0);
   const totalCompressed = compression === "brotli" ? totalBrotli : totalGzip;
   const overLimit = totalCompressed > limitBytes;
+
+  const reportAssets = [...rows]
+    .sort((a, b) => a.rel.localeCompare(b.rel))
+    .map((r) => ({
+      path: r.rel,
+      ext: r.ext,
+      raw_bytes: r.rawBytes,
+      brotli_bytes: r.brotliBytes,
+      gzip_bytes: r.gzipBytes,
+    }));
 
   rows.sort((a, b) => {
     const ak = compression === "brotli" ? a.brotliBytes : a.gzipBytes;
@@ -283,6 +365,28 @@ async function main() {
   } catch {
     // Ignore summary write failures.
   }
+
+  const jsonReport = {
+    dist_dir: reportPath(distDir, repoRoot),
+    assets_dir: reportPath(assetsDir, repoRoot),
+    compression,
+    limit_mb: limitMb,
+    limit_bytes: limitBytes,
+    enforce,
+    file_count: rows.length,
+    totals: {
+      raw_bytes: totalRaw,
+      brotli_bytes: totalBrotli,
+      gzip_bytes: totalGzip,
+      compressed_bytes: totalCompressed,
+    },
+    over_limit: overLimit,
+    missing_assets_dir: false,
+    assets: reportAssets,
+  };
+  if (runnerOs) jsonReport.runner_os = runnerOs;
+  const wroteJson = await writeJsonReport(jsonOut, jsonReport);
+  if (!wroteJson) return 2;
 
   if (!enforce) return 0;
   if (overLimit) {

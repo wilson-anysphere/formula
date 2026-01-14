@@ -259,7 +259,15 @@ jobs:
           FORMULA_ENFORCE_FRONTEND_ASSET_SIZE: ${{ vars.FORMULA_ENFORCE_FRONTEND_ASSET_SIZE }}
           FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB: ${{ vars.FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB }}
           FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION: ${{ vars.FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION }}
-        run: node scripts/frontend_asset_size_report.mjs --dist apps/web/dist
+        run: node scripts/frontend_asset_size_report.mjs --dist apps/web/dist --json-out web-frontend-asset-size-report.json
+
+      - name: Upload frontend asset size report (web, JSON)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: web-frontend-asset-size-report
+          path: web-frontend-asset-size-report.json
+          if-no-files-found: ignore
       - name: Detect Pyodide version (for caching)
         id: pyodide
         run: |
@@ -308,7 +316,15 @@ jobs:
           FORMULA_ENFORCE_FRONTEND_ASSET_SIZE: ${{ vars.FORMULA_ENFORCE_FRONTEND_ASSET_SIZE }}
           FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB: ${{ vars.FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB }}
           FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION: ${{ vars.FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION }}
-        run: node scripts/frontend_asset_size_report.mjs --dist apps/desktop/dist
+        run: node scripts/frontend_asset_size_report.mjs --dist apps/desktop/dist --json-out desktop-frontend-asset-size-report.json
+
+      - name: Upload frontend asset size report (desktop, JSON)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-frontend-asset-size-report
+          path: desktop-frontend-asset-size-report.json
+          if-no-files-found: ignore
 
       - name: Check desktop JS bundle size budgets
         run: pnpm -C apps/desktop check:bundle-size
