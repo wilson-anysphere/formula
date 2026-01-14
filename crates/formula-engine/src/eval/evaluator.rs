@@ -1436,11 +1436,13 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 let mut start_idx: Option<usize> = None;
                 let mut end_idx: Option<usize> = None;
                 for (idx, name) in order.iter().enumerate() {
-                    if start_idx.is_none() && formula_model::sheet_name_eq_case_insensitive(name, start)
+                    if start_idx.is_none()
+                        && formula_model::sheet_name_eq_case_insensitive(name, start)
                     {
                         start_idx = Some(idx);
                     }
-                    if end_idx.is_none() && formula_model::sheet_name_eq_case_insensitive(name, end) {
+                    if end_idx.is_none() && formula_model::sheet_name_eq_case_insensitive(name, end)
+                    {
                         end_idx = Some(idx);
                     }
                     if start_idx.is_some() && end_idx.is_some() {

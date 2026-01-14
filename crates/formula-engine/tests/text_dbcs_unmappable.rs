@@ -106,4 +106,3 @@ fn unmappable_semantics_are_consistent_across_dbcs_codepages_cp936() {
         Value::Number(2.0)
     );
 }
-

@@ -145,16 +145,12 @@ fn cmp_sheet_ids_in_tab_order(grid: &dyn Grid, a: &SheetId, b: &SheetId) -> Orde
                             let mut b_idx: Option<usize> = None;
                             for (idx, name) in order.iter().enumerate() {
                                 if a_idx.is_none()
-                                    && formula_model::sheet_name_eq_case_insensitive(
-                                        name, a_sheet,
-                                    )
+                                    && formula_model::sheet_name_eq_case_insensitive(name, a_sheet)
                                 {
                                     a_idx = Some(idx);
                                 }
                                 if b_idx.is_none()
-                                    && formula_model::sheet_name_eq_case_insensitive(
-                                        name, b_sheet,
-                                    )
+                                    && formula_model::sheet_name_eq_case_insensitive(name, b_sheet)
                                 {
                                     b_idx = Some(idx);
                                 }

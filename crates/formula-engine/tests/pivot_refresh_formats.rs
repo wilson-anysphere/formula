@@ -434,9 +434,15 @@ fn refresh_pivot_infers_dates_from_spill_origin_number_formats() {
 
     engine.refresh_pivot_table(pivot_id).unwrap();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(serial_1));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D2"),
+        Value::Number(serial_1)
+    );
     assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(10.0));
-    assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Number(serial_2));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D3"),
+        Value::Number(serial_2)
+    );
     assert_eq!(engine.get_cell_value("Sheet1", "E3"), Value::Number(20.0));
 
     for addr in ["D2", "D3"] {
