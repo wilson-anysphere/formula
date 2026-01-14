@@ -113,6 +113,36 @@ class MockWorker implements WorkerLike {
           this.serverPort?.postMessage(response);
           return;
         }
+        if (req.method === "supportedLocaleIds") {
+          const response: WorkerOutboundMessage = {
+            type: "response",
+            id: req.id,
+            ok: true,
+            result: ["de-DE", "en-US"]
+          };
+          this.serverPort?.postMessage(response);
+          return;
+        }
+        if (req.method === "getLocaleInfo") {
+          const response: WorkerOutboundMessage = {
+            type: "response",
+            id: req.id,
+            ok: true,
+            result: {
+              localeId: "de-DE",
+              decimalSeparator: ",",
+              argSeparator: ";",
+              arrayRowSeparator: ";",
+              arrayColSeparator: "\\",
+              thousandsSeparator: ".",
+              isRtl: false,
+              booleanTrue: "WAHR",
+              booleanFalse: "FALSCH"
+            }
+          };
+          this.serverPort?.postMessage(response);
+          return;
+        }
         if (req.method === "getCalcSettings") {
           const response: WorkerOutboundMessage = {
             type: "response",
@@ -905,6 +935,43 @@ describe("EngineWorker RPC", () => {
     );
     expect(requests).toHaveLength(1);
     expect(requests[0].params).toEqual({ localeId: "de-DE" });
+  });
+
+  it("supports supportedLocaleIds and getLocaleInfo module-level RPCs", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    const ids = await engine.supportedLocaleIds();
+    expect(ids).toEqual(["de-DE", "en-US"]);
+
+    const info = await engine.getLocaleInfo("de-DE");
+    expect(info).toEqual({
+      localeId: "de-DE",
+      decimalSeparator: ",",
+      argSeparator: ";",
+      arrayRowSeparator: ";",
+      arrayColSeparator: "\\",
+      thousandsSeparator: ".",
+      isRtl: false,
+      booleanTrue: "WAHR",
+      booleanFalse: "FALSCH"
+    });
+
+    const supportedReqs = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "supportedLocaleIds"
+    );
+    expect(supportedReqs).toHaveLength(1);
+    expect(supportedReqs[0].params).toEqual({});
+
+    const infoReqs = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "getLocaleInfo"
+    );
+    expect(infoReqs).toHaveLength(1);
+    expect(infoReqs[0].params).toEqual({ localeId: "de-DE" });
   });
 
   it("forwards applyOperation calls with the correct RPC method name", async () => {
