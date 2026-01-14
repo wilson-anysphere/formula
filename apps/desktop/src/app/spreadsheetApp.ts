@@ -9745,20 +9745,27 @@ export class SpreadsheetApp {
       if (!uiAnchor || typeof uiAnchor !== "object") return uiAnchor;
 
       const normalizeTag = (tag: string): string => tag.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+      const normalizeEmu = (n: unknown): number => {
+        const num = typeof n === "number" ? n : typeof n === "bigint" ? Number(n) : Number(n);
+        return Number.isFinite(num) ? Math.round(num) : 0;
+      };
+      const uiType = typeof (uiAnchor as any).type === "string" ? normalizeTag((uiAnchor as any).type) : "";
 
       const patchCellRef = (cell: any, next: { row: number; col: number }): void => {
         if (!cell || typeof cell !== "object") return;
-        (cell as any).row = next.row;
-        (cell as any).col = next.col;
+        (cell as any).row = Math.trunc(next.row);
+        (cell as any).col = Math.trunc(next.col);
       };
 
       const patchCellOffset = (offset: any, next: { xEmu: number; yEmu: number }): void => {
         if (!offset || typeof offset !== "object") return;
+        const xEmu = normalizeEmu(next.xEmu);
+        const yEmu = normalizeEmu(next.yEmu);
         // Support both formula-model (`x_emu`) and UI (`xEmu`) key conventions.
-        if ("x_emu" in offset) (offset as any).x_emu = next.xEmu;
-        if ("y_emu" in offset) (offset as any).y_emu = next.yEmu;
-        if ("xEmu" in offset) (offset as any).xEmu = next.xEmu;
-        if ("yEmu" in offset) (offset as any).yEmu = next.yEmu;
+        if ("x_emu" in offset) (offset as any).x_emu = xEmu;
+        if ("y_emu" in offset) (offset as any).y_emu = yEmu;
+        if ("xEmu" in offset) (offset as any).xEmu = xEmu;
+        if ("yEmu" in offset) (offset as any).yEmu = yEmu;
       };
 
       const patchAnchorPoint = (point: any, next: { cell: { row: number; col: number }; offset: { xEmu: number; yEmu: number } }): void => {
@@ -9771,8 +9778,10 @@ export class SpreadsheetApp {
 
       const patchEmuSize = (size: any, next: { cx: number; cy: number }): void => {
         if (!size || typeof size !== "object") return;
-        if ("cx" in size) (size as any).cx = next.cx;
-        if ("cy" in size) (size as any).cy = next.cy;
+        const cx = normalizeEmu(next.cx);
+        const cy = normalizeEmu(next.cy);
+        if ("cx" in size) (size as any).cx = cx;
+        if ("cy" in size) (size as any).cy = cy;
       };
 
       // Preserve the raw enum representation when the anchor is stored as a formula-model/Rust enum
@@ -9785,22 +9794,57 @@ export class SpreadsheetApp {
           const value = (rawAnchor as any)[tag];
           const normalized = normalizeTag(tag);
           if (value && typeof value === "object") {
-            if (normalized === "onecell" && uiAnchor.type === "oneCell") {
+            if (normalized === "onecell" && uiType === "onecell") {
               patchAnchorPoint((value as any).from, uiAnchor.from);
               // Formula-model uses `ext` for size; accept `size` too for compatibility.
               patchEmuSize((value as any).ext, uiAnchor.size);
               patchEmuSize((value as any).size, uiAnchor.size);
               return rawAnchor;
             }
-            if (normalized === "twocell" && uiAnchor.type === "twoCell") {
+            if (normalized === "twocell" && uiType === "twocell") {
               patchAnchorPoint((value as any).from, uiAnchor.from);
               patchAnchorPoint((value as any).to, uiAnchor.to);
               return rawAnchor;
             }
-            if (normalized === "absolute" && uiAnchor.type === "absolute") {
+            if (normalized === "absolute" && uiType === "absolute") {
               patchCellOffset((value as any).pos, uiAnchor.pos);
               patchEmuSize((value as any).ext, uiAnchor.size);
               patchEmuSize((value as any).size, uiAnchor.size);
+              return rawAnchor;
+            }
+          }
+        }
+      }
+
+      // Preserve internally-tagged anchor encodings too (`{ kind: "Absolute", ... }` or
+      // `{ type: "Absolute", value: {...} }`).
+      {
+        const tagVal = typeof (rawAnchor as any).kind === "string" ? (rawAnchor as any).kind : typeof (rawAnchor as any).type === "string" ? (rawAnchor as any).type : null;
+        if (tagVal) {
+          const normalized = normalizeTag(tagVal);
+          const payload =
+            (rawAnchor as any).value && typeof (rawAnchor as any).value === "object"
+              ? (rawAnchor as any).value
+              : (rawAnchor as any).content && typeof (rawAnchor as any).content === "object"
+                ? (rawAnchor as any).content
+                : rawAnchor;
+
+          if (payload && typeof payload === "object") {
+            if (normalized === "onecell" && uiType === "onecell") {
+              patchAnchorPoint((payload as any).from, uiAnchor.from);
+              patchEmuSize((payload as any).ext, uiAnchor.size);
+              patchEmuSize((payload as any).size, uiAnchor.size);
+              return rawAnchor;
+            }
+            if (normalized === "twocell" && uiType === "twocell") {
+              patchAnchorPoint((payload as any).from, uiAnchor.from);
+              patchAnchorPoint((payload as any).to, uiAnchor.to);
+              return rawAnchor;
+            }
+            if (normalized === "absolute" && uiType === "absolute") {
+              patchCellOffset((payload as any).pos, uiAnchor.pos);
+              patchEmuSize((payload as any).ext, uiAnchor.size);
+              patchEmuSize((payload as any).size, uiAnchor.size);
               return rawAnchor;
             }
           }
