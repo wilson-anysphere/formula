@@ -423,6 +423,8 @@ describe("SpreadsheetApp worksheet background images", () => {
       await app.whenIdle();
 
       expect(app.getSheetBackgroundImageId(app.getCurrentSheetId())).toBe(imageId);
+      const workbookImageManager = (app as any).workbookImageManager as any;
+      expect(Number(workbookImageManager?.imageRefCount?.get(imageId) ?? 0)).toBeGreaterThan(0);
       expect(doc.isDirty).toBe(false);
       expect(createPatternSpy).toHaveBeenCalled();
       expect(patternFillRects.filter((rect) => rect.canvasClassName.includes("grid-canvas--base")).length).toBeGreaterThan(0);
@@ -483,6 +485,8 @@ describe("SpreadsheetApp worksheet background images", () => {
       await app.whenIdle();
 
       expect(app.getSheetBackgroundImageId(app.getCurrentSheetId())).toBe(imageId);
+      const workbookImageManager = (app as any).workbookImageManager as any;
+      expect(Number(workbookImageManager?.imageRefCount?.get(imageId) ?? 0)).toBeGreaterThan(0);
       expect(doc.isDirty).toBe(false);
       expect(createPatternSpy).toHaveBeenCalled();
       const basePatternRects = patternFillRects.filter((rect) => rect.canvasClassName.includes("grid-canvas--base"));

@@ -3071,9 +3071,26 @@ export class SpreadsheetApp {
       // the drag, and rebuilding large override maps here can be expensive for sheets with
       // many explicit row/col sizes.
       const source = typeof payload?.source === "string" ? payload.source : "";
-      const hasActiveSheetViewDelta =
-        Array.isArray(payload?.sheetViewDeltas) &&
-        payload.sheetViewDeltas.some((delta: any) => delta?.sheetId === this.sheetId);
+      const sheetViewDeltas: any[] = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
+      let hasActiveSheetViewDelta = false;
+      let hasBackgroundImageDelta = false;
+      for (const delta of sheetViewDeltas) {
+        if (!delta) continue;
+        if (delta?.sheetId === this.sheetId) hasActiveSheetViewDelta = true;
+        const beforeRaw =
+          typeof delta?.before?.backgroundImageId === "string" ? delta.before.backgroundImageId.trim() : "";
+        const afterRaw =
+          typeof delta?.after?.backgroundImageId === "string" ? delta.after.backgroundImageId.trim() : "";
+        const beforeId = beforeRaw ? beforeRaw : null;
+        const afterId = afterRaw ? afterRaw : null;
+        if (beforeId !== afterId) hasBackgroundImageDelta = true;
+        if (hasActiveSheetViewDelta && hasBackgroundImageDelta) break;
+      }
+      if (hasBackgroundImageDelta) {
+        // Sheet background images are stored as external image references (not drawings).
+        // Keep workbook-level image refcounts in sync so GC doesn't evict background bytes.
+        this.workbookImageManager.setExternalImageIds(this.listWorkbookExternalImageIds());
+      }
       if (hasActiveSheetViewDelta) {
         if (source !== "sharedGridAxis") {
           this.syncFrozenPanes();
