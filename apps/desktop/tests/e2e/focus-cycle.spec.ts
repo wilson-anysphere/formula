@@ -130,12 +130,15 @@ test.describe("focus cycling (Excel-style F6)", () => {
     // Menu open signal.
     await expect(page.getByTestId("theme-option-dark")).toBeVisible();
 
-    await expect(themeSelector).toBeFocused();
+    // Opening a ribbon dropdown moves focus into the menu for accessibility,
+    // so assert focus is inside the dropdown rather than on the trigger button.
+    const systemTheme = page.getByTestId("theme-option-system");
+    await expect(systemTheme).toBeFocused();
 
     await dispatchF6(page);
-    await expect(themeSelector).toBeFocused();
+    await expect(systemTheme).toBeFocused();
 
     await dispatchF6(page, { shiftKey: true });
-    await expect(themeSelector).toBeFocused();
+    await expect(systemTheme).toBeFocused();
   });
 });
