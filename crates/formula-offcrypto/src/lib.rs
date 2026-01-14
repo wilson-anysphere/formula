@@ -3250,13 +3250,30 @@ pub fn decrypt_encrypted_package(
 ) -> Result<Vec<u8>, OffcryptoError> {
     let info = parse_encryption_info(encryption_info)?;
 
-    let decrypted = match info {
-        EncryptionInfo::Standard { header, verifier, .. } => decrypt_standard_stream(
-            StandardEncryptionInfo { header, verifier },
-            encrypted_package,
-            password,
-        )?,
-        EncryptionInfo::Agile { info, .. } => decrypt_agile_stream(&info, encrypted_package, password, &options)?,
+    // Reject clearly malformed `EncryptedPackage` streams before expensive password derivation.
+    //
+    // This surfaces actionable structural errors (truncation / framing) and prevents doing large
+    // KDF work on inputs that cannot be decrypted.
+    match &info {
+        EncryptionInfo::Standard { .. } => {
+            validate_standard_encrypted_package_stream(encrypted_package)?;
+        }
+        EncryptionInfo::Agile { .. } => {
+            let header = parse_encrypted_package_header(encrypted_package)?;
+            let ciphertext_len = encrypted_package.len() - 8;
+            if ciphertext_len % AES_BLOCK_SIZE != 0 {
+                return Err(OffcryptoError::InvalidCiphertextLength { len: ciphertext_len });
+            }
+
+            // Mirror `agile_decrypt_package`'s plausibility guard: the declared plaintext size should
+            // not be wildly larger than the available ciphertext.
+            let plausible_max = (encrypted_package.len() as u64).saturating_mul(2);
+            if header.original_size > plausible_max {
+                return Err(OffcryptoError::EncryptedPackageSizeOverflow {
+                    total_size: header.original_size,
+                });
+            }
+        }
         EncryptionInfo::Unsupported { version } => {
             if version.minor == 3 && matches!(version.major, 3 | 4) {
                 return Err(OffcryptoError::UnsupportedEncryption {
@@ -3268,6 +3285,17 @@ pub fn decrypt_encrypted_package(
                 minor: version.minor,
             });
         }
+    }
+
+    let decrypted = match info {
+        EncryptionInfo::Standard { header, verifier, .. } => decrypt_standard_stream(
+            StandardEncryptionInfo { header, verifier },
+            encrypted_package,
+            password,
+        )?,
+        EncryptionInfo::Agile { info, .. } => decrypt_agile_stream(&info, encrypted_package, password, &options)?,
+        // Unsupported cases are handled above (before expensive work).
+        EncryptionInfo::Unsupported { .. } => unreachable!("handled above"),
     };
 
     validate_zip_like(&decrypted)?;

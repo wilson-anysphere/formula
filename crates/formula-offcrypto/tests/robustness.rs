@@ -1,9 +1,11 @@
 use formula_offcrypto::{
-    decrypt_encrypted_package_ecb, parse_encrypted_package_header, parse_encryption_info,
-    validate_agile_segment_decrypt_inputs, validate_standard_encrypted_package_stream, OffcryptoError,
-    StandardEncryptionHeader, StandardEncryptionHeaderFlags, StandardEncryptionInfo,
-    StandardEncryptionVerifier,
+    decrypt_encrypted_package, decrypt_encrypted_package_ecb, parse_encrypted_package_header,
+    parse_encryption_info, validate_agile_segment_decrypt_inputs,
+    validate_standard_encrypted_package_stream, DecryptOptions, OffcryptoError, StandardEncryptionHeader,
+    StandardEncryptionHeaderFlags, StandardEncryptionInfo, StandardEncryptionVerifier,
 };
+use std::io::{Cursor, Read};
+use std::path::PathBuf;
 
 fn minimal_standard_encryption_info_bytes() -> Vec<u8> {
     const CALG_AES_128: u32 = 0x0000_660E;
@@ -36,6 +38,21 @@ fn minimal_standard_encryption_info_bytes() -> Vec<u8> {
     bytes.extend_from_slice(&[0u8; 32]); // encryptedVerifierHash (padded to 32)
 
     bytes
+}
+
+fn fixture(path: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join(path)
+}
+
+fn extract_stream_bytes(cfb_bytes: &[u8], stream_name: &str) -> Vec<u8> {
+    let mut ole = cfb::CompoundFile::open(Cursor::new(cfb_bytes)).expect("open cfb");
+    let mut stream = ole.open_stream(stream_name).expect("open stream");
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).expect("read stream");
+    buf
 }
 
 #[test]
@@ -149,6 +166,72 @@ fn standard_encrypted_package_ciphertext_not_multiple_of_16_errors() {
     encrypted_package.extend_from_slice(&[0u8; 15]); // not a multiple of 16
 
     let err = validate_standard_encrypted_package_stream(&encrypted_package).unwrap_err();
+    assert_eq!(err, OffcryptoError::InvalidCiphertextLength { len: 15 });
+}
+
+#[test]
+fn decrypt_encrypted_package_standard_rejects_short_encrypted_package_before_password_check() {
+    let encryption_info = minimal_standard_encryption_info_bytes();
+    let encrypted_package = [0u8; 7];
+    let err = decrypt_encrypted_package(
+        &encryption_info,
+        &encrypted_package,
+        "wrong-password",
+        DecryptOptions::default(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, OffcryptoError::Truncated { context } if context == "EncryptedPackageHeader.original_size"),
+        "expected Truncated(original_size), got {err:?}"
+    );
+}
+
+#[test]
+fn decrypt_encrypted_package_standard_rejects_unaligned_ciphertext_before_password_check() {
+    let encryption_info = minimal_standard_encryption_info_bytes();
+    let mut encrypted_package = 0u64.to_le_bytes().to_vec();
+    encrypted_package.extend_from_slice(&[0u8; 15]);
+    let err = decrypt_encrypted_package(
+        &encryption_info,
+        &encrypted_package,
+        "wrong-password",
+        DecryptOptions::default(),
+    )
+    .unwrap_err();
+    assert_eq!(err, OffcryptoError::InvalidCiphertextLength { len: 15 });
+}
+
+#[test]
+fn decrypt_encrypted_package_agile_rejects_short_encrypted_package_before_password_check() {
+    let encrypted = std::fs::read(fixture("inputs/example_password.xlsx")).expect("read fixture");
+    let encryption_info = extract_stream_bytes(&encrypted, "EncryptionInfo");
+    let encrypted_package = [0u8; 7];
+    let err = decrypt_encrypted_package(
+        &encryption_info,
+        &encrypted_package,
+        "wrong-password",
+        DecryptOptions::default(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, OffcryptoError::Truncated { context } if context == "EncryptedPackageHeader.original_size"),
+        "expected Truncated(original_size), got {err:?}"
+    );
+}
+
+#[test]
+fn decrypt_encrypted_package_agile_rejects_unaligned_ciphertext_before_password_check() {
+    let encrypted = std::fs::read(fixture("inputs/example_password.xlsx")).expect("read fixture");
+    let encryption_info = extract_stream_bytes(&encrypted, "EncryptionInfo");
+    let mut encrypted_package = 0u64.to_le_bytes().to_vec();
+    encrypted_package.extend_from_slice(&[0u8; 15]);
+    let err = decrypt_encrypted_package(
+        &encryption_info,
+        &encrypted_package,
+        "wrong-password",
+        DecryptOptions::default(),
+    )
+    .unwrap_err();
     assert_eq!(err, OffcryptoError::InvalidCiphertextLength { len: 15 });
 }
 
