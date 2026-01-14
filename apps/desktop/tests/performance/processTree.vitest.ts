@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildTaskkillCommand, terminateProcessTree } from './processTree.ts';
+import { buildTaskkillCommand, terminateProcessTree } from './desktopStartupUtil.ts';
 
 describe('terminateProcessTree', () => {
   it('buildTaskkillCommand uses /PID <pid> /T /F', () => {
