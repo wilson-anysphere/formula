@@ -68,3 +68,46 @@ test("collab-yjs-utils: getTextRoot normalizes foreign roots created via CJS app
   assert.ok(doc.getText("title") instanceof Y.Text);
   assert.equal(doc.getText("title").toString(), "hello");
 });
+
+test("collab-yjs-utils: getTextRoot preserves formatting + embeds for foreign roots created via CJS applyUpdate", () => {
+  const Ycjs = requireYjsCjs();
+
+  const remote = new Ycjs.Doc();
+  const remoteTitle = remote.getText("title");
+  remoteTitle.insert(0, "hi");
+  remoteTitle.format(0, 2, { bold: true });
+  remoteTitle.insertEmbed(2, { foo: "bar" });
+  const embedded = new Ycjs.Map();
+  embedded.set("x", 1);
+  remoteTitle.insertEmbed(3, embedded);
+
+  const update = Ycjs.encodeStateAsUpdate(remote);
+
+  const doc = new Y.Doc();
+  // Apply updates using the CJS build (simulating y-websocket applying updates).
+  Ycjs.applyUpdate(doc, update);
+
+  const title = getTextRoot(doc, "title");
+  assert.ok(title instanceof Y.Text);
+
+  const delta = title.toDelta();
+  const inserted = delta.map((op) => (typeof op.insert === "string" ? op.insert : "")).join("");
+  assert.equal(inserted, "hi");
+  assert.equal(
+    delta.some((op) => typeof op.attributes === "object" && op.attributes && op.attributes.bold === true),
+    true,
+  );
+  assert.equal(
+    delta.some((op) => op && typeof op.insert === "object" && op.insert && op.insert.foo === "bar"),
+    true,
+  );
+
+  const embeddedInsert = delta.find((op) => op && op.insert && typeof op.insert === "object" && typeof op.insert.get === "function")?.insert;
+  if (embeddedInsert) {
+    assert.equal(embeddedInsert.get("x"), 1);
+  } else {
+    // Depending on the Yjs implementation, embedded types may appear as plain objects.
+    const anyObj = delta.find((op) => op && typeof op.insert === "object" && op.insert && op.insert.x === 1)?.insert;
+    assert.ok(anyObj, "expected embedded map to round-trip through toDelta()");
+  }
+});
