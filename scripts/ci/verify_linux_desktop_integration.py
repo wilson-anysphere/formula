@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import configparser
 import json
+import os
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -391,9 +392,10 @@ def main() -> int:
         required=True,
         help="Path to extracted Linux package root (dpkg-deb -x output directory or rpm2cpio output directory)",
     )
+    default_tauri_config = os.environ.get("FORMULA_TAURI_CONF_PATH") or "apps/desktop/src-tauri/tauri.conf.json"
     parser.add_argument(
         "--tauri-config",
-        default=Path("apps/desktop/src-tauri/tauri.conf.json"),
+        default=Path(default_tauri_config),
         type=Path,
         help="Path to tauri.conf.json (source of truth for expected file associations)",
     )

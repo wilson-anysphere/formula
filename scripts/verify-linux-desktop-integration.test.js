@@ -117,12 +117,34 @@ function runValidator({ packageRoot, configPath, extraArgs = [] }) {
   return proc;
 }
 
+function runValidatorWithEnv({ packageRoot, configPath, extraArgs = [] }) {
+  const proc = spawnSync("python3", [scriptPath, "--package-root", packageRoot, ...extraArgs], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      FORMULA_TAURI_CONF_PATH: configPath,
+    },
+  });
+  if (proc.error) throw proc.error;
+  return proc;
+}
+
 test("verify_linux_desktop_integration passes for a desktop entry targeting the expected binary", { skip: !hasPython3 }, () => {
   const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
   const configPath = writeConfig(tmp);
   const pkgRoot = writePackageRoot(tmp);
 
   const proc = runValidator({ packageRoot: pkgRoot, configPath });
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("verify_linux_desktop_integration supports FORMULA_TAURI_CONF_PATH env override", { skip: !hasPython3 }, () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+  const configPath = writeConfig(tmp);
+  const pkgRoot = writePackageRoot(tmp);
+
+  const proc = runValidatorWithEnv({ packageRoot: pkgRoot, configPath });
   assert.equal(proc.status, 0, proc.stderr);
 });
 
