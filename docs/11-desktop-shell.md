@@ -420,7 +420,7 @@ in-app updater downloads whatever assets `latest.json.platforms[*].url` points a
 chosen from the Release page”):
 
 - macOS: `*.app.tar.gz` updater payload (not the `.dmg`)
-- Windows: `.msi` (preferred) or `.exe` (same files used for manual install)
+- Windows: `.msi` updater installer (CI expects `latest.json` to reference the MSI; the `.exe` is for manual install)
 - Linux: `*.AppImage` updater payload (not `.deb`/`.rpm`)
 
 For the exact `latest.json.platforms` key names (multi-arch), see `docs/desktop-updater-target-mapping.md`.
