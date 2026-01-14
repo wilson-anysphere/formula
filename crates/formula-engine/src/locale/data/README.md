@@ -173,6 +173,8 @@ CI/tests also provide guard rails:
 
 - `crates/formula-engine/tests/locale_function_tsv_completeness.rs` enforces that each locale TSV
   contains exactly one entry per catalog function and has no ambiguous localized collisions.
+- `crates/formula-engine/tests/locale_de_de_function_sentinels.rs` asserts a small set of core
+  German spellings (e.g. `SUM` → `SUMME`, `IF` → `WENN`) to catch regressions.
 - `crates/formula-engine/tests/locale_es_es_function_sentinels.rs` is an explicit regression test
   for Spanish financial function spellings (including `NPV`/`IRR`), since missing entries otherwise
   silently fall back to English.
