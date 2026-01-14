@@ -39,11 +39,10 @@ formula-xlsx = { path = "../formula-xlsx", default-features = false }
 formula-xls = { path = "../formula-xls" }
 formula-xlsb = { path = "../formula-xlsb" }
 roxmltree = "0.20"
+sha1 = "0.10"
 sha2 = "0.10"
 tempfile = "3.10"
 thiserror = "1.0"
-sha1 = "0.10"
-md5 = { package = "md-5", version = "0.10" }
 zip = { version = "2.1", default-features = false }
 
 [dev-dependencies]
