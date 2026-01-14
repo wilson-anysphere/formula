@@ -862,6 +862,112 @@ fn relatedtable_errors_on_ambiguous_relationship_paths_with_m2m() {
 }
 
 #[test]
+fn related_errors_on_ambiguous_relationship_paths_with_m2m() {
+    // Similar to the RELATEDTABLE ambiguity test above, but for RELATED navigation (fact -> dim).
+    // There are two active paths from Fact to Dim:
+    //   Fact -> Dim (direct)
+    //   Fact -> Bridge -> Dim
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "Direct".into()]).unwrap();
+    dim.push_row(vec![2.into(), "ViaBridge".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut bridge = Table::new("Bridge", vec!["BridgeKey", "DimKey"]);
+    bridge.push_row(vec![10.into(), 2.into()]).unwrap();
+    model.add_table(bridge).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key", "BridgeKey"]);
+    fact.push_row(vec![1.into(), 1.into(), 10.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Bridge".into(),
+            from_table: "Fact".into(),
+            from_column: "BridgeKey".into(),
+            to_table: "Bridge".into(),
+            to_column: "BridgeKey".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Bridge_Dim".into(),
+            from_table: "Bridge".into(),
+            from_column: "DimKey".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let mut ctx = RowContext::default();
+    ctx.push("Fact", 0);
+
+    let err = engine
+        .evaluate(
+            &model,
+            "RELATED(Dim[Attr])",
+            &FilterContext::empty(),
+            &ctx,
+        )
+        .unwrap_err();
+    let msg = err.to_string().to_ascii_lowercase();
+    assert!(
+        msg.contains("ambiguous") && msg.contains("relationship path"),
+        "unexpected error: {err}"
+    );
+
+    // Disable the Bridge->Dim hop to force the direct Fact->Dim path.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(RELATED(Dim[Attr]), CROSSFILTER(Bridge[DimKey], Dim[Key], NONE))",
+                &FilterContext::empty(),
+                &ctx,
+            )
+            .unwrap(),
+        "Direct".into()
+    );
+
+    // Disable the direct Fact->Dim relationship to force the Bridge path.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(RELATED(Dim[Attr]), CROSSFILTER(Fact[Key], Dim[Key], NONE))",
+                &FilterContext::empty(),
+                &ctx,
+            )
+            .unwrap(),
+        "ViaBridge".into()
+    );
+}
+
+#[test]
 fn insert_row_updates_m2m_from_index() {
     let mut model = DataModel::new();
 
