@@ -1833,6 +1833,32 @@ fn main() {
                 // Keep the process alive so the tray icon stays available.
                 api.prevent_close();
 
+                // SECURITY: If the main webview has navigated to an untrusted origin, do not
+                // delegate the close flow to the frontend (which would leak workbook-derived
+                // state via the `close-requested` payload) and do not run privileged
+                // `Workbook_BeforeClose` automation.
+                let window_url = window.url().ok();
+                let is_trusted_origin = window_url
+                    .as_ref()
+                    .is_some_and(desktop::ipc_origin::is_trusted_app_origin);
+                if !is_trusted_origin {
+                    let url_for_log = window_url
+                        .as_ref()
+                        .map(|url| url.to_string())
+                        .unwrap_or_else(|| "<unknown>".to_string());
+                    eprintln!(
+                        "[close] blocked close-requested flow from untrusted origin: {url_for_log}"
+                    );
+
+                    // Deterministic fallback: hide-to-tray without involving the webview.
+                    let _ = window.hide();
+
+                    // Reset immediately so repeated close clicks don't hang for the 60s
+                    // `close-handled` timeout.
+                    CLOSE_REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
+                    return;
+                }
+
                 // Avoid running multiple overlapping close flows / macros if the user triggers
                 // repeated close requests while a close prompt is still in flight.
                 if CLOSE_REQUEST_IN_FLIGHT.swap(true, Ordering::SeqCst) {
@@ -1851,6 +1877,19 @@ fn main() {
                         }
                     }
                     let _guard = CloseRequestGuard;
+
+                    // Double-check the current webview URL inside the async task so a navigation
+                    // between the sync window-event handler and this task being scheduled cannot
+                    // leak workbook state to an untrusted origin.
+                    if !window
+                        .url()
+                        .ok()
+                        .as_ref()
+                        .is_some_and(desktop::ipc_origin::is_trusted_app_origin)
+                    {
+                        let _ = window.hide();
+                        return;
+                    }
 
                     // Best-effort Workbook_BeforeClose. We do this in a background task so we
                     // don't block the window event loop. Cancellation isn't supported yet.
@@ -1879,6 +1918,18 @@ fn main() {
                     let _ = window.emit("close-prep", token.clone());
                     let _ = timeout(Duration::from_millis(750), rx).await;
                     window.unlisten(handler);
+
+                    // Do not run the macro if the webview navigated away from the trusted app
+                    // origin while we were waiting for the close-prep handshake.
+                    if !window
+                        .url()
+                        .ok()
+                        .as_ref()
+                        .is_some_and(desktop::ipc_origin::is_trusted_app_origin)
+                    {
+                        let _ = window.hide();
+                        return;
+                    }
 
                     let state_for_macro = shared_state.clone();
                     let trust_for_macro = shared_trust.clone();
@@ -1939,6 +1990,17 @@ fn main() {
                             Vec::new()
                         }
                     };
+
+                    // Do not emit workbook-derived updates to untrusted origins.
+                    if !window
+                        .url()
+                        .ok()
+                        .as_ref()
+                        .is_some_and(desktop::ipc_origin::is_trusted_app_origin)
+                    {
+                        let _ = window.hide();
+                        return;
+                    }
 
                     // Delegate the rest of close-handling to the frontend (unsaved changes prompt
                     // + deciding whether to hide the window or keep it open).
