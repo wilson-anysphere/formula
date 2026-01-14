@@ -17,7 +17,7 @@ const BLOCK_KEY_INTEGRITY_HMAC_KEY: &[u8; 8] = b"\x5F\xB2\xAD\x01\x0C\xB9\xE1\xF
 const BLOCK_KEY_INTEGRITY_HMAC_VALUE: &[u8; 8] = b"\xA0\x67\x7F\x02\xB2\x2C\x84\x33";
 
 #[test]
-fn roundtrip_standard_rc4_sha1_encryption() {
+fn roundtrip_standard_rc4_encryption() {
     let password = "password";
     let plaintext = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -30,6 +30,9 @@ fn roundtrip_standard_rc4_sha1_encryption() {
     let decrypted = decrypt_encrypted_package_ole(&ole_bytes, password).expect("decrypt");
     assert_eq!(decrypted, plaintext);
     assert_zip_contains_workbook_xml(&decrypted);
+
+    let err = decrypt_encrypted_package_ole(&ole_bytes, "wrong-password").expect_err("wrong pw");
+    assert!(matches!(err, OfficeCryptoError::InvalidPassword));
 }
 
 #[test]
