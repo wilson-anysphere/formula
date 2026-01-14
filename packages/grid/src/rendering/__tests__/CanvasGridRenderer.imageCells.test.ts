@@ -345,9 +345,12 @@ describe("CanvasGridRenderer image cells", () => {
       const pending = (renderer as any).imageBitmapCache.get("img1") as
         | { state: "pending"; promise: Promise<void> }
         | { state: string };
-      expect(pending?.state).toBe("pending");
+      // In most environments, the decode will still be pending after the first render pass. In
+      // synchronous requestAnimationFrame test setups, it may also complete quickly; handle both.
       if (pending?.state === "pending") {
         await pending.promise;
+      } else {
+        expect(pending?.state).toBe("ready");
       }
 
       renderer.renderImmediately();
@@ -360,6 +363,122 @@ describe("CanvasGridRenderer image cells", () => {
       expect(createObjectURL).toHaveBeenCalledTimes(1);
       expect(revokeObjectURL).toHaveBeenCalledTimes(1);
       expect(content.rec.drawImages.length).toBeGreaterThan(0);
+    } finally {
+      if (originalCreateObjectURL === undefined) delete URLCtor.createObjectURL;
+      else URLCtor.createObjectURL = originalCreateObjectURL;
+      if (originalRevokeObjectURL === undefined) delete URLCtor.revokeObjectURL;
+      else URLCtor.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
+
+  it("falls back to drawing the decoded canvas when createImageBitmap(canvas) throws", async () => {
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "img1", altText: "img", width: 100, height: 50 }
+            }
+          : null
+    };
+
+    const createImageBitmapSpy = vi.fn((src: any) => {
+      if (src instanceof Blob) {
+        const err = new Error("decode failed");
+        (err as any).name = "InvalidStateError";
+        return Promise.reject(err);
+      }
+      if (src instanceof HTMLCanvasElement) {
+        return Promise.reject(new Error("bitmap allocation failed"));
+      }
+      return Promise.resolve({ width: 10, height: 10 } as any);
+    });
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    const imageResolver = vi.fn(async () => new Blob([new Uint8Array([1])], { type: "image/png" }));
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const created = createRecordingContext(this).ctx;
+      contexts.set(this, created);
+      return created;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const URLCtor = globalThis.URL as any;
+    const originalCreateObjectURL = URLCtor?.createObjectURL;
+    const originalRevokeObjectURL = URLCtor?.revokeObjectURL;
+    const createObjectURL = vi.fn(() => "blob:fake");
+    const revokeObjectURL = vi.fn();
+    URLCtor.createObjectURL = createObjectURL;
+    URLCtor.revokeObjectURL = revokeObjectURL;
+
+    try {
+      class FakeImage {
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        width = 16;
+        height = 8;
+        naturalWidth = 16;
+        naturalHeight = 8;
+        set src(_value: string) {
+          queueMicrotask(() => {
+            this.onload?.();
+          });
+        }
+      }
+      vi.stubGlobal("Image", FakeImage as unknown as typeof Image);
+
+      const renderer = new CanvasGridRenderer({
+        provider,
+        rowCount: 1,
+        colCount: 1,
+        defaultColWidth: 100,
+        defaultRowHeight: 50,
+        imageResolver
+      });
+      renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+      renderer.resize(100, 50, 1);
+
+      renderer.renderImmediately();
+
+      const pending = (renderer as any).imageBitmapCache.get("img1") as
+        | { state: "pending"; promise: Promise<void> }
+        | { state: string };
+      if (pending?.state === "pending") {
+        await pending.promise;
+      } else {
+        expect(pending?.state).toBe("ready");
+      }
+
+      renderer.renderImmediately();
+
+      expect(imageResolver).toHaveBeenCalledTimes(1);
+      // One call for blob decode attempt, one call for the fallback bitmap allocation (which fails).
+      expect(createImageBitmapSpy).toHaveBeenCalledTimes(2);
+      expect(createImageBitmapSpy.mock.calls[0]?.[0]).toBeInstanceOf(Blob);
+      expect(createImageBitmapSpy.mock.calls[1]?.[0]).toBeInstanceOf(HTMLCanvasElement);
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+      expect(content.rec.drawImages.length).toBeGreaterThan(0);
+      const last = content.rec.drawImages[content.rec.drawImages.length - 1]!;
+      expect(last[0]).toBeInstanceOf(HTMLCanvasElement);
     } finally {
       if (originalCreateObjectURL === undefined) delete URLCtor.createObjectURL;
       else URLCtor.createObjectURL = originalCreateObjectURL;
