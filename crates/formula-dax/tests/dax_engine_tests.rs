@@ -2828,6 +2828,17 @@ fn calculatetable_keepfilters_intersects_with_existing_column_filters() {
         )
         .unwrap();
     assert_eq!(keep_count, 0.into());
+
+    // Redundantly nested KEEPFILTERS should behave the same as a single wrapper.
+    let nested_keep_count = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(CALCULATETABLE(Customers, KEEPFILTERS(KEEPFILTERS(Customers[Region] = \"West\"))))",
+            &east_filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(nested_keep_count, 0.into());
 }
 
 #[test]

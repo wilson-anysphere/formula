@@ -2377,18 +2377,25 @@ impl DaxEngine {
             // replacement (clear existing filters on the target table/column) to intersection.
             // We implement that by evaluating the inner argument as usual, but skipping any
             // additions to `clear_tables` / `clear_columns`.
-            let (arg, arg_keep_filters) = match arg {
-                Expr::Call { name, args } if name.eq_ignore_ascii_case("KEEPFILTERS") => {
-                    let [inner] = args.as_slice() else {
-                        return Err(DaxError::Eval(
-                            "KEEPFILTERS expects exactly 1 argument".into(),
-                        ));
-                    };
-                    (inner, true)
+            //
+            // Note: `KEEPFILTERS` can appear redundantly nested; treat multiple wrappers as a
+            // single `keep_filters = true` flag.
+            let mut arg = arg;
+            let mut keep_filters = keep_filters;
+            loop {
+                match arg {
+                    Expr::Call { name, args } if name.eq_ignore_ascii_case("KEEPFILTERS") => {
+                        let [inner] = args.as_slice() else {
+                            return Err(DaxError::Eval(
+                                "KEEPFILTERS expects exactly 1 argument".into(),
+                            ));
+                        };
+                        arg = inner;
+                        keep_filters = true;
+                    }
+                    _ => break,
                 }
-                _ => (arg, false),
-            };
-            let keep_filters = keep_filters || arg_keep_filters;
+            }
 
             match arg {
                 Expr::Let { bindings, body } => {
