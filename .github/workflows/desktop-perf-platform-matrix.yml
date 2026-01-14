@@ -80,7 +80,7 @@ jobs:
         # which can both break workflows unexpectedly and introduce noise into perf trends.
         # Update these pins deliberately after validating on newer runner images:
         # https://github.com/actions/runner-images
-        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.os != 'all' && format('[{0}]', toJSON(inputs.os)) || '["ubuntu-24.04","windows-2022","macos-14"]') }}
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && github.event.inputs.os != 'all' && format('[{0}]', toJSON(github.event.inputs.os)) || '["ubuntu-24.04","windows-2022","macos-14"]') }}
 
     steps:
       - name: Checkout
@@ -153,11 +153,11 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         shell: bash
         env:
-          INPUT_STARTUP_RUNS: ${{ inputs.startupRuns }}
-          INPUT_STARTUP_TIMEOUT_MS: ${{ inputs.startupTimeoutMs }}
-          INPUT_MEMORY_RUNS: ${{ inputs.memoryRuns }}
-          INPUT_MEMORY_TIMEOUT_MS: ${{ inputs.memoryTimeoutMs }}
-          INPUT_MEMORY_SETTLE_MS: ${{ inputs.memorySettleMs }}
+          INPUT_STARTUP_RUNS: ${{ github.event.inputs.startupRuns }}
+          INPUT_STARTUP_TIMEOUT_MS: ${{ github.event.inputs.startupTimeoutMs }}
+          INPUT_MEMORY_RUNS: ${{ github.event.inputs.memoryRuns }}
+          INPUT_MEMORY_TIMEOUT_MS: ${{ github.event.inputs.memoryTimeoutMs }}
+          INPUT_MEMORY_SETTLE_MS: ${{ github.event.inputs.memorySettleMs }}
         run: |
           set -euo pipefail
 
