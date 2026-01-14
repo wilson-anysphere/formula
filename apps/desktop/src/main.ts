@@ -8343,10 +8343,20 @@ async function applyRibbonAutoFilterFromSelection(): Promise<boolean> {
 
   const selection = currentSelectionRect();
   const sheetId = selection.sheetId;
-  const range = { startRow: selection.startRow, endRow: selection.endRow, startCol: selection.startCol, endCol: selection.endCol };
-  const rangeA1 = rangeToA1(range);
+  const selectionRange = {
+    startRow: selection.startRow,
+    endRow: selection.endRow,
+    startCol: selection.startCol,
+    endCol: selection.endCol,
+  };
 
-  const headerRows = 1;
+  // If the active cell is already inside an existing filter range, treat the ribbon command as
+  // "edit that filter" (so users don't need to re-select the original range).
+  const existingForCell = ribbonAutoFilterStore.findByCell(sheetId, { row: selection.activeRow, col: selection.activeCol });
+  const range = existingForCell ? parseA1Range(existingForCell.rangeA1) : selectionRange;
+  const rangeA1 = existingForCell ? existingForCell.rangeA1 : rangeToA1(range);
+
+  const headerRows = existingForCell?.headerRows ?? 1;
   const dataStartRow = range.startRow + headerRows;
   if (dataStartRow > range.endRow) {
     showToast("Select a range with a header row and at least one data row to filter.", "warning");
