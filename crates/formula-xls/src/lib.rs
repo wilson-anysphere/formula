@@ -1981,6 +1981,15 @@ fn import_xls_path_with_biff_reader(
                             }
 
                             for shared in parsed.shared_formulas.drain(..) {
+                                let base_cell = biff::rgce::CellCoord::new(
+                                    shared.row_first as u32,
+                                    shared.col_first as u32,
+                                );
+                                let analysis =
+                                    biff::rgce::analyze_biff8_shared_formula_rgce(&shared.rgce)
+                                        .ok();
+                                let mut materialization_failed = false;
+
                                 for row_u16 in shared.row_first..=shared.row_last {
                                     for col_u16 in shared.col_first..=shared.col_last {
                                         let row: u32 = row_u16 as u32;
@@ -1998,11 +2007,47 @@ fn import_xls_path_with_biff_reader(
                                             continue;
                                         }
 
-                                        let base = biff::rgce::CellCoord::new(row, col);
+                                        let target_cell = biff::rgce::CellCoord::new(row, col);
+                                        let delta_is_zero = target_cell == base_cell;
+                                        let needs_materialization = !delta_is_zero
+                                            && !materialization_failed
+                                            && (analysis
+                                                .as_ref()
+                                                .is_some_and(|a| a.has_abs_refs_with_relative_flags)
+                                                // Best-effort: if we cannot analyze the token
+                                                // stream, still attempt materialization for
+                                                // follower cells and fall back on failure.
+                                                || analysis.is_none());
+
+                                        let rgce_to_decode: std::borrow::Cow<'_, [u8]> =
+                                            if needs_materialization {
+                                                match biff::rgce::materialize_biff8_shared_formula_rgce(
+                                                    &shared.rgce,
+                                                    base_cell,
+                                                    target_cell,
+                                                ) {
+                                                    Ok(v) => std::borrow::Cow::Owned(v),
+                                                    Err(err) => {
+                                                        materialization_failed = true;
+                                                        push_import_warning(
+                                                            &mut warnings,
+                                                            format!(
+                                                                "failed to materialize shared formula in sheet `{sheet_name}` at {}: {err}",
+                                                                cell_ref.to_a1()
+                                                            ),
+                                                            &mut warnings_suppressed,
+                                                        );
+                                                        std::borrow::Cow::Borrowed(&shared.rgce)
+                                                    }
+                                                }
+                                            } else {
+                                                std::borrow::Cow::Borrowed(&shared.rgce)
+                                            };
+
                                         let decoded = biff::rgce::decode_biff8_rgce_with_base(
-                                            &shared.rgce,
+                                            &rgce_to_decode,
                                             &rgce_ctx,
-                                            Some(base),
+                                            Some(target_cell),
                                         );
 
                                         for warning in decoded.warnings {

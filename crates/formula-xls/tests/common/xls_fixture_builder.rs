@@ -325,6 +325,26 @@ pub fn build_shared_formula_ptgref_relative_flags_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture where a shared formula is defined only by a `SHRFMLA` record
+/// (no `FORMULA` records in the shared range), and the shared `rgce` uses `PtgRef` with the
+/// row/col-relative flags set.
+///
+/// Expected decoded formulas:
+/// - B1: `A1+1`
+/// - B2: `A2+1`
+pub fn build_shared_formula_shrfmla_only_ptgref_relative_flags_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_shrfmla_only_ptgref_relative_flags_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a malformed shared-formula pattern:
 /// - Base cell contains a full `FORMULA.rgce` token stream (no `PtgExp`).
 /// - Follower cell contains only `PtgExp` pointing at the base cell.
@@ -7528,6 +7548,56 @@ fn build_shared_formula_ptgname_sheet_stream(xf_cell: u16) -> Vec<u8> {
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_formula_shrfmla_only_ptgref_relative_flags_workbook_stream() -> Vec<u8> {
+    let xf_cell = 16u16;
+    let sheet_stream = build_shared_formula_shrfmla_only_ptgref_relative_flags_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedOnlyRefFlags", &sheet_stream, 1252)
+}
+
+fn build_shared_formula_shrfmla_only_ptgref_relative_flags_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Shared formula range B1:B2, but without any cell `FORMULA` records. The importer should still
+    // recover formulas from the SHRFMLA record definition.
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide value cells in column A so the references are within the sheet's used range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0)); // A1
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0)); // A2
+
+    // Shared formula definition (`SHRFMLA`) for range B1:B2.
+    //
+    // Base rgce is `A1+1`, encoded using `PtgRef` with row/col-relative flags set (rather than
+    // `PtgRefN` offsets).
+    let rgce_base = vec![
+        0x24, // PtgRef
+        0x00, 0x00, // rw = 0
+        0x00, 0xC0, // col = 0 | row_rel | col_rel
+        0x1E, // PtgInt
+        0x01, 0x00, // 1
+        0x03, // PtgAdd
+    ];
+
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 1, 1, 1, &rgce_base),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
 }
 
