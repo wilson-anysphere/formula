@@ -680,6 +680,9 @@ describe("ToolExecutor", () => {
 
     const value = result.data?.values?.[0]?.[0];
     expect(typeof value).toBe("string");
+    if (typeof value !== "string") {
+      throw new Error("Expected read_range cell value to be a string");
+    }
     // Exact serialization may vary depending on internal rich-value bounding heuristics, but it must be bounded.
     expect(value.length).toBeLessThanOrEqual(10_100);
     expect(value).toContain("truncated");
