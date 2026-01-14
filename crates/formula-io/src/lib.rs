@@ -36,13 +36,16 @@ pub(crate) fn parse_encrypted_package_size_prefix_bytes(prefix: [u8; 8], ciphert
     // `(u32 size, u32 reserved)` (often with `reserved = 0`). When the high DWORD is non-zero but
     // the combined 64-bit value is not plausible for the available ciphertext, fall back to the
     // low DWORD for compatibility.
+    //
+    // Note: avoid falling back when the low DWORD is zero. Some real files may have true 64-bit
+    // sizes that are exact multiples of 2^32, so `lo=0, hi!=0` must be treated as a 64-bit size.
     let len_lo = u32::from_le_bytes([prefix[0], prefix[1], prefix[2], prefix[3]]) as u64;
     let len_hi = u32::from_le_bytes([prefix[4], prefix[5], prefix[6], prefix[7]]) as u64;
     let size_u64 = len_lo | (len_hi << 32);
 
     match ciphertext_len {
         Some(ciphertext_len) => {
-            if len_hi != 0 && size_u64 > ciphertext_len && len_lo <= ciphertext_len {
+            if len_lo != 0 && len_hi != 0 && size_u64 > ciphertext_len && len_lo <= ciphertext_len {
                 len_lo
             } else {
                 size_u64
@@ -51,7 +54,11 @@ pub(crate) fn parse_encrypted_package_size_prefix_bytes(prefix: [u8; 8], ciphert
         None => {
             // Without ciphertext length (e.g. streaming readers), prefer compatibility with
             // producers that treat the high DWORD as reserved.
-            if len_hi != 0 { len_lo } else { size_u64 }
+            if len_hi != 0 && len_lo != 0 {
+                len_lo
+            } else {
+                size_u64
+            }
         }
     }
 }
@@ -64,6 +71,25 @@ pub(crate) fn parse_encrypted_package_original_size(encrypted_package: &[u8]) ->
     prefix.copy_from_slice(&encrypted_package[..8]);
     let ciphertext_len = encrypted_package.len().saturating_sub(8) as u64;
     Some(parse_encrypted_package_size_prefix_bytes(prefix, Some(ciphertext_len)))
+}
+
+#[cfg(test)]
+mod encrypted_package_size_prefix_tests {
+    use super::*;
+
+    #[test]
+    fn does_not_fall_back_when_low_dword_is_zero() {
+        // Some files may store a true 64-bit size that is an exact multiple of 2^32 (lo=0).
+        // The reserved-high-DWORD compatibility fallback must not misinterpret that as 0.
+        let mut prefix = [0u8; 8];
+        prefix[4..].copy_from_slice(&1u32.to_le_bytes()); // hi=1, lo=0 => 2^32
+
+        assert_eq!(
+            parse_encrypted_package_size_prefix_bytes(prefix, Some(0)),
+            1u64 << 32
+        );
+        assert_eq!(parse_encrypted_package_size_prefix_bytes(prefix, None), 1u64 << 32);
+    }
 }
 // BIFF record ids for legacy `.xls` encryption detection.
 //

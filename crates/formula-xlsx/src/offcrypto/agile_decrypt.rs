@@ -734,12 +734,15 @@ pub fn decrypt_agile_encrypted_package_stream_with_options<R: Read + Seek, W: Wr
     //
     // For compatibility, parse as two DWORDs and fall back to the low DWORD when the combined
     // 64-bit value is not plausible for the available ciphertext.
+    //
+    // Avoid falling back when the low DWORD is zero: some real files may have true 64-bit sizes
+    // that are exact multiples of 2^32 (lo=0, hi!=0).
     let len_lo = u32::from_le_bytes(header[..4].try_into().expect("slice length checked")) as u64;
     let len_hi = u32::from_le_bytes(header[4..].try_into().expect("slice length checked")) as u64;
     let declared_len_u64 = len_lo | (len_hi << 32);
     let ciphertext_len = encrypted_package_len.saturating_sub(8);
     let declared_len =
-        if len_hi != 0 && declared_len_u64 > ciphertext_len && len_lo <= ciphertext_len {
+        if len_lo != 0 && len_hi != 0 && declared_len_u64 > ciphertext_len && len_lo <= ciphertext_len {
             len_lo
         } else {
             declared_len_u64
@@ -869,6 +872,9 @@ fn parse_encrypted_package_stream(encrypted_package: &[u8]) -> Result<(usize, &[
     // To improve compatibility, parse as two DWORDs and apply a small heuristic:
     // - if the combined 64-bit size is larger than the available ciphertext, but the low DWORD is
     //   plausible, treat the upper DWORD as "reserved" and fall back to the low DWORD.
+    //
+    // Avoid falling back when the low DWORD is zero: some real files may have true 64-bit sizes
+    // that are exact multiples of 2^32 (lo=0, hi!=0).
     let len_lo = u32::from_le_bytes(
         encrypted_package[..4]
             .try_into()
@@ -882,7 +888,8 @@ fn parse_encrypted_package_stream(encrypted_package: &[u8]) -> Result<(usize, &[
     let declared_len_u64 = len_lo | (len_hi << 32);
 
     let ciphertext_len = encrypted_package.len() - 8;
-    let effective_len_u64 = if len_hi != 0
+    let effective_len_u64 = if len_lo != 0
+        && len_hi != 0
         && declared_len_u64 > ciphertext_len as u64
         && len_lo <= ciphertext_len as u64
     {

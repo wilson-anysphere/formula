@@ -1041,6 +1041,9 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
     // MS-OFFCRYPTO describes the plaintext size prefix as a `u64le`, but some producers/libraries
     // treat it as `u32 totalSize` + `u32 reserved`. Parse as two DWORDs and fall back to the low
     // DWORD when the combined 64-bit value is not plausible for the available ciphertext.
+    //
+    // Avoid falling back when the low DWORD is zero: some real files may have true 64-bit sizes
+    // that are exact multiples of 2^32 (lo=0, hi!=0).
     let len_lo = u32::from_le_bytes([size_bytes[0], size_bytes[1], size_bytes[2], size_bytes[3]])
         as u64;
     let len_hi = u32::from_le_bytes([size_bytes[4], size_bytes[5], size_bytes[6], size_bytes[7]])
@@ -1050,7 +1053,11 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
     let ciphertext = &encrypted_package_stream[8..];
     let ciphertext_len_u64 = ciphertext.len() as u64;
     let declared_len_u64 =
-        if len_hi != 0 && declared_len_u64_raw > ciphertext_len_u64 && len_lo <= ciphertext_len_u64 {
+        if len_lo != 0
+            && len_hi != 0
+            && declared_len_u64_raw > ciphertext_len_u64
+            && len_lo <= ciphertext_len_u64
+        {
             len_lo
         } else {
             declared_len_u64_raw
@@ -1387,13 +1394,14 @@ mod tests {
         // Some producers treat the 8-byte size prefix as (u32 totalSize, u32 reserved). Ensure we
         // tolerate a non-zero "reserved" high DWORD.
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(&0u32.to_le_bytes()); // size (low DWORD)
+        bytes.extend_from_slice(&16u32.to_le_bytes()); // size (low DWORD)
         bytes.extend_from_slice(&1u32.to_le_bytes()); // reserved (high DWORD)
+        bytes.extend_from_slice(&[0u8; 16]); // ciphertext (block-aligned)
 
         let out =
             decrypt_agile_encrypted_package_stream_with_key(&bytes, &dummy_key_data(), &[0u8; 16])
                 .expect("decrypt should succeed");
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 16);
     }
 
     #[test]

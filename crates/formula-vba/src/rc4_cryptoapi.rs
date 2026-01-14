@@ -169,7 +169,11 @@ impl Rc4CryptoApiDecryptor {
         let plaintext_len_u64_raw = (lo as u64) | ((hi as u64) << 32);
         let ciphertext_len = encrypted_package_stream.len().saturating_sub(8) as u64;
         let plaintext_len_u64 =
-            if hi != 0 && plaintext_len_u64_raw > ciphertext_len && (lo as u64) <= ciphertext_len {
+            if lo != 0
+                && hi != 0
+                && plaintext_len_u64_raw > ciphertext_len
+                && (lo as u64) <= ciphertext_len
+            {
                 lo as u64
             } else {
                 plaintext_len_u64_raw
@@ -357,5 +361,29 @@ mod tests {
             .decrypt_encrypted_package(&encrypted_package)
             .expect("decrypt");
         assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn rc4_cryptoapi_encryptedpackage_does_not_fall_back_when_low_dword_is_zero() {
+        let password = "correct horse battery staple";
+        let salt: [u8; 16] = [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x10, 0x32, 0x54, 0x76, 0x98, 0xBA,
+            0xDC, 0xFE,
+        ];
+        let key_len = 16;
+
+        let decryptor =
+            Rc4CryptoApiDecryptor::new(password, &salt, key_len, HashAlg::Sha1).expect("decryptor");
+
+        // True 64-bit size (2^32). With no ciphertext, this must be treated as truncated, not as an
+        // empty package.
+        let mut encrypted_package = Vec::new();
+        encrypted_package.extend_from_slice(&0u32.to_le_bytes()); // lo
+        encrypted_package.extend_from_slice(&1u32.to_le_bytes()); // hi
+
+        let err = decryptor
+            .decrypt_encrypted_package(&encrypted_package)
+            .expect_err("should be truncated");
+        assert!(matches!(err, super::Rc4CryptoApiError::Truncated));
     }
 }
