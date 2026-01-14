@@ -125,7 +125,7 @@ fn bytecode_indirect_external_cell_ref_is_ref_error() {
     assert_eq!(
         engine.bytecode_program_count(),
         1,
-        "expected INDIRECT external workbook refs to compile to bytecode (stats={:?}, report={:?})",
+        "expected INDIRECT formulas to compile to bytecode (stats={:?}, report={:?})",
         engine.bytecode_compile_stats(),
         engine.bytecode_compile_report(32)
     );
@@ -160,7 +160,7 @@ fn bytecode_indirect_dynamic_external_cell_ref_is_ref_error() {
     assert_eq!(
         engine.bytecode_program_count(),
         1,
-        "expected dynamic INDIRECT external workbook refs to compile to bytecode (stats={:?}, report={:?})",
+        "expected INDIRECT formulas to compile to bytecode (stats={:?}, report={:?})",
         engine.bytecode_compile_stats(),
         engine.bytecode_compile_report(32)
     );
