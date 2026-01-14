@@ -1,0 +1,145 @@
+use std::io::{Cursor, Write};
+
+use formula_model::{CellRef, CellValue};
+use formula_xlsx::{
+    patch_xlsx_streaming, worksheet_parts_from_reader, worksheet_parts_from_reader_limited,
+    patch_xlsx_streaming_workbook_cell_patches, CellPatch, WorkbookCellPatches, WorksheetCellPatch,
+    XlsxPackage,
+};
+use zip::write::FileOptions;
+use zip::ZipWriter;
+
+fn build_minimal_xlsx_with_percent_encoded_sheet_part() -> Vec<u8> {
+    let content_types = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+</Types>"#;
+
+    // Intentionally use an unescaped space in the relationship Target (producer bug), while the
+    // stored ZIP entry name is percent-encoded.
+    let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+    Target="worksheets/sheet 1.xml"/>
+</Relationships>"#;
+
+    let worksheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+</worksheet>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options =
+        FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("[Content_Types].xml", options).unwrap();
+    zip.write_all(content_types).unwrap();
+    zip.start_file("xl/workbook.xml", options).unwrap();
+    zip.write_all(workbook_xml).unwrap();
+    zip.start_file("xl/_rels/workbook.xml.rels", options)
+        .unwrap();
+    zip.write_all(workbook_rels).unwrap();
+    // Store the worksheet part name percent-encoded.
+    zip.start_file("xl/worksheets/sheet%201.xml", options)
+        .unwrap();
+    zip.write_all(worksheet_xml).unwrap();
+
+    zip.finish().unwrap().into_inner()
+}
+
+// The CI filter uses `-- percent_encoded_zip_entries`; wrapping tests in this module ensures the
+// substring matches and the intended subset runs.
+mod percent_encoded_zip_entries_tests {
+    use super::*;
+
+    #[test]
+    fn worksheet_parts_from_reader_finds_percent_encoded_sheet_entries() {
+        let bytes = build_minimal_xlsx_with_percent_encoded_sheet_part();
+        let parts = worksheet_parts_from_reader(Cursor::new(bytes)).expect("worksheet parts");
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].name, "Sheet1");
+        assert_eq!(parts[0].worksheet_part, "xl/worksheets/sheet%201.xml");
+    }
+
+    #[test]
+    fn worksheet_parts_from_reader_limited_finds_percent_encoded_sheet_entries() {
+        let bytes = build_minimal_xlsx_with_percent_encoded_sheet_part();
+        let parts = worksheet_parts_from_reader_limited(Cursor::new(bytes), 1024)
+            .expect("worksheet parts");
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].name, "Sheet1");
+        assert_eq!(parts[0].worksheet_part, "xl/worksheets/sheet%201.xml");
+    }
+
+    #[test]
+    fn streaming_patcher_accepts_percent_encoded_sheet_part_names() {
+        let bytes = build_minimal_xlsx_with_percent_encoded_sheet_part();
+        let parts = worksheet_parts_from_reader(Cursor::new(bytes.clone())).expect("worksheet parts");
+        let part = parts[0].worksheet_part.clone();
+
+        let patch = WorksheetCellPatch::new(
+            &part,
+            CellRef::new(0, 0),
+            CellValue::Number(42.0),
+            None,
+        );
+        let mut out = Cursor::new(Vec::new());
+        patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch]).expect("streaming patch");
+
+        let pkg = XlsxPackage::from_bytes(&out.into_inner()).expect("read patched package");
+        let sheet_xml = std::str::from_utf8(pkg.part(&part).expect("worksheet part present"))
+            .expect("worksheet xml utf-8");
+        assert!(
+            sheet_xml.contains("<v>42</v>") || sheet_xml.contains("<v>42.0</v>"),
+            "expected patched worksheet XML to contain cell value 42 (got {sheet_xml:?})"
+        );
+    }
+
+    #[test]
+    fn workbook_cell_patches_resolve_to_percent_encoded_sheet_entries() {
+        let bytes = build_minimal_xlsx_with_percent_encoded_sheet_part();
+
+        let mut patches = WorkbookCellPatches::default();
+        patches.set_cell(
+            "Sheet1",
+            CellRef::new(0, 0),
+            CellPatch::set_value(CellValue::Number(42.0)),
+        );
+
+        let mut out = Cursor::new(Vec::new());
+        patch_xlsx_streaming_workbook_cell_patches(Cursor::new(bytes), &mut out, &patches)
+            .expect("workbook streaming patch");
+
+        let pkg = XlsxPackage::from_bytes(&out.into_inner()).expect("read patched package");
+        let sheet_xml =
+            std::str::from_utf8(pkg.part("xl/worksheets/sheet%201.xml").expect("worksheet part"))
+                .expect("worksheet xml utf-8");
+        assert!(
+            sheet_xml.contains("<v>42</v>") || sheet_xml.contains("<v>42.0</v>"),
+            "expected patched worksheet XML to contain cell value 42 (got {sheet_xml:?})"
+        );
+    }
+
+    #[test]
+    fn preserve_pivot_parts_from_reader_discovers_sheet_with_percent_encoded_zip_name() {
+        let bytes = build_minimal_xlsx_with_percent_encoded_sheet_part();
+        let preserved =
+            formula_xlsx::pivots::preserve_pivot_parts_from_reader(Cursor::new(bytes))
+                .expect("preserve pivot parts");
+        assert_eq!(preserved.workbook_sheets.len(), 1);
+        assert_eq!(preserved.workbook_sheets[0].name, "Sheet1");
+        assert_eq!(preserved.workbook_sheets[0].index, 0);
+    }
+}

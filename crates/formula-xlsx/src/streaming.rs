@@ -334,6 +334,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy<
     }
 
     let mut archive = ZipArchive::new(input)?;
+    let part_names = list_zip_part_names(&mut archive)?;
 
     let mut pre_read_parts: HashMap<String, Vec<u8>> = HashMap::new();
     let workbook_xml = read_zip_part(&mut archive, "xl/workbook.xml", &mut pre_read_parts)?;
@@ -370,6 +371,8 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy<
         }
         let worksheet_part =
             resolve_worksheet_part_for_selector(sheet_selector, &workbook_sheets, &rel_targets)?;
+        let worksheet_part = find_zip_part_name(&part_names, &worksheet_part)
+            .unwrap_or_else(|| worksheet_part.clone());
 
         if let Some(cols) = sheet_patches.col_properties() {
             col_properties_by_part.insert(worksheet_part.clone(), cols.clone());
@@ -490,6 +493,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc
     }
 
     let mut archive = ZipArchive::new(input)?;
+    let part_names = list_zip_part_names(&mut archive)?;
 
     let mut pre_read_parts: HashMap<String, Vec<u8>> = HashMap::new();
     let workbook_xml = read_zip_part(&mut archive, "xl/workbook.xml", &mut pre_read_parts)?;
@@ -523,6 +527,8 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc
         }
         let worksheet_part =
             resolve_worksheet_part_for_selector(sheet_selector, &workbook_sheets, &rel_targets)?;
+        let worksheet_part = find_zip_part_name(&part_names, &worksheet_part)
+            .unwrap_or_else(|| worksheet_part.clone());
 
         if let Some(cols) = sheet_patches.col_properties() {
             col_properties_by_part.insert(worksheet_part.clone(), cols.clone());
@@ -1781,6 +1787,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides
     }
 
     let mut archive = ZipArchive::new(input)?;
+    let part_names = list_zip_part_names(&mut archive)?;
 
     let mut pre_read_parts: HashMap<String, Vec<u8>> = HashMap::new();
     let mut updated_parts: HashMap<String, Vec<u8>> = HashMap::new();
@@ -1805,6 +1812,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides
             continue;
         }
         let resolved = resolve_target("xl/workbook.xml", &rel.target);
+        let resolved = find_zip_part_name(&part_names, &resolved).unwrap_or(resolved);
         if rel.type_uri == REL_TYPE_STYLES {
             styles_part.get_or_insert(resolved.clone());
         }
@@ -1855,6 +1863,8 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides
         }
         let worksheet_part =
             resolve_worksheet_part_for_selector(sheet_selector, &workbook_sheets, &rel_targets)?;
+        let worksheet_part = find_zip_part_name(&part_names, &worksheet_part)
+            .unwrap_or_else(|| worksheet_part.clone());
 
         if let Some(cols) = sheet_patches.col_properties() {
             col_properties_by_part.insert(worksheet_part.clone(), cols.clone());
@@ -2142,14 +2152,29 @@ fn resolve_shared_strings_part_name<R: Read + Seek>(
                     .as_deref()
                     .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
         }) {
-            return Ok(Some(resolve_target("xl/workbook.xml", &rel.target)));
+            let resolved = resolve_target("xl/workbook.xml", &rel.target);
+            match open_zip_part(archive, &resolved) {
+                Ok(file) => {
+                    let name = file.name();
+                    return Ok(Some(name.strip_prefix('/').unwrap_or(name).to_string()));
+                }
+                Err(zip::result::ZipError::FileNotFound) => {
+                    return Ok(Some(resolved));
+                }
+                Err(err) => return Err(err.into()),
+            }
         }
     }
 
     // Fallback: common path when workbook.xml.rels is missing the sharedStrings relationship.
-    if zip_part_exists(archive, "xl/sharedStrings.xml")? {
-        return Ok(Some("xl/sharedStrings.xml".to_string()));
-    }
+    match open_zip_part(archive, "xl/sharedStrings.xml") {
+        Ok(file) => {
+            let name = file.name();
+            return Ok(Some(name.strip_prefix('/').unwrap_or(name).to_string()));
+        }
+        Err(zip::result::ZipError::FileNotFound) => {}
+        Err(err) => return Err(err.into()),
+    };
 
     Ok(None)
 }
@@ -2938,6 +2963,31 @@ fn should_patch_recalc_part(name: &str, recalc_policy: RecalcPolicy) -> bool {
         }
         _ => false,
     }
+}
+
+fn list_zip_part_names<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+) -> Result<HashSet<String>, StreamingPatchError> {
+    let mut out = HashSet::new();
+    for i in 0..archive.len() {
+        let file = archive.by_index(i)?;
+        if file.is_dir() {
+            continue;
+        }
+        let name = file.name();
+        out.insert(name.strip_prefix('/').unwrap_or(name).to_string());
+    }
+    Ok(out)
+}
+
+fn find_zip_part_name(part_names: &HashSet<String>, candidate: &str) -> Option<String> {
+    if part_names.contains(candidate) {
+        return Some(candidate.to_string());
+    }
+    part_names
+        .iter()
+        .find(|name| crate::zip_util::zip_part_names_equivalent(name.as_str(), candidate))
+        .cloned()
 }
 
 fn read_zip_part<R: Read + Seek>(

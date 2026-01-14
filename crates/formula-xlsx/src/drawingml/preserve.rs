@@ -186,7 +186,12 @@ pub fn preserve_drawing_parts_from_reader<R: Read + Seek>(
     let sheets = workbook_sheet_parts_from_workbook_xml(
         &workbook_xml,
         workbook_rels_xml.as_deref(),
-        |name| part_names.contains(name),
+        |candidate| {
+            part_names.contains(candidate)
+                || part_names
+                    .iter()
+                    .any(|name| crate::zip_util::zip_part_names_equivalent(name, candidate))
+        },
     )?;
 
     let mut root_parts: BTreeSet<String> = BTreeSet::new();

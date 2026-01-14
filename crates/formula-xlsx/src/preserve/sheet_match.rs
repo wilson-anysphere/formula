@@ -4,7 +4,7 @@ use roxmltree::Document;
 
 use formula_model::sheet_name_eq_case_insensitive;
 
-use crate::path::resolve_target;
+use crate::path::resolve_target_candidates;
 use crate::relationships::parse_relationships;
 use crate::workbook::ChartExtractionError;
 use crate::XlsxPackage;
@@ -73,7 +73,9 @@ where
                     .as_deref()
                     .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External")) =>
             {
-                Some(resolve_target(workbook_part, &rel.target))
+                resolve_target_candidates(workbook_part, &rel.target)
+                    .into_iter()
+                    .find(|candidate| has_part(candidate))
             }
             _ => sheet_id
                 .map(|sheet_id| format!("xl/worksheets/sheet{sheet_id}.xml"))

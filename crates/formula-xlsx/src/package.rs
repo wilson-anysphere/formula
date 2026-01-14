@@ -659,6 +659,17 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
 
     let workbook_part = "xl/workbook.xml";
     let mut out = Vec::with_capacity(sheets.len());
+
+    fn find_part_name(part_names: &HashSet<String>, candidate: &str) -> Option<String> {
+        if part_names.contains(candidate) {
+            return Some(candidate.to_string());
+        }
+        part_names
+            .iter()
+            .find(|name| crate::zip_util::zip_part_names_equivalent(name.as_str(), candidate))
+            .cloned()
+    }
+
     for sheet in sheets {
         let resolved = rel_by_id
             .get(&sheet.rel_id)
@@ -670,11 +681,11 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
             .and_then(|rel| {
                 crate::path::resolve_target_candidates(workbook_part, &rel.target)
                     .into_iter()
-                    .find(|candidate| part_names.contains(candidate))
+                    .find_map(|candidate| find_part_name(&part_names, &candidate))
             })
             .or_else(|| {
                 let candidate = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
-                part_names.contains(&candidate).then_some(candidate)
+                find_part_name(&part_names, &candidate)
             });
 
         let Some(worksheet_part) = resolved else {
@@ -755,6 +766,17 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
 
     let workbook_part = "xl/workbook.xml";
     let mut out = Vec::with_capacity(sheets.len());
+
+    fn find_part_name(part_names: &HashSet<String>, candidate: &str) -> Option<String> {
+        if part_names.contains(candidate) {
+            return Some(candidate.to_string());
+        }
+        part_names
+            .iter()
+            .find(|name| crate::zip_util::zip_part_names_equivalent(name.as_str(), candidate))
+            .cloned()
+    }
+
     for sheet in sheets {
         let resolved = rel_by_id
             .get(&sheet.rel_id)
@@ -763,10 +785,14 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
                     .as_deref()
                     .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
             })
-            .map(|rel| crate::path::resolve_target(workbook_part, &rel.target))
+            .and_then(|rel| {
+                crate::path::resolve_target_candidates(workbook_part, &rel.target)
+                    .into_iter()
+                    .find_map(|candidate| find_part_name(&part_names, &candidate))
+            })
             .or_else(|| {
                 let candidate = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
-                part_names.contains(&candidate).then_some(candidate)
+                find_part_name(&part_names, &candidate)
             });
 
         let Some(worksheet_part) = resolved else {
