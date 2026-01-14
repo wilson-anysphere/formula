@@ -12,6 +12,7 @@ import {
 import { duplicateDrawingObject } from "../duplicate";
 import { DrawingInteractionController } from "../interaction";
 import { pxToEmu } from "../overlay";
+import { getRotationHandleCenter } from "../selectionHandles";
 import type { DrawingObject } from "../types";
 import type { GridGeometry, Viewport } from "../overlay";
 
@@ -291,6 +292,61 @@ describe("DrawingInteractionController commit-time patching", () => {
     expect(objects[0]!.preserved?.["xlsx.pic_xml"]).toContain(`cy="${pxToEmu(130)}"`);
   });
 
+  it("fires onInteractionCommit once after a resize, with patched preserved xml", () => {
+    const startCx = pxToEmu(100);
+    const startCy = pxToEmu(100);
+    const obj: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId: "img1.png" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: 0, yEmu: 0 },
+        size: { cx: startCx, cy: startCy },
+      },
+      zOrder: 0,
+      preserved: {
+        "xlsx.pic_xml": `<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="1" name="Picture 1"/></xdr:nvPicPr><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${startCx}" cy="${startCy}"/></a:xfrm></xdr:spPr></xdr:pic>`,
+      },
+    };
+
+    let objects: DrawingObject[] = [obj];
+    const commits: Array<any> = [];
+    const el = createStubElement();
+
+    new DrawingInteractionController(el, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+      },
+      onInteractionCommit: (payload) => commits.push(payload),
+    });
+
+    // Start resizing at the bottom-right corner (se handle).
+    el.dispatch("pointerdown", createPointerEvent({ clientX: 100, clientY: 100, pointerId: 10 }));
+    el.dispatch("pointermove", createPointerEvent({ clientX: 120, clientY: 130, pointerId: 10 }));
+    el.dispatch("pointerup", createPointerEvent({ clientX: 120, clientY: 130, pointerId: 10 }));
+
+    expect(commits).toHaveLength(1);
+    const payload = commits[0]!;
+    expect(payload.kind).toBe("resize");
+    expect(payload.id).toBe(1);
+
+    expect(payload.before.anchor).toMatchObject({
+      type: "absolute",
+      size: { cx: startCx, cy: startCy },
+    });
+    expect(payload.after.anchor).toMatchObject({
+      type: "absolute",
+      size: { cx: pxToEmu(120), cy: pxToEmu(130) },
+    });
+
+    // Commit callback should see the patched DrawingML fragment.
+    expect(payload.after.preserved?.["xlsx.pic_xml"]).toContain(`cx="${pxToEmu(120)}"`);
+    expect(payload.after.preserved?.["xlsx.pic_xml"]).toContain(`cy="${pxToEmu(130)}"`);
+    expect(payload.objects.find((o: DrawingObject) => o.id === 1)).toEqual(payload.after);
+  });
+
   it("patches xfrm off on move commit when off is non-zero", () => {
     const startOffX = pxToEmu(10);
     const startOffY = pxToEmu(20);
@@ -328,6 +384,114 @@ describe("DrawingInteractionController commit-time patching", () => {
     const xml = (objects[0]!.kind as any).rawXml as string;
     expect(xml).toContain(`x="${pxToEmu(15)}"`);
     expect(xml).toContain(`y="${pxToEmu(27)}"`);
+  });
+
+  it("fires onInteractionCommit once after a move, with patched rawXml", () => {
+    const startOffX = pxToEmu(10);
+    const startOffY = pxToEmu(20);
+    const obj: DrawingObject = {
+      id: 1,
+      kind: {
+        type: "shape",
+        rawXml: `<xdr:sp><xdr:nvSpPr><xdr:cNvPr id="1" name="Shape 1"/></xdr:nvSpPr><xdr:spPr><a:xfrm><a:off x="${startOffX}" y="${startOffY}"/><a:ext cx="${pxToEmu(
+          100,
+        )}" cy="${pxToEmu(100)}"/></a:xfrm></xdr:spPr></xdr:sp>`,
+      },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: 0, yEmu: 0 },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+      zOrder: 0,
+    };
+
+    let objects: DrawingObject[] = [obj];
+    const commits: Array<any> = [];
+    const el = createStubElement();
+
+    new DrawingInteractionController(el, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+      },
+      onInteractionCommit: (payload) => commits.push(payload),
+    });
+
+    el.dispatch("pointerdown", createPointerEvent({ clientX: 50, clientY: 50, pointerId: 11 }));
+    el.dispatch("pointermove", createPointerEvent({ clientX: 55, clientY: 57, pointerId: 11 }));
+    el.dispatch("pointerup", createPointerEvent({ clientX: 55, clientY: 57, pointerId: 11 }));
+
+    expect(commits).toHaveLength(1);
+    const payload = commits[0]!;
+    expect(payload.kind).toBe("move");
+    expect(payload.id).toBe(1);
+
+    expect(payload.after.anchor).toMatchObject({
+      type: "absolute",
+      pos: { xEmu: pxToEmu(5), yEmu: pxToEmu(7) },
+    });
+
+    const xml = (payload.after.kind as any).rawXml as string;
+    expect(xml).toContain(`x="${pxToEmu(15)}"`);
+    expect(xml).toContain(`y="${pxToEmu(27)}"`);
+  });
+
+  it("fires onInteractionCommit once after a rotate, with transform + patched rawXml", () => {
+    const obj: DrawingObject = {
+      id: 1,
+      kind: {
+        type: "shape",
+        rawXml: `<xdr:sp><xdr:nvSpPr><xdr:cNvPr id="1" name="Shape 1"/></xdr:nvSpPr><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${pxToEmu(
+          80,
+        )}" cy="${pxToEmu(40)}"/></a:xfrm></xdr:spPr></xdr:sp>`,
+      },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(100) },
+        size: { cx: pxToEmu(80), cy: pxToEmu(40) },
+      },
+      zOrder: 0,
+    };
+
+    let objects: DrawingObject[] = [obj];
+    const commits: Array<any> = [];
+    const el = createStubElement();
+
+    const controller = new DrawingInteractionController(el, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+      },
+      onInteractionCommit: (payload) => commits.push(payload),
+    });
+
+    // Rotation handles only work for the selected object.
+    controller.setSelectedId(1);
+
+    const bounds = { x: 100, y: 100, width: 80, height: 40 };
+    const rotHandle = getRotationHandleCenter(bounds);
+    const centerX = bounds.x + bounds.width / 2;
+    const centerY = bounds.y + bounds.height / 2;
+
+    el.dispatch(
+      "pointerdown",
+      createPointerEvent({ clientX: rotHandle.x, clientY: rotHandle.y, pointerId: 12 }),
+    );
+    // Drag to the right of center (roughly +90° clockwise from "above").
+    el.dispatch("pointermove", createPointerEvent({ clientX: centerX + 100, clientY: centerY, pointerId: 12 }));
+    el.dispatch("pointerup", createPointerEvent({ clientX: centerX + 100, clientY: centerY, pointerId: 12 }));
+
+    expect(commits).toHaveLength(1);
+    const payload = commits[0]!;
+    expect(payload.kind).toBe("rotate");
+    expect(payload.id).toBe(1);
+    expect(payload.after.transform?.rotationDeg).toBeCloseTo(90);
+
+    // Commit callback should see the patched DrawingML rot attribute.
+    const xml = (payload.after.kind as any).rawXml as string;
+    expect(xml).toContain(`rot="5400000"`);
   });
 
   it("patches full-anchor wrapper <from>/<to> blocks on move commit for unknown objects", () => {

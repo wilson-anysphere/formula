@@ -47,6 +47,20 @@ export interface DrawingInteractionCallbacks {
    * keep keyboard focus on the grid root (so Delete/Ctrl+D shortcuts work).
    */
   requestFocus?(): void;
+  /**
+   * Fires once on pointerup/cancel after a move/resize/rotate interaction has been committed.
+   *
+   * This is intended for persistence layers that want to write edits at the end of an interaction
+   * (not on every pointermove). The payload's `objects` list reflects the final state after any
+   * commit-time DrawingML patching has been applied.
+   */
+  onInteractionCommit?: (payload: {
+    kind: "move" | "resize" | "rotate";
+    id: number;
+    before: DrawingObject;
+    after: DrawingObject;
+    objects: DrawingObject[];
+  }) => void;
 }
 
 export interface DrawingInteractionControllerOptions {
@@ -484,6 +498,8 @@ export class DrawingInteractionController {
 
     this.stopPointerEvent(e);
 
+    const kind: "move" | "resize" | "rotate" = dragging ? "move" : resizing ? "resize" : "rotate";
+
     // Commit-time patching only: pointermove updates anchors for live previews,
     // while pointerup updates preserved DrawingML fragments (`rawXml`, `xlsx.pic_xml`)
     // so inner `<a:xfrm>` values (when present) stay consistent with the new anchor.
@@ -523,6 +539,21 @@ export class DrawingInteractionController {
       }
     }
 
+    const finalObj = finalObjects.find((o) => o.id === active.id);
+    if (startObj && finalObj) {
+      try {
+        this.callbacks.onInteractionCommit?.({
+          kind,
+          id: active.id,
+          before: startObj,
+          after: finalObj,
+          objects: finalObjects,
+        });
+      } catch {
+        // Best-effort; persistence hooks should not break interaction cleanup.
+      }
+    }
+
     const rect = this.activeRect ?? this.element.getBoundingClientRect();
     const { x, y } = this.getLocalPoint(e, rect);
 
@@ -546,14 +577,16 @@ export class DrawingInteractionController {
     if (!active) return;
     if (e.pointerId !== active.pointerId) return;
     this.stopPointerEvent(e);
-    this.cancelActiveGesture();
+    this.cancelActiveGesture(true);
   };
 
-  private cancelActiveGesture(): void {
+  private cancelActiveGesture(emitCommit: boolean = false): void {
     const active = this.dragging ?? this.resizing ?? this.rotating;
     if (!active) return;
 
+    const kind: "move" | "resize" | "rotate" = this.dragging ? "move" : this.resizing ? "resize" : "rotate";
     const startObjects = active.startObjects;
+    const startObj = startObjects.find((o) => o.id === active.id);
     const pointerId = active.pointerId;
 
     this.dragging = null;
@@ -566,6 +599,20 @@ export class DrawingInteractionController {
     // Revert the live in-memory state and cancel the undo batch.
     this.callbacks.setObjects(startObjects);
     this.callbacks.cancelBatch?.();
+
+    if (emitCommit && startObj) {
+      try {
+        this.callbacks.onInteractionCommit?.({
+          kind,
+          id: active.id,
+          before: startObj,
+          after: startObj,
+          objects: startObjects,
+        });
+      } catch {
+        // Best-effort; persistence hooks should not break cancellation cleanup.
+      }
+    }
 
     // Cursor best-effort: we may not have a meaningful point after cancel.
     this.element.style.cursor = "default";
