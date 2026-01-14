@@ -1,6 +1,241 @@
 use std::fs;
 use std::path::PathBuf;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode {
+    Code,
+    LineComment,
+    BlockComment { depth: usize },
+    NormalString { escape: bool },
+    RawString { hashes: usize },
+}
+
+fn is_ascii_hexdigit(b: u8) -> bool {
+    matches!(b, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F')
+}
+
+fn consume_char_literal(src: &str, bytes: &[u8], start: usize) -> Option<usize> {
+    if bytes.get(start) != Some(&b'\'') {
+        return None;
+    }
+    let mut j = start + 1;
+    if j >= bytes.len() {
+        return None;
+    }
+    // Char literals can't span lines; treat lifetimes (no closing `'`) as normal code.
+    if matches!(bytes[j], b'\n' | b'\r') {
+        return None;
+    }
+
+    let j_end = if bytes[j] == b'\\' {
+        let esc = *bytes.get(j + 1)?;
+        match esc {
+            b'\\' | b'\'' | b'"' | b'n' | b'r' | b't' | b'0' => j + 2,
+            b'x' => {
+                let h1 = *bytes.get(j + 2)?;
+                let h2 = *bytes.get(j + 3)?;
+                if is_ascii_hexdigit(h1) && is_ascii_hexdigit(h2) {
+                    j + 4
+                } else {
+                    return None;
+                }
+            }
+            b'u' => {
+                if bytes.get(j + 2) != Some(&b'{') {
+                    return None;
+                }
+                let mut k = j + 3;
+                let mut saw_digit = false;
+                while k < bytes.len() {
+                    let b = bytes[k];
+                    if b == b'}' {
+                        break;
+                    }
+                    if !is_ascii_hexdigit(b) {
+                        return None;
+                    }
+                    saw_digit = true;
+                    k += 1;
+                }
+                if k >= bytes.len() || bytes[k] != b'}' || !saw_digit {
+                    return None;
+                }
+                k + 1
+            }
+            _ => return None,
+        }
+    } else {
+        // Reject empty literals.
+        if bytes[j] == b'\'' {
+            return None;
+        }
+        let ch = src[j..].chars().next()?;
+        j += ch.len_utf8();
+        j
+    };
+
+    if bytes.get(j_end) == Some(&b'\'') {
+        Some(j_end + 1)
+    } else {
+        None
+    }
+}
+
+fn find_next_code_byte(src: &str, start: usize, needle: u8) -> Option<usize> {
+    let bytes = src.as_bytes();
+    let mut mode = Mode::Code;
+    let mut i = start;
+
+    while i < bytes.len() {
+        match mode {
+            Mode::Code => {
+                if bytes[i] == b'/' && i + 1 < bytes.len() {
+                    match bytes[i + 1] {
+                        b'/' => {
+                            mode = Mode::LineComment;
+                            i += 2;
+                            continue;
+                        }
+                        b'*' => {
+                            mode = Mode::BlockComment { depth: 1 };
+                            i += 2;
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+
+                if bytes[i] == b'\'' {
+                    if let Some(next) = consume_char_literal(src, bytes, i) {
+                        i = next;
+                        continue;
+                    }
+                }
+
+                // Raw string literals: r"..." / r#"..."# / br"..." / br#"..."#
+                if bytes[i] == b'r' {
+                    let mut j = i + 1;
+                    while j < bytes.len() && bytes[j] == b'#' {
+                        j += 1;
+                    }
+                    if j < bytes.len() && bytes[j] == b'"' {
+                        mode = Mode::RawString {
+                            hashes: j - (i + 1),
+                        };
+                        i = j + 1;
+                        continue;
+                    }
+                } else if bytes[i] == b'b' && i + 1 < bytes.len() && bytes[i + 1] == b'r' {
+                    let mut j = i + 2;
+                    while j < bytes.len() && bytes[j] == b'#' {
+                        j += 1;
+                    }
+                    if j < bytes.len() && bytes[j] == b'"' {
+                        mode = Mode::RawString {
+                            hashes: j - (i + 2),
+                        };
+                        i = j + 1;
+                        continue;
+                    }
+                }
+
+                // Normal string literals: "..." and b"..."
+                if bytes[i] == b'"' {
+                    mode = Mode::NormalString { escape: false };
+                    i += 1;
+                    continue;
+                }
+                if bytes[i] == b'b' && i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+                    mode = Mode::NormalString { escape: false };
+                    i += 2; // consume b"
+                    continue;
+                }
+
+                if bytes[i] == needle {
+                    return Some(i);
+                }
+                i += 1;
+            }
+            Mode::LineComment => {
+                if bytes[i] == b'\n' {
+                    mode = Mode::Code;
+                }
+                i += 1;
+            }
+            Mode::BlockComment {
+                depth: mut comment_depth,
+            } => {
+                if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                    comment_depth += 1;
+                    mode = Mode::BlockComment {
+                        depth: comment_depth,
+                    };
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    comment_depth = comment_depth.saturating_sub(1);
+                    if comment_depth == 0 {
+                        mode = Mode::Code;
+                    } else {
+                        mode = Mode::BlockComment {
+                            depth: comment_depth,
+                        };
+                    }
+                    i += 2;
+                    continue;
+                }
+                mode = Mode::BlockComment {
+                    depth: comment_depth,
+                };
+                i += 1;
+            }
+            Mode::NormalString { mut escape } => {
+                if escape {
+                    escape = false;
+                    mode = Mode::NormalString { escape };
+                    i += 1;
+                    continue;
+                }
+                match bytes[i] {
+                    b'\\' => {
+                        escape = true;
+                        mode = Mode::NormalString { escape };
+                        i += 1;
+                    }
+                    b'"' => {
+                        mode = Mode::Code;
+                        i += 1;
+                    }
+                    _ => {
+                        mode = Mode::NormalString { escape };
+                        i += 1;
+                    }
+                }
+            }
+            Mode::RawString { hashes } => {
+                if bytes[i] == b'"' {
+                    let mut ok = true;
+                    for k in 0..hashes {
+                        if i + 1 + k >= bytes.len() || bytes[i + 1 + k] != b'#' {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if ok {
+                        i += 1 + hashes;
+                        mode = Mode::Code;
+                        continue;
+                    }
+                }
+                i += 1;
+            }
+        }
+    }
+
+    None
+}
+
 fn repo_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative)
 }
@@ -31,21 +266,14 @@ fn extract_tauri_scheme_protocol_handler_block<'a>(main_rs_src: &'a str) -> &'a 
     //
     // Historically this guard test sliced the builder chain at the next `.plugin(...)`, but that
     // is brittle if `.plugin(` ever appears in a string literal inside the handler.
-    let first_pipe = rest
-        .find('|')
+    let first_pipe = find_next_code_byte(rest, 0, b'|')
         .unwrap_or_else(|| panic!("failed to find closure `|` in the `tauri://` handler block"));
-    let second_pipe = rest[first_pipe + 1..]
-        .find('|')
-        .map(|idx| first_pipe + 1 + idx)
-        .unwrap_or_else(|| {
-            panic!("failed to find closing closure `|` in the `tauri://` handler block")
-        });
-    let open_brace = rest[second_pipe + 1..]
-        .find('{')
-        .map(|idx| second_pipe + 1 + idx)
-        .unwrap_or_else(|| {
-            panic!("failed to find `{{` after closure args in the `tauri://` handler block")
-        });
+    let second_pipe = find_next_code_byte(rest, first_pipe + 1, b'|').unwrap_or_else(|| {
+        panic!("failed to find closing closure `|` in the `tauri://` handler block")
+    });
+    let open_brace = find_next_code_byte(rest, second_pipe + 1, b'{').unwrap_or_else(|| {
+        panic!("failed to find `{{` after closure args in the `tauri://` handler block")
+    });
 
     extract_brace_block(rest, open_brace)
 }
@@ -61,86 +289,6 @@ fn extract_brace_block<'a>(src: &'a str, open_brace: usize) -> &'a str {
         "expected `open_brace` to point at `{{`, got {:?} at byte offset {open_brace}",
         bytes.get(open_brace).copied()
     );
-
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    enum Mode {
-        Code,
-        LineComment,
-        BlockComment { depth: usize },
-        NormalString { escape: bool },
-        RawString { hashes: usize },
-    }
-
-    fn is_ascii_hexdigit(b: u8) -> bool {
-        matches!(b, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F')
-    }
-
-    fn consume_char_literal(src: &str, bytes: &[u8], start: usize) -> Option<usize> {
-        if bytes.get(start) != Some(&b'\'') {
-            return None;
-        }
-        let mut j = start + 1;
-        if j >= bytes.len() {
-            return None;
-        }
-        // Char literals can't span lines; treat lifetimes (no closing `'`) as normal code.
-        if matches!(bytes[j], b'\n' | b'\r') {
-            return None;
-        }
-
-        let j_end = if bytes[j] == b'\\' {
-            let esc = *bytes.get(j + 1)?;
-            match esc {
-                b'\\' | b'\'' | b'"' | b'n' | b'r' | b't' | b'0' => j + 2,
-                b'x' => {
-                    let h1 = *bytes.get(j + 2)?;
-                    let h2 = *bytes.get(j + 3)?;
-                    if is_ascii_hexdigit(h1) && is_ascii_hexdigit(h2) {
-                        j + 4
-                    } else {
-                        return None;
-                    }
-                }
-                b'u' => {
-                    if bytes.get(j + 2) != Some(&b'{') {
-                        return None;
-                    }
-                    let mut k = j + 3;
-                    let mut saw_digit = false;
-                    while k < bytes.len() {
-                        let b = bytes[k];
-                        if b == b'}' {
-                            break;
-                        }
-                        if !is_ascii_hexdigit(b) {
-                            return None;
-                        }
-                        saw_digit = true;
-                        k += 1;
-                    }
-                    if k >= bytes.len() || bytes[k] != b'}' || !saw_digit {
-                        return None;
-                    }
-                    k + 1
-                }
-                _ => return None,
-            }
-        } else {
-            // Reject empty literals.
-            if bytes[j] == b'\'' {
-                return None;
-            }
-            let ch = src[j..].chars().next()?;
-            j += ch.len_utf8();
-            j
-        };
-
-        if bytes.get(j_end) == Some(&b'\'') {
-            Some(j_end + 1)
-        } else {
-            None
-        }
-    }
 
     let mut mode = Mode::Code;
     let mut depth: i32 = 1;
@@ -371,6 +519,48 @@ fn extract_brace_block_ignores_braces_in_strings_and_comments() {
     assert!(
         block.trim_end().ends_with('}'),
         "expected brace matcher to include the final outer `}}`, got:\n{block}"
+    );
+}
+
+#[test]
+fn extract_tauri_handler_extractor_ignores_tokens_in_comments_and_strings() {
+    let src = r#"
+tauri::Builder::default()
+    .register_uri_scheme_protocol(
+        "asset",
+        asset_protocol::handler,
+    )
+    .register_uri_scheme_protocol("tauri", /* comment with | and { } */ move |_ctx, request|
+        /* comment with { braces } before the body */ {
+        let _s = ".plugin(";
+        if let Some(asset) = _ctx.app_handle().asset_resolver().get("index.html".to_string()) {
+            let mut response = Response::builder()
+                .status(StatusCode::OK)
+                .body(Vec::new())
+                .unwrap();
+            apply_cross_origin_isolation_headers(&mut response);
+            return response;
+        }
+        Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Vec::new())
+            .unwrap()
+    })
+    .plugin(tauri_plugin_dialog::init());
+"#;
+
+    let handler_block = extract_tauri_scheme_protocol_handler_block(src);
+    assert!(
+        handler_block.contains("apply_cross_origin_isolation_headers("),
+        "expected extracted handler block to contain the COOP/COEP helper call.\nExtracted:\n{handler_block}"
+    );
+    assert!(
+        handler_block.contains("if let Some(asset)"),
+        "expected extracted handler block to include the AssetResolver success path.\nExtracted:\n{handler_block}"
+    );
+    assert!(
+        !handler_block.contains(".plugin(tauri_plugin_dialog"),
+        "expected extracted handler block to stop at the end of the closure body, not include the surrounding builder chain.\nExtracted:\n{handler_block}"
     );
 }
 
