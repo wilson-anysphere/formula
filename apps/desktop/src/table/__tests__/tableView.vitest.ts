@@ -22,4 +22,13 @@ describe("distinctColumnValues", () => {
 
     expect(distinctColumnValues(rows, 0)).toEqual(["1", "2", "10"]);
   });
+
+  it("includes null/undefined values as blanks", () => {
+    const rows: TableViewRow[] = [
+      { row: 0, values: [null] },
+      { row: 1, values: ["x"] },
+    ];
+
+    expect(distinctColumnValues(rows, 0)).toEqual(["x", ""]);
+  });
 });

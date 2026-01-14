@@ -33,8 +33,8 @@ export function distinctColumnValues(
   const set = new Set<string>();
   for (const row of rows) {
     const v = row.values[colId];
-    if (v == null) continue;
-    set.add(String(v));
+    // Treat null/undefined as blanks so users can filter for blank cells (Excel-like).
+    set.add(v == null ? "" : String(v));
   }
   return Array.from(set).sort((a, b) => {
     // Match Excel-like ordering where blanks appear last.
