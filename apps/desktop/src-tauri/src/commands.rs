@@ -1328,7 +1328,9 @@ pub struct IpcPivotField {
 impl From<IpcPivotField> for formula_engine::pivot::PivotField {
     fn from(value: IpcPivotField) -> Self {
         Self {
-            source_field: value.source_field.into_inner(),
+            source_field: formula_engine::pivot::PivotFieldRef::CacheFieldName(
+                value.source_field.into_inner(),
+            ),
             sort_order: value.sort_order,
             manual_sort: value.manual_sort.map(|v| {
                 v.into_inner()
@@ -1360,12 +1362,16 @@ pub struct IpcValueField {
 impl From<IpcValueField> for formula_engine::pivot::ValueField {
     fn from(value: IpcValueField) -> Self {
         Self {
-            source_field: value.source_field.into_inner(),
+            source_field: formula_engine::pivot::PivotFieldRef::CacheFieldName(
+                value.source_field.into_inner(),
+            ),
             name: value.name.into_inner(),
             aggregation: value.aggregation,
             number_format: value.number_format.map(|s| s.into_inner()),
             show_as: value.show_as,
-            base_field: value.base_field.map(|s| s.into_inner()),
+            base_field: value.base_field.map(|s| {
+                formula_engine::pivot::PivotFieldRef::CacheFieldName(s.into_inner())
+            }),
             base_item: value.base_item.map(|s| s.into_inner()),
         }
     }
@@ -1386,7 +1392,9 @@ pub struct IpcFilterField {
 impl From<IpcFilterField> for formula_engine::pivot::FilterField {
     fn from(value: IpcFilterField) -> Self {
         Self {
-            source_field: value.source_field.into_inner(),
+            source_field: formula_engine::pivot::PivotFieldRef::CacheFieldName(
+                value.source_field.into_inner(),
+            ),
             allowed: value.allowed.map(|vals| {
                 vals.into_inner()
                     .into_iter()
