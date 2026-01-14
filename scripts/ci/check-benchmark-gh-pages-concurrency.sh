@@ -34,7 +34,7 @@ for path in "${inputs[@]}"; do
     while IFS= read -r file; do
       [ -z "$file" ] && continue
       workflows+=("$file")
-    done < <(find "$path" -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)
+    done < <(find "$path" -maxdepth 4 -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)
     continue
   fi
 

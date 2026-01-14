@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -11,6 +11,17 @@ const scriptPath = path.join(repoRoot, "scripts", "ci", "check-gha-action-sha-pi
 
 const bashProbe = spawnSync("bash", ["--version"], { encoding: "utf8" });
 const hasBash = !bashProbe.error && bashProbe.status === 0;
+
+test("check-gha-action-sha-pins bounds directory scans (perf guardrail)", () => {
+  const script = readFileSync(scriptPath, "utf8");
+  const idx = script.indexOf('find "$path"');
+  assert.ok(idx >= 0, "Expected script to enumerate workflow directories via find \"$path\".");
+  const snippet = script.slice(idx, idx + 120);
+  assert.ok(
+    snippet.includes("-maxdepth"),
+    `Expected workflow file discovery to be bounded with -maxdepth.\nSaw snippet:\n${snippet}`,
+  );
+});
 
 /**
  * @param {string} yaml
