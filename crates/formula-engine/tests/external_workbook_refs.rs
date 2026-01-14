@@ -593,6 +593,35 @@ fn indirect_external_3d_span_is_ref_error() {
 }
 
 #[test]
+fn database_functions_reject_external_3d_sheet_spans_as_database_range() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_sheet_order(
+        "Book.xlsx",
+        vec![
+            "Sheet1".to_string(),
+            "Sheet2".to_string(),
+            "Sheet3".to_string(),
+        ],
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            r#"=DSUM([Book.xlsx]Sheet1:Sheet3!A1:D4,"Salary",F1:F2)"#,
+        )
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(formula_engine::ErrorKind::Value)
+    );
+}
+
+#[test]
 fn database_functions_support_computed_criteria_over_external_database() {
     let provider = Arc::new(TestExternalProvider::default());
 

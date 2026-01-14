@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::eval::compile_canonical_expr;
+use crate::eval::{compile_canonical_expr, split_external_sheet_key};
 use crate::functions::math::criteria::Criteria;
 use crate::functions::{ArgValue, FunctionContext};
 use crate::value::{casefold, Array, ErrorKind, Value};
@@ -94,6 +94,16 @@ fn parse_database_range(
         },
         ArgValue::Reference(r) => {
             let r = r.normalized();
+            if let crate::functions::SheetId::External(key) = &r.sheet_id {
+                // Database functions (DSUM/DGET/DCOUNT/...) require the database range to be a
+                // single-sheet 2D rectangle. Even though the evaluator can expand external-workbook
+                // 3D spans like `[Book.xlsx]Sheet1:Sheet3!A1:D4` into a multi-area reference,
+                // Excel treats that form as an invalid database range.
+                let (_workbook, sheet_part) = split_external_sheet_key(key).ok_or(ErrorKind::Value)?;
+                if sheet_part.contains(':') {
+                    return Err(ErrorKind::Value);
+                }
+            }
             let array = reference_to_array(ctx, r.clone())?;
             (array, Some(r))
         }
@@ -402,23 +412,6 @@ fn row_matches(
     }
 
     Ok(any_clause)
-}
-
-fn split_external_sheet_key(key: &str) -> Option<(&str, &str)> {
-    if !key.starts_with('[') {
-        return None;
-    }
-    let end = key.find(']')?;
-    let workbook = &key[1..end];
-    let sheet = &key[end.saturating_add(1)..];
-    if workbook.is_empty() || sheet.is_empty() {
-        return None;
-    }
-    if sheet.contains(':') {
-        // External 3D sheet spans are treated as invalid by the evaluator.
-        return None;
-    }
-    Some((workbook, sheet))
 }
 
 fn qualify_unprefixed_sheet_references(expr: &crate::Expr, workbook: &str, sheet: &str) -> crate::Expr {
