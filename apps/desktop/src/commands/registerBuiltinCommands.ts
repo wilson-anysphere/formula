@@ -7,6 +7,7 @@ import { t } from "../i18n/index.js";
 import { showQuickPick, showToast } from "../extensions/ui.js";
 import { getPasteSpecialMenuItems } from "../clipboard/pasteSpecial.js";
 import type { ThemeController } from "../theme/themeController.js";
+import { READ_ONLY_SHEET_MUTATION_MESSAGE } from "../collab/permissionGuards.js";
 import { cycleWorkbenchFocusRegion, type WorkbenchFocusCycleDeps } from "./workbenchFocusCycle.js";
 import { registerNumberFormatCommands } from "./registerNumberFormatCommands.js";
 import { DEFAULT_GRID_LIMITS } from "../selection/selection.js";
@@ -99,6 +100,13 @@ export function registerBuiltinCommands(params: {
 
   const isEditingFn =
     isEditing ?? (() => (typeof (app as any)?.isEditing === "function" ? Boolean((app as any).isEditing()) : false));
+  const isReadOnlyFn = (): boolean => {
+    try {
+      return typeof (app as any)?.isReadOnly === "function" && (app as any).isReadOnly() === true;
+    } catch {
+      return false;
+    }
+  };
 
   const commandCategoryFormat = t("commandCategory.format");
   const commandCategoryData = t("commandCategory.data");
@@ -798,6 +806,14 @@ export function registerBuiltinCommands(params: {
     t("command.view.insertPivotTable"),
     () => {
       if (isEditingFn()) return;
+      if (isReadOnlyFn()) {
+        try {
+          showToast(READ_ONLY_SHEET_MUTATION_MESSAGE, "warning");
+        } catch {
+          // Best-effort (toast root missing in tests/minimal harnesses).
+        }
+        return;
+      }
       // Always call openPanel so we activate docked panels and also trigger a layout re-render
       // even when the panel is already floating (useful for refreshing panel-local state).
       const layout = (() => {
@@ -905,6 +921,14 @@ export function registerBuiltinCommands(params: {
     `${t("whatIf.scenario.title")}…`,
     () => {
       if (isEditingFn()) return;
+      if (isReadOnlyFn()) {
+        try {
+          showToast(READ_ONLY_SHEET_MUTATION_MESSAGE, "warning");
+        } catch {
+          // ignore
+        }
+        return;
+      }
       openDockPanel(PanelIds.SCENARIO_MANAGER);
     },
     {
@@ -920,6 +944,14 @@ export function registerBuiltinCommands(params: {
     `${t("whatIf.monteCarlo.title")}…`,
     () => {
       if (isEditingFn()) return;
+      if (isReadOnlyFn()) {
+        try {
+          showToast(READ_ONLY_SHEET_MUTATION_MESSAGE, "warning");
+        } catch {
+          // ignore
+        }
+        return;
+      }
       openDockPanel(PanelIds.MONTE_CARLO);
     },
     {
@@ -935,6 +967,14 @@ export function registerBuiltinCommands(params: {
     `${t("whatIf.goalSeek.title")}…`,
     () => {
       if (isEditingFn()) return;
+      if (isReadOnlyFn()) {
+        try {
+          showToast(READ_ONLY_SHEET_MUTATION_MESSAGE, "warning");
+        } catch {
+          // ignore
+        }
+        return;
+      }
       if (openGoalSeekDialog) {
         openGoalSeekDialog();
         return;
@@ -959,6 +999,14 @@ export function registerBuiltinCommands(params: {
     t("panels.solver.title"),
     () => {
       if (isEditingFn()) return;
+      if (isReadOnlyFn()) {
+        try {
+          showToast(READ_ONLY_SHEET_MUTATION_MESSAGE, "warning");
+        } catch {
+          // ignore
+        }
+        return;
+      }
       openDockPanel(PanelIds.SOLVER);
     },
     {

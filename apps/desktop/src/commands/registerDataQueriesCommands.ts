@@ -31,6 +31,13 @@ export function registerDataQueriesCommands(params: {
    * secondary editor state so command palette/keybindings cannot bypass ribbon disabling.
    */
   isEditing?: (() => boolean) | null;
+  /**
+   * Optional spreadsheet read-only predicate. When omitted, refresh commands are assumed to be runnable.
+   *
+   * The desktop ribbon disables refresh commands in read-only collab roles; guard execution so
+   * command palette/keybindings cannot bypass that state.
+   */
+  isReadOnly?: (() => boolean) | null;
   getPowerQueryService: () => PowerQueryServiceLike | null;
   showToast: ToastFn;
   notify: NotifyFn;
@@ -55,6 +62,7 @@ export function registerDataQueriesCommands(params: {
     commandRegistry,
     layoutController,
     isEditing = null,
+    isReadOnly = null,
     getPowerQueryService,
     showToast,
     notify,
@@ -63,6 +71,7 @@ export function registerDataQueriesCommands(params: {
     now = () => Date.now(),
   } = params;
   const isEditingFn = isEditing ?? (() => false);
+  const isReadOnlyFn = isReadOnly ?? (() => false);
 
   commandRegistry.registerBuiltinCommand(
     DATA_QUERIES_RIBBON_COMMANDS.toggleQueriesConnections,
@@ -131,6 +140,7 @@ export function registerDataQueriesCommands(params: {
 
   const refreshAll = () => {
     if (isEditingFn()) return;
+    if (isReadOnlyFn()) return;
     void (async () => {
       const service = getPowerQueryService();
       if (!service) {

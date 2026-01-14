@@ -53,9 +53,17 @@ export function registerRibbonMacroCommands(params: {
    * secondary editor state so command palette/keybindings cannot bypass ribbon disabling.
    */
   isEditing?: (() => boolean) | null;
+  /**
+   * Optional spreadsheet read-only predicate. When omitted, macro commands are assumed to be runnable.
+   *
+   * The desktop ribbon disables macro commands in read-only collab roles; guard execution so
+   * command palette/keybindings cannot bypass that state.
+   */
+  isReadOnly?: (() => boolean) | null;
 }): void {
-  const { commandRegistry, handlers, isEditing = null } = params;
+  const { commandRegistry, handlers, isEditing = null, isReadOnly = null } = params;
   const isEditingFn = isEditing ?? (() => false);
+  const isReadOnlyFn = isReadOnly ?? (() => false);
   const {
     openPanel,
     focusScriptEditorPanel,
@@ -224,6 +232,7 @@ export function registerRibbonMacroCommands(params: {
       titleForCommand(commandId),
       () => {
         if (isEditingFn()) return;
+        if (isReadOnlyFn()) return;
         return delegateTo ? commandRegistry.executeCommand(delegateTo) : runCommand(commandId);
       },
       {

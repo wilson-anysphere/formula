@@ -1075,7 +1075,7 @@ export function registerDesktopCommands(params: {
   }
 
   if (ribbonMacroHandlers) {
-    registerRibbonMacroCommands({ commandRegistry, handlers: ribbonMacroHandlers, isEditing: isEditingFn });
+    registerRibbonMacroCommands({ commandRegistry, handlers: ribbonMacroHandlers, isEditing: isEditingFn, isReadOnly });
   }
 
   if (dataQueriesHandlers) {
@@ -1091,6 +1091,7 @@ export function registerDesktopCommands(params: {
       layoutController,
       refreshRibbonUiState,
       isEditing: isEditingFn,
+      isReadOnly,
       ...dataQueriesHandlers,
       focusAfterExecute,
     });
