@@ -146,13 +146,6 @@ impl WorkbookArchive {
         file.rewind().context("rewind workbook stream")?;
 
         if n >= OLE_MAGIC.len() && header == OLE_MAGIC {
-            let password = password.ok_or_else(|| {
-                anyhow!(
-                    "workbook {} is encrypted; provide a password (e.g. --password)",
-                    path.display()
-                )
-            })?;
-
             let mut bytes = Vec::new();
             file.read_to_end(&mut bytes)
                 .with_context(|| format!("read workbook {}", path.display()))?;
@@ -163,6 +156,13 @@ impl WorkbookArchive {
                     path.display()
                 ));
             }
+
+            let password = password.ok_or_else(|| {
+                anyhow!(
+                    "workbook {} is encrypted; provide a password (e.g. --password)",
+                    path.display()
+                )
+            })?;
 
             let decrypted = decrypt_ole_encrypted_ooxml_with_office_crypto(&bytes, password)
                 .with_context(|| format!("decrypt workbook {}", path.display()))?;
