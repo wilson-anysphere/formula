@@ -8304,7 +8304,15 @@ export class SpreadsheetApp {
       secondary.container.focus?.();
     }
 
-    this.selectDrawingById(hit.id);
+    // Avoid redundant selection + redraw work on repeated clicks within the already-selected drawing
+    // (common when opening context menus).
+    if (hit.id !== prevSelected) {
+      this.selectDrawingById(hit.id);
+    } else if (this.selectedChartId != null) {
+      // Drawings and charts are mutually exclusive selections. If the state is ever out of sync,
+      // prefer keeping the drawing selected when the user clicks it again.
+      this.setSelectedChartId(null);
+    }
 
     if (isContextClick) {
       // Tag the pointer event so the shared-grid selection canvas can avoid moving the active cell
