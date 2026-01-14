@@ -1521,7 +1521,15 @@ Proposed WASM binding validation rules (if/when implemented):
 - `variableCells` should not contain duplicates (not currently validated by Rust); duplicates would cause multiple decision variables to write to the same cell (last write wins).
 - `constraintCells` should not contain duplicates (not currently validated); duplicates are allowed but can make constraints ambiguous in UI.
 - `problem.constraints[*].index` must be within `[0, constraintCells.length)`.
-- Numeric fields in `options` / `problem` should be finite; integer-valued fields should be integers.
+- Numeric fields in `problem` / `options` should be finite (no NaN); integer-valued fields should be integers.
+  - Variable specs: `lower`/`upper` may be `±Infinity` for unbounded, but should not be `NaN`. Prefer finite bounds for integer/binary vars.
+  - Constraint specs: `rhs` should be finite; `tolerance` should be `>= 0`.
+  - Objective: if `kind === "target"`, require finite `targetValue` and `targetTolerance >= 0`.
+  - `options.maxIterations` should be an integer `> 0`; `options.tolerance` should be `>= 0`.
+  - Simplex options: `maxPivots`/`maxBnbNodes` should be integers `> 0`; `integerTolerance >= 0`.
+  - GRG options: `diffStep > 0`, `penaltyWeight >= 0`, `penaltyGrowth >= 1`, `lineSearchShrink` in `(0, 1)`, `lineSearchMaxSteps` integer `> 0`.
+  - Evolutionary options: `populationSize` integer `> 0`, `eliteCount` integer in `[0, populationSize]`,
+    `mutationRate`/`crossoverRate` in `[0, 1]`, `penaltyWeight >= 0`, `seed` is a non-negative safe integer.
 
 WASM binding return shape (suggested):
 
