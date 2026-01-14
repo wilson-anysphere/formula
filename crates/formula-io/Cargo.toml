@@ -29,6 +29,7 @@ cfb = "0.10"
 encoding_rs = "0.8"
 # MS-OFFCRYPTO Standard (CryptoAPI) uses MD5 in its password verifier/KDF.
 # Keep the dependency name `md5` for compatibility with existing call sites.
+# (Avoid adding a separate `md-5 = ...` entry; use this renamed dep to prevent duplication.)
 md5 = { package = "md-5", version = "0.10" }
 formula-columnar = { path = "../formula-columnar", optional = true, features = ["arrow"] }
 formula-fs = { path = "../formula-fs" }
