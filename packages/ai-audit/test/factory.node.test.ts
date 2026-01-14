@@ -124,6 +124,14 @@ describe("createDefaultAIAuditStore (node entrypoint)", () => {
     expect(unwrap(store)).toBeInstanceOf(LocalStorageAIAuditStore);
   });
 
+  it('prefer: "indexeddb" respects bounded:false when falling back to localStorage', async () => {
+    const storage = new MemoryLocalStorage();
+    Object.defineProperty(globalThis as any, "localStorage", { value: storage, configurable: true });
+
+    const store = await createDefaultAIAuditStore({ prefer: "indexeddb", bounded: false });
+    expect(store).toBeInstanceOf(LocalStorageAIAuditStore);
+  });
+
   it('prefer: "indexeddb" falls back to MemoryAIAuditStore (bounded by default) when localStorage access throws', async () => {
     Object.defineProperty(globalThis as any, "localStorage", {
       configurable: true,
@@ -135,6 +143,18 @@ describe("createDefaultAIAuditStore (node entrypoint)", () => {
     const store = await createDefaultAIAuditStore({ prefer: "indexeddb" });
     expect(store).toBeInstanceOf(BoundedAIAuditStore);
     expect(unwrap(store)).toBeInstanceOf(MemoryAIAuditStore);
+  });
+
+  it('prefer: "indexeddb" respects bounded:false when falling back to memory', async () => {
+    Object.defineProperty(globalThis as any, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("no localStorage");
+      }
+    });
+
+    const store = await createDefaultAIAuditStore({ prefer: "indexeddb", bounded: false });
+    expect(store).toBeInstanceOf(MemoryAIAuditStore);
   });
 
   it('prefer: "localstorage" chooses LocalStorageAIAuditStore when localStorage is available', async () => {
