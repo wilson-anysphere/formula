@@ -5171,6 +5171,7 @@ mod tests {
         workbook.preserved_pivot_parts = Some(PreservedPivotParts {
             content_types_xml: b"<Types/>".to_vec(),
             parts: BTreeMap::new(),
+            workbook_sheets: Vec::new(),
             workbook_pivot_caches: None,
             workbook_pivot_cache_rels: Vec::new(),
             sheet_pivot_tables: pivot_tables,
@@ -5310,6 +5311,7 @@ mod tests {
         workbook.preserved_pivot_parts = Some(PreservedPivotParts {
             content_types_xml: b"<Types/>".to_vec(),
             parts: BTreeMap::new(),
+            workbook_sheets: Vec::new(),
             workbook_pivot_caches: None,
             workbook_pivot_cache_rels: Vec::new(),
             sheet_pivot_tables: BTreeMap::from([
