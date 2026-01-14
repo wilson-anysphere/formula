@@ -1,4 +1,4 @@
-import type { Anchor, DrawingObject } from "./types";
+import { createDrawingObjectId, type Anchor, type DrawingObject } from "./types";
 import { pxToEmu } from "./overlay";
 
 /**
@@ -52,7 +52,12 @@ export function duplicateSelected(
   const dyEmu = pxToEmu(offsetPx);
 
   const normalized = normalizeZOrder(objects);
-  const nextId = nextDrawingId(normalized);
+  // Drawing ids must be globally unique across collaborators; avoid deterministic counters like
+  // `max + 1` that can collide when two users duplicate simultaneously.
+  let nextId = createDrawingObjectId();
+  while (normalized.some((o) => o.id === nextId)) {
+    nextId = createDrawingObjectId();
+  }
   const clone: DrawingObject = {
     ...deepCloneDrawingObject(source),
     id: nextId,
@@ -127,14 +132,6 @@ function reorderZOrder(objects: DrawingObject[], id: number, mode: ReorderMode):
   return changed ? reordered : normalized;
 }
 
-function nextDrawingId(objects: DrawingObject[]): number {
-  let max = 0;
-  for (const obj of objects) {
-    if (obj.id > max) max = obj.id;
-  }
-  return max + 1;
-}
-
 function deepCloneDrawingObject(obj: DrawingObject): DrawingObject {
   // DrawingObject is plain data (no functions/classes) so structured cloning is safe here.
   // Using JSON stringify avoids relying on structuredClone availability in older runtimes.
@@ -182,4 +179,3 @@ function shiftAnchor(anchor: Anchor, dxEmu: number, dyEmu: number): Anchor {
       };
   }
 }
-
