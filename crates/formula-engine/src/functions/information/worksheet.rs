@@ -295,7 +295,8 @@ fn cell_number_format<'a>(
     sheet_id: &SheetId,
     addr: CellAddr,
 ) -> Option<&'a str> {
-    resolve_number_format(ctx, sheet_id, addr)
+    ctx.get_cell_number_format(sheet_id, addr)
+        .or_else(|| resolve_number_format(ctx, sheet_id, addr))
 }
 
 fn format_options_for_cell(ctx: &dyn FunctionContext) -> formula_format::FormatOptions {

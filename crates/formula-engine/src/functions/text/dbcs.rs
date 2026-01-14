@@ -767,7 +767,6 @@ fn encode_bytes_len(codepage: u16, text: &str) -> usize {
         // Best-effort fallback: treat byte count as character count.
         return text.chars().count();
     };
-
     // `encoding_rs::Encoding::encode` emits HTML numeric character references for unmappable
     // characters, which is Web-correct but not what we want for Excel byte-count semantics. We
     // instead count the number of bytes that would be produced by the encoding while treating any

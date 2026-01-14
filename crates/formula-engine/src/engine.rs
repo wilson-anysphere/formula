@@ -3272,6 +3272,9 @@ impl Engine {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         let addr = parse_a1(addr)?;
 
+        let format_pattern =
+            format_pattern.and_then(|s| if s.trim().is_empty() { None } else { Some(s) });
+
         // Keep the same safety bounds as `set_cell_value`/formula compilation paths.
         if addr.row >= i32::MAX as u32 {
             return Err(EngineError::Address(
@@ -3283,24 +3286,22 @@ impl Engine {
             sheet: sheet_id,
             addr,
         };
-        let normalized =
-            format_pattern.and_then(|s| if s.trim().is_empty() { None } else { Some(s) });
-
         let existing = self
             .workbook
             .get_cell(key)
             .and_then(|cell| cell.number_format.as_deref());
-        if existing == normalized.as_deref() {
+        if existing == format_pattern.as_deref() {
             return Ok(());
         }
 
-        let sheet_dims_changed = self.workbook.grow_sheet_dimensions(sheet_id, addr);
+        let sheet_dims_changed =
+            format_pattern.is_some() && self.workbook.grow_sheet_dimensions(sheet_id, addr);
         if sheet_dims_changed {
             self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
             self.mark_all_compiled_cells_dirty();
         }
 
-        match normalized {
+        match format_pattern {
             Some(pattern) => {
                 let cell = self.workbook.get_or_create_cell_mut(key);
                 cell.number_format = Some(pattern);
@@ -3328,7 +3329,6 @@ impl Engine {
         // In "precision as displayed" mode, cell number format changes can affect stored numeric
         // values at formula boundaries, even when the formula itself is unchanged. Mark the cell
         // dirty so it is re-evaluated on the next recalculation tick.
-        let mut needs_recalc = sheet_dims_changed;
         if !self.calc_settings.full_precision {
             let has_formula = self
                 .workbook
@@ -3339,11 +3339,11 @@ impl Engine {
                 self.mark_dirty_including_self_with_reasons(key);
                 self.calc_graph.mark_dirty(cell_id);
                 self.sync_dirty_from_calc_graph();
-                needs_recalc = true;
             }
         }
 
-        if needs_recalc && self.calc_settings.calculation_mode != CalculationMode::Manual {
+        // Number format changes affect volatile metadata functions (e.g. `CELL("format")`).
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
         Ok(())
@@ -10662,6 +10662,7 @@ struct Snapshot {
     style_ids: HashMap<CellKey, u32>,
     phonetics: HashMap<CellKey, String>,
     formulas: HashMap<CellKey, String>,
+    number_formats: HashMap<CellKey, String>,
     /// Stable ordering of stored cell keys (sheet, row, col) for deterministic sparse iteration.
     ///
     /// The evaluator's `iter_reference_cells` prefers iterating stored cells when the backend
@@ -10768,6 +10769,7 @@ impl Snapshot {
         let mut phonetics = HashMap::new();
         let mut style_ids = HashMap::new();
         let mut formulas = HashMap::new();
+        let mut number_formats = HashMap::new();
         let mut ordered_cells = BTreeSet::new();
         for (sheet_id, sheet) in workbook.sheets.iter().enumerate() {
             if !workbook.sheet_exists(sheet_id) {
@@ -10793,6 +10795,9 @@ impl Snapshot {
                 style_ids.insert(key, cell.style_id);
                 if let Some(formula) = cell.formula.as_ref() {
                     formulas.insert(key, formula.clone());
+                }
+                if let Some(number_format) = cell.number_format.as_ref() {
+                    number_formats.insert(key, number_format.clone());
                 }
                 ordered_cells.insert(key);
             }
@@ -10910,6 +10915,7 @@ impl Snapshot {
             style_ids,
             phonetics,
             formulas,
+            number_formats,
             ordered_cells,
             spill_end_by_origin,
             spill_origin_by_cell,
@@ -11156,6 +11162,87 @@ impl crate::eval::ValueResolver for Snapshot {
 
     fn workbook_filename(&self) -> Option<&str> {
         self.workbook_filename.as_deref()
+    }
+
+    fn get_cell_number_format(&self, sheet_id: usize, addr: CellAddr) -> Option<&str> {
+        if !self.sheet_exists(sheet_id) {
+            return None;
+        }
+
+        let (rows, cols) = self.sheet_dimensions(sheet_id);
+        if addr.row >= rows || addr.col >= cols {
+            return None;
+        }
+
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
+
+        // Explicit per-cell override always wins.
+        if let Some(fmt) = self.number_formats.get(&key) {
+            return Some(fmt.as_str());
+        }
+
+        // Spilled outputs inherit formatting from the spill origin cell.
+        if let Some(origin) = self.spill_origin_by_cell.get(&key).copied() {
+            if origin != key {
+                return self.get_cell_number_format(origin.sheet, origin.addr);
+            }
+        }
+
+        let sheet_style_id = self.sheet_default_style_id(sheet_id).unwrap_or(0);
+        let col_style_id = self
+            .col_properties
+            .get(sheet_id)
+            .and_then(|cols| cols.get(&addr.col))
+            .and_then(|props| props.style_id)
+            .unwrap_or(0);
+        let row_style_id = self
+            .row_properties
+            .get(sheet_id)
+            .and_then(|rows| rows.get(&addr.row))
+            .and_then(|props| props.style_id)
+            .unwrap_or(0);
+        let run_style_id = self
+            .format_runs_by_col
+            .get(sheet_id)
+            .and_then(|cols| cols.get(&addr.col))
+            .map(|runs| {
+                // Runs are expected to be sorted and non-overlapping, but use a conservative
+                // linear scan (last-match wins) to preserve deterministic behavior even if hosts
+                // provide unexpected overlaps.
+                let mut style_id = 0;
+                for run in runs {
+                    if addr.row < run.start_row {
+                        break;
+                    }
+                    if addr.row >= run.end_row_exclusive {
+                        continue;
+                    }
+                    style_id = run.style_id;
+                }
+                style_id
+            })
+            .unwrap_or(0);
+        let cell_style_id = self.cell_style_id(sheet_id, addr);
+
+        // Style precedence matches DocumentController layering:
+        // sheet < col < row < range-run < cell.
+        //
+        // When a style does not specify a number format (`number_format=None`), it is treated as
+        // "inherit" so lower-precedence layers can contribute the number format.
+        for style_id in [cell_style_id, run_style_id, row_style_id, col_style_id, sheet_style_id] {
+            if let Some(fmt) = self
+                .styles
+                .get(style_id)
+                .and_then(|style| style.number_format.as_deref())
+            {
+                return Some(fmt);
+            }
+        }
+
+        None
     }
 
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value {

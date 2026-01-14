@@ -1256,6 +1256,74 @@ fn cell_format_color_and_parentheses_reflect_number_format() {
 }
 
 #[test]
+fn cell_format_color_and_parentheses_reflect_cell_number_format_override() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine
+        .set_cell_number_format(
+            "Sheet1",
+            "A1",
+            Some("__builtin_numFmtId:12".to_string()),
+        )
+        .expect("set number format");
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
+        .unwrap();
+
+    // Color/parentheses flags are derived from the explicit negative section.
+    engine
+        .set_cell_number_format("Sheet1", "A2", Some("0;[Red](0)".to_string()))
+        .expect("set number format");
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"color\",A2)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=CELL(\"parentheses\",A2)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("N".to_string())
+    );
+    assert_number(&engine.get_cell_value("Sheet1", "B2"), 1.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B3"), 1.0);
+}
+
+#[test]
+fn cell_format_recalculates_when_cell_number_format_changes() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine
+        .set_cell_number_format(
+            "Sheet1",
+            "A1",
+            Some("__builtin_numFmtId:12".to_string()),
+        )
+        .expect("set number format");
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("N".to_string())
+    );
+
+    // Change only the format metadata; dependent formulas should refresh on the next recalc.
+    engine
+        .set_cell_number_format("Sheet1", "A1", None)
+        .expect("clear number format");
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("G".to_string())
+    );
+}
+
+#[test]
 fn cell_format_color_and_parentheses_fallback_to_general_for_external_refs() {
     use formula_engine::Engine;
 
