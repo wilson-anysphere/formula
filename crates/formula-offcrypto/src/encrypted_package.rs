@@ -196,6 +196,44 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     #[test]
+    fn ciphertext_length_not_multiple_of_16_errors_before_invoking_decryptor() {
+        // total_size=0, but provide a non-block-aligned ciphertext tail (15 bytes).
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.extend_from_slice(&[0u8; 15]);
+
+        let err = decrypt_encrypted_package(bytes.as_slice(), |_idx, _ct, _pt| {
+            panic!("decryptor should not be invoked for invalid ciphertext framing");
+        })
+        .expect_err("expected invalid ciphertext length");
+
+        assert_eq!(err, OffcryptoError::InvalidCiphertextLength { len: 15 });
+    }
+
+    #[test]
+    fn truncated_ciphertext_for_large_total_size_errors_without_large_allocation() {
+        // `original_size` is attacker-controlled. Ensure we reject obviously truncated ciphertext
+        // *before* attempting to allocate the full output buffer.
+        let total_size: u64 = 100 * 1024 * 1024; // 100MiB
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&total_size.to_le_bytes());
+        bytes.extend_from_slice(&[0u8; 16]); // 1 AES block of ciphertext (far too short)
+
+        MAX_ALLOC.store(0, Ordering::Relaxed);
+
+        let err = decrypt_encrypted_package(bytes.as_slice(), |_idx, _ct, _pt| Ok(()))
+            .expect_err("expected truncated ciphertext");
+        assert!(matches!(err, OffcryptoError::Truncated { .. }));
+
+        let max_alloc = MAX_ALLOC.load(Ordering::Relaxed);
+        assert!(
+            max_alloc < 10 * 1024 * 1024,
+            "expected no large allocations, observed max allocation request: {max_alloc} bytes"
+        );
+    }
+
+    #[test]
     fn decrypt_encrypted_package_identity_reads_size_and_payload() {
         let total_size: u64 = 10;
         let mut bytes = Vec::new();
