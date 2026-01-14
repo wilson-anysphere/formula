@@ -7515,10 +7515,6 @@ registerDesktopCommands({
   isEditing: isSpreadsheetEditing,
   focusAfterSheetNavigation: focusAfterSheetNavigationFromCommandRef,
   getVisibleSheetIds: () => listSheetsForUi().map((sheet) => sheet.id),
-  sheetStructureHandlers: {
-    insertSheet: handleAddSheet,
-    deleteActiveSheet: handleDeleteActiveSheet,
-  },
   ensureExtensionsLoaded: () => ensureExtensionsLoadedRef?.() ?? Promise.resolve(),
   onExtensionsLoaded: () => {
     updateKeybindingsRef?.();
@@ -8860,34 +8856,34 @@ mountRibbon(ribbonReactRoot, {
 });
 
 function handleRibbonCommand(commandId: string): void {
-    if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
-      return;
-    }
+  if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
+    return;
+  }
 
-    switch (commandId) {
-      case "home.cells.format":
-        // This command is a dropdown with menu items; the top-level command is not expected
-        // to fire when the menu is present. Keep this as a fallback.
+  switch (commandId) {
+    case "home.cells.format":
+      // This command is a dropdown with menu items; the top-level command is not expected
+      // to fire when the menu is present. Keep this as a fallback.
+      return;
+    case "home.cells.format.organizeSheets":
+      openOrganizeSheets();
+      return;
+    case "home.cells.insert.insertSheet":
+      if (isSpreadsheetEditing() || app.isReadOnly()) return;
+      void handleAddSheet();
+      return;
+    case "home.cells.delete.deleteSheet":
+      if (isSpreadsheetEditing() || app.isReadOnly()) return;
+      void handleDeleteActiveSheet();
+      return;
+    default:
+      if (commandId.startsWith("file.")) {
+        showToast(`File command not implemented: ${commandId}`);
         return;
-      case "home.cells.format.organizeSheets":
-        openOrganizeSheets();
-        return;
-      case "home.cells.insert.insertSheet":
-        if (isSpreadsheetEditing() || app.isReadOnly()) return;
-        void handleAddSheet();
-        return;
-      case "home.cells.delete.deleteSheet":
-        if (isSpreadsheetEditing() || app.isReadOnly()) return;
-        void handleDeleteActiveSheet();
-        return;
-      default:
-        if (commandId.startsWith("file.")) {
-          showToast(`File command not implemented: ${commandId}`);
-          return;
-        }
-        showToast(`Ribbon: ${commandId}`);
-        return;
-    }
+      }
+      showToast(`Ribbon: ${commandId}`);
+      return;
+  }
 }
 // In Yjs-backed collaboration mode the workbook is continuously persisted, but
 // DocumentController's `isDirty` flips to true on essentially every local/remote
