@@ -830,6 +830,91 @@ impl<'de, const MAX_BYTES: usize> Deserialize<'de> for LimitedString<MAX_BYTES> 
     }
 }
 
+/// IPC string wrapper for script code payloads with a maximum byte length.
+///
+/// This uses a more user-friendly error message than `LimitedString` when the limit is exceeded
+/// since it is surfaced directly to users via the Python/TypeScript execution UI.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LimitedScriptCode<const MAX_BYTES: usize>(String);
+
+impl<const MAX_BYTES: usize> LimitedScriptCode<MAX_BYTES> {
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl<const MAX_BYTES: usize> AsRef<str> for LimitedScriptCode<MAX_BYTES> {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<const MAX_BYTES: usize> Serialize for LimitedScriptCode<MAX_BYTES> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de, const MAX_BYTES: usize> Deserialize<'de> for LimitedScriptCode<MAX_BYTES> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct ScriptCodeVisitor<const MAX_BYTES: usize>;
+
+        impl<const MAX_BYTES: usize> ScriptCodeVisitor<MAX_BYTES> {
+            fn validate<E>(value: &str) -> Result<(), E>
+            where
+                E: de::Error,
+            {
+                if value.len() > MAX_BYTES {
+                    return Err(E::custom(format!(
+                        "Script is too large (max {MAX_BYTES} bytes)"
+                    )));
+                }
+                Ok(())
+            }
+        }
+
+        impl<'de, const MAX_BYTES: usize> de::Visitor<'de> for ScriptCodeVisitor<MAX_BYTES> {
+            type Value = LimitedScriptCode<MAX_BYTES>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                write!(formatter, "a script string (max {MAX_BYTES} bytes)")
+            }
+
+            fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Self::validate::<E>(v)?;
+                Ok(LimitedScriptCode(v.to_owned()))
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Self::validate::<E>(v)?;
+                Ok(LimitedScriptCode(v.to_owned()))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Self::validate::<E>(&v)?;
+                Ok(LimitedScriptCode(v))
+            }
+        }
+
+        deserializer.deserialize_str(ScriptCodeVisitor::<MAX_BYTES>)
+    }
+}
+
 /// IPC-only cell value type that only accepts scalar JSON values.
 ///
 /// This rejects arrays/objects immediately during deserialization to avoid allocating or
@@ -5156,7 +5241,7 @@ pub async fn run_macro(
 pub async fn run_python_script(
     window: tauri::WebviewWindow,
     workbook_id: Option<String>,
-    code: String,
+    code: LimitedScriptCode<{ crate::ipc_limits::MAX_SCRIPT_CODE_BYTES }>,
     permissions: Option<PythonPermissions>,
     timeout_ms: Option<u64>,
     max_memory_bytes: Option<u64>,
@@ -5170,7 +5255,7 @@ pub async fn run_python_script(
 
     let _ = workbook_id;
 
-    crate::ipc_limits::enforce_script_code_size(&code)?;
+    let code = code.into_inner();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -6208,7 +6293,7 @@ pub async fn validate_vba_migration(
     workbook_id: Option<String>,
     macro_id: String,
     target: MigrationTarget,
-    code: String,
+    code: LimitedScriptCode<{ crate::ipc_limits::MAX_SCRIPT_CODE_BYTES }>,
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MigrationValidationReport, String> {
@@ -6217,7 +6302,7 @@ pub async fn validate_vba_migration(
     ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
-    crate::ipc_limits::enforce_script_code_size(&code)?;
+    let code = code.into_inner();
     let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
@@ -7937,6 +8022,18 @@ mod tests {
             .expect_err("expected oversized print area ranges to fail");
         assert!(
             err.to_string().contains("max") && err.to_string().contains("4"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn limited_script_code_rejects_oversized_payloads() {
+        type ShortCode = LimitedScriptCode<4>;
+
+        let err = serde_json::from_str::<ShortCode>("\"abcde\"")
+            .expect_err("expected oversized code to fail");
+        assert!(
+            err.to_string().contains("Script is too large") && err.to_string().contains("4"),
             "unexpected error: {err}"
         );
     }
