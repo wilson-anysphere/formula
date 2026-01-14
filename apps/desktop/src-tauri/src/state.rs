@@ -1946,7 +1946,7 @@ impl AppState {
         let Some(storage) = self.persistent_storage() else {
             return false;
         };
-        let sheet_ids = match self.get_workbook() {
+        let sheet_ids: Vec<String> = match self.get_workbook() {
             Ok(workbook) => workbook.sheets.iter().map(|s| s.id.clone()).collect(),
             Err(_) => return false,
         };
