@@ -162,6 +162,49 @@ fn asc_and_dbcs_convert_under_cp932() {
 }
 
 #[test]
+fn byte_count_text_functions_use_dbcs_byte_semantics_under_cp932() {
+    let mut sheet = TestSheet::new();
+    sheet.set_text_codepage(932);
+
+    // Byte-count functions should treat Hiragana/Kanji as 2 bytes under Shift_JIS.
+    assert_eq!(sheet.eval(r#"=LENB("あ")"#), Value::Number(2.0));
+    assert_eq!(sheet.eval(r#"=LENB("Aあ")"#), Value::Number(3.0));
+
+    // LEFTB/RIGHTB/MIDB operate on byte counts, truncating at character boundaries.
+    assert_eq!(
+        sheet.eval(r#"=LEFTB("A漢B",2)"#),
+        Value::Text("A".to_string())
+    );
+    assert_eq!(
+        sheet.eval(r#"=LEFTB("A漢B",3)"#),
+        Value::Text("A漢".to_string())
+    );
+    assert_eq!(
+        sheet.eval(r#"=RIGHTB("A漢B",2)"#),
+        Value::Text("B".to_string())
+    );
+    assert_eq!(
+        sheet.eval(r#"=RIGHTB("A漢B",3)"#),
+        Value::Text("漢B".to_string())
+    );
+    assert_eq!(
+        sheet.eval(r#"=MIDB("A漢B",2,2)"#),
+        Value::Text("漢".to_string())
+    );
+
+    // FINDB/SEARCHB return 1-indexed byte positions.
+    assert_eq!(sheet.eval(r#"=FINDB("漢","A漢B")"#), Value::Number(2.0));
+    assert_eq!(sheet.eval(r#"=SEARCHB("b","A漢B")"#), Value::Number(4.0));
+    assert_eq!(sheet.eval(r#"=SEARCHB("漢*","A漢B")"#), Value::Number(2.0));
+
+    // REPLACEB uses byte-based start/length.
+    assert_eq!(
+        sheet.eval(r#"=REPLACEB("A漢B",2,2,"Z")"#),
+        Value::Text("AZB".to_string())
+    );
+}
+
+#[test]
 fn phonetic_reads_cell_metadata_or_falls_back_to_text() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", "abc");
