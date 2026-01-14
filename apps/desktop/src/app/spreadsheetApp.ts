@@ -257,6 +257,14 @@ const MAX_FORMULA_RANGE_PREVIEW_CELLS = 100;
 const FORMULA_RANGE_PREVIEW_SAMPLE_ROWS = 3;
 const FORMULA_RANGE_PREVIEW_SAMPLE_COLS = 3;
 
+// Guardrails for PNG decompression bombs: a PNG can advertise extremely large dimensions while the
+// compressed payload remains small. Decoding such images can allocate huge bitmaps and hang/crash
+// the renderer.
+//
+// Keep these in sync with the guards in `ImageBitmapCache` and the collaboration image-bytes binder.
+const MAX_PNG_DIMENSION = 10_000;
+const MAX_PNG_PIXELS = 50_000_000;
+
 const LINE_DASH_NONE: number[] = [];
 const LINE_DASH_FILL_PREVIEW: number[] = [4, 3];
 let formulaRangePreviewTooltipIdCounter = 0;
@@ -1213,7 +1221,7 @@ export class SpreadsheetApp {
   private sharedGridRowsVersion = -1;
   private sharedGridColsVersion = -1;
 
-  private readonly workbookImageBitmaps = new ImageBitmapCache();
+  private readonly workbookImageBitmaps = new ImageBitmapCache({ negativeCacheMs: 250 });
   private activeSheetBackgroundImageId: string | null = null;
   private activeSheetBackgroundBitmap: ImageBitmap | null = null;
   private activeSheetBackgroundLoadToken = 0;
@@ -6363,9 +6371,11 @@ export class SpreadsheetApp {
         // Guard against PNG decompression bombs: small compressed bytes can still decode into huge bitmaps.
         const dims = readPngDimensions(bytes);
         if (dims) {
-          const MAX_DIMENSION = 10_000;
-          const MAX_PIXELS = 50_000_000;
-          if (dims.width > MAX_DIMENSION || dims.height > MAX_DIMENSION || dims.width * dims.height > MAX_PIXELS) {
+          if (
+            dims.width > MAX_PNG_DIMENSION ||
+            dims.height > MAX_PNG_DIMENSION ||
+            dims.width * dims.height > MAX_PNG_PIXELS
+          ) {
             return {
               kind: "skippedDimensions",
               name: typeof file?.name === "string" ? file.name : "",
@@ -9904,9 +9914,11 @@ export class SpreadsheetApp {
       // we can cheaply inspect without decoding.
       const dims = readPngDimensions(bytes);
       if (dims) {
-        const MAX_DIMENSION = 10_000;
-        const MAX_PIXELS = 50_000_000;
-        if (dims.width > MAX_DIMENSION || dims.height > MAX_DIMENSION || dims.width * dims.height > MAX_PIXELS) {
+        if (
+          dims.width > MAX_PNG_DIMENSION ||
+          dims.height > MAX_PNG_DIMENSION ||
+          dims.width * dims.height > MAX_PNG_PIXELS
+        ) {
           try {
             showToast(`Image dimensions too large (${dims.width}x${dims.height}). Choose a smaller image.`, "warning");
           } catch {
@@ -20063,11 +20075,13 @@ export class SpreadsheetApp {
     // Guard against PNG decompression bombs: small compressed bytes can still decode into huge bitmaps.
     const dims = readPngDimensions(bytes);
     if (dims) {
-      const MAX_DIMENSION = 10_000;
-      const MAX_PIXELS = 50_000_000;
-      if (dims.width > MAX_DIMENSION || dims.height > MAX_DIMENSION || dims.width * dims.height > MAX_PIXELS) {
+      if (
+        dims.width > MAX_PNG_DIMENSION ||
+        dims.height > MAX_PNG_DIMENSION ||
+        dims.width * dims.height > MAX_PNG_PIXELS
+      ) {
         try {
-          showToast("Image too large to paste.", "warning");
+          showToast(`Image dimensions too large (${dims.width}x${dims.height}). Choose a smaller image.`, "warning");
         } catch {
           // `showToast` requires a #toast-root; unit tests don't always include it.
         }
