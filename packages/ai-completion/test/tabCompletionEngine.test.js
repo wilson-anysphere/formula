@@ -2074,6 +2074,46 @@ test("Argument value suggestions use catalog arg_types (RANDBETWEEN suggests num
   );
 });
 
+test("Value-arg suggestions are pure insertions (ABS suggests left cell only when prefix matches)", async () => {
+  const engine = new TabCompletionEngine();
+
+  // Empty prefix: suggest left cell (A1) when editing in B1.
+  const emptyInput = "=ABS(";
+  const emptySuggestions = await engine.getSuggestions({
+    currentInput: emptyInput,
+    cursorPosition: emptyInput.length,
+    cellRef: { row: 0, col: 1 }, // B1
+    surroundingCells: createMockCellContext({}),
+  });
+  assert.ok(
+    emptySuggestions.some((s) => s.text === "=ABS(A1"),
+    `Expected ABS to suggest left cell for empty arg, got: ${emptySuggestions.map((s) => s.text).join(", ")}`
+  );
+
+  // Matching prefix: still suggest.
+  const aInput = "=ABS(A";
+  const aSuggestions = await engine.getSuggestions({
+    currentInput: aInput,
+    cursorPosition: aInput.length,
+    cellRef: { row: 0, col: 1 }, // B1
+    surroundingCells: createMockCellContext({}),
+  });
+  assert.ok(
+    aSuggestions.some((s) => s.text === "=ABS(A1"),
+    `Expected ABS to suggest A1 for the 'A' prefix, got: ${aSuggestions.map((s) => s.text).join(", ")}`
+  );
+
+  // Non-matching prefix: do not suggest (would require deleting typed text).
+  const vInput = "=ABS(V";
+  const vSuggestions = await engine.getSuggestions({
+    currentInput: vInput,
+    cursorPosition: vInput.length,
+    cellRef: { row: 0, col: 1 }, // B1
+    surroundingCells: createMockCellContext({}),
+  });
+  assert.equal(vSuggestions.length, 0);
+});
+
 test("Numeric argument suggestions work with a unary '-' prefix", async () => {
   const engine = new TabCompletionEngine();
 
