@@ -747,7 +747,7 @@ fn read_zip_part_optional<R: Read + std::io::Seek>(
             if file.is_dir() {
                 return Ok(None);
             }
-            let mut buf = Vec::with_capacity(file.size() as usize);
+            let mut buf = Vec::new();
             file.read_to_end(&mut buf)?;
             Ok(Some(buf))
         }
@@ -835,7 +835,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         // downstream lookups (which assume `xl/...`) working.
         let name = file.name();
         let name = name.strip_prefix('/').unwrap_or(name).to_string();
-        let mut buf = Vec::with_capacity(file.size() as usize);
+        let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
         parts.insert(name, buf);
     }

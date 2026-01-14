@@ -2532,7 +2532,7 @@ fn read_zip_part_optional<R: Read + Seek>(
         Err(zip::result::ZipError::FileNotFound) => return Ok(None),
         Err(err) => return Err(err.into()),
     };
-    let mut buf = Vec::with_capacity(file.size() as usize);
+    let mut buf = Vec::new();
     file.read_to_end(&mut buf)?;
     Ok(Some(buf))
 }
@@ -2897,7 +2897,7 @@ fn read_zip_part<R: Read + Seek>(
         return Ok(bytes.clone());
     }
     let mut file = open_zip_part(archive, name)?;
-    let mut buf = Vec::with_capacity(file.size() as usize);
+    let mut buf = Vec::new();
     file.read_to_end(&mut buf)?;
     cache.insert(name.to_string(), buf.clone());
     Ok(buf)

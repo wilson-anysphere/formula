@@ -1100,7 +1100,7 @@ fn read_zip_part_optional<R: Read + Seek>(
             if file.is_dir() {
                 return Ok(None);
             }
-            let mut buf = Vec::with_capacity(file.size() as usize);
+            let mut buf = Vec::new();
             file.read_to_end(&mut buf)
                 .map_err(|e| ChartExtractionError::XmlStructure(format!("io error: {e}")))?;
             Ok(Some(buf))
