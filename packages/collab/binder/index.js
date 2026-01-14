@@ -34,9 +34,13 @@ function isRecord(value) {
  * @returns {any}
  */
 function sanitizeDrawingsForPreservation(raw) {
+  if (raw === null || raw === undefined) return raw;
   const yArr = getYArray(raw);
   const isArr = Array.isArray(raw);
-  if (!yArr && !isArr) return raw;
+  // `drawings` should always be list-like. If it's a different type (e.g. a malicious Y.Text),
+  // treat it as invalid so we don't accidentally materialize it via `yjsValueToJson(...)` when
+  // preserving unknown view keys.
+  if (!yArr && !isArr) return [];
   /** @type {any[]} */
   const out = [];
   let changed = false;
