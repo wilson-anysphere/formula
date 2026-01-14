@@ -99,6 +99,66 @@ test("passes when LICENSE/NOTICE resources + Linux doc files are configured", ()
   assert.match(proc.stdout, /desktop-compliance: OK/i);
 });
 
+test("honors FORMULA_TAURI_CONF_PATH as a repo-root-relative path (independent of cwd)", () => {
+  const tmpRoot = path.join(repoRoot, "target");
+  mkdirSync(tmpRoot, { recursive: true });
+  const tmpdir = mkdtempSync(path.join(tmpRoot, "desktop-compliance-rel-"));
+  try {
+    const confPath = path.join(tmpdir, "tauri.conf.json");
+    const repoLicense = path.join(repoRoot, "LICENSE");
+    const repoNotice = path.join(repoRoot, "NOTICE");
+    writeFileSync(
+      confPath,
+      `${JSON.stringify(
+        {
+          mainBinaryName: "formula-desktop",
+          bundle: {
+            resources: [repoLicense, repoNotice],
+            fileAssociations: [],
+            linux: {
+              deb: {
+                files: {
+                  "usr/share/doc/formula-desktop/LICENSE": repoLicense,
+                  "usr/share/doc/formula-desktop/NOTICE": repoNotice,
+                },
+              },
+              rpm: {
+                files: {
+                  "usr/share/doc/formula-desktop/LICENSE": repoLicense,
+                  "usr/share/doc/formula-desktop/NOTICE": repoNotice,
+                },
+              },
+              appimage: {
+                files: {
+                  "usr/share/doc/formula-desktop/LICENSE": repoLicense,
+                  "usr/share/doc/formula-desktop/NOTICE": repoNotice,
+                },
+              },
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const proc = spawnSync(process.execPath, [scriptPath], {
+      cwd: path.join(repoRoot, "apps", "desktop"),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        FORMULA_TAURI_CONF_PATH: path.relative(repoRoot, confPath),
+      },
+    });
+    if (proc.error) throw proc.error;
+    assert.equal(proc.status, 0, proc.stderr || proc.stdout);
+    assert.match(proc.stdout, /desktop-compliance: OK/i);
+  } finally {
+    rmSync(tmpdir, { recursive: true, force: true });
+  }
+});
+
 test("fails when tauri.conf.json (in repo) points LICENSE at a non-root LICENSE file via bundle.linux.*.files", () => {
   const tmpRoot = path.join(repoRoot, "target");
   mkdirSync(tmpRoot, { recursive: true });

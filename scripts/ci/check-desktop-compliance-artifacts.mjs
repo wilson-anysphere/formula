@@ -6,9 +6,14 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const repoRootReal = fs.realpathSync(repoRoot);
 const defaultConfigPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
-const configPath = process.env.FORMULA_TAURI_CONF_PATH
-  ? path.resolve(process.env.FORMULA_TAURI_CONF_PATH)
-  : defaultConfigPath;
+const configPath = (() => {
+  const override = process.env.FORMULA_TAURI_CONF_PATH;
+  if (override && String(override).trim()) {
+    const p = String(override).trim();
+    return path.isAbsolute(p) ? p : path.join(repoRoot, p);
+  }
+  return defaultConfigPath;
+})();
 
 function safeRealpath(p) {
   try {
