@@ -3253,6 +3253,7 @@ export class FormulaBarView {
           // Only a few token kinds can plausibly contain `<`, `>`, or `&`:
           // - operators: `&`, `<`, `>`, `<=`, `<>`, ...
           // - strings: user-entered string literals can contain them
+          // - references: quoted sheet names / workbook prefixes can contain them (e.g. `'A&B'!A1`)
           // - unknown: defensive fallback
           if (kind === "operator") {
             if (text === "&") content = "&amp;";
@@ -3261,7 +3262,7 @@ export class FormulaBarView {
             else if (text.indexOf("&") !== -1 || text.indexOf("<") !== -1 || text.indexOf(">") !== -1) {
               content = escapeHtml(text);
             }
-          } else if (kind === "string" || kind === "unknown") {
+          } else if (kind === "string" || kind === "reference" || kind === "unknown") {
             if (text.indexOf("&") !== -1 || text.indexOf("<") !== -1 || text.indexOf(">") !== -1) {
               content = escapeHtml(text);
             }
