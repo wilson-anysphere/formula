@@ -5294,6 +5294,35 @@ fn refresh_pivot_registration(
                 );
 
                 let existing = sheet.get_cell(row, col);
+
+                // Apply number-format hints to the formula engine even when the workbook-side cell
+                // doesn't need to change. This is important for pivots that were rendered before we
+                // started syncing styles into the engine: their workbook values/formats might
+                // already match, but the engine would otherwise keep default (General) formatting,
+                // breaking pivot-of-pivot date inference and style-aware functions like `CELL()`.
+                let should_write_style = desired_number_format.is_some()
+                    || (existing.number_format.is_some() && desired_number_format.is_none());
+                if should_write_style {
+                    let style_id = desired_number_format
+                        .as_deref()
+                        .map(|fmt| {
+                            if let Some(existing) = style_ids_by_format.get(fmt) {
+                                *existing
+                            } else {
+                                let fmt = fmt.to_string();
+                                let style_id = engine.intern_style(formula_model::Style {
+                                    number_format: Some(fmt.clone()),
+                                    ..Default::default()
+                                });
+                                style_ids_by_format.insert(fmt, style_id);
+                                style_id
+                            }
+                        })
+                        .unwrap_or(0);
+                    style_writes
+                        .push((formula_model::CellRef::new(row as u32, col as u32), style_id));
+                }
+
                 let changed = existing.formula.is_some()
                     || existing.computed_value != desired_scalar
                     || existing.number_format.as_deref() != desired_number_format.as_deref();
@@ -5316,24 +5345,6 @@ fn refresh_pivot_registration(
                     formula: None,
                     display_value,
                 });
-
-                let style_id = desired_number_format
-                    .as_deref()
-                    .map(|fmt| {
-                        if let Some(existing) = style_ids_by_format.get(fmt) {
-                            *existing
-                        } else {
-                            let fmt = fmt.to_string();
-                            let style_id = engine.intern_style(formula_model::Style {
-                                number_format: Some(fmt.clone()),
-                                ..Default::default()
-                            });
-                            style_ids_by_format.insert(fmt, style_id);
-                            style_id
-                        }
-                    })
-                    .unwrap_or(0);
-                style_writes.push((formula_model::CellRef::new(row as u32, col as u32), style_id));
             }
         }
     }
