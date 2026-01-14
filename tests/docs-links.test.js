@@ -4,6 +4,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
+import { stripHtmlComments } from "../apps/desktop/test/sourceTextUtils.js";
+
 async function listFilesRecursively(dir) {
   /** @type {string[]} */
   const out = [];
@@ -63,7 +65,8 @@ test("docs: markdown links resolve to existing files", async () => {
 
   for (const file of files) {
     const raw = await fs.readFile(file, "utf8");
-    const markdown = stripFencedCodeBlocks(raw);
+    // Strip HTML comments so commented-out markdown links cannot satisfy or fail assertions.
+    const markdown = stripFencedCodeBlocks(stripHtmlComments(raw));
 
     for (const match of markdown.matchAll(linkRe)) {
       let url = match[1]?.trim() ?? "";
@@ -112,4 +115,3 @@ test("docs: markdown links resolve to existing files", async () => {
     assert.fail(msg);
   }
 });
-

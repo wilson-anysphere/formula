@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { expect, test } from "vitest";
 
+import { stripComments } from "../../../apps/desktop/test/sourceTextUtils.js";
+
 const browserSafeEntrypoints = [
   new URL("../src/index.js", import.meta.url),
   new URL("../src/embedding/hashEmbedder.js", import.meta.url),
@@ -86,7 +88,7 @@ async function scanTransitiveForNodeImports(entryPath: string): Promise<void> {
     if (visited.has(filePath)) return;
     visited.add(filePath);
 
-    const code = await readFile(filePath, "utf8");
+    const code = stripComments(await readFile(filePath, "utf8"));
     expect(code, `${filePath} should not statically import node:*`).not.toMatch(/from\s+["']node:/);
     expect(code, `${filePath} should not statically import node:*`).not.toMatch(/import\(\s*["']node:/);
     expect(code, `${filePath} should not statically import node:*`).not.toMatch(/\bimport\s+["']node:/);
@@ -105,7 +107,7 @@ async function scanTransitiveForNodeImports(entryPath: string): Promise<void> {
 
 test("browser-safe entrypoints do not contain static node:* imports", async () => {
   for (const url of browserSafeEntrypoints) {
-    const code = await readFile(url, "utf8");
+    const code = stripComments(await readFile(url, "utf8"));
     expect(code, `${url} should not statically import node:*`).not.toMatch(/from\s+["']node:/);
     expect(code, `${url} should not statically import node:*`).not.toMatch(/import\(\s*["']node:/);
     expect(code, `${url} should not statically import node:*`).not.toMatch(/\bimport\s+["']node:/);

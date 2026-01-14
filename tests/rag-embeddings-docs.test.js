@@ -4,6 +4,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
+import { stripHtmlComments } from "../apps/desktop/test/sourceTextUtils.js";
+
 const DOC_PATH = path.resolve(process.cwd(), "docs/05-ai-integration.md");
 
 /**
@@ -36,7 +38,8 @@ function extractSection(markdown, headingLine) {
 }
 
 test("docs: RAG Over Cells describes deterministic HashEmbedder embeddings (not user-configurable)", async () => {
-  const markdown = await fs.readFile(DOC_PATH, "utf8");
+  // Strip HTML comments so commented-out docs cannot satisfy or fail assertions.
+  const markdown = stripHtmlComments(await fs.readFile(DOC_PATH, "utf8"));
   const section = extractSection(markdown, "### RAG Over Cells");
   const lower = section.toLowerCase();
 

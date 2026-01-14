@@ -108,7 +108,8 @@ test("tokens.css defines required design tokens", () => {
 
 test("tokens.css defines the shared spacing scale (2px base) per mockups", () => {
   const tokensPath = path.join(__dirname, "..", "src", "styles", "tokens.css");
-  const css = fs.readFileSync(tokensPath, "utf8");
+  // Strip comments so commented-out token assignments cannot satisfy or fail assertions.
+  const css = stripCssComments(fs.readFileSync(tokensPath, "utf8"));
 
   const rootMatch = css.match(/:root\s*\{([\s\S]*?)\}/);
   assert.ok(rootMatch, "tokens.css missing :root block");

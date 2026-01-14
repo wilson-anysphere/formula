@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { CLIPBOARD_LIMITS } from "../platform/provider.js";
+import { stripRustComments } from "../../../test/sourceTextUtils.js";
 
 /**
  * Parse Rust `const`/`pub const` usize definitions from the clipboard module so we can keep JS
@@ -168,7 +169,7 @@ test("clipboard provider JS limits match Rust backend clipboard IPC guardrails",
   const here = path.dirname(fileURLToPath(import.meta.url));
   const repoRoot = path.resolve(here, "../../../../..");
   const rustPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "src", "clipboard", "mod.rs");
-  const rustText = await readFile(rustPath, "utf8");
+  const rustText = stripRustComments(await readFile(rustPath, "utf8"));
 
   const consts = parseUsizeConsts(rustText);
   const rustMaxPngBytes = evalConst("MAX_PNG_BYTES", consts, new Set());

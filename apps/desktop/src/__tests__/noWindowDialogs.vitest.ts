@@ -4,6 +4,8 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils";
+
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const SOURCE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"]);
@@ -42,24 +44,27 @@ async function collectSourceFiles(dir: string): Promise<string[]> {
 }
 
 function findViolationsInFileContent(content: string, relPath: string): string[] {
+  // Strip comments so commented-out `window.alert(...)` wiring cannot satisfy or fail assertions.
+  const stripped = stripComments(content);
+
   // Only compute line/column context when there is a match. The common case is that
   // there are *no* violations, so avoid splitting every file into lines (which gets
   // expensive as the codebase grows).
-  if (!WINDOW_DIALOG_RE.test(content)) return [];
+  if (!WINDOW_DIALOG_RE.test(stripped)) return [];
 
   const violations: string[] = [];
   const re = new RegExp(WINDOW_DIALOG_RE_SOURCE, "g");
+  const rawLines = content.split(/\r?\n/);
   re.lastIndex = 0;
   let match: RegExpExecArray | null = null;
-  while ((match = re.exec(content))) {
+  while ((match = re.exec(stripped))) {
     const idx = match.index;
-    const lineStart = content.lastIndexOf("\n", idx) + 1;
-    const lineEnd = content.indexOf("\n", idx);
-    const lineText = content.slice(lineStart, lineEnd === -1 ? content.length : lineEnd).trim();
+    const lineStart = stripped.lastIndexOf("\n", idx) + 1;
     // Best-effort line number: only needed when reporting violations, so a simple
     // split is fine here.
-    const lineNumber = content.slice(0, lineStart).split(/\r?\n/).length;
-    violations.push(`${relPath}:${lineNumber}: ${lineText}`);
+    const lineNumber = stripped.slice(0, lineStart).split(/\r?\n/).length;
+    const lineText = rawLines[lineNumber - 1] ?? "";
+    violations.push(`${relPath}:${lineNumber}: ${lineText.trim()}`);
   }
   return violations;
 }

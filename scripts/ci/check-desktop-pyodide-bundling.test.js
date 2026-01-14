@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { stripComments } from "../../apps/desktop/test/sourceTextUtils.js";
+import { stripComments, stripRustComments } from "../../apps/desktop/test/sourceTextUtils.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -141,7 +141,7 @@ test("vite build strips dist/pyodide unless FORMULA_BUNDLE_PYODIDE_ASSETS is set
 
 test("desktop Pyodide version + required assets stay in sync (ensure script / Rust / python-runtime)", () => {
   const ensureSrc = readText("apps/desktop/scripts/ensure-pyodide-assets.mjs");
-  const rustSrc = readText("apps/desktop/src-tauri/src/pyodide_assets.rs");
+  const rustSrc = stripRustComments(readText("apps/desktop/src-tauri/src/pyodide_assets.rs"));
 
   const ensureVersion = extractPyodideVersionFromEnsureScript(ensureSrc);
   const rustVersion = extractPyodideVersionFromRust(rustSrc);

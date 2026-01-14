@@ -4,6 +4,8 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "../../__tests__/sourceTextUtils";
+
 const TAURI_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC_ROOT = path.resolve(TAURI_DIR, "..");
 
@@ -474,7 +476,8 @@ describe("tauri/invoke guardrails", () => {
       if (normalized === "tauri/api.ts" || normalized === "tauri/api.js") continue;
       if (normalized === "tauri/invoke.js" || normalized === "tauri/invoke.ts") continue;
 
-      const content = await readFile(absPath, "utf8");
+      // Strip comments so commented-out `__TAURI__.core.invoke` access cannot satisfy or fail this guardrail.
+      const content = stripComments(await readFile(absPath, "utf8"));
       // Fast-path: if the file doesn't mention the Tauri globals at all, none of the banned
       // patterns can match (including the alias-based checks in this guard).
       if (!content.includes("__TAURI__")) continue;

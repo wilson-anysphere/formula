@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 
 import { expect, test } from "vitest";
 
+import { stripComments } from "../../../apps/desktop/test/sourceTextUtils.js";
+
 function extractStarExports(code: string): string[] {
   const exports: string[] = [];
   // Allow optional semicolons so the test keeps working if we ever switch to a
@@ -17,8 +19,8 @@ test("src/index.d.ts mirrors src/index.js exports and all exported modules have 
   const indexJsUrl = new URL("../src/index.js", import.meta.url);
   const indexDtsUrl = new URL("../src/index.d.ts", import.meta.url);
 
-  const indexJs = await readFile(indexJsUrl, "utf8");
-  const indexDts = await readFile(indexDtsUrl, "utf8");
+  const indexJs = stripComments(await readFile(indexJsUrl, "utf8"));
+  const indexDts = stripComments(await readFile(indexDtsUrl, "utf8"));
 
   const jsExports = extractStarExports(indexJs);
   const dtsExports = extractStarExports(indexDts);

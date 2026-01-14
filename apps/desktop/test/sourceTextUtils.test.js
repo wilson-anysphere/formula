@@ -8,6 +8,7 @@ import {
   stripHashComments,
   stripPowerShellComments,
   stripPythonComments,
+  stripRustComments,
 } from "./sourceTextUtils.js";
 
 test("stripComments strips line/block comments but preserves string literals", () => {
@@ -68,6 +69,29 @@ test("stripComments recognizes regex literals preceded by division operators", (
     `expected stripped source to preserve the regex literal; got:\n${out}`,
   );
   assert.doesNotMatch(out, /\bcomment\b/);
+});
+
+test("stripComments strips full-line comments adjacent to regex literals (does not get confused by regex literal heuristics)", () => {
+  // Repro for a tricky case where a regex literal is preceded by a full-line comment:
+  //
+  //   // comment
+  //   /re/
+  //
+  // The regex literal start detection must ignore the comment line so it doesn't misclassify
+  // the opening/closing `/` and accidentally preserve later `// ...` comments.
+  const input = [
+    "const xs = [",
+    "  // comment A",
+    "  /a\\(/,",
+    "  // comment B",
+    "  /b\\(/,",
+    "];",
+  ].join("\n");
+  const out = stripComments(input);
+  assert.doesNotMatch(out, /\bcomment A\b/);
+  assert.doesNotMatch(out, /\bcomment B\b/);
+  assert.match(out, /\/a\\\(\//);
+  assert.match(out, /\/b\\\(\//);
 });
 
 test("stripCssComments strips block comments but preserves strings", () => {
@@ -154,4 +178,23 @@ test("stripPythonComments strips # comments but preserves strings (including tri
   assert.doesNotMatch(out, /\bfull line\b/);
   assert.match(out, /"# not a comment"/);
   assert.match(out, /triple string # not a comment/);
+});
+
+test("stripRustComments strips Rust line/block comments but preserves strings/raw strings", () => {
+  const input = [
+    `pub const MAX_BYTES: usize = 5 * 1024; // comment`,
+    `/* block comment`,
+    `pub const SHOULD_NOT_MATCH: usize = 1;`,
+    `*/`,
+    `pub const URL: &str = "https://example.com/#anchor";`,
+    `pub const RAW: &str = r#"// not a comment"#;`,
+  ].join("\n");
+
+  const out = stripRustComments(input);
+  assert.match(out, /\bpub const MAX_BYTES\b/);
+  assert.doesNotMatch(out, /\/\/\s*comment\b/);
+  assert.doesNotMatch(out, /\bblock comment\b/);
+  assert.doesNotMatch(out, /\bSHOULD_NOT_MATCH\b/);
+  assert.match(out, /https:\/\/example\.com\/#anchor/);
+  assert.match(out, /r#\"\/\/ not a comment\"#/);
 });

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { stripComments } from "../../../apps/desktop/test/sourceTextUtils.js";
+
 const browserSafeEntrypoints = [
   new URL("../src/index.js", import.meta.url),
   new URL("../src/contextManager.js", import.meta.url),
@@ -22,9 +24,8 @@ const browserSafeEntrypoints = [
 
 test("ai-context: browser-safe entrypoints do not contain static node:* imports", async () => {
   for (const url of browserSafeEntrypoints) {
-    const code = await readFile(url, "utf8");
+    const code = stripComments(await readFile(url, "utf8"));
     assert.ok(!/from\s+["']node:/.test(code), `${url} should not statically import node:*`);
     assert.ok(!/import\(\s*["']node:/.test(code), `${url} should not dynamically import node:*`);
   }
 });
-

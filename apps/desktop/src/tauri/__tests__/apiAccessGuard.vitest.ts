@@ -4,6 +4,8 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "../../__tests__/sourceTextUtils";
+
 const TAURI_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC_ROOT = path.resolve(TAURI_DIR, "..");
 
@@ -688,11 +690,13 @@ describe("tauri/api guardrails", () => {
       const normalized = relPath.replace(/\\/g, "/");
       if (normalized === "tauri/api.ts" || normalized === "tauri/api.js") continue;
 
-      const content = await readFile(absPath, "utf8");
+      // Strip comments so commented-out `__TAURI__` API access cannot satisfy or fail this guardrail.
+      const raw = await readFile(absPath, "utf8");
+      const content = stripComments(raw);
       // Fast-path: if the file doesn't mention the Tauri globals at all, none of the banned
       // patterns can match (including the alias-based checks in this guard).
       if (!content.includes("__TAURI__")) continue;
-      const lines = content.split(/\r?\n/);
+      const rawLines = raw.split(/\r?\n/);
 
       const globalAliases = collectGlobalObjectAliases(content);
       const dynamicBannedRes: RegExp[] = [];
@@ -722,7 +726,7 @@ describe("tauri/api guardrails", () => {
         while ((match = globalRe.exec(content)) != null) {
           const start = match.index;
           const lineNumber = content.slice(0, start).split(/\r?\n/).length;
-          const line = lines[lineNumber - 1] ?? "";
+          const line = rawLines[lineNumber - 1] ?? "";
           violations.add(`${relPath}:${lineNumber}: ${line.trim()}`);
 
           // Avoid infinite loops on zero-length matches.

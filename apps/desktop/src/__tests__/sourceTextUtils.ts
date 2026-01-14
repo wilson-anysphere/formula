@@ -94,8 +94,34 @@ function isRegexLiteralStart(source: string, start: number): boolean {
   if (next === "/" || next === "*") return false;
 
   let i = start - 1;
-  while (i >= 0 && /\s/.test(source[i]!)) i -= 1;
-  if (i < 0) return true;
+  while (true) {
+    while (i >= 0 && /\s/.test(source[i]!)) i -= 1;
+    if (i < 0) return true;
+
+    // Skip over block comments when the regex literal is preceded by:
+    //   /* comment */
+    //   /re/
+    if (i >= 1 && source[i] === "/" && source[i - 1] === "*") {
+      i -= 2;
+      while (i >= 1 && !(source[i - 1] === "/" && source[i] === "*")) i -= 1;
+      if (i < 1) return true;
+      i -= 2;
+      continue;
+    }
+
+    // Skip over full-line `//` comments when the regex literal is preceded by:
+    //   // comment
+    //   /re/
+    const lineStart = source.lastIndexOf("\n", i) + 1;
+    let j = lineStart;
+    while (j <= i && /\s/.test(source[j]!)) j += 1;
+    if (j + 1 <= i && source[j] === "/" && source[j + 1] === "/") {
+      i = lineStart - 1;
+      continue;
+    }
+
+    break;
+  }
   const prev = source[i]!;
 
   // Characters that can precede an expression, where a regex literal is valid.

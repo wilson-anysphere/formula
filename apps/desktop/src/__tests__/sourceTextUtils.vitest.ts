@@ -48,6 +48,22 @@ describe("sourceTextUtils.stripComments", () => {
     expect(out).toContain("const b = `x ${foo /* } */} y`;");
     expect(out).toContain("const c = `x ${ { a: 1, b: 2 } } y`;");
   });
+
+  it("strips full-line comments adjacent to regex literals (does not get confused by regex literal heuristics)", () => {
+    const input = [
+      "const xs = [",
+      "  // comment A",
+      "  /a\\(/,",
+      "  // comment B",
+      "  /b\\(/,",
+      "];",
+    ].join("\n");
+    const out = stripComments(input);
+    expect(out).not.toContain("comment A");
+    expect(out).not.toContain("comment B");
+    expect(out).toContain("/a\\(/");
+    expect(out).toContain("/b\\(/");
+  });
 });
 
 describe("sourceTextUtils.stripCssComments", () => {

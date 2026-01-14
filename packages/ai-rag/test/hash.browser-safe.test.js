@@ -5,6 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "../../../apps/desktop/test/sourceTextUtils.js";
+
 /**
  * @param {string} dir
  * @param {string[]} out
@@ -42,9 +44,9 @@ test("utils/hash.js is browser-safe (no Node builtin crypto import)", async () =
       "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
     );
   }
-
+ 
   const sourcePath = fileURLToPath(new URL("../src/utils/hash.js", import.meta.url));
-  const source = await readFile(sourcePath, "utf8");
+  const source = stripComments(await readFile(sourcePath, "utf8"));
   const nodeCryptoSpecifier = ["node", "crypto"].join(":");
   assert.equal(source.includes(nodeCryptoSpecifier), false);
 
@@ -57,7 +59,7 @@ test("utils/hash.js is browser-safe (no Node builtin crypto import)", async () =
   const files = [];
   await collectJsFiles(srcDir, files);
   for (const file of files) {
-    const contents = await readFile(file, "utf8");
+    const contents = stripComments(await readFile(file, "utf8"));
     assert.equal(
       contents.includes(nodeCryptoSpecifier),
       false,

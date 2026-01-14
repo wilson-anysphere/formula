@@ -94,8 +94,34 @@ function isRegexLiteralStart(source, start) {
   if (next === "/" || next === "*") return false;
 
   let i = start - 1;
-  while (i >= 0 && /\s/.test(source[i])) i -= 1;
-  if (i < 0) return true;
+  while (true) {
+    while (i >= 0 && /\s/.test(source[i])) i -= 1;
+    if (i < 0) return true;
+
+    // Skip over block comments when the regex literal is preceded by:
+    //   /* comment */
+    //   /re/
+    if (i >= 1 && source[i] === "/" && source[i - 1] === "*") {
+      i -= 2;
+      while (i >= 1 && !(source[i - 1] === "/" && source[i] === "*")) i -= 1;
+      if (i < 1) return true;
+      i -= 2;
+      continue;
+    }
+
+    // Skip over full-line `//` comments when the regex literal is preceded by:
+    //   // comment
+    //   /re/
+    const lineStart = source.lastIndexOf("\n", i) + 1;
+    let j = lineStart;
+    while (j <= i && /\s/.test(source[j])) j += 1;
+    if (j + 1 <= i && source[j] === "/" && source[j + 1] === "/") {
+      i = lineStart - 1;
+      continue;
+    }
+
+    break;
+  }
   const prev = source[i];
 
   // Characters that can precede an expression, where a regex literal is valid.
@@ -591,6 +617,153 @@ export function stripPythonComments(source) {
       out += ch;
       continue;
     }
+  }
+
+  return out;
+}
+
+function parseRustRawStringStart(source, start) {
+  // Rust raw strings:
+  // - r"..." / r#"..."# / r##"..."## / ...
+  // - br"..." / br#"..."# / ...
+  let i = start;
+  if (source[i] === "b" && source[i + 1] === "r") {
+    i += 2;
+  } else if (source[i] === "r") {
+    i += 1;
+  } else {
+    return null;
+  }
+
+  let hashCount = 0;
+  while (source[i] === "#") {
+    hashCount += 1;
+    i += 1;
+  }
+
+  if (source[i] !== '"') return null;
+  return { endQuote: i, hashCount };
+}
+
+export function stripRustComments(source) {
+  // Strip Rust `//` and `/* */` comments while preserving string literals and newlines.
+  //
+  // Rust block comments are nestable; this is a best-effort implementation sufficient for
+  // source-scanning guardrails in tests (e.g. extracting const definitions).
+  const text = String(source);
+  let out = "";
+  /** @type {"code" | "string" | "rawString" | "lineComment" | "blockComment"} */
+  let state = "code";
+  let rawHashCount = 0;
+  let blockDepth = 0;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = i + 1 < text.length ? text[i + 1] : "";
+
+    if (state === "lineComment") {
+      if (ch === "\n") {
+        out += "\n";
+        state = "code";
+      } else {
+        out += " ";
+      }
+      continue;
+    }
+
+    if (state === "blockComment") {
+      if (ch === "/" && next === "*") {
+        out += "  ";
+        i += 1;
+        blockDepth += 1;
+        continue;
+      }
+      if (ch === "*" && next === "/") {
+        out += "  ";
+        i += 1;
+        blockDepth -= 1;
+        if (blockDepth <= 0) {
+          blockDepth = 0;
+          state = "code";
+        }
+        continue;
+      }
+      out += ch === "\n" ? "\n" : " ";
+      continue;
+    }
+
+    if (state === "string") {
+      out += ch;
+      if (ch === "\\") {
+        if (next) {
+          out += next;
+          i += 1;
+        }
+        continue;
+      }
+      if (ch === '"') state = "code";
+      continue;
+    }
+
+    if (state === "rawString") {
+      out += ch;
+      if (ch === '"') {
+        let ok = true;
+        for (let j = 0; j < rawHashCount; j += 1) {
+          if (text[i + 1 + j] !== "#") {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) {
+          for (let j = 0; j < rawHashCount; j += 1) out += "#";
+          i += rawHashCount;
+          state = "code";
+        }
+      }
+      continue;
+    }
+
+    // state === "code"
+    const rawStart = parseRustRawStringStart(text, i);
+    if (rawStart) {
+      const { endQuote, hashCount } = rawStart;
+      out += text.slice(i, endQuote + 1);
+      i = endQuote;
+      state = "rawString";
+      rawHashCount = hashCount;
+      continue;
+    }
+
+    if (ch === "b" && next === '"') {
+      out += 'b"';
+      i += 1;
+      state = "string";
+      continue;
+    }
+
+    if (ch === '"') {
+      out += ch;
+      state = "string";
+      continue;
+    }
+
+    if (ch === "/" && next === "/") {
+      out += "  ";
+      i += 1;
+      state = "lineComment";
+      continue;
+    }
+
+    if (ch === "/" && next === "*") {
+      out += "  ";
+      i += 1;
+      state = "blockComment";
+      blockDepth = 1;
+      continue;
+    }
+
+    out += ch;
   }
 
   return out;
