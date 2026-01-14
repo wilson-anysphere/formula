@@ -311,6 +311,17 @@ for deb in "${debs[@]}"; do
   dpkg -I "$deb"
   echo "::endgroup::"
 
+  deb_pkg="$(dpkg-deb -f "$deb" Package 2>/dev/null || true)"
+  if [ -z "$deb_pkg" ]; then
+    fail "could not read Package field from .deb: $deb"
+  fi
+  deb_pkg="$(printf '%s' "$deb_pkg" | head -n 1 | tr -d '\r')"
+  deb_pkg="${deb_pkg#"${deb_pkg%%[![:space:]]*}"}"
+  deb_pkg="${deb_pkg%"${deb_pkg##*[![:space:]]}"}"
+  if [[ "$deb_pkg" != "$EXPECTED_PACKAGE_NAME" ]]; then
+    fail "$deb: package name mismatch (dpkg Package). Expected ${EXPECTED_PACKAGE_NAME}, found ${deb_pkg}"
+  fi
+
   deb_version="$(dpkg-deb -f "$deb" Version 2>/dev/null || true)"
   if [ -z "$deb_version" ]; then
     fail "could not read Version field from .deb: $deb"
