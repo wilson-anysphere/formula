@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, isAbsolute, parse, resolve, relative } from 'node:path';
 import { createInterface, type Interface } from 'node:readline';
