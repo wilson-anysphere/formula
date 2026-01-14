@@ -1375,6 +1375,12 @@ const SORT_INDEX_ENUM_1_2_3 = [
   { replacement: "3", displayText: "3 (3rd column/row)", confidence: 0.64 },
 ];
 
+const SIGNIFICANCE_ENUM_3_2_1 = [
+  { replacement: "3", displayText: "3 (default precision)", confidence: 0.66 },
+  { replacement: "2", displayText: "2 (2 decimal places)", confidence: 0.65 },
+  { replacement: "1", displayText: "1 (1 decimal place)", confidence: 0.64 },
+];
+
 const VLOOKUP_COL_INDEX_NUM_ENUM_1_2_3 = [
   { replacement: "2", displayText: "2 (2nd column)", confidence: 0.66 },
   { replacement: "1", displayText: "1 (1st column)", confidence: 0.65 },
@@ -1752,6 +1758,18 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
   "PERCENTILE.EXC": {
     // k
     1: PERCENTILE_K_ENUM_EXC,
+  },
+  PERCENTRANK: {
+    // significance
+    2: SIGNIFICANCE_ENUM_3_2_1,
+  },
+  "PERCENTRANK.INC": {
+    // significance
+    2: SIGNIFICANCE_ENUM_3_2_1,
+  },
+  "PERCENTRANK.EXC": {
+    // significance
+    2: SIGNIFICANCE_ENUM_3_2_1,
   },
   "T.TEST": {
     // tails

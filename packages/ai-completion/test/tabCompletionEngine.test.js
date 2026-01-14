@@ -4261,6 +4261,31 @@ test("PERCENTILE.EXC k suggests common values (no 0/1)", async () => {
   }
 });
 
+test("PERCENTRANK significance suggests 3, 2, 1 (no 0)", async () => {
+  const engine = new TabCompletionEngine();
+
+  for (const fn of ["PERCENTRANK", "PERCENTRANK.INC", "PERCENTRANK.EXC"]) {
+    const currentInput = `=${fn}(A1:A10, 5, `;
+    const suggestions = await engine.getSuggestions({
+      currentInput,
+      cursorPosition: currentInput.length,
+      cellRef: { row: 0, col: 0 },
+      surroundingCells: createMockCellContext({}),
+    });
+
+    for (const v of ["3", "2", "1"]) {
+      assert.ok(
+        suggestions.some((s) => s.text === `${currentInput}${v}`),
+        `Expected ${fn} to suggest significance=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+      );
+    }
+    assert.ok(
+      !suggestions.some((s) => s.text === `${currentInput}0`),
+      `Did not expect ${fn} to suggest significance=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("NORM.DIST cumulative suggests TRUE/FALSE", async () => {
   const engine = new TabCompletionEngine();
 
