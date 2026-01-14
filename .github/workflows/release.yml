@@ -3037,7 +3037,7 @@ jobs:
     needs: preflight
     runs-on: ubuntu-24.04
     outputs:
-      generated: ${{ steps.generate_sbom.outcome == 'success' }}
+      generated: ${{ steps.generate_sbom.outcome == 'success' && steps.sbom_file.outputs.exists == 'true' }}
     permissions:
       contents: read
     steps:
@@ -3098,6 +3098,17 @@ jobs:
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Detect SBOM file
+        id: sbom_file
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f sbom.spdx.json ]]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload SBOM (workflow artifact)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -3117,13 +3128,15 @@ jobs:
     steps:
       - name: Download SBOM artifact
         if: needs.sbom.outputs.generated == 'true'
+        id: download_sbom
+        continue-on-error: true
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: sbom-${{ needs.preflight.outputs.artifact_label }}
           path: .
 
       - name: Upload SBOM to the draft release
-        if: needs.sbom.outputs.generated == 'true'
+        if: needs.sbom.outputs.generated == 'true' && hashFiles('sbom.spdx.json') != ''
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -3132,6 +3145,10 @@ jobs:
           gh release upload "${{ needs.preflight.outputs.release_tag }}" sbom.spdx.json \
             --repo "${{ github.repository }}" \
             --clobber
+
+      - name: Skip SBOM upload (artifact download failed)
+        if: needs.sbom.outputs.generated == 'true' && (steps.download_sbom.outcome != 'success' || hashFiles('sbom.spdx.json') == '')
+        run: echo "::warning::SBOM artifact download failed (or sbom.spdx.json missing); skipping SBOM upload to the draft release."
 
       - name: Skip SBOM upload (SBOM generation failed)
         if: needs.sbom.outputs.generated != 'true'
