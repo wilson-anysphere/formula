@@ -12740,6 +12740,7 @@ export class SpreadsheetApp {
 
     const source = typeof payload?.source === "string" ? payload.source : "";
     const drawingDeltas: any[] = Array.isArray(payload?.drawingDeltas) ? payload.drawingDeltas : [];
+    const sheetViewDeltas: any[] = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
     const sheetMetaDeltas: any[] = Array.isArray(payload?.sheetMetaDeltas) ? payload.sheetMetaDeltas : [];
     const drawingsChanged = payload?.drawingsChanged === true;
 
@@ -12753,6 +12754,30 @@ export class SpreadsheetApp {
         externalImageIds: this.listWorkbookExternalImageIds(),
       });
       return;
+    }
+
+    // Sheet-level background images are stored on sheet view state. Ensure our external image refs stay
+    // in sync even when the background is changed via undo/redo or remote/collab updates.
+    const backgroundImageChanged = sheetViewDeltas.some((delta) => {
+      if (!delta) return false;
+      const before = (delta as any).before;
+      const after = (delta as any).after;
+      const beforeId =
+        typeof before?.backgroundImageId === "string"
+          ? before.backgroundImageId
+          : typeof before?.background_image_id === "string"
+            ? before.background_image_id
+            : null;
+      const afterId =
+        typeof after?.backgroundImageId === "string"
+          ? after.backgroundImageId
+          : typeof after?.background_image_id === "string"
+            ? after.background_image_id
+            : null;
+      return String(beforeId ?? "").trim() !== String(afterId ?? "").trim();
+    });
+    if (backgroundImageChanged) {
+      this.workbookImageManager.setExternalImageIds(this.listWorkbookExternalImageIds());
     }
 
     const deletedSheetIds = sheetMetaDeltas
