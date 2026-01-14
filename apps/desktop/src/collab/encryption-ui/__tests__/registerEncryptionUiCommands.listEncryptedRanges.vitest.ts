@@ -163,4 +163,29 @@ describe("registerEncryptionUiCommands", () => {
       { scrollIntoView: true, focus: true },
     );
   });
+
+  it("listEncryptedRanges surfaces list errors via toast", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const manager = {
+      list: () => {
+        throw new Error("Unsupported metadata.encryptedRanges schema");
+      },
+    };
+
+    const app: any = {
+      getCollabSession: () => ({ getRole: () => "editor" }),
+      getEncryptedRangeManager: () => manager,
+      getSheetDisplayNameById: (id: string) => id,
+      selectRange: vi.fn(),
+    };
+
+    registerEncryptionUiCommands({ commandRegistry, app });
+
+    await commandRegistry.executeCommand("collab.listEncryptedRanges");
+
+    expect(showQuickPick).not.toHaveBeenCalled();
+    expect(app.selectRange).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/Failed to read encrypted ranges/i), "error");
+  });
 });

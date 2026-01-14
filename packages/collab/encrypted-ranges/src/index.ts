@@ -323,6 +323,7 @@ export class EncryptedRangeManager {
 
   list(): EncryptedRange[] {
     const raw = this.metadata.get(METADATA_KEY);
+    assertEncryptedRangesSchemaSupported(raw);
 
     const rangesById = new Map<string, EncryptedRange>();
 

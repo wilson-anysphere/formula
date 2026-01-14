@@ -164,6 +164,17 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         return;
       }
 
+      // Ensure the encrypted range metadata is readable before we generate or store key material.
+      // If the doc contains an unknown `metadata.encryptedRanges` schema, the manager will throw;
+      // fail early so we don't create orphaned keys.
+      try {
+        manager.list();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`Encrypted range metadata is in an unsupported format: ${message}`, "error");
+        return;
+      }
+
       // If the key id already exists, reuse the stored key bytes rather than overwriting
       // them (overwriting would make previously-encrypted cells unrecoverable).
       let existingKeyBytes: Uint8Array | null = null;
@@ -353,8 +364,16 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         return normalizeSheetNameForCompare(rangeId) === normalizeSheetNameForCompare(sheetName);
       };
 
-      const candidates = manager
-        .list()
+      let allRanges: ReturnType<typeof manager.list>;
+      try {
+        allRanges = manager.list();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`Failed to read encrypted ranges: ${message}`, "error");
+        return;
+      }
+
+      const candidates = allRanges
         .filter((r) => matchesSheet(r.sheetId))
         .filter((r) =>
           rangesIntersect(
@@ -439,7 +458,14 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         return;
       }
 
-      const ranges = manager.list();
+      let ranges: ReturnType<typeof manager.list>;
+      try {
+        ranges = manager.list();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`Failed to read encrypted ranges: ${message}`, "error");
+        return;
+      }
       if (ranges.length === 0) {
         showToast("No encrypted ranges in this workbook.", "info");
         return;

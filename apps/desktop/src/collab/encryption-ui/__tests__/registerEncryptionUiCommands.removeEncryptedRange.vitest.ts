@@ -222,4 +222,31 @@ describe("registerEncryptionUiCommands", () => {
 
     expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/Failed to remove encrypted range/), "error");
   });
+
+  it("removeEncryptedRange surfaces list errors via toast", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const manager = {
+      list: () => {
+        throw new Error("Unsupported metadata.encryptedRanges schema");
+      },
+      remove: vi.fn(),
+    };
+
+    const app: any = {
+      getCollabSession: () => ({ getRole: () => "editor" }),
+      getEncryptedRangeManager: () => manager,
+      getSelectionRanges: () => [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }],
+      getCurrentSheetId: () => "Sheet1",
+      getCurrentSheetDisplayName: () => "Sheet1",
+      getSheetDisplayNameById: (id: string) => id,
+    };
+
+    registerEncryptionUiCommands({ commandRegistry, app });
+
+    await commandRegistry.executeCommand("collab.removeEncryptedRange");
+
+    expect(manager.remove).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/Failed to read encrypted ranges/i), "error");
+  });
 });
