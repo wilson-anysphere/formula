@@ -90,7 +90,8 @@ pub use hyperlinks::{
 pub use offcrypto::{
     decrypt_agile_encrypted_package, decrypt_agile_encrypted_package_with_warnings,
     decrypt_agile_ooxml_from_cfb, decrypt_agile_ooxml_from_ole_bytes, decrypt_agile_ooxml_from_ole_reader,
-    OffCryptoError, OffCryptoWarning,
+    decrypt_ooxml_from_cfb, decrypt_ooxml_from_ole_bytes, decrypt_ooxml_from_ole_reader, OffCryptoError,
+    OffCryptoWarning,
 };
 pub use lazy_package::XlsxLazyPackage;
 pub use model_package::{WorkbookPackage, WorkbookPackageError};

@@ -115,6 +115,23 @@ pub fn decrypt_agile_ooxml_from_cfb<R: Read + Seek>(
     decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, password)
 }
 
+/// Decrypt an OOXML encrypted package (Agile or Standard) directly from an OLE CFB container.
+///
+/// This is a convenience wrapper around [`decrypt_ooxml_encrypted_package`] that handles stream
+/// extraction from a `cfb::CompoundFile`.
+///
+/// Stream names are matched at the root level and support both common forms:
+/// - `EncryptionInfo` / `EncryptedPackage`
+/// - `/EncryptionInfo` / `/EncryptedPackage`
+pub fn decrypt_ooxml_from_cfb<R: Read + Seek>(
+    cfb: &mut cfb::CompoundFile<R>,
+    password: &str,
+) -> Result<Vec<u8>> {
+    let encryption_info = read_cfb_stream_bytes(cfb, "EncryptionInfo")?;
+    let encrypted_package = read_cfb_stream_bytes(cfb, "EncryptedPackage")?;
+    decrypt_ooxml_encrypted_package(&encryption_info, &encrypted_package, password)
+}
+
 /// Decrypt an Agile-encrypted OOXML package from an in-memory OLE/CFB container.
 ///
 /// This helper opens the compound file container and delegates to
@@ -126,6 +143,19 @@ pub fn decrypt_agile_ooxml_from_ole_bytes(ole_bytes: &[u8], password: &str) -> R
             source,
         })?;
     decrypt_agile_ooxml_from_cfb(&mut cfb, password)
+}
+
+/// Decrypt an OOXML encrypted package (Agile or Standard) from an in-memory OLE/CFB container.
+///
+/// This helper opens the compound file container and delegates to
+/// [`decrypt_ooxml_from_cfb`].
+pub fn decrypt_ooxml_from_ole_bytes(ole_bytes: &[u8], password: &str) -> Result<Vec<u8>> {
+    let mut cfb =
+        cfb::CompoundFile::open(Cursor::new(ole_bytes)).map_err(|source| OffCryptoError::Io {
+            context: "opening OLE compound file",
+            source,
+        })?;
+    decrypt_ooxml_from_cfb(&mut cfb, password)
 }
 
 /// Decrypt an Agile-encrypted OOXML package from an OLE/CFB reader.
@@ -141,6 +171,18 @@ pub fn decrypt_agile_ooxml_from_ole_reader<R: Read + Seek>(
         source,
     })?;
     decrypt_agile_ooxml_from_cfb(&mut cfb, password)
+}
+
+/// Decrypt an OOXML encrypted package (Agile or Standard) from an OLE/CFB reader.
+///
+/// This helper opens the compound file container and delegates to
+/// [`decrypt_ooxml_from_cfb`].
+pub fn decrypt_ooxml_from_ole_reader<R: Read + Seek>(reader: R, password: &str) -> Result<Vec<u8>> {
+    let mut cfb = cfb::CompoundFile::open(reader).map_err(|source| OffCryptoError::Io {
+        context: "opening OLE compound file",
+        source,
+    })?;
+    decrypt_ooxml_from_cfb(&mut cfb, password)
 }
 
 fn read_cfb_stream_bytes<R: Read + Seek>(
