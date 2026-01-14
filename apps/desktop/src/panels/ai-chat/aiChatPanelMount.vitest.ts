@@ -54,6 +54,15 @@ const [{ createPanelBodyRenderer }, { PanelIds }] = await Promise.all([
   import("../panelBodyRenderer.js"),
   import("../panelRegistry.js"),
 ]);
+// Preload the AI chat panel container module that `PanelBodyRenderer` loads via `React.lazy()`.
+//
+// Under full-suite Vitest runs, Vite may need to transform a large dependency graph the first
+// time this module is imported. If that work happens inside an individual test, the DOM can take
+// long enough to mount that we hit the smaller `waitFor()` timeouts and flake.
+//
+// Warming the module cache here keeps the tests focused on `renderPanelBody` behavior rather than
+// transform timing.
+await import("./AIChatPanelContainer.js");
 
 async function waitFor(assertion: () => void, timeoutMs = 2_000) {
   const started = Date.now();
@@ -162,6 +171,10 @@ describe("AI chat panel", () => {
         renderer.renderPanelBody(PanelIds.AI_CHAT, body);
       });
 
+      await waitFor(() => {
+        expect(body.querySelector('[data-testid="ai-include-formula-values"]')).toBeInstanceOf(HTMLInputElement);
+      }, 10_000);
+
       const includeFormulaValues = body.querySelector('[data-testid="ai-include-formula-values"]');
       expect(includeFormulaValues).toBeInstanceOf(HTMLInputElement);
       expect((includeFormulaValues as HTMLInputElement).checked).toBe(true);
@@ -194,6 +207,10 @@ describe("AI chat panel", () => {
       await act(async () => {
         renderer.renderPanelBody(PanelIds.AI_CHAT, body);
       });
+
+      await waitFor(() => {
+        expect(body.querySelector('[data-testid="ai-include-formula-values"]')).toBeInstanceOf(HTMLInputElement);
+      }, 10_000);
 
       const checkbox = body.querySelector('[data-testid="ai-include-formula-values"]') as HTMLInputElement | null;
       expect(checkbox).toBeInstanceOf(HTMLInputElement);

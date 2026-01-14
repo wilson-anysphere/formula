@@ -705,9 +705,12 @@ export async function runOnce({
       // If the process exits before we initiated shutdown (e.g. an `afterCapture` hook was
       // running), still attempt to tear down the full process group. WebView helper processes can
       // outlive the parent process and leak across runs.
-      if (!exitDeadline) {
-        terminateProcessTree(child, 'force');
-      }
+      //
+      // Even when we *did* initiate shutdown (graceful SIGTERM + a delayed SIGKILL failsafe),
+      // helper processes can still outlive the parent or take longer than expected to exit under
+      // contention. Once the root pid is gone, we no longer need graceful shutdown behavior, so
+      // force-kill the process group to avoid leaking background processes across iterations/tests.
+      terminateProcessTree(child, 'force');
 
       if (captured) {
         settle('resolve', captured);
