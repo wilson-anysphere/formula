@@ -210,3 +210,26 @@ fn rgce_coverage_opens_standard_encrypted_xlsb_with_password() {
     let summary = summary_from_output(&output);
     assert_eq!(summary["formulas_total"], 0);
 }
+
+#[test]
+fn rgce_coverage_opens_agile_encrypted_xlsb_with_password() {
+    let plaintext_path = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/simple.xlsb"
+    ));
+    let plaintext_bytes = std::fs::read(plaintext_path).expect("read xlsb fixture");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let password = "Password1234_";
+    let encrypted = common::agile_encrypted_ooxml::build_agile_encrypted_ooxml_ole_bytes(
+        &plaintext_bytes,
+        password,
+    );
+    let encrypted_path = tmp.path().join("encrypted_agile.xlsb");
+    std::fs::write(&encrypted_path, encrypted).expect("write encrypted fixture");
+
+    // Use max=0 so we only exercise workbook open + selector plumbing (fast).
+    let output = run_rgce_coverage(&encrypted_path, &["--password", password, "--max", "0"]);
+    let summary = summary_from_output(&output);
+    assert_eq!(summary["formulas_total"], 0);
+}

@@ -126,3 +126,28 @@ fn xlsb_dump_opens_standard_encrypted_xlsb_with_password() {
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     assert!(stdout.contains("Sheet1"), "stdout:\n{stdout}");
 }
+
+#[test]
+fn xlsb_dump_opens_agile_encrypted_xlsb_with_password() {
+    let plaintext_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
+    let plaintext_bytes = std::fs::read(plaintext_path).expect("read xlsb fixture");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let password = "Password1234_";
+    let encrypted = common::agile_encrypted_ooxml::build_agile_encrypted_ooxml_ole_bytes(
+        &plaintext_bytes,
+        password,
+    );
+    let encrypted_path = tmp.path().join("encrypted_agile.xlsb");
+    std::fs::write(&encrypted_path, encrypted).expect("write encrypted fixture");
+
+    let assert = Command::new(assert_cmd::cargo::cargo_bin!("xlsb_dump"))
+        .arg("--password")
+        .arg(password)
+        .arg(&encrypted_path)
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("Sheet1"), "stdout:\n{stdout}");
+}
