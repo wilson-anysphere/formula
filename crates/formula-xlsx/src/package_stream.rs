@@ -33,6 +33,12 @@ pub struct StreamingXlsxPackage {
     /// Map canonical part name -> source zip entry index.
     source_part_name_to_index: HashMap<String, usize>,
     /// Overlay of part overrides keyed by canonical part name.
+    ///
+    /// Keys are stored in the same form expected by the streaming ZIP rewriter:
+    /// - if the part exists in the source ZIP, the key is the original ZIP entry name with only a
+    ///   leading `/` stripped (i.e. it may contain `\\` path separators if the archive used them).
+    /// - if the part does not exist in the source ZIP (new part), the key is the canonical name
+    ///   (`/` separators, no leading `/`).
     part_overrides: HashMap<String, PartOverride>,
 }
 
@@ -103,18 +109,29 @@ impl StreamingXlsxPackage {
     /// [`PartOverride::Add`].
     pub fn set_part(&mut self, name: &str, bytes: Vec<u8>) {
         let canonical = canonical_part_name(name);
+        let override_key = self
+            .source_part_name_to_zip_key
+            .get(&canonical)
+            .cloned()
+            .unwrap_or_else(|| canonical.clone());
         let op = if self.source_part_names.contains(&canonical) {
             PartOverride::Replace(bytes)
         } else {
             PartOverride::Add(bytes)
         };
-        self.part_overrides.insert(canonical, op);
+        self.part_overrides.insert(override_key, op);
     }
 
     /// Remove a part from the output package.
     pub fn remove_part(&mut self, name: &str) {
         let canonical = canonical_part_name(name);
-        self.part_overrides.insert(canonical, PartOverride::Remove);
+        let override_key = self
+            .source_part_name_to_zip_key
+            .get(&canonical)
+            .cloned()
+            .unwrap_or(canonical);
+        self.part_overrides
+            .insert(override_key, PartOverride::Remove);
     }
 
     /// Access the raw part override map (useful for debugging/testing).
@@ -163,8 +180,13 @@ impl StreamingXlsxPackage {
     /// Read a single part, consulting overrides first and otherwise reading from the source ZIP.
     pub fn read_part(&self, name: &str) -> Result<Option<Vec<u8>>, XlsxError> {
         let canonical = canonical_part_name(name);
+        let override_key = self
+            .source_part_name_to_zip_key
+            .get(&canonical)
+            .map(String::as_str)
+            .unwrap_or(canonical.as_str());
 
-        if let Some(override_op) = self.part_overrides.get(&canonical) {
+        if let Some(override_op) = self.part_overrides.get(override_key) {
             match override_op {
                 PartOverride::Remove => return Ok(None),
                 PartOverride::Replace(bytes) | PartOverride::Add(bytes) => {
@@ -191,7 +213,6 @@ impl StreamingXlsxPackage {
 
     /// Write the effective package to a new ZIP stream, raw-copying unchanged entries.
     pub fn write_to<W: Write + Seek>(&self, output: W) -> Result<(), XlsxError> {
-        let overrides = self.streaming_overrides();
         let patches = WorkbookCellPatches::default();
 
         let mut reader = self.reader.borrow_mut();
@@ -200,25 +221,10 @@ impl StreamingXlsxPackage {
             &mut *reader,
             output,
             &patches,
-            &overrides,
+            &self.part_overrides,
             RecalcPolicy::PRESERVE,
         )?;
         Ok(())
-    }
-
-    fn streaming_overrides(&self) -> HashMap<String, PartOverride> {
-        let mut out = HashMap::with_capacity(self.part_overrides.len());
-        for (canonical, op) in &self.part_overrides {
-            // If the part exists in the source archive, translate to the ZIP entry key expected by
-            // the streaming rewriter (which only strips leading `/`).
-            if let Some(zip_key) = self.source_part_name_to_zip_key.get(canonical) {
-                out.insert(zip_key.clone(), op.clone());
-            } else {
-                // New part: write using the canonical name (forward slashes, no leading `/`).
-                out.insert(canonical.clone(), op.clone());
-            }
-        }
-        out
     }
 }
 
@@ -228,12 +234,13 @@ fn effective_part_names(
 ) -> BTreeSet<String> {
     let mut out = source_part_names.clone();
     for (name, op) in part_overrides {
+        let canonical_name = canonical_part_name(name);
         match op {
             PartOverride::Remove => {
-                out.remove(name);
+                out.remove(&canonical_name);
             }
             PartOverride::Replace(_) | PartOverride::Add(_) => {
-                out.insert(name.clone());
+                out.insert(canonical_name);
             }
         }
     }
