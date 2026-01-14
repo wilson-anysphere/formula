@@ -197,6 +197,7 @@ const implementedCommandIds: string[] = [
   "formulas.formulaAuditing.traceDependents",
   "formulas.formulaAuditing.tracePrecedents",
   "formulas.solutions.solver",
+  "home.alignment.mergeCenter",
   "home.alignment.mergeCenter.mergeAcross",
   "home.alignment.mergeCenter.mergeCells",
   "home.alignment.mergeCenter.mergeCenter",
@@ -226,6 +227,10 @@ const implementedCommandIds: string[] = [
   "home.editing.sortFilter.reapply",
   "home.editing.sortFilter.sortAtoZ",
   "home.editing.sortFilter.sortZtoA",
+  "home.font.borders",
+  "home.font.fillColor",
+  "home.font.fontColor",
+  "home.font.fontSize",
   "home.font.subscript",
   "home.font.superscript",
   "home.number.moreFormats.custom",
@@ -443,7 +448,6 @@ const knownUnimplementedCommandIds: string[] = [
   "help.support.feedback",
   "help.support.help",
   "help.support.training",
-  "home.alignment.mergeCenter",
   "home.alignment.orientation",
   "home.cells.delete",
   "home.cells.insert",
@@ -458,12 +462,8 @@ const knownUnimplementedCommandIds: string[] = [
   "home.editing.fill",
   "home.editing.findSelect",
   "home.editing.sortFilter",
-  "home.font.borders",
   "home.font.clearFormatting",
-  "home.font.fillColor",
-  "home.font.fontColor",
   "home.font.fontName",
-  "home.font.fontSize",
   "home.number.moreFormats",
   "home.number.numberFormat",
   "home.styles.cellStyles",
@@ -924,6 +924,30 @@ function computeImplementedSchemaCommandIds(schemaCommandIdSet: Set<string>): st
 
   for (const match of source.matchAll(/commandId\s*===\s*["']([^"']+)["']/g)) {
     addIfSchema(match[1]!);
+  }
+
+  // Formatting-related ribbon ids are centralized in `ribbon/commandHandlers.ts`, which is invoked
+  // by main.ts before falling back to the big `switch (commandId)` block. Include those ids here
+  // so the test stays accurate even when the implementation lives outside main.ts.
+  const commandHandlersPath = fileURLToPath(new URL("../commandHandlers.ts", import.meta.url));
+  const commandHandlersSource = readFileSync(commandHandlersPath, "utf8");
+  for (const match of commandHandlersSource.matchAll(/case\s+["']([^"']+)["']/g)) {
+    addIfSchema(match[1]!);
+  }
+  for (const match of commandHandlersSource.matchAll(/commandId\s*===\s*["']([^"']+)["']/g)) {
+    addIfSchema(match[1]!);
+  }
+  const handlerPrefixes = [
+    // Prefix handlers in `handleRibbonCommand` (commandHandlers.ts).
+    "format.fontName.",
+    "format.fontSize.",
+    "format.fillColor.",
+    "format.fontColor.",
+    "format.borders.",
+  ];
+  const presentHandlerPrefixes = handlerPrefixes.filter((prefix) => commandHandlersSource.includes(prefix));
+  for (const id of schemaCommandIdSet) {
+    if (presentHandlerPrefixes.some((prefix) => id.startsWith(prefix))) implemented.add(id);
   }
 
   for (const key of ["commandOverrides", "toggleOverrides"] as const satisfies OverrideKey[]) {
