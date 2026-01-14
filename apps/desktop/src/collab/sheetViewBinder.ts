@@ -7,6 +7,7 @@ import type { DocumentController } from "../document/documentController.js";
 export type SheetViewState = {
   frozenRows: number;
   frozenCols: number;
+  backgroundImageId?: string;
   colWidths?: Record<string, number>;
   rowHeights?: Record<string, number>;
   mergedRanges?: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }>;
@@ -25,6 +26,9 @@ const VIEW_KEYS = new Set([
   "view",
   "frozenRows",
   "frozenCols",
+  "backgroundImageId",
+  // Backwards compatibility with older clients / alternate naming.
+  "background_image_id",
   "colWidths",
   "rowHeights",
   "mergedRanges",
@@ -204,6 +208,13 @@ function mergedRangesEquals(
   return true;
 }
 
+function normalizeOptionalId(value: unknown): string | null {
+  const raw = coerceString(value);
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed ? trimmed : null;
+}
+
 function sheetViewEquals(a: SheetViewState, b: SheetViewState): boolean {
   if (a === b) return true;
 
@@ -227,6 +238,7 @@ function sheetViewEquals(a: SheetViewState, b: SheetViewState): boolean {
   return (
     a.frozenRows === b.frozenRows &&
     a.frozenCols === b.frozenCols &&
+    normalizeOptionalId(a.backgroundImageId) === normalizeOptionalId(b.backgroundImageId) &&
     axisEquals(a.colWidths, b.colWidths) &&
     axisEquals(a.rowHeights, b.rowHeights) &&
     mergedRangesEquals(a.mergedRanges, b.mergedRanges) &&
@@ -314,12 +326,30 @@ function readSheetViewFromSheetMap(sheet: any): SheetViewState {
       ? readMergedRanges(readYMapOrObject(viewRaw, "mergedRanges") ?? readYMapOrObject(viewRaw, "mergedCells"))
       : readMergedRanges(sheet?.get?.("mergedRanges") ?? sheet?.get?.("mergedCells"));
 
+  let backgroundRaw: unknown = undefined;
+  if (viewRaw !== undefined) {
+    backgroundRaw =
+      readYMapOrObject(viewRaw, "backgroundImageId") ??
+      readYMapOrObject(viewRaw, "background_image_id") ??
+      readYMapOrObject(viewRaw, "backgroundImage") ??
+      readYMapOrObject(viewRaw, "background_image");
+  }
+  if (backgroundRaw === undefined) {
+    backgroundRaw =
+      sheet?.get?.("backgroundImageId") ??
+      sheet?.get?.("background_image_id") ??
+      sheet?.get?.("backgroundImage") ??
+      sheet?.get?.("background_image");
+  }
+  const backgroundImageId = normalizeOptionalId(backgroundRaw) ?? undefined;
+
   let drawingsRaw: unknown = undefined;
   if (viewRaw !== undefined) drawingsRaw = readYMapOrObject(viewRaw, "drawings");
   if (drawingsRaw === undefined) drawingsRaw = sheet?.get?.("drawings") ?? sheet?.drawings;
   const drawings = normalizeDrawings(drawingsRaw);
 
   const out: SheetViewState = { frozenRows, frozenCols };
+  if (backgroundImageId) out.backgroundImageId = backgroundImageId;
   if (colWidths) out.colWidths = colWidths;
   if (rowHeights) out.rowHeights = rowHeights;
   if (mergedRanges) out.mergedRanges = mergedRanges;
@@ -418,6 +448,7 @@ export function bindSheetViewToCollabSession(options: {
       const beforeComparable: SheetViewState = {
         frozenRows: beforeRaw.frozenRows,
         frozenCols: beforeRaw.frozenCols,
+        ...(normalizeOptionalId(beforeRaw.backgroundImageId) ? { backgroundImageId: beforeRaw.backgroundImageId } : {}),
         ...(beforeRaw.colWidths ? { colWidths: beforeRaw.colWidths } : {}),
         ...(beforeRaw.rowHeights ? { rowHeights: beforeRaw.rowHeights } : {}),
         ...(Array.isArray(beforeRaw.mergedRanges) && beforeRaw.mergedRanges.length > 0
@@ -435,6 +466,7 @@ export function bindSheetViewToCollabSession(options: {
       const afterComparable: SheetViewState = {
         frozenRows: after.frozenRows,
         frozenCols: after.frozenCols,
+        ...(after.backgroundImageId ? { backgroundImageId: after.backgroundImageId } : {}),
         ...(after.colWidths ? { colWidths: after.colWidths } : {}),
         ...(after.rowHeights ? { rowHeights: after.rowHeights } : {}),
         ...(Array.isArray(after.mergedRanges) && after.mergedRanges.length > 0 ? { mergedRanges: after.mergedRanges } : {}),
@@ -447,6 +479,8 @@ export function bindSheetViewToCollabSession(options: {
         const afterFull: any = { ...beforeRaw };
         afterFull.frozenRows = after.frozenRows;
         afterFull.frozenCols = after.frozenCols;
+        if (after.backgroundImageId) afterFull.backgroundImageId = after.backgroundImageId;
+        else delete afterFull.backgroundImageId;
         if (after.colWidths) afterFull.colWidths = after.colWidths;
         else delete afterFull.colWidths;
         if (after.rowHeights) afterFull.rowHeights = after.rowHeights;
@@ -540,6 +574,19 @@ export function bindSheetViewToCollabSession(options: {
 
           if (viewMap.get("frozenRows") !== after.frozenRows) viewMap.set("frozenRows", after.frozenRows);
           if (viewMap.get("frozenCols") !== after.frozenCols) viewMap.set("frozenCols", after.frozenCols);
+
+          const nextBackgroundImageId = normalizeOptionalId((after as any).backgroundImageId);
+          const prevBackgroundImageId = normalizeOptionalId((before as any)?.backgroundImageId);
+          if (nextBackgroundImageId !== prevBackgroundImageId) {
+            if (nextBackgroundImageId) {
+              viewMap.set("backgroundImageId", nextBackgroundImageId);
+              // Back-compat mirror (similar to other sheet view keys).
+              sheet.set("backgroundImageId", nextBackgroundImageId);
+            } else {
+              viewMap.delete("backgroundImageId");
+              sheet.delete("backgroundImageId");
+            }
+          }
 
           const colWidthsMap = ensureNestedYMap(viewMap, "colWidths");
           const rowHeightsMap = ensureNestedYMap(viewMap, "rowHeights");
