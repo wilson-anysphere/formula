@@ -7,21 +7,26 @@
   produced (publishing an empty Windows release), and to ensure that when
   signing is configured the produced installers are Authenticode-signed.
 
-  By default this script searches common Tauri output locations:
+  By default this script searches common Tauri output locations (including
+  workspace target roots and per-target-triple subdirectories):
     - apps/desktop/src-tauri/target/**/release/bundle/nsis/*.exe
+    - apps/desktop/src-tauri/target/**/release/bundle/nsis-web/*.exe
     - apps/desktop/src-tauri/target/**/release/bundle/msi/*.msi
-    - target/**/release/bundle/nsis/*.exe
-    - target/**/release/bundle/msi/*.msi
+    - apps/desktop/target/**/release/bundle/(nsis|nsis-web|msi)/*
+    - target/**/release/bundle/(nsis|nsis-web|msi)/*
+    - $env:CARGO_TARGET_DIR/**/release/bundle/(nsis|nsis-web|msi)/* (when set)
 
   You can override discovery by providing -ExePath and/or -MsiPath.
 
 .PARAMETER ExePath
   Optional path(s) to NSIS installer .exe files, directories containing them,
-  or wildcard patterns. When provided, overrides default NSIS discovery.
+  or wildcard patterns. Directories are searched recursively. When provided,
+  overrides default NSIS discovery.
 
 .PARAMETER MsiPath
   Optional path(s) to MSI installer .msi files, directories containing them,
-  or wildcard patterns. When provided, overrides default MSI discovery.
+  or wildcard patterns. Directories are searched recursively. When provided,
+  overrides default MSI discovery.
 
 .PARAMETER BundleDir
   Optional path to a Tauri bundle directory (…/release/bundle). When provided,
@@ -44,6 +49,9 @@
 
 .EXAMPLE
   pwsh ./scripts/validate-windows-bundles.ps1 -ExePath apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+
+.EXAMPLE
+  pwsh ./scripts/validate-windows-bundles.ps1 -BundleDir apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle -RequireExe -RequireMsi
 
 .NOTES
   If the environment variable WINDOWS_CERTIFICATE is set (non-empty), this
