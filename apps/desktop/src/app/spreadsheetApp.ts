@@ -7629,7 +7629,16 @@ export class SpreadsheetApp {
     // Desktop/Tauri: prefer native dialog + backend reads (avoids `<input type=file>` sandbox quirks).
     // Web fallback below retains the persistent `<input>` element so unit tests can interact with it.
     const tauriDialogOpenAvailable = getTauriDialogOpenOrNull() != null;
-    const tauriInvokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+    const tauriInvokeAvailable = (() => {
+      // `__TAURI__` access is intentionally limited; core.invoke checks are allowed
+      // (dialog/window/event access is centralized in `src/tauri/api`).
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+      } catch {
+        return false;
+      }
+    })();
     if (tauriDialogOpenAvailable && tauriInvokeAvailable) {
       void (async () => {
         const files = await pickLocalImageFiles({ multiple: false });
@@ -7727,17 +7736,25 @@ export class SpreadsheetApp {
       return;
     }
 
-    const imageId = (() => {
-      const randomUUID = (globalThis as any)?.crypto?.randomUUID;
+    const ext = (() => {
+      const raw = String(file?.name ?? "").split(".").pop()?.toLowerCase();
+      return raw && raw !== file.name ? raw : null;
+    })();
+
+    const uuid = (() => {
+      const randomUUID = (globalThis as any)?.crypto?.randomUUID as (() => string) | undefined;
       if (typeof randomUUID === "function") {
         try {
-          return String(randomUUID.call((globalThis as any).crypto));
+          return randomUUID.call((globalThis as any).crypto);
         } catch {
-          // Fall back to monotonic ids below.
+          // Fall through to pseudo-random below.
         }
       }
-      return `image_${this.nextDrawingImageId++}`;
+      // Fall back to a collision-resistant-ish token even in environments without WebCrypto.
+      return `${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}_${this.nextDrawingImageId++}`;
     })();
+
+    const imageId = `image_${uuid}${ext ? `.${ext}` : ""}`;
 
     const active = this.selection.active;
     const anchor: DrawingAnchor = {
@@ -7776,7 +7793,10 @@ export class SpreadsheetApp {
 
       if (canInsertDrawing) {
         try {
-          docAny.insertDrawing(this.sheetId, inserted);
+          // Persist the drawing id as a string for compatibility with existing document-schema
+          // expectations (some integrations treat drawing ids as JSON-friendly string keys).
+          // The overlay adapters normalize ids back to numbers for rendering/interaction.
+          docAny.insertDrawing(this.sheetId, { ...inserted, id: String(inserted.id) });
         } catch {
           // Best-effort: if inserting into the document fails, fall back to the in-memory cache below.
           try {
