@@ -1,7 +1,6 @@
 #![cfg(target_arch = "wasm32")]
 
 use serde_json::Value as JsonValue;
-use serde_json::json;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -10,6 +9,16 @@ use formula_wasm::WasmWorkbook;
 #[derive(Debug, serde::Deserialize)]
 struct CellData {
     value: JsonValue,
+}
+
+fn assert_json_number(value: &JsonValue, expected: f64) {
+    let got = value
+        .as_f64()
+        .unwrap_or_else(|| panic!("expected JSON number, got {value:?}"));
+    assert!(
+        (got - expected).abs() < 1e-9,
+        "expected {expected}, got {got} ({value:?})"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -74,6 +83,6 @@ fn from_xlsx_bytes_imports_styles_for_cells_rows_and_cols() {
     assert_eq!(d1.value, JsonValue::String("F2".to_string()));
     assert_eq!(d2.value, JsonValue::String("F2".to_string()));
     assert_eq!(d3.value, JsonValue::String("F2".to_string()));
-    assert_eq!(d4.value, json!(0.0));
-    assert_eq!(d5.value, json!(12.1));
+    assert_json_number(&d4.value, 0.0);
+    assert_json_number(&d5.value, 12.1);
 }
