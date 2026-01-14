@@ -151,6 +151,7 @@ describe("SpreadsheetApp drawing hover cursor", () => {
       } as any);
 
       expect(root.style.cursor).toBe("nwse-resize");
+      expect(selectionCanvas.style.cursor).toBe("nwse-resize");
 
       app.destroy();
       root.remove();
@@ -207,6 +208,7 @@ describe("SpreadsheetApp drawing hover cursor", () => {
       } as any);
 
       expect(root.style.cursor).toBe("grab");
+      expect(selectionCanvas.style.cursor).toBe("grab");
 
       app.destroy();
       root.remove();
