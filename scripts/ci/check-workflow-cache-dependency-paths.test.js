@@ -69,7 +69,7 @@ function findBadCacheDependencyPathGlobs(workflowName, workflowText) {
     }
 
     const blockScalarStart = line.match(
-      /^\s*(?:-\s*)?(?<key>[A-Za-z0-9_-]+):\s*(?<indicator>[|>](?:[1-9])?[+-]?)\s*(?:#.*)?$/,
+      /^\s*(?:-\s*)?(?<key>[A-Za-z0-9_-]+):\s*(?<indicator>[|>][0-9+-]*)\s*(?:#.*)?$/,
     );
     if (blockScalarStart?.groups) {
       blockScalar = { key: blockScalarStart.groups.key, contentIndent: null };
@@ -96,7 +96,20 @@ jobs:
   test:
     steps:
       - run: |
-          echo "cache-dependency-path: **/pnpm-lock.yaml"
+          cache-dependency-path: **/pnpm-lock.yaml
+        name: Example
+`;
+
+  assert.deepEqual(findBadCacheDependencyPathGlobs("example.yml", text), []);
+});
+
+test("cache-dependency-path scanner ignores YAML block scalars with chomping/indent indicators in any order", () => {
+  const text = `
+jobs:
+  test:
+    steps:
+      - run: |-2
+          cache-dependency-path: **/pnpm-lock.yaml
         name: Example
 `;
 
@@ -109,6 +122,21 @@ steps:
   - uses: actions/setup-node@v4
     with:
       cache-dependency-path: |
+        pnpm-lock.yaml
+        **/pnpm-lock.yaml
+`;
+
+  assert.deepEqual(findBadCacheDependencyPathGlobs("example.yml", text), [
+    "example.yml:7:**/pnpm-lock.yaml",
+  ]);
+});
+
+test("cache-dependency-path scanner detects bad globs inside cache-dependency-path block scalars using |-2", () => {
+  const text = `
+steps:
+  - uses: actions/setup-node@v4
+    with:
+      cache-dependency-path: |-2
         pnpm-lock.yaml
         **/pnpm-lock.yaml
 `;
