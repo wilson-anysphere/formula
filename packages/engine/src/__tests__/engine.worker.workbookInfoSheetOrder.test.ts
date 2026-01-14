@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 
-import type { InitMessage, RpcRequest, WorkerOutboundMessage } from "../protocol.ts";
+import type { InitMessage, RpcRequest, WorkerOutboundMessage, WorkbookSheetInfoDto } from "../protocol.ts";
 
 class MockWorkerGlobal {
   private readonly listeners = new Set<(event: MessageEvent<unknown>) => void>();
@@ -118,11 +118,11 @@ describe("engine.worker getWorkbookInfo fallback respects sheetOrder", () => {
       const resp = await sendRequest(port, { type: "request", id: 1, method: "getWorkbookInfo", params: {} });
 
       expect(resp.ok).toBe(true);
-      const sheets = (resp as any).result?.sheets ?? [];
-      expect(sheets.map((s: any) => s.id)).toEqual(["Sheet2", "Sheet1", "Empty"]);
+      const sheets: WorkbookSheetInfoDto[] = (resp as any).result?.sheets ?? [];
+      expect(sheets.map((s) => s.id)).toEqual(["Sheet2", "Sheet1", "Empty"]);
 
       // Use an `as const` entry tuple so TS infers a stable Map value type (instead of `{}`).
-      const byId = new Map<string, any>(sheets.map((s: any) => [s.id, s] as const));
+      const byId = new Map<string, WorkbookSheetInfoDto>(sheets.map((s) => [s.id, s] as const));
       expect(byId.get("Sheet1")?.visibility).toBe("hidden");
       expect(byId.get("Sheet1")?.tabColor).toEqual({ rgb: "FFFF0000" });
       expect(byId.get("Sheet2")?.visibility).toBe("veryHidden");
