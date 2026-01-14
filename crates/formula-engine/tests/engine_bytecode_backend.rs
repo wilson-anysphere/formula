@@ -2476,6 +2476,71 @@ fn bytecode_backend_respects_external_value_provider() {
 }
 
 #[test]
+fn bytecode_backend_resolves_external_workbook_reference_via_provider() {
+    struct Provider;
+
+    impl ExternalValueProvider for Provider {
+        fn get(&self, sheet: &str, addr: formula_engine::eval::CellAddr) -> Option<Value> {
+            if !sheet.eq_ignore_ascii_case("[Book.xlsx]Sheet1") {
+                return None;
+            }
+            match (addr.row, addr.col) {
+                (0, 0) => Some(Value::Number(123.0)),
+                _ => None,
+            }
+        }
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(Arc::new(Provider)));
+    let before = engine.bytecode_program_count();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1!A1")
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path.
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 1);
+    assert_eq!(stats.fallback, 0);
+    assert!(
+        engine.bytecode_program_count() > before,
+        "expected bytecode program cache to grow for external workbook reference"
+    );
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(123.0));
+    assert!(engine.bytecode_program_count() > 0);
+}
+
+#[test]
+fn bytecode_backend_external_workbook_reference_without_provider_is_ref_error() {
+    let mut engine = Engine::new();
+    let before = engine.bytecode_program_count();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1!A1")
+        .unwrap();
+
+    // Ensure the formula still compiles to bytecode even without an external provider.
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 1);
+    assert_eq!(stats.fallback, 0);
+    assert!(
+        engine.bytecode_program_count() > before,
+        "expected bytecode program cache to grow for external workbook reference"
+    );
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
+}
+
+#[test]
 fn sum_ignores_rich_values_in_references_via_bytecode_column_slices() {
     // Regression coverage: column-slice evaluation should tolerate non-numeric values in the
     // referenced range (ignored like text in Excel SUM semantics).
