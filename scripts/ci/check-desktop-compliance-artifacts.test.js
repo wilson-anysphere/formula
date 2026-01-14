@@ -523,3 +523,62 @@ test("fails when Parquet shared-mime-info definition file lacks expected content
   assert.match(proc.stderr, /shared-mime-info definition file is missing required glob mappings/i);
   assert.match(proc.stderr, /\.parquet/i);
 });
+
+test("fails when shared-mime-info XML is missing a glob mapping for a configured non-Parquet extension", () => {
+  const mimeDest = `usr/share/mime/packages/${testIdentifier}.xml`;
+  const mimeSrc = `mime/${testIdentifier}.xml`;
+  const proc = run(
+    {
+      identifier: testIdentifier,
+      mainBinaryName: "formula-desktop",
+      bundle: {
+        resources: ["LICENSE", "NOTICE"],
+        fileAssociations: [
+          { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+          { ext: ["parquet"], mimeType: "application/vnd.apache.parquet" },
+        ],
+        linux: {
+          deb: {
+            depends: ["shared-mime-info"],
+            files: {
+              [mimeDest]: mimeSrc,
+              "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+              "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
+            },
+          },
+          rpm: {
+            depends: ["shared-mime-info"],
+            files: {
+              [mimeDest]: mimeSrc,
+              "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+              "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
+            },
+          },
+          appimage: {
+            files: {
+              [mimeDest]: mimeSrc,
+              "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+              "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
+            },
+          },
+        },
+      },
+    },
+    {
+      // Only define Parquet mapping; xlsx is configured but missing in the XML.
+      mimeXmlContent: [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+        '  <mime-type type="application/vnd.apache.parquet">',
+        '    <glob pattern="*.parquet" />',
+        "  </mime-type>",
+        "</mime-info>",
+        "",
+      ].join("\n"),
+    },
+  );
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /missing required glob mappings/i);
+  assert.match(proc.stderr, /xlsx/i);
+  assert.match(proc.stderr, /\*\.xlsx/i);
+});

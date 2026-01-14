@@ -289,6 +289,24 @@ test("fails when Parquet is configured but shared-mime-info definition file lack
   assert.match(proc.stderr, /\*\.parquet/i);
 });
 
+test("fails when Parquet is configured but shared-mime-info definition omits a non-Parquet extension glob (e.g. xlsx)", () => {
+  const config = baseConfig();
+  config.__testParquetMimeXml = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+    '  <mime-type type="application/vnd.apache.parquet">',
+    '    <glob pattern="*.parquet" />',
+    "  </mime-type>",
+    "</mime-info>",
+    "",
+  ].join("\n");
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /missing required glob mappings/i);
+  assert.match(proc.stderr, /xlsx/i);
+  assert.match(proc.stderr, /\*\.xlsx/i);
+});
+
 test("fails when bundle.fileAssociations is present but missing required extensions", () => {
   const config = baseConfig({
     fileAssociations: [

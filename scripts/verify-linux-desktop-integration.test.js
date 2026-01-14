@@ -544,6 +544,48 @@ test(
 );
 
 test(
+  "verify_linux_desktop_integration fails when shared-mime-info XML is missing a glob mapping for a configured non-Parquet extension",
+  { skip: !hasPython3 },
+  () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+    const configPath = writeConfigWithAssociations(tmp, {
+      fileAssociations: [
+        {
+          ext: ["xlsx"],
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        },
+        {
+          ext: ["parquet"],
+          mimeType: "application/vnd.apache.parquet",
+        },
+      ],
+    });
+
+    const pkgRoot = writePackageRoot(tmp, {
+      mimeTypeLine:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.apache.parquet;x-scheme-handler/formula;",
+    });
+    // Define only Parquet, omitting the xlsx glob mapping.
+    writeParquetMimeDefinition(pkgRoot, {
+      xmlContent: [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+        '  <mime-type type="application/vnd.apache.parquet">',
+        '    <glob pattern="*.parquet" />',
+        "  </mime-type>",
+        "</mime-info>",
+      ].join("\n"),
+    });
+
+    const proc = runValidator({ packageRoot: pkgRoot, configPath });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /missing required glob mappings/i);
+    assert.match(proc.stderr, /xlsx/i);
+    assert.match(proc.stderr, /\*\.xlsx/i);
+  },
+);
+
+test(
   "verify_linux_desktop_integration fails when Parquet association is configured but MIME XML filename does not match tauri identifier",
   { skip: !hasPython3 },
   () => {
