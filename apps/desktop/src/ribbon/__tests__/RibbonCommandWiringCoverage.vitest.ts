@@ -108,13 +108,28 @@ function extractImplementedCommandIdsFromMainTs(schemaCommandIds: Set<string>): 
     if (schemaCommandIds.has(id)) ids.add(id);
   };
 
-  for (const match of source.matchAll(/case\s+\"([^\"]+)\"/g)) {
+  for (const match of source.matchAll(/case\s+["']([^"']+)["']/g)) {
     addIfSchema(match[1]!);
   }
 
-  for (const match of source.matchAll(/commandId\s*===\s*\"([^\"]+)\"/g)) {
+  for (const match of source.matchAll(/commandId\s*===\s*["']([^"']+)["']/g)) {
     addIfSchema(match[1]!);
   }
+
+  // Keys in the `createRibbonActionsFromCommands({ ... })` overrides (commandOverrides/toggleOverrides).
+  //
+  // Use a structural regex anchored on the surrounding property names so we don't accidentally
+  // treat other large object literals (e.g. `disabledById`) as command handlers.
+  const extractOverrideKeys = (re: RegExp): void => {
+    const match = re.exec(source);
+    const body = match?.[1];
+    if (!body) return;
+    for (const keyMatch of body.matchAll(/["']([^"']+)["']\s*:/g)) {
+      addIfSchema(keyMatch[1]!);
+    }
+  };
+  extractOverrideKeys(/commandOverrides\s*:\s*\{([\s\S]*?)\}\s*,\s*onBeforeExecuteCommand\s*:/);
+  extractOverrideKeys(/toggleOverrides\s*:\s*\{([\s\S]*?)\}\s*,\s*onUnknownCommand\s*:/);
 
   const presentPrefixes = IMPLEMENTED_COMMAND_PREFIXES.filter((prefix) => source.includes(prefix));
   for (const id of schemaCommandIds) {

@@ -151,9 +151,10 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "formulas.formulaAuditing.removeArrows",
 
   // --- Pivot table (panel) ----------------------------------------------------
-  "insert.tables.pivotTable",
   // Insert → PivotTable dropdown variant; routed via `createRibbonActionsFromCommands.commandOverrides` in main.ts.
   "insert.tables.pivotTable.fromTableRange",
+
+  // --- Insert pictures --------------------------------------------------------
   // Insert → Pictures menu items are routed via `handleInsertPicturesRibbonCommand` in main.ts.
   "insert.illustrations.pictures",
   "insert.illustrations.pictures.thisDevice",

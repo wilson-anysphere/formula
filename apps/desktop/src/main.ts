@@ -8404,10 +8404,6 @@ function handleRibbonCommand(commandId: string): void {
         scheduleRibbonSelectionFormatStateUpdate();
         app.focus();
         return;
-      case "insert.tables.pivotTable":
-        ribbonLayoutController?.openPanel(PanelIds.PIVOT_BUILDER);
-        window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
-        return;
 
       case "insert.illustrations.pictures":
       case "insert.illustrations.pictures.thisDevice":
