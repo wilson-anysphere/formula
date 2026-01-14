@@ -33,6 +33,7 @@ md-5 = "0.10"
 formula-xlsx = { path = "../formula-xlsx", default-features = false }
 formula-xls = { path = "../formula-xls" }
 formula-xlsb = { path = "../formula-xlsb" }
+md-5 = "0.10"
 roxmltree = "0.20"
 sha2 = "0.10"
 tempfile = "3.10"
