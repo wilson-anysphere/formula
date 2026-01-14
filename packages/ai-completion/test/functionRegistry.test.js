@@ -279,6 +279,11 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("IMAGE", 0), "string", "Expected IMAGE source to be a string");
 
   // Date/time helpers with more descriptive arg naming
+  assert.equal(registry.getFunction("DATE")?.args?.[0]?.name, "year", "Expected DATE arg1 to be year");
+  assert.equal(registry.getArgType("DATE", 0), "value", "Expected DATE year to be value-like");
+  assert.equal(registry.getFunction("EDATE")?.args?.[0]?.name, "start_date", "Expected EDATE arg1 to be start_date");
+  assert.equal(registry.getArgType("YEAR", 0), "value", "Expected YEAR serial_number to be value-like");
+  assert.equal(registry.getArgType("WEEKDAY", 0), "value", "Expected WEEKDAY serial_number to be value-like");
   assert.equal(registry.getFunction("DAYS")?.args?.[0]?.name, "end_date", "Expected DAYS arg1 to be end_date");
   assert.equal(registry.getFunction("DAYS360")?.args?.[2]?.name, "method", "Expected DAYS360 arg3 to be method");
   assert.equal(registry.getArgType("DAYS360", 2), "boolean", "Expected DAYS360 method to be boolean");

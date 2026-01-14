@@ -242,6 +242,77 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "DATE",
+    description: "Returns the serial number of a particular date.",
+    args: [
+      { name: "year", type: "value" },
+      { name: "month", type: "value" },
+      { name: "day", type: "value" },
+    ],
+  },
+  {
+    name: "TIME",
+    description: "Returns the serial number of a particular time.",
+    args: [
+      { name: "hour", type: "value" },
+      { name: "minute", type: "value" },
+      { name: "second", type: "value" },
+    ],
+  },
+  {
+    name: "YEAR",
+    description: "Returns the year corresponding to a date.",
+    args: [
+      { name: "serial_number", type: "value" },
+    ],
+  },
+  {
+    name: "MONTH",
+    description: "Returns the month corresponding to a date.",
+    args: [
+      { name: "serial_number", type: "value" },
+    ],
+  },
+  {
+    name: "DAY",
+    description: "Returns the day of the month corresponding to a date.",
+    args: [
+      { name: "serial_number", type: "value" },
+    ],
+  },
+  {
+    name: "EDATE",
+    description: "Returns the serial number of the date that is the indicated number of months before or after a specified date.",
+    args: [
+      { name: "start_date", type: "value" },
+      { name: "months", type: "number" },
+    ],
+  },
+  {
+    name: "EOMONTH",
+    description: "Returns the serial number for the last day of the month that is the indicated number of months before or after a specified date.",
+    args: [
+      { name: "start_date", type: "value" },
+      { name: "months", type: "number" },
+    ],
+  },
+  {
+    name: "WEEKDAY",
+    description: "Converts a serial number to a day of the week.",
+    args: [
+      { name: "serial_number", type: "value" },
+      { name: "return_type", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "WEEKNUM",
+    description: "Converts a serial number to a number representing where the week falls numerically with a year.",
+    args: [
+      { name: "serial_number", type: "value" },
+      { name: "return_type", type: "number", optional: true },
+    ],
+  },
+  {
     name: "DATEDIF",
     description: "Calculates the number of days, months, or years between two dates.",
     args: [
