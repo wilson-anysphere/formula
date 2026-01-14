@@ -366,6 +366,19 @@ pub trait FunctionContext {
         0
     }
 
+    /// Return the style id from the compressed range-run formatting layer for a cell, if present.
+    ///
+    /// This corresponds to the `formatRunsByCol` / `setFormatRunsByCol` representation used by
+    /// DocumentController hydration/deltas.
+    ///
+    /// Style id `0` indicates no run-style override (default formatting).
+    ///
+    /// Style precedence matches the DocumentController layering:
+    /// `sheet < col < row < range-run < cell`.
+    fn format_run_style_id(&self, _sheet_id: &SheetId, _addr: CellAddr) -> u32 {
+        0
+    }
+
     /// Return the default style id for an entire row, if present.
     fn row_style_id(&self, _sheet_id: &SheetId, _row: u32) -> Option<u32> {
         None

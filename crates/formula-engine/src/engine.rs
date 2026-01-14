@@ -9979,6 +9979,29 @@ impl crate::eval::ValueResolver for Snapshot {
             .unwrap_or(0)
     }
 
+    fn format_run_style_id(&self, sheet_id: usize, addr: CellAddr) -> u32 {
+        self.format_runs_by_col
+            .get(sheet_id)
+            .and_then(|cols| cols.get(&addr.col))
+            .map(|runs| {
+                // Runs are expected to be sorted and non-overlapping, but we use a conservative
+                // linear scan (last-match wins) to preserve deterministic behavior even if hosts
+                // provide unexpected overlaps.
+                let mut style_id = 0;
+                for run in runs {
+                    if addr.row < run.start_row {
+                        break;
+                    }
+                    if addr.row >= run.end_row_exclusive {
+                        continue;
+                    }
+                    style_id = run.style_id;
+                }
+                style_id
+            })
+            .unwrap_or(0)
+    }
+
     fn row_style_id(&self, sheet_id: usize, row: u32) -> Option<u32> {
         self.row_properties
             .get(sheet_id)
@@ -10056,27 +10079,7 @@ impl crate::eval::ValueResolver for Snapshot {
             .and_then(|rows| rows.get(&addr.row))
             .and_then(|props| props.style_id)
             .unwrap_or(0);
-        let run_style_id = self
-            .format_runs_by_col
-            .get(sheet_id)
-            .and_then(|cols| cols.get(&addr.col))
-            .map(|runs| {
-                // Runs are expected to be sorted and non-overlapping, but we use a conservative
-                // linear scan (last-match wins) to preserve deterministic behavior even if hosts
-                // provide unexpected overlaps.
-                let mut style_id = 0;
-                for run in runs {
-                    if addr.row < run.start_row {
-                        break;
-                    }
-                    if addr.row >= run.end_row_exclusive {
-                        continue;
-                    }
-                    style_id = run.style_id;
-                }
-                style_id
-            })
-            .unwrap_or(0);
+        let run_style_id = self.format_run_style_id(sheet_id, addr);
         let cell_style_id = self.cell_style_id(sheet_id, addr);
 
         for style_id in [sheet_style_id, col_style_id, row_style_id, run_style_id, cell_style_id] {

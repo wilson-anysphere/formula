@@ -289,6 +289,16 @@ pub trait ValueResolver {
         0
     }
 
+    /// Return the style id from the compressed range-run formatting layer for a cell, if present.
+    ///
+    /// Runs are defined per-column as row intervals and have precedence:
+    /// `sheet < col < row < range-run < cell`.
+    ///
+    /// Style id `0` indicates no range-run override.
+    fn format_run_style_id(&self, _sheet_id: usize, _addr: CellAddr) -> u32 {
+        0
+    }
+
     /// Return the default style id for an entire row, if present.
     fn row_style_id(&self, _sheet_id: usize, _row: u32) -> Option<u32> {
         None
@@ -2067,6 +2077,13 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     fn cell_style_id(&self, sheet_id: &FnSheetId, addr: CellAddr) -> u32 {
         match sheet_id {
             FnSheetId::Local(id) => self.resolver.cell_style_id(*id, addr),
+            FnSheetId::External(_) => 0,
+        }
+    }
+
+    fn format_run_style_id(&self, sheet_id: &FnSheetId, addr: CellAddr) -> u32 {
+        match sheet_id {
+            FnSheetId::Local(id) => self.resolver.format_run_style_id(*id, addr),
             FnSheetId::External(_) => 0,
         }
     }

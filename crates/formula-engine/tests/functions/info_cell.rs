@@ -698,6 +698,68 @@ fn cell_prefix_respects_range_run_precedence() {
 }
 
 #[test]
+fn cell_protect_and_format_respect_range_run_layer() {
+    use formula_engine::{Engine, FormatRun};
+    use formula_model::{Protection, Style};
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "x").unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"protect\",A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"format\",A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    // Excel defaults to locked cells and general number format.
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+
+    let run_style_id = engine.intern_style(Style {
+        protection: Some(Protection {
+            locked: false,
+            hidden: false,
+        }),
+        number_format: Some("__builtin_numFmtId:12".to_string()),
+        ..Style::default()
+    });
+
+    // Apply range-run formatting (unlocked + number format) for A1.
+    engine
+        .set_format_runs_by_col(
+            "Sheet1",
+            0, // col A
+            vec![FormatRun {
+                start_row: 0,
+                end_row_exclusive: 10,
+                style_id: run_style_id,
+            }],
+        )
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(0.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B2"),
+        Value::Text("N".to_string())
+    );
+
+    // Cell style overrides range-run.
+    let locked_style_id = engine.intern_style(Style {
+        protection: Some(Protection {
+            locked: true,
+            hidden: false,
+        }),
+        ..Style::default()
+    });
+    engine
+        .set_cell_style_id("Sheet1", "A1", locked_style_id)
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+}
+
+#[test]
 fn info_recalc_defaults_to_manual_and_unknown_keys() {
     let mut sheet = TestSheet::new();
 

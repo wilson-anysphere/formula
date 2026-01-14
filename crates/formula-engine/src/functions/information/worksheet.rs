@@ -173,16 +173,17 @@ fn parse_cell_info_type(key: &str) -> Option<CellInfoType> {
     }
 }
 
-fn style_layer_ids(ctx: &dyn FunctionContext, sheet_id: &SheetId, addr: CellAddr) -> [u32; 4] {
+fn style_layer_ids(ctx: &dyn FunctionContext, sheet_id: &SheetId, addr: CellAddr) -> [u32; 5] {
     let col_style_id = ctx
         .col_properties(sheet_id, addr.col)
         .and_then(|props| props.style_id)
         .unwrap_or(0);
 
     // Style precedence matches the DocumentController layering:
-    //   sheet < col < row < cell
+    //   sheet < col < row < range-run < cell
     [
         ctx.cell_style_id(sheet_id, addr),
+        ctx.format_run_style_id(sheet_id, addr),
         ctx.row_style_id(sheet_id, addr.row).unwrap_or(0),
         col_style_id,
         ctx.sheet_default_style_id(sheet_id).unwrap_or(0),
