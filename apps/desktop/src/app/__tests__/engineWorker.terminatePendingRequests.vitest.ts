@@ -17,7 +17,7 @@ class TrackingAbortSignal {
 }
 
 class MockMessagePort {
-  private listeners = new Set<(event: MessageEvent<unknown>) => void>();
+  private listeners = new Map<string, Set<(event: MessageEvent<unknown>) => void>>();
   private other: MockMessagePort | null = null;
   private closed = false;
 
@@ -42,19 +42,26 @@ class MockMessagePort {
     this.other = null;
   }
 
-  addEventListener(_type: "message", listener: (event: MessageEvent<unknown>) => void): void {
+  addEventListener(type: string, listener: (event: MessageEvent<unknown>) => void): void {
     if (this.closed) return;
-    this.listeners.add(listener);
+    const key = String(type ?? "");
+    let set = this.listeners.get(key);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(key, set);
+    }
+    set.add(listener);
   }
 
-  removeEventListener(_type: "message", listener: (event: MessageEvent<unknown>) => void): void {
-    this.listeners.delete(listener);
+  removeEventListener(type: string, listener: (event: MessageEvent<unknown>) => void): void {
+    const key = String(type ?? "");
+    this.listeners.get(key)?.delete(listener);
   }
 
   private dispatchMessage(data: unknown): void {
     if (this.closed) return;
     const event = { data } as MessageEvent<unknown>;
-    for (const listener of this.listeners) {
+    for (const listener of this.listeners.get("message") ?? []) {
       listener(event);
     }
   }
@@ -121,4 +128,3 @@ describe("EngineWorker terminate() cleanup", () => {
     }
   });
 });
-
