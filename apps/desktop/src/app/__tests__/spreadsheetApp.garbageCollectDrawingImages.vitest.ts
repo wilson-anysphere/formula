@@ -195,6 +195,48 @@ describe("SpreadsheetApp.garbageCollectDrawingImages", () => {
     root.remove();
   });
 
+  it("handles wrapped image ids in drawing kinds", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const sheetId = app.getCurrentSheetId();
+
+    // Some model encodings wrap scalar ids as singleton tuples/structs.
+    app.getDocument().setSheetDrawings(sheetId, [
+      {
+        id: "drawing_doc_wrapped_array",
+        kind: { Image: { image_id: ["image_wrapped_array.png"] } },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: pxToEmu(10), cy: pxToEmu(10) } },
+        zOrder: 0,
+      },
+      {
+        id: "drawing_doc_wrapped_object",
+        kind: { Image: { image_id: { 0: "image_wrapped_object.png" } } },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: pxToEmu(10), cy: pxToEmu(10) } },
+        zOrder: 1,
+      },
+    ]);
+
+    const garbageCollectAsync = vi.fn(async (_keep: Iterable<string>) => {});
+    (app as any).drawingImages = { get: () => undefined, set: () => {}, garbageCollectAsync, clear: () => {} };
+
+    await app.garbageCollectDrawingImages();
+
+    expect(garbageCollectAsync).toHaveBeenCalledTimes(1);
+    const keep = garbageCollectAsync.mock.calls[0]?.[0] as Iterable<string>;
+    const keepSet = new Set(Array.from(keep));
+    expect(keepSet.has("image_wrapped_array.png")).toBe(true);
+    expect(keepSet.has("image_wrapped_object.png")).toBe(true);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("keeps image ids referenced by in-cell images", async () => {
     const root = createRoot();
     const status = {

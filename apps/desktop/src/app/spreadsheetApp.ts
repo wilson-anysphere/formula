@@ -8708,6 +8708,11 @@ export class SpreadsheetApp {
       if (typeof value === "string") return value.trim();
       if (typeof value === "number" && Number.isFinite(value)) return String(value);
       if (typeof value === "bigint") return String(value);
+      // Some imported/model encodings wrap scalar ids in singleton tuples/structs.
+      if (Array.isArray(value) && value.length === 1) return normalizeImageId(value[0]);
+      if (value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "0")) {
+        return normalizeImageId((value as any)[0]);
+      }
       return "";
     };
 
