@@ -995,6 +995,7 @@ WASM binding validation rules (current `formula-wasm` implementation):
   - must be valid A1 addresses
   - must **not** contain `!` (no sheet prefix)
   - `$` absolute markers are allowed (e.g. `"$A$1"`); the binding normalizes them to `A1` internally.
+  - A1 parsing is case-insensitive (e.g. `"a1"` is accepted).
 - `targetValue` must be a finite number.
 - `tolerance` (optional) must be a finite number and `> 0`.
 - `maxIterations` (optional) must be an integer `> 0` and not exceed `usize::MAX`.
@@ -1140,6 +1141,7 @@ Proposed WASM binding validation rules (if/when implemented):
   - each cell must be a non-empty string
   - must be a valid A1 address
   - must **not** contain `!` (no sheet prefix); the binding should apply the `sheet` context itself
+  - A1 parsing should be case-insensitive; `$` absolute markers are allowed and can be normalized to plain `A1`.
 - `values.length` must equal `changingCells.length` (mirror Rust error message if possible).
 
 ### Monte Carlo Simulation
@@ -1311,6 +1313,7 @@ Proposed WASM binding validation rules (if/when implemented):
   - must be non-empty strings
   - must be valid A1 addresses
   - must **not** contain `!` (no sheet prefix); the binding should apply the `sheet` context itself
+  - A1 parsing should be case-insensitive; `$` absolute markers are allowed and can be normalized to plain `A1`.
 - `seed` (optional): must be a non-negative safe integer (to preserve deterministic seeding).
 - `onProgress` (optional): must be a function.
 
@@ -1513,6 +1516,7 @@ Proposed WASM binding validation rules (if/when implemented):
   - must be non-empty strings
   - must be valid A1 addresses
   - should **not** contain `!` (no sheet prefix) if the binding follows the `goalSeek` style
+  - A1 parsing should be case-insensitive; `$` absolute markers are allowed and can be normalized to plain `A1`.
 - `problem.variables.length` must equal `variableCells.length`.
 - `variableCells` should not contain duplicates (not currently validated by Rust); duplicates would cause multiple decision variables to write to the same cell (last write wins).
 - `constraintCells` should not contain duplicates (not currently validated); duplicates are allowed but can make constraints ambiguous in UI.
