@@ -10,6 +10,7 @@ use sha2::Digest;
 use zeroize::Zeroizing;
 
 const MAX_DIGEST_LEN: usize = 64; // SHA-512
+const MAX_HASH_BLOCK_LEN: usize = 128; // SHA-384/SHA-512 block size
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashAlgorithm {
@@ -38,6 +39,14 @@ impl HashAlgorithm {
             HashAlgorithm::Sha256 => 32,
             HashAlgorithm::Sha384 => 48,
             HashAlgorithm::Sha512 => 64,
+        }
+    }
+
+    pub(crate) fn block_len(&self) -> usize {
+        // Hash block sizes (bytes). MD5/SHA-1/SHA-256 use 64-byte blocks; SHA-384/512 use 128-byte.
+        match self {
+            HashAlgorithm::Md5 | HashAlgorithm::Sha1 | HashAlgorithm::Sha256 => 64,
+            HashAlgorithm::Sha384 | HashAlgorithm::Sha512 => 128,
         }
     }
 
@@ -253,6 +262,42 @@ pub(crate) fn derive_iv(
     hash_alg.digest_two_into(salt, block_key, &mut digest[..digest_len]);
 
     normalize_key_material(&digest[..digest_len], iv_len)
+}
+
+#[cfg(test)]
+pub(crate) fn aes_ecb_encrypt_in_place(
+    key: &[u8],
+    buf: &mut [u8],
+) -> Result<(), OfficeCryptoError> {
+    use aes::cipher::{generic_array::GenericArray, BlockEncrypt};
+
+    if buf.len() % 16 != 0 {
+        return Err(OfficeCryptoError::InvalidFormat(format!(
+            "AES-ECB plaintext length must be multiple of 16 (got {})",
+            buf.len()
+        )));
+    }
+
+    fn encrypt_with<C>(key: &[u8], buf: &mut [u8]) -> Result<(), OfficeCryptoError>
+    where
+        C: BlockEncrypt + aes::cipher::KeyInit,
+    {
+        let cipher = C::new_from_slice(key)
+            .map_err(|_| OfficeCryptoError::InvalidFormat("invalid AES key".to_string()))?;
+        for block in buf.chunks_mut(16) {
+            cipher.encrypt_block(GenericArray::from_mut_slice(block));
+        }
+        Ok(())
+    }
+
+    match key.len() {
+        16 => encrypt_with::<Aes128>(key, buf),
+        24 => encrypt_with::<Aes192>(key, buf),
+        32 => encrypt_with::<Aes256>(key, buf),
+        other => Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "unsupported AES key length {other}"
+        ))),
+    }
 }
 
 pub(crate) fn aes_cbc_decrypt(
@@ -519,6 +564,7 @@ impl StandardKeyDeriver {
         buf.extend_from_slice(&self.password_hash);
         buf.extend_from_slice(&block_index.to_le_bytes());
         let h: Zeroizing<Vec<u8>> = Zeroizing::new(self.hash_alg.digest(&buf));
+
         match self.derivation {
             StandardKeyDerivation::Aes => crypt_derive_key_aes(self.hash_alg, &h, self.key_bytes),
             StandardKeyDerivation::Rc4 => {
@@ -540,31 +586,31 @@ fn crypt_derive_key_aes(
     hash: &[u8],
     key_len: usize,
 ) -> Result<Zeroizing<Vec<u8>>, OfficeCryptoError> {
-    // CryptoAPI `CryptDeriveKey` semantics (MS-OFFCRYPTO Standard):
+    // MS-OFFCRYPTO Standard encryption uses CryptoAPI `CryptDeriveKey`-style expansion:
     //
-    // - Pad the hash output to 64 bytes with zeros
-    // - XOR with ipad/opad (0x36/0x5C)
-    // - Hash each, concatenate, truncate to key_len
+    //   D = hash padded with zeros to the hash block size (64 or 128 bytes)
+    //   inner = Hash(D XOR 0x36)
+    //   outer = Hash(D XOR 0x5c)
+    //   derived = inner || outer
+    //   key = derived[0..key_len]
     //
-    // This is applied even when `key_len <= hash.len()` (e.g. AES-128 + SHA1).
-    let mut buf: Zeroizing<[u8; 64]> = Zeroizing::new([0u8; 64]);
-    if hash.len() > buf.len() {
-        return Err(OfficeCryptoError::UnsupportedEncryption(format!(
-            "hash output too long for CryptoAPI key derivation: {} bytes",
-            hash.len()
-        )));
-    }
-    buf[..hash.len()].copy_from_slice(hash);
+    // Notes:
+    // - AES uses this derivation even for AES-128 (key_len < digest_len).
+    // - The output length is 2*digest_len, which is always >= 32 for the hashes we support.
+    let digest_len = hash_alg.digest_len();
+    let block_len = hash_alg.block_len();
+    debug_assert!(block_len <= MAX_HASH_BLOCK_LEN);
 
-    let mut ipad: Zeroizing<[u8; 64]> = Zeroizing::new([0u8; 64]);
-    let mut opad: Zeroizing<[u8; 64]> = Zeroizing::new([0u8; 64]);
-    for i in 0..64 {
-        ipad[i] = buf[i] ^ 0x36;
-        opad[i] = buf[i] ^ 0x5C;
+    let mut buf1: Zeroizing<Vec<u8>> = Zeroizing::new(vec![0x36u8; block_len]);
+    let mut buf2: Zeroizing<Vec<u8>> = Zeroizing::new(vec![0x5Cu8; block_len]);
+    let take = digest_len.min(hash.len()).min(block_len);
+    for i in 0..take {
+        buf1[i] ^= hash[i];
+        buf2[i] ^= hash[i];
     }
 
-    let h1: Zeroizing<Vec<u8>> = Zeroizing::new(hash_alg.digest(&ipad[..]));
-    let h2: Zeroizing<Vec<u8>> = Zeroizing::new(hash_alg.digest(&opad[..]));
+    let h1: Zeroizing<Vec<u8>> = Zeroizing::new(hash_alg.digest(&buf1));
+    let h2: Zeroizing<Vec<u8>> = Zeroizing::new(hash_alg.digest(&buf2));
 
     let mut out: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(h1.len() + h2.len()));
     out.extend_from_slice(&h1);
@@ -648,6 +694,7 @@ mod tests {
             ),
         ];
 
+        // These vectors are from the legacy CryptoAPI RC4 derivation used by classic XLS.
         let deriver = StandardKeyDeriver::new(
             HashAlgorithm::Md5,
             128,

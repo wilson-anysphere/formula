@@ -1,92 +1,108 @@
-use std::io::{Cursor, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use ms_offcrypto_writer::Ecma376AgileWriter;
 
-#[test]
-fn diff_encrypted_workbook_against_plain_no_differences() -> Result<()> {
-    let fixture =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/basic.xlsx");
-    let plain_bytes =
-        std::fs::read(&fixture).with_context(|| format!("read fixture {}", fixture.display()))?;
+const PASSWORD: &str = "password";
 
-    let tmp = tempfile::tempdir().context("tempdir")?;
-    let encrypted_path = tmp.path().join("encrypted.xlsx");
-    let password = "xlsx-diff-test-password";
+fn fixture_path(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/encrypted/ooxml")
+        .join(name)
+}
 
-    // Encrypt the fixture bytes into an ECMA-376 agile-encrypted OLE container.
-    let cursor = Cursor::new(Vec::<u8>::new());
-    let mut rng = rand::rng();
-    let mut writer =
-        Ecma376AgileWriter::create(&mut rng, password, cursor).context("create encryptor")?;
-    writer
-        .write_all(&plain_bytes)
-        .context("write plaintext workbook bytes")?;
-    let cursor = writer.into_inner().context("finalize encryption")?;
-    let encrypted_bytes = cursor.into_inner();
-    std::fs::write(&encrypted_path, encrypted_bytes)
-        .with_context(|| format!("write encrypted workbook {}", encrypted_path.display()))?;
-
+fn assert_diff_empty(
+    expected: &Path,
+    actual: &Path,
+    expected_password: Option<&str>,
+    actual_password: Option<&str>,
+) -> Result<()> {
     let report = xlsx_diff::diff_workbooks_with_inputs(
         xlsx_diff::DiffInput {
-            path: &fixture,
-            password: None,
+            path: expected,
+            password: expected_password,
         },
         xlsx_diff::DiffInput {
-            path: &encrypted_path,
-            password: Some(password),
+            path: actual,
+            password: actual_password,
         },
     )
-        .context("diff workbooks")?;
+    .with_context(|| {
+        format!(
+            "diff {} (pw={:?}) vs {} (pw={:?})",
+            expected.display(),
+            expected_password,
+            actual.display(),
+            actual_password
+        )
+    })?;
+
     assert!(
         report.is_empty(),
-        "expected no diffs between plaintext and encrypted-decrypted workbook, got: {:#?}",
-        report.differences
+        "expected no diffs, got:\n{}",
+        report
+            .differences
+            .iter()
+            .map(|d| d.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 
     Ok(())
 }
 
 #[test]
-fn encrypted_workbook_requires_password() -> Result<()> {
-    let fixture =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/basic.xlsx");
-    let plain_bytes =
-        std::fs::read(&fixture).with_context(|| format!("read fixture {}", fixture.display()))?;
+fn diff_agile_fixture_against_plain_no_differences() -> Result<()> {
+    let plain = fixture_path("plaintext.xlsx");
+    let encrypted = fixture_path("agile.xlsx");
+    assert_diff_empty(&plain, &encrypted, None, Some(PASSWORD))?;
+    Ok(())
+}
 
-    let tmp = tempfile::tempdir().context("tempdir")?;
-    let encrypted_path = tmp.path().join("encrypted.xlsx");
-    let password = "xlsx-diff-test-password";
+#[test]
+fn diff_standard_fixture_against_plain_no_differences() -> Result<()> {
+    let plain = fixture_path("plaintext.xlsx");
+    let encrypted = fixture_path("standard.xlsx");
+    assert_diff_empty(&plain, &encrypted, None, Some(PASSWORD))?;
+    Ok(())
+}
 
-    let cursor = Cursor::new(Vec::<u8>::new());
-    let mut rng = rand::rng();
-    let mut writer =
-        Ecma376AgileWriter::create(&mut rng, password, cursor).context("create encryptor")?;
-    writer
-        .write_all(&plain_bytes)
-        .context("write plaintext workbook bytes")?;
-    let cursor = writer.into_inner().context("finalize encryption")?;
-    let encrypted_bytes = cursor.into_inner();
-    std::fs::write(&encrypted_path, encrypted_bytes)
-        .with_context(|| format!("write encrypted workbook {}", encrypted_path.display()))?;
+#[test]
+fn diff_large_fixtures_against_plain_large_no_differences() -> Result<()> {
+    let plain = fixture_path("plaintext-large.xlsx");
 
+    for encrypted in ["agile-large.xlsx", "standard-large.xlsx"] {
+        let encrypted = fixture_path(encrypted);
+        assert_diff_empty(&plain, &encrypted, None, Some(PASSWORD))?;
+    }
+
+    Ok(())
+}
+
+#[test]
+fn agile_empty_password_fixture_requires_explicit_empty_string() -> Result<()> {
+    let plain = fixture_path("plaintext.xlsx");
+    let encrypted = fixture_path("agile-empty-password.xlsx");
+
+    // Missing password should error (even though the password is the empty string).
     let err = xlsx_diff::diff_workbooks_with_inputs(
         xlsx_diff::DiffInput {
-            path: &encrypted_path,
+            path: &plain,
             password: None,
         },
         xlsx_diff::DiffInput {
-            path: &encrypted_path,
+            path: &encrypted,
             password: None,
         },
     )
-    .expect_err("expected diff to fail without password");
-    let msg = err.to_string().to_lowercase();
+    .expect_err("expected encrypted input to require an explicit password");
+    let msg = err.to_string().to_ascii_lowercase();
     assert!(
         msg.contains("password") || msg.contains("encrypt"),
         "expected error message to mention password/encryption, got: {msg}"
     );
 
+    // An explicit empty password should successfully decrypt.
+    assert_diff_empty(&plain, &encrypted, None, Some(""))?;
     Ok(())
 }
+
