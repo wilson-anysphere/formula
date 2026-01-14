@@ -329,7 +329,9 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             start: addr,
             end: addr,
         };
-        if reference_provided {
+        let is_self_reference = matches!(&cell_ref.sheet_id, SheetId::Local(id) if *id == ctx.current_sheet_id())
+            && addr == ctx.current_cell_addr();
+        if reference_provided && !is_self_reference {
             ctx.record_reference(&cell_ref);
         }
         cell_ref

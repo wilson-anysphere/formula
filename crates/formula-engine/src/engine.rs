@@ -14159,6 +14159,107 @@ fn walk_calc_expr(
                         lexical_scopes.pop();
                         return;
                     }
+                    "CELL" => {
+                        if args.is_empty() {
+                            return;
+                        }
+
+                        // `CELL(info_type, reference)` is unusual: for many `info_type` values,
+                        // the `reference` argument is used only for its *address* (sheet/row/col)
+                        // and should not create calculation dependencies on the referenced cells'
+                        // values.
+                        //
+                        // Without this special-casing, a formula like `=CELL("width", A1)` entered
+                        // into `A1` becomes a self-edge in the calc graph and is treated as a
+                        // circular reference, even though the column width does not depend on the
+                        // cell's value.
+                        //
+                        // When `info_type` is not a compile-time literal, fall back to the generic
+                        // dependency walker.
+                        let info_type_literal = match &args[0] {
+                            Expr::Text(s) => Some(s.trim().to_ascii_lowercase()),
+                            _ => None,
+                        };
+
+                        // Always walk `info_type`; it can itself contain references (e.g. `CELL(A1, ...)`).
+                        walk_calc_expr(
+                            &args[0],
+                            current_cell,
+                            tables_by_sheet,
+                            workbook,
+                            spills,
+                            precedents,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+
+                        if args.len() < 2 {
+                            return;
+                        }
+
+                        if let Some(info_type) = info_type_literal {
+                            let derefs_reference_value =
+                                matches!(info_type.as_str(), "contents" | "type");
+
+                            if derefs_reference_value {
+                                // Treat the reference argument like a normal value/range dependency
+                                // *except* for a direct self-reference (which is non-circular in Excel
+                                // because CELL reads formula/metadata, not the evaluated value).
+                                if let Expr::CellRef(r) = &args[1] {
+                                    if let Some(sheets) =
+                                        resolve_sheet_span(&r.sheet, current_cell.sheet, workbook)
+                                    {
+                                        let Some(addr) = r.addr.resolve(current_cell.addr) else {
+                                            return;
+                                        };
+                                        if sheets.len() == 1
+                                            && sheets[0] == current_cell.sheet
+                                            && addr == current_cell.addr
+                                        {
+                                            return;
+                                        }
+                                    }
+                                }
+
+                                walk_calc_expr(
+                                    &args[1],
+                                    current_cell,
+                                    tables_by_sheet,
+                                    workbook,
+                                    spills,
+                                    precedents,
+                                    visiting_names,
+                                    lexical_scopes,
+                                );
+                                return;
+                            }
+
+                            // Address-only `info_type` values (e.g. width/format/address) should not
+                            // treat a bare reference as a precedent.
+                            //
+                            // When the reference is more complex (e.g. OFFSET(...)), fall back to
+                            // the generic walker so we still pick up dependencies used to *compute*
+                            // the reference.
+                            match &args[1] {
+                                Expr::CellRef(_)
+                                | Expr::RangeRef(_)
+                                | Expr::StructuredRef(_)
+                                | Expr::SpillRange(_) => return,
+                                Expr::ImplicitIntersection(inner) => {
+                                    if matches!(
+                                        inner.as_ref(),
+                                        Expr::CellRef(_)
+                                            | Expr::RangeRef(_)
+                                            | Expr::StructuredRef(_)
+                                            | Expr::SpillRange(_)
+                                    ) {
+                                        return;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                     _ => {}
                 }
             } else {
@@ -14911,12 +15012,15 @@ mod tests {
             .set_cell_formula("Sheet1", "A1", r#"=CELL("width", A1)"#)
             .unwrap();
         engine.recalculate_single_threaded();
-        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(8.43));
+        // Excel returns the column width rounded down to whole characters, with a `0.0` fractional
+        // marker when the column uses the sheet default width.
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(8.0));
 
         // Column widths are stored in Excel "character" units (OOXML `col/@width`).
         engine.set_col_width("Sheet1", 0, Some(15.0));
         engine.recalculate_single_threaded();
-        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(15.0));
+        // When a column uses an explicit width override, Excel reports a `0.1` fractional marker.
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(15.1));
 
         // Hidden columns should return 0 for CELL("width").
         engine.set_col_hidden("Sheet1", 0, true);
