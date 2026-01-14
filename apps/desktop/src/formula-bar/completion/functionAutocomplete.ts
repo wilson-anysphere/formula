@@ -70,6 +70,8 @@ const DEFAULT_ARG_SEPARATOR = (() => {
   }
 })();
 
+const SIGNATURE_PREVIEW_CACHE = new Map<string, string>();
+
 function isWhitespace(ch: string): boolean {
   return ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
 }
@@ -167,8 +169,15 @@ function findCompletionContext(input: string, cursorPosition: number): Completio
 }
 
 function signaturePreview(name: string): string {
+  const cached = SIGNATURE_PREVIEW_CACHE.get(name);
+  if (cached) return cached;
+
   const sig = getFunctionSignature(name);
-  if (!sig) return "(…)";
+  if (!sig) {
+    const fallback = "(…)";
+    SIGNATURE_PREVIEW_CACHE.set(name, fallback);
+    return fallback;
+  }
 
   // The dropdown already shows the function name; display just the argument list for
   // a compact "signature preview" (Excel-like).
@@ -182,7 +191,9 @@ function signaturePreview(name: string): string {
     .join("");
   const args = `(${inner})`;
   const summary = sig.summary?.trim?.() ?? "";
-  return summary ? `${args} — ${summary}` : args;
+  const out = summary ? `${args} — ${summary}` : args;
+  SIGNATURE_PREVIEW_CACHE.set(name, out);
+  return out;
 }
 
 function preserveTypedCasing(typedPrefix: string, canonical: string): string {
