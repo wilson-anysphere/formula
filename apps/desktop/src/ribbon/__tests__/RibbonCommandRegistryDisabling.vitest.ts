@@ -178,4 +178,51 @@ describe("CommandRegistry-backed ribbon disabling", () => {
 
     act(() => root.unmount());
   });
+
+  it("keeps Home → Editing → Clear menu items enabled via the exemption list", () => {
+    const commandRegistry = new CommandRegistry();
+    const schema: RibbonSchema = {
+      tabs: [
+        {
+          id: "home",
+          label: "Home",
+          groups: [
+            {
+              id: "editing",
+              label: "Editing",
+              buttons: [
+                {
+                  id: "home.editing.clear",
+                  label: "Clear",
+                  ariaLabel: "Clear",
+                  kind: "dropdown",
+                  menuItems: [
+                    { id: "home.editing.clear.clearAll", label: "Clear All", ariaLabel: "Clear All" },
+                    { id: "home.editing.clear.clearFormats", label: "Clear Formats", ariaLabel: "Clear Formats" },
+                    { id: "home.editing.clear.clearContents", label: "Clear Contents", ariaLabel: "Clear Contents" },
+                    { id: "home.editing.clear.clearComments", label: "Clear Comments", ariaLabel: "Clear Comments" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const disabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry, { schema });
+
+    // These menu items are ribbon-specific ids but are routed to real `format.clear*` commands
+    // in `main.ts` (via `resolveHomeEditingClearCommandTarget`). They should not be auto-disabled
+    // just because the command registry doesn't have matching ids.
+    expect(disabledById["home.editing.clear.clearAll"]).not.toBe(true);
+    expect(disabledById["home.editing.clear.clearFormats"]).not.toBe(true);
+    expect(disabledById["home.editing.clear.clearContents"]).not.toBe(true);
+
+    // Unimplemented variants should remain disabled by default.
+    expect(disabledById["home.editing.clear.clearComments"]).toBe(true);
+
+    // The trigger should not be disabled because at least one menu item is enabled.
+    expect(disabledById["home.editing.clear"]).not.toBe(true);
+  });
 });

@@ -32,6 +32,12 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   "home.editing.sortFilter.clear": true,
   "home.editing.sortFilter.reapply": true,
 
+  // --- Clear -----------------------------------------------------------------
+  "home.editing.clear": true,
+  "home.editing.clear.clearAll": true,
+  "home.editing.clear.clearFormats": true,
+  "home.editing.clear.clearContents": true,
+
   "data.sortFilter.sortAtoZ": true,
   "data.sortFilter.sortZtoA": true,
   "data.sortFilter.sort": true,
