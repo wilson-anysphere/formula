@@ -1011,6 +1011,44 @@ describe("AiCellFunctionEngine", () => {
     expect(resolved).toBe("ok");
   });
 
+  it.each([
+    ["SSNs", "123-45-6789"],
+    ["credit card numbers", "4111 1111 1111 1111"],
+    ["phone numbers", "(415) 555-2671"],
+    ["IBANs", "GB82 WEST 1234 5698 7654 32"],
+  ])("heuristically redacts referenced %s even without structured classifications", async (_name, sensitiveValue) => {
+    globalThis.localStorage?.clear();
+
+    const workbookId = `dlp-heuristic-${String(_name).replaceAll(" ", "-").toLowerCase()}`;
+    const llmClient = {
+      chat: vi.fn(async (_request: any) => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      workbookId,
+    });
+
+    const getCellValue = (addr: string) => (addr === "A1" ? sensitiveValue : null);
+
+    const pending = evaluateFormula('=AI("summarize", A1)', getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    expect(llmClient.chat).toHaveBeenCalledTimes(1);
+    const call = llmClient.chat.mock.calls[0]?.[0];
+    const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
+    expect(userMessage).toContain("[REDACTED]");
+    expect(userMessage).not.toContain(String(sensitiveValue));
+
+    const resolved = evaluateFormula('=AI("summarize", A1)', getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
+    expect(resolved).toBe("ok");
+  });
+
   it("DLP redacts inputs before sending to the LLM", async () => {
     const workbookId = "dlp-redact-workbook";
     const llmClient = {
