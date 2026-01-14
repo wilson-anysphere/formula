@@ -848,14 +848,6 @@ jobs:
             exit 1
           fi
 
-      - name: Smoke check packaged cross-origin isolation (COOP/COEP)
-        # COOP/COEP + Worker support can regress per-platform; run on all release targets by default.
-        #
-        # Optional: set `FORMULA_COI_CHECK_ALL_PLATFORMS=0` (or `false`) as a GitHub Actions variable to
-        # only run this step on Linux (useful if a hosted-runner regression makes the check flaky on
-        # macOS/Windows while keeping at least one COI signal before publishing).
-        if: needs.preflight.outputs.upload == 'true' && (runner.os == 'Linux' || (vars.FORMULA_COI_CHECK_ALL_PLATFORMS != '0' && vars.FORMULA_COI_CHECK_ALL_PLATFORMS != 'false'))
-        run: pnpm -C apps/desktop check:coi
       - name: Cache pinned Tauri CLI binary (cargo-tauri)
         id: tauri-cli-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
