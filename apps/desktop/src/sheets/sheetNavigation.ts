@@ -1,13 +1,14 @@
 import type { SheetMeta } from "./workbookSheetStore";
 
 /**
- * Pick the visible sheet to activate after deleting/hiding the current visible sheet.
+ * Pick the visible sheet to activate after deleting/hiding a sheet.
  *
  * Mirrors Excel behavior:
  * - Prefer the next visible sheet to the right
  * - Otherwise fall back to the previous visible sheet
  *
- * Returns `null` when the reference sheet isn't found in the visible list.
+ * Returns `null` when the reference sheet isn't found or there is no visible
+ * neighbor to activate.
  */
 export function pickAdjacentVisibleSheetId(
   sheets: ReadonlyArray<Pick<SheetMeta, "id" | "visibility">>,
@@ -16,9 +17,18 @@ export function pickAdjacentVisibleSheetId(
   const id = String(referenceSheetId ?? "").trim();
   if (!id) return null;
 
-  const visibleSheets = sheets.filter((s) => s.visibility === "visible");
-  const idx = visibleSheets.findIndex((s) => s.id === id);
+  const idx = sheets.findIndex((s) => s.id === id);
   if (idx === -1) return null;
-  return visibleSheets[idx + 1]?.id ?? visibleSheets[idx - 1]?.id ?? null;
-}
 
+  for (let i = idx + 1; i < sheets.length; i += 1) {
+    const sheet = sheets[i];
+    if (sheet?.visibility === "visible") return sheet.id;
+  }
+
+  for (let i = idx - 1; i >= 0; i -= 1) {
+    const sheet = sheets[i];
+    if (sheet?.visibility === "visible") return sheet.id;
+  }
+
+  return null;
+}
