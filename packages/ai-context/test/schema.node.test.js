@@ -68,6 +68,27 @@ test("extractSheetSchema: treats rich text + in-cell image values as strings", (
   assert.ok(photoCol.sampleValues.includes("[Image]"));
 });
 
+test("extractSheetSchema: does not call custom toString() on non-string header cells", () => {
+  const dangerous = {
+    toString() {
+      throw new Error("toString should not be called");
+    },
+  };
+
+  const sheet = {
+    name: "Sheet1",
+    values: [
+      [dangerous, "Name", "Age"],
+      ["Alice", 30, 5],
+    ],
+  };
+
+  const schema = extractSheetSchema(sheet);
+  assert.equal(schema.dataRegions.length, 1);
+  assert.equal(schema.dataRegions[0].hasHeader, true);
+  assert.deepStrictEqual(schema.dataRegions[0].headers, ["Column1", "Name", "Age"]);
+});
+
 test("extractSheetSchema: detects multiple disconnected regions", () => {
   const sheet = {
     name: "Sheet1",

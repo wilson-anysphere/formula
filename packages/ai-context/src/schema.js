@@ -434,8 +434,10 @@ function analyzeRegion(sheetValues, normalized, options = {}) {
     const raw = headerRowValues[c];
     const fallback = `Column${c + 1}`;
     const scalar = valueToScalar(raw);
-    const headerText = typeof scalar === "string" ? scalar : scalar == null ? "" : String(scalar);
-    headers.push(hasHeader && isHeaderCandidateValue(scalar) ? headerText.trim() : fallback);
+    // Header detection only considers string-like values. Avoid calling `String(...)` on arbitrary
+    // objects here: custom `toString()` implementations can throw or produce user-controlled
+    // content even though non-string headers are ignored (we fall back to `ColumnN`).
+    headers.push(hasHeader && typeof scalar === "string" && isHeaderCandidateValue(scalar) ? scalar.trim() : fallback);
   }
 
   /** @type {InferredType[]} */
