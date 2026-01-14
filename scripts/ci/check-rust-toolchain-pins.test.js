@@ -68,6 +68,61 @@ jobs:
   assert.match(proc.stdout, /Rust toolchain pins match/i);
 });
 
+test("fails when docs/13-testing-validation.md toolchain pin drifts", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.92.0
+`,
+    "docs/13-testing-validation.md": `
+\`\`\`yaml
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.91.0
+\`\`\`
+`,
+  });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /docs\/13-testing-validation\.md/i);
+  assert.match(proc.stderr, /toolchain/i);
+});
+
+test("passes when docs/13-testing-validation.md toolchain pin matches rust-toolchain.toml", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.92.0
+`,
+    "docs/13-testing-validation.md": `
+\`\`\`yaml
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: "v1.92.0"
+\`\`\`
+`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Rust toolchain pins match/i);
+});
+
 test("passes when workflow toolchain is quoted", { skip: !canRun }, () => {
   const proc = run({
     "rust-toolchain.toml": `

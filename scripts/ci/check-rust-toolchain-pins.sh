@@ -389,6 +389,57 @@ if [ -f "${mise_file}" ]; then
   fi
 fi
 
+# Best-effort docs check: keep the testing docs example in sync with the pinned Rust toolchain.
+# docs/13-testing-validation.md contains a sample workflow that explicitly pins dtolnay/rust-toolchain.
+docs_file="docs/13-testing-validation.md"
+if [ -f "${docs_file}" ]; then
+  while IFS= read -r match; do
+    [ -z "$match" ] && continue
+    line_no="${match%%:*}"
+    content="${match#*:}"
+
+    # Ignore commented lines.
+    trimmed="${content#"${content%%[![:space:]]*}"}"
+    case "$trimmed" in
+      \#*) continue ;;
+    esac
+
+    value="${content#*:}"
+    value="${value%%#*}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    if [[ "$value" == \"*\" ]]; then
+      value="${value#\"}"
+      value="${value%\"}"
+    elif [[ "$value" == \'*\' ]]; then
+      value="${value#\'}"
+      value="${value%\'}"
+    fi
+    value="${value#[vV]}"
+
+    if [ -z "$value" ]; then
+      continue
+    fi
+
+    if ! [[ "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      echo "docs/13-testing-validation.md Rust toolchain version must be patch-pinned (X.Y.Z):" >&2
+      echo "  ${docs_file}:${line_no}: toolchain: ${value}" >&2
+      echo "  Fix: set toolchain: ${channel}" >&2
+      fail=1
+      continue
+    fi
+
+    if [ "$value" != "$channel" ]; then
+      echo "Rust toolchain pin mismatch between rust-toolchain.toml and docs/13-testing-validation.md:" >&2
+      echo "  rust-toolchain.toml: channel=${channel}" >&2
+      echo "  ${docs_file}:${line_no}: toolchain: ${value}" >&2
+      echo "" >&2
+      echo "Fix: update ${docs_file} toolchain pin to ${channel}." >&2
+      fail=1
+    fi
+  done < <(grep -n -E '^[[:space:]]*toolchain[[:space:]]*:' "${docs_file}" || true)
+fi
+
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi

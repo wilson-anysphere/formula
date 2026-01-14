@@ -545,4 +545,50 @@ if [ -n "$mise_node_major" ] && [ "$mise_node_major" != "$ci_node_major" ]; then
   exit 1
 fi
 
+# Best-effort docs check: keep documented example workflows in sync with CI/release pins.
+# These docs explicitly instruct readers to keep NODE_VERSION aligned with `.nvmrc` and CI.
+docs_files=(
+  "docs/13-testing-validation.md"
+  "docs/16-performance-targets.md"
+)
+for doc in "${docs_files[@]}"; do
+  if [ ! -f "$doc" ]; then
+    continue
+  fi
+  found=0
+  while IFS= read -r match; do
+    [ -z "$match" ] && continue
+    found=1
+
+    line_no="${match%%:*}"
+    content="${match#*:}"
+
+    # Ignore commented lines.
+    trimmed="$content"
+    trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+    case "$trimmed" in
+      \#*) continue ;;
+    esac
+
+    value="${content#*:}"
+    value="${value%%#*}"
+    major="$(extract_first_numeric_major "$value")"
+    if [ -z "$major" ]; then
+      echo "Failed to parse NODE_VERSION in ${doc}:${line_no}:" >&2
+      echo "  ${content}" >&2
+      exit 1
+    fi
+    if [ "$major" != "$ci_node_major" ]; then
+      echo "Node major pin mismatch between workflows and ${doc}:" >&2
+      echo "  workflows: NODE_VERSION=${ci_node_major}" >&2
+      echo "  ${doc}:${line_no}: NODE_VERSION=${major}" >&2
+      echo "" >&2
+      echo "Fix: update ${doc} so NODE_VERSION matches ${ci_node_major} (and keep it in sync with .nvmrc / workflows)." >&2
+      exit 1
+    fi
+  done < <(grep -n -E '^[[:space:]]*NODE_VERSION[[:space:]]*:' "$doc" || true)
+  # If the docs file doesn't mention NODE_VERSION, ignore; some downstream forks may not carry these docs.
+  [ "$found" -eq 0 ] && true
+done
+
 echo "Node version pins match (NODE_VERSION=${ci_node_major})."

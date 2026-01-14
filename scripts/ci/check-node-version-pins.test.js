@@ -82,6 +82,91 @@ jobs:
   assert.match(proc.stdout, /Node version pins match/i);
 });
 
+test("fails when docs NODE_VERSION differs from workflows", { skip: !canRun }, () => {
+  const proc = run({
+    ".nvmrc": "22",
+    ".github/workflows/ci.yml": `
+name: CI
+env:
+  NODE_VERSION: 22
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: \${{ env.NODE_VERSION }}
+`,
+    ".github/workflows/release.yml": `
+name: Release
+env:
+  NODE_VERSION: 22
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: \${{ env.NODE_VERSION }}
+`,
+    "docs/13-testing-validation.md": `
+\`\`\`yaml
+env:
+  NODE_VERSION: 23
+\`\`\`
+`,
+  });
+
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /docs\/13-testing-validation\.md/i);
+  assert.match(proc.stderr, /NODE_VERSION/i);
+});
+
+test("passes when docs NODE_VERSION matches workflows", { skip: !canRun }, () => {
+  const proc = run({
+    ".nvmrc": "22",
+    ".github/workflows/ci.yml": `
+name: CI
+env:
+  NODE_VERSION: 22
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: \${{ env.NODE_VERSION }}
+`,
+    ".github/workflows/release.yml": `
+name: Release
+env:
+  NODE_VERSION: 22
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: \${{ env.NODE_VERSION }}
+`,
+    "docs/13-testing-validation.md": `
+\`\`\`yaml
+env:
+  NODE_VERSION: 22
+\`\`\`
+`,
+    "docs/16-performance-targets.md": `
+\`\`\`yaml
+env:
+  NODE_VERSION: 22
+\`\`\`
+`,
+  });
+
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Node version pins match/i);
+});
+
 test("ignores node-version strings inside YAML block scalars", { skip: !canRun }, () => {
   const proc = run({
     ".nvmrc": "22",
