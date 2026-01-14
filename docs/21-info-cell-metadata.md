@@ -195,8 +195,14 @@ Current behavior (Excel encoding):
 These keys are computed from the cell’s **effective number format string** (`Style.number_format`), not from the cell’s value.
 
 - `CELL("format")` returns an Excel format code string (e.g. `"G"`, `"F2"`, `"N0"`, `"C2"`).
-- `CELL("color")` returns `1` if the **negative section** of the number format specifies a color (e.g. `0;[Red](0)`), otherwise `0`.
+- `CELL("color")` returns `1` if the **negative section** of the number format specifies a color (e.g. a second section with a color tag), otherwise `0`.
 - `CELL("parentheses")` returns `1` if the **negative section** of the number format uses parentheses for negatives, otherwise `0`.
+
+Example number format with a colored negative section:
+
+```text
+0;[Red](0)
+```
 
 Notes:
 
