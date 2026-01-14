@@ -825,11 +825,12 @@ impl Engine {
         if self.workbook.sheet_order == before_order {
             return true;
         }
-        if self.rebuild_graph().is_err() {
+        if self.recompile_all_defined_names().is_err() || self.rebuild_graph().is_err() {
             // Reordering should not introduce new parse errors (formulas are unchanged), but if
             // rebuilding fails for any reason, restore the previous order and best-effort rebuild
             // to keep the engine in a consistent state.
             self.workbook.sheet_order = before_order;
+            let _ = self.recompile_all_defined_names();
             let _ = self.rebuild_graph();
             return false;
         }
@@ -840,7 +841,6 @@ impl Engine {
 
         true
     }
-
     /// Insert (or reuse) a style in the workbook's style table, returning its stable id.
     pub fn intern_style(&mut self, style: Style) -> u32 {
         self.workbook.styles.intern(style)
@@ -6497,11 +6497,12 @@ impl Engine {
             | StructuralEdit::DeleteCols { sheet, .. } => sheet.as_str(),
         };
 
+        let sheet_order_indices = build_sheet_order_indices(&self.workbook);
         let mut updates: Vec<(Option<SheetId>, String, NameDefinition, CompiledExpr)> = Vec::new();
 
         for (name, def) in &self.workbook.names {
             let Some((new_def, compiled)) =
-                rewrite_defined_name_structural(self, def, edit_sheet, edit)?
+                rewrite_defined_name_structural(self, def, edit_sheet, edit, &sheet_order_indices)?
             else {
                 continue;
             };
@@ -6514,7 +6515,7 @@ impl Engine {
             };
             for (name, def) in &sheet.names {
                 let Some((new_def, compiled)) =
-                    rewrite_defined_name_structural(self, def, ctx_sheet, edit)?
+                    rewrite_defined_name_structural(self, def, ctx_sheet, edit, &sheet_order_indices)?
                 else {
                     continue;
                 };
@@ -6547,11 +6548,12 @@ impl Engine {
         sheet_names: &HashMap<SheetId, String>,
         edit: &RangeMapEdit,
     ) -> Result<(), EngineError> {
+        let sheet_order_indices = build_sheet_order_indices(&self.workbook);
         let mut updates: Vec<(Option<SheetId>, String, NameDefinition, CompiledExpr)> = Vec::new();
 
         for (name, def) in &self.workbook.names {
             let Some((new_def, compiled)) =
-                rewrite_defined_name_range_map(self, def, &edit.sheet, edit)?
+                rewrite_defined_name_range_map(self, def, &edit.sheet, edit, &sheet_order_indices)?
             else {
                 continue;
             };
@@ -6564,7 +6566,7 @@ impl Engine {
             };
             for (name, def) in &sheet.names {
                 let Some((new_def, compiled)) =
-                    rewrite_defined_name_range_map(self, def, ctx_sheet, edit)?
+                    rewrite_defined_name_range_map(self, def, ctx_sheet, edit, &sheet_order_indices)?
                 else {
                     continue;
                 };
@@ -7727,6 +7729,20 @@ fn fill_range(
     }
 }
 
+fn build_sheet_order_indices(workbook: &Workbook) -> HashMap<String, usize> {
+    // 3D references (`Sheet1:Sheet3!A1`) use sheet *tab order* to define span membership.
+    // Produce a map from case-insensitive sheet name -> tab order index so formula rewrite helpers
+    // can translate sheet spans consistently.
+    let mut out: HashMap<String, usize> = HashMap::with_capacity(workbook.sheet_order.len());
+    for (order_index, &sheet_id) in workbook.sheet_order.iter().enumerate() {
+        let Some(name) = workbook.sheet_name(sheet_id) else {
+            continue;
+        };
+        out.insert(Workbook::sheet_key(name), order_index);
+    }
+    out
+}
+
 fn rewrite_all_formulas_structural(
     workbook: &mut Workbook,
     sheet_names: &HashMap<SheetId, String>,
@@ -7734,14 +7750,7 @@ fn rewrite_all_formulas_structural(
 ) -> Vec<FormulaRewrite> {
     // 3D references (`Sheet1:Sheet3!A1`) use sheet *tab order* to define span membership, so use
     // the workbook's current sheet ordering rather than stable sheet ids.
-    let mut sheet_order_indices: HashMap<String, usize> =
-        HashMap::with_capacity(workbook.sheet_ids_in_order().len());
-    for (order_index, &sheet_id) in workbook.sheet_ids_in_order().iter().enumerate() {
-        let Some(name) = workbook.sheet_name(sheet_id) else {
-            continue;
-        };
-        sheet_order_indices.insert(Workbook::sheet_key(name), order_index);
-    }
+    let sheet_order_indices = build_sheet_order_indices(workbook);
 
     let mut rewrites = Vec::new();
     for (sheet_id, sheet) in workbook.sheets.iter_mut().enumerate() {
@@ -7781,14 +7790,7 @@ fn rewrite_all_formulas_range_map(
 ) -> Vec<FormulaRewrite> {
     // 3D references (`Sheet1:Sheet3!A1`) use sheet *tab order* to define span membership, so use
     // the workbook's current sheet ordering rather than stable sheet ids.
-    let mut sheet_order_indices: HashMap<String, usize> =
-        HashMap::with_capacity(workbook.sheet_ids_in_order().len());
-    for (order_index, &sheet_id) in workbook.sheet_ids_in_order().iter().enumerate() {
-        let Some(name) = workbook.sheet_name(sheet_id) else {
-            continue;
-        };
-        sheet_order_indices.insert(Workbook::sheet_key(name), order_index);
-    }
+    let sheet_order_indices = build_sheet_order_indices(workbook);
 
     let mut rewrites = Vec::new();
     for (sheet_id, sheet) in workbook.sheets.iter_mut().enumerate() {
@@ -14087,17 +14089,8 @@ fn rewrite_defined_name_structural(
     def: &DefinedName,
     ctx_sheet: &str,
     edit: &StructuralEdit,
+    sheet_order_indices: &HashMap<String, usize>,
 ) -> Result<Option<(NameDefinition, CompiledExpr)>, EngineError> {
-    // 3D references (`Sheet1:Sheet3!A1`) use sheet *tab order* to define span membership, so build
-    // a mapping from sheet name -> tab index using the workbook's current sheet ordering.
-    let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
-    for (order_index, &sheet_id) in engine.workbook.sheet_ids_in_order().iter().enumerate() {
-        let Some(name) = engine.workbook.sheet_name(sheet_id) else {
-            continue;
-        };
-        sheet_order_indices.insert(Workbook::sheet_key(name), order_index);
-    }
-
     let origin = crate::CellAddr::new(0, 0);
     let (new_def, changed) = match &def.definition {
         NameDefinition::Constant(_) => return Ok(None),
@@ -14149,17 +14142,8 @@ fn rewrite_defined_name_range_map(
     def: &DefinedName,
     ctx_sheet: &str,
     edit: &RangeMapEdit,
+    sheet_order_indices: &HashMap<String, usize>,
 ) -> Result<Option<(NameDefinition, CompiledExpr)>, EngineError> {
-    // 3D references (`Sheet1:Sheet3!A1`) use sheet *tab order* to define span membership, so build
-    // a mapping from sheet name -> tab index using the workbook's current sheet ordering.
-    let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
-    for (order_index, &sheet_id) in engine.workbook.sheet_ids_in_order().iter().enumerate() {
-        let Some(name) = engine.workbook.sheet_name(sheet_id) else {
-            continue;
-        };
-        sheet_order_indices.insert(Workbook::sheet_key(name), order_index);
-    }
-
     let origin = crate::CellAddr::new(0, 0);
     let (new_def, changed) = match &def.definition {
         NameDefinition::Constant(_) => return Ok(None),
