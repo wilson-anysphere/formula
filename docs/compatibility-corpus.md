@@ -117,8 +117,8 @@ This stores:
 - ingest metadata (`metadata/*.json`)
 - a triage report (`reports/*.json`)
 
-Note: ingest uses triage `--privacy-mode private` behavior when generating the stored triage report, so
-filenames/custom domains are not written into the private corpus metadata by default.
+Note: ingest uses triage `--privacy-mode private` behavior when generating the stored triage report
+(`reports/*.json`), so filenames/custom domains are not written into that report JSON by default.
 
 ### Run triage
 

@@ -72,7 +72,11 @@ def main() -> int:
     workbook = read_workbook_input(args.input)
     raw = workbook.data
     workbook_id = sha256_hex(raw)[:16]
-    ext = "".join(Path(workbook.display_name).suffixes) or ".xlsx"
+    # Preserve only the real workbook extension (xlsx/xlsm/xlsb) to avoid leaking customer/org
+    # identifiers embedded as extra dot-separated suffixes (e.g. `acme.com.xlsx`).
+    ext = Path(workbook.display_name).suffix.lower()
+    if ext not in (".xlsx", ".xlsm", ".xlsb"):
+        ext = ".xlsx"
 
     corpus_dir: Path = args.corpus_dir
     originals_dir = corpus_dir / "originals"
