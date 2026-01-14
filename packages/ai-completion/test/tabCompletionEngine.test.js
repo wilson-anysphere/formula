@@ -190,6 +190,24 @@ test("Typing =Vlo suggests Vlookup( (title-style casing)", async () => {
   );
 });
 
+test("FunctionSpec.completionBoost biases function-name completion ranking", async () => {
+  const functionRegistry = new FunctionRegistry([
+    { name: "SUMIF", args: [] },
+    // Same prefix length/overall length as SUMIF; without a boost, lexicographic tie-breaking would prefer SUMIF.
+    { name: "SUMME", args: [], completionBoost: 0.05 },
+  ]);
+  const engine = new TabCompletionEngine({ functionRegistry, maxSuggestions: 2 });
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=SU",
+    cursorPosition: 3,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.equal(suggestions[0]?.text, "=SUMME(");
+});
+
 test("Function name completion works after ';' inside an array constant", async () => {
   const engine = new TabCompletionEngine();
 
