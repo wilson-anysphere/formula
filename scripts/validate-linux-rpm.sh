@@ -261,7 +261,10 @@ validate_container() {
   # leftovers from previous builds.
   local mount_dir
   mount_dir="$(mktemp -d)"
-  if ! ln -s "${rpm_path}" "${mount_dir}/${rpm_basename}" 2>/dev/null; then
+  # Note: do NOT symlink here. A symlink to a host path outside the bind mount
+  # will be broken inside the container. Prefer a hardlink when possible to
+  # avoid copying large RPM payloads; fall back to a normal copy otherwise.
+  if ! ln "${rpm_path}" "${mount_dir}/${rpm_basename}" 2>/dev/null; then
     cp "${rpm_path}" "${mount_dir}/${rpm_basename}"
   fi
 
