@@ -3556,18 +3556,16 @@ export class SpreadsheetApp {
       }
     }
 
-    // Undo/redo/applyState can add/remove/hide sheets. DocumentController lazily materializes sheets
-    // whenever callers read sheet state (e.g. `getCell`, `getSheetView`). If the active sheet is
-    // deleted during undo/redo, downstream `document.on("change")` listeners can accidentally
-    // recreate it by reading from the now-missing sheet id.
+    // DocumentController can add/remove/hide sheets (undo/redo, snapshot restores, scripts/extensions, etc).
+    // DocumentController also lazily materializes sheets whenever callers read sheet state
+    // (`getCell`, `getSheetView`). If the active sheet is deleted (or made hidden) during a document
+    // mutation, downstream `document.on("change")` listeners can accidentally recreate it by reading
+    // from the now-missing sheet id.
     //
     // Keep the active sheet id valid *before* other change listeners run so sheet deletions don't
     // resurrect "phantom" sheets. Mirror Excel behavior: prefer activating the adjacent visible
     // sheet (next to the right, else left).
     this.undoRedoActiveSheetGuardUnsubscribe = this.document.on("change", (payload: any) => {
-      const source = typeof payload?.source === "string" ? payload.source : "";
-      if (source !== "undo" && source !== "redo" && source !== "applyState") return;
-
       const activeId = this.sheetId;
       if (!activeId) return;
 
@@ -3582,32 +3580,25 @@ export class SpreadsheetApp {
       const visibleSet = new Set(visibleSheetIds);
       const sheetIdSet = new Set(sheetIds);
 
-      const currentSnapshot = sheetIds.map((id) => ({
-        id,
-        visibility: visibleSet.has(id) ? "visible" : "hidden",
-      }));
-
-      const ordering: string[] | null = (() => {
+      const ordering: string[] = (() => {
         if (Array.isArray(this.undoRedoSheetOrderSnapshot) && this.undoRedoSheetOrderSnapshot.length > 0) {
           return this.undoRedoSheetOrderSnapshot;
         }
         const delta = payload?.sheetOrderDelta;
         const before = Array.isArray(delta?.before) ? delta.before : null;
         if (before && before.length > 0) return before;
-        return null;
+        return sheetIds;
       })();
 
-      const preferred =
-        pickAdjacentVisibleSheetId(currentSnapshot, activeId) ??
-        (ordering
-          ? pickAdjacentVisibleSheetId(
-              ordering.map((id) => ({
-                id,
-                visibility: visibleSet.has(id) ? "visible" : "hidden",
-              })),
-              activeId,
-            )
-          : null);
+      // Pick an adjacent visible sheet using the pre-change order when available (for deletes),
+      // otherwise fall back to the current order (for visibility-only changes).
+      const preferred = pickAdjacentVisibleSheetId(
+        ordering.map((id) => ({
+          id,
+          visibility: visibleSet.has(id) ? "visible" : "hidden",
+        })),
+        activeId,
+      );
 
       const fallback =
         (preferred && sheetIdSet.has(preferred) ? preferred : null) ?? visibleSheetIds[0] ?? sheetIds[0] ?? null;
