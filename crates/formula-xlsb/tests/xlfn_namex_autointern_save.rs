@@ -32,14 +32,52 @@ fn first_ptg_namex_ref(rgce: &[u8]) -> Option<(u16, u16)> {
     //
     // We intentionally ignore the token *class* (R/V/A) and focus on the `(ixti, name_index)`
     // payload, since this regression test is about stable NameX indices, not expression typing.
-    rgce.windows(5).find_map(|w| {
-        if !matches!(w[0], 0x39 | 0x59 | 0x79) {
-            return None;
+    //
+    // We scan token-by-token (instead of searching raw byte windows) so we don't accidentally
+    // match `0x39` inside unrelated token payloads (e.g. floating point constants).
+    let mut i = 0usize;
+    while i < rgce.len() {
+        let ptg = *rgce.get(i)?;
+        i += 1;
+
+        match ptg {
+            // PtgNameX: [ixti:u16][name_index:u16]
+            0x39 | 0x59 | 0x79 => {
+                let end = i.checked_add(4)?;
+                let payload = rgce.get(i..end)?;
+                let ixti = u16::from_le_bytes([payload[0], payload[1]]);
+                let name_index = u16::from_le_bytes([payload[2], payload[3]]);
+                return Some((ixti, name_index));
+            }
+
+            // PtgInt: [u16]
+            0x1E | 0x3E | 0x5E => {
+                i = i.checked_add(2)?;
+                if i > rgce.len() {
+                    return None;
+                }
+            }
+            // PtgNum: [f64]
+            0x1F | 0x3F | 0x5F => {
+                i = i.checked_add(8)?;
+                if i > rgce.len() {
+                    return None;
+                }
+            }
+            // PtgFuncVar: [argc:u8][iftab:u16]
+            0x22 | 0x42 | 0x62 => {
+                i = i.checked_add(3)?;
+                if i > rgce.len() {
+                    return None;
+                }
+            }
+
+            // Unexpected token in this test formula. Bail out instead of risking desync.
+            _ => return None,
         }
-        let ixti = u16::from_le_bytes([w[1], w[2]]);
-        let name_index = u16::from_le_bytes([w[3], w[4]]);
-        Some((ixti, name_index))
-    })
+    }
+
+    None
 }
 
 #[test]
