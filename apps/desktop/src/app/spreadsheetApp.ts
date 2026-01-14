@@ -1575,6 +1575,7 @@ export class SpreadsheetApp {
     | null = null;
   private chartContentRefreshScheduled = false;
   private drawingsRenderScheduled = false;
+  private drawingsChangedWindowEventScheduled = false;
   private clipboardProviderPromise: ReturnType<typeof createClipboardProvider> | null = null;
   private clipboardCopyContext:
     | {
@@ -2159,17 +2160,18 @@ export class SpreadsheetApp {
            }
            chartCountForCanvasModelPrune = charts.length;
 
-           if (this.useCanvasCharts) {
-             this.renderDrawings();
-             // In `?canvasCharts=1` mode ChartStore charts are rendered as drawing objects, so
-             // consumers like Selection Pane + split view need a drawings-changed signal when
-             // charts are created or deleted (but *not* for per-tick anchor updates).
-             if (countChanged) this.dispatchDrawingsChanged();
-           } else {
-             this.renderCharts(false);
-           }
-         }
-       });
+            if (this.useCanvasCharts) {
+              this.renderDrawings();
+              // In `?canvasCharts=1` mode ChartStore charts are rendered as drawing objects, so
+              // consumers like Selection Pane + split view need a drawings-changed signal when
+              // charts are created or deleted (but *not* for per-tick anchor updates).
+              if (countChanged) this.dispatchDrawingsChanged();
+              else this.scheduleDrawingsChangedWindowEvent();
+            } else {
+              this.renderCharts(false);
+            }
+          }
+        });
     chartCountForCanvasModelPrune = this.chartStore.listCharts().length;
 
     this.chartCanvasStoreAdapter = new ChartCanvasStoreAdapter({
@@ -3988,6 +3990,30 @@ export class SpreadsheetApp {
       window.dispatchEvent(new Event("formula:drawings-changed"));
     }
     this.emitDrawingsChanged();
+  }
+
+  private scheduleDrawingsChangedWindowEvent(): void {
+    if (this.disposed) return;
+    if (this.drawingsChangedWindowEventScheduled) return;
+    if (typeof window === "undefined") return;
+    // This is a split-view-only signal; avoid scheduling before the UI is ready.
+    if (!this.uiReady) return;
+
+    this.drawingsChangedWindowEventScheduled = true;
+
+    const schedule =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame
+        : (cb: FrameRequestCallback) =>
+            globalThis.setTimeout(() => cb(typeof performance !== "undefined" ? performance.now() : Date.now()), 0);
+
+    schedule(() => {
+      this.drawingsChangedWindowEventScheduled = false;
+      if (this.disposed) return;
+      if (!this.uiReady) return;
+      if (typeof window === "undefined") return;
+      window.dispatchEvent(new Event("formula:drawings-changed"));
+    });
   }
 
   private dispatchDrawingSelectionChanged(): void {
