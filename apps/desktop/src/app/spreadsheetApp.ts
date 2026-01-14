@@ -5992,13 +5992,19 @@ export class SpreadsheetApp {
       // Ensure subsequent reads re-derive drawing state from the DocumentController snapshot.
       // (This avoids caching a stale pre-insert list if drawings changed while decoding files.)
       this.drawingObjectsCache = null;
-      this.drawingHitTestIndex = null;
-      this.drawingHitTestIndexObjects = null;
+      this.invalidateDrawingHitTestIndexCaches();
       const prevSelected = this.selectedDrawingId;
       this.selectedDrawingId = lastInsertedId;
+      if (this.selectedChartId != null) {
+        // Drawings and charts share a single selection model; inserting/selecting a picture should
+        // clear any active chart selection so UI state (ribbon/context panels) stays consistent.
+        this.setSelectedChartId(null);
+      }
       this.drawingOverlay.setSelectedId(lastInsertedId);
       if (this.gridMode === "shared") {
         this.ensureDrawingInteractionController().setSelectedId(lastInsertedId);
+      } else {
+        this.drawingInteractionController?.setSelectedId(lastInsertedId);
       }
       if (prevSelected !== lastInsertedId) {
         this.dispatchDrawingSelectionChanged();
@@ -6008,6 +6014,7 @@ export class SpreadsheetApp {
     // Ensure the drawings overlay is up-to-date after the batch completes.
     this.renderDrawings();
     this.renderSelection();
+    this.emitDrawingsChanged();
     this.focus();
   }
 

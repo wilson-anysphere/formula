@@ -164,4 +164,26 @@ describe("SpreadsheetApp insertPicturesFromFiles", () => {
     app.destroy();
     root.remove();
   });
+
+  it("clears any active chart selection when inserting pictures", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    // Simulate a selected chart (e.g. user previously clicked a chart). Inserting a picture should
+    // clear chart selection so ribbon/panels reflect the newly-selected picture.
+    (app as any).selectedChartId = "chart_123";
+
+    const file = new File([new Uint8Array([1, 2, 3])], "cat.png", { type: "image/png" });
+    await app.insertPicturesFromFiles([file]);
+
+    expect(app.getSelectedChartId()).toBeNull();
+
+    app.destroy();
+    root.remove();
+  });
 });
