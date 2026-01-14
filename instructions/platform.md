@@ -227,6 +227,12 @@ The scope check uses canonicalization to normalize paths and prevent symlink-bas
 - Check for updates on startup
 - Background download
 - User approval before install
+- Updater manifest signature verification (CI enforced)
+  - Tagged releases must upload a `latest.json` updater manifest **and** a matching `latest.json.sig`.
+  - Release CI verifies `latest.json.sig` matches `latest.json` using the updater public key embedded in
+    `apps/desktop/src-tauri/tauri.conf.json → plugins.updater.pubkey` (see
+    `scripts/ci/verify-updater-manifest-signature.mjs`).
+  - If the signature does not verify (or the pubkey is missing/placeholder), the release workflow fails.
 - Rollback capability
   - Tauri does not provide an automatic “revert to previous version” after a successful upgrade.
   - Formula supports a clear **manual downgrade path** via the GitHub Releases page (in-app via the
