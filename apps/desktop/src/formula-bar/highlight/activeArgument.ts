@@ -5,6 +5,18 @@ type ActiveArgumentSpan = {
   span: { start: number; end: number };
 };
 
+type GetActiveArgumentSpanOptions = {
+  /**
+   * Argument separator characters to treat as delimiting function arguments.
+   *
+   * Defaults to both `,` and `;` so the parser works reasonably across locales.
+   * Callers that know the workbook/UI locale should provide the active list separator
+   * (e.g. `;` for many comma-decimal locales) so we don't misinterpret decimal commas
+   * inside numeric literals as argument separators.
+   */
+  argSeparators?: string | readonly string[];
+};
+
 type StackFrame =
   | { kind: "function"; name: string; argIndex: number; argStart: number; parenIndex: number }
   | { kind: "group" }
@@ -107,7 +119,7 @@ function popParenFrame(stack: StackFrame[]): void {
   }
 }
 
-function findArgumentEnd(formulaText: string, start: number): number {
+function findArgumentEnd(formulaText: string, start: number, isArgSeparator: (ch: string) => boolean): number {
   let inString = false;
   let inSheetQuote = false;
   let parenDepth = 0;
@@ -199,7 +211,7 @@ function findArgumentEnd(formulaText: string, start: number): number {
       return i;
     }
 
-    if ((ch === "," || ch === ";") && parenDepth === 0 && braceDepth === 0) return i;
+    if (isArgSeparator(ch ?? "") && parenDepth === 0 && braceDepth === 0) return i;
 
     i += 1;
   }
@@ -218,13 +230,21 @@ function findArgumentEnd(formulaText: string, start: number): number {
  *  - square brackets (`[]`) (structured / external references)
  *  - curly braces (`{}`) (array literals)
  */
-export function getActiveArgumentSpan(formulaText: string, cursorIndex: number): ActiveArgumentSpan | null {
+export function getActiveArgumentSpan(
+  formulaText: string,
+  cursorIndex: number,
+  opts: GetActiveArgumentSpanOptions = {}
+): ActiveArgumentSpan | null {
   const cursor = Math.max(0, Math.min(cursorIndex, formulaText.length));
   const stack: StackFrame[] = [];
 
   let i = 0;
   let inString = false;
   let inSheetQuote = false;
+
+  const separatorsRaw = opts.argSeparators ?? [",", ";"];
+  const separators = Array.isArray(separatorsRaw) ? separatorsRaw : [separatorsRaw];
+  const isArgSeparator = (ch: string): boolean => separators.some((sep) => sep === ch);
 
   while (i < cursor) {
     const ch = formulaText[i];
@@ -325,7 +345,7 @@ export function getActiveArgumentSpan(formulaText: string, cursorIndex: number):
       continue;
     }
 
-    if (ch === "," || ch === ";") {
+    if (isArgSeparator(ch ?? "")) {
       const top = stack[stack.length - 1];
       if (top?.kind === "function") {
         top.argIndex += 1;
@@ -342,7 +362,7 @@ export function getActiveArgumentSpan(formulaText: string, cursorIndex: number):
     const frame = stack[s];
     if (frame?.kind !== "function") continue;
 
-    const boundary = findArgumentEnd(formulaText, frame.argStart);
+    const boundary = findArgumentEnd(formulaText, frame.argStart, isArgSeparator);
 
     let start = frame.argStart;
     while (start < boundary && isWhitespace(formulaText[start] ?? "")) start += 1;

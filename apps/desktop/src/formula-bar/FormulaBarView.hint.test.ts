@@ -67,6 +67,41 @@ describe("FormulaBarView function hint UI", () => {
     host.remove();
   });
 
+  it("does not treat decimal commas as argument separators in semicolon locales", async () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "de-DE";
+
+    try {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+
+      view.focus({ cursor: "end" });
+      view.textarea.value = "=ROUND(1,2; 0)";
+
+      const inFirstArg = view.textarea.value.indexOf("1,2") + 1;
+      view.textarea.setSelectionRange(inFirstArg, inFirstArg);
+      view.textarea.dispatchEvent(new Event("input"));
+      await nextFrame();
+
+      expect(getSignatureName(host)).toBe("ROUND(");
+      // Cursor in the first argument; the comma is a decimal separator (1,2), not an argument separator.
+      expect(getActiveParamText(host)).toBe("number");
+
+      const inSecondArg = view.textarea.value.indexOf("0") + 1;
+      view.textarea.setSelectionRange(inSecondArg, inSecondArg);
+      view.textarea.dispatchEvent(new Event("select"));
+      await nextFrame();
+      expect(getActiveParamText(host)).toBe("num_digits");
+
+      host.remove();
+    } finally {
+      document.documentElement.lang = prevLang;
+    }
+  });
+
   it("updates the active parameter as the cursor moves across commas", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

@@ -200,6 +200,23 @@ describe("getActiveArgumentSpan", () => {
     });
   });
 
+  it("can be configured to only treat ';' as an argument separator (so decimal commas don't split)", () => {
+    const formula = "=ROUND(1,2; 0)";
+    const insideFirstArg = formula.indexOf("1,2") + 1;
+    expect(getActiveArgumentSpan(formula, insideFirstArg, { argSeparators: ";" })).toMatchObject({
+      fnName: "ROUND",
+      argIndex: 0,
+      argText: "1,2",
+    });
+
+    const insideSecondArg = formula.indexOf("0") + 1;
+    expect(getActiveArgumentSpan(formula, insideSecondArg, { argSeparators: ";" })).toMatchObject({
+      fnName: "ROUND",
+      argIndex: 1,
+      argText: "0",
+    });
+  });
+
   it("treats escaped closing brackets inside structured refs as plain text (does not end bracket context)", () => {
     // Regression: column names may contain escaped `]` (written as `]]`). When the escaped
     // `]` is followed by function-like text, we must not treat it as a nested call.

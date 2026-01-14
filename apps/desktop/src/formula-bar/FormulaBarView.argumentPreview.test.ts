@@ -125,6 +125,46 @@ describe("FormulaBarView argument preview (integration)", () => {
     host.remove();
   });
 
+  it("does not treat decimal commas as argument separators in semicolon locales", async () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "de-DE";
+
+    try {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+      view.focus({ cursor: "end" });
+
+      const provider = vi.fn((expr: string) => {
+        if (expr === "1,2") return "OK";
+        return "(preview unavailable)";
+      });
+      view.setArgumentPreviewProvider(provider);
+
+      const formula = "=ROUND(1,2; 0)";
+      view.textarea.value = formula;
+
+      // Cursor inside first argument (`1,2`).
+      const cursor = formula.indexOf("1,2") + 1;
+      view.textarea.setSelectionRange(cursor, cursor);
+      view.textarea.dispatchEvent(new Event("input"));
+
+      await flushPreview();
+
+      const preview = host.querySelector<HTMLElement>('[data-testid="formula-hint-arg-preview"]');
+      expect(preview?.dataset.argStart).toBe(String(formula.indexOf("1,2")));
+      expect(preview?.dataset.argEnd).toBe(String(formula.indexOf("1,2") + "1,2".length));
+      expect(preview?.textContent).toBe("↳ 1,2  →  OK");
+      expect(provider).toHaveBeenCalledWith("1,2");
+
+      host.remove();
+    } finally {
+      document.documentElement.lang = prevLang;
+    }
+  });
+
   it("ignores stale async preview results when the cursor moves between arguments", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

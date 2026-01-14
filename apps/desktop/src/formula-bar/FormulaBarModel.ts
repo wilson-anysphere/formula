@@ -74,10 +74,10 @@ export class FormulaBarModel {
   #cursorEnd = 0;
   #tokenCache: { draft: string; tokens: FormulaToken[] } | null = null;
   #activeArgumentSpanCache:
-    | { draft: string; cursor: number; result: ReturnType<typeof getActiveArgumentSpan> }
+    | { draft: string; cursor: number; argSeparator: string; result: ReturnType<typeof getActiveArgumentSpan> }
     | null = null;
   #activeArgumentSpanCache2:
-    | { draft: string; cursor: number; result: ReturnType<typeof getActiveArgumentSpan> }
+    | { draft: string; cursor: number; argSeparator: string; result: ReturnType<typeof getActiveArgumentSpan> }
     | null = null;
   #extractFormulaReferencesOptions: ExtractFormulaReferencesOptions | null = null;
   #extractFormulaReferencesOptionsVersion = 0;
@@ -701,19 +701,26 @@ export class FormulaBarModel {
     const draft = this.#draft;
     const cursor = Math.max(0, Math.min(cursorIndex, draft.length));
 
+    const hasEngineLocaleForDraft = this.#engineToolingFormula === draft;
+    const localeId = hasEngineLocaleForDraft
+      ? this.#engineToolingLocaleId
+      : (typeof document !== "undefined" ? document.documentElement?.lang : "")?.trim?.() || "en-US";
+    const argSeparatorText = inferArgSeparator(localeId).trim();
+    const argSeparator = argSeparatorText.startsWith(";") ? ";" : ",";
+
     const c1 = this.#activeArgumentSpanCache;
-    if (c1 && c1.draft === draft && c1.cursor === cursor) return c1.result;
+    if (c1 && c1.draft === draft && c1.cursor === cursor && c1.argSeparator === argSeparator) return c1.result;
     const c2 = this.#activeArgumentSpanCache2;
-    if (c2 && c2.draft === draft && c2.cursor === cursor) {
+    if (c2 && c2.draft === draft && c2.cursor === cursor && c2.argSeparator === argSeparator) {
       // Promote to the front of the small LRU.
       this.#activeArgumentSpanCache2 = c1;
       this.#activeArgumentSpanCache = c2;
       return c2.result;
     }
 
-    const result = getActiveArgumentSpan(draft, cursor);
+    const result = getActiveArgumentSpan(draft, cursor, { argSeparators: argSeparator });
     this.#activeArgumentSpanCache2 = c1;
-    this.#activeArgumentSpanCache = { draft, cursor, result };
+    this.#activeArgumentSpanCache = { draft, cursor, argSeparator, result };
     return result;
   }
 
