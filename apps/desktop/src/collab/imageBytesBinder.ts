@@ -505,6 +505,11 @@ export function bindImageBytesToCollabSession(options: {
         },
         binderOrigin,
       );
+
+       // Local writes use `binderOrigin` and therefore won't flow through the deep-observer
+       // (it early-returns to avoid echo). Prune here so we don't retain cached raw values
+       // for images that were evicted by `enforceMaxImages` in this transaction.
+       pruneHydratedRawValues();
     } catch {
       // ignore
     }
