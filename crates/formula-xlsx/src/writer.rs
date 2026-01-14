@@ -879,7 +879,7 @@ fn sheet_xml(
     } else {
         String::new()
     };
-    let sheet_format_pr_xml = render_sheet_format_pr_xml(sheet);
+    let sheet_format_pr_xml = sheet_format_pr_xml(sheet);
     let cols_xml = render_cols(sheet, &outline, style_to_xf);
 
     struct ColumnarInfo<'a> {
@@ -1528,29 +1528,6 @@ fn sheet_data_validations_xml(sheet: &Worksheet) -> String {
     out
 }
 
-fn render_sheet_format_pr_xml(sheet: &Worksheet) -> String {
-    if sheet.default_row_height.is_none()
-        && sheet.default_col_width.is_none()
-        && sheet.base_col_width.is_none()
-    {
-        return String::new();
-    }
-
-    let mut attrs = String::new();
-    if let Some(base) = sheet.base_col_width {
-        attrs.push_str(&format!(r#" baseColWidth="{base}""#));
-    }
-    if let Some(width) = sheet.default_col_width {
-        let width = trim_float(width as f64);
-        attrs.push_str(&format!(r#" defaultColWidth="{width}""#));
-    }
-    if let Some(height) = sheet.default_row_height {
-        let height = trim_float(height as f64);
-        attrs.push_str(&format!(r#" defaultRowHeight="{height}""#));
-    }
-
-    format!(r#"<sheetFormatPr{attrs}/>"#)
-}
 fn sheet_protection_xml(sheet: &Worksheet) -> String {
     let prot = &sheet.sheet_protection;
     if !prot.enabled {
